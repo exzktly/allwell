@@ -736,10 +736,28 @@ def test_the_page_offers_the_layout_the_file_describes(qapp, tmp_path):
 
     assert page._suggest_row.isVisibleTo(page)
     assert "2×3 wells × 4 FOV(s)" in page._suggest_label.text()
-    # Offered, not applied: the coordinates fix the block's shape, never which
-    # physical well its corner is, so the form is untouched until asked.
-    assert page._rows_edit.text() == "1"
-    assert page._fovs_edit.text() == ""
+    # Applied on sight, because the form still held only its defaults: a file
+    # that describes itself should not need the same answers typed back in.
+    assert (page._rows_edit.text(), page._cols_edit.text()) == ("2", "3")
+    assert page._fovs_edit.text() == "4"
+
+
+def test_an_answered_form_is_never_overwritten_by_the_file(qapp, tmp_path):
+    """The metadata beats the defaults it replaces and loses to anything typed
+    on purpose — including a grid that happens to disagree with the file."""
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _plate_scan(tmp_path / "scan.ome.tif", 2, 3, 4)
+    page = OmeImportController().page
+    page._rows_edit.setText("3")
+    page._cols_edit.setText("8")
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+
+    assert (page._rows_edit.text(), page._cols_edit.text()) == ("3", "8")
+    assert page._suggest_row.isVisibleTo(page)      # still offered
+    page._apply_suggestion()                        # …and applied when asked
+    assert (page._rows_edit.text(), page._cols_edit.text()) == ("2", "3")
 
 
 def test_applying_the_suggestion_fills_the_ordering_controls(qapp, tmp_path):

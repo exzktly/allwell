@@ -351,3 +351,40 @@ def path_in_cells(positions, pitch: float,
         ((x - x0) / pitch + anchor_col, (y - y0) / pitch + anchor_row)
         for x, y in points
     ]
+
+
+def infer_frame_order(positions) -> tuple[str, int, int] | None:
+    """``(frame_order, n_positions, n_timepoints)`` from the coordinate sequence.
+
+    A single-image OME-TIFF packs every stage position into its ``T`` axis,
+    because an OME ``<Image>`` has no position dimension — so the file's own
+    ``DimensionOrder`` cannot say how positions and timepoints interleave in
+    there, and the converter asks the user. The coordinates answer it outright:
+    a position visited once is a scan with one timepoint, a sequence that runs
+    through every position before repeating is *positions within timepoint*,
+    and one that repeats each position consecutively is *timepoints within
+    position*.
+
+    ``None`` when the sequence is neither — a partial timelapse, or coordinates
+    that do not describe a repeated visit pattern at all.
+    """
+    points = [(float(x), float(y)) for x, y in positions or []]
+    if not points:
+        return None
+    first: list[tuple[float, float]] = []
+    seen: set[tuple[float, float]] = set()
+    for point in points:
+        if point not in seen:
+            seen.add(point)
+            first.append(point)
+    n = len(first)
+    if n == len(points):
+        return "single", n, 1
+    timepoints, remainder = divmod(len(points), n)
+    if remainder or timepoints < 2:
+        return None
+    if points[:n] == first:
+        return "pos_in_time", n, timepoints
+    if all(p == first[i // timepoints] for i, p in enumerate(points)):
+        return "time_in_pos", n, timepoints
+    return None

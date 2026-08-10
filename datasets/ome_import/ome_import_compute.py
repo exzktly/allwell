@@ -12,6 +12,7 @@ page/worker layer stays a thin shell on top (CLAUDE.md §3/§5).
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from pipeline.ome_explode import (
     read_ome_layout,
 )
 from datasets.ome_import.stage_layout import (
+    infer_frame_order,
     infer_stage_layout,
     path_in_cells,
     place,
@@ -36,6 +38,7 @@ from util.plate_grid import (
 # The channel-role heuristic moved to the shared ``util.channel_roles`` so the
 # Analyze page can reuse it; re-exported here so the converter's imports and its
 # tests keep resolving through this module.
+from util.well_token import canonical_well_label
 from util.channel_roles import (  # noqa: F401 (re-export)
     CHANNEL_ROLES,
     ChannelTokens,
@@ -297,13 +300,47 @@ class LayoutSuggestion:
     direction: str
     n_positions: int
     well_order: tuple[str, ...] = ()
+    # How the file's flat frame sequence splits, read from the repeat pattern in
+    # the coordinates — the one setting the file's own DimensionOrder cannot
+    # express, because an OME Image has no position dimension.
+    frame_order: str = ""
+    n_timepoints: int = 0
+    # The starting well, when the metadata names it. Coordinates are relative to
+    # the microscope, so they can never say this; a StageLabel or Image name
+    # often does.
+    origin: str = ""
 
     def describe(self) -> str:
         path = " (as an explicit path)" if self.well_order else ""
+        timing = (f", {self.n_timepoints} timepoint(s)"
+                  if self.n_timepoints > 1 else "")
+        placed = f", starting at {self.origin}" if self.origin else ""
         return (
             f"{self.rows}×{self.cols} wells × {self.fovs_per_well} FOV(s), "
-            f"snaking by {'row' if self.direction == 'row' else 'column'}{path}"
+            f"snaking by {'row' if self.direction == 'row' else 'column'}"
+            f"{timing}{path}{placed}"
         )
+
+
+def wells_from_names(names) -> list[str]:
+    """The well each named position sits in, or ``[]`` if the names don't say.
+
+    Acquisition software writes the well into a ``StageLabel`` or ``Image`` name
+    far more often than not — ``"B02"``, ``"Well B2, Site 1"``, ``"scan_B02_f0"``
+    — and that is the only thing in an OME-TIFF that locates a position on the
+    *plate*. Every name has to yield exactly one well token for the answer to be
+    usable: a set where some names parse and others do not is a partial mapping,
+    and guessing the rest is how a plate ends up half-labelled.
+    """
+    out: list[str] = []
+    for name in names or []:
+        found = {canonical_well_label(token)
+                 for token in re.findall(r"[A-Za-z]{1,2}\d{1,2}", str(name))}
+        found.discard(None)
+        if len(found) != 1:
+            return []
+        out.append(found.pop())
+    return out
 
 
 def infer_layout(layout: OmeLayout):
@@ -357,6 +394,19 @@ def suggest_layout(layout: OmeLayout, origin: str = "A01",
     except ValueError:
         from_grid = []
     order = () if placed == from_grid else tuple(placed)
+
+    # The file's own account of where on the plate it was, when it has one. It
+    # beats every inference here: the coordinates give a shape and the user
+    # places it, while a StageLabel names the well outright.
+    named = wells_from_names(layout.position_names)
+    start = ""
+    if named:
+        visited = list(dict.fromkeys(named))
+        start = visited[0]
+        if len(visited) == inferred.rows * inferred.cols:
+            order = tuple(visited)
+
+    timing = infer_frame_order(layout.stage_positions) if layout.single_image else None
     return LayoutSuggestion(
         rows=inferred.rows,
         cols=inferred.cols,
@@ -364,6 +414,9 @@ def suggest_layout(layout: OmeLayout, origin: str = "A01",
         direction=inferred.direction,
         n_positions=inferred.n_positions,
         well_order=order,
+        frame_order=(timing[0] if timing else ""),
+        n_timepoints=(timing[2] if timing else 0),
+        origin=start,
     )
 
 

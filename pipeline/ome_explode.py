@@ -133,6 +133,11 @@ class OmeLayout:
     # ``(x, y)`` stage coordinates per plane, in the OME-XML's plane order, for
     # callers that infer the plate layout from where the images were taken.
     stage_positions: list[tuple[float, float]] = field(default_factory=list)
+    # One name per ``<Image>``, from its ``<StageLabel>`` or its own ``Name``.
+    # Coordinates say where on the *stage* a position was; only these ever say
+    # where on the *plate*, so they are the one place a starting well can come
+    # from rather than be typed.
+    position_names: list[str] = field(default_factory=list)
 
     def validation_report(self, name: str = "") -> str:
         """The one blocking problem with this file, or ``""`` if it is sound.
@@ -502,6 +507,29 @@ def _stage_positions(ome_xml: str | None) -> list[tuple[float, float]]:
     return order
 
 
+def _position_names(ome_xml: str | None) -> list[str]:
+    """One name per ``<Image>``: its ``<StageLabel>``'s, else the Image's own.
+
+    Acquisition software routinely writes the well into these — ``"B02"``,
+    ``"Well B2, Site 1"``, ``"scan_B02_f0"`` — which is the only thing in an
+    OME-TIFF that says where on the *plate* a position was, as opposed to where
+    on the stage. Returned raw; reading a well out of one is the caller's job.
+    """
+    if not ome_xml:
+        return []
+    try:
+        root = ET.fromstring(ome_xml)
+    except ET.ParseError:
+        return []
+    names: list[str] = []
+    for image in (el for el in root.iter() if _localname(el.tag) == "Image"):
+        label = next((el for el in image.iter()
+                      if _localname(el.tag) == "StageLabel"), None)
+        name = (label.get("Name") if label is not None else None) or image.get("Name")
+        names.append(str(name or ""))
+    return names
+
+
 def _referenced_filenames(ome_xml: str | None) -> list[str]:
     """The companion filenames the OME-XML's ``UUID`` elements point at.
 
@@ -601,6 +629,7 @@ def read_ome_layout(ome_path: Path | str) -> OmeLayout:
         unreferenced_pages=unreferenced,
         warnings=list(warnings),
         stage_positions=_stage_positions(ome_xml),
+        position_names=_position_names(ome_xml),
     )
 
 

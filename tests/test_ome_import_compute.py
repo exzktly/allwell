@@ -27,6 +27,7 @@ from datasets.ome_import.ome_import_compute import (  # noqa: E402
     read_layout,
     selection_target,
     suggest_layout,
+    wells_from_names,
     strip_ome_suffix,
 )
 from pipeline.ome_explode import OmeLayout  # noqa: E402
@@ -637,3 +638,60 @@ def test_convert_finishes_an_interrupted_run_and_says_so(tmp_path):
     assert len(sorted((dest / "in").glob("*.zip"))) == 6
     # Finished: the folder is a dataset now, not an interrupted run.
     assert read_run_marker(dest) is None
+
+
+def test_frame_order_and_timepoints_come_from_the_repeat_pattern(tmp_path):
+    """An OME <Image> has no position dimension, so the file's DimensionOrder
+    cannot say how positions and timepoints interleave in its T axis — the one
+    setting the user had to guess. The coordinates say it outright."""
+    from datasets.ome_import.stage_layout import infer_frame_order
+
+    pitch = 9000.0
+    positions = [(c * pitch, r * pitch) for r in range(2) for c in range(3)]
+    assert infer_frame_order(positions) == ("single", 6, 1)
+    assert infer_frame_order(positions * 4) == ("pos_in_time", 6, 4)
+    assert infer_frame_order(
+        [p for p in positions for _ in range(4)]) == ("time_in_pos", 6, 4)
+    # Neither pattern, so nothing is claimed.
+    assert infer_frame_order(positions + positions[:2]) is None
+    assert infer_frame_order([]) is None
+
+
+def test_wells_come_from_the_metadata_when_it_names_them():
+    """A StageLabel or Image name is the only thing in an OME-TIFF that says
+    where on the *plate* a position was; coordinates give a shape, not a place."""
+    assert wells_from_names(["B02", "B03"]) == ["B02", "B03"]
+    assert wells_from_names(["Well B2, Site 1", "Well B2, Site 2"]) == ["B02", "B02"]
+    assert wells_from_names(["scan_B02_f0", "scan_C03_f0"]) == ["B02", "C03"]
+    # All or nothing: a half-parsed set is a half-labelled plate.
+    assert wells_from_names(["B02", "Position 3"]) == []
+    assert wells_from_names(["B02 and C03"]) == []
+    assert wells_from_names([]) == []
+
+
+def test_a_named_scan_needs_no_origin_at_all(tmp_path):
+    """The strongest case: the file names its own wells, so the visit order is
+    read rather than inferred and nothing is left for the user to enter."""
+    pitch = 9000.0
+    coords = [(c * pitch, r * pitch) for r in range(2) for c in range(3)]
+    wells = ["C04", "C05", "C06", "D04", "D05", "D06"]
+    images = "".join(
+        f'<Image ID="Image:{i}" Name="{wells[i]}"><Pixels ID="Pixels:{i}" '
+        f'DimensionOrder="XYZCT" Type="uint16" SizeX="6" SizeY="6" SizeC="1" '
+        f'SizeZ="1" SizeT="1">'
+        f'<Channel ID="Channel:{i}:0" Name="DAPI" SamplesPerPixel="1"/>'
+        f'<StageLabel Name="Well {wells[i]}"/>'
+        f'<Plane TheT="0" TheC="0" TheZ="0" PositionX="{x}" PositionY="{y}"/>'
+        f'<TiffData FirstT="0" FirstC="0" FirstZ="0" IFD="{i}" PlaneCount="1"/>'
+        f'</Pixels></Image>'
+        for i, (x, y) in enumerate(coords))
+    p = tmp_path / "named.ome.tif"
+    tifffile.imwrite(str(p), np.zeros((len(coords), 6, 6), np.uint16),
+                     description=('<OME xmlns="http://www.openmicroscopy.org/'
+                                  f'Schemas/OME/2016-06">{images}</OME>'),
+                     metadata=None, photometric="minisblack")
+
+    suggestion = suggest_layout(read_layout(p))
+    assert suggestion.origin == "C04"
+    assert suggestion.well_order == ("C04", "C05", "C06", "D04", "D05", "D06")
+    assert "starting at C04" in suggestion.describe()

@@ -111,6 +111,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._suggestion = None
         self._inferred = None
         self._inferred_key = None
+        self._auto_apply_key = None
         self._build_ui()
         self.refresh_readout()
 
@@ -286,12 +287,13 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._suggest_label.setObjectName("Muted")
         self._suggest_label.setWordWrap(True)
         sl.addWidget(self._suggest_label, 1)
-        self._suggest_btn = QPushButton("Use this", self._suggest_row)
+        self._suggest_btn = QPushButton("Apply again", self._suggest_row)
         self._suggest_btn.setProperty("variant", "secondary")
         self._suggest_btn.setToolTip(
-            "Fill the grid, FOVs per well and serpentine direction from the "
-            "stage coordinates in the file's own metadata. The origin stays "
-            "yours — the file records where the stage was, not which well."
+            "Fill the grid, FOVs per well, serpentine direction, frame order "
+            "and — when the metadata names it — the starting well, from the "
+            "file's own contents. Applied automatically on a form you have not "
+            "answered; press this to re-apply after editing."
         )
         self._suggest_btn.clicked.connect(self._apply_suggestion)
         sl.addWidget(self._suggest_btn)
@@ -786,10 +788,16 @@ class OmeImportPage(LogPanelMixin, QWidget):
             self._suggest_row.setVisible(False)
             return
         self._suggest_label.setText(
-            f"↳ The file's stage coordinates describe "
-            f"{self._suggestion.describe()}."
+            f"↳ Read from the file: {self._suggestion.describe()}."
         )
         self._suggest_row.setVisible(True)
+        # Applied without being asked only on a form the user has not answered.
+        # A file that describes itself should not need the same answers typed
+        # back into it, and the button stays for a second look or an undo by
+        # editing.
+        if self._auto_apply_key != id(layout) and self._untouched():
+            self._auto_apply_key = id(layout)
+            self._apply_suggestion()
 
     def _refresh_path(self, layout) -> None:
         """Redraw the stage path, anchored where the run will actually start.
@@ -809,10 +817,24 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._path_caption.setVisible(bool(points))
 
     def _apply_suggestion(self) -> None:
-        """Fill the ordering controls from the inferred layout."""
+        """Fill every control the file's own metadata can answer.
+
+        Channels and their names arrive from the OME-XML already; this fills the
+        rest — grid, FOVs per well, sweep direction, how the frame sequence
+        splits into positions and timepoints, and, when a ``StageLabel`` names
+        it, the well the scan starts in. What is left for the user is the
+        starting well on a file whose metadata does not name one, because
+        nothing in an OME-TIFF says where on the *plate* the stage was.
+        """
         suggestion = getattr(self, "_suggestion", None)
         if suggestion is None:
             return
+        if suggestion.origin:
+            self._origin_edit.setText(suggestion.origin)
+        if suggestion.frame_order:
+            index = self._frame_order_cb.findData(suggestion.frame_order)
+            if index >= 0:
+                self._frame_order_cb.setCurrentIndex(index)
         if suggestion.well_order:
             # A path the grid cannot express: hand it over as an owned order,
             # which also puts the page into its hand-drawn mode.
@@ -826,6 +848,21 @@ class OmeImportPage(LogPanelMixin, QWidget):
                 self._direction_cb.setCurrentIndex(index)
         self._fovs_edit.setText(str(suggestion.fovs_per_well))
         self.refresh_readout()
+
+    def _untouched(self) -> bool:
+        """True while the form still holds only its defaults.
+
+        A suggestion applies itself on a fresh file and never over an answer the
+        user has given — the file's metadata is better than the defaults it
+        would replace, and worse than anything typed on purpose.
+        """
+        return (
+            self._rows_edit.text().strip() in ("", "1")
+            and self._cols_edit.text().strip() in ("", "1")
+            and not self._fovs_edit.text().strip()
+            and self._origin_edit.text().strip() in ("", "A01")
+            and not self._plate.is_dirty()
+        )
 
     def _set_verdict(self, text: str, tone: str) -> None:
         """Show the pass/fail line in its own tone (``Muted``/``Warn``/``Danger``).

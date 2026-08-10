@@ -3042,6 +3042,24 @@ serpentine whose first well is the block's *bottom*-left, and the grid always
 starts top-left, so the rows come out mirrored with every count still correct.
 One comparison covers that, a raster, and any other starting corner.
 
+**Two more settings come out of the same metadata.** `stage_layout.infer_frame_order`
+reads the converter's *frame order* — the one thing the file's own
+`DimensionOrder` cannot express, since an OME `<Image>` has no position
+dimension — from which coordinates repeat and how: every position visited once
+is `single`, a sequence running through all of them before repeating is
+`pos_in_time`, one repeating each position consecutively is `time_in_pos`, and
+anything else is `None` rather than a guess. That also yields the timepoint
+count. And `ome_import_compute.wells_from_names` reads the **starting well**
+out of `OmeLayout.position_names` (each `<Image>`'s `<StageLabel>` name, else
+its own) — the only thing in an OME-TIFF that locates a position on the *plate*
+rather than on the stage. Every name must yield exactly one well token or the
+answer is discarded whole: a set where some parse and some do not is a partial
+mapping, and filling the rest by inference is how a plate ends up half
+labelled. When every position names its well the visit order is taken from the
+names outright, and nothing is inferred at all. The page applies the result
+**automatically while the form still holds its defaults** and never over a value
+the user has entered.
+
 **The grid and the clicked path are alternatives, and only one of them is an
 input.** The converter page draws the grid's serpentine onto the plate as a live
 *preview*, and the plate the preview lands on is the same one the user clicks

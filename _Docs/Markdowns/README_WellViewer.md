@@ -2615,16 +2615,31 @@ What it catches, and what each one means:
   missing" — every image is in the file and only the metadata is wrong, so
   re-export or repair the metadata rather than re-running the plate.
 
-**The layout can be read from the file.** Microscopes record where on the stage
+**Most of the form fills itself from the file.** Microscopes record where on the stage
 each image was taken, and All-Well reads those coordinates: wells sit 9 mm apart
 while the fields of view inside one well are a fraction of a millimetre apart, so
 the grid falls out of the spacing. When the file carries them, a line under the
-settings reads *"The file's stage coordinates describe 2×3 wells × 4 FOV(s),
-snaking by row"* with a **Use this** button that fills the grid, FOVs per well and
-serpentine direction for you. Origin stays yours — the file records where the
-stage was, not which well that is, so nothing but you can say the block starts at
-`B02`. A scan that isn't a serpentine at all (a plain raster, say) is handed over
-as a clicked path instead, since the grid fields cannot express one.
+settings reads *"Read from the file: 2×3 wells × 4 FOV(s), snaking by row, 4
+timepoint(s), starting at C04"* — and, on a form you have not answered yet, it is
+already applied. Between the coordinates and the rest of the metadata that
+covers the **well grid**, **FOVs per well**, **serpentine direction**,
+**frame order** (how the packed frame sequence splits into positions and
+timepoints — read from which coordinates repeat, and how), the **channel names
+and roles**, and the **timepoint labels**. A scan that isn't a plain serpentine
+is handed over as a clicked path instead, since the grid fields cannot express
+one.
+
+The **starting well** is the one thing coordinates cannot give: they say where
+the *stage* was, and no file states that in plate terms. But acquisition
+software usually writes the well into each position's name — `B02`,
+`Well B2, Site 1`, `scan_B02_f0` — and when every position parses, All-Well uses
+those names directly: the origin is filled in and the whole visit order comes
+from the file rather than from a grid. Only when the names say nothing does the
+**Origin** box need you.
+
+A suggestion never overwrites an answer you have given. It applies itself while
+the form still holds its defaults; edit anything and it stops, leaving
+**Apply again** to re-apply on demand.
 
 **The stage path is drawn under the plate**, at the same scale, whenever the
 file carries coordinates: one dot per image — not per well — joined in the order

@@ -1262,8 +1262,8 @@ that have adopted it: one control row per module — a `ControlBand`, a
 `FlowLayout` control row beside it, and no plot-card header built only to be
 hidden. It also asserts the specific shape of the Plotting page: every one of
 its five sub-tabs claims a slot and none constructs a band; and that every
-module building a top-level page's tab strip (Plotting, Image Browser, Sample
-Definitions, Batch Export) hands it to the shell band rather than to its own
+module building a top-level page's tab strip (Plotting, Image Browser, Home,
+Batch Export) hands it to the shell band rather than to its own
 body. It is a static scan on purpose — a test that builds a tab needs the
 `viewer_app` fixture, which `conftest.py` auto-marks `slow`, and
 `scripts/test.sh` runs `-m "not slow"`, so such a test would never run in CI.

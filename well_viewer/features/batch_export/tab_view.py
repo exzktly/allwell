@@ -107,7 +107,7 @@ def _show_batch_mode(ctx, mode: str) -> None:
     panels[mode]._reload_persisted_groups()
 
     # Note: we deliberately do NOT auto-resync the panel's groups from the live
-    # the definitions on every tab show. Batch-export groups are export-
+    # sample definitions on every tab show. Batch-export groups are export-
     # specific and start empty; re-seeding here used to wipe the user's export
     # groups with the replicate sets on each visit. Users pull in the replicate
     # groups explicitly via the panel's "Sync from app" button or Quick Setup.

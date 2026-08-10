@@ -11,8 +11,8 @@ from well_viewer.core.safe import swallowed
 # helpers below; these tuples only seed the fallback.
 #
 # Per-well tabs keep per-well plate selection even when replicate sets / stat
-# groups exist (rep-set mode otherwise makes the plate passive): Sample
-# Definitions / Review CSV need user-chosen wells for Cell Gating / Add Prefix /
+# groups exist (rep-set mode otherwise makes the plate passive): Home /
+# Review CSV need user-chosen wells for Cell Gating / Add Prefix /
 # row-loading, and the Cell Browser draws its gallery from the active selection.
 _PER_WELL_TAB_NAMES = ("Home", "Review CSV", "Cell Browser")
 _SINGLE_WELL_TAB_NAMES = ("smFISH",)
@@ -58,8 +58,8 @@ def _plate_passive_in_group_mode(ctx) -> bool:
     app = ctx.window  # transitional bridge (A3)
     """Whether the sidebar plate runs in passive (group-visibility) mode.
 
-    Passive in rep-set (group) mode unless a *well-editing* pane (Sample
-    Definitions / Review CSV) is on screen — those need the plate as a per-well
+    Passive in rep-set (group) mode unless a *well-editing* pane (Home /
+    Review CSV) is on screen — those need the plate as a per-well
     selector. The Cell Browser does NOT force the plate active: it mirrors the
     plotting layer's group wells, so a Scatter + Cell Browser split keeps the
     plate group-driven (no focus-dependent flip; clicking toggles a group and

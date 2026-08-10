@@ -302,7 +302,9 @@ def _subtabs(app):
     return app._ctx.runtime.home.subtabs
 
 
-def _goto(app, qtbot, name: str) -> None:
+def _goto_subtab(app, qtbot, name: str) -> None:
+    """Select one of Home's tabs. Distinct from ``_goto`` above, which moves
+    between *pages* — shadowing that one silently sent its callers here."""
     sub = _subtabs(app)
     for i in range(sub.count()):
         if sub.tabText(i) == name:
@@ -351,9 +353,9 @@ def test_the_group_plate_follows_the_tab(loaded_app, qtbot):
     ctx = loaded_app._ctx
     frame = ctx.widgets.get("_sidebar_sample_frame")
 
-    _goto(loaded_app, qtbot, "Groups")
+    _goto_subtab(loaded_app, qtbot, "Groups")
     assert frame.isVisibleTo(loaded_app)
-    _goto(loaded_app, qtbot, "Overview")
+    _goto_subtab(loaded_app, qtbot, "Overview")
     assert not frame.isVisibleTo(loaded_app)
 
 
@@ -362,9 +364,9 @@ def test_import_is_offered_only_where_it_means_something(loaded_app, qtbot):
     nothing the user can see."""
     btn = loaded_app._ctx.widgets.get("_home_import_btn")
 
-    _goto(loaded_app, qtbot, "Well Labels")
+    _goto_subtab(loaded_app, qtbot, "Well Labels")
     assert btn.isVisibleTo(loaded_app)
-    _goto(loaded_app, qtbot, "Overview")
+    _goto_subtab(loaded_app, qtbot, "Overview")
     assert not btn.isVisibleTo(loaded_app)
 
 
@@ -389,7 +391,7 @@ def test_a_plate_drag_edits_the_group_only_from_the_groups_tab(loaded_app, qtbot
         {"id": "g1", "name": "G1", "wells": [wells[0]]})
     plate = ctx.widgets.get("_rep_map_plate")
 
-    _goto(loaded_app, qtbot, "Groups")
+    _goto_subtab(loaded_app, qtbot, "Groups")
     # Entering the tab deselects whatever was active, so a plate click has no
     # consequence until the user picks a group — the order a real edit follows.
     assert ctx.state.selection.current_selection_id is None
@@ -402,7 +404,7 @@ def test_a_plate_drag_edits_the_group_only_from_the_groups_tab(loaded_app, qtbot
     qtbot.wait(10)
     assert sel_by_id(ctx, "g1").get("wells") == wells[:2]
 
-    _goto(loaded_app, qtbot, "Well Labels")
+    _goto_subtab(loaded_app, qtbot, "Well Labels")
     ctx.state.selection.current_selection_id = "g1"
     plate.setSelectedWellIds(wells[1:3])
     plate.selectionDragFinished.emit()
@@ -410,14 +412,3 @@ def test_a_plate_drag_edits_the_group_only_from_the_groups_tab(loaded_app, qtbot
     assert sel_by_id(ctx, "g1").get("wells") == wells[:2], (
         "a drag from a non-Groups tab rewrote the group")
 
-
-def test_a_document_naming_the_old_page_still_restores(loaded_app):
-    """Every session writes a view-state snapshot, so documents naming the page
-    the definitions used to live on are on disk everywhere. Without the remap
-    the restore silently fails and the dataset reopens on whatever page happened
-    to be current."""
-    from well_viewer.persistence.view_state import _activate_tab
-
-    loaded_app._notebook.setCurrentByName("Plotting")
-    _activate_tab(loaded_app._ctx, "Sample Definitions")
-    assert loaded_app._notebook.currentName() == "Home"

@@ -685,7 +685,7 @@ class SavedSelectionsList(QWidget):
         for row in self._rows.values():
             row.setCompact(on)
         # The "From selection" / "Import…" footer buttons exist to manage
-        # the editable list in Sample Definitions; in the left rail's
+        # the editable list on Home → Groups; in the left rail's
         # read-only mirror they're noise.
         try:
             self._from_btn.setVisible(not on)

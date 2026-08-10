@@ -259,3 +259,89 @@ def test_a_deleted_widget_does_not_take_the_save_down(fn):
     ctx = _ctx(**{HOME: _DeadEdit()})
     ctx.state.selection.notes_text = "alive"
     fn(ctx)
+
+
+# ── the roster's fan-out, with more than one editor on it ───────────────────
+#
+# There is one editor today, so the branches below are unreachable through the
+# real roster. They are still the reason ``core/ui_helpers`` fans out over a
+# roster instead of naming a widget — the module says a second editor is safe to
+# add, and this is what makes that claim checkable rather than a hope. A second
+# roster entry that arrives without these holding would bring back the original
+# bug: a stale box writing its text over a fresh edit on focus-out.
+
+@pytest.fixture()
+def two_editors(monkeypatch):
+    """Put a second key on the roster, the way adding an editor would."""
+    import well_viewer.core.ui_helpers as uh
+    keys = ("_home_notes_edit", "_second_notes_edit")
+    monkeypatch.setattr(uh, "NOTES_WIDGET_KEYS", keys)
+    return keys
+
+
+def test_committing_on_one_editor_updates_the_other(two_editors):
+    home_key, other_key = two_editors
+    home, other = _FakeEdit("new note"), _FakeEdit("old note")
+    ctx = _ctx(**{home_key: home, other_key: other})
+
+    notes_schedule_save(ctx, widget_key=home_key)
+
+    assert ctx.state.selection.notes_text == "new note"
+    assert other.toPlainText() == "new note"
+
+
+def test_the_stale_editor_cannot_write_back_over_the_edit(two_editors):
+    """The sequence as a user performs it: type in one box, visit the other,
+    focus out there. The second commit must be a no-op, not a revert."""
+    home_key, other_key = two_editors
+    home, other = _FakeEdit("old note"), _FakeEdit("old note")
+    ctx = _ctx(**{home_key: home, other_key: other})
+
+    home._text = "the incubator alarmed overnight"
+    notes_schedule_save(ctx, widget_key=home_key)   # the edited box loses focus
+    notes_schedule_save(ctx, widget_key=other_key)  # …then so does the other
+
+    assert ctx.state.selection.notes_text == "the incubator alarmed overnight"
+    assert other.toPlainText() == "the incubator alarmed overnight"
+
+
+def test_only_the_focused_editor_wins(two_editors):
+    home_key, other_key = two_editors
+    ctx = _ctx(**{home_key: _FakeEdit("home text"),
+                  other_key: _FakeEdit("the one being typed in", focused=True)})
+
+    commit_focused_notes(ctx)
+    assert ctx.state.selection.notes_text == "the one being typed in"
+
+
+def test_two_divergent_boxes_are_left_alone_rather_than_guessed_between(two_editors):
+    """Cannot happen while the mirror works. If it ever did, picking one would
+    silently discard the other — leaving the slice is the recoverable answer."""
+    home_key, other_key = two_editors
+    ctx = _ctx(**{home_key: _FakeEdit("box a"), other_key: _FakeEdit("box b")})
+    ctx.state.selection.notes_text = "committed earlier"
+
+    commit_focused_notes(ctx)
+
+    assert ctx.state.selection.notes_text == "committed earlier"
+
+
+def test_focus_still_wins_over_the_divergence_fallback(two_editors):
+    home_key, other_key = two_editors
+    ctx = _ctx(**{home_key: _FakeEdit("also different"),
+                  other_key: _FakeEdit("the one being typed in", focused=True)})
+    ctx.state.selection.notes_text = "committed earlier"
+
+    commit_focused_notes(ctx)
+    assert ctx.state.selection.notes_text == "the one being typed in"
+
+
+def test_a_dataset_swap_blanks_every_editor(two_editors):
+    home_key, other_key = two_editors
+    home, other = _FakeEdit("previous dataset"), _FakeEdit("previous dataset")
+    ctx = _ctx(**{home_key: home, other_key: other})
+
+    clear_notes_editors(ctx)
+
+    assert home.toPlainText() == "" and other.toPlainText() == ""
+    assert home.set_while_blocked == [True] and other.set_while_blocked == [True]

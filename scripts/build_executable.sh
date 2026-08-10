@@ -44,7 +44,7 @@ fi
 # profile manifest (profiles/<name>.toml). The spec omits excluded features'
 # source + their unique heavy deps (e.g. a StarDist-only build drops torch /
 # torchvision / cellpose) and bakes the profile so the frozen app matches.
-# Unset = the full app. Example (thin build — Plotting / Sample Definitions /
+# Unset = the full app. Example (thin build — Plotting / Home /
 # Segmentation only):
 #   ALLWELL_PROFILE=thin scripts/build_executable.sh
 if [[ -n "${ALLWELL_PROFILE:-}" && "${ALLWELL_PROFILE}" != "full" ]]; then

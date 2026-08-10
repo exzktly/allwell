@@ -336,10 +336,17 @@ def on_home_selection_changed(ctx) -> None:
     """Keep Home's plate showing the app-wide selection, and Cell Gating fed.
 
     Cell Gating is a tab on this page, and its CDF is drawn from the selected
-    wells' cell areas — so a selection change has to reload them, exactly as it
-    did when Cell Gating lived on a page of its own.
+    wells' cell areas — so a selection change reloads them, exactly as it did
+    when Cell Gating lived on a page of its own.
+
+    Only while that tab is the one showing. The reload is a per-well ``get_rows``
+    plus a Python-level pass over every cell, per channel; on the page the app
+    opens on, where clicking wells is the primary interaction and nothing draws a
+    CDF, paying it on every click is the same cost the ``_is_tab_visible`` guard
+    exists to keep off the plot tabs.
     """
-    if ctx.runtime.cell_gating.fluor_gate_edits is not None:
+    if (current_subtab(ctx) == "Cell Gating"
+            and ctx.runtime.cell_gating.fluor_gate_edits is not None):
         _cell_gating_load_cell_areas(ctx)
     plate = _widget(ctx, "_home_plate")
     if plate is None:

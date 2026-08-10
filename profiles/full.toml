@@ -6,8 +6,8 @@
 # paths are simply absent and the generator skips them.
 #
 # The runtime filter does NOT read this file — it only needs `features` /
-# `subtabs` in a target profile. Kept-forever features (Plotting, Sample
-# Definitions, Segmentation, and support libs crop/qc/export/preview) are
+# `subtabs` in a target profile. Kept-forever features (Plotting, Home,
+# Segmentation, and support libs crop/qc/export/preview) are
 # deliberately absent: only removable units appear here.
 
 name = "full"

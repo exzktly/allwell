@@ -111,7 +111,7 @@ def build_home_tab(ctx, parent: QWidget) -> None:
     # Every definition on this page autosaves to the data folder on edit, so
     # there is no Save button to pair this with: Import merely merges an
     # external JSON in. It is an action on the page rather than on any one tab,
-    # but it means nothing beside the report, so the handler hides it there.
+    # but it means nothing beside the report, so it is hidden on Overview.
     import_btn = ctx.widgets.register(
         IMPORT_KEY, IconButton("plus", band, text="Import"))
     import_btn.setToolTip(
@@ -142,7 +142,9 @@ def build_home_tab(ctx, parent: QWidget) -> None:
             ctx.runtime.cell_gating.subtab_frame = frame
             ctx.runtime.cell_gating.subtab_built = False
 
-    from .controller import drain_home_subtabs, on_home_subtab_changed
+    from .controller import (
+        drain_home_subtabs, on_home_subtab_changed, sync_home_sidebar,
+    )
     sub_tabs.currentChanged.connect(lambda idx: on_home_subtab_changed(ctx, idx))
 
     # The visible bar lives in the shell's mode band beside the mode selector,
@@ -152,6 +154,11 @@ def build_home_tab(ctx, parent: QWidget) -> None:
     mirror_tab_widget(ctx.window, "Home", sub_tabs)
 
     build_home_overview(ctx, sub_tabs.widget(0))
+    # Decide the band's and the rail plate's state here rather than leaving it to
+    # the activate hook: Home is page 0 and already current when this runs, so no
+    # currentChanged fires and on_tab_change has returned early — the opening
+    # screen would otherwise show an Import button belonging to tabs it is not on.
+    sync_home_sidebar(ctx)
     drain_home_subtabs(ctx)
 
 

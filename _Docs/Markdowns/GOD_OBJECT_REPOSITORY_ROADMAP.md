@@ -96,8 +96,7 @@ not reinvent what it already gives:
   subset-profile boot assertion, matching this.
 - **Still coupled (confirmed teardown targets):** `core/load_controller.py` retains
   many direct `from well_viewer.features…` imports (qc/crop/review_image/grouping/
-  heatmap at `:292,308-310,318,333,378`) *not* yet on the hook seam; Sample
-  Definitions still routes through an app-bridge god-seam (`registry.py:108-116`);
+  heatmap at `:292,308-310,318,333,378`) *not* yet on the hook seam;
   `on_selection_changed` hooks + the `stats`/preview builders still name `app`.
 
 ## Context

@@ -2,8 +2,8 @@
 
 The ``empty_well`` / ``basic`` correction modes need a per-channel field built
 from a reference well's frames. ``build_reference_fields`` is the pure (IO-only,
-no Qt) compute — it loads that well's RAW frames via the same image_table /
-image_discovery loaders the Playground already uses and calls the pipeline's
+no Qt) compute — it loads that well's RAW frames through the shared data-layer
+loaders (``data/frame_load.py``, ``data/image_discovery.py``) and calls the pipeline's
 estimators (``estimate_background_field`` / ``estimate_basic_flatfield``), so the
 math matches a batch run.
 
@@ -46,9 +46,13 @@ def build_reference_fields(ctx, well: str, chan_lower: str, *,
     import process_microscopy as pm
     from pipeline.flatfield import estimate_basic_flatfield, normalize_flatfield
     from well_viewer.data.image_discovery import open_imgref_as_array
-    from well_viewer.features.image_browser.image_table.controller import _load_well_channel
+    from well_viewer.data.frame_load import load_well_channel
 
-    refs = _load_well_channel(ctx, {}, well, chan_lower, use_tophat=False)
+    # The data layer's loader, not the Image Table's wrapper around it. The
+    # wrapper only binds that tab's pass-scoped ``scan_misses``, which this
+    # worker has no business writing -- and reaching for it made the Playground
+    # unopenable in a build with the Image Table profiled out.
+    refs = load_well_channel(ctx, {}, well, chan_lower, use_tophat=False)
     sample = list(refs.values())[:max_samples]
     total = len(sample)
     frames: list = []

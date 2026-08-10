@@ -183,3 +183,46 @@ def test_app_tolerates_a_sub_tab_deletion(qtbot, monkeypatch, mini_dataset,
     app._load_path(mini_dataset)
     _exercise(app)
     assert app._features.get(subtab) is None
+
+
+# ── a removable sub-tab's *deferred* reach into a sibling ────────────────────
+
+def test_the_playground_builds_reference_fields_without_the_image_table():
+    """Deleting one sub-tab must not disarm another's correction modes.
+
+    `playground/worker.py` reached into `image_table.controller` for its frame
+    loader. Nothing caught it: the import is function-local, so the static guard
+    could not see it, and `test_app_tolerates_a_sub_tab_deletion` opens every
+    sub-tab but never selects a correction mode, so it never ran the line. The
+    failure surfaced only when a user picked `basic` / `empty_well` and clicked
+    -- on a daemon thread, in the one interaction the tab exists for.
+
+    Deliberately not a full-app test: the defect is an import reached from a
+    pure compute function, so blocking the package and calling that function is
+    the whole experiment, and it costs milliseconds instead of an app build.
+    """
+    import types
+
+    blocker = _ImportBlocker("image_browser.image_table")
+    purged = [n for n in list(sys.modules)
+              if n.startswith("well_viewer.features.image_browser.image_table")]
+    saved = {n: sys.modules[n] for n in purged}
+    for n in purged:
+        del sys.modules[n]
+    sys.meta_path.insert(0, blocker)
+    try:
+        from well_viewer.features.image_browser.playground import worker
+
+        ctx = types.SimpleNamespace(state=types.SimpleNamespace(
+            dataset=types.SimpleNamespace(pipeline_info={}, data_dir="",
+                                          in_dir="", cache={}, well_paths={}),
+            channel=types.SimpleNamespace(fluor_channels=[], smfish_channels=[]),
+        ))
+        # No frames to find, so this returns (None, None) -- the point is that it
+        # returns at all rather than raising ModuleNotFoundError off-thread.
+        assert worker.build_reference_fields(
+            ctx, "H12", "gfp", flatfield_mode="basic",
+            background_method="empty_well", max_samples=1) == (None, None)
+    finally:
+        sys.meta_path.remove(blocker)
+        sys.modules.update(saved)

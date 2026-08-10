@@ -26,6 +26,8 @@ event loop and the page stays a builder.
 
 from __future__ import annotations
 
+from bisect import bisect_left
+from collections import Counter
 from dataclasses import dataclass, field
 
 # A gap has to be this many times the typical spacing along an axis before it is
@@ -155,8 +157,18 @@ def _group_axis(values: list[float], pitch: float | None,
 
 
 def _nearest(unique: list[float], value: float) -> float:
-    """The merged coordinate *value* belongs to (see :func:`_distinct`)."""
-    return min(unique, key=lambda u: abs(u - value))
+    """The merged coordinate *value* belongs to (see :func:`_distinct`).
+
+    Binary search rather than a scan of every candidate: this runs once per
+    imaged position, and a timelapse plate scan holds tens of thousands.
+    """
+    i = bisect_left(unique, value)
+    if i == 0:
+        return unique[0]
+    if i == len(unique):
+        return unique[-1]
+    before, after = unique[i - 1], unique[i]
+    return before if value - before <= after - value else after
 
 
 def _well_step(values: list[float], groups: dict[float, int],
@@ -177,9 +189,25 @@ def _well_step(values: list[float], groups: dict[float, int],
     return diffs[len(diffs) // 2]
 
 
+def _first_visits(cells: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Each cell once, in the order it was first visited.
+
+    A ``seen`` set rather than the obvious ``c not in cells[:i]``, which is
+    quadratic: at 36,000 positions — a 96-well plate at 16 fields over 24
+    timepoints — that alone took five seconds, on the UI thread, per keystroke.
+    """
+    seen: set[tuple[int, int]] = set()
+    out: list[tuple[int, int]] = []
+    for cell in cells:
+        if cell not in seen:
+            seen.add(cell)
+            out.append(cell)
+    return out
+
+
 def _direction_and_serpentine(cells: list[tuple[int, int]]) -> tuple[str, bool]:
     """Read the sweep axis and whether alternate lines reverse, from the order."""
-    first = [c for i, c in enumerate(cells) if c not in cells[:i]]
+    first = _first_visits(cells)
     if len(first) < 2:
         return "row", True
     # Whichever coordinate changes on the first well-to-well step is the one the
@@ -243,14 +271,25 @@ def infer_stage_layout(positions) -> StageLayout | None:
     if rows * cols != len(occupied):
         return None            # not a filled rectangle — no grid to report
 
-    counts = {cell: cells.count(cell) for cell in occupied}
+    # Distinct *coordinates* per well, not visits: a timelapse returns to every
+    # position once per timepoint, and counting visits would report a well's
+    # fields multiplied by the number of timepoints — 384 "fields" for a plate
+    # imaged at 16 fields over 24 timepoints.
+    seen_here: set[tuple[tuple[int, int], float, float]] = set()
+    counts: Counter = Counter()
+    for cell, (x, y) in zip(cells, points):
+        key = (cell, round(x, _COORD_DECIMALS), round(y, _COORD_DECIMALS))
+        if key in seen_here:
+            continue
+        seen_here.add(key)
+        counts[cell] += 1
     per_well = set(counts.values())
     if len(per_well) != 1:
         return None            # uneven fields per well: not a plate scan pattern
 
     fovs = per_well.pop()
     direction, serpentine = _direction_and_serpentine(cells)
-    order = [c for i, c in enumerate(cells) if c not in cells[:i]]
+    order = _first_visits(cells)
     return StageLayout(
         n_positions=len(points),
         rows=rows,

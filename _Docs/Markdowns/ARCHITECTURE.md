@@ -3011,7 +3011,19 @@ from the group means — not the gap the grouping threshold uses, which runs fro
 the last field of one well to the first of the next and is short by the width of
 a well's own block of fields; at that scale the drawing shrinks by that fraction
 per column and lands a whole cell out of place across twelve of them.
-`ome_import_compute.suggest_layout`
+**The inference is a function of the file, and the page is not.** Every box on
+the converter recomputes the readout as it is typed in, so `suggest_layout` and
+`stage_path_for` both take an already-computed `StageLayout` and the page holds
+one per source (`_inferred_for`, keyed on the layout object `_read_layout`
+already caches per path+mtime). Left to re-derive itself it ran **twice per
+keystroke**; the loops behind it are linear now, but a 96-well plate at 16 fields
+over 24 timepoints is 36,864 positions and still ~90 ms, which is not something
+to spend per character on the UI thread. Two things in that measurement are worth
+keeping in mind for anything else that walks these lists: `c not in cells[:i]` is
+the obvious way to take first visits and is quadratic (five seconds at that
+size), and a timelapse revisits every position once per timepoint, so counting
+*visits* per well rather than distinct coordinates reports a plate's fields
+multiplied by its timepoints. `ome_import_compute.suggest_layout`
 wraps that for the page, which *offers* it — a serpentine as grid fields the user
 can still edit, anything else as an explicit order, since the grid controls
 cannot express a raster.

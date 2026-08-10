@@ -55,6 +55,7 @@ from datasets.ome_import.ome_import_compute import (
     default_channel_roles,
     default_dest,
     destination_problem,
+    infer_layout,
     stage_path_for,
     suggest_layout,
     plan_conversion,
@@ -101,6 +102,8 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._dest_user_set = False
         self._running = False
         self._suggestion = None
+        self._inferred = None
+        self._inferred_key = None
         self._build_ui()
         self.refresh_readout()
 
@@ -722,10 +725,30 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._run_btn.setEnabled(can)
         self._queue_btn.setEnabled(can)
 
+    def _inferred_for(self, layout):
+        """The stage-coordinate layout for *layout*, computed once per file.
+
+        Keyed on the layout object, which ``_read_layout`` already caches per
+        (path, mtime): the inference is a function of the file, while this
+        page recomputes its readout on every keystroke in every box.
+        """
+        if layout is None:
+            self._inferred_key = None
+            return None
+        # `!=`, not `is not`: `id()` returns a large int, and two equal large
+        # ints are not the same object, so an identity test never matches and
+        # the cache recomputes every time — which is what it is here to avoid.
+        if self._inferred_key != id(layout):
+            self._inferred_key = id(layout)
+            self._inferred = infer_layout(layout)
+        return self._inferred
+
     def _refresh_suggestion(self, layout) -> None:
         """Offer the layout the file's stage coordinates describe, if any."""
+        inferred = self._inferred_for(layout)
         self._suggestion = (
-            suggest_layout(layout, self._origin_edit.text().strip() or "A01")
+            suggest_layout(layout, self._origin_edit.text().strip() or "A01",
+                           inferred=inferred)
             if layout is not None else None
         )
         if self._suggestion is None:
@@ -749,7 +772,9 @@ class OmeImportPage(LogPanelMixin, QWidget):
         """
         order = self._plate.order() if self._plate.is_dirty() else []
         anchor = order[0] if order else (self._origin_edit.text().strip() or "A01")
-        points = stage_path_for(layout, anchor) if layout is not None else []
+        points = (stage_path_for(layout, anchor,
+                                 inferred=self._inferred_for(layout))
+                  if layout is not None else [])
         self._path_view.setPath(points)
         self._path_view.setVisible(bool(points))
         self._path_caption.setVisible(bool(points))

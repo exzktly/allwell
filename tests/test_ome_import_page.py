@@ -797,3 +797,32 @@ def test_no_path_is_drawn_when_the_file_has_no_coordinates(qapp, tmp_path):
     page._on_source_changed()
     assert not page._path_view.isVisibleTo(page)
     assert not page._path_caption.isVisibleTo(page)
+
+
+def test_the_stage_inference_runs_once_per_file_not_once_per_keystroke(
+        qapp, tmp_path, monkeypatch):
+    """Every box on this page recomputes the readout as it is typed in, and the
+    inference is a function of the *file*. Left to re-derive itself it ran twice
+    per character — on a 96-well timelapse that is 190 ms of UI thread each."""
+    import datasets.ome_import.view as view_module
+    from datasets.ome_import.controller import OmeImportController
+
+    calls = []
+    real = view_module.infer_layout
+    monkeypatch.setattr(view_module, "infer_layout",
+                        lambda layout: (calls.append(1), real(layout))[1])
+
+    p = _plate_scan(tmp_path / "scan.ome.tif", 2, 3, 4)
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    assert len(calls) == 1
+
+    for text in ("A", "A0", "A03"):
+        page._origin_edit.setText(text)
+    page._rows_edit.setText("2")
+    page._workers_edit.setText("4")
+    _click(page, "D05")
+    assert len(calls) == 1, "the inference re-ran for a change the file didn't make"
+    # …and the drawing still followed every one of those edits.
+    assert page._path_view._points[0] == (4.0, 3.0)

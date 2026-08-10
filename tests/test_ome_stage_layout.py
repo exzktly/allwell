@@ -163,3 +163,33 @@ def test_the_inferred_pitch_is_the_well_step_not_the_gap_between_wells():
     for fovs in (1, 4, 9):
         layout = infer_stage_layout(_scan(2, 3, fovs)[0])
         assert round(layout.pitch, 3) == PITCH, fovs
+
+
+def test_a_timelapse_counts_fields_not_visits():
+    """A timelapse returns to every position once per timepoint. Counting
+    visits reports a well's fields multiplied by the timepoint count — 48
+    "fields per well" for a plate imaged at 4 fields over 12 timepoints."""
+    once, _ = _scan(2, 3, 4)
+    repeated = once * 12
+    layout = infer_stage_layout(repeated)
+    assert layout.fovs_per_well == 4
+    assert (layout.rows, layout.cols) == (2, 3)
+    assert layout.n_positions == len(repeated)     # every image still counted
+
+
+def test_the_inference_stays_usable_on_a_full_timelapse_plate():
+    """96 wells x 16 fields x 24 timepoints. The obvious "have I seen this
+    cell before" scan over the list is quadratic and took five seconds here,
+    on the UI thread, for a page that recomputes on every keystroke."""
+    import time
+
+    points = [
+        (c * PITCH + (f % 4) * FOV, r * PITCH + (f // 4) * FOV)
+        for _ in range(24) for r in range(8) for c in range(12) for f in range(16)
+    ]
+    assert len(points) == 36864
+    start = time.perf_counter()
+    layout = infer_stage_layout(points)
+    elapsed = time.perf_counter() - start
+    assert (layout.rows, layout.cols, layout.fovs_per_well) == (8, 12, 16)
+    assert elapsed < 1.5, f"{elapsed:.2f}s — the quadratic scan is back"

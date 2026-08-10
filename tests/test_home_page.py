@@ -343,7 +343,7 @@ def test_every_definition_tab_is_built_after_a_load(loaded_app):
     for key in ("_rep_list", "_lbl_grid", "_ratio_panel"):
         assert ctx.widgets.get_or_none(key) is not None, key
     assert ctx.runtime.cell_gating.fluor_gate_edits is not None
-    assert callable(ctx.runtime.grouping.pipeline_info_refresh)
+    assert callable(ctx.runtime.pipeline_info.refresh)
 
 
 def test_the_group_plate_follows_the_tab(loaded_app, qtbot):

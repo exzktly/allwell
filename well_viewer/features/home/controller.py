@@ -201,7 +201,7 @@ def on_home_subtab_changed(ctx, idx: int) -> None:
         # Pick up any gates drawn on the Scatter tab since the last visit.
         _cell_gating_sync_scatter_gates(ctx)
     elif name == "Pipeline Info":
-        cb = ctx.runtime.grouping.pipeline_info_refresh
+        cb = ctx.runtime.pipeline_info.refresh
         if callable(cb):
             cb()            # re-read in case the dataset changed
     elif name == "Groups":

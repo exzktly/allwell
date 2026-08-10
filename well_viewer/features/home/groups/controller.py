@@ -43,9 +43,9 @@ def make_replicate_pairs(toks, size=2):
 
 def rep_quick_pairs(ctx) -> None:
     """Generate quick replicate pairs using current dropdown selections."""
-    pair_dir = ctx.runtime.grouping.pair_dir or "row"
-    iter_order = ctx.runtime.grouping.iter_order or "row"
-    size = ctx.runtime.grouping.rep_size or 2
+    pair_dir = ctx.runtime.groups.pair_dir or "row"
+    iter_order = ctx.runtime.groups.iter_order or "row"
+    size = ctx.runtime.groups.rep_size or 2
     well_paths = ctx.state.dataset.well_paths
     sel_state = ctx.state.selection
     new_sets = []
@@ -218,7 +218,7 @@ def rep_refresh_map(ctx) -> None:
 
 def rep_quick_pairs_from_dropdowns(ctx) -> None:
     """Read dropdown values and update state, then call rep_quick_pairs()."""
-    grp = ctx.runtime.grouping
+    grp = ctx.runtime.groups
     pair_cb = ctx.widgets.get_or_none("_rep_quick_pair_dir_var")
     iter_cb = ctx.widgets.get_or_none("_rep_quick_iter_order_var")
     size_sb = ctx.widgets.get_or_none("_rep_quick_size_var")

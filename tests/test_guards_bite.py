@@ -660,3 +660,84 @@ def test_heatmap_guard_clears_a_controller_with_click_handlers_only(tmp_path, mo
            'def on_heatmap_click(ctx, event):\n    return None\n')
     assert _run_heatmap_scan(monkeypatch, tmp_path,
                              "test_controller_exposes_no_hover_motion_handler") is None
+
+
+# ── nested removable sub-packages ───────────────────────────────────────────
+#
+# The container guard walks the tree itself and reads `profiles/full.toml`, so
+# a synthetic case has to supply both: a catalog naming a nested removable unit
+# and a source tree that either violates it or does not.
+
+_NESTED_CATALOG = (
+    'name = "full"\n\n'
+    '[[feature]]\n'
+    'name = "Ratios"\n'
+    'parent = "Home"\n'
+    'paths = ["well_viewer/features/home/ratios"]\n'
+)
+
+
+def _nested_tree(tmp_path: Path, container_body: str) -> Path:
+    (tmp_path / "profiles").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "profiles" / "full.toml").write_text(_NESTED_CATALOG)
+    pkg = tmp_path / "well_viewer" / "features" / "home"
+    (pkg / "ratios").mkdir(parents=True, exist_ok=True)
+    (pkg / "ratios" / "tab_view.py").write_text("PANEL = 1\n")
+    (pkg / "controller.py").write_text(container_body)
+    return tmp_path
+
+
+def _run_nested_scan(monkeypatch, root: Path, test_name: str, debt=frozenset()):
+    return _run_rooted_scan(
+        monkeypatch, "tests.test_architecture_contracts", test_name, root,
+        extra={"WELL_VIEWER": root / "well_viewer",
+               "_NESTED_IMPORT_DEBT": set(debt)})
+
+
+def test_nested_guard_catches_a_container_importing_its_own_sub_package(
+        tmp_path, monkeypatch):
+    root = _nested_tree(
+        tmp_path,
+        "from well_viewer.features.home.ratios.tab_view import PANEL\n")
+    exc = _run_nested_scan(
+        monkeypatch, root,
+        "test_a_container_feature_does_not_import_its_own_removable_sub_packages")
+    assert exc is not None, "the container's module-scope import went uncaught"
+    assert "controller.py" in str(exc) and "Ratios" in str(exc)
+
+
+def test_nested_guard_clears_a_function_local_import(tmp_path, monkeypatch):
+    root = _nested_tree(
+        tmp_path,
+        "def build(ctx, frame):\n"
+        "    from well_viewer.features.home.ratios.tab_view import PANEL\n"
+        "    return PANEL\n")
+    assert _run_nested_scan(
+        monkeypatch, root,
+        "test_a_container_feature_does_not_import_its_own_removable_sub_packages"
+    ) is None
+
+
+def test_nested_guard_clears_a_module_inside_the_sub_package_itself(
+        tmp_path, monkeypatch):
+    """A sub-package importing its own siblings is not a removability problem —
+    the whole directory goes at once."""
+    root = _nested_tree(tmp_path, "STUB = 1\n")
+    (root / "well_viewer" / "features" / "home" / "ratios" / "controller.py"
+     ).write_text("from well_viewer.features.home.ratios.tab_view import PANEL\n")
+    assert _run_nested_scan(
+        monkeypatch, root,
+        "test_a_container_feature_does_not_import_its_own_removable_sub_packages"
+    ) is None
+
+
+def test_nested_debt_liveness_catches_an_entry_that_no_longer_bites(
+        tmp_path, monkeypatch):
+    """An allowlist entry naming an import that has since been repaired must be
+    reported, or the exemption outlives the violation it was written for."""
+    root = _nested_tree(tmp_path, "STUB = 1\n")
+    exc = _run_nested_scan(
+        monkeypatch, root, "test_the_nested_import_debt_list_still_describes_real_imports",
+        debt={("well_viewer/features/home/controller.py",
+               "well_viewer.features.home.ratios")})
+    assert exc is not None and "no longer describe" in str(exc)

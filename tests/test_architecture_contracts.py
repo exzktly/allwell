@@ -236,6 +236,116 @@ def test_no_module_scope_imports_of_removable_features():
     )
 
 
+def _nested_removable_packages() -> dict[str, str]:
+    """``{"well_viewer.features.home.ratios": "Ratios", …}`` — every removable
+    unit in ``profiles/full.toml`` whose package sits *inside* another feature.
+
+    The catalog is the authority on what gets physically deleted, so it is also
+    the authority on which sub-packages a container may not bind at import time.
+    """
+    import tomllib
+
+    catalog = tomllib.loads((REPO_ROOT / "profiles" / "full.toml")
+                            .read_text(encoding="utf-8"))
+    out: dict[str, str] = {}
+    for entry in catalog.get("feature", []):
+        for rel in entry.get("paths") or []:
+            parts = Path(rel).parts
+            # well_viewer / features / <container> / <sub-package>
+            if len(parts) == 4 and parts[:2] == ("well_viewer", "features"):
+                out[".".join(parts)] = str(entry.get("name"))
+    return out
+
+
+def test_a_container_feature_does_not_import_its_own_removable_sub_packages():
+    """§5.3 removability, for the nested case the sibling guard cannot see.
+
+    ``test_no_module_scope_imports_of_removable_features`` compares only the
+    first path segment under ``features/``, so it treats an import from
+    ``features/home/ratios`` by ``features/home/controller.py`` as intra-feature
+    and waves it through. But Ratios is its own removable unit with its own
+    ``[[feature]]`` block: ``derive_profile`` deletes that directory, and a
+    module-scope import in the container would then fail at startup — the whole
+    app, not just the tab. The same applies to Image Browser's three sub-tabs.
+
+    A container reaches its sub-tabs the way ``features/registry.py`` does: a
+    function-local import inside the descriptor's ``build`` adapter.
+    """
+    nested = _nested_removable_packages()
+    assert nested, "profiles/full.toml lists no nested removable package"
+    found = []
+    for path in _walk_py(WELL_VIEWER):
+        if path == WELL_VIEWER / "features" / "registry.py":
+            continue
+        rel = str(path.relative_to(REPO_ROOT))
+        mod_here = ".".join(path.relative_to(REPO_ROOT).with_suffix("").parts)
+        for node in _parse(path).body:
+            if not isinstance(node, ast.ImportFrom) or node.level:
+                continue
+            mod = node.module or ""
+            for pkg, name in nested.items():
+                if mod != pkg and not mod.startswith(pkg + "."):
+                    continue
+                if mod_here == pkg or mod_here.startswith(pkg + "."):
+                    continue      # inside the sub-package itself — allowed
+                found.append((rel, pkg, node.lineno, mod, name))
+
+    offenders = [f"{rel}:{lineno} -> {mod} (removable unit {name!r})"
+                 for rel, pkg, lineno, mod, name in found
+                 if (rel, pkg) not in _NESTED_IMPORT_DEBT]
+    assert not offenders, (
+        "Module-scope import of a removable SUB-package. `derive_profile` "
+        "deletes this directory, so the import would break app startup, not "
+        "just the tab. Make it function-local — the descriptor's build adapter "
+        "in features/registry.py is where a container reaches its sub-tabs:\n  "
+        + "\n  ".join(sorted(offenders)))
+
+
+#: Known-bad sites this guard grandfathers, one entry per ``(importer, target
+#: package)`` pair rather than per file, so a *new* import from the same module
+#: still fails. All three are Image Browser sub-tabs reaching sideways into a
+#: sibling for a shared helper — ``_load_array`` / ``_load_mask_array`` on Image
+#: Table, ``resolve_channel_tint`` on Cell Browser — which the manifest claims
+#: are independently deletable and are not. Making the imports function-local
+#: would silence this guard and fix nothing: a lazy import of a deleted module
+#: fails just as hard, one frame later. The real repair is to move those helpers
+#: down into ``data/`` where all three can reach them, which is its own change.
+_NESTED_IMPORT_DEBT = {
+    ("well_viewer/features/image_browser/cell_browser/worker.py",
+     "well_viewer.features.image_browser.image_table"),
+    ("well_viewer/features/image_browser/image_table/builder_view.py",
+     "well_viewer.features.image_browser.cell_browser"),
+    ("well_viewer/features/image_browser/playground/controller.py",
+     "well_viewer.features.image_browser.image_table"),
+}
+
+
+def test_the_nested_import_debt_list_still_describes_real_imports():
+    """An allowlist that outlives what it excuses starts hiding the next one.
+
+    Every entry above must still name a module-scope import this guard would
+    otherwise reject. When one of these is repaired, its entry must go — and
+    this test is what says so.
+    """
+    nested = _nested_removable_packages()
+    live = set()
+    for path in _walk_py(WELL_VIEWER):
+        rel = str(path.relative_to(REPO_ROOT))
+        mod_here = ".".join(path.relative_to(REPO_ROOT).with_suffix("").parts)
+        for node in _parse(path).body:
+            if not isinstance(node, ast.ImportFrom) or node.level:
+                continue
+            mod = node.module or ""
+            for pkg in nested:
+                if (mod == pkg or mod.startswith(pkg + ".")) and not (
+                        mod_here == pkg or mod_here.startswith(pkg + ".")):
+                    live.add((rel, pkg))
+    stale = _NESTED_IMPORT_DEBT - live
+    assert not stale, (
+        "These entries no longer describe a real violation — delete them from "
+        f"_NESTED_IMPORT_DEBT: {sorted(stale)}")
+
+
 def test_disabling_a_leaf_feature_drops_it_everywhere():
     """Commenting a descriptor out of ``FEATURES`` removes the feature's rail
     entry, dispatch, and state slice — with no dangling references. Exercised on

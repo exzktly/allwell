@@ -269,7 +269,7 @@ def _activate_smfish(ctx) -> None:
 
 
 def _activate_cell_gating(ctx) -> None:
-    from well_viewer.features.grouping.cell_gating.controller import (
+    from well_viewer.features.home.cell_gating.controller import (
         cell_gating_load_cell_areas,
         cell_gating_refresh_included_count,
         cell_gating_sync_scatter_gates,

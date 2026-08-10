@@ -14,7 +14,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QWidget
 
-from well_viewer.features.grouping.cell_gating.tab_view import build_cell_gating_tab
+from well_viewer.features.home.cell_gating.tab_view import build_cell_gating_tab
 from tests.widget_registry_helpers import assert_handles_registered
 
 _HANDLES = (

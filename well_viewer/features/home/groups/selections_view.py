@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QTimer
 from well_viewer.core.safe import swallowed
-from well_viewer.features.grouping.controller import rep_add
+from well_viewer.features.home.groups.controller import rep_add
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -84,5 +84,5 @@ def rep_panel_refresh(ctx) -> None:
         row = getattr(lst, "_rows", {}).get(sels[idx].get("id"))
         if row is not None and hasattr(row, "trigger_rename"):
             QTimer.singleShot(0, row.trigger_rename)
-    from well_viewer.features.grouping.controller import rep_refresh_map
+    from well_viewer.features.home.groups.controller import rep_refresh_map
     rep_refresh_map(ctx)

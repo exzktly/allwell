@@ -554,7 +554,7 @@ def labels_apply_affix(ctx, *, where: str) -> None:
     """
     from well_viewer.core.ui_helpers import ask_name_dialog
     from well_viewer.domain.viewer_state import parse_rc
-    from well_viewer.features.grouping.label_grid_view import label_grid_refresh
+    from well_viewer.features.home.labels.tab_view import label_grid_refresh
 
     grid = ctx.widgets.get_or_none("_lbl_grid")
     grid_sel: list[str] = []
@@ -874,8 +874,8 @@ def groups_centre_refresh(ctx) -> None:
             swallowed()  # was: pass (silent except)
 
     if tab_visible:
-        from well_viewer.features.grouping.label_grid_view import label_grid_refresh
-        from well_viewer.features.grouping.tab_view import rep_panel_refresh
+        from well_viewer.features.home.labels.tab_view import label_grid_refresh
+        from well_viewer.features.home.groups.selections_view import rep_panel_refresh
         rep_panel_refresh(ctx)
         label_grid_refresh(ctx)
     from well_viewer.features.grouping.controller import rep_refresh_map
@@ -1226,7 +1226,7 @@ def plate_commit_deferred(ctx) -> None:
 
 def labels_clear_all(ctx) -> None:
     if ctx.state.dataset.well_labels:
-        from well_viewer.features.grouping.label_grid_view import label_grid_refresh
+        from well_viewer.features.home.labels.tab_view import label_grid_refresh
         ctx.state.dataset.well_labels.clear()
         label_grid_refresh(ctx)
         invalidate_stats_cache(ctx)

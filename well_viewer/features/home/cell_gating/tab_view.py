@@ -42,7 +42,7 @@ from well_viewer.core.ui_helpers import (
     install_canvas_wheel_scroll,
 )
 from well_viewer.features.qc.tab_view import build_qc_gate_controls
-from well_viewer.features.grouping.cell_gating.controller import (
+from well_viewer.features.home.cell_gating.controller import (
     _GATE_BUTTON_ATTR,
     _GATE_CHOICES_ATTR,
     _GATE_HINT_ATTR,
@@ -62,10 +62,10 @@ from well_viewer.features.grouping.cell_gating.controller import (
     cell_gating_sync_scatter_gates,
     logger,
 )
-from well_viewer.features.grouping.cell_gating.optimizer_view import (
+from well_viewer.features.home.cell_gating.optimizer_view import (
     build_optimizer_window, show_optimizer_window,
 )
-from well_viewer.features.grouping.cell_gating.renderer import _cell_gating_plot_cdf
+from well_viewer.features.home.cell_gating.renderer import _cell_gating_plot_cdf
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes

@@ -13,7 +13,7 @@ import pytest
 
 pd = pytest.importorskip("pandas")
 
-from well_viewer.features.grouping.cell_gating.gating_compute import (
+from well_viewer.features.home.cell_gating.gating_compute import (
     format_inclusion_funnel, inclusion_funnel,
 )
 

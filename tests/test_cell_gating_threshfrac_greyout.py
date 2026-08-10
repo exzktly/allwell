@@ -9,7 +9,7 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 
 
 def test_threshfracon_fields_grey_out_with_fraction_on_gate(loaded_app):
-    from well_viewer.features.grouping.cell_gating import controller as cg
+    from well_viewer.features.home.cell_gating import controller as cg
 
     app = loaded_app
     assert app._notebook.setCurrentByName("Home")

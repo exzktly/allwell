@@ -93,8 +93,8 @@ def test_cell_gating_edit_persists_without_save_button(loaded_app, mini_dataset)
     relies on.
     """
     from well_viewer.domain.gating_state import read_gating_params
-    from well_viewer.features.grouping.cell_gating.controller import cell_gating_on_threshold_frac_on_change
-    from well_viewer.features.grouping.cell_gating.tab_view import build_cell_gating_subtab
+    from well_viewer.features.home.cell_gating.controller import cell_gating_on_threshold_frac_on_change
+    from well_viewer.features.home.cell_gating.tab_view import build_cell_gating_subtab
 
     app = loaded_app
     if not hasattr(app, "_cell_gating_thresh_frac_edits"):

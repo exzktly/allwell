@@ -464,7 +464,7 @@ def test_ctxbar_threshold_box_reflects_set_value(loaded_app):
     ThreshFracOn (e.g. after an auto-threshold or Cell Gating edit), not stay at
     its 50.0 default, and follow the active channel."""
     app = loaded_app
-    from well_viewer.features.grouping.cell_gating.controller import cell_gating_on_threshold_frac_on_change
+    from well_viewer.features.home.cell_gating.controller import cell_gating_on_threshold_frac_on_change
     from well_viewer.core.channel_state_controller import set_active_channel
     set_active_channel(app._ctx, "gfp")
     app._cell_gating_thresh_frac_edits["gfp"].setText("123")

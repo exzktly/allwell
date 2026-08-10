@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 
 from widgets.flow_layout import FlowLayout, flow_group
 from well_viewer.core.ui_helpers import build_section_header
-from well_viewer.features.grouping.cell_gating.controller import (
+from well_viewer.features.home.cell_gating.controller import (
     _cell_gating_autofill_opt_range,
     _cell_gating_on_opt_scope_changed,
     cell_gating_optimize_thresh_frac_on,

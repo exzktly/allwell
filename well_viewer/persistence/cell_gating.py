@@ -236,7 +236,7 @@ def _mirror_gating_to_widgets(ctx, *, run_worker: bool = False) -> bool:
     )
     if not ensure_cell_gating_tab_built(ctx):
         return False
-    from well_viewer.features.grouping.cell_gating.controller import (
+    from well_viewer.features.home.cell_gating.controller import (
         cell_gating_apply_persisted_state,
         cell_gating_start_gating_worker,
     )

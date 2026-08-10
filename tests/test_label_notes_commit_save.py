@@ -17,7 +17,7 @@ pytestmark = pytest.mark.qt
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.grouping.label_grid_view import LabelGrid
+from well_viewer.features.home.labels.tab_view import LabelGrid
 
 
 class _Persistence:

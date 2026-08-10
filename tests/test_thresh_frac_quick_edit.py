@@ -202,7 +202,7 @@ def test_set_writes_through_active_channel_edit(monkeypatch):
     app = _FakeApp()
     # The cell-gating change handler fans out via the ctx-native redraw_app
     # orchestrator (was ctx.app._redraw()); route it back to the fake's counter.
-    import well_viewer.features.grouping.cell_gating.controller as cg
+    import well_viewer.features.home.cell_gating.controller as cg
     monkeypatch.setattr(cg, "redraw_app", lambda ctx: app._redraw())
     set_thresh_frac_on(app._ctx, 123.0)       # active channel == gfp
     assert app._cell_gating_thresh_frac_edits["gfp"].text() == "123.0"
@@ -215,7 +215,7 @@ def test_set_writes_through_active_channel_edit(monkeypatch):
 
 def test_set_targets_explicit_channel(monkeypatch):
     app = _FakeApp()
-    import well_viewer.features.grouping.cell_gating.controller as cg
+    import well_viewer.features.home.cell_gating.controller as cg
     monkeypatch.setattr(cg, "redraw_app", lambda ctx: app._redraw())
     set_thresh_frac_on(app._ctx, 77.0, channel="mcherry")
     assert get_thresh_frac_on(app._ctx, "mcherry") == 77.0
@@ -300,7 +300,7 @@ def test_write_follows_the_displayed_target(monkeypatch):
     the channel's intensity cutoff exactly where the user put it.
     """
     app = _FakeApp()
-    import well_viewer.features.grouping.cell_gating.controller as cg
+    import well_viewer.features.home.cell_gating.controller as cg
     monkeypatch.setattr(cg, "redraw_app", lambda ctx: app._redraw())
     # A committed intensity cutoff: the edit is the input surface and the slice
     # the source of truth, so a real one has both (the change handler syncs the
@@ -317,7 +317,7 @@ def test_write_follows_the_displayed_target(monkeypatch):
 
 def test_write_still_targets_the_intensity_cutoff_for_an_intensity_metric(monkeypatch):
     app = _FakeApp()
-    import well_viewer.features.grouping.cell_gating.controller as cg
+    import well_viewer.features.home.cell_gating.controller as cg
     monkeypatch.setattr(cg, "redraw_app", lambda ctx: app._redraw())
     set_on_cutoff(app._ctx, 120.0)
     assert get_thresh_frac_on(app._ctx, "gfp") == 120.0
@@ -442,7 +442,7 @@ def test_a_channel_without_counts_keeps_the_intensity_cutoff(monkeypatch):
     edit and return. Such a channel stays on the cutoff it actually has.
     """
     from well_viewer.core.channel_state_controller import quick_edit_cutoff_is_count
-    import well_viewer.features.grouping.cell_gating.controller as cg
+    import well_viewer.features.home.cell_gating.controller as cg
     monkeypatch.setattr(cg, "redraw_app", lambda ctx: app._redraw())
 
     app = _FakeApp()

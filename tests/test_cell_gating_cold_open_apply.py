@@ -19,7 +19,7 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 def test_fluor_gate_applies_on_cold_open(qtbot, mini_dataset):
     from well_viewer.runtime_app import WellViewerApp
     from well_viewer.data.data_loading import df_included_mask
-    import well_viewer.features.grouping.cell_gating.controller as cg
+    import well_viewer.features.home.cell_gating.controller as cg
 
     app1 = WellViewerApp()
     app1._load_path(mini_dataset)

@@ -78,7 +78,7 @@ DIVIDER_VIOLATIONS = {
     # of the scan only understood a plain attribute argument.
     "conditional": ("def build(p, stack):\n    f = QFrame(p)\n"
                     "    f.setFrameShape(QFrame.HLine if stack else QFrame.VLine)\n"),
-    # `QFrame` is imported under an alias in replicate_panel_view.
+    # `QFrame` is imported under an alias in home/groups/tab_view.py.
     "aliased": "def build(p):\n    f = _QFrame(p)\n    f.setFrameShape(_QFrame.HLine)\n",
     # The shape and the shadow OR'd into setFrameStyle is the same act.
     "frame_style": "def build(p):\n    f = QFrame(p)\n    f.setFrameStyle(QFrame.HLine | QFrame.Plain)\n",

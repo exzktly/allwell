@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QDialog, QVBoxLayout
 
 import theme
 from well_viewer.data.data_loading import get_rows
-from well_viewer.features.grouping.cell_gating.gating_compute import (
+from well_viewer.features.home.cell_gating.gating_compute import (
     ThreshFracOptimizationResult,
     _opt_curve_ylim,
     _timepoint_label,

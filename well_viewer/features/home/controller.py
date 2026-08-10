@@ -36,23 +36,23 @@ from .tab_view import (
 # ratchets down (``test_deferred_imports``). A ``lazy(...)`` call is neither —
 # it imports on first call and caches.
 _build_cell_gating_subtab = lazy(
-    "well_viewer.features.grouping.cell_gating.tab_view",
+    "well_viewer.features.home.cell_gating.tab_view",
     "build_cell_gating_subtab")
 _cell_gating_sync_scatter_gates = lazy(
-    "well_viewer.features.grouping.cell_gating.controller",
+    "well_viewer.features.home.cell_gating.controller",
     "cell_gating_sync_scatter_gates")
 _cell_gating_load_cell_areas = lazy(
-    "well_viewer.features.grouping.cell_gating.controller",
+    "well_viewer.features.home.cell_gating.controller",
     "cell_gating_load_cell_areas")
 _build_replicate_groups_centre = lazy(
-    "well_viewer.features.grouping.replicate_panel_view",
+    "well_viewer.features.home.groups.tab_view",
     "build_replicate_groups_centre")
 _build_label_grid = lazy(
-    "well_viewer.features.grouping.label_grid_view", "build_label_grid")
+    "well_viewer.features.home.labels.tab_view", "build_label_grid")
 _build_ratios_inline_panel = lazy(
-    "well_viewer.features.scatter.ratio_panel_view", "build_ratios_inline_panel")
+    "well_viewer.features.home.ratios.tab_view", "build_ratios_inline_panel")
 _build_pipeline_info_subtab = lazy(
-    "well_viewer.features.grouping.pipeline_info_view",
+    "well_viewer.features.home.pipeline_info.tab_view",
     "build_pipeline_info_subtab")
 
 _logger = logging.getLogger("well_viewer")

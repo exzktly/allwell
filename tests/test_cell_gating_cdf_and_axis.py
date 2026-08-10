@@ -12,7 +12,7 @@ import pandas as pd
 
 
 def test_cell_gating_valid_rows_filters_crop_and_qc_not_fluor_gate():
-    from well_viewer.features.grouping.cell_gating.gating_compute import _cell_gating_valid_rows
+    from well_viewer.features.home.cell_gating.gating_compute import _cell_gating_valid_rows
     df = pd.DataFrame({
         "area_px": [10, 20, 30, 40],
         "Included": [1, 1, 0, 0],   # fluor gate / manual — MUST be ignored
@@ -26,7 +26,7 @@ def test_cell_gating_valid_rows_filters_crop_and_qc_not_fluor_gate():
 
 
 def test_cell_gating_valid_rows_absent_columns_pass_through():
-    from well_viewer.features.grouping.cell_gating.gating_compute import _cell_gating_valid_rows
+    from well_viewer.features.home.cell_gating.gating_compute import _cell_gating_valid_rows
     df = pd.DataFrame({"area_px": [1, 2, 3]})   # no QC_Pass / Crop_Pass
     assert len(_cell_gating_valid_rows(df)) == 3
 

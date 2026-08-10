@@ -54,7 +54,7 @@ from well_viewer.domain.gating_state import (
 from well_viewer.domain.metric_registry import channel_supports_smfish
 from well_viewer.domain.selections_model import active_replicate_sets
 from well_viewer.domain.viewer_state import parse_rc
-from well_viewer.features.grouping.cell_gating.gating_compute import (
+from well_viewer.features.home.cell_gating.gating_compute import (
     _cell_gating_first_frame_rows,
     _cell_gating_valid_rows,
     _distinct_timepoints,
@@ -69,10 +69,10 @@ from well_viewer.features.grouping.cell_gating.gating_compute import (
     inclusion_counts,
     inclusion_funnel,
 )
-from well_viewer.features.grouping.cell_gating.opt_curve_view import (
+from well_viewer.features.home.cell_gating.opt_curve_view import (
     _cell_gating_show_opt_curve_popup,
 )
-from well_viewer.features.grouping.cell_gating.renderer import _cell_gating_plot_cdf
+from well_viewer.features.home.cell_gating.renderer import _cell_gating_plot_cdf
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes

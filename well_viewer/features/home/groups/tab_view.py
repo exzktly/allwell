@@ -10,7 +10,7 @@ The sample definitions are split between two places:
     SavedSelectionsList over ``app._app_state.selection.selections``. Hoisted out of the
     sidebar so the user has full vertical room for the list and the
     plate keeps its proper aspect ratio.
-  - **Home — Well Labels tab**: see ``label_grid_view``.
+  - **Home — Well Labels tab**: see ``home/labels/tab_view.py``.
 
 The page hosting those tabs is Home's (``features/home/tab_view.py``), which
 owns the notebook, the control band and the Import action; this module supplies
@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 
 from well_viewer.domain.plate_layout import PLATE_COLS
 from well_viewer.core.ui_helpers import btn_primary, btn_secondary, build_hline_separator
-from well_viewer.features.grouping.controller import (
+from well_viewer.features.home.groups.controller import (
     rep_add, rep_refresh_map, rep_quick_pairs_from_dropdowns,
 )
 from well_viewer.core.safe import swallowed
@@ -195,7 +195,7 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     # The groups card-list — a widgets.SavedSelectionsList (composable)
     # over ctx.state.selection.selections.
     from widgets.saved_selections_list import SavedSelectionsList
-    from well_viewer.features.grouping.tab_view import wire_selections_list as _wire
+    from well_viewer.features.home.groups.selections_view import wire_selections_list as _wire
     rep_list = ctx.widgets.register("_rep_list", SavedSelectionsList(parent))
     rep_list.setComposable(True)
     layout.addWidget(rep_list, 1)

@@ -19,7 +19,12 @@ from pipeline.ome_explode import (
     OmeLayout,
     read_ome_layout,
 )
-from util.plate_grid import normalize_well_order, serpentine_well_labels
+from datasets.ome_import.stage_layout import infer_stage_layout, place
+from util.plate_grid import (
+    normalize_well_order,
+    serpentine_well_labels,
+    well_row_col,
+)
 
 # The channel-role heuristic moved to the shared ``util.channel_roles`` so the
 # Analyze page can reuse it; re-exported here so the converter's imports and its
@@ -269,6 +274,68 @@ def default_dest(src: Path | str) -> Path:
     return src.parent / f"{strip_ome_suffix(src.name)}_dataset"
 
 
+@dataclass(frozen=True)
+class LayoutSuggestion:
+    """A plate layout read out of the file's own stage coordinates.
+
+    ``well_order`` is filled only when the scan is **not** the serpentine the
+    page can express with a grid — a raster, or any other path — because an
+    explicit order is the only way to say those, whereas a serpentine is better
+    left as grid fields the user can still edit.
+    """
+
+    rows: int
+    cols: int
+    fovs_per_well: int
+    direction: str
+    n_positions: int
+    well_order: tuple[str, ...] = ()
+
+    def describe(self) -> str:
+        path = " (non-serpentine path)" if self.well_order else ""
+        return (
+            f"{self.rows}×{self.cols} wells × {self.fovs_per_well} FOV(s), "
+            f"snaking by {'row' if self.direction == 'row' else 'column'}{path}"
+        )
+
+
+def suggest_layout(layout: OmeLayout, origin: str = "A01") -> LayoutSuggestion | None:
+    """Read the plate layout out of *layout*'s stage coordinates, or ``None``.
+
+    The OME-XML records where on the stage every plane was taken, and a plate
+    scan's coordinates carry the well grid in their spacing (see
+    :mod:`datasets.ome_import.stage_layout`). That answers, from the file
+    itself, three of the questions the page otherwise asks the user to guess:
+    the grid, the fields per well, and the direction the stage swept.
+
+    *origin* places the inferred block, since stage coordinates are relative to
+    the microscope and say nothing about which physical well the corner is.
+    ``None`` when the file carries no positions or they do not describe a grid —
+    a wrong suggestion silently entered into the form would be worse than none.
+    """
+    inferred = infer_stage_layout(layout.stage_positions)
+    if inferred is None:
+        return None
+    try:
+        origin_row, origin_col = well_row_col(origin or "A01")
+    except ValueError:
+        origin_row, origin_col = 0, 0
+    order: tuple[str, ...] = ()
+    if not inferred.serpentine:
+        placed = place(inferred, origin_row, origin_col)
+        if not placed:
+            return None
+        order = tuple(placed)
+    return LayoutSuggestion(
+        rows=inferred.rows,
+        cols=inferred.cols,
+        fovs_per_well=inferred.fovs_per_well,
+        direction=inferred.direction,
+        n_positions=inferred.n_positions,
+        well_order=order,
+    )
+
+
 def destination_problem(dest: Path | str) -> str:
     """``""`` if *dest* is usable, else a short reason, for the field's hint.
 
@@ -313,9 +380,9 @@ def plan_conversion(layout: OmeLayout, params: ConversionParams) -> ConversionPl
     since no grid can make an incomplete file convertible, and the page's readout
     should say *that* rather than a divisibility error derived from it.
     """
-    incomplete = layout.missing_plane_report()
-    if incomplete:
-        raise OmeImportError(incomplete)
+    unsound = layout.validation_report()
+    if unsound:
+        raise OmeImportError(unsound)
 
     rows, cols = params.grid_rows, params.grid_cols
     if params.well_order:

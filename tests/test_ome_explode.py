@@ -601,3 +601,123 @@ def test_packed_plane_states_which_plane_is_missing(tmp_path):
         _packed_plane(_Series(), "TYX", 1, 0)
     assert "frame 1" in str(exc.value)
     assert "no image data" in str(exc.value)
+
+
+# ── validating the source before anything is written ─────────────────────────
+
+
+def _write_ome_xml(path, xml, n_pages, *, shape=(6, 6)):
+    """A TIFF carrying *xml* verbatim as its description, with *n_pages* pages."""
+    data = np.stack([np.full(shape, i + 1, np.uint16) for i in range(n_pages)])
+    tifffile.imwrite(str(path), data, description=xml, metadata=None,
+                     photometric="minisblack")
+    return path
+
+
+def _ome_xml(*, size_t, size_c=1, tiffdata=None, planes=""):
+    entries = tiffdata if tiffdata is not None else [
+        (t, c, t * size_c + c) for t in range(size_t) for c in range(size_c)]
+    mapping = "".join(
+        f'<TiffData FirstT="{t}" FirstC="{c}" FirstZ="0" IFD="{ifd}" PlaneCount="1"/>'
+        for t, c, ifd in entries)
+    chans = "".join(f'<Channel ID="Channel:0:{c}" Name="ch{c}" SamplesPerPixel="1"/>'
+                    for c in range(size_c))
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+        '<Image ID="Image:0" Name="scan"><Pixels ID="Pixels:0" '
+        'DimensionOrder="XYZCT" Type="uint16" SizeX="6" SizeY="6" '
+        f'SizeC="{size_c}" SizeZ="1" SizeT="{size_t}">{chans}{planes}{mapping}'
+        '</Pixels></Image></OME>'
+    )
+
+
+def test_a_named_ome_tiff_with_no_readable_metadata_is_refused(tmp_path):
+    """The shape an interrupted copy leaves: a structurally valid TIFF holding a
+    fraction of the plate, whose description tag points past its own end. It
+    reads as a one-frame file and would convert, silently, into one well."""
+    # Big enough that tifffile writes the OME description after the pixel data,
+    # which is what puts its offset past the end of a shortened copy — the same
+    # shape a real interrupted transfer of a plate-sized file leaves.
+    good = tmp_path / "full.ome.tif"
+    tifffile.imwrite(str(good), np.zeros((40, 64, 64), np.uint16), ome=True,
+                     photometric="minisblack",
+                     metadata={"axes": "TYX"})
+    cut = tmp_path / "cut.ome.tif"
+    cut.write_bytes(good.read_bytes()[: int(good.stat().st_size * 0.6)])
+
+    layout = read_ome_layout(cut)
+    assert not layout.has_ome_xml
+    assert layout.named_ome
+    assert layout.warnings                       # tifffile said so; we kept it
+    report = layout.validation_report("cut.ome.tif")
+    assert "no readable OME metadata" in report
+    with pytest.raises(ValueError, match="no readable OME metadata"):
+        explode_ome_tiff(cut, tmp_path / "in", grid_rows=1, grid_cols=1)
+
+
+def test_a_plain_tiff_stack_is_still_accepted(tmp_path):
+    """A stack that never claimed to be an OME-TIFF is a legitimate input, and
+    the "no OME metadata" refusal must not catch it."""
+    p = tmp_path / "stack.tif"
+    tifffile.imwrite(str(p), np.zeros((6, 6, 6), np.uint16), photometric="minisblack")
+    layout = read_ome_layout(p)
+    assert not layout.named_ome
+    assert layout.validation_report("stack.tif") == ""
+
+
+def test_ome_metadata_that_does_not_describe_the_pages_is_refused(tmp_path):
+    """No TiffData at all: tifffile declines the OME structure and falls back to
+    a plain page sequence, so every plane's channel and timepoint is a guess."""
+    xml = _ome_xml(size_t=6, tiffdata=[])
+    p = _write_ome_xml(tmp_path / "nomap.ome.tif", xml, 6)
+    layout = read_ome_layout(p)
+    assert layout.has_ome_xml
+    assert layout.series_kind != "ome"
+    assert "does not describe its pages" in layout.validation_report("nomap.ome.tif")
+
+
+def test_a_broken_index_map_is_not_reported_as_a_truncated_run(tmp_path):
+    """Every plane is in the file; the metadata points two of them at IFDs that
+    do not exist. Telling this user to re-export a shorter file would throw away
+    data that is present, so the count of unreferenced pages picks the cause."""
+    xml = _ome_xml(size_t=6, tiffdata=[(0, 0, 0), (1, 0, 1), (2, 0, 2),
+                                       (3, 0, 3), (4, 0, 8), (5, 0, 9)])
+    p = _write_ome_xml(tmp_path / "badmap.ome.tif", xml, 6)
+    layout = read_ome_layout(p)
+    assert layout.missing_planes == 2
+    assert layout.unreferenced_pages == 2
+    report = layout.validation_report("badmap.ome.tif")
+    assert "No image data is missing" in report
+    assert "index map" in report
+    assert "acquisition was stopped" not in report
+
+
+def test_a_truncated_acquisition_still_reads_as_one(tmp_path):
+    """The counterpart: fewer pages than declared, and every page referenced."""
+    xml = _ome_xml(size_t=6, tiffdata=[(t, 0, t) for t in range(4)])
+    p = _write_ome_xml(tmp_path / "short.ome.tif", xml, 4)
+    layout = read_ome_layout(p)
+    assert layout.missing_planes == 2
+    assert layout.unreferenced_pages == 0
+    report = layout.validation_report("short.ome.tif")
+    assert "acquisition was stopped" in report
+    assert "index map" not in report
+
+
+def test_stage_positions_are_read_from_the_plane_elements(tmp_path):
+    planes = "".join(
+        f'<Plane TheT="{i}" TheC="0" TheZ="0" PositionX="{i * 10}" '
+        f'PositionY="{i * 20}"/>' for i in range(4))
+    p = _write_ome_xml(tmp_path / "pos.ome.tif",
+                       _ome_xml(size_t=4, planes=planes), 4)
+    layout = read_ome_layout(p)
+    assert layout.stage_positions == [(0.0, 0.0), (10.0, 20.0),
+                                      (20.0, 40.0), (30.0, 60.0)]
+
+
+def test_a_sound_file_reports_nothing(tmp_path):
+    p = _write_ome(tmp_path / "s.ome.tif", positions=4, size_t=2)
+    layout = read_ome_layout(p)
+    assert layout.validation_report("s.ome.tif") == ""
+    assert layout.warnings == []

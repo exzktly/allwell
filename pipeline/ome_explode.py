@@ -34,6 +34,7 @@ inside the pipeline self-sufficiency contract (ARCHITECTURE §6.2).
 from __future__ import annotations
 
 import io
+import logging
 import os
 import re
 import threading
@@ -41,6 +42,7 @@ import time
 import xml.etree.ElementTree as ET
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -79,9 +81,11 @@ class OmeLayout:
       count; how it splits into positions × timepoints is decided at explode time
       from the user's grid and frame-order.
 
-    The last three fields describe the file's *completeness* rather than its
-    shape — see :func:`series_page_gaps` for what a gap is and
-    :meth:`missing_plane_report` for how one is reported.
+    The fields after ``n_frames`` describe the file's *soundness* rather than its
+    shape — whether it is an OME-TIFF at all, whether the dimensions it declares
+    are the ones it turned out to have, and whether every plane it declares is
+    backed by image data. :meth:`validation_report` turns them into the one
+    sentence a caller shows; :func:`series_page_gaps` defines what a gap is.
     """
 
     n_positions: int
@@ -103,16 +107,89 @@ class OmeLayout:
     incomplete_positions: list[int] = field(default_factory=list)
     first_missing_plane: int = -1
     missing_files: list[str] = field(default_factory=list)
+    # Is this an OME-TIFF at all, and did its OME structure survive the read?
+    # Three separate questions, because a plain TIFF stack is a legitimate input
+    # here while a *named* ``.ome.tif`` with no readable OME-XML is a damaged
+    # one. ``series_kind`` is ``tifffile``'s own verdict: anything other than
+    # ``"ome"`` means it declined to build the series from the OME structure and
+    # fell back to enumerating pages, so channel and timepoint identity are
+    # guesses whatever the metadata says.
+    named_ome: bool = False
+    has_ome_xml: bool = True
+    series_kind: str = "ome"
+    # ``SizeT``/``SizeC``/``SizeZ`` as the OME-XML states them, against which the
+    # series tifffile actually produced is checked: a file can declare forty
+    # frames and yield one.
+    declared_sizes: dict[str, int] = field(default_factory=dict)
+    # Physical IFDs in the file that no series slot references. Non-zero means
+    # image data is present that the metadata's index map never points at — the
+    # third cause of a missing plane, and the only one where nothing is lost.
+    unreferenced_pages: int = 0
+    # What ``tifffile`` itself said while reading. It diagnoses every fault here
+    # (bad page offsets, out-of-range TiffData indices, missing companion files)
+    # and writes it to a logger, so a caller that does not listen throws the
+    # file's own account of what is wrong with it away.
+    warnings: list[str] = field(default_factory=list)
+    # ``(x, y)`` stage coordinates per plane, in the OME-XML's plane order, for
+    # callers that infer the plate layout from where the images were taken.
+    stage_positions: list[tuple[float, float]] = field(default_factory=list)
+
+    def validation_report(self, name: str = "") -> str:
+        """The one blocking problem with this file, or ``""`` if it is sound.
+
+        Ordered by how far upstream the fault is: a file that is not an OME-TIFF
+        cannot have its dimensions checked, and dimensions that were not
+        realised make a plane count meaningless. Each branch names the remedy,
+        because the causes need different ones and the wrong remedy costs a
+        re-export of a plate that did not need one.
+        """
+        subject = name or "This file"
+        detail = f" {self.warnings[0]}" if self.warnings else ""
+        # A plain TIFF stack carries no OME-XML and is a legitimate input, so
+        # only a file *named* .ome.tif is expected to have any: one that does
+        # not has almost certainly been truncated in transit, which leaves a
+        # structurally valid TIFF holding a fraction of the plate.
+        if self.named_ome and not self.has_ome_xml:
+            return (
+                f"{subject} has no readable OME metadata, so the wells, channels "
+                f"and timepoints it holds are unknown.{detail} A copy that stopped "
+                f"part-way does this — the file still opens as a plain TIFF and "
+                f"reads as a fraction of its real size. Check its size against the "
+                f"original and copy it again."
+            )
+        if self.has_ome_xml and self.series_kind != "ome":
+            return (
+                f"{subject} carries OME metadata that does not describe its pages, "
+                f"so the reader fell back to a plain sequence and the channel and "
+                f"timepoint of each plane are unknown.{detail} Re-export it from "
+                f"the acquisition software."
+            )
+        realised = self.n_frames if self.single_image else self.size_t
+        declared_t = int(self.declared_sizes.get("T", 0))
+        if self.single_image and declared_t and realised and declared_t != realised:
+            return (
+                f"{subject} declares SizeT={declared_t} but the image series it "
+                f"produced holds {realised} — its metadata and its pages disagree, "
+                f"so which plane is which cannot be trusted. Re-export it from the "
+                f"acquisition software."
+            )
+        return self.missing_plane_report(name)
 
     def missing_plane_report(self, name: str = "") -> str:
         """A user-facing explanation of the file's missing planes, or ``""``.
 
         Returns the empty string when every declared plane is backed by image
         data. Otherwise the message names the shortfall and the likeliest cause,
-        because the two causes need opposite fixes: missing companion files are
-        recovered by putting them back beside the source, whereas an acquisition
-        that stopped early has to be re-exported with the dimensions it really
-        holds.
+        because the three causes need different fixes. Missing companion files
+        are recovered by putting them back beside the source. An acquisition that
+        stopped early has to be re-exported with the dimensions it really holds.
+        And a **broken index map** — ``TiffData`` entries pointing at IFDs the
+        file does not have, or carrying a coordinate outside the declared sizes,
+        which ``tifffile`` reports and then leaves as a hole — loses nothing at
+        all: the pixels are in the file and only the metadata is wrong, so
+        telling that user to re-export a shorter file would throw away data that
+        is there. The tell is *unreferenced pages*: image data the map never
+        points at.
         """
         if self.missing_planes <= 0:
             return ""
@@ -135,6 +212,14 @@ class OmeLayout:
                 " Companion file(s) the metadata references are not in the same "
                 f"folder as the source: {', '.join(self.missing_files)}. Put them "
                 "back beside it and convert again."
+            )
+        elif self.unreferenced_pages > 0:
+            cause = (
+                f" No image data is missing: the file still holds "
+                f"{self.unreferenced_pages} image plane(s) that its own index map "
+                "never points at, so the fault is in the metadata rather than the "
+                "pixels. Re-export or repair the OME-XML rather than re-running "
+                "the acquisition."
             )
         else:
             cause = (
@@ -279,6 +364,122 @@ def series_page_gaps(series) -> list[int]:
     return gaps
 
 
+@contextmanager
+def _captured_tifffile_warnings():
+    """Collect what ``tifffile`` logs while the block runs, as a list of strings.
+
+    ``tifffile`` diagnoses every fault this module cares about — an invalid page
+    offset, a ``TiffData`` index out of range, a companion file it could not
+    read, frames it had to zero — and reports them through its logger, which
+    nothing here was attached to. It is the file's own account of what is wrong
+    with it, and it costs nothing to keep.
+    """
+    messages: list[str] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            messages.append(record.getMessage())
+
+    handler = _Collect()
+    logger = logging.getLogger("tifffile")
+    logger.addHandler(handler)
+    try:
+        yield messages
+    finally:
+        logger.removeHandler(handler)
+
+
+def _unreferenced_page_count(tf, series) -> int:
+    """Physical IFDs in *tf* that no slot of *series* points at.
+
+    Distinguishes the two shapes a hole in the index map can take. An
+    acquisition that stopped early has fewer pages than the metadata declares
+    and every page it does have is referenced, so this is zero. A file whose
+    ``TiffData`` entries point at IFDs it does not have — or carry a coordinate
+    outside the declared sizes, which ``tifffile`` drops — has the pixels on
+    disk with nothing pointing at them, and this counts them.
+    """
+    mapped: set[int] = set()
+    for s in series:
+        if str(getattr(s, "kind", "")).lower() not in _SPARSE_SERIES_KINDS:
+            return 0
+        for i in range(len(s.pages)):
+            try:
+                page = s.pages[i]
+            except IndexError:
+                continue
+            if page is not None:
+                mapped.add(int(page.index))
+    return max(0, len(tf.pages) - len(mapped))
+
+
+def _declared_sizes(ome_xml: str | None) -> dict[str, int]:
+    """``{"T": …, "C": …, "Z": …}`` as the OME-XML's first ``Pixels`` states them.
+
+    Read from the document rather than from the series so the two can be
+    compared: ``tifffile`` silently produces whatever series the *pages* support,
+    which for a damaged file can be a fraction of what the metadata claims.
+    """
+    if not ome_xml:
+        return {}
+    try:
+        root = ET.fromstring(ome_xml)
+    except ET.ParseError:
+        return {}
+    pixels = next((el for el in root.iter() if _localname(el.tag) == "Pixels"), None)
+    if pixels is None:
+        return {}
+    out: dict[str, int] = {}
+    for ax in ("T", "C", "Z"):
+        raw = pixels.get(f"Size{ax}")
+        if raw is None:
+            continue
+        try:
+            out[ax] = int(raw)
+        except ValueError:
+            continue
+    return out
+
+
+def _stage_positions(ome_xml: str | None) -> list[tuple[float, float]]:
+    """``(x, y)`` per ``Plane``, in document order, for layout inference.
+
+    Only planes carrying both coordinates are returned, and each ``(TheZ, TheC)``
+    combination collapses onto its ``TheT`` — the stage does not move between a
+    plane's channels or Z-slices, so one coordinate per frame is what a caller
+    counting *positions* wants. Units are left as written: every consumer here
+    compares distances within one file, where a common scale cancels.
+    """
+    if not ome_xml:
+        return []
+    try:
+        root = ET.fromstring(ome_xml)
+    except ET.ParseError:
+        return []
+    by_frame: dict[int, tuple[float, float]] = {}
+    order: list[tuple[float, float]] = []
+    for el in root.iter():
+        if _localname(el.tag) != "Plane":
+            continue
+        x, y = el.get("PositionX"), el.get("PositionY")
+        if x is None or y is None:
+            continue
+        try:
+            xy = (float(x), float(y))
+        except ValueError:
+            continue
+        the_t = el.get("TheT")
+        try:
+            key = int(the_t) if the_t is not None else len(by_frame)
+        except ValueError:
+            key = len(by_frame)
+        if key in by_frame:
+            continue
+        by_frame[key] = xy
+        order.append(xy)
+    return order
+
+
 def _referenced_filenames(ome_xml: str | None) -> list[str]:
     """The companion filenames the OME-XML's ``UUID`` elements point at.
 
@@ -324,26 +525,31 @@ def read_ome_layout(ome_path: Path | str) -> OmeLayout:
     decided at explode time). Sizes are taken from the first series (a plate scan
     is dimensionally uniform).
 
-    The same pass counts the planes the file declares but does not contain, so a
-    conversion can refuse an incomplete file up front rather than failing part-way
-    through — or, worse, writing zero-filled images that look like data.
+    The same pass audits the file — see :meth:`OmeLayout.validation_report` —
+    so a conversion can refuse an unsound one up front rather than failing
+    part-way through, or, worse, writing images that look like data. Everything
+    it collects is metadata: page offsets, sizes and the OME-XML. No pixels are
+    read, so the cost is one file open however large the plate is.
     """
     ome_path = Path(ome_path)
-    with tifffile.TiffFile(str(ome_path)) as tf:
-        series = list(tf.series)
-        if not series:
-            raise ValueError(f"{ome_path.name} contains no image series.")
-        axes_per_series = [str(s.axes).upper() for s in series]
-        axes0 = axes_per_series[0]
-        shape0 = series[0].shape
+    with _captured_tifffile_warnings() as warnings:
+        with tifffile.TiffFile(str(ome_path)) as tf:
+            series = list(tf.series)
+            if not series:
+                raise ValueError(f"{ome_path.name} contains no image series.")
+            axes_per_series = [str(s.axes).upper() for s in series]
+            axes0 = axes_per_series[0]
+            shape0 = series[0].shape
 
-        def _size(ax: str) -> int:
-            return int(shape0[axes0.index(ax)]) if ax in axes0 else 1
+            def _size(ax: str) -> int:
+                return int(shape0[axes0.index(ax)]) if ax in axes0 else 1
 
-        size_t, size_c, size_z = _size("T"), _size("C"), _size("Z")
-        ome_xml = tf.ome_metadata
-        gaps = [series_page_gaps(s) for s in series]
-        total_planes = sum(len(s.pages) for s in series)
+            size_t, size_c, size_z = _size("T"), _size("C"), _size("Z")
+            ome_xml = tf.ome_metadata
+            series_kind = str(getattr(series[0], "kind", "") or "")
+            gaps = [series_page_gaps(s) for s in series]
+            total_planes = sum(len(s.pages) for s in series)
+            unreferenced = _unreferenced_page_count(tf, series)
 
     single_image = len(series) == 1
     # For a single-image file the T axis is the frame sequence, not timepoints, so
@@ -366,6 +572,13 @@ def read_ome_layout(ome_path: Path | str) -> OmeLayout:
         incomplete_positions=[i for i, g in enumerate(gaps) if g],
         first_missing_plane=next((g[0] for g in gaps if g), -1),
         missing_files=_missing_companion_files(ome_xml, ome_path),
+        named_ome=ome_path.name.lower().endswith((".ome.tif", ".ome.tiff")),
+        has_ome_xml=bool(ome_xml),
+        series_kind=series_kind,
+        declared_sizes=_declared_sizes(ome_xml),
+        unreferenced_pages=unreferenced,
+        warnings=list(warnings),
+        stage_positions=_stage_positions(ome_xml),
     )
 
 
@@ -593,12 +806,14 @@ def explode_ome_tiff(
         )
 
     layout = read_ome_layout(ome_path)
-    # Refuse an incomplete source before a single archive is written. tifffile
-    # zero-fills the planes a file declares but does not hold, which would put
-    # blank images into the dataset with nothing on them saying so.
-    incomplete = layout.missing_plane_report(ome_path.name)
-    if incomplete:
-        raise ValueError(incomplete)
+    # Refuse an unsound source before a single archive is written. Each fault
+    # this catches otherwise reaches the dataset as images that look like data:
+    # tifffile zero-fills a plane the file declares but does not hold, and a
+    # file whose OME structure it could not use converts as whatever page
+    # sequence it fell back to.
+    unsound = layout.validation_report(ome_path.name)
+    if unsound:
+        raise ValueError(unsound)
     exp_tok = _safe_token(experiment, "ome")
     # An explicit ordering (click-defined on the plate mockup) is used verbatim;
     # it needn't be rectangular. Otherwise reconstruct the rectangular serpentine

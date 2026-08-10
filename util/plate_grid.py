@@ -35,11 +35,13 @@ PLATE_MAX_COL = 12
 DIRECTIONS = ("row", "col")
 
 
-def _origin_rc(origin: str) -> tuple[int, int]:
+def well_row_col(origin: str) -> tuple[int, int]:
     """Return the ``(row_index, col_index)`` of *origin* as 0-based offsets.
 
     Row ``A`` → 0, column ``1`` → 0. Raises ``ValueError`` if *origin* is not a
-    valid 96-well position.
+    valid 96-well position. Public because placing an *inferred* block of wells
+    at a chosen origin (``datasets.ome_import.ome_import_compute.suggest_layout``)
+    is the same question this module already answers for a typed grid.
     """
     canon = canonical_well_label(origin)
     if canon is None:
@@ -82,7 +84,7 @@ def serpentine_well_labels(
             f"Unknown serpentine direction {direction!r}; expected one of {DIRECTIONS}."
         )
 
-    row0, col0 = _origin_rc(origin)
+    row0, col0 = well_row_col(origin)
     last_row = row0 + rows - 1
     last_col = col0 + cols - 1
     if last_row >= len(PLATE_ROWS) or last_col >= PLATE_MAX_COL:

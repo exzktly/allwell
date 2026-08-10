@@ -2579,17 +2579,41 @@ fluorescent channel tokens arrive pre-filled from the channel roles you set (ste
 7; adjust if needed), so you can run straight away. Because the wells now exist on
 disk, background-well and control-well options work normally.
 
-**If the file is incomplete, the converter says so instead of converting it.** An
-OME-TIFF's metadata declares how many image planes it holds, and that count can
-exceed what the file actually contains — an acquisition stopped before it
-finished leaves the *planned* dimensions in the header, and a scan written across
-several files is incomplete if its companion `.ome.tif` files aren't in the same
-folder. Those planes read back as solid black, which would land in the dataset as
-images indistinguishable from real ones. So the readout refuses the file as soon
-as you pick it, saying how many planes carry no data and which of the two causes
-it looks like, and **Convert** stays disabled. For missing companion files, put
-them back beside the source. For a run that stopped early, re-export the file
-with the dimensions it really holds — All-Well will not convert part of it.
+**The file is checked as soon as you pick it**, and a file that can't be
+converted honestly is refused there rather than part-way through a run. The check
+reads metadata only — no images — so it costs nothing however large the plate is.
+What it catches, and what each one means:
+
+- **"has no readable OME metadata"** — the file is named `.ome.tif` but its OME
+  block can't be read. A copy or download that stopped part-way does this: what
+  is left is still a valid TIFF, so it opens without complaint and reads as a
+  small fraction of the plate. Check its size against the original and copy it
+  again. (A plain `.tif` image stack is fine and is not caught by this.)
+- **"carries OME metadata that does not describe its pages"** — the OME block is
+  there but doesn't match the images, so which channel and timepoint each plane
+  belongs to is a guess. Re-export from the acquisition software.
+- **"declares SizeT=… but the image series it produced holds …"** — the header
+  and the pages disagree about how many frames there are.
+- **"is incomplete: … carry no image data"** — the metadata declares planes the
+  file has nothing behind, which would land in the dataset as solid black images
+  indistinguishable from real ones. The message names the likely cause, and the
+  three need different fixes: **companion files** listed but not in the same
+  folder (put them back beside the source), an **acquisition stopped early** (the
+  planned dimensions are in the header — re-export with the dimensions it really
+  holds), or a **broken index map**, where the message says "No image data is
+  missing" — every image is in the file and only the metadata is wrong, so
+  re-export or repair the metadata rather than re-running the plate.
+
+**The layout can be read from the file.** Microscopes record where on the stage
+each image was taken, and All-Well reads those coordinates: wells sit 9 mm apart
+while the fields of view inside one well are a fraction of a millimetre apart, so
+the grid falls out of the spacing. When the file carries them, a line under the
+settings reads *"The file's stage coordinates describe 2×3 wells × 4 FOV(s),
+snaking by row"* with a **Use this** button that fills the grid, FOVs per well and
+serpentine direction for you. Origin stays yours — the file records where the
+stage was, not which well that is, so nothing but you can say the block starts at
+`B02`. A scan that isn't a serpentine at all (a plain raster, say) is handed over
+as a clicked path instead, since the grid fields cannot express one.
 
 ### Concatenate datasets
 

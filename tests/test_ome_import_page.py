@@ -664,3 +664,82 @@ def test_a_run_locks_every_input_that_would_redraw_the_plate(qapp, tmp_path):
     page.refresh_readout()
     assert page._plate.order() == ["A01", "A02", "B02", "B01"]
     assert page._plate._grid._fractions
+
+
+# ── the layout the file already knows ────────────────────────────────────────
+
+
+def _plate_scan(path, rows, cols, fovs):
+    """An OME-TIFF carrying real plate stage coordinates in its Plane elements."""
+    pitch, fov = 9000.0, 600.0
+    coords = []
+    for r in range(rows):
+        line = list(range(cols))
+        if r % 2:
+            line.reverse()
+        for c in line:
+            for f in range(fovs):
+                coords.append((c * pitch + (f % 2) * fov, r * pitch + (f // 2) * fov))
+    planes = "".join(
+        f'<Plane TheT="{i}" TheC="0" TheZ="0" PositionX="{x}" PositionY="{y}"/>'
+        for i, (x, y) in enumerate(coords))
+    mapping = "".join(
+        f'<TiffData FirstT="{i}" FirstC="0" FirstZ="0" IFD="{i}" PlaneCount="1"/>'
+        for i in range(len(coords)))
+    xml = (
+        '<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+        '<Image ID="Image:0" Name="scan"><Pixels ID="Pixels:0" '
+        'DimensionOrder="XYZCT" Type="uint16" SizeX="6" SizeY="6" SizeC="1" '
+        f'SizeZ="1" SizeT="{len(coords)}">'
+        '<Channel ID="Channel:0:0" Name="DAPI" SamplesPerPixel="1"/>'
+        f'{planes}{mapping}</Pixels></Image></OME>')
+    tifffile.imwrite(str(path), np.zeros((len(coords), 6, 6), np.uint16),
+                    description=xml, metadata=None, photometric="minisblack")
+    return path
+
+
+def test_the_page_offers_the_layout_the_file_describes(qapp, tmp_path):
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _plate_scan(tmp_path / "scan.ome.tif", 2, 3, 4)
+    page = OmeImportController().page
+    assert not page._suggest_row.isVisibleTo(page)
+
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+
+    assert page._suggest_row.isVisibleTo(page)
+    assert "2×3 wells × 4 FOV(s)" in page._suggest_label.text()
+    # Offered, not applied: the coordinates fix the block's shape, never which
+    # physical well its corner is, so the form is untouched until asked.
+    assert page._rows_edit.text() == "1"
+    assert page._fovs_edit.text() == ""
+
+
+def test_applying_the_suggestion_fills_the_ordering_controls(qapp, tmp_path):
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _plate_scan(tmp_path / "scan.ome.tif", 2, 3, 4)
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    page._origin_edit.setText("B02")
+    page._apply_suggestion()
+
+    assert (page._rows_edit.text(), page._cols_edit.text()) == ("2", "3")
+    assert page._fovs_edit.text() == "4"
+    assert page._direction_cb.currentData() == "row"
+    # The origin stays the user's, and the plate draws the placed block.
+    assert page._plate.order() == ["B02", "B03", "B04", "C04", "C03", "C02"]
+    assert "6 well(s) B02→C02" in page._verdict.text()
+
+
+def test_no_suggestion_is_offered_when_the_file_has_no_stage_coordinates(qapp, tmp_path):
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _write_packed(tmp_path / "bare.ome.tif", n_frames=6,
+                      channel_names=("DAPI",))
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    assert not page._suggest_row.isVisibleTo(page)

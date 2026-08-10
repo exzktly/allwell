@@ -49,6 +49,7 @@ from datasets.ome_import.ome_import_compute import (
     default_channel_roles,
     default_dest,
     destination_problem,
+    suggest_layout,
     plan_conversion,
     read_layout,
     selection_target,
@@ -92,6 +93,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._layout_cache: dict[tuple[str, float], object] = {}
         self._dest_user_set = False
         self._running = False
+        self._suggestion = None
         self._build_ui()
         self.refresh_readout()
 
@@ -253,6 +255,31 @@ class OmeImportPage(LogPanelMixin, QWidget):
         hl.addWidget(self._direction_cb)
         hl.addStretch(1)
         outer.addWidget(self._grid_row)
+
+        # What the file's own stage coordinates say the layout is. Offered
+        # rather than applied on sight: the coordinates fix the *shape* of the
+        # imaged block, never which physical well its corner is (a microscope's
+        # origin is its own), so silently filling the grid would state a well
+        # mapping the file does not actually make.
+        self._suggest_row = QWidget(self)
+        sl = QHBoxLayout(self._suggest_row)
+        sl.setContentsMargins(0, 0, 0, 0)
+        sl.setSpacing(theme.Spacing.sm)
+        self._suggest_label = QLabel("", self._suggest_row)
+        self._suggest_label.setObjectName("Muted")
+        self._suggest_label.setWordWrap(True)
+        sl.addWidget(self._suggest_label, 1)
+        self._suggest_btn = QPushButton("Use this", self._suggest_row)
+        self._suggest_btn.setProperty("variant", "secondary")
+        self._suggest_btn.setToolTip(
+            "Fill the grid, FOVs per well and serpentine direction from the "
+            "stage coordinates in the file's own metadata. The origin stays "
+            "yours — the file records where the stage was, not which well."
+        )
+        self._suggest_btn.clicked.connect(self._apply_suggestion)
+        sl.addWidget(self._suggest_btn)
+        self._suggest_row.setVisible(False)
+        outer.addWidget(self._suggest_row)
 
         # Shown only while a clicked path is in force, when the three controls
         # above are disabled and would otherwise look merely broken.
@@ -628,6 +655,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
         layout = self._read_layout(src) if src else None
         if hasattr(self, "_channels_host"):
             self._rebuild_channels(layout.channel_names if layout else [])
+        self._refresh_suggestion(layout)
         problems = fields.problems()
         dest_problem = destination_problem(self._dest_field.path())
         if src and layout is None:
@@ -661,6 +689,40 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._set_verdict(verdict, tone)
         self._run_btn.setEnabled(can)
         self._queue_btn.setEnabled(can)
+
+    def _refresh_suggestion(self, layout) -> None:
+        """Offer the layout the file's stage coordinates describe, if any."""
+        self._suggestion = (
+            suggest_layout(layout, self._origin_edit.text().strip() or "A01")
+            if layout is not None else None
+        )
+        if self._suggestion is None:
+            self._suggest_row.setVisible(False)
+            return
+        self._suggest_label.setText(
+            f"↳ The file's stage coordinates describe "
+            f"{self._suggestion.describe()}."
+        )
+        self._suggest_row.setVisible(True)
+
+    def _apply_suggestion(self) -> None:
+        """Fill the ordering controls from the inferred layout."""
+        suggestion = getattr(self, "_suggestion", None)
+        if suggestion is None:
+            return
+        if suggestion.well_order:
+            # A path the grid cannot express: hand it over as an owned order,
+            # which also puts the page into its hand-drawn mode.
+            self._plate.set_order(list(suggestion.well_order))
+        else:
+            self._plate.clear()
+            self._rows_edit.setText(str(suggestion.rows))
+            self._cols_edit.setText(str(suggestion.cols))
+            index = self._direction_cb.findData(suggestion.direction)
+            if index >= 0:
+                self._direction_cb.setCurrentIndex(index)
+        self._fovs_edit.setText(str(suggestion.fovs_per_well))
+        self.refresh_readout()
 
     def _set_verdict(self, text: str, tone: str) -> None:
         """Show the pass/fail line in its own tone (``Muted``/``Warn``/``Danger``).

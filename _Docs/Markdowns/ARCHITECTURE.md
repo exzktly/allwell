@@ -2980,6 +2980,27 @@ discards its staging file). A read-vs-write timing line is logged so the dominan
 cost is visible; the parallelism grain is per-well, so a degenerate single-well
 grid stays serial.
 
+**The file already knows most of the layout.** An OME-TIFF's `<Plane>`
+elements carry `PositionX`/`PositionY` — where on the stage each image was taken
+— and `read_ome_layout` collects them into `OmeLayout.stage_positions`.
+`datasets/ome_import/stage_layout.py` reads a plate layout back out of them, on
+one physical separation: wells sit on a 9 mm pitch while the fields of view
+inside a well are hundreds of micrometres apart, so each axis carries two scales
+and the larger one is the well step. The axes share a plate and therefore a
+pitch, so an axis showing only the within-well spacing (a single row or column of
+wells) takes the other's; where neither shows two scales the reading is genuinely
+ambiguous between "one well holding a grid of fields" and "a grid of wells
+holding one field each", and the latter is taken because it is the ordinary plate
+scan. Coordinates are merged within a fraction of the coarsest spacing first, or
+a stage's few-micrometre repeatability reads as a position of its own and the
+grid explodes. What is **not** inferred is which physical well the block starts
+at: stage coordinates are relative to the microscope's origin, which no file
+states in plate terms, so `StageLayout.relative_order` is `(row, col)` offsets and
+`place()` puts them at the origin the user chose. `ome_import_compute.suggest_layout`
+wraps that for the page, which *offers* it — a serpentine as grid fields the user
+can still edit, anything else as an explicit order, since the grid controls
+cannot express a raster.
+
 **The grid and the clicked path are alternatives, and only one of them is an
 input.** The converter page draws the grid's serpentine onto the plate as a live
 *preview*, and the plate the preview lands on is the same one the user clicks
@@ -3029,6 +3050,25 @@ dimension:
   because a packed plate array is routinely tens–hundreds of GB — far too large
   to `asarray` whole.
 
+**The source is validated before anything is written.** `read_ome_layout`
+audits the file in the same pass that reads its sizes — all metadata, no pixels,
+so the cost is one file open however large the plate — and
+`OmeLayout.validation_report()` returns the one blocking problem, ordered by how
+far upstream the fault is. **Not an OME-TIFF:** a file *named* `.ome.tif` whose
+OME-XML cannot be read has almost certainly been truncated in transit; it still
+opens as a valid TIFF, `tifffile` invents a plain series from the pages it could
+enumerate, and a forty-frame plate converts silently into one well. A plain
+`.tif` stack carries no OME-XML either and is a legitimate input, which is why
+the check is keyed on the *name* claiming OME rather than on the metadata alone.
+**Metadata that does not describe the pages:** `series_kind` is `tifffile`'s own
+verdict, and anything but `"ome"` means it declined the OME structure and fell
+back to enumerating pages, so each plane's channel and timepoint is a guess.
+**Declared sizes that were not realised:** `declared_sizes` holds `SizeT`/`SizeC`/
+`SizeZ` as the XML states them, against the series that actually came out.
+`OmeLayout.warnings` keeps what `tifffile` logged while reading — it diagnoses
+every one of these in its own words and writes them to a logger nothing was
+attached to, which is the file's own account of what is wrong with it.
+
 **An incomplete source is refused before anything is written.** `tifffile` sizes
 a series' page list from the dimensions the *metadata* declares and leaves a slot
 `None` wherever the file carries no IFD for it — an acquisition stopped early
@@ -3043,8 +3083,15 @@ for the series kinds that can hold one) and carries them on `OmeLayout` as
 `total_planes` / `missing_planes` / `incomplete_positions` /
 `first_missing_plane`, plus `missing_files` — the companion filenames the OME-XML
 references that are not on disk beside the source, which is what separates the
-two causes and therefore the two fixes. `OmeLayout.missing_plane_report()` is the
-single wording both callers use: `explode_ome_tiff` raises it as a `ValueError`
+two causes and therefore the two fixes. A gap has a **third** cause besides those two, and it needs the
+opposite remedy: a *broken index map* — `TiffData` entries pointing at IFDs the
+file does not have, or carrying a coordinate outside the declared sizes, which
+`tifffile` reports and then leaves as a hole — loses nothing at all, because the
+pixels are on disk and only the metadata is wrong. Telling that user to re-export
+a shorter file would discard data that is present. `unreferenced_pages` is the
+tell: physical IFDs no series slot points at, which is zero for a truncated run
+and non-zero for a broken map. `OmeLayout.validation_report()` is the
+single wording every caller uses: `explode_ome_tiff` raises it as a `ValueError`
 before the destination directory is even created, and `plan_conversion` raises it
 as an `OmeImportError` *ahead of* its grid arithmetic — no grid makes a gapped
 file convertible, so a divisibility error derived from one would be a red

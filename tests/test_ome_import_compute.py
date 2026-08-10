@@ -21,6 +21,7 @@ from datasets.ome_import.ome_import_compute import (  # noqa: E402
     plan_conversion,
     read_layout,
     selection_target,
+    suggest_layout,
     strip_ome_suffix,
 )
 from pipeline.ome_explode import OmeLayout  # noqa: E402
@@ -434,3 +435,75 @@ def test_destination_problem_flags_a_folder_that_already_holds_a_conversion(tmp_
     (finished / "out").mkdir(parents=True)
     (finished / "out" / "pipeline_info.json").write_text("{}")
     assert "finished dataset" in destination_problem(finished)
+
+
+# ── the layout the file already knows ────────────────────────────────────────
+
+
+def _plate_scan(path, rows, cols, fovs, *, serpentine=True):
+    """An OME-TIFF whose Plane elements carry real plate stage coordinates."""
+    pitch, fov = 9000.0, 600.0
+    coords = []
+    for r in range(rows):
+        line = list(range(cols))
+        if serpentine and r % 2:
+            line.reverse()
+        for c in line:
+            for f in range(fovs):
+                coords.append((c * pitch + (f % 2) * fov, r * pitch + (f // 2) * fov))
+    planes = "".join(
+        f'<Plane TheT="{i}" TheC="0" TheZ="0" PositionX="{x}" PositionY="{y}"/>'
+        for i, (x, y) in enumerate(coords))
+    mapping = "".join(
+        f'<TiffData FirstT="{i}" FirstC="0" FirstZ="0" IFD="{i}" PlaneCount="1"/>'
+        for i in range(len(coords)))
+    xml = (
+        '<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+        '<Image ID="Image:0" Name="scan"><Pixels ID="Pixels:0" '
+        'DimensionOrder="XYZCT" Type="uint16" SizeX="6" SizeY="6" SizeC="1" '
+        f'SizeZ="1" SizeT="{len(coords)}">'
+        '<Channel ID="Channel:0:0" Name="DAPI" SamplesPerPixel="1"/>'
+        f'{planes}{mapping}</Pixels></Image></OME>')
+    tifffile.imwrite(str(path), np.zeros((len(coords), 6, 6), np.uint16),
+                     description=xml, metadata=None, photometric="minisblack")
+    return path
+
+
+def test_suggest_layout_reads_the_grid_and_fovs_from_stage_coordinates(tmp_path):
+    layout = read_layout(_plate_scan(tmp_path / "scan.ome.tif", 2, 3, 4))
+    suggestion = suggest_layout(layout)
+    assert (suggestion.rows, suggestion.cols) == (2, 3)
+    assert suggestion.fovs_per_well == 4
+    assert suggestion.direction == "row"
+    assert suggestion.n_positions == 24
+    # A serpentine is left as grid fields the user can still edit, not frozen
+    # into an explicit path.
+    assert suggestion.well_order == ()
+    assert "2×3 wells × 4 FOV(s)" in suggestion.describe()
+
+
+def test_suggest_layout_gives_a_raster_scan_an_explicit_order(tmp_path):
+    """The grid fields can only express a serpentine, so anything else has to be
+    handed over as the order itself — placed at the origin the user chose."""
+    layout = read_layout(_plate_scan(tmp_path / "r.ome.tif", 2, 3, 1,
+                                     serpentine=False))
+    suggestion = suggest_layout(layout, origin="B02")
+    assert suggestion.well_order == ("B02", "B03", "B04", "C02", "C03", "C04")
+    assert "non-serpentine path" in suggestion.describe()
+
+
+def test_suggest_layout_is_none_when_the_file_says_nothing_useful(tmp_path):
+    p = _write_packed(tmp_path / "bare.ome.tif", n_frames=6)   # no Plane positions
+    assert suggest_layout(read_layout(p)) is None
+
+
+def test_a_plan_refuses_a_source_that_is_not_a_sound_ome_tiff(tmp_path):
+    """plan_conversion gates on the whole validation, not only missing planes,
+    so the page's readout carries whichever fault the file actually has."""
+    layout = OmeLayout(
+        n_positions=1, size_t=0, size_c=1, size_z=1, channel_names=["GFP"],
+        timepoint_tokens=[], axes_per_series=["YX"], single_image=True,
+        n_frames=4, named_ome=True, has_ome_xml=False, series_kind="uniform",
+    )
+    with pytest.raises(OmeImportError, match="no readable OME metadata"):
+        plan_conversion(layout, ConversionParams(grid_rows=1, grid_cols=4))

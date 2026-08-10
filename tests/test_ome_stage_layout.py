@@ -14,6 +14,7 @@ import random
 from datasets.ome_import.stage_layout import (
     StageLayout,
     infer_stage_layout,
+    path_in_cells,
     place,
 )
 
@@ -124,3 +125,41 @@ def test_place_puts_the_block_at_an_origin_and_refuses_to_overflow():
 
 def test_n_wells_is_the_block_area():
     assert StageLayout(n_positions=8, rows=2, cols=4, fovs_per_well=1).n_wells == 8
+
+
+# ── the path, in plate cells ─────────────────────────────────────────────────
+
+
+def test_path_in_cells_anchors_the_first_position_at_the_chosen_well():
+    points, _ = _scan(1, 2, 4)
+    layout = infer_stage_layout(points)
+    cells = path_in_cells(points, layout.pitch, 1, 1)      # anchor B02
+
+    assert cells[0] == (1.0, 1.0)                          # centre of B02
+    # The four fields inside the first well sit a fraction of a cell apart —
+    # 600 um against a 9 mm pitch — which is the whole point of the drawing: a
+    # plate map puts all four in the same cell and can say nothing about them.
+    assert round(cells[1][0] - cells[0][0], 4) == round(FOV / PITCH, 4)
+    assert all(abs(x - 1.0) < 0.5 and abs(y - 1.0) < 0.5 for x, y in cells[:4])
+    # The second well is exactly one cell along.
+    assert cells[4] == (2.0, 1.0)
+
+
+def test_path_in_cells_is_empty_without_a_usable_scale():
+    points, _ = _scan(2, 2, 4)
+    assert path_in_cells(points, 0.0, 0, 0) == []
+    assert path_in_cells([], PITCH, 0, 0) == []
+
+
+def test_the_inferred_pitch_is_the_well_step_not_the_gap_between_wells():
+    """Centre to centre, which is what converts stage units into plate cells.
+
+    The gap the grouping threshold uses runs from the *last* field of one well
+    to the *first* of the next, so it is short by the width of a well's own
+    block of fields — 8400 against a 9000 pitch here. Drawn at that scale the
+    path shrinks 7% per column and lands a whole cell out of place across a
+    twelve-column plate.
+    """
+    for fovs in (1, 4, 9):
+        layout = infer_stage_layout(_scan(2, 3, fovs)[0])
+        assert round(layout.pitch, 3) == PITCH, fovs

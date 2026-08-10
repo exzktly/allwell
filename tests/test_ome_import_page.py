@@ -743,3 +743,57 @@ def test_no_suggestion_is_offered_when_the_file_has_no_stage_coordinates(qapp, t
     page._src_field.set_path(str(p))
     page._on_source_changed()
     assert not page._suggest_row.isVisibleTo(page)
+
+
+def test_the_stage_path_is_drawn_under_the_plate_and_anchored_at_the_origin(
+        qapp, tmp_path):
+    """The plate can only say which well a position belongs to. Every field of
+    view inside one well is that same cell, so the route through them — and how
+    far off-centre they sit — has nowhere else on the page to appear."""
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _plate_scan(tmp_path / "scan.ome.tif", 2, 3, 4)
+    page = OmeImportController().page
+    assert not page._path_view.isVisibleTo(page)
+
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+
+    assert page._path_view.isVisibleTo(page)
+    assert page._path_caption.isVisibleTo(page)
+    points = page._path_view._points
+    assert len(points) == 24                      # one dot per image, not per well
+    assert points[0] == (0.0, 0.0)                # anchored at A01 by default
+    # The four fields of the first well are a fraction of a cell apart.
+    assert 0 < points[1][0] - points[0][0] < 0.25
+
+    page._origin_edit.setText("B02")
+    page.refresh_readout()
+    assert page._path_view._points[0] == (1.0, 1.0)
+
+
+def test_the_stage_path_follows_a_hand_drawn_first_well(qapp, tmp_path):
+    """The anchor is wherever position 1 will actually land, which a clicked
+    path decides for itself."""
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _plate_scan(tmp_path / "scan.ome.tif", 2, 3, 4)
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+
+    _click(page, "D05")
+    page.refresh_readout()
+    assert page._path_view._points[0] == (4.0, 3.0)      # column 5, row D
+
+
+def test_no_path_is_drawn_when_the_file_has_no_coordinates(qapp, tmp_path):
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _write_packed(tmp_path / "bare.ome.tif", n_frames=6,
+                      channel_names=("DAPI",))
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    assert not page._path_view.isVisibleTo(page)
+    assert not page._path_caption.isVisibleTo(page)

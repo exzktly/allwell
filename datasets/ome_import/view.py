@@ -37,8 +37,14 @@ from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
 from util.plate_grid import serpentine_well_labels
 from widgets._support import set_variant
 from widgets.path_field import PathField
-from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
+from widgets.plate_geometry import (
+    PLATE_ALIGNMENT,
+    PLATE_MAX_HEIGHT,
+    PLATE_MAX_WIDTH,
+    apply_plate_geometry,
+)
 from widgets.plate_order_editor import PlateOrderEditor
+from widgets.stage_path_view import StagePathView
 from widgets.plate_progress import apply_outcome, fraction_or_none
 from datasets.ome_import.ome_import_compute import (
     CHANNEL_ROLES,
@@ -49,6 +55,7 @@ from datasets.ome_import.ome_import_compute import (
     default_channel_roles,
     default_dest,
     destination_problem,
+    stage_path_for,
     suggest_layout,
     plan_conversion,
     read_layout,
@@ -343,6 +350,31 @@ class OmeImportPage(LogPanelMixin, QWidget):
         # hand.
         apply_plate_geometry(self._plate, role="editor")
         outer.addWidget(self._plate, 0, PLATE_ALIGNMENT)
+
+        # The stage's own travel, under the plate and at the plate's scale. The
+        # plate can only say which well a position belongs to; every field of
+        # view inside one well is the same cell there, so the order the stage
+        # took through them — and how far off-centre they sit — has nowhere else
+        # to appear.
+        self._path_caption = QLabel(
+            "Stage path — one dot per image, joined in acquisition order, "
+            "anchored at the well the scan starts in. The tight clusters are "
+            "the fields of view within one well.", self)
+        self._path_caption.setObjectName("Muted")
+        self._path_caption.setWordWrap(True)
+        self._path_caption.setVisible(False)
+        outer.addWidget(self._path_caption)
+
+        self._path_view = StagePathView(self)
+        self._path_view.setPlate(self._plate)
+        # The shared caps, applied directly: `apply_plate_geometry` speaks to a
+        # `WellPlateSelector`'s action row and selection model, which this view
+        # has neither of. What it must share is the *size*, so that its cells
+        # land under the plate's own.
+        self._path_view.setMaximumWidth(PLATE_MAX_WIDTH)
+        self._path_view.setMaximumHeight(PLATE_MAX_HEIGHT)
+        self._path_view.setVisible(False)
+        outer.addWidget(self._path_view, 0, PLATE_ALIGNMENT)
 
         btn_row = QWidget(self)
         bl = QHBoxLayout(btn_row)
@@ -698,12 +730,29 @@ class OmeImportPage(LogPanelMixin, QWidget):
         )
         if self._suggestion is None:
             self._suggest_row.setVisible(False)
+            self._refresh_path(None)
             return
+        self._refresh_path(layout)
         self._suggest_label.setText(
             f"↳ The file's stage coordinates describe "
             f"{self._suggestion.describe()}."
         )
         self._suggest_row.setVisible(True)
+
+    def _refresh_path(self, layout) -> None:
+        """Redraw the stage path, anchored where the run will actually start.
+
+        The anchor is the first well of whatever ordering is in force — the
+        clicked path's first click, else the Origin field — because that is the
+        well the user has said position 1 lands in, and the file's coordinates
+        only fix the shape that follows from it.
+        """
+        order = self._plate.order() if self._plate.is_dirty() else []
+        anchor = order[0] if order else (self._origin_edit.text().strip() or "A01")
+        points = stage_path_for(layout, anchor) if layout is not None else []
+        self._path_view.setPath(points)
+        self._path_view.setVisible(bool(points))
+        self._path_caption.setVisible(bool(points))
 
     def _apply_suggestion(self) -> None:
         """Fill the ordering controls from the inferred layout."""

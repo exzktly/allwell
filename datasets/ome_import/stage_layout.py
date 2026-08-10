@@ -68,6 +68,11 @@ class StageLayout:
     # what the page's serpentine preview draws. A raster scan — every row left
     # to right — is not serpentine, and its order has to be given explicitly.
     serpentine: bool = True
+    # The well-to-well step in the file's own coordinate units. Carried because
+    # it is the conversion factor between stage coordinates and plate cells, and
+    # re-deriving it somewhere else would be a second definition of the same
+    # number (see :func:`path_in_cells`).
+    pitch: float = 0.0
 
     @property
     def n_wells(self) -> int:
@@ -154,6 +159,24 @@ def _nearest(unique: list[float], value: float) -> float:
     return min(unique, key=lambda u: abs(u - value))
 
 
+def _well_step(values: list[float], groups: dict[float, int],
+               unique: list[float]) -> float | None:
+    """Centre-to-centre distance between adjacent well groups on one axis.
+
+    ``None`` when the axis holds a single group, which has no step to measure.
+    Taken as the median of the consecutive differences so one irregular column
+    — a scan that skipped a well — does not set the scale for the rest.
+    """
+    centres: dict[int, list[float]] = {}
+    for value in values:
+        centres.setdefault(groups[_nearest(unique, value)], []).append(value)
+    if len(centres) < 2:
+        return None
+    means = [sum(vs) / len(vs) for _, vs in sorted(centres.items())]
+    diffs = sorted(b - a for a, b in zip(means[:-1], means[1:]))
+    return diffs[len(diffs) // 2]
+
+
 def _direction_and_serpentine(cells: list[tuple[int, int]]) -> tuple[str, bool]:
     """Read the sweep axis and whether alternate lines reverse, from the order."""
     first = [c for i, c in enumerate(cells) if c not in cells[:i]]
@@ -207,6 +230,13 @@ def infer_stage_layout(positions) -> StageLayout | None:
     by_y = _group_axis(ys, pitch, tol)
     ux, uy = sorted(by_x), sorted(by_y)
     cells = [(by_y[_nearest(uy, y)], by_x[_nearest(ux, x)]) for x, y in points]
+    # The *step* between wells, which is not the gap `_axis_scale` found: that
+    # gap runs from the last field of one well to the first of the next, so it
+    # is short by the width of a well's own block of fields. Only a threshold
+    # needs the gap; converting stage units to plate cells needs the real
+    # centre-to-centre distance, and a 7% error there walks the drawing a whole
+    # cell out of place across twelve columns.
+    step = _well_step(xs, by_x, ux) or _well_step(ys, by_y, uy) or pitch or 0.0
     occupied = sorted(set(cells))
     rows = len({r for r, _ in occupied})
     cols = len({c for _, c in occupied})
@@ -229,6 +259,7 @@ def infer_stage_layout(positions) -> StageLayout | None:
         relative_order=order,
         direction=direction,
         serpentine=serpentine,
+        pitch=float(step or 0.0),
     )
 
 
@@ -245,3 +276,28 @@ def place(layout: StageLayout, origin_row: int, origin_col: int) -> list[str]:
             return []
         labels.append(f"{chr(ord('A') + row)}{col + 1:02d}")
     return labels
+
+
+def path_in_cells(positions, pitch: float,
+                  anchor_row: int, anchor_col: int) -> list[tuple[float, float]]:
+    """The acquisition path in **plate cells**, ready to draw over a plate map.
+
+    Returns ``(x, y)`` per imaged position where one unit is one well and
+    ``(anchor_col, anchor_row)`` is the centre of the well the user says the scan
+    started in. Fractional by design: the fields of view *inside* a well are a
+    fraction of a cell apart, and showing where they sit is the point — a plate
+    map can only draw the well a position belongs to, never the order the stage
+    took within it.
+
+    The anchor comes from the user rather than the file because stage
+    coordinates are relative to the microscope's origin (see the module
+    docstring): the file fixes the path's shape, the user fixes where it starts.
+    """
+    points = [(float(x), float(y)) for x, y in positions or []]
+    if not points or pitch <= 0:
+        return []
+    x0, y0 = points[0]
+    return [
+        ((x - x0) / pitch + anchor_col, (y - y0) / pitch + anchor_row)
+        for x, y in points
+    ]

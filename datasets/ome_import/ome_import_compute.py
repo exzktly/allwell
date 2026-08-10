@@ -19,7 +19,11 @@ from pipeline.ome_explode import (
     OmeLayout,
     read_ome_layout,
 )
-from datasets.ome_import.stage_layout import infer_stage_layout, place
+from datasets.ome_import.stage_layout import (
+    infer_stage_layout,
+    path_in_cells,
+    place,
+)
 from util.plate_grid import (
     normalize_well_order,
     serpentine_well_labels,
@@ -334,6 +338,25 @@ def suggest_layout(layout: OmeLayout, origin: str = "A01") -> LayoutSuggestion |
         n_positions=inferred.n_positions,
         well_order=order,
     )
+
+
+def stage_path_for(layout: OmeLayout,
+                   anchor: str = "A01") -> list[tuple[float, float]]:
+    """The file's acquisition path in plate cells, starting at well *anchor*.
+
+    Empty unless the coordinates describe a plate grid, since the cell scale is
+    the well pitch and an unrecognised pattern has no reliable one — drawing at
+    a guessed scale would put the fields of view in the wrong wells, which is
+    exactly the mistake the picture exists to catch.
+    """
+    inferred = infer_stage_layout(layout.stage_positions)
+    if inferred is None or inferred.pitch <= 0:
+        return []
+    try:
+        row, col = well_row_col(anchor or "A01")
+    except ValueError:
+        row, col = 0, 0
+    return path_in_cells(layout.stage_positions, inferred.pitch, row, col)
 
 
 def destination_problem(dest: Path | str) -> str:

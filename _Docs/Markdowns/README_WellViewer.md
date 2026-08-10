@@ -2615,6 +2615,17 @@ stage was, not which well that is, so nothing but you can say the block starts a
 `B02`. A scan that isn't a serpentine at all (a plain raster, say) is handed over
 as a clicked path instead, since the grid fields cannot express one.
 
+**The stage path is drawn under the plate**, at the same scale, whenever the
+file carries coordinates: one dot per image — not per well — joined in the order
+they were taken, with a larger green dot where the scan starts. The tight
+clusters are the fields of view within a single well, which the plate map above
+cannot show at all: every field in a well is the same square there. Use it to
+check the shape of the run before converting — that the block sits where you
+think, that the snake turns the way you think, and that the fields inside each
+well were taken in the order you expect. It is anchored at whichever well
+position 1 will land in: the **Origin** you typed, or the first well of a
+hand-drawn path.
+
 ### Concatenate datasets
 
 Use this when the *same plate* was imaged in two separate sessions and you want a

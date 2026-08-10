@@ -164,7 +164,7 @@ class BarBatchExportPanel(BatchExportPanel):
             "  \u2022 One bar figure per timepoint (or one figure spanning all\n"
             "    selected timepoints when the toggle above is on)\n"
             "  \u2022 One CSV row per member at each timepoint\n\n"
-            + ("Groups come from Sample Definitions in the left sidebar.\n"
+            + ("Groups come from Home → Groups.\n"
                if self._use_sidebar_groups
                else "Groups are defined in the left panel.\n")
             + "SD/SEM is computed within each ReplicateSet only."
@@ -181,7 +181,7 @@ class BarBatchExportPanel(BatchExportPanel):
         )
         if not groups_with_data:
             msg = (
-                "Define at least one non-empty group in Sample Definitions."
+                "Define at least one non-empty group on Home → Groups."
                 if self._use_sidebar_groups
                 else "Define at least one non-empty group."
             )

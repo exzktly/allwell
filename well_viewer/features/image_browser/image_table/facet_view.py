@@ -88,7 +88,7 @@ def _fmt(ctx, dim: str, val: str) -> str:
             return f"{joined} overlay" if joined else "overlay"
         return str(val).upper()
     if dim == "well":
-        # Show the well's custom label (Sample Definitions → Well Labels) instead
+        # Show the well's custom label (Home → Well Labels) instead
         # of its A01-style position when one is defined — matching every plot tab.
         from well_viewer.domain.selections_model import well_display_label
         return well_display_label(ctx, str(val))

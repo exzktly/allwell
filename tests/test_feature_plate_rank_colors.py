@@ -3,7 +3,7 @@
 Two feature plates colour their wells, but by different rules that each match
 their context:
 
-- The Sample Definitions **Groups** plate (``rep_refresh_map``) tints each
+- The Home → **Groups** plate (``rep_refresh_map``) tints each
   well by its **group's** colour (``color_for_selection`` — explicit override,
   else the group's lowest-well rank), so all wells in a group read as one
   condition and a recolour is honoured. This matches the group row's swatch and

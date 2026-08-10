@@ -2,9 +2,9 @@
 
 Everything computable is tested without an application in
 ``test_home_collect.py``. What needs a real app is the wiring: that Home is the
-page Review opens on, that its plate paints from the record, that its notes
-editor and the long-form one cannot clobber each other, and that taking the
-eager first-tab slot did not cost the attribute twelve modules read off Plotting.
+page Review opens on, that its plate paints from the record, that its tabs and
+their sidebar behave, and that taking the eager first-tab slot did not cost the
+attribute twelve modules read off Plotting.
 
 Slow lane, deliberately one file — each of these builds a full ``WellViewerApp``
 whose Qt↔Python reference web is never reclaimed in-process.
@@ -100,26 +100,22 @@ def test_clicking_a_well_selects_it_rather_than_navigating(loaded_app):
 
 # ── notes ───────────────────────────────────────────────────────────────────
 
-def test_the_two_notes_editors_cannot_clobber_each_other(loaded_app):
-    """The sequence with no other guard: type on Home, visit Sample
-    Definitions, focus out there. Without the mirror the second box holds the
-    previous text and writes it back over the edit."""
+def test_home_carries_the_only_notes_editor(loaded_app):
+    """The page that used to hold the long-form editor is gone, and its box with
+    it. A second editor over one string needed a mirror to stop the stale one
+    writing back over an edit; one editor needs no such thing, and a second one
+    reappearing without the roster knowing would resurrect that bug."""
     ctx = loaded_app._ctx
-    from well_viewer.core.ui_helpers import notes_schedule_save
+    from well_viewer.core.ui_helpers import NOTES_WIDGET_KEYS, notes_schedule_save
 
+    assert NOTES_WIDGET_KEYS == ("_home_notes_edit",)
     home = ctx.widgets.get_or_none("_home_notes_edit")
-    other = ctx.widgets.get_or_none("_notes_edit")
-    assert home is not None and other is not None, "premise: both editors exist"
+    assert home is not None
+    assert ctx.widgets.get_or_none("_notes_edit") is None
 
     home.setPlainText("the incubator alarmed overnight")
     notes_schedule_save(ctx, widget_key="_home_notes_edit")
-
-    assert other.toPlainText() == "the incubator alarmed overnight"
-
-    # Now the long-form editor loses focus in its turn. It must not revert.
-    notes_schedule_save(ctx, widget_key="_notes_edit")
     assert ctx.state.selection.notes_text == "the incubator alarmed overnight"
-    assert home.toPlainText() == "the incubator alarmed overnight"
 
 
 def test_a_save_that_never_moved_focus_still_captures_the_home_edit(loaded_app):
@@ -219,3 +215,124 @@ def test_the_record_survives_a_round_trip_through_the_sidecar(loaded_app, tmp_pa
     reloaded = json.loads(json.dumps(block))
     assert reloaded == block
     assert all(w["health"] in HEALTH_STATES for w in reloaded["wells"].values())
+
+
+# ── the page's tabs ─────────────────────────────────────────────────────────
+
+def _subtabs(app):
+    return app._ctx.runtime.home.subtabs
+
+
+def _goto(app, qtbot, name: str) -> None:
+    sub = _subtabs(app)
+    for i in range(sub.count()):
+        if sub.tabText(i) == name:
+            sub.setCurrentIndex(i)
+            qtbot.wait(10)
+            return
+    raise AssertionError(f"no Home tab named {name!r}")
+
+
+def test_the_page_opens_on_overview(loaded_app):
+    """Overview leads because Home is the landing page and it reports rather
+    than asks. The definition editors follow it."""
+    sub = _subtabs(loaded_app)
+    assert [sub.tabText(i) for i in range(sub.count())] == [
+        "Overview", "Cell Gating", "Groups", "Well Labels", "Ratios",
+        "Pipeline Info",
+    ]
+    assert sub.tabText(sub.currentIndex()) == "Overview"
+
+
+def test_every_definition_tab_is_built_after_a_load(loaded_app):
+    """The timing contract, and the reason the tabs are drained rather than
+    built on first click.
+
+    These editors' widgets are read after a load by persistence hydration, by
+    the plot tabs' threshold quick-edit and by the Playground's context bar —
+    none of which open a tab first. That was true when the definitions were a
+    page of their own, drained by ``centre_view``; moving them onto the eagerly
+    built landing page must not quietly make them lazy.
+    """
+    ctx = loaded_app._ctx
+    assert ctx.runtime.home.built == {
+        "Cell Gating": True, "Groups": True, "Well Labels": True,
+        "Ratios": True, "Pipeline Info": True,
+    }
+    for key in ("_rep_list", "_lbl_grid", "_ratio_panel"):
+        assert ctx.widgets.get_or_none(key) is not None, key
+    assert ctx.runtime.cell_gating.fluor_gate_edits is not None
+    assert callable(ctx.runtime.grouping.pipeline_info_refresh)
+
+
+def test_the_group_plate_follows_the_tab(loaded_app, qtbot):
+    """The rail plate composes groups. On Overview that question is not being
+    asked — and Overview has a plate of its own in the page body, so leaving the
+    rail one up would put two plates on screen answering different things."""
+    ctx = loaded_app._ctx
+    frame = ctx.widgets.get("_sidebar_sample_frame")
+
+    _goto(loaded_app, qtbot, "Groups")
+    assert frame.isVisibleTo(loaded_app)
+    _goto(loaded_app, qtbot, "Overview")
+    assert not frame.isVisibleTo(loaded_app)
+
+
+def test_import_is_offered_only_where_it_means_something(loaded_app, qtbot):
+    """Import merges a sample-definitions JSON. Beside the report it names
+    nothing the user can see."""
+    btn = loaded_app._ctx.widgets.get("_home_import_btn")
+
+    _goto(loaded_app, qtbot, "Well Labels")
+    assert btn.isVisibleTo(loaded_app)
+    _goto(loaded_app, qtbot, "Overview")
+    assert not btn.isVisibleTo(loaded_app)
+
+
+def test_a_plate_drag_edits_the_group_only_from_the_groups_tab(loaded_app, qtbot):
+    """Two failures in one test, because they are two halves of one rule.
+
+    The rail plate must still commit from Groups once a group exists — the
+    plate goes passive in group mode unless a *well-editing* pane is on screen,
+    and that predicate is page-level, so Home has to be named in it or the drag
+    silently does nothing. And it must not commit from any other tab, where
+    ``selectionDragFinished`` still fires on programmatic refresh ticks and
+    would rewrite the group's composition unasked.
+    """
+    from well_viewer.core.selection_controller import (
+        _plate_passive_in_group_mode, sel_by_id,
+    )
+
+    ctx = loaded_app._ctx
+    wells = sorted(ctx.state.dataset.well_paths)
+    ctx.state.selection.selections.append(
+        {"id": "g1", "name": "G1", "wells": [wells[0]]})
+    ctx.state.selection.current_selection_id = "g1"
+    plate = ctx.widgets.get("_rep_map_plate")
+
+    _goto(loaded_app, qtbot, "Groups")
+    assert not _plate_passive_in_group_mode(ctx), (
+        "the plate went passive on Groups, so a drag would be dropped")
+    plate.setSelectedWellIds(wells[:2])
+    plate.selectionDragFinished.emit()
+    qtbot.wait(10)
+    assert sel_by_id(ctx, "g1").get("wells") == wells[:2]
+
+    _goto(loaded_app, qtbot, "Well Labels")
+    plate.setSelectedWellIds(wells[3:5])
+    plate.selectionDragFinished.emit()
+    qtbot.wait(10)
+    assert sel_by_id(ctx, "g1").get("wells") == wells[:2], (
+        "a drag from a non-Groups tab rewrote the group")
+
+
+def test_a_document_naming_the_old_page_still_restores(loaded_app):
+    """Every session writes a view-state snapshot, so documents naming the page
+    the definitions used to live on are on disk everywhere. Without the remap
+    the restore silently fails and the dataset reopens on whatever page happened
+    to be current."""
+    from well_viewer.persistence.view_state import _activate_tab
+
+    loaded_app._notebook.setCurrentByName("Plotting")
+    _activate_tab(loaded_app._ctx, "Sample Definitions")
+    assert loaded_app._notebook.currentName() == "Home"

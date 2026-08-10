@@ -1,4 +1,4 @@
-"""Ratio metric definition panel (embedded in the Sample Definitions tab).
+"""Ratio metric definition panel (embedded in the Home → Ratios tab).
 
 Lets the user define / edit / delete ratio metrics. Each ratio is a virtual
 channel computed at read time from two ``{channel}_{metric}`` columns. The

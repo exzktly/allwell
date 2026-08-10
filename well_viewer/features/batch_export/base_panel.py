@@ -459,7 +459,7 @@ class BatchExportPanel(QWidget):
             "  \u2022 One figure with one line per group member\n"
             "    (ReplicateSet = mean of its wells, Solo well = raw)\n"
             "  \u2022 One CSV with per-member time-series data\n\n"
-            + ("Groups come from Sample Definitions in the left sidebar.\n"
+            + ("Groups come from Home → Groups.\n"
                if self._use_sidebar_groups
                else "Groups are defined in the left panel.\n")
             + "No statistics are computed across group members.\n"
@@ -1600,7 +1600,7 @@ class BatchExportPanel(QWidget):
                             if any(w in self._ctx.state.dataset.well_paths for w in g.wells)]
         if not groups_with_data:
             msg = (
-                "Define at least one non-empty group in Sample Definitions."
+                "Define at least one non-empty group on Home → Groups."
                 if self._use_sidebar_groups
                 else "Define at least one non-empty group."
             )

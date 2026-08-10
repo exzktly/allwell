@@ -829,18 +829,18 @@ QPushButton[variant="toggle_muted"], QToolButton[variant="toggle_muted"] {{
     color: {c.text_muted};
 }}
 
-/* Nested sub-tab bars (Plotting / Image Browser / Sample Definitions). The call
+/* Nested sub-tab bars (Plotting / Image Browser / Home). The call
    sites carried comments claiming this name "picks up the existing
    rectangular-tab QSS"; no such rule existed, so all of them fell through to the
    generic QTabBar::tab rule and were indistinguishable from the top level. */
-QTabBar#SampleDefinitionsSubTabs::tab,
+QTabBar#HomeSubTabs::tab,
 QTabBar#ImageBrowserSubTabs::tab,
 QTabBar#PlottingSubTabs::tab {{
     padding: {s.xs}px {s.md}px;
     min-width: 72px;
     color: {c.text_secondary};
 }}
-QTabBar#SampleDefinitionsSubTabs::tab:selected,
+QTabBar#HomeSubTabs::tab:selected,
 QTabBar#ImageBrowserSubTabs::tab:selected,
 QTabBar#PlottingSubTabs::tab:selected {{
     color: {c.text_primary};
@@ -849,7 +849,7 @@ QTabBar#PlottingSubTabs::tab:selected {{
 
 /* ── Plate-map well buttons (WellButton grid) ─────────────────────────── */
 /* Used by the picker grids that use ``WellButton`` / ``build_plate_grid``
-   (Statistics / Image Table / Segmentation / Sample Definitions / Bar Plots).
+   (Statistics / Image Table / Segmentation / Home / Bar Plots).
    Driven by ``WellButton.set_state(...)`` via the dynamic ``state`` property;
    the per-widget overrides in ``WellViewerApp._style_plate_button`` (Stats /
    bar pickers) take precedence for those grids. Keep the 18px box in sync with
@@ -1044,7 +1044,7 @@ QTabWidget::pane {{
    closes a frame that is not drawn, and its top edge would start the body
    inside a pixel below where an un-nested page's body starts. */
 QTabWidget#ImageBrowserSubTabs::pane,
-QTabWidget#SampleDefinitionsSubTabs::pane {{
+QTabWidget#HomeSubTabs::pane {{
     border: none;
     border-radius: 0;
 }}

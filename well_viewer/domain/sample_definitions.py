@@ -1,4 +1,4 @@
-"""Save / load Sample Definitions (well labels + replicate sets + groups)
+"""Save / load the sample definitions (well labels + replicate sets + groups)
 inside ``pipeline_info.json``.
 
 The pipeline writes pipeline_info.json as part of every analysis run. This

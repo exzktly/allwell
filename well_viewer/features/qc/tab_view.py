@@ -1,4 +1,4 @@
-"""QC debris-gate controls, embedded in the Sample Definitions → Cell Gating tab.
+"""QC debris-gate controls, embedded in the Home → Cell Gating tab.
 
 The Cell Gating tab is the QC editing home: the QC debris gate is a *fundamental*
 inclusion layer that is always applied (``QC_Pass`` at the ``df_included_mask``

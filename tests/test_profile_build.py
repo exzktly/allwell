@@ -115,7 +115,7 @@ _SAMPLE_README = """\
 1. [Install](#install)
    - Plotting: [Bar Plots](#bar-plots) · [Distribution](#distribution)
    - [Multivariate analysis](#multivariate-analysis) · [Spatial analysis](#spatial-analysis)
-   - [Sample Definitions](#sample-definitions) · [Batch export](#batch-export)
+   - [Home](#home) · [Batch export](#batch-export)
 2. [Building](#building)
 
 ## Review mode
@@ -132,8 +132,8 @@ Multivariate docs.
 ### Spatial analysis
 Spatial docs.
 
-### Sample Definitions
-Sample def docs.
+### Home
+Home docs.
 
 ## Building
 Build docs (unmapped ## heading — always kept).
@@ -163,11 +163,11 @@ def test_trim_readme_full_app_is_unchanged():
 
 
 def test_trim_readme_drops_excluded_feature_sections():
-    out = trim_readme_for_profile(_SAMPLE_README, {"Plotting", "Sample Definitions"})
-    # Kept: Plotting (Bar Plots + its #### sub-heading), Sample Definitions.
+    out = trim_readme_for_profile(_SAMPLE_README, {"Plotting", "Home"})
+    # Kept: Plotting (Bar Plots + its #### sub-heading), Home.
     assert "### Bar Plots" in out
     assert "A bar sub-heading" in out       # the #### sub-section rode along
-    assert "### Sample Definitions" in out
+    assert "### Home" in out
     # Dropped: the Multivariate / Spatial section headings + bodies.
     assert "### Multivariate analysis" not in out
     assert "### Spatial analysis" not in out
@@ -179,11 +179,11 @@ def test_trim_readme_drops_excluded_feature_sections():
 
 
 def test_trim_readme_prunes_the_contents_index():
-    out = trim_readme_for_profile(_SAMPLE_README, {"Plotting", "Sample Definitions"})
+    out = trim_readme_for_profile(_SAMPLE_README, {"Plotting", "Home"})
     toc = out.split("## Review mode")[0]   # the Contents section only
     # Kept features' index links survive.
     assert "[Bar Plots](#bar-plots)" in toc
-    assert "[Sample Definitions](#sample-definitions)" in toc
+    assert "[Home](#home)" in toc
     # Excluded features' index links are pruned (no broken anchors advertised).
     assert "multivariate-analysis" not in toc
     assert "spatial-analysis" not in toc
@@ -195,7 +195,7 @@ def test_trim_readme_prunes_the_contents_index():
 def test_trim_readme_leaves_inline_prose_links_intact():
     # A [Title](#anchor) cross-reference inside a KEPT section's prose is not the
     # Contents index and must survive verbatim (the pruning is TOC-scoped).
-    out = trim_readme_for_profile(_SAMPLE_README, {"Plotting", "Sample Definitions"})
+    out = trim_readme_for_profile(_SAMPLE_README, {"Plotting", "Home"})
     body = out.split("## Review mode")[1]
     assert "See [Multivariate analysis](#multivariate-analysis) for more." in body
 
@@ -225,7 +225,7 @@ Cell docs.
 #### Playground
 Playground docs.
 
-### Sample Definitions
+### Home
 Sample docs.
 """
 
@@ -233,7 +233,7 @@ Sample docs.
 def test_trim_readme_drops_excluded_subtab_sections():
     # Image Browser kept, but only its Segmentation sub-tab is included.
     out = trim_readme_for_profile(
-        _SUBTAB_README, {"Image Browser", "Sample Definitions"},
+        _SUBTAB_README, {"Image Browser", "Home"},
         {"Image Browser": {"Segmentation"}})
     assert "### Image Browser" in out          # the feature stays
     assert "#### Segmentation" in out          # the included sub-tab stays
@@ -246,7 +246,7 @@ def test_trim_readme_drops_excluded_subtab_sections():
     assert "(Segmentation)" in out
     assert "Image Table" not in out
     # A feature with no sub-tab restriction keeps everything.
-    assert "### Sample Definitions" in out
+    assert "### Home" in out
 
 
 def test_trim_readme_no_subtab_restriction_keeps_all_subtabs():
@@ -264,10 +264,10 @@ def test_trim_readme_matches_real_thin_profile():
     prof = tomllib.loads(
         (_REPO / "profiles" / "thin.toml").read_text(encoding="utf-8"))
     out = trim_readme_for_profile(readme, prof["features"])
-    # thin = Plotting + Sample Definitions + Image Browser.
+    # thin = Plotting + Home + Image Browser.
     assert "### Bar Plots" in out
     assert "### Image Browser" in out
-    assert "### Sample Definitions" in out
+    assert "### Home" in out
     # Everything the thin profile excludes is gone from the shipped help.
     for dropped in ("### Multivariate analysis", "### Spatial analysis",
                     "### smFISH", "### Review CSV", "### Saved Plots",

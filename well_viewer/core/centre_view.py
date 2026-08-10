@@ -11,7 +11,7 @@ Sections:
 * **Analysis** — Plotting (sub-pages: Line Graphs, Bar Plots, Scatter Plot,
   Distribution, Heat Map), Statistics.
 * **Images** — Image Table, Segmentation, smFISH.
-* **Data** — Review CSV, Sample Definitions, Batch Export.
+* **Data** — Review CSV, Saved Plots, Batch Export.
 
 Pages are also built lazily: only the initially active "Plotting" page
 and the sidebar panels that other code touches at startup are constructed
@@ -203,13 +203,7 @@ def build_centre(win, parent: QWidget) -> None:
     win._centre_lazy_only_titles = frozenset(lazy_only)
 
     # Pre-create stable widget handles so deferred builder closures can
-    # capture them. Sample Definitions in particular needs the QWidget to
-    # be allocated up-front so the deferred ``_build_sample_definitions``
-    # closure can see it; otherwise the variable would be shadowed by the
-    # ``addTab`` call further down.
-    tab_groups = QWidget(win._notebook)
-    QVBoxLayout(tab_groups).setContentsMargins(0, 0, 0, 0)
-
+    # capture them.
     # "Plotting" is a top-level tab whose body is a nested QTabWidget
     # containing the five plot sub-tabs.  We pre-allocate both the outer
     # container and the five sub-tab frames so builder closures (and the
@@ -278,7 +272,7 @@ def build_centre(win, parent: QWidget) -> None:
         from theme import Colors as _C, Radii as _R, Typography as _T
 
         # A standalone QTabBar carrying the nested-sub-tab object name, which
-        # theme.qss styles alongside Sample Definitions' bar — one rule, so the
+        # theme.qss styles alongside Home's bar — one rule, so the
         # two nested tab strips cannot drift apart.
         sub_seg = QTabBar()
         sub_seg.setObjectName("PlottingSubTabs")
@@ -653,12 +647,7 @@ def build_centre(win, parent: QWidget) -> None:
     ]
 
     def _new_tab(title: str) -> QWidget:
-        if title == "Sample Definitions":
-            # Sample Definitions uses the pre-allocated tab_groups widget so
-            # the deferred body builder closure (_build_sample_definitions)
-            # can reference it before the tab is added to the QTabWidget.
-            frame = tab_groups
-        elif title == "Plotting":
+        if title == "Plotting":
             # "Plotting" uses the pre-allocated container so the nested
             # QTabWidget can be inserted into it by _build_plotting.
             frame = plotting_container

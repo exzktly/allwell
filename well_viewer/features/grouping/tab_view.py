@@ -1,4 +1,4 @@
-"""GROUPS panel (Sample Definitions tab) — wiring for the unified `_selections`
+"""GROUPS panel (Home → Groups) — wiring for the unified `_selections`
 model rendered by a ``widgets.SavedSelectionsList``."""
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from well_viewer.features.grouping.controller import rep_add
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# The "GROUPS" panel on the Sample Definitions tab — a widgets.SavedSelectionsList
+# The "GROUPS" panel on Home → Groups — a widgets.SavedSelectionsList
 # over the unified app._app_state.selection.selections model (Phase 8.0 Stage C: _selections is the
 # in-memory source of truth; the SavedSelectionsList's signals go straight to the
 # app's `_sel_*` mutators, keyed by selection id).

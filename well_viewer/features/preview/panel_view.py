@@ -252,7 +252,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     ctrl.add_action(view_btn)
     il.addWidget(ctrl)
 
-    # The QC debris-gate controls now live on the Sample Definitions → Cell
+    # The QC debris-gate controls now live on the Home → Cell
     # Gating tab (a fundamental inclusion layer alongside FluorGating / scatter
     # gates). This overlay still *renders* the QC verdict — excluded cells show
     # here. The per-channel ON cutoff IS editable here again, via the inline

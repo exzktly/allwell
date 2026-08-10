@@ -1,5 +1,5 @@
 """Quick-replicate helpers — drives the "Quick Replicates" dropdowns on the
-Sample Definitions panel. (The rep-map plate is now a ``widgets.WellPlateSelector``
+sample-definitions panel. (The rep-map plate is now a ``widgets.WellPlateSelector``
 wired in ``views/replicate_panel_view.py``; its drag edits the current selection
 via ``WellViewerApp._sel_set_composition`` directly — no controller helpers.)"""
 

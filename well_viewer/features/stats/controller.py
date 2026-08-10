@@ -684,7 +684,7 @@ def stats_sync_from_app(ctx, *, visible_only_in_split: bool = True) -> None:
     # On *auto-populate* (first visit) in Split View, seed the comparison groups
     # from only the rep-sets currently *visible* on the plots (non-hidden) so the
     # comparison matches what the user is looking at. The explicit "Load from
-    # Sample Definitions" action passes visible_only_in_split=False to load every
+    # Home → Groups" action passes visible_only_in_split=False to load every
     # defined grouping regardless of visibility. Falls back to all groups outside
     # Split View, or when nothing is visible.
     if visible_only_in_split and ctx.runtime.split.active:
@@ -700,20 +700,20 @@ def stats_resync_from_sample_defs(ctx) -> None:
 
     Statistics auto-seeds its groups from the Sample-Definition replicate sets
     on first visit (tab_controller); this is the explicit "do it again" so a
-    user who edited Sample Definitions can refresh without rebuilding groups by
+    user who edited the sample definitions can refresh without rebuilding them by
     hand. Confirm first when existing groups would be discarded.
     """
     from PySide6.QtWidgets import QMessageBox
 
     rsets = _stats_groups_from_rep_sets(ctx)
     if not rsets:
-        ctx.notify.set_status("No Sample-Definition groups to load — define them on the Sample Definitions tab.")
+        ctx.notify.set_status("No sample-definition groups to load — define them on Home → Groups.")
         return
     existing = [g for g in ctx.state.stats.groups if g.wells]
     if existing:
         resp = QMessageBox.question(
             ctx.window,
-            "Load from Sample Definitions",
+            "Load from Home → Groups",
             f"Replace the current {len(existing)} comparison group(s) with the "
             f"{len(rsets)} Sample-Definition group(s)?",
             QMessageBox.Yes | QMessageBox.No,
@@ -721,10 +721,10 @@ def stats_resync_from_sample_defs(ctx) -> None:
         )
         if resp != QMessageBox.Yes:
             return
-    # Explicit "load all from Sample Definitions" — never filter to the
+    # Explicit "load all from Home → Groups" — never filter to the
     # split-visible subset (the dialog above promised all rsets groups).
     stats_sync_from_app(ctx, visible_only_in_split=False)
-    ctx.notify.set_status(f"Loaded {len(rsets)} comparison group(s) from Sample Definitions.")
+    ctx.notify.set_status(f"Loaded {len(rsets)} comparison group(s) from Home → Groups.")
 
 
 def stats_on_test_change(ctx) -> None:

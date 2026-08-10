@@ -227,7 +227,7 @@ def test_batch_bar_group_uses_sample_labels(ctx):
     (``well_display_label`` / ``replicate_display_label``), not emit the
     bare well token / rep-set name. Regression: ``collect_bar_items_for_group``
     used to hand back ``(rset.name, rset.name, ...)`` and ``(w, w, ...)``
-    straight through to ``BarItem.display``, so a custom Sample Definitions
+    straight through to ``BarItem.display``, so a custom Home → Well Labels
     label never reached the batch-exported bar figure even though the
     on-tab collector (``collect_bar_items``) already resolved it."""
     from well_viewer.features.barplot.controller import (

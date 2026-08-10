@@ -31,7 +31,7 @@ _CSV_FILTER = "CSV files (*.csv);;All files (*.*)"
 
 
 def _well_labels_map(ctx) -> dict:
-    """Snapshot of the Sample Definitions well-label map (token → name)."""
+    """Snapshot of the Home → Well Labels map (token → name)."""
     return dict(ctx.state.dataset.well_labels or {})
 
 
@@ -43,7 +43,7 @@ def _well_paths_keys(ctx) -> set:
 
 def well_name_for(token, well_labels: dict, *, well_paths: set | None = None,
                   strict: bool = False) -> str:
-    """Look up the Sample Definitions display name for a well token.
+    """Look up the Home → Well Labels display name for a well token.
 
     Falls back to the token itself when no custom name is set, matching
     the editor convention "blank = use well token". When ``strict`` is

@@ -70,6 +70,15 @@ _IMAGE_BROWSER_SUBTABS = (
     "Segmentation", "Image Table", "Cell Browser", "Playground",
 )
 
+# Pages a saved document may name that no longer exist under that name. A
+# snapshot is written on every session, so documents naming the old page are on
+# disk everywhere; without this the restore silently fails and the dataset
+# reopens on whatever page happened to be current.
+_RENAMED_PAGES = {
+    # The sample definitions became tabs of Home rather than a page of their own.
+    "Sample Definitions": "Home",
+}
+
 
 # ── snapshot ───────────────────────────────────────────────────────────────
 
@@ -552,6 +561,7 @@ def _activate_tab(ctx, name: str) -> None:
     outer = getattr(ctx.window, "_notebook", None)
     if outer is None:
         return
+    name = _RENAMED_PAGES.get(name, name)
     try:
         if name in _PLOT_SUBTABS:
             outer.setCurrentByName("Plotting")

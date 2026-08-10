@@ -1,4 +1,4 @@
-"""Editable 96-well label grid for the Sample Definitions tab.
+"""Editable 96-well label grid for the Home → Well Labels tab.
 
 Replaces the legacy 96-row stack of ``Well | QLineEdit`` rows. Each well
 is a small editable text field laid out in a real 8×12 plate grid; the
@@ -16,7 +16,7 @@ API
 * ``selectedTokens() -> list[str]`` — read by the runtime's Add-Affix logic.
 * ``refresh()`` — pull values back from ``app._app_state.dataset.well_labels``.
 
-The widget is owned by the Sample Definitions Well Labels sub-tab and
+The widget is owned by the Home → Well Labels tab and
 stashed on the app as ``app._lbl_grid``.
 """
 

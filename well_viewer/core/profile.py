@@ -19,7 +19,7 @@ consumes to produce a physically-stripped tree for distribution.
 Manifest shape (TOML)::
 
     name = "thin"
-    features = ["Plotting", "Sample Definitions", "Image Browser"]
+    features = ["Plotting", "Home", "Image Browser"]
 
     [subtabs]                 # optional; omit a parent to keep all its sub-tabs
     "Image Browser" = ["Segmentation"]

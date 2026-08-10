@@ -80,7 +80,7 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     # Pull the comparison groups straight from the shared Sample-Definition
     # sets (S1) — own full-width row so the narrow sidebar doesn't truncate it.
     from_defs_btn = btn_secondary(
-        parent, "↻ Load groups from Sample Definitions",
+        parent, "↻ Load groups from Home → Groups",
         partial(stats_resync_from_sample_defs, ctx),
     )
     layout.addWidget(from_defs_btn)

@@ -1,4 +1,4 @@
-"""Pipeline Info sub-tab (Sample Definitions).
+"""Pipeline Info tab (Home).
 
 Loads the dataset's ``pipeline_info.json`` and presents the run parameters in a
 human-readable, organised tree — schema, channels, segmentation, the Quality-

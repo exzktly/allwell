@@ -868,7 +868,7 @@ def _render_threshold_binary(ctx, cache, well, chan, tp, fov, crop_tool, sz):
         norm_tp = norm_timepoint(ctx, tp)
         norm_fov = review_norm_fov(fov)
         # Gate each cell by ITS OWN channel's ThreshFracOn (set per-channel in
-        # Sample Definitions), not whatever channel the Segmentation tab last
+        # Home → Cell Gating), not whatever channel the Segmentation tab last
         # showed. Only override for real fluor channels — nuc+seg / ratio cells
         # fall back to the displayed-channel default.
         chan_l = str(chan or "").strip().lower()

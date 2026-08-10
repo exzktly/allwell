@@ -23,7 +23,7 @@ def test_fluor_gate_applies_on_cold_open(qtbot, mini_dataset):
 
     app1 = WellViewerApp()
     app1._load_path(mini_dataset)
-    app1._notebook.setCurrentByName("Sample Definitions")
+    app1._notebook.setCurrentByName("Home")
     well = next(iter(app1._app_state.dataset.well_paths))
     ch = app1._app_state.channel.active_channel
     base = int(df_included_mask(app1._get_rows(well)).sum())

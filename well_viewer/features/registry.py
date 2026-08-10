@@ -120,17 +120,6 @@ _build_review_csv = _lazy_build("well_viewer.features.review_csv.tab_view", "bui
 _build_home = _lazy_build("well_viewer.features.home.tab_view", "build_home_tab")
 
 
-def _build_sample_definitions(ctx, frame) -> None:
-    # The Sample Definitions centre builder + its sub-builder tree are app-native
-    # (they stamp app._rep_*/_sel_* widgets and wire the _clear_sample_definitions_all
-    # / _groups_centre_refresh / _refresh_sidebar_map god-methods). The feature
-    # layer must not name the god-object, so the single god-object unwrap for the
-    # whole tab build lives behind the core ``build_sample_definitions_app_bridge``
-    # seam (which reaches the builder via a lazy proxy — no core→feature import).
-    from well_viewer.core.tab_controller import build_sample_definitions_app_bridge
-    build_sample_definitions_app_bridge(ctx, frame)
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # State factories — lazy constructors for each feature-owned ``AppState`` slice.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -204,16 +193,6 @@ def _activate_image_table(ctx) -> None:
     # idempotent refresh on every activation — without it the channel chips only
     # appeared after the first drag onto a Rows/Cols zone.
     builder_refresh(ctx)
-
-
-def _activate_sample_definitions(ctx) -> None:
-    from well_viewer.core.selection_controller import groups_centre_refresh
-    from well_viewer.features.grouping.cell_gating.controller import cell_gating_sync_scatter_gates
-    ctx.widgets.get("_sidebar_sample_frame").setVisible(True)
-    groups_centre_refresh(ctx)
-    # Cell Gating leads this tab; pick up any scatter gates drawn since the
-    # last visit (refresh the summary + recompute Included if they changed).
-    cell_gating_sync_scatter_gates(ctx)
 
 
 def _activate_statistics(ctx) -> None:
@@ -566,14 +545,6 @@ def _sel_playground(ctx) -> None:
     playground_sync_selected_well(ctx)
 
 
-def _sel_sample_definitions(ctx) -> None:
-    app = ctx.window  # transitional bridge (A3)
-    # Cell Gating is a sub-tab here; refresh its CDF if the user has opened it.
-    if hasattr(app, "_cell_gating_fluor_gate_edits"):
-        from well_viewer.features.grouping.cell_gating.controller import cell_gating_load_cell_areas
-        cell_gating_load_cell_areas(ctx)
-
-
 def _sel_cell_browser(ctx) -> None:
     # Keep the gallery in sync with the live well selection when both panes are
     # live in Split View — the user expects the Scatter and Cell Browser to track
@@ -709,6 +680,10 @@ def _features() -> list[FeatureDescriptor]:
             on_activate=_activate_home,
             on_dataset_loaded=_loaded_home,
             on_selection_changed=_sel_home,
+            # The definition editors are tabs of this page, and they edit wells
+            # one at a time — so the rail plate stays an active per-well
+            # selector here even when groups exist.
+            per_well_selection=True,
         ),
         # its builder from its local fallback map. Its plot sub-tabs are the
         # sub-leaf descriptors below.
@@ -767,13 +742,6 @@ def _features() -> list[FeatureDescriptor]:
             name="Review CSV", group="Data", build=_build_review_csv,
             on_activate=_activate_review_csv,
             on_selection_changed=_sel_review_csv,
-            per_well_selection=True,
-        ),
-        FeatureDescriptor(
-            name="Sample Definitions", group="Data",
-            build=_build_sample_definitions,
-            on_activate=_activate_sample_definitions,
-            on_selection_changed=_sel_sample_definitions,
             per_well_selection=True,
         ),
         FeatureDescriptor(
@@ -841,8 +809,13 @@ def _features() -> list[FeatureDescriptor]:
                           on_dataset_loaded=_loaded_playground,
                           single_well_selection=True),
 
-        # ── Sample Definitions sub-leaf ────────────────────────────────────
-        FeatureDescriptor(name="Cell Gating", parent="Sample Definitions",
+        # ── Home sub-leaf ─────────────────────────────────────────────────
+        # Declared so a build profile can name Cell Gating in ``[subtabs]``.
+        # Its ``on_activate`` does not fire: dispatch is keyed on
+        # ``current_centre_tab``, which resolves Home's tabs to "Home" rather
+        # than descending into them (``tab_controller._resolve_leaf``). Home's
+        # own sub-tab handler does the per-tab work instead.
+        FeatureDescriptor(name="Cell Gating", parent="Home",
                           on_activate=_activate_cell_gating),
     ]
 

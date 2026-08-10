@@ -54,7 +54,7 @@ def test_stats_seeds_only_visible_groups_in_split(loaded_app):
 
 @pytest.mark.slow
 def test_load_from_sample_defs_loads_all_groups_even_in_split(loaded_app):
-    # The explicit "Load from Sample Definitions" action must load every group
+    # The explicit "Load from Home → Groups" action must load every group
     # (visible_only_in_split=False), not just the split-visible subset — even
     # with a group hidden in Split View.
     app = loaded_app

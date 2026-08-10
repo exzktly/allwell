@@ -40,7 +40,7 @@ def build_image_browser_tab(ctx, parent: QWidget) -> None:
     sub_tabs = QTabWidget(parent)
     # Every nested sub-tab bar in the pane — this one, Plotting's and Sample
     # Definitions' — is named in one theme.qss rule, so the three cannot drift
-    # apart. The name is this bar's own; it used to borrow Sample Definitions',
+    # apart. The name is this bar's own; it used to borrow another page's,
     # which made the rule read as if only that tab had a bar.
     sub_tabs.setObjectName("ImageBrowserSubTabs")
     sub_tabs.tabBar().setExpanding(False)

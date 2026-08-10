@@ -466,7 +466,7 @@ def aggregate_with_threshold_df(
                     "Cell-gating channel %r references column %r which is "
                     "absent from the loaded CSVs — aggregation is returning "
                     "no rows for this channel. Check the gating thresholds "
-                    "in Sample Definitions / Cell Gating against the "
+                    "on Home → Cell Gating against the "
                     "current dataset's schema.",
                     channel, col,
                 )

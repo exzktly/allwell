@@ -1380,6 +1380,23 @@ class _PlateGrid(QWidget):
         # laid across the plate rather than something a well is wearing.
         if self._selection_model == "path":
             self._paint_path(p, cell)
+
+        # Disabled: a scrim over the finished plate rather than a disabled
+        # variant of each fill. Every state this widget paints — lit, recessed,
+        # dial, ring, marker, path — is carried by *colour*, so draining the
+        # colour is what reads as "not active here", and one veil does that
+        # uniformly where ten paired palettes would drift apart.
+        #
+        # It has to be painted, not left to the style: nothing in this class
+        # consulted ``isEnabled()`` before, so ``setEnabled(False)`` rendered
+        # pixel-identically — the plate looked as live on a tab that ignores its
+        # clicks as on the one that reads them. ``setEnabledWells([])`` is not
+        # the same thing and must not be used for it: an empty socket already
+        # means "this well is not in the dataset".
+        if not self.isEnabled():
+            p.setPen(Qt.NoPen)
+            p.setBrush(with_alpha(QColor(c.rail), 0.62))
+            p.drawRect(self.rect())
         p.end()
 
     def _paint_visit_number(self, p: QPainter, wr: QRectF, text: str) -> None:

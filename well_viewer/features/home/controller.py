@@ -161,19 +161,36 @@ def drain_home_subtabs(ctx) -> None:
     QTimer.singleShot(0, _step)
 
 
-def sync_home_sidebar(ctx) -> None:
-    """Show the group-editing plate on the definition tabs, and only there.
+#: Tabs whose editor reads the well selection, so the rail plate is live there.
+#: Groups edits a group's membership with it. Cell Gating draws its CDFs from
+#: the selected wells (``cell_gating_load_cell_areas``). Well Labels' Add Prefix
+#: / Add Suffix apply to them. Ratios and Pipeline Info ask nothing of it.
+_TABS_USING_THE_PLATE = ("Groups", "Cell Gating", "Well Labels")
 
-    Overview has its own plate in the page body; the rail's is for composing
-    groups, so on Overview it would be a second plate answering a different
-    question.
+
+def sync_home_sidebar(ctx) -> None:
+    """Put the rail plate in the state the current tab warrants.
+
+    Three states, because there are three cases. Overview has its own plate in
+    the page body, so the rail's would be a second one answering a different
+    question — hidden. The editors that read the well selection get it live. The
+    two that do not get it greyed rather than removed: it is the page's fixture
+    and the rail visibly emptying as you move between sibling tabs reads as
+    something breaking, but a live-looking plate that silently ignores clicks is
+    worse. The plate paints its own disabled state; nothing in it consulted
+    ``isEnabled()`` before this, so greying it used to be invisible.
     """
+    name = current_subtab(ctx)
+    on_a_definition_tab = name in definition_subtabs(ctx)
     frame = ctx.widgets.get_or_none("_sidebar_sample_frame")
     if frame is not None:
-        frame.setVisible(current_subtab(ctx) in definition_subtabs(ctx))
+        frame.setVisible(on_a_definition_tab)
+    plate = ctx.widgets.get_or_none("_rep_map_plate")
+    if plate is not None:
+        plate.setEnabled(name in _TABS_USING_THE_PLATE)
     btn = ctx.widgets.get_or_none(IMPORT_KEY)
     if btn is not None:
-        btn.setVisible(current_subtab(ctx) in definition_subtabs(ctx))
+        btn.setVisible(on_a_definition_tab)
 
 
 def on_home_subtab_changed(ctx, idx: int) -> None:

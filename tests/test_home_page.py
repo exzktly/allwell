@@ -412,3 +412,58 @@ def test_a_plate_drag_edits_the_group_only_from_the_groups_tab(loaded_app, qtbot
     assert sel_by_id(ctx, "g1").get("wells") == wells[:2], (
         "a drag from a non-Groups tab rewrote the group")
 
+
+
+def test_the_rail_plate_is_live_only_where_a_tab_reads_the_selection(loaded_app, qtbot):
+    """Three states, and the greyed one has to be visible to be worth having.
+
+    Groups edits membership with the plate, Cell Gating draws its CDFs from the
+    selected wells, and Well Labels' affix actions apply to them. Ratios and
+    Pipeline Info ask nothing of it, so a live-looking plate there would take
+    clicks and discard them — which is what it did before. Overview has its own
+    plate in the page body, so the rail's is hidden rather than greyed.
+    """
+    ctx = loaded_app._ctx
+    frame = ctx.widgets.get("_sidebar_sample_frame")
+    plate = ctx.widgets.get("_rep_map_plate")
+
+    expected = {
+        "Overview": (False, False),
+        "Cell Gating": (True, True),
+        "Groups": (True, True),
+        "Well Labels": (True, True),
+        "Ratios": (True, False),
+        "Pipeline Info": (True, False),
+    }
+    for name, (rail_shown, plate_live) in expected.items():
+        _goto_subtab(loaded_app, qtbot, name)
+        assert frame.isVisibleTo(loaded_app) is rail_shown, f"{name}: rail visibility"
+        assert plate.isEnabled() is plate_live, f"{name}: plate enabled"
+
+
+def test_a_greyed_plate_actually_looks_greyed(qtbot):
+    """``setEnabled(False)`` on this widget used to be a no-op on screen.
+
+    Nothing in ``WellPlateSelector`` consulted ``isEnabled()``, so the plate
+    rendered pixel-identically in both states and greying it said nothing. Every
+    signal it carries is a colour, so it drains them behind a scrim rather than
+    keeping a disabled twin of each fill.
+    """
+    from widgets.well_plate_selector import WellPlateSelector
+
+    def shot(enabled):
+        plate = WellPlateSelector()
+        qtbot.addWidget(plate)
+        plate.setEnabledWells([f"{r}{c:02d}" for r in "ABCDEFGH" for c in range(1, 13)])
+        plate.setSelectedWellIds(["A01", "B02"])
+        plate.resize(330, 240)
+        plate.setEnabled(enabled)
+        return plate.grab().toImage()
+
+    live, greyed = shot(True), shot(False)
+    differing = sum(
+        1 for x in range(0, live.width(), 3) for y in range(0, live.height(), 3)
+        if live.pixelColor(x, y) != greyed.pixelColor(x, y)
+    )
+    assert differing > 100, (
+        f"only {differing} sampled pixels differ — a greyed plate reads as live")

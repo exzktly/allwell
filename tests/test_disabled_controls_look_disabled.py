@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 import theme
 from widgets.labeled_combo import LabeledComboBox
 from widgets.styled_slider import StyledSlider
+from widgets.well_plate_selector import WellPlateSelector
 
 
 def _make_combo():
@@ -52,6 +53,16 @@ def _make_labeled_combo():
     cb = LabeledComboBox("Timepoint")
     cb.addItem("4.0h", 4.0)
     return cb
+
+
+def _make_plate():
+    """A plate with wells to draw. An empty one paints only sockets, so it would
+    compare equal in both states for a reason that has nothing to do with the
+    disabled look."""
+    plate = WellPlateSelector()
+    plate.setEnabledWells([f"{r}{c:02d}" for r in "ABCDEFGH" for c in range(1, 13)])
+    plate.setSelectedWellIds(["A01", "B02"])
+    return plate
 
 
 #: (name, factory) for every interactive class the app calls setEnabled(False)
@@ -74,6 +85,10 @@ CONTROLS = (
     # Violin display is picked. Paints its own disabled state (paintEvent reads
     # isEnabled) rather than relying on the stylesheet.
     ("StyledSlider", lambda: StyledSlider()),
+    # home/controller.py — the rail plate, greyed on the Home tabs that do not
+    # read the well selection (Ratios, Pipeline Info). Paints its own state:
+    # every signal it carries is a colour, so it drains them behind a scrim.
+    ("WellPlateSelector", _make_plate),
 )
 
 

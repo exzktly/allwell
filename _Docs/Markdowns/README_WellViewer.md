@@ -2507,16 +2507,16 @@ the layout Analyze processes. Do this first, then open the result in Analyze.
    how many stage positions (or, for a single packed image, frames) it holds, and
    once you set FOVs per well, the well count that implies (positions ÷ FOVs). Use
    it to guide how many wells to place before you touch the grid or the plate.
-2. **Well grid (rows × cols)** — the block of wells you imaged (e.g. `2 × 3`).
-   By default the stage is assumed to have visited them in **serpentine** order
-   (sweep a row, drop down, sweep back); this is what lets each position get its
-   well label. For a non-rectangular scan you can override this by clicking the
-   plate mockup directly (step 5).
-3. **FOVs per well** — fields-of-view per well. Leave blank to derive it; enter a
-   value and the converter refuses to run if it doesn't match the file.
-4. **Origin** (top-left well, default `A01`) and **Serpentine** direction (snake
-   by row or by column).
-5. **Acquisition path** — the plate mockup below the settings shows how stage
+2. **Which wells did you image?** — this group has one job: produce the order in
+   which the stage visited the wells. **Well grid (rows × cols)** is the block you
+   imaged (e.g. `2 × 3`), **Origin** is its top-left well (default `A01`), and
+   **Serpentine** is the direction the stage snaked in (by row or by column). The
+   plate below shows the resulting path live.
+3. **How was each well sampled?** — **FOVs per well** is the fields-of-view per
+   well; leave it blank to derive it, or enter a value and the converter refuses
+   to run if it doesn't match the file. **Frame order** appears here for a
+   single-image file (step 6).
+4. **Acquisition path** — the plate mockup below the settings shows how stage
    positions map onto the plate: each visited well is numbered in visit order and
    a subtle arrow traces the sequence across the plate. Entering a grid seeds this
    with the serpentine path automatically, so for a normal rectangular scan you
@@ -2524,20 +2524,28 @@ the layout Analyze processes. Do this first, then open the result in Analyze.
    rectangular — an L-shape, a scattered subset, or a custom visit order — click
    the wells directly, in the order the stage visited them: the first click is
    position 1, the next is position 2, and so on. Clicking a numbered well removes
-   it and the rest renumber. **Generate path from grid** refills the plate with
-   the serpentine of the current grid as an editable starting point; **Clear path**
-   empties it and returns to the live grid preview. Once you've clicked, the grid
-   fields stop overwriting your hand-drawn order (they become just a seed).
-6. **Workers** — how many wells to convert in parallel (blank = auto). Lower it if
-   converting to a single spinning disk feels slower rather than faster.
-7. **Frame order** — *shown only for a single-image file that packs every
+   it and the rest renumber.
+
+   **The two are alternatives, not layers.** Your first click takes the path over
+   from the grid — the wells the grid was showing are dropped, so position 1 is
+   the well you clicked and nothing you did not choose is in the order. The grid,
+   origin and serpentine boxes then grey out, with a note saying so, because a
+   hand-drawn path is what will be used and those three no longer reach the
+   conversion. **Generate path from grid** refills the plate with the serpentine
+   of the current grid as an editable starting point; **Clear path** empties it,
+   hands the three boxes back, and returns to the live grid preview.
+5. **Workers** — beside the **Convert** button, since it changes only how fast the
+   run goes and nothing about what comes out. How many wells to convert in
+   parallel (blank = auto, capped at the number of wells). Lower it if converting
+   to a single spinning disk feels slower rather than faster.
+6. **Frame order** — *shown only for a single-image file that packs every
    position into its T axis*. Because an OME image has no position dimension, the
    positions live in the T axis, possibly interleaved with real timepoints. Say
    how the frames are ordered: **Single timepoint** (every frame is a distinct
    position), **Positions within timepoint** (all positions, then the set repeats
    next timepoint), or **Timepoints within position**. Positions come from your
    grid × FOVs; timepoints are then `frames ÷ positions`.
-8. **Channel roles** — one row per channel read from the OME metadata, each with a
+7. **Channel roles** — one row per channel read from the OME metadata, each with a
    role: **Nuclear / segmentation**, **Fluorescent**, **Phase / brightfield**, or
    **Skip**. The roles are seeded from the channel names: a `DAPI` / `Hoechst`-type
    stain is guessed as the nuclear/segmentation channel, or failing that a
@@ -2550,17 +2558,38 @@ the layout Analyze processes. Do this first, then open the result in Analyze.
 
 The readout shows how the file splits into wells × FOVs × timepoints and lists the
 channel names (any Z-stack is **maximum-intensity projected**; labels stay within
-the 96-well plate `A01`–`H12`). Press **Convert** — the acquisition plate above
+the 96-well plate `A01`–`H12`). It names the **wells at both ends of the order**
+and says which input produced them — `4 well(s) C03→D03 (clicked path)` — so you
+can see at a glance that the run starts where you meant it to, which a count on
+its own cannot tell you. A line below it in red says why **Convert** is unavailable:
+a grid that doesn't divide into the file's positions, a box that isn't a whole
+number (FOVs per well, Workers and the grid all say so rather than quietly
+treating a typo as "auto"), or a destination folder that already holds a
+converted plate. Press **Convert** — the acquisition plate above
 becomes the progress view: each well fills clockwise as its images are written,
 the same dial every other plate map in the app uses, and the plate locks against
 clicks until the run finishes so the order being converted can't be edited
 under it. A progress bar for the run as a whole appears below (Cancel stops it
-cleanly). The output is one
+cleanly), and when the run ends a line under that bar says how it went — a green
+summary, or the reason in red if it failed or was cancelled. You never have to
+open **Show raw log** to find out whether it worked. The output is one
 per-well `<WELL>.zip` in `<destination>/in/`, the layout Analyze reads directly
 (no regrouping step). Then **Open dataset in Analyze** — the Segmentation /
 fluorescent channel tokens arrive pre-filled from the channel roles you set (step
-8; adjust if needed), so you can run straight away. Because the wells now exist on
+7; adjust if needed), so you can run straight away. Because the wells now exist on
 disk, background-well and control-well options work normally.
+
+**If the file is incomplete, the converter says so instead of converting it.** An
+OME-TIFF's metadata declares how many image planes it holds, and that count can
+exceed what the file actually contains — an acquisition stopped before it
+finished leaves the *planned* dimensions in the header, and a scan written across
+several files is incomplete if its companion `.ome.tif` files aren't in the same
+folder. Those planes read back as solid black, which would land in the dataset as
+images indistinguishable from real ones. So the readout refuses the file as soon
+as you pick it, saying how many planes carry no data and which of the two causes
+it looks like, and **Convert** stays disabled. For missing companion files, put
+them back beside the source. For a run that stopped early, re-export the file
+with the dimensions it really holds — All-Well will not convert part of it.
 
 ### Concatenate datasets
 

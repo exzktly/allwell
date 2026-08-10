@@ -14,12 +14,16 @@ from datasets.ome_import.ome_import_compute import (  # noqa: E402
     channel_tokens_from_roles,
     default_channel_roles,
     default_dest,
+    destination_problem,
     guess_channel_role,
+    parse_count,
+    RawFields,
     plan_conversion,
     read_layout,
     selection_target,
     strip_ome_suffix,
 )
+from pipeline.ome_explode import OmeLayout  # noqa: E402
 
 
 def _write_multi(path, *, positions, size_t=1, size_c=1, channel_names=("GFP",)):
@@ -329,3 +333,104 @@ def test_convert_multi_image_with_custom_origin_and_direction(tmp_path):
             assert members == [f"m_GFP_{well}_f0_t0.tif"]
             arr = tifffile.imread(io.BytesIO(zf.read(members[0])))
             assert int(arr.max()) == pos  # confirms position -> well mapping, not just naming
+
+
+def test_plan_rejects_a_file_missing_image_planes():
+    """An incomplete source is refused by the planner, so the page's readout
+    carries the real reason and the Convert button never enables — rather than
+    the conversion dying part-way through on a page tifffile zero-fills."""
+    layout = OmeLayout(
+        n_positions=6, size_t=1, size_c=1, size_z=1,
+        channel_names=["GFP"], timepoint_tokens=["t0"],
+        axes_per_series=["YX"] * 6,
+        total_planes=6, missing_planes=2, incomplete_positions=[4, 5],
+        first_missing_plane=0,
+    )
+    with pytest.raises(OmeImportError) as exc:
+        plan_conversion(layout, ConversionParams(grid_rows=1, grid_cols=6))
+    assert "no image data" in str(exc.value)
+
+
+def test_plan_reports_incompleteness_before_a_grid_mismatch():
+    """The incompleteness check runs first: no grid makes a gapped file
+    convertible, so an unrelated divisibility error would be a red herring."""
+    layout = OmeLayout(
+        n_positions=6, size_t=1, size_c=1, size_z=1,
+        channel_names=["GFP"], timepoint_tokens=["t0"],
+        axes_per_series=["YX"] * 6,
+        total_planes=6, missing_planes=2, incomplete_positions=[4, 5],
+        first_missing_plane=0,
+    )
+    with pytest.raises(OmeImportError) as exc:
+        plan_conversion(layout, ConversionParams(grid_rows=1, grid_cols=4))
+    assert "no image data" in str(exc.value)
+    assert "don't divide evenly" not in str(exc.value)
+
+
+# ── reading the form as typed ────────────────────────────────────────────────
+
+
+def test_parse_count_separates_blank_from_malformed():
+    assert parse_count("") == (None, True)          # blank is a real answer
+    assert parse_count("  ") == (None, True)
+    assert parse_count("3") == (3, True)
+    assert parse_count("-3") == (-3, True)          # parses; range is a problem
+    assert parse_count("two") == (None, False)
+    assert parse_count("1.5") == (None, False)
+
+
+def test_raw_fields_report_malformed_values_rather_than_coercing_them():
+    fields = RawFields(rows="1", cols="4", fovs="0", workers="abc")
+    assert fields.problems() == [
+        "FOVs per well must be 1 or more, or blank for auto.",
+        "Workers must be a whole number, or blank for auto.",
+    ]
+    # …and a clean form has nothing to say.
+    assert RawFields(rows="1", cols="4", fovs="", workers="2").problems() == []
+
+
+def test_raw_fields_skip_the_grid_when_the_order_is_hand_drawn():
+    """The grid boxes are disabled then, so their contents are not an input and
+    a stale value in one must not block a run that does not read it."""
+    fields = RawFields(rows="two", cols="", well_order=("C03", "C04"))
+    assert fields.hand_drawn
+    assert fields.problems() == []
+    assert fields.to_params().well_order == ("C03", "C04")
+
+
+def test_raw_fields_to_params_matches_the_page_defaults():
+    params = RawFields(rows="2", cols="3", origin=" b02 ", fovs="", workers="",
+                       direction="col", frame_order="pos_in_time").to_params()
+    assert (params.grid_rows, params.grid_cols) == (2, 3)
+    assert params.origin == "b02"
+    assert params.fovs_per_well is None      # blank = derive
+    assert params.workers == 0               # blank = auto
+    assert params.direction == "col"
+    assert params.well_order == ()
+
+
+def test_summary_names_the_wells_and_which_input_produced_them(tmp_path):
+    p = _write_multi(tmp_path / "m.ome.tif", positions=3)
+    layout = read_layout(p)
+
+    grid = plan_conversion(layout, ConversionParams(grid_rows=1, grid_cols=3))
+    assert "3 well(s) A01→A03 (from the grid)" in grid.summary()
+
+    clicked = plan_conversion(layout, ConversionParams(
+        grid_rows=1, grid_cols=3, well_order=("H12", "H11", "G11")))
+    assert "3 well(s) H12→G11 (clicked path)" in clicked.summary()
+
+
+def test_destination_problem_flags_a_folder_that_already_holds_a_conversion(tmp_path):
+    assert destination_problem("") == ""
+    assert destination_problem(tmp_path / "fresh") == ""
+
+    used = tmp_path / "used"
+    (used / "in").mkdir(parents=True)
+    (used / "in" / "A01.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
+    assert "already holds converted wells" in destination_problem(used).lower()
+
+    finished = tmp_path / "finished"
+    (finished / "out").mkdir(parents=True)
+    (finished / "out" / "pipeline_info.json").write_text("{}")
+    assert "finished dataset" in destination_problem(finished)

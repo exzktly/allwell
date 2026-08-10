@@ -88,8 +88,12 @@ def test_preview_ignored_once_dirty(qapp):
 
     _click_well(w, "H12")               # user takes ownership
     assert w.is_dirty()
+    # Taking ownership replaces the preview rather than extending it — the
+    # preview's wells were never chosen, and keeping them makes them positions
+    # 1..n of the order the user is defining.
+    assert w.order() == ["H12"]
     w.set_preview(["A01", "A02", "A03"])   # ignored now
-    assert w.order() == ["A01", "A02", "H12"]
+    assert w.order() == ["H12"]
 
 
 def test_clear_resets_and_emits(qapp):
@@ -151,3 +155,72 @@ def test_editing_the_order_drops_any_progress_dials(qapp):
 
     _click_well(w, "H12")           # user edits the order
     assert w._grid._fractions == {}
+
+
+# ── a preview is not a path ──────────────────────────────────────────────────
+
+
+def test_the_first_click_replaces_a_preview_rather_than_extending_it(qapp):
+    """The host draws its grid guess into the same path the user clicks into.
+
+    Appending to it would make the guess's wells positions 1..n of an order the
+    user believes they are defining from scratch, pushing every clicked well one
+    place later — a conversion where each well receives the previous stage
+    position's images, with no count on screen that looks wrong.
+    """
+    w = PlateOrderEditor()
+    w.resize(480, 320)
+    w.set_preview(["B02"])
+    assert w.order() == ["B02"]
+    assert not w.is_dirty()
+
+    _click_well(w, "C03")
+    assert w.order() == ["C03"]
+    assert w.is_dirty()
+
+    # Ownership is taken once: from here the plate appends as it always has.
+    _click_well(w, "C04")
+    assert w.order() == ["C03", "C04"]
+
+
+def test_taking_over_a_multi_well_preview_keeps_only_what_was_clicked(qapp):
+    w = PlateOrderEditor()
+    w.resize(480, 320)
+    w.set_preview(["A01", "A02", "A03"])
+
+    _click_well(w, "H12")
+    assert w.order() == ["H12"]
+
+
+def test_clicking_a_previewed_well_starts_from_nothing(qapp):
+    """The plate's click gesture removes an on-path well; on a preview that
+    leaves an empty owned path, which is what taking over means."""
+    w = PlateOrderEditor()
+    w.resize(480, 320)
+    w.set_preview(["A01", "A02"])
+
+    _click_well(w, "A01")
+    assert w.order() == []
+    assert w.is_dirty()
+
+
+def test_an_order_the_host_set_is_appended_to_not_replaced(qapp):
+    """`set_order` is the host handing over a real order (a restored job, or
+    "Generate path from grid"), not a guess — clicks extend it."""
+    w = PlateOrderEditor()
+    w.resize(480, 320)
+    w.set_order(["A01", "A02"])
+
+    _click_well(w, "H12")
+    assert w.order() == ["A01", "A02", "H12"]
+
+
+def test_clear_forgets_the_preview_so_the_next_takeover_is_clean(qapp):
+    w = PlateOrderEditor()
+    w.resize(480, 320)
+    w.set_preview(["A01"])
+    w.clear()
+    w.set_preview(["B02"])
+
+    _click_well(w, "C03")
+    assert w.order() == ["C03"]

@@ -2980,6 +2980,22 @@ discards its staging file). A read-vs-write timing line is logged so the dominan
 cost is visible; the parallelism grain is per-well, so a degenerate single-well
 grid stays serial.
 
+**The grid and the clicked path are alternatives, and only one of them is an
+input.** The converter page draws the grid's serpentine onto the plate as a live
+*preview*, and the plate the preview lands on is the same one the user clicks
+into. So the page reads `well_order` from the plate **only once the widget is
+dirty** (`OmeImportPage.raw_fields`), and `PlateOrderEditor` makes the first click
+*replace* the preview rather than extend it: a preview is the host's guess, and
+carrying its wells into the order the user is defining makes them positions 1..n,
+pushing every clicked well one stage position later — each well then receives the
+previous position's images, with no count on screen that looks wrong. While a
+hand-drawn path is in force the grid, origin and serpentine controls are disabled
+with a note saying why, since they describe the other way of producing the same
+order and a control that accepts input and discards it is the page's most
+confusing state. `ConversionPlan.summary()` names the wells at both ends of the
+order and which input produced it for the same reason: the counts are identical
+either way.
+
 **The well ordering need not be rectangular.** Each stage position `i` maps to
 `well_labels[i // fovs_per_well]`, so the acquisition path is just an ordered list
 of wells (one well × FOV per position; FOVs-per-well is entered explicitly and
@@ -3012,6 +3028,29 @@ dimension:
   against the series' leading-axis sizes, honouring the file's `DimensionOrder`)
   because a packed plate array is routinely tens–hundreds of GB — far too large
   to `asarray` whole.
+
+**An incomplete source is refused before anything is written.** `tifffile` sizes
+a series' page list from the dimensions the *metadata* declares and leaves a slot
+`None` wherever the file carries no IFD for it — an acquisition stopped early
+(the planned `SizeT` stays in the header), or a multi-file OME whose companion
+files are not beside the master. Its own `series.asarray()` zero-fills those
+slots, which is exactly the substitution §7's design rule forbids: a converted
+plate would carry solid-black planes no downstream step could tell from real
+ones. Reading pages individually, as the single-image path must, instead puts the
+gap in front of `.asarray()` as a bare `None`. So `read_ome_layout` counts
+the gaps in the same pass it reads the sizes (`series_page_gaps`, scanned only
+for the series kinds that can hold one) and carries them on `OmeLayout` as
+`total_planes` / `missing_planes` / `incomplete_positions` /
+`first_missing_plane`, plus `missing_files` — the companion filenames the OME-XML
+references that are not on disk beside the source, which is what separates the
+two causes and therefore the two fixes. `OmeLayout.missing_plane_report()` is the
+single wording both callers use: `explode_ome_tiff` raises it as a `ValueError`
+before the destination directory is even created, and `plan_conversion` raises it
+as an `OmeImportError` *ahead of* its grid arithmetic — no grid makes a gapped
+file convertible, so a divisibility error derived from one would be a red
+herring. The converter page shows it in the readout and leaves **Convert**
+disabled. `_packed_plane` keeps a per-plane guard behind that check, naming the
+frame/channel/Z it was asked for rather than raising on `None`.
 
 `explode_ome_tiff` also takes a `progress_fn`/`should_abort` pair (raising
 `OmeExplodeCancelled`) so the converter's worker can drive a progress bar and
@@ -3879,12 +3918,41 @@ turning into a dead zone below its own height-capped plate.
 **Convert OME-TIFF** (`datasets/ome_import/`) is the standalone OME-TIFF
 de-interleaver described in §6.1: `ome_import_compute.plan_conversion` validates
 the well-grid / FOVs / frame-order against the file's `OmeLayout` for the live
-readout — alongside `ome_import_compute.selection_target`, which reads the file's
+readout — and, first of all, that the file contains every image plane its
+metadata declares (§6.1) — alongside `ome_import_compute.selection_target`, which reads the file's
 position/frame budget from the same `OmeLayout` and (when FOVs is pinned) the well
 count it implies, so the readout guides how many wells to place before any grid is
 entered, not only errors at the end. `apply.convert` calls `explode_ome_tiff` (which writes per-well zips into
 `<destination>/in/`, threaded, with progress + cancel), and `OmeImportWorker`
-runs it off the UI thread. On success
+runs it off the UI thread. **The form is read once, through
+`ome_import_compute.RawFields`** — the boxes exactly as typed, with `parse_count`
+telling a blank ("auto", a real answer) from a value that is not a whole number.
+`RawFields.problems()` returns the user-facing reasons a box can't be read and
+`to_params()` the settings it describes; the page shows the former and refuses to
+run while there are any, so a typo in FOVs per well or Workers is answered instead
+of collapsing into the same silent default as an empty box. The grid boxes are
+exempt while the order is hand-drawn, since nothing then reads them. The
+destination field carries a validator of its own (`destination_problem`) like
+every other tool's: a conversion overwrites the wells it writes and keeps the
+rest, so a folder that already holds a plate would end up holding two.
+The readout is two labels — neutral context above, and a pass/fail line below it
+whose object name switches between `Muted`, `Warn` and `Danger`, because a
+refusal and a green ✓ in the same grey differ only by a glyph. **A run locks
+every input that would redraw the plate**, not only the plate: the plate is the
+progress display, and a grid edit re-seeds its preview, which would swap the
+wells being reported on — dials and all — for the ones the grid currently
+describes while the conversion carries on against the order it started with.
+**A finished conversion says how it went on the page.**
+This is the one tool with no dashboard — it reports on the acquisition plate it
+already draws (below) — so the verdict has a label of its own under the progress
+bar (`set_outcome` / `clear_outcome`), painted by the shared
+`widgets.plate_progress.apply_outcome` so a conversion reads the same way here as
+on any dashboard headline. It belongs on the page and not only in the raw log,
+which `LogPanelMixin` hides by default: a verdict that reaches only a hidden pane
+leaves a failed run looking exactly like one that was never started. A terminal
+state also lands the progress bar, which a run that ends before it has counted
+its planes would otherwise leave in its indeterminate state — a bar still
+sweeping is the one thing on the page claiming work is happening. On success
 the page's "Open dataset in Analyze" button routes the produced folder to the
 Analyze pane (`on_open_in_analyze`) — the output is an Analyze *input*, not a
 Review dataset. The page also carries a per-channel **role picker** (one row

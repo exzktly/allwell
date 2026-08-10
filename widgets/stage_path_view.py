@@ -30,10 +30,22 @@ _N_ROWS, _N_COLS = 8, 12
 
 # Dot diameter and line width as fractions of a cell, so the drawing scales with
 # the plate instead of pinning pixel sizes that only look right at one size.
+# These are ceilings: see ``_marks`` for why the drawing usually goes smaller.
 _DOT_FRACTION = 0.14
 _START_DOT_FRACTION = 0.26
 _LINE_FRACTION = 0.035
 _GRID_LINE_FRACTION = 0.012
+
+# A dot is drawn at most this share of the distance to its nearest neighbour, so
+# the fields of view inside one well stay separate marks. A whole cell is a well,
+# and the fields in it are a fifteenth of that apart, so a dot sized off the cell
+# alone is wider than the gap it has to sit in — the four dots merge into one and
+# the drawing says exactly what the plate map above it already said.
+_DOT_OF_SPACING = 0.45
+
+# Below this many pixels a dot is not a dot, so the cluster is drawn as a mark
+# the eye can still resolve rather than sub-pixel mush.
+_MIN_DOT_PX = 2.2
 
 # Above this many positions the dots are dropped and only the route is drawn: a
 # plate scan can hold thousands, and at that density the dots merge into a blob
@@ -107,17 +119,41 @@ class StagePathView(QWidget):
             x = ox + col * cell
             painter.drawLine(QPointF(x, oy), QPointF(x, oy + _N_ROWS * cell))
 
+    @staticmethod
+    def _marks(pixels: list[QPointF], cell: float) -> tuple[float, float]:
+        """``(dot diameter, line width)`` in pixels for this set of points.
+
+        Sized off the **closest pair**, not off the cell. A cell is a whole well
+        and the fields of view inside it are a fifteenth of that apart, so a dot
+        scaled to the cell is wider than the gap it has to sit in: the fields
+        merge into a single mark and the drawing tells the user nothing the plate
+        map above it had not already said. The cell fraction stays as a ceiling,
+        for a scan with one field per well where there is nothing to crowd.
+        """
+        closest = min(
+            (
+                max(abs(a.x() - b.x()), abs(a.y() - b.y()))
+                for a, b in zip(pixels[:-1], pixels[1:])
+                if a != b
+            ),
+            default=cell,
+        )
+        dot = min(cell * _DOT_FRACTION, max(_MIN_DOT_PX, closest * _DOT_OF_SPACING))
+        return dot, min(cell * _LINE_FRACTION, max(1.3, dot / 2.5))
+
     def _paint_path(self, painter: QPainter, cell: float,
                     ox: float, oy: float) -> None:
         pixels = [
             QPointF(ox + (x + 0.5) * cell, oy + (y + 0.5) * cell)
             for x, y in self._points
         ]
+        dot, line = self._marks(pixels, cell)
+
         route = QPainterPath(pixels[0])
         for point in pixels[1:]:
             route.lineTo(point)
         pen = QPen(QColor(theme.Colors.accent))
-        pen.setWidthF(max(1.0, cell * _LINE_FRACTION))
+        pen.setWidthF(line)
         pen.setJoinStyle(Qt.RoundJoin)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
@@ -126,11 +162,12 @@ class StagePathView(QWidget):
         painter.setPen(Qt.NoPen)
         if len(pixels) <= _DOT_BUDGET:
             painter.setBrush(QColor(theme.Colors.accent))
-            radius = cell * _DOT_FRACTION / 2.0
             for point in pixels:
-                painter.drawEllipse(point, radius, radius)
+                painter.drawEllipse(point, dot / 2.0, dot / 2.0)
         # The first position always keeps a dot, and a larger one: where the scan
         # began is the one thing on this drawing the user chose rather than read.
+        # Sized off the same neighbour spacing, so it marks the start without
+        # swallowing the cluster it sits in.
         painter.setBrush(QColor(theme.Colors.success))
-        start = cell * _START_DOT_FRACTION / 2.0
+        start = max(dot * 1.8, min(cell * _START_DOT_FRACTION, dot * 3.0)) / 2.0
         painter.drawEllipse(pixels[0], start, start)

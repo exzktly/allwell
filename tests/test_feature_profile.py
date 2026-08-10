@@ -7,6 +7,8 @@ than a fork — so full-app changes to surviving regions flow in for free.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 pytest.importorskip("PySide6")
@@ -151,3 +153,41 @@ def test_every_non_removable_subleaf_is_absent_from_the_strip_catalog():
             if d.parent and not d.removable}
     assert not (kept & strippable), (
         f"marked non-removable but listed in full.toml: {sorted(kept & strippable)}")
+
+
+def test_home_enumerates_its_tabs_from_the_registry():
+    """The tab list and the descriptor list cannot disagree.
+
+    Home used to filter a module constant through ``includes_subtab``, which is a
+    bare string check against the ``[subtabs]`` allowlist and never consults
+    descriptors. Asking it about names nothing declared meant a manifest could
+    drop tabs it had never heard of: the one line ARCHITECTURE's valid-names
+    table sanctioned — ``[subtabs] "Home" = ["Cell Gating"]``, meaning *keep Cell
+    Gating* — silently took four editors with it.
+    """
+    from well_viewer.features.home.tab_view import active_subtabs
+
+    full = build_feature_registry(FULL)
+    ctx = SimpleNamespace(features=full)
+    assert active_subtabs(ctx) == (
+        "Overview", "Cell Gating", "Groups", "Well Labels", "Ratios",
+        "Pipeline Info",
+    )
+
+    # The sanctioned manifest line keeps the three load-bearing editors and drops
+    # only what is declared removable.
+    narrowed = Profile(name="p", features=frozenset({"Home"}),
+                       subtabs={"Home": frozenset({"Cell Gating"})})
+    ctx = SimpleNamespace(features=build_feature_registry(narrowed))
+    assert active_subtabs(ctx) == (
+        "Overview", "Cell Gating", "Groups", "Well Labels")
+
+
+def test_every_home_tab_has_a_builder():
+    """Home dispatches through the descriptor, so one without a ``build`` would
+    add a tab that silently stays empty."""
+    home_leaves = [d for d in build_feature_registry(FULL).all()
+                   if d.parent == "Home"]
+    assert home_leaves, "premise: Home declares sub-leaves"
+    missing = [d.name for d in home_leaves if d.build is None]
+    assert not missing, f"Home sub-leaves with no builder: {missing}"

@@ -25,35 +25,19 @@ from well_viewer.core.selection_controller import (
 from . import collect as hc
 from .plate_panel import paint_plate, well_tooltip
 from .tab_view import (
-    DEFINITION_SUBTABS, IMPORT_KEY, format_value, legend_label,
+    IMPORT_KEY, definition_subtabs, format_value, legend_label,
     legend_swatch_style,
 )
 
-# The definition tabs' bodies belong to other features. They are reached through
-# lazy proxies rather than imports: a module-scope import would couple Home to a
-# removable feature (``test_architecture_contracts``), and a function-local one
-# is a deferred feature import, which is a cycle-workaround this codebase
-# ratchets down (``test_deferred_imports``). A ``lazy(...)`` call is neither —
-# it imports on first call and caches.
-_build_cell_gating_subtab = lazy(
-    "well_viewer.features.home.cell_gating.tab_view",
-    "build_cell_gating_subtab")
+# Cell Gating's controller is reached for two refreshes the sub-tab handler and
+# the selection hook drive. Its tab body, and the other four, are built through
+# the feature registry instead — see ``build_home_subtab``.
 _cell_gating_sync_scatter_gates = lazy(
     "well_viewer.features.home.cell_gating.controller",
     "cell_gating_sync_scatter_gates")
 _cell_gating_load_cell_areas = lazy(
     "well_viewer.features.home.cell_gating.controller",
     "cell_gating_load_cell_areas")
-_build_replicate_groups_centre = lazy(
-    "well_viewer.features.home.groups.tab_view",
-    "build_replicate_groups_centre")
-_build_label_grid = lazy(
-    "well_viewer.features.home.labels.tab_view", "build_label_grid")
-_build_ratios_inline_panel = lazy(
-    "well_viewer.features.home.ratios.tab_view", "build_ratios_inline_panel")
-_build_pipeline_info_subtab = lazy(
-    "well_viewer.features.home.pipeline_info.tab_view",
-    "build_pipeline_info_subtab")
 
 _logger = logging.getLogger("well_viewer")
 
@@ -138,22 +122,11 @@ def build_home_subtab(ctx, idx: int) -> None:
         built = ctx.runtime.home.built = {}
     if name == "Overview" or built.get(name):
         return
-    frame = sub.widget(idx)
+    desc = ctx.features.get(name)
+    if desc is None or desc.build is None:
+        return
     try:
-        if name == "Cell Gating":
-            _build_cell_gating_subtab(ctx)
-        elif name == "Groups":
-            _build_replicate_groups_centre(ctx, frame)
-        elif name == "Well Labels":
-            _build_label_grid(ctx, frame)
-        elif name == "Ratios":
-            layout = frame.layout()
-            layout.addWidget(_build_ratios_inline_panel(ctx, frame))
-            layout.addStretch(1)
-        elif name == "Pipeline Info":
-            _build_pipeline_info_subtab(ctx, frame)
-        else:
-            return
+        desc.build(ctx, sub.widget(idx))
         built[name] = True
     except Exception:
         _logger.exception("Home: build sub-tab %r failed", name)
@@ -197,10 +170,10 @@ def sync_home_sidebar(ctx) -> None:
     """
     frame = ctx.widgets.get_or_none("_sidebar_sample_frame")
     if frame is not None:
-        frame.setVisible(current_subtab(ctx) in DEFINITION_SUBTABS)
+        frame.setVisible(current_subtab(ctx) in definition_subtabs(ctx))
     btn = ctx.widgets.get_or_none(IMPORT_KEY)
     if btn is not None:
-        btn.setVisible(current_subtab(ctx) in DEFINITION_SUBTABS)
+        btn.setVisible(current_subtab(ctx) in definition_subtabs(ctx))
 
 
 def on_home_subtab_changed(ctx, idx: int) -> None:
@@ -245,7 +218,7 @@ def activate_home(ctx) -> None:
     resync_record(ctx)
     refresh_home(ctx)
     sync_home_sidebar(ctx)
-    if current_subtab(ctx) in DEFINITION_SUBTABS:
+    if current_subtab(ctx) in definition_subtabs(ctx):
         groups_centre_refresh(ctx)
         _cell_gating_sync_scatter_gates(ctx)
 

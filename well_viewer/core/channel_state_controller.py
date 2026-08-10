@@ -1050,6 +1050,14 @@ def ensure_cell_gating_tab_built(ctx) -> bool:
         build = ctx.runtime.centre.build_pending
         if callable(build):
             build("Home")
+        # The builder finds its frame through the runtime, and the drain may not
+        # have reached this tab yet, so seed it from Home's frame map. Absent
+        # entirely means a build without the tab: nothing to materialize.
+        if ctx.runtime.cell_gating.subtab_frame is None:
+            frames = ctx.runtime.home.frames or {}
+            ctx.runtime.cell_gating.subtab_frame = frames.get("Cell Gating")
+        if ctx.runtime.cell_gating.subtab_frame is None:
+            return False
         from well_viewer.features.home.cell_gating.tab_view import build_cell_gating_subtab
         build_cell_gating_subtab(ctx)
     return ctx.runtime.cell_gating.fluor_gate_edits is not None

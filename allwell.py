@@ -40,7 +40,7 @@ import theme as theme_v2
 from version import __version__ as _APP_VERSION
 from widgets.brand_tile import BrandTile
 from widgets.icon_button import IconButton
-from well_viewer.core.safe import swallowed
+from well_viewer.core.safe import swallow, swallowed
 from well_viewer.core.ui_helpers import build_hline_separator
 
 # Pixel geometry for this module's controls. Named rather than written
@@ -938,6 +938,16 @@ class AllWellApp(QMainWindow):
         except Exception:
             return overview
         pages = help_topics.SECTION_BY_PAGE
+        if leaf == "Home":
+            # Home is a notebook and `current_centre_tab` stops at the page, so
+            # without this every one of its six tabs lands on the top of the Home
+            # chapter. Ask Home which tab is showing and prefer that heading;
+            # Overview has none of its own and correctly falls through to "Home".
+            with swallow("help: home sub-tab"):
+                from well_viewer.features.home.controller import current_subtab
+                sub = current_subtab(ctx) or ""
+                if sub in pages:
+                    return pages[sub]
         if leaf in pages:
             return pages[leaf]
         # Fall back to a loose match so renamed/prefixed leaves ("Spatial Map",

@@ -147,6 +147,10 @@ README_SECTION_FEATURES = {
 #: sub-tab names.
 README_SUBTAB_TITLES = {
     "Image Browser": {"Segmentation", "Image Table", "Cell Browser", "Playground"},
+    # Home's notebook. "Overview" is the report page itself, not a sub-leaf, and
+    # has no ``####`` heading of its own — it is the prose the Home section opens
+    # with, so it is deliberately absent here.
+    "Home": {"Cell Gating", "Groups", "Well Labels", "Ratios", "Pipeline Info"},
 }
 
 _H1_3 = re.compile(r"^#{1,3} ")     # an h1/h2/h3 heading ends a ``###`` section

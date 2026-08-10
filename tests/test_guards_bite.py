@@ -741,3 +741,34 @@ def test_nested_debt_liveness_catches_an_entry_that_no_longer_bites(
         debt={("well_viewer/features/home/controller.py",
                "well_viewer.features.home.ratios")})
     assert exc is not None and "no longer describe" in str(exc)
+
+
+# ── Home sub-tab help topics ────────────────────────────────────────────────
+
+_HOME_REGISTRY_SRC = (
+    "FEATURES = (\n"
+    '    FeatureDescriptor(name="Home", group="Review"),\n'
+    '    FeatureDescriptor(name="Ratios", parent="Home", build=_build_ratios),\n'
+    ")\n"
+)
+
+
+def _run_home_topic_scan(monkeypatch, tmp_path, topics: dict):
+    import help_topics
+
+    (tmp_path / "well_viewer" / "features").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "well_viewer" / "features" / "registry.py").write_text(
+        _HOME_REGISTRY_SRC)
+    monkeypatch.setattr(help_topics, "SECTION_BY_PAGE", topics)
+    return _run_rooted_scan(monkeypatch, "tests.test_help_topics",
+                            "test_every_home_subtab_has_a_topic", tmp_path)
+
+
+def test_home_topic_guard_catches_a_subtab_with_no_topic(tmp_path, monkeypatch):
+    exc = _run_home_topic_scan(monkeypatch, tmp_path, {"Home": "Home"})
+    assert exc is not None and "Ratios" in str(exc)
+
+
+def test_home_topic_guard_clears_a_subtab_that_has_one(tmp_path, monkeypatch):
+    assert _run_home_topic_scan(
+        monkeypatch, tmp_path, {"Home": "Home", "Ratios": "Ratios"}) is None

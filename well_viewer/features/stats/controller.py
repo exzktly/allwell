@@ -878,8 +878,8 @@ def deserialize_stats_groups(ctx, data) -> list:
     from well_viewer.domain.batch_models import BarGroup, ReplicateSet
     paths = ctx.state.dataset.well_paths
     # One ReplicateSet per selection with >=1 loaded well — the same rule as
-    # ``grouping.rep_sets_loaded``, inlined off ``ctx.state`` so this stays free
-    # of both a cross-feature import and the app god-object.
+    # ``domain.selections_model.replicate_sets_loaded``, inlined off
+    # ``ctx.state`` so this stays free of the app god-object.
     rep_by_name: dict = {}
     for s in ctx.state.selection.selections:
         s_wells = s.get("wells") or []

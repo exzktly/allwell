@@ -118,8 +118,9 @@ def color_for_selection(s: Any) -> str:
 
 def color_for_replicate_set(rset: Any, selections: Iterable[Any]) -> str:
     """Colour for a replicate set / bar group: honours the ``color`` of a
-    selection sharing its ``name``, else the rank colour of its wells. Pure core
-    of ``grouping.controller.rank_color_rset`` (A8 teardown)."""
+    selection sharing its ``name``, else the rank colour of its wells. The A8
+    teardown left this the single implementation; the ctx-shaped adapter that
+    used to wrap it is gone and callers reach it here directly."""
     name = getattr(rset, "name", None)
     if name:
         for s in selections:
@@ -143,7 +144,7 @@ def replicate_display_label(ctx, rset: Any) -> str:
     """Human-friendly x-axis label for a replicate set: the group name, or —
     when that name looks auto-generated (``"1"`` / ``"Replicate 2"`` / ``"R3"``) —
     its member well labels so the axis stays interpretable. A8 teardown: pure
-    ``ctx.state`` + ``well_display_label`` (moved from grouping.controller)."""
+    ``ctx.state`` + ``well_display_label``, with no feature-side wrapper."""
     name = str(getattr(rset, "name", "") or "").strip()
     if not name:
         name = "Replicate"

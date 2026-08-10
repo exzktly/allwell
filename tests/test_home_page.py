@@ -467,3 +467,31 @@ def test_a_greyed_plate_actually_looks_greyed(qtbot):
     )
     assert differing > 100, (
         f"only {differing} sampled pixels differ — a greyed plate reads as live")
+
+
+def test_the_help_drawer_lands_on_the_current_tab_not_the_top_of_the_chapter(
+        loaded_app, qtbot):
+    """``current_centre_tab`` deliberately does not descend into Home, so every
+    tab here resolves to the leaf ``"Home"``. Left at that, opening the help
+    drawer from Ratios scrolled to the top of the Home chapter -- the same place
+    it lands from Overview, and indistinguishable from the scroll having failed.
+
+    ``_review_help_section`` ignores ``self``; it reads the ctx off the review
+    pane it is handed, so the loaded app stands in for it directly.
+    """
+    import allwell
+    import help_topics
+
+    resolve = allwell.AllWellApp._review_help_section
+
+    for tab, heading in (("Groups", "Groups"),
+                         ("Ratios", "Ratios"),
+                         ("Pipeline Info", "Pipeline Info"),
+                         ("Cell Gating", "Cell Gating")):
+        _goto_subtab(loaded_app, qtbot, tab)
+        assert resolve(None, loaded_app) == heading, tab
+
+    # Overview is the report page, not a sub-leaf. It has no heading of its own
+    # and correctly falls through to the Home chapter.
+    _goto_subtab(loaded_app, qtbot, "Overview")
+    assert resolve(None, loaded_app) == help_topics.SECTION_BY_PAGE["Home"]

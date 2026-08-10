@@ -1151,22 +1151,32 @@ the crop region and the QC gate.
 cutoffs, then use the optimizer on the one channel that separates your
 conditions.
 
-#### Groups, Well Labels & Ratios
+#### Groups
 
-- **Groups (replicate sets)** — name a set of wells as replicates; every plot,
-  the Statistics tab, and Batch Export can then treat them as one condition. A
-  group **is** exactly one condition — its wells are its replicate set (no mixed
-  sub-sets or solo wells inside a group). Build one with **+ Add** (a graphical
-  plate picker — rubber-band select, row/column headers), or let **Quick
-  Replicates** chunk the current selection into groups of a chosen size via the
-  **Replicates per group** spinbox (default 2), walking the wells along the
-  Rows / Columns direction. On the Groups plate every well is tinted by its
-  **group's** colour, so all wells in a group read as one condition and match
-  the group's row swatch.
-- **Well Labels** — give wells / groups human-readable names; these show in
-  every plot legend instead of the raw well token.
-- **Ratios** — define a ratio channel (e.g. `GFP/MCHERRY`); it appears as a
-  virtual channel in the channel selector everywhere.
+Name a set of wells as replicates; every plot, the Statistics tab, and Batch
+Export can then treat them as one condition. A group **is** exactly one
+condition — its wells are its replicate set (no mixed sub-sets or solo wells
+inside a group). Build one with **+ Add** (a graphical plate picker —
+rubber-band select, row/column headers), or let **Quick Replicates** chunk the
+current selection into groups of a chosen size via the **Replicates per group**
+spinbox (default 2), walking the wells along the Rows / Columns direction. On
+the Groups plate every well is tinted by its **group's** colour, so all wells in
+a group read as one condition and match the group's row swatch.
+
+#### Well Labels
+
+Give wells / groups human-readable names; these show in every plot legend
+instead of the raw well token. **Add Prefix** and **Add Suffix** apply to the
+wells currently selected on the plate beside the tab.
+
+#### Ratios
+
+Define a ratio channel (e.g. `GFP/MCHERRY`) computed at read time as
+*numerator / (denominator + ε)*; it appears as a virtual channel in the channel
+selector everywhere. **ε** is added to the denominator before dividing, so a
+cell whose denominator reads 0 yields `NaN` and drops out at ε = 0, or survives
+with the ratio biased toward 0 at a small positive ε. **Apply** commits the
+table and persists it with the dataset.
 
 #### Pipeline Info
 
@@ -1747,7 +1757,7 @@ place cells in a grid that mirrors your plate or your experimental design.
 replicate sets — **t-test**, **Mann-Whitney**, and **KS** — with a KS CDF plot.
 
 - **Needs** — at least two groups. On first visit the tab auto-populates from
-  the replicate sets defined on [Home → Groups](#groups-well-labels--ratios).
+  the replicate sets defined on [Home → Groups](#groups).
 - **Controls** — the group editor is in the sidebar; everything else is on the
   same one-row controls band every tab uses — **Channel**, **Property**,
   **Statistic**, **Timepoint** and **Test**, then an FOV-replicate indicator

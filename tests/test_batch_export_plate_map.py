@@ -187,7 +187,7 @@ def test_a_real_drag_gesture_reaches_the_group(loaded_app):
 
 
 def _define_replicate_set(app, name: str, wells: list[str]) -> None:
-    """Add a sample definition the way the Sample Definitions tab would."""
+    """Add a sample definition the way Home → Groups would."""
     app._ctx.state.selection.selections.append({"name": name, "wells": list(wells)})
 
 

@@ -37,5 +37,6 @@ def test_per_well_tabs_includes_cell_browser():
     reg = build_feature_registry()
     per_well = {d.name for d in reg.all() if d.per_well_selection}
     assert "Cell Browser" in per_well
-    assert "Sample Definitions" in per_well
+    # Home carries the sample-definition editors, which pick wells one at a time.
+    assert "Home" in per_well
     assert "Review CSV" in per_well

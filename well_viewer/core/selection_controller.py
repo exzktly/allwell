@@ -11,10 +11,10 @@ from well_viewer.core.safe import swallowed
 # helpers below; these tuples only seed the fallback.
 #
 # Per-well tabs keep per-well plate selection even when replicate sets / stat
-# groups exist (rep-set mode otherwise makes the plate passive): Sample
-# Definitions / Review CSV need user-chosen wells for Cell Gating / Add Prefix /
+# groups exist (rep-set mode otherwise makes the plate passive): Home /
+# Review CSV need user-chosen wells for Cell Gating / Add Prefix /
 # row-loading, and the Cell Browser draws its gallery from the active selection.
-_PER_WELL_TAB_NAMES = ("Sample Definitions", "Review CSV", "Cell Browser")
+_PER_WELL_TAB_NAMES = ("Home", "Review CSV", "Cell Browser")
 _SINGLE_WELL_TAB_NAMES = ("smFISH",)
 
 
@@ -42,7 +42,12 @@ def _is_single_well_tab(ctx, tab_name: str) -> bool:
 # plate stays group-driven and clicking a well toggles its group (driving both
 # panes), instead of the plate flipping to a per-well selector that ignored the
 # groups and stopped affecting the scatter.
-_WELL_EDITING_TAB_NAMES = ("Sample Definitions", "Review CSV")
+#
+# "Home" is here because the sample-definition editors are tabs of that page.
+# This is page-level, not tab-level — ``current_centre_tab`` reports "Home" for
+# every one of its tabs — so the plate stays an active per-well selector on
+# Overview too. That matches Overview's own plate, whose clicks select wells.
+_WELL_EDITING_TAB_NAMES = ("Home", "Review CSV")
 
 
 def _is_well_editing_tab(ctx, tab_name: str) -> bool:
@@ -53,8 +58,8 @@ def _plate_passive_in_group_mode(ctx) -> bool:
     app = ctx.window  # transitional bridge (A3)
     """Whether the sidebar plate runs in passive (group-visibility) mode.
 
-    Passive in rep-set (group) mode unless a *well-editing* pane (Sample
-    Definitions / Review CSV) is on screen — those need the plate as a per-well
+    Passive in rep-set (group) mode unless a *well-editing* pane (Home /
+    Review CSV) is on screen — those need the plate as a per-well
     selector. The Cell Browser does NOT force the plate active: it mirrors the
     plotting layer's group wells, so a Scatter + Cell Browser split keeps the
     plate group-driven (no focus-dependent flip; clicking toggles a group and
@@ -340,7 +345,7 @@ def select_none(ctx) -> None:
         solo.clear()
     # Mirror the sidebar's mode decision: group ("rep") mode applies only when
     # saved selections exist AND the current tab isn't a per-well tab. On a
-    # per-well tab (Cell Browser / Sample Definitions / Review CSV) the plate
+    # per-well tab (Cell Browser / Home / Review CSV) the plate
     # selects individual wells, so "Deselect all" must clear ``selected_wells``
     # — even when saved groups also exist. Branching on ``sel.selections`` alone
     # (the old behaviour) only hid the groups and left the per-well selection,
@@ -371,7 +376,7 @@ def on_sidebar_plate_selection_changed(ctx, ids) -> None:
     # _refresh_sidebar_map_now calls setSelectedWellIds / setEnabledWells
     # (those corrections converge harmlessly).
     #
-    # Sample Definitions / Review CSV exception: even when groups exist
+    # Home / Review CSV exception: even when groups exist
     # (rep-set mode), these tabs need per-well selection so Add Prefix /
     # Add Suffix / row-filter can act on user-chosen wells. We let the
     # click through and update _selected_wells normally;
@@ -653,7 +658,7 @@ def refresh_sidebar_map_now(ctx) -> None:
         return
 
     # Some tabs need per-well selection even when groups exist:
-    # Sample Definitions (Cell Gating / Add Prefix / Add Suffix all
+    # Home's definition tabs (Cell Gating / Add Prefix / Add Suffix all
     # need user-chosen wells), and Review CSV (the user has to pick
     # which wells' rows to load). For those tabs the plate stays in
     # ``select`` mode and ``_selected_wells`` is honoured.
@@ -847,17 +852,24 @@ def sel_set_color(ctx, sid, color) -> None:
 
 
 def groups_centre_refresh(ctx) -> None:
-    """Refresh all Sample Definitions panels.
+    """Refresh all sample-definition panels.
 
-    Card lists are only rebuilt when the tab is active (expensive).
-    Plate maps are always updated (cheap).
+    Card lists are only rebuilt when one of the definition tabs is showing
+    (expensive). Plate maps are always updated (cheap).
+
+    The test is the *tab*, not the page. The definitions are tabs of Home, and
+    Home is what the app opens on — so asking whether the page is current would
+    be true from startup and would rebuild both card lists on every selection
+    change, whatever the user is actually looking at.
     """
     enforce_well_exclusivity(ctx)
     tab_visible = False
     nb = getattr(ctx.window, "_notebook", None)
-    if nb is not None:
+    sub_tabs = ctx.runtime.home.subtabs
+    if nb is not None and sub_tabs is not None:
         try:
-            tab_visible = nb.currentName() == "Sample Definitions"
+            tab_visible = (nb.currentName() == "Home"
+                           and sub_tabs.tabText(sub_tabs.currentIndex()) != "Overview")
         except Exception:
             swallowed()  # was: pass (silent except)
 
@@ -964,14 +976,14 @@ def rebuild_all(ctx) -> None:
     explicit user actions (button clicks / dialog OK), never during drag.
     """
     app._invalidate_stats_cache()
-    app._groups_centre_refresh()          # Sample Definitions: GROUPS panel + map
+    app._groups_centre_refresh()          # Home: GROUPS panel + map
     app._refresh_sidebar_map()            # line-graph picker: rep colours
     # Only redraw plots that are actually on screen. An off-screen plot is fully
     # re-rendered from current state by its on_activate hook the moment the user
     # switches to it, so redrawing it here — a synchronous matplotlib cla()+draw
     # — is pure waste. This mirrors the visibility guard the Cell Browser /
     # Spatial / Multivariate block below already uses. Without it, editing a
-    # sample group (done on the Sample Definitions tab, where NO plot is visible)
+    # sample group (done on Home → Groups, where NO plot is visible)
     # paid 3–5 off-screen figure re-renders — and a full stats recompute to feed
     # them — on every single well click: the "group edits are ridiculously slow"
     # bug. ``_is_tab_visible`` is true in either split-view pane, so a plot shown

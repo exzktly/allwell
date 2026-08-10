@@ -1,6 +1,6 @@
 """'Deselect all' (select_none) honours the current tab's selection mode.
 
-Regression: on a per-well tab (Cell Browser / Sample Definitions / Review CSV)
+Regression: on a per-well tab (Cell Browser / Home / Review CSV)
 with saved groups also present, select_none used to only hide the groups and
 leave ``selected_wells`` — so the button looked broken. It must clear the
 per-well selection on those tabs, and still hide groups on rep-mode plot tabs.

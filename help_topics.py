@@ -70,7 +70,6 @@ SECTION_BY_PAGE: dict[str, str] = {
     "smFISH": "smFISH",
     "Review CSV": "Review CSV",
     "Cell Gating": "Cell Gating",
-    "Sample Definitions": "Sample Definitions",
     "Saved Plots": "Saved Plots",
     "Batch Export": "Batch export",
 }

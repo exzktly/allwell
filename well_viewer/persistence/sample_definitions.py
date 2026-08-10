@@ -125,8 +125,10 @@ def _apply_unified_state(ctx, block, *, set_notes: bool = True) -> tuple[bool, d
     (the in-memory source of truth). v1 blocks are migrated by ``from_block``.
 
     ctx-native: reads the typed ``ctx.state`` slices, reports through the
-    ``ctx.set_status`` service accessor, and writes the Notes back through the
-    registered ``_notes_edit`` widget (``ctx.widgets``) — it names no god-object.
+    ``ctx.set_status`` service accessor, and pushes the loaded Notes into every
+    registered editor through ``mirror_notes`` — it names no god-object, and no
+    single widget key, so an editor that has not been built yet (or has been
+    profiled away) costs nothing.
 
     Returns ``(applied, well_labels_dict)``. On a malformed block / migration
     failure: logs, leaves the existing state alone, disables v2 writes for the
@@ -188,13 +190,10 @@ def _apply_unified_state(ctx, block, *, set_notes: bool = True) -> tuple[bool, d
         )
     if set_notes:
         sel_state.notes_text = notes
-        notes_edit = ctx.widgets.get_or_none("_notes_edit")
-        if notes_edit is not None and notes_edit.toPlainText() != notes:
-            blocked = notes_edit.blockSignals(True)
-            try:
-                notes_edit.setPlainText(notes)
-            finally:
-                notes_edit.blockSignals(blocked)
+        # No source editor — the text came off disk, so every box on screen is
+        # a destination.
+        from well_viewer.core.ui_helpers import mirror_notes
+        mirror_notes(ctx, source_key="")
     return True, well_labels
 
 

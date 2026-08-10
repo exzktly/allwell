@@ -2,7 +2,7 @@
 
 Editing a sample group funnels through ``rebuild_all``, which used to always
 redraw Bar / Line / Scatter — a synchronous matplotlib ``cla()``+draw each —
-even though group editing happens on the Sample Definitions tab, where no plot
+even though group editing happens on Home → Groups, where no plot
 is on screen. That paid 3–5 off-screen re-renders (plus a full stats recompute
 to feed them) on every well click: the "sample-group edits are ridiculously
 slow" bug. ``rebuild_all`` now guards each plot redraw by tab visibility,
@@ -35,7 +35,7 @@ def test_group_edit_skips_all_plot_redraws_when_none_visible(loaded_app, monkeyp
     from well_viewer.core import selection_controller as sc
 
     app = loaded_app
-    # Sample Definitions tab open → no plot on screen.
+    # Home open → no plot on screen.
     monkeypatch.setattr(app, "_is_tab_visible", lambda name: False)
     names, line = _spy_plot_redraws(app, monkeypatch)
 
@@ -50,7 +50,7 @@ def test_group_edit_redraws_only_the_visible_plot(loaded_app, monkeypatch):
     from well_viewer.core import selection_controller as sc
 
     app = loaded_app
-    # Bar Plots visible (e.g. in a split pane alongside Sample Definitions).
+    # Bar Plots visible (e.g. in a split pane alongside Home).
     monkeypatch.setattr(app, "_is_tab_visible", lambda name: name == "Bar Plots")
     names, line = _spy_plot_redraws(app, monkeypatch)
 

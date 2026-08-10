@@ -179,7 +179,7 @@ def test_label_axes_are_tagged_and_span_their_group():
 
 
 def test_well_label_overrides_the_position_in_the_export():
-    # Sample Definitions → Well Labels must reach the exported strip, not just
+    # Home → Well Labels must reach the exported strip, not just
     # the live grid: both read the plan's _fmt.
     plan, cells = _nested_plan(well_labels={"A01": "Control"})
     drawn = _drawn_texts(_drawn_figure(plan, cells))

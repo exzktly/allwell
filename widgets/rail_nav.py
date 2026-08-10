@@ -1,7 +1,7 @@
 """RailNav — vertical accent-bar navigation for the left rail.
 
 Mockup target: the eight section items (Plotting / smFISH / Statistics /
-Image Table / Segmentation / Review CSV / Sample Definitions / Batch Export)
+Image Table / Segmentation / Review CSV / Home / Batch Export)
 between the rail's mode-seg and the plate. Each row carries a leading
 Lucide icon + label + optional trailing count chip. The active row has a
 ``--accent-dim`` background **and** a 2-px left accent bar drawn via
@@ -338,7 +338,7 @@ if __name__ == "__main__":
     nav.addItem("Image Table",       icon="layout-grid")
     nav.addItem("Segmentation",      icon="scan-line")
     nav.addItem("Review CSV",        icon="file-spreadsheet")
-    nav.addItem("Sample Definitions",icon="tag")
+    nav.addItem("Batch Export",icon="boxes")
     nav.addItem("Batch Export",      icon="boxes")
     lay.addWidget(nav)
     lay.addStretch(1)

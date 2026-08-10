@@ -260,7 +260,7 @@ def _group_visibility_mode(ctx) -> bool:
     """Whether the sidebar plate is painting *group visibility* right now.
 
     Mirrors ``selection_controller._plate_passive_in_group_mode``: replicate
-    sets exist and no well-editing pane (Sample Definitions / Review CSV) is on
+    sets exist and no well-editing pane (Home / Review CSV) is on
     screen, so clicks toggle a set's ``hidden`` flag instead of selecting wells.
     Falls back to "replicate sets exist" when the shell isn't reachable — the
     lightweight ``ctx`` used by headless callers and unit tests has no window.
@@ -415,7 +415,7 @@ def _plot_groups_load(ctx, group_id: str) -> None:
     # click does: show every set the group touches, hide the rest, and carry any
     # well the group names that belongs to no set as a solo well. This changes
     # only what is *shown* — no replicate set's membership is touched, so Plot
-    # Groups still never mutate Sample Definitions.
+    # Groups still never mutate the sample definitions.
     _apply_plot_group_to_rep_mode(ctx, wells)
     # Mirror the selection into the Image Table's tab-local well set so a
     # group picked from any sidebar (plotting or Image Table) immediately

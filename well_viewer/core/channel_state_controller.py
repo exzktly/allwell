@@ -1049,7 +1049,7 @@ def ensure_cell_gating_tab_built(ctx) -> bool:
     if ctx.runtime.cell_gating.fluor_gate_edits is None:
         build = ctx.runtime.centre.build_pending
         if callable(build):
-            build("Sample Definitions")
+            build("Home")
         from well_viewer.features.grouping.cell_gating.tab_view import build_cell_gating_subtab
         build_cell_gating_subtab(ctx)
     return ctx.runtime.cell_gating.fluor_gate_edits is not None

@@ -431,7 +431,6 @@ class WellViewerApp(QWidget):
         "Image Browser":      "layout-grid",
         "smFISH":             "dna",
         "Review CSV":         "file-spreadsheet",
-        "Sample Definitions": "tag",
         "Saved Plots":        "image",
         "Batch Export":       "boxes",
     }
@@ -540,7 +539,7 @@ class WellViewerApp(QWidget):
         from well_viewer.persistence import view_state as _vs
         _vs.reset(self._ctx)
 
-    # ── Sample Definitions + Cell Gating persistence ─────────────────────────
+    # ── Sample definitions + Cell Gating persistence ─────────────────────────
     # Implementations live in ``well_viewer.persistence.{sample_definitions,cell_gating}``.
 
     def _load_sample_definitions_from_pipeline_info(self) -> bool:

@@ -699,6 +699,6 @@ def refresh_bar_layout_btn_state(ctx) -> None:
         pool_btn.setToolTip(
             "Collapse each replicate set's wells into one pooled column "
             "(off = one column per well)." if has_rsets
-            else "Define replicate groups (Sample Definitions → Groups) to "
+            else "Define replicate groups (Home → Groups) to "
             "pool them.")
 

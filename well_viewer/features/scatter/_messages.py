@@ -57,7 +57,7 @@ def agg_empty_message(ctx, cut_sink: dict | None) -> str:
     knob = "ThreshCountOn" if is_count else "ThreshFracOn"
     detail = (f"Every cell on the {axis} axis was cut by the ON cutoff:\n"
               f"{channel} {quantity} > {cutoff:g} kept 0 of {n_total:,} cells.")
-    remedy = f"Lower {knob} for {channel} in\nSample Definitions → Cell Gating."
+    remedy = f"Lower {knob} for {channel} in\nHome → Cell Gating."
     # Mirror to the status line too — an empty figure is easy to scroll past,
     # and the remedy is the half worth carrying there.
     with swallow("scatter: status line unavailable for the cut-cells notice"):

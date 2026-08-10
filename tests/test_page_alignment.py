@@ -108,7 +108,7 @@ def test_every_review_page_starts_its_band_at_the_stack_top(shell, qapp):
 def test_nested_sub_tab_bodies_fill_their_host(shell, qapp):
     """A sub-tab's body starts at the top of the widget hosting it.
 
-    Image Browser and Sample Definitions nest their leaves in a ``QTabWidget``
+    Image Browser and Home nest their leaves in a ``QTabWidget``
     whose own bar is hidden (it is mirrored into the mode band), so the pane
     border that bar would have sat on has nothing left to close — and its top
     edge used to push every nested body a pixel below where an un-nested page's

@@ -1,7 +1,7 @@
 """Named reset scopes — the one map from what a user names to the state it owns.
 
 The app used to carry three overlapping "start over" commands (a title-bar
-trash-can, a title-bar circular arrow, and an x on the Sample Definitions band),
+trash-can, a title-bar circular arrow, and an x on the definitions band),
 each written against the *files* it happened to know about. That is the wrong
 axis: a user reaches for a reset thinking "drop my gating", not "delete
 persistence.json". Two of the three drifted from their own dialog text as a

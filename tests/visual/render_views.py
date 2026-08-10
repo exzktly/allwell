@@ -205,10 +205,10 @@ def capture_review(app) -> None:
     if goto(app, rev, "Review CSV"):
         grab(w, "60-review-csv", "Review CSV — per-cell table")
 
-    # 7) Sample Definitions + 6 sub-tabs.
-    if goto(app, rev, "Sample Definitions"):
-        _capture_inner(app, w, rev, _current_page(rev), "70-sample-def",
-                       "Sample Definitions", fallback="70-sample-def")
+    # 7) Home + its tabs (Overview + the definition editors).
+    if goto(app, rev, "Home"):
+        _capture_inner(app, w, rev, _current_page(rev), "70-home",
+                       "Home", fallback="70-home")
 
     # 8) Batch Export.
     if goto(app, rev, "Batch Export"):

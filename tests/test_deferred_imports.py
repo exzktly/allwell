@@ -110,7 +110,13 @@ FEATURE_PREFIX = "well_viewer.features"
 # replacement (`persistence/reset_scopes.py`) reaches every feature through a
 # stamped `ctx.runtime.<feature>` callback instead, so a module that clears
 # state across the whole app imports no feature at all.
-MAX_DEFERRED_FEATURE_IMPORTS = 108
+# 108 -> 104: the sample definitions became tabs of Home, and the page builder
+# that assembled them (`grouping.replicate_panel_view.build_sample_definitions_centre`)
+# was deleted with its four function-local imports of the cell-gating, ratio and
+# pipeline-info builders. Home reaches those same builders through `core.lazy`
+# proxies instead — a call rather than an import statement, so the escape hatch
+# is not re-opened somewhere else.
+MAX_DEFERRED_FEATURE_IMPORTS = 104
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

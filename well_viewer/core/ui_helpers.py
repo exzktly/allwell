@@ -21,7 +21,7 @@ def well_plate_tooltip_provider(ctx) -> Callable[[str], str]:
     """Tooltip-provider closure for ``WellPlateSelector.setWellTooltipProvider``.
 
     Returns ``"<well_id> — <label>"`` for wells the user has named in
-    Sample Definitions, falling back to the bare well id otherwise. The
+    Home → Well Labels, falling back to the bare well id otherwise. The
     closure reads ``ctx.state.dataset.well_labels`` on every hover
     so a label edit reflects immediately without re-wiring the provider.
     """
@@ -1242,19 +1242,19 @@ def toggle_log(ctx) -> None:
 
 
 
-#: Every registered editor of the project notes, in no particular order. The
-#: same string lives in two places on screen — Sample Definitions → Notes is the
-#: long-form editor, Home carries the same text beside the plate — and both
-#: write through the helpers below rather than being read directly by the save
-#: path. One roster, so adding a third editor is one edit.
-NOTES_WIDGET_KEYS: tuple[str, ...] = ("_notes_edit", "_home_notes_edit")
+#: Every registered editor of the project notes, in no particular order. Home's
+#: box beside the plate is the only one — but the roster, and the helpers below
+#: that fan out over it, stay: the save path reads the slice through them rather
+#: than reading a widget by name, which is what made a second editor safe to add
+#: and then safe to remove.
+NOTES_WIDGET_KEYS: tuple[str, ...] = ("_home_notes_edit",)
 
 
 def notes_widgets(ctx):
     """The notes editors that currently exist, as ``(key, widget)`` pairs.
 
-    Either can be absent: both pages build lazily, and a feature profile may
-    drop one of them entirely.
+    Any of them can be absent: the page builds lazily, and a feature profile may
+    drop one entirely.
     """
     for key in NOTES_WIDGET_KEYS:
         widget = ctx.widgets.get_or_none(key)
@@ -1301,12 +1301,12 @@ def commit_focused_notes(ctx) -> None:
 
 
 def mirror_notes(ctx, *, source_key: str) -> None:
-    """Push the committed text into every *other* notes editor.
+    """Push the committed text into every notes editor other than *source_key*.
 
-    Without this: edit on Home, switch to Sample Definitions, and its box still
-    shows the previous text — then focusing out of it writes that stale text
-    back over the edit. Signals are blocked so mirroring is not itself read as
-    an edit.
+    Pass ``source_key=""`` to reach all of them — that is what the hydrator does
+    when the text came from disk rather than from a box on screen. Signals are
+    blocked so mirroring is never itself read as an edit, which is what would
+    otherwise let a stale box write back over a fresh edit.
     """
     text = ctx.state.selection.notes_text or ""
     for key, widget in notes_widgets(ctx):
@@ -1343,12 +1343,12 @@ def clear_notes_editors(ctx) -> None:
             continue
 
 
-def notes_schedule_save(ctx, *, widget_key: str = "_notes_edit") -> None:
+def notes_schedule_save(ctx, *, widget_key: str = "_home_notes_edit") -> None:
     """Capture one editor's Notes text and queue a debounced save.
 
     The widget read must stay here (the registry never touches widgets);
     the debounce + disk write live in the PersistenceRegistry. *widget_key*
-    names the editor that is committing, so the caller's own box wins and the
+    names the editor that is committing, so the caller's own box wins and any
     other is mirrored to match rather than competing with it.
     """
     edit = ctx.widgets.get_or_none(widget_key)

@@ -15,6 +15,13 @@ that constructs a tab to check its layout would never run in CI at all.
 ``ADOPTED`` is a ratchet: modules are added as they adopt the band and never
 removed. ``test_adoption_list_only_grows`` fails if an entry goes stale, which
 is what would happen if a tab were reverted to its own row.
+
+There is exactly one legitimate reason to take an entry out, and it is not "the
+module stopped using the band": it is that the **page** the entry described no
+longer exists, and the module that now owns that page's row is listed in its
+place. Removing an entry any other way is the regression this file exists to
+catch, so a commit that does it says which page went away and which module
+inherited the row.
 """
 
 import ast
@@ -38,12 +45,12 @@ ADOPTED = (
     "well_viewer/features/barplot/tab_view.py",
     "well_viewer/features/distribution/tab_view.py",
     "well_viewer/features/heatmap/tab_view.py",
+    "well_viewer/features/home/tab_view.py",     # Home — the page band + its tabs
     "well_viewer/features/lineplot/tab_view.py",
     "well_viewer/features/multivariate/tab_view.py",
     "well_viewer/features/scatter/agg_tab_view.py",
     "well_viewer/features/scatter/cells_tab_view.py",
     "well_viewer/features/batch_export/tab_view.py",
-    "well_viewer/features/grouping/replicate_panel_view.py",  # Sample Definitions
     "well_viewer/features/image_browser/cell_browser/tab_view.py",
     "well_viewer/features/image_browser/playground/tab_view.py",
     "well_viewer/features/preview/panel_view.py",          # Segmentation
@@ -178,7 +185,7 @@ def test_plotting_leaves_share_the_page_band():
 PAGE_TAB_OWNERS = (
     "well_viewer/core/centre_view.py",                       # Plotting
     "well_viewer/features/image_browser/tab_view.py",        # Image Browser
-    "well_viewer/features/grouping/replicate_panel_view.py",  # Sample Definitions
+    "well_viewer/features/home/tab_view.py",                 # Home
     "well_viewer/features/batch_export/tab_view.py",          # Batch Export
 )
 

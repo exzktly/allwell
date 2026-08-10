@@ -261,7 +261,7 @@ class _PlateGrid(QWidget):
 
     # Lock the plate's aspect ratio: at any given width the layout knows the
     # minimum height that keeps the wells circular and the row/column labels
-    # legible. Prevents the Sample Definitions tab's stacked plate + groups
+    # legible. Prevents the Groups tab's stacked plate + groups
     # from crushing the plate when the centre column is short.
     def hasHeightForWidth(self) -> bool:
         return True

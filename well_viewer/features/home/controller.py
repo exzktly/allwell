@@ -9,16 +9,53 @@ loaded with the sidecar.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 import theme
+from well_viewer.core.lazy import lazy
 from well_viewer.core.safe import swallow
+from well_viewer.core.selection_controller import (
+    groups_centre_refresh, update_active_group_label,
+)
 
 from . import collect as hc
 from .plate_panel import paint_plate, well_tooltip
-from .tab_view import format_value, legend_label, legend_swatch_style
+from .tab_view import (
+    DEFINITION_SUBTABS, IMPORT_KEY, format_value, legend_label,
+    legend_swatch_style,
+)
+
+# The definition tabs' bodies belong to other features. They are reached through
+# lazy proxies rather than imports: a module-scope import would couple Home to a
+# removable feature (``test_architecture_contracts``), and a function-local one
+# is a deferred feature import, which is a cycle-workaround this codebase
+# ratchets down (``test_deferred_imports``). A ``lazy(...)`` call is neither —
+# it imports on first call and caches.
+_build_cell_gating_subtab = lazy(
+    "well_viewer.features.grouping.cell_gating.tab_view",
+    "build_cell_gating_subtab")
+_cell_gating_sync_scatter_gates = lazy(
+    "well_viewer.features.grouping.cell_gating.controller",
+    "cell_gating_sync_scatter_gates")
+_cell_gating_load_cell_areas = lazy(
+    "well_viewer.features.grouping.cell_gating.controller",
+    "cell_gating_load_cell_areas")
+_build_replicate_groups_centre = lazy(
+    "well_viewer.features.grouping.replicate_panel_view",
+    "build_replicate_groups_centre")
+_build_label_grid = lazy(
+    "well_viewer.features.grouping.label_grid_view", "build_label_grid")
+_build_ratios_inline_panel = lazy(
+    "well_viewer.features.scatter.ratio_panel_view", "build_ratios_inline_panel")
+_build_pipeline_info_subtab = lazy(
+    "well_viewer.features.grouping.pipeline_info_view",
+    "build_pipeline_info_subtab")
+
+_logger = logging.getLogger("well_viewer")
 
 #: The masthead's actions, in the order they appear. Each is handled by
 #: :func:`run_home_action`, which is also what the next-step row calls — one
@@ -66,6 +103,131 @@ def _clear(host: QWidget) -> None:
             child.setParent(None)
 
 
+# ── the sub-tab notebook ────────────────────────────────────────────────────
+
+def _subtabs(ctx):
+    return ctx.runtime.home.subtabs
+
+
+def current_subtab(ctx) -> str:
+    """The label of the Home tab now showing, or ``""`` before the page builds."""
+    sub = _subtabs(ctx)
+    if sub is None or sub.count() == 0:
+        return ""
+    try:
+        return str(sub.tabText(sub.currentIndex()))
+    except RuntimeError:
+        return ""
+
+
+def build_home_subtab(ctx, idx: int) -> None:
+    """Build the body of the sub-tab at *idx*, once.
+
+    Idempotent: the per-name ``ctx.runtime.home.built`` map guards a second
+    call, so the drain and a user's click cannot both construct the same body.
+    A builder that raises leaves its tab empty and the rest of the page intact
+    — the alternative is a landing page that fails to open because one editor
+    could not build.
+    """
+    sub = _subtabs(ctx)
+    if sub is None or idx < 0 or idx >= sub.count():
+        return
+    name = sub.tabText(idx)
+    built = ctx.runtime.home.built
+    if built is None:
+        built = ctx.runtime.home.built = {}
+    if name == "Overview" or built.get(name):
+        return
+    frame = sub.widget(idx)
+    try:
+        if name == "Cell Gating":
+            _build_cell_gating_subtab(ctx)
+        elif name == "Groups":
+            _build_replicate_groups_centre(ctx, frame)
+        elif name == "Well Labels":
+            _build_label_grid(ctx, frame)
+        elif name == "Ratios":
+            layout = frame.layout()
+            layout.addWidget(_build_ratios_inline_panel(ctx, frame))
+            layout.addStretch(1)
+        elif name == "Pipeline Info":
+            _build_pipeline_info_subtab(ctx, frame)
+        else:
+            return
+        built[name] = True
+    except Exception:
+        _logger.exception("Home: build sub-tab %r failed", name)
+
+
+def drain_home_subtabs(ctx) -> None:
+    """Build the definition tabs one per event-loop tick, after Overview.
+
+    Home is the page the app opens on and is built eagerly, so its bodies
+    cannot all be constructed inline. They are not built lazily on first click
+    either: these editors' widgets are read after a load by persistence
+    hydration and by other tabs, without the user having opened them, and that
+    was true when they were drained as a page of their own. Draining preserves
+    that while keeping startup off the hook.
+    """
+    sub = _subtabs(ctx)
+    if sub is None:
+        return
+
+    def _step(idx: int = 0) -> None:
+        if _subtabs(ctx) is not sub:
+            return          # the page was rebuilt under us; that build drains itself
+        try:
+            count = sub.count()
+        except RuntimeError:
+            return          # the window went away mid-drain
+        if idx >= count:
+            return
+        build_home_subtab(ctx, idx)
+        QTimer.singleShot(0, lambda: _step(idx + 1))
+
+    QTimer.singleShot(0, _step)
+
+
+def sync_home_sidebar(ctx) -> None:
+    """Show the group-editing plate on the definition tabs, and only there.
+
+    Overview has its own plate in the page body; the rail's is for composing
+    groups, so on Overview it would be a second plate answering a different
+    question.
+    """
+    frame = ctx.widgets.get_or_none("_sidebar_sample_frame")
+    if frame is not None:
+        frame.setVisible(current_subtab(ctx) in DEFINITION_SUBTABS)
+    btn = ctx.widgets.get_or_none(IMPORT_KEY)
+    if btn is not None:
+        btn.setVisible(current_subtab(ctx) in DEFINITION_SUBTABS)
+
+
+def on_home_subtab_changed(ctx, idx: int) -> None:
+    """Build the now-current tab if the drain has not reached it, then refresh."""
+    build_home_subtab(ctx, idx)
+    name = current_subtab(ctx)
+    if name == "Cell Gating":
+        # Pick up any gates drawn on the Scatter tab since the last visit.
+        _cell_gating_sync_scatter_gates(ctx)
+    elif name == "Pipeline Info":
+        cb = ctx.runtime.grouping.pipeline_info_refresh
+        if callable(cb):
+            cb()            # re-read in case the dataset changed
+    elif name == "Groups":
+        # Entering Groups deselects any previously-active group, so a click on
+        # the rail plate has no consequence until the user picks one.
+        if ctx.state.selection.current_selection_id is not None:
+            ctx.state.selection.current_selection_id = None
+            groups_centre_refresh(ctx)
+            ctx.coordinator.refresh_sidebar_map()
+        if ctx.widgets.has("_rep_active_group_lbl"):
+            update_active_group_label(ctx)
+    sync_home_sidebar(ctx)
+
+
+# ── page lifecycle ──────────────────────────────────────────────────────────
+
 def activate_home(ctx) -> None:
     """Fired when the page is shown.
 
@@ -82,6 +244,10 @@ def activate_home(ctx) -> None:
     hide_rail_body(ctx)
     resync_record(ctx)
     refresh_home(ctx)
+    sync_home_sidebar(ctx)
+    if current_subtab(ctx) in DEFINITION_SUBTABS:
+        groups_centre_refresh(ctx)
+        _cell_gating_sync_scatter_gates(ctx)
 
 
 def hide_rail_body(ctx) -> None:
@@ -167,7 +333,21 @@ def on_home_dataset_loaded(ctx) -> None:
 
 
 def on_home_selection_changed(ctx) -> None:
-    """Keep Home's plate showing the app-wide selection."""
+    """Keep Home's plate showing the app-wide selection, and Cell Gating fed.
+
+    Cell Gating is a tab on this page, and its CDF is drawn from the selected
+    wells' cell areas — so a selection change reloads them, exactly as it did
+    when Cell Gating lived on a page of its own.
+
+    Only while that tab is the one showing. The reload is a per-well ``get_rows``
+    plus a Python-level pass over every cell, per channel; on the page the app
+    opens on, where clicking wells is the primary interaction and nothing draws a
+    CDF, paying it on every click is the same cost the ``_is_tab_visible`` guard
+    exists to keep off the plot tabs.
+    """
+    if (current_subtab(ctx) == "Cell Gating"
+            and ctx.runtime.cell_gating.fluor_gate_edits is not None):
+        _cell_gating_load_cell_areas(ctx)
     plate = _widget(ctx, "_home_plate")
     if plate is None:
         return
@@ -417,9 +597,11 @@ def _row_widget(parent: QWidget, row: dict, *, kind: str) -> QWidget:
 #: not a next step — every one of them is fixed by running the pipeline again
 #: over what is missing, so they all route to ``complete``.
 _ACTION_PAGE = {
-    "samples": "Sample Definitions",
     "plot": "Plotting",
 }
+
+#: Actions that land on a tab of this page rather than on another page.
+_ACTION_SUBTAB = {"samples": "Groups"}
 
 
 def run_home_action(ctx, action: str) -> None:
@@ -444,6 +626,10 @@ def run_home_action(ctx, action: str) -> None:
         if action == "validate":
             _open_validate(ctx)
             return
+        subtab = _ACTION_SUBTAB.get(action)
+        if subtab:
+            show_home_subtab(ctx, subtab)
+            return
         if action == "complete":
             _complete_run_in_analyze(ctx)
             return
@@ -452,6 +638,22 @@ def run_home_action(ctx, action: str) -> None:
             notebook = getattr(ctx.window, "_notebook", None)
             if notebook is not None:
                 notebook.setCurrentByName(page)
+
+
+def show_home_subtab(ctx, name: str) -> None:
+    """Select the Home tab labelled *name*.
+
+    Navigating within the page rather than to it: the button that offers to take
+    the user to their groups is itself on Home, so ``setCurrentByName("Home")``
+    would be a no-op and the offer would do nothing.
+    """
+    sub = _subtabs(ctx)
+    if sub is None:
+        return
+    for i in range(sub.count()):
+        if sub.tabText(i) == name:
+            sub.setCurrentIndex(i)
+            return
 
 
 def _open_dataset(ctx) -> None:

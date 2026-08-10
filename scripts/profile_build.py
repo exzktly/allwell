@@ -136,7 +136,7 @@ README_SECTION_FEATURES = {
     "Image Browser": "Image Browser",
     "smFISH": "smFISH",
     "Review CSV": "Review CSV",
-    "Sample Definitions": "Sample Definitions",
+    "Home": "Home",
     "Saved Plots": "Saved Plots",
     "Batch export": "Batch Export",
 }

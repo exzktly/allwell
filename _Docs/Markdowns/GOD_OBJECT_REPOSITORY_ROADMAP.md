@@ -96,8 +96,7 @@ not reinvent what it already gives:
   subset-profile boot assertion, matching this.
 - **Still coupled (confirmed teardown targets):** `core/load_controller.py` retains
   many direct `from well_viewer.features…` imports (qc/crop/review_image/grouping/
-  heatmap at `:292,308-310,318,333,378`) *not* yet on the hook seam; Sample
-  Definitions still routes through an app-bridge god-seam (`registry.py:108-116`);
+  heatmap at `:292,308-310,318,333,378`) *not* yet on the hook seam;
   `on_selection_changed` hooks + the `stats`/preview builders still name `app`.
 
 ## Context
@@ -191,10 +190,12 @@ Same "one module per PR" cadence as the `ctx.app` ledger. Priority by risk:
    Flip that hook contract to `ctx` in lock-step, and fix the stale
    `feature_registry.py:72` docstring that still claims "every hook takes `app`."
    Then `export/style.py` (5); `heatmap/sidebar_view.py` (5).
-5. **Sample Definitions app-bridge god-seam** (`registry.py:108-116`) — the residual
-   place a feature routes through the god-object; migrate onto the same `ctx`/hook
-   mechanisms once its callback targets (`_groups_centre_refresh`, `_redraw`, …) are
-   `ctx`-native (couples to A5's `NotificationService`/`SelectionCoordinator`).
+5. **Sample Definitions app-bridge god-seam** — **closed.** The sample definitions
+   became tabs of Home, and the page builder that needed the seam
+   (`grouping.replicate_panel_view.build_sample_definitions_centre`) went with the
+   page. Home assembles those tab bodies itself through `core.lazy` proxies, so
+   `tab_controller.build_sample_definitions_app_bridge` is deleted rather than
+   migrated: there is no feature routing through the god-object here any more.
 - Pattern per fn: `def f(app,...)` → `def f(ctx,...)`; body reads
   `ctx.state`/`ctx.widgets`/`ctx.runtime`; callers pass `ctx` (or `app._ctx` at a
   boundary). Identical to every ledger entry.
@@ -412,8 +413,7 @@ A5 `window` = terminal state ; B5 (image repo) optional/last
 - `well_viewer/core/feature_registry.py` — `FeatureDescriptor` + `with_hook`; add the
   `cache_projector` field (B1). **This registry is the reuse seam for B1/B1b/A3.**
 - `well_viewer/features/registry.py` — descriptor hook factories; `on_selection_changed`
-  (last app-first hook, A3), Sample Definitions app-bridge `:108-116` (A3.5), QC/Crop
-  `cache_projector` factories (B1)
+  (last app-first hook, A3), QC/Crop `cache_projector` factories (B1)
 - `well_viewer/data/data_loading.py` — `get_rows` layer inversion via `with_hook` (B1)
 - `well_viewer/core/load_controller.py` — residual feature imports → `on_dataset_loaded`
   hooks (B1b); load-path convergence (B4)

@@ -18,7 +18,7 @@ from well_viewer.features.registry import build_feature_registry
 def test_full_profile_admits_everything():
     reg = build_feature_registry(FULL)
     names = {d.name for d in reg.all()}
-    assert {"Plotting", "Sample Definitions", "Image Browser", "Bar Plots",
+    assert {"Plotting", "Home", "Image Browser", "Bar Plots",
             "Segmentation", "Cell Gating"} <= names
 
 
@@ -29,8 +29,8 @@ def test_profile_filters_features_and_their_subleaves():
     assert names == {"Plotting", "Bar Plots", "Line Graphs", "Scatter Plot",
                      "Distribution", "Heat Map"}
     # Excluded top-levels and their sub-leaves are gone.
-    assert reg.get("Sample Definitions") is None
-    assert reg.get("Cell Gating") is None       # sub-leaf of Sample Definitions
+    assert reg.get("Home") is None
+    assert reg.get("Cell Gating") is None       # sub-leaf of Home
     assert reg.get("Image Browser") is None
     assert reg.get("Segmentation") is None       # sub-leaf of Image Browser
 
@@ -38,7 +38,7 @@ def test_profile_filters_features_and_their_subleaves():
 def test_thin_profile_matches_this_branch():
     reg = build_feature_registry(load_profile("thin"))
     assert reg.get("Plotting") is not None
-    assert reg.get("Sample Definitions") is not None
+    assert reg.get("Home") is not None
     assert reg.get("Segmentation") is not None
 
 

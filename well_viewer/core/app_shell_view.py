@@ -301,7 +301,7 @@ def show_page_tabs(win, name: str) -> None:
 def mirror_tab_widget(win, name: str, tab_widget):
     """Drive a ``QTabWidget`` from a ``QTabBar`` in the band, two ways.
 
-    The two nested ``QTabWidget``s (Image Browser, Sample Definitions) are read
+    The two nested ``QTabWidget``s (Image Browser, Home) are read
     through their own API by controllers, persistence and eight test modules —
     ``tabText`` / ``currentIndex`` / ``count`` / ``addTab`` / ``currentChanged``.
     Converting them to a bar plus a page stack would break every one of those.

@@ -40,12 +40,13 @@ to add features, how to debug, and build / environment troubleshooting), see
 3. [Quick start](#quick-start)
 4. [Analyze mode — running the pipeline](#analyze-mode--running-the-pipeline)
 5. [Review mode — exploring results](#review-mode--exploring-results)
+   - [Home](#home) (Overview · Cell Gating · Groups · Well Labels · Ratios · Pipeline Info)
    - [The Review window at a glance](#the-review-window-at-a-glance)
    - [Controls shared by every tab](#controls-shared-by-every-tab)
    - Plotting: [Bar Plots](#bar-plots) · [Line Graphs](#line-graphs) · [Scatter Plot](#scatter-plot) · [Distribution](#distribution) · [Heat Map](#heat-map)
    - [Statistics](#statistics) · [Multivariate analysis](#multivariate-analysis) · [Spatial analysis](#spatial-analysis)
    - [Image Browser](#image-browser) (Segmentation · Image Table · Cell Browser · Playground) · [smFISH](#smfish) · [Review CSV](#review-csv)
-   - [Sample Definitions](#sample-definitions) · [Saved Plots](#saved-plots) · [Batch export](#batch-export)
+   - [Saved Plots](#saved-plots) · [Batch export](#batch-export)
    - [Starting over](#starting-over)
 6. [Datasets mode — dataset-level tools](#datasets-mode--dataset-level-tools)
    - [Convert OME-TIFF](#convert-ome-tiff) · [Concatenate datasets](#concatenate-datasets) ·
@@ -956,9 +957,8 @@ What is on it:
   not navigate, so you can pick several. Hovering one says what its numbers are.
   There is no All / Invert / Clear row here, unlike the plate in the rail: those
   act on what gets plotted, and nothing on this page plots.
-- **Notes.** The same project notes as
-  [Sample Definitions](#sample-definitions), editable here. Type and click away;
-  it saves on its own. Whatever the numbers will not tell you in six months
+- **Notes.** The project notes, and the only place they are edited. Type and
+  click away; it saves on its own. Whatever the numbers will not tell you in six months
   belongs here — which plate had the incubator alarm, which columns were
   re-plated, which channel bled.
 - **The numbers.** Wells, timepoints, fields per well, shape features, and how
@@ -993,6 +993,185 @@ handoff carries it, and Analyze says on its dashboard what it just set up.
 when you last quit. Everything else about that session is restored as before —
 it is only arriving with a new dataset that starts on Home, since that is the
 moment there is most to tell you.
+
+#### Telling the app what your wells mean
+
+The rest of Home's tabs are where you *declare* things, rather than read them:
+which cells count, which wells are replicates of each other, what to call them,
+and what ratios to derive. **Import**, at the right end of the page's controls
+row, merges definitions from a JSON file into what is already there; it is
+hidden on Overview, where there is nothing to merge into. Everything on these
+tabs autosaves to the dataset folder as you edit, so there is no Save button to
+look for; to discard definitions, use **Reset analysis** in the title bar
+([Starting over](#starting-over)), which lets you pick exactly which kinds to
+drop.
+
+#### Cell Gating
+
+**What it is.** The single place that decides which cells are *included* and
+which count as *on* for fraction-on statistics — the gating layer every plot,
+statistic, and export consumes.
+
+The tab is laid out as the two questions it answers, in the order they are
+applied, and each question offers the same two sources as a pair of radio
+buttons — you pick one or the other, because choosing the scatter option
+*replaces* the per-channel numbers rather than adding to them.
+
+- **Cell inclusion — which cells count.** The **QC debris gate** leads and is
+  marked *always applied*: it composes with everything else on the tab. It reads
+  as one row per measured quantity — Area, Solidity, Region area, Circularity —
+  with its lower and upper bound in the `min` and `max` columns. Solidity has no
+  upper bound and Region area no lower one, so those cells show an em-dash
+  rather than an empty box you might think you were meant to fill in. Then
+  choose the source of the inclusion decision —
+  the per-channel **intensity minimum** (the `Include ≥` column below), or the
+  rectangular gates drawn on the [Scatter Plot](#scatter-plot). Until you have
+  drawn a gate there, the scatter option is greyed out and says so.
+
+  **Area and Region area are not the same measurement**, and the difference is
+  the reason both exist. **Area** is the size of the one cell — how many pixels
+  that cell's own outline encloses. **Region area** is the size of the connected
+  bright blob the cell is sitting in: the app takes every bright pixel, joins the
+  ones that touch, and asks how big the resulting island is.
+
+  They only differ when the segmenter has been fooled. It draws small, roughly
+  round shapes, so it cannot represent one large lump of debris as a single
+  object — it shatters the lump into many small "cells" instead. Each fragment
+  then looks like a perfectly normal cell by size, which is exactly what an area
+  gate cannot see through:
+
+  ```
+                        Area        Region area
+    a real nucleus      253 px         253 px      ← sits alone
+    one debris fragment  64 px         729 px      ← 9 of these share one blob
+  ```
+
+  No `max area` setting can remove that debris: each fragment (64 px) is
+  *smaller* than the real nucleus (253 px), so any rule big enough to catch them
+  deletes real cells first. A `max region area` of, say, 400 removes all nine
+  fragments and keeps the nucleus, because it is judging the lump rather than the
+  pieces. In one line: **Area is how big I am; Region area is how big the crowd
+  I am standing in is.**
+
+  The same reasoning is the caution. Cells that genuinely touch each other also
+  form one crowd, so on a dense or confluent plate a tight `max region area` can
+  start discarding real cells that happen to be packed together. Change it in
+  steps and watch the QC line in the inclusion funnel below the table: if the
+  number it removes jumps far beyond the amount of visible debris, the bound is
+  catching neighbours rather than junk. Datasets processed before this
+  measurement existed have no region area recorded, and the bound is ignored for
+  them rather than excluding everything.
+
+  The other two bounds are about shape, not size. **Solidity** is the cell's area
+  divided by the area of a rubber band stretched round it, so low values mean
+  ragged or fragmented outlines; there is no upper bound, because a perfectly
+  smooth cell is not a defect. **Circularity** is 1.0 for a perfect circle and
+  falls as an outline becomes jagged or elongated, and it is bounded on both
+  sides — a maximum is useful when something in the image is *too* perfectly
+  round to be a cell.
+- **Fraction-on — which included cells count as ON.** Removes no cells. Choose
+  the per-channel **ON cutoff**, or a scatter gate. The two questions have
+  **independent** gate pickers, so you can include cells by one set of gates and
+  compute fraction-on from a different set.
+
+  This question has **two** cutoffs per channel, because the answer depends on
+  what you are plotting. `ON ≥ (ThreshFracOn)` is the brightness a cell must
+  reach, and applies when the selected Property is an intensity.
+  `ON > (ThreshCountOn)` is the number of spots it must carry, and applies when
+  the Property is an smFISH Count. They are separate values on purpose: one asks
+  how *bright* a cell is, the other how many *spots* it holds, and the two live
+  on scales that share no useful number. A channel with no spot-count column has
+  no count cutoff to set, and shows an em-dash in that column.
+
+  ThreshCountOn starts at **-1**, below the smallest tally a cell can have, so
+  every cell counts as on — including cells carrying no spots at all, which are
+  a real measurement and not missing data. Raise it to N to plot "the fraction
+  of cells with more than N spots"; the mean, the fraction-on panel and the
+  events panel all follow it.
+
+Each question has **its own table** directly under it, with a row per
+fluorescence channel and ratio metric. They are kept apart on purpose: the
+numbers have the same shape but answer different questions — the inclusion floor
+decides whether a cell is in the dataset at all, the ON cutoffs only decide how
+the cells already in it are counted — and a single table serving both would need
+a heading that names neither. The inclusion floor is always measured against
+per-cell mean fluorescence intensity, whichever Property is selected elsewhere. A
+readout channel's ON cutoff starts at 50; the nuclear (segmentation) channel
+starts at 0, because an ON/OFF brightness cut has no meaning for the channel
+nuclei are *found* with — every segmented cell is by construction a detection in
+it, so a non-zero cut there only hides nuclei from the Image Table's
+"≥ threshold" view. Whichever channel it is, a value you set yourself always wins
+over the starting one.
+
+Two helpers sit beside the fraction-on section:
+
+- **Auto-threshold all channels** — an Otsu pass over per-cell + matched
+  background pixels, to derive sensible ON cutoffs for every channel at once.
+- **Optimize ON cutoff…** — opens the optimizer in its own window (which you can
+  leave open while you read the CDFs behind it). Pick two wells, a timepoint and
+  a Min / Max / # Points range, and it applies the threshold that maximises the
+  *relative* fraction-on gap `|fa − fb| / max(fa, fb)`, opening a validation
+  graph so you can sanity-check the pick. Independent Control / Baseline pickers
+  let you optimize on a fold-change-adjusted fraction-on.
+
+Below the table is the readout:
+
+- **The inclusion funnel** — each layer applied on top of the one above it, so
+  you can see *which* layer removed what rather than only the final total:
+
+  ```
+  20,000 segmented cells
+     Curation + intensity gate: −1,240  →  18,760
+     QC debris gate: −1,204  →  17,556
+     Crop region: not applied
+     Scatter gates: not applied
+  ```
+
+  A layer reads "not applied" when it is not in play at all — which is different
+  from a layer that ran and removed nothing, and is never shown as `−0`. Manual
+  curation and the intensity gate share a line because they write the same
+  underlying column and cannot be told apart after the fact.
+- **Included for analysis** — a live count under the gate controls, e.g.
+  `Included for analysis: 12,345 / 20,000 cells  ·  1,204 failed QC`. The first
+  number is the population every plot, statistic, and export actually uses, so
+  it is the quickest way to confirm a gate did something; the total is every
+  segmented object across all loaded wells (not just the selected ones the
+  curves below show). The QC figure is a diagnostic alongside, not a separate
+  slice — a cell can fail QC *and* be gated out. It updates as you edit
+  thresholds, toggle the scatter-gate modes, or change the QC gate, and reads
+  `updating…` while a pass is running. The ON cutoff deliberately does not move
+  it: that cutoff decides which included cells count as *on*, not which cells
+  count.
+
+The fluorescence **CDFs** come next, directly under the numbers they explain, so
+you can place a threshold and see where it falls without scrolling. They respect
+the crop region and the QC gate.
+
+**Optimal use** — set the QC gate first, auto-threshold to get baseline ON
+cutoffs, then use the optimizer on the one channel that separates your
+conditions.
+
+#### Groups, Well Labels & Ratios
+
+- **Groups (replicate sets)** — name a set of wells as replicates; every plot,
+  the Statistics tab, and Batch Export can then treat them as one condition. A
+  group **is** exactly one condition — its wells are its replicate set (no mixed
+  sub-sets or solo wells inside a group). Build one with **+ Add** (a graphical
+  plate picker — rubber-band select, row/column headers), or let **Quick
+  Replicates** chunk the current selection into groups of a chosen size via the
+  **Replicates per group** spinbox (default 2), walking the wells along the
+  Rows / Columns direction. On the Groups plate every well is tinted by its
+  **group's** colour, so all wells in a group read as one condition and match
+  the group's row swatch.
+- **Well Labels** — give wells / groups human-readable names; these show in
+  every plot legend instead of the raw well token.
+- **Ratios** — define a ratio channel (e.g. `GFP/MCHERRY`); it appears as a
+  virtual channel in the channel selector everywhere.
+
+#### Pipeline Info
+
+Read the schema + channel tokens + FOVs + timepoints the dataset was built with.
+It is read-only — it reports what the run recorded, not something you set here.
 
 ### The Review window at a glance
 
@@ -1065,7 +1244,7 @@ The single channel dropdown at the top of every plotting sub-tab is shared
 across the whole window — picking a different channel re-renders every
 plot, every axis label, every threshold range, and every export against
 the new channel. Ratio channels (e.g. `GFP/MCHERRY`) defined under the
-Sample Definitions ratio editor appear here as virtual channels.
+Home → Ratios editor appear here as virtual channels.
 
 #### Plate-map well picker
 
@@ -1076,7 +1255,7 @@ or column number to toggle the whole row / column; **Select all** /
 tabs and is what every plot / aggregate / export consumes.
 
 Every plate map in the app — this one, the pickers on the Statistics, Image
-Browser, Preview and Sample Definitions panels, the Datasets tools' own well
+Browser, Preview and Home panels, the Datasets tools' own well
 pickers, and the status map on a running job's dashboard — is the same control
 at the same size, centred in whatever panel holds it. A plate looks the same
 wherever you meet it, so a well you can find on one is in the same place on
@@ -1228,7 +1407,7 @@ Fold change:  Control [— ▾]   Baseline [— ▾]
 - **Control** — pick a loaded well or replicate set to divide every bar
   / curve by its mean at the matching timepoint. `—` disables this
   axis. (The Bar Plots control combo also includes any replicate sets
-  defined in Sample Definitions.) When a rep-set name happens to match
+  defined on Home → Groups.) When a rep-set name happens to match
   a well token, the well's combo entry is suffixed with `(well)` so
   the two are unambiguous.
 - **Baseline** — pick `t0 (first timepoint)` to divide every bar / curve
@@ -1568,7 +1747,7 @@ place cells in a grid that mirrors your plate or your experimental design.
 replicate sets — **t-test**, **Mann-Whitney**, and **KS** — with a KS CDF plot.
 
 - **Needs** — at least two groups. On first visit the tab auto-populates from
-  the replicate sets defined on [Sample Definitions](#sample-definitions).
+  the replicate sets defined on [Home → Groups](#groups-well-labels--ratios).
 - **Controls** — the group editor is in the sidebar; everything else is on the
   same one-row controls band every tab uses — **Channel**, **Property**,
   **Statistic**, **Timepoint** and **Test**, then an FOV-replicate indicator
@@ -2038,7 +2217,7 @@ channel for every well).
   well or timepoint selection, or crop the view.
 - **Well labels** — where a well would show its `A01` position (axis / group labels,
   cell tooltips, exported labels and titles), its custom label is shown instead when
-  one is set under Sample Definitions → Well Labels.
+  one is set under Home → Well Labels.
 - **Optimal use** — drag **Well** onto Rows and nest a couple of channels, drag
   **Timepoint** onto Columns → one row per well×channel, one column per timepoint,
   for a treatment's full time-course at a glance. Flip a root to **Overlay** for a
@@ -2205,183 +2384,6 @@ per-nucleus rows behind every plot.
 - **Optimal use** — sanity-check outliers: filter to a suspicious metric range,
   then double-click into Segmentation to see the actual cell.
 
-### Sample Definitions
-
-**Sample Definitions** is where you tell the app what your wells *mean*. Its
-sub-tabs are led by **Cell Gating**. An **Import** button at the right end of the
-page's controls row merges definitions from a JSON file into what is already
-there. Everything here autosaves to the dataset folder as you edit, so there is
-no Save button to look for; to discard definitions, use **Reset analysis** in the
-title bar ([Starting over](#starting-over)), which lets you pick exactly which
-kinds to drop.
-
-#### Cell Gating
-
-**What it is.** The single place that decides which cells are *included* and
-which count as *on* for fraction-on statistics — the gating layer every plot,
-statistic, and export consumes.
-
-The tab is laid out as the two questions it answers, in the order they are
-applied, and each question offers the same two sources as a pair of radio
-buttons — you pick one or the other, because choosing the scatter option
-*replaces* the per-channel numbers rather than adding to them.
-
-- **Cell inclusion — which cells count.** The **QC debris gate** leads and is
-  marked *always applied*: it composes with everything else on the tab. It reads
-  as one row per measured quantity — Area, Solidity, Region area, Circularity —
-  with its lower and upper bound in the `min` and `max` columns. Solidity has no
-  upper bound and Region area no lower one, so those cells show an em-dash
-  rather than an empty box you might think you were meant to fill in. Then
-  choose the source of the inclusion decision —
-  the per-channel **intensity minimum** (the `Include ≥` column below), or the
-  rectangular gates drawn on the [Scatter Plot](#scatter-plot). Until you have
-  drawn a gate there, the scatter option is greyed out and says so.
-
-  **Area and Region area are not the same measurement**, and the difference is
-  the reason both exist. **Area** is the size of the one cell — how many pixels
-  that cell's own outline encloses. **Region area** is the size of the connected
-  bright blob the cell is sitting in: the app takes every bright pixel, joins the
-  ones that touch, and asks how big the resulting island is.
-
-  They only differ when the segmenter has been fooled. It draws small, roughly
-  round shapes, so it cannot represent one large lump of debris as a single
-  object — it shatters the lump into many small "cells" instead. Each fragment
-  then looks like a perfectly normal cell by size, which is exactly what an area
-  gate cannot see through:
-
-  ```
-                        Area        Region area
-    a real nucleus      253 px         253 px      ← sits alone
-    one debris fragment  64 px         729 px      ← 9 of these share one blob
-  ```
-
-  No `max area` setting can remove that debris: each fragment (64 px) is
-  *smaller* than the real nucleus (253 px), so any rule big enough to catch them
-  deletes real cells first. A `max region area` of, say, 400 removes all nine
-  fragments and keeps the nucleus, because it is judging the lump rather than the
-  pieces. In one line: **Area is how big I am; Region area is how big the crowd
-  I am standing in is.**
-
-  The same reasoning is the caution. Cells that genuinely touch each other also
-  form one crowd, so on a dense or confluent plate a tight `max region area` can
-  start discarding real cells that happen to be packed together. Change it in
-  steps and watch the QC line in the inclusion funnel below the table: if the
-  number it removes jumps far beyond the amount of visible debris, the bound is
-  catching neighbours rather than junk. Datasets processed before this
-  measurement existed have no region area recorded, and the bound is ignored for
-  them rather than excluding everything.
-
-  The other two bounds are about shape, not size. **Solidity** is the cell's area
-  divided by the area of a rubber band stretched round it, so low values mean
-  ragged or fragmented outlines; there is no upper bound, because a perfectly
-  smooth cell is not a defect. **Circularity** is 1.0 for a perfect circle and
-  falls as an outline becomes jagged or elongated, and it is bounded on both
-  sides — a maximum is useful when something in the image is *too* perfectly
-  round to be a cell.
-- **Fraction-on — which included cells count as ON.** Removes no cells. Choose
-  the per-channel **ON cutoff**, or a scatter gate. The two questions have
-  **independent** gate pickers, so you can include cells by one set of gates and
-  compute fraction-on from a different set.
-
-  This question has **two** cutoffs per channel, because the answer depends on
-  what you are plotting. `ON ≥ (ThreshFracOn)` is the brightness a cell must
-  reach, and applies when the selected Property is an intensity.
-  `ON > (ThreshCountOn)` is the number of spots it must carry, and applies when
-  the Property is an smFISH Count. They are separate values on purpose: one asks
-  how *bright* a cell is, the other how many *spots* it holds, and the two live
-  on scales that share no useful number. A channel with no spot-count column has
-  no count cutoff to set, and shows an em-dash in that column.
-
-  ThreshCountOn starts at **-1**, below the smallest tally a cell can have, so
-  every cell counts as on — including cells carrying no spots at all, which are
-  a real measurement and not missing data. Raise it to N to plot "the fraction
-  of cells with more than N spots"; the mean, the fraction-on panel and the
-  events panel all follow it.
-
-Each question has **its own table** directly under it, with a row per
-fluorescence channel and ratio metric. They are kept apart on purpose: the
-numbers have the same shape but answer different questions — the inclusion floor
-decides whether a cell is in the dataset at all, the ON cutoffs only decide how
-the cells already in it are counted — and a single table serving both would need
-a heading that names neither. The inclusion floor is always measured against
-per-cell mean fluorescence intensity, whichever Property is selected elsewhere. A
-readout channel's ON cutoff starts at 50; the nuclear (segmentation) channel
-starts at 0, because an ON/OFF brightness cut has no meaning for the channel
-nuclei are *found* with — every segmented cell is by construction a detection in
-it, so a non-zero cut there only hides nuclei from the Image Table's
-"≥ threshold" view. Whichever channel it is, a value you set yourself always wins
-over the starting one.
-
-Two helpers sit beside the fraction-on section:
-
-- **Auto-threshold all channels** — an Otsu pass over per-cell + matched
-  background pixels, to derive sensible ON cutoffs for every channel at once.
-- **Optimize ON cutoff…** — opens the optimizer in its own window (which you can
-  leave open while you read the CDFs behind it). Pick two wells, a timepoint and
-  a Min / Max / # Points range, and it applies the threshold that maximises the
-  *relative* fraction-on gap `|fa − fb| / max(fa, fb)`, opening a validation
-  graph so you can sanity-check the pick. Independent Control / Baseline pickers
-  let you optimize on a fold-change-adjusted fraction-on.
-
-Below the table is the readout:
-
-- **The inclusion funnel** — each layer applied on top of the one above it, so
-  you can see *which* layer removed what rather than only the final total:
-
-  ```
-  20,000 segmented cells
-     Curation + intensity gate: −1,240  →  18,760
-     QC debris gate: −1,204  →  17,556
-     Crop region: not applied
-     Scatter gates: not applied
-  ```
-
-  A layer reads "not applied" when it is not in play at all — which is different
-  from a layer that ran and removed nothing, and is never shown as `−0`. Manual
-  curation and the intensity gate share a line because they write the same
-  underlying column and cannot be told apart after the fact.
-- **Included for analysis** — a live count under the gate controls, e.g.
-  `Included for analysis: 12,345 / 20,000 cells  ·  1,204 failed QC`. The first
-  number is the population every plot, statistic, and export actually uses, so
-  it is the quickest way to confirm a gate did something; the total is every
-  segmented object across all loaded wells (not just the selected ones the
-  curves below show). The QC figure is a diagnostic alongside, not a separate
-  slice — a cell can fail QC *and* be gated out. It updates as you edit
-  thresholds, toggle the scatter-gate modes, or change the QC gate, and reads
-  `updating…` while a pass is running. The ON cutoff deliberately does not move
-  it: that cutoff decides which included cells count as *on*, not which cells
-  count.
-
-The fluorescence **CDFs** come next, directly under the numbers they explain, so
-you can place a threshold and see where it falls without scrolling. They respect
-the crop region and the QC gate.
-
-**Optimal use** — set the QC gate first, auto-threshold to get baseline ON
-cutoffs, then use the optimizer on the one channel that separates your
-conditions.
-
-#### Groups, Well Labels & Ratios
-
-- **Groups (replicate sets)** — name a set of wells as replicates; every plot,
-  the Statistics tab, and Batch Export can then treat them as one condition. A
-  group **is** exactly one condition — its wells are its replicate set (no mixed
-  sub-sets or solo wells inside a group). Build one with **+ Add** (a graphical
-  plate picker — rubber-band select, row/column headers), or let **Quick
-  Replicates** chunk the current selection into groups of a chosen size via the
-  **Replicates per group** spinbox (default 2), walking the wells along the
-  Rows / Columns direction. On the Groups plate every well is tinted by its
-  **group's** colour, so all wells in a group read as one condition and match
-  the group's row swatch.
-- **Well Labels** — give wells / groups human-readable names; these show in
-  every plot legend instead of the raw well token.
-- **Ratios** — define a ratio channel (e.g. `GFP/MCHERRY`); it appears as a
-  virtual channel in the channel selector everywhere.
-
-#### Pipeline Info & Notes
-
-Read the schema + channel tokens + FOVs + timepoints the dataset was built with
-(**Pipeline Info**), and keep free-text **Notes** saved next to the data.
-
 ### Saved Plots
 
 **What it is.** A per-dataset gallery of plots you have captured. Hover any plot
@@ -2472,7 +2474,7 @@ something you asked to discard. If one item fails (an unreadable file, say), the
 others still run and the status line names the one that did not.
 
 Smaller resets stay next to the thing they affect: **Clear all groups** on
-Sample Definitions → Groups, and **Reset crop + curation** in the Segmentation
+Home → Groups, and **Reset crop + curation** in the Segmentation
 tab's Edit menu, which is the same action as the Curation checkbox above.
 
 ---

@@ -98,7 +98,8 @@ class AppRuntime:
                  "image_table", "heatmap", "barplot", "cell_gating", "multivariate",
                  "batch_export", "saved_plots", "split", "fov", "sem", "aggregate",
                  "review_image", "review", "stats", "plot_groups", "export",
-                 "centre", "view_state", "tab", "grouping", "playground", "qc")
+                 "centre", "view_state", "tab", "grouping", "playground", "qc",
+                 "home")
 
     def __init__(self, app=None, store: dict | None = None) -> None:
         if store is None:
@@ -236,3 +237,9 @@ class AppRuntime:
         # and the pan-drag origin tuple (``.pan_drag``). Live session objects the
         # Playground controller reads/writes, never persisted.
         object.__setattr__(self, "playground", _FeatureRuntime(s, "_playground_"))
+        # Home's sub-tab notebook (prefix ``_home_``): the ``QTabWidget`` itself
+        # (``ctx.runtime.home.subtabs``) and the per-sub-tab built-flag map
+        # (``.built``). The widget handle is what the sidebar-plate commit guard
+        # and the groups refresh consult to answer "which Home tab is showing",
+        # so it is a live object rather than a window attribute.
+        object.__setattr__(self, "home", _FeatureRuntime(s, "_home_"))

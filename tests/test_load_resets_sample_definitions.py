@@ -29,7 +29,7 @@ class _FakeNotesEdit:
 
 def _ctx_with_selection(sel: SelectionState, notes_edit=None):
     widgets = types.SimpleNamespace(
-        get_or_none=lambda name: notes_edit if name == "_notes_edit" else None
+        get_or_none=lambda name: notes_edit if name == "_home_notes_edit" else None
     )
     return types.SimpleNamespace(
         state=types.SimpleNamespace(selection=sel), widgets=widgets

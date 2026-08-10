@@ -458,7 +458,7 @@ def load_directory(ctx, d: Path, label=None) -> None:
         app._refresh_preview_picker()
     from well_viewer.features.grouping.label_grid_view import label_grid_refresh
     label_grid_refresh(ctx)
-    # Refresh the Sample Definitions tab so any newly loaded labels / groups
+    # Refresh Home's definition tabs so any newly loaded labels / groups
     # appear without requiring a tab switch.
     if hasattr(app, "_groups_centre_refresh"):
         try:

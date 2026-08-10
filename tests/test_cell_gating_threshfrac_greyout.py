@@ -12,7 +12,7 @@ def test_threshfracon_fields_grey_out_with_fraction_on_gate(loaded_app):
     from well_viewer.features.grouping.cell_gating import controller as cg
 
     app = loaded_app
-    assert app._notebook.setCurrentByName("Sample Definitions")
+    assert app._notebook.setCurrentByName("Home")
     edits = getattr(app, "_cell_gating_thresh_frac_edits", {})
     assert edits, "expected ThreshFracOn edits"
 

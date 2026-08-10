@@ -20,9 +20,18 @@ from typing import NamedTuple
 import numpy as np
 
 import process_microscopy as pm
-from well_viewer.features.image_browser.image_table.controller import (
-    _channel_options, _fov_options, _load_array, _load_mask_array,
-    _timepoint_options, _well_options,
+# The dataset's option lists and the frame loader are the data layer's, not the
+# Image Table's. Playground used to import them out of that tab, so a build
+# without the Image Table had no Playground either.
+from well_viewer.data.dataset_dims import (
+    channel_options as _channel_options,
+    fov_options as _fov_options,
+    timepoint_options as _timepoint_options,
+    well_options as _well_options,
+)
+from well_viewer.data.frame_load import (
+    load_frame_array as _load_array,
+    load_mask_array as _load_mask_array,
 )
 from well_viewer.features.image_browser.playground.renderer import (
     build_playground_rgb, render_playground_display,

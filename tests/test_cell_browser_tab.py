@@ -183,8 +183,8 @@ def test_compose_loads_channels_before_mask(monkeypatch):
             return None
         return mask
 
-    monkeypatch.setattr(w, "_load_array", fake_load_array)
-    monkeypatch.setattr(w, "_load_mask_array", fake_load_mask)
+    monkeypatch.setattr(w, "load_frame_array", fake_load_array)
+    monkeypatch.setattr(w, "load_mask_array", fake_load_mask)
 
     desc = CellDescriptor(well="A1", fov="1", tp_token="1", timepoint_h=0.0,
                           filename="f", nucleus_id="7", row_idx=0,

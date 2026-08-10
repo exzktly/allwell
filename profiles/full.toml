@@ -60,12 +60,19 @@ paths = ["well_viewer/features/batch_export", "well_viewer/persistence/export_gr
 tests = ["tests/test_batch_export_*.py", "tests/test_export_groups_*.py"]
 
 [[feature]]
+# The frame loaders and the dataset option lists this tab used to own are in
+# `data/frame_load.py` / `data/dataset_dims.py`, so the Cell Browser and the
+# Playground survive its deletion; what stays here is the grid itself.
 name = "Image Table"
 parent = "Image Browser"
 paths = ["well_viewer/features/image_browser/image_table"]
-tests = ["tests/test_image_table_*.py", "tests/test_image_compose_*.py"]
+tests = ["tests/test_image_table_*.py"]
+# The loader tests went with the loader: they are `tests/test_frame_load_*.py`
+# now and cover `data/`, which survives this feature being stripped.
 
 [[feature]]
+# The channel-tint palette moved to `widgets/lut_cmaps.py`, which is why the
+# Image Table's builder shelf no longer needs this package to exist.
 name = "Cell Browser"
 parent = "Image Browser"
 paths = ["well_viewer/features/image_browser/cell_browser"]

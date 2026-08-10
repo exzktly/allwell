@@ -950,7 +950,7 @@ def image_table_generate(ctx) -> None:
     if not isinstance(cache, dict):
         cache = {}
         ctx.state.image_table.image_cache = cache
-    # Empty scans are remembered for THIS pass only (image_compose._load_well_channel),
+    # Empty scans are remembered for THIS pass only (data/frame_load.load_well_channel),
     # so one Generate scans a missing well/channel once and the next Generate
     # gives a drive that had stalled another chance.
     reset_scan_misses(ctx)

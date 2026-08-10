@@ -687,11 +687,10 @@ def _nested_tree(tmp_path: Path, container_body: str) -> Path:
     return tmp_path
 
 
-def _run_nested_scan(monkeypatch, root: Path, test_name: str, debt=frozenset()):
+def _run_nested_scan(monkeypatch, root: Path, test_name: str):
     return _run_rooted_scan(
         monkeypatch, "tests.test_architecture_contracts", test_name, root,
-        extra={"WELL_VIEWER": root / "well_viewer",
-               "_NESTED_IMPORT_DEBT": set(debt)})
+        extra={"WELL_VIEWER": root / "well_viewer"})
 
 
 def test_nested_guard_catches_a_container_importing_its_own_sub_package(
@@ -729,18 +728,6 @@ def test_nested_guard_clears_a_module_inside_the_sub_package_itself(
         monkeypatch, root,
         "test_a_container_feature_does_not_import_its_own_removable_sub_packages"
     ) is None
-
-
-def test_nested_debt_liveness_catches_an_entry_that_no_longer_bites(
-        tmp_path, monkeypatch):
-    """An allowlist entry naming an import that has since been repaired must be
-    reported, or the exemption outlives the violation it was written for."""
-    root = _nested_tree(tmp_path, "STUB = 1\n")
-    exc = _run_nested_scan(
-        monkeypatch, root, "test_the_nested_import_debt_list_still_describes_real_imports",
-        debt={("well_viewer/features/home/controller.py",
-               "well_viewer.features.home.ratios")})
-    assert exc is not None and "no longer describe" in str(exc)
 
 
 # ── Home sub-tab help topics ────────────────────────────────────────────────

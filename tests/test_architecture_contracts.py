@@ -291,59 +291,15 @@ def test_a_container_feature_does_not_import_its_own_removable_sub_packages():
                 found.append((rel, pkg, node.lineno, mod, name))
 
     offenders = [f"{rel}:{lineno} -> {mod} (removable unit {name!r})"
-                 for rel, pkg, lineno, mod, name in found
-                 if (rel, pkg) not in _NESTED_IMPORT_DEBT]
+                 for rel, _pkg, lineno, mod, name in found]
     assert not offenders, (
         "Module-scope import of a removable SUB-package. `derive_profile` "
         "deletes this directory, so the import would break app startup, not "
-        "just the tab. Make it function-local — the descriptor's build adapter "
-        "in features/registry.py is where a container reaches its sub-tabs:\n  "
-        + "\n  ".join(sorted(offenders)))
-
-
-#: Known-bad sites this guard grandfathers, one entry per ``(importer, target
-#: package)`` pair rather than per file, so a *new* import from the same module
-#: still fails. All three are Image Browser sub-tabs reaching sideways into a
-#: sibling for a shared helper — ``_load_array`` / ``_load_mask_array`` on Image
-#: Table, ``resolve_channel_tint`` on Cell Browser — which the manifest claims
-#: are independently deletable and are not. Making the imports function-local
-#: would silence this guard and fix nothing: a lazy import of a deleted module
-#: fails just as hard, one frame later. The real repair is to move those helpers
-#: down into ``data/`` where all three can reach them, which is its own change.
-_NESTED_IMPORT_DEBT = {
-    ("well_viewer/features/image_browser/cell_browser/worker.py",
-     "well_viewer.features.image_browser.image_table"),
-    ("well_viewer/features/image_browser/image_table/builder_view.py",
-     "well_viewer.features.image_browser.cell_browser"),
-    ("well_viewer/features/image_browser/playground/controller.py",
-     "well_viewer.features.image_browser.image_table"),
-}
-
-
-def test_the_nested_import_debt_list_still_describes_real_imports():
-    """An allowlist that outlives what it excuses starts hiding the next one.
-
-    Every entry above must still name a module-scope import this guard would
-    otherwise reject. When one of these is repaired, its entry must go — and
-    this test is what says so.
-    """
-    nested = _nested_removable_packages()
-    live = set()
-    for path in _walk_py(WELL_VIEWER):
-        rel = str(path.relative_to(REPO_ROOT))
-        mod_here = ".".join(path.relative_to(REPO_ROOT).with_suffix("").parts)
-        for node in _parse(path).body:
-            if not isinstance(node, ast.ImportFrom) or node.level:
-                continue
-            mod = node.module or ""
-            for pkg in nested:
-                if (mod == pkg or mod.startswith(pkg + ".")) and not (
-                        mod_here == pkg or mod_here.startswith(pkg + ".")):
-                    live.add((rel, pkg))
-    stale = _NESTED_IMPORT_DEBT - live
-    assert not stale, (
-        "These entries no longer describe a real violation — delete them from "
-        f"_NESTED_IMPORT_DEBT: {sorted(stale)}")
+        "just the tab. A function-local import is NOT the fix -- a lazy import "
+        "of a deleted module fails just as hard, one frame later. Move the "
+        "shared code down to `data/` where every sibling can reach it, or "
+        "reach the sub-tab through its descriptor's build adapter in "
+        "features/registry.py:\n  " + "\n  ".join(sorted(offenders)))
 
 
 def test_disabling_a_leaf_feature_drops_it_everywhere():

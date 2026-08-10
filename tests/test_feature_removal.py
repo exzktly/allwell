@@ -29,12 +29,56 @@ def _prune_registry(monkeypatch, descriptor_name: str):
     return rt
 
 
+def _narrow_profile(monkeypatch, parent: str, dropped: str):
+    """Remove one sub-leaf the way a real build does: through the profile.
+
+    A sub-leaf is not removed by commenting a descriptor out. Its parent survives,
+    and ``build_feature_registry`` drops both the sub-leaf descriptor *and* the
+    parent's ``subtab``-tagged ``StateSpec``s by asking the profile — which is the
+    half that matters here, because a slice factory imports its feature's state
+    module eagerly at app construction. Pruning the descriptor alone leaves that
+    factory in place and the "deleted" package gets imported anyway.
+    """
+    import well_viewer.runtime_app as rt
+    from well_viewer.core.profile import Profile, active_profile
+    from well_viewer.features.registry import build_feature_registry as _real
+
+    full = active_profile()
+    from well_viewer.features.registry import _features
+    siblings = tuple(d.name for d in _features()
+                     if d.parent == parent and d.name != dropped)
+    narrowed = Profile(
+        name="removal-probe",
+        features=frozenset(d.name for d in _features() if d.group) | {parent},
+        subtabs={parent: list(siblings)},
+    )
+    assert full.includes_subtab(parent, dropped), (
+        f"{dropped!r} is not a narrowable sub-tab of {parent!r} — a "
+        "`removable=False` leaf cannot be dropped and must not be tested here")
+    monkeypatch.setattr(rt, "build_feature_registry", lambda: _real(narrowed))
+    return rt
+
+
 def _exercise(app):
     """Drive the cross-feature surfaces so any lazy call site of a removed
-    feature would fire: switch every top-level tab, invalidate the stats cache,
-    rebuild the channel selector (routes through set_active_image_channel)."""
+    feature would fire: switch every top-level tab **and every sub-tab of a
+    notebook page**, invalidate the stats cache, rebuild the channel selector
+    (routes through set_active_image_channel).
+
+    The sub-tab sweep is not decoration. A sibling import inside a sub-tab's
+    module only fires when that sub-tab builds, so a version of this that
+    stopped at the page level passed happily while deleting the Image Table
+    left the Cell Browser unimportable — the exact defect these tests exist to
+    catch, invisible because nothing ever opened the tab that would have hit it.
+    """
     for name in list(app._notebook.pageNames()):
         app._notebook.setCurrentByName(name)
+        for ns in ("image_browser", "home"):
+            sub = getattr(getattr(app._ctx.runtime, ns, None), "subtabs", None)
+            if sub is None:
+                continue
+            for i in range(sub.count()):
+                sub.setCurrentIndex(i)
     app._invalidate_stats_cache()
     from well_viewer.core.channel_state_controller import update_channel_selector
     update_channel_selector(app._ctx)
@@ -108,3 +152,34 @@ def test_app_tolerates_feature_deletion(qtbot, monkeypatch, mini_dataset, pkg, d
     app._load_path(mini_dataset)
     _exercise(app)
     assert app._features.get(descriptor) is None
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("pkg, subtab", [
+    ("image_browser.image_table", "Image Table"),
+    ("image_browser.cell_browser", "Cell Browser"),
+    ("image_browser.playground", "Playground"),
+])
+def test_app_tolerates_a_sub_tab_deletion(qtbot, monkeypatch, mini_dataset,
+                                          pkg, subtab):
+    """Image Browser's sub-tabs are separately removable, and were not.
+
+    Each reached sideways into a sibling for a shared helper -- the frame
+    loaders on Image Table, the channel-tint palette on Cell Browser -- so
+    deleting one broke another, whatever ``profiles/full.toml`` claimed. Those
+    helpers are in ``data/`` and ``widgets/`` now, and this is what says the
+    claim is true: the package is blocked at import and the app must still boot,
+    load and operate.
+    """
+    for m in [n for n in list(sys.modules)
+              if n == f"well_viewer.features.{pkg}"
+              or n.startswith(f"well_viewer.features.{pkg}.")]:
+        monkeypatch.delitem(sys.modules, m, raising=False)
+    monkeypatch.setattr(sys, "meta_path", [_ImportBlocker(pkg), *sys.meta_path])
+
+    rt = _narrow_profile(monkeypatch, "Image Browser", subtab)
+    app = rt.WellViewerApp()
+    qtbot.addWidget(app)
+    app._load_path(mini_dataset)
+    _exercise(app)
+    assert app._features.get(subtab) is None

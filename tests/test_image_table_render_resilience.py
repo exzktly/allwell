@@ -27,6 +27,7 @@ import pytest
 pytest.importorskip("PySide6")
 
 from well_viewer.features.image_browser.image_table import image_compose as IC
+from well_viewer.data import frame_load as FL
 
 
 class _Ref:
@@ -120,7 +121,7 @@ def test_mask_resolves_through_the_same_matcher_as_the_image(monkeypatch):
     images = {("1", "T01"): _Ref("m.tif")}
     cache = {("A01", "__mask__", "raw"): images}
     # The numeric tier is what rescues this pairing on the image side.
-    assert IC._match_image_ref(images, "1", "1")[1] == "numeric"
+    assert FL.match_image_ref(images, "1", "1")[1] == "numeric"
     out = IC._load_mask_array(None, cache, "A01", "1", "1")
     assert out is not None and int(out.max()) == 5
 
@@ -134,7 +135,7 @@ def test_mask_refuses_an_ambiguous_empty_fov(monkeypatch):
 
     images = {("1", "0"): _Ref("f1.tif"), ("2", "0"): _Ref("f2.tif")}
     cache = {("A01", "__mask__", "raw"): images}
-    assert IC._match_image_ref(images, "", "0") == (None, "ambiguous_fov")
+    assert FL.match_image_ref(images, "", "0") == (None, "ambiguous_fov")
     assert IC._load_mask_array(None, cache, "A01", "0", "") is None
 
 

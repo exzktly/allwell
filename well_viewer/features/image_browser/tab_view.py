@@ -24,10 +24,25 @@ from well_viewer.features.image_browser import controller as ctl
 SUBTABS = ("Image Table", "Segmentation", "Cell Browser", "Playground")
 
 
-def _active_subtabs() -> tuple:
-    from well_viewer.core.profile import active_profile
-    prof = active_profile()
-    return tuple(s for s in SUBTABS if prof.includes_subtab("Image Browser", s))
+def _active_subtabs(ctx) -> tuple:
+    """The sub-tabs this build ships, in the order above.
+
+    Membership comes from the registry -- ``sub_leaves`` is already filtered by
+    the active profile, and honours ``removable=False``. It must not come from
+    ``Profile.includes_subtab``, which is a bare string check against the
+    ``[subtabs]`` allowlist: that ignores the flag, so a manifest narrowing this
+    parent used to keep the ``Segmentation`` *descriptor* while the notebook
+    never created its *tab*. Home was moved off the same predicate for the same
+    reason (issue #14).
+
+    The order stays here rather than following declaration order, because it is a
+    presentation decision this file owns: Image Table leads as the primary
+    image-review surface and is the one built eagerly below.
+    ``test_image_browser_subtabs_match_the_registry`` keeps this tuple and the
+    registry from disagreeing about membership.
+    """
+    kept = set(ctx.features.sub_leaves("Image Browser"))
+    return tuple(s for s in SUBTABS if s in kept)
 
 
 def build_image_browser_tab(ctx, parent: QWidget) -> None:
@@ -53,7 +68,7 @@ def build_image_browser_tab(ctx, parent: QWidget) -> None:
     # One empty frame per sub-tab; bodies build lazily (the build function sets
     # each sub-tab's own layout, so the frames stay layout-less here — Playground
     # in particular needs a QHBoxLayout, not the QVBoxLayout the others use).
-    for name in _active_subtabs():
+    for name in _active_subtabs(ctx):
         sub_tabs.addTab(QWidget(sub_tabs), name)
 
     sub_tabs.currentChanged.connect(

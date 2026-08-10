@@ -121,10 +121,44 @@ def test_a_non_removable_subleaf_survives_a_narrowing_subtabs_list():
                          "Image Browser": frozenset({"Image Table"})})
     reg = build_feature_registry(p)
     assert reg.get("Cell Gating") is not None, "a removable=False leaf was dropped"
-    assert reg.get("Segmentation") is not None
-    # …while the optional ones still obey the allowlist.
+    assert reg.get("Segmentation") is not None, "a removable=False leaf was dropped"
+
+    # And the *tab*, not just the descriptor. Keeping one without the other is
+    # the shape this flag was added to prevent, and it is what Image Browser did:
+    # its notebook filtered a static tuple through ``includes_subtab``, which
+    # never reads ``removable``, so ``Segmentation`` survived in the registry
+    # while its tab was never created.
+    import types
+
+    from well_viewer.features.home.tab_view import active_subtabs
+    from well_viewer.features.image_browser.tab_view import _active_subtabs
+
+    ctx = types.SimpleNamespace(features=reg)
+    home_tabs = active_subtabs(ctx)
+    for name in ("Cell Gating", "Groups", "Well Labels"):
+        assert name in home_tabs, f"Home tab {name!r} narrowed away"
+    assert "Segmentation" in _active_subtabs(ctx), "Image Browser tab narrowed away"
+
+    # …while the optional ones still obey the allowlist, in both halves.
     assert reg.get("Cell Browser") is None
     assert reg.get("Playground") is None
+    assert "Cell Browser" not in _active_subtabs(ctx)
+    assert "Pipeline Info" not in home_tabs
+
+
+def test_image_browser_subtabs_match_the_registry():
+    """The notebook owns the *order*; the registry owns the *membership*.
+
+    ``SUBTABS`` leads with Image Table because that tab is the primary surface
+    and the one built eagerly, which declaration order does not express. That is
+    a fair split only while the two agree on which tabs exist — a sub-leaf added
+    to the registry and not to the tuple would be silently absent from the app,
+    which is issue #14 wearing a different hat.
+    """
+    from well_viewer.features.image_browser.tab_view import SUBTABS
+
+    reg = build_feature_registry(FULL)
+    assert set(SUBTABS) == set(reg.sub_leaves("Image Browser"))
 
 
 def test_the_flag_does_not_rescue_a_leaf_whose_parent_is_gone():

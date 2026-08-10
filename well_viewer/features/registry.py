@@ -861,6 +861,17 @@ def build_feature_registry(profile=None) -> FeatureRegistry:
     if profile is None:
         profile = active_profile()
 
+    # The sub-leaf names that survive, per parent — decided by the *same*
+    # predicate that keeps the descriptors, so the two halves cannot disagree.
+    # `includes_subtab` is deliberately not used here: it is a bare string check
+    # against the `[subtabs]` allowlist and ignores `removable`, so tagging a
+    # `StateSpec` with a non-removable sub-tab would keep the descriptor and drop
+    # its slice — an app that boots and then raises `AttributeError` on first use.
+    kept_subleaves: dict[str, set] = {}
+    for leaf in _features():
+        if leaf.parent and profile.includes(leaf):
+            kept_subleaves.setdefault(leaf.parent, set()).add(leaf.name)
+
     def _admit_states(d):
         # Drop a surviving composite parent's sub-tab-tagged state slices whose
         # sub-tab the profile excludes. Descriptor-level ``includes`` keeps the
@@ -870,8 +881,8 @@ def build_feature_registry(profile=None) -> FeatureRegistry:
         # and eagerly import their physically-stripped state modules.
         if not any(s.subtab for s in d.states):
             return d
-        kept = tuple(s for s in d.states
-                     if not s.subtab or profile.includes_subtab(d.name, s.subtab))
+        admitted = kept_subleaves.get(d.name, set())
+        kept = tuple(s for s in d.states if not s.subtab or s.subtab in admitted)
         return d if kept == d.states else replace(d, states=kept)
 
     return FeatureRegistry(_admit_states(d) for d in _features()

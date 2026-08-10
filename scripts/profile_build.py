@@ -153,6 +153,22 @@ README_SUBTAB_TITLES = {
     "Home": {"Cell Gating", "Groups", "Well Labels", "Ratios", "Pipeline Info"},
 }
 
+#: Of those, the ones a ``[subtabs]`` line cannot actually drop — their
+#: descriptors carry ``removable=False``, so ``Profile.includes`` admits them
+#: whatever the allowlist says and their tabs ship in every build. Trimming their
+#: sections deletes documentation for a tab the binary still has: with
+#: ``[subtabs] "Home" = ["Ratios"]`` the trimmer removed Cell Gating, Groups and
+#: Well Labels from the manual while all three stayed in the app.
+#:
+#: Restated here rather than read from the registry because this module is
+#: stdlib-only — ``all_well.spec`` imports it at build time and importing
+#: ``well_viewer`` would drag in Qt. ``test_profile_build`` holds this against
+#: the registry, which is where the drift check belongs.
+README_ALWAYS_SUBTABS = {
+    "Image Browser": {"Segmentation"},
+    "Home": {"Cell Gating", "Groups", "Well Labels"},
+}
+
 _H1_3 = re.compile(r"^#{1,3} ")     # an h1/h2/h3 heading ends a ``###`` section
 _H1_4 = re.compile(r"^#{1,4} ")     # an h1..h4 heading ends a ``####`` sub-section
 _H1 = re.compile(r"^# ")
@@ -224,7 +240,7 @@ def trim_readme_for_profile(readme_text: str, features, subtabs=None) -> str:
     excluded_titles = {t for t, f in README_SECTION_FEATURES.items() if f not in kept}
     # Sub-tabs to drop: a kept feature's known sub-tab titles minus the ones its
     # profile actually includes. A feature with no ``subtabs`` entry keeps all.
-    allowed_by_feat = {feat: set(subtabs[feat])
+    allowed_by_feat = {feat: set(subtabs[feat]) | README_ALWAYS_SUBTABS.get(feat, set())
                        for feat in README_SUBTAB_TITLES if feat in kept and feat in subtabs}
     excluded_subtabs = {t for feat, allowed in allowed_by_feat.items()
                         for t in README_SUBTAB_TITLES[feat] if t not in allowed}

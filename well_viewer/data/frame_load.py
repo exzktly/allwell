@@ -33,6 +33,14 @@ the caller owns and passes in:
 They are parameters rather than something read off ``ctx`` because they belong
 to the *caller's* pass. A caller that passes neither still gets its pixels; it
 simply has no pass to report against.
+
+Passing no ``scan_misses`` is not free, though, and the throwaway set below is
+not merely inert: suppression is what stops one absent well/channel being
+re-scanned per cell. Measured over ten cells against one absent channel, a
+caller sharing a set scans once and a caller passing none scans ten times, each
+walk emitting its own log line. The answers are identical either way — this is
+wall-clock and log noise, not correctness — but a caller rendering many cells
+should thread a set through rather than accept the default.
 """
 
 from __future__ import annotations
@@ -198,7 +206,7 @@ def load_well_channel(
         # silent, and never cached: the retry below is what lets a stalled drive
         # recover on the next Generate instead of leaving a permanent hole.
         logger.warning(
-            "image_table: image discovery failed for well=%r channel=%r; "
+            "frame_load: image discovery failed for well=%r channel=%r; "
             "will retry on the next Generate", well, chan_lower, exc_info=True,
         )
         fluor, overlay, mask, tophat = {}, {}, {}, {}
@@ -220,7 +228,7 @@ def load_well_channel(
     else:
         misses.add(key)
         logger.info(
-            "image_table: no %s images found for well=%r channel=%r "
+            "frame_load: no %s images found for well=%r channel=%r "
             "(retried on the next Generate)", variant, well, chan_lower,
         )
     # Stash the raw fluor dict alongside the tophat dict so load_frame_array can
@@ -340,7 +348,7 @@ def load_frame_array(ctx, cache: dict, well: str, chan_upper: str, tp: str,
                 if raw_fallbacks is not None:
                     raw_fallbacks.add((well, chan_lower, str(tp), str(fov)))
                 logger.info(
-                    "image_table: no corrected image for well=%r channel=%r "
+                    "frame_load: no corrected image for well=%r channel=%r "
                     "tp=%r fov=%r — showing the raw frame",
                     well, chan_lower, tp, fov,
                 )
@@ -351,7 +359,7 @@ def load_frame_array(ctx, cache: dict, well: str, chan_upper: str, tp: str,
         # frame is diagnosable rather than silently misread as QC truth
         # (audit S5).
         logger.debug(
-            "image_table: (%s, tp=%r, fov=%r) resolved via %s fallback",
+            "frame_load: (%s, tp=%r, fov=%r) resolved via %s fallback",
             well, tp, fov, kind,
         )
     try:
@@ -363,7 +371,7 @@ def load_frame_array(ctx, cache: dict, well: str, chan_upper: str, tp: str,
     except Exception:
         # A corrupt/undecodable image renders as "no tile". Leave a breadcrumb
         # so it's diagnosable rather than silently blank (audit E15).
-        logger.debug("image_table: failed to load %r: skipping tile", ref, exc_info=True)
+        logger.debug("frame_load: failed to load %r: skipping tile", ref, exc_info=True)
         return None
 
 
@@ -388,13 +396,13 @@ def load_mask_array(ctx, cache, well, tp, fov):
     ref, kind = match_image_ref(mask_dict, fov, tp)
     if ref is None:
         logger.debug(
-            "image_table: no mask for well=%r tp=%r fov=%r (%s)",
+            "frame_load: no mask for well=%r tp=%r fov=%r (%s)",
             well, tp, fov, kind or "no match",
         )
         return None
     if kind != "exact":
         logger.debug(
-            "image_table: mask (%s, tp=%r, fov=%r) resolved via %s fallback",
+            "frame_load: mask (%s, tp=%r, fov=%r) resolved via %s fallback",
             well, tp, fov, kind,
         )
     try:
@@ -407,5 +415,5 @@ def load_mask_array(ctx, cache, well, tp, fov):
     except Exception:
         # A corrupt mask must not silently render as "no overlay" — that reads
         # as a clean QC/segmentation view (audit E15). Leave a breadcrumb.
-        logger.debug("image_table: failed to load mask %r: no overlay", ref, exc_info=True)
+        logger.debug("frame_load: failed to load mask %r: no overlay", ref, exc_info=True)
         return None

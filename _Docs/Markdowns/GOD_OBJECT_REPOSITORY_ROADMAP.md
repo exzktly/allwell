@@ -193,7 +193,8 @@ Same "one module per PR" cadence as the `ctx.app` ledger. Priority by risk:
 5. **Sample Definitions app-bridge god-seam** — **closed.** The sample definitions
    became tabs of Home, and the page builder that needed the seam
    (`grouping.replicate_panel_view.build_sample_definitions_centre`) went with the
-   page. Home assembles those tab bodies itself through `core.lazy` proxies, so
+   page. Home assembles those tab bodies from the registry — each is a sub-leaf
+   descriptor whose `build` adapter holds the only import of its package — so
    `tab_controller.build_sample_definitions_app_bridge` is deleted rather than
    migrated: there is no feature routing through the god-object here any more.
 - Pattern per fn: `def f(app,...)` → `def f(ctx,...)`; body reads

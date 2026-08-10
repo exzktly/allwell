@@ -85,9 +85,9 @@ def color_for_wells(wells: Any) -> str:
     """Canonical group colour: the rank colour of the *lowest* well in *wells*.
 
     So every well in a group (and its line/bar trace) shares one colour. The
-    pure implementation shared by ``core`` and feature code (A8 teardown), lifted
-    verbatim from ``grouping.controller.rank_color_wells`` so there is one home
-    for it and neither layer reaches through the god-object. Indexes the raw
+    pure implementation shared by ``core`` and feature code (A8 teardown), and the
+    only one — the feature-side wrapper it was lifted from is gone, so neither
+    layer reaches through the god-object for a colour. Indexes the raw
     ``WELL_COLORS`` palette directly to preserve the exact historical colours.
     """
     from well_viewer.domain.plate_layout import WELL_COLORS

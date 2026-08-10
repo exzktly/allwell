@@ -68,7 +68,7 @@ def channel_options(ctx) -> list[str]:
     # Binary variants — "<CHAN> (binary)" renders that channel's ThreshFracOn
     # threshold-binary (positive cells white). Offered right after the real
     # channels so a nested row axis can mix e.g. NIR, GFP and GFP (binary). The
-    # render/load path decodes the token (see image_compose._binary_base).
+    # render/load path decodes the token (see ``frame_load.base_channel``).
     options += [binary_variant(c) for c in options]
 
     seg_tok = (ctx.state.channel.seg_channel_token or "").strip()

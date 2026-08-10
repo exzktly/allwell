@@ -13,7 +13,8 @@ what did I say about it, what is in it, what went wrong, what was it run with,
 what have I already done. The tabs after it are where the user *declares* what
 the wells mean. Each has its own sub-package beside this module —
 ``cell_gating/``, ``groups/``, ``labels/``, ``ratios/``, ``pipeline_info/`` —
-and :mod:`.controller` builds them through lazy proxies, so a sub-package a
+and each is built by calling its own descriptor's ``build``, whose adapter in
+``features/registry.py`` holds the only import of the package, so a sub-package a
 profile strips is never imported.
 """
 
@@ -45,7 +46,11 @@ IMPORT_KEY = "_home_import_btn"
 
 #: The report this module builds. Every other tab is a definition editor whose
 #: body lives in a sub-package beside this one and is declared in the feature
-#: registry, so this is the only tab name stated here.
+#: registry, so no tab is *selected* by name here — the list comes from
+#: ``active_subtabs``. Two per-tab presentation facts are still named, below and
+#: in ``controller._TABS_USING_THE_PLATE``: which tabs inset their frame, and
+#: which read the well selection. Both would sit better on the descriptors, the
+#: way ``per_well_selection`` already does for top-level tabs.
 OVERVIEW = "Overview"
 
 #: Each body's own inset. The report and the two read-only panes paint to their
@@ -139,6 +144,17 @@ def build_home_tab(ctx, parent: QWidget) -> None:
     body.layout().addWidget(sub_tabs, 1)
     ctx.runtime.home.subtabs = sub_tabs
     ctx.runtime.home.built = {}
+
+    # Fresh frames mean nothing is built into them yet, so the per-tab
+    # "already built" flags reset with them. Cell Gating carries its own —
+    # ``build_cell_gating_subtab`` early-returns on it, because persistence can
+    # reach that builder with no sub-tab index to hand over — and the frame loop
+    # cleared it here before the builders moved onto descriptors. Without the
+    # clear, a rebuilt page would early-return into an empty tab whose widget
+    # handles point at destroyed C++ objects, with no exception and no log line,
+    # since ``build_home_subtab`` would still record the tab as built. No path
+    # builds Home twice per runtime today; this costs one line and settles it.
+    ctx.runtime.cell_gating.subtab_built = False
 
     # Every frame exists as soon as this loop ends; only the bodies are drained.
     # The map is what lets a builder be reached by name from outside the

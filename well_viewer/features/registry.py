@@ -810,7 +810,9 @@ def _features() -> list[FeatureDescriptor]:
 
         # ── Image Browser sub-leaves (dispatch hooks only) ─────────────────
         # Not removable: it has no catalog entry, so its source is never
-        # stripped, and `thin` keeps it today only by naming it in [subtabs].
+        # stripped, and `removable=False` keeps its tab whatever a `[subtabs]`
+        # line says. `thin` still lists it, which is now a no-op it can keep or
+        # drop freely.
         FeatureDescriptor(name="Segmentation", parent="Image Browser",
                           on_activate=_activate_segmentation, removable=False),
         FeatureDescriptor(name="Image Table", parent="Image Browser",

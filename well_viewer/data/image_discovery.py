@@ -186,7 +186,7 @@ class _DecodedArrayCache:
     churns via LRU eviction instead of growing without limit. Values are shared by
     reference — callers must treat a returned array as READ-ONLY (the hot consumers
     already copy-on-write: ``crop_tool.apply_to_array`` returns a view, the RGB
-    composer does ``a.astype(float32)``, ``_load_mask_array`` copies via ``rint``)."""
+    composer does ``a.astype(float32)``, ``load_mask_array`` copies via ``rint``)."""
 
     def __init__(self, max_entries: int = DEFAULT_MAX_DECODE_ENTRIES,
                  max_bytes: int = DEFAULT_MAX_DECODE_BYTES) -> None:

@@ -4,8 +4,9 @@ LUT colour palette + per-row tint/cmap resolution, array loading from the cache,
 binary-mask / threshold rendering, the RGB cell composer, and the boundary
 overlay — the lower "turn cache + state into pixels" layer of the Image Table.
 Extracted from ``controller.py`` so the controller keeps event handling +
-orchestration. ``controller`` re-exports every name here, so its call sites and
-external importers (playground, grid_view) are unchanged.
+orchestration. Address resolution and array loading are the data layer's
+(``data/frame_load.py``), shared with the Cell Browser and the Playground; the
+three wrappers below bind this tab's per-pass diagnostics to them.
 """
 
 from __future__ import annotations
@@ -23,8 +24,6 @@ from well_viewer.data.frame_load import (  # noqa: F401
     BINARY_SUFFIX as _BINARY_SUFFIX,
     MASK_SUFFIX as _MASK_SUFFIX,
     NUC_SEG_TOKEN,
-    RAW_SUFFIX as _RAW_SUFFIX,
-    VARIANT_SUFFIXES as _VARIANT_SUFFIXES,
     base_channel as _base_channel,
     binary_variant as _binary_variant,
     has_suffix as _has_suffix,
@@ -32,8 +31,7 @@ from well_viewer.data.frame_load import (  # noqa: F401
     is_variant_token,
     load_frame_array,
     load_mask_array,
-    norm_token as _norm_token,
-    numeric_token as _numeric_token,
+    load_well_channel,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,7 +54,6 @@ def _load_array(ctx, cache: dict, well: str, chan_upper: str, tp: str, fov: str,
 
 def _load_well_channel(ctx, cache, well, chan_lower, *, use_tophat: bool = False):
     """:func:`data.frame_load.load_well_channel`, bound to this render pass."""
-    from well_viewer.data.frame_load import load_well_channel
     return load_well_channel(ctx, cache, well, chan_lower,
                              use_tophat=use_tophat,
                              scan_misses=_scan_misses(ctx))
@@ -422,7 +419,7 @@ def reset_scan_misses(ctx) -> None:
 
 def _scan_misses(ctx) -> set:
     """The current render pass's set of (well, channel, variant) scans that came
-    up empty — see :func:`_load_well_channel`.
+    up empty — see :func:`load_well_channel`.
 
     Lives on ``ctx.state.image_table.scan_misses`` and is cleared at the top of
     every ``image_table_generate`` / export run. A ctx without that field (a

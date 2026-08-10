@@ -844,7 +844,7 @@ def iter_plot_groups(ctx, fallback_to_all: bool = True) -> Iterator[tuple[str, s
 
     A8 teardown: takes ``ctx`` — the well set / selection come from typed state,
     rows from the ctx-native :func:`get_rows` (R1), and colours from the pure
-    ``rank_color_rset`` / ``color_for_wells`` graph. The old ``_color_for_label``
+    ``color_for_replicate_set`` / ``color_for_wells`` graph. The old ``_color_for_label``
     / ``_color_for_well`` override hooks were vestigial (never set anywhere) and
     are dropped. Colours are identical to the sidebar plate map + the Line / Bar /
     Scatter renderers (locked by test_iter_plot_groups_ctx).

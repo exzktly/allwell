@@ -20,10 +20,8 @@ from well_viewer.features.image_browser.image_table.image_compose import OVERLAY
 # the data layer's (`data/dataset_dims.py`, `data/frame_load.py`), shared with the
 # Playground. Re-exported under this module's existing private names so its own
 # call sites and `controller`'s re-export block are unchanged.
-from well_viewer.data.frame_load import norm_token as _norm_token  # noqa: F401
 from well_viewer.data.frame_load import is_variant_token  # noqa: F401
 from well_viewer.data.dataset_dims import (  # noqa: F401
-    cache_column_tokens as _cache_column_tokens,
     channel_options as _channel_options,
     fov_options as _fov_options,
     timepoint_options as _timepoint_options,
@@ -32,23 +30,12 @@ from well_viewer.data.dataset_dims import (  # noqa: F401
 )
 
 
-
 def _find_ratio_for_channel(ctx, chan: str):
     """Return the RatioMetric whose display_label matches *chan*, or None."""
     for r in (ctx.state.channel.ratio_metrics or []):
         if r.display_label().upper() == chan.strip().upper():
             return r
     return None
-
-
-
-
-
-
-
-
-
-
 
 
 # ── Plate (96-well) virtual dimensions ───────────────────────────────────────

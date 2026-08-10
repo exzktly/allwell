@@ -183,9 +183,10 @@ def rep_add(ctx) -> None:
 
 
 
-# A8 teardown: the display-label leaves now live in the domain layer (shared by
-# core / every plot renderer without a feature import). Re-exported here so the
-# god-method delegates + existing ``grouping.controller`` importers resolve.
+# A8 teardown: the display-label leaves live in the domain layer (shared by core
+# and every plot renderer without a feature import), and callers reach them
+# there directly — the re-export this comment used to describe went with
+# ``features/grouping``.
 
 
 def rep_refresh_map(ctx) -> None:

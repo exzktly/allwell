@@ -229,6 +229,14 @@ class AppRuntime:
         # (``ctx.runtime.groups.pair_dir`` / ``.iter_order`` / ``.rep_size``) the
         # row/col-pair shims + the from-dropdowns reader thread through.
         # Session-only, never persisted.
+        #
+        # The prefix overlaps two ``WellViewerApp`` delegates,
+        # ``_groups_centre_refresh`` and ``_groups_from_rep_sets``, so a field
+        # named ``centre_refresh`` or ``from_rep_sets`` here would stamp onto a
+        # method's name. None of the four fields does. This is not special to
+        # this namespace — 18 such overlaps exist across 7 prefixes (``_stats_``
+        # alone has 8) — so it is recorded rather than guarded; a guard would be
+        # new policy for the whole god-object surface, not a fix for this rename.
         object.__setattr__(self, "groups", _FeatureRuntime(s, "_groups_"))
         # Home's PIPELINE INFO tab (prefix ``_pipeline_info_``): the re-read
         # closure (``ctx.runtime.pipeline_info.refresh``) the tab stamps on build

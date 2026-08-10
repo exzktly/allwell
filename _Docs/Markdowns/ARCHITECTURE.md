@@ -1298,8 +1298,9 @@ the other.
 Home owns the page — the control band (carrying **Import**, which merges a
 sample-definitions JSON and is hidden on Overview because it names nothing
 there), the `QTabWidget`, and the tab-change handler. Each tab body is a
-sub-package under `features/home/`, one per tab, the same arrangement
-`features/image_browser/` uses for its four.
+sub-package under `features/home/`, the same arrangement
+`features/image_browser/` uses for the three of its four sub-tabs that have
+one (Segmentation's body is `review_image/`, shared with the Review CSV jump).
 
 **Home does not name its tabs and does not import their bodies.**
 `active_subtabs` is `("Overview", *ctx.features.sub_leaves("Home"))` — the
@@ -1345,9 +1346,12 @@ which said nothing about that.
 
 Disabling it required the widget to acquire a disabled appearance.
 `WellPlateSelector` consulted `isEnabled()` nowhere in its paint path, so
-`setEnabled(False)` rendered pixel-identically — measured at zero differing
-pixels of 79,200. `paintEvent` now ends by laying a rail-toned scrim over the
-finished plate. A scrim rather than a disabled variant of each fill, because
+`setEnabled(False)` rendered **pixel-identically** — grab the widget enabled,
+grab it disabled, compare: zero differing pixels. `paintEvent` now ends by laying
+a rail-toned scrim over the finished plate, which takes the same comparison to
+roughly seven eighths of the widget. The absolute count is deliberately not
+quoted: it scales with whatever size the host gives the plate, so it says more
+about the measurement than about the widget. A scrim rather than a disabled variant of each fill, because
 every state this widget paints — lit, recessed, dial, ring, marker, path — is
 carried by *colour*, so draining the colour is what reads as "not active here",
 and one veil does that uniformly where ten paired palettes would drift apart.
@@ -1730,7 +1734,7 @@ are that parent's sub-leaves), so this list can't silently drift from the code:
 | `Statistics` | |
 | `Multivariate` | |
 | `Spatial` | |
-| `Image Browser` | `Image Browser` → `Segmentation`, `Image Table`, `Cell Browser`, `Playground` |
+| `Image Browser` | `Image Browser` → `Image Table`, `Cell Browser`, `Playground` |
 | `smFISH` | |
 | `Review CSV` | |
 | `Home` | `Home` → `Ratios`, `Pipeline Info` |

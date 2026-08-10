@@ -20,6 +20,7 @@ from datasets.ome_import.ome_import_compute import (  # noqa: E402
     selection_target,
     strip_ome_suffix,
 )
+from pipeline.ome_explode import OmeLayout  # noqa: E402
 
 
 def _write_multi(path, *, positions, size_t=1, size_c=1, channel_names=("GFP",)):
@@ -329,3 +330,35 @@ def test_convert_multi_image_with_custom_origin_and_direction(tmp_path):
             assert members == [f"m_GFP_{well}_f0_t0.tif"]
             arr = tifffile.imread(io.BytesIO(zf.read(members[0])))
             assert int(arr.max()) == pos  # confirms position -> well mapping, not just naming
+
+
+def test_plan_rejects_a_file_missing_image_planes():
+    """An incomplete source is refused by the planner, so the page's readout
+    carries the real reason and the Convert button never enables — rather than
+    the conversion dying part-way through on a page tifffile zero-fills."""
+    layout = OmeLayout(
+        n_positions=6, size_t=1, size_c=1, size_z=1,
+        channel_names=["GFP"], timepoint_tokens=["t0"],
+        axes_per_series=["YX"] * 6,
+        total_planes=6, missing_planes=2, incomplete_positions=[4, 5],
+        first_missing_plane=0,
+    )
+    with pytest.raises(OmeImportError) as exc:
+        plan_conversion(layout, ConversionParams(grid_rows=1, grid_cols=6))
+    assert "no image data" in str(exc.value)
+
+
+def test_plan_reports_incompleteness_before_a_grid_mismatch():
+    """The incompleteness check runs first: no grid makes a gapped file
+    convertible, so an unrelated divisibility error would be a red herring."""
+    layout = OmeLayout(
+        n_positions=6, size_t=1, size_c=1, size_z=1,
+        channel_names=["GFP"], timepoint_tokens=["t0"],
+        axes_per_series=["YX"] * 6,
+        total_planes=6, missing_planes=2, incomplete_positions=[4, 5],
+        first_missing_plane=0,
+    )
+    with pytest.raises(OmeImportError) as exc:
+        plan_conversion(layout, ConversionParams(grid_rows=1, grid_cols=4))
+    assert "no image data" in str(exc.value)
+    assert "don't divide evenly" not in str(exc.value)

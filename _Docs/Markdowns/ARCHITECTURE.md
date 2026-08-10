@@ -3013,6 +3013,30 @@ dimension:
   because a packed plate array is routinely tens–hundreds of GB — far too large
   to `asarray` whole.
 
+**An incomplete source is refused before anything is written.** `tifffile` sizes
+a series' page list from the dimensions the *metadata* declares and leaves a slot
+`None` wherever the file carries no IFD for it — an acquisition stopped early
+(the planned `SizeT` stays in the header), or a multi-file OME whose companion
+files are not beside the master. Its own `series.asarray()` zero-fills those
+slots, which is the failure mode §7's design rule exists for: the multi-image
+path wrote solid-black planes that no downstream step could tell from real ones,
+while the single-image path, which reads pages individually, died part-way
+through a run on `AttributeError: 'NoneType' object has no attribute 'asarray'`
+— after the earlier wells had already been written. So `read_ome_layout` counts
+the gaps in the same pass it reads the sizes (`series_page_gaps`, scanned only
+for the series kinds that can hold one) and carries them on `OmeLayout` as
+`total_planes` / `missing_planes` / `incomplete_positions` /
+`first_missing_plane`, plus `missing_files` — the companion filenames the OME-XML
+references that are not on disk beside the source, which is what separates the
+two causes and therefore the two fixes. `OmeLayout.missing_plane_report()` is the
+single wording both callers use: `explode_ome_tiff` raises it as a `ValueError`
+before the destination directory is even created, and `plan_conversion` raises it
+as an `OmeImportError` *ahead of* its grid arithmetic — no grid makes a gapped
+file convertible, so a divisibility error derived from one would be a red
+herring. The converter page shows it in the readout and leaves **Convert**
+disabled. `_packed_plane` keeps a per-plane guard behind that check, naming the
+frame/channel/Z it was asked for rather than raising on `None`.
+
 `explode_ome_tiff` also takes a `progress_fn`/`should_abort` pair (raising
 `OmeExplodeCancelled`) so the converter's worker can drive a progress bar and
 Cancel. Channel roles are *not* set in the converter — it writes the OME channel
@@ -3879,7 +3903,8 @@ turning into a dead zone below its own height-capped plate.
 **Convert OME-TIFF** (`datasets/ome_import/`) is the standalone OME-TIFF
 de-interleaver described in §6.1: `ome_import_compute.plan_conversion` validates
 the well-grid / FOVs / frame-order against the file's `OmeLayout` for the live
-readout — alongside `ome_import_compute.selection_target`, which reads the file's
+readout — and, first of all, that the file contains every image plane its
+metadata declares (§6.1) — alongside `ome_import_compute.selection_target`, which reads the file's
 position/frame budget from the same `OmeLayout` and (when FOVs is pinned) the well
 count it implies, so the readout guides how many wells to place before any grid is
 entered, not only errors at the end. `apply.convert` calls `explode_ome_tiff` (which writes per-well zips into

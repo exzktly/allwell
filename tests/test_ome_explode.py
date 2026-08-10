@@ -13,6 +13,9 @@ tifffile = pytest.importorskip("tifffile")
 
 from pipeline.ome_explode import (  # noqa: E402
     OmeExplodeCancelled,
+    OmeLayout,
+    _missing_companion_files,
+    _packed_plane,
     explode_ome_tiff,
     read_ome_layout,
 )
@@ -469,3 +472,132 @@ def test_convert_quantises_per_well_ticks_before_the_ui_sees_them(tmp_path):
         assert steps == sorted(steps), well             # monotonic, never resets
         assert len(steps) == len(set(steps)), well      # no repeated step
         assert steps[-1] == 100, well                   # ends full
+
+
+# ── incomplete sources ───────────────────────────────────────────────────────
+#
+# tifffile sizes an OME series' page list from the dimensions the metadata
+# declares and leaves a slot None wherever the file holds no IFD for it, then
+# zero-fills those slots in ``series.asarray()``. The exploder reads pages one at
+# a time, so a gap used to surface as ``AttributeError: 'NoneType' object has no
+# attribute 'asarray'`` part-way through a run, after earlier wells had been
+# written. These pin the refusal that replaced it.
+
+
+def _write_truncated_packed(path, *, declared_frames, written_frames, size_c=1):
+    """A single-<Image> OME-TIFF declaring more frames than the file contains.
+
+    The shape an acquisition stopped part-way leaves behind: the OME-XML carries
+    the planned ``SizeT`` while only the frames that were actually acquired have
+    an IFD. Written by hand rather than through ``tifffile``'s ``ome=True``
+    writer, which only ever emits self-consistent metadata.
+    """
+    planes = "".join(
+        f'<TiffData FirstT="{i // size_c}" FirstC="{i % size_c}" FirstZ="0" '
+        f'IFD="{i}" PlaneCount="1"/>'
+        for i in range(written_frames * size_c)
+    )
+    channels = "".join(
+        f'<Channel ID="Channel:0:{c}" Name="ch{c}" SamplesPerPixel="1"/>'
+        for c in range(size_c)
+    )
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+        '<Image ID="Image:0" Name="scan">'
+        '<Pixels ID="Pixels:0" DimensionOrder="XYZCT" Type="uint16" '
+        f'SizeX="6" SizeY="6" SizeC="{size_c}" SizeZ="1" SizeT="{declared_frames}">'
+        f'{channels}{planes}</Pixels></Image></OME>'
+    )
+    data = np.zeros((written_frames * size_c, 6, 6), np.uint16)
+    tifffile.imwrite(str(path), data, description=xml, metadata=None,
+                     photometric="minisblack")
+    return path
+
+
+def test_layout_counts_planes_the_file_does_not_contain(tmp_path):
+    p = _write_truncated_packed(tmp_path / "cut.ome.tif",
+                                declared_frames=6, written_frames=4)
+    layout = read_ome_layout(p)
+    assert layout.total_planes == 6
+    assert layout.missing_planes == 2
+    assert layout.first_missing_plane == 4
+    assert layout.missing_plane_report("cut.ome.tif")
+
+
+def test_complete_file_reports_no_missing_planes(tmp_path):
+    layout = read_ome_layout(_write_ome(tmp_path / "s.ome.tif", positions=4, size_t=2))
+    assert layout.missing_planes == 0
+    assert layout.incomplete_positions == []
+    assert layout.first_missing_plane == -1
+    assert layout.missing_plane_report("s.ome.tif") == ""
+
+
+def test_incomplete_file_rejected_before_any_zip_is_written(tmp_path):
+    p = _write_truncated_packed(tmp_path / "cut.ome.tif",
+                                declared_frames=6, written_frames=4)
+    out = tmp_path / "in"
+    with pytest.raises(ValueError) as exc:
+        explode_ome_tiff(p, out, grid_rows=1, grid_cols=6, experiment="exp")
+    # The message names the shortfall rather than the AttributeError the missing
+    # page used to raise, and nothing was written for the wells that did resolve.
+    assert "no image data" in str(exc.value)
+    assert "cut.ome.tif" in str(exc.value)
+    assert _zips(out) == []
+
+
+def test_incomplete_multi_image_file_names_its_positions(tmp_path):
+    """A gap in a multi-image file is refused too, and it names the positions.
+
+    This is the quieter half of the bug: ``series.asarray()`` zero-fills a
+    missing page instead of raising, so the multi-image path wrote blank images
+    for those planes with nothing on them saying so.
+    """
+    layout = OmeLayout(
+        n_positions=6, size_t=1, size_c=1, size_z=1,
+        channel_names=["GFP"], timepoint_tokens=["t0"], axes_per_series=["YX"],
+        total_planes=6, missing_planes=2, incomplete_positions=[4, 5],
+        first_missing_plane=0,
+    )
+    report = layout.missing_plane_report("plate.ome.tif")
+    assert "stage position(s): 4, 5" in report
+    assert "blank images" in report
+
+
+def test_missing_companion_files_are_named(tmp_path):
+    """A multi-file OME whose companions are absent gets the actionable cause."""
+    xml = (
+        '<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06"><Image>'
+        '<Pixels><TiffData><UUID FileName="scan.ome.tif">uuid:a</UUID></TiffData>'
+        '<TiffData><UUID FileName="scan_2.ome.tif">uuid:b</UUID></TiffData>'
+        '<TiffData><UUID FileName="scan_3.ome.tif">uuid:c</UUID></TiffData>'
+        '</Pixels></Image></OME>'
+    )
+    (tmp_path / "scan.ome.tif").write_bytes(b"")
+    (tmp_path / "scan_2.ome.tif").write_bytes(b"")
+    assert _missing_companion_files(xml, tmp_path / "scan.ome.tif") == ["scan_3.ome.tif"]
+
+    layout = OmeLayout(
+        n_positions=1, size_t=0, size_c=1, size_z=1,
+        channel_names=["GFP"], timepoint_tokens=[], axes_per_series=["TYX"],
+        single_image=True, n_frames=6, total_planes=6, missing_planes=2,
+        incomplete_positions=[0], first_missing_plane=4,
+        missing_files=["scan_3.ome.tif"],
+    )
+    report = layout.missing_plane_report("scan.ome.tif")
+    assert "scan_3.ome.tif" in report
+    assert "same folder" in report
+
+
+def test_packed_plane_states_which_plane_is_missing(tmp_path):
+    """The per-plane guard behind the pre-flight check: a stated failure, not
+    ``AttributeError: 'NoneType' object has no attribute 'asarray'``."""
+
+    class _Series:
+        shape = (4, 6, 6)
+        pages = [object(), None, object(), object()]
+
+    with pytest.raises(ValueError) as exc:
+        _packed_plane(_Series(), "TYX", 1, 0)
+    assert "frame 1" in str(exc.value)
+    assert "no image data" in str(exc.value)

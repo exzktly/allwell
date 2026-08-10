@@ -172,8 +172,15 @@ def plan_conversion(layout: OmeLayout, params: ConversionParams) -> ConversionPl
     """Resolve *params* against *layout* into a :class:`ConversionPlan`.
 
     Raises :class:`OmeImportError` when the grid, FOVs-per-well or frame-order
-    can't produce a whole split, or the grid overflows the 96-well plate.
+    can't produce a whole split, the grid overflows the 96-well plate, or the
+    source declares image planes it does not contain — the last checked first,
+    since no grid can make an incomplete file convertible, and the page's readout
+    should say *that* rather than a divisibility error derived from it.
     """
+    incomplete = layout.missing_plane_report()
+    if incomplete:
+        raise OmeImportError(incomplete)
+
     rows, cols = params.grid_rows, params.grid_cols
     if params.well_order:
         try:

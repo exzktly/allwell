@@ -78,6 +78,10 @@ class OmeLayout:
       Then ``single_image`` is True and ``n_frames`` is that ``SizeT`` frame
       count; how it splits into positions × timepoints is decided at explode time
       from the user's grid and frame-order.
+
+    The last three fields describe the file's *completeness* rather than its
+    shape — see :func:`series_page_gaps` for what a gap is and
+    :meth:`missing_plane_report` for how one is reported.
     """
 
     n_positions: int
@@ -89,6 +93,62 @@ class OmeLayout:
     axes_per_series: list[str]    # tifffile axes string per series
     single_image: bool = False
     n_frames: int = 0             # single-image: the T-axis frame count
+    total_planes: int = 0         # image planes the metadata declares, all series
+    missing_planes: int = 0       # of those, the ones the file holds no data for
+    # Series indices (= stage positions, for a multi-image file) holding at least
+    # one missing plane; the first missing plane's index within its own series
+    # (-1 when none), which locates the shortfall in a single-image file where
+    # there are no positions to name; and companion files the OME-XML references
+    # that are not on disk beside the source — the usual reason planes go missing.
+    incomplete_positions: list[int] = field(default_factory=list)
+    first_missing_plane: int = -1
+    missing_files: list[str] = field(default_factory=list)
+
+    def missing_plane_report(self, name: str = "") -> str:
+        """A user-facing explanation of the file's missing planes, or ``""``.
+
+        Returns the empty string when every declared plane is backed by image
+        data. Otherwise the message names the shortfall and the likeliest cause,
+        because the two causes need opposite fixes: missing companion files are
+        recovered by putting them back beside the source, whereas an acquisition
+        that stopped early has to be re-exported with the dimensions it really
+        holds.
+        """
+        if self.missing_planes <= 0:
+            return ""
+        subject = f"{name} is incomplete" if name else "This OME-TIFF is incomplete"
+        where = ""
+        if self.single_image:
+            if self.first_missing_plane >= 0:
+                # Plane, not frame: the planes are ordered by the file's own
+                # DimensionOrder, so a plane index is a frame index only when
+                # there is a single channel and a single Z.
+                where = (" The first plane with no image data is number "
+                         f"{self.first_missing_plane} of {self.total_planes}.")
+        elif self.incomplete_positions:
+            shown = ", ".join(str(p) for p in self.incomplete_positions[:6])
+            more = (f" and {len(self.incomplete_positions) - 6} more"
+                    if len(self.incomplete_positions) > 6 else "")
+            where = f" Affected stage position(s): {shown}{more}."
+        if self.missing_files:
+            cause = (
+                " Companion file(s) the metadata references are not in the same "
+                f"folder as the source: {', '.join(self.missing_files)}. Put them "
+                "back beside it and convert again."
+            )
+        else:
+            cause = (
+                " That usually means the acquisition was stopped before it "
+                "finished, leaving the planned dimensions in the header. "
+                "Re-export the file with the dimensions it actually holds, or "
+                "trim the run to the planes that were written."
+            )
+        return (
+            f"{subject}: its OME metadata declares {self.total_planes} image "
+            f"plane(s) but {self.missing_planes} of them carry no image data, so "
+            f"converting would write blank images indistinguishable from real "
+            f"ones.{where}{cause}"
+        )
 
 
 @dataclass
@@ -187,6 +247,72 @@ def _parse_ome_labels(
     return channel_names, timepoint_tokens
 
 
+# ``tifffile`` sizes a series' page list from the dimensions the *metadata*
+# declares and leaves a slot ``None`` wherever the file carries no IFD for it —
+# an acquisition stopped early, or a multi-file OME whose companion files are
+# absent. Its own ``series.asarray()`` zero-fills those slots ("Missing data are
+# zeroed"); this module reads pages individually, so a gap surfaced as
+# ``AttributeError: 'NoneType' object has no attribute 'asarray'`` mid-run, after
+# the wells before it had already been written. Only these three series builders
+# can produce a gap, so only they are worth the scan.
+_SPARSE_SERIES_KINDS = ("ome", "mmstack", "ndtiff")
+
+
+def series_page_gaps(series) -> list[int]:
+    """The indices of the page slots *series* declares that hold no image data.
+
+    Empty for a complete series, and empty for any series kind that cannot carry
+    a gap (see :data:`_SPARSE_SERIES_KINDS`) — which also keeps the scan off the
+    contiguous-series path, where indexing every slot would walk the whole IFD
+    chain of a file this converter otherwise reads a plane at a time.
+    """
+    if str(getattr(series, "kind", "")).lower() not in _SPARSE_SERIES_KINDS:
+        return []
+    gaps: list[int] = []
+    for i in range(len(series.pages)):
+        try:
+            page = series.pages[i]
+        except IndexError:
+            page = None  # declared past the end of what the file holds
+        if page is None:
+            gaps.append(i)
+    return gaps
+
+
+def _referenced_filenames(ome_xml: str | None) -> list[str]:
+    """The companion filenames the OME-XML's ``UUID`` elements point at.
+
+    A multi-file OME-TIFF stores its planes across several files and names them
+    in the master's ``TiffData``/``UUID`` elements. Order-preserving and
+    de-duplicated; an unparseable document yields nothing, since this only ever
+    sharpens an error message.
+    """
+    if not ome_xml:
+        return []
+    try:
+        root = ET.fromstring(ome_xml)
+    except ET.ParseError:
+        return []
+    names: list[str] = []
+    for el in root.iter():
+        if _localname(el.tag) != "UUID":
+            continue
+        fname = el.get("FileName")
+        if fname and fname not in names:
+            names.append(fname)
+    return names
+
+
+def _missing_companion_files(ome_xml: str | None, ome_path: Path) -> list[str]:
+    """Companion files the OME-XML names that are not beside *ome_path*."""
+    directory = ome_path.parent
+    return [
+        name for name in _referenced_filenames(ome_xml)
+        if name.lower() != ome_path.name.lower()
+        and not (directory / name).exists()
+    ]
+
+
 def read_ome_layout(ome_path: Path | str) -> OmeLayout:
     """Open *ome_path* and read its position/T/C/Z sizes and metadata labels.
 
@@ -197,11 +323,16 @@ def read_ome_layout(ome_path: Path | str) -> OmeLayout:
     ``n_frames`` is that ``SizeT`` (the split into positions × timepoints is
     decided at explode time). Sizes are taken from the first series (a plate scan
     is dimensionally uniform).
+
+    The same pass counts the planes the file declares but does not contain, so a
+    conversion can refuse an incomplete file up front rather than failing part-way
+    through — or, worse, writing zero-filled images that look like data.
     """
+    ome_path = Path(ome_path)
     with tifffile.TiffFile(str(ome_path)) as tf:
         series = list(tf.series)
         if not series:
-            raise ValueError(f"{Path(ome_path).name} contains no image series.")
+            raise ValueError(f"{ome_path.name} contains no image series.")
         axes_per_series = [str(s.axes).upper() for s in series]
         axes0 = axes_per_series[0]
         shape0 = series[0].shape
@@ -211,6 +342,8 @@ def read_ome_layout(ome_path: Path | str) -> OmeLayout:
 
         size_t, size_c, size_z = _size("T"), _size("C"), _size("Z")
         ome_xml = tf.ome_metadata
+        gaps = [series_page_gaps(s) for s in series]
+        total_planes = sum(len(s.pages) for s in series)
 
     single_image = len(series) == 1
     # For a single-image file the T axis is the frame sequence, not timepoints, so
@@ -228,6 +361,11 @@ def read_ome_layout(ome_path: Path | str) -> OmeLayout:
         axes_per_series=axes_per_series,
         single_image=single_image,
         n_frames=size_t if single_image else 0,
+        total_planes=total_planes,
+        missing_planes=sum(len(g) for g in gaps),
+        incomplete_positions=[i for i, g in enumerate(gaps) if g],
+        first_missing_plane=next((g[0] for g in gaps if g), -1),
+        missing_files=_missing_companion_files(ome_xml, ome_path),
     )
 
 
@@ -280,15 +418,25 @@ def _packed_plane(series, axes: str, frame: int, c: int) -> np.ndarray:
             pi = pi * sizes[a] + idx.get(a, 0)
         return pi
 
+    def _page(z: int):
+        """The page at (frame, c, z), or a stated failure — never a silent gap."""
+        page = series.pages[_page_index({"T": frame, "C": c, "Z": z})]
+        if page is None:
+            # A slot the metadata declares but the file has no data for. The
+            # explode refuses such a file up front (``OmeLayout.missing_planes``),
+            # so reaching here means the gap appeared after that check; say what
+            # is missing rather than raising on ``None.asarray``.
+            raise ValueError(
+                f"This OME-TIFF declares a plane at frame {frame}, channel {c}, "
+                f"Z {z} that carries no image data — the file is incomplete."
+            )
+        return page
+
     nz = sizes.get("Z", 1)
     if "Z" in leading and nz > 1:
-        stack = [
-            np.asarray(series.pages[_page_index({"T": frame, "C": c, "Z": z})].asarray())
-            for z in range(nz)
-        ]
+        stack = [np.asarray(_page(z).asarray()) for z in range(nz)]
         return np.max(np.stack(stack), axis=0)
-    plane = series.pages[_page_index({"T": frame, "C": c, "Z": 0})].asarray()
-    plane = np.asarray(plane)
+    plane = np.asarray(_page(0).asarray())
     while plane.ndim > 2:
         plane = plane[0]
     return plane
@@ -424,8 +572,10 @@ def explode_ome_tiff(
     *should_abort*, polled per plane, raises :class:`OmeExplodeCancelled` when it
     returns True -- each in-flight well's staged archive is discarded, so no
     partial ``<WELL>.zip`` is left (a re-run overwrites cleanly). Raises
-    ``ValueError`` on any grid / FOVs / frame-order inconsistency, or a grid that
-    overflows the plate.
+    ``ValueError`` on any grid / FOVs / frame-order inconsistency, a grid that
+    overflows the plate, or a source whose metadata declares planes the file does
+    not contain (see :meth:`OmeLayout.missing_plane_report`) — all of them before
+    anything is written.
     """
     ome_path = Path(ome_path)
     out_in_dir = Path(out_in_dir)
@@ -443,6 +593,12 @@ def explode_ome_tiff(
         )
 
     layout = read_ome_layout(ome_path)
+    # Refuse an incomplete source before a single archive is written. tifffile
+    # zero-fills the planes a file declares but does not hold, which would put
+    # blank images into the dataset with nothing on them saying so.
+    incomplete = layout.missing_plane_report(ome_path.name)
+    if incomplete:
+        raise ValueError(incomplete)
     exp_tok = _safe_token(experiment, "ome")
     # An explicit ordering (click-defined on the plate mockup) is used verbatim;
     # it needn't be rectangular. Otherwise reconstruct the rectangular serpentine

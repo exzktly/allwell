@@ -2562,6 +2562,18 @@ fluorescent channel tokens arrive pre-filled from the channel roles you set (ste
 8; adjust if needed), so you can run straight away. Because the wells now exist on
 disk, background-well and control-well options work normally.
 
+**If the file is incomplete, the converter says so instead of converting it.** An
+OME-TIFF's metadata declares how many image planes it holds, and that count can
+exceed what the file actually contains — an acquisition stopped before it
+finished leaves the *planned* dimensions in the header, and a scan written across
+several files is incomplete if its companion `.ome.tif` files aren't in the same
+folder. Those planes read back as solid black, which would land in the dataset as
+images indistinguishable from real ones. So the readout refuses the file as soon
+as you pick it, saying how many planes carry no data and which of the two causes
+it looks like, and **Convert** stays disabled. For missing companion files, put
+them back beside the source. For a run that stopped early, re-export the file
+with the dimensions it really holds — All-Well will not convert part of it.
+
 ### Concatenate datasets
 
 Use this when the *same plate* was imaged in two separate sessions and you want a

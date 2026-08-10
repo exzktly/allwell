@@ -494,7 +494,7 @@ def test_suggest_layout_gives_a_raster_scan_an_explicit_order(tmp_path):
                                      serpentine=False))
     suggestion = suggest_layout(layout, origin="B02")
     assert suggestion.well_order == ("B02", "B03", "B04", "C02", "C03", "C04")
-    assert "non-serpentine path" in suggestion.describe()
+    assert "as an explicit path" in suggestion.describe()
 
 
 def test_suggest_layout_is_none_when_the_file_says_nothing_useful(tmp_path):
@@ -549,6 +549,10 @@ def test_a_marker_from_different_settings_is_refused_not_resumed(tmp_path):
     src = _write_packed(tmp_path / "s.ome.tif", n_frames=6)
     dest = tmp_path / "out"
     write_run_marker(dest, src, ConversionParams(grid_rows=1, grid_cols=6))
+    # A well on disk: a marker with nothing behind it describes a run that
+    # wrote nothing, which is not a mismatch to warn about but an empty folder.
+    (dest / "in").mkdir(parents=True, exist_ok=True)
+    (dest / "in" / "A01.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
 
     for changed in (
         ConversionParams(grid_rows=2, grid_cols=3),
@@ -574,7 +578,39 @@ def test_a_marker_for_another_source_file_is_a_mismatch(tmp_path):
     dest = tmp_path / "out"
     params = ConversionParams(grid_rows=1, grid_cols=6)
     write_run_marker(dest, a, params)
+    (dest / "in").mkdir(parents=True, exist_ok=True)
+    (dest / "in" / "A01.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
     assert resume_state(dest, b, params).mismatched
+
+
+def test_a_source_replaced_at_the_same_path_is_a_mismatch(tmp_path):
+    """The path alone does not identify a file. A re-export, a restore, or the
+    next plate saved over the last is a different source, and resuming across
+    that leaves half of one plate and half of another under one set of names."""
+    src = _write_packed(tmp_path / "s.ome.tif", n_frames=6)
+    dest = tmp_path / "out"
+    params = ConversionParams(grid_rows=1, grid_cols=6)
+    write_run_marker(dest, src, params)
+    (dest / "in").mkdir(parents=True, exist_ok=True)
+    (dest / "in" / "A01.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
+    assert resume_state(dest, src, params).resumable
+
+    _write_packed(src, n_frames=8)                 # same name, different plate
+    assert resume_state(dest, src, params).mismatched
+
+
+def test_a_marker_with_nothing_behind_it_does_not_block_the_folder(tmp_path):
+    """A run that failed before its first archive, or was cancelled and then had
+    its settings changed, leaves a hidden marker in an otherwise empty folder.
+    There is nothing there for a second mapping to contaminate, and "empty the
+    folder" does not clear a dotfile."""
+    src = _write_packed(tmp_path / "s.ome.tif", n_frames=6)
+    dest = tmp_path / "out"
+    write_run_marker(dest, src, ConversionParams(grid_rows=1, grid_cols=6))
+
+    changed = ConversionParams(grid_rows=2, grid_cols=3)
+    assert resume_state(dest, src, changed) == ResumeState()
+    assert destination_problem(dest, src, changed) == ""
 
 
 def test_convert_finishes_an_interrupted_run_and_says_so(tmp_path):

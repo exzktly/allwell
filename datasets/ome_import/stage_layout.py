@@ -29,6 +29,7 @@ from __future__ import annotations
 from bisect import bisect_left
 from collections import Counter
 from dataclasses import dataclass, field
+from math import isfinite
 
 # A gap has to be this many times the typical spacing along an axis before it is
 # read as the step between wells rather than between fields of view. Well pitch
@@ -234,7 +235,15 @@ def infer_stage_layout(positions) -> StageLayout | None:
     it would be worse than no guess at all).
     """
     points = [(float(x), float(y)) for x, y in positions or []]
-    if len(points) < 2:
+    # Anything that is not a finite number is not a stage position. A single
+    # NaN reaches `pitch`, and `nan <= 0` is False, so it passes every downstream
+    # guard and arrives at a painter as a coordinate.
+    points = [(x, y) for x, y in points if isfinite(x) and isfinite(y)]
+    if len(points) < 2 or len({(x, y) for x, y in points}) < 2:
+        # Every plane at the same coordinate — a stage that writes 0,0 on every
+        # plane, and they exist — describes no layout at all. Reported as one
+        # well of one field it becomes a confident offer to convert a plate into
+        # a single well.
         return None
 
     xs = [x for x, _ in points]
@@ -265,6 +274,8 @@ def infer_stage_layout(positions) -> StageLayout | None:
     # centre-to-centre distance, and a 7% error there walks the drawing a whole
     # cell out of place across twelve columns.
     step = _well_step(xs, by_x, ux) or _well_step(ys, by_y, uy) or pitch or 0.0
+    if not isfinite(step) or step <= 0:
+        return None      # no scale, so nothing downstream can be placed or drawn
     occupied = sorted(set(cells))
     rows = len({r for r, _ in occupied})
     cols = len({c for _, c in occupied})

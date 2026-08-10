@@ -10,6 +10,7 @@ and many, single rows and single columns, with and without stage jitter.
 from __future__ import annotations
 
 import random
+from math import isfinite
 
 from datasets.ome_import.stage_layout import (
     StageLayout,
@@ -193,3 +194,37 @@ def test_the_inference_stays_usable_on_a_full_timelapse_plate():
     elapsed = time.perf_counter() - start
     assert (layout.rows, layout.cols, layout.fovs_per_well) == (8, 12, 16)
     assert elapsed < 1.5, f"{elapsed:.2f}s — the quadratic scan is back"
+
+
+def test_a_descending_axis_is_not_read_as_an_ascending_one():
+    """An inverted scope reports Y decreasing down the plate. Read ascending,
+    the first well visited lands at the block's *bottom* row, so the grid's
+    top-left sweep mirrors every row — and the counts still look right."""
+    points, order = _scan(2, 3, 1)
+    flipped = [(x, -y) for x, y in points]
+    layout = infer_stage_layout(flipped)
+    assert (layout.rows, layout.cols) == (2, 3)
+    # The first position visited must still be the first cell of the order.
+    assert layout.relative_order[0] == (1, 0)     # bottom-left, ascending-Y
+    assert layout.relative_order != order         # …and not the unflipped one
+
+
+def test_coordinates_that_describe_nothing_are_refused():
+    """A confident layout out of degenerate input is the worst outcome here: it
+    is offered to the user as the file's own answer."""
+    assert infer_stage_layout([(0.0, 0.0)] * 96) is None      # a stage writing 0,0
+    assert infer_stage_layout([(5.0, 7.0), (5.0, 7.0)]) is None
+    nan = float("nan")
+    assert infer_stage_layout([(nan, nan)] * 4) is None
+    # A stray non-finite point is dropped rather than poisoning the scale: NaN
+    # reaches `pitch`, and `nan <= 0` is False, so it passes every guard below
+    # and arrives at the painter as a coordinate.
+    good, _ = _scan(2, 3, 4)
+    with_nan = infer_stage_layout(good + [(nan, 0.0)])
+    assert with_nan is not None
+    assert (with_nan.rows, with_nan.cols) == (2, 3)
+    assert isfinite(with_nan.pitch)
+    assert infer_stage_layout([(float("inf"), 0.0)] * 4) is None
+    # A layout that does survive never carries a scale nothing can be drawn at.
+    good = infer_stage_layout(_scan(2, 3, 4)[0])
+    assert good.pitch > 0

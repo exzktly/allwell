@@ -379,10 +379,17 @@ def _captured_tifffile_warnings():
     with it, and it costs nothing to keep.
     """
     messages: list[str] = []
+    # Only this thread's records. The logger is global and shared, so a page
+    # reading a file on the UI thread while a conversion reads another on a
+    # worker would otherwise each collect both — and ``validation_report``
+    # quotes ``warnings[0]`` as the closing sentence of a refusal, so one file's
+    # refusal could end by describing what is wrong with a different file.
+    owner = threading.get_ident()
 
     class _Collect(logging.Handler):
         def emit(self, record: logging.LogRecord) -> None:
-            messages.append(record.getMessage())
+            if threading.get_ident() == owner:
+                messages.append(record.getMessage())
 
     handler = _Collect()
     logger = logging.getLogger("tifffile")
@@ -448,11 +455,20 @@ def _declared_sizes(ome_xml: str | None) -> dict[str, int]:
 def _stage_positions(ome_xml: str | None) -> list[tuple[float, float]]:
     """``(x, y)`` per ``Plane``, in document order, for layout inference.
 
-    Only planes carrying both coordinates are returned, and each ``(TheZ, TheC)``
-    combination collapses onto its ``TheT`` — the stage does not move between a
-    plane's channels or Z-slices, so one coordinate per frame is what a caller
-    counting *positions* wants. Units are left as written: every consumer here
-    compares distances within one file, where a common scale cancels.
+    Only planes carrying both coordinates are returned, and within one
+    ``<Image>`` each ``(TheZ, TheC)`` combination collapses onto its ``TheT`` —
+    the stage does not move between a plane's channels or Z-slices, so one
+    coordinate per frame is what a caller counting *positions* wants.
+
+    That collapse is **per Image**, not per document. A multi-image plate scan
+    has one ``<Image>`` per stage position and every one of them numbers its
+    planes from ``TheT="0"``, so a document-wide key keeps the first Image and
+    throws the other ninety-five away — leaving one coordinate for a whole
+    plate, or, for a multi-image timelapse, several coordinates that are all the
+    same position.
+
+    Units are left as written: every consumer here compares distances within one
+    file, where a common scale cancels.
     """
     if not ome_xml:
         return []
@@ -460,27 +476,29 @@ def _stage_positions(ome_xml: str | None) -> list[tuple[float, float]]:
         root = ET.fromstring(ome_xml)
     except ET.ParseError:
         return []
-    by_frame: dict[int, tuple[float, float]] = {}
     order: list[tuple[float, float]] = []
-    for el in root.iter():
-        if _localname(el.tag) != "Plane":
-            continue
-        x, y = el.get("PositionX"), el.get("PositionY")
-        if x is None or y is None:
-            continue
-        try:
-            xy = (float(x), float(y))
-        except ValueError:
-            continue
-        the_t = el.get("TheT")
-        try:
-            key = int(the_t) if the_t is not None else len(by_frame)
-        except ValueError:
-            key = len(by_frame)
-        if key in by_frame:
-            continue
-        by_frame[key] = xy
-        order.append(xy)
+    images = [el for el in root.iter() if _localname(el.tag) == "Image"]
+    for image in images or [root]:
+        seen: set[int] = set()
+        for el in image.iter():
+            if _localname(el.tag) != "Plane":
+                continue
+            x, y = el.get("PositionX"), el.get("PositionY")
+            if x is None or y is None:
+                continue
+            try:
+                xy = (float(x), float(y))
+            except ValueError:
+                continue
+            the_t = el.get("TheT")
+            try:
+                key = int(the_t) if the_t is not None else len(seen)
+            except ValueError:
+                key = len(seen)
+            if key in seen:
+                continue
+            seen.add(key)
+            order.append(xy)
     return order
 
 

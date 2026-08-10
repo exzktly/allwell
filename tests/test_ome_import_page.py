@@ -656,8 +656,34 @@ def test_a_run_locks_every_input_that_would_redraw_the_plate(qapp, tmp_path):
     page.set_well_fraction("A01", 1, 2)
     assert page._plate._grid._fractions
 
+    # Enumerated, not listed. A hand-written roster cannot fail when a control
+    # is added, and one was: "Use this" arrived a PR later, outside the lock,
+    # and clearing the plate through it wiped every dial mid-run.
+    from PySide6.QtWidgets import QComboBox, QLineEdit, QPushButton
+
+    live = []
+    for kind in (QComboBox, QLineEdit, QPushButton):
+        live += [w for w in page.findChildren(kind)
+                 if w.isEnabled() and w.isVisibleTo(page)]
+    # Convert and Queue are gated on their own, Open appears only afterwards,
+    # and the log's Clear empties a display rather than an input. A PathField's
+    # box is read-only and stays readable on purpose while a run goes (it locks
+    # its Browse button instead) — that is the one piece of context someone
+    # watching a long run most wants to check.
+    allowed = {page._run_btn, page._queue_btn, page._open_btn}
+    unlocked = [
+        w for w in live
+        if w not in allowed
+        and not (isinstance(w, QLineEdit) and w.isReadOnly())
+        and not (isinstance(w, QPushButton) and w.text().strip() == "Clear")
+    ]
+    assert not unlocked, (
+        "these edit the run's inputs and stayed live: "
+        + ", ".join(sorted(w.text() or w.objectName() or type(w).__name__
+                           for w in unlocked)))
     for w in (page._grid_row, page._fovs_edit, page._seed_btn,
-              page._clear_path_btn, page._workers_edit, page._plate):
+              page._clear_path_btn, page._workers_edit, page._plate,
+              page._suggest_btn):
         assert not w.isEnabled(), w
 
     page._cols_edit.setText("3")        # the keystroke that used to do it

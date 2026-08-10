@@ -791,3 +791,56 @@ def test_resume_rewrites_a_well_whose_archive_is_for_other_settings(tmp_path):
     assert result.wells_resumed == []
     assert result.images_written == 8
     assert all(name.startswith("new_") for name in _members(out))
+
+
+def test_stage_positions_are_collected_from_every_image(tmp_path):
+    """A multi-image plate scan is one <Image> per stage position, and every one
+    of them numbers its planes from TheT="0". Keyed document-wide, ninety-five
+    of ninety-six positions are discarded and the inference reads one."""
+    coords = [(c * 9000.0, r * 9000.0) for r in range(2) for c in range(3)]
+    images = "".join(
+        f'<Image ID="Image:{i}"><Pixels ID="Pixels:{i}" DimensionOrder="XYZCT" '
+        f'Type="uint16" SizeX="6" SizeY="6" SizeC="1" SizeZ="1" SizeT="1">'
+        f'<Channel ID="Channel:{i}:0" Name="ch0" SamplesPerPixel="1"/>'
+        f'<Plane TheT="0" TheC="0" TheZ="0" PositionX="{x}" PositionY="{y}"/>'
+        f'<TiffData FirstT="0" FirstC="0" FirstZ="0" IFD="{i}" PlaneCount="1"/>'
+        f'</Pixels></Image>'
+        for i, (x, y) in enumerate(coords))
+    xml = ('<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+           f'{images}</OME>')
+    p = _write_ome_xml(tmp_path / "multi.ome.tif", xml, len(coords))
+
+    layout = read_ome_layout(p)
+    assert layout.validation_report("multi.ome.tif") == ""
+    assert not layout.single_image
+    assert layout.stage_positions == coords
+
+
+def test_captured_warnings_do_not_leak_between_threads(tmp_path):
+    """`tifffile` logs to one shared logger, and `validation_report` quotes the
+    first warning as the closing sentence of a refusal — so a refusal for one
+    file could end by describing what is wrong with another."""
+    import logging
+    import threading
+
+    from pipeline.ome_explode import _captured_tifffile_warnings
+
+    logger = logging.getLogger("tifffile")
+    collected: dict[str, list[str]] = {}
+    started = threading.Barrier(2)
+
+    def read(tag):
+        with _captured_tifffile_warnings() as messages:
+            started.wait(timeout=5)
+            logger.warning("%s speaking", tag)
+            started.wait(timeout=5)
+            collected[tag] = list(messages)
+
+    threads = [threading.Thread(target=read, args=(tag,)) for tag in ("a", "b")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+
+    assert collected["a"] == ["a speaking"]
+    assert collected["b"] == ["b speaking"]

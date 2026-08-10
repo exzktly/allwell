@@ -299,7 +299,7 @@ class LayoutSuggestion:
     well_order: tuple[str, ...] = ()
 
     def describe(self) -> str:
-        path = " (non-serpentine path)" if self.well_order else ""
+        path = " (as an explicit path)" if self.well_order else ""
         return (
             f"{self.rows}×{self.cols} wells × {self.fovs_per_well} FOV(s), "
             f"snaking by {'row' if self.direction == 'row' else 'column'}{path}"
@@ -340,12 +340,23 @@ def suggest_layout(layout: OmeLayout, origin: str = "A01",
         origin_row, origin_col = well_row_col(origin or "A01")
     except ValueError:
         origin_row, origin_col = 0, 0
-    order: tuple[str, ...] = ()
-    if not inferred.serpentine:
-        placed = place(inferred, origin_row, origin_col)
-        if not placed:
-            return None
-        order = tuple(placed)
+    # An explicit order whenever the grid fields could not reproduce this one.
+    # "Is it a serpentine?" is not that question: a stage that reports Y (or X)
+    # descending sweeps a perfectly good serpentine whose *first* well is the
+    # block's bottom-left, while the grid always starts top-left. The rows come
+    # out mirrored, every image lands one row off, and nothing on screen looks
+    # wrong. Comparing the two orders outright covers that, the raster, and any
+    # other starting corner, in one condition.
+    placed = place(inferred, origin_row, origin_col)
+    if not placed:
+        return None
+    try:
+        from_grid = serpentine_well_labels(
+            inferred.rows, inferred.cols,
+            origin=origin or "A01", direction=inferred.direction)
+    except ValueError:
+        from_grid = []
+    order = () if placed == from_grid else tuple(placed)
     return LayoutSuggestion(
         rows=inferred.rows,
         cols=inferred.cols,
@@ -393,7 +404,19 @@ def _mapping_signature(src: Path | str, params: ConversionParams) -> dict:
     """What a resume has to match: the source, and the settings that map it."""
     values = {name: getattr(params, name) for name in _MAPPING_FIELDS}
     values["well_order"] = list(values["well_order"] or ())
-    values["source"] = str(Path(src).resolve())
+    source = Path(src)
+    values["source"] = str(source.resolve())
+    # Size and mtime as well as the path: a file replaced at the same name — a
+    # re-export, a restore, the next plate saved over the last — is a different
+    # source, and resuming across that leaves half of one plate and half of
+    # another under one set of filenames. Cheap: one stat, no hashing.
+    try:
+        stat = source.stat()
+        values["source_size"] = stat.st_size
+        values["source_mtime_ns"] = stat.st_mtime_ns
+    except OSError:
+        values["source_size"] = None
+        values["source_mtime_ns"] = None
     return values
 
 
@@ -460,9 +483,16 @@ def resume_state(dest: Path | str, src: Path | str,
     marker = read_run_marker(dest)
     if marker is None:
         return ResumeState()
+    done = len(converted_wells(dest))
     if marker != _mapping_signature(src, params):
-        return ResumeState(mismatched=True, wells_done=len(converted_wells(dest)))
-    return ResumeState(resumable=True, wells_done=len(converted_wells(dest)))
+        # A marker with no wells behind it describes a run that wrote nothing —
+        # one that failed before its first archive, or was cancelled and then
+        # had its settings changed, which is the commonest reason to cancel.
+        # There is nothing on disk for a second mapping to contaminate, and the
+        # marker is a hidden file the "empty the folder" advice does not clear.
+        return ResumeState() if done == 0 else ResumeState(mismatched=True,
+                                                           wells_done=done)
+    return ResumeState(resumable=True, wells_done=done)
 
 
 def destination_problem(dest: Path | str, src: Path | str = "",

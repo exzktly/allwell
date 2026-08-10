@@ -75,7 +75,13 @@ _FIELD_W = 48
 _ORIGIN_W = 56
 
 def _is_destination(root) -> str:
-    """This page's destination rule, as `PathField` wants it (`""` = usable)."""
+    """The destination rule with no run in view — see `OmeImportPage._dest_rule`.
+
+    `PathField` validates a path on its own, so this cannot see the source or
+    the settings and therefore cannot see a resume. The page rebinds it to
+    `_dest_rule` at build time, which can; this stays as the honest answer for
+    a `PathField` used without one.
+    """
     return destination_problem(root)
 
 
@@ -152,7 +158,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._src_field.changed.connect(self._on_source_changed)
         outer.addWidget(self._src_field)
         self._dest_field = PathField("Destination folder", pick=self._pick_dest,
-                                     validator=_is_destination)
+                                     validator=self._dest_rule)
         self._dest_field.changed.connect(self._on_dest_changed)
         outer.addWidget(self._dest_field)
 
@@ -656,7 +662,8 @@ class OmeImportPage(LogPanelMixin, QWidget):
         # carries on against the order it actually started with.
         self._plate.setEnabled(not running)
         for w in (self._grid_row, self._fovs_edit, self._frame_order_cb,
-                  self._workers_edit, self._seed_btn, self._clear_path_btn):
+                  self._workers_edit, self._seed_btn, self._clear_path_btn,
+                  self._suggest_btn):
             w.setEnabled(not running)
         # Path fields lock rather than disable: `setEnabled(False)` dims the
         # path text too, which is the one piece of context someone watching a
@@ -751,9 +758,25 @@ class OmeImportPage(LogPanelMixin, QWidget):
             self._inferred = infer_layout(layout)
         return self._inferred
 
+    def _dest_rule(self, root) -> str:
+        """The destination field's own hint, aware of the run being set up.
+
+        Bound rather than free (`_is_destination`) because the folder holding
+        this conversion's own interrupted output is a resume, not a problem —
+        and a red "choose an empty folder" under a readout that says the run
+        will resume is the page contradicting itself.
+        """
+        source = self._src_field.path() if hasattr(self, "_src_field") else ""
+        if not source:
+            return destination_problem(root)
+        return destination_problem(root, source, self.raw_fields().to_params())
+
     def _refresh_suggestion(self, layout) -> None:
         """Offer the layout the file's stage coordinates describe, if any."""
         inferred = self._inferred_for(layout)
+        # Drawn from the coordinates alone, so it survives an origin the
+        # suggestion cannot place: the picture needs a scale, not a placement.
+        self._refresh_path(layout)
         self._suggestion = (
             suggest_layout(layout, self._origin_edit.text().strip() or "A01",
                            inferred=inferred)
@@ -761,9 +784,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
         )
         if self._suggestion is None:
             self._suggest_row.setVisible(False)
-            self._refresh_path(None)
             return
-        self._refresh_path(layout)
         self._suggest_label.setText(
             f"↳ The file's stage coordinates describe "
             f"{self._suggestion.describe()}."

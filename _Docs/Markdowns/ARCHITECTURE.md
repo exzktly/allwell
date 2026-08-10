@@ -2982,7 +2982,10 @@ grid stays serial.
 
 **The file already knows most of the layout.** An OME-TIFF's `<Plane>`
 elements carry `PositionX`/`PositionY` — where on the stage each image was taken
-— and `read_ome_layout` collects them into `OmeLayout.stage_positions`.
+— and `read_ome_layout` collects them into `OmeLayout.stage_positions`, **per
+`<Image>`**: a multi-image plate scan is one `<Image>` per stage position and
+every one of them numbers its planes from `TheT="0"`, so collapsing duplicates
+document-wide keeps the first image and discards the rest of the plate.
 `datasets/ome_import/stage_layout.py` reads a plate layout back out of them, on
 one physical separation: wells sit on a 9 mm pitch while the fields of view
 inside a well are hundreds of micrometres apart, so each axis carries two scales
@@ -2993,7 +2996,14 @@ ambiguous between "one well holding a grid of fields" and "a grid of wells
 holding one field each", and the latter is taken because it is the ordinary plate
 scan. Coordinates are merged within a fraction of the coarsest spacing first, or
 a stage's few-micrometre repeatability reads as a position of its own and the
-grid explodes. What is **not** inferred is which physical well the block starts
+grid explodes. **A single well imaged as a montage still reads as a grid of
+wells**, because that ambiguity has no answer in the coordinates alone — telling
+them apart needs the absolute scale, which means trusting the file's
+`PositionXUnit` — and the common reading is chosen. Degenerate input is refused
+outright rather than answered: every plane at one coordinate, fewer than two
+distinct positions, or a scale that is not finite and positive all return
+`None`, since a confident layout out of those is offered to the user as the
+file's own answer. What is **not** inferred is which physical well the block starts
 at: stage coordinates are relative to the microscope's origin, which no file
 states in plate terms, so `StageLayout.relative_order` is `(row, col)` offsets and
 `place()` puts them at the origin the user chose. `stage_layout.path_in_cells` converts the same coordinates into **plate
@@ -3024,9 +3034,13 @@ the obvious way to take first visits and is quadratic (five seconds at that
 size), and a timelapse revisits every position once per timepoint, so counting
 *visits* per well rather than distinct coordinates reports a plate's fields
 multiplied by its timepoints. `ome_import_compute.suggest_layout`
-wraps that for the page, which *offers* it — a serpentine as grid fields the user
-can still edit, anything else as an explicit order, since the grid controls
-cannot express a raster.
+wraps that for the page, which *offers* it. Whether it arrives as grid fields or
+as an explicit order is decided by **comparing** the placed order against the
+serpentine those fields would produce, not by asking whether the scan is a
+serpentine: a stage reporting Y or X descending sweeps a perfectly good
+serpentine whose first well is the block's *bottom*-left, and the grid always
+starts top-left, so the rows come out mirrored with every count still correct.
+One comparison covers that, a raster, and any other starting corner.
 
 **The grid and the clicked path are alternatives, and only one of them is an
 input.** The converter page draws the grid's serpentine onto the plate as a live
@@ -3091,7 +3105,10 @@ the check is keyed on the *name* claiming OME rather than on the metadata alone.
 verdict, and anything but `"ome"` means it declined the OME structure and fell
 back to enumerating pages, so each plane's channel and timepoint is a guess.
 **Declared sizes that were not realised:** `declared_sizes` holds `SizeT`/`SizeC`/
-`SizeZ` as the XML states them, against the series that actually came out.
+`SizeZ` as the XML states them; `SizeT` on a single-image file is the one
+compared against the series that actually came out, since that is the axis the
+converter splits into positions. The other two are collected for a caller that
+wants them and are not themselves a refusal.
 `OmeLayout.warnings` keeps what `tifffile` logged while reading — it diagnoses
 every one of these in its own words and writes them to a logger nothing was
 attached to, which is the file's own account of what is wrong with it.

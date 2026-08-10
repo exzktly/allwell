@@ -392,3 +392,86 @@ def test_the_acquisition_plate_is_capped_like_every_other_plate(qapp):
     assert plate.maximumWidth() == PLATE_MAX_WIDTH
     assert plate.maximumHeight() == PLATE_MAX_HEIGHT   # action row hidden
     ctrl.shutdown()
+
+
+# ── how a finished conversion reports itself ─────────────────────────────────
+#
+# This page has no dashboard — it reports on the acquisition plate it already
+# draws — so a run's verdict used to reach only the raw log, which the shared
+# log furniture hides by default. A conversion that failed looked exactly like
+# one that had not been started.
+
+
+def _page_with_source(tmp_path):
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _write_packed(tmp_path / "plate.ome.tif", n_frames=4,
+                      channel_names=("DAPI",))
+    ctrl = OmeImportController()
+    ctrl.page._src_field.set_path(str(p))
+    ctrl.page._on_source_changed()
+    return ctrl
+
+
+def test_a_failed_conversion_is_visible_without_opening_the_log(qapp, tmp_path):
+    import theme
+
+    ctrl = _page_with_source(tmp_path)
+    page = ctrl.page
+    assert not page._outcome_label.isVisibleTo(page)      # nothing has run yet
+
+    ctrl._on_failed("plate.ome.tif is incomplete: 2 planes carry no image data.")
+
+    assert page._outcome_label.isVisibleTo(page)
+    assert page._outcome_label.text().startswith("Failed — ")
+    assert "no image data" in page._outcome_label.text()
+    assert theme.Colors.danger in page._outcome_label.styleSheet()
+    # The raw log stayed shut: the message has to be readable without it.
+    assert not page._raw_log_cb.isChecked()
+
+
+def test_a_failed_conversion_stops_the_indeterminate_progress_bar(qapp, tmp_path):
+    ctrl = _page_with_source(tmp_path)
+    page = ctrl.page
+    page.set_progress(0, 0)                          # what a launch starts with
+    assert page._progress.maximum() == 0             # indeterminate: keeps sweeping
+
+    ctrl._on_failed("boom")
+
+    assert page._progress.maximum() == 1
+    assert page._progress.value() == 0
+
+
+def test_a_cancelled_conversion_reads_as_cancelled_not_failed(qapp, tmp_path):
+    import theme
+
+    ctrl = _page_with_source(tmp_path)
+    ctrl._on_failed("Cancelled — partial output was left in the destination.")
+
+    text = ctrl.page._outcome_label.text()
+    assert theme.Colors.warn in ctrl.page._outcome_label.styleSheet()
+    # The worker's message already carries the state word; it is not said twice.
+    assert text == "Cancelled — partial output was left in the destination."
+
+
+def test_a_successful_conversion_says_so_on_the_page(qapp, tmp_path):
+    import theme
+
+    ctrl = _page_with_source(tmp_path)
+    ctrl._on_succeeded(str(tmp_path / "out"), "Wrote 8 image(s) for 4 well(s)")
+
+    assert ctrl.page._outcome_label.isVisibleTo(ctrl.page)
+    assert ctrl.page._outcome_label.text() == "Wrote 8 image(s) for 4 well(s)"
+    assert theme.Colors.success in ctrl.page._outcome_label.styleSheet()
+
+
+def test_a_new_run_drops_the_previous_run_s_verdict(qapp, tmp_path):
+    """A second conversion must not begin wearing the first one's failure."""
+    ctrl = _page_with_source(tmp_path)
+    ctrl._on_failed("boom")
+    ctrl.page.clear_outcome()
+
+    assert not ctrl.page._outcome_label.isVisibleTo(ctrl.page)
+    assert ctrl.page._outcome_label.text() == ""
+    assert ctrl.page._outcome_label.styleSheet() == ""
+    assert ctrl.page._outcome_label.toolTip() == ""

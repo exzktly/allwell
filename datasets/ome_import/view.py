@@ -39,7 +39,7 @@ from widgets._support import set_variant
 from widgets.path_field import PathField
 from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
 from widgets.plate_order_editor import PlateOrderEditor
-from widgets.plate_progress import fraction_or_none
+from widgets.plate_progress import apply_outcome, fraction_or_none
 from datasets.ome_import.ome_import_compute import (
     CHANNEL_ROLES,
     ConversionParams,
@@ -368,6 +368,17 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._progress.setVisible(False)
         outer.addWidget(self._progress)
 
+        # How a finished run says how it went. Every other Datasets tool has a
+        # dashboard whose headline carries this; this page reports on the
+        # acquisition plate it already draws, so it had a progress bar and
+        # nothing else — a failed conversion changed nothing on screen and left
+        # its only account in the raw log, which is hidden by default. That is a
+        # run that failed looking exactly like a run that did not.
+        self._outcome_label = QLabel("", self)
+        self._outcome_label.setWordWrap(True)
+        self._outcome_label.setVisible(False)
+        outer.addWidget(self._outcome_label)
+
         self.build_log_tail(outer, placeholder="Status will appear here.")
 
     def _pick_source(self, current: str, parent: QWidget | None = None) -> str:
@@ -458,6 +469,29 @@ class OmeImportPage(LogPanelMixin, QWidget):
 
     def clear_well_fractions(self) -> None:
         self._plate.clearWellFractions()
+
+    def set_outcome(self, outcome: str, message: str = "") -> None:
+        """Show how the run ended: ``done`` / ``failed`` / ``cancelled``.
+
+        Shares its wording and tone with every Datasets dashboard's headline
+        (``widgets.plate_progress.apply_outcome``) so the same conversion
+        reported here and in the Job Queue reads the same way.
+        """
+        apply_outcome(self._outcome_label, outcome, message)
+        self._outcome_label.setVisible(True)
+        if outcome != "done":
+            # A run that never counted its planes left the bar indeterminate, so
+            # it goes on sweeping after the run is over — the one thing on the
+            # page still claiming work is happening. Land it empty and still.
+            self._progress.setRange(0, 1)
+            self._progress.setValue(0)
+
+    def clear_outcome(self) -> None:
+        """Drop the previous run's verdict — a new run has not ended yet."""
+        self._outcome_label.setText("")
+        self._outcome_label.setToolTip("")
+        self._outcome_label.setStyleSheet("")
+        self._outcome_label.setVisible(False)
 
     def set_progress(self, done: int, total: int) -> None:
         if total <= 0:

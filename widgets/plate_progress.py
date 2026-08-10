@@ -53,6 +53,68 @@ def status_dot(color: str, d: int = 11) -> QLabel:
     return lbl
 
 
+# How a run's terminal state reads: its tone, and the word that stands in when
+# the caller has no message. ``done`` shows its summary alone — a summary is
+# already a sentence — while the other two prefix theirs, since a bare message
+# would not say which state it was.
+_OUTCOME_TONES = {
+    "done": (theme.Colors.success, "Done"),
+    "failed": (theme.Colors.danger, "Failed"),
+    "cancelled": (theme.Colors.warn, "Cancelled"),
+}
+
+
+def _without_state_prefix(message: str, word: str) -> str:
+    """Drop a leading ``"<word> — "`` from *message*, so it isn't said twice.
+
+    Every Datasets worker announces a stopped run as ``"Cancelled — <why>"``
+    (`datasets/job_queue/controller.py` matches on that prefix), and the caller
+    then hands the whole string to a setter that prefixes it again. A separator
+    is required, not merely the word: a real failure often *begins* with its
+    state — "Failed to open …" is a sentence, not a prefix, and must survive
+    whole.
+    """
+    text = str(message or "").strip()
+    if text[: len(word)].lower() != word.lower():
+        return text
+    rest = text[len(word):].lstrip()
+    if not rest:
+        return ""
+    if rest[0] not in "—–-:":
+        return text
+    return rest[1:].lstrip()
+
+
+def apply_outcome(label, outcome: str, message: str = "", *,
+                  tooltip: str | None = None) -> None:
+    """Paint *label* with a run's terminal state — one wording, one tone.
+
+    The three states were painted by hand on every Datasets dashboard before
+    :class:`PlateProgress` gathered them; this is the same decision hoisted one
+    step further out, because a page can report an outcome without owning a
+    dashboard at all (Convert OME-TIFF, whose status strip is a bare progress
+    bar over the acquisition plate it already draws). Module-level for the same
+    reason :func:`fraction_or_none` is: two kinds of host need it, so it gets
+    one home rather than a second copy to drift.
+
+    The full text stays reachable as a tooltip even when the caller shortens
+    what it displays — a pipeline refusal names figures and remedies the
+    headline has no room for. A **cancel** is the exception: it carries no
+    explanation, so it must never keep a failure's.
+    """
+    colour, fallback = _OUTCOME_TONES[outcome]
+    body = _without_state_prefix(message, fallback)
+    if outcome == "done":
+        label.setText(body or fallback)
+    else:
+        label.setText(f"{fallback} — {body}" if body else fallback)
+    if outcome == "cancelled":
+        label.setToolTip("")
+    else:
+        label.setToolTip(tooltip if tooltip is not None else (message or fallback))
+    label.setStyleSheet(f"color:{colour};")
+
+
 def fraction_or_none(done: int, total: int) -> float | None:
     """``done / total`` clamped to 0.0–1.0, or ``None`` when *total* is not
     positive.
@@ -242,31 +304,17 @@ class PlateProgress(QWidget):
 
     def set_done(self, summary: str, *, tooltip: str | None = None) -> None:
         self._outcome = "done"
-        self._headline.setText(summary or "Done")
-        # The full text (often a whole destination path baked into the summary)
-        # survives as a tooltip even when the caller has shortened the displayed
-        # headline to a basename.
-        self._headline.setToolTip(tooltip if tooltip is not None else (summary or "Done"))
-        self._headline.setStyleSheet(f"color:{theme.Colors.success};")
+        apply_outcome(self._headline, "done", summary, tooltip=tooltip)
         self._on_outcome_changed()
 
     def set_failed(self, message: str, *, tooltip: str | None = None) -> None:
         self._outcome = "failed"
-        self._headline.setText(f"Failed — {message}" if message else "Failed")
-        # Same contract as ``set_done``: the caller may shorten what it displays,
-        # and the full text stays reachable on the label that displays it. A
-        # pipeline refusal names two volumes, two figures and two remedies, so
-        # the headline is a first sentence and this is the rest of it.
-        self._headline.setToolTip(tooltip if tooltip is not None else (message or "Failed"))
-        self._headline.setStyleSheet(f"color:{theme.Colors.danger};")
+        apply_outcome(self._headline, "failed", message, tooltip=tooltip)
         self._on_outcome_changed()
 
     def set_cancelled(self, message: str = "") -> None:
         self._outcome = "cancelled"
-        self._headline.setText(f"Cancelled — {message}" if message else "Cancelled")
-        # A cancel carries no explanation, so it must not keep a failure's.
-        self._headline.setToolTip("")
-        self._headline.setStyleSheet(f"color:{theme.Colors.warn};")
+        apply_outcome(self._headline, "cancelled", message)
         self._on_outcome_changed()
 
     def _on_outcome_changed(self) -> None:

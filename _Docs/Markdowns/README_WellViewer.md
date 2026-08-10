@@ -2555,7 +2555,9 @@ becomes the progress view: each well fills clockwise as its images are written,
 the same dial every other plate map in the app uses, and the plate locks against
 clicks until the run finishes so the order being converted can't be edited
 under it. A progress bar for the run as a whole appears below (Cancel stops it
-cleanly). The output is one
+cleanly), and when the run ends a line under that bar says how it went — a green
+summary, or the reason in red if it failed or was cancelled. You never have to
+open **Show raw log** to find out whether it worked. The output is one
 per-well `<WELL>.zip` in `<destination>/in/`, the layout Analyze reads directly
 (no regrouping step). Then **Open dataset in Analyze** — the Segmentation /
 fluorescent channel tokens arrive pre-filled from the channel roles you set (step

@@ -56,6 +56,7 @@ class OmeImportController(DatasetToolController):
         if not src or not dest:
             return
         self.page.clear_log()
+        self.page.clear_outcome()
         self.page.set_progress(0, 0)
         # A fresh run starts on an empty plate — a second conversion must not
         # begin wearing the first one's dials.
@@ -102,12 +103,18 @@ class OmeImportController(DatasetToolController):
     def _on_succeeded(self, dest_root: str, summary: str) -> None:
         self.page.append_log("")
         self.page.append_log(f"✓ {summary}")
+        self.page.set_outcome("done", summary)
         self.page.show_open_in_analyze(dest_root)
         self._last_result = (True, summary, dest_root)
 
     def _on_failed(self, message: str) -> None:
         self.page.append_log("")
         self.page.append_log(f"✗ {message}")
+        # On the page as well as in the log: the raw log is hidden by default,
+        # so a log line on its own is a failure the user never sees. Same split
+        # every other Datasets tool makes on its dashboard headline.
+        self.page.set_outcome(
+            "cancelled" if message.startswith("Cancelled") else "failed", message)
         self._last_result = (False, message, "")
 
     def _on_finished(self) -> None:

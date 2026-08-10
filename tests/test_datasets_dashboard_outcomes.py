@@ -123,3 +123,44 @@ def test_reset_forgets_the_previous_run_s_outcome(qapp, kind):
     # failure, which is the "degraded output indistinguishable from good output"
     # these outcome states exist to prevent.
     assert dash._headline.toolTip() == ""
+
+
+# ── the wording itself ───────────────────────────────────────────────────────
+#
+# `apply_outcome` is the decision one step further out than the setters above:
+# a page can report an outcome without owning a dashboard (Convert OME-TIFF),
+# and it must read the same way there.
+
+
+def test_a_message_that_already_names_the_state_does_not_say_it_twice(qapp):
+    from PySide6.QtWidgets import QLabel
+
+    from widgets.plate_progress import apply_outcome
+
+    label = QLabel()
+    # Every Datasets worker announces a stopped run this way.
+    apply_outcome(label, "cancelled", "Cancelled — partial output was left.")
+    assert label.text() == "Cancelled — partial output was left."
+
+
+def test_a_failure_that_begins_with_its_state_survives_whole(qapp):
+    """"Failed to open …" is a sentence, not a duplicated prefix."""
+    from PySide6.QtWidgets import QLabel
+
+    from widgets.plate_progress import apply_outcome
+
+    label = QLabel()
+    apply_outcome(label, "failed", "Failed to open the destination folder.")
+    assert label.text() == "Failed — Failed to open the destination folder."
+
+
+def test_an_empty_message_falls_back_to_the_state_word(qapp):
+    from PySide6.QtWidgets import QLabel
+
+    from widgets.plate_progress import apply_outcome
+
+    label = QLabel()
+    apply_outcome(label, "failed", "Failed")
+    assert label.text() == "Failed"
+    apply_outcome(label, "done", "")
+    assert label.text() == "Done"

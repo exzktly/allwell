@@ -3018,11 +3018,10 @@ a series' page list from the dimensions the *metadata* declares and leaves a slo
 `None` wherever the file carries no IFD for it — an acquisition stopped early
 (the planned `SizeT` stays in the header), or a multi-file OME whose companion
 files are not beside the master. Its own `series.asarray()` zero-fills those
-slots, which is the failure mode §7's design rule exists for: the multi-image
-path wrote solid-black planes that no downstream step could tell from real ones,
-while the single-image path, which reads pages individually, died part-way
-through a run on `AttributeError: 'NoneType' object has no attribute 'asarray'`
-— after the earlier wells had already been written. So `read_ome_layout` counts
+slots, which is exactly the substitution §7's design rule forbids: a converted
+plate would carry solid-black planes no downstream step could tell from real
+ones. Reading pages individually, as the single-image path must, instead puts the
+gap in front of `.asarray()` as a bare `None`. So `read_ome_layout` counts
 the gaps in the same pass it reads the sizes (`series_page_gaps`, scanned only
 for the series kinds that can hold one) and carries them on `OmeLayout` as
 `total_planes` / `missing_planes` / `incomplete_positions` /
@@ -3909,7 +3908,17 @@ position/frame budget from the same `OmeLayout` and (when FOVs is pinned) the we
 count it implies, so the readout guides how many wells to place before any grid is
 entered, not only errors at the end. `apply.convert` calls `explode_ome_tiff` (which writes per-well zips into
 `<destination>/in/`, threaded, with progress + cancel), and `OmeImportWorker`
-runs it off the UI thread. On success
+runs it off the UI thread. **A finished conversion says how it went on the page.**
+This is the one tool with no dashboard — it reports on the acquisition plate it
+already draws (below) — so the verdict has a label of its own under the progress
+bar (`set_outcome` / `clear_outcome`), painted by the shared
+`widgets.plate_progress.apply_outcome` so a conversion reads the same way here as
+on any dashboard headline. It belongs on the page and not only in the raw log,
+which `LogPanelMixin` hides by default: a verdict that reaches only a hidden pane
+leaves a failed run looking exactly like one that was never started. A terminal
+state also lands the progress bar, which a run that ends before it has counted
+its planes would otherwise leave in its indeterminate state — a bar still
+sweeping is the one thing on the page claiming work is happening. On success
 the page's "Open dataset in Analyze" button routes the produced folder to the
 Analyze pane (`on_open_in_analyze`) — the output is an Analyze *input*, not a
 Review dataset. The page also carries a per-channel **role picker** (one row

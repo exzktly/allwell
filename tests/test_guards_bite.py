@@ -687,34 +687,59 @@ def _nested_tree(tmp_path: Path, container_body: str) -> Path:
     return tmp_path
 
 
-def _run_nested_scan(monkeypatch, root: Path, test_name: str):
+def _run_nested_scan(monkeypatch, root: Path, test_name: str, exempt=frozenset()):
+    """Point the container guard at *root* and run one of its tests.
+
+    It derives its scan surface from `tests/_repo_scan.python_sources`, imported
+    into its own namespace, so redirecting that plus `REPO_ROOT` / `WELL_VIEWER`
+    aims the whole rule at the synthetic tree.
+    """
+    files = [q for q in sorted((root / "well_viewer").rglob("*.py"))]
     return _run_rooted_scan(
         monkeypatch, "tests.test_architecture_contracts", test_name, root,
-        extra={"WELL_VIEWER": root / "well_viewer"})
+        extra={"WELL_VIEWER": root / "well_viewer",
+               "python_sources": lambda **kw: files,
+               "_DISPATCH_EXEMPT": set(exempt)})
 
 
-def test_nested_guard_catches_a_container_importing_its_own_sub_package(
-        tmp_path, monkeypatch):
-    root = _nested_tree(
-        tmp_path,
-        "from well_viewer.features.home.ratios.tab_view import PANEL\n")
-    exc = _run_nested_scan(
-        monkeypatch, root,
-        "test_a_container_feature_does_not_import_its_own_removable_sub_packages")
-    assert exc is not None, "the container's module-scope import went uncaught"
+_GUARD = "test_a_container_feature_does_not_import_its_own_removable_sub_packages"
+
+#: Every shape that reaches a nested removable sub-package from its container.
+#: The first is the one the guard was written for; the rest are evasions a
+#: reviewer demonstrated against the first version of it, and the function-local
+#: one is the shape that actually shipped a defect on this branch — the guard
+#: used to *clear* it.
+NESTED_VIOLATIONS = {
+    "module_scope": "from well_viewer.features.home.ratios.tab_view import PANEL\n",
+    "function_local": ("def build(ctx, frame):\n"
+                       "    from well_viewer.features.home.ratios.tab_view import PANEL\n"
+                       "    return PANEL\n"),
+    "plain_import": "import well_viewer.features.home.ratios.tab_view as rv\n",
+    "relative": "from .ratios.tab_view import PANEL\n",
+    "try_wrapped": ("try:\n"
+                    "    from well_viewer.features.home.ratios.tab_view import PANEL\n"
+                    "except ImportError:\n"
+                    "    PANEL = None\n"),
+    "aliased": "from well_viewer.features.home.ratios.tab_view import PANEL as _p\n",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(NESTED_VIOLATIONS))
+def test_nested_guard_catches_every_reach_into_a_sub_package(
+        tmp_path, monkeypatch, shape):
+    root = _nested_tree(tmp_path, NESTED_VIOLATIONS[shape])
+    exc = _run_nested_scan(monkeypatch, root, _GUARD)
+    assert exc is not None, f"the {shape} reach went uncaught"
     assert "controller.py" in str(exc) and "Ratios" in str(exc)
 
 
-def test_nested_guard_clears_a_function_local_import(tmp_path, monkeypatch):
-    root = _nested_tree(
-        tmp_path,
-        "def build(ctx, frame):\n"
-        "    from well_viewer.features.home.ratios.tab_view import PANEL\n"
-        "    return PANEL\n")
-    assert _run_nested_scan(
-        monkeypatch, root,
-        "test_a_container_feature_does_not_import_its_own_removable_sub_packages"
-    ) is None
+def test_nested_guard_names_a_function_local_reach_as_still_fatal(
+        tmp_path, monkeypatch):
+    """The message has to say why deferring does not help, or the next reader
+    'fixes' the failure by indenting the import."""
+    root = _nested_tree(tmp_path, NESTED_VIOLATIONS["function_local"])
+    exc = _run_nested_scan(monkeypatch, root, _GUARD)
+    assert "function-local" in str(exc)
 
 
 def test_nested_guard_clears_a_module_inside_the_sub_package_itself(
@@ -724,10 +749,29 @@ def test_nested_guard_clears_a_module_inside_the_sub_package_itself(
     root = _nested_tree(tmp_path, "STUB = 1\n")
     (root / "well_viewer" / "features" / "home" / "ratios" / "controller.py"
      ).write_text("from well_viewer.features.home.ratios.tab_view import PANEL\n")
+    assert _run_nested_scan(monkeypatch, root, _GUARD) is None
+
+
+def test_nested_guard_clears_a_listed_dispatch_site(tmp_path, monkeypatch):
+    """The one sanctioned reach: a container selecting a builder by tab name,
+    whose branch is unreachable once the tab is gone."""
+    root = _nested_tree(tmp_path, NESTED_VIOLATIONS["function_local"])
     assert _run_nested_scan(
-        monkeypatch, root,
-        "test_a_container_feature_does_not_import_its_own_removable_sub_packages"
-    ) is None
+        monkeypatch, root, _GUARD,
+        exempt={("well_viewer/features/home/controller.py",
+                 "well_viewer.features.home.ratios")}) is None
+
+
+def test_nested_exemption_liveness_catches_an_entry_that_no_longer_bites(
+        tmp_path, monkeypatch):
+    """An exemption naming an import that has since been repaired must be
+    reported, or it outlives the violation it was written for."""
+    root = _nested_tree(tmp_path, "STUB = 1\n")
+    exc = _run_nested_scan(
+        monkeypatch, root, "test_the_dispatch_exemption_still_describes_real_imports",
+        exempt={("well_viewer/features/home/controller.py",
+                 "well_viewer.features.home.ratios")})
+    assert exc is not None and "no longer describe" in str(exc)
 
 
 # ── Home sub-tab help topics ────────────────────────────────────────────────

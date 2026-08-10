@@ -53,14 +53,19 @@ IMPORT_KEY = "_home_import_btn"
 #: way ``per_well_selection`` already does for top-level tabs.
 OVERVIEW = "Overview"
 
-#: Each body's own inset. The report and the two read-only panes paint to their
-#: own edges; the two editable grids want a gutter. The frames themselves are
-#: flush with the notebook either way, which is what ``test_page_alignment``
-#: measures.
-_SUBTAB_MARGINS = {
-    "Groups": theme.Spacing.md,
-    "Well Labels": theme.Spacing.md,
-}
+def _subtab_inset(ctx, name: str) -> int:
+    """This tab's own gutter, in pixels.
+
+    Which tabs want one is the descriptor's ``subtab_inset``, not a list here:
+    the report and the read-only panes paint to their own edges, the editable
+    grids want a gutter, and a tab added tomorrow should not silently get the
+    wrong one because nobody updated a constant. The descriptor carries the
+    decision and this supplies the spacing token, so the registry never imports
+    ``theme``. The frames themselves are flush with the notebook either way,
+    which is what ``test_page_alignment`` measures.
+    """
+    desc = ctx.features.get(name)
+    return theme.Spacing.md if (desc is not None and desc.subtab_inset) else 0
 
 
 def active_subtabs(ctx) -> tuple[str, ...]:
@@ -163,7 +168,7 @@ def build_home_tab(ctx, parent: QWidget) -> None:
     frames = ctx.runtime.home.frames = {}
     for name in active_subtabs(ctx):
         frame = QWidget(sub_tabs)
-        inset = _SUBTAB_MARGINS.get(name, 0)
+        inset = _subtab_inset(ctx, name)
         QVBoxLayout(frame).setContentsMargins(inset, inset, inset, inset)
         sub_tabs.addTab(frame, name)
         frames[name] = frame

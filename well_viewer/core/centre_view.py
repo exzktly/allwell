@@ -221,7 +221,7 @@ def build_centre(win, parent: QWidget) -> None:
     # Sidebars referenced by data-load + tab-switch logic must exist
     # immediately even though the centre tab bodies that depend on them
     # are deferred.
-    from well_viewer.features.home.groups.tab_view import build_replicate_panel
+    from well_viewer.features.home.groups.panel_view import build_replicate_panel
     from well_viewer.features.preview.preview_view import build_preview_picker
     build_replicate_panel(win._ctx, win._sidebar_sample_frame)
     build_preview_picker(win, win._sidebar_preview_frame)

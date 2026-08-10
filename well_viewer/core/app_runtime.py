@@ -222,22 +222,23 @@ class AppRuntime:
         # (``ctx.runtime.tab.selection_model_identity``). Debug-only, never
         # persisted; read exclusively by the tab controller.
         object.__setattr__(self, "tab", _FeatureRuntime(s, "_tab_"))
-        # Home's GROUPS-tab transient scratch (prefix ``_groups_``): the pending
-        # inline-rename row index (``ctx.runtime.groups.inline_edit_idx`` <->
-        # ``app._groups_inline_edit_idx``) the rename action sets and the panel
+        # Home's GROUPS-tab transient scratch (prefix ``_groupstab_``): the
+        # pending inline-rename row index (``ctx.runtime.groups.inline_edit_idx``
+        # <-> ``app._groupstab_inline_edit_idx``) the rename action sets and the panel
         # refresh consumes, and the Quick-Replicates dropdown state
         # (``ctx.runtime.groups.pair_dir`` / ``.iter_order`` / ``.rep_size``) the
         # row/col-pair shims + the from-dropdowns reader thread through.
         # Session-only, never persisted.
         #
-        # The prefix overlaps two ``WellViewerApp`` delegates,
-        # ``_groups_centre_refresh`` and ``_groups_from_rep_sets``, so a field
-        # named ``centre_refresh`` or ``from_rep_sets`` here would stamp onto a
-        # method's name. None of the four fields does. This is not special to
-        # this namespace — 18 such overlaps exist across 7 prefixes (``_stats_``
-        # alone has 8) — so it is recorded rather than guarded; a guard would be
-        # new policy for the whole god-object surface, not a fix for this rename.
-        object.__setattr__(self, "groups", _FeatureRuntime(s, "_groups_"))
+        # The prefix is ``_groupstab_`` rather than the tidier ``_groups_``
+        # because that one is taken: ``WellViewerApp._groups_centre_refresh`` and
+        # ``._groups_from_rep_sets`` already own it, and ``reset_scopes`` reaches
+        # the first by name. Since the store is shared with the widget registry,
+        # a field called ``centre_refresh`` here would stamp straight onto the
+        # method's key. None of the four fields does today, so this is a
+        # collision avoided rather than a bug fixed — but the old ``_grp_``
+        # prefix had no overlap, and the rename introduced one for free.
+        object.__setattr__(self, "groups", _FeatureRuntime(s, "_groupstab_"))
         # Home's PIPELINE INFO tab (prefix ``_pipeline_info_``): the re-read
         # closure (``ctx.runtime.pipeline_info.refresh``) the tab stamps on build
         # and the sub-tab switch invokes, so entering the tab picks up a

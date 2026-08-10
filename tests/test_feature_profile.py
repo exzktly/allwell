@@ -225,3 +225,35 @@ def test_every_home_tab_has_a_builder():
     assert home_leaves, "premise: Home declares sub-leaves"
     missing = [d.name for d in home_leaves if d.build is None]
     assert not missing, f"Home sub-leaves with no builder: {missing}"
+
+
+def test_home_subtab_behaviour_is_declared_not_listed():
+    """Home's per-tab facts live on the descriptors, not in name lists.
+
+    Two behaviours used to be module constants in the Home package: which tabs
+    inset their frame (``_SUBTAB_MARGINS``) and which read the well selection so
+    the rail plate stays live (``_TABS_USING_THE_PLATE``). Both are the same
+    shape as issue #14 in miniature -- a tab added to the registry and not to the
+    constant would silently inherit whichever answer the constant happened to
+    give it, with no error and nothing on screen saying so. A greyed plate on a
+    tab that needs it is a control that ignores clicks; a live one on a tab that
+    does not is a control whose clicks do nothing.
+
+    The values themselves are asserted here because they are the *user-visible*
+    rule, and they are what a careless edit to the registry would change.
+    """
+    reg = build_feature_registry(FULL)
+    subs = {n: reg.get(n) for n in reg.sub_leaves("Home")}
+
+    reads = {n for n, d in subs.items() if d.reads_well_selection}
+    assert reads == {"Groups", "Cell Gating", "Well Labels"}
+
+    inset = {n for n, d in subs.items() if d.subtab_inset}
+    assert inset == {"Groups", "Well Labels"}
+
+    # Nothing outside Home claims either flag: they are sub-tab behaviours, and a
+    # top-level page's plate rule is `per_well_selection`, resolved per page.
+    for d in build_feature_registry(FULL).all():
+        if d.parent != "Home":
+            assert not d.reads_well_selection, d.name
+            assert not d.subtab_inset, d.name

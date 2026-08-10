@@ -161,13 +161,6 @@ def drain_home_subtabs(ctx) -> None:
     QTimer.singleShot(0, _step)
 
 
-#: Tabs whose editor reads the well selection, so the rail plate is live there.
-#: Groups edits a group's membership with it. Cell Gating draws its CDFs from
-#: the selected wells (``cell_gating_load_cell_areas``). Well Labels' Add Prefix
-#: / Add Suffix apply to them. Ratios and Pipeline Info ask nothing of it.
-_TABS_USING_THE_PLATE = ("Groups", "Cell Gating", "Well Labels")
-
-
 def sync_home_sidebar(ctx) -> None:
     """Put the rail plate in the state the current tab warrants.
 
@@ -179,6 +172,13 @@ def sync_home_sidebar(ctx) -> None:
     something breaking, but a live-looking plate that silently ignores clicks is
     worse. The plate paints its own disabled state; nothing in it consulted
     ``isEnabled()`` before this, so greying it used to be invisible.
+
+    Which editors read the selection is the descriptor's ``reads_well_selection``
+    rather than a name list here: Groups edits a group's membership with the
+    plate, Cell Gating draws its CDFs from the selected wells, Well Labels' Add
+    Prefix / Add Suffix apply to them, and Ratios and Pipeline Info ask nothing
+    of it. A tab added tomorrow declares its own answer instead of inheriting
+    whichever one a constant here happened to give it.
     """
     name = current_subtab(ctx)
     on_a_definition_tab = name in definition_subtabs(ctx)
@@ -187,7 +187,8 @@ def sync_home_sidebar(ctx) -> None:
         frame.setVisible(on_a_definition_tab)
     plate = ctx.widgets.get_or_none("_rep_map_plate")
     if plate is not None:
-        plate.setEnabled(name in _TABS_USING_THE_PLATE)
+        desc = ctx.features.get(name)
+        plate.setEnabled(bool(desc is not None and desc.reads_well_selection))
     btn = ctx.widgets.get_or_none(IMPORT_KEY)
     if btn is not None:
         btn.setVisible(on_a_definition_tab)

@@ -838,11 +838,14 @@ def _features() -> list[FeatureDescriptor]:
         # the per-tab work. The first three are load-bearing for code that
         # never asks whether they are present — see ``removable``.
         FeatureDescriptor(name="Cell Gating", parent="Home",
-                          build=_build_cell_gating, removable=False),
+                          build=_build_cell_gating, removable=False,
+                          reads_well_selection=True),
         FeatureDescriptor(name="Groups", parent="Home",
-                          build=_build_groups, removable=False),
+                          build=_build_groups, removable=False,
+                          reads_well_selection=True, subtab_inset=True),
         FeatureDescriptor(name="Well Labels", parent="Home",
-                          build=_build_well_labels, removable=False),
+                          build=_build_well_labels, removable=False,
+                          reads_well_selection=True, subtab_inset=True),
         FeatureDescriptor(name="Ratios", parent="Home", build=_build_ratios),
         FeatureDescriptor(name="Pipeline Info", parent="Home",
                           build=_build_pipeline_info),

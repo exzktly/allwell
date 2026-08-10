@@ -1,20 +1,14 @@
-"""Replicate panel builder (Qt port).
+"""Home — **Groups** tab: the GROUPS header, Quick Replicates and the group list.
 
-The sample definitions are split between two places:
+The editable ``SavedSelectionsList`` over ``ctx.state.selection.selections``,
+hoisted out of the sidebar so the list has full vertical room and the plate keeps
+its aspect ratio. The plate that edits the selected group's well membership is
+the rail's, and lives in ``groups/panel_view.py`` -- §3 keeps a feature's main
+tab page here and its sidebar panels in a ``*_view.py``.
 
-  - **Left sidebar** (this module, ``build_replicate_panel``): the plate
-    map only. Clicking a well edits the *current* selection's well
-    membership.
-  - **Home — Groups tab** (``build_replicate_groups_centre``): the
-    GROUPS header, Quick Replicates row, and the editable
-    SavedSelectionsList over ``app._app_state.selection.selections``. Hoisted out of the
-    sidebar so the user has full vertical room for the list and the
-    plate keeps its proper aspect ratio.
-  - **Home — Well Labels tab**: see ``home/labels/tab_view.py``.
-
-The page hosting those tabs is Home's (``features/home/tab_view.py``), which
-owns the notebook, the control band and the Import action; this module supplies
-one tab's body and the rail plate that edits it.
+Home's own module (``features/home/tab_view.py``) owns the notebook, the control
+band and the Import action; this supplies one tab's body. Well Labels is
+``home/labels/tab_view.py``.
 """
 
 from __future__ import annotations
@@ -26,74 +20,8 @@ from PySide6.QtWidgets import (
 from well_viewer.domain.plate_layout import PLATE_COLS
 from well_viewer.core.ui_helpers import btn_primary, btn_secondary, build_hline_separator
 from well_viewer.features.home.groups.controller import (
-    rep_add, rep_refresh_map, rep_quick_pairs_from_dropdowns,
+    rep_add, rep_quick_pairs_from_dropdowns,
 )
-from well_viewer.core.safe import swallowed
-
-
-def build_replicate_panel(ctx, parent: QWidget) -> None:
-    """Sample-Definitions LEFT sidebar: the plate map only.
-
-    The GROUPS panel (header + Quick Replicates + SavedSelectionsList +
-    hint line) lives in the centre area now; see
-    ``build_replicate_groups_centre``.
-    """
-
-    layout = parent.layout()
-    if layout is None:
-        layout = QVBoxLayout(parent)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-    from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
-    from widgets.well_plate_selector import WellPlateSelector
-    plate = WellPlateSelector(parent)
-    plate.setDragSelectEnabled(True)
-    plate.setRowColumnSelectable(True)
-    plate.setEnabledWells([])
-    from well_viewer.core.ui_helpers import well_plate_tooltip_provider
-    plate.setWellTooltipProvider(well_plate_tooltip_provider(ctx))
-    # The app-wide plate geometry (widgets/plate_geometry.py): same caps, same
-    # cell scale and same centring as every other plate map in the app. The
-    # trailing addStretch below pins the plate to the top of the column.
-    apply_plate_geometry(plate, role="rail")
-    layout.addWidget(plate, 0, PLATE_ALIGNMENT)
-    layout.addStretch(1)
-    ctx.widgets.register("_rep_map_plate", plate)
-
-    def _commit_plate_to_current(*_a) -> None:
-        from well_viewer.core.selection_controller import sel_by_id, sel_set_composition
-        from well_viewer.domain.viewer_state import parse_rc
-        # Well-membership edits should only land while the user is on Home's
-        # GROUPS tab. From Overview / Cell Gating / Well Labels / Ratios /
-        # Pipeline Info, this plate's selectionDragFinished can still fire
-        # (e.g. from programmatic refresh ticks) and silently rewrite the
-        # current group's composition — exactly the "wells get reassigned even
-        # though I'm not on the Groups tab" bug. Guard against it here.
-        sub_tabs = ctx.runtime.home.subtabs
-        if sub_tabs is not None:
-            try:
-                if sub_tabs.tabText(sub_tabs.currentIndex()) != "Groups":
-                    return
-            except Exception:
-                swallowed()  # was: pass (silent except)
-        sid = ctx.state.selection.current_selection_id
-        sel = sel_by_id(ctx, sid) if sid else None
-        if sel is None:
-            rep_refresh_map(ctx)        # no current selection — revert the click
-            return
-        well_paths = ctx.state.dataset.well_paths
-        new = sorted((w for w in plate.selectedWellIds() if w in well_paths),
-                     key=parse_rc)
-        old = sorted((w for w in (sel.get("wells") or []) if w in well_paths),
-                     key=parse_rc)
-        if new == old:
-            return
-        # sel_set_composition enforces well-exclusivity (the current group wins)
-        # and runs ctx.coordinator.rebuild_all(), which re-pushes the plate via rep_refresh_map.
-        sel_set_composition(ctx, sid, new)
-    # selectionDragFinished fires once per click *and* once at the end of a drag.
-    plate.selectionDragFinished.connect(_commit_plate_to_current)
 
 
 def build_replicate_groups_centre(ctx, parent: QWidget) -> None:

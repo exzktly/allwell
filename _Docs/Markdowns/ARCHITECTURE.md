@@ -1318,6 +1318,17 @@ persistence can build the tab with no frame to hand over), and the Ratios editor
 is *returned* rather than mounted. Both adapters are function-local imports
 inside the descriptor, which is what keeps the removable sub-packages removable.
 
+Two more per-tab facts are descriptor fields rather than name lists in the Home
+package: `reads_well_selection` decides whether the rail plate is live while that
+tab shows (Groups edits a group's membership with it, Cell Gating draws its CDFs
+from the selected wells, Well Labels' prefix/suffix apply to them; Ratios and
+Pipeline Info ask nothing of it), and `subtab_inset` decides whether the tab's
+frame takes a gutter. Both were constants keyed by tab name, which is issue #14's
+shape in miniature — a tab added to the registry and not to the constant inherits
+whichever answer the constant happens to give it, silently. `reads_well_selection`
+is finer than `per_well_selection`: that one is resolved per *page*, and Home is
+per-well as a page while only three of its five editors ask the plate anything.
+
 `Cell Gating`, `Groups` and `Well Labels` carry `removable=False`. That is not a
 statement of preference: `centre_view.build_centre` builds the rail plate that
 edits groups at startup with no descriptor check, so a profile dropping the
@@ -1933,7 +1944,7 @@ load. The Sample definitions reset scope writes both (§5.7).
 Other sidebar bodies live with their feature: the preview picker is
 `features/preview/preview_view.py`, the image-table picker is
 `features/image_browser/image_table/picker_view.py`, Home's Groups editor
-is `features/home/groups/tab_view.build_replicate_panel`, and the
+is `features/home/groups/panel_view.build_replicate_panel`, and the
 Statistics group editor is `features/stats/tab_view.build_stats_group_editor`. They're stacked inside the same sidebar QWidget
 and shown/hidden by `core/tab_controller.on_tab_change` based on the
 active tab.

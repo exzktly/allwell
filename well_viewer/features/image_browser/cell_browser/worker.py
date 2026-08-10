@@ -66,7 +66,8 @@ def compose_cell_rgb(ctx, desc: CellDescriptor, channels: list[str],
                      show_boundaries: bool, cache: dict,
                      lut_by_channel: dict[str, tuple] | None = None,
                      tint_by_channel: dict[str, tuple] | None = None,
-                     use_tophat: bool = False) -> np.ndarray | None:
+                     use_tophat: bool = False,
+                     scan_misses: set | None = None) -> np.ndarray | None:
     """Multi-channel composite RGB (uint8) of one cell, or None if unrenderable.
 
     *cache* is a per-page dict so each FOV's mask + channel arrays load once.
@@ -75,6 +76,14 @@ def compose_cell_rgb(ctx, desc: CellDescriptor, channels: list[str],
     others auto-scale per crop. *tint_by_channel* overrides the additive display
     colour per channel (else the fixed per-index palette). *use_tophat* selects
     the corrected (top-hat) image instead of raw.
+
+    *scan_misses* has the same per-page lifetime as *cache* and does the job
+    ``cache`` cannot: an image scan that comes up empty is deliberately not
+    cached (an empty result must not pin "this well has no images" for the
+    session), so without a shared set every cell re-walks the directory for an
+    absent well/channel. Measured over ten cells against one absent channel:
+    ten walks without it, one with, each walk emitting its own log line. The
+    pixels are identical either way -- this is wall-clock and log noise.
     """
     lut_by_channel = lut_by_channel or {}
     tint_by_channel = tint_by_channel or {}
@@ -88,7 +97,7 @@ def compose_cell_rgb(ctx, desc: CellDescriptor, channels: list[str],
     # load_frame_array always missed → every cell rendered as "—".
     chan_arrays = [
         load_frame_array(ctx, cache, desc.well, ch, desc.tp_token, desc.fov,
-                    use_tophat=use_tophat)
+                         use_tophat=use_tophat, scan_misses=scan_misses)
         for ch in channels
     ]
     mask_full = load_mask_array(ctx, cache, desc.well, desc.tp_token, desc.fov)
@@ -175,6 +184,9 @@ class CellImageLoader(QObject):
 
         def _run() -> None:
             cache: dict[str, Any] = {}
+            # Same lifetime as `cache`: one page, one scan per absent
+            # well/channel rather than one per cell.
+            scan_misses: set = set()
             n = 0
             for offset, desc in enumerate(descriptors):
                 # A newer page (or a dataset swap that bumped the gen) has
@@ -186,7 +198,8 @@ class CellImageLoader(QObject):
                 try:
                     rgb = compose_cell_rgb(self._ctx, desc, channels,
                                            show_boundaries, cache, lut_map,
-                                           tint_map, use_tophat)
+                                           tint_map, use_tophat,
+                                           scan_misses=scan_misses)
                 except Exception:
                     _logger.debug("cell_browser: compose failed for %r",
                                   desc, exc_info=True)

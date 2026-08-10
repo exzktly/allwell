@@ -826,3 +826,37 @@ def test_the_stage_inference_runs_once_per_file_not_once_per_keystroke(
     assert len(calls) == 1, "the inference re-ran for a change the file didn't make"
     # …and the drawing still followed every one of those edits.
     assert page._path_view._points[0] == (4.0, 3.0)
+
+
+def test_the_readout_says_a_run_will_be_resumed(qapp, tmp_path):
+    from datasets.ome_import.controller import OmeImportController
+    from datasets.ome_import.ome_import_compute import write_run_marker
+
+    p = _write_packed(tmp_path / "plate.ome.tif", n_frames=6,
+                      channel_names=("DAPI",))
+    dest = tmp_path / "out"
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    page._rows_edit.setText("1")
+    page._cols_edit.setText("6")
+    page.set_destination_path(str(dest))
+    page.refresh_readout()
+    assert "Resuming" not in page._readout.text()
+    assert page._run_btn.isEnabled()
+
+    # A previous attempt on the same settings left two wells and its marker.
+    write_run_marker(dest, p, page.params())
+    (dest / "in").mkdir(parents=True, exist_ok=True)
+    for well in ("A01", "A02"):
+        (dest / "in" / f"{well}.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
+    page.refresh_readout()
+
+    assert "Resuming an interrupted run: 2 well(s)" in page._readout.text()
+    assert page._run_btn.isEnabled()      # a resume is a run, not a refusal
+
+    # Change the grid and the same folder becomes a refusal, not a resume.
+    page._cols_edit.setText("3")
+    page._rows_edit.setText("2")
+    page.refresh_readout()
+    assert not page._run_btn.isEnabled()

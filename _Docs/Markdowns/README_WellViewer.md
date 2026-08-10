@@ -2574,7 +2574,18 @@ cleanly), and when the run ends a line under that bar says how it went — a gre
 summary, or the reason in red if it failed or was cancelled. You never have to
 open **Show raw log** to find out whether it worked. The output is one
 per-well `<WELL>.zip` in `<destination>/in/`, the layout Analyze reads directly
-(no regrouping step). Then **Open dataset in Analyze** — the Segmentation /
+(no regrouping step).
+
+**If a conversion is interrupted, running it again finishes it.** Each well is
+written in one piece, so whatever was completed before the interruption is
+already correct on disk. Point the same source at the same destination with the
+same settings and the readout says *"Resuming an interrupted run: 12 well(s) are
+already converted and will be kept"*; only the missing wells are converted, and
+the summary at the end says how many were kept. Change anything that alters
+which stage position becomes which well — the grid, origin, serpentine
+direction, FOVs per well, the clicked path, or the source file — and it is
+refused instead, because the two runs would produce files with the same names
+from different images. Empty the folder and start again in that case. Then **Open dataset in Analyze** — the Segmentation /
 fluorescent channel tokens arrive pre-filled from the channel roles you set (step
 7; adjust if needed), so you can run straight away. Because the wells now exist on
 disk, background-well and control-well options work normally.

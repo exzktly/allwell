@@ -13,8 +13,13 @@ from datasets.ome_import.ome_import_compute import (  # noqa: E402
     OmeImportError,
     channel_tokens_from_roles,
     default_channel_roles,
+    ResumeState,
+    clear_run_marker,
     default_dest,
     destination_problem,
+    read_run_marker,
+    resume_state,
+    write_run_marker,
     guess_channel_role,
     parse_count,
     RawFields,
@@ -507,3 +512,92 @@ def test_a_plan_refuses_a_source_that_is_not_a_sound_ome_tiff(tmp_path):
     )
     with pytest.raises(OmeImportError, match="no readable OME metadata"):
         plan_conversion(layout, ConversionParams(grid_rows=1, grid_cols=4))
+
+
+# ── finishing an interrupted conversion ──────────────────────────────────────
+
+
+def test_the_marker_makes_an_interrupted_run_resumable(tmp_path):
+    """Without it a half-finished folder is indistinguishable from someone
+    else's dataset, and the destination check has to refuse both."""
+    src = _write_packed(tmp_path / "s.ome.tif", n_frames=6)
+    dest = tmp_path / "out"
+    params = ConversionParams(grid_rows=1, grid_cols=6, experiment="e")
+
+    assert read_run_marker(dest) is None
+    assert resume_state(dest, src, params) == ResumeState()
+
+    write_run_marker(dest, src, params)
+    (dest / "in").mkdir(parents=True)
+    (dest / "in" / "A01.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
+
+    state = resume_state(dest, src, params)
+    assert state.resumable and state.wells_done == 1
+    assert "Resuming" in state.hint()
+    # …and the folder stops being a refusal while that is true.
+    assert destination_problem(dest, src, params) == ""
+
+    clear_run_marker(dest)
+    assert read_run_marker(dest) is None
+    assert "already holds converted wells" in destination_problem(
+        dest, src, params).lower()
+
+
+def test_a_marker_from_different_settings_is_refused_not_resumed(tmp_path):
+    """Two mappings produce the same filenames from different images, so the
+    names on disk cannot tell them apart — only the recorded settings can."""
+    src = _write_packed(tmp_path / "s.ome.tif", n_frames=6)
+    dest = tmp_path / "out"
+    write_run_marker(dest, src, ConversionParams(grid_rows=1, grid_cols=6))
+
+    for changed in (
+        ConversionParams(grid_rows=2, grid_cols=3),
+        ConversionParams(grid_rows=1, grid_cols=6, origin="B02"),
+        ConversionParams(grid_rows=1, grid_cols=6, direction="col"),
+        ConversionParams(grid_rows=1, grid_cols=6, fovs_per_well=2),
+        ConversionParams(grid_rows=1, grid_cols=6, experiment="other"),
+        ConversionParams(grid_rows=1, grid_cols=6, well_order=("A01", "A02")),
+    ):
+        state = resume_state(dest, src, changed)
+        assert state.mismatched, changed
+        assert not state.resumable, changed
+        assert "different settings" in destination_problem(dest, src, changed)
+
+    # Workers is not part of the mapping — it changes speed, not output.
+    faster = ConversionParams(grid_rows=1, grid_cols=6, workers=4)
+    assert resume_state(dest, src, faster).resumable
+
+
+def test_a_marker_for_another_source_file_is_a_mismatch(tmp_path):
+    a = _write_packed(tmp_path / "a.ome.tif", n_frames=6)
+    b = _write_packed(tmp_path / "b.ome.tif", n_frames=6)
+    dest = tmp_path / "out"
+    params = ConversionParams(grid_rows=1, grid_cols=6)
+    write_run_marker(dest, a, params)
+    assert resume_state(dest, b, params).mismatched
+
+
+def test_convert_finishes_an_interrupted_run_and_says_so(tmp_path):
+    from pipeline.ome_explode import OmeExplodeCancelled
+
+    src = _write_packed(tmp_path / "s.ome.tif", n_frames=6)
+    dest = tmp_path / "out"
+    params = ConversionParams(grid_rows=1, grid_cols=6, experiment="e", workers=1)
+
+    ticks = {"n": 0}
+
+    def stop_after_a_couple_of_wells():
+        ticks["n"] += 1
+        return ticks["n"] > 2
+
+    with pytest.raises(OmeExplodeCancelled):
+        convert(src, dest, params, is_cancelled=stop_after_a_couple_of_wells)
+    partial = sorted(p.stem for p in (dest / "in").glob("*.zip"))
+    assert partial and len(partial) < 6
+    assert read_run_marker(dest) is not None          # the run is still open
+
+    summary = convert(src, dest, params)
+    assert f"{len(partial)} kept from an interrupted run" in summary
+    assert len(sorted((dest / "in").glob("*.zip"))) == 6
+    # Finished: the folder is a dataset now, not an interrupted run.
+    assert read_run_marker(dest) is None

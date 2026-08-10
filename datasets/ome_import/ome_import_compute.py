@@ -11,8 +11,11 @@ page/worker layer stays a thin shell on top (CLAUDE.md §3/§5).
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from util.aw_safe import swallow
 
 from pipeline.ome_explode import (
     FRAME_ORDERS,
@@ -372,7 +375,98 @@ def stage_path_for(layout: OmeLayout, anchor: str = "A01",
     return path_in_cells(layout.stage_positions, inferred.pitch, row, col)
 
 
-def destination_problem(dest: Path | str) -> str:
+# Written into the destination while a conversion is running and removed when it
+# finishes. Its presence is what separates "this tool's interrupted run, resume
+# it" from "somebody else's dataset, refuse it" — the same device every other
+# Datasets tool uses (``_common.dataset_paths.make_dataset_api``).
+IN_PROGRESS_MARKER = ".aw_ome_in_progress"
+
+# The settings that decide which stage position becomes which well. Two runs
+# agreeing on these produce identical archives; two that differ produce the same
+# *filenames* from different images, which is why a resume has to compare them
+# rather than trusting the names on disk.
+_MAPPING_FIELDS = ("grid_rows", "grid_cols", "origin", "direction",
+                   "fovs_per_well", "frame_order", "experiment", "well_order")
+
+
+def _mapping_signature(src: Path | str, params: ConversionParams) -> dict:
+    """What a resume has to match: the source, and the settings that map it."""
+    values = {name: getattr(params, name) for name in _MAPPING_FIELDS}
+    values["well_order"] = list(values["well_order"] or ())
+    values["source"] = str(Path(src).resolve())
+    return values
+
+
+def write_run_marker(dest: Path | str, src: Path | str,
+                     params: ConversionParams) -> None:
+    """Record that a conversion is under way in *dest*, and with what settings."""
+    root = Path(dest)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / IN_PROGRESS_MARKER).write_text(
+        json.dumps(_mapping_signature(src, params), indent=2), encoding="utf-8")
+
+
+def clear_run_marker(dest: Path | str) -> None:
+    """Drop the marker — the run finished, so the folder is a dataset now."""
+    with swallow("ome-import marker"):
+        (Path(dest) / IN_PROGRESS_MARKER).unlink(missing_ok=True)
+
+
+def read_run_marker(dest: Path | str) -> dict | None:
+    """The settings of the interrupted run in *dest*, or ``None`` if there is none."""
+    path = Path(dest) / IN_PROGRESS_MARKER
+    if not path.is_file():
+        return None
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
+def converted_wells(dest: Path | str) -> list[str]:
+    """The well archives already sitting in ``<dest>/in``."""
+    in_dir = Path(dest) / "in"
+    if not in_dir.is_dir():
+        return []
+    return sorted(p.stem for p in in_dir.glob("*.zip"))
+
+
+@dataclass(frozen=True)
+class ResumeState:
+    """Whether *dest* holds an interrupted run of this conversion to finish."""
+
+    resumable: bool = False
+    wells_done: int = 0
+    # A previous run is there but was making a different dataset — different
+    # source, grid, origin or ordering. Resuming onto it would leave a folder
+    # stitched from two mappings, with the filenames of one and the images of
+    # both, and nothing in it saying so.
+    mismatched: bool = False
+
+    def hint(self) -> str:
+        if self.mismatched:
+            return ("This folder holds an interrupted conversion made with "
+                    "different settings. Empty it, or choose another folder.")
+        if self.resumable:
+            return (f"↳ Resuming an interrupted run: {self.wells_done} well(s) "
+                    f"are already converted and will be kept.")
+        return ""
+
+
+def resume_state(dest: Path | str, src: Path | str,
+                 params: ConversionParams) -> ResumeState:
+    """Read *dest* as a place to continue this conversion in."""
+    marker = read_run_marker(dest)
+    if marker is None:
+        return ResumeState()
+    if marker != _mapping_signature(src, params):
+        return ResumeState(mismatched=True, wells_done=len(converted_wells(dest)))
+    return ResumeState(resumable=True, wells_done=len(converted_wells(dest)))
+
+
+def destination_problem(dest: Path | str, src: Path | str = "",
+                        params: ConversionParams | None = None) -> str:
     """``""`` if *dest* is usable, else a short reason, for the field's hint.
 
     A conversion writes ``<dest>/in/<WELL>.zip`` and overwrites each archive it
@@ -381,12 +475,24 @@ def destination_problem(dest: Path | str) -> str:
     nothing in it saying so. Every other Datasets tool validates its destination
     field this way (``_common.dataset_fields.is_free_destination``); the wording
     differs here only because this tool writes ``in/`` and nothing else.
+
+    Given *src* and *params*, a folder carrying this tool's own in-progress
+    marker for the *same* settings is not a problem but a resume, and one
+    carrying it for different settings is refused with its own wording — the
+    filenames of two mappings are identical, so only the marker can tell them
+    apart.
     """
     root = Path(dest)
     if not str(dest).strip():
         return ""
     if root.exists() and not root.is_dir():
         return "Not a folder — choose a folder."
+    if params is not None:
+        state = resume_state(root, src or root, params)
+        if state.mismatched:
+            return state.hint()
+        if state.resumable:
+            return ""      # this tool's own interrupted run: finish it
     if (root / "out" / "pipeline_info.json").exists():
         return "Already holds a finished dataset — choose an empty folder."
     in_dir = root / "in"

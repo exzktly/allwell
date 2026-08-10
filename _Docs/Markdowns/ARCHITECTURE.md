@@ -3126,6 +3126,34 @@ herring. The converter page shows it in the readout and leaves **Convert**
 disabled. `_packed_plane` keeps a per-plane guard behind that check, naming the
 frame/channel/Z it was asked for rather than raising on `None`.
 
+**An interrupted conversion is finished, not repeated.** Every well is
+published atomically (`util.zip_write.atomic_zip`), so a run that stopped
+part-way leaves whole, correct archives and no half-written one — the work
+already done is on disk and only the rest is missing. `explode_ome_tiff(...,
+resume=True)` skips a well whose archive already holds **every member name these
+settings call for** (`_expected_members` / `_well_is_complete`, read from the
+zip's central directory, so a couple of seeks each), reports it through the same
+progress callbacks as a converted one — otherwise the plate map shows a finished
+well as one that never ran, and the run-wide bar never reaches its total — and
+names the count in `ExplodeResult.wells_resumed` and the closing log line.
+
+**Resume is off by default, and gated on the settings rather than the
+filenames.** Two different mappings — another grid, origin, ordering, FOVs-per-
+well, or another source file — produce *identical* member names from different
+images, so an archive on disk cannot say which run made it. `apply.convert`
+writes `datasets/ome_import/ome_import_compute.IN_PROGRESS_MARKER`
+(`.aw_ome_in_progress`) into the destination before the first archive, holding
+the source path and the mapping fields, and removes it on success; so the marker
+exists exactly while a run is unfinished. `resume_state` compares it against the
+current settings and answers *resumable*, *mismatched* or neither, and
+`destination_problem` reads that: a folder carrying this tool's marker for the
+same settings is not a refusal but a resume, for different settings it is
+refused in its own words, and with no marker at all the ordinary
+"already holds converted wells" rule applies. This is the same device the other
+Datasets tools use (`_common.dataset_paths.make_dataset_api`), for the same
+reason: a folder holding *this* tool's interrupted attempt is a resume, while the
+same folder holding another tool's leftovers is not.
+
 `explode_ome_tiff` also takes a `progress_fn`/`should_abort` pair (raising
 `OmeExplodeCancelled`) so the converter's worker can drive a progress bar and
 Cancel. Channel roles are *not* set in the converter — it writes the OME channel

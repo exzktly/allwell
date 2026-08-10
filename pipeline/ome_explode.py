@@ -245,6 +245,10 @@ class ExplodeResult:
     timepoints: list[str] = field(default_factory=list)
     fovs_per_well: int = 0
     images_written: int = 0
+    # Wells a resumed run found already complete and did not rewrite. Reported
+    # rather than merely skipped: a run that converted a tenth of a plate and
+    # one that converted all of it otherwise print the same closing line.
+    wells_resumed: list[str] = field(default_factory=list)
 
 
 def _safe_token(value: object, fallback: str) -> str:
@@ -680,6 +684,38 @@ def _resolve_positions(
     return fovs_per_well
 
 
+def _expected_members(experiment: str, channels, well: str, fovs: int,
+                      timepoints) -> set[str]:
+    """Every member name a finished ``<well>.zip`` holds, for these settings.
+
+    The exact set, not a count: an archive left by a run with a different grid
+    holds the right *number* of images under the wrong names, and resuming onto
+    it would leave a dataset stitched from two different well mappings.
+    """
+    return {
+        f"{experiment}_{channel}_{well}_f{fov}_{tp}.tif"
+        for channel in channels
+        for fov in range(fovs)
+        for tp in timepoints
+    }
+
+
+def _well_is_complete(path: Path, expected: set[str]) -> bool:
+    """True when *path* is a readable archive already holding *expected*.
+
+    Reads the central directory only, so this costs a couple of seeks however
+    large the archive is. An unreadable or truncated zip is treated as absent —
+    ``atomic_zip`` cannot leave one, but a half-copied folder can.
+    """
+    if not path.is_file():
+        return False
+    try:
+        with zipfile.ZipFile(path) as zf:
+            return expected.issubset(set(zf.namelist()))
+    except (OSError, zipfile.BadZipFile):
+        return False
+
+
 def _pick_workers(workers: int, n_wells: int) -> int:
     """Resolve the worker-thread count (0 = auto), capped at the well count."""
     if n_wells <= 0:
@@ -750,6 +786,7 @@ def explode_ome_tiff(
     progress_fn: "Callable[[int, int], None] | None" = None,
     well_progress_fn: "Callable[[str, int, int], None] | None" = None,
     should_abort: "Callable[[], bool] | None" = None,
+    resume: bool = False,
 ) -> ExplodeResult:
     """Explode a packed OME-TIFF into per-well ``<WELL>.zip`` archives in *out_in_dir*.
 
@@ -848,6 +885,24 @@ def explode_ome_tiff(
         f" -- {n_workers} worker(s).\n"
     )
 
+    # Wells a previous attempt already finished. A well's archive is published
+    # atomically, so one that exists holding every member these settings call
+    # for is complete and correct — there is no half-written archive to detect.
+    # Off by default: silently leaving wells alone is only right when the caller
+    # has established that the folder holds *this* run's interrupted output.
+    resumable: set[str] = set()
+    if resume:
+        resumable = {
+            label for label in well_labels
+            if _well_is_complete(
+                out_in_dir / f"{label}.zip",
+                _expected_members(exp_tok, layout.channel_names, label,
+                                  fovs, tp_tokens))
+        }
+        if resumable:
+            _log(f"[ome] Resuming: {len(resumable)} of {n_wells} well(s) are "
+                 f"already converted and will be left alone.\n")
+
     lock = threading.Lock()
     done = 0
     # Planes one well accounts for: its FOVs x timepoints x channels. Every well
@@ -873,6 +928,7 @@ def explode_ome_tiff(
     def _convert_wells(well_indices: "list[int]"):
         written = 0
         wells: list[str] = []
+        resumed: list[str] = []
         read_s = write_s = 0.0
         with tifffile.TiffFile(str(ome_path)) as tf:
             series0 = tf.series[0]
@@ -881,6 +937,16 @@ def explode_ome_tiff(
                 if _abort():
                     raise OmeExplodeCancelled()
                 label = well_labels[i]
+                if label in resumable:
+                    # Report it full rather than silently absent: the plate map
+                    # this drives would otherwise show a finished well as one
+                    # that never ran.
+                    resumed.append(label)
+                    if well_progress_fn:
+                        well_progress_fn(label, planes_per_well, planes_per_well)
+                    for _ in range(fovs * n_timepoints * layout.size_c):
+                        _bump()
+                    continue
                 well_written = 0
                 base = i * fovs
                 with atomic_zip(out_in_dir / f"{label}.zip",
@@ -914,7 +980,7 @@ def explode_ome_tiff(
                                 well_written += 1
                                 _bump(label, well_written)
                 wells.append(label)
-        return written, wells, read_s, write_s
+        return written, wells, read_s, write_s, resumed
 
     groups = [g for g in (list(range(i, n_wells, n_workers))
                           for i in range(n_workers)) if g]
@@ -924,23 +990,28 @@ def explode_ome_tiff(
         fovs_per_well=fovs,
     )
     all_wells: list[str] = []
+    all_resumed: list[str] = []
     read_total = write_total = 0.0
     t_start = time.perf_counter()
     with ThreadPoolExecutor(max_workers=n_workers) as ex:
         futures = [ex.submit(_convert_wells, g) for g in groups]
         for fut in as_completed(futures):
-            w, wells, rs, ws = fut.result()
+            w, wells, rs, ws, resumed = fut.result()
             result.images_written += w
             all_wells.extend(wells)
+            all_resumed.extend(resumed)
             read_total += rs
             write_total += ws
-    result.wells = sorted(set(all_wells))
+    result.wells = sorted(set(all_wells) | set(all_resumed))
+    result.wells_resumed = sorted(set(all_resumed))
 
     wall = time.perf_counter() - t_start
     rate = result.images_written / wall if wall > 0 else 0.0
+    kept = (f" ({len(result.wells_resumed)} well(s) kept from the previous run)"
+            if result.wells_resumed else "")
     _log(
         f"[ome] Wrote {result.images_written} image(s) for "
-        f"{len(result.wells)} well(s) into {out_in_dir.name}/ in {wall:.1f}s "
+        f"{len(result.wells)} well(s){kept} into {out_in_dir.name}/ in {wall:.1f}s "
         f"({rate:.0f} planes/s; read {read_total:.1f}s, write {write_total:.1f}s "
         f"summed across {n_workers} worker(s)).\n"
     )

@@ -721,3 +721,73 @@ def test_a_sound_file_reports_nothing(tmp_path):
     layout = read_ome_layout(p)
     assert layout.validation_report("s.ome.tif") == ""
     assert layout.warnings == []
+
+
+# ── finishing an interrupted run ─────────────────────────────────────────────
+
+
+def test_resume_keeps_finished_wells_and_writes_only_the_rest(tmp_path):
+    """Each well's archive is published atomically, so one that exists is
+    complete. Rewriting it costs the whole plate's read and encode again."""
+    p = _write_packed(tmp_path / "s.ome.tif", n_frames=6)
+    out = tmp_path / "in"
+    explode_ome_tiff(p, out, grid_rows=1, grid_cols=6, experiment="e")
+    full = _members(out)
+    keep = {"A01", "A02"}
+    for zip_path in out.glob("*.zip"):
+        if zip_path.stem not in keep:
+            zip_path.unlink()
+
+    lines: list[str] = []
+    result = explode_ome_tiff(p, out, grid_rows=1, grid_cols=6, experiment="e",
+                              resume=True, log_fn=lines.append)
+
+    assert result.wells_resumed == ["A01", "A02"]
+    assert len(result.wells) == 6                     # the whole plate is there
+    assert result.images_written == 8                 # 4 wells x 2 channels
+    assert _members(out) == full                      # and identical to a full run
+    assert any("already converted" in line for line in lines)
+
+
+def test_without_resume_every_well_is_rewritten(tmp_path):
+    """The default: silently leaving wells alone is only right once a caller has
+    established the folder holds *this* run's output."""
+    p = _write_packed(tmp_path / "s.ome.tif", n_frames=6)
+    out = tmp_path / "in"
+    explode_ome_tiff(p, out, grid_rows=1, grid_cols=6, experiment="e")
+    result = explode_ome_tiff(p, out, grid_rows=1, grid_cols=6, experiment="e")
+    assert result.wells_resumed == []
+    assert result.images_written == 12
+
+
+def test_a_resumed_well_still_reports_its_progress(tmp_path):
+    """The plate map this drives would otherwise show a finished well as one
+    that never ran, and the run-wide bar would never reach its total."""
+    p = _write_packed(tmp_path / "s.ome.tif", n_frames=4)
+    out = tmp_path / "in"
+    explode_ome_tiff(p, out, grid_rows=1, grid_cols=4, experiment="e")
+    for zip_path in out.glob("*.zip"):
+        if zip_path.stem != "A01":
+            zip_path.unlink()
+
+    seen: list[tuple[str, int, int]] = []
+    totals: list[tuple[int, int]] = []
+    explode_ome_tiff(p, out, grid_rows=1, grid_cols=4, experiment="e", resume=True,
+                     well_progress_fn=lambda w, d, t: seen.append((w, d, t)),
+                     progress_fn=lambda d, t: totals.append((d, t)))
+
+    assert ("A01", 2, 2) in seen                      # full, in one step
+    assert totals[-1] == (8, 8)                       # the run-wide bar completes
+
+
+def test_resume_rewrites_a_well_whose_archive_is_for_other_settings(tmp_path):
+    """Same well label, different experiment token: the members the settings
+    call for are not in there, so it is not this run's output."""
+    p = _write_packed(tmp_path / "s.ome.tif", n_frames=4)
+    out = tmp_path / "in"
+    explode_ome_tiff(p, out, grid_rows=1, grid_cols=4, experiment="old")
+    result = explode_ome_tiff(p, out, grid_rows=1, grid_cols=4, experiment="new",
+                              resume=True)
+    assert result.wells_resumed == []
+    assert result.images_written == 8
+    assert all(name.startswith("new_") for name in _members(out))

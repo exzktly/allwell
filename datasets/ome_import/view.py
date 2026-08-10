@@ -56,6 +56,7 @@ from datasets.ome_import.ome_import_compute import (
     default_dest,
     destination_problem,
     infer_layout,
+    resume_state,
     stage_path_for,
     suggest_layout,
     plan_conversion,
@@ -692,7 +693,12 @@ class OmeImportPage(LogPanelMixin, QWidget):
             self._rebuild_channels(layout.channel_names if layout else [])
         self._refresh_suggestion(layout)
         problems = fields.problems()
-        dest_problem = destination_problem(self._dest_field.path())
+        dest_problem = destination_problem(
+            self._dest_field.path(), src, fields.to_params())
+        resume = (
+            resume_state(self._dest_field.path(), src, fields.to_params())
+            if src and self._dest_field.path() else None
+        )
         if src and layout is None:
             verdict, tone = "⚠ Could not read this file as an OME-TIFF.", "Danger"
         elif problems:
@@ -711,6 +717,8 @@ class OmeImportPage(LogPanelMixin, QWidget):
             # before any grid is entered) so the user is guided, not just
             # error-checked at the end.
             head += "\n" + selection_target(layout, params).hint()
+            if resume is not None and resume.resumable:
+                head += "\n" + resume.hint()
             try:
                 plan = plan_conversion(layout, params)
                 verdict, tone = f"✓ {plan.summary()}", "Muted"

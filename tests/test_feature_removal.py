@@ -40,11 +40,24 @@ def _narrow_profile(monkeypatch, parent: str, dropped: str):
     factory in place and the "deleted" package gets imported anyway.
     """
     import well_viewer.runtime_app as rt
-    from well_viewer.core.profile import Profile, active_profile
+    from well_viewer.core.profile import Profile
     from well_viewer.features.registry import build_feature_registry as _real
 
-    full = active_profile()
     from well_viewer.features.registry import _features
+
+    # Ask the *descriptor*, not `includes_subtab`. Under the full profile that
+    # predicate short-circuits (`features is None`, then no `[subtabs]` entry) and
+    # returns True for any pair of strings — including a misspelled sub-tab and a
+    # `removable=False` one, which is precisely what this is meant to refuse. It
+    # never reads `removable` at all.
+    leaf = next((d for d in _features()
+                 if d.name == dropped and d.parent == parent), None)
+    assert leaf is not None, (
+        f"{dropped!r} is not a sub-leaf of {parent!r} in the registry")
+    assert leaf.removable, (
+        f"{dropped!r} is `removable=False` — a profile cannot drop it, so a "
+        "deletion test for it would be asserting something the app forbids")
+
     siblings = tuple(d.name for d in _features()
                      if d.parent == parent and d.name != dropped)
     narrowed = Profile(
@@ -52,9 +65,6 @@ def _narrow_profile(monkeypatch, parent: str, dropped: str):
         features=frozenset(d.name for d in _features() if d.group) | {parent},
         subtabs={parent: list(siblings)},
     )
-    assert full.includes_subtab(parent, dropped), (
-        f"{dropped!r} is not a narrowable sub-tab of {parent!r} — a "
-        "`removable=False` leaf cannot be dropped and must not be tested here")
     monkeypatch.setattr(rt, "build_feature_registry", lambda: _real(narrowed))
     return rt
 

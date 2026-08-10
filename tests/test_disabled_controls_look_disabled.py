@@ -56,12 +56,28 @@ def _make_labeled_combo():
 
 
 def _make_plate():
-    """A plate with wells to draw. An empty one paints only sockets, so it would
-    compare equal in both states for a reason that has nothing to do with the
-    disabled look."""
+    """The rail plate, built the way the rail builds it.
+
+    Two things here are load-bearing and both were got wrong the first time.
+
+    It needs wells: an empty plate paints only sockets, so it would compare equal
+    in both states for a reason that has nothing to do with the disabled look.
+
+    And it needs ``role="rail"``, which hides the action row. Every Review rail
+    plate goes through ``apply_plate_geometry``, and `"rail"` sets
+    ``setActionsVisible(False)`` -- so the real ``_rep_map_plate`` has no All 96 /
+    Invert / Clear buttons. Left visible, those buttons are the entire pixel
+    difference this case measures, because Qt greys a ``QPushButton`` for free.
+    The first version of this factory kept them, and the case passed against the
+    widget *before* it could paint a disabled state at all: 0 differing pixels in
+    the grid, all of the delta in the button row.
+    """
+    from widgets.plate_geometry import apply_plate_geometry
+
     plate = WellPlateSelector()
     plate.setEnabledWells([f"{r}{c:02d}" for r in "ABCDEFGH" for c in range(1, 13)])
     plate.setSelectedWellIds(["A01", "B02"])
+    apply_plate_geometry(plate, role="rail")
     return plate
 
 

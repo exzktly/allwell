@@ -328,7 +328,16 @@ def apply_image_table(ctx, state: dict) -> None:
     _restore_scope(ctx, state)
     _relight_sidebar_plate(ctx)
     # Intentionally NOT calling image_table_generate here — restore only pre-fills
-    # the dropdowns; the user clicks Generate to load images off disk.
+    # the dropdowns; the user clicks Generate to load images off disk. That holds
+    # for Saved Plots' Restore too: reading a whole grid back off disk is the
+    # user's call to make, not something a restore takes on their behalf.
+    #
+    # It does mean the shelf now describes a table the pictures below it are not
+    # of, so the restored table is marked stale by the same flag a shelf edit
+    # sets. The header then carries its standing "edited — press Generate" cue,
+    # which is what turns "these controls do not match the grid" from something
+    # the reader has to notice into something the page says.
+    ctx.runtime.image_table.builder_dirty = True
 
     # Redraw the shelf (rows/cols trees, Fixed panel, tray) so it visually
     # reflects what was just restored instead of the stale spec it was built

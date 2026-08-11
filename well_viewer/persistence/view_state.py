@@ -601,6 +601,30 @@ def _activate_tab(ctx, name: str) -> None:
         _logger.debug("view_state: tab activation failed for %r", name, exc_info=True)
 
 
+#: Tabs whose per-tab block this module snapshots itself. Every other block
+#: comes from a feature's ``view_state_io`` hook, so the full set is these plus
+#: whatever the registry currently carries — see :func:`owns_tab_block`.
+_BUILTIN_TAB_BLOCKS = ("Bar Plots", "Distribution", "Scatter Plot")
+
+
+def owns_tab_block(ctx, tab_name: str) -> bool:
+    """Whether *tab_name* stores per-tab state of its own in a snapshot.
+
+    Lets a caller tell "this saved view has no block for the tab because the tab
+    keeps nothing" from "…because it was saved before the tab kept anything".
+    The first is normal for most tabs — Line Graphs has no block and never had —
+    and the second is a saved view that will silently restore less than the user
+    expects, which is worth saying out loud.
+    """
+    if tab_name in _BUILTIN_TAB_BLOCKS:
+        return True
+    try:
+        d = ctx.features.get(tab_name)
+    except Exception:
+        return False
+    return bool(d is not None and d.view_state_io)
+
+
 def apply_pending_tab_state(ctx, tab_name: str) -> bool:
     """Pop *tab_name*'s pending state (if any) into live widgets.
 

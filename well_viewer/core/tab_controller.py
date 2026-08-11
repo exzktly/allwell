@@ -102,8 +102,11 @@ def on_tab_change(ctx, _e=None) -> None:
             # which ``update_bar_tp_menu`` had defaulted to a single checked
             # timepoint, so the plot showed one timepoint even though the saved
             # selection (now applied) has several. Redraw the plot tabs so they
-            # reflect the restored state. (Image Table deliberately does not
-            # auto-regenerate, so it is intentionally excluded.)
+            # reflect the restored state. The Image Table is deliberately
+            # excluded — it reads images off disk, and it renders only when the
+            # user presses Generate. That holds on every restore path, this one
+            # and Saved Plots' Restore alike; the table is marked stale instead,
+            # so the shelf header asks for the Generate rather than taking it.
             if tab == "Bar Plots":
                 ctx.features.redraw(ctx, "Bar Plots")
             elif tab == "Scatter Plot":

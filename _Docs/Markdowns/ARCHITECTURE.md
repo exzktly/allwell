@@ -1433,6 +1433,19 @@ parameters and must leave the user looking at the tab that figure came from.
 Sending it to Home instead would apply the whole restored view to a tab nobody
 is on, which on screen is indistinguishable from a restore that did nothing.
 
+Two other ways that restore can look like it did nothing. A tab that renders on
+demand rather than on every state change comes back with its controls restored
+and its picture untouched — that is the Image Table, which does not regenerate
+on a restore (§5.3) and instead marks itself stale so the shelf asks for the
+Generate. And a record saved before its tab began storing a per-tab block
+restores the cross-cutting state and nothing tab-specific:
+`features/saved_plots/controller.py`'s `_report_missing_tab_block` says so in
+the status line,
+gated on `view_state.owns_tab_block`, which separates "this tab keeps no block"
+(true of most tabs, and not worth a warning) from "this record has none of the
+block this tab keeps" (worth one — the fix is to re-save the plot, and a user
+who is told nothing re-clicks Restore instead).
+
 **Every shortfall Home reports offers the same next step: finish the run.**
 Failures, partial wells, images without measurements, staged-but-never-processed
 — all four route to `run_home_action(ctx, "complete")`, which hands the dataset
@@ -1603,7 +1616,15 @@ everything core used to hard-code:
 - `redraw` — a plot feature's figure-redraw callable; core plot orchestration
   (`plot_orchestrator.redraw_app`, tab activation) triggers a redraw by name via
   `registry.redraw(ctx, "<tab>")`, so it names no renderer (Bar Plots / Line
-  Graphs / Scatter Plot / Distribution / Heat Map register it);
+  Graphs / Scatter Plot / Distribution / Heat Map / Spatial register it). **The
+  Image Table deliberately registers none.** Its render reads images off disk,
+  so it happens when the user presses Generate and at no other time — including
+  on a Saved Plots restore, where a saved grid can be hundreds of frames and
+  paying for them is the user's decision to make. What restore owes the reader
+  instead is not implying the pictures match the controls: `apply_image_table`
+  marks the table stale (`runtime.image_table.builder_dirty`), which is the flag
+  a shelf edit already sets, so the shelf header carries its standing
+  "edited — press Generate" cue;
 - `fold_change_scope_factory` — the feature's fold-change redraw scope
   (`core/scope_registry` registers these from the descriptors);
 - `plot_card_decorator` — a feature that decorates every plot card (Saved Plots'

@@ -36,11 +36,19 @@ def test_toggle_never_overlaps_the_well_picker_plate(viewer_app):
     app.resize(1640, 980)
     app.show()
     _settle(app)
+    # Land on a page that actually shows the rail's picker. Review opens on
+    # Home, which deliberately shows no rail frame at all — it carries its own
+    # plate, and a second one in the rail would be two plates on one screen — so
+    # the collision this test exists to catch is not reachable from there.
+    assert app._notebook.setCurrentByName("Plotting")
+    _settle(app)
     position_rail_toggle(app)
 
     btn = app._sidebar_toggle_btn
     plate = app._sidebar_plate
-    assert plate.isVisible()
+    assert plate.isVisible(), (
+        "no rail plate on screen, so this test would pass without measuring "
+        "the overlap it exists to measure")
 
     from PySide6.QtCore import QPoint
     btn_top = btn.y()

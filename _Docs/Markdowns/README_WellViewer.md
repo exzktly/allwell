@@ -2407,6 +2407,16 @@ rather than a single panel.
   parameters and take you to the tab it was captured from, so you arrive looking
   at the figure it recreated), **Export**, **Rename**, **Delete**, and a
   collapsible parameter summary.
+  - A saved **Image Table** grid comes back complete: its wells, timepoints,
+    channels, LUTs and layout, *and* the images themselves — restoring one
+    re-generates the grid rather than leaving you to press **Generate**. That is
+    the one tab where restoring reads images off disk again, so a large grid
+    takes as long to come back as it took to draw.
+  - A plot saved before its tab began recording its own settings can only
+    restore the settings shared across tabs — channel, metric, wells, gating.
+    The status line says so by name when it happens, because a silent partial
+    restore looks exactly like a broken one. Re-save the plot from the tab and
+    the new card carries everything.
 - **Export all** — write the whole gallery as a multi-page **PDF report** (a
   cover page plus one full-quality page per plot with its parameters). The
   Image Table grid can be saved here too.

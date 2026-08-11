@@ -337,3 +337,74 @@ def test_channel_restore_through_full_view_state_path(image_table_app):
 
     assert it.cells[0][0]["chan"] == chan0
     assert app._ctx.state.image_table.channel_opts[chan0].get("render") == "corrected"
+
+
+def test_restoring_a_saved_plot_re_renders_the_image_grid(image_table_app):
+    """Saved Plots' Restore must put the *pictures* back, not only the controls.
+
+    The tab is generation-gated — ``apply_image_table`` restores the shelf and
+    leaves the images alone, which is right for the restore that runs during a
+    dataset load and would otherwise decode a whole saved grid on every app
+    open. It is wrong for Restore, where the user asked for one figure back: a
+    tab whose controls changed under an unchanged picture is indistinguishable
+    from a restore that did nothing. The Image Table's ``redraw`` descriptor
+    hook closes that, and `saved_plots` reaches it by name.
+    """
+    from well_viewer.features.saved_plots.controller import (
+        restore_saved_plot, save_plot_from_card,
+    )
+    from well_viewer.features.saved_plots.state import get_store
+
+    app = image_table_app
+    ctx = app._ctx
+    C.image_table_repopulate_dropdowns(ctx)
+    C.image_table_apply_preset(ctx, "channel", "timepoint")
+    assert ctx.runtime.image_table.cells, "apply_preset built no render model"
+
+    assert save_plot_from_card(ctx, "Image Table", b"\x89PNG", "grid").startswith("Saved")
+    rec = get_store(ctx).records[-1]
+
+    # Empty the rendered grid, the way another table's Generate would.
+    from well_viewer.core.ui_helpers import clear_layout
+    grid = ctx.runtime.image_table.render_grid
+    assert grid is not None
+    clear_layout(grid)
+    assert grid.count() == 0
+
+    restore_saved_plot(ctx, rec.id)
+    assert grid.count() > 0, "Restore left the rendered grid empty"
+
+
+def test_the_image_table_owns_a_per_tab_block(image_table_app):
+    """The predicate `saved_plots` uses to tell "this tab keeps nothing" from
+    "this record predates what it keeps"."""
+    ctx = image_table_app._ctx
+    assert vs.owns_tab_block(ctx, "Image Table") is True
+    assert vs.owns_tab_block(ctx, "Bar Plots") is True
+    assert vs.owns_tab_block(ctx, "Line Graphs") is False
+
+
+def test_a_record_with_no_image_table_block_says_so(image_table_app):
+    """A saved plot from before the tab recorded its settings restores the
+    cross-cutting state and nothing tab-specific. Silence there reads as a
+    broken Restore, and the user re-clicks it rather than re-saving the plot —
+    the one thing that would actually fix it."""
+    from well_viewer.features.saved_plots.controller import restore_saved_plot
+    from well_viewer.features.saved_plots.state import SavedPlot, get_store
+
+    app = image_table_app
+    ctx = app._ctx
+    said = []
+    ctx.notify.set_status = lambda msg: said.append(msg)  # boundary, not state
+
+    store = get_store(ctx)
+    store.ensure_loaded(ctx)
+    store.records.append(SavedPlot(
+        id="old-1", created_at="2026-01-01T00:00:00", tab="Image Table",
+        title="an old grid", png_filename="old-1.png",
+        params={"active_centre_tab": "Image Table"},   # no "tabs" block at all
+        thresholds={}))
+
+    restore_saved_plot(ctx, "old-1")
+    assert said, "restoring a record with no Image Table block said nothing"
+    assert "Image Table" in said[-1] and "an old grid" in said[-1]

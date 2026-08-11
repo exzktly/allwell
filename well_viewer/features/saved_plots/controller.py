@@ -93,7 +93,36 @@ def restore_saved_plot(ctx, plot_id: str) -> None:
     # per-tab state (Heat Map / Bar / Scatter / Distribution / Image Table) and
     # force its redraw, so restored axis limits + Heat-Map display settings reach
     # the live figure regardless of whether the tab actually switched.
-    _reapply_target_tab(ctx, rec.params.get("active_centre_tab") or rec.tab)
+    target = rec.params.get("active_centre_tab") or rec.tab
+    _reapply_target_tab(ctx, target)
+    _report_missing_tab_block(ctx, rec, target)
+
+
+def _report_missing_tab_block(ctx, rec, tab: str) -> None:
+    """Say so when the record carries no per-tab settings for the tab it names.
+
+    A record saved before a tab began storing its own block restores the
+    cross-cutting state and nothing tab-specific — the Image Table's wells,
+    timepoints, channels and LUTs, say. Left silent that is indistinguishable
+    from a restore that failed, and the user re-clicks Restore rather than
+    re-saving the plot, which is the one thing that would fix it.
+
+    Only for tabs that keep a block at all: most tabs have none and never had,
+    and a warning there would be false.
+    """
+    if not tab:
+        return
+    try:
+        if not view_state.owns_tab_block(ctx, tab):
+            return
+        blocks = rec.params.get("tabs")
+        if isinstance(blocks, dict) and blocks.get(tab):
+            return
+        ctx.notify.set_status(
+            f"Restored “{rec.title}” — but it carries no saved {tab} settings "
+            f"(saved before this tab recorded them). Re-save it to capture them.")
+    except Exception:
+        _logger.debug("saved_plots: missing-block report failed", exc_info=True)
 
 
 def _reapply_target_tab(ctx, tab: str) -> None:

@@ -677,6 +677,36 @@ def _image_table_view_state_io():
     return snapshot_image_table, apply_image_table
 
 
+def _redraw_image_table():
+    """The Image Table's equivalent of a plot redraw: reload the cells' images
+    and lay the rendered grid out again.
+
+    This tab is *generation-gated* — it reads images off disk, so it renders when
+    the user asks rather than on every state change, and ``apply_image_table``
+    deliberately restores the controls without touching the pictures. That is
+    right for the dataset-load restore, which would otherwise decode a whole
+    saved grid during every app open. It is wrong for Saved Plots' *Restore
+    settings*, where the user has asked for one particular figure back and a tab
+    whose controls changed under an unchanged picture reads as a restore that did
+    nothing.
+
+    The hook is only ever reached by name — `saved_plots` restore is the one
+    caller that passes a tab name it did not hard-code — so adding it here does
+    not put an image decode on any redraw fan-out. It no-ops before the tab is
+    built, when there is no render grid to lay anything out in.
+    """
+    from well_viewer.features.image_browser.image_table.controller import (
+        image_table_generate,
+    )
+
+    def _redraw(ctx) -> None:
+        if getattr(ctx.runtime.image_table, "render_grid", None) is None:
+            return
+        image_table_generate(ctx)
+
+    return _redraw
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # The descriptor list — the single source of truth. Comment a line to remove
 # a feature.
@@ -818,6 +848,7 @@ def _features() -> list[FeatureDescriptor]:
         FeatureDescriptor(name="Image Table", parent="Image Browser",
                           on_activate=_activate_image_table,
                           on_dataset_loaded=_loaded_image_table,
+                          redraw=_redraw_image_table,
                           view_state_io=_image_table_view_state_io),
         FeatureDescriptor(name="Cell Browser", parent="Image Browser",
                           on_activate=_activate_cell_browser,

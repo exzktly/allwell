@@ -1433,6 +1433,18 @@ parameters and must leave the user looking at the tab that figure came from.
 Sending it to Home instead would apply the whole restored view to a tab nobody
 is on, which on screen is indistinguishable from a restore that did nothing.
 
+Two other ways that restore can look like it did nothing, both closed in
+`features/saved_plots/controller.py`. A tab that renders on demand rather than on
+every state change needs its `redraw` hook called once the parameters are back,
+or the controls change under an unchanged picture — that is the Image Table, and
+`_reapply_target_tab` reaches its hook by name (§5.3). And a record saved before
+its tab began storing a per-tab block restores the cross-cutting state and
+nothing tab-specific: `_report_missing_tab_block` says so in the status line,
+gated on `view_state.owns_tab_block`, which separates "this tab keeps no block"
+(true of most tabs, and not worth a warning) from "this record has none of the
+block this tab keeps" (worth one — the fix is to re-save the plot, and a user
+who is told nothing re-clicks Restore instead).
+
 **Every shortfall Home reports offers the same next step: finish the run.**
 Failures, partial wells, images without measurements, staged-but-never-processed
 — all four route to `run_home_action(ctx, "complete")`, which hands the dataset
@@ -1584,10 +1596,18 @@ everything core used to hard-code:
   `channel_state_controller.recalculate_threshold`'s fan-out, and
   `load_controller`'s per-feature post-load refresh). Core fans each out over
   `registry.with_hook("<name>")` in declaration order, so it names no feature;
-- `redraw` — a plot feature's figure-redraw callable; core plot orchestration
-  (`plot_orchestrator.redraw_app`, tab activation) triggers a redraw by name via
-  `registry.redraw(ctx, "<tab>")`, so it names no renderer (Bar Plots / Line
-  Graphs / Scatter Plot / Distribution / Heat Map register it);
+- `redraw` — a feature's "put the picture back" callable; core plot
+  orchestration (`plot_orchestrator.redraw_app`, tab activation) triggers one by
+  name via `registry.redraw(ctx, "<tab>")`, so it names no renderer (Bar Plots /
+  Line Graphs / Scatter Plot / Distribution / Heat Map / Spatial register it).
+  **The Image Table registers one too, and it is the expensive kind**: its body
+  is `image_table_generate`, which reads images off disk. That is safe because
+  every other call site passes a hard-coded tab name and none of them is
+  `"Image Table"`; the only caller that passes a name it did not choose is
+  `saved_plots`' Restore, which is exactly the moment the user has asked for one
+  particular figure back. Landing on the tab still does not regenerate it — a
+  tab visit is not a request for the pictures — and the hook no-ops before the
+  tab is built;
 - `fold_change_scope_factory` — the feature's fold-change redraw scope
   (`core/scope_registry` registers these from the descriptors);
 - `plot_card_decorator` — a feature that decorates every plot card (Saved Plots'

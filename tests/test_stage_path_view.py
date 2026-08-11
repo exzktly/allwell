@@ -93,3 +93,27 @@ def test_painting_a_path_does_not_raise(qapp):
         view.render(pixmap)
         assert not pixmap.isNull(), count
     plate.hide()
+
+
+def test_the_view_asks_a_layout_for_a_real_box(qapp):
+    """A bare QWidget has no size hint, so a QVBoxLayout gives it nothing and it
+    lays out at 0x0 — `isVisible()` True, `setPath` full, and not one pixel on
+    screen. Asserting the points it holds cannot catch that; only its geometry
+    can, and this is the assertion that was missing."""
+    from PySide6.QtWidgets import QVBoxLayout, QWidget as _W
+
+    from widgets.plate_geometry import PLATE_MAX_HEIGHT, PLATE_MAX_WIDTH
+
+    host = _W()
+    layout = QVBoxLayout(host)
+    view = StagePathView(host)
+    layout.addWidget(view)
+    host.resize(900, 900)
+    host.show()
+    qapp.processEvents()
+
+    assert view.sizeHint().height() == PLATE_MAX_HEIGHT
+    assert view.sizeHint().width() == PLATE_MAX_WIDTH
+    assert view.height() > 0
+    assert view.width() > 0
+    host.hide()

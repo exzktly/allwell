@@ -61,6 +61,17 @@ _PLATE_FRAME_TOL = 0.33
 # worse measurement of the same one.
 _AXIS_AGREEMENT_TOL = 0.1
 
+# Centre-to-centre well spacing of an SBS 96-well plate, in micrometres. Used
+# only when the file states the unit of its stage coordinates: then a position
+# names its well outright, instead of being placed relative to its neighbours.
+WELL_PITCH_UM = 9000.0
+
+# How far a measured step may sit from that nominal pitch and still be read as
+# it. Plates are moulded to tighter than this and stages place to micrometres;
+# the width is here to absorb a scan whose fields are offset from well centres,
+# not to stretch onto a different plate format.
+_PITCH_MATCH_TOL = 0.15
+
 # The plate this module reads layouts for. Named because three separate checks
 # ask "does this fit?" and a bare 8 and 12 in each is three chances to disagree.
 _PLATE_ROWS, _PLATE_COLS = 8, 12
@@ -308,6 +319,59 @@ def _axis_has_wells(values: list[float], tol: float) -> bool:
     return smallest > 0 and any(g > smallest * _WELL_GAP_RATIO for g in gaps)
 
 
+def _well_scale_gaps(xs: list[float], ys: list[float],
+                     tol: float) -> list[float]:
+    """Gaps in micrometre coordinates too wide to be two fields of one well."""
+    steps = []
+    for values in (xs, ys):
+        unique = _distinct(values, tol)
+        steps += [b - a for a, b in zip(unique[:-1], unique[1:])]
+    return [g for g in steps if g > WELL_PITCH_UM * _PITCH_MATCH_TOL]
+
+
+def _one_well(xs: list[float], ys: list[float], tol: float) -> bool:
+    """True when these micrometre coordinates all sit inside a single well.
+
+    The ambiguity that relative spacing genuinely cannot settle: a montage of
+    fields across one well and a grid of wells one field each produce the same
+    pattern, differing only in the *size* of the step, and a file with no stated
+    unit has no size. So the grid reading was taken, because a plate scan is the
+    ordinary case — and a montage was reported as a plate of as many wells as it
+    had fields, each holding one.
+
+    Micrometres settle it. Nothing 600 um apart is two wells.
+    """
+    return not _well_scale_gaps(xs, ys, tol)
+
+
+def _known_pitch(xs: list[float], ys: list[float], tol: float) -> float | None:
+    """``WELL_PITCH_UM`` when these micrometre coordinates are on a 96-well plate.
+
+    The one thing relative spacing cannot recover. Distances *within* a file say
+    how far apart two wells are in multiples of some step, but not what that
+    step is, so a scattered selection — B02, D07, G11, nothing adjacent — has no
+    adjacent pair to learn it from and reads as three neighbouring wells. An
+    absolute unit answers it outright: 9 mm is a well, and every position names
+    its own.
+
+    Believed only when the coordinates agree with a plate. Every measured step
+    must be a whole number of 9 mm pitches within `_PITCH_MATCH_TOL`, and a
+    within-well step (the fields of a montage, far below one pitch) is not a
+    step at all here — it is the case this must *not* fire on, since a montage
+    in one well would otherwise read as a grid of wells whose spacing happens to
+    be small. ``None`` hands the question back to the relative inference.
+    """
+    coarse = _well_scale_gaps(xs, ys, tol)
+    if not coarse:
+        return None            # nothing here is a well apart: see `_one_well`
+    for gap in coarse:
+        wells = round(gap / WELL_PITCH_UM)
+        if wells < 1 or abs(gap - wells * WELL_PITCH_UM) > (
+                WELL_PITCH_UM * _PITCH_MATCH_TOL):
+            return None        # not a multiple of a well: not this plate format
+    return WELL_PITCH_UM
+
+
 def _pitch(xs: list[float], ys: list[float], tol: float) -> float | None:
     """The well-to-well step, from whichever axis is entitled to say.
 
@@ -466,13 +530,23 @@ def _direction_and_serpentine(cells: list[tuple[int, int]]) -> tuple[str, bool]:
     return direction, serpentine
 
 
-def infer_stage_layout(positions) -> StageLayout | None:
+def infer_stage_layout(positions, *, in_um: bool = False) -> StageLayout | None:
     """Read a :class:`StageLayout` out of ``(x, y)`` stage coordinates.
 
     ``None`` when the coordinates cannot describe a plate scan: fewer than two
     positions, or wells holding different numbers of fields of view (which means
     the gap split found something that is not a well grid, and a guess built on
     it would be worse than no guess at all).
+
+    *in_um* says the coordinates are in micrometres, which the file states often
+    enough to be worth using (`ome_explode.OmeLayout.stage_positions_in_um`).
+    Then the well pitch is **known** rather than inferred, and an arbitrary
+    selection of wells maps exactly — a scattered set with nothing adjacent has
+    no neighbour to learn a pitch from, and relative spacing alone reads it as a
+    row of adjacent wells. The nominal pitch is used only where the coordinates
+    agree with it (:func:`_known_pitch`); otherwise the relative reading stands,
+    so a file in unknown units, or a plate that is not 96-well, is no worse off
+    than before.
     """
     points = [(float(x), float(y)) for x, y in positions or []]
     # Anything that is not a finite number is not a stage position. A single
@@ -489,7 +563,18 @@ def infer_stage_layout(positions) -> StageLayout | None:
     xs = [x for x, _ in points]
     ys = [y for _, y in points]
     tol = _jitter_tolerance(xs, ys)
-    pitch = _pitch(xs, ys, tol)
+    if in_um and _one_well(xs, ys, tol):
+        # One well, imaged as a montage. Reported as itself rather than as a
+        # grid of wells the size of the montage — which is what every reading
+        # without a unit has to do, and which converts one well's fields into
+        # one field in each of nine wells that were never imaged.
+        places = len(set(place_keys(points)))
+        return StageLayout(
+            n_positions=len(points), rows=1, cols=1, fovs_per_well=places,
+            relative_order=[(0, 0)], direction="row", serpentine=True,
+            pitch=WELL_PITCH_UM, absolute_origin=None,
+        )
+    pitch = (_known_pitch(xs, ys, tol) if in_um else None) or _pitch(xs, ys, tol)
     by_x = _group_axis(xs, pitch, tol)
     by_y = _group_axis(ys, pitch, tol)
     ux, uy = sorted(by_x), sorted(by_y)

@@ -3066,7 +3066,24 @@ the conversion from stage units to plate cells, so a doubled one draws the map a
 half scale. There is one pitch for the plate, not one per axis, which is what
 makes a one-sided skip recoverable: rows sampled A/C/E with every column present
 measure 18 mm down and 9 mm across, and the axis showing the single step supplies
-the pitch that reads the other's gaps as the multiples they are. That is a real
+the pitch that reads the other's gaps as the multiples they are. **When the file states a unit, the pitch is known rather than inferred.**
+`ome_explode._stage_positions` converts stage coordinates to micrometres
+whenever every plane names a length unit for both axes (`PositionXUnit`), and
+reports `stage_positions_in_um`; mixed or missing units convert nothing, since
+OME's own default is "reference frame" — the microscope's frame, which has no
+defined size, and treating it as micrometres would put a confident wrong mapping
+on every file that omits the attribute. With a unit, `_known_pitch` uses the
+nominal `WELL_PITCH_UM` where the measured steps agree with whole multiples of
+it, and that is what maps an **arbitrary selection of wells**: a scattered set
+(B02, D07, G11) has no adjacent pair anywhere to learn a pitch from, so relative
+spacing alone reads it as three neighbouring wells or refuses outright. It also
+settles the oldest ambiguity here — `_one_well` reports a montage across a
+single well as one well of N fields, where without a unit a montage and a grid
+of wells holding one field each are the same pattern at two scales and the grid
+reading had to be taken. A spacing that is not a whole number of 9 mm pitches
+falls back to the relative reading, so another plate format is no worse off.
+
+That the two axes share one pitch is a real
 assumption — an SBS plate is on 9 mm centres both ways — so it is **checked**
 rather than relied on: the two axes' per-well steps must agree within
 `_AXIS_AGREEMENT_TOL`, and where they do not there is no layout. Taking each axis

@@ -15,6 +15,7 @@ from math import isfinite
 from datasets.ome_import.stage_layout import (
     StageLayout,
     infer_frame_order,
+    WELL_PITCH_UM,
     infer_stage_layout,
     mirrored,
     path_in_cells,
@@ -548,3 +549,77 @@ def test_rows_of_different_lengths_are_read_as_they_were_imaged():
     assert labels[:7] == ["A01", "A02", "A03", "A04", "A05", "A06", "A07"]
     assert labels[7:13] == ["B06", "B05", "B04", "B03", "B02", "B01"]
     assert "B07" not in labels and "C07" not in labels
+
+
+# ── coordinates that state their unit ────────────────────────────────────────
+
+
+def _um(cells, fovs=1, fov=600.0):
+    """Micrometre coordinates for *cells* on a real 96-well plate."""
+    return [
+        (c * WELL_PITCH_UM + (f % 2) * fov, r * WELL_PITCH_UM + (f // 2) * fov)
+        for r, c in cells for f in range(fovs)
+    ]
+
+
+def test_an_arbitrary_selection_of_wells_maps_when_the_unit_is_known():
+    """The one thing relative spacing cannot do. A scattered selection has no
+    two neighbouring wells to learn a pitch from, so distances within the file
+    say only that the wells are *some* multiple apart — and the run reads as a
+    handful of adjacent wells. An absolute unit answers it outright."""
+    scattered = [(1, 1), (3, 6), (6, 10)]          # nothing adjacent anywhere
+    points = _um(scattered)
+
+    # Without a unit there is no honest answer, and none is given.
+    assert infer_stage_layout(points) is None
+
+    layout = infer_stage_layout(points, in_um=True)
+    assert layout.relative_order == [(0, 0), (2, 5), (5, 9)]
+    assert place(layout, 1, 1) == ["B02", "D07", "G11"]
+    assert layout.pitch == WELL_PITCH_UM
+
+
+def test_a_uniform_skip_is_resolved_by_the_unit():
+    """Rows A, C and E in a single column: every step on the only axis that
+    carries wells is a double one, which no amount of relative reasoning can
+    tell from three wells side by side. The unit can."""
+    points = _um([(0, 0), (2, 0), (4, 0)])
+    assert place(infer_stage_layout(points), 0, 0) == ["A01", "B01", "C01"]
+    assert place(infer_stage_layout(points, in_um=True), 0, 0) == [
+        "A01", "C01", "E01"]
+
+
+def test_a_montage_in_one_well_is_no_longer_a_grid_of_wells():
+    """The oldest ambiguity here: a montage across one well and a grid of wells
+    holding one field each are the same pattern at different scales, and a file
+    with no unit has no scale. The grid reading had to be taken — turning one
+    well's nine fields into one field in each of nine wells that were never
+    imaged."""
+    montage = [(c * 600.0, r * 600.0) for r in range(3) for c in range(3)]
+
+    without = infer_stage_layout(montage)
+    assert (without.rows, without.cols, without.fovs_per_well) == (3, 3, 1)
+
+    with_unit = infer_stage_layout(montage, in_um=True)
+    assert (with_unit.rows, with_unit.cols) == (1, 1)
+    assert with_unit.fovs_per_well == 9
+    assert with_unit.relative_order == [(0, 0)]
+
+
+def test_wells_holding_large_montages_are_still_wells():
+    """The other side of it: 25 fields per well spans 2.4 mm, which must not
+    read as a single well merely because the fields are close together."""
+    layout = infer_stage_layout(_um([(r, c) for r in range(2) for c in range(3)],
+                                    fovs=4), in_um=True)
+    assert (layout.rows, layout.cols, layout.fovs_per_well) == (2, 3, 4)
+    assert layout.pitch == WELL_PITCH_UM
+
+
+def test_a_spacing_that_is_not_a_96_well_plate_falls_back_to_the_ratios():
+    """The nominal pitch is used only where the coordinates agree with it. A
+    plate on 4.5 mm centres is not this app's plate, and claiming 9 mm for it
+    would place every second well on top of the last."""
+    other = [(c * 4500.0, r * 4500.0) for r in range(2) for c in range(3)]
+    layout = infer_stage_layout(other, in_um=True)
+    assert (layout.rows, layout.cols) == (2, 3)          # read from the ratios
+    assert layout.pitch == 4500.0

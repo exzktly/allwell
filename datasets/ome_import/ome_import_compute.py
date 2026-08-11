@@ -376,7 +376,8 @@ def infer_layout(layout: OmeLayout):
     itself it ran twice per character typed — 190 ms of it on a 96-well plate at
     16 fields over 24 timepoints, on the UI thread.
     """
-    return infer_stage_layout(layout.stage_positions)
+    return infer_stage_layout(layout.stage_positions,
+                              in_um=layout.stage_positions_in_um)
 
 
 def suggest_layout(layout: OmeLayout, origin: str = "A01",

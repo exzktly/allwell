@@ -270,37 +270,55 @@ class OmeImportPage(LogPanelMixin, QWidget):
         """
         self._sub_heading("Which wells did you image?", outer)
 
+        # Two rows, not one. They answer different questions — *which* block of
+        # wells, and *in what order* the stage crossed it — and five controls on
+        # one line read as a single setting with five boxes. The pair is wrapped
+        # in one widget so the run lock, the visibility rules and the "ignored
+        # while hand-drawn" note keep addressing them as the group they are.
         self._grid_row = QWidget(self)
-        hl = QHBoxLayout(self._grid_row)
+        grid_stack = QVBoxLayout(self._grid_row)
+        grid_stack.setContentsMargins(0, 0, 0, 0)
+        grid_stack.setSpacing(theme.Spacing.sm)
+
+        block_row = QWidget(self._grid_row)
+        hl = QHBoxLayout(block_row)
         hl.setContentsMargins(0, 0, 0, 0)
         hl.setSpacing(theme.Spacing.md)
-        hl.addWidget(QLabel("Grid (rows × cols):", self._grid_row))
+        hl.addWidget(QLabel("Grid (rows × cols):", block_row))
         self._rows_edit = self._small("1")
         hl.addWidget(self._rows_edit)
-        hl.addWidget(QLabel("×", self._grid_row))
+        hl.addWidget(QLabel("×", block_row))
         self._cols_edit = self._small("1")
         hl.addWidget(self._cols_edit)
-        hl.addWidget(QLabel("Origin:", self._grid_row))
+        hl.addWidget(QLabel("Origin:", block_row))
         self._origin_edit = self._small("A01", width=_ORIGIN_W, placeholder="A01")
         hl.addWidget(self._origin_edit)
-        hl.addWidget(QLabel("Sweep:", self._grid_row))
-        self._direction_cb = QComboBox(self._grid_row)
+        hl.addStretch(1)
+        grid_stack.addWidget(block_row)
+
+        order_row = QWidget(self._grid_row)
+        ol = QHBoxLayout(order_row)
+        ol.setContentsMargins(0, 0, 0, 0)
+        ol.setSpacing(theme.Spacing.md)
+        ol.addWidget(QLabel("Sweep:", order_row))
+        self._direction_cb = QComboBox(order_row)
         self._direction_cb.addItem("By row", userData="row")
         self._direction_cb.addItem("By column", userData="col")
         self._direction_cb.currentIndexChanged.connect(
             lambda _=None: self.refresh_readout())
-        hl.addWidget(self._direction_cb)
+        ol.addWidget(self._direction_cb)
         # What happens at the end of each line. A raster read as a snake labels
         # every second line backwards — the right well count, every other row
         # mirrored — so it has to be answerable rather than assumed. Ticked by
         # default because a snake is the commoner pattern, and because that is
         # the order this page generated before it could be asked.
         self._snake_cb = QCheckBox("Snake (alternate lines run backwards)",
-                                   self._grid_row)
+                                   order_row)
         self._snake_cb.setChecked(True)
         self._snake_cb.toggled.connect(lambda _=None: self.refresh_readout())
-        hl.addWidget(self._snake_cb)
-        hl.addStretch(1)
+        ol.addWidget(self._snake_cb)
+        ol.addStretch(1)
+        grid_stack.addWidget(order_row)
         outer.addWidget(self._grid_row)
 
         # What the file's own stage coordinates say the layout is. Offered

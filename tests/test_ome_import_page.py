@@ -1035,6 +1035,55 @@ def test_a_raster_file_fills_the_grid_and_unticks_the_snake(qapp, tmp_path):
     assert "no snake" in page._suggest_label.text()
 
 
+def test_a_scattered_selection_of_wells_is_mapped_from_the_stated_unit(
+        qapp, tmp_path):
+    """Any selection at all, when the file says what its coordinates mean. The
+    wells here share no row and no column and none is next to another, so there
+    is no adjacent pair anywhere to learn a pitch from — the whole run reads as
+    three neighbouring wells without the unit, and exactly as imaged with it."""
+    from datasets.ome_import.controller import OmeImportController
+
+    pitch = 9000.0
+    cells = [(1, 1), (3, 6), (6, 10)]                    # B02, D07, G11
+    coords = [(c * pitch, r * pitch) for r, c in cells]
+    planes = "".join(
+        f'<Plane TheT="{i}" TheC="0" TheZ="0" PositionX="{x}" PositionY="{y}" '
+        # "um", not "µm": a TIFF description is 7-bit ASCII, so a real file
+        # writes the micro sign as an XML entity or spells it out. Both reach
+        # the parser as the same unit — `test_ome_explode` covers the entity.
+        'PositionXUnit="um" PositionYUnit="um"/>'
+        for i, (x, y) in enumerate(coords))
+    mapping = "".join(
+        f'<TiffData FirstT="{i}" FirstC="0" FirstZ="0" IFD="{i}" PlaneCount="1"/>'
+        for i in range(len(coords)))
+    xml = ('<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+           '<Image ID="Image:0" Name="scatter"><Pixels ID="Pixels:0" '
+           'DimensionOrder="XYZCT" Type="uint16" SizeX="4" SizeY="4" SizeC="1" '
+           f'SizeZ="1" SizeT="{len(coords)}">'
+           '<Channel ID="Channel:0:0" Name="DAPI" SamplesPerPixel="1"/>'
+           f'{planes}{mapping}</Pixels></Image></OME>')
+    p = tmp_path / "scatter.ome.tif"
+    tifffile.imwrite(str(p), np.zeros((len(coords), 4, 4), np.uint16),
+                     description=xml, metadata=None, photometric="minisblack")
+
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+
+    # The wells themselves, with nothing typed. A known unit makes the
+    # coordinates plate-referenced arithmetic — A01 at the origin, every centre
+    # a whole number of pitches out — so `absolute_origin` places the block as
+    # well as shaping it, and the Origin box is filled to match.
+    assert page._plate.order() == ["B02", "D07", "G11"]
+    assert page._origin_edit.text() == "B02"
+    assert page._run_btn.isEnabled()
+
+    # And the Origin stays the user's to override, as for any inferred order.
+    page._origin_edit.setText("A01")
+    page.refresh_readout()
+    assert page._plate.order() == ["A01", "C06", "F10"]
+
+
 def test_the_stage_path_follows_a_hand_drawn_first_well(qapp, tmp_path):
     """The anchor is wherever position 1 will actually land, which a clicked
     path decides for itself."""

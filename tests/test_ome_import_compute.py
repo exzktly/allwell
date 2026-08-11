@@ -35,6 +35,7 @@ from datasets.ome_import.ome_import_compute import (  # noqa: E402
     strip_ome_suffix,
 )
 from pipeline.ome_explode import OmeLayout  # noqa: E402
+from util.plate_grid import block_well_labels  # noqa: E402
 
 
 def _write_multi(path, *, positions, size_t=1, size_c=1, channel_names=("GFP",)):
@@ -492,14 +493,22 @@ def test_suggest_layout_reads_the_grid_and_fovs_from_stage_coordinates(tmp_path)
     assert "2×3 wells × 4 FOV(s)" in suggestion.describe()
 
 
-def test_suggest_layout_gives_a_raster_scan_an_explicit_order(tmp_path):
-    """The grid fields can only express a serpentine, so anything else has to be
-    handed over as the order itself — placed at the origin the user chose."""
+def test_suggest_layout_reads_a_raster_as_a_grid_that_does_not_snake(tmp_path):
+    """A raster used to be handed over as an explicit order, because the grid
+    fields could only express a snake. They can say either now, so the offer is
+    the editable grid plus an unticked Snake box — and an explicit order is kept
+    for paths a grid genuinely cannot describe."""
     layout = read_layout(_plate_scan(tmp_path / "r.ome.tif", 2, 3, 1,
                                      serpentine=False))
     suggestion = suggest_layout(layout, origin="B02")
-    assert suggestion.well_order == ("B02", "B03", "B04", "C02", "C03", "C04")
-    assert "as an explicit path" in suggestion.describe()
+    assert (suggestion.rows, suggestion.cols) == (2, 3)
+    assert suggestion.serpentine is False
+    assert suggestion.well_order == ()
+    assert "no snake" in suggestion.describe()
+    # And the wells it means are the raster ones, not the snake's.
+    assert block_well_labels(2, 3, origin="B02", direction=suggestion.direction,
+                             serpentine=False) == [
+        "B02", "B03", "B04", "C02", "C03", "C04"]
 
 
 def test_suggest_layout_is_none_when_the_file_says_nothing_useful(tmp_path):
@@ -869,7 +878,8 @@ def _convert_mirrored(src, dest, *, flip_x=False, flip_y=False):
     suggestion = suggest_layout(layout, "A01")
     params = ConversionParams(
         grid_rows=suggestion.rows, grid_cols=suggestion.cols, origin="A01",
-        direction=suggestion.direction, fovs_per_well=suggestion.fovs_per_well,
+        direction=suggestion.direction, serpentine=suggestion.serpentine,
+        fovs_per_well=suggestion.fovs_per_well,
         frame_order=suggestion.frame_order or "single",
         well_order=tuple(suggestion.well_order), experiment="p")
     plan_conversion(layout, params)
@@ -905,3 +915,100 @@ def test_mirroring_reflects_the_wells_a_conversion_writes(tmp_path):
     # Both at once, which is a 180-degree turn of the block.
     assert _convert_mirrored(src, tmp_path / "dxy", flip_x=True, flip_y=True) == {
         "A01": 5, "A02": 4, "A03": 3, "B01": 2, "B02": 1, "B03": 0}
+
+
+# ── shapes, and a sweep that does not snake ──────────────────────────────────
+
+
+def _shaped_ome(path, cells, *, fovs=1):
+    """A file visiting exactly *cells* in order, each frame holding its index."""
+    pitch, fov = 9000.0, 600.0
+    coords = [
+        (c * pitch + (f % 2) * fov, r * pitch + (f // 2) * fov)
+        for r, c in cells for f in range(fovs)
+    ]
+    planes = "".join(
+        f'<Plane TheT="{i}" TheC="0" TheZ="0" PositionX="{x}" PositionY="{y}"/>'
+        for i, (x, y) in enumerate(coords))
+    mapping = "".join(
+        f'<TiffData FirstT="{i}" FirstC="0" FirstZ="0" IFD="{i}" PlaneCount="1"/>'
+        for i in range(len(coords)))
+    xml = (
+        '<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+        '<Image ID="Image:0" Name="scan"><Pixels ID="Pixels:0" '
+        'DimensionOrder="XYZCT" Type="uint16" SizeX="4" SizeY="4" SizeC="1" '
+        f'SizeZ="1" SizeT="{len(coords)}">'
+        '<Channel ID="Channel:0:0" Name="DAPI" SamplesPerPixel="1"/>'
+        f'{planes}{mapping}</Pixels></Image></OME>')
+    tifffile.imwrite(
+        str(path),
+        np.stack([np.full((4, 4), i, np.uint16) for i in range(len(coords))]),
+        description=xml, metadata=None, photometric="minisblack")
+    return path
+
+
+def test_an_l_shaped_scan_converts_into_the_wells_it_visited(tmp_path):
+    """End to end, on the archives. The shape used to be refused outright, so
+    the run could only happen by clicking five wells in the right order."""
+    src = _shaped_ome(tmp_path / "l.ome.tif",
+                      [(0, 0), (0, 1), (0, 2), (1, 0), (2, 0)])
+    found = _convert_mirrored(src, tmp_path / "dl")
+    assert found == {"A01": 0, "A02": 1, "A03": 2, "B01": 3, "C01": 4}
+    # No archive for the wells the scan never visited.
+    assert "B02" not in found and "C03" not in found
+
+
+def test_a_scan_that_skips_a_row_keeps_the_wells_it_skipped_empty(tmp_path):
+    """Rows A and C, B never imaged. Closing the gap up writes every image of
+    the third row into the second."""
+    src = _shaped_ome(tmp_path / "gap.ome.tif",
+                      [(0, 0), (0, 1), (2, 0), (2, 1)])
+    found = _convert_mirrored(src, tmp_path / "dg")
+    assert found == {"A01": 0, "A02": 1, "C01": 2, "C02": 3}
+
+
+def test_a_raster_converts_without_snaking(tmp_path):
+    """The grid could only ever generate a snake, so a raster had to be clicked
+    well by well. Read as a snake it mislabels every second line backwards —
+    the right well count, every other row mirrored."""
+    src = _shaped_ome(tmp_path / "raster.ome.tif",
+                      [(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)])
+    layout = read_layout(src)
+    suggestion = suggest_layout(layout, "A01")
+    assert suggestion.serpentine is False
+    assert suggestion.well_order == ()          # the grid fields can say this now
+
+    assert _convert_mirrored(src, tmp_path / "draster") == {
+        "A01": 0, "A02": 1, "A03": 2, "B01": 3, "B02": 4, "B03": 5}
+    # And the snake the page would have forced instead, for contrast.
+    params = ConversionParams(grid_rows=2, grid_cols=3, origin="A01",
+                              serpentine=True, fovs_per_well=1, experiment="p")
+    convert(str(src), str(tmp_path / "dsnake"), params)
+    import io
+    import zipfile
+
+    snaked = {}
+    for archive in sorted((tmp_path / "dsnake" / "in").glob("*.zip")):
+        with zipfile.ZipFile(archive) as zf:
+            for member in zf.namelist():
+                snaked[archive.stem.upper()] = int(
+                    tifffile.imread(io.BytesIO(zf.read(member))).max())
+    assert snaked == {"A01": 0, "A02": 1, "A03": 2, "B03": 3, "B02": 4, "B01": 5}
+
+
+def test_a_scan_with_rows_of_different_lengths_converts(tmp_path):
+    """Row A across seven columns, rows B and C across six, swept as a snake.
+    Nothing writes an archive for the two wells at the end of the short rows."""
+    cells = ([(0, c) for c in range(7)]
+             + [(1, c) for c in range(5, -1, -1)]
+             + [(2, c) for c in range(6)])
+    src = _shaped_ome(tmp_path / "ragged.ome.tif", cells)
+    found = _convert_mirrored(src, tmp_path / "dr")
+
+    assert len(found) == 19
+    assert {k: v for k, v in found.items() if k.startswith("A")} == {
+        "A01": 0, "A02": 1, "A03": 2, "A04": 3, "A05": 4, "A06": 5, "A07": 6}
+    # Row B ran backwards, so its wells hold the frames in reverse.
+    assert {k: v for k, v in found.items() if k.startswith("B")} == {
+        "B06": 7, "B05": 8, "B04": 9, "B03": 10, "B02": 11, "B01": 12}
+    assert "B07" not in found and "C07" not in found

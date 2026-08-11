@@ -80,6 +80,7 @@ def convert(
         grid_cols=params.grid_cols,
         origin_well=params.origin or "A01",
         direction=params.direction,
+        serpentine=params.serpentine,
         experiment=experiment,
         fovs_per_well=params.fovs_per_well,
         frame_order=params.frame_order,

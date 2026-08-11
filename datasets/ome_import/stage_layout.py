@@ -55,6 +55,27 @@ _JITTER_FRACTION = 0.02
 # equally good answers.
 _PLATE_FRAME_TOL = 0.33
 
+# How far the two axes' well steps may differ and still be read as one plate
+# pitch. A stage places to micrometres on a 9 mm pitch, so real slop is well
+# under a per cent; anything approaching this is a different geometry, not a
+# worse measurement of the same one.
+_AXIS_AGREEMENT_TOL = 0.1
+
+# Centre-to-centre well spacing of an SBS 96-well plate, in micrometres. Used
+# only when the file states the unit of its stage coordinates: then a position
+# names its well outright, instead of being placed relative to its neighbours.
+WELL_PITCH_UM = 9000.0
+
+# How far a measured step may sit from that nominal pitch and still be read as
+# it. Plates are moulded to tighter than this and stages place to micrometres;
+# the width is here to absorb a scan whose fields are offset from well centres,
+# not to stretch onto a different plate format.
+_PITCH_MATCH_TOL = 0.15
+
+# The plate this module reads layouts for. Named because three separate checks
+# ask "does this fit?" and a bare 8 and 12 in each is three chances to disagree.
+_PLATE_ROWS, _PLATE_COLS = 8, 12
+
 
 @dataclass(frozen=True)
 class StageLayout:
@@ -94,7 +115,23 @@ class StageLayout:
 
     @property
     def n_wells(self) -> int:
-        return self.rows * self.cols
+        """How many wells were imaged — not ``rows × cols``.
+
+        The two are the same only for a filled rectangle. A scan shaped like an
+        L, or one that skips wells, occupies fewer cells than its extent, and
+        reporting the extent overstates the run by every well it never visited.
+        """
+        return len(set(self.relative_order)) or self.rows * self.cols
+
+    @property
+    def filled(self) -> bool:
+        """True when every cell of the extent was imaged.
+
+        What decides whether the grid fields can express this block at all: a
+        rows × cols sweep visits all of them, so anything sparser has to be
+        handed over as an explicit order.
+        """
+        return self.n_wells == self.rows * self.cols
 
 
 def _jitter_tolerance(xs: list[float], ys: list[float]) -> float:
@@ -252,11 +289,125 @@ def _axis_scale(values: list[float], tol: float) -> float | None:
     if len(unique) < 2:
         return None
     gaps = [b - a for a, b in zip(unique[:-1], unique[1:])]
-    typical = sorted(gaps)[len(gaps) // 2]
-    if typical <= 0:
+    smallest = min(gaps)
+    if smallest <= 0:
         return None
-    large = [g for g in gaps if g > typical * _WELL_GAP_RATIO]
-    return min(large) if large else typical
+    # Measured against the *smallest* gap, not the median. The median is the
+    # typical gap only while the gaps are all of one scale: an axis holding one
+    # within-well step and one between-well step has a median of the larger, so
+    # nothing is ever three times it and the two scales read as one.
+    large = [g for g in gaps if g > smallest * _WELL_GAP_RATIO]
+    # And the smallest instance of whichever scale wins, because a gap spans a
+    # whole number of steps and never a fraction of one: a scan that skips wells
+    # leaves gaps of two and three pitches beside the ordinary ones, and an
+    # average of those is a step no well sits on. Jitter cannot drag the minimum
+    # down — `_distinct` merged it before these gaps were measured.
+    return min(large) if large else smallest
+
+
+def _axis_has_wells(values: list[float], tol: float) -> bool:
+    """True when this axis shows a well-to-well gap, not just fields of view.
+
+    The distinction the pitch needs: an axis whose gaps are all alike may be a
+    row of wells or the fields inside one, and only the other axis can say.
+    """
+    unique = _distinct(values, tol)
+    if len(unique) < 2:
+        return False
+    gaps = [b - a for a, b in zip(unique[:-1], unique[1:])]
+    smallest = min(gaps)
+    return smallest > 0 and any(g > smallest * _WELL_GAP_RATIO for g in gaps)
+
+
+def _well_scale_gaps(xs: list[float], ys: list[float],
+                     tol: float) -> list[float]:
+    """Gaps in micrometre coordinates too wide to be two fields of one well."""
+    steps = []
+    for values in (xs, ys):
+        unique = _distinct(values, tol)
+        steps += [b - a for a, b in zip(unique[:-1], unique[1:])]
+    return [g for g in steps if g > WELL_PITCH_UM * _PITCH_MATCH_TOL]
+
+
+def _one_well(xs: list[float], ys: list[float], tol: float) -> bool:
+    """True when these micrometre coordinates all sit inside a single well.
+
+    The ambiguity that relative spacing genuinely cannot settle: a montage of
+    fields across one well and a grid of wells one field each produce the same
+    pattern, differing only in the *size* of the step, and a file with no stated
+    unit has no size. So the grid reading was taken, because a plate scan is the
+    ordinary case — and a montage was reported as a plate of as many wells as it
+    had fields, each holding one.
+
+    Micrometres settle it. Nothing 600 um apart is two wells.
+    """
+    return not _well_scale_gaps(xs, ys, tol)
+
+
+def _known_pitch(xs: list[float], ys: list[float], tol: float) -> float | None:
+    """``WELL_PITCH_UM`` when these micrometre coordinates are on a 96-well plate.
+
+    The one thing relative spacing cannot recover. Distances *within* a file say
+    how far apart two wells are in multiples of some step, but not what that
+    step is, so a scattered selection — B02, D07, G11, nothing adjacent — has no
+    adjacent pair to learn it from and reads as three neighbouring wells. An
+    absolute unit answers it outright: 9 mm is a well, and every position names
+    its own.
+
+    Believed only when the coordinates agree with a plate. Every measured step
+    must be a whole number of 9 mm pitches within `_PITCH_MATCH_TOL`, and a
+    within-well step (the fields of a montage, far below one pitch) is not a
+    step at all here — it is the case this must *not* fire on, since a montage
+    in one well would otherwise read as a grid of wells whose spacing happens to
+    be small. ``None`` hands the question back to the relative inference.
+    """
+    coarse = _well_scale_gaps(xs, ys, tol)
+    if not coarse:
+        return None            # nothing here is a well apart: see `_one_well`
+    for gap in coarse:
+        wells = round(gap / WELL_PITCH_UM)
+        if wells < 1 or abs(gap - wells * WELL_PITCH_UM) > (
+                WELL_PITCH_UM * _PITCH_MATCH_TOL):
+            return None        # not a multiple of a well: not this plate format
+    return WELL_PITCH_UM
+
+
+def _pitch(xs: list[float], ys: list[float], tol: float) -> float | None:
+    """The well-to-well step, from whichever axis is entitled to say.
+
+    Two failure modes pull in opposite directions, which is why this is not
+    simply the larger or the smaller candidate.
+
+    An axis holding *only* fields of view has no well step in it at all, and its
+    spacing — an order of magnitude smaller — must never become the pitch. That
+    is what taking the larger candidate protected against.
+
+    But a scan that **skips** a well leaves a double gap, and on an axis where
+    every step is a skip the smallest gap is two pitches. Taking the larger
+    candidate then reads a plate imaged on rows A and C as one whose wells are
+    18 mm apart, merging the two rows into one and doubling its field count.
+
+    So an axis that shows a well gap outranks one that does not, and among
+    axes that do, the *smallest* wins: a gap can be several pitches wide, never
+    a fraction of one.
+    """
+    scales = {axis: _axis_scale(values, tol)
+              for axis, values in (("x", xs), ("y", ys))}
+    with_wells = [scale for axis, scale in scales.items()
+                  if scale is not None and _axis_has_wells(
+                      xs if axis == "x" else ys, tol)]
+    if with_wells:
+        return min(with_wells)
+    candidates = [s for s in scales.values() if s is not None]
+    if not candidates:
+        return None
+    # Neither axis shows a well gap: every step on both is alike. One may still
+    # be a well pitch and the other the fields inside a well — an order of
+    # magnitude apart — and then the larger is the pitch. Within an order of
+    # magnitude they are both well steps, and the smaller is the pitch for the
+    # same reason as above.
+    low, high = min(candidates), max(candidates)
+    return high if high > low * _WELL_GAP_RATIO else low
 
 
 def _group_axis(values: list[float], pitch: float | None,
@@ -274,6 +425,12 @@ def _group_axis(values: list[float], pitch: float | None,
     taken, because one field per well is the ordinary plate scan and a montage
     spanning a whole plate's pitch is not; the page's own fields override it
     either way.
+
+    Indices count **wells, not groups**, so a skipped well leaves a hole. A scan
+    of rows A and C used to index them 0 and 1 — the empty row silently closed
+    up, the block reported as two adjacent rows, and every image in the second
+    one written a row too high. How many wells a gap spans is exactly what the
+    pitch is for, so it is used rather than assumed to be one.
     """
     unique = _distinct(values, tol)
     if len(unique) < 2:
@@ -284,7 +441,10 @@ def _group_axis(values: list[float], pitch: float | None,
     index = 0
     for prev, cur in zip(unique[:-1], unique[1:]):
         if cur - prev > pitch / 2.0:
-            index += 1
+            # How many wells were stepped over, not merely "the next one".
+            # Rounded, so an ordinary step of one pitch is one whether the
+            # stage lands a little short or a little long of nominal.
+            index += max(1, round((cur - prev) / pitch))
         groups[cur] = index
     return groups
 
@@ -311,15 +471,27 @@ def _well_step(values: list[float], groups: dict[float, int],
     ``None`` when the axis holds a single group, which has no step to measure.
     Taken as the median of the consecutive differences so one irregular column
     — a scan that skipped a well — does not set the scale for the rest.
+
+    **Per well, not per group.** Two occupied groups two wells apart are two
+    pitches apart, so a scan that skips a column measures 18 mm and calls it the
+    pitch. That number is the conversion from stage units to plate cells, so the
+    drawn map came out compressed by exactly the factor the scan was sparse by,
+    which is the same class of error as reading the inter-well gap for the well
+    step and an order of magnitude worse. The group indices already count wells
+    (:func:`_group_axis`), so the distance is divided by the wells between them.
     """
     centres: dict[int, list[float]] = {}
     for value in values:
         centres.setdefault(groups[_nearest(unique, value)], []).append(value)
     if len(centres) < 2:
         return None
-    means = [sum(vs) / len(vs) for _, vs in sorted(centres.items())]
-    diffs = sorted(b - a for a, b in zip(means[:-1], means[1:]))
-    return diffs[len(diffs) // 2]
+    ordered = sorted((index, sum(vs) / len(vs)) for index, vs in centres.items())
+    steps = sorted(
+        (b_mean - a_mean) / (b_index - a_index)
+        for (a_index, a_mean), (b_index, b_mean) in zip(ordered[:-1], ordered[1:])
+        if b_index > a_index
+    )
+    return steps[len(steps) // 2] if steps else None
 
 
 def _first_visits(cells: list[tuple[int, int]]) -> list[tuple[int, int]]:
@@ -358,13 +530,23 @@ def _direction_and_serpentine(cells: list[tuple[int, int]]) -> tuple[str, bool]:
     return direction, serpentine
 
 
-def infer_stage_layout(positions) -> StageLayout | None:
+def infer_stage_layout(positions, *, in_um: bool = False) -> StageLayout | None:
     """Read a :class:`StageLayout` out of ``(x, y)`` stage coordinates.
 
     ``None`` when the coordinates cannot describe a plate scan: fewer than two
     positions, or wells holding different numbers of fields of view (which means
     the gap split found something that is not a well grid, and a guess built on
     it would be worse than no guess at all).
+
+    *in_um* says the coordinates are in micrometres, which the file states often
+    enough to be worth using (`ome_explode.OmeLayout.stage_positions_in_um`).
+    Then the well pitch is **known** rather than inferred, and an arbitrary
+    selection of wells maps exactly — a scattered set with nothing adjacent has
+    no neighbour to learn a pitch from, and relative spacing alone reads it as a
+    row of adjacent wells. The nominal pitch is used only where the coordinates
+    agree with it (:func:`_known_pitch`); otherwise the relative reading stands,
+    so a file in unknown units, or a plate that is not 96-well, is no worse off
+    than before.
     """
     points = [(float(x), float(y)) for x, y in positions or []]
     # Anything that is not a finite number is not a stage position. A single
@@ -381,11 +563,18 @@ def infer_stage_layout(positions) -> StageLayout | None:
     xs = [x for x, _ in points]
     ys = [y for _, y in points]
     tol = _jitter_tolerance(xs, ys)
-    # One pitch for the plate: the larger candidate across the two axes, since an
-    # axis showing only the within-well spacing must not set it.
-    scales = [s for s in (_axis_scale(xs, tol), _axis_scale(ys, tol))
-              if s is not None]
-    pitch = max(scales) if scales else None
+    if in_um and _one_well(xs, ys, tol):
+        # One well, imaged as a montage. Reported as itself rather than as a
+        # grid of wells the size of the montage — which is what every reading
+        # without a unit has to do, and which converts one well's fields into
+        # one field in each of nine wells that were never imaged.
+        places = len(set(place_keys(points)))
+        return StageLayout(
+            n_positions=len(points), rows=1, cols=1, fovs_per_well=places,
+            relative_order=[(0, 0)], direction="row", serpentine=True,
+            pitch=WELL_PITCH_UM, absolute_origin=None,
+        )
+    pitch = (_known_pitch(xs, ys, tol) if in_um else None) or _pitch(xs, ys, tol)
     by_x = _group_axis(xs, pitch, tol)
     by_y = _group_axis(ys, pitch, tol)
     ux, uy = sorted(by_x), sorted(by_y)
@@ -396,14 +585,36 @@ def infer_stage_layout(positions) -> StageLayout | None:
     # needs the gap; converting stage units to plate cells needs the real
     # centre-to-centre distance, and a 7% error there walks the drawing a whole
     # cell out of place across twelve columns.
-    step = _well_step(xs, by_x, ux) or _well_step(ys, by_y, uy) or pitch or 0.0
+    step_x, step_y = _well_step(xs, by_x, ux), _well_step(ys, by_y, uy)
+    step = step_x or step_y or pitch or 0.0
     if not isfinite(step) or step <= 0:
         return None      # no scale, so nothing downstream can be placed or drawn
+    # One pitch serves both axes, and this is where that assumption is checked
+    # rather than merely relied on. It is a real assumption: a 96-well plate is
+    # on 9 mm centres *both* ways, and taking each axis at its own word instead
+    # would make rows sampled A/C/E read as adjacent — the cross-axis
+    # corroboration is exactly what recovers a one-sided skip.
+    #
+    # So the two axes' per-well steps have to agree. Where they do not, the
+    # coordinates are not an SBS plate on one pitch — chambers on unequal
+    # centres, a stitched montage, a file mixing units — and grouping the odd
+    # axis at the other's pitch rounds its spacing to the nearest whole well.
+    # A ratio of 1.5 rounds to 2 and produces a confident, plausible, wrong
+    # answer: exactly the layout a genuine skipped row produces, offered with
+    # the same certainty. No layout at all is the honest output.
+    if step_x and step_y and (max(step_x, step_y) - min(step_x, step_y)
+                              > min(step_x, step_y) * _AXIS_AGREEMENT_TOL):
+        return None
     occupied = sorted(set(cells))
-    rows = len({r for r, _ in occupied})
-    cols = len({c for _, c in occupied})
-    if rows * cols != len(occupied):
-        return None            # not a filled rectangle — no grid to report
+    # The block's **extent**, not its populated row and column counts. A scan
+    # that skips wells — an L, a plate with two rows left out, a diagonal — is a
+    # perfectly ordinary experiment, and the page has expressed arbitrary orders
+    # since it grew a clickable plate. Refusing to read one because it is not a
+    # filled rectangle threw away the whole layout, including the fields per
+    # well and the visit order, which are right whatever the outline is; the
+    # user then got no offer at all and no reason for its absence.
+    rows = max(r for r, _ in occupied) + 1
+    cols = max(c for _, c in occupied) + 1
 
     # Distinct *places* per well, not visits: a timelapse returns to every
     # position once per timepoint, and counting visits would report a well's
@@ -451,14 +662,15 @@ def place(layout: StageLayout, origin_row: int, origin_col: int) -> list[str]:
     labels: list[str] = []
     for r, c in layout.relative_order:
         row, col = origin_row + r, origin_col + c
-        if not (0 <= row < 8 and 0 <= col < 12):
+        if not (0 <= row < _PLATE_ROWS and 0 <= col < _PLATE_COLS):
             return []
         labels.append(f"{chr(ord('A') + row)}{col + 1:02d}")
     return labels
 
 
 def _absolute_origin(points, cells, step: float,
-                     rows: int = 8, cols: int = 12) -> tuple[int, int] | None:
+                     rows: int = _PLATE_ROWS,
+                     cols: int = _PLATE_COLS) -> tuple[int, int] | None:
     """Where this block sits on the plate, if the coordinates say so.
 
     A scanner that reports positions in the *plate's* frame puts A01 at the

@@ -3049,9 +3049,53 @@ document-wide keeps the first image and discards the rest of the plate.
 `datasets/ome_import/stage_layout.py` reads a plate layout back out of them, on
 one physical separation: wells sit on a 9 mm pitch while the fields of view
 inside a well are hundreds of micrometres apart, so each axis carries two scales
-and the larger one is the well step. The axes share a plate and therefore a
-pitch, so an axis showing only the within-well spacing (a single row or column of
-wells) takes the other's; where neither shows two scales the reading is genuinely
+and the larger one is the well step. Both are measured against the axis's
+**smallest** gap, never its median: an axis holding one within-well step and one
+between-well step has a median equal to the larger, so nothing is ever three
+times it and the two scales read as one. And the smallest instance of whichever
+scale wins is the step, because a gap spans a whole number of steps and never a
+fraction of one — a scan that skips wells leaves gaps of two and three pitches
+beside the ordinary ones, and an average of those is a step no well sits on. The
+axes share a plate and therefore a pitch, so an axis showing only the within-well
+spacing (a single row or column of wells) takes the other's; an axis that shows a
+well gap outranks one that does not, and among those that do the *smallest* wins
+(`_pitch`) — taking the larger read a plate imaged on rows A and C as one whose
+wells are 18 mm apart. `_well_step` divides by the **wells** between two occupied
+groups rather than treating them as adjacent, for the same reason: that number is
+the conversion from stage units to plate cells, so a doubled one draws the map at
+half scale. There is one pitch for the plate, not one per axis, which is what
+makes a one-sided skip recoverable: rows sampled A/C/E with every column present
+measure 18 mm down and 9 mm across, and the axis showing the single step supplies
+the pitch that reads the other's gaps as the multiples they are. **When the file states a unit, the pitch is known rather than inferred.**
+`ome_explode._stage_positions` converts stage coordinates to micrometres
+whenever every plane names a length unit for both axes (`PositionXUnit`), and
+reports `stage_positions_in_um`; mixed or missing units convert nothing, since
+OME's own default is "reference frame" — the microscope's frame, which has no
+defined size, and treating it as micrometres would put a confident wrong mapping
+on every file that omits the attribute. With a unit, `_known_pitch` uses the
+nominal `WELL_PITCH_UM` where the measured steps agree with whole multiples of
+it, and that is what maps an **arbitrary selection of wells**: a scattered set
+(B02, D07, G11) has no adjacent pair anywhere to learn a pitch from, so relative
+spacing alone reads it as three neighbouring wells or refuses outright. It also
+settles the oldest ambiguity here — `_one_well` reports a montage across a
+single well as one well of N fields, where without a unit a montage and a grid
+of wells holding one field each are the same pattern at two scales and the grid
+reading had to be taken. A spacing that is not a whole number of 9 mm pitches
+falls back to the relative reading, so another plate format is no worse off.
+
+That the two axes share one pitch is a real
+assumption — an SBS plate is on 9 mm centres both ways — so it is **checked**
+rather than relied on: the two axes' per-well steps must agree within
+`_AXIS_AGREEMENT_TOL`, and where they do not there is no layout. Taking each axis
+at its own word instead would read A/C/E as adjacent, and letting a disagreement
+through is worse: a scan whose rows sit 1.5 pitches apart rounds to 2 and
+produces *exactly* the layout a genuine skipped row produces, with the same
+confidence. One adjacent
+pair anywhere on one axis is enough. Where **every** step on every axis skips —
+rows A, C and E in a single column — nothing in the file distinguishes that from
+three adjacent wells on a coarser plate, since no absolute unit is trusted here;
+it reads as adjacent, which the map draws at plate scale and the user's grid
+overrides; where neither shows two scales the reading is genuinely
 ambiguous between "one well holding a grid of fields" and "a grid of wells
 holding one field each", and the latter is taken because it is the ordinary plate
 scan. Coordinates are merged within a fraction of the coarsest spacing first, or
@@ -3065,7 +3109,20 @@ distinct positions, or a scale that is not finite and positive all return
 `None`, since a confident layout out of those is offered to the user as the
 file's own answer. What is **not** always inferred is which physical well the block starts at: stage coordinates are relative to the microscope's origin, which no file
 states in plate terms, so `StageLayout.relative_order` is `(row, col)` offsets and
-`place()` puts them at the origin the user chose. `stage_layout.path_in_cells` converts the same coordinates into **plate
+`place()` puts them at the origin the user chose.
+
+**A shape need not be a rectangle.** An L, a diagonal, a plate with a row left
+out: ordinary experiments, and the fields per well and the visit order are right
+whatever the outline is. `rows`/`cols` are the block's **extent** and `n_wells`
+counts the cells actually visited, with `filled` reporting whether they agree —
+`suggest_layout` hands anything sparse over as an explicit `well_order`, since a
+`rows × cols` sweep visits every cell and cannot describe one that does not.
+Group indices count *wells, not groups* (`_group_axis` advances by
+`round(gap / pitch)`), so a skipped well leaves a hole: indexing occupied groups
+consecutively closed the gap up, and a scan of rows A and C in two columns
+collapsed to two wells, `A01` and `B01`. The one refusal left is **uneven fields
+per well**, which no single FOVs-per-well setting can express, and the page says
+which of the two it is hit. `stage_layout.path_in_cells` converts the same coordinates into **plate
 cells** — one unit per well, fractional inside one — anchored so the first
 position sits at the centre of the well the user says the scan starts in.
 What reaches it is `stage_layout.single_cycle(...)`, the coordinates with
@@ -3141,6 +3198,18 @@ serpentine: a stage reporting Y or X descending sweeps a perfectly good
 serpentine whose first well is the block's *bottom*-left, and the grid always
 starts top-left, so the rows come out mirrored with every count still correct.
 One comparison covers that, a raster, and any other starting corner.
+
+**The grid says whether it snakes.** `util/plate_grid.block_well_labels` is the
+one generator of a block's labels — `serpentine_well_labels` is now a wrapper
+that passes `serpentine=True` — and its flag decides what happens at the end of
+each line: snake back, or fly back to the near edge and raster. Both are ordinary
+acquisition patterns, and a raster read as a snake labels every second line
+*backwards*, which is a silent well-mapping error with the right well count. It
+reaches the pipeline as `ConversionParams.serpentine` and sits in `_MAPPING_FIELDS`,
+so a resume refuses to finish a run under a different sweep than started it. The
+page carries it as a Snake checkbox beside the Sweep combo, filled from the
+inference like the rest; before it existed, the grid could only generate a snake
+and a raster had to be clicked well by well.
 
 **Two more settings come out of the same metadata.** `stage_layout.infer_frame_order`
 reads the converter's *frame order* — the one thing the file's own

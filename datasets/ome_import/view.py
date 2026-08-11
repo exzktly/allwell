@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 
 import theme
 from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
-from util.plate_grid import serpentine_well_labels
+from util.plate_grid import block_well_labels
 from widgets._support import set_variant
 from widgets.path_field import PathField
 from widgets.plate_geometry import (
@@ -270,27 +270,55 @@ class OmeImportPage(LogPanelMixin, QWidget):
         """
         self._sub_heading("Which wells did you image?", outer)
 
+        # Two rows, not one. They answer different questions — *which* block of
+        # wells, and *in what order* the stage crossed it — and five controls on
+        # one line read as a single setting with five boxes. The pair is wrapped
+        # in one widget so the run lock, the visibility rules and the "ignored
+        # while hand-drawn" note keep addressing them as the group they are.
         self._grid_row = QWidget(self)
-        hl = QHBoxLayout(self._grid_row)
+        grid_stack = QVBoxLayout(self._grid_row)
+        grid_stack.setContentsMargins(0, 0, 0, 0)
+        grid_stack.setSpacing(theme.Spacing.sm)
+
+        block_row = QWidget(self._grid_row)
+        hl = QHBoxLayout(block_row)
         hl.setContentsMargins(0, 0, 0, 0)
         hl.setSpacing(theme.Spacing.md)
-        hl.addWidget(QLabel("Grid (rows × cols):", self._grid_row))
+        hl.addWidget(QLabel("Grid (rows × cols):", block_row))
         self._rows_edit = self._small("1")
         hl.addWidget(self._rows_edit)
-        hl.addWidget(QLabel("×", self._grid_row))
+        hl.addWidget(QLabel("×", block_row))
         self._cols_edit = self._small("1")
         hl.addWidget(self._cols_edit)
-        hl.addWidget(QLabel("Origin:", self._grid_row))
+        hl.addWidget(QLabel("Origin:", block_row))
         self._origin_edit = self._small("A01", width=_ORIGIN_W, placeholder="A01")
         hl.addWidget(self._origin_edit)
-        hl.addWidget(QLabel("Serpentine:", self._grid_row))
-        self._direction_cb = QComboBox(self._grid_row)
-        self._direction_cb.addItem("Snake by row", userData="row")
-        self._direction_cb.addItem("Snake by column", userData="col")
+        hl.addStretch(1)
+        grid_stack.addWidget(block_row)
+
+        order_row = QWidget(self._grid_row)
+        ol = QHBoxLayout(order_row)
+        ol.setContentsMargins(0, 0, 0, 0)
+        ol.setSpacing(theme.Spacing.md)
+        ol.addWidget(QLabel("Sweep:", order_row))
+        self._direction_cb = QComboBox(order_row)
+        self._direction_cb.addItem("By row", userData="row")
+        self._direction_cb.addItem("By column", userData="col")
         self._direction_cb.currentIndexChanged.connect(
             lambda _=None: self.refresh_readout())
-        hl.addWidget(self._direction_cb)
-        hl.addStretch(1)
+        ol.addWidget(self._direction_cb)
+        # What happens at the end of each line. A raster read as a snake labels
+        # every second line backwards — the right well count, every other row
+        # mirrored — so it has to be answerable rather than assumed. Ticked by
+        # default because a snake is the commoner pattern, and because that is
+        # the order this page generated before it could be asked.
+        self._snake_cb = QCheckBox("Snake (alternate lines run backwards)",
+                                   order_row)
+        self._snake_cb.setChecked(True)
+        self._snake_cb.toggled.connect(lambda _=None: self.refresh_readout())
+        ol.addWidget(self._snake_cb)
+        ol.addStretch(1)
+        grid_stack.addWidget(order_row)
         outer.addWidget(self._grid_row)
 
         # What the file's own stage coordinates say the layout is. Offered
@@ -477,10 +505,11 @@ class OmeImportPage(LogPanelMixin, QWidget):
         if rows <= 0 or cols <= 0:
             return []
         try:
-            return serpentine_well_labels(
+            return block_well_labels(
                 rows, cols,
                 origin=self._origin_edit.text().strip() or "A01",
                 direction=str(self._direction_cb.currentData() or "row"),
+                serpentine=self._snake_cb.isChecked(),
             )
         except ValueError:
             return []
@@ -638,6 +667,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
             origin=self._origin_edit.text(),
             workers=self._workers_edit.text(),
             direction=str(self._direction_cb.currentData() or "row"),
+            serpentine=self._snake_cb.isChecked(),
             frame_order=str(self._frame_order_cb.currentData() or "single"),
             well_order=tuple(plate.order()) if hand_drawn else (),
         )
@@ -915,17 +945,21 @@ class OmeImportPage(LogPanelMixin, QWidget):
                 self._suggest_row.setVisible(True)
                 return
             if layout is not None and layout.stage_positions:
-                # Coordinates are in the file but do not describe a plate scan:
-                # not a filled rectangle, or uneven fields per well. Refusing to
-                # guess is right — a wrong grid entered silently is the worst
-                # outcome — but refusing *silently* leaves a file that clearly
-                # holds positions looking like one that holds none.
+                # Coordinates are in the file but do not describe a plate scan.
+                # A shape with wells skipped is read and offered as a path, so
+                # what is left here is a run whose wells hold *different*
+                # numbers of fields — which no single FOVs-per-well setting can
+                # express — or coordinates with no usable spacing at all.
+                # Refusing to guess is right; refusing *silently* leaves a file
+                # that clearly holds positions looking like one that holds none.
                 self._suggest_label.setText(
                     f"↳ This file records {len(layout.stage_positions)} stage "
-                    "position(s), but they do not form a rectangular block of "
-                    "wells with the same number of fields in each — a scan with "
-                    "wells skipped, or with uneven fields — so no grid could be "
-                    "read from them. Enter the grid and FOVs per well below.")
+                    "position(s), but they do not describe a plate scan: its "
+                    "wells hold different numbers of fields, its rows and "
+                    "columns are not on one spacing, or the coordinates say "
+                    "nothing about a well grid at all. A shape with wells "
+                    "skipped is fine and would have been read — this is not "
+                    "that. Enter the grid and FOVs per well below.")
                 self._suggest_btn.setVisible(False)
                 self._suggest_row.setVisible(True)
                 return
@@ -1035,6 +1069,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
             self._order_from_file = False
             self._rows_edit.setText(str(suggestion.rows))
             self._cols_edit.setText(str(suggestion.cols))
+            self._snake_cb.setChecked(bool(suggestion.serpentine))
             index = self._direction_cb.findData(suggestion.direction)
             if index >= 0:
                 self._direction_cb.setCurrentIndex(index)

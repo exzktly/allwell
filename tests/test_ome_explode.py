@@ -907,3 +907,72 @@ def test_the_ome_planes_still_win_when_they_have_coordinates(tmp_path):
     layout = read_ome_layout(_write_ome_xml(tmp_path / "both.ome.tif", xml, 4))
     assert layout.stage_positions == [(0.0, 0.0), (10.0, 0.0),
                                       (20.0, 0.0), (30.0, 0.0)]
+
+
+# ── the unit a file states for its stage coordinates ─────────────────────────
+
+
+def _positions_xml(coords, unit=None):
+    attr = "" if unit is None else f' PositionXUnit="{unit}" PositionYUnit="{unit}"'
+    planes = "".join(
+        f'<Plane TheT="{i}" TheC="0" TheZ="0" PositionX="{x}" PositionY="{y}"'
+        f'{attr}/>'
+        for i, (x, y) in enumerate(coords))
+    return (
+        '<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+        '<Image ID="Image:0"><Pixels ID="Pixels:0" DimensionOrder="XYZCT" '
+        'Type="uint16" SizeX="4" SizeY="4" SizeC="1" SizeZ="1" '
+        f'SizeT="{len(coords)}">{planes}</Pixels></Image></OME>')
+
+
+def test_stage_positions_are_converted_when_the_file_states_a_length():
+    """A stated unit is the difference between "these are 9 apart" and "these
+    are 9 mm apart", and only the second names a well."""
+    from pipeline.ome_explode import _stage_positions
+
+    coords = [(0.0, 0.0), (9.0, 0.0)]
+    points, in_um = _stage_positions(_positions_xml(coords, "mm"))
+    assert in_um
+    assert points == [(0.0, 0.0), (9000.0, 0.0)]
+
+    points, in_um = _stage_positions(_positions_xml(coords, "µm"))
+    assert in_um and points == coords
+
+    # A TIFF description is 7-bit ASCII, so a real file spells the micro sign
+    # as an entity or as "um". The XML parser resolves the first to the same
+    # character this table already holds.
+    points, in_um = _stage_positions(_positions_xml(coords, "&#181;m"))
+    assert in_um and points == coords
+    points, in_um = _stage_positions(_positions_xml(coords, "um"))
+    assert in_um and points == coords
+
+
+def test_a_unit_that_is_not_a_length_is_not_a_scale():
+    """OME's own default for PositionX is "reference frame" — the microscope's
+    frame, which has no defined size. Treating it as micrometres would put a
+    confident, wrong plate mapping on every file that omits the attribute."""
+    from pipeline.ome_explode import _stage_positions
+
+    coords = [(0.0, 0.0), (9000.0, 0.0)]
+    for unit in (None, "reference frame", "pixel", ""):
+        _points, in_um = _stage_positions(_positions_xml(coords, unit))
+        assert not in_um, unit
+
+
+def test_mixed_units_are_reported_as_no_unit_at_all():
+    """Half a file in millimetres and half in micrometres has no single scale,
+    and picking either is a thousandfold error in the half it does not fit."""
+    from pipeline.ome_explode import _stage_positions
+
+    xml = (
+        '<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+        '<Image ID="Image:0"><Pixels ID="Pixels:0" DimensionOrder="XYZCT" '
+        'Type="uint16" SizeX="4" SizeY="4" SizeC="1" SizeZ="1" SizeT="2">'
+        '<Plane TheT="0" TheC="0" TheZ="0" PositionX="0" PositionY="0" '
+        'PositionXUnit="mm" PositionYUnit="mm"/>'
+        '<Plane TheT="1" TheC="0" TheZ="0" PositionX="9000" PositionY="0" '
+        'PositionXUnit="µm" PositionYUnit="µm"/>'
+        '</Pixels></Image></OME>')
+    points, in_um = _stage_positions(xml)
+    assert not in_um
+    assert points == [(0.0, 0.0), (9000.0, 0.0)]        # left exactly as written

@@ -50,7 +50,7 @@ from typing import Callable
 import numpy as np
 import tifffile
 
-from util.plate_grid import normalize_well_order, serpentine_well_labels
+from util.plate_grid import block_well_labels, normalize_well_order
 from util.zip_write import atomic_zip
 
 # How a single-image file's flat T-frame sequence splits into (position, timepoint):
@@ -133,6 +133,14 @@ class OmeLayout:
     # ``(x, y)`` stage coordinates per plane, in the OME-XML's plane order, for
     # callers that infer the plate layout from where the images were taken.
     stage_positions: list[tuple[float, float]] = field(default_factory=list)
+    # True when those coordinates were converted to **micrometres** from a unit
+    # the file stated. Without it a layout can only be read from the *ratios*
+    # between positions, which cannot tell wells two apart from wells one apart
+    # unless something in the scan is adjacent; with it, a coordinate names its
+    # well outright. False when the file states no unit, or states one that is
+    # not a length (OME's default for PositionX is "reference frame", which is
+    # the microscope's own and has no fixed size).
+    stage_positions_in_um: bool = False
     # What metadata the file turned out to carry, as ``{source: count}``, and a
     # sample of the keys in it. Neither is used to decide anything — they exist
     # so a file that yields no layout can say what it *does* hold instead of
@@ -465,7 +473,27 @@ def _declared_sizes(ome_xml: str | None) -> dict[str, int]:
     return out
 
 
-def _stage_positions(ome_xml: str | None) -> list[tuple[float, float]]:
+# Length units an OME file may state for a stage position, as micrometres each.
+# "reference frame" is deliberately absent: it is OME's default and means the
+# microscope's own frame, which has no defined size.
+_LENGTH_UNITS_UM = {
+    "m": 1e6, "dm": 1e5, "cm": 1e4, "mm": 1e3,
+    "µm": 1.0, "um": 1.0, "micron": 1.0, "micrometer": 1.0, "micrometre": 1.0,
+    "nm": 1e-3, "pm": 1e-6, "Å": 1e-4, "angstrom": 1e-4,
+    "in": 25400.0, "inch": 25400.0, "mi": 1.609344e9, "ft": 304800.0,
+    "yd": 914400.0, "thou": 25.4, "li": 201168000.0,
+}
+
+
+def _unit_to_um(raw: str | None) -> float | None:
+    """Micrometres per *raw* unit, or ``None`` if it is not a stated length."""
+    if not raw:
+        return None
+    return _LENGTH_UNITS_UM.get(raw.strip()) or _LENGTH_UNITS_UM.get(
+        raw.strip().lower())
+
+
+def _stage_positions(ome_xml: str | None) -> tuple[list[tuple[float, float]], bool]:
     """``(x, y)`` per ``Plane``, in document order, for layout inference.
 
     Only planes carrying both coordinates are returned, and within one
@@ -480,16 +508,22 @@ def _stage_positions(ome_xml: str | None) -> list[tuple[float, float]]:
     plate, or, for a multi-image timelapse, several coordinates that are all the
     same position.
 
-    Units are left as written: every consumer here compares distances within one
-    file, where a common scale cancels.
+    Returns ``(positions, in_micrometres)``. Coordinates are converted to
+    micrometres whenever **every** plane states a length unit for both axes, and
+    left exactly as written otherwise — a consumer comparing distances within
+    one file needs no scale, but one asking "which well is this?" of a scattered
+    selection cannot answer without one. Mixed or missing units are reported as
+    not-converted rather than guessed: a scale that is wrong is worse than none,
+    because it is the thing everything downstream then trusts.
     """
     if not ome_xml:
-        return []
+        return [], False
     try:
         root = ET.fromstring(ome_xml)
     except ET.ParseError:
-        return []
+        return [], False
     order: list[tuple[float, float]] = []
+    scales: list[float | None] = []
     images = [el for el in root.iter() if _localname(el.tag) == "Image"]
     for image in images or [root]:
         seen: set[int] = set()
@@ -503,6 +537,9 @@ def _stage_positions(ome_xml: str | None) -> list[tuple[float, float]]:
                 xy = (float(x), float(y))
             except ValueError:
                 continue
+            sx = _unit_to_um(el.get("PositionXUnit"))
+            sy = _unit_to_um(el.get("PositionYUnit"))
+            scale = sx if sx is not None and sx == sy else None
             the_t = el.get("TheT")
             try:
                 key = int(the_t) if the_t is not None else len(seen)
@@ -512,7 +549,11 @@ def _stage_positions(ome_xml: str | None) -> list[tuple[float, float]]:
                 continue
             seen.add(key)
             order.append(xy)
-    return order
+            scales.append(scale)
+    if order and all(s is not None for s in scales) and len(set(scales)) == 1:
+        factor = scales[0]
+        return [(x * factor, y * factor) for x, y in order], True
+    return order, False
 
 
 # Vendor blocks ``tifffile`` parses in their own right, in the order they are
@@ -771,6 +812,7 @@ def read_ome_layout(ome_path: Path | str) -> OmeLayout:
     channel_names, timepoint_tokens = _parse_ome_labels(
         ome_xml, size_c, 0 if single_image else size_t
     )
+    ome_positions, positions_in_um = _stage_positions(ome_xml)
     return OmeLayout(
         n_positions=len(series),
         size_t=0 if single_image else size_t,
@@ -792,7 +834,11 @@ def read_ome_layout(ome_path: Path | str) -> OmeLayout:
         declared_sizes=_declared_sizes(ome_xml),
         unreferenced_pages=unreferenced,
         warnings=list(warnings),
-        stage_positions=(_stage_positions(ome_xml) or vendor_positions),
+        stage_positions=(ome_positions or vendor_positions),
+        # Only the OME planes carry a unit. A vendor block's coordinates are in
+        # whatever the instrument writes, so a scale read from the OME half must
+        # not be claimed for the fallback half.
+        stage_positions_in_um=(positions_in_um and bool(ome_positions)),
         position_names=_position_names(ome_xml),
         metadata_blocks=blocks,
         metadata_key_sample=key_sample,
@@ -990,6 +1036,7 @@ def explode_ome_tiff(
     grid_cols: int,
     origin_well: str = "A01",
     direction: str = "row",
+    serpentine: bool = True,
     experiment: str = "ome",
     fovs_per_well: "int | None" = None,
     frame_order: str = "single",
@@ -1071,8 +1118,9 @@ def explode_ome_tiff(
     if well_order:
         well_labels = normalize_well_order(well_order)
     else:
-        well_labels = serpentine_well_labels(
-            grid_rows, grid_cols, origin=origin_well, direction=direction
+        well_labels = block_well_labels(
+            grid_rows, grid_cols, origin=origin_well, direction=direction,
+            serpentine=serpentine,
         )
     n_wells = len(well_labels)
 

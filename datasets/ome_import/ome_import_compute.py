@@ -32,8 +32,8 @@ from datasets.ome_import.stage_layout import (
     place,
 )
 from util.plate_grid import (
+    block_well_labels,
     normalize_well_order,
-    serpentine_well_labels,
     well_row_col,
 )
 
@@ -64,6 +64,11 @@ class ConversionParams:
     grid_cols: int
     origin: str = "A01"
     direction: str = "row"
+    # False rasters the grid: every line swept the same way, the stage flying
+    # back between them. A raster read as a snake mislabels every second line
+    # backwards, with the well count still correct — so it is an input, not an
+    # assumption.
+    serpentine: bool = True
     fovs_per_well: int | None = None      # None = derive
     frame_order: str = "single"           # single-image files only
     experiment: str = ""                  # blank = derive from the filename
@@ -154,6 +159,7 @@ class RawFields:
     origin: str = ""
     workers: str = ""
     direction: str = "row"
+    serpentine: bool = True
     frame_order: str = "single"
     experiment: str = ""
     well_order: tuple[str, ...] = ()
@@ -205,6 +211,7 @@ class RawFields:
             grid_cols=max(0, cols or 0),
             origin=self.origin.strip() or "A01",
             direction=self.direction or "row",
+            serpentine=self.serpentine,
             fovs_per_well=fovs if (fovs or 0) > 0 else None,
             frame_order=self.frame_order or "single",
             experiment=self.experiment,
@@ -304,6 +311,10 @@ class LayoutSuggestion:
     fovs_per_well: int
     direction: str
     n_positions: int
+    # Whether alternate lines run backwards. Read from the coordinates like the
+    # rest, and applied to the page's Snake box: a raster offered as a snake
+    # would fill the form with an order that mirrors every second line.
+    serpentine: bool = True
     well_order: tuple[str, ...] = ()
     # How the file's flat frame sequence splits, read from the repeat pattern in
     # the coordinates — the one setting the file's own DimensionOrder cannot
@@ -320,10 +331,18 @@ class LayoutSuggestion:
         timing = (f", {self.n_timepoints} timepoint(s)"
                   if self.n_timepoints > 1 else "")
         placed = f", starting at {self.origin}" if self.origin else ""
+        axis = "row" if self.direction == "row" else "column"
+        sweep = f"snaking by {axis}" if self.serpentine else f"by {axis}, no snake"
+        # A sparse block's extent is not its well count, and naming only the
+        # extent claims wells the run never imaged — "3×3 wells" for an L of
+        # five. Both numbers, so the shape is legible without the map.
+        wells = len(self.well_order)
+        shape = (f"{wells} wells in a {self.rows}×{self.cols} block"
+                 if wells and wells != self.rows * self.cols
+                 else f"{self.rows}×{self.cols} wells")
         return (
-            f"{self.rows}×{self.cols} wells × {self.fovs_per_well} FOV(s), "
-            f"snaking by {'row' if self.direction == 'row' else 'column'}"
-            f"{timing}{path}{placed}"
+            f"{shape} × {self.fovs_per_well} FOV(s), "
+            f"{sweep}{timing}{path}{placed}"
         )
 
 
@@ -357,7 +376,8 @@ def infer_layout(layout: OmeLayout):
     itself it ran twice per character typed — 190 ms of it on a 96-well plate at
     16 fields over 24 timepoints, on the UI thread.
     """
-    return infer_stage_layout(layout.stage_positions)
+    return infer_stage_layout(layout.stage_positions,
+                              in_um=layout.stage_positions_in_um)
 
 
 def suggest_layout(layout: OmeLayout, origin: str = "A01",
@@ -408,9 +428,10 @@ def suggest_layout(layout: OmeLayout, origin: str = "A01",
     # look like a path the grid cannot express.
     start_label = f"{chr(ord('A') + origin_row)}{origin_col + 1:02d}"
     try:
-        from_grid = serpentine_well_labels(
+        from_grid = block_well_labels(
             inferred.rows, inferred.cols,
-            origin=start_label, direction=inferred.direction)
+            origin=start_label, direction=inferred.direction,
+            serpentine=inferred.serpentine)
     except ValueError:
         from_grid = []
     order = () if placed == from_grid else tuple(placed)
@@ -435,6 +456,7 @@ def suggest_layout(layout: OmeLayout, origin: str = "A01",
         cols=inferred.cols,
         fovs_per_well=inferred.fovs_per_well,
         direction=inferred.direction,
+        serpentine=inferred.serpentine,
         n_positions=inferred.n_positions,
         well_order=order,
         frame_order=(timing[0] if timing else ""),
@@ -516,7 +538,7 @@ IN_PROGRESS_MARKER = ".aw_ome_in_progress"
 # agreeing on these produce identical archives; two that differ produce the same
 # *filenames* from different images, which is why a resume has to compare them
 # rather than trusting the names on disk.
-_MAPPING_FIELDS = ("grid_rows", "grid_cols", "origin", "direction",
+_MAPPING_FIELDS = ("grid_rows", "grid_cols", "origin", "direction", "serpentine",
                    "fovs_per_well", "frame_order", "experiment", "well_order")
 
 
@@ -689,8 +711,9 @@ def plan_conversion(layout: OmeLayout, params: ConversionParams) -> ConversionPl
                 "whole numbers."
             )
         try:
-            well_labels = serpentine_well_labels(
-                rows, cols, origin=params.origin or "A01", direction=params.direction,
+            well_labels = block_well_labels(
+                rows, cols, origin=params.origin or "A01",
+                direction=params.direction, serpentine=params.serpentine,
             )
         except ValueError as exc:
             raise OmeImportError(str(exc)) from exc

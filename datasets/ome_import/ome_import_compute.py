@@ -677,6 +677,32 @@ def plan_conversion(layout: OmeLayout, params: ConversionParams) -> ConversionPl
     )
 
 
+def workable_splits(n_frames: int, limit: int = 6) -> list[tuple[int, int]]:
+    """``(positions, timepoints)`` pairs a flat frame count can actually take.
+
+    A refusal that only says the current grid does not fit leaves the user
+    guessing at a number the file has already determined: the frame count's
+    divisors are the *complete* list of ways it can split, and most counts have
+    very few. 6958 frames, for instance, is 2 x 7 x 7 x 71 — it does not divide
+    by 96, 48 or 24, so no full-plate reading exists at all, and saying which
+    readings do exist turns a dead end into a choice.
+    """
+    if n_frames <= 0:
+        return []
+    pairs = [(d, n_frames // d) for d in range(1, min(n_frames, 96) + 1)
+             if n_frames % d == 0]
+    return pairs[:limit]
+
+
+def _splits_hint(n_frames: int) -> str:
+    """The workable splits as a sentence, or ``""`` when there is nothing to say."""
+    pairs = workable_splits(n_frames)
+    if not pairs:
+        return ""
+    shown = "; ".join(f"{pos} position(s) × {tps} timepoint(s)" for pos, tps in pairs)
+    return f" This file's {n_frames} frames can only split as: {shown}."
+
+
 def _split_multi_image(
     total: int, n_wells: int, fovs: int | None, size_t: int, wells_desc: str,
 ) -> tuple[int, int, int]:
@@ -706,12 +732,13 @@ def _split_single_image(
                 raise OmeImportError(
                     f"{n_frames} frames don't divide evenly into {wells_desc}. "
                     f"Set FOVs per well, or fix the grid."
+                    + _splits_hint(n_frames)
                 )
             fovs = n_frames // n_wells
         if n_wells * fovs != n_frames:
             raise OmeImportError(
                 f"{wells_desc} × {fovs} FOV(s) = {n_wells * fovs}, but the "
-                f"file has {n_frames} frame(s)."
+                f"file has {n_frames} frame(s)." + _splits_hint(n_frames)
             )
         return n_frames, 1, fovs
     if fovs is None:
@@ -726,5 +753,6 @@ def _split_single_image(
         raise OmeImportError(
             f"{n_frames} frames don't split into {wells_desc} × {fovs} FOV(s) = "
             f"{n_positions} positions × a whole number of timepoints."
+            + _splits_hint(n_frames)
         )
     return n_positions, n_timepoints, fovs

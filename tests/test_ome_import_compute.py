@@ -28,6 +28,7 @@ from datasets.ome_import.ome_import_compute import (  # noqa: E402
     selection_target,
     suggest_layout,
     wells_from_names,
+    workable_splits,
     strip_ome_suffix,
 )
 from pipeline.ome_explode import OmeLayout  # noqa: E402
@@ -695,3 +696,22 @@ def test_a_named_scan_needs_no_origin_at_all(tmp_path):
     assert suggestion.origin == "C04"
     assert suggestion.well_order == ("C04", "C05", "C06", "D04", "D05", "D06")
     assert "starting at C04" in suggestion.describe()
+
+
+def test_a_refusal_names_the_splits_the_frame_count_can_actually_take():
+    """A refusal that only says the current grid does not fit leaves the user
+    guessing at a number the file has already decided. 6958 frames is
+    2 x 7 x 7 x 71 — it does not divide by 96, 48 or 24, so no full-plate
+    reading exists at all, and the few that do are worth naming."""
+    assert workable_splits(6958) == [
+        (1, 6958), (2, 3479), (7, 994), (14, 497), (49, 142), (71, 98)]
+    assert workable_splits(0) == []
+    assert workable_splits(12) == [(1, 12), (2, 6), (3, 4), (4, 3), (6, 2), (12, 1)]
+
+
+def test_the_split_refusal_carries_those_splits(tmp_path):
+    p = _write_packed(tmp_path / "s.ome.tif", n_frames=98)
+    with pytest.raises(OmeImportError) as exc:
+        plan_conversion(read_layout(p), ConversionParams(grid_rows=3, grid_cols=4))
+    assert "can only split as" in str(exc.value)
+    assert "14 position(s) × 7 timepoint(s)" in str(exc.value)

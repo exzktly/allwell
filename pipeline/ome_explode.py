@@ -133,6 +133,14 @@ class OmeLayout:
     # ``(x, y)`` stage coordinates per plane, in the OME-XML's plane order, for
     # callers that infer the plate layout from where the images were taken.
     stage_positions: list[tuple[float, float]] = field(default_factory=list)
+    # What metadata the file turned out to carry, as ``{source: count}``, and a
+    # sample of the keys in it. Neither is used to decide anything — they exist
+    # so a file that yields no layout can say what it *does* hold instead of
+    # only what it does not. Without that, "no stage coordinates" is
+    # indistinguishable from "looked in the wrong place", and the only way to
+    # tell them apart is to have the file in hand.
+    metadata_blocks: dict[str, int] = field(default_factory=dict)
+    metadata_key_sample: list[str] = field(default_factory=list)
     # One name per ``<Image>``, from its ``<StageLabel>`` or its own ``Name``.
     # Coordinates say where on the *stage* a position was; only these ever say
     # where on the *plate*, so they are the one place a starting well can come
@@ -626,6 +634,41 @@ def _vendor_positions(tf, ome_xml: str | None) -> list[tuple[float, float]]:
     return []
 
 
+# How many keys to keep as a sample. Enough to recognise a vendor's spelling of
+# a stage coordinate, few enough to paste into a message.
+_KEY_SAMPLE = 40
+
+
+def _metadata_inventory(tf, ome_xml: str | None) -> tuple[dict, list]:
+    """``({source: key count}, [sample keys])`` for everything the file carries.
+
+    Diagnostic only. A file that yields no layout should be able to say what it
+    *does* hold — which blocks are present, how large they are, and what their
+    keys look like — because "no stage coordinates found" and "looked in the
+    wrong place" are otherwise the same sentence, and telling them apart
+    currently needs the file itself.
+    """
+    blocks: dict[str, int] = {}
+    sample: list[str] = []
+
+    def _take(name: str, flat: dict) -> None:
+        if not flat:
+            return
+        blocks[name] = len(flat)
+        for key in list(flat)[:_KEY_SAMPLE]:
+            if len(sample) < _KEY_SAMPLE:
+                sample.append(f"{name}: {key}")
+
+    if ome_xml:
+        blocks["ome_xml_chars"] = len(ome_xml)
+    _take("original_metadata", _flatten_metadata(_original_metadata(ome_xml)))
+    for name in _VENDOR_BLOCKS:
+        with_block = getattr(tf, name, None)
+        if with_block:
+            _take(name, _flatten_metadata(with_block))
+    return blocks, sample
+
+
 def _position_names(ome_xml: str | None) -> list[str]:
     """One name per ``<Image>``: its ``<StageLabel>``'s, else the Image's own.
 
@@ -717,6 +760,7 @@ def read_ome_layout(ome_path: Path | str) -> OmeLayout:
             ome_xml = tf.ome_metadata
             series_kind = str(getattr(series[0], "kind", "") or "")
             vendor_positions = _vendor_positions(tf, ome_xml)
+            blocks, key_sample = _metadata_inventory(tf, ome_xml)
             gaps = [series_page_gaps(s) for s in series]
             total_planes = sum(len(s.pages) for s in series)
             unreferenced = _unreferenced_page_count(tf, series)
@@ -750,6 +794,8 @@ def read_ome_layout(ome_path: Path | str) -> OmeLayout:
         warnings=list(warnings),
         stage_positions=(_stage_positions(ome_xml) or vendor_positions),
         position_names=_position_names(ome_xml),
+        metadata_blocks=blocks,
+        metadata_key_sample=key_sample,
     )
 
 

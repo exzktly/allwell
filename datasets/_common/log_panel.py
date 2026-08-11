@@ -129,6 +129,16 @@ class LogPanelMixin:
     def append_log(self, text: str) -> None:
         self._status.appendPlainText(text)
 
+    def log_text(self) -> str:
+        """Everything in the raw log, for a caller that needs to read it back.
+
+        The log is the page's only durable record of what a file turned out to
+        contain, so a test — or a user copying it into a message — has to be
+        able to get at it without reaching into the widget.
+        """
+        view = getattr(self, "_status", None)
+        return view.toPlainText() if view is not None else ""
+
     def clear_log(self) -> None:
         self._status.clear()
 

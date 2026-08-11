@@ -2642,7 +2642,14 @@ the OME block, and the original metadata the microscope wrote, which conversion
 tools copy in alongside it. Plenty of files record positions only in the second.
 
 **Not every OME-TIFF carries stage coordinates anywhere.** When yours does not, the page
-says so where the suggestion would have been — *"This file records no stage
+says so where the suggestion would have been, **and names the metadata the file
+does hold** — how large its OME block is, and which of the instrument's own
+blocks it carries. Open **Show raw log** for a sample of that metadata's keys.
+That sample is what to send if a file you believe records positions still comes
+back with none: the keys say whether the coordinates are truly absent or merely
+spelled in a way All-Well does not match yet.
+
+The message reads — *"This file records no stage
 coordinates, so the well grid cannot be read from it"* — and you enter the grid
 and FOVs per well yourself. If what you enter doesn't fit, the refusal now names
 the splits the file's frame count *can* take (`14 position(s) × 7 timepoint(s)`,

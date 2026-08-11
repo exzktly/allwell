@@ -119,6 +119,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
         # at the starting well cannot be corrected without first knowing to
         # press Clear path.
         self._order_from_file = False
+        self._logged_keys_for = None
         self._build_ui()
         self.refresh_readout()
 
@@ -828,6 +829,25 @@ class OmeImportPage(LogPanelMixin, QWidget):
             return destination_problem(root)
         return destination_problem(root, source, self.raw_fields().to_params())
 
+    def _log_metadata_sample(self, layout) -> None:
+        """Put the file's own metadata keys in the log, once per file.
+
+        The one thing a user can send back when a file yields no layout: the
+        keys are what say whether the coordinates are absent or merely spelled
+        in a way nothing here matches yet.
+        """
+        if getattr(self, "_logged_keys_for", None) == id(layout):
+            return
+        self._logged_keys_for = id(layout)
+        if not layout.metadata_key_sample:
+            self.append_log("[ome] This file carries no key/value metadata "
+                            "beyond its OME-XML.")
+            return
+        self.append_log("[ome] No stage coordinates found. A sample of the "
+                        "metadata keys this file does carry:")
+        for key in layout.metadata_key_sample:
+            self.append_log(f"    {key}")
+
     def _refresh_suggestion(self, layout) -> None:
         """Offer the layout the file's stage coordinates describe, if any."""
         inferred = self._inferred_for(layout)
@@ -844,10 +864,15 @@ class OmeImportPage(LogPanelMixin, QWidget):
             # offers nothing, and a file that cannot be read this way looks the
             # same as one the feature forgot to look at.
             if layout is not None and not layout.stage_positions:
+                held = ", ".join(f"{name} ({count})" for name, count
+                                 in sorted(layout.metadata_blocks.items())) or "none"
                 self._suggest_label.setText(
-                    "↳ This file records no stage coordinates, so the well grid "
-                    "cannot be read from it — enter the grid and FOVs per well "
-                    "below.")
+                    "↳ This file records no stage coordinates in either its OME "
+                    "metadata or the instrument's own, so the well grid cannot be "
+                    "read from it — enter the grid and FOVs per well below. "
+                    f"Metadata it does carry: {held}. Open Show raw log for a "
+                    "sample of its keys.")
+                self._log_metadata_sample(layout)
                 self._suggest_btn.setVisible(False)
                 self._suggest_row.setVisible(True)
             else:

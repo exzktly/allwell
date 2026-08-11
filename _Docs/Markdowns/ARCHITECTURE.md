@@ -3038,7 +3038,11 @@ the rest of `_VENDOR_BLOCKS`). Both are flattened to `{path: leaf}` and scanned
 by `_paired_coordinates`, which pairs an X key with the Y that shares its *stem*
 — "Position 3 XPos" belongs with "Position 3 YPos" and nothing else — so a stray
 coordinate elsewhere in a block cannot pull a pair out of line, and fewer than
-two complete pairs yields nothing at all. The `<Plane>` collection is **per
+two complete pairs yields nothing at all. `OmeLayout.metadata_blocks` and
+`metadata_key_sample` are collected on the same pass and decide nothing: they
+exist so a file that yields no layout can report what it *does* hold, since
+"no stage coordinates found" and "looked in the wrong place" are otherwise the
+same sentence and telling them apart needs the file itself. The `<Plane>` collection is **per
 `<Image>`**: a multi-image plate scan is one `<Image>` per stage position and
 every one of them numbers its planes from `TheT="0"`, so collapsing duplicates
 document-wide keeps the first image and discards the rest of the plate.

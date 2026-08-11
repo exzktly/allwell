@@ -24,6 +24,7 @@ from pipeline.ome_explode import (
     read_ome_layout,
 )
 from datasets.ome_import.stage_layout import (
+    single_cycle,
     infer_frame_order,
     infer_stage_layout,
     path_in_cells,
@@ -449,6 +450,13 @@ def stage_path_for(layout: OmeLayout, anchor: str = "A01",
     the well pitch and an unrecognised pattern has no reliable one — drawing at
     a guessed scale would put the fields of view in the wrong wells, which is
     exactly the mistake the picture exists to catch.
+
+    **One cycle only.** A timelapse walks the same route once per timepoint, so
+    its coordinates repeat; drawn in full that is one map overdrawn N times,
+    with every dot on a dot and the numbering running to N times the count of
+    real positions. ``single_cycle`` keeps the first arrival at each place, so
+    what is drawn is the map of a single pass — see :func:`stage_path_cycles`
+    for the count the caption reports.
     """
     inferred = inferred if inferred is not None else infer_layout(layout)
     if inferred is None or inferred.pitch <= 0:
@@ -457,7 +465,21 @@ def stage_path_for(layout: OmeLayout, anchor: str = "A01",
         row, col = well_row_col(anchor or "A01")
     except ValueError:
         row, col = 0, 0
-    return path_in_cells(layout.stage_positions, inferred.pitch, row, col)
+    return path_in_cells(single_cycle(layout.stage_positions),
+                         inferred.pitch, row, col)
+
+
+def stage_path_cycles(layout: OmeLayout) -> tuple[int, int]:
+    """``(positions drawn, positions in the file)`` for the stage path.
+
+    The caption needs both to say that what is on screen is one cycle of a
+    repeated route rather than the whole file. A picture that quietly shows a
+    twelfth of the coordinates is the silent-substitution failure CLAUDE.md §7
+    is about, so the shortfall is named in the artifact rather than only being
+    true.
+    """
+    positions = list(layout.stage_positions or ())
+    return len(single_cycle(positions)), len(positions)
 
 
 # Written into the destination while a conversion is running and removed when it

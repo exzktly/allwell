@@ -3068,6 +3068,18 @@ states in plate terms, so `StageLayout.relative_order` is `(row, col)` offsets a
 `place()` puts them at the origin the user chose. `stage_layout.path_in_cells` converts the same coordinates into **plate
 cells** — one unit per well, fractional inside one — anchored so the first
 position sits at the centre of the well the user says the scan starts in.
+What reaches it is `stage_layout.single_cycle(...)`, the coordinates with
+every return to a place already imaged dropped, because a timelapse walks
+the same route once per timepoint: drawn in full that is **one map
+overdrawn N times**, every dot landing on a dot, every line on a line, and
+the numbering running to N times the count of real positions while showing
+the geometry of one. Repeats are dropped rather than the list cut at the
+first one, because a file ordered timepoints-within-position repeats its
+*second* coordinate and truncating would leave it a single dot.
+`ome_import_compute.stage_path_cycles` returns `(drawn, in the file)` and the
+page's caption states both whenever they differ — a picture showing a twelfth
+of the coordinates must say so in the artifact, not only in the code that
+decided it.
 `widgets/stage_path_view.py` draws that under the acquisition plate at the
 plate's own scale: a dot per imaged position, joined in acquisition order, over
 the same 8×12 lattice. It is the one view that can show anything about the
@@ -3113,7 +3125,20 @@ dimension — from which coordinates repeat and how: every position visited once
 is `single`, a sequence running through all of them before repeating is
 `pos_in_time`, one repeating each position consecutively is `time_in_pos`, and
 anything else is `None` rather than a guess. That also yields the timepoint
-count. `StageLayout.absolute_origin` reads the **starting well** straight out of the
+count.
+
+**"The same place" is one definition for the module** — `stage_layout.place_keys`,
+which snaps each coordinate to the merged axis values `_distinct` / `_nearest`
+group wells with, at the `_jitter_tolerance` both the grouping and the revisit
+test read from the coarsest gap on either axis. The question is asked in four
+places (how many fields a well holds, whether the sequence repeats and how
+often, which places the map draws, which cell a coordinate belongs to), and a
+stage sent back to a nominal position reports it a fraction of a micrometre
+off, so an equality test finds no repeats at all: the same file then reports a
+well's fields *multiplied* by its timepoints and `single` for its frame order,
+each contradicting the other. Comparison is O(n log n) rather than pairwise —
+a plate timelapse holds tens of thousands of positions and this runs on the UI
+thread, on every keystroke. `StageLayout.absolute_origin` reads the **starting well** straight out of the
 coordinates when they are stated in the plate's own frame — A01 at the origin,
 every well centre a whole number of pitches out — believed only when every well
 in the block lands on its grid position within `_PLATE_FRAME_TOL` of a pitch and

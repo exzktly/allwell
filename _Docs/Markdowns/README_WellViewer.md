@@ -2707,7 +2707,13 @@ positions is labelled with four digits apiece. If the run turns out not to fit a
 the well spacing read from the file, the drawing is scaled down to show all of
 it and the caption says so — a square is then no longer a well, and it usually
 means the grid and FOVs per well need checking too. Otherwise: one dot per image — not per well — joined in the order
-they were taken, with a larger green dot where the scan starts. The tight
+they were taken, with a larger green dot where the scan starts.
+**A timelapse is drawn once.** The stage walks the same route at every
+timepoint, so drawing every coordinate would be one map laid over itself a
+dozen times — each dot on top of the last, and the numbers running to a
+dozen times the number of places actually visited. Only the first visit to
+each place is drawn, and the caption says how many coordinates the file
+holds so you can see that is what happened. The tight
 clusters are the fields of view within a single well, which the plate map above
 cannot show at all: every field in a well is the same square there. Use it to
 check the shape of the run before converting — that the block sits where you

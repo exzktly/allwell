@@ -26,6 +26,8 @@ from datasets.ome_import.ome_import_compute import (  # noqa: E402
     plan_conversion,
     read_layout,
     selection_target,
+    stage_path_cycles,
+    stage_path_for,
     suggest_layout,
     wells_from_names,
     workable_splits,
@@ -715,3 +717,67 @@ def test_the_split_refusal_carries_those_splits(tmp_path):
         plan_conversion(read_layout(p), ConversionParams(grid_rows=3, grid_cols=4))
     assert "can only split as" in str(exc.value)
     assert "14 position(s) × 7 timepoint(s)" in str(exc.value)
+
+
+# ── the stage path draws one cycle ───────────────────────────────────────────
+
+
+def _timelapse_layout(cycles=4, wobble=0.31):
+    """A packed single-image file: 2x3 wells, 4 fields each, imaged *cycles* times.
+
+    The repeats carry stage wobble, because that is what a microscope writes and
+    because a fixture of bit-identical repeats cannot tell a working revisit test
+    from one comparing floats for equality.
+    """
+    pitch, fov = 9000.0, 600.0
+    once = [
+        (col * pitch + (f % 2) * fov, row * pitch + (f // 2) * fov)
+        for well in range(6)
+        for row, col in [divmod(well, 3)]
+        for f in range(4)
+    ]
+    points = [
+        (x + wobble * ((t % 3) - 1), y - wobble * 0.7 * (t % 2))
+        for t in range(cycles) for x, y in once
+    ]
+    return OmeLayout(
+        n_positions=1, size_t=len(points), size_c=1, size_z=1,
+        channel_names=["GFP"], timepoint_tokens=[], axes_per_series=[],
+        single_image=True, n_frames=len(points), stage_positions=points,
+    ), len(once)
+
+
+def test_the_stage_path_draws_one_cycle_of_a_timelapse():
+    """A timelapse walks the same route once per timepoint, so drawing every
+    coordinate is one map overdrawn N times — every dot on a dot, every line on
+    a line, and the numbering running to N times the map's real length."""
+    layout, per_cycle = _timelapse_layout(cycles=4)
+    points = stage_path_for(layout, "A01")
+
+    assert len(points) == per_cycle
+    assert len(layout.stage_positions) == per_cycle * 4      # the file has them all
+    # And it is the *first* cycle: the path still starts at the anchor well.
+    assert points[0] == (0.0, 0.0)
+
+
+def test_the_path_reports_what_it_left_out():
+    """A picture quietly showing a quarter of the file's coordinates is the
+    silent substitution CLAUDE.md §7 forbids, so the counts are available for
+    the caption to say so."""
+    layout, per_cycle = _timelapse_layout(cycles=4)
+    assert stage_path_cycles(layout) == (per_cycle, per_cycle * 4)
+
+    once, _ = _timelapse_layout(cycles=1)
+    drawn, total = stage_path_cycles(once)
+    assert drawn == total                     # nothing repeats, nothing to say
+
+
+def test_a_timelapse_still_suggests_the_fields_of_one_cycle():
+    """The count the form is filled with is fields per well, not visits per
+    well: a four-field map over four timepoints is four fields, not sixteen."""
+    layout, _ = _timelapse_layout(cycles=4)
+    suggestion = suggest_layout(layout, "A01")
+    assert (suggestion.rows, suggestion.cols) == (2, 3)
+    assert suggestion.fovs_per_well == 4
+    assert suggestion.frame_order == "pos_in_time"
+    assert suggestion.n_timepoints == 4

@@ -521,3 +521,30 @@ def test_the_two_axes_must_agree_on_one_pitch():
     # And ordinary stage slop is not a disagreement.
     close = infer_stage_layout(scan(PITCH * 1.05))
     assert place(close, 0, 0)[:6] == ["A01", "A02", "A03", "B01", "B02", "B03"]
+
+
+def test_rows_of_different_lengths_are_read_as_they_were_imaged():
+    """Row A across seven columns, rows B and C across six. Nothing about a
+    scan makes its rows the same length — a plate is often filled to whatever
+    the experiment needed — and the mapping was never the limitation: an
+    ordered list of wells describes this exactly. Only the inference refused."""
+    ragged = ([(0, c) for c in range(7)]
+              + [(r, c) for r in (1, 2) for c in range(6)])
+    snaked = ([(0, c) for c in range(7)]
+              + [(1, c) for c in range(5, -1, -1)]
+              + [(2, c) for c in range(6)])
+    for name, cells in (("raster", ragged), ("snake", snaked)):
+        for fovs in (1, 4):
+            layout = infer_stage_layout(_shape(cells, fovs))
+            assert layout is not None, (name, fovs)
+            assert layout.relative_order == cells, (name, fovs)
+            assert (layout.rows, layout.cols) == (3, 7), (name, fovs)
+            assert layout.n_wells == 19, (name, fovs)
+            assert layout.fovs_per_well == fovs, (name, fovs)
+            assert not layout.filled, (name, fovs)
+            assert round(layout.pitch, 3) == PITCH, (name, fovs)
+    # The long row reaches column 7; the short ones stop at 6.
+    labels = place(infer_stage_layout(_shape(snaked)), 0, 0)
+    assert labels[:7] == ["A01", "A02", "A03", "A04", "A05", "A06", "A07"]
+    assert labels[7:13] == ["B06", "B05", "B04", "B03", "B02", "B01"]
+    assert "B07" not in labels and "C07" not in labels

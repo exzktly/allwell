@@ -994,3 +994,21 @@ def test_a_raster_converts_without_snaking(tmp_path):
                 snaked[archive.stem.upper()] = int(
                     tifffile.imread(io.BytesIO(zf.read(member))).max())
     assert snaked == {"A01": 0, "A02": 1, "A03": 2, "B03": 3, "B02": 4, "B01": 5}
+
+
+def test_a_scan_with_rows_of_different_lengths_converts(tmp_path):
+    """Row A across seven columns, rows B and C across six, swept as a snake.
+    Nothing writes an archive for the two wells at the end of the short rows."""
+    cells = ([(0, c) for c in range(7)]
+             + [(1, c) for c in range(5, -1, -1)]
+             + [(2, c) for c in range(6)])
+    src = _shaped_ome(tmp_path / "ragged.ome.tif", cells)
+    found = _convert_mirrored(src, tmp_path / "dr")
+
+    assert len(found) == 19
+    assert {k: v for k, v in found.items() if k.startswith("A")} == {
+        "A01": 0, "A02": 1, "A03": 2, "A04": 3, "A05": 4, "A06": 5, "A07": 6}
+    # Row B ran backwards, so its wells hold the frames in reverse.
+    assert {k: v for k, v in found.items() if k.startswith("B")} == {
+        "B06": 7, "B05": 8, "B04": 9, "B03": 10, "B02": 11, "B01": 12}
+    assert "B07" not in found and "C07" not in found

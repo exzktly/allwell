@@ -2407,11 +2407,13 @@ rather than a single panel.
   parameters and take you to the tab it was captured from, so you arrive looking
   at the figure it recreated), **Export**, **Rename**, **Delete**, and a
   collapsible parameter summary.
-  - A saved **Image Table** grid comes back complete: its wells, timepoints,
-    channels, LUTs and layout, *and* the images themselves — restoring one
-    re-generates the grid rather than leaving you to press **Generate**. That is
-    the one tab where restoring reads images off disk again, so a large grid
-    takes as long to come back as it took to draw.
+  - A saved **Image Table** grid comes back as its settings: wells, timepoints,
+    channels, LUTs, layout and scope, all filled back into the shelf. The
+    pictures are not re-read from disk — that tab draws when you press
+    **Generate** and at no other time, so a restore never spends minutes
+    decoding a grid you may only have wanted the settings from. The shelf header
+    says **edited — press Generate** so it is clear the images below it are not
+    yet of what the shelf now describes.
   - A plot saved before its tab began recording its own settings can only
     restore the settings shared across tabs — channel, metric, wells, gating.
     The status line says so by name when it happens, because a silent partial

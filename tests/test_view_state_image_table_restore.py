@@ -339,17 +339,17 @@ def test_channel_restore_through_full_view_state_path(image_table_app):
     assert app._ctx.state.image_table.channel_opts[chan0].get("render") == "corrected"
 
 
-def test_restoring_a_saved_plot_re_renders_the_image_grid(image_table_app):
-    """Saved Plots' Restore must put the *pictures* back, not only the controls.
+def test_restoring_a_saved_plot_does_not_regenerate_the_grid(image_table_app):
+    """Restore puts back the shelf, the scope and the LUTs — and does NOT read
+    the images back off disk.
 
-    The tab is generation-gated — ``apply_image_table`` restores the shelf and
-    leaves the images alone, which is right for the restore that runs during a
-    dataset load and would otherwise decode a whole saved grid on every app
-    open. It is wrong for Restore, where the user asked for one figure back: a
-    tab whose controls changed under an unchanged picture is indistinguishable
-    from a restore that did nothing. The Image Table's ``redraw`` descriptor
-    hook closes that, and `saved_plots` reaches it by name.
+    The tab is generation-gated on purpose: a grid can be hundreds of frames, and
+    deciding to pay for that is the user's call, on Restore exactly as on a
+    dataset load. What Restore owes them instead is not pretending the pictures
+    match the controls, so the restored table is marked stale and the shelf
+    header carries its "edited — press Generate" cue.
     """
+    from well_viewer.core.ui_helpers import clear_layout
     from well_viewer.features.saved_plots.controller import (
         restore_saved_plot, save_plot_from_card,
     )
@@ -364,15 +364,17 @@ def test_restoring_a_saved_plot_re_renders_the_image_grid(image_table_app):
     assert save_plot_from_card(ctx, "Image Table", b"\x89PNG", "grid").startswith("Saved")
     rec = get_store(ctx).records[-1]
 
-    # Empty the rendered grid, the way another table's Generate would.
-    from well_viewer.core.ui_helpers import clear_layout
     grid = ctx.runtime.image_table.render_grid
     assert grid is not None
     clear_layout(grid)
-    assert grid.count() == 0
+    ctx.runtime.image_table.builder_dirty = False
 
     restore_saved_plot(ctx, rec.id)
-    assert grid.count() > 0, "Restore left the rendered grid empty"
+
+    assert grid.count() == 0, "Restore regenerated the grid off disk"
+    assert ctx.runtime.image_table.builder_dirty is True, (
+        "restored table was not marked stale, so the shelf claims the grid is "
+        "of the settings it now shows")
 
 
 def test_the_image_table_owns_a_per_tab_block(image_table_app):

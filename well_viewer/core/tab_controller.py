@@ -103,10 +103,10 @@ def on_tab_change(ctx, _e=None) -> None:
             # timepoint, so the plot showed one timepoint even though the saved
             # selection (now applied) has several. Redraw the plot tabs so they
             # reflect the restored state. The Image Table is deliberately
-            # excluded: it reads images off disk, so merely *landing* on the tab
-            # must not decode a saved grid. It does have a ``redraw`` hook, and
-            # Saved Plots' Restore reaches it — there the user has asked for one
-            # particular figure back, which is a different question from this one.
+            # excluded — it reads images off disk, and it renders only when the
+            # user presses Generate. That holds on every restore path, this one
+            # and Saved Plots' Restore alike; the table is marked stale instead,
+            # so the shelf header asks for the Generate rather than taking it.
             if tab == "Bar Plots":
                 ctx.features.redraw(ctx, "Bar Plots")
             elif tab == "Scatter Plot":

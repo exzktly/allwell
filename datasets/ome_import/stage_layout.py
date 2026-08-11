@@ -55,6 +55,10 @@ _JITTER_FRACTION = 0.02
 # equally good answers.
 _PLATE_FRAME_TOL = 0.33
 
+# The plate this module reads layouts for. Named because three separate checks
+# ask "does this fit?" and a bare 8 and 12 in each is three chances to disagree.
+_PLATE_ROWS, _PLATE_COLS = 8, 12
+
 
 @dataclass(frozen=True)
 class StageLayout:
@@ -94,7 +98,23 @@ class StageLayout:
 
     @property
     def n_wells(self) -> int:
-        return self.rows * self.cols
+        """How many wells were imaged — not ``rows × cols``.
+
+        The two are the same only for a filled rectangle. A scan shaped like an
+        L, or one that skips wells, occupies fewer cells than its extent, and
+        reporting the extent overstates the run by every well it never visited.
+        """
+        return len(set(self.relative_order)) or self.rows * self.cols
+
+    @property
+    def filled(self) -> bool:
+        """True when every cell of the extent was imaged.
+
+        What decides whether the grid fields can express this block at all: a
+        rows × cols sweep visits all of them, so anything sparser has to be
+        handed over as an explicit order.
+        """
+        return self.n_wells == self.rows * self.cols
 
 
 def _jitter_tolerance(xs: list[float], ys: list[float]) -> float:
@@ -252,11 +272,72 @@ def _axis_scale(values: list[float], tol: float) -> float | None:
     if len(unique) < 2:
         return None
     gaps = [b - a for a, b in zip(unique[:-1], unique[1:])]
-    typical = sorted(gaps)[len(gaps) // 2]
-    if typical <= 0:
+    smallest = min(gaps)
+    if smallest <= 0:
         return None
-    large = [g for g in gaps if g > typical * _WELL_GAP_RATIO]
-    return min(large) if large else typical
+    # Measured against the *smallest* gap, not the median. The median is the
+    # typical gap only while the gaps are all of one scale: an axis holding one
+    # within-well step and one between-well step has a median of the larger, so
+    # nothing is ever three times it and the two scales read as one.
+    large = [g for g in gaps if g > smallest * _WELL_GAP_RATIO]
+    # And the smallest instance of whichever scale wins, because a gap spans a
+    # whole number of steps and never a fraction of one: a scan that skips wells
+    # leaves gaps of two and three pitches beside the ordinary ones, and an
+    # average of those is a step no well sits on. Jitter cannot drag the minimum
+    # down — `_distinct` merged it before these gaps were measured.
+    return min(large) if large else smallest
+
+
+def _axis_has_wells(values: list[float], tol: float) -> bool:
+    """True when this axis shows a well-to-well gap, not just fields of view.
+
+    The distinction the pitch needs: an axis whose gaps are all alike may be a
+    row of wells or the fields inside one, and only the other axis can say.
+    """
+    unique = _distinct(values, tol)
+    if len(unique) < 2:
+        return False
+    gaps = [b - a for a, b in zip(unique[:-1], unique[1:])]
+    smallest = min(gaps)
+    return smallest > 0 and any(g > smallest * _WELL_GAP_RATIO for g in gaps)
+
+
+def _pitch(xs: list[float], ys: list[float], tol: float) -> float | None:
+    """The well-to-well step, from whichever axis is entitled to say.
+
+    Two failure modes pull in opposite directions, which is why this is not
+    simply the larger or the smaller candidate.
+
+    An axis holding *only* fields of view has no well step in it at all, and its
+    spacing — an order of magnitude smaller — must never become the pitch. That
+    is what taking the larger candidate protected against.
+
+    But a scan that **skips** a well leaves a double gap, and on an axis where
+    every step is a skip the smallest gap is two pitches. Taking the larger
+    candidate then reads a plate imaged on rows A and C as one whose wells are
+    18 mm apart, merging the two rows into one and doubling its field count.
+
+    So an axis that shows a well gap outranks one that does not, and among
+    axes that do, the *smallest* wins: a gap can be several pitches wide, never
+    a fraction of one.
+    """
+    scales = {axis: _axis_scale(values, tol)
+              for axis, values in (("x", xs), ("y", ys))}
+    with_wells = [scale for axis, scale in scales.items()
+                  if scale is not None and _axis_has_wells(
+                      xs if axis == "x" else ys, tol)]
+    if with_wells:
+        return min(with_wells)
+    candidates = [s for s in scales.values() if s is not None]
+    if not candidates:
+        return None
+    # Neither axis shows a well gap: every step on both is alike. One may still
+    # be a well pitch and the other the fields inside a well — an order of
+    # magnitude apart — and then the larger is the pitch. Within an order of
+    # magnitude they are both well steps, and the smaller is the pitch for the
+    # same reason as above.
+    low, high = min(candidates), max(candidates)
+    return high if high > low * _WELL_GAP_RATIO else low
 
 
 def _group_axis(values: list[float], pitch: float | None,
@@ -274,6 +355,12 @@ def _group_axis(values: list[float], pitch: float | None,
     taken, because one field per well is the ordinary plate scan and a montage
     spanning a whole plate's pitch is not; the page's own fields override it
     either way.
+
+    Indices count **wells, not groups**, so a skipped well leaves a hole. A scan
+    of rows A and C used to index them 0 and 1 — the empty row silently closed
+    up, the block reported as two adjacent rows, and every image in the second
+    one written a row too high. How many wells a gap spans is exactly what the
+    pitch is for, so it is used rather than assumed to be one.
     """
     unique = _distinct(values, tol)
     if len(unique) < 2:
@@ -284,7 +371,10 @@ def _group_axis(values: list[float], pitch: float | None,
     index = 0
     for prev, cur in zip(unique[:-1], unique[1:]):
         if cur - prev > pitch / 2.0:
-            index += 1
+            # How many wells were stepped over, not merely "the next one".
+            # Rounded, so an ordinary step of one pitch is one whether the
+            # stage lands a little short or a little long of nominal.
+            index += max(1, round((cur - prev) / pitch))
         groups[cur] = index
     return groups
 
@@ -311,15 +401,27 @@ def _well_step(values: list[float], groups: dict[float, int],
     ``None`` when the axis holds a single group, which has no step to measure.
     Taken as the median of the consecutive differences so one irregular column
     — a scan that skipped a well — does not set the scale for the rest.
+
+    **Per well, not per group.** Two occupied groups two wells apart are two
+    pitches apart, so a scan that skips a column measures 18 mm and calls it the
+    pitch. That number is the conversion from stage units to plate cells, so the
+    drawn map came out compressed by exactly the factor the scan was sparse by,
+    which is the same class of error as reading the inter-well gap for the well
+    step and an order of magnitude worse. The group indices already count wells
+    (:func:`_group_axis`), so the distance is divided by the wells between them.
     """
     centres: dict[int, list[float]] = {}
     for value in values:
         centres.setdefault(groups[_nearest(unique, value)], []).append(value)
     if len(centres) < 2:
         return None
-    means = [sum(vs) / len(vs) for _, vs in sorted(centres.items())]
-    diffs = sorted(b - a for a, b in zip(means[:-1], means[1:]))
-    return diffs[len(diffs) // 2]
+    ordered = sorted((index, sum(vs) / len(vs)) for index, vs in centres.items())
+    steps = sorted(
+        (b_mean - a_mean) / (b_index - a_index)
+        for (a_index, a_mean), (b_index, b_mean) in zip(ordered[:-1], ordered[1:])
+        if b_index > a_index
+    )
+    return steps[len(steps) // 2] if steps else None
 
 
 def _first_visits(cells: list[tuple[int, int]]) -> list[tuple[int, int]]:
@@ -381,11 +483,7 @@ def infer_stage_layout(positions) -> StageLayout | None:
     xs = [x for x, _ in points]
     ys = [y for _, y in points]
     tol = _jitter_tolerance(xs, ys)
-    # One pitch for the plate: the larger candidate across the two axes, since an
-    # axis showing only the within-well spacing must not set it.
-    scales = [s for s in (_axis_scale(xs, tol), _axis_scale(ys, tol))
-              if s is not None]
-    pitch = max(scales) if scales else None
+    pitch = _pitch(xs, ys, tol)
     by_x = _group_axis(xs, pitch, tol)
     by_y = _group_axis(ys, pitch, tol)
     ux, uy = sorted(by_x), sorted(by_y)
@@ -400,10 +498,15 @@ def infer_stage_layout(positions) -> StageLayout | None:
     if not isfinite(step) or step <= 0:
         return None      # no scale, so nothing downstream can be placed or drawn
     occupied = sorted(set(cells))
-    rows = len({r for r, _ in occupied})
-    cols = len({c for _, c in occupied})
-    if rows * cols != len(occupied):
-        return None            # not a filled rectangle — no grid to report
+    # The block's **extent**, not its populated row and column counts. A scan
+    # that skips wells — an L, a plate with two rows left out, a diagonal — is a
+    # perfectly ordinary experiment, and the page has expressed arbitrary orders
+    # since it grew a clickable plate. Refusing to read one because it is not a
+    # filled rectangle threw away the whole layout, including the fields per
+    # well and the visit order, which are right whatever the outline is; the
+    # user then got no offer at all and no reason for its absence.
+    rows = max(r for r, _ in occupied) + 1
+    cols = max(c for _, c in occupied) + 1
 
     # Distinct *places* per well, not visits: a timelapse returns to every
     # position once per timepoint, and counting visits would report a well's
@@ -451,14 +554,15 @@ def place(layout: StageLayout, origin_row: int, origin_col: int) -> list[str]:
     labels: list[str] = []
     for r, c in layout.relative_order:
         row, col = origin_row + r, origin_col + c
-        if not (0 <= row < 8 and 0 <= col < 12):
+        if not (0 <= row < _PLATE_ROWS and 0 <= col < _PLATE_COLS):
             return []
         labels.append(f"{chr(ord('A') + row)}{col + 1:02d}")
     return labels
 
 
 def _absolute_origin(points, cells, step: float,
-                     rows: int = 8, cols: int = 12) -> tuple[int, int] | None:
+                     rows: int = _PLATE_ROWS,
+                     cols: int = _PLATE_COLS) -> tuple[int, int] | None:
     """Where this block sits on the plate, if the coordinates say so.
 
     A scanner that reports positions in the *plate's* frame puts A01 at the

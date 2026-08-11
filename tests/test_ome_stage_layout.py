@@ -376,3 +376,87 @@ def test_a_mirrored_scan_walks_its_wells_the_other_way():
     flipped = infer_stage_layout(mirrored(points, flip_x=True))
     assert flipped.relative_order == [(r, 2 - c) for r, c in order]
     assert place(flipped, 0, 0) == ["A03", "A02", "A01", "B03", "B02", "B01"]
+
+
+# ── shapes that are not filled rectangles ────────────────────────────────────
+
+
+def _shape(cells, fovs=4):
+    """Coordinates visiting exactly *cells*, in order, at real plate scales."""
+    return [
+        (c * PITCH + (f % 2) * FOV, r * PITCH + (f // 2) * FOV)
+        for r, c in cells for f in range(fovs)
+    ]
+
+
+def test_a_shape_that_is_not_a_rectangle_is_still_read():
+    """An L, a diagonal, a plate with a row left out: ordinary experiments. The
+    fields per well and the visit order are right whatever the outline is, and
+    refusing the whole layout because the outline is not a rectangle threw those
+    away too — the user got no offer and no reason for its absence."""
+    shapes = {
+        "L": [(0, 0), (0, 1), (0, 2), (1, 0), (2, 0)],
+        "diagonal": [(0, 0), (1, 1), (2, 2)],
+        "gapped row": [(0, 0), (0, 1), (2, 0), (2, 1)],
+        "gapped column": [(0, 0), (0, 2), (1, 0), (1, 2)],
+    }
+    for name, cells in shapes.items():
+        layout = infer_stage_layout(_shape(cells))
+        assert layout is not None, name
+        assert layout.relative_order == cells, name
+        assert layout.n_wells == len(cells), name
+        assert layout.fovs_per_well == 4, name
+        assert not layout.filled, name
+        # The extent is the box around the shape, which is not its well count.
+        assert (layout.rows, layout.cols) == (max(r for r, _ in cells) + 1,
+                                              max(c for _, c in cells) + 1), name
+
+
+def test_a_skipped_well_keeps_its_place_on_the_plate():
+    """Rows A and C imaged, B not. Indexing the occupied groups consecutively
+    closes the gap up: the block reads as two adjacent rows and every image in
+    the second is written a row too high."""
+    layout = infer_stage_layout(_shape([(0, 0), (0, 1), (2, 0), (2, 1)]))
+    assert layout.relative_order == [(0, 0), (0, 1), (2, 0), (2, 1)]
+    assert place(layout, 0, 0) == ["A01", "A02", "C01", "C02"]
+
+
+def test_a_skipped_well_does_not_double_the_pitch():
+    """The gap over a skipped well is two pitches, and both the axis scale and
+    the well step will read it as one unless told otherwise. The pitch converts
+    stage units into plate cells, so a doubled one draws the map at half scale
+    — the same class of error as reading the inter-well gap for the well step,
+    and far larger."""
+    for cells in ([(0, 0), (0, 2), (1, 0), (1, 2)],       # a column skipped
+                  [(0, 0), (0, 1), (2, 0), (2, 1)],       # a row skipped
+                  [(0, 0), (0, 2), (0, 3)]):              # a gap and a step
+        for fovs in (1, 4):
+            layout = infer_stage_layout(_shape(cells, fovs))
+            assert round(layout.pitch, 3) == PITCH, (cells, fovs)
+
+
+def test_a_uniformly_skipped_scan_cannot_know_it_skipped():
+    """The limit of the above, stated rather than papered over. Every
+    comparison in this module is between distances *within* one file — no
+    absolute units are trusted — so two wells alone, three pitches apart, are
+    indistinguishable from two adjacent wells on a coarser plate. Something has
+    to show a single step: another axis, or another pair of wells on this one.
+    The block then reads as adjacent, which the drawn map shows and the user's
+    grid overrides."""
+    layout = infer_stage_layout(_shape([(0, 0), (0, 3)], fovs=1))
+    assert layout.pitch == 3 * PITCH
+    assert layout.relative_order == [(0, 0), (0, 1)]
+
+
+def test_a_filled_rectangle_still_says_it_is_one():
+    layout = infer_stage_layout(_shape([(0, 0), (0, 1), (1, 1), (1, 0)]))
+    assert layout.filled
+    assert layout.n_wells == 4 == layout.rows * layout.cols
+
+
+def test_uneven_fields_per_well_is_still_refused():
+    """The refusal that stays. A conversion writes one FOVs-per-well count for
+    the whole run, so a scan whose wells hold different numbers of fields has no
+    layout to offer — unlike a skipped well, which has one."""
+    uneven = [(0.0, 0.0), (FOV, 0.0), (PITCH, 0.0)]     # two fields, then one
+    assert infer_stage_layout(uneven) is None

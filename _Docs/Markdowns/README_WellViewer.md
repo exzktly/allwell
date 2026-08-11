@@ -2531,9 +2531,14 @@ the layout Analyze processes. Do this first, then open the result in Analyze.
    it to guide how many wells to place before you touch the grid or the plate.
 2. **Which wells did you image?** — this group has one job: produce the order in
    which the stage visited the wells. **Well grid (rows × cols)** is the block you
-   imaged (e.g. `2 × 3`), **Origin** is its top-left well (default `A01`), and
-   **Serpentine** is the direction the stage snaked in (by row or by column). The
-   plate below shows the resulting path live.
+   imaged (e.g. `2 × 3`), **Origin** is its top-left well (default `A01`),
+   **Sweep** is the axis the stage swept along (by row or by column), and
+   **Snake** is what it did at the end of each line. Ticked, alternate lines run
+   backwards — the stage never travels back across the plate empty. Unticked,
+   every line runs the same way (a raster), the stage flying back to the near
+   edge between them. Get this wrong and every second line is labelled
+   *backwards* while the well count stays right, so it is worth a glance at the
+   plate below, which shows the resulting path live.
 3. **How was each well sampled?** — **FOVs per well** is the fields-of-view per
    well; leave it blank to derive it, or enter a value and the converter refuses
    to run if it doesn't match the file. **Frame order** appears here for a
@@ -2541,9 +2546,13 @@ the layout Analyze processes. Do this first, then open the result in Analyze.
 4. **Acquisition path** — the plate mockup below the settings shows how stage
    positions map onto the plate: each visited well is numbered in visit order and
    a subtle arrow traces the sequence across the plate. Entering a grid seeds this
-   with the serpentine path automatically, so for a normal rectangular scan you
+   with that path automatically, so for a normal rectangular scan you
    only need to glance at it to confirm the labelling. If your scan **isn't**
-   rectangular — an L-shape, a scattered subset, or a custom visit order — click
+   rectangular — an L-shape, a plate with rows left out, a scattered subset — the
+   converter reads it straight from the stage coordinates and fills the plate in
+   for you, describing it as e.g. *5 wells in a 3×3 block*; the wells you never
+   imaged stay empty and no archive is written for them. To define a visit order
+   by hand instead, or to correct one, click
    the wells directly, in the order the stage visited them: the first click is
    position 1, the next is position 2, and so on. Clicking a numbered well removes
    it and the rest renumber.

@@ -60,15 +60,38 @@ def serpentine_well_labels(
     origin: str = "A01",
     direction: str = "row",
 ) -> list[str]:
-    """Return the 96-well labels of a *rows* × *cols* block in serpentine order.
+    """A *rows* × *cols* block in serpentine order — :func:`block_well_labels`.
+
+    Kept as the name for the snaking case, which is what most callers mean and
+    what every one of them meant before a scan could say otherwise.
+    """
+    return block_well_labels(rows, cols, origin=origin, direction=direction,
+                             serpentine=True)
+
+
+def block_well_labels(
+    rows: int,
+    cols: int,
+    *,
+    origin: str = "A01",
+    direction: str = "row",
+    serpentine: bool = True,
+) -> list[str]:
+    """Return the 96-well labels of a *rows* × *cols* block in acquisition order.
 
     The block's top-left corner is *origin* (default ``"A01"``). ``direction``
     selects the snake axis:
 
-    * ``"row"`` — sweep a whole row of wells, step down to the next row, sweep it
-      back the other way. Row 0 runs left-to-right, row 1 right-to-left, etc.
-    * ``"col"`` — sweep a whole column, step right, sweep back up. Column 0 runs
-      top-to-bottom, column 1 bottom-to-top, etc.
+    * ``"row"`` — sweep a whole row of wells, then step down to the next row.
+    * ``"col"`` — sweep a whole column, then step right to the next column.
+
+    *serpentine* decides what happens at the end of each line. True snakes: row 0
+    runs left-to-right, row 1 right-to-left, and the stage never travels back
+    across the plate empty. False rasters: every row runs left-to-right, the
+    stage flying back to the near edge between them. Both are ordinary
+    acquisition patterns and a scan cannot be assumed to be either — a raster
+    read as a snake mislabels every second row *backwards*, which is a silent
+    well-mapping error with the right well count.
 
     The returned list has length ``rows * cols`` and is in *acquisition order*:
     element ``i`` is the well the stage visited at position ``i``.
@@ -98,16 +121,19 @@ def serpentine_well_labels(
     def _label(row_idx: int, col_idx: int) -> str:
         return f"{PLATE_ROWS[row_idx]}{col_idx + 1:02d}"
 
+    def _line(length: int, index: int) -> range:
+        if serpentine and index % 2:
+            return range(length - 1, -1, -1)
+        return range(length)
+
     labels: list[str] = []
     if direction == "row":
         for r in range(rows):
-            col_range = range(cols) if r % 2 == 0 else range(cols - 1, -1, -1)
-            for c in col_range:
+            for c in _line(cols, r):
                 labels.append(_label(row0 + r, col0 + c))
     else:  # "col"
         for c in range(cols):
-            row_range = range(rows) if c % 2 == 0 else range(rows - 1, -1, -1)
-            for r in row_range:
+            for r in _line(rows, c):
                 labels.append(_label(row0 + r, col0 + c))
     return labels
 

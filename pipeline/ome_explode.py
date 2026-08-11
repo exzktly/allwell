@@ -50,7 +50,7 @@ from typing import Callable
 import numpy as np
 import tifffile
 
-from util.plate_grid import normalize_well_order, serpentine_well_labels
+from util.plate_grid import block_well_labels, normalize_well_order
 from util.zip_write import atomic_zip
 
 # How a single-image file's flat T-frame sequence splits into (position, timepoint):
@@ -990,6 +990,7 @@ def explode_ome_tiff(
     grid_cols: int,
     origin_well: str = "A01",
     direction: str = "row",
+    serpentine: bool = True,
     experiment: str = "ome",
     fovs_per_well: "int | None" = None,
     frame_order: str = "single",
@@ -1071,8 +1072,9 @@ def explode_ome_tiff(
     if well_order:
         well_labels = normalize_well_order(well_order)
     else:
-        well_labels = serpentine_well_labels(
-            grid_rows, grid_cols, origin=origin_well, direction=direction
+        well_labels = block_well_labels(
+            grid_rows, grid_cols, origin=origin_well, direction=direction,
+            serpentine=serpentine,
         )
     n_wells = len(well_labels)
 

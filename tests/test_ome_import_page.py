@@ -724,6 +724,36 @@ def _plate_scan(path, rows, cols, fovs, *, serpentine=True):
     return path
 
 
+def _shaped_scan(path, cells, *, fovs=1):
+    """An OME-TIFF whose stage coordinates visit exactly *cells*, in that order.
+
+    Unlike `_plate_scan` the shape need not be a rectangle: an L, a diagonal, a
+    plate with rows left out. The point of the fixture is that real experiments
+    skip wells and the page has to read them.
+    """
+    pitch, fov = 9000.0, 600.0
+    coords = [
+        (c * pitch + (f % 2) * fov, r * pitch + (f // 2) * fov)
+        for r, c in cells for f in range(fovs)
+    ]
+    planes = "".join(
+        f'<Plane TheT="{i}" TheC="0" TheZ="0" PositionX="{x}" PositionY="{y}"/>'
+        for i, (x, y) in enumerate(coords))
+    mapping = "".join(
+        f'<TiffData FirstT="{i}" FirstC="0" FirstZ="0" IFD="{i}" PlaneCount="1"/>'
+        for i in range(len(coords)))
+    xml = (
+        '<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+        '<Image ID="Image:0" Name="scan"><Pixels ID="Pixels:0" '
+        'DimensionOrder="XYZCT" Type="uint16" SizeX="6" SizeY="6" SizeC="1" '
+        f'SizeZ="1" SizeT="{len(coords)}">'
+        '<Channel ID="Channel:0:0" Name="DAPI" SamplesPerPixel="1"/>'
+        f'{planes}{mapping}</Pixels></Image></OME>')
+    tifffile.imwrite(str(path), np.zeros((len(coords), 6, 6), np.uint16),
+                     description=xml, metadata=None, photometric="minisblack")
+    return path
+
+
 def test_the_page_offers_the_layout_the_file_describes(qapp, tmp_path):
     from datasets.ome_import.controller import OmeImportController
 
@@ -969,6 +999,42 @@ def test_the_mirror_control_appears_only_with_coordinates_to_mirror(qapp, tmp_pa
     assert not page._mirror_row.isVisibleTo(page)     # no stage coordinates
 
 
+def test_the_snake_can_be_turned_off(qapp, tmp_path):
+    """The grid could only ever generate a snake, so a raster — every line swept
+    the same way — could only be had by clicking wells one at a time. Read as a
+    snake it labels every second line backwards, with the well count still
+    right, which is a silent well-mapping error."""
+    from datasets.ome_import.controller import OmeImportController
+
+    page = OmeImportController().page
+    page._rows_edit.setText("2")
+    page._cols_edit.setText("3")
+    page.refresh_readout()
+    assert page._snake_cb.isChecked()
+    assert page._plate.order() == ["A01", "A02", "A03", "B03", "B02", "B01"]
+
+    page._snake_cb.setChecked(False)
+    assert page._plate.order() == ["A01", "A02", "A03", "B01", "B02", "B03"]
+    # And it reaches the settings a run would use, not only the preview.
+    assert page.raw_fields().to_params().serpentine is False
+
+
+def test_a_raster_file_fills_the_grid_and_unticks_the_snake(qapp, tmp_path):
+    """What the file says now lands in the controls rather than being handed
+    over as an explicit path: a raster is a grid the user can still edit."""
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _plate_scan(tmp_path / "raster.ome.tif", 2, 3, 4, serpentine=False)
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+
+    assert (page._rows_edit.text(), page._cols_edit.text()) == ("2", "3")
+    assert page._snake_cb.isChecked() is False
+    assert not page._plate.is_dirty()          # the grid says it, not a path
+    assert "no snake" in page._suggest_label.text()
+
+
 def test_the_stage_path_follows_a_hand_drawn_first_well(qapp, tmp_path):
     """The anchor is wherever position 1 will actually land, which a clicked
     path decides for itself."""
@@ -1101,9 +1167,12 @@ def test_a_wrong_starting_well_can_still_be_corrected_by_hand(qapp, tmp_path):
     be greyed out as a hand-drawn path would grey it."""
     from datasets.ome_import.controller import OmeImportController
 
-    # A raster: the grid fields cannot express it, so the file hands over an
-    # explicit order — the state in which the grid controls used to go dead.
-    p = _plate_scan(tmp_path / "scan.ome.tif", 2, 3, 4, serpentine=False)
+    # An L: the grid fields cannot express it whichever way they sweep, so the
+    # file hands over an explicit order — the state in which the grid controls
+    # used to go dead. (A raster reaches the page as a grid with Snake
+    # unticked, so it no longer exercises this.)
+    p = _shaped_scan(tmp_path / "scan.ome.tif",
+                     [(0, 0), (0, 1), (0, 2), (1, 0), (2, 0)], fovs=4)
     page = OmeImportController().page
     page._src_field.set_path(str(p))
     page._on_source_changed()
@@ -1231,13 +1300,15 @@ def test_a_block_too_big_for_a_plate_says_why_the_grid_stayed_empty(qapp, tmp_pa
     assert "no longer a well" in page._path_caption.text()
 
 
-def test_coordinates_that_describe_no_grid_are_not_met_with_silence(qapp, tmp_path):
-    """Refusing to guess a grid is right — a wrong one entered silently is the
-    worst outcome — but refusing *silently* leaves a file that plainly holds
-    positions looking exactly like one that holds none."""
+def test_an_l_shaped_scan_is_read_and_offered_as_a_path(qapp, tmp_path):
+    """A scan that is not a filled rectangle is still a scan. The grid fields
+    cannot describe an L, but the plate can — this page has taken arbitrary
+    orders since it grew a clickable one — so the shape is read and handed over
+    as the order itself rather than thrown away with the fields per well and the
+    visit order that were never in doubt."""
     from datasets.ome_import.controller import OmeImportController
 
-    coords = [(0.0, 0.0), (9000.0, 0.0), (18000.0, 0.0), (0.0, 9000.0)]  # ragged
+    coords = [(0.0, 0.0), (9000.0, 0.0), (18000.0, 0.0), (0.0, 9000.0)]  # an L
     planes = "".join(
         f'<Plane TheT="{i}" TheC="0" TheZ="0" PositionX="{x}" PositionY="{y}"/>'
         for i, (x, y) in enumerate(coords))
@@ -1260,8 +1331,48 @@ def test_coordinates_that_describe_no_grid_are_not_met_with_silence(qapp, tmp_pa
 
     assert page._suggest_row.isVisibleTo(page)
     label = page._suggest_label.text()
-    assert "4 stage position(s)" in label
-    assert "do not form a rectangular block" in label
+    # The extent and the well count both, since for a sparse shape they differ
+    # and naming only the extent claims wells the run never imaged.
+    assert "4 wells in a 2×3 block" in label
+    assert "as an explicit path" in label
+    assert page._suggest_btn.isVisibleTo(page)
+    # And the offer is the L itself, in visit order.
+    assert page._plate.order() == ["A01", "A02", "A03", "B01"]
+
+
+def test_a_scan_with_uneven_fields_per_well_is_still_refused(qapp, tmp_path):
+    """The refusal that remains, and why it is not the one above: no single
+    FOVs-per-well setting can describe wells holding different numbers of
+    fields, so there is nothing to offer — but the file plainly holds positions
+    and must not look like one that holds none."""
+    from datasets.ome_import.controller import OmeImportController
+
+    # A01 gets two fields, A02 one.
+    coords = [(0.0, 0.0), (600.0, 0.0), (9000.0, 0.0)]
+    planes = "".join(
+        f'<Plane TheT="{i}" TheC="0" TheZ="0" PositionX="{x}" PositionY="{y}"/>'
+        for i, (x, y) in enumerate(coords))
+    mapping = "".join(
+        f'<TiffData FirstT="{i}" FirstC="0" FirstZ="0" IFD="{i}" PlaneCount="1"/>'
+        for i in range(len(coords)))
+    xml = ('<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+           '<Image ID="Image:0"><Pixels ID="Pixels:0" DimensionOrder="XYZCT" '
+           'Type="uint16" SizeX="4" SizeY="4" SizeC="1" SizeZ="1" '
+           f'SizeT="{len(coords)}">'
+           '<Channel ID="Channel:0:0" Name="DAPI" SamplesPerPixel="1"/>'
+           f'{planes}{mapping}</Pixels></Image></OME>')
+    p = tmp_path / "uneven.ome.tif"
+    tifffile.imwrite(str(p), np.zeros((len(coords), 4, 4), np.uint16),
+                     description=xml, metadata=None, photometric="minisblack")
+
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+
+    label = page._suggest_label.text()
+    assert "3 stage position(s)" in label
+    assert "different numbers of fields" in label
+    assert "wells skipped is fine" in label     # names what it is *not*
     assert not page._suggest_btn.isVisibleTo(page)
 
 

@@ -57,6 +57,7 @@ from datasets.ome_import.ome_import_compute import (
     destination_problem,
     infer_layout,
     resume_state,
+    stage_path_cycles,
     stage_path_for,
     suggest_layout,
     plan_conversion,
@@ -939,6 +940,15 @@ class OmeImportPage(LogPanelMixin, QWidget):
             # out of the coordinates is too small. Say so: a drawing that is no
             # longer one-cell-per-well must not be read as one, and the reason
             # it happened is usually the layout being wrong too.
+            drawn, total = stage_path_cycles(layout)
+            # A drawing that quietly shows a twelfth of the file's coordinates
+            # must say so in the picture's own caption, not only in the code
+            # that decided it.
+            repeats = (f" The file holds {total} coordinates that repeat this "
+                       f"route; only the first visit to each of the {drawn} "
+                       "places is drawn, so this is one cycle of a timelapse "
+                       "rather than every frame."
+                       if total > drawn else "")
             self._path_caption.setText(
                 "Stage path — one dot per image, joined in acquisition order. "
                 + ("This run does not fit a 96-well plate at the well spacing "
@@ -946,6 +956,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
                    "no longer a well — check the grid and FOVs per well."
                    if self._path_view.isFitted() else
                    "The tight clusters are the fields of view within one well.")
+                + repeats
                 + " Scroll to zoom, drag to move, double-click to fit; the "
                   "positions number themselves once there is room.")
 

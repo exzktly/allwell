@@ -2699,11 +2699,21 @@ file carries coordinates. **Scroll on it to zoom, drag to move around, and
 double-click to fit the whole run again.** Each position numbers itself in
 acquisition order as soon as there is room to print the number — so zoom into a
 well and its fields of view are labelled 1, 2, 3… in the order the stage took
-them, which is the detail a plate map can never show. If the run turns out not to fit a 96-well plate at
+them, which is the detail a plate map can never show. A number is only printed
+where it does not touch one already printed, so on a dense scan some are left
+off rather than piling on top of each other; zoom in further and the rest
+appear. Numbers that overlap are not numbers, and a run of several thousand
+positions is labelled with four digits apiece. If the run turns out not to fit a 96-well plate at
 the well spacing read from the file, the drawing is scaled down to show all of
 it and the caption says so — a square is then no longer a well, and it usually
 means the grid and FOVs per well need checking too. Otherwise: one dot per image — not per well — joined in the order
-they were taken, with a larger green dot where the scan starts. The tight
+they were taken, with a larger green dot where the scan starts.
+**A timelapse is drawn once.** The stage walks the same route at every
+timepoint, so drawing every coordinate would be one map laid over itself a
+dozen times — each dot on top of the last, and the numbers running to a
+dozen times the number of places actually visited. Only the first visit to
+each place is drawn, and the caption says how many coordinates the file
+holds so you can see that is what happened. The tight
 clusters are the fields of view within a single well, which the plate map above
 cannot show at all: every field in a well is the same square there. Use it to
 check the shape of the run before converting — that the block sits where you

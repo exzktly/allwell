@@ -275,3 +275,121 @@ def test_positions_are_numbered_once_there_is_room(qapp):
 
     assert _ink(close) != _ink(flat)
     plate.hide()
+
+
+def _labels_drawn(view):
+    """Every ``(rect, text)`` the view actually asked the painter to draw.
+
+    Spying on the painter rather than reading the widget's own numbers: what
+    makes a label legible is where it lands on screen next to the others, and no
+    value inside the widget knows that. See CLAUDE.md §7.4 — the assertion goes
+    at the outbound call.
+    """
+    from PySide6.QtGui import QFontMetricsF, QPainter
+
+    seen: list = []
+    original = QPainter.drawText
+
+    def spy(painter, *args):
+        point, text = args[0], args[-1]
+        rect = QFontMetricsF(painter.font()).boundingRect(str(text))
+        rect.moveTo(point.x(), point.y() - rect.height())
+        seen.append((rect, str(text)))
+        return original(painter, *args)
+
+    QPainter.drawText = spy
+    try:
+        _render(view)
+    finally:
+        QPainter.drawText = original
+    return seen
+
+
+def test_numbers_never_overlap_each_other(qapp):
+    """A dense scan runs to four digits, and a four-digit label is far wider
+    than the gap between consecutive marks that the room test clears. Every
+    label then sat on its neighbours and the result was white scribble rather
+    than numbers — legible only if no two of them share pixels."""
+    from PySide6.QtCore import QPointF
+
+    view, plate = _view_with_plate(qapp)
+    # 7x7 fields in each of 48 wells: 2352 positions, so the numbers reach four
+    # digits, which is the case that produced the unreadable drawing.
+    view.setPath([
+        (col + 0.15 + fc * 0.11, row + 0.15 + fr * 0.11)
+        for well in range(48)
+        for row, col in [divmod(well, 12)]
+        for fr in range(7)
+        for fc in (range(7) if fr % 2 == 0 else range(6, -1, -1))
+    ])
+    view.setZoom(4.0, QPointF(120, 90))
+
+    labels = _labels_drawn(view)
+    assert labels, "a zoomed-in dense scan drew no numbers at all"
+    overlapping = [
+        (a[1], b[1])
+        for i, a in enumerate(labels)
+        for b in labels[i + 1:]
+        if a[0].intersects(b[0])
+    ]
+    assert not overlapping, f"{len(overlapping)} labels overlap, e.g. {overlapping[:5]}"
+    plate.hide()
+
+
+def test_every_number_is_backed_off_the_route_line(qapp):
+    """The digits are white and the thing they annotate is a bright accent line
+    that runs under them — inside a well the route doubles back through its own
+    labels. Each number is laid on the panel colour first, or it is white text
+    on the line at eight points."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QPainter
+
+    view, plate = _view_with_plate(qapp)
+    view.setPath([(c + (f % 2) * 0.07, (f // 2) * 0.07)
+                  for c in range(4) for f in range(4)])
+    view.setZoom(6.0, QPointF(90, 90))
+
+    calls: list = []
+    rect_original, text_original = QPainter.drawRect, QPainter.drawText
+
+    def rect_spy(painter, *args):
+        calls.append(("rect", args[0]))
+        return rect_original(painter, *args)
+
+    def text_spy(painter, *args):
+        calls.append(("text", args[0]))
+        return text_original(painter, *args)
+
+    QPainter.drawRect, QPainter.drawText = rect_spy, text_spy
+    try:
+        _render(view)
+    finally:
+        QPainter.drawRect, QPainter.drawText = rect_original, text_original
+
+    numbers = [i for i, (kind, _) in enumerate(calls) if kind == "text"]
+    assert numbers, "no numbers drawn at 6x"
+    for i in numbers:
+        assert i and calls[i - 1][0] == "rect", "a number was drawn with nothing under it"
+        backdrop, point = calls[i - 1][1], calls[i][1]
+        assert backdrop.contains(point), "the backdrop is not under its own number"
+    plate.hide()
+
+
+def test_numbers_are_drawn_large_enough_to_read(qapp):
+    """Below about 8pt the digits stop being distinguishable from each other,
+    so a label that cannot reach that size is not worth drawing."""
+    from PySide6.QtCore import QPointF
+
+    from widgets.stage_path_view import _LABEL_MIN_PT
+
+    view, plate = _view_with_plate(qapp)
+    view.setPath([(c + (f % 2) * 0.07, (f // 2) * 0.07)
+                  for c in range(4) for f in range(4)])
+    view.setZoom(6.0, QPointF(90, 90))
+
+    heights = [rect.height() for rect, _ in _labels_drawn(view)]
+    assert heights, "no numbers drawn at 6x"
+    # Point size is not pixels, but a glyph box is never taller than it is big:
+    # anything at or above the floor clears this, anything under it does not.
+    assert min(heights) >= _LABEL_MIN_PT
+    plate.hide()

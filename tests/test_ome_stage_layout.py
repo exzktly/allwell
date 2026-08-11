@@ -14,9 +14,11 @@ from math import isfinite
 
 from datasets.ome_import.stage_layout import (
     StageLayout,
+    infer_frame_order,
     infer_stage_layout,
     path_in_cells,
     place,
+    single_cycle,
 )
 
 PITCH = 9000.0    # 9 mm well pitch, in micrometres
@@ -166,6 +168,25 @@ def test_the_inferred_pitch_is_the_well_step_not_the_gap_between_wells():
         assert round(layout.pitch, 3) == PITCH, fovs
 
 
+def _revisited(points, cycles, *, wobble=0.31, interleave="pos_in_time"):
+    """*points* imaged *cycles* times, as a stage that does not repeat exactly.
+
+    The real mess this whole family of tests is about: a stage sent back to a
+    nominal position reports it a fraction of a micrometre off what it reported
+    before, so a fixture built as ``once * 12`` — every repeat identical to the
+    original — passes any test written against plain equality while a real file
+    fails it. Both interleavings, because a file may finish the map before
+    starting the next timepoint or take every timepoint of a position first.
+    """
+    def moved(point, cycle):
+        x, y = point
+        return (x + wobble * ((cycle % 3) - 1), y - (wobble * 0.7) * (cycle % 2))
+
+    if interleave == "pos_in_time":
+        return [moved(p, t) for t in range(cycles) for p in points]
+    return [moved(p, t) for p in points for t in range(cycles)]
+
+
 def test_a_timelapse_counts_fields_not_visits():
     """A timelapse returns to every position once per timepoint. Counting
     visits reports a well's fields multiplied by the timepoint count — 48
@@ -176,6 +197,74 @@ def test_a_timelapse_counts_fields_not_visits():
     assert layout.fovs_per_well == 4
     assert (layout.rows, layout.cols) == (2, 3)
     assert layout.n_positions == len(repeated)     # every image still counted
+
+
+def test_a_jittered_timelapse_counts_fields_not_visits():
+    """The same count, on repeats that are not bit-identical to the original.
+
+    The test above builds its timelapse as ``once * 12``, so every revisit is
+    the same float as the first visit and an equality test passes. A stage does
+    not do that, and against the real thing the field count came out multiplied
+    by the timepoints — the multiplied number the test above exists to forbid,
+    reported anyway."""
+    once, _ = _scan(2, 3, 4)
+    for interleave in ("pos_in_time", "time_in_pos"):
+        layout = infer_stage_layout(
+            _revisited(once, 12, interleave=interleave))
+        assert layout.fovs_per_well == 4, interleave
+        assert (layout.rows, layout.cols) == (2, 3), interleave
+
+
+def test_single_cycle_keeps_the_first_visit_to_each_place():
+    """The map is drawn once. Every dot of a twelve-timepoint run lands on the
+    dot of the first timepoint, so drawing all of them is one map overdrawn
+    twelve times, numbered to twelve times its real length."""
+    once, _ = _scan(2, 3, 4)
+    assert single_cycle(once) == once              # nothing repeats: untouched
+
+    for interleave in ("pos_in_time", "time_in_pos"):
+        drawn = single_cycle(_revisited(once, 12, interleave=interleave))
+        assert len(drawn) == len(once), interleave
+        # The order is the stage's, and the coordinates are the ones the file
+        # gave for that first visit — not a rounded or averaged stand-in.
+        for (dx, dy), (ox, oy) in zip(drawn, once):
+            assert abs(dx - ox) < 1.0 and abs(dy - oy) < 1.0, interleave
+
+
+def test_single_cycle_survives_what_is_not_a_timelapse():
+    assert single_cycle([]) == []
+    assert single_cycle([(1.0, 2.0)]) == [(1.0, 2.0)]
+    # Every plane at one coordinate: one place, drawn once.
+    assert single_cycle([(5.0, 5.0)] * 9) == [(5.0, 5.0)]
+    # A coordinate that is not a number is not a position (it reaches a painter).
+    assert single_cycle([(1.0, 2.0), (float("nan"), 3.0)]) == [(1.0, 2.0)]
+
+
+def test_the_frame_order_reads_a_jittered_timelapse():
+    """Which axis is positions and which is timepoints is read off the repeat
+    pattern, and under equality a jittered file has no repeats at all: it reads
+    as a single timepoint holding as many positions as the file has frames."""
+    once, _ = _scan(2, 3, 4)
+    assert infer_frame_order(once) == ("single", 24, 1)
+    assert infer_frame_order(_revisited(once, 5)) == ("pos_in_time", 24, 5)
+    assert infer_frame_order(
+        _revisited(once, 5, interleave="time_in_pos")) == ("time_in_pos", 24, 5)
+
+
+def test_single_cycle_is_not_quadratic():
+    """96 wells x 16 fields x 24 timepoints, on the UI thread, per keystroke."""
+    import time
+
+    points = [
+        (c * PITCH + (f % 4) * FOV, r * PITCH + (f // 4) * FOV)
+        for _ in range(24) for r in range(8) for c in range(12) for f in range(16)
+    ]
+    assert len(points) == 36864
+    start = time.perf_counter()
+    drawn = single_cycle(points)
+    elapsed = time.perf_counter() - start
+    assert len(drawn) == 1536
+    assert elapsed < 1.5, f"{elapsed:.2f}s — the quadratic scan is back"
 
 
 def test_the_inference_stays_usable_on_a_full_timelapse_plate():

@@ -97,6 +97,94 @@ class StageLayout:
         return self.rows * self.cols
 
 
+def _jitter_tolerance(xs: list[float], ys: list[float]) -> float:
+    """How far apart two coordinates may be and still be the same place.
+
+    Read from the coarsest structure visible: the widest gap on either axis is
+    at least the well pitch whenever more than one well was imaged, and a
+    fraction of it sits far below the spacing of two fields of view while
+    staying far above a stage's repeatability.
+
+    One definition for the module, because two would disagree. The layout
+    inference and the "has the stage come back here?" test are the same question
+    asked twice, and a run whose fields group into wells under one tolerance and
+    not the other produces a map drawn to a layout it contradicts.
+    """
+    if len(set(xs)) <= 1 and len(set(ys)) <= 1:
+        return 0.0
+    coarse = max(
+        (b - a)
+        for axis in (xs, ys)
+        for a, b in zip(sorted(set(axis))[:-1], sorted(set(axis))[1:])
+    )
+    return coarse * _JITTER_FRACTION
+
+
+def place_keys(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """One key per point, equal exactly when two images share a stage position.
+
+    The module's single answer to "is this the same place?", because it is asked
+    in four separate places — how many fields a well holds, whether the sequence
+    repeats and how often, which places the map should draw, and which cell a
+    coordinate belongs to — and three of those used plain equality on the
+    rounded coordinate. A stage sent back to a nominal position reports it a
+    fraction of a micrometre off, so under equality a six-well map imaged at
+    four fields over three timepoints reports **twelve** fields per well and no
+    timepoints at all, both from the same file.
+
+    Snapping to the merged axis coordinates rather than comparing pairs: the
+    same `_distinct` / `_nearest` machinery the well grouping runs on, and
+    O(n log n) where the pairwise test is quadratic — a plate timelapse holds
+    tens of thousands of positions and this runs on the UI thread.
+    """
+    if not points:
+        return []
+    xs = [x for x, _ in points]
+    ys = [y for _, y in points]
+    tol = _jitter_tolerance(xs, ys)
+    ux, uy = _distinct(xs, tol), _distinct(ys, tol)
+    return [(_nearest(ux, x), _nearest(uy, y)) for x, y in points]
+
+
+def single_cycle(positions) -> list[tuple[float, float]]:
+    """*positions* with every return to a place already imaged dropped.
+
+    A timelapse images the same map once per timepoint, so its coordinates walk
+    the same route over and over. Drawn in full that is one map overdrawn N
+    times: every dot lands on a dot, every line on a line, and the numbering
+    runs to N times the count of real positions while describing the geometry of
+    one. So each place is drawn once, at the stage's first arrival, and the
+    picture is the map of a single pass.
+
+    Repeats are *dropped* rather than the list cut at the first one, because the
+    two ways a file can interleave positions and timepoints put them in
+    different places: a run that finishes the map before starting the next
+    timepoint repeats nothing until the end, while one that takes every
+    timepoint of a position before moving on repeats the file's *second*
+    coordinate. Truncating would leave that second kind with a single dot.
+
+    "The same place" is :func:`_jitter_tolerance`, the module's one definition
+    of it — not equality. A stage sent back to a nominal position reports
+    coordinates a fraction of a micrometre off the ones it reported before, and
+    against equality every one of those reads as somewhere new. Neither is it a
+    typical *step*: in a file ordered timepoints-within-position, consecutive
+    coordinates are that jitter, so the typical step **is** the jitter and a
+    tolerance scaled from it finds nothing.
+    """
+    points = [(float(x), float(y)) for x, y in positions or []
+              if isfinite(float(x)) and isfinite(float(y))]
+    if len(points) < 2:
+        return points
+    seen: set[tuple[float, float]] = set()
+    kept: list[tuple[float, float]] = []
+    for point, place in zip(points, place_keys(points)):
+        if place in seen:
+            continue
+        seen.add(place)
+        kept.append(point)
+    return kept
+
+
 def _distinct(values: list[float], tol: float) -> list[float]:
     """The distinct coordinates along an axis, merging anything within *tol*.
 
@@ -263,16 +351,7 @@ def infer_stage_layout(positions) -> StageLayout | None:
 
     xs = [x for x, _ in points]
     ys = [y for _, y in points]
-    # Jitter tolerance first, from the coarsest structure visible: the widest gap
-    # on either axis is at least the well pitch whenever more than one well was
-    # imaged, and a fraction of it sits far below the spacing of two fields of
-    # view while staying far above a stage's repeatability.
-    coarse = max(
-        (b - a)
-        for axis in (xs, ys)
-        for a, b in zip(sorted(set(axis))[:-1], sorted(set(axis))[1:])
-    ) if len(set(xs)) > 1 or len(set(ys)) > 1 else 0.0
-    tol = coarse * _JITTER_FRACTION
+    tol = _jitter_tolerance(xs, ys)
     # One pitch for the plate: the larger candidate across the two axes, since an
     # axis showing only the within-well spacing must not set it.
     scales = [s for s in (_axis_scale(xs, tol), _axis_scale(ys, tol))
@@ -297,14 +376,18 @@ def infer_stage_layout(positions) -> StageLayout | None:
     if rows * cols != len(occupied):
         return None            # not a filled rectangle — no grid to report
 
-    # Distinct *coordinates* per well, not visits: a timelapse returns to every
+    # Distinct *places* per well, not visits: a timelapse returns to every
     # position once per timepoint, and counting visits would report a well's
     # fields multiplied by the number of timepoints — 384 "fields" for a plate
-    # imaged at 16 fields over 24 timepoints.
-    seen_here: set[tuple[tuple[int, int], float, float]] = set()
+    # imaged at 16 fields over 24 timepoints. Distinctness is `place_keys`,
+    # never the rounded coordinate: a stage comes back a fraction of a
+    # micrometre off, which rounding at three decimals preserves, so every
+    # revisit counted as another field and the multiplied number was reported
+    # anyway — by the very code whose comment says it must not be.
+    seen_here: set[tuple[tuple[int, int], tuple[float, float]]] = set()
     counts: Counter = Counter()
-    for cell, (x, y) in zip(cells, points):
-        key = (cell, round(x, _COORD_DECIMALS), round(y, _COORD_DECIMALS))
+    for cell, place in zip(cells, place_keys(points)):
+        key = (cell, place)
         if key in seen_here:
             continue
         seen_here.add(key)
@@ -425,24 +508,31 @@ def infer_frame_order(positions) -> tuple[str, int, int] | None:
 
     ``None`` when the sequence is neither — a partial timelapse, or coordinates
     that do not describe a repeated visit pattern at all.
+
+    Every comparison here is between `place_keys`, not coordinates. A stage
+    returns to a position a fraction of a micrometre off the value it reported
+    last time, so under equality no visit is ever a repeat: a real timelapse
+    reads as ``single`` with as many positions as it has frames, and the page is
+    told there is one timepoint in a file holding twelve.
     """
     points = [(float(x), float(y)) for x, y in positions or []]
     if not points:
         return None
+    keys = place_keys(points)
     first: list[tuple[float, float]] = []
     seen: set[tuple[float, float]] = set()
-    for point in points:
-        if point not in seen:
-            seen.add(point)
-            first.append(point)
+    for key in keys:
+        if key not in seen:
+            seen.add(key)
+            first.append(key)
     n = len(first)
     if n == len(points):
         return "single", n, 1
     timepoints, remainder = divmod(len(points), n)
     if remainder or timepoints < 2:
         return None
-    if points[:n] == first:
+    if keys[:n] == first:
         return "pos_in_time", n, timepoints
-    if all(p == first[i // timepoints] for i, p in enumerate(points)):
+    if all(k == first[i // timepoints] for i, k in enumerate(keys)):
         return "time_in_pos", n, timepoints
     return None

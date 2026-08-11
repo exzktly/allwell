@@ -824,6 +824,77 @@ def test_the_stage_path_is_drawn_under_the_plate_and_anchored_at_the_origin(
     assert page._path_view._points[0] == (1.0, 1.0)
 
 
+def _plate_timelapse(path, rows, cols, fovs, cycles, *, wobble=0.31):
+    """A plate scan imaged *cycles* times, with the stage wobble a real one has.
+
+    Bit-identical repeats would be answered correctly by comparing coordinates
+    for equality, which is not what a microscope writes and not what the page
+    has to survive.
+    """
+    pitch, fov = 9000.0, 600.0
+    once = [
+        (c * pitch + (f % 2) * fov, r * pitch + (f // 2) * fov)
+        for r in range(rows)
+        for c in (range(cols) if r % 2 == 0 else range(cols - 1, -1, -1))
+        for f in range(fovs)
+    ]
+    coords = [
+        (x + wobble * ((t % 3) - 1), y - wobble * 0.7 * (t % 2))
+        for t in range(cycles) for x, y in once
+    ]
+    planes = "".join(
+        f'<Plane TheT="{i}" TheC="0" TheZ="0" PositionX="{x}" PositionY="{y}"/>'
+        for i, (x, y) in enumerate(coords))
+    mapping = "".join(
+        f'<TiffData FirstT="{i}" FirstC="0" FirstZ="0" IFD="{i}" PlaneCount="1"/>'
+        for i in range(len(coords)))
+    xml = (
+        '<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+        '<Image ID="Image:0" Name="lapse"><Pixels ID="Pixels:0" '
+        'DimensionOrder="XYZCT" Type="uint16" SizeX="6" SizeY="6" SizeC="1" '
+        f'SizeZ="1" SizeT="{len(coords)}">'
+        '<Channel ID="Channel:0:0" Name="DAPI" SamplesPerPixel="1"/>'
+        f'{planes}{mapping}</Pixels></Image></OME>')
+    tifffile.imwrite(str(path), np.zeros((len(coords), 6, 6), np.uint16),
+                     description=xml, metadata=None, photometric="minisblack")
+    return path, len(once)
+
+
+def test_the_page_draws_one_cycle_of_a_timelapse_and_says_so(qapp, tmp_path):
+    """Drawing all four cycles is one map drawn four times over: every dot
+    lands on a dot and the numbering runs to four times the map's real length.
+    The caption has to name the shortfall, because a picture showing a quarter
+    of the file's coordinates and saying nothing is the silent substitution."""
+    from datasets.ome_import.controller import OmeImportController
+
+    p, per_cycle = _plate_timelapse(tmp_path / "lapse.ome.tif", 2, 3, 4, 4)
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+
+    assert len(page._path_view._points) == per_cycle
+    caption = page._path_caption.text()
+    assert f"{per_cycle * 4} coordinates" in caption
+    assert "one cycle" in caption
+    # And the form is filled with the fields of one cycle, not the visits.
+    assert "2×3 wells × 4 FOV(s)" in page._suggest_label.text()
+    assert "4 timepoint(s)" in page._suggest_label.text()
+
+
+def test_a_run_with_no_repeats_says_nothing_about_cycles(qapp, tmp_path):
+    """The caption earns its words: nothing was left out, so there is nothing
+    to explain, and a line saying so on every file is noise."""
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _plate_scan(tmp_path / "once.ome.tif", 2, 3, 4)
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+
+    assert len(page._path_view._points) == 24
+    assert "one cycle" not in page._path_caption.text()
+
+
 def test_the_stage_path_follows_a_hand_drawn_first_well(qapp, tmp_path):
     """The anchor is wherever position 1 will actually land, which a clicked
     path decides for itself."""

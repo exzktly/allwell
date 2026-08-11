@@ -218,3 +218,37 @@ def test_plotstate_fields_round_trip(loaded_app):
     assert plot.line_order_rsets == ["B", "A"]
     assert plot.line_order_wells == ["A02", "A01"]
     assert plot.focus_timepoint == pytest.approx(24.0)
+
+
+# ── Where the restore lands ──────────────────────────────────────────────────
+
+def test_restore_lands_on_the_saved_tab_in_the_real_app(loaded_app):
+    """End to end in the built app: Restore leaves the user looking at the tab
+    the plot came from, with the saved settings applied.
+
+    ``view_state.restore`` is shared with the dataset-load path, which lands on
+    Home deliberately. Saved Plots must not inherit that: navigating to Home
+    applies every restored setting to a tab nobody is looking at, which is
+    indistinguishable from a restore that did nothing.
+    """
+    from well_viewer.core.tab_controller import current_centre_tab
+    from well_viewer.features.saved_plots.controller import save_plot_from_card
+
+    app = loaded_app
+    ctx = app._ctx
+    view_state._activate_tab(ctx, "Bar Plots")
+    ctx.state.plot.use_sem = True
+    ctx.state.plot.time_scale = 4.0
+    assert save_plot_from_card(ctx, "Bar Plots", b"\x89PNG", "Panel A").startswith("Saved")
+
+    # Walk away and undo both settings, as a user would before restoring.
+    view_state._activate_tab(ctx, "Home")
+    ctx.state.plot.use_sem = False
+    ctx.state.plot.time_scale = 1.0
+
+    rec = get_store(ctx).records[-1]
+    restore_saved_plot(ctx, rec.id)
+
+    assert current_centre_tab(ctx) == "Bar Plots"
+    assert ctx.state.plot.use_sem is True
+    assert ctx.state.plot.time_scale == pytest.approx(4.0)

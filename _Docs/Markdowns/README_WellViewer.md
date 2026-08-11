@@ -992,7 +992,8 @@ handoff carries it, and Analyze says on its dashboard what it just set up.
 **Opening a dataset always brings you here first**, whichever page you were on
 when you last quit. Everything else about that session is restored as before —
 it is only arriving with a new dataset that starts on Home, since that is the
-moment there is most to tell you.
+moment there is most to tell you. Restoring a saved plot from **Saved Plots**
+does not come here: it takes you to the tab that plot came from.
 
 #### Telling the app what your wells mean
 
@@ -2402,9 +2403,10 @@ plus the exact parameters / thresholds that produced it — here. On a multi-pan
 figure a **one-click whole-figure save** captures the entire figure at once
 rather than a single panel.
 
-- **Per-card controls** — **Restore** (reload the plot with its saved
-  parameters), **Export**, **Rename**, **Delete**, and a collapsible parameter
-  summary.
+- **Per-card controls** — **Restore settings** (re-apply the plot's saved
+  parameters and take you to the tab it was captured from, so you arrive looking
+  at the figure it recreated), **Export**, **Rename**, **Delete**, and a
+  collapsible parameter summary.
 - **Export all** — write the whole gallery as a multi-page **PDF report** (a
   cover page plus one full-quality page per plot with its parameters). The
   Image Table grid can be saved here too.

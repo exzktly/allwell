@@ -315,11 +315,16 @@ def _snapshot_scatter(ctx) -> dict:
 
 # ── restore ────────────────────────────────────────────────────────────────
 
-def restore(ctx, state: dict) -> None:
+def restore(ctx, state: dict, *, prefer_home: bool = False) -> None:
     """Apply *state* in two phases — cross-cutting now, per-tab deferred.
 
     Per-tab combo values are stashed on ``ctx.runtime.view_state.pending`` and
     flushed by ``apply_pending_tab_state`` when each tab becomes active.
+
+    *prefer_home* asks for the Home page instead of the snapshot's own
+    ``active_centre_tab``. It is for the arrival of a dataset and nothing else;
+    every other caller wants the tab the snapshot names, because it is
+    re-applying a view the user asked to see rather than opening a folder.
     """
     if not isinstance(state, dict):
         return
@@ -544,15 +549,17 @@ def restore(ctx, state: dict) -> None:
     # lazy build with cross-cutting state already in place. Drives the
     # nested plotting stack when a plot sub-tab is requested.
     #
-    # **Home wins over the saved tab.** Opening a dataset is the moment a user
-    # most needs to be told what they just opened — whether its run finished,
-    # what is missing from it, what it was run with — and landing instead on
-    # whatever page they happened to quit from puts a plot of a plate they have
-    # not been oriented to in front of them. The saved tab is still restored for
-    # every other page, so a session that ends on Line Graphs comes back to Line
-    # Graphs; it is only the arrival of a *dataset* that goes to Home.
+    # **Home wins over the saved tab when a dataset is arriving.** Opening a
+    # dataset is the moment a user most needs to be told what they just opened —
+    # whether its run finished, what is missing from it, what it was run with —
+    # and landing instead on whatever page they happened to quit from puts a plot
+    # of a plate they have not been oriented to in front of them. That applies to
+    # the arrival of a dataset only, which is why it is gated on *prefer_home*: a
+    # caller replaying a snapshot the user picked (Saved Plots' Restore) is
+    # answering a request to see one particular figure, and sending that to Home
+    # would leave the restored settings applied to a tab nobody is looking at.
     target = state.get("active_centre_tab")
-    if _has_home(ctx):
+    if prefer_home and _has_home(ctx):
         _activate_tab(ctx, "Home")
         return
     if isinstance(target, str) and target:
@@ -872,7 +879,8 @@ def load_from_data_dir(ctx) -> None:
             "view_state migrated from schema_version=%r to %d.", sv, SCHEMA_VERSION)
         state = migrated
     try:
-        restore(ctx, state)
+        # The dataset-arrival path, and the only one that lands on Home.
+        restore(ctx, state, prefer_home=True)
     except Exception:
         _logger.exception("view_state: restore failed; continuing with defaults")
 

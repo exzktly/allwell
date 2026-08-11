@@ -3093,7 +3093,12 @@ the obvious way to take first visits and is quadratic (five seconds at that
 size), and a timelapse revisits every position once per timepoint, so counting
 *visits* per well rather than distinct coordinates reports a plate's fields
 multiplied by its timepoints. `ome_import_compute.suggest_layout`
-wraps that for the page, which *offers* it. Whether it arrives as grid fields or
+wraps that for the page, which *offers* it. It returns `None` when `place`
+refuses the block — one larger than a 96-well plate, which is what a pitch read
+as the *field* spacing produces — and the page then says so, naming the block it
+read: the path drawing needs no placement and draws regardless, so a silent
+`None` leaves an overflowing picture, an untouched form and no account of
+either. Whether it arrives as grid fields or
 as an explicit order is decided by **comparing** the placed order against the
 serpentine those fields would produce, not by asking whether the scan is a
 serpentine: a stage reporting Y or X descending sweeps a perfectly good

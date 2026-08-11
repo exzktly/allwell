@@ -863,6 +863,24 @@ class OmeImportPage(LogPanelMixin, QWidget):
             # Say why nothing filled itself in. Without this the page simply
             # offers nothing, and a file that cannot be read this way looks the
             # same as one the feature forgot to look at.
+            inferred = self._inferred_for(layout) if layout is not None else None
+            if inferred is not None:
+                # Coordinates were read and *did* describe a grid — one that
+                # cannot be a 96-well plate, so `place` refused it and there is
+                # nothing to offer. Saying nothing here is the worst of the
+                # three: the path draws, overflows, and the form stays empty
+                # with no account of why.
+                self._suggest_label.setText(
+                    f"↳ The stage coordinates describe a {inferred.rows}×"
+                    f"{inferred.cols} block of {inferred.n_wells} positions, "
+                    "which is not a 96-well plate — so the grid was not filled "
+                    "in. The spacing read between wells is most likely the "
+                    "spacing between fields of view instead. Enter the grid and "
+                    "FOVs per well yourself; the path drawn below still shows "
+                    "the shape of the run.")
+                self._suggest_btn.setVisible(False)
+                self._suggest_row.setVisible(True)
+                return
             if layout is not None and not layout.stage_positions:
                 held = ", ".join(f"{name} ({count})" for name, count
                                  in sorted(layout.metadata_blocks.items())) or "none"

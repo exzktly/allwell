@@ -1043,3 +1043,44 @@ def test_the_stage_path_view_is_laid_out_with_a_real_size(qapp, tmp_path):
     # …and the same box as the plate it sits under, so the cells line up.
     assert page._path_view.height() == page._plate.height()
     page.hide()
+
+
+def test_a_block_too_big_for_a_plate_says_why_the_grid_stayed_empty(qapp, tmp_path):
+    """`place` refuses a block that runs off the plate, so `suggest_layout`
+    returns nothing and the form stays as it was — while the path, which needs
+    no placement, still draws and overflows. Silence there is the worst of the
+    three states: something clearly happened and nothing accounts for it."""
+    from datasets.ome_import.controller import OmeImportController
+
+    # What a pitch mistaken for the field spacing produces: a 20x20 "plate".
+    coords = [(c * 600.0, r * 600.0) for r in range(20) for c in range(20)]
+    planes = "".join(
+        f'<Plane TheT="{i}" TheC="0" TheZ="0" PositionX="{x}" PositionY="{y}"/>'
+        for i, (x, y) in enumerate(coords))
+    mapping = "".join(
+        f'<TiffData FirstT="{i}" FirstC="0" FirstZ="0" IFD="{i}" PlaneCount="1"/>'
+        for i in range(len(coords)))
+    xml = ('<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+           '<Image ID="Image:0"><Pixels ID="Pixels:0" DimensionOrder="XYZCT" '
+           'Type="uint16" SizeX="4" SizeY="4" SizeC="1" SizeZ="1" '
+           f'SizeT="{len(coords)}">'
+           '<Channel ID="Channel:0:0" Name="DAPI" SamplesPerPixel="1"/>'
+           f'{planes}{mapping}</Pixels></Image></OME>')
+    p = tmp_path / "toobig.ome.tif"
+    tifffile.imwrite(str(p), np.zeros((len(coords), 4, 4), np.uint16),
+                     description=xml, metadata=None, photometric="minisblack")
+
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+
+    label = page._suggest_label.text()
+    assert "20×20" in label
+    assert "not a 96-well plate" in label
+    assert "fields of view" in label
+    assert not page._suggest_btn.isVisibleTo(page)      # nothing to apply
+    assert (page._rows_edit.text(), page._cols_edit.text()) == ("1", "1")
+    # The path still draws, scaled to fit, and its caption says the scale changed.
+    assert page._path_view._points
+    assert page._path_view.isFitted()
+    assert "no longer a well" in page._path_caption.text()

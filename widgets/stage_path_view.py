@@ -97,6 +97,15 @@ class StagePathView(QWidget):
     def setPath(self, points) -> None:
         """Set the path, as ``(x, y)`` in cell units — see the module docstring."""
         self._points = [(float(x), float(y)) for x, y in points or []]
+        # Decided here, not while painting: the host writes its caption from
+        # ``isFitted`` as soon as it sets the path, and a value that only became
+        # true on the next paint left the caption describing the previous one.
+        # The test needs the points alone, so there is nothing to wait for.
+        xs = [x for x, _ in self._points]
+        ys = [y for _, y in self._points]
+        self._fitted = bool(self._points) and not (
+            min(xs) >= -0.5 and max(xs) <= _N_COLS - 0.5
+            and min(ys) >= -0.5 and max(ys) <= _N_ROWS - 0.5)
         self.update()
 
     def clear(self) -> None:
@@ -189,12 +198,10 @@ class StagePathView(QWidget):
         centred, so the shape of the run is visible even though a cell is no
         longer a well. :meth:`isFitted` reports which of the two happened.
         """
+        if not self._fitted:
+            return cell, ox, oy
         xs = [x for x, _ in self._points]
         ys = [y for _, y in self._points]
-        fits = (min(xs) >= -0.5 and max(xs) <= _N_COLS - 0.5
-                and min(ys) >= -0.5 and max(ys) <= _N_ROWS - 0.5)
-        if fits:
-            return cell, ox, oy
         span_x = max(max(xs) - min(xs), 1e-9)
         span_y = max(max(ys) - min(ys), 1e-9)
         scale = min(_N_COLS * cell / (span_x + 1), _N_ROWS * cell / (span_y + 1))
@@ -205,7 +212,6 @@ class StagePathView(QWidget):
     def _paint_path(self, painter: QPainter, cell: float,
                     ox: float, oy: float) -> None:
         scale, px, py = self._transform(cell, ox, oy)
-        self._fitted = scale != cell
         pixels = [
             QPointF(px + (x + 0.5) * scale, py + (y + 0.5) * scale)
             for x, y in self._points

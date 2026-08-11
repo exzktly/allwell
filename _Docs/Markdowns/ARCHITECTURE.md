@@ -1418,11 +1418,20 @@ gated on the wells, a page gated on anything else could describe a dataset the
 placeholder says is not there.
 
 **Opening a dataset always lands on Home**, whatever page the last session
-ended on. `persistence/view_state.apply_view_state` restores `active_centre_tab`
-for everything else, but the arrival of a *dataset* is the moment a reader most
-needs to be told what they just opened, and dropping them onto a plot of a plate
-they have not been oriented to is not that. A profile with no Home page falls
-back to the saved tab.
+ended on: the arrival of a *dataset* is the moment a reader most needs to be
+told what they just opened, and dropping them onto a plot of a plate they have
+not been oriented to is not that. A profile with no Home page falls back to the
+saved tab.
+
+That override is opt-in, and only the dataset-load path opts in.
+`persistence/view_state.restore` activates the `active_centre_tab` its snapshot
+names unless the caller passes `prefer_home=True`, which `load_from_data_dir` —
+the one caller that runs on the arrival of a dataset — does. Every other caller
+is replaying a view the user asked to see rather than opening a folder, and the
+one that exists is Saved Plots' *Restore settings*: it re-applies one figure's
+parameters and must leave the user looking at the tab that figure came from.
+Sending it to Home instead would apply the whole restored view to a tab nobody
+is on, which on screen is indistinguishable from a restore that did nothing.
 
 **Every shortfall Home reports offers the same next step: finish the run.**
 Failures, partial wells, images without measurements, staged-but-never-processed

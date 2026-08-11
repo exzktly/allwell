@@ -81,6 +81,7 @@ class StagePathView(QWidget):
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self._plate: QWidget | None = None
         self._points: list[tuple[float, float]] = []
+        self._fitted = False
 
     def sizeHint(self) -> QSize:
         return QSize(PLATE_MAX_WIDTH, PLATE_MAX_HEIGHT)
@@ -96,6 +97,15 @@ class StagePathView(QWidget):
     def setPath(self, points) -> None:
         """Set the path, as ``(x, y)`` in cell units — see the module docstring."""
         self._points = [(float(x), float(y)) for x, y in points or []]
+        # Decided here, not while painting: the host writes its caption from
+        # ``isFitted`` as soon as it sets the path, and a value that only became
+        # true on the next paint left the caption describing the previous one.
+        # The test needs the points alone, so there is nothing to wait for.
+        xs = [x for x, _ in self._points]
+        ys = [y for _, y in self._points]
+        self._fitted = bool(self._points) and not (
+            min(xs) >= -0.5 and max(xs) <= _N_COLS - 0.5
+            and min(ys) >= -0.5 and max(ys) <= _N_ROWS - 0.5)
         self.update()
 
     def clear(self) -> None:
@@ -103,6 +113,19 @@ class StagePathView(QWidget):
 
     def hasPath(self) -> bool:
         return bool(self._points)
+
+    def isFitted(self) -> bool:
+        """True when the drawing had to be shrunk to show the whole path.
+
+        The path is drawn at the plate's own scale — one cell, one well — which
+        only works while it *fits* on a plate. A scan whose inferred well pitch
+        came out too small spans far more than twelve columns, and at plate
+        scale all but the first few wells fall outside the widget: the user sees
+        a fragment and no indication that there is more. Then the drawing is
+        scaled to its own extent instead, and this says so, because a picture
+        that is no longer one-cell-per-well must not claim to be.
+        """
+        return self._fitted
 
     # ── painting ─────────────────────────────────────────────────────────────
     def _geometry(self) -> tuple[float, float, float] | None:
@@ -166,12 +189,34 @@ class StagePathView(QWidget):
         dot = min(cell * _DOT_FRACTION, max(_MIN_DOT_PX, closest * _DOT_OF_SPACING))
         return dot, min(cell * _LINE_FRACTION, max(1.3, dot / 2.5))
 
+    def _transform(self, cell: float, ox: float, oy: float):
+        """``(scale, x offset, y offset)`` for drawing the path in this widget.
+
+        Plate scale whenever the path fits the 8x12 grid, which is the point of
+        the view. When it does not — a pitch read too small, a block placed off
+        the edge — the whole drawing is scaled to its own bounding box and
+        centred, so the shape of the run is visible even though a cell is no
+        longer a well. :meth:`isFitted` reports which of the two happened.
+        """
+        if not self._fitted:
+            return cell, ox, oy
+        xs = [x for x, _ in self._points]
+        ys = [y for _, y in self._points]
+        span_x = max(max(xs) - min(xs), 1e-9)
+        span_y = max(max(ys) - min(ys), 1e-9)
+        scale = min(_N_COLS * cell / (span_x + 1), _N_ROWS * cell / (span_y + 1))
+        return (scale,
+                ox + (_N_COLS * cell - span_x * scale) / 2.0 - min(xs) * scale,
+                oy + (_N_ROWS * cell - span_y * scale) / 2.0 - min(ys) * scale)
+
     def _paint_path(self, painter: QPainter, cell: float,
                     ox: float, oy: float) -> None:
+        scale, px, py = self._transform(cell, ox, oy)
         pixels = [
-            QPointF(ox + (x + 0.5) * cell, oy + (y + 0.5) * cell)
+            QPointF(px + (x + 0.5) * scale, py + (y + 0.5) * scale)
             for x, y in self._points
         ]
+        cell = scale
         dot, line = self._marks(pixels, cell)
 
         route = QPainterPath(pixels[0])

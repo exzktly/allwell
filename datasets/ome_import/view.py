@@ -863,6 +863,39 @@ class OmeImportPage(LogPanelMixin, QWidget):
             # Say why nothing filled itself in. Without this the page simply
             # offers nothing, and a file that cannot be read this way looks the
             # same as one the feature forgot to look at.
+            inferred = self._inferred_for(layout) if layout is not None else None
+            if inferred is not None:
+                # Coordinates were read and *did* describe a grid — one that
+                # cannot be a 96-well plate, so `place` refused it and there is
+                # nothing to offer. Saying nothing here is the worst of the
+                # three: the path draws, overflows, and the form stays empty
+                # with no account of why.
+                self._suggest_label.setText(
+                    f"↳ The stage coordinates describe a {inferred.rows}×"
+                    f"{inferred.cols} block of {inferred.n_wells} positions, "
+                    "which is not a 96-well plate — so the grid was not filled "
+                    "in. The spacing read between wells is most likely the "
+                    "spacing between fields of view instead. Enter the grid and "
+                    "FOVs per well yourself; the path drawn below still shows "
+                    "the shape of the run.")
+                self._suggest_btn.setVisible(False)
+                self._suggest_row.setVisible(True)
+                return
+            if layout is not None and layout.stage_positions:
+                # Coordinates are in the file but do not describe a plate scan:
+                # not a filled rectangle, or uneven fields per well. Refusing to
+                # guess is right — a wrong grid entered silently is the worst
+                # outcome — but refusing *silently* leaves a file that clearly
+                # holds positions looking like one that holds none.
+                self._suggest_label.setText(
+                    f"↳ This file records {len(layout.stage_positions)} stage "
+                    "position(s), but they do not form a rectangular block of "
+                    "wells with the same number of fields in each — a scan with "
+                    "wells skipped, or with uneven fields — so no grid could be "
+                    "read from them. Enter the grid and FOVs per well below.")
+                self._suggest_btn.setVisible(False)
+                self._suggest_row.setVisible(True)
+                return
             if layout is not None and not layout.stage_positions:
                 held = ", ".join(f"{name} ({count})" for name, count
                                  in sorted(layout.metadata_blocks.items())) or "none"
@@ -900,6 +933,19 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._path_view.setPath(points)
         self._path_view.setVisible(bool(points))
         self._path_caption.setVisible(bool(points))
+        if points:
+            # The view falls back to fitting the whole path in its box when the
+            # path does not fit a plate, which happens when the well pitch read
+            # out of the coordinates is too small. Say so: a drawing that is no
+            # longer one-cell-per-well must not be read as one, and the reason
+            # it happened is usually the layout being wrong too.
+            self._path_caption.setText(
+                "Stage path — one dot per image, joined in acquisition order. "
+                + ("This run does not fit a 96-well plate at the well spacing "
+                   "read from the file, so it is scaled to fit and a square is "
+                   "no longer a well — check the grid and FOVs per well."
+                   if self._path_view.isFitted() else
+                   "The tight clusters are the fields of view within one well."))
 
     def _apply_suggestion(self) -> None:
         """Fill every control the file's own metadata can answer.

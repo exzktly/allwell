@@ -1001,3 +1001,23 @@ def test_a_file_with_no_stage_coordinates_says_so(qapp, tmp_path):
     page._cols_edit.setText("4")
     page.refresh_readout()
     assert "can only split as" in page._verdict.text()
+
+
+def test_a_file_with_no_coordinates_reports_what_it_does_carry(qapp, tmp_path):
+    """"No stage coordinates found" and "looked in the wrong place" are the
+    same sentence to a user. The page names the metadata the file does hold and
+    puts a sample of its keys in the log, which is the one thing that can be
+    sent back when a file still yields no layout."""
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _write_packed(tmp_path / "bare.ome.tif", n_frames=6,
+                      channel_names=("DAPI",))
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+
+    label = page._suggest_label.text()
+    assert "no stage coordinates" in label
+    assert "Metadata it does carry:" in label
+    assert "ome_xml_chars" in label
+    assert "no key/value metadata" in page.log_text()

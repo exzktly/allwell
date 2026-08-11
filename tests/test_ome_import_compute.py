@@ -828,3 +828,80 @@ def test_mirroring_moves_the_wells_a_conversion_would_write():
     path = stage_path_for(oriented(layout, flip_x=True), "A03")
     assert path[0] == (2.0, 0.0)                    # anchored at the first well
     assert path[-1][0] < path[0][0]                 # and it runs leftwards
+
+
+def _positional_ome(path, rows=2, cols=3):
+    """A scan whose every frame is filled with its own stage-position index.
+
+    The pixel value is the evidence: it says which position an image came from,
+    so an archive can be read back as a position→well mapping rather than as a
+    set of filenames that merely look plausible.
+    """
+    pitch = 9000.0
+    coords = [(c * pitch, r * pitch) for r in range(rows) for c in range(cols)]
+    planes = "".join(
+        f'<Plane TheT="{i}" TheC="0" TheZ="0" PositionX="{x}" PositionY="{y}"/>'
+        for i, (x, y) in enumerate(coords))
+    mapping = "".join(
+        f'<TiffData FirstT="{i}" FirstC="0" FirstZ="0" IFD="{i}" PlaneCount="1"/>'
+        for i in range(len(coords)))
+    xml = (
+        '<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+        '<Image ID="Image:0" Name="scan"><Pixels ID="Pixels:0" '
+        'DimensionOrder="XYZCT" Type="uint16" SizeX="4" SizeY="4" SizeC="1" '
+        f'SizeZ="1" SizeT="{len(coords)}">'
+        '<Channel ID="Channel:0:0" Name="DAPI" SamplesPerPixel="1"/>'
+        f'{planes}{mapping}</Pixels></Image></OME>')
+    tifffile.imwrite(
+        str(path),
+        np.stack([np.full((4, 4), i, np.uint16) for i in range(len(coords))]),
+        description=xml, metadata=None, photometric="minisblack")
+    return path
+
+
+def _convert_mirrored(src, dest, *, flip_x=False, flip_y=False):
+    """Convert *src* as the page would with those boxes ticked, and read back
+    which stage position ended up in which well."""
+    import io
+    import zipfile
+
+    layout = oriented(read_layout(str(src)), flip_x=flip_x, flip_y=flip_y)
+    suggestion = suggest_layout(layout, "A01")
+    params = ConversionParams(
+        grid_rows=suggestion.rows, grid_cols=suggestion.cols, origin="A01",
+        direction=suggestion.direction, fovs_per_well=suggestion.fovs_per_well,
+        frame_order=suggestion.frame_order or "single",
+        well_order=tuple(suggestion.well_order), experiment="p")
+    plan_conversion(layout, params)
+    convert(str(src), str(dest), params)
+
+    found = {}
+    for archive in sorted((dest / "in").glob("*.zip")):
+        with zipfile.ZipFile(archive) as zf:
+            for member in zf.namelist():
+                arr = tifffile.imread(io.BytesIO(zf.read(member)))
+                assert int(arr.min()) == int(arr.max())   # untouched, not resampled
+                found[archive.stem.upper()] = int(arr.max())
+    return found
+
+
+def test_mirroring_reflects_the_wells_a_conversion_writes(tmp_path):
+    """The end of the chain, asserted on the archives rather than on anything
+    the page computed: the flip has to move which well each *image* is filed
+    under. The pixels are never touched — a mirrored run writes the same frame
+    it always did, into the reflected well."""
+    src = _positional_ome(tmp_path / "flip.ome.tif")
+
+    straight = _convert_mirrored(src, tmp_path / "d0")
+    assert straight == {"A01": 0, "A02": 1, "A03": 2,
+                        "B01": 3, "B02": 4, "B03": 5}
+
+    # Left to right, about the Y axis: columns reverse, rows stay.
+    assert _convert_mirrored(src, tmp_path / "dx", flip_x=True) == {
+        "A01": 2, "A02": 1, "A03": 0, "B01": 5, "B02": 4, "B03": 3}
+    # Top to bottom, about the X axis: rows reverse, columns stay.
+    assert _convert_mirrored(src, tmp_path / "dy", flip_y=True) == {
+        "A01": 3, "A02": 4, "A03": 5, "B01": 0, "B02": 1, "B03": 2}
+    # Both at once, which is a 180-degree turn of the block.
+    assert _convert_mirrored(src, tmp_path / "dxy", flip_x=True, flip_y=True) == {
+        "A01": 5, "A02": 4, "A03": 3, "B01": 2, "B02": 1, "B03": 0}

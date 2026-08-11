@@ -1483,12 +1483,28 @@ Three rules the page is built around:
   "None yet". Conflating *not computed* with *computed as zero* is the bug class
   the completeness record exists to end, and the page reporting it must not
   reintroduce it.
-- **The plate never spends `accent` or `accent2`.** Those already mean
-  "anomalous well" (Concatenate, Subset) and "the other of two normal groups"
-  (Merge Plates) on the other plate dashboards. Home paints from the status
-  palette, spends hue on exceptions, and gives *partial* a coverage arc as well
-  as a colour — the one state the page exists to make visible, and the one that
-  has to survive a small cell and a fast skim.
+- **Every colour it spends means what it means on the other plate maps.**
+  `success` = complete, `warn` = partial, `danger` = an errored well, and
+  `accent` = the anomalous one, which here is *images with no measurements* —
+  Concatenate paints the identical condition (merged with no measurements CSV on
+  one side) in the same token. `text_muted` carries *staged, never processed*,
+  the token the Datasets dashboards use for pending and for Validate's "no
+  output yet". `accent2` is unused: it means "the other of two normal groups"
+  (Merge Plates), which no state here is. The rule is one colour per state and
+  no colour that means something else elsewhere; `tests/test_home_plate_colors.py`
+  asserts the table, and `tests/test_home_plate_render.py` samples the rendered
+  widget, because the two can disagree — a table of legible tokens can still
+  arrive as near-black cells if something dims them on the way to the screen.
+- **The two states that describe an absence are painted in nothing at all.**
+  `unchecked` (no completeness record exists) and `no_output` (the record holds
+  the well and it has no evidence at all) both assert nothing, so they get the
+  plate's own uncoloured cell and the legend gives them a hollow swatch. They
+  cannot be confused, because `plate_cells` can only produce one of them per
+  plate: `unchecked` is what a plate with no record is made of, `no_output` can
+  only come from a record.
+- *Partial* gets a coverage arc as well as a colour — the one state the page
+  exists to make visible, and the one that has to survive a small cell and a
+  fast skim.
 - **The states it paints are renderings, not a second opinion.**
   `pipeline.completeness.health` remains the only classifier; `plate_cells`
   separates a staged-but-never-processed well from a half-finished one on

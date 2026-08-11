@@ -33,7 +33,10 @@ CELL_FAILED = "failed"
 CELL_INPUT_ONLY = "input_only"
 CELL_NO_MEASUREMENTS = "no_measurements"
 CELL_UNCHECKED = "unchecked"
-CELL_ABSENT = "absent"
+#: The record's fourth health state (``pipeline.completeness.HEALTH_STATES``):
+#: the well has no evidence at all — no staged input, no output. Named for the
+#: health value it renders so the two cannot drift apart.
+CELL_NO_OUTPUT = "no_output"
 
 
 @dataclass(frozen=True)
@@ -167,12 +170,19 @@ def identity(ctx) -> dict:
 def plate_cells(ctx) -> dict:
     """Every well the record knows, as the state the plate paints it in.
 
-    The five painted states are derived from figures already in the record —
+    The painted states are derived from figures already in the record —
     ``covered_any == 0`` separates a staged-but-never-processed well from a
     half-finished one, ``failed`` marks wells with tracebacks — rather than
     from a second reading of the plate. Without a record every well is
     ``unchecked``: a neutral state that is not "fine" and not "broken", because
     neither is known.
+
+    Each of the record's four health states maps to a painted state by name,
+    ``no_output`` included: a well with no evidence at all is in the record and
+    produced nothing, which is a narrower claim than being absent from the
+    dataset, and the legend has a row for it. A health value this build does not
+    recognise falls back to ``unchecked`` — the state that asserts nothing —
+    rather than to one that would claim something specific about the well.
     """
     block = _record(ctx)
     wells = block.get("wells") if isinstance(block.get("wells"), dict) else {}
@@ -195,8 +205,10 @@ def plate_cells(ctx) -> dict:
             cells[well] = CELL_NO_MEASUREMENTS
         elif health == "complete":
             cells[well] = CELL_COMPLETE
+        elif health == "no_output":
+            cells[well] = CELL_NO_OUTPUT
         else:
-            cells[well] = CELL_ABSENT
+            cells[well] = CELL_UNCHECKED
     return cells
 
 
@@ -223,6 +235,12 @@ def plate_legend(ctx) -> list:
 
     Rows whose count is zero stay on screen — a legend that hides its empty
     states makes the reader work out what a colour would have meant.
+
+    The two states that describe an *absence* (``unchecked``, ``no_output``) are
+    the exception: they appear only when the plate actually holds one. They are
+    also mutually exclusive — ``unchecked`` is what a plate with no record at
+    all is made of, ``no_output`` can only come from a record — so at most one
+    of them is ever on screen, and no well is left with no row to explain it.
     """
     cells = plate_cells(ctx)
     order = (
@@ -231,13 +249,15 @@ def plate_legend(ctx) -> list:
         (CELL_FAILED, "failed"),
         (CELL_INPUT_ONLY, "input only"),
         (CELL_NO_MEASUREMENTS, "no measurements"),
+        (CELL_NO_OUTPUT, "no output yet"),
         (CELL_UNCHECKED, "not checked"),
     )
+    only_when_present = (CELL_UNCHECKED, CELL_NO_OUTPUT)
     counts = {}
     for state in cells.values():
         counts[state] = counts.get(state, 0) + 1
     return [(state, label, counts.get(state, 0)) for state, label in order
-            if counts.get(state, 0) or state != CELL_UNCHECKED]
+            if counts.get(state, 0) or state not in only_when_present]
 
 
 def stat_tiles(ctx) -> list:

@@ -9,14 +9,37 @@ it has no run to report on, and clicking a well selects it. Undoing inertness on
 a base whose whole point is inertness is fighting it, so this borrows that
 class's four-line read-only idiom and stops there.
 
-**No well is ever painted in the accent colours.** ``accent`` already means
-"anomalous well" on the Concatenate and Subset dashboards, and ``accent2`` means
-"belongs to the other of two normal groups" on Merge Plates. A landing page that
-spent either on an ordinary state would contradict a convention the rest of the
-app has already taught. Colour here is spent on exceptions and the normal states
-separate by luminance — which is also why *partial* is the one state given a
-shape as well as a hue: it is the state this page exists to make visible, and an
-arc survives a small cell, colour blindness and a fast skim.
+**Every colour here means what it means on the other plate maps in the app**,
+because a reader who has learnt one plate has learnt all of them:
+
+===================== ============== ==========================================
+State                 Token          The same token elsewhere
+===================== ============== ==========================================
+complete              ``success``    done / merged / complete on every dashboard
+partial               ``warn``       Validate's *partial*, and work in flight
+failures recorded     ``danger``     Validate's *missing*, any errored well
+images, no            ``accent``     Concatenate's *merged — no measurements CSV
+measurements                         on one side*: the identical condition, and
+                                     the convention that ``accent`` flags the
+                                     anomalous well rather than a normal one
+staged, never         ``text_muted`` *pending* on Concatenate, Merge Plates and
+processed                            Import Loose; *no output yet* on Validate
+===================== ============== ==========================================
+
+``accent2`` is deliberately unused: it means "belongs to the other of two normal
+groups" on Merge Plates, and no state here is that.
+
+**The two states that describe an absence are painted in no colour at all.**
+``unchecked`` (there is no completeness record) and ``no_output`` (the record
+has the well, and it has no evidence at all) both assert nothing about a well,
+so they get the plate's own uncoloured cell rather than a hue that would. They
+cannot be confused with each other: ``unchecked`` is what a plate with no record
+is made of and ``no_output`` can only come from a record, so only one of them is
+ever on screen.
+
+*Partial* is the one state given a shape as well as a hue — it is the state this
+page exists to make visible, and an arc survives a small cell, colour blindness
+and a fast skim.
 """
 
 from __future__ import annotations
@@ -28,31 +51,32 @@ from widgets.plate_geometry import apply_plate_geometry
 from widgets.well_plate_selector import WellPlateSelector
 
 from .collect import (
-    CELL_ABSENT,
     CELL_COMPLETE,
     CELL_FAILED,
     CELL_INPUT_ONLY,
     CELL_NO_MEASUREMENTS,
+    CELL_NO_OUTPUT,
     CELL_PARTIAL,
     CELL_UNCHECKED,
 )
 
 #: One colour per painted state. Read through ``theme.Colors`` so a theme swap
-#: carries the plate with it, and deliberately drawn from the status palette:
-#: these *are* status colours, unlike the well-identity palette every plot uses.
+#: carries the plate with it, and drawn from the status palette every other
+#: plate map uses (see the table above) rather than from the well-identity
+#: palette the plots key to wells.
 STATE_COLORS = {
     CELL_COMPLETE: theme.Colors.success,
     CELL_PARTIAL: theme.Colors.warn,
     CELL_FAILED: theme.Colors.danger,
-    CELL_INPUT_ONLY: theme.Colors.panel_elevated,
-    CELL_NO_MEASUREMENTS: theme.Colors.threshold,
-    CELL_UNCHECKED: theme.Colors.border,
-    CELL_ABSENT: theme.Colors.surface,
+    CELL_NO_MEASUREMENTS: theme.Colors.accent,
+    CELL_INPUT_ONLY: theme.Colors.text_muted,
 }
 
-#: States drawn dimmed rather than lit — nothing has been produced for them, so
-#: they should recede rather than compete with the wells that carry data.
-_MUTED_STATES = (CELL_INPUT_ONLY, CELL_UNCHECKED, CELL_ABSENT)
+#: The states that assert nothing, and so are painted in nothing: the plate's
+#: own uncoloured cell. Every other state carries a colour, and no state carries
+#: a colour another state also carries — a plate on which two states looked
+#: alike would be a plate that cannot be read against its legend.
+NEUTRAL_STATES = (CELL_UNCHECKED, CELL_NO_OUTPUT)
 
 STATE_LABELS = {
     CELL_COMPLETE: "Complete",
@@ -61,7 +85,7 @@ STATE_LABELS = {
     CELL_INPUT_ONLY: "Staged, never processed",
     CELL_NO_MEASUREMENTS: "Images, no measurements",
     CELL_UNCHECKED: "Not checked",
-    CELL_ABSENT: "Absent",
+    CELL_NO_OUTPUT: "No output yet",
 }
 
 
@@ -87,17 +111,20 @@ def build_home_plate(parent: QWidget) -> WellPlateSelector:
 def paint_plate(plate: WellPlateSelector, cells: dict, fractions: dict) -> None:
     """Paint one state per well, plus a coverage arc for the part-done ones.
 
-    A well the record does not mention is left neutral rather than being given
-    a colour that would assert something about it.
+    A well the record does not mention — and one whose state asserts nothing —
+    is left neutral rather than being given a colour that would speak for it.
     """
     plate.clearWellColors()
     plate.clearWellFractions()
     for well, state in (cells or {}).items():
         colour = STATE_COLORS.get(state)
         if colour is None:
+            # Neutral, not skipped: an earlier paint may have left a colour on
+            # this well, and ``clearWellColors`` above only covers the ones the
+            # plate still holds.
+            plate.setWellState(well, "neutral")
             continue
-        prefix = "muted:" if state in _MUTED_STATES else "color:"
-        plate.setWellState(well, f"{prefix}{colour}")
+        plate.setWellState(well, f"color:{colour}")
     for well, fraction in (fractions or {}).items():
         plate.setWellFraction(well, fraction)
 

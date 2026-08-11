@@ -951,8 +951,16 @@ moments.
 What is on it:
 
 - **The plate.** One dot per well, coloured by what the run actually produced:
-  complete, partial (with an arc showing how much of it landed), failures
-  recorded, staged but never processed, images with no measurements behind them.
+  complete (green), partial (amber, with an arc showing how much of it landed),
+  failures recorded (red), images with no measurements behind them (blue — the
+  same colour the Datasets tools use to flag an odd well), staged but never
+  processed (grey). Those colours are the ones every other well map in the app
+  uses for the same things, so a colour you have learnt once reads the same
+  here. A well the record says nothing about — because no completeness check has
+  been run, or because it produced nothing at all — is left plain, uncoloured:
+  the legend beside the plate has a hollow swatch and a count for it, and the
+  well's tooltip says which of the two it is. Every colour on the plate has a
+  legend row, and no two rows share one.
   Clicking a well selects it, the same selection every other page uses — it does
   not navigate, so you can pick several. Hovering one says what its numbers are.
   There is no All / Invert / Clear row here, unlike the plate in the rail: those

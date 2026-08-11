@@ -458,7 +458,16 @@ def format_value(value) -> str:
 
 
 def legend_swatch_style(state: str) -> str:
-    colour = STATE_COLORS.get(state, theme.Colors.border)
+    """The swatch beside a legend row, showing what the plate actually paints.
+
+    A state the plate leaves uncoloured gets an empty outline rather than a
+    filled chip: a legend that fills a swatch for a well that carries no fill is
+    a legend the reader cannot match to the plate, which is the one job it has.
+    """
+    colour = STATE_COLORS.get(state)
+    if colour is None:
+        return (f"background:transparent; border:1px solid {theme.Colors.border_strong};"
+                f" border-radius:{theme.Radii.xs}px;")
     return (f"background:{colour}; border-radius:{theme.Radii.xs}px;")
 
 

@@ -201,9 +201,10 @@ def test_the_quick_edit_writes_the_cutoff_it_is_showing(loaded_app_smfish):
     stepper = ctx.widgets.get_or_none("_plotting_thresh_frac_stepper")
     if stepper is not None:
         assert stepper.value() == 3.0
-        # What the box actually reads: the unit belongs in the field being
-        # typed into, not only in a caption beside it.
-        assert stepper._edit.text() == "3 spots"
+        # The box holds a bare count. The unit is stated once, in the caption
+        # beside it (asserted below) — repeating it inside the field put it in
+        # the one place the user is typing, and made the box clip its own text.
+        assert stepper._edit.text() == "3"
     caption = ctx.widgets.get_or_none("_plotting_thresh_frac_lbl")
     if caption is not None:
         assert caption.text() == "ON spots"

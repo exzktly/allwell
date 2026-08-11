@@ -84,6 +84,12 @@ def test_line_graphs_branch_redraws_line(loaded_app, monkeypatch):
     monkeypatch.setattr("well_viewer.features.barplot.renderer.redraw_bars",
                         lambda app: calls.__setitem__("bars", calls["bars"] + 1))
     _show_plotting_tab(loaded_app, "Line Graphs")
+    # Drop the redraw the navigation itself triggered, exactly as the Bar Plots
+    # test above does. Review opens on Home, so reaching Plotting is a real page
+    # change and activates whichever plot sub-tab that page is currently on
+    # (Bar Plots) before this test moves the inner notebook to Line Graphs.
+    # What is under test is the *selection* dispatch, below.
+    calls["bars"] = 0
     counter = _CallCounter(loaded_app, ["_redraw"])
     select_all(loaded_app._ctx)
     assert counter.counts["_redraw"] == 1

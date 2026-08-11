@@ -3080,6 +3080,30 @@ first one, because a file ordered timepoints-within-position repeats its
 page's caption states both whenever they differ — a picture showing a twelfth
 of the coordinates must say so in the artifact, not only in the code that
 decided it.
+
+**Which way the stage ran is the user's answer, not an inference.** A microscope's
+axes are not the plate's: how the plate sits in the holder and where the objective
+is decide which way X grows, so a scan that swept left to right across the plate
+can be written with X *decreasing*. Read straight it comes out mirrored — the
+inferred visit order walks the wells backwards, the map draws the run back to
+front, and the conversion writes each image into the horizontally opposite well,
+with every count correct and nothing on screen broken. Nothing in an OME-TIFF says
+which way the plate faced, and the coordinates alone cannot tell a right-to-left
+scan from a left-to-right one on a plate loaded the other way round, so the page
+carries two checkboxes (left↔right, top↔bottom) rather than guessing.
+`stage_layout.mirrored` negates the chosen axes — a reflection, so shape, spacing
+and pitch are untouched and only the direction of travel changes — and
+`ome_import_compute.oriented` wraps a layout in the reflected coordinates,
+returning the layout itself when neither axis flips so the page's identity-keyed
+inference cache still sees one object per file. The page applies it **once**, in
+`_read_layout`, so the inference, the suggested grid, the frame order, the drawn
+map and the wells a run writes cannot disagree; mirroring only the drawing would
+be the worse bug of the two, leaving the picture the user checks the layout
+against contradicting the layout the conversion uses. Toggling re-offers the
+file's answer whenever the form still holds it — `_holds(suggestion)`, which
+compares the controls against the last offer, because `_untouched` asks whether
+the form is at its *defaults* and a file whose metadata was applied on load has
+left it holding the file's answers instead.
 `widgets/stage_path_view.py` draws that under the acquisition plate at the
 plate's own scale: a dot per imaged position, joined in acquisition order, over
 the same 8×12 lattice. It is the one view that can show anything about the

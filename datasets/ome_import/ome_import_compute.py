@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from util.aw_safe import swallow
@@ -24,6 +24,7 @@ from pipeline.ome_explode import (
     read_ome_layout,
 )
 from datasets.ome_import.stage_layout import (
+    mirrored,
     single_cycle,
     infer_frame_order,
     infer_stage_layout,
@@ -467,6 +468,29 @@ def stage_path_for(layout: OmeLayout, anchor: str = "A01",
         row, col = 0, 0
     return path_in_cells(single_cycle(layout.stage_positions),
                          inferred.pitch, row, col)
+
+
+def oriented(layout: OmeLayout, *, flip_x: bool = False,
+             flip_y: bool = False) -> OmeLayout:
+    """*layout* with its stage coordinates reflected, or *layout* itself.
+
+    Applied **once**, where the page reads the file, so that the inference, the
+    suggested grid, the frame order, the drawn map and the well labels a
+    conversion writes all read the same coordinates. Mirroring only the drawing
+    would be the worse bug of the two it fixes: the picture the user checks the
+    layout against would then disagree with the layout the run actually uses,
+    and it would agree with it before the flip.
+
+    Returns the object unchanged when neither axis flips, so the page's
+    identity-keyed inference cache still sees one layout per file.
+    """
+    if not (flip_x or flip_y) or not layout.stage_positions:
+        return layout
+    return replace(
+        layout,
+        stage_positions=mirrored(layout.stage_positions,
+                                 flip_x=flip_x, flip_y=flip_y),
+    )
 
 
 def stage_path_cycles(layout: OmeLayout) -> tuple[int, int]:

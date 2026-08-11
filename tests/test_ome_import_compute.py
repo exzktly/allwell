@@ -25,6 +25,7 @@ from datasets.ome_import.ome_import_compute import (  # noqa: E402
     RawFields,
     plan_conversion,
     read_layout,
+    oriented,
     selection_target,
     stage_path_cycles,
     stage_path_for,
@@ -781,3 +782,126 @@ def test_a_timelapse_still_suggests_the_fields_of_one_cycle():
     assert suggestion.fovs_per_well == 4
     assert suggestion.frame_order == "pos_in_time"
     assert suggestion.n_timepoints == 4
+
+
+# ── mirroring the stage's axes ───────────────────────────────────────────────
+
+
+def test_oriented_is_the_same_layout_when_nothing_is_mirrored():
+    """The page keys its inference cache on the identity of what this returns,
+    so a fresh object per call would re-infer on every keystroke — 190 ms of it
+    on a full plate, on the UI thread."""
+    layout, _ = _timelapse_layout(cycles=1)
+    assert oriented(layout) is layout
+    assert oriented(layout, flip_x=False, flip_y=False) is layout
+
+
+def test_oriented_reflects_only_the_coordinates():
+    layout, _ = _timelapse_layout(cycles=1)
+    flipped = oriented(layout, flip_x=True)
+
+    assert flipped is not layout
+    assert layout.stage_positions[1][0] > 0                 # the original stands
+    assert [x for x, _ in flipped.stage_positions] == [
+        -x for x, _ in layout.stage_positions]
+    assert [y for _, y in flipped.stage_positions] == [
+        y for _, y in layout.stage_positions]
+    # Everything that is not a coordinate is carried across untouched: the flip
+    # is about which way the stage ran, not about what the file holds.
+    assert (flipped.n_frames, flipped.size_c, flipped.channel_names) == (
+        layout.n_frames, layout.size_c, layout.channel_names)
+
+
+def test_mirroring_moves_the_wells_a_conversion_would_write():
+    """Not just the picture. Mirroring only the drawing would leave the map the
+    user checks the layout against disagreeing with the layout the run uses —
+    and agreeing with it before the flip, which is worse than no control."""
+    layout, _ = _timelapse_layout(cycles=1)
+    straight = suggest_layout(layout, "A01")
+    flipped = suggest_layout(oriented(layout, flip_x=True), "A01")
+
+    assert (flipped.rows, flipped.cols) == (straight.rows, straight.cols)
+    assert flipped.fovs_per_well == straight.fovs_per_well
+    # Same block, walked from the other end.
+    assert list(flipped.well_order) == ["A03", "A02", "A01", "B03", "B02", "B01"]
+
+    path = stage_path_for(oriented(layout, flip_x=True), "A03")
+    assert path[0] == (2.0, 0.0)                    # anchored at the first well
+    assert path[-1][0] < path[0][0]                 # and it runs leftwards
+
+
+def _positional_ome(path, rows=2, cols=3):
+    """A scan whose every frame is filled with its own stage-position index.
+
+    The pixel value is the evidence: it says which position an image came from,
+    so an archive can be read back as a position→well mapping rather than as a
+    set of filenames that merely look plausible.
+    """
+    pitch = 9000.0
+    coords = [(c * pitch, r * pitch) for r in range(rows) for c in range(cols)]
+    planes = "".join(
+        f'<Plane TheT="{i}" TheC="0" TheZ="0" PositionX="{x}" PositionY="{y}"/>'
+        for i, (x, y) in enumerate(coords))
+    mapping = "".join(
+        f'<TiffData FirstT="{i}" FirstC="0" FirstZ="0" IFD="{i}" PlaneCount="1"/>'
+        for i in range(len(coords)))
+    xml = (
+        '<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+        '<Image ID="Image:0" Name="scan"><Pixels ID="Pixels:0" '
+        'DimensionOrder="XYZCT" Type="uint16" SizeX="4" SizeY="4" SizeC="1" '
+        f'SizeZ="1" SizeT="{len(coords)}">'
+        '<Channel ID="Channel:0:0" Name="DAPI" SamplesPerPixel="1"/>'
+        f'{planes}{mapping}</Pixels></Image></OME>')
+    tifffile.imwrite(
+        str(path),
+        np.stack([np.full((4, 4), i, np.uint16) for i in range(len(coords))]),
+        description=xml, metadata=None, photometric="minisblack")
+    return path
+
+
+def _convert_mirrored(src, dest, *, flip_x=False, flip_y=False):
+    """Convert *src* as the page would with those boxes ticked, and read back
+    which stage position ended up in which well."""
+    import io
+    import zipfile
+
+    layout = oriented(read_layout(str(src)), flip_x=flip_x, flip_y=flip_y)
+    suggestion = suggest_layout(layout, "A01")
+    params = ConversionParams(
+        grid_rows=suggestion.rows, grid_cols=suggestion.cols, origin="A01",
+        direction=suggestion.direction, fovs_per_well=suggestion.fovs_per_well,
+        frame_order=suggestion.frame_order or "single",
+        well_order=tuple(suggestion.well_order), experiment="p")
+    plan_conversion(layout, params)
+    convert(str(src), str(dest), params)
+
+    found = {}
+    for archive in sorted((dest / "in").glob("*.zip")):
+        with zipfile.ZipFile(archive) as zf:
+            for member in zf.namelist():
+                arr = tifffile.imread(io.BytesIO(zf.read(member)))
+                assert int(arr.min()) == int(arr.max())   # untouched, not resampled
+                found[archive.stem.upper()] = int(arr.max())
+    return found
+
+
+def test_mirroring_reflects_the_wells_a_conversion_writes(tmp_path):
+    """The end of the chain, asserted on the archives rather than on anything
+    the page computed: the flip has to move which well each *image* is filed
+    under. The pixels are never touched — a mirrored run writes the same frame
+    it always did, into the reflected well."""
+    src = _positional_ome(tmp_path / "flip.ome.tif")
+
+    straight = _convert_mirrored(src, tmp_path / "d0")
+    assert straight == {"A01": 0, "A02": 1, "A03": 2,
+                        "B01": 3, "B02": 4, "B03": 5}
+
+    # Left to right, about the Y axis: columns reverse, rows stay.
+    assert _convert_mirrored(src, tmp_path / "dx", flip_x=True) == {
+        "A01": 2, "A02": 1, "A03": 0, "B01": 5, "B02": 4, "B03": 3}
+    # Top to bottom, about the X axis: rows reverse, columns stay.
+    assert _convert_mirrored(src, tmp_path / "dy", flip_y=True) == {
+        "A01": 3, "A02": 4, "A03": 5, "B01": 0, "B02": 1, "B03": 2}
+    # Both at once, which is a 180-degree turn of the block.
+    assert _convert_mirrored(src, tmp_path / "dxy", flip_x=True, flip_y=True) == {
+        "A01": 5, "A02": 4, "A03": 3, "B01": 2, "B02": 1, "B03": 0}

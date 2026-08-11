@@ -19,6 +19,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -56,6 +57,7 @@ from datasets.ome_import.ome_import_compute import (
     default_dest,
     destination_problem,
     infer_layout,
+    oriented,
     resume_state,
     stage_path_cycles,
     stage_path_for,
@@ -120,6 +122,14 @@ class OmeImportPage(LogPanelMixin, QWidget):
         # at the starting well cannot be corrected without first knowing to
         # press Clear path.
         self._order_from_file = False
+        # Which way the stage's axes run against the plate. Not inferable — see
+        # `stage_layout.mirrored` — so it is the user's answer, and it is held
+        # here rather than read off the checkboxes at each call site so that
+        # everything downstream of `_read_layout` sees one coordinate frame.
+        self._flip_x = False
+        self._flip_y = False
+        self._oriented_key = None
+        self._oriented_layout = None
         self._logged_keys_for = None
         self._build_ui()
         self.refresh_readout()
@@ -404,6 +414,28 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._path_view.setMaximumHeight(PLATE_MAX_HEIGHT)
         self._path_view.setVisible(False)
         outer.addWidget(self._path_view, 0, PLATE_ALIGNMENT)
+
+        # Which way the stage's axes run against the plate. A scan that swept
+        # left to right can be written with X decreasing, and read straight it
+        # comes out mirrored — every count right, nothing on screen broken, and
+        # each image written into the horizontally opposite well.
+        self._mirror_row = QWidget(self)
+        ml = QHBoxLayout(self._mirror_row)
+        ml.setContentsMargins(0, 0, 0, 0)
+        ml.setSpacing(theme.Spacing.sm)
+        mirror_label = QLabel("Mirror the stage coordinates:", self)
+        mirror_label.setObjectName("Muted")
+        ml.addWidget(mirror_label)
+        self._flip_x_cb = QCheckBox("Left ↔ right (reflect X about the Y axis)",
+                                    self)
+        self._flip_y_cb = QCheckBox("Top ↔ bottom (reflect Y about the X axis)",
+                                    self)
+        for box in (self._flip_x_cb, self._flip_y_cb):
+            box.toggled.connect(self._on_mirror_changed)
+            ml.addWidget(box)
+        ml.addStretch(1)
+        self._mirror_row.setVisible(False)
+        outer.addWidget(self._mirror_row)
 
         btn_row = QWidget(self)
         bl = QHBoxLayout(btn_row)
@@ -697,7 +729,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._plate.setEnabled(not running)
         for w in (self._grid_row, self._fovs_edit, self._frame_order_cb,
                   self._workers_edit, self._seed_btn, self._clear_path_btn,
-                  self._suggest_btn):
+                  self._suggest_btn, self._mirror_row):
             w.setEnabled(not running)
         # Path fields lock rather than disable: `setEnabled(False)` dims the
         # path text too, which is the one piece of context someone watching a
@@ -934,6 +966,10 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._path_view.setPath(points)
         self._path_view.setVisible(bool(points))
         self._path_caption.setVisible(bool(points))
+        # The mirror control belongs to the drawing: with no coordinates there is
+        # nothing to reflect, and a live control over an empty box invites the
+        # user to answer a question the file never asked.
+        self._mirror_row.setVisible(bool(points))
         if points:
             # The view falls back to fitting the whole path in its box when the
             # path does not fit a plate, which happens when the well pitch read
@@ -1074,13 +1110,78 @@ class OmeImportPage(LogPanelMixin, QWidget):
         except OSError:
             return None
         if key in self._layout_cache:
-            return self._layout_cache[key]
+            return self._oriented(self._layout_cache[key])
         try:
             layout = read_layout(src)
         except OmeImportError:
             layout = None
         self._layout_cache[key] = layout
-        return layout
+        return self._oriented(layout)
+
+    def _oriented(self, layout):
+        """*layout* in the coordinate frame the mirror checkboxes describe.
+
+        Applied here, at the page's one read of the file, so the inference, the
+        suggested grid, the frame order, the drawn map and the wells a run
+        writes cannot disagree about which way the stage ran. Mirroring only the
+        drawing would leave the picture the user checks the layout against
+        contradicting the layout the conversion uses.
+
+        Cached on ``(id(layout), flips)`` because `_inferred_for` keys its own
+        far more expensive result on the identity of what this returns: a fresh
+        object per call would defeat it and re-infer on every keystroke.
+        """
+        if layout is None:
+            return None
+        key = (id(layout), self._flip_x, self._flip_y)
+        if self._oriented_key != key:
+            self._oriented_key = key
+            self._oriented_layout = oriented(layout, flip_x=self._flip_x,
+                                             flip_y=self._flip_y)
+        return self._oriented_layout
+
+    def _on_mirror_changed(self) -> None:
+        """Re-read the file in the new frame, and re-offer what it now says.
+
+        The suggestion is re-applied rather than only re-computed whenever the
+        form is still the file's own answer — untouched, or holding an order
+        this page put there — because that is what the user is asking for by
+        flipping the box: the wells they would convert into, the other way
+        round. A form the user has typed into is left alone, and the suggestion
+        row shows the new offer with its Apply button, as for any other change.
+        """
+        # Decided against the *old* suggestion, before the flip changes it:
+        # the question is whether what is on the form now is the file's answer
+        # or the user's, and only the pre-flip offer can say.
+        was_the_files = self._untouched() or self._holds(self._suggestion)
+        self._flip_x = self._flip_x_cb.isChecked()
+        self._flip_y = self._flip_y_cb.isChecked()
+        self.refresh_readout()
+        if was_the_files and self._suggestion is not None:
+            self._apply_suggestion()
+            self.refresh_readout()
+
+    def _holds(self, suggestion) -> bool:
+        """True when the form still says exactly what *suggestion* filled in.
+
+        `_untouched` cannot answer this: it asks whether the form is at its
+        *defaults*, and a file whose metadata was applied on load has left it
+        holding the file's answers instead. Read as "the user has answered",
+        that skipped the re-apply on a mirror flip and left the plate ordering
+        the run would use pointing one way while the picture beside it pointed
+        the other — the disagreement the flip exists to remove.
+        """
+        if suggestion is None:
+            return False
+        if suggestion.well_order:
+            return list(self._plate.order()) == list(suggestion.well_order)
+        return (
+            not self._plate.is_dirty()
+            and self._rows_edit.text().strip() == str(suggestion.rows)
+            and self._cols_edit.text().strip() == str(suggestion.cols)
+            and self._fovs_edit.text().strip() == str(suggestion.fovs_per_well)
+            and self._direction_cb.currentData() == suggestion.direction
+        )
 
 
 def _as_int(text: str) -> int:

@@ -120,6 +120,35 @@ def _jitter_tolerance(xs: list[float], ys: list[float]) -> float:
     return coarse * _JITTER_FRACTION
 
 
+def mirrored(positions, *, flip_x: bool = False,
+             flip_y: bool = False) -> list[tuple[float, float]]:
+    """*positions* reflected about the Y axis, the X axis, or both.
+
+    A microscope's stage axes are not the plate's. Which way X grows depends on
+    how the plate sits in the holder and on where the objective is, so a scan
+    that ran left to right across the plate can be written with X *decreasing*
+    — and read straight, the block comes out mirrored: the inferred visit order
+    walks the wells in the wrong direction, the map draws the run back to front,
+    and the conversion then writes each image into the horizontally opposite
+    well. Every count is right and nothing on screen looks broken, which is why
+    this is a control rather than a guess.
+
+    Not inferred, because nothing in an OME-TIFF says which way the plate faced.
+    The coordinates alone cannot tell a scan that ran right-to-left from one
+    that ran left-to-right on a plate loaded the other way round; only the user
+    knows, and the map is what shows them which they are looking at.
+
+    Reflection, not rotation: negating a coordinate mirrors the run about the
+    axis and leaves it there, so the shape, the spacing and the pitch are
+    untouched and only the direction of travel changes. Everything downstream
+    re-derives itself from these numbers, so nothing else has to know.
+    """
+    points = [(float(x), float(y)) for x, y in positions or []]
+    if not (flip_x or flip_y):
+        return points
+    return [(-x if flip_x else x, -y if flip_y else y) for x, y in points]
+
+
 def place_keys(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
     """One key per point, equal exactly when two images share a stage position.
 

@@ -25,6 +25,7 @@ from datasets.ome_import.ome_import_compute import (  # noqa: E402
     RawFields,
     plan_conversion,
     read_layout,
+    oriented,
     selection_target,
     stage_path_cycles,
     stage_path_for,
@@ -781,3 +782,49 @@ def test_a_timelapse_still_suggests_the_fields_of_one_cycle():
     assert suggestion.fovs_per_well == 4
     assert suggestion.frame_order == "pos_in_time"
     assert suggestion.n_timepoints == 4
+
+
+# ── mirroring the stage's axes ───────────────────────────────────────────────
+
+
+def test_oriented_is_the_same_layout_when_nothing_is_mirrored():
+    """The page keys its inference cache on the identity of what this returns,
+    so a fresh object per call would re-infer on every keystroke — 190 ms of it
+    on a full plate, on the UI thread."""
+    layout, _ = _timelapse_layout(cycles=1)
+    assert oriented(layout) is layout
+    assert oriented(layout, flip_x=False, flip_y=False) is layout
+
+
+def test_oriented_reflects_only_the_coordinates():
+    layout, _ = _timelapse_layout(cycles=1)
+    flipped = oriented(layout, flip_x=True)
+
+    assert flipped is not layout
+    assert layout.stage_positions[1][0] > 0                 # the original stands
+    assert [x for x, _ in flipped.stage_positions] == [
+        -x for x, _ in layout.stage_positions]
+    assert [y for _, y in flipped.stage_positions] == [
+        y for _, y in layout.stage_positions]
+    # Everything that is not a coordinate is carried across untouched: the flip
+    # is about which way the stage ran, not about what the file holds.
+    assert (flipped.n_frames, flipped.size_c, flipped.channel_names) == (
+        layout.n_frames, layout.size_c, layout.channel_names)
+
+
+def test_mirroring_moves_the_wells_a_conversion_would_write():
+    """Not just the picture. Mirroring only the drawing would leave the map the
+    user checks the layout against disagreeing with the layout the run uses —
+    and agreeing with it before the flip, which is worse than no control."""
+    layout, _ = _timelapse_layout(cycles=1)
+    straight = suggest_layout(layout, "A01")
+    flipped = suggest_layout(oriented(layout, flip_x=True), "A01")
+
+    assert (flipped.rows, flipped.cols) == (straight.rows, straight.cols)
+    assert flipped.fovs_per_well == straight.fovs_per_well
+    # Same block, walked from the other end.
+    assert list(flipped.well_order) == ["A03", "A02", "A01", "B03", "B02", "B01"]
+
+    path = stage_path_for(oriented(layout, flip_x=True), "A03")
+    assert path[0] == (2.0, 0.0)                    # anchored at the first well
+    assert path[-1][0] < path[0][0]                 # and it runs leftwards

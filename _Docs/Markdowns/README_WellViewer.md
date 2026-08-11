@@ -2708,6 +2708,18 @@ the well spacing read from the file, the drawing is scaled down to show all of
 it and the caption says so — a square is then no longer a well, and it usually
 means the grid and FOVs per well need checking too. Otherwise: one dot per image — not per well — joined in the order
 they were taken, with a larger green dot where the scan starts.
+**If the map comes out mirrored, flip it.** Under the drawing are two
+checkboxes — **left ↔ right** and **top ↔ bottom**. A microscope's stage axes are
+not the plate's: depending on how the plate sits in the holder, a scan that swept
+left to right can be recorded with X running the other way, and read straight the
+whole block is mirrored. Every count still looks right, so the giveaway is the
+picture: the path starts at the wrong end, or runs off the side of the plate.
+Ticking a box reflects the coordinates and re-reads everything from them — the
+suggested grid, the visit order, the map, and the wells the conversion will
+actually write into — so the drawing and the run stay in step. If you have typed
+your own grid, that is left alone and only the drawing moves, which is what a
+grid that no longer matches the coordinates should look like.
+
 **A timelapse is drawn once.** The stage walks the same route at every
 timepoint, so drawing every coordinate would be one map laid over itself a
 dozen times — each dot on top of the last, and the numbers running to a

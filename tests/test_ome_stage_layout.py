@@ -16,6 +16,7 @@ from datasets.ome_import.stage_layout import (
     StageLayout,
     infer_frame_order,
     infer_stage_layout,
+    mirrored,
     path_in_cells,
     place,
     single_cycle,
@@ -341,3 +342,37 @@ def test_a_microscope_framed_file_says_nothing_about_the_plate():
     for offset in ((123456.0, 98765.0), (-50000.0, -50000.0), (PITCH / 2, 0.0)):
         shifted = [(x + offset[0], y + offset[1]) for x, y in base]
         assert infer_stage_layout(shifted).absolute_origin is None, offset
+
+
+# ── mirroring the stage's axes ───────────────────────────────────────────────
+
+
+def test_mirroring_reflects_the_run_and_leaves_its_shape_alone():
+    points, _ = _scan(2, 3, 4)
+    assert mirrored(points) == points                      # neither axis: a no-op
+    assert mirrored([]) == []
+
+    flipped = mirrored(points, flip_x=True)
+    assert [x for x, _ in flipped] == [-x for x, _ in points]
+    assert [y for _, y in flipped] == [y for _, y in points]
+    # A reflection, so the spacing — and therefore the inferred pitch, grid and
+    # field count — is exactly what it was.
+    was, now = infer_stage_layout(points), infer_stage_layout(flipped)
+    assert (now.rows, now.cols, now.fovs_per_well) == (was.rows, was.cols,
+                                                       was.fovs_per_well)
+    assert round(now.pitch, 6) == round(was.pitch, 6)
+
+    both = mirrored(points, flip_x=True, flip_y=True)
+    assert both == [(-x, -y) for x, y in points]
+
+
+def test_a_mirrored_scan_walks_its_wells_the_other_way():
+    """The reason the control exists. A stage whose X decreases across the
+    plate describes the same block visited from the other end, and read
+    straight every image lands in the horizontally opposite well."""
+    points, order = _scan(2, 3, 1, serpentine=False)
+    assert infer_stage_layout(points).relative_order == order
+
+    flipped = infer_stage_layout(mirrored(points, flip_x=True))
+    assert flipped.relative_order == [(r, 2 - c) for r, c in order]
+    assert place(flipped, 0, 0) == ["A03", "A02", "A01", "B03", "B02", "B01"]

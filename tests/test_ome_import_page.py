@@ -895,6 +895,80 @@ def test_a_run_with_no_repeats_says_nothing_about_cycles(qapp, tmp_path):
     assert "one cycle" not in page._path_caption.text()
 
 
+def test_mirroring_moves_the_plate_order_and_the_drawing_together(qapp, tmp_path):
+    """A stage whose X decreases across the plate describes the same block
+    visited from the other end. The checkbox has to reach the wells a run would
+    write, not only the picture — a drawing that flips while the order stays put
+    is a map that disagrees with the conversion beside it."""
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _plate_scan(tmp_path / "scan.ome.tif", 2, 3, 1, serpentine=False)
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+
+    assert page._mirror_row.isVisibleTo(page)
+    straight_order = list(page._plate.order())
+    straight_path = list(page._path_view._points)
+    assert straight_order[:3] == ["A01", "A02", "A03"]
+
+    page._flip_x_cb.setChecked(True)
+
+    assert list(page._plate.order())[:3] == ["A03", "A02", "A01"]
+    flipped_path = page._path_view._points
+    assert flipped_path[0] == (2.0, 0.0)              # starts at the far well
+    assert flipped_path[-1][0] < flipped_path[0][0]   # and runs the other way
+
+    page._flip_x_cb.setChecked(False)
+    assert list(page._plate.order()) == straight_order
+    assert page._path_view._points == straight_path
+
+
+def test_mirroring_does_not_overwrite_a_grid_the_user_typed(qapp, tmp_path):
+    """The form is the user's the moment they answer it. The drawing still
+    flips — that is what was asked for — and the two disagreeing on screen is
+    the honest picture of a grid that no longer matches the coordinates.
+
+    A serpentine scan, so the file's answer is the grid fields rather than an
+    explicit path: an explicit order is the file's under this page's rules even
+    when a grid has been typed beside it, and re-offering *that* mirrored is
+    right."""
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _plate_scan(tmp_path / "scan.ome.tif", 2, 3, 4)
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    assert (page._rows_edit.text(), page._cols_edit.text()) == ("2", "3")
+
+    page._rows_edit.setText("1")
+    page._cols_edit.setText("6")
+    page.refresh_readout()
+
+    page._flip_x_cb.setChecked(True)
+    assert (page._rows_edit.text(), page._cols_edit.text()) == ("1", "6")
+    # The drawing did flip: anchored where the user's Origin says, it now runs
+    # off the left of the plate, which is the visible disagreement.
+    points = page._path_view._points
+    assert points[0][0] == 0.0
+    assert min(x for x, _ in points) < 0
+
+
+def test_the_mirror_control_appears_only_with_coordinates_to_mirror(qapp, tmp_path):
+    """A live control over an empty box invites the user to answer a question
+    the file never asked."""
+    from datasets.ome_import.controller import OmeImportController
+
+    page = OmeImportController().page
+    assert not page._mirror_row.isVisibleTo(page)
+
+    p = _write_packed(tmp_path / "bare.ome.tif", n_frames=6,
+                      channel_names=("DAPI",))
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    assert not page._mirror_row.isVisibleTo(page)     # no stage coordinates
+
+
 def test_the_stage_path_follows_a_hand_drawn_first_well(qapp, tmp_path):
     """The anchor is wherever position 1 will actually land, which a clicked
     path decides for itself."""

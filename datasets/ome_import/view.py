@@ -945,7 +945,9 @@ class OmeImportPage(LogPanelMixin, QWidget):
                    "read from the file, so it is scaled to fit and a square is "
                    "no longer a well — check the grid and FOVs per well."
                    if self._path_view.isFitted() else
-                   "The tight clusters are the fields of view within one well."))
+                   "The tight clusters are the fields of view within one well.")
+                + " Scroll to zoom, drag to move, double-click to fit; the "
+                  "positions number themselves once there is room.")
 
     def _apply_suggestion(self) -> None:
         """Fill every control the file's own metadata can answer.

@@ -2695,7 +2695,11 @@ can see. Clicking the plate still takes the order over completely, and *then*
 the grid controls grey out, because a hand-drawn path replaces them.
 
 **The stage path is drawn under the plate**, at the same scale, whenever the
-file carries coordinates. If the run turns out not to fit a 96-well plate at
+file carries coordinates. **Scroll on it to zoom, drag to move around, and
+double-click to fit the whole run again.** Each position numbers itself in
+acquisition order as soon as there is room to print the number — so zoom into a
+well and its fields of view are labelled 1, 2, 3… in the order the stage took
+them, which is the detail a plate map can never show. If the run turns out not to fit a 96-well plate at
 the well spacing read from the file, the drawing is scaled down to show all of
 it and the caption says so — a square is then no longer a well, and it usually
 means the grid and FOVs per well need checking too. Otherwise: one dot per image — not per well — joined in the order

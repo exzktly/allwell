@@ -20,8 +20,8 @@ stays inside the ``widgets/`` no-app-coupling contract.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QSize, Qt
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PySide6.QtCore import QPointF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 import theme
@@ -53,6 +53,21 @@ _MIN_DOT_PX = 2.2
 # that hides the very route they were meant to decorate.
 _DOT_BUDGET = 600
 
+# A position's number is drawn once there is room for it: the gap to its nearest
+# neighbour has to exceed this many pixels, or the labels overlap each other and
+# the marks they belong to. It is a *room* test rather than a count, so zooming
+# in reveals the numbers exactly where the eye has already gone.
+_LABEL_ROOM_PX = 16.0
+
+# Font size as a share of the room available, bounded so it stays legible while
+# never swamping the dot it names.
+_LABEL_OF_ROOM = 0.42
+_LABEL_MIN_PT = 6.0
+_LABEL_MAX_PT = 13.0
+
+# Zoom bounds, and how much one wheel notch moves it.
+_ZOOM_MIN, _ZOOM_MAX, _ZOOM_STEP = 1.0, 40.0, 1.25
+
 
 class StagePathView(QWidget):
     """Dots at each imaged position, joined in order, at a plate's own scale."""
@@ -82,6 +97,10 @@ class StagePathView(QWidget):
         self._plate: QWidget | None = None
         self._points: list[tuple[float, float]] = []
         self._fitted = False
+        self._zoom = 1.0
+        self._pan = QPointF(0.0, 0.0)
+        self._drag_from: QPointF | None = None
+        self.setMouseTracking(True)
 
     def sizeHint(self) -> QSize:
         return QSize(PLATE_MAX_WIDTH, PLATE_MAX_HEIGHT)
@@ -113,6 +132,71 @@ class StagePathView(QWidget):
 
     def hasPath(self) -> bool:
         return bool(self._points)
+
+    zoomChanged = Signal(float)
+
+    def zoom(self) -> float:
+        return self._zoom
+
+    def setZoom(self, factor: float, about: QPointF | None = None) -> None:
+        """Zoom to *factor*, keeping the point under *about* where it is.
+
+        Zooming about the cursor rather than the centre is what makes a scan of
+        hundreds of positions navigable: the well being looked at stays put
+        instead of sliding off while the view grows around the middle.
+        """
+        new = max(_ZOOM_MIN, min(_ZOOM_MAX, float(factor)))
+        if new == self._zoom:
+            return
+        anchor = about if about is not None else QPointF(self.rect().center())
+        # Keep the anchor over the same content: solve for the pan that leaves
+        # (anchor - pan) / zoom unchanged across the two zoom levels.
+        ratio = new / self._zoom
+        self._pan = QPointF(
+            anchor.x() - (anchor.x() - self._pan.x()) * ratio,
+            anchor.y() - (anchor.y() - self._pan.y()) * ratio,
+        )
+        self._zoom = new
+        if new == _ZOOM_MIN:
+            self._pan = QPointF(0.0, 0.0)     # fully out is always the whole map
+        self.update()
+        self.zoomChanged.emit(new)
+
+    def resetView(self) -> None:
+        """Back to the whole map, unzoomed and unpanned."""
+        self._zoom = 1.0
+        self._pan = QPointF(0.0, 0.0)
+        self.update()
+        self.zoomChanged.emit(self._zoom)
+
+    # ── navigation ───────────────────────────────────────────────────────────
+    def wheelEvent(self, event) -> None:  # noqa: D401 — Qt entry point
+        notches = event.angleDelta().y() / 120.0
+        if not notches:
+            return
+        self.setZoom(self._zoom * (_ZOOM_STEP ** notches),
+                     QPointF(event.position()))
+        event.accept()
+
+    def mousePressEvent(self, event) -> None:  # noqa: D401 — Qt entry point
+        if event.button() == Qt.LeftButton and self._zoom > _ZOOM_MIN:
+            self._drag_from = QPointF(event.position())
+            self.setCursor(Qt.ClosedHandCursor)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: D401 — Qt entry point
+        if self._drag_from is None:
+            return
+        here = QPointF(event.position())
+        self._pan += here - self._drag_from
+        self._drag_from = here
+        self.update()
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: D401 — Qt entry point
+        self._drag_from = None
+        self.unsetCursor()
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: D401 — Qt entry point
+        self.resetView()
 
     def isFitted(self) -> bool:
         """True when the drawing had to be shrunk to show the whole path.
@@ -147,11 +231,17 @@ class StagePathView(QWidget):
         if geometry is None:
             return
         cell, ox, oy = geometry
+        # One transform for the whole drawing. The lattice is the frame the path
+        # is read against, so it has to move and scale with it — left at plate
+        # scale while the path zoomed, it stopped being a reference and became
+        # a decoration the path had flown off.
+        scale, px, py = self._transform(cell, ox, oy)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        self._paint_cells(painter, cell, ox, oy)
+        painter.setClipRect(self.rect())
+        self._paint_cells(painter, scale, px, py)
         if self._points:
-            self._paint_path(painter, cell, ox, oy)
+            self._paint_path(painter, scale, px, py)
         painter.end()
 
     def _paint_cells(self, painter: QPainter, cell: float,
@@ -199,19 +289,23 @@ class StagePathView(QWidget):
         longer a well. :meth:`isFitted` reports which of the two happened.
         """
         if not self._fitted:
-            return cell, ox, oy
+            return (cell * self._zoom,
+                    ox * self._zoom + self._pan.x(),
+                    oy * self._zoom + self._pan.y())
         xs = [x for x, _ in self._points]
         ys = [y for _, y in self._points]
         span_x = max(max(xs) - min(xs), 1e-9)
         span_y = max(max(ys) - min(ys), 1e-9)
         scale = min(_N_COLS * cell / (span_x + 1), _N_ROWS * cell / (span_y + 1))
+        scale *= self._zoom
         return (scale,
-                ox + (_N_COLS * cell - span_x * scale) / 2.0 - min(xs) * scale,
-                oy + (_N_ROWS * cell - span_y * scale) / 2.0 - min(ys) * scale)
+                ox + (_N_COLS * cell - span_x * scale) / 2.0
+                - min(xs) * scale + self._pan.x(),
+                oy + (_N_ROWS * cell - span_y * scale) / 2.0
+                - min(ys) * scale + self._pan.y())
 
-    def _paint_path(self, painter: QPainter, cell: float,
-                    ox: float, oy: float) -> None:
-        scale, px, py = self._transform(cell, ox, oy)
+    def _paint_path(self, painter: QPainter, scale: float,
+                    px: float, py: float) -> None:
         pixels = [
             QPointF(px + (x + 0.5) * scale, py + (y + 0.5) * scale)
             for x, y in self._points
@@ -241,3 +335,35 @@ class StagePathView(QWidget):
         painter.setBrush(QColor(theme.Colors.success))
         start = max(dot * 1.8, min(cell * _START_DOT_FRACTION, dot * 3.0)) / 2.0
         painter.drawEllipse(pixels[0], start, start)
+        self._paint_numbers(painter, pixels, dot)
+
+    def _paint_numbers(self, painter: QPainter, pixels: list[QPointF],
+                       dot: float) -> None:
+        """Number each position, once the drawing has room to show them.
+
+        Room, not a count: at full extent a plate scan's positions are a few
+        pixels apart and any label overlaps its neighbours and the marks they
+        name, while zoomed in there is space and the numbers are the reason to
+        have zoomed. So they appear exactly where the eye has already gone,
+        rather than being all-or-nothing for the whole run.
+        """
+        room = min(
+            (
+                max(abs(a.x() - b.x()), abs(a.y() - b.y()))
+                for a, b in zip(pixels[:-1], pixels[1:])
+                if a != b
+            ),
+            default=float(min(self.width(), self.height())),
+        )
+        if room < _LABEL_ROOM_PX:
+            return
+        font = QFont(painter.font())
+        font.setPointSizeF(
+            max(_LABEL_MIN_PT, min(_LABEL_MAX_PT, room * _LABEL_OF_ROOM)))
+        painter.setFont(font)
+        painter.setPen(QPen(QColor(theme.Colors.ink_light)))
+        painter.setBrush(Qt.NoBrush)
+        offset = dot / 2.0 + 2.0
+        for index, point in enumerate(pixels, start=1):
+            painter.drawText(QPointF(point.x() + offset, point.y() - offset),
+                             str(index))

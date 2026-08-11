@@ -174,3 +174,104 @@ def test_a_fitted_path_is_drawn_inside_the_widget(qapp):
                     for y in range(0, with_path.height(), 2))
     assert differing > 50, "the fitted path drew nothing inside the widget"
     plate.hide()
+
+
+def _view_with_plate(qapp, size=(660, 420)):
+    plate = WellPlateSelector()
+    plate.setFixedSize(*size)
+    plate.show()
+    view = StagePathView()
+    view.setFixedSize(*size)
+    view.setPlate(plate)
+    view.show()
+    qapp.processEvents()
+    return view, plate
+
+
+def _render(view):
+    from PySide6.QtGui import QPixmap
+
+    pixmap = QPixmap(view.size())
+    view.render(pixmap)
+    return pixmap.toImage()
+
+
+def test_zoom_changes_the_drawing_and_reset_undoes_it(qapp):
+    from PySide6.QtCore import QPointF
+
+    view, plate = _view_with_plate(qapp)
+    view.setPath([(c + (f % 2) * 0.07, r + (f // 2) * 0.07)
+                  for r in range(2) for c in range(3) for f in range(4)])
+    out = _render(view)
+
+    view.setZoom(8.0, QPointF(120, 110))
+    assert view.zoom() == 8.0
+    assert _render(view) != out
+
+    view.resetView()
+    assert view.zoom() == 1.0
+    assert _render(view) == out          # exactly where it started
+    plate.hide()
+
+
+def test_zoom_is_bounded_and_keeps_its_anchor_put(qapp):
+    from PySide6.QtCore import QPointF
+
+    view, plate = _view_with_plate(qapp)
+    view.setPath([(float(c), 0.0) for c in range(6)])
+
+    view.setZoom(1000.0)
+    assert view.zoom() <= 40.0            # bounded, not unbounded
+    view.setZoom(0.01)
+    assert view.zoom() == 1.0             # and never smaller than the whole map
+    # Fully zoomed out is always the whole map, never a panned fragment of it.
+    view.setZoom(6.0, QPointF(200, 100))
+    view.setZoom(1.0)
+    assert view._pan == QPointF(0.0, 0.0)
+    plate.hide()
+
+
+def test_the_lattice_moves_with_the_path(qapp):
+    """The grid is the frame the path is read against. Left at plate scale
+    while the path zooms it stops being a reference: the path flies off it and
+    what is left is an empty lattice."""
+    from PySide6.QtCore import QPointF
+
+    view, plate = _view_with_plate(qapp)
+    view.clear()                                  # the lattice on its own
+    flat = _render(view)
+    view.setZoom(8.0, QPointF(100, 100))
+    assert _render(view) != flat, "the lattice did not move with the zoom"
+
+    # And the path is still drawn on it at that zoom, over the same cells.
+    view.resetView()
+    view.setPath([(float(c) * 0.1, 0.1) for c in range(4)])
+    view.setZoom(8.0, QPointF(60, 60))
+    with_path = _render(view)
+    view.clear()
+    assert _render(view) != with_path, "the path is not drawn at this zoom"
+    plate.hide()
+
+
+def test_positions_are_numbered_once_there_is_room(qapp):
+    """Room, not a count: at full extent the marks are pixels apart and labels
+    would overlap each other, while zoomed in the numbers are the reason to
+    have zoomed."""
+    from PySide6.QtCore import QPointF
+
+    view, plate = _view_with_plate(qapp)
+    # Four fields inside each of two wells: a fraction of a cell apart, so at
+    # 1x there is no room for a label and at 8x there is.
+    view.setPath([(c + (f % 2) * 0.07, (f // 2) * 0.07)
+                  for c in range(2) for f in range(4)])
+    flat = _render(view)
+    view.setZoom(8.0, QPointF(80, 80))
+    close = _render(view)
+
+    def _ink(image):
+        return sum(image.pixelColor(x, y).lightness()
+                   for x in range(0, image.width(), 3)
+                   for y in range(0, image.height(), 3))
+
+    assert _ink(close) != _ink(flat)
+    plate.hide()

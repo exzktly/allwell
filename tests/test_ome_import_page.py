@@ -783,7 +783,9 @@ def test_applying_the_suggestion_fills_the_ordering_controls(qapp, tmp_path):
     assert "6 well(s) A01→B01" in page._verdict.text()
 
 
-def test_no_suggestion_is_offered_when_the_file_has_no_stage_coordinates(qapp, tmp_path):
+def test_no_layout_is_offered_when_the_file_has_no_stage_coordinates(qapp, tmp_path):
+    """The row stays, but as an explanation rather than an offer — see
+    test_a_file_with_no_stage_coordinates_says_so."""
     from datasets.ome_import.controller import OmeImportController
 
     p = _write_packed(tmp_path / "bare.ome.tif", n_frames=6,
@@ -791,7 +793,8 @@ def test_no_suggestion_is_offered_when_the_file_has_no_stage_coordinates(qapp, t
     page = OmeImportController().page
     page._src_field.set_path(str(p))
     page._on_source_changed()
-    assert not page._suggest_row.isVisibleTo(page)
+    assert page._suggestion is None
+    assert not page._suggest_btn.isVisibleTo(page)
 
 
 def test_the_stage_path_is_drawn_under_the_plate_and_anchored_at_the_origin(
@@ -976,3 +979,25 @@ def test_a_wrong_starting_well_can_still_be_corrected_by_hand(qapp, tmp_path):
     assert not page._order_from_file
     assert not page._origin_edit.isEnabled()
     assert page._grid_note.isVisibleTo(page)
+
+
+def test_a_file_with_no_stage_coordinates_says_so(qapp, tmp_path):
+    """Otherwise a file the layout cannot be read from looks exactly like one
+    the feature forgot to look at: nothing appears, the grid stays 1x1, and the
+    only well lit on the plate is A01."""
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _write_packed(tmp_path / "bare.ome.tif", n_frames=98,
+                      channel_names=("DAPI",))
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+
+    assert page._suggest_row.isVisibleTo(page)
+    assert "no stage coordinates" in page._suggest_label.text()
+    assert not page._suggest_btn.isVisibleTo(page)     # nothing to apply
+    # …and the refusal that follows names the splits that would work.
+    page._rows_edit.setText("3")
+    page._cols_edit.setText("4")
+    page.refresh_readout()
+    assert "can only split as" in page._verdict.text()

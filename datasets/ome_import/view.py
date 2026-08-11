@@ -840,8 +840,20 @@ class OmeImportPage(LogPanelMixin, QWidget):
             if layout is not None else None
         )
         if self._suggestion is None:
-            self._suggest_row.setVisible(False)
+            # Say why nothing filled itself in. Without this the page simply
+            # offers nothing, and a file that cannot be read this way looks the
+            # same as one the feature forgot to look at.
+            if layout is not None and not layout.stage_positions:
+                self._suggest_label.setText(
+                    "↳ This file records no stage coordinates, so the well grid "
+                    "cannot be read from it — enter the grid and FOVs per well "
+                    "below.")
+                self._suggest_btn.setVisible(False)
+                self._suggest_row.setVisible(True)
+            else:
+                self._suggest_row.setVisible(False)
             return
+        self._suggest_btn.setVisible(True)
         self._suggest_label.setText(
             f"↳ Read from the file: {self._suggestion.describe()}."
         )

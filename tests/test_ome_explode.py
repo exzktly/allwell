@@ -844,3 +844,66 @@ def test_captured_warnings_do_not_leak_between_threads(tmp_path):
 
     assert collected["a"] == ["a speaking"]
     assert collected["b"] == ["b speaking"]
+
+
+# ── the other metadata in the file ───────────────────────────────────────────
+
+
+def test_stage_coordinates_are_read_from_the_instrument_s_own_metadata():
+    """An OME-TIFF carries two sets of metadata: the OME-XML, and the original
+    file's own. Bio-Formats copies the second into StructuredAnnotations as
+    OriginalMetadata pairs, and tifffile parses the vendor tags separately —
+    and for plenty of files the stage coordinates are only in there, because
+    the OME-XML a converter writes need not repeat what the original recorded.
+    """
+    from pipeline.ome_explode import (
+        _flatten_metadata,
+        _original_metadata,
+        _paired_coordinates,
+    )
+
+    # Bio-Formats' copy, inside the OME-XML.
+    xml = ('<OME><StructuredAnnotations>' + "".join(
+        f'<XMLAnnotation><Value><OriginalMetadata><Key>Position {i} XPos</Key>'
+        f'<Value>{i * 9000}</Value></OriginalMetadata></Value></XMLAnnotation>'
+        f'<XMLAnnotation><Value><OriginalMetadata><Key>Position {i} YPos</Key>'
+        f'<Value>0</Value></OriginalMetadata></Value></XMLAnnotation>'
+        for i in range(3)) + '</StructuredAnnotations></OME>')
+    assert _paired_coordinates(_flatten_metadata(_original_metadata(xml))) == [
+        (0.0, 0.0), (9000.0, 0.0), (18000.0, 0.0)]
+
+    # The spellings the instruments actually use, at whatever depth.
+    for block, expected in (
+        ({"StagePositions": [{"XPositionUm": 0.0, "YPositionUm": 0.0},
+                             {"XPositionUm": 9000.0, "YPositionUm": 0.0}]},
+         [(0.0, 0.0), (9000.0, 0.0)]),
+        ({"Point 1": {"Stage X (um)": 0.0, "Stage Y (um)": 0.0},
+          "Point 2": {"Stage X (um)": 9000.0, "Stage Y (um)": 0.0}},
+         [(0.0, 0.0), (9000.0, 0.0)]),
+        ({"p0": {"x_pos_um": 0.0, "y_pos_um": 0.0},
+          "p1": {"x_pos_um": 600.0, "y_pos_um": 0.0}},
+         [(0.0, 0.0), (600.0, 0.0)]),
+    ):
+        assert _paired_coordinates(_flatten_metadata(block)) == expected, block
+
+    # An X paired with a Y from somewhere else would be worse than nothing.
+    assert _paired_coordinates(_flatten_metadata({"Exposure": 100})) == []
+    assert _paired_coordinates({"XPos": 1.0}) == []
+    assert _paired_coordinates({"XPos": 1.0, "YPos": 2.0}) == []   # one pair only
+
+
+def test_the_ome_planes_still_win_when_they_have_coordinates(tmp_path):
+    """The vendor block is a fallback, not a second opinion: the OME-XML's own
+    Plane elements are the file's considered answer where it gives one."""
+    planes = "".join(
+        f'<Plane TheT="{i}" TheC="0" TheZ="0" PositionX="{i * 10}" '
+        f'PositionY="0"/>' for i in range(4))
+    annotations = ('<StructuredAnnotations><XMLAnnotation><Value>'
+                   '<OriginalMetadata><Key>Position 0 XPos</Key><Value>999</Value>'
+                   '</OriginalMetadata></Value></XMLAnnotation>'
+                   '</StructuredAnnotations>')
+    xml = _ome_xml(size_t=4, planes=planes).replace(
+        "</Image>", "</Image>" + annotations)
+    layout = read_ome_layout(_write_ome_xml(tmp_path / "both.ome.tif", xml, 4))
+    assert layout.stage_positions == [(0.0, 0.0), (10.0, 0.0),
+                                      (20.0, 0.0), (30.0, 0.0)]

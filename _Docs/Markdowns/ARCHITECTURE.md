@@ -3028,7 +3028,17 @@ grid stays serial.
 
 **The file already knows most of the layout.** An OME-TIFF's `<Plane>`
 elements carry `PositionX`/`PositionY` — where on the stage each image was taken
-— and `read_ome_layout` collects them into `OmeLayout.stage_positions`, **per
+— and `read_ome_layout` collects them into `OmeLayout.stage_positions` from **both**
+sets of metadata an OME-TIFF carries. The OME-XML's own `<Plane>` elements come
+first, and where they have no coordinates the *instrument's* metadata is read
+instead: Bio-Formats copies the original file's metadata into the OME-XML as
+`<OriginalMetadata>` key/value annotations, and `tifffile` parses the vendor's
+own tags into blocks of its own (`micromanager_metadata`, `imagej_metadata` and
+the rest of `_VENDOR_BLOCKS`). Both are flattened to `{path: leaf}` and scanned
+by `_paired_coordinates`, which pairs an X key with the Y that shares its *stem*
+— "Position 3 XPos" belongs with "Position 3 YPos" and nothing else — so a stray
+coordinate elsewhere in a block cannot pull a pair out of line, and fewer than
+two complete pairs yields nothing at all. The `<Plane>` collection is **per
 `<Image>`**: a multi-image plate scan is one `<Image>` per stage position and
 every one of them numbers its planes from `TheT="0"`, so collapsing duplicates
 document-wide keeps the first image and discards the rest of the plate.

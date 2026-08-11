@@ -3066,7 +3066,14 @@ the conversion from stage units to plate cells, so a doubled one draws the map a
 half scale. There is one pitch for the plate, not one per axis, which is what
 makes a one-sided skip recoverable: rows sampled A/C/E with every column present
 measure 18 mm down and 9 mm across, and the axis showing the single step supplies
-the pitch that reads the other's gaps as the multiples they are. One adjacent
+the pitch that reads the other's gaps as the multiples they are. That is a real
+assumption — an SBS plate is on 9 mm centres both ways — so it is **checked**
+rather than relied on: the two axes' per-well steps must agree within
+`_AXIS_AGREEMENT_TOL`, and where they do not there is no layout. Taking each axis
+at its own word instead would read A/C/E as adjacent, and letting a disagreement
+through is worse: a scan whose rows sit 1.5 pitches apart rounds to 2 and
+produces *exactly* the layout a genuine skipped row produces, with the same
+confidence. One adjacent
 pair anywhere on one axis is enough. Where **every** step on every axis skips —
 rows A, C and E in a single column — nothing in the file distinguishes that from
 three adjacent wells on a coarser plate, since no absolute unit is trusted here;

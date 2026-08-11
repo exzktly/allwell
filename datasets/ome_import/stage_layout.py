@@ -55,6 +55,12 @@ _JITTER_FRACTION = 0.02
 # equally good answers.
 _PLATE_FRAME_TOL = 0.33
 
+# How far the two axes' well steps may differ and still be read as one plate
+# pitch. A stage places to micrometres on a 9 mm pitch, so real slop is well
+# under a per cent; anything approaching this is a different geometry, not a
+# worse measurement of the same one.
+_AXIS_AGREEMENT_TOL = 0.1
+
 # The plate this module reads layouts for. Named because three separate checks
 # ask "does this fit?" and a bare 8 and 12 in each is three chances to disagree.
 _PLATE_ROWS, _PLATE_COLS = 8, 12
@@ -494,9 +500,26 @@ def infer_stage_layout(positions) -> StageLayout | None:
     # needs the gap; converting stage units to plate cells needs the real
     # centre-to-centre distance, and a 7% error there walks the drawing a whole
     # cell out of place across twelve columns.
-    step = _well_step(xs, by_x, ux) or _well_step(ys, by_y, uy) or pitch or 0.0
+    step_x, step_y = _well_step(xs, by_x, ux), _well_step(ys, by_y, uy)
+    step = step_x or step_y or pitch or 0.0
     if not isfinite(step) or step <= 0:
         return None      # no scale, so nothing downstream can be placed or drawn
+    # One pitch serves both axes, and this is where that assumption is checked
+    # rather than merely relied on. It is a real assumption: a 96-well plate is
+    # on 9 mm centres *both* ways, and taking each axis at its own word instead
+    # would make rows sampled A/C/E read as adjacent — the cross-axis
+    # corroboration is exactly what recovers a one-sided skip.
+    #
+    # So the two axes' per-well steps have to agree. Where they do not, the
+    # coordinates are not an SBS plate on one pitch — chambers on unequal
+    # centres, a stitched montage, a file mixing units — and grouping the odd
+    # axis at the other's pitch rounds its spacing to the nearest whole well.
+    # A ratio of 1.5 rounds to 2 and produces a confident, plausible, wrong
+    # answer: exactly the layout a genuine skipped row produces, offered with
+    # the same certainty. No layout at all is the honest output.
+    if step_x and step_y and (max(step_x, step_y) - min(step_x, step_y)
+                              > min(step_x, step_y) * _AXIS_AGREEMENT_TOL):
+        return None
     occupied = sorted(set(cells))
     # The block's **extent**, not its populated row and column counts. A scan
     # that skips wells — an L, a plate with two rows left out, a diagonal — is a

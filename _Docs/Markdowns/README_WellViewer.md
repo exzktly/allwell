@@ -2555,7 +2555,9 @@ the layout Analyze processes. Do this first, then open the result in Analyze.
    read correctly as long as some part of the scan visits two neighbouring wells
    — if *every* step skips (say rows A, C and E in one column, and nothing
    else), the file gives no way to tell that from three wells side by side, so
-   check the plate and correct it by clicking if needed. To define a visit order
+   check the plate and correct it by clicking if needed. Rows and columns have
+   to be on the same spacing, as they are on any standard plate; if they are
+   not, the converter says so rather than guessing a grid. To define a visit order
    by hand instead, or to correct one, click
    the wells directly, in the order the stage visited them: the first click is
    position 1, the next is position 2, and so on. Clicking a numbered well removes

@@ -937,10 +937,11 @@ class OmeImportPage(LogPanelMixin, QWidget):
                 self._suggest_label.setText(
                     f"↳ This file records {len(layout.stage_positions)} stage "
                     "position(s), but they do not describe a plate scan: its "
-                    "wells hold different numbers of fields, or the spacing "
-                    "between them says nothing about a well grid. A shape with "
-                    "wells skipped is fine and would have been read — this is "
-                    "not that. Enter the grid and FOVs per well below.")
+                    "wells hold different numbers of fields, its rows and "
+                    "columns are not on one spacing, or the coordinates say "
+                    "nothing about a well grid at all. A shape with wells "
+                    "skipped is fine and would have been read — this is not "
+                    "that. Enter the grid and FOVs per well below.")
                 self._suggest_btn.setVisible(False)
                 self._suggest_row.setVisible(True)
                 return

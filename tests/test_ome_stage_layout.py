@@ -497,3 +497,27 @@ def test_a_scan_that_skips_uniformly_everywhere_reads_as_adjacent():
     layout = infer_stage_layout(_shape([(0, 0), (2, 0), (4, 0)], fovs=1))
     assert place(layout, 0, 0) == ["A01", "B01", "C01"]
     assert layout.pitch == 2 * PITCH
+
+
+def test_the_two_axes_must_agree_on_one_pitch():
+    """One pitch serves both axes, and where that is false there is no layout.
+
+    A 96-well plate is on 9 mm centres both ways, and reading each axis at its
+    own word instead would make rows sampled A/C/E adjacent — the cross-axis
+    agreement is what recovers a one-sided skip. So it has to hold: a scan whose
+    rows sit 1.5 pitches apart is not that plate, and grouping it at the other
+    axis's pitch rounds 1.5 to 2 and produces exactly the layout a genuine
+    skipped row produces, with the same confidence.
+    """
+    cells = [(r, c) for r in range(3) for c in range(3)]
+
+    def scan(y_step):
+        return [(c * PITCH, r * y_step) for r, c in cells]
+
+    assert infer_stage_layout(scan(PITCH * 1.5)) is None
+    # Two pitches apart is a skipped row, which is a plate and reads as one.
+    skipped = infer_stage_layout(scan(PITCH * 2))
+    assert place(skipped, 0, 0)[:6] == ["A01", "A02", "A03", "C01", "C02", "C03"]
+    # And ordinary stage slop is not a disagreement.
+    close = infer_stage_layout(scan(PITCH * 1.05))
+    assert place(close, 0, 0)[:6] == ["A01", "A02", "A03", "B01", "B02", "B03"]

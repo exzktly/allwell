@@ -527,7 +527,7 @@ def test_clicking_a_path_does_not_inherit_the_grids_seed_well(qapp, tmp_path):
 
     assert page.params().well_order == ("C03", "C04", "D04", "D03")
     assert "C03→D03" in page._verdict.text()
-    assert "clicked path" in page._verdict.text()
+    assert "explicit path" in page._verdict.text()
 
 
 def test_a_hand_drawn_path_greys_out_the_grid_controls(qapp, tmp_path):
@@ -656,11 +656,323 @@ def test_a_run_locks_every_input_that_would_redraw_the_plate(qapp, tmp_path):
     page.set_well_fraction("A01", 1, 2)
     assert page._plate._grid._fractions
 
+    # Enumerated, not listed. A hand-written roster cannot fail when a control
+    # is added, and one was: "Use this" arrived a PR later, outside the lock,
+    # and clearing the plate through it wiped every dial mid-run.
+    from PySide6.QtWidgets import QComboBox, QLineEdit, QPushButton
+
+    live = []
+    for kind in (QComboBox, QLineEdit, QPushButton):
+        live += [w for w in page.findChildren(kind)
+                 if w.isEnabled() and w.isVisibleTo(page)]
+    # Convert and Queue are gated on their own, Open appears only afterwards,
+    # and the log's Clear empties a display rather than an input. A PathField's
+    # box is read-only and stays readable on purpose while a run goes (it locks
+    # its Browse button instead) — that is the one piece of context someone
+    # watching a long run most wants to check.
+    allowed = {page._run_btn, page._queue_btn, page._open_btn}
+    unlocked = [
+        w for w in live
+        if w not in allowed
+        and not (isinstance(w, QLineEdit) and w.isReadOnly())
+        and not (isinstance(w, QPushButton) and w.text().strip() == "Clear")
+    ]
+    assert not unlocked, (
+        "these edit the run's inputs and stayed live: "
+        + ", ".join(sorted(w.text() or w.objectName() or type(w).__name__
+                           for w in unlocked)))
     for w in (page._grid_row, page._fovs_edit, page._seed_btn,
-              page._clear_path_btn, page._workers_edit, page._plate):
+              page._clear_path_btn, page._workers_edit, page._plate,
+              page._suggest_btn):
         assert not w.isEnabled(), w
 
     page._cols_edit.setText("3")        # the keystroke that used to do it
     page.refresh_readout()
     assert page._plate.order() == ["A01", "A02", "B02", "B01"]
     assert page._plate._grid._fractions
+
+
+# ── the layout the file already knows ────────────────────────────────────────
+
+
+def _plate_scan(path, rows, cols, fovs, *, serpentine=True):
+    """An OME-TIFF carrying real plate stage coordinates in its Plane elements."""
+    pitch, fov = 9000.0, 600.0
+    coords = []
+    for r in range(rows):
+        line = list(range(cols))
+        if serpentine and r % 2:
+            line.reverse()
+        for c in line:
+            for f in range(fovs):
+                coords.append((c * pitch + (f % 2) * fov, r * pitch + (f // 2) * fov))
+    planes = "".join(
+        f'<Plane TheT="{i}" TheC="0" TheZ="0" PositionX="{x}" PositionY="{y}"/>'
+        for i, (x, y) in enumerate(coords))
+    mapping = "".join(
+        f'<TiffData FirstT="{i}" FirstC="0" FirstZ="0" IFD="{i}" PlaneCount="1"/>'
+        for i in range(len(coords)))
+    xml = (
+        '<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+        '<Image ID="Image:0" Name="scan"><Pixels ID="Pixels:0" '
+        'DimensionOrder="XYZCT" Type="uint16" SizeX="6" SizeY="6" SizeC="1" '
+        f'SizeZ="1" SizeT="{len(coords)}">'
+        '<Channel ID="Channel:0:0" Name="DAPI" SamplesPerPixel="1"/>'
+        f'{planes}{mapping}</Pixels></Image></OME>')
+    tifffile.imwrite(str(path), np.zeros((len(coords), 6, 6), np.uint16),
+                    description=xml, metadata=None, photometric="minisblack")
+    return path
+
+
+def test_the_page_offers_the_layout_the_file_describes(qapp, tmp_path):
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _plate_scan(tmp_path / "scan.ome.tif", 2, 3, 4)
+    page = OmeImportController().page
+    assert not page._suggest_row.isVisibleTo(page)
+
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+
+    assert page._suggest_row.isVisibleTo(page)
+    assert "2×3 wells × 4 FOV(s)" in page._suggest_label.text()
+    # Applied on sight, because the form still held only its defaults: a file
+    # that describes itself should not need the same answers typed back in.
+    assert (page._rows_edit.text(), page._cols_edit.text()) == ("2", "3")
+    assert page._fovs_edit.text() == "4"
+
+
+def test_an_answered_form_is_never_overwritten_by_the_file(qapp, tmp_path):
+    """The metadata beats the defaults it replaces and loses to anything typed
+    on purpose — including a grid that happens to disagree with the file."""
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _plate_scan(tmp_path / "scan.ome.tif", 2, 3, 4)
+    page = OmeImportController().page
+    page._rows_edit.setText("3")
+    page._cols_edit.setText("8")
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+
+    assert (page._rows_edit.text(), page._cols_edit.text()) == ("3", "8")
+    assert page._suggest_row.isVisibleTo(page)      # still offered
+    page._apply_suggestion()                        # …and applied when asked
+    assert (page._rows_edit.text(), page._cols_edit.text()) == ("2", "3")
+
+
+def test_applying_the_suggestion_fills_the_ordering_controls(qapp, tmp_path):
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _plate_scan(tmp_path / "scan.ome.tif", 2, 3, 4)
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    page._origin_edit.setText("B02")
+    page._apply_suggestion()
+
+    assert (page._rows_edit.text(), page._cols_edit.text()) == ("2", "3")
+    assert page._fovs_edit.text() == "4"
+    assert page._direction_cb.currentData() == "row"
+    # Pressing the button is asking for the file's answer, and these
+    # coordinates are stated in the plate's own frame — so the origin it names
+    # replaces the typed one, and the block is placed where the file says.
+    # (Nothing is overwritten *without* being asked: see
+    # test_an_answered_form_is_never_overwritten_by_the_file.)
+    assert page._origin_edit.text() == "A01"
+    assert page._plate.order() == ["A01", "A02", "A03", "B03", "B02", "B01"]
+    assert "6 well(s) A01→B01" in page._verdict.text()
+
+
+def test_no_suggestion_is_offered_when_the_file_has_no_stage_coordinates(qapp, tmp_path):
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _write_packed(tmp_path / "bare.ome.tif", n_frames=6,
+                      channel_names=("DAPI",))
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    assert not page._suggest_row.isVisibleTo(page)
+
+
+def test_the_stage_path_is_drawn_under_the_plate_and_anchored_at_the_origin(
+        qapp, tmp_path):
+    """The plate can only say which well a position belongs to. Every field of
+    view inside one well is that same cell, so the route through them — and how
+    far off-centre they sit — has nowhere else on the page to appear."""
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _plate_scan(tmp_path / "scan.ome.tif", 2, 3, 4)
+    page = OmeImportController().page
+    assert not page._path_view.isVisibleTo(page)
+
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+
+    assert page._path_view.isVisibleTo(page)
+    assert page._path_caption.isVisibleTo(page)
+    points = page._path_view._points
+    assert len(points) == 24                      # one dot per image, not per well
+    assert points[0] == (0.0, 0.0)                # anchored at A01 by default
+    # The four fields of the first well are a fraction of a cell apart.
+    assert 0 < points[1][0] - points[0][0] < 0.25
+
+    page._origin_edit.setText("B02")
+    page.refresh_readout()
+    assert page._path_view._points[0] == (1.0, 1.0)
+
+
+def test_the_stage_path_follows_a_hand_drawn_first_well(qapp, tmp_path):
+    """The anchor is wherever position 1 will actually land, which a clicked
+    path decides for itself."""
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _plate_scan(tmp_path / "scan.ome.tif", 2, 3, 4)
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+
+    _click(page, "D05")
+    page.refresh_readout()
+    assert page._path_view._points[0] == (4.0, 3.0)      # column 5, row D
+
+
+def test_no_path_is_drawn_when_the_file_has_no_coordinates(qapp, tmp_path):
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _write_packed(tmp_path / "bare.ome.tif", n_frames=6,
+                      channel_names=("DAPI",))
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    assert not page._path_view.isVisibleTo(page)
+    assert not page._path_caption.isVisibleTo(page)
+
+
+def test_the_stage_inference_runs_once_per_file_not_once_per_keystroke(
+        qapp, tmp_path, monkeypatch):
+    """Every box on this page recomputes the readout as it is typed in, and the
+    inference is a function of the *file*. Left to re-derive itself it ran twice
+    per character — on a 96-well timelapse that is 190 ms of UI thread each."""
+    import datasets.ome_import.view as view_module
+    from datasets.ome_import.controller import OmeImportController
+
+    calls = []
+    real = view_module.infer_layout
+    monkeypatch.setattr(view_module, "infer_layout",
+                        lambda layout: (calls.append(1), real(layout))[1])
+
+    p = _plate_scan(tmp_path / "scan.ome.tif", 2, 3, 4)
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    assert len(calls) == 1
+
+    for text in ("A", "A0", "A03"):
+        page._origin_edit.setText(text)
+    page._rows_edit.setText("2")
+    page._workers_edit.setText("4")
+    _click(page, "D05")
+    assert len(calls) == 1, "the inference re-ran for a change the file didn't make"
+    # …and the drawing still followed every one of those edits.
+    assert page._path_view._points[0] == (4.0, 3.0)
+
+
+def test_the_readout_says_a_run_will_be_resumed(qapp, tmp_path):
+    from datasets.ome_import.controller import OmeImportController
+    from datasets.ome_import.ome_import_compute import write_run_marker
+
+    p = _write_packed(tmp_path / "plate.ome.tif", n_frames=6,
+                      channel_names=("DAPI",))
+    dest = tmp_path / "out"
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    page._rows_edit.setText("1")
+    page._cols_edit.setText("6")
+    page.set_destination_path(str(dest))
+    page.refresh_readout()
+    assert "Resuming" not in page._readout.text()
+    assert page._run_btn.isEnabled()
+
+    # A previous attempt on the same settings left two wells and its marker.
+    write_run_marker(dest, p, page.params())
+    (dest / "in").mkdir(parents=True, exist_ok=True)
+    for well in ("A01", "A02"):
+        (dest / "in" / f"{well}.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
+    page.refresh_readout()
+
+    assert "Resuming an interrupted run: 2 well(s)" in page._readout.text()
+    assert page._run_btn.isEnabled()      # a resume is a run, not a refusal
+
+    # Change the grid and the same folder becomes a refusal, not a resume.
+    page._cols_edit.setText("3")
+    page._rows_edit.setText("2")
+    page.refresh_readout()
+    assert not page._run_btn.isEnabled()
+
+
+def test_a_plate_referenced_file_needs_nothing_typed(qapp, tmp_path):
+    """The whole point: pick the file, and the page already knows which wells
+    were imaged — because the coordinates are stated in the plate's frame."""
+    from datasets.ome_import.controller import OmeImportController
+
+    pitch, fov = 9000.0, 600.0
+    coords = [(c * pitch + (f % 2) * fov, r * pitch + (f // 2) * fov)
+              for r in (2, 3) for c in (3, 4, 5) for f in range(4)]
+    planes = "".join(
+        f'<Plane TheT="{i}" TheC="0" TheZ="0" PositionX="{x}" PositionY="{y}"/>'
+        for i, (x, y) in enumerate(coords))
+    mapping = "".join(
+        f'<TiffData FirstT="{i}" FirstC="0" FirstZ="0" IFD="{i}" PlaneCount="1"/>'
+        for i in range(len(coords)))
+    xml = ('<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+           '<Image ID="Image:0"><Pixels ID="Pixels:0" DimensionOrder="XYZCT" '
+           'Type="uint16" SizeX="6" SizeY="6" SizeC="1" SizeZ="1" '
+           f'SizeT="{len(coords)}">'
+           '<Channel ID="Channel:0:0" Name="DAPI" SamplesPerPixel="1"/>'
+           f'{planes}{mapping}</Pixels></Image></OME>')
+    p = tmp_path / "plate.ome.tif"
+    tifffile.imwrite(str(p), np.zeros((len(coords), 6, 6), np.uint16),
+                     description=xml, metadata=None, photometric="minisblack")
+
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+
+    assert page._origin_edit.text() == "C04"
+    assert page._fovs_edit.text() == "4"
+    assert page._plate.order() == ["C04", "C05", "C06", "D04", "D05", "D06"]
+    assert "6 well(s) C04→D06" in page._verdict.text()
+    assert "starting at C04" in page._suggest_label.text()
+
+
+def test_a_wrong_starting_well_can_still_be_corrected_by_hand(qapp, tmp_path):
+    """The place is the one thing the coordinates can get wrong in a way only
+    the user can see — a scope-framed file that happens to look plate-framed —
+    so Origin has to stay live over the file's own order and re-place it, not
+    be greyed out as a hand-drawn path would grey it."""
+    from datasets.ome_import.controller import OmeImportController
+
+    # A raster: the grid fields cannot express it, so the file hands over an
+    # explicit order — the state in which the grid controls used to go dead.
+    p = _plate_scan(tmp_path / "scan.ome.tif", 2, 3, 4, serpentine=False)
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    assert page._plate.is_dirty()                 # the file supplied an order
+    assert page._origin_edit.isEnabled()
+    assert page._file_order_note.isVisibleTo(page)
+
+    page._origin_edit.setText("F07")
+    page.refresh_readout()
+
+    assert page._plate.order()[0] == "F07"
+    assert "F07" in page._verdict.text()
+    assert page._run_btn.isEnabled()
+
+    # A click still takes the order over, and *then* the grid controls go dead.
+    _click(page, "H12")
+    page.refresh_readout()
+    assert not page._order_from_file
+    assert not page._origin_edit.isEnabled()
+    assert page._grid_note.isVisibleTo(page)

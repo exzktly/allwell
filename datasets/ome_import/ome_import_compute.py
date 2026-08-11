@@ -11,19 +11,34 @@ page/worker layer stays a thin shell on top (CLAUDE.md §3/§5).
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from util.aw_safe import swallow
 
 from pipeline.ome_explode import (
     FRAME_ORDERS,
     OmeLayout,
     read_ome_layout,
 )
-from util.plate_grid import normalize_well_order, serpentine_well_labels
+from datasets.ome_import.stage_layout import (
+    infer_frame_order,
+    infer_stage_layout,
+    path_in_cells,
+    place,
+)
+from util.plate_grid import (
+    normalize_well_order,
+    serpentine_well_labels,
+    well_row_col,
+)
 
 # The channel-role heuristic moved to the shared ``util.channel_roles`` so the
 # Analyze page can reuse it; re-exported here so the converter's imports and its
 # tests keep resolving through this module.
+from util.well_token import canonical_well_label
 from util.channel_roles import (  # noqa: F401 (re-export)
     CHANNEL_ROLES,
     ChannelTokens,
@@ -90,7 +105,10 @@ class ConversionPlan:
         if self.well_labels:
             first, last = self.well_labels[0], self.well_labels[-1]
             span = f" {first}" if first == last else f" {first}→{last}"
-        source = " (clicked path)" if self.hand_drawn else " (from the grid)"
+        # "explicit path", not "clicked": the same order can come from the
+        # user's clicks or from the file's own coordinates, and calling the
+        # second one clicked describes something that did not happen.
+        source = " (explicit path)" if self.hand_drawn else " (from the grid)"
         return (
             f"{self.n_wells} well(s){span}{source} × {self.fovs_per_well} FOV(s) × "
             f"{self.n_timepoints} timepoint(s) · channels: {chans}"
@@ -269,7 +287,290 @@ def default_dest(src: Path | str) -> Path:
     return src.parent / f"{strip_ome_suffix(src.name)}_dataset"
 
 
-def destination_problem(dest: Path | str) -> str:
+@dataclass(frozen=True)
+class LayoutSuggestion:
+    """A plate layout read out of the file's own stage coordinates.
+
+    ``well_order`` is filled only when the scan is **not** the serpentine the
+    page can express with a grid — a raster, or any other path — because an
+    explicit order is the only way to say those, whereas a serpentine is better
+    left as grid fields the user can still edit.
+    """
+
+    rows: int
+    cols: int
+    fovs_per_well: int
+    direction: str
+    n_positions: int
+    well_order: tuple[str, ...] = ()
+    # How the file's flat frame sequence splits, read from the repeat pattern in
+    # the coordinates — the one setting the file's own DimensionOrder cannot
+    # express, because an OME Image has no position dimension.
+    frame_order: str = ""
+    n_timepoints: int = 0
+    # The starting well, when the metadata names it. Coordinates are relative to
+    # the microscope, so they can never say this; a StageLabel or Image name
+    # often does.
+    origin: str = ""
+
+    def describe(self) -> str:
+        path = " (as an explicit path)" if self.well_order else ""
+        timing = (f", {self.n_timepoints} timepoint(s)"
+                  if self.n_timepoints > 1 else "")
+        placed = f", starting at {self.origin}" if self.origin else ""
+        return (
+            f"{self.rows}×{self.cols} wells × {self.fovs_per_well} FOV(s), "
+            f"snaking by {'row' if self.direction == 'row' else 'column'}"
+            f"{timing}{path}{placed}"
+        )
+
+
+def wells_from_names(names) -> list[str]:
+    """The well each named position sits in, or ``[]`` if the names don't say.
+
+    Acquisition software writes the well into a ``StageLabel`` or ``Image`` name
+    far more often than not — ``"B02"``, ``"Well B2, Site 1"``, ``"scan_B02_f0"``
+    — and that is the only thing in an OME-TIFF that locates a position on the
+    *plate*. Every name has to yield exactly one well token for the answer to be
+    usable: a set where some names parse and others do not is a partial mapping,
+    and guessing the rest is how a plate ends up half-labelled.
+    """
+    out: list[str] = []
+    for name in names or []:
+        found = {canonical_well_label(token)
+                 for token in re.findall(r"[A-Za-z]{1,2}\d{1,2}", str(name))}
+        found.discard(None)
+        if len(found) != 1:
+            return []
+        out.append(found.pop())
+    return out
+
+
+def infer_layout(layout: OmeLayout):
+    """The plate layout the file's stage coordinates describe, or ``None``.
+
+    The expensive half of the two calls below, and the reason they both take an
+    already-computed one: it is a function of the *file*, while the page
+    recomputes its readout on every keystroke in every box. Left to re-derive
+    itself it ran twice per character typed — 190 ms of it on a 96-well plate at
+    16 fields over 24 timepoints, on the UI thread.
+    """
+    return infer_stage_layout(layout.stage_positions)
+
+
+def suggest_layout(layout: OmeLayout, origin: str = "A01",
+                   *, inferred=None) -> LayoutSuggestion | None:
+    """Read the plate layout out of *layout*'s stage coordinates, or ``None``.
+
+    The OME-XML records where on the stage every plane was taken, and a plate
+    scan's coordinates carry the well grid in their spacing (see
+    :mod:`datasets.ome_import.stage_layout`). That answers, from the file
+    itself, three of the questions the page otherwise asks the user to guess:
+    the grid, the fields per well, and the direction the stage swept.
+
+    *origin* places the inferred block, since stage coordinates are relative to
+    the microscope and say nothing about which physical well the corner is.
+    ``None`` when the file carries no positions or they do not describe a grid —
+    a wrong suggestion silently entered into the form would be worse than none.
+    """
+    inferred = inferred if inferred is not None else infer_layout(layout)
+    if inferred is None:
+        return None
+    # The block is *placed* at the origin the caller passes, always: an origin
+    # the user has typed is an answer, and an inference never overrules one.
+    # What the coordinates give is the origin to *offer* (``start`` below), which
+    # the page applies into that same box on a form nobody has answered — so a
+    # plate-referenced file still ends up placing itself, by filling the field
+    # rather than by ignoring it.
+    try:
+        origin_row, origin_col = well_row_col(origin or "A01")
+    except ValueError:
+        origin_row, origin_col = 0, 0
+    if inferred.absolute_origin is not None:
+        origin_row, origin_col = (
+            inferred.absolute_origin if not (origin or "").strip()
+            else (origin_row, origin_col))
+    # An explicit order whenever the grid fields could not reproduce this one.
+    # "Is it a serpentine?" is not that question: a stage that reports Y (or X)
+    # descending sweeps a perfectly good serpentine whose *first* well is the
+    # block's bottom-left, while the grid always starts top-left. The rows come
+    # out mirrored, every image lands one row off, and nothing on screen looks
+    # wrong. Comparing the two orders outright covers that, the raster, and any
+    # other starting corner, in one condition.
+    placed = place(inferred, origin_row, origin_col)
+    if not placed:
+        return None
+    # Compared at the origin the placement actually used — which the file may
+    # have supplied — not at the one that was passed in. Comparing against a
+    # serpentine drawn from a different corner makes every plate-referenced scan
+    # look like a path the grid cannot express.
+    start_label = f"{chr(ord('A') + origin_row)}{origin_col + 1:02d}"
+    try:
+        from_grid = serpentine_well_labels(
+            inferred.rows, inferred.cols,
+            origin=start_label, direction=inferred.direction)
+    except ValueError:
+        from_grid = []
+    order = () if placed == from_grid else tuple(placed)
+
+    # The file's own account of where on the plate it was, when it has one. It
+    # beats every inference here: the coordinates give a shape and the user
+    # places it, while a StageLabel names the well outright.
+    named = wells_from_names(layout.position_names)
+    start = ""
+    if inferred.absolute_origin is not None:
+        r, c = inferred.absolute_origin
+        start = f"{chr(ord('A') + r)}{c + 1:02d}"
+    if named:
+        visited = list(dict.fromkeys(named))
+        start = visited[0]
+        if len(visited) == inferred.rows * inferred.cols:
+            order = tuple(visited)
+
+    timing = infer_frame_order(layout.stage_positions) if layout.single_image else None
+    return LayoutSuggestion(
+        rows=inferred.rows,
+        cols=inferred.cols,
+        fovs_per_well=inferred.fovs_per_well,
+        direction=inferred.direction,
+        n_positions=inferred.n_positions,
+        well_order=order,
+        frame_order=(timing[0] if timing else ""),
+        n_timepoints=(timing[2] if timing else 0),
+        origin=start,
+    )
+
+
+def stage_path_for(layout: OmeLayout, anchor: str = "A01",
+                   *, inferred=None) -> list[tuple[float, float]]:
+    """The file's acquisition path in plate cells, starting at well *anchor*.
+
+    Empty unless the coordinates describe a plate grid, since the cell scale is
+    the well pitch and an unrecognised pattern has no reliable one — drawing at
+    a guessed scale would put the fields of view in the wrong wells, which is
+    exactly the mistake the picture exists to catch.
+    """
+    inferred = inferred if inferred is not None else infer_layout(layout)
+    if inferred is None or inferred.pitch <= 0:
+        return []
+    try:
+        row, col = well_row_col(anchor or "A01")
+    except ValueError:
+        row, col = 0, 0
+    return path_in_cells(layout.stage_positions, inferred.pitch, row, col)
+
+
+# Written into the destination while a conversion is running and removed when it
+# finishes. Its presence is what separates "this tool's interrupted run, resume
+# it" from "somebody else's dataset, refuse it" — the same device every other
+# Datasets tool uses (``_common.dataset_paths.make_dataset_api``).
+IN_PROGRESS_MARKER = ".aw_ome_in_progress"
+
+# The settings that decide which stage position becomes which well. Two runs
+# agreeing on these produce identical archives; two that differ produce the same
+# *filenames* from different images, which is why a resume has to compare them
+# rather than trusting the names on disk.
+_MAPPING_FIELDS = ("grid_rows", "grid_cols", "origin", "direction",
+                   "fovs_per_well", "frame_order", "experiment", "well_order")
+
+
+def _mapping_signature(src: Path | str, params: ConversionParams) -> dict:
+    """What a resume has to match: the source, and the settings that map it."""
+    values = {name: getattr(params, name) for name in _MAPPING_FIELDS}
+    values["well_order"] = list(values["well_order"] or ())
+    source = Path(src)
+    values["source"] = str(source.resolve())
+    # Size and mtime as well as the path: a file replaced at the same name — a
+    # re-export, a restore, the next plate saved over the last — is a different
+    # source, and resuming across that leaves half of one plate and half of
+    # another under one set of filenames. Cheap: one stat, no hashing.
+    try:
+        stat = source.stat()
+        values["source_size"] = stat.st_size
+        values["source_mtime_ns"] = stat.st_mtime_ns
+    except OSError:
+        values["source_size"] = None
+        values["source_mtime_ns"] = None
+    return values
+
+
+def write_run_marker(dest: Path | str, src: Path | str,
+                     params: ConversionParams) -> None:
+    """Record that a conversion is under way in *dest*, and with what settings."""
+    root = Path(dest)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / IN_PROGRESS_MARKER).write_text(
+        json.dumps(_mapping_signature(src, params), indent=2), encoding="utf-8")
+
+
+def clear_run_marker(dest: Path | str) -> None:
+    """Drop the marker — the run finished, so the folder is a dataset now."""
+    with swallow("ome-import marker"):
+        (Path(dest) / IN_PROGRESS_MARKER).unlink(missing_ok=True)
+
+
+def read_run_marker(dest: Path | str) -> dict | None:
+    """The settings of the interrupted run in *dest*, or ``None`` if there is none."""
+    path = Path(dest) / IN_PROGRESS_MARKER
+    if not path.is_file():
+        return None
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
+def converted_wells(dest: Path | str) -> list[str]:
+    """The well archives already sitting in ``<dest>/in``."""
+    in_dir = Path(dest) / "in"
+    if not in_dir.is_dir():
+        return []
+    return sorted(p.stem for p in in_dir.glob("*.zip"))
+
+
+@dataclass(frozen=True)
+class ResumeState:
+    """Whether *dest* holds an interrupted run of this conversion to finish."""
+
+    resumable: bool = False
+    wells_done: int = 0
+    # A previous run is there but was making a different dataset — different
+    # source, grid, origin or ordering. Resuming onto it would leave a folder
+    # stitched from two mappings, with the filenames of one and the images of
+    # both, and nothing in it saying so.
+    mismatched: bool = False
+
+    def hint(self) -> str:
+        if self.mismatched:
+            return ("This folder holds an interrupted conversion made with "
+                    "different settings. Empty it, or choose another folder.")
+        if self.resumable:
+            return (f"↳ Resuming an interrupted run: {self.wells_done} well(s) "
+                    f"are already converted and will be kept.")
+        return ""
+
+
+def resume_state(dest: Path | str, src: Path | str,
+                 params: ConversionParams) -> ResumeState:
+    """Read *dest* as a place to continue this conversion in."""
+    marker = read_run_marker(dest)
+    if marker is None:
+        return ResumeState()
+    done = len(converted_wells(dest))
+    if marker != _mapping_signature(src, params):
+        # A marker with no wells behind it describes a run that wrote nothing —
+        # one that failed before its first archive, or was cancelled and then
+        # had its settings changed, which is the commonest reason to cancel.
+        # There is nothing on disk for a second mapping to contaminate, and the
+        # marker is a hidden file the "empty the folder" advice does not clear.
+        return ResumeState() if done == 0 else ResumeState(mismatched=True,
+                                                           wells_done=done)
+    return ResumeState(resumable=True, wells_done=done)
+
+
+def destination_problem(dest: Path | str, src: Path | str = "",
+                        params: ConversionParams | None = None) -> str:
     """``""`` if *dest* is usable, else a short reason, for the field's hint.
 
     A conversion writes ``<dest>/in/<WELL>.zip`` and overwrites each archive it
@@ -278,12 +579,24 @@ def destination_problem(dest: Path | str) -> str:
     nothing in it saying so. Every other Datasets tool validates its destination
     field this way (``_common.dataset_fields.is_free_destination``); the wording
     differs here only because this tool writes ``in/`` and nothing else.
+
+    Given *src* and *params*, a folder carrying this tool's own in-progress
+    marker for the *same* settings is not a problem but a resume, and one
+    carrying it for different settings is refused with its own wording — the
+    filenames of two mappings are identical, so only the marker can tell them
+    apart.
     """
     root = Path(dest)
     if not str(dest).strip():
         return ""
     if root.exists() and not root.is_dir():
         return "Not a folder — choose a folder."
+    if params is not None:
+        state = resume_state(root, src or root, params)
+        if state.mismatched:
+            return state.hint()
+        if state.resumable:
+            return ""      # this tool's own interrupted run: finish it
     if (root / "out" / "pipeline_info.json").exists():
         return "Already holds a finished dataset — choose an empty folder."
     in_dir = root / "in"
@@ -313,9 +626,9 @@ def plan_conversion(layout: OmeLayout, params: ConversionParams) -> ConversionPl
     since no grid can make an incomplete file convertible, and the page's readout
     should say *that* rather than a divisibility error derived from it.
     """
-    incomplete = layout.missing_plane_report()
-    if incomplete:
-        raise OmeImportError(incomplete)
+    unsound = layout.validation_report()
+    if unsound:
+        raise OmeImportError(unsound)
 
     rows, cols = params.grid_rows, params.grid_cols
     if params.well_order:

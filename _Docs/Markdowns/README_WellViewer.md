@@ -2574,22 +2574,95 @@ cleanly), and when the run ends a line under that bar says how it went — a gre
 summary, or the reason in red if it failed or was cancelled. You never have to
 open **Show raw log** to find out whether it worked. The output is one
 per-well `<WELL>.zip` in `<destination>/in/`, the layout Analyze reads directly
-(no regrouping step). Then **Open dataset in Analyze** — the Segmentation /
+(no regrouping step).
+
+**If a conversion is interrupted, running it again finishes it.** Each well is
+written in one piece, so whatever was completed before the interruption is
+already correct on disk. Point the same source at the same destination with the
+same settings and the readout says *"Resuming an interrupted run: 12 well(s) are
+already converted and will be kept"*; only the missing wells are converted, and
+the summary at the end says how many were kept. Change anything that alters
+which stage position becomes which well — the grid, origin, serpentine
+direction, FOVs per well, the clicked path, or the source file — and it is
+refused instead, because the two runs would produce files with the same names
+from different images. Empty the folder and start again in that case. Then **Open dataset in Analyze** — the Segmentation /
 fluorescent channel tokens arrive pre-filled from the channel roles you set (step
 7; adjust if needed), so you can run straight away. Because the wells now exist on
 disk, background-well and control-well options work normally.
 
-**If the file is incomplete, the converter says so instead of converting it.** An
-OME-TIFF's metadata declares how many image planes it holds, and that count can
-exceed what the file actually contains — an acquisition stopped before it
-finished leaves the *planned* dimensions in the header, and a scan written across
-several files is incomplete if its companion `.ome.tif` files aren't in the same
-folder. Those planes read back as solid black, which would land in the dataset as
-images indistinguishable from real ones. So the readout refuses the file as soon
-as you pick it, saying how many planes carry no data and which of the two causes
-it looks like, and **Convert** stays disabled. For missing companion files, put
-them back beside the source. For a run that stopped early, re-export the file
-with the dimensions it really holds — All-Well will not convert part of it.
+**The file is checked as soon as you pick it**, and a file that can't be
+converted honestly is refused there rather than part-way through a run. The check
+reads metadata only — no images — so it costs nothing however large the plate is.
+What it catches, and what each one means:
+
+- **"has no readable OME metadata"** — the file is named `.ome.tif` but its OME
+  block can't be read. A copy or download that stopped part-way does this: what
+  is left is still a valid TIFF, so it opens without complaint and reads as a
+  small fraction of the plate. Check its size against the original and copy it
+  again. (A plain `.tif` image stack is fine and is not caught by this.)
+- **"carries OME metadata that does not describe its pages"** — the OME block is
+  there but doesn't match the images, so which channel and timepoint each plane
+  belongs to is a guess. Re-export from the acquisition software.
+- **"declares SizeT=… but the image series it produced holds …"** — the header
+  and the pages disagree about how many frames there are.
+- **"is incomplete: … carry no image data"** — the metadata declares planes the
+  file has nothing behind, which would land in the dataset as solid black images
+  indistinguishable from real ones. The message names the likely cause, and the
+  three need different fixes: **companion files** listed but not in the same
+  folder (put them back beside the source), an **acquisition stopped early** (the
+  planned dimensions are in the header — re-export with the dimensions it really
+  holds), or a **broken index map**, where the message says "No image data is
+  missing" — every image is in the file and only the metadata is wrong, so
+  re-export or repair the metadata rather than re-running the plate.
+
+**Most of the form fills itself from the file.** Microscopes record where on the stage
+each image was taken, and All-Well reads those coordinates: wells sit 9 mm apart
+while the fields of view inside one well are a fraction of a millimetre apart, so
+the grid falls out of the spacing. When the file carries them, a line under the
+settings reads *"Read from the file: 2×3 wells × 4 FOV(s), snaking by row, 4
+timepoint(s), starting at C04"* — and, on a form you have not answered yet, it is
+already applied. Between the coordinates and the rest of the metadata that
+covers the **well grid**, **FOVs per well**, **serpentine direction**,
+**frame order** (how the packed frame sequence splits into positions and
+timepoints — read from which coordinates repeat, and how), the **channel names
+and roles**, and the **timepoint labels**. A scan that isn't a plain serpentine
+is handed over as a clicked path instead, since the grid fields cannot express
+one.
+
+The **starting well** usually comes from the file too. Many plate scanners
+report positions in the *plate's* own frame — A01 at the origin — so every well
+centre is a whole number of well-pitches out and the well is arithmetic: a block
+at 27 mm, 18 mm is C04. All-Well believes that only when every well in the scan
+lands on its grid position within a third of a pitch and inside the plate;
+otherwise the coordinates are in the microscope's own frame, with an arbitrary
+zero, and say nothing about the plate. Failing that, acquisition software usually
+writes the well into each position's name — `B02`,
+`Well B2, Site 1`, `scan_B02_f0` — and when every position parses, All-Well uses
+those names directly: the origin is filled in and the whole visit order comes
+from the file rather than from a grid. Only when the names say nothing does the
+**Origin** box need you.
+
+A suggestion never overwrites an answer you have given. It applies itself while
+the form still holds its defaults; edit anything and it stops, leaving
+**Apply again** to re-apply on demand.
+
+**And you can always correct the starting well.** When the file supplies the
+order itself, the plate fills in but **Origin** stays live — type another well
+and the whole order moves there, keeping its shape. That matters because the
+starting well is the one thing the coordinates can get wrong in a way only you
+can see. Clicking the plate still takes the order over completely, and *then*
+the grid controls grey out, because a hand-drawn path replaces them.
+
+**The stage path is drawn under the plate**, at the same scale, whenever the
+file carries coordinates: one dot per image — not per well — joined in the order
+they were taken, with a larger green dot where the scan starts. The tight
+clusters are the fields of view within a single well, which the plate map above
+cannot show at all: every field in a well is the same square there. Use it to
+check the shape of the run before converting — that the block sits where you
+think, that the snake turns the way you think, and that the fields inside each
+well were taken in the order you expect. It is anchored at whichever well
+position 1 will land in: the **Origin** you typed, or the first well of a
+hand-drawn path.
 
 ### Concatenate datasets
 

@@ -1517,6 +1517,19 @@ class WellPlateSelector(QWidget):
     def clearWellFractions(self) -> None:
         self._grid.clear_well_fractions()
 
+    def cellRect(self, row: int, col: int) -> QRectF:
+        """The rect of well ``(row, col)`` **in this widget's own coordinates**.
+
+        Public because a companion view drawn beside a plate has to share its
+        scale exactly, and deriving it from the widget's width fails: the grid
+        reserves room for the row and column headers first, so the same width
+        gives a different cell size. Translated out of the inner grid child, so
+        a sibling widget of the same width and alignment can use the x values
+        directly.
+        """
+        rect = self._grid._cell_rect(int(row), int(col))
+        return rect.translated(self._grid.x(), self._grid.y())
+
     def setWellRing(self, well_id, on: bool = True) -> None:
         """Ring one well in accent, on top of whatever it already shows."""
         self._grid.set_well_ring(well_id, on)

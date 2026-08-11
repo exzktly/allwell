@@ -37,8 +37,14 @@ from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
 from util.plate_grid import serpentine_well_labels
 from widgets._support import set_variant
 from widgets.path_field import PathField
-from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
+from widgets.plate_geometry import (
+    PLATE_ALIGNMENT,
+    PLATE_MAX_HEIGHT,
+    PLATE_MAX_WIDTH,
+    apply_plate_geometry,
+)
 from widgets.plate_order_editor import PlateOrderEditor
+from widgets.stage_path_view import StagePathView
 from widgets.plate_progress import apply_outcome, fraction_or_none
 from datasets.ome_import.ome_import_compute import (
     CHANNEL_ROLES,
@@ -49,6 +55,10 @@ from datasets.ome_import.ome_import_compute import (
     default_channel_roles,
     default_dest,
     destination_problem,
+    infer_layout,
+    resume_state,
+    stage_path_for,
+    suggest_layout,
     plan_conversion,
     read_layout,
     selection_target,
@@ -65,7 +75,13 @@ _FIELD_W = 48
 _ORIGIN_W = 56
 
 def _is_destination(root) -> str:
-    """This page's destination rule, as `PathField` wants it (`""` = usable)."""
+    """The destination rule with no run in view — see `OmeImportPage._dest_rule`.
+
+    `PathField` validates a path on its own, so this cannot see the source or
+    the settings and therefore cannot see a resume. The page rebinds it to
+    `_dest_rule` at build time, which can; this stays as the honest answer for
+    a `PathField` used without one.
+    """
     return destination_problem(root)
 
 
@@ -92,6 +108,17 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._layout_cache: dict[tuple[str, float], object] = {}
         self._dest_user_set = False
         self._running = False
+        self._suggestion = None
+        self._inferred = None
+        self._inferred_key = None
+        self._auto_apply_key = None
+        # True while the plate's path is the file's answer rather than the
+        # user's clicks. The two look identical to the plate and must not be
+        # treated alike: a hand-drawn path *replaces* the grid controls, while
+        # a suggested one is still steerable by them — otherwise a wrong guess
+        # at the starting well cannot be corrected without first knowing to
+        # press Clear path.
+        self._order_from_file = False
         self._build_ui()
         self.refresh_readout()
 
@@ -139,7 +166,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._src_field.changed.connect(self._on_source_changed)
         outer.addWidget(self._src_field)
         self._dest_field = PathField("Destination folder", pick=self._pick_dest,
-                                     validator=_is_destination)
+                                     validator=self._dest_rule)
         self._dest_field.changed.connect(self._on_dest_changed)
         outer.addWidget(self._dest_field)
 
@@ -254,6 +281,32 @@ class OmeImportPage(LogPanelMixin, QWidget):
         hl.addStretch(1)
         outer.addWidget(self._grid_row)
 
+        # What the file's own stage coordinates say the layout is. Offered
+        # rather than applied on sight: the coordinates fix the *shape* of the
+        # imaged block, never which physical well its corner is (a microscope's
+        # origin is its own), so silently filling the grid would state a well
+        # mapping the file does not actually make.
+        self._suggest_row = QWidget(self)
+        sl = QHBoxLayout(self._suggest_row)
+        sl.setContentsMargins(0, 0, 0, 0)
+        sl.setSpacing(theme.Spacing.sm)
+        self._suggest_label = QLabel("", self._suggest_row)
+        self._suggest_label.setObjectName("Muted")
+        self._suggest_label.setWordWrap(True)
+        sl.addWidget(self._suggest_label, 1)
+        self._suggest_btn = QPushButton("Apply again", self._suggest_row)
+        self._suggest_btn.setProperty("variant", "secondary")
+        self._suggest_btn.setToolTip(
+            "Fill the grid, FOVs per well, serpentine direction, frame order "
+            "and — when the metadata names it — the starting well, from the "
+            "file's own contents. Applied automatically on a form you have not "
+            "answered; press this to re-apply after editing."
+        )
+        self._suggest_btn.clicked.connect(self._apply_suggestion)
+        sl.addWidget(self._suggest_btn)
+        self._suggest_row.setVisible(False)
+        outer.addWidget(self._suggest_row)
+
         # Shown only while a clicked path is in force, when the three controls
         # above are disabled and would otherwise look merely broken.
         self._grid_note = QLabel(
@@ -263,6 +316,14 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._grid_note.setWordWrap(True)
         self._grid_note.setVisible(False)
         outer.addWidget(self._grid_note)
+
+        self._file_order_note = QLabel(
+            "This order came from the file. Change Origin to move it to another "
+            "well, or click the plate to draw your own.", self)
+        self._file_order_note.setObjectName("Muted")
+        self._file_order_note.setWordWrap(True)
+        self._file_order_note.setVisible(False)
+        outer.addWidget(self._file_order_note)
 
         self._sub_heading("How was each well sampled?", outer)
 
@@ -306,7 +367,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
         outer.addWidget(caption)
 
         self._plate = PlateOrderEditor(self)
-        self._plate.orderChanged.connect(lambda _=None: self.refresh_readout())
+        self._plate.orderChanged.connect(self._on_plate_order_changed)
         # The one sizing and placement rule every plate map in the app goes
         # through. The "editor" role hides the built-in action row (this page
         # carries its own Generate/Clear buttons below the plate), keeps the
@@ -316,6 +377,31 @@ class OmeImportPage(LogPanelMixin, QWidget):
         # hand.
         apply_plate_geometry(self._plate, role="editor")
         outer.addWidget(self._plate, 0, PLATE_ALIGNMENT)
+
+        # The stage's own travel, under the plate and at the plate's scale. The
+        # plate can only say which well a position belongs to; every field of
+        # view inside one well is the same cell there, so the order the stage
+        # took through them — and how far off-centre they sit — has nowhere else
+        # to appear.
+        self._path_caption = QLabel(
+            "Stage path — one dot per image, joined in acquisition order, "
+            "anchored at the well the scan starts in. The tight clusters are "
+            "the fields of view within one well.", self)
+        self._path_caption.setObjectName("Muted")
+        self._path_caption.setWordWrap(True)
+        self._path_caption.setVisible(False)
+        outer.addWidget(self._path_caption)
+
+        self._path_view = StagePathView(self)
+        self._path_view.setPlate(self._plate)
+        # The shared caps, applied directly: `apply_plate_geometry` speaks to a
+        # `WellPlateSelector`'s action row and selection model, which this view
+        # has neither of. What it must share is the *size*, so that its cells
+        # land under the plate's own.
+        self._path_view.setMaximumWidth(PLATE_MAX_WIDTH)
+        self._path_view.setMaximumHeight(PLATE_MAX_HEIGHT)
+        self._path_view.setVisible(False)
+        outer.addWidget(self._path_view, 0, PLATE_ALIGNMENT)
 
         btn_row = QWidget(self)
         bl = QHBoxLayout(btn_row)
@@ -338,6 +424,11 @@ class OmeImportPage(LogPanelMixin, QWidget):
         bl.addWidget(self._clear_path_btn)
         bl.addStretch(1)
         outer.addWidget(btn_row)
+
+    def _on_plate_order_changed(self, _order=None) -> None:
+        """A click on the plate makes the order the user's, not the file's."""
+        self._order_from_file = False
+        self.refresh_readout()
 
     def _generate_path(self) -> None:
         labels = self._serpentine_seed()
@@ -461,6 +552,16 @@ class OmeImportPage(LogPanelMixin, QWidget):
         if self._src_field.path() and not self._dest_user_set:
             self._dest_field.set_path(str(default_dest(self._src_field.path())))
         self.refresh_readout()
+        # Then, once, whatever the file itself answers — here rather than inside
+        # ``refresh_readout``, which is re-entrant: applying a suggestion edits
+        # fields that call it again, and the outer pass would finish by writing
+        # a readout computed from the form as it stood *before* the apply.
+        # A form the user has answered is never overwritten.
+        layout = self._read_layout(self._src_field.path())
+        if (self._suggestion is not None and layout is not None
+                and self._auto_apply_key != id(layout) and self._untouched()):
+            self._auto_apply_key = id(layout)
+            self._apply_suggestion()
 
     def _on_dest_changed(self) -> None:
         self._dest_user_set = True
@@ -593,7 +694,8 @@ class OmeImportPage(LogPanelMixin, QWidget):
         # carries on against the order it actually started with.
         self._plate.setEnabled(not running)
         for w in (self._grid_row, self._fovs_edit, self._frame_order_cb,
-                  self._workers_edit, self._seed_btn, self._clear_path_btn):
+                  self._workers_edit, self._seed_btn, self._clear_path_btn,
+                  self._suggest_btn):
             w.setEnabled(not running)
         # Path fields lock rather than disable: `setEnabled(False)` dims the
         # path text too, which is the one piece of context someone watching a
@@ -615,6 +717,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
         # grid fields currently describe, dials and all.
         if self._running:
             return
+        self._reposition_file_order()
         fields = self.raw_fields()
         self._apply_order_source(fields.hand_drawn)
         if not self._plate.is_dirty():
@@ -628,8 +731,14 @@ class OmeImportPage(LogPanelMixin, QWidget):
         layout = self._read_layout(src) if src else None
         if hasattr(self, "_channels_host"):
             self._rebuild_channels(layout.channel_names if layout else [])
+        self._refresh_suggestion(layout)
         problems = fields.problems()
-        dest_problem = destination_problem(self._dest_field.path())
+        dest_problem = destination_problem(
+            self._dest_field.path(), src, fields.to_params())
+        resume = (
+            resume_state(self._dest_field.path(), src, fields.to_params())
+            if src and self._dest_field.path() else None
+        )
         if src and layout is None:
             verdict, tone = "⚠ Could not read this file as an OME-TIFF.", "Danger"
         elif problems:
@@ -648,6 +757,8 @@ class OmeImportPage(LogPanelMixin, QWidget):
             # before any grid is entered) so the user is guided, not just
             # error-checked at the end.
             head += "\n" + selection_target(layout, params).hint()
+            if resume is not None and resume.resumable:
+                head += "\n" + resume.hint()
             try:
                 plan = plan_conversion(layout, params)
                 verdict, tone = f"✓ {plan.summary()}", "Muted"
@@ -661,6 +772,157 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._set_verdict(verdict, tone)
         self._run_btn.setEnabled(can)
         self._queue_btn.setEnabled(can)
+
+    def _inferred_for(self, layout):
+        """The stage-coordinate layout for *layout*, computed once per file.
+
+        Keyed on the layout object, which ``_read_layout`` already caches per
+        (path, mtime): the inference is a function of the file, while this
+        page recomputes its readout on every keystroke in every box.
+        """
+        if layout is None:
+            self._inferred_key = None
+            return None
+        # `!=`, not `is not`: `id()` returns a large int, and two equal large
+        # ints are not the same object, so an identity test never matches and
+        # the cache recomputes every time — which is what it is here to avoid.
+        if self._inferred_key != id(layout):
+            self._inferred_key = id(layout)
+            self._inferred = infer_layout(layout)
+        return self._inferred
+
+    def _reposition_file_order(self) -> None:
+        """Move the file's own order to the Origin the user has typed.
+
+        The coordinates fix the scan's *shape* and, when they are stated in the
+        plate's frame, its place too — but the place is the one thing they can
+        get wrong (a scope-framed file that happens to look plate-framed), and
+        only the user can see it. Editing Origin re-places the same order rather
+        than being ignored, which is what a disabled box would amount to.
+        """
+        if not (self._order_from_file and self._plate.is_dirty()):
+            return
+        origin = self._origin_edit.text().strip() or "A01"
+        current = self._plate.order()
+        if current and current[0] == origin:
+            return
+        layout = self._read_layout(self._src_field.path())
+        if layout is None:
+            return
+        moved = suggest_layout(layout, origin, inferred=self._inferred_for(layout))
+        if moved is None or not moved.well_order:
+            return
+        self._plate.set_order(list(moved.well_order))
+        self._order_from_file = True
+
+    def _dest_rule(self, root) -> str:
+        """The destination field's own hint, aware of the run being set up.
+
+        Bound rather than free (`_is_destination`) because the folder holding
+        this conversion's own interrupted output is a resume, not a problem —
+        and a red "choose an empty folder" under a readout that says the run
+        will resume is the page contradicting itself.
+        """
+        source = self._src_field.path() if hasattr(self, "_src_field") else ""
+        if not source:
+            return destination_problem(root)
+        return destination_problem(root, source, self.raw_fields().to_params())
+
+    def _refresh_suggestion(self, layout) -> None:
+        """Offer the layout the file's stage coordinates describe, if any."""
+        inferred = self._inferred_for(layout)
+        # Drawn from the coordinates alone, so it survives an origin the
+        # suggestion cannot place: the picture needs a scale, not a placement.
+        self._refresh_path(layout)
+        self._suggestion = (
+            suggest_layout(layout, self._origin_edit.text().strip() or "A01",
+                           inferred=inferred)
+            if layout is not None else None
+        )
+        if self._suggestion is None:
+            self._suggest_row.setVisible(False)
+            return
+        self._suggest_label.setText(
+            f"↳ Read from the file: {self._suggestion.describe()}."
+        )
+        self._suggest_row.setVisible(True)
+
+    def _refresh_path(self, layout) -> None:
+        """Redraw the stage path, anchored where the run will actually start.
+
+        The anchor is the first well of whatever ordering is in force — the
+        clicked path's first click, else the Origin field — because that is the
+        well the user has said position 1 lands in, and the file's coordinates
+        only fix the shape that follows from it.
+        """
+        order = self._plate.order() if self._plate.is_dirty() else []
+        anchor = order[0] if order else (self._origin_edit.text().strip() or "A01")
+        points = (stage_path_for(layout, anchor,
+                                 inferred=self._inferred_for(layout))
+                  if layout is not None else [])
+        self._path_view.setPath(points)
+        self._path_view.setVisible(bool(points))
+        self._path_caption.setVisible(bool(points))
+
+    def _apply_suggestion(self) -> None:
+        """Fill every control the file's own metadata can answer.
+
+        Channels and their names arrive from the OME-XML already; this fills the
+        rest — grid, FOVs per well, sweep direction, how the frame sequence
+        splits into positions and timepoints, and, when a ``StageLabel`` names
+        it, the well the scan starts in. What is left for the user is the
+        starting well on a file whose metadata does not name one, because
+        nothing in an OME-TIFF says where on the *plate* the stage was.
+        """
+        suggestion = getattr(self, "_suggestion", None)
+        if suggestion is None:
+            return
+        if suggestion.origin:
+            self._origin_edit.setText(suggestion.origin)
+            # Re-read at that origin before applying the rest: the order was
+            # placed against whatever the box said a moment ago, and the box
+            # has just been answered by the file.
+            layout = self._read_layout(self._src_field.path())
+            if layout is not None:
+                suggestion = suggest_layout(
+                    layout, suggestion.origin,
+                    inferred=self._inferred_for(layout)) or suggestion
+                self._suggestion = suggestion
+        if suggestion.frame_order:
+            index = self._frame_order_cb.findData(suggestion.frame_order)
+            if index >= 0:
+                self._frame_order_cb.setCurrentIndex(index)
+        if suggestion.well_order:
+            # A path the grid cannot express, handed over as an owned order —
+            # but marked as the file's rather than the user's, so the grid and
+            # Origin controls stay live over it.
+            self._plate.set_order(list(suggestion.well_order))
+            self._order_from_file = True
+        else:
+            self._plate.clear()
+            self._order_from_file = False
+            self._rows_edit.setText(str(suggestion.rows))
+            self._cols_edit.setText(str(suggestion.cols))
+            index = self._direction_cb.findData(suggestion.direction)
+            if index >= 0:
+                self._direction_cb.setCurrentIndex(index)
+        self._fovs_edit.setText(str(suggestion.fovs_per_well))
+        self.refresh_readout()
+
+    def _untouched(self) -> bool:
+        """True while the form still holds only its defaults.
+
+        A suggestion applies itself on a fresh file and never over an answer the
+        user has given — the file's metadata is better than the defaults it
+        would replace, and worse than anything typed on purpose.
+        """
+        return (
+            self._rows_edit.text().strip() in ("", "1")
+            and self._cols_edit.text().strip() in ("", "1")
+            and not self._fovs_edit.text().strip()
+            and self._origin_edit.text().strip() in ("", "A01")
+            and not self._plate.is_dirty()
+        )
 
     def _set_verdict(self, text: str, tone: str) -> None:
         """Show the pass/fail line in its own tone (``Muted``/``Warn``/``Danger``).
@@ -686,10 +948,15 @@ class OmeImportPage(LogPanelMixin, QWidget):
         confusing: the user fills in a grid, clicks a path, and the fields keep
         showing values that no longer reach the conversion.
         """
-        for w in (self._rows_edit, self._cols_edit, self._origin_edit,
-                  self._direction_cb):
-            w.setEnabled(not hand_drawn)
-        self._grid_note.setVisible(hand_drawn)
+        clicked = hand_drawn and not self._order_from_file
+        for w in (self._rows_edit, self._cols_edit, self._direction_cb):
+            w.setEnabled(not clicked)
+        # Origin stays live even for the file's own order: it is the one answer
+        # an inference can get wrong in a way only the user can see, so it must
+        # always be correctable in place.
+        self._origin_edit.setEnabled(not clicked)
+        self._grid_note.setVisible(clicked)
+        self._file_order_note.setVisible(hand_drawn and self._order_from_file)
 
     # ── internals ────────────────────────────────────────────────────────────
     def _can_convert(self) -> bool:

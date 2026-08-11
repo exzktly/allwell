@@ -68,8 +68,9 @@ class OmeImportWorker(QThread):
             )
         except OmeExplodeCancelled:
             self.failed.emit(
-                "Cancelled — partial output was left in the destination; "
-                "re-running overwrites it."
+                "Cancelled — the wells already converted were left in the "
+                "destination; re-running with the same settings finishes the "
+                "rest rather than repeating them."
             )
         except Exception as exc:  # pragma: no cover — defensive
             swallowed("ome-import convert")

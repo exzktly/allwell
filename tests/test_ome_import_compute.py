@@ -13,14 +13,21 @@ from datasets.ome_import.ome_import_compute import (  # noqa: E402
     OmeImportError,
     channel_tokens_from_roles,
     default_channel_roles,
+    ResumeState,
+    clear_run_marker,
     default_dest,
     destination_problem,
+    read_run_marker,
+    resume_state,
+    write_run_marker,
     guess_channel_role,
     parse_count,
     RawFields,
     plan_conversion,
     read_layout,
     selection_target,
+    suggest_layout,
+    wells_from_names,
     strip_ome_suffix,
 )
 from pipeline.ome_explode import OmeLayout  # noqa: E402
@@ -418,7 +425,7 @@ def test_summary_names_the_wells_and_which_input_produced_them(tmp_path):
 
     clicked = plan_conversion(layout, ConversionParams(
         grid_rows=1, grid_cols=3, well_order=("H12", "H11", "G11")))
-    assert "3 well(s) H12→G11 (clicked path)" in clicked.summary()
+    assert "3 well(s) H12→G11 (explicit path)" in clicked.summary()
 
 
 def test_destination_problem_flags_a_folder_that_already_holds_a_conversion(tmp_path):
@@ -434,3 +441,257 @@ def test_destination_problem_flags_a_folder_that_already_holds_a_conversion(tmp_
     (finished / "out").mkdir(parents=True)
     (finished / "out" / "pipeline_info.json").write_text("{}")
     assert "finished dataset" in destination_problem(finished)
+
+
+# ── the layout the file already knows ────────────────────────────────────────
+
+
+def _plate_scan(path, rows, cols, fovs, *, serpentine=True):
+    """An OME-TIFF whose Plane elements carry real plate stage coordinates."""
+    pitch, fov = 9000.0, 600.0
+    coords = []
+    for r in range(rows):
+        line = list(range(cols))
+        if serpentine and r % 2:
+            line.reverse()
+        for c in line:
+            for f in range(fovs):
+                coords.append((c * pitch + (f % 2) * fov, r * pitch + (f // 2) * fov))
+    planes = "".join(
+        f'<Plane TheT="{i}" TheC="0" TheZ="0" PositionX="{x}" PositionY="{y}"/>'
+        for i, (x, y) in enumerate(coords))
+    mapping = "".join(
+        f'<TiffData FirstT="{i}" FirstC="0" FirstZ="0" IFD="{i}" PlaneCount="1"/>'
+        for i in range(len(coords)))
+    xml = (
+        '<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+        '<Image ID="Image:0" Name="scan"><Pixels ID="Pixels:0" '
+        'DimensionOrder="XYZCT" Type="uint16" SizeX="6" SizeY="6" SizeC="1" '
+        f'SizeZ="1" SizeT="{len(coords)}">'
+        '<Channel ID="Channel:0:0" Name="DAPI" SamplesPerPixel="1"/>'
+        f'{planes}{mapping}</Pixels></Image></OME>')
+    tifffile.imwrite(str(path), np.zeros((len(coords), 6, 6), np.uint16),
+                     description=xml, metadata=None, photometric="minisblack")
+    return path
+
+
+def test_suggest_layout_reads_the_grid_and_fovs_from_stage_coordinates(tmp_path):
+    layout = read_layout(_plate_scan(tmp_path / "scan.ome.tif", 2, 3, 4))
+    suggestion = suggest_layout(layout)
+    assert (suggestion.rows, suggestion.cols) == (2, 3)
+    assert suggestion.fovs_per_well == 4
+    assert suggestion.direction == "row"
+    assert suggestion.n_positions == 24
+    # A serpentine is left as grid fields the user can still edit, not frozen
+    # into an explicit path.
+    assert suggestion.well_order == ()
+    assert "2×3 wells × 4 FOV(s)" in suggestion.describe()
+
+
+def test_suggest_layout_gives_a_raster_scan_an_explicit_order(tmp_path):
+    """The grid fields can only express a serpentine, so anything else has to be
+    handed over as the order itself — placed at the origin the user chose."""
+    layout = read_layout(_plate_scan(tmp_path / "r.ome.tif", 2, 3, 1,
+                                     serpentine=False))
+    suggestion = suggest_layout(layout, origin="B02")
+    assert suggestion.well_order == ("B02", "B03", "B04", "C02", "C03", "C04")
+    assert "as an explicit path" in suggestion.describe()
+
+
+def test_suggest_layout_is_none_when_the_file_says_nothing_useful(tmp_path):
+    p = _write_packed(tmp_path / "bare.ome.tif", n_frames=6)   # no Plane positions
+    assert suggest_layout(read_layout(p)) is None
+
+
+def test_a_plan_refuses_a_source_that_is_not_a_sound_ome_tiff(tmp_path):
+    """plan_conversion gates on the whole validation, not only missing planes,
+    so the page's readout carries whichever fault the file actually has."""
+    layout = OmeLayout(
+        n_positions=1, size_t=0, size_c=1, size_z=1, channel_names=["GFP"],
+        timepoint_tokens=[], axes_per_series=["YX"], single_image=True,
+        n_frames=4, named_ome=True, has_ome_xml=False, series_kind="uniform",
+    )
+    with pytest.raises(OmeImportError, match="no readable OME metadata"):
+        plan_conversion(layout, ConversionParams(grid_rows=1, grid_cols=4))
+
+
+# ── finishing an interrupted conversion ──────────────────────────────────────
+
+
+def test_the_marker_makes_an_interrupted_run_resumable(tmp_path):
+    """Without it a half-finished folder is indistinguishable from someone
+    else's dataset, and the destination check has to refuse both."""
+    src = _write_packed(tmp_path / "s.ome.tif", n_frames=6)
+    dest = tmp_path / "out"
+    params = ConversionParams(grid_rows=1, grid_cols=6, experiment="e")
+
+    assert read_run_marker(dest) is None
+    assert resume_state(dest, src, params) == ResumeState()
+
+    write_run_marker(dest, src, params)
+    (dest / "in").mkdir(parents=True)
+    (dest / "in" / "A01.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
+
+    state = resume_state(dest, src, params)
+    assert state.resumable and state.wells_done == 1
+    assert "Resuming" in state.hint()
+    # …and the folder stops being a refusal while that is true.
+    assert destination_problem(dest, src, params) == ""
+
+    clear_run_marker(dest)
+    assert read_run_marker(dest) is None
+    assert "already holds converted wells" in destination_problem(
+        dest, src, params).lower()
+
+
+def test_a_marker_from_different_settings_is_refused_not_resumed(tmp_path):
+    """Two mappings produce the same filenames from different images, so the
+    names on disk cannot tell them apart — only the recorded settings can."""
+    src = _write_packed(tmp_path / "s.ome.tif", n_frames=6)
+    dest = tmp_path / "out"
+    write_run_marker(dest, src, ConversionParams(grid_rows=1, grid_cols=6))
+    # A well on disk: a marker with nothing behind it describes a run that
+    # wrote nothing, which is not a mismatch to warn about but an empty folder.
+    (dest / "in").mkdir(parents=True, exist_ok=True)
+    (dest / "in" / "A01.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
+
+    for changed in (
+        ConversionParams(grid_rows=2, grid_cols=3),
+        ConversionParams(grid_rows=1, grid_cols=6, origin="B02"),
+        ConversionParams(grid_rows=1, grid_cols=6, direction="col"),
+        ConversionParams(grid_rows=1, grid_cols=6, fovs_per_well=2),
+        ConversionParams(grid_rows=1, grid_cols=6, experiment="other"),
+        ConversionParams(grid_rows=1, grid_cols=6, well_order=("A01", "A02")),
+    ):
+        state = resume_state(dest, src, changed)
+        assert state.mismatched, changed
+        assert not state.resumable, changed
+        assert "different settings" in destination_problem(dest, src, changed)
+
+    # Workers is not part of the mapping — it changes speed, not output.
+    faster = ConversionParams(grid_rows=1, grid_cols=6, workers=4)
+    assert resume_state(dest, src, faster).resumable
+
+
+def test_a_marker_for_another_source_file_is_a_mismatch(tmp_path):
+    a = _write_packed(tmp_path / "a.ome.tif", n_frames=6)
+    b = _write_packed(tmp_path / "b.ome.tif", n_frames=6)
+    dest = tmp_path / "out"
+    params = ConversionParams(grid_rows=1, grid_cols=6)
+    write_run_marker(dest, a, params)
+    (dest / "in").mkdir(parents=True, exist_ok=True)
+    (dest / "in" / "A01.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
+    assert resume_state(dest, b, params).mismatched
+
+
+def test_a_source_replaced_at_the_same_path_is_a_mismatch(tmp_path):
+    """The path alone does not identify a file. A re-export, a restore, or the
+    next plate saved over the last is a different source, and resuming across
+    that leaves half of one plate and half of another under one set of names."""
+    src = _write_packed(tmp_path / "s.ome.tif", n_frames=6)
+    dest = tmp_path / "out"
+    params = ConversionParams(grid_rows=1, grid_cols=6)
+    write_run_marker(dest, src, params)
+    (dest / "in").mkdir(parents=True, exist_ok=True)
+    (dest / "in" / "A01.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
+    assert resume_state(dest, src, params).resumable
+
+    _write_packed(src, n_frames=8)                 # same name, different plate
+    assert resume_state(dest, src, params).mismatched
+
+
+def test_a_marker_with_nothing_behind_it_does_not_block_the_folder(tmp_path):
+    """A run that failed before its first archive, or was cancelled and then had
+    its settings changed, leaves a hidden marker in an otherwise empty folder.
+    There is nothing there for a second mapping to contaminate, and "empty the
+    folder" does not clear a dotfile."""
+    src = _write_packed(tmp_path / "s.ome.tif", n_frames=6)
+    dest = tmp_path / "out"
+    write_run_marker(dest, src, ConversionParams(grid_rows=1, grid_cols=6))
+
+    changed = ConversionParams(grid_rows=2, grid_cols=3)
+    assert resume_state(dest, src, changed) == ResumeState()
+    assert destination_problem(dest, src, changed) == ""
+
+
+def test_convert_finishes_an_interrupted_run_and_says_so(tmp_path):
+    from pipeline.ome_explode import OmeExplodeCancelled
+
+    src = _write_packed(tmp_path / "s.ome.tif", n_frames=6)
+    dest = tmp_path / "out"
+    params = ConversionParams(grid_rows=1, grid_cols=6, experiment="e", workers=1)
+
+    ticks = {"n": 0}
+
+    def stop_after_a_couple_of_wells():
+        ticks["n"] += 1
+        return ticks["n"] > 2
+
+    with pytest.raises(OmeExplodeCancelled):
+        convert(src, dest, params, is_cancelled=stop_after_a_couple_of_wells)
+    partial = sorted(p.stem for p in (dest / "in").glob("*.zip"))
+    assert partial and len(partial) < 6
+    assert read_run_marker(dest) is not None          # the run is still open
+
+    summary = convert(src, dest, params)
+    assert f"{len(partial)} kept from an interrupted run" in summary
+    assert len(sorted((dest / "in").glob("*.zip"))) == 6
+    # Finished: the folder is a dataset now, not an interrupted run.
+    assert read_run_marker(dest) is None
+
+
+def test_frame_order_and_timepoints_come_from_the_repeat_pattern(tmp_path):
+    """An OME <Image> has no position dimension, so the file's DimensionOrder
+    cannot say how positions and timepoints interleave in its T axis — the one
+    setting the user had to guess. The coordinates say it outright."""
+    from datasets.ome_import.stage_layout import infer_frame_order
+
+    pitch = 9000.0
+    positions = [(c * pitch, r * pitch) for r in range(2) for c in range(3)]
+    assert infer_frame_order(positions) == ("single", 6, 1)
+    assert infer_frame_order(positions * 4) == ("pos_in_time", 6, 4)
+    assert infer_frame_order(
+        [p for p in positions for _ in range(4)]) == ("time_in_pos", 6, 4)
+    # Neither pattern, so nothing is claimed.
+    assert infer_frame_order(positions + positions[:2]) is None
+    assert infer_frame_order([]) is None
+
+
+def test_wells_come_from_the_metadata_when_it_names_them():
+    """A StageLabel or Image name is the only thing in an OME-TIFF that says
+    where on the *plate* a position was; coordinates give a shape, not a place."""
+    assert wells_from_names(["B02", "B03"]) == ["B02", "B03"]
+    assert wells_from_names(["Well B2, Site 1", "Well B2, Site 2"]) == ["B02", "B02"]
+    assert wells_from_names(["scan_B02_f0", "scan_C03_f0"]) == ["B02", "C03"]
+    # All or nothing: a half-parsed set is a half-labelled plate.
+    assert wells_from_names(["B02", "Position 3"]) == []
+    assert wells_from_names(["B02 and C03"]) == []
+    assert wells_from_names([]) == []
+
+
+def test_a_named_scan_needs_no_origin_at_all(tmp_path):
+    """The strongest case: the file names its own wells, so the visit order is
+    read rather than inferred and nothing is left for the user to enter."""
+    pitch = 9000.0
+    coords = [(c * pitch, r * pitch) for r in range(2) for c in range(3)]
+    wells = ["C04", "C05", "C06", "D04", "D05", "D06"]
+    images = "".join(
+        f'<Image ID="Image:{i}" Name="{wells[i]}"><Pixels ID="Pixels:{i}" '
+        f'DimensionOrder="XYZCT" Type="uint16" SizeX="6" SizeY="6" SizeC="1" '
+        f'SizeZ="1" SizeT="1">'
+        f'<Channel ID="Channel:{i}:0" Name="DAPI" SamplesPerPixel="1"/>'
+        f'<StageLabel Name="Well {wells[i]}"/>'
+        f'<Plane TheT="0" TheC="0" TheZ="0" PositionX="{x}" PositionY="{y}"/>'
+        f'<TiffData FirstT="0" FirstC="0" FirstZ="0" IFD="{i}" PlaneCount="1"/>'
+        f'</Pixels></Image>'
+        for i, (x, y) in enumerate(coords))
+    p = tmp_path / "named.ome.tif"
+    tifffile.imwrite(str(p), np.zeros((len(coords), 6, 6), np.uint16),
+                     description=('<OME xmlns="http://www.openmicroscopy.org/'
+                                  f'Schemas/OME/2016-06">{images}</OME>'),
+                     metadata=None, photometric="minisblack")
+
+    suggestion = suggest_layout(read_layout(p))
+    assert suggestion.origin == "C04"
+    assert suggestion.well_order == ("C04", "C05", "C06", "D04", "D05", "D06")
+    assert "starting at C04" in suggestion.describe()

@@ -20,7 +20,13 @@ from collections.abc import Callable
 from pathlib import Path
 
 from datasets._common.containers import WellFraction
-from datasets.ome_import.ome_import_compute import ConversionParams, strip_ome_suffix
+from datasets.ome_import.ome_import_compute import (
+    ConversionParams,
+    clear_run_marker,
+    resume_state,
+    strip_ome_suffix,
+    write_run_marker,
+)
 from pipeline.ome_explode import explode_ome_tiff
 
 
@@ -46,6 +52,15 @@ def convert(
     """
     src, dest = Path(src), Path(dest)
     experiment = params.experiment or strip_ome_suffix(src.name)
+
+    # A conversion that stopped part-way leaves whole wells behind — each
+    # archive is published atomically, so what is there is finished and correct.
+    # Finishing the rest is only safe when the settings match the run that wrote
+    # them, since two mappings produce the same filenames from different images;
+    # the marker is what records them. Written before the first archive and
+    # dropped on success, so an interrupted run is the only state it describes.
+    resuming = resume_state(dest, src, params).resumable
+    write_run_marker(dest, src, params)
 
     dials: dict[str, Callable[[int, int], None]] = {}
 
@@ -74,10 +89,14 @@ def convert(
         progress_fn=progress,
         well_progress_fn=None if well_progress is None else _well_progress,
         should_abort=is_cancelled,
+        resume=resuming,
     )
+    clear_run_marker(dest)
     channels = ", ".join(result.channels) if result.channels else "?"
+    kept = (f" ({len(result.wells_resumed)} kept from an interrupted run)"
+            if result.wells_resumed else "")
     return (
-        f"Wrote {result.images_written} image(s) for {len(result.wells)} well(s) "
-        f"(channels: {channels}) into {dest.name}/in — open it in Analyze to "
-        f"process."
+        f"Wrote {result.images_written} image(s) for {len(result.wells)} well(s)"
+        f"{kept} (channels: {channels}) into {dest.name}/in — open it in Analyze "
+        f"to process."
     )

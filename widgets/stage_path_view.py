@@ -20,11 +20,12 @@ stays inside the ``widgets/`` no-app-coupling contract.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, QSize, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QSizePolicy, QWidget
 
 import theme
+from widgets.plate_geometry import PLATE_MAX_HEIGHT, PLATE_MAX_WIDTH
 
 _N_ROWS, _N_COLS = 8, 12
 
@@ -73,8 +74,19 @@ class StagePathView(QWidget):
             border-radius: {theme.Radii.md}px;
         }}
         """)
+        # A bare QWidget has no size hint, so a layout gives it nothing and it
+        # collapses to 0x0 — visible by every flag, and never a pixel on screen.
+        # The plate above it gets its size from `plate_geometry`; this asks for
+        # the same box, so the two line up and neither has to be told twice.
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self._plate: QWidget | None = None
         self._points: list[tuple[float, float]] = []
+
+    def sizeHint(self) -> QSize:
+        return QSize(PLATE_MAX_WIDTH, PLATE_MAX_HEIGHT)
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
 
     def setPlate(self, plate: QWidget | None) -> None:
         """Take cell geometry from *plate* (anything with ``cellRect``)."""

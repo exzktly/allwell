@@ -1021,3 +1021,25 @@ def test_a_file_with_no_coordinates_reports_what_it_does_carry(qapp, tmp_path):
     assert "Metadata it does carry:" in label
     assert "ome_xml_chars" in label
     assert "no key/value metadata" in page.log_text()
+
+
+def test_the_stage_path_view_is_laid_out_with_a_real_size(qapp, tmp_path):
+    """It reported visible, held its 24 points, and measured 0x0 — so the second
+    drawing under the plate never appeared, for any file."""
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _plate_scan(tmp_path / "scan.ome.tif", 2, 3, 4)
+    page = OmeImportController().page
+    page.resize(1100, 1000)
+    page.show()
+    qapp.processEvents()
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    qapp.processEvents()
+
+    assert page._path_view._points
+    assert page._path_view.height() > 0
+    assert page._path_view.width() > 0
+    # …and the same box as the plate it sits under, so the cells line up.
+    assert page._path_view.height() == page._plate.height()
+    page.hide()

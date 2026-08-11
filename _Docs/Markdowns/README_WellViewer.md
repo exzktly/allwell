@@ -2637,7 +2637,11 @@ What it catches, and what each one means:
   missing" — every image is in the file and only the metadata is wrong, so
   re-export or repair the metadata rather than re-running the plate.
 
-**Not every OME-TIFF carries stage coordinates.** When yours does not, the page
+All-Well looks for those coordinates in **both** places a file keeps metadata:
+the OME block, and the original metadata the microscope wrote, which conversion
+tools copy in alongside it. Plenty of files record positions only in the second.
+
+**Not every OME-TIFF carries stage coordinates anywhere.** When yours does not, the page
 says so where the suggestion would have been — *"This file records no stage
 coordinates, so the well grid cannot be read from it"* — and you enter the grid
 and FOVs per well yourself. If what you enter doesn't fit, the refusal now names

@@ -507,6 +507,125 @@ def _stage_positions(ome_xml: str | None) -> list[tuple[float, float]]:
     return order
 
 
+# Vendor blocks ``tifffile`` parses in their own right, in the order they are
+# worth trying. An OME-TIFF written by acquisition software usually carries the
+# instrument's *original* metadata alongside the OME-XML — Bio-Formats copies it
+# into ``StructuredAnnotations`` as ``OriginalMetadata`` key/value pairs, and
+# tifffile parses the vendor's own tags separately — and the stage coordinates
+# live there for plenty of files whose OME ``<Plane>`` elements carry none.
+_VENDOR_BLOCKS = ("micromanager_metadata", "imagej_metadata", "metaseries_metadata",
+                  "stk_metadata", "fluoview_metadata", "lsm_metadata",
+                  "scanimage_metadata", "sis_metadata", "andor_metadata")
+
+# A stage coordinate's key, as the instruments spell it. Vendors differ on word
+# order, separators and whether a unit is appended, and the *stem* in front of
+# the axis is what pairs an X with its own Y — "Position 3 XPos" belongs with
+# "Position 3 YPos" and with nothing else.
+_AXIS_KEY = re.compile(
+    r"^(?P<stem>.*?)[\s_.\-]*"
+    r"(?:(?P<pos>position|stage)[\s_.\-]*(?P<axis1>[xy])"
+    r"|(?P<axis2>[xy])[\s_.\-]*(?:position|pos|stage)?)"
+    r"(?:[\s_.\-]*[\(\[]?(?:um|µm|microns?|mm)[\)\]]?)?$",
+    re.IGNORECASE,
+)
+
+
+def _flatten_metadata(value, prefix: str = "", out: dict | None = None) -> dict:
+    """Flatten a nested vendor metadata mapping into ``{"a.b.c": leaf}``.
+
+    Vendor blocks arrive as arbitrarily nested dicts and lists, and the keys
+    worth finding sit at unpredictable depths. Flattening once here means the
+    matchers below can be simple string tests rather than a walker each.
+    """
+    out = {} if out is None else out
+    if isinstance(value, dict):
+        for key, sub in value.items():
+            _flatten_metadata(sub, f"{prefix}.{key}" if prefix else str(key), out)
+    elif isinstance(value, (list, tuple)):
+        for i, sub in enumerate(value):
+            _flatten_metadata(sub, f"{prefix}[{i}]", out)
+    elif prefix:
+        out[prefix] = value
+    return out
+
+
+def _original_metadata(ome_xml: str | None) -> dict:
+    """Bio-Formats' copy of the instrument's own metadata, as ``{key: value}``.
+
+    It writes the original file's metadata into the OME-XML as
+    ``<OriginalMetadata><Key>…</Key><Value>…</Value></OriginalMetadata>``
+    annotations, which is where the stage coordinates end up for files whose
+    ``<Plane>`` elements have none.
+    """
+    if not ome_xml:
+        return {}
+    try:
+        root = ET.fromstring(ome_xml)
+    except ET.ParseError:
+        return {}
+    out: dict = {}
+    for el in root.iter():
+        if _localname(el.tag) != "OriginalMetadata":
+            continue
+        key = next((c.text for c in el if _localname(c.tag) == "Key"), None)
+        val = next((c.text for c in el if _localname(c.tag) == "Value"), None)
+        if key:
+            out[str(key)] = val
+    return out
+
+
+def _paired_coordinates(flat: dict) -> list[tuple[float, float]]:
+    """``(x, y)`` per position from a flattened metadata mapping, or ``[]``.
+
+    Pairs an X key with the Y that shares its stem — the same path in a nested
+    block, or the same prefix in a flat one — so a per-position list keeps its
+    order and a stray coordinate elsewhere in the block cannot pull a pair out
+    of line. Nothing is returned below two complete pairs: one describes no
+    layout, and a partial set is worse than none.
+    """
+    found: dict[str, dict[str, float]] = {}
+    order: list[str] = []
+    for key, value in flat.items():
+        head, _, leaf = str(key).rpartition(".")
+        match = _AXIS_KEY.match(leaf)
+        if match is None:
+            continue
+        axis = (match.group("axis1") or match.group("axis2") or "").lower()
+        if axis not in ("x", "y"):
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        stem = f"{head}.{match.group('stem')}" if head else match.group("stem")
+        if stem not in found:
+            found[stem] = {}
+            order.append(stem)
+        found[stem][axis] = number
+    pairs = [(found[s]["x"], found[s]["y"]) for s in order
+             if "x" in found[s] and "y" in found[s]]
+    return pairs if len(pairs) >= 2 else []
+
+
+def _vendor_positions(tf, ome_xml: str | None) -> list[tuple[float, float]]:
+    """Stage coordinates from the instrument's own metadata, or ``[]``.
+
+    Tried only when the OME ``<Plane>`` elements carry none — which is common,
+    since the OME-XML a converter writes need not repeat what the original file
+    already recorded.
+    """
+    sources: list[dict] = [_original_metadata(ome_xml)]
+    for name in _VENDOR_BLOCKS:
+        block = getattr(tf, name, None)
+        if block:
+            sources.append(_flatten_metadata(block))
+    for flat in sources:
+        pairs = _paired_coordinates(flat)
+        if pairs:
+            return pairs
+    return []
+
+
 def _position_names(ome_xml: str | None) -> list[str]:
     """One name per ``<Image>``: its ``<StageLabel>``'s, else the Image's own.
 
@@ -597,6 +716,7 @@ def read_ome_layout(ome_path: Path | str) -> OmeLayout:
             size_t, size_c, size_z = _size("T"), _size("C"), _size("Z")
             ome_xml = tf.ome_metadata
             series_kind = str(getattr(series[0], "kind", "") or "")
+            vendor_positions = _vendor_positions(tf, ome_xml)
             gaps = [series_page_gaps(s) for s in series]
             total_planes = sum(len(s.pages) for s in series)
             unreferenced = _unreferenced_page_count(tf, series)
@@ -628,7 +748,7 @@ def read_ome_layout(ome_path: Path | str) -> OmeLayout:
         declared_sizes=_declared_sizes(ome_xml),
         unreferenced_pages=unreferenced,
         warnings=list(warnings),
-        stage_positions=_stage_positions(ome_xml),
+        stage_positions=(_stage_positions(ome_xml) or vendor_positions),
         position_names=_position_names(ome_xml),
     )
 

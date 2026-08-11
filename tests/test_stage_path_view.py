@@ -117,3 +117,60 @@ def test_the_view_asks_a_layout_for_a_real_box(qapp):
     assert view.height() > 0
     assert view.width() > 0
     host.hide()
+
+
+def test_a_path_that_does_not_fit_a_plate_is_scaled_to_fit(qapp):
+    """At plate scale a path wider than twelve cells runs off the widget, and
+    the user sees the first few wells and no sign there is more. A wrong well
+    pitch read out of the coordinates does exactly that."""
+    plate = WellPlateSelector()
+    plate.resize(330, 210)
+    plate.show()
+    view = StagePathView()
+    view.resize(330, 210)
+    view.setPlate(plate)
+    qapp.processEvents()
+
+    view.setPath([(c, r) for r in range(3) for c in range(4)])
+    view.grab()
+    assert not view.isFitted()                    # fits a plate: true scale
+
+    view.setPath([(c * 3.0, r * 2.5) for r in range(8) for c in range(12)])
+    view.grab()
+    assert view.isFitted()
+
+    view.setPath([(50.0 + c, 2.0) for c in range(6)])   # off the right edge
+    view.grab()
+    assert view.isFitted()
+    plate.hide()
+
+
+def test_a_fitted_path_is_drawn_inside_the_widget(qapp):
+    """Scaling to fit is only worth anything if the result lands on screen."""
+    from PySide6.QtGui import QPixmap
+
+    plate = WellPlateSelector()
+    plate.resize(330, 210)
+    plate.show()
+    view = StagePathView()
+    view.resize(330, 210)
+    view.setPlate(plate)
+    view.setPath([(c * 4.0, r * 3.0) for r in range(8) for c in range(12)])
+    qapp.processEvents()
+
+    def _render():
+        pixmap = QPixmap(view.size())
+        view.render(pixmap)
+        return pixmap.toImage()
+
+    with_path = _render()
+    view.setPath([])
+    qapp.processEvents()
+    empty = _render()
+    # Compared against the same widget holding nothing, rather than hunting an
+    # exact colour: the marks are antialiased, so their pixels are blends.
+    differing = sum(with_path.pixelColor(x, y) != empty.pixelColor(x, y)
+                    for x in range(0, with_path.width(), 2)
+                    for y in range(0, with_path.height(), 2))
+    assert differing > 50, "the fitted path drew nothing inside the widget"
+    plate.hide()

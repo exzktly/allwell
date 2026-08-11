@@ -900,6 +900,19 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._path_view.setPath(points)
         self._path_view.setVisible(bool(points))
         self._path_caption.setVisible(bool(points))
+        if points:
+            # The view falls back to fitting the whole path in its box when the
+            # path does not fit a plate, which happens when the well pitch read
+            # out of the coordinates is too small. Say so: a drawing that is no
+            # longer one-cell-per-well must not be read as one, and the reason
+            # it happened is usually the layout being wrong too.
+            self._path_caption.setText(
+                "Stage path — one dot per image, joined in acquisition order. "
+                + ("This run does not fit a 96-well plate at the well spacing "
+                   "read from the file, so it is scaled to fit and a square is "
+                   "no longer a well — check the grid and FOVs per well."
+                   if self._path_view.isFitted() else
+                   "The tight clusters are the fields of view within one well."))
 
     def _apply_suggestion(self) -> None:
         """Fill every control the file's own metadata can answer.

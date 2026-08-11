@@ -2695,7 +2695,10 @@ can see. Clicking the plate still takes the order over completely, and *then*
 the grid controls grey out, because a hand-drawn path replaces them.
 
 **The stage path is drawn under the plate**, at the same scale, whenever the
-file carries coordinates: one dot per image — not per well — joined in the order
+file carries coordinates. If the run turns out not to fit a 96-well plate at
+the well spacing read from the file, the drawing is scaled down to show all of
+it and the caption says so — a square is then no longer a well, and it usually
+means the grid and FOVs per well need checking too. Otherwise: one dot per image — not per well — joined in the order
 they were taken, with a larger green dot where the scan starts. The tight
 clusters are the fields of view within a single well, which the plate map above
 cannot show at all: every field in a well is the same square there. Use it to

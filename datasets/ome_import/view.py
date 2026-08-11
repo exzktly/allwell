@@ -881,6 +881,21 @@ class OmeImportPage(LogPanelMixin, QWidget):
                 self._suggest_btn.setVisible(False)
                 self._suggest_row.setVisible(True)
                 return
+            if layout is not None and layout.stage_positions:
+                # Coordinates are in the file but do not describe a plate scan:
+                # not a filled rectangle, or uneven fields per well. Refusing to
+                # guess is right — a wrong grid entered silently is the worst
+                # outcome — but refusing *silently* leaves a file that clearly
+                # holds positions looking like one that holds none.
+                self._suggest_label.setText(
+                    f"↳ This file records {len(layout.stage_positions)} stage "
+                    "position(s), but they do not form a rectangular block of "
+                    "wells with the same number of fields in each — a scan with "
+                    "wells skipped, or with uneven fields — so no grid could be "
+                    "read from them. Enter the grid and FOVs per well below.")
+                self._suggest_btn.setVisible(False)
+                self._suggest_row.setVisible(True)
+                return
             if layout is not None and not layout.stage_positions:
                 held = ", ".join(f"{name} ({count})" for name, count
                                  in sorted(layout.metadata_blocks.items())) or "none"

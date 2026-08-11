@@ -1084,3 +1084,61 @@ def test_a_block_too_big_for_a_plate_says_why_the_grid_stayed_empty(qapp, tmp_pa
     assert page._path_view._points
     assert page._path_view.isFitted()
     assert "no longer a well" in page._path_caption.text()
+
+
+def test_coordinates_that_describe_no_grid_are_not_met_with_silence(qapp, tmp_path):
+    """Refusing to guess a grid is right — a wrong one entered silently is the
+    worst outcome — but refusing *silently* leaves a file that plainly holds
+    positions looking exactly like one that holds none."""
+    from datasets.ome_import.controller import OmeImportController
+
+    coords = [(0.0, 0.0), (9000.0, 0.0), (18000.0, 0.0), (0.0, 9000.0)]  # ragged
+    planes = "".join(
+        f'<Plane TheT="{i}" TheC="0" TheZ="0" PositionX="{x}" PositionY="{y}"/>'
+        for i, (x, y) in enumerate(coords))
+    mapping = "".join(
+        f'<TiffData FirstT="{i}" FirstC="0" FirstZ="0" IFD="{i}" PlaneCount="1"/>'
+        for i in range(len(coords)))
+    xml = ('<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+           '<Image ID="Image:0"><Pixels ID="Pixels:0" DimensionOrder="XYZCT" '
+           'Type="uint16" SizeX="4" SizeY="4" SizeC="1" SizeZ="1" '
+           f'SizeT="{len(coords)}">'
+           '<Channel ID="Channel:0:0" Name="DAPI" SamplesPerPixel="1"/>'
+           f'{planes}{mapping}</Pixels></Image></OME>')
+    p = tmp_path / "ragged.ome.tif"
+    tifffile.imwrite(str(p), np.zeros((len(coords), 4, 4), np.uint16),
+                     description=xml, metadata=None, photometric="minisblack")
+
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+
+    assert page._suggest_row.isVisibleTo(page)
+    label = page._suggest_label.text()
+    assert "4 stage position(s)" in label
+    assert "do not form a rectangular block" in label
+    assert not page._suggest_btn.isVisibleTo(page)
+
+
+def test_every_outcome_of_reading_a_file_says_something(qapp, tmp_path):
+    """Four ways this can end, and the page has to account for all of them:
+    a layout to offer, a block too big to be a plate, coordinates that describe
+    no grid, and no coordinates at all. Silence in any of them reads as the
+    feature having forgotten to look."""
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _plate_scan(tmp_path / "good.ome.tif", 2, 3, 4)
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    assert page._suggest_row.isVisibleTo(page)
+    assert "Read from the file:" in page._suggest_label.text()
+    assert page._suggest_btn.isVisibleTo(page)      # this one has something to apply
+
+    bare = _write_packed(tmp_path / "bare.ome.tif", n_frames=6,
+                         channel_names=("DAPI",))
+    page2 = OmeImportController().page
+    page2._src_field.set_path(str(bare))
+    page2._on_source_changed()
+    assert page2._suggest_row.isVisibleTo(page2)
+    assert "no stage coordinates" in page2._suggest_label.text()

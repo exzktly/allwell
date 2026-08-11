@@ -336,6 +336,45 @@ def test_numbers_never_overlap_each_other(qapp):
     plate.hide()
 
 
+def test_every_number_is_backed_off_the_route_line(qapp):
+    """The digits are white and the thing they annotate is a bright accent line
+    that runs under them — inside a well the route doubles back through its own
+    labels. Each number is laid on the panel colour first, or it is white text
+    on the line at eight points."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QPainter
+
+    view, plate = _view_with_plate(qapp)
+    view.setPath([(c + (f % 2) * 0.07, (f // 2) * 0.07)
+                  for c in range(4) for f in range(4)])
+    view.setZoom(6.0, QPointF(90, 90))
+
+    calls: list = []
+    rect_original, text_original = QPainter.drawRect, QPainter.drawText
+
+    def rect_spy(painter, *args):
+        calls.append(("rect", args[0]))
+        return rect_original(painter, *args)
+
+    def text_spy(painter, *args):
+        calls.append(("text", args[0]))
+        return text_original(painter, *args)
+
+    QPainter.drawRect, QPainter.drawText = rect_spy, text_spy
+    try:
+        _render(view)
+    finally:
+        QPainter.drawRect, QPainter.drawText = rect_original, text_original
+
+    numbers = [i for i, (kind, _) in enumerate(calls) if kind == "text"]
+    assert numbers, "no numbers drawn at 6x"
+    for i in numbers:
+        assert i and calls[i - 1][0] == "rect", "a number was drawn with nothing under it"
+        backdrop, point = calls[i - 1][1], calls[i][1]
+        assert backdrop.contains(point), "the backdrop is not under its own number"
+    plate.hide()
+
+
 def test_numbers_are_drawn_large_enough_to_read(qapp):
     """Below about 8pt the digits stop being distinguishable from each other,
     so a label that cannot reach that size is not worth drawing."""

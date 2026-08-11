@@ -78,6 +78,12 @@ _LABEL_MAX_PT = 13.0
 # attributable to a mark.
 _LABEL_PAD_PX = 2.0
 
+# Opacity of the plate colour laid under a number. The digits are white and the
+# route they annotate is a bright accent line running under them, so unbacked
+# text is white-on-blue at the exact places the numbers matter most — inside a
+# well, where the route doubles back through its own labels.
+_LABEL_BACKDROP_ALPHA = 205
+
 # Zoom bounds, and how much one wheel notch moves it.
 _ZOOM_MIN, _ZOOM_MAX, _ZOOM_STEP = 1.0, 40.0, 1.25
 
@@ -378,8 +384,9 @@ class StagePathView(QWidget):
         # and at this size that is not small text, it is noise — which is what
         # "white scribbling" is.
         painter.setRenderHint(QPainter.TextAntialiasing, True)
-        painter.setPen(QPen(QColor(theme.Colors.ink_light)))
-        painter.setBrush(Qt.NoBrush)
+        text_pen = QPen(QColor(theme.Colors.ink_light))
+        backdrop = QColor(theme.Colors.panel)
+        backdrop.setAlpha(_LABEL_BACKDROP_ALPHA)
         metrics = QFontMetricsF(font)
         offset = dot / 2.0 + 2.0
         # A label is drawn only where it does not touch one already drawn. The
@@ -397,5 +404,14 @@ class StagePathView(QWidget):
             if any(rect.intersects(other) for other in taken):
                 continue
             taken.append(rect)
+            # Panel colour behind the digits, because the thing they sit on is
+            # the route itself: inside a well the line doubles back through the
+            # labels, and white on accent at 8pt is the same unreadable smear as
+            # white on white.
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(backdrop)
+            painter.drawRect(rect)
+            painter.setPen(text_pen)
+            painter.setBrush(Qt.NoBrush)
             painter.drawText(QPointF(point.x() + offset, point.y() - offset),
                              label)

@@ -460,3 +460,40 @@ def test_uneven_fields_per_well_is_still_refused():
     layout to offer — unlike a skipped well, which has one."""
     uneven = [(0.0, 0.0), (FOV, 0.0), (PITCH, 0.0)]     # two fields, then one
     assert infer_stage_layout(uneven) is None
+
+
+def test_skipping_on_one_axis_only_is_recovered_from_the_other():
+    """Rows skipped, columns not — the ordinary way a plate gets sampled. The
+    two axes then measure *different* steps (18 mm down, 9 mm across), and the
+    plate has one pitch: whichever axis shows a single well step supplies it,
+    and the other's gaps are read as the multiples they are."""
+    rows_skipped = [(r, c) for r in (0, 2, 4) for c in range(4)]
+    cols_skipped = [(r, c) for r in range(3) for c in (0, 2, 4)]
+    for name, cells, labels in (
+            ("rows", rows_skipped, ["A01", "A02", "A03", "A04", "C01"]),
+            ("cols", cols_skipped, ["A01", "A03", "A05", "B01", "B03"])):
+        for fovs in (1, 4):
+            layout = infer_stage_layout(_shape(cells, fovs))
+            assert round(layout.pitch, 3) == PITCH, (name, fovs)
+            assert layout.relative_order == cells, (name, fovs)
+            assert place(layout, 0, 0)[:5] == labels, (name, fovs)
+
+
+def test_one_adjacent_pair_anywhere_is_enough():
+    """Rows A, B and D: the skip is irregular, so the axis carries both a single
+    step and a double one and needs no help from the other axis."""
+    cells = [(r, c) for r in (0, 1, 3) for c in range(3)]
+    layout = infer_stage_layout(_shape(cells))
+    assert round(layout.pitch, 3) == PITCH
+    assert place(layout, 0, 0)[-3:] == ["D01", "D02", "D03"]
+
+
+def test_a_scan_that_skips_uniformly_everywhere_reads_as_adjacent():
+    """The limit, stated. Rows A, C and E in a single column: every step on the
+    only axis that carries wells is a double one, and no absolute unit is
+    trusted anywhere in this module, so two wells two pitches apart cannot be
+    told from two adjacent wells on a coarser plate. It reads as A, B, C — which
+    the drawn map shows at plate scale and the user's own grid overrides."""
+    layout = infer_stage_layout(_shape([(0, 0), (2, 0), (4, 0)], fovs=1))
+    assert place(layout, 0, 0) == ["A01", "B01", "C01"]
+    assert layout.pitch == 2 * PITCH

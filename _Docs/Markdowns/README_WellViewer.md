@@ -2551,7 +2551,11 @@ the layout Analyze processes. Do this first, then open the result in Analyze.
    rectangular — an L-shape, a plate with rows left out, a scattered subset — the
    converter reads it straight from the stage coordinates and fills the plate in
    for you, describing it as e.g. *5 wells in a 3×3 block*; the wells you never
-   imaged stay empty and no archive is written for them. To define a visit order
+   imaged stay empty and no archive is written for them. Skipping whole rows or columns is
+   read correctly as long as some part of the scan visits two neighbouring wells
+   — if *every* step skips (say rows A, C and E in one column, and nothing
+   else), the file gives no way to tell that from three wells side by side, so
+   check the plate and correct it by clicking if needed. To define a visit order
    by hand instead, or to correct one, click
    the wells directly, in the order the stage visited them: the first click is
    position 1, the next is position 2, and so on. Clicking a numbered well removes

@@ -3063,7 +3063,15 @@ well gap outranks one that does not, and among those that do the *smallest* wins
 wells are 18 mm apart. `_well_step` divides by the **wells** between two occupied
 groups rather than treating them as adjacent, for the same reason: that number is
 the conversion from stage units to plate cells, so a doubled one draws the map at
-half scale; where neither shows two scales the reading is genuinely
+half scale. There is one pitch for the plate, not one per axis, which is what
+makes a one-sided skip recoverable: rows sampled A/C/E with every column present
+measure 18 mm down and 9 mm across, and the axis showing the single step supplies
+the pitch that reads the other's gaps as the multiples they are. One adjacent
+pair anywhere on one axis is enough. Where **every** step on every axis skips —
+rows A, C and E in a single column — nothing in the file distinguishes that from
+three adjacent wells on a coarser plate, since no absolute unit is trusted here;
+it reads as adjacent, which the map draws at plate scale and the user's grid
+overrides; where neither shows two scales the reading is genuinely
 ambiguous between "one well holding a grid of fields" and "a grid of wells
 holding one field each", and the latter is taken because it is the ordinary plate
 scan. Coordinates are merged within a fraction of the coarsest spacing first, or

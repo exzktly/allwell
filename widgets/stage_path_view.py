@@ -21,7 +21,14 @@ stays inside the ``widgets/`` no-app-coupling contract.
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetricsF,
+    QPainter,
+    QPainterPath,
+    QPen,
+)
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 import theme
@@ -59,11 +66,17 @@ _DOT_BUDGET = 600
 # in reveals the numbers exactly where the eye has already gone.
 _LABEL_ROOM_PX = 16.0
 
-# Font size as a share of the room available, bounded so it stays legible while
-# never swamping the dot it names.
+# Font size as a share of the room available, floored at a size that is still
+# a readable glyph rather than a smudge. Below about 8pt the digits stop being
+# distinguishable at all, so a label that cannot reach it is not drawn.
 _LABEL_OF_ROOM = 0.42
-_LABEL_MIN_PT = 6.0
+_LABEL_MIN_PT = 8.0
 _LABEL_MAX_PT = 13.0
+
+# Clearance kept around a label before the next one may be drawn. Labels that
+# touch are worse than none: the numbers stop being readable *and* stop being
+# attributable to a mark.
+_LABEL_PAD_PX = 2.0
 
 # Zoom bounds, and how much one wheel notch moves it.
 _ZOOM_MIN, _ZOOM_MAX, _ZOOM_STEP = 1.0, 40.0, 1.25
@@ -358,12 +371,31 @@ class StagePathView(QWidget):
         if room < _LABEL_ROOM_PX:
             return
         font = QFont(painter.font())
-        font.setPointSizeF(
-            max(_LABEL_MIN_PT, min(_LABEL_MAX_PT, room * _LABEL_OF_ROOM)))
+        font.setPointSizeF(min(_LABEL_MAX_PT, max(_LABEL_MIN_PT,
+                                                  room * _LABEL_OF_ROOM)))
         painter.setFont(font)
+        # Text needs its own hint. Without it the glyphs are drawn unsmoothed
+        # and at this size that is not small text, it is noise — which is what
+        # "white scribbling" is.
+        painter.setRenderHint(QPainter.TextAntialiasing, True)
         painter.setPen(QPen(QColor(theme.Colors.ink_light)))
         painter.setBrush(Qt.NoBrush)
+        metrics = QFontMetricsF(font)
         offset = dot / 2.0 + 2.0
+        # A label is drawn only where it does not touch one already drawn. The
+        # spacing test above is between *consecutive* marks, which says nothing
+        # about a mark from another row landing in the same place, and a number
+        # is far wider than the gap that test clears — so on a dense run every
+        # label overlapped its neighbours and the result read as scribble.
+        taken: list = []
         for index, point in enumerate(pixels, start=1):
+            label = str(index)
+            rect = metrics.boundingRect(label)
+            rect.moveTo(point.x() + offset, point.y() - offset - rect.height())
+            rect = rect.adjusted(-_LABEL_PAD_PX, -_LABEL_PAD_PX,
+                                 _LABEL_PAD_PX, _LABEL_PAD_PX)
+            if any(rect.intersects(other) for other in taken):
+                continue
+            taken.append(rect)
             painter.drawText(QPointF(point.x() + offset, point.y() - offset),
-                             str(index))
+                             label)

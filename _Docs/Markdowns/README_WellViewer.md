@@ -2163,6 +2163,12 @@ channel for every well).
   row and its cell mask on the next. Each render gets its own row, labelled
   **DAPI**, **DAPI (mask)**, **DAPI (raw)** or **DAPI (binary)**, so a channel can
   appear as many times as you have renders for it.
+- **Curated-away cells are not drawn.** A cell you deleted on the Segmentation
+  tab, or one a crop excluded, gets no outline here and does not appear in the
+  **Mask** or **≥ threshold** views — the table shows the same population every
+  plot, statistic and export counts. The one place that still shows every
+  segmented cell is the pipeline's own **NUC+SEG** overlay channel, whose
+  boundaries are drawn into the saved image before All-Well ever sees it.
 - **Colour cells** — in the **Mask** and **≥ threshold** views, give every cell its
   own colour instead of painting them all white. Two nuclei that touch are
   otherwise a single white shape, which is exactly the mistake you are looking at a

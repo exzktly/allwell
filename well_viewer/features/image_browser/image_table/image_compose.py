@@ -60,8 +60,26 @@ def _load_well_channel(ctx, cache, well, chan_lower, *, use_tophat: bool = False
 
 
 def _load_mask_array(ctx, cache, well, tp, fov):
-    """:func:`data.frame_load.load_mask_array` — no pass state to thread."""
-    return load_mask_array(ctx, cache, well, tp, fov)
+    """:func:`data.frame_load.load_mask_array`, minus the cells that don't count.
+
+    Every mask the Image Table draws from comes through here — the boundary
+    overlay, the Binary (mask) view, the Binary (threshold) view, the mask
+    channel's own LUT pass — so the inclusion filter is applied once, at the
+    load, rather than at each of those four.
+
+    A pipeline mask holds every object that was segmented, including cells the
+    user deleted by hand and cells a crop excluded. Outlining those says they
+    are counted when every plot, statistic and export has dropped them, so the
+    labels the inclusion chokepoint rejects are zeroed out of the array here and
+    the whole tab follows. The one thing this cannot reach is the pipeline's
+    pre-rendered **NUC+SEG overlay** channel: those boundaries are baked into a
+    saved image, so that channel still shows every segmented cell.
+    """
+    from well_viewer.data.inclusion import (
+        drop_excluded_labels, excluded_nids_for_frame,
+    )
+    arr = load_mask_array(ctx, cache, well, tp, fov)
+    return drop_excluded_labels(arr, excluded_nids_for_frame(ctx, well, fov, tp))
 
 
 LUT_COLORS: dict[str, tuple[float, float, float] | None] = {

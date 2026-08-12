@@ -415,7 +415,12 @@ def test_a_host_with_no_launcher_is_not_told_it_is_waiting():
 
 def test_both_launch_paths_announce_the_handoff():
     """The defect itself: one launcher announced, the other did not. Asserted
-    against the source so the batched path cannot fall silent again."""
+    against the source so neither path can fall silent again.
+
+    The batched path announces once per *run*, from the method that launches
+    the driver — batched mode holds a single allocation for every batch, so a
+    per-batch announcement would promise a queue wait that never happens.
+    """
     import inspect
 
     import services.remote_runner as rr
@@ -423,8 +428,11 @@ def test_both_launch_paths_announce_the_handoff():
     src = inspect.getsource(rr)
     # Once as the definition, once per launch site.
     assert src.count("_scheduler_handoff_lines") >= 3
-    batched = inspect.getsource(rr._BatchedRemoteProcess._run_batches)
+    batched = inspect.getsource(rr._BatchedRemoteProcess._start_driver)
     assert "_scheduler_handoff_lines" in batched, "the batched path went quiet"
+    loop = inspect.getsource(rr._BatchedRemoteProcess._run_batches)
+    assert "_scheduler_handoff_lines" not in loop, (
+        "one allocation for the run means one hand-off announcement")
 
 
 def test_the_tracker_reads_the_whole_scheduler_handshake():

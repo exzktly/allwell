@@ -79,6 +79,12 @@ def _load_mask_array(ctx, cache, well, tp, fov):
         drop_excluded_labels, excluded_nids_for_frame,
     )
     arr = load_mask_array(ctx, cache, well, tp, fov)
+    if ctx is None:
+        # The mask resolution below this call is pure — it needs only the ref
+        # cache — and the tests that pin it (``test_image_table_render_resilience``)
+        # pass no ctx at all. Inclusion is the one part that needs one, so with
+        # no ctx there is nothing to ask and the labels stand as loaded.
+        return arr
     return drop_excluded_labels(arr, excluded_nids_for_frame(ctx, well, fov, tp))
 
 

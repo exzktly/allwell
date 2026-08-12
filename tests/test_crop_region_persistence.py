@@ -120,3 +120,14 @@ def test_load_ignores_malformed_section(tmp_path):
     app = _app(tmp_path)
     crop_region.load_from_data_dir(app)
     assert app._app_state.dataset.crop_region is None
+
+
+def test_a_scope_with_no_region_is_not_persisted(tmp_path):
+    """A scope with nothing to scope is not worth carrying across sessions —
+    and the section is what "cleared" looks like on disk, so it stays one
+    state rather than two that read alike."""
+    app = _app(tmp_path)
+    app._app_state.dataset.crop_scope_wells = {"A01"}
+    crop_region.save_to_data_dir(app)
+    assert "crop_region" not in json.loads(
+        (tmp_path / "persistence.json").read_text())

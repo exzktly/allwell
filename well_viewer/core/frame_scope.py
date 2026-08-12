@@ -71,28 +71,45 @@ def is_armed(ctx, spec: ScopeSpec) -> bool:
     return any(v is not None for v in read_scope(ctx, spec))
 
 
-def write_scope_field(ctx, spec: ScopeSpec, index: int, values) -> None:
-    """Arm one field, leaving the other two alone, then run ``on_change``.
+def apply_scope_change(ctx, spec: ScopeSpec) -> None:
+    """Run the spec's re-derivation, if it has one.
+
+    Separate from the state write because the two have wildly different costs.
+    Writing a field is an attribute set; the crop's re-derivation re-projects
+    ``Crop_Pass`` over every cached well, redraws the active plot and re-renders
+    the canvas. A control that emits one signal per ticked checkbox has to be
+    able to do the first eleven times and the second once.
+    """
+    if spec.on_change is not None:
+        spec.on_change(ctx)
+
+
+def write_scope_field(ctx, spec: ScopeSpec, index: int, values,
+                      *, apply: bool = True) -> None:
+    """Arm one field, leaving the other two alone.
 
     Committing all three together would be the trap: ticking two wells would
     also pin the FOV and timepoint to whatever happened to be on screen, so
     navigating to the next FOV would silently put the user outside their own
     scope. A field the user never touched stays ``None`` and keeps meaning
     whatever the spec says un-armed means.
+
+    ``apply=False`` writes the state without re-deriving anything; the caller
+    then owes an :func:`apply_scope_change`, which is how the popover coalesces
+    a burst of ticks into one recompute.
     """
     setattr(scope_state(ctx, spec), spec.fields[index],
             None if values is None else {str(v) for v in values})
-    if spec.on_change is not None:
-        spec.on_change(ctx)
+    if apply:
+        apply_scope_change(ctx, spec)
 
 
 def reset_scope(ctx, spec: ScopeSpec) -> None:
-    """Return every field to un-armed, then run ``on_change``."""
+    """Return every field to un-armed, then re-derive."""
     state = scope_state(ctx, spec)
     for f in spec.fields:
         setattr(state, f, None)
-    if spec.on_change is not None:
-        spec.on_change(ctx)
+    apply_scope_change(ctx, spec)
 
 
 def _well_sort_key(label: str):

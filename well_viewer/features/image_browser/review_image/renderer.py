@@ -569,18 +569,18 @@ def _crop_applies_to_displayed_frame(ctx) -> bool:
     can be armed for wells and timepoints the canvas is not showing. Drawing the
     same solid outline either way would state that these cells are being
     filtered when they are not — see the outline's own dashed branch.
+
+    The answer is the crop layer's own ``crop_covers_frame``, which judges the
+    frame from the scope and the well's rows — the same inputs the ``Crop_Pass``
+    verdict uses. Comparing the tokens here instead was wrong in both
+    directions: a scope holding a raw ``T24`` read as out-of-scope while cells
+    were being excluded, and a frame whose CSV has no timepoint column read as
+    in-scope while no row of it could match.
     """
     from well_viewer.core.frame_scope import current_frame
-    from well_viewer.features.crop.controller import get_crop_scope
-    scope = get_crop_scope(ctx)
-    if not scope.is_armed:
-        return True
+    from well_viewer.features.crop.controller import crop_covers_frame
     well, fov, tp = current_frame(ctx)
-    return (
-        (scope.wells is None or str(well) in {str(w) for w in scope.wells})
-        and (scope.fovs is None or str(fov) in {str(f) for f in scope.fovs})
-        and (scope.tps is None or str(tp) in {str(t) for t in scope.tps})
-    )
+    return crop_covers_frame(ctx, well, fov, tp)
 
 
 def _draw_crop_outline(ctx, rgb) -> None:

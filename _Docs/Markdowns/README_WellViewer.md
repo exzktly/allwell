@@ -2114,9 +2114,11 @@ box sits, but **dashed and dimmed**, so you can see the rectangle without
 mistaking it for a filter that is running there.
 
 The scope is saved with the crop, in `persistence.json`, and reloads with the
-dataset — a two-well crop stays a two-well crop across sessions. **Edit ▾ →
-Reset crop + curation** clears the scope along with the box, and loading a
-different dataset starts fresh.
+dataset — a two-well crop stays a two-well crop across sessions. Each dataset
+carries its own: opening another one loads that one's saved crop and scope, or
+none if it has never been cropped. **Edit ▾ → Clear crop** and **Edit ▾ → Reset
+crop + curation** both clear the scope along with the box, so the next
+rectangle you draw starts at all frames again.
 
 #### Image Table
 
@@ -2163,8 +2165,9 @@ channel for every well).
   row and its cell mask on the next. Each render gets its own row, labelled
   **DAPI**, **DAPI (mask)**, **DAPI (raw)** or **DAPI (binary)**, so a channel can
   appear as many times as you have renders for it.
-- **Curated-away cells are not drawn.** A cell you deleted on the Segmentation
-  tab, or one a crop excluded, gets no outline here and does not appear in the
+- **Cells the analysis has dropped are not drawn.** A cell you deleted on the
+  Segmentation tab, one a crop excluded, one that failed the QC debris gate, and
+  one outside your gating all get no outline here and do not appear in the
   **Mask** or **≥ threshold** views — the table shows the same population every
   plot, statistic and export counts. The one place that still shows every
   segmented cell is the pipeline's own **NUC+SEG** overlay channel, whose

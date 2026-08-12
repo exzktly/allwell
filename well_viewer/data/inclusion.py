@@ -14,8 +14,9 @@ which is right. Zeroing the excluded labels out of the mask fixes the boundary
 overlay, the binary mask view and the threshold view in one place, because all
 three read that array.
 
-Qt-free and feature-free: it sits under ``features/`` so any image view (the
-Image Table today) can ask the question without importing another feature.
+Qt-free and feature-free, and in ``data/`` rather than under any one feature, so
+every image view (the Image Table today) can ask the question without importing
+another feature.
 """
 
 from __future__ import annotations
@@ -84,6 +85,14 @@ def excluded_nids_by_frame(ctx, well: str) -> dict[tuple[str, str], frozenset]:
     Keyed by the inclusion-change counter, so an edit invalidates it; held on
     the frame's own ``attrs`` rather than in a module-level dict, so it dies
     with the frame it describes and cannot outlive a dataset swap.
+
+    The stored key carries the frame's identity as well as the counter, because
+    ``attrs`` is *inherited by derived frames*: ``df.copy()`` carries this memo
+    across to a different frame, where the counter alone would say it is fresh
+    and cells deleted in the copy would go on being drawn. Nothing in the app
+    puts a derived frame into the row cache today — both writers assign a fresh
+    ``load_well_csv`` result — so this guards a future one rather than a live
+    bug.
     """
     try:
         df = get_rows(ctx, well)
@@ -97,11 +106,11 @@ def excluded_nids_by_frame(ctx, well: str) -> dict[tuple[str, str], frozenset]:
     version = _inclusion_version(ctx)
     if version is not None:
         cached = df.attrs.get(_ATTR)
-        if cached is not None and cached[0] == version:
+        if cached is not None and cached[0] == (version, id(df)):
             return cached[1]
     built = _build_excluded_map(df)
     if version is not None:
-        df.attrs[_ATTR] = (version, built)
+        df.attrs[_ATTR] = ((version, id(df)), built)
     return built
 
 
@@ -119,7 +128,16 @@ def drop_excluded_labels(labels, excluded):
     Returns ``labels`` untouched when there is nothing to drop, so a dataset
     with no curation pays nothing. The array is modified in place: the loaders
     that produce it (``frame_load.load_mask_array``) build a fresh array per
-    call, and the caller is the render pass that asked for it.
+    call — ``image_discovery``'s decode cache names that function as one of its
+    copy-on-read consumers — and the caller is the render pass that asked for it.
+
+    Membership goes through a lookup table indexed by label rather than
+    ``np.isin``: a mask is a few million pixels and this runs once per rendered
+    cell, and one indexing pass is several times cheaper than a sort-or-hash
+    over the whole array. It also makes the id range explicit — an id that the
+    array's own dtype cannot represent is dropped from the query instead of
+    being wrapped into some other cell's label, which is a way to blank the
+    wrong cell's pixels.
     """
     if labels is None or not excluded:
         return labels
@@ -127,6 +145,13 @@ def drop_excluded_labels(labels, excluded):
     arr = np.asarray(labels)
     if arr.size == 0:
         return labels
-    arr[np.isin(arr, np.fromiter(excluded, dtype=arr.dtype,
-                                 count=len(excluded)))] = 0
+    hi = int(arr.max(initial=0))
+    wanted = [n for n in (int(v) for v in excluded) if 0 < n <= hi]
+    if not wanted:
+        return arr
+    drop = np.zeros(hi + 1, dtype=bool)
+    drop[wanted] = True
+    # Negative labels are not a thing a segmentation mask carries, but an
+    # unsigned index would wrap one into the table if it were.
+    arr[drop[np.clip(arr, 0, hi)] & (arr > 0)] = 0
     return arr

@@ -236,3 +236,40 @@ def test_one_failing_scope_does_not_abandon_the_others(monkeypatch):
 def test_unknown_scope_key_is_ignored_not_reported_done(monkeypatch):
     monkeypatch.setattr(reset_scopes, "ANALYSIS_SCOPES", ())
     assert reset_scopes.clear_analysis(_Ctx(), ["nope"]) == []
+
+
+# ── curation clears the crop, and the frames it was scoped to ─────────────
+
+
+def test_clear_curation_widens_the_crop_scope_back_to_every_frame():
+    """The crop scope is armed alongside the region and cleared alongside it.
+
+    Left armed behind a cleared crop it would silently narrow the *next* box the
+    user draws to frames they had just reset away — the argument this module
+    already makes for clearing the region itself.
+    """
+    from types import SimpleNamespace
+
+    from well_viewer.core.dataset_state import DatasetState
+
+    dataset = DatasetState()
+    dataset.crop_region = (0, 0, 8, 12)
+    dataset.crop_scope_wells = {"A01"}
+    dataset.crop_scope_tps = {"24"}
+    ctx = SimpleNamespace(
+        state=SimpleNamespace(
+            dataset=dataset,
+            review_image=SimpleNamespace(override_version=0),
+        ),
+        runtime=SimpleNamespace(
+            review=SimpleNamespace(included_overrides={("A01", "1", "0", "1"): "0"}),
+        ),
+        persistence=None,
+    )
+
+    reset_scopes.clear_curation(ctx)
+
+    assert dataset.crop_region is None
+    assert (dataset.crop_scope_wells, dataset.crop_scope_fovs,
+            dataset.crop_scope_tps) == (None, None, None)
+    assert not ctx.runtime.review.included_overrides

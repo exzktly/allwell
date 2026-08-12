@@ -113,6 +113,51 @@ def rows_in_scope(df, scope: FrameScope | None, well: str | None = None):
     return inside.astype(bool)
 
 
+def frame_in_scope(df, scope: FrameScope | None, well: str | None,
+                   fov, tp) -> bool:
+    """Whether the crop actually reaches any cell of one displayed frame.
+
+    The question a *view* asks — "is the box I am drawing filtering this
+    picture?" — answered by the same code that decides the rows, rather than by
+    a second comparison of the same tokens. Restating it was a bug in both
+    directions: a scope holding a non-canonical token (a hand-edited
+    ``persistence.json``) read as out-of-scope while the rows were being
+    excluded, and a frame whose CSV carries no timepoint column read as
+    in-scope while no row of it could match an armed timepoint.
+
+    ``df`` is the well's rows. Only when there are none at all — a well with
+    images but no CSV — does the answer fall back to comparing the tokens; a
+    frame whose well *has* rows and none of them lands on it reaches no cell,
+    whatever its tokens say.
+    """
+    if scope is None or not scope.is_armed:
+        return True
+    if scope.wells is not None:
+        if str(well or "").strip() not in {str(w).strip() for w in scope.wells}:
+            return False
+
+    from well_viewer.data.image_identity import (
+        frame_token_series, normalize_fov, normalize_tp,
+    )
+    want_fov, want_tp = normalize_fov(fov), normalize_tp(tp)
+    if df is not None and len(df) > 0:
+        fov_n, tp_n = frame_token_series(df)
+        here = (fov_n == want_fov) & (tp_n == want_tp)
+        if not bool(here.any()):
+            # The well has rows and none of them belongs to this frame — the
+            # crop can reach nothing here even if the tokens look armed.
+            return False
+        return bool((here & rows_in_scope(df, scope, well)).any())
+    # No rows at all — judge the tokens themselves.
+    if scope.fovs is not None and want_fov not in {
+            normalize_fov(f) for f in scope.fovs}:
+        return False
+    if scope.tps is not None and want_tp not in {
+            normalize_tp(t) for t in scope.tps}:
+        return False
+    return True
+
+
 def normalize_region(
     row0: float, col0: float, row1: float, col1: float,
 ) -> CropRegion | None:

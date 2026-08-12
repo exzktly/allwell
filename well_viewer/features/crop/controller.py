@@ -16,7 +16,7 @@ from __future__ import annotations
 
 
 from .region import (
-    CropRegion, FrameScope, compute_crop_pass, normalize_region,
+    CropRegion, FrameScope, compute_crop_pass, frame_in_scope, normalize_region,
 )
 from well_viewer.core.frame_scope import (
     ScopeSpec, describe_scope, refresh_scope_button,
@@ -214,6 +214,10 @@ def _on_crop_scope_changed(ctx) -> None:
         )
         return
     removed, total_incl, _has_centroids, n_wells = _crop_effect_counts(ctx)
+    # ``total_incl`` and ``n_wells`` span every loaded well, in scope or not —
+    # they are the population the crop is being measured against, not the
+    # population it reaches. Saying "loaded" rather than "scoped" keeps the two
+    # numbers from reading as a contradiction of the scope the button states.
     ctx.notify.set_status(
         f"Crop scope updated: now excluding {removed:,} of {total_incl:,} "
         f"otherwise-included cell(s) across {n_wells} loaded well(s)."
@@ -252,16 +256,54 @@ def refresh_crop_scope_button(ctx) -> None:
     refresh_scope_button(ctx, CROP_SCOPE)
 
 
+def crop_covers_frame(ctx, well: str, fov, tp) -> bool:
+    """Whether the crop, as scoped, reaches any cell of one displayed frame.
+
+    The question the Segmentation canvas asks before it decides whether to draw
+    the crop outline solid or dashed. It lives here rather than in the renderer
+    so the answer comes from the same place the ``Crop_Pass`` verdict does — the
+    scope, and the well's own rows — instead of from a second comparison of the
+    same tokens, which disagreed with the verdict in both directions.
+    """
+    from well_viewer.data.data_loading import get_rows
+    scope = get_crop_scope(ctx)
+    if not scope.is_armed:
+        return True
+    df = None
+    if well:
+        try:
+            df = get_rows(ctx, well)
+        except Exception:
+            # A well whose rows will not load still deserves its outline drawn;
+            # ``frame_in_scope`` falls back to the tokens when it gets nothing.
+            swallowed()
+    return frame_in_scope(df, scope, well, fov, tp)
+
+
 def clear_crop_region(ctx) -> None:
-    """Remove the crop (no warning): cropped-out cells return to included.
-    Manual deletes are untouched."""
-    if ctx.state.dataset.crop_region is None:
+    """Remove the crop and the frames it was scoped to (no warning).
+
+    Cropped-out cells return to included; manual deletes are untouched.
+
+    The scope goes with the box for the reason ``clear_curation`` gives for
+    doing the same: a scope left armed behind a cleared crop silently narrows
+    the *next* box the user draws to frames they thought they had cleared, and
+    it would not survive a restart either (the section is dropped once there is
+    no region to save), so the two would then disagree.
+    """
+    ds = ctx.state.dataset
+    was_scoped = get_crop_scope(ctx).is_armed
+    if ds.crop_region is None and not was_scoped:
         ctx.notify.set_status("Crop region: nothing to clear.")
         return
-    ctx.state.dataset.crop_region = None
+    ds.crop_region = None
+    ds.reset_crop_scope()
+    refresh_crop_scope_button(ctx)
     recompute_crop_all(ctx)
     _save_redraw_refresh(ctx)
-    ctx.notify.set_status("Crop region cleared.")
+    ctx.notify.set_status(
+        "Crop region and scope cleared." if was_scoped else "Crop region cleared."
+    )
 
 
 # ── draw-mode toggle ─────────────────────────────────────────────────────────

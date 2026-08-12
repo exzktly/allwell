@@ -171,3 +171,30 @@ def test_excluded_cells_lose_their_boundary(monkeypatch):
     assert both[1:4, 1:4].any() and both[5:8, 5:8].any()
     assert filtered[1:4, 1:4].any()          # the kept cell still outlined
     assert not filtered[5:8, 5:8].any()      # the excluded one is gone
+
+
+def test_a_derived_frame_does_not_inherit_another_frame_s_memo():
+    """``df.attrs`` is copied onto derived frames, so a memo keyed by the
+    version counter alone would travel to a different frame and report it as
+    having nothing excluded. Nothing in the app puts a copy into the row cache
+    today; the key guards a future one."""
+    a = _df([(1, "1", "0", 1, 1, 1)])
+    assert excluded_nids_by_frame(_ctx({"A01": a}), "A01") == {}
+    b = a.copy()
+    b.loc[0, "Included"] = 0
+    assert "_aw_excluded_nids" in b.attrs          # inherited from `a`
+    assert excluded_nids_for_frame(
+        _ctx({"B02": b}), "B02", "1", "0") == frozenset({1})
+
+
+def test_an_id_the_label_dtype_cannot_hold_is_dropped_from_the_query():
+    """Casting the id set to the array's dtype wrapped a large id into some
+    other cell's label, which blanks the wrong cell's pixels."""
+    labels = np.array([[5, 5], [0, 7]], dtype=np.int32)
+    out = drop_excluded_labels(labels, frozenset({2 ** 31 + 5}))
+    assert out.tolist() == [[5, 5], [0, 7]]
+
+
+def test_ids_absent_from_the_frame_change_nothing():
+    labels = np.array([[1, 2]], dtype=np.int32)
+    assert drop_excluded_labels(labels, frozenset({99})).tolist() == [[1, 2]]

@@ -139,3 +139,74 @@ def test_armed_readout_names_the_fields_it_narrows_and_the_ones_it_does_not():
     assert describe_scope(ctx, crop.CROP_SCOPE) == (
         "Crop scope: 2 wells · all FOVs · 1 TP"
     )
+
+
+# ── the outline and the verdict must not disagree ────────────────────────────
+def test_frame_in_scope_matches_a_scope_holding_raw_tokens():
+    """A scope hydrated from a hand-edited persistence.json can hold ``T24``
+    where the combos read ``24``. Judging the frame by a second, un-normalised
+    comparison drew the outline dashed while cells were being excluded."""
+    from well_viewer.features.crop.region import frame_in_scope
+    df = _df([1, 50], [1, 50], fovs=["1", "1"], tps=["24", "24"])
+    scope = FrameScope(fovs=frozenset({"001"}), tps=frozenset({"T24"}))
+    assert frame_in_scope(df, scope, "A01", "1", "24") is True
+    assert list(compute_crop_pass(df, (0, 0, 10, 10), scope, "A01")) == [1, 0]
+
+
+def test_frame_with_no_timepoint_column_is_out_of_scope_when_tps_are_armed():
+    """The pickers offer a timepoint from ``pipeline_info`` that the rows do not
+    carry, so no row can match it and the crop reaches nothing. Saying the frame
+    is in scope would state a filter that is not running."""
+    from well_viewer.features.crop.region import frame_in_scope
+    df = _df([1, 50], [1, 50], fovs=["1", "1"])          # no timepoint column
+    scope = FrameScope(tps=frozenset({"0"}))
+    assert list(compute_crop_pass(df, (0, 0, 10, 10), scope, "A01")) == [1, 1]
+    assert frame_in_scope(df, scope, "A01", "1", "0") is False
+
+
+def test_frame_in_scope_falls_back_to_tokens_without_rows():
+    """A well with images but no CSV rows still shows its crop."""
+    from well_viewer.features.crop.region import frame_in_scope
+    scope = FrameScope(wells=frozenset({"A01"}), tps=frozenset({"24"}))
+    assert frame_in_scope(None, scope, "A01", "1", "24") is True
+    assert frame_in_scope(None, scope, "A01", "1", "0") is False
+    assert frame_in_scope(None, scope, "B02", "1", "24") is False
+
+
+# ── clearing ─────────────────────────────────────────────────────────────────
+def _full_ctx(**scope):
+    """A ctx complete enough for the controller's clear / reset paths."""
+    ctx = _ctx({"A01": _df([2, 50], [3, 60])}, region=(0, 0, 10, 10), **scope)
+    ctx.state.dataset.reset_crop_scope = lambda: (
+        setattr(ctx.state.dataset, "crop_scope_wells", None),
+        setattr(ctx.state.dataset, "crop_scope_fovs", None),
+        setattr(ctx.state.dataset, "crop_scope_tps", None),
+    )
+    ctx.statuses = []
+    ctx.notify = SimpleNamespace(set_status=ctx.statuses.append)
+    ctx.persistence = SimpleNamespace(schedule_save=lambda _d: None)
+    ctx.widgets = SimpleNamespace(get_or_none=lambda _n: None)
+    return ctx
+
+
+def test_clear_crop_also_clears_the_scope():
+    """A scope left armed behind a cleared box silently narrows the next crop
+    the user draws — and would not survive a restart either, since the section
+    is dropped once there is no region to save."""
+    ctx = _full_ctx(wells={"A01"})
+    crop.clear_crop_region(ctx)
+    ds = ctx.state.dataset
+    assert ds.crop_region is None
+    assert (ds.crop_scope_wells, ds.crop_scope_fovs, ds.crop_scope_tps) == (
+        None, None, None)
+    assert "scope" in ctx.statuses[-1]
+
+
+def test_clear_crop_with_a_scope_but_no_region_is_not_a_no_op():
+    """Arming frames and then clearing must still disarm them, or the button
+    goes on advertising a scope the user just cleared."""
+    ctx = _full_ctx(wells={"A01"})
+    ctx.state.dataset.crop_region = None
+    crop.clear_crop_region(ctx)
+    assert ctx.state.dataset.crop_scope_wells is None
+    assert "nothing to clear" not in ctx.statuses[-1]

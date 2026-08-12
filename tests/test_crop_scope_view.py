@@ -142,13 +142,15 @@ def test_ticking_one_dropdown_arms_only_that_field(built):
     assert btn.text().startswith("Crop scope: 2 wells · all FOVs · all TPs")
 
 
-def test_arming_reprojects_crop_pass_immediately(built):
+def test_arming_reprojects_crop_pass_once_the_burst_settles(built):
     """Changing the scope changes which cells are excluded, exactly as moving
     the box would, so it takes the same recompute path rather than waiting for
-    the next cache miss."""
+    the next cache miss. It waits only for the run of ticks to finish —
+    closing the popover is the user saying they are done."""
     ctx, btn, _parent = built
     btn.menu().aboutToShow.emit()
     _dropdowns(btn)[0].setCheckedData(["A01"])
+    btn.menu().aboutToHide.emit()
     cache = ctx.state.dataset.cache
     assert list(cache["A01"]["Crop_Pass"]) == [1, 0]   # in scope: box applies
     assert list(cache["B02"]["Crop_Pass"]) == [1, 1]   # out of scope: untouched
@@ -192,4 +194,69 @@ def test_scope_change_without_a_box_says_so_rather_than_excluded_zero(qtbot):
     btn = build_crop_scope_control(ctx, parent)
     btn.menu().aboutToShow.emit()
     _dropdowns(btn)[0].setCheckedData(["A01"])
+    btn.menu().aboutToHide.emit()
     assert any("draw a crop rectangle" in s for s in ctx.statuses)
+
+
+# ── a burst of ticks is one recompute, not one per tick ──────────────────────
+def test_each_tick_writes_state_but_only_one_recompute_runs(built, monkeypatch):
+    """``CheckableDropdown`` emits ``changed`` once per item, and the crop's
+    re-derivation re-projects every cached well, redraws the plot and re-renders
+    the canvas. Ticking eleven wells one at a time ran eleven of those on the UI
+    thread. The state and the button still move on every tick."""
+    from well_viewer.features.preview import frame_scope_view
+
+    ctx, btn, _parent = built
+    calls: list[int] = []
+    monkeypatch.setattr(frame_scope_view, "apply_scope_change",
+                        lambda *_a, **_k: calls.append(1))
+    btn.menu().aboutToShow.emit()
+    wells_dd = _dropdowns(btn)[0]
+    for picked in (["A01"], ["A01", "B02"], ["A01", "B02", "C03"]):
+        wells_dd.setCheckedData(picked)
+    assert ctx.state.dataset.crop_scope_wells == {"A01", "B02", "C03"}
+    assert btn.text().startswith("Crop scope: all wells")   # 3 of 3
+    assert calls == []                                      # still settling
+    btn.menu().aboutToHide.emit()                           # closing flushes it
+    assert calls == [1]
+
+
+def test_closing_the_popover_with_nothing_pending_recomputes_nothing(built,
+                                                                     monkeypatch):
+    from well_viewer.features.preview import frame_scope_view
+
+    _ctx_, btn, _parent = built
+    calls: list[int] = []
+    monkeypatch.setattr(frame_scope_view, "apply_scope_change",
+                        lambda *_a, **_k: calls.append(1))
+    btn.menu().aboutToShow.emit()
+    btn.menu().aboutToHide.emit()
+    assert calls == []
+
+
+def test_plate_selection_leaves_the_effect_number_on_the_status_line(qtbot):
+    """``on_change`` reports how many cells the crop now excludes. Running it
+    before the "armed N wells" line left the user with the number-free half."""
+    ctx = _ctx(selected=("B02", "C03"))
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    btn = build_crop_scope_control(ctx, parent)
+    plate = next(b for b in btn.menu().findChildren(QPushButton)
+                 if b.text() == "Use plate selection")
+    plate.click()
+    assert "Crop scope updated" in ctx.statuses[-1]
+
+
+def test_scope_change_is_persisted(qtbot):
+    """The scope is part of what a saved crop means, so a change schedules the
+    same save the region does."""
+    saved: list[str] = []
+    ctx = _ctx()
+    ctx.persistence = SimpleNamespace(schedule_save=saved.append)
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    btn = build_crop_scope_control(ctx, parent)
+    btn.menu().aboutToShow.emit()
+    _dropdowns(btn)[0].setCheckedData(["A01"])
+    btn.menu().aboutToHide.emit()
+    assert "crop_region" in saved

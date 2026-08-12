@@ -100,3 +100,44 @@ def test_no_region_draws_nothing():
     rgb = _rgb()
     _draw_crop_outline(_ctx(region=None), rgb)
     assert rgb.any() == False  # noqa: E712 — asserting the array is untouched
+
+
+# ── the outline agrees with the verdict, not with a second token comparison ──
+def _ctx_with_rows(rows, **scope):
+    """A ctx whose well carries real rows, so the outline is judged the way the
+    ``Crop_Pass`` verdict judges them."""
+    import pandas as pd
+    df = pd.DataFrame(rows)
+    ctx = _ctx(**scope)
+    ctx.state.dataset.cache = {"A01": df}
+    ctx.state.dataset.well_paths = {"A01": "/tmp/A01.csv"}
+    ctx.state.dataset.fov_integrity = {}
+    return ctx
+
+
+def test_a_scope_holding_raw_tokens_still_draws_solid():
+    """The scope came off disk holding ``T24``/``001`` where the combos read
+    ``24``/``1``. The cells *are* being excluded, so a dashed outline would
+    understate a filter that is running."""
+    rows = {"shape_centroid_row": [1, 50], "shape_centroid_col": [1, 50],
+            "fov": ["1", "1"], "timepoint": ["24", "24"]}
+    ctx = _ctx_with_rows(rows, fovs={"001"}, tps={"T24"})
+    ctx.runtime.review_image.fov_menu = _Combo("1")
+    ctx.runtime.review_image.tp_cb = _Combo("24")
+    rgb = _rgb()
+    _draw_crop_outline(ctx, rgb)
+    assert _count(rgb, _IN_SCOPE) > 0
+    assert _count(rgb, _OUT_OF_SCOPE) == 0
+
+
+def test_a_frame_whose_rows_cannot_match_the_armed_timepoint_is_dashed():
+    """The timepoint picker offers a value from ``pipeline_info`` that the rows
+    do not carry, so no row of this frame can match it and the crop reaches
+    nothing here — a solid outline would state a filter that is not running."""
+    rows = {"shape_centroid_row": [1, 50], "shape_centroid_col": [1, 50],
+            "fov": ["1", "1"]}                      # no timepoint column
+    ctx = _ctx_with_rows(rows, tps={"0"})
+    rgb = _rgb()
+    _draw_crop_outline(ctx, rgb)
+    assert _count(rgb, _IN_SCOPE) == 0
+    assert _count(rgb, _OUT_OF_SCOPE) > 0

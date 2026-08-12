@@ -20,11 +20,12 @@ from __future__ import annotations
 
 from functools import partial
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QLabel, QPushButton, QWidget
 
 from well_viewer.core.frame_scope import (
-    ScopeSpec, current_frame, read_scope, refresh_scope_button, reset_scope,
-    scope_options, write_scope_field,
+    ScopeSpec, apply_scope_change, current_frame, read_scope,
+    refresh_scope_button, reset_scope, scope_options, write_scope_field,
 )
 from well_viewer.core.ui_helpers import make_popover_button
 from widgets.checkable_dropdown import CheckableDropdown
@@ -33,6 +34,16 @@ from widgets.checkable_dropdown import CheckableDropdown
 # caption label used to supply as a side effect of its own minimum width; the
 # alignment was worth keeping, the caption was not — see below.
 _FIELD_W = 190
+
+# How long a burst of ticks is allowed to run together before the spec's
+# ``on_change`` fires. A ``CheckableDropdown`` emits ``changed`` once per item,
+# and the crop's on_change re-projects ``Crop_Pass`` over every cached well,
+# redraws the active plot and re-renders the canvas — so ticking eleven wells
+# one at a time ran eleven full recomputes on the UI thread. The state and the
+# button still update on every tick; only the expensive half waits. Long enough
+# to swallow a run of clicks, short enough that letting go of the mouse and
+# looking at the plot behind the popover shows the new numbers.
+_COMMIT_DEBOUNCE_MS = 400
 
 
 def build_frame_scope_control(ctx, ctrl: QWidget, spec: ScopeSpec):
@@ -96,9 +107,32 @@ def build_frame_scope_control(ctx, ctrl: QWidget, spec: ScopeSpec):
             _seed(dropdown, opts or ([cur] if cur else []), arm, cur)
         refresh_scope_button(ctx, spec)
 
+    # The expensive half of a commit, coalesced across a burst of ticks. Parented
+    # to the popover so it dies with it — a timer outliving the panel would fire
+    # a redraw into a torn-down tab.
+    settle = QTimer(panel)
+    settle.setSingleShot(True)
+    settle.setInterval(_COMMIT_DEBOUNCE_MS)
+    settle.timeout.connect(lambda: apply_scope_change(ctx, spec))
+
     def _commit(index: int, dropdown: CheckableDropdown) -> None:
-        write_scope_field(ctx, spec, index, dropdown.checkedData())
+        """Write one field now; let the re-derivation settle.
+
+        ``write_scope_field`` is given no ``on_change`` here — the state write
+        and the button relabel are cheap and must land on every tick, while the
+        spec's re-derivation (for the crop: re-project every cached well,
+        redraw, re-render) waits for the burst to finish.
+        """
+        write_scope_field(ctx, spec, index, dropdown.checkedData(), apply=False)
         refresh_scope_button(ctx, spec)
+        if spec.on_change is not None:
+            settle.start()
+
+    def _flush() -> None:
+        """Apply a pending change immediately (the popover is closing)."""
+        if settle.isActive():
+            settle.stop()
+            apply_scope_change(ctx, spec)
 
     for _i, _dd in enumerate(dropdowns):
         _dd.changed.connect(partial(_commit, _i, _dd))
@@ -119,9 +153,14 @@ def build_frame_scope_control(ctx, ctrl: QWidget, spec: ScopeSpec):
         if not chosen:
             ctx.notify.set_status(spec.plate_status_empty)
             return
-        write_scope_field(ctx, spec, 0, chosen)
+        write_scope_field(ctx, spec, 0, chosen, apply=False)
         _repopulate()
+        # This message first, then the re-derivation, so the line the user is
+        # left with is the one carrying the numbers ("now excluding N of M").
+        # The button already reads back how many wells were armed.
         ctx.notify.set_status(spec.plate_status_ok.format(n=len(chosen)))
+        settle.stop()
+        apply_scope_change(ctx, spec)
 
     plate_btn.clicked.connect(lambda _=False: _use_plate_selection())
     lay.addWidget(plate_btn)
@@ -131,6 +170,7 @@ def build_frame_scope_control(ctx, ctrl: QWidget, spec: ScopeSpec):
     reset_btn.setToolTip(spec.reset_tooltip)
 
     def _reset() -> None:
+        settle.stop()
         reset_scope(ctx, spec)
         _repopulate()
         ctx.notify.set_status(spec.reset_status)
@@ -141,4 +181,7 @@ def build_frame_scope_control(ctx, ctrl: QWidget, spec: ScopeSpec):
     menu = btn.menu()
     if menu is not None:
         menu.aboutToShow.connect(_repopulate)
+        # Closing the popover is the user saying they are done ticking, so the
+        # pending re-derivation runs then rather than waiting out its timer.
+        menu.aboutToHide.connect(_flush)
     return btn

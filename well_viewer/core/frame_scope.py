@@ -203,4 +203,12 @@ def refresh_scope_button(ctx, spec: ScopeSpec) -> None:
     btn = ctx.widgets.get_or_none(spec.button_key)
     if btn is None:
         return
-    btn.setText(describe_scope(ctx, spec) + " ▾")
+    try:
+        btn.setText(describe_scope(ctx, spec) + " ▾")
+    except RuntimeError:
+        # The registry hands back a widget whose C++ half may already be gone
+        # (a tab torn down, the window closing). Relabelling is the least
+        # important thing a scope change does — it must not be the thing that
+        # stops the rest of it from running.
+        from well_viewer.core.safe import swallowed
+        swallowed()

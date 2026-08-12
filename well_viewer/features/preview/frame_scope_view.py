@@ -27,6 +27,7 @@ from well_viewer.core.frame_scope import (
     ScopeSpec, apply_scope_change, current_frame, read_scope,
     refresh_scope_button, reset_scope, scope_options, write_scope_field,
 )
+from well_viewer.core.safe import swallowed
 from well_viewer.core.ui_helpers import make_popover_button
 from widgets.checkable_dropdown import CheckableDropdown
 
@@ -113,7 +114,35 @@ def build_frame_scope_control(ctx, ctrl: QWidget, spec: ScopeSpec):
     settle = QTimer(panel)
     settle.setSingleShot(True)
     settle.setInterval(_COMMIT_DEBOUNCE_MS)
-    settle.timeout.connect(lambda: apply_scope_change(ctx, spec))
+    # Tracked here rather than by asking the timer, because the one moment this
+    # has to be right — the panel being destroyed — is the moment the timer is
+    # being destroyed too.
+    pending: list[bool] = [False]
+
+    def _apply_now() -> None:
+        pending[0] = False
+        apply_scope_change(ctx, spec)
+
+    settle.timeout.connect(_apply_now)
+
+    def _apply_on_teardown() -> None:
+        """Do not let a pending change die with the widget that scheduled it.
+
+        The state is already written and the button already relabelled, so
+        dropping this would leave the row cache projected against a scope the
+        user can see armed — silently, for the rest of the session. The teardown
+        is why ``crop.controller`` guards its redraw: the widgets it would
+        refresh may be gone, and its own ``swallowed()`` handling covers that.
+        """
+        if not pending[0]:
+            return
+        pending[0] = False
+        try:
+            apply_scope_change(ctx, spec)
+        except Exception:
+            swallowed()
+
+    panel.destroyed.connect(lambda *_a: _apply_on_teardown())
 
     def _commit(index: int, dropdown: CheckableDropdown) -> None:
         """Write one field now; let the re-derivation settle.
@@ -126,13 +155,14 @@ def build_frame_scope_control(ctx, ctrl: QWidget, spec: ScopeSpec):
         write_scope_field(ctx, spec, index, dropdown.checkedData(), apply=False)
         refresh_scope_button(ctx, spec)
         if spec.on_change is not None:
+            pending[0] = True
             settle.start()
 
     def _flush() -> None:
         """Apply a pending change immediately (the popover is closing)."""
-        if settle.isActive():
+        if pending[0]:
             settle.stop()
-            apply_scope_change(ctx, spec)
+            _apply_now()
 
     for _i, _dd in enumerate(dropdowns):
         _dd.changed.connect(partial(_commit, _i, _dd))
@@ -160,7 +190,7 @@ def build_frame_scope_control(ctx, ctrl: QWidget, spec: ScopeSpec):
         # The button already reads back how many wells were armed.
         ctx.notify.set_status(spec.plate_status_ok.format(n=len(chosen)))
         settle.stop()
-        apply_scope_change(ctx, spec)
+        _apply_now()
 
     plate_btn.clicked.connect(lambda _=False: _use_plate_selection())
     lay.addWidget(plate_btn)
@@ -171,6 +201,7 @@ def build_frame_scope_control(ctx, ctrl: QWidget, spec: ScopeSpec):
 
     def _reset() -> None:
         settle.stop()
+        pending[0] = False
         reset_scope(ctx, spec)
         _repopulate()
         ctx.notify.set_status(spec.reset_status)

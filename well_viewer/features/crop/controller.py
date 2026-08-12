@@ -202,10 +202,14 @@ def _on_crop_scope_changed(ctx) -> None:
     The scope decides which cells the crop excludes, so changing it changes
     every downstream number exactly as moving the box would — it takes the same
     recompute path, and says what it did.
+
+    Data first, chrome second. This can run from a teardown (a popover destroyed
+    with a tick still settling), where the button is gone; relabelling first
+    made the widget the gate on the re-projection ever happening.
     """
-    refresh_crop_scope_button(ctx)
     recompute_crop_all(ctx)
     _save_redraw_refresh(ctx)
+    refresh_crop_scope_button(ctx)
     if get_crop_region(ctx) is None:
         # Arming frames before drawing a box is a legitimate order of
         # operations, but "excluded 0 cells" would read as a broken crop.
@@ -270,7 +274,7 @@ def crop_covers_frame(ctx, well: str, fov, tp) -> bool:
     if not scope.is_armed:
         return True
     df = None
-    if well:
+    if well and well in ctx.state.dataset.well_paths:
         try:
             df = get_rows(ctx, well)
         except Exception:

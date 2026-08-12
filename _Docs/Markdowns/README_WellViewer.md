@@ -2106,9 +2106,11 @@ whole analysis, so its scope starts at *all frames* and you narrow it.
 
 Cells in frames outside the scope are left alone entirely — the crop neither
 includes nor excludes them, and they keep whatever inclusion state your curation
-and gating gave them. Changing the scope takes effect immediately: the status
-line reports how many cells the crop now excludes, so a scope that turns out to
-match nothing shows up as *excluding 0* rather than looking like a working crop.
+and gating gave them. Changing the scope takes effect as soon as you stop ticking — a run of ticks
+is applied together rather than one at a time, since each one re-filters every
+loaded well. The status line then reports how many cells the crop excludes, so a
+scope that turns out to match nothing shows up as *excluding 0* rather than
+looking like a working crop.
 On a frame the scope does not name, the crop outline is still drawn where the
 box sits, but **dashed and dimmed**, so you can see the rectangle without
 mistaking it for a filter that is running there.
@@ -2167,11 +2169,14 @@ channel for every well).
   appear as many times as you have renders for it.
 - **Cells the analysis has dropped are not drawn.** A cell you deleted on the
   Segmentation tab, one a crop excluded, one that failed the QC debris gate, and
-  one outside your gating all get no outline here and do not appear in the
-  **Mask** or **≥ threshold** views — the table shows the same population every
-  plot, statistic and export counts. The one place that still shows every
-  segmented cell is the pipeline's own **NUC+SEG** overlay channel, whose
-  boundaries are drawn into the saved image before All-Well ever sees it.
+  one outside your gating all get no outline when the table renders, and do not
+  appear in the **Mask** or **≥ threshold** views — the table shows the same
+  population every plot, statistic and export counts. A grid drawn *before* such
+  an edit does not repaint itself (re-rendering a plate is seconds of work): the
+  header cues **edited — press Generate**, and the grid is current again after
+  that. The one place that still shows every segmented cell is the pipeline's
+  own **NUC+SEG** overlay channel, whose boundaries are drawn into the saved
+  image before All-Well ever sees it.
 - **Colour cells** — in the **Mask** and **≥ threshold** views, give every cell its
   own colour instead of painting them all white. Two nuclei that touch are
   otherwise a single white shape, which is exactly the mistake you are looking at a

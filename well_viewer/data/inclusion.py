@@ -52,7 +52,7 @@ def _inclusion_version(ctx) -> int | None:
     return int(getattr(slice_, "override_version", 0))
 
 
-def _build_excluded_map(df) -> dict[tuple[str, str], frozenset]:
+def _build_excluded_map(df, well: str) -> dict[tuple[str, str], frozenset]:
     """``{(fov, tp): {nucleus ids the analysis drops}}`` for one well's rows."""
     import pandas as pd
 
@@ -64,9 +64,15 @@ def _build_excluded_map(df) -> dict[tuple[str, str], frozenset]:
     nid_col = resolve_identity_column(
         df, "nucleus_id", "nucleus id", "nucleusId", "nucleusID")
     if nid_col is None:
-        # Without ids there is no way to say *which* objects to drop. Say so:
-        # the view then draws every cell, which is what it did before, and the
-        # log names the well rather than leaving a silent mismatch.
+        # Without ids there is no way to say *which* objects to drop, so the
+        # view draws every cell — which is what it did before this module
+        # existed, and is wrong in a way only the log can report. Name the well:
+        # its images will disagree with its numbers for the whole session.
+        _logger.warning(
+            "inclusion: well %s has %d excluded cell(s) but no nucleus_id "
+            "column, so image views cannot filter them — its images will show "
+            "cells its plots do not count.", well, int((~mask).sum()),
+        )
         return {}
     fov_n, tp_n = frame_token_series(df)
     nids = pd.to_numeric(df[nid_col], errors="coerce")
@@ -94,6 +100,13 @@ def excluded_nids_by_frame(ctx, well: str) -> dict[tuple[str, str], frozenset]:
     ``load_well_csv`` result — so this guards a future one rather than a live
     bug.
     """
+    if well not in ctx.state.dataset.well_paths:
+        # A grid can name a well this dataset does not have (a restored layout,
+        # a stale picker). Asking ``get_rows`` for it raises, and this runs once
+        # per rendered cell — a plate-wide grid logged a traceback per cell.
+        # There is nothing to filter, so say it once, quietly.
+        _logger.debug("inclusion: well %r is not in this dataset", well)
+        return {}
     try:
         df = get_rows(ctx, well)
     except Exception:
@@ -108,7 +121,7 @@ def excluded_nids_by_frame(ctx, well: str) -> dict[tuple[str, str], frozenset]:
         cached = df.attrs.get(_ATTR)
         if cached is not None and cached[0] == (version, id(df)):
             return cached[1]
-    built = _build_excluded_map(df)
+    built = _build_excluded_map(df, well)
     if version is not None:
         df.attrs[_ATTR] = ((version, id(df)), built)
     return built
@@ -131,27 +144,28 @@ def drop_excluded_labels(labels, excluded):
     call — ``image_discovery``'s decode cache names that function as one of its
     copy-on-read consumers — and the caller is the render pass that asked for it.
 
-    Membership goes through a lookup table indexed by label rather than
-    ``np.isin``: a mask is a few million pixels and this runs once per rendered
-    cell, and one indexing pass is several times cheaper than a sort-or-hash
-    over the whole array. It also makes the id range explicit — an id that the
-    array's own dtype cannot represent is dropped from the query instead of
-    being wrapped into some other cell's label, which is a way to blank the
-    wrong cell's pixels.
+    The query is built at 64-bit width and clipped to the ids the array
+    actually holds, rather than cast to the array's own dtype: casting wrapped
+    an id larger than ``int32`` into a negative one, silently, and a wrapped
+    value colliding with a live label blanks the wrong cell's pixels. Narrowing
+    it to the ids present also lets a scope naming thousands of excluded cells
+    query only the ones this frame could contain.
+
+    A non-integer label array is returned untouched — there are no ids to match
+    in a float image, and guessing at a cast is how a render silently loses
+    cells. A read-only array is copied rather than written through.
     """
     if labels is None or not excluded:
         return labels
     import numpy as np
     arr = np.asarray(labels)
-    if arr.size == 0:
+    if arr.size == 0 or arr.dtype.kind not in "iu":
         return labels
     hi = int(arr.max(initial=0))
     wanted = [n for n in (int(v) for v in excluded) if 0 < n <= hi]
     if not wanted:
         return arr
-    drop = np.zeros(hi + 1, dtype=bool)
-    drop[wanted] = True
-    # Negative labels are not a thing a segmentation mask carries, but an
-    # unsigned index would wrap one into the table if it were.
-    arr[drop[np.clip(arr, 0, hi)] & (arr > 0)] = 0
+    if not arr.flags.writeable:
+        arr = arr.copy()
+    arr[np.isin(arr, np.asarray(wanted, dtype=np.int64))] = 0
     return arr

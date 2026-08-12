@@ -260,3 +260,23 @@ def test_scope_change_is_persisted(qtbot):
     _dropdowns(btn)[0].setCheckedData(["A01"])
     btn.menu().aboutToHide.emit()
     assert "crop_region" in saved
+
+
+def test_a_pending_change_is_not_lost_when_the_popover_is_destroyed(qtbot):
+    """The state is written and the button relabelled on the tick; dropping the
+    deferred half would leave the row cache projected against a scope the user
+    can see armed, silently, for the rest of the session."""
+    ctx = _ctx()
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    btn = build_crop_scope_control(ctx, parent)
+    btn.menu().aboutToShow.emit()
+    _dropdowns(btn)[0].setCheckedData(["A01"])
+    assert "Crop_Pass" not in ctx.state.dataset.cache["A01"].columns
+
+    from PySide6.QtCore import QCoreApplication, QEvent
+    parent.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+    assert list(ctx.state.dataset.cache["A01"]["Crop_Pass"]) == [1, 0]
+    assert list(ctx.state.dataset.cache["B02"]["Crop_Pass"]) == [1, 1]

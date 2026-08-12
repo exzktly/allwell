@@ -69,6 +69,34 @@ class FrameScope(NamedTuple):
         return not (self.wells is None and self.fovs is None and self.tps is None)
 
 
+# Where a frame's normalised (fov, tp) token pair is memoised on the frame
+# itself. The tokens are a pure function of two columns the loader writes once
+# and nothing afterwards touches, so the only invalidation this needs is the
+# frame's own identity and length — and it dies with the frame.
+_TOKENS_ATTR = "_aw_frame_tokens"
+
+
+def _frame_tokens(df):
+    """Normalised ``(fov, tp)`` Series for *df*, computed once per frame.
+
+    The normalisation is per row and in Python, which makes it the dominant
+    cost of every scope question: ~430 ms on a 200k-row well. Both the row
+    verdict and the outline's frame test ask it, on the projection path and on
+    every canvas redraw respectively, so it is memoised rather than repeated.
+    """
+    from well_viewer.data.image_identity import frame_token_series
+    key = (id(df), len(df))
+    try:
+        cached = df.attrs.get(_TOKENS_ATTR)
+        if cached is not None and cached[0] == key:
+            return cached[1], cached[2]
+    except AttributeError:      # not a DataFrame — let the caller's use fail
+        return frame_token_series(df)
+    fov_n, tp_n = frame_token_series(df)
+    df.attrs[_TOKENS_ATTR] = (key, fov_n, tp_n)
+    return fov_n, tp_n
+
+
 def rows_in_scope(df, scope: FrameScope | None, well: str | None = None):
     """Boolean Series — ``True`` where the row's frame is inside *scope*.
 
@@ -97,10 +125,8 @@ def rows_in_scope(df, scope: FrameScope | None, well: str | None = None):
     if scope.fovs is None and scope.tps is None:
         return pd.Series(True, index=df.index, dtype=bool)
 
-    from well_viewer.data.image_identity import (
-        frame_token_series, normalize_fov, normalize_tp,
-    )
-    fov_n, tp_n = frame_token_series(df)
+    from well_viewer.data.image_identity import normalize_fov, normalize_tp
+    fov_n, tp_n = _frame_tokens(df)
     inside = pd.Series(True, index=df.index, dtype=bool)
     # The armed tokens are normalised here as well as where they are picked: a
     # scope can arrive from ``persistence.json`` written by an older session, and
@@ -136,18 +162,31 @@ def frame_in_scope(df, scope: FrameScope | None, well: str | None,
         if str(well or "").strip() not in {str(w).strip() for w in scope.wells}:
             return False
 
-    from well_viewer.data.image_identity import (
-        frame_token_series, normalize_fov, normalize_tp,
-    )
+    if scope.fovs is None and scope.tps is None:
+        # A well-only scope is decided by the well, which is already checked.
+        # Worth its own branch: the row scan below costs a per-row token
+        # normalisation, and this runs on every canvas redraw.
+        return True
+
+    from well_viewer.data.image_identity import normalize_fov, normalize_tp
     want_fov, want_tp = normalize_fov(fov), normalize_tp(tp)
     if df is not None and len(df) > 0:
-        fov_n, tp_n = frame_token_series(df)
+        # One token pass, shared between locating the frame and judging it —
+        # calling ``rows_in_scope`` here instead would normalise every row a
+        # second time, and this is on the redraw path.
+        fov_n, tp_n = _frame_tokens(df)
         here = (fov_n == want_fov) & (tp_n == want_tp)
         if not bool(here.any()):
             # The well has rows and none of them belongs to this frame — the
             # crop can reach nothing here even if the tokens look armed.
             return False
-        return bool((here & rows_in_scope(df, scope, well)).any())
+        if scope.fovs is not None and want_fov not in {
+                normalize_fov(f) for f in scope.fovs}:
+            return False
+        if scope.tps is not None and want_tp not in {
+                normalize_tp(t) for t in scope.tps}:
+            return False
+        return True
     # No rows at all — judge the tokens themselves.
     if scope.fovs is not None and want_fov not in {
             normalize_fov(f) for f in scope.fovs}:

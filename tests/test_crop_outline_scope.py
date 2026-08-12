@@ -35,11 +35,28 @@ class _Combo:
         return self._text
 
 
+def _rows():
+    """Two cells in each of the well's two frames — (fov 1, t=0) and (fov 1,
+    t=24). The scope is judged against these, so a ctx without them would send
+    every test down the no-rows fallback and prove nothing about the path the
+    outline actually takes."""
+    import pandas as pd
+    return pd.DataFrame({
+        "shape_centroid_row": [20, 80, 20, 80],
+        "shape_centroid_col": [20, 80, 20, 80],
+        "fov": ["1", "1", "1", "1"],
+        "timepoint": ["0", "0", "24", "24"],
+    })
+
+
 def _ctx(*, well="A01", fov="1", tp="0", region=(10, 10, 90, 90), **scope):
     return SimpleNamespace(
         state=SimpleNamespace(
             preview=SimpleNamespace(selected_well=well),
             dataset=SimpleNamespace(
+                cache={"A01": _rows()},
+                well_paths={"A01": "/tmp/A01.csv"},
+                fov_integrity={},
                 crop_region=region,
                 crop_scope_wells=scope.get("wells"),
                 crop_scope_fovs=scope.get("fovs"),
@@ -110,8 +127,6 @@ def _ctx_with_rows(rows, **scope):
     df = pd.DataFrame(rows)
     ctx = _ctx(**scope)
     ctx.state.dataset.cache = {"A01": df}
-    ctx.state.dataset.well_paths = {"A01": "/tmp/A01.csv"}
-    ctx.state.dataset.fov_integrity = {}
     return ctx
 
 

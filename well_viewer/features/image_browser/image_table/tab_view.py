@@ -53,7 +53,8 @@ from well_viewer.features.image_browser.image_table.build_layout import (
     image_table_reset_on_dataset_load,
 )
 from well_viewer.features.image_browser.image_table.builder_view import (
-    build_shelf, builder_notify_rendered, builder_flush_pending,
+    build_shelf, builder_mark_inclusion_stale, builder_notify_rendered,
+    builder_flush_pending,
 )
 from well_viewer.features.image_browser.image_table.export import (
     GALLERY_QUALITY_LABELS,
@@ -300,6 +301,11 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # persistence/reset_scopes.py never names the Image Table (and no-ops when
     # this lazy tab was never built).
     _it.reset_cb = lambda: image_table_reset_on_dataset_load(ctx)
+    # The grid draws only the cells the analysis counts, and it draws them once.
+    # This stamp is how an inclusion edit made elsewhere (a Segmentation delete,
+    # a crop, a QC or gating change) reaches the header cue without core naming
+    # this feature — same idiom as ``reset_cb`` above and ``qc.changed_cb``.
+    _it.inclusion_changed_cb = lambda: builder_mark_inclusion_stale(ctx)
     # Shared square-region crop helper. on_change re-runs Generate so the
     # rendered grid follows mode toggles and crop changes automatically.
     if _it.crop_tool is None:

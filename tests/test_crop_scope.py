@@ -210,3 +210,52 @@ def test_clear_crop_with_a_scope_but_no_region_is_not_a_no_op():
     crop.clear_crop_region(ctx)
     assert ctx.state.dataset.crop_scope_wells is None
     assert "nothing to clear" not in ctx.statuses[-1]
+
+
+# ── the token memo ───────────────────────────────────────────────────────────
+def test_frame_tokens_are_computed_once_per_frame(monkeypatch):
+    """Normalising a well's tokens is the dominant cost of every scope question
+    — ~430 ms on a 200k-row well — and both the row verdict and the outline's
+    frame test ask it, the latter on every canvas redraw."""
+    from well_viewer.data import image_identity
+    from well_viewer.features.crop import region as region_mod
+
+    calls: list[int] = []
+    real = image_identity.frame_token_series
+    monkeypatch.setattr(image_identity, "frame_token_series",
+                        lambda df: (calls.append(1), real(df))[1])
+
+    df = _df([1, 50], [1, 50], fovs=["1", "1"], tps=["24", "24"])
+    scope = FrameScope(tps=frozenset({"24"}))
+    for _ in range(3):
+        region_mod.frame_in_scope(df, scope, "A01", "1", "24")
+        rows_in_scope(df, scope, "A01")
+    assert calls == [1]
+
+
+def test_a_copied_frame_does_not_inherit_the_token_memo():
+    """``df.attrs`` travels through ``df.copy()``; the key carries the frame's
+    identity so a copy recomputes rather than reading another frame's tokens."""
+    from well_viewer.features.crop import region as region_mod
+
+    df = _df([1, 50], [1, 50], fovs=["1", "1"], tps=["24", "24"])
+    region_mod._frame_tokens(df)
+    other = df.copy()
+    other["fov"] = ["9", "9"]
+    fov_n, _tp_n = region_mod._frame_tokens(other)
+    assert list(fov_n) == ["9", "9"]
+
+
+def test_a_well_only_scope_needs_no_token_pass(monkeypatch):
+    """The commonest scoping — a few wells, all FOVs and timepoints — is decided
+    by the well alone, and this runs on every canvas redraw."""
+    from well_viewer.data import image_identity
+    from well_viewer.features.crop import region as region_mod
+
+    monkeypatch.setattr(
+        image_identity, "frame_token_series",
+        lambda df: pytest.fail("token pass ran for a well-only scope"))
+    df = _df([1, 50], [1, 50], fovs=["1", "1"], tps=["24", "24"])
+    scope = FrameScope(wells=frozenset({"A01"}))
+    assert region_mod.frame_in_scope(df, scope, "A01", "1", "24") is True
+    assert list(rows_in_scope(df, scope, "A01")) == [True, True]

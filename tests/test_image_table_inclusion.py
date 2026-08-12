@@ -198,3 +198,87 @@ def test_an_id_the_label_dtype_cannot_hold_is_dropped_from_the_query():
 def test_ids_absent_from_the_frame_change_nothing():
     labels = np.array([[1, 2]], dtype=np.int32)
     assert drop_excluded_labels(labels, frozenset({99})).tolist() == [[1, 2]]
+
+
+def test_a_well_this_dataset_does_not_have_is_quiet(caplog):
+    """This runs once per rendered cell. Letting ``get_rows`` raise for a well
+    a restored layout still names logged a full traceback per cell — 96 of them
+    for a plate grid — for a condition with nothing to report."""
+    ctx = _ctx({"A01": _df([(1, "1", "0", 1, 1, 1)])})
+    with caplog.at_level("DEBUG", logger="well_viewer"):
+        assert excluded_nids_for_frame(ctx, "Z99", "1", "0") == frozenset()
+    assert not [r for r in caplog.records if r.levelname in ("WARNING", "ERROR")]
+
+
+def test_a_well_with_exclusions_but_no_nucleus_ids_says_so(caplog):
+    """Nothing can be filtered without ids, so that well's images will show
+    cells its plots do not count — which only the log can report."""
+    df = pd.DataFrame({"fov": ["1", "1"], "timepoint": ["0", "0"],
+                       "Included": [1, 0]})
+    ctx = _ctx({"A01": df})
+    with caplog.at_level("WARNING", logger="well_viewer"):
+        assert excluded_nids_for_frame(ctx, "A01", "1", "0") == frozenset()
+    assert any("no nucleus_id" in r.getMessage() and "A01" in r.getMessage()
+               for r in caplog.records)
+
+
+def test_a_float_label_array_is_left_alone():
+    """There are no ids to match in a float image, and guessing at a cast is
+    how a render silently loses cells."""
+    labels = np.array([[1.0, 2.0]], dtype=np.float32)
+    assert drop_excluded_labels(labels, frozenset({2})) is labels
+
+
+def test_a_read_only_label_array_is_copied_not_written_through():
+    labels = np.array([[1, 2]], dtype=np.int32)
+    labels.setflags(write=False)
+    out = drop_excluded_labels(labels, frozenset({2}))
+    assert out.tolist() == [[1, 0]]
+    assert labels.tolist() == [[1, 2]]
+
+
+# ── an already-drawn grid says it is out of date ─────────────────────────────
+def test_an_inclusion_edit_cues_a_generate_on_a_drawn_grid():
+    """The grid draws only the counted cells, but it draws them once. Without
+    this cue a deleted cell keeps its outline in an already-rendered table and
+    the tab agrees with the plots only if the user happens to press Generate —
+    the "degraded output indistinguishable from good output" failure this whole
+    change is about."""
+    from well_viewer.core.selection_controller import invalidate_stats_cache
+
+    marked: list[int] = []
+    review_image = SimpleNamespace(override_version=0)
+    ctx = SimpleNamespace(
+        state=SimpleNamespace(
+            stats_cache=SimpleNamespace(invalidate=lambda: None),
+            plot=SimpleNamespace(use_fov_replicates=False),
+            feature_slice=lambda name: (
+                review_image if name == "review_image" else None),
+        ),
+        widgets=SimpleNamespace(get_or_none=lambda _n: None),
+        runtime=SimpleNamespace(
+            fov=SimpleNamespace(btns=[], observers=[]),
+            image_table=SimpleNamespace(
+                inclusion_changed_cb=lambda: marked.append(1)),
+        ),
+    )
+    invalidate_stats_cache(ctx)
+    assert marked == [1]
+    assert review_image.override_version == 1
+
+
+def test_the_cue_is_a_no_op_when_the_image_table_was_never_built():
+    from well_viewer.core.selection_controller import invalidate_stats_cache
+
+    ctx = SimpleNamespace(
+        state=SimpleNamespace(
+            stats_cache=SimpleNamespace(invalidate=lambda: None),
+            plot=SimpleNamespace(use_fov_replicates=False),
+            feature_slice=lambda _n: None,
+        ),
+        widgets=SimpleNamespace(get_or_none=lambda _n: None),
+        runtime=SimpleNamespace(
+            fov=SimpleNamespace(btns=[], observers=[]),
+            image_table=SimpleNamespace(inclusion_changed_cb=None)),
+    )
+    invalidate_stats_cache(ctx)   # must not raise

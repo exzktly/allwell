@@ -394,6 +394,27 @@ def _edit(ctx) -> None:
     _schedule_apply(ctx)
 
 
+def builder_mark_inclusion_stale(ctx) -> None:
+    """Cue a Generate after the inclusion layers changed under a drawn grid.
+
+    The grid draws only the cells the analysis counts, but it draws them once:
+    a cell deleted on the Segmentation tab, or excluded by a crop, keeps its
+    outline in an already-rendered table until the next Generate. Re-rendering
+    here instead would be worse — a plate-wide grid is seconds of decoding, and
+    an inclusion edit is something a user does in runs of ten — so the table
+    says it is out of date rather than quietly disagreeing with every plot.
+
+    Only ever a cue: nothing about the layout changed, so unlike a shelf edit
+    this schedules no re-apply. No-op when the tab was never built.
+    """
+    rt = _rt(ctx)
+    if getattr(rt, "cells", None) is None:
+        return
+    rt.builder_dirty = True
+    if getattr(rt, "rows_zone_body", None) is not None:
+        _refresh_shape(ctx, builder_spec(ctx))
+
+
 def builder_notify_rendered(ctx) -> None:
     """Clear the "edited — press Generate" cue once the table has rendered. Called
     from the Generate action so the header reflects that the grid is now current."""

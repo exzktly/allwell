@@ -55,10 +55,14 @@ def test_effect_no_centroids_fails_open():
 
 
 # ── aggregation over the cache ────────────────────────────────────────────────
-def _app(cache, region):
+def _app(cache, region, **scope):
     app = SimpleNamespace(
         _app_state=SimpleNamespace(
-            dataset=SimpleNamespace(cache=cache, crop_region=region)))
+            dataset=SimpleNamespace(
+                cache=cache, crop_region=region,
+                crop_scope_wells=scope.get("wells"),
+                crop_scope_fovs=scope.get("fovs"),
+                crop_scope_tps=scope.get("tps"))))
     # _crop_effect_counts reads the region through get_crop_region(ctx) (R1).
     app._ctx = SimpleNamespace(state=app._app_state, app=app)
     return app
@@ -72,6 +76,18 @@ def test_counts_aggregate_over_loaded_wells():
     app = _app(cache, (0, 0, 8, 12))
     removed, total_incl, has_centroids, n_wells = crop._crop_effect_counts(app._ctx)
     assert (removed, total_incl, has_centroids, n_wells) == (2, 4, True, 2)
+
+
+def test_counts_ignore_wells_outside_the_crop_scope():
+    """A scoped crop must not be reported as removing cells from wells it does
+    not touch — the count is what the user reads to decide the crop worked."""
+    cache = {
+        "A01": _df([2, 10], [3, 15]),   # in scope: 1 inside, 1 outside
+        "A02": _df([4, 12], [6, 18]),   # out of scope: untouched
+    }
+    app = _app(cache, (0, 0, 8, 12), wells={"A01"})
+    removed, total_incl, has_centroids, n_wells = crop._crop_effect_counts(app._ctx)
+    assert (removed, total_incl, n_wells) == (1, 4, 2)
 
 
 def test_counts_flag_missing_centroids_dataset_wide():

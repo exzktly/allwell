@@ -496,6 +496,12 @@ def _loaded_image_browser(ctx) -> None:
             refresh_delete_scope_button,
         )
         refresh_delete_scope_button(ctx)
+    # The crop's scope is the other half of the same control. It is *not*
+    # disarmed here — it is persisted with the crop region and hydrated from the
+    # new dataset's persistence.json earlier in the load — but the button still
+    # has to be relabelled, or it goes on advertising the previous plate's scope.
+    from well_viewer.features.crop.controller import refresh_crop_scope_button
+    refresh_crop_scope_button(ctx)
     pv = ctx.state.feature_slice("preview")
     if pv is not None:
         pv.clear_caches()

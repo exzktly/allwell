@@ -57,8 +57,12 @@ def project_verdict_column(
 
     The walk every inclusion-verdict projector performs: with *label* given,
     only that well; otherwise every cached well. Empty and missing frames are
-    skipped. *verdict* is a ``(df) -> Series`` returning the per-row 0/1
-    decision, cast to int here so callers need not.
+    skipped. *verdict* is a ``(df, well_label) -> Series`` returning the per-row
+    0/1 decision, cast to int here so callers need not. The label is passed
+    because a verdict can be scoped to particular wells (the crop's
+    :class:`~well_viewer.features.crop.region.FrameScope`) and the frame itself
+    need not carry a well column — this walk is the only place that knows which
+    well each cached frame belongs to.
 
     A projector must never take down the data path, so a frame whose columns
     ``verdict`` cannot read is logged against *layer* and stepped over rather
@@ -73,7 +77,7 @@ def project_verdict_column(
         if df is None or df.empty:
             continue
         try:
-            df[column] = verdict(df).astype(int)
+            df[column] = verdict(df, lbl).astype(int)
         except Exception:
             _logger.exception(
                 "%s: failed to compute %s for well %s", layer, column, lbl)

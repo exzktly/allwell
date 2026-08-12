@@ -85,10 +85,14 @@ def test_df_included_mask_three_way_and():
 
 
 # ── controller projection ─────────────────────────────────────────────────────
-def _fake_app(cache, region=None):
+def _fake_app(cache, region=None, **scope):
     app = SimpleNamespace(
         _app_state=SimpleNamespace(
-            dataset=SimpleNamespace(cache=cache, crop_region=region)))
+            dataset=SimpleNamespace(
+                cache=cache, crop_region=region,
+                crop_scope_wells=scope.get("wells"),
+                crop_scope_fovs=scope.get("fovs"),
+                crop_scope_tps=scope.get("tps"))))
     # The crop projector takes ``ctx`` (R1); a minimal ctx over the same state.
     app._ctx = SimpleNamespace(state=app._app_state, app=app)
     return app

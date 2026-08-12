@@ -2022,8 +2022,9 @@ reviewing and curating individual cells.
   inclusion; **Delete Cell** turns the canvas into a delete tool, where a click
   drops one cell and a dragged rectangle drops every cell inside it (see
   *Deleting a region across the plate* below); **draw a crop rectangle** to keep
-  only cells whose centroid is inside it (applied dataset-wide across every
-  FOV/timepoint/channel/well),
+  only cells whose centroid is inside it (applied across every
+  FOV/timepoint/channel/well by default, or only the frames **Crop scope ▾**
+  names — see *Scoping the crop to particular frames* below),
   with **Reset** to restore every cell and **Clear crop** to remove just the
   box; click-drag to pan and scroll to zoom (zoom is kept when you switch
   wells). **Zoom controls** sit on the control row — **−** and **+** step
@@ -2039,7 +2040,8 @@ reviewing and curating individual cells.
   export honours. A cell counts only when it is manually **kept** *and* it
   passes QC. Overrides persist to `cell_overrides.json` next to the CSVs.
 - **Optimal use** — exclude a well's edge artifacts in one gesture with the
-  crop rectangle; click away obvious mis-segmentations.
+  crop rectangle, narrowing **Crop scope ▾** to the wells that need it; click
+  away obvious mis-segmentations.
 
 ##### Deleting a region across the plate
 
@@ -2080,6 +2082,41 @@ A wide scope takes a few seconds: the app reads every scoped well's data and
 re-applies your curation across it, with the cursor showing busy while it does.
 A plate-wide drag over roughly 300,000 cells takes about two and a half seconds
 on a warm dataset, longer if the wells have not been read yet.
+
+##### Scoping the crop to particular frames
+
+The crop rectangle filters **every frame in the dataset** unless you say
+otherwise, which is right for an artifact that sits in the same place
+everywhere — an objective vignette, a consistently bad image edge. It is wrong
+when only some wells need clipping: cropping the whole plate to fix two of them
+throws away good cells in all the others.
+
+**Crop scope ▾**, next to the Crop cells button, is the same control as **Delete
+scope ▾** and works the same way — tick the wells, FOVs and timepoints the crop
+should apply to, use **Use plate selection** to arm the wells you have selected
+on the plate, and read the armed scope straight off the button (*Crop scope: all
+frames*, or *Crop scope: 2 wells · all FOVs · 1 TP*). A field you never touch
+keeps meaning **all** of that field, so narrowing by well leaves every FOV and
+timepoint of those wells cropped. **Reset to all frames** widens it back.
+
+The one difference from the delete's scope is the default, and it follows from
+what each control does. A drag-delete is one gesture on one frame, so its scope
+starts at *this frame* and you widen it. A crop is a standing filter on the
+whole analysis, so its scope starts at *all frames* and you narrow it.
+
+Cells in frames outside the scope are left alone entirely — the crop neither
+includes nor excludes them, and they keep whatever inclusion state your curation
+and gating gave them. Changing the scope takes effect immediately: the status
+line reports how many cells the crop now excludes, so a scope that turns out to
+match nothing shows up as *excluding 0* rather than looking like a working crop.
+On a frame the scope does not name, the crop outline is still drawn where the
+box sits, but **dashed and dimmed**, so you can see the rectangle without
+mistaking it for a filter that is running there.
+
+The scope is saved with the crop, in `persistence.json`, and reloads with the
+dataset — a two-well crop stays a two-well crop across sessions. **Edit ▾ →
+Reset crop + curation** clears the scope along with the box, and loading a
+different dataset starts fresh.
 
 #### Image Table
 

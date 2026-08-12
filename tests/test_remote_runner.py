@@ -808,9 +808,16 @@ def _make_spawn_test_runner(host, tmp_path, monkeypatch, *, completed_remote_wel
         DatasetCache, "_ssh_script",
         lambda self, script, *, check: MagicMock(stdout="", returncode=0),
     )
+    # One key from both entry points. ``spawn`` derives the remote paths from
+    # ``cache_key`` before the upload starts (so the allocation can be asked
+    # for first) and checks that the upload landed under the same key — a fake
+    # that answers differently describes a run whose bytes went somewhere the
+    # pipeline would never look.
+    _KEY = "cachekey" + "0" * 24
+    monkeypatch.setattr(DatasetCache, "cache_key", lambda self, zipped: _KEY)
     monkeypatch.setattr(
         DatasetCache, "ensure_uploaded",
-        lambda self, zipped, **kw: ("cachekey" + "0" * 24, 0, 0.01),
+        lambda self, zipped, **kw: (_KEY, 0, 0.01),
     )
     monkeypatch.setattr(
         RemoteRunner, "sync_required_files",

@@ -2243,6 +2243,49 @@ def _scheduler_handoff_lines(launcher: str, *, batch: int | None = None) -> str:
     )
 
 
+# Written into the run directory once every byte of the plate has landed. The
+# scheduled job waits for it before starting the pipeline, which is what lets
+# the allocation be requested *while* the upload is still running instead of
+# after it: on a busy cluster the queue wait and the transfer then overlap
+# instead of running end to end.
+UPLOAD_SENTINEL = ".aw_upload_complete"
+
+# How long a granted allocation will wait for that file before giving up. The
+# node is idle and billed for every second of it, so this is a backstop against
+# a dead uploader holding a node, not a budget to be spent — a healthy upload
+# writes the sentinel as soon as rsync returns. Exit code is distinct so the
+# failure reads as "the upload never finished", not as a pipeline crash.
+UPLOAD_WAIT_TIMEOUT_S = 7200
+UPLOAD_WAIT_POLL_S = 3
+_UPLOAD_WAIT_EXIT = 75
+
+
+def _wait_for_upload_snippet(sentinel: str) -> str:
+    """Shell that blocks until *sentinel* exists, or gives the node back.
+
+    Runs **inside** the allocation, so its output reaches the user on the same
+    stdout as the rest of the run. Announcing both edges matters: a job that
+    has been granted a node but is waiting on bytes looks exactly like a job
+    that has hung, and the whole point of asking for the node early is that
+    this window is expected.
+    """
+    sentinel_q = _remote_quote(sentinel)
+    waited = int(UPLOAD_WAIT_TIMEOUT_S // UPLOAD_WAIT_POLL_S)
+    return (
+        f'if [ ! -f {sentinel_q} ]; then '
+        f'echo "[remote] scheduler: node granted; waiting for the upload to '
+        f'finish before starting the pipeline…"; fi; '
+        f'_aw_w=0; '
+        f'while [ ! -f {sentinel_q} ]; do '
+        f'_aw_w=$((_aw_w+1)); '
+        f'if [ "$_aw_w" -gt {waited} ]; then '
+        f'echo "[remote] ERROR the upload never completed — giving the node '
+        f'back after {UPLOAD_WAIT_TIMEOUT_S}s"; exit {_UPLOAD_WAIT_EXIT}; fi; '
+        f'sleep {UPLOAD_WAIT_POLL_S}; done; '
+        f'echo "[remote] scheduler: input is complete — starting the pipeline"; '
+    )
+
+
 def _compose_remote_cmd(
     launcher: str,
     remote_pidfile: str,
@@ -2250,6 +2293,7 @@ def _compose_remote_cmd(
     *,
     cache_hit: bool,
     env_selector: EnvSelector = DEFAULT_ENV_SELECTOR,
+    upload_sentinel: str = "",
 ) -> str:
     """Build the bash command string ssh runs on the remote login node.
 
@@ -2305,6 +2349,11 @@ def _compose_remote_cmd(
     # only prints once the scheduler has granted a node — it streams back over
     # the same ssh stdout and is the user's "queue wait over, now running on
     # <node>" signal, naming the job id and partition for diagnosis.
+    # The wait goes first, before conda and before the pipeline: the job may
+    # have been granted its node while the plate was still uploading, which is
+    # the point of requesting it early.
+    wait_snippet = (_wait_for_upload_snippet(upload_sentinel)
+                    if upload_sentinel else "")
     inner = (
         f"{_CONDA_ACTIVATE_SNIPPET}; "
         f"{guard}"
@@ -2312,6 +2361,7 @@ def _compose_remote_cmd(
         f'echo "[remote] scheduler: allocation granted — job ${{SLURM_JOB_ID:-?}} '
         f'on ${{SLURMD_NODENAME:-$(hostname)}} '
         f'(partition ${{SLURM_JOB_PARTITION:-?}})"; '
+        f"{wait_snippet}"
         f"exec {_remote_join(remote_argv)}"
     )
     # shlex.split→join normalises whitespace AND re-quotes any token with
@@ -5223,10 +5273,11 @@ class RemoteRunner:
         # and batched paths). Cheap — ~300 KB of source plus rsync's
         # delta-skip when nothing changed.
 
-        # Upload.
-        key, sent, elapsed = self._cache.ensure_uploaded(
-            zipped, log_fn=log, progress_fn=progress_fn, stop_event=stop_event
-        )
+        # The cache key is a local computation over the input archives, so the
+        # remote paths — and therefore the run directory the scheduled job will
+        # wait in — are known before a single byte moves. That is what lets the
+        # allocation be asked for first; see the upload below.
+        key = self._cache.cache_key(zipped)
 
         # v5.2.25: deterministic run_id keyed on the input cache_key
         # + pipeline-args hash, so re-running the same input with the
@@ -5241,11 +5292,21 @@ class RemoteRunner:
         remote_input = self._cache.remote_dataset_dir(key)
         remote_output = f"{self.host.remote_staging_dir}/runs/{run_id}/out"
         remote_pidfile = f"{self.host.remote_staging_dir}/runs/{run_id}/run.pid"
+        remote_sentinel = (
+            f"{self.host.remote_staging_dir}/runs/{run_id}/{UPLOAD_SENTINEL}")
 
+        # The sentinel is cleared with the same call that makes the directory:
+        # ``run_id`` is deterministic in (input, arguments), so a re-run lands
+        # in the directory the last one used and would otherwise find that
+        # run's "upload finished" flag already waiting for it.
         self._cache._ssh_run(  # short-circuit reuse of ssh helper
             ["mkdir", "-p", remote_output],
             check=True,
         )
+        # Two calls rather than one shell line: ``_remote_join`` quotes every
+        # token, so an ``&&`` between them would reach the remote as a
+        # directory named "&&" instead of as an operator.
+        self._cache._ssh_run(["rm", "-f", remote_sentinel], check=False)
 
         _force, _forced_wells = _forced_from_argv(pipeline_argv)
         self._run = _RemoteRun(
@@ -5351,12 +5412,20 @@ class RemoteRunner:
         # the login/"lobby" node we ssh into — see _compose_remote_cmd.
         # A cache hit short-circuits to a ``true`` no-op, which must NOT
         # consume a compute allocation, so the launcher is skipped there.
+        # **Ask for the node before sending the data**, so a queue wait and the
+        # transfer overlap instead of running end to end. Only where there is
+        # something to queue *for*: a host with no launcher runs on the login
+        # node the moment ssh connects, and a cache hit runs ``true``, so both
+        # must keep the old order or the pipeline would start against an input
+        # directory that is still filling.
+        overlap = bool(self.host.compute_launcher.strip()) and not cache_hit
         remote_cmd = _compose_remote_cmd(
             self.host.compute_launcher,
             remote_pidfile,
             remote_argv,
             cache_hit=cache_hit,
             env_selector=self.env_selector,
+            upload_sentinel=remote_sentinel if overlap else "",
         )
         ssh_argv = self.host.ssh_argv(allocate_tty=True) + [remote_cmd]
 
@@ -5368,8 +5437,7 @@ class RemoteRunner:
         if self._env_warning:
             log(f"[remote] warn: {self._env_warning}\n")
         log(
-            f"[remote] run_id={run_id}  cache_key={key[:8]}  "
-            f"(upload {sent / (1024**2):.1f} MB in {_fmt_secs(elapsed)})\n"
+            f"[remote] run_id={run_id}  cache_key={key[:8]}\n"
             f"[remote] $ {_remote_join(remote_argv)}\n"
         )
         # Surface the scheduler hand-off so a queue wait reads as "waiting",
@@ -5380,21 +5448,59 @@ class RemoteRunner:
             # allocation, so it is not waiting for one.
             log(_scheduler_handoff_lines(self.host.compute_launcher))
 
-        popen = subprocess.Popen(
-            ssh_argv,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            # Decode the remote (Linux, UTF-8) pipeline output as UTF-8 so the
-            # em-dash in per-well markers ("Well X — done.") isn't mojibake'd on
-            # a cp1252 Windows client — otherwise the dashboard's Process stage
-            # stays stuck at 0/N while ASCII-only markers (threshold) reach N/N.
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
-            start_new_session=(os.name == "posix"),
-        )
+        def _start_ssh() -> subprocess.Popen:
+            return subprocess.Popen(
+                ssh_argv,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                # Decode the remote (Linux, UTF-8) pipeline output as UTF-8 so
+                # the em-dash in per-well markers ("Well X — done.") isn't
+                # mojibake'd on a cp1252 Windows client — otherwise the
+                # dashboard's Process stage stays stuck at 0/N while ASCII-only
+                # markers (threshold) reach N/N.
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                start_new_session=(os.name == "posix"),
+            )
+
+        def _upload() -> tuple[int, float]:
+            up_key, sent, elapsed = self._cache.ensure_uploaded(
+                zipped, log_fn=log, progress_fn=progress_fn,
+                stop_event=stop_event,
+            )
+            if up_key != key:
+                # The key decides the remote input directory, and the job was
+                # sent to wait in the one derived above. Two answers here means
+                # the bytes went somewhere the pipeline will not look.
+                raise RuntimeError(
+                    f"upload landed under cache key {up_key[:8]} but the run "
+                    f"was prepared for {key[:8]}")
+            log(f"[remote] uploaded {sent / (1024**2):.1f} MB in "
+                f"{_fmt_secs(elapsed)}\n")
+            return sent, elapsed
+
+        if overlap:
+            popen = _start_ssh()
+            try:
+                _upload()
+            except BaseException:
+                # An allocation is already in flight and nothing will ever
+                # write its sentinel, so it would sit on a node until the
+                # timeout. Hand it back now rather than in two hours.
+                log("[remote] upload failed — releasing the allocation\n")
+                try:
+                    self.cancel(popen)
+                except Exception:
+                    swallowed("releasing the allocation after a failed upload")
+                raise
+            # The job is watching for exactly this file.
+            self._cache._ssh_run(["touch", remote_sentinel], check=True)
+        else:
+            _upload()
+            popen = _start_ssh()
 
         fetcher = Fetcher(
             self.host,

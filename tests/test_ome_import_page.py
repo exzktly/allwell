@@ -1084,6 +1084,47 @@ def test_a_scattered_selection_of_wells_is_mapped_from_the_stated_unit(
     assert page._plate.order() == ["A01", "C06", "F10"]
 
 
+def test_a_finished_well_does_not_look_like_an_unstarted_one(qapp, tmp_path):
+    """The dial paints its done wedge in the well's own state colour, and a
+    well on the acquisition path is already lit in that same accent — so at
+    100% the two converged and a well that had just been written looked exactly
+    like one that had not been started. Measured on the rendered plate rather
+    than on the fraction the widget holds: what went wrong was the colour, and
+    every value inside the widget was correct throughout."""
+    from PySide6.QtGui import QPixmap
+
+    from datasets.ome_import.controller import OmeImportController
+
+    page = OmeImportController().page
+    page._plate.setFixedSize(660, 420)
+    page._plate.set_order(["A01", "A02", "A03", "A04"])
+    page._plate.show()
+    qapp.processEvents()
+
+    page.set_well_fraction("A02", 1, 2)          # halfway
+    page.set_well_fraction("A03", 4, 4)          # finished
+
+    def body(col):
+        pixmap = QPixmap(page._plate.size())
+        page._plate.render(pixmap)
+        rect = page._plate.cellRect(0, col)
+        # Clear of the visit number drawn at the centre.
+        return pixmap.toImage().pixelColor(
+            int(rect.center().x() + rect.width() * 0.28),
+            int(rect.center().y()))
+
+    unstarted, half, done = body(0), body(1), body(2)
+    assert done != unstarted
+    # Green, not a slightly different blue: the two used to differ by four
+    # points per channel, which is not a difference anyone can see.
+    assert done.green() > done.blue() and done.green() > done.red()
+    assert half.blue() > half.green()            # still in progress, still blue
+
+    # A second run must not open on a plate still green from the first.
+    page.clear_well_fractions()
+    assert body(2).blue() > body(2).green()
+
+
 def test_the_stage_path_follows_a_hand_drawn_first_well(qapp, tmp_path):
     """The anchor is wherever position 1 will actually land, which a clicked
     path decides for itself."""

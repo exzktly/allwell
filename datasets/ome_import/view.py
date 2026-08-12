@@ -703,11 +703,27 @@ class OmeImportPage(LogPanelMixin, QWidget):
         while a conversion runs, the same way Subset's well picker does — the
         wells on it are exactly the wells being written, so a second plate map
         would be a copy of this one.
+
+        A finished well is recoloured, not merely filled. The dial paints its
+        done wedge in the well's own state colour, and a well on the
+        acquisition path is already lit in that same accent — so at 100% the
+        two converge and a well that has just been written looks exactly like
+        one that has not been started. Measured on the rendered plate: #6683f1
+        against #627ee7. Green is the app's finished colour, and it is what the
+        dial then draws itself in.
         """
-        self._plate.setWellFraction(well_id, fraction_or_none(done, total))
+        fraction = fraction_or_none(done, total)
+        self._plate.setWellFraction(well_id, fraction)
+        if fraction is not None and fraction >= 1.0:
+            self._plate.setWellColor(well_id, theme.Colors.success)
 
     def clear_well_fractions(self) -> None:
         self._plate.clearWellFractions()
+        # The finished-well colours go with them. They are this page's own
+        # marks, set only by `set_well_fraction`, and a second run that opened
+        # on a plate still green from the first would show every well done
+        # before it had written anything.
+        self._plate.clearWellColors()
 
     def set_outcome(self, outcome: str, message: str = "") -> None:
         """Show how the run ended: ``done`` / ``failed`` / ``cancelled``.

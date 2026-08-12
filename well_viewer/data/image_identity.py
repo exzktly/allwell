@@ -561,6 +561,54 @@ class CellKey:
         )
 
 
+def resolve_identity_column(df, *names: str) -> str | None:
+    """The first of *names* present in ``df.columns``, case-insensitively.
+
+    The one column-resolution rule the identity helpers share, so a caller that
+    only needs the frame tokens (:func:`frame_token_series`) and a caller that
+    needs whole keys (:func:`cell_keys_for_dataframe`) cannot end up reading
+    different columns off the same CSV.
+    """
+    lowered = {str(c).lower(): c for c in df.columns}
+    for n in names:
+        if n in df.columns:
+            return n
+        if n.lower() in lowered:
+            return lowered[n.lower()]
+    return None
+
+
+def frame_token_series(df):
+    """Normalised ``(fov, tp)`` token ``Series`` pair aligned with ``df.index``.
+
+    The frame half of :func:`cell_keys_for_dataframe`, without the per-row
+    :class:`CellKey` construction — which is the dominant cost of that function
+    and is pure waste for a caller that only has to decide *which frame a row
+    belongs to* (the crop scope, for one). Both series are the canonical token
+    forms, so they compare directly against a combo's normalised text.
+
+    A frame with no FOV column reads as ``"1"`` (the single-FOV convention);
+    one with no timepoint column reads as ``""``, which matches no timepoint
+    the pickers offer — a caller filtering on timepoints must decide what that
+    means for it rather than assume a match. Lazy pandas import.
+    """
+    import pandas as pd
+    if df is None or df.empty:
+        empty = pd.Series([], dtype=object)
+        return empty, empty
+    fov_col = resolve_identity_column(df, "fov", "FOV")
+    tp_col = resolve_identity_column(
+        df, "timepoint", "tp", "time", "time_h", "timepoint_hours",
+    )
+    fov_n = (normalize_fov_series(df[fov_col].fillna("").astype(str))
+             if fov_col else
+             pd.Series(["1"] * len(df), index=df.index))
+    tp_raw = (df[tp_col].fillna("").astype(str)
+              if tp_col else
+              pd.Series([""] * len(df), index=df.index))
+    return fov_n, tp_raw.map(normalize_tp)
+
+
 def cell_keys_for_dataframe(
     df,
     *,
@@ -575,19 +623,9 @@ def cell_keys_for_dataframe(
         return pd.Series([], dtype=object)
 
     def _resolve_col(*names: str) -> str | None:
-        lowered = {str(c).lower(): c for c in df.columns}
-        for n in names:
-            if n in df.columns:
-                return n
-            if n.lower() in lowered:
-                return lowered[n.lower()]
-        return None
+        return resolve_identity_column(df, *names)
 
     well_col = _resolve_col("well", "Well")
-    fov_col = _resolve_col("fov", "FOV")
-    tp_col = _resolve_col(
-        "timepoint", "tp", "time", "time_h", "timepoint_hours",
-    )
     nid_col = _resolve_col(
         "nucleus_id", "nucleus id", "nucleusId", "nucleusID",
     )
@@ -602,13 +640,7 @@ def cell_keys_for_dataframe(
         well_series = pd.Series([""] * len(df), index=df.index)
 
     well_n = well_series.map(normalize_well)
-    fov_n = (normalize_fov_series(df[fov_col].fillna("").astype(str))
-             if fov_col else
-             pd.Series(["1"] * len(df), index=df.index))
-    tp_raw = (df[tp_col].fillna("").astype(str)
-              if tp_col else
-              pd.Series([""] * len(df), index=df.index))
-    tp_n = tp_raw.map(normalize_tp)
+    fov_n, tp_n = frame_token_series(df)
     nid_raw = (df[nid_col].fillna("").astype(str)
                if nid_col else
                pd.Series([""] * len(df), index=df.index))

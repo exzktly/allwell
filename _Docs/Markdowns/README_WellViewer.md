@@ -2022,8 +2022,9 @@ reviewing and curating individual cells.
   inclusion; **Delete Cell** turns the canvas into a delete tool, where a click
   drops one cell and a dragged rectangle drops every cell inside it (see
   *Deleting a region across the plate* below); **draw a crop rectangle** to keep
-  only cells whose centroid is inside it (applied dataset-wide across every
-  FOV/timepoint/channel/well),
+  only cells whose centroid is inside it (applied across every
+  FOV/timepoint/channel/well by default, or only the frames **Crop scope ▾**
+  names — see *Scoping the crop to particular frames* below),
   with **Reset** to restore every cell and **Clear crop** to remove just the
   box; click-drag to pan and scroll to zoom (zoom is kept when you switch
   wells). **Zoom controls** sit on the control row — **−** and **+** step
@@ -2039,7 +2040,8 @@ reviewing and curating individual cells.
   export honours. A cell counts only when it is manually **kept** *and* it
   passes QC. Overrides persist to `cell_overrides.json` next to the CSVs.
 - **Optimal use** — exclude a well's edge artifacts in one gesture with the
-  crop rectangle; click away obvious mis-segmentations.
+  crop rectangle, narrowing **Crop scope ▾** to the wells that need it; click
+  away obvious mis-segmentations.
 
 ##### Deleting a region across the plate
 
@@ -2080,6 +2082,45 @@ A wide scope takes a few seconds: the app reads every scoped well's data and
 re-applies your curation across it, with the cursor showing busy while it does.
 A plate-wide drag over roughly 300,000 cells takes about two and a half seconds
 on a warm dataset, longer if the wells have not been read yet.
+
+##### Scoping the crop to particular frames
+
+The crop rectangle filters **every frame in the dataset** unless you say
+otherwise, which is right for an artifact that sits in the same place
+everywhere — an objective vignette, a consistently bad image edge. It is wrong
+when only some wells need clipping: cropping the whole plate to fix two of them
+throws away good cells in all the others.
+
+**Crop scope ▾**, next to the Crop cells button, is the same control as **Delete
+scope ▾** and works the same way — tick the wells, FOVs and timepoints the crop
+should apply to, use **Use plate selection** to arm the wells you have selected
+on the plate, and read the armed scope straight off the button (*Crop scope: all
+frames*, or *Crop scope: 2 wells · all FOVs · 1 TP*). A field you never touch
+keeps meaning **all** of that field, so narrowing by well leaves every FOV and
+timepoint of those wells cropped. **Reset to all frames** widens it back.
+
+The one difference from the delete's scope is the default, and it follows from
+what each control does. A drag-delete is one gesture on one frame, so its scope
+starts at *this frame* and you widen it. A crop is a standing filter on the
+whole analysis, so its scope starts at *all frames* and you narrow it.
+
+Cells in frames outside the scope are left alone entirely — the crop neither
+includes nor excludes them, and they keep whatever inclusion state your curation
+and gating gave them. Changing the scope takes effect as soon as you stop ticking — a run of ticks
+is applied together rather than one at a time, since each one re-filters every
+loaded well. The status line then reports how many cells the crop excludes, so a
+scope that turns out to match nothing shows up as *excluding 0* rather than
+looking like a working crop.
+On a frame the scope does not name, the crop outline is still drawn where the
+box sits, but **dashed and dimmed**, so you can see the rectangle without
+mistaking it for a filter that is running there.
+
+The scope is saved with the crop, in `persistence.json`, and reloads with the
+dataset — a two-well crop stays a two-well crop across sessions. Each dataset
+carries its own: opening another one loads that one's saved crop and scope, or
+none if it has never been cropped. **Edit ▾ → Clear crop** and **Edit ▾ → Reset
+crop + curation** both clear the scope along with the box, so the next
+rectangle you draw starts at all frames again.
 
 #### Image Table
 
@@ -2126,6 +2167,16 @@ channel for every well).
   row and its cell mask on the next. Each render gets its own row, labelled
   **DAPI**, **DAPI (mask)**, **DAPI (raw)** or **DAPI (binary)**, so a channel can
   appear as many times as you have renders for it.
+- **Cells the analysis has dropped are not drawn.** A cell you deleted on the
+  Segmentation tab, one a crop excluded, one that failed the QC debris gate, and
+  one outside your gating all get no outline when the table renders, and do not
+  appear in the **Mask** or **≥ threshold** views — the table shows the same
+  population every plot, statistic and export counts. A grid drawn *before* such
+  an edit does not repaint itself (re-rendering a plate is seconds of work): the
+  header cues **edited — press Generate**, and the grid is current again after
+  that. The one place that still shows every segmented cell is the pipeline's
+  own **NUC+SEG** overlay channel, whose boundaries are drawn into the saved
+  image before All-Well ever sees it.
 - **Colour cells** — in the **Mask** and **≥ threshold** views, give every cell its
   own colour instead of painting them all white. Two nuclei that touch are
   otherwise a single white shape, which is exactly the mistake you are looking at a

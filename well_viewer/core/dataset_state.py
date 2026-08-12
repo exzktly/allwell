@@ -53,10 +53,24 @@ class DatasetState:
     fov_tp_extractor: Callable[[str], tuple[str, str]] | None = None
     persistence_doc: object = None
 
-    # Dataset-wide crop rectangle (row0, col0, row1, col1) in source-mask pixels,
-    # or None. Owned by features/crop; cells whose centroid falls outside are
-    # excluded at the df_included_mask chokepoint via the Crop_Pass column.
+    # Crop rectangle (row0, col0, row1, col1) in source-mask pixels, or None.
+    # Owned by features/crop; cells whose centroid falls outside are excluded at
+    # the df_included_mask chokepoint via the Crop_Pass column.
     crop_region: tuple[int, int, int, int] | None = None
+
+    # Which frames that rectangle is applied to — the same wells / FOVs /
+    # timepoints mechanism the Segmentation tab's drag-delete arms, with the
+    # opposite un-armed default: ``None`` here means *every* value of that
+    # field, so an un-scoped crop filters the whole plate. An empty set names no
+    # frames at all, so the two cannot be collapsed into one representation.
+    #
+    # Unlike the delete scope these are persisted (``persistence.json::crop_region``)
+    # and cleared on a dataset swap: the scope is part of what a saved crop
+    # *means*, so reloading a dataset without it would silently widen the crop to
+    # every frame.
+    crop_scope_wells: set[str] | None = None
+    crop_scope_fovs: set[str] | None = None
+    crop_scope_tps: set[str] | None = None
 
     # well token -> domain.fov_integrity.FovIntegrity, filled by ``get_rows`` as
     # each well's frame is built. A well whose FOV labels don't identify its
@@ -96,6 +110,19 @@ class DatasetState:
         self.well_labels.clear()
         # A new dataset has no crop until its persisted region (if any) loads.
         self.crop_region = None
+        self.reset_crop_scope()
+
+    def reset_crop_scope(self) -> None:
+        """Widen the crop back to every frame in the dataset.
+
+        The armed tokens name wells, FOVs and timepoints of one plate, so they
+        are dropped on a dataset swap rather than carried across it — a scope
+        that survived would either name wells the new plate does not have (the
+        crop then quietly filters nothing) or, worse, wells it does.
+        """
+        self.crop_scope_wells = None
+        self.crop_scope_fovs = None
+        self.crop_scope_tps = None
 
     def rebuild_timepoints(self) -> None:
         """Recompute the canonical numeric timepoint list.

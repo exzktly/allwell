@@ -47,7 +47,7 @@ def apply_qc_to_cache(ctx, label: str | None = None) -> None:
     project_verdict_column(
         ctx, label,
         column="QC_Pass",
-        verdict=lambda df: compute_qc_pass(df, params),
+        verdict=lambda df, _well: compute_qc_pass(df, params),
         layer="QC",
     )
 

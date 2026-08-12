@@ -1098,6 +1098,18 @@ def invalidate_stats_cache(ctx) -> None:
     _review_image = ctx.state.feature_slice("review_image")
     if _review_image is not None:
         _review_image.override_version += 1
+    # The Image Table draws only the cells the analysis counts, but it draws
+    # them once — an already-rendered grid would keep the outlines of cells this
+    # edit just dropped, agreeing with the plots only if the user happened to
+    # press Generate. The stamp cues that instead; re-rendering a plate-wide
+    # grid here would be seconds of decoding per edit. Unstamped means the lazy
+    # tab was never built, so there is nothing to cue.
+    _mark_stale = ctx.runtime.image_table.inclusion_changed_cb
+    if _mark_stale is not None:
+        try:
+            _mark_stale()
+        except Exception:
+            swallowed()  # a failed cue must not abort the edit that caused it
 
 
 

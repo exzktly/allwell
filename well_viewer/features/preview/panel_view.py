@@ -18,6 +18,9 @@ from well_viewer.core.ui_helpers import (
     make_action_menu_button, make_popover_button,
 )
 from widgets.control_band import ControlBand
+from well_viewer.features.preview.crop_scope_view import (
+    build_crop_scope_control,
+)
 from well_viewer.features.preview.delete_scope_view import (
     build_delete_scope_control,
 )
@@ -156,9 +159,11 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     # modifies, and carries the armed scope in its own label.
     ctrl.add_action(build_delete_scope_control(ctx, ctrl))
 
-    # Crop cells: drag a rectangle to keep only cells whose centroid is inside;
-    # applies to every FOV/timepoint/channel/well. Clear crop removes just the
-    # box; Reset restores every cell (incl. manual deletes) and removes the crop.
+    # Crop cells: drag a rectangle to keep only cells whose centroid is inside.
+    # Every FOV/timepoint/channel/well by default; the Crop scope control beside
+    # it narrows that to chosen wells / FOVs / timepoints. Clear crop removes
+    # just the box; Reset restores every cell (incl. manual deletes) and removes
+    # the crop.
     #
     # Named for what it does to the *data*. The Image Table has a "Crop view"
     # that sounds the same and is not: that one crops the pixels shown, this one
@@ -172,13 +177,21 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
         "Enter crop mode, then drag a rectangle.\n"
         "• Cells whose centroid is inside are kept; cells outside are excluded "
         "from every plot, statistic and export.\n"
-        "• Applies to all FOVs / timepoints / channels / wells.\n"
-        "Note: the box is drawn in the current FOV's pixel space and applied to all."
+        "• Applies to all FOVs / timepoints / channels / wells, unless the Crop "
+        "scope control narrows it.\n"
+        "Note: the box is drawn in the current FOV's pixel space and applied to "
+        "every frame in scope."
     )
     crop_btn.clicked.connect(
         lambda _=False: toggle_crop_edit_mode(ctx)
     )
     ctrl.add_action(crop_btn)
+
+    # Which frames the crop filters. Same control as the Delete scope above, and
+    # for the same reason it sits next to the button it modifies and carries the
+    # armed scope in its own label — an off-screen scope silently deciding which
+    # cells count is exactly what this readout exists to prevent.
+    ctrl.add_action(build_crop_scope_control(ctx, ctrl))
 
     # ── Edit ▾ menu — the one-shot crop / reset actions ─────────────────
     edit_btn, edit_menu = make_action_menu_button(

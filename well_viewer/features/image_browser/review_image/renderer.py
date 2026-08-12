@@ -562,17 +562,44 @@ def draw_review_image(
         )
 
 
+def _crop_applies_to_displayed_frame(ctx) -> bool:
+    """Whether the Crop scope names the frame currently on the canvas.
+
+    The crop's scope is a property of the dataset, not of the view, so the box
+    can be armed for wells and timepoints the canvas is not showing. Drawing the
+    same solid outline either way would state that these cells are being
+    filtered when they are not — see the outline's own dashed branch.
+
+    The answer is the crop layer's own ``crop_covers_frame``, which judges the
+    frame from the scope and the well's rows — the same inputs the ``Crop_Pass``
+    verdict uses. Comparing the tokens here instead was wrong in both
+    directions: a scope holding a raw ``T24`` read as out-of-scope while cells
+    were being excluded, and a frame whose CSV has no timepoint column read as
+    in-scope while no row of it could match.
+    """
+    from well_viewer.core.frame_scope import current_frame
+    from well_viewer.features.crop.controller import crop_covers_frame
+    well, fov, tp = current_frame(ctx)
+    return crop_covers_frame(ctx, well, fov, tp)
+
+
 def _draw_crop_outline(ctx, rgb) -> None:
-    """Draw the active dataset-wide crop rectangle as an outline on ``rgb``.
+    """Draw the active crop rectangle as an outline on ``rgb``.
 
     The region is in mask-pixel (row, col) space — the same coordinate system as
     ``rgb`` for the displayed FOV — so it maps directly. No-op when no crop is
     set. A distinct cyan edge keeps it readable over both the red boundaries and
     the white binary mask.
+
+    When the Crop scope does not name the displayed frame the same rectangle is
+    drawn dashed and dimmed: the crop exists and is worth showing where it sits,
+    but nothing in this frame is excluded by it, and a solid box saying
+    otherwise is the kind of silent substitution §7 of CLAUDE.md is about.
     """
     region = ctx.state.dataset.crop_region
     if not region:
         return
+    in_scope = _crop_applies_to_displayed_frame(ctx)
     h, w = rgb.shape[:2]
     r0, c0, r1, c1 = region
     r0 = max(0, min(h - 1, int(r0)))
@@ -581,14 +608,33 @@ def _draw_crop_outline(ctx, rgb) -> None:
     c1 = max(0, min(w - 1, int(c1)))
     if r1 <= r0 or c1 <= c0:
         return
-    color = _np.array([0, 220, 255], dtype=_np.uint8)
+    color = (_np.array([0, 220, 255], dtype=_np.uint8) if in_scope
+             else _np.array([0, 110, 128], dtype=_np.uint8))
     # Draw the border as bands scaled to the image size (~0.5% of the smaller
     # dimension, min 2 px) so it survives the downscale when zoomed out — a
     # single-pixel edge subsamples away and the crop looks like it vanished.
     t = max(2, int(round(min(h, w) / 200)))
+    # Out of scope, the same band is broken into dashes. Dimming alone reads as
+    # a rendering artefact at low zoom; a dashed edge does not, and the two
+    # together survive both the downscale and a bright background. The dash is
+    # long enough (8×) that it never subsamples into a solid line.
+    dash = 0 if in_scope else max(2 * t, int(round(min(h, w) / 25)))
 
     def _band(rl, rh, cl, ch) -> None:
-        rgb[max(0, rl):min(h, rh), max(0, cl):min(w, ch)] = color
+        rl, rh = max(0, rl), min(h, rh)
+        cl, ch = max(0, cl), min(w, ch)
+        if rh <= rl or ch <= cl:
+            return
+        if not dash:
+            rgb[rl:rh, cl:ch] = color
+            return
+        # Step along the band's long axis, painting one dash in every two.
+        if (ch - cl) >= (rh - rl):
+            for start in range(cl, ch, 2 * dash):
+                rgb[rl:rh, start:min(ch, start + dash)] = color
+        else:
+            for start in range(rl, rh, 2 * dash):
+                rgb[min(rh, start):min(rh, start + dash), cl:ch] = color
     _band(r0, r0 + t, c0, c1 + 1)            # top
     _band(r1 - t + 1, r1 + 1, c0, c1 + 1)    # bottom
     _band(r0, r1 + 1, c0, c0 + t)            # left

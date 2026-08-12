@@ -437,8 +437,9 @@ def load_directory(ctx, d: Path, label=None) -> None:
         qc_gate_refresh_widgets(app)  # sync the Cell Gating QC gate row if built
     except Exception:
         swallowed()  # was: pass (silent except)
-    # Hydrate the dataset-wide crop region (persistence.json::crop_region) and
-    # project Crop_Pass onto any already-cached rows. Safe no-op when unset.
+    # Hydrate the crop region and the frames it is scoped to
+    # (persistence.json::crop_region) and project Crop_Pass onto any
+    # already-cached rows. Safe no-op when unset.
     try:
         app._persistence.load("crop_region")
         from well_viewer.features.crop.controller import apply_crop_to_cache

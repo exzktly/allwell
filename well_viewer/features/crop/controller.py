@@ -1,5 +1,5 @@
-"""App-facing crop layer: hold the dataset-wide crop rectangle, project
-``Crop_Pass`` onto the row cache, drive the draw-mode toggle, and own the
+"""App-facing crop layer: hold the crop rectangle and the frames it applies to,
+project ``Crop_Pass`` onto the row cache, drive the draw-mode toggle, and own the
 Reset / Clear-crop actions.
 
 The crop verdict composes with manual curation and QC at the inclusion
@@ -15,17 +15,41 @@ Mirrors :mod:`well_viewer.features.qc.controller`.
 from __future__ import annotations
 
 
-from .region import CropRegion, compute_crop_pass, normalize_region
+from .region import (
+    CropRegion, FrameScope, compute_crop_pass, frame_in_scope, normalize_region,
+)
+from well_viewer.core.frame_scope import (
+    ScopeSpec, describe_scope, refresh_scope_button,
+)
 from well_viewer.core.safe import swallowed
 from well_viewer.data.cache_projectors import project_verdict_column
 
+# The three ``DatasetState`` fields the crop scope is spread over, in the order
+# the popover stacks them. One list so the view, the persistence block and the
+# reset cannot come to disagree about which fields make up a scope.
+SCOPE_FIELDS = ("crop_scope_wells", "crop_scope_fovs", "crop_scope_tps")
+
 
 def get_crop_region(ctx) -> CropRegion | None:
-    """The active dataset-wide crop rectangle, or ``None``.
+    """The active crop rectangle, or ``None``.
 
     A8 residuals-ledger R1: pure typed state (``ctx.state.dataset.crop_region``),
     so it takes ``ctx``."""
     return ctx.state.dataset.crop_region
+
+
+def get_crop_scope(ctx) -> FrameScope:
+    """The frames the crop is armed for, as a :class:`FrameScope`.
+
+    Un-armed fields stay ``None`` — every value of that field — so the default
+    scope is the whole dataset and an un-scoped crop behaves exactly as it did
+    before the control existed."""
+    ds = ctx.state.dataset
+    return FrameScope(
+        wells=None if ds.crop_scope_wells is None else frozenset(ds.crop_scope_wells),
+        fovs=None if ds.crop_scope_fovs is None else frozenset(ds.crop_scope_fovs),
+        tps=None if ds.crop_scope_tps is None else frozenset(ds.crop_scope_tps),
+    )
 
 
 def apply_crop_to_cache(ctx, label: str | None = None) -> None:
@@ -35,16 +59,19 @@ def apply_crop_to_cache(ctx, label: str | None = None) -> None:
     explicit all-pass column when there is no crop so the chokepoint stays
     consistent across re-crops. Shares the cache walk with
     ``qc.controller.apply_qc_to_cache`` via
-    :func:`well_viewer.data.cache_projectors.project_verdict_column`.
+    :func:`well_viewer.data.cache_projectors.project_verdict_column`, which is
+    also where the well label comes from — the frame need not carry a well
+    column, and the crop scope is partly a per-well decision.
 
-    A8 residuals-ledger R1: takes ``ctx`` — region + row cache from typed state,
-    so the crop projection is a pure ``ctx`` operation the row-fetch data service
-    can call."""
+    A8 residuals-ledger R1: takes ``ctx`` — region + scope + row cache from typed
+    state, so the crop projection is a pure ``ctx`` operation the row-fetch data
+    service can call."""
     region = get_crop_region(ctx)
+    scope = get_crop_scope(ctx)
     project_verdict_column(
         ctx, label,
         column="Crop_Pass",
-        verdict=lambda df: compute_crop_pass(df, region),
+        verdict=lambda df, well: compute_crop_pass(df, region, scope, well),
         layer="Crop",
     )
 
@@ -104,6 +131,7 @@ def set_crop_region(ctx, region: CropRegion | None) -> None:
     removed, total_incl, has_centroids, n_wells = _crop_effect_counts(ctx)
     r0, c0, r1, c1 = region
     where = f"{c1 - c0}×{r1 - r0}px @ ({c0},{r0})"
+    scoped = " (scoped)" if get_crop_scope(ctx).is_armed else ""
     if n_wells and not has_centroids:
         from PySide6.QtWidgets import QMessageBox
         QMessageBox.warning(
@@ -121,8 +149,9 @@ def set_crop_region(ctx, region: CropRegion | None) -> None:
         )
         return
     ctx.notify.set_status(
-        f"Crop region set ({where}): excluded {removed:,} of {total_incl:,} "
-        f"otherwise-included cell(s) across {n_wells} loaded well(s)."
+        f"Crop region set ({where}{scoped}): excluded {removed:,} of "
+        f"{total_incl:,} otherwise-included cell(s) across {n_wells} loaded "
+        "well(s)."
     )
 
 
@@ -136,29 +165,149 @@ def _crop_effect_counts(ctx):
     from .region import crop_effect_for_df
 
     region = get_crop_region(ctx)
+    scope = get_crop_scope(ctx)
     removed = total_incl = n_wells = 0
     has_centroids = False
-    for df in ctx.state.dataset.cache.values():
+    for label, df in ctx.state.dataset.cache.items():
         if df is None or len(df) == 0:
             continue
         n_wells += 1
-        r, incl, hc = crop_effect_for_df(df, region)
+        r, incl, hc = crop_effect_for_df(df, region, scope, label)
         removed += r
         total_incl += incl
         has_centroids = has_centroids or hc
     return removed, total_incl, has_centroids, n_wells
 
 
-def clear_crop_region(ctx) -> None:
-    """Remove the crop (no warning): cropped-out cells return to included.
-    Manual deletes are untouched."""
-    if ctx.state.dataset.crop_region is None:
-        ctx.notify.set_status("Crop region: nothing to clear.")
-        return
-    ctx.state.dataset.crop_region = None
+# ── scope ────────────────────────────────────────────────────────────────────
+#
+# The crop is armed with the same wells / FOVs / timepoints control the
+# Segmentation tab's drag-delete uses (``core/frame_scope.py``). Only two things
+# differ, and both are in the spec: the fields live on ``DatasetState`` (they are
+# persisted with the region, because they are part of what a saved crop means),
+# and an un-armed field means *every* value rather than the displayed one — so a
+# crop nobody has scoped filters the whole plate, as it always has.
+#
+# The spec lives here rather than beside the popover because every path that
+# changes a scoped crop is on this side: the popover writes through it, and so do
+# the Reset actions and the dataset swap, which must relabel the button or it
+# goes on advertising a scope the state no longer holds.
+
+CROP_SCOPE_BTN = "_review_crop_scope_btn"
+
+
+def _on_crop_scope_changed(ctx) -> None:
+    """Re-project, persist and redraw after the armed frames change.
+
+    The scope decides which cells the crop excludes, so changing it changes
+    every downstream number exactly as moving the box would — it takes the same
+    recompute path, and says what it did.
+
+    Data first, chrome second. This can run from a teardown (a popover destroyed
+    with a tick still settling), where the button is gone; relabelling first
+    made the widget the gate on the re-projection ever happening.
+    """
     recompute_crop_all(ctx)
     _save_redraw_refresh(ctx)
-    ctx.notify.set_status("Crop region cleared.")
+    refresh_crop_scope_button(ctx)
+    if get_crop_region(ctx) is None:
+        # Arming frames before drawing a box is a legitimate order of
+        # operations, but "excluded 0 cells" would read as a broken crop.
+        ctx.notify.set_status(
+            "Crop scope set — draw a crop rectangle to apply it."
+        )
+        return
+    removed, total_incl, _has_centroids, n_wells = _crop_effect_counts(ctx)
+    # ``total_incl`` and ``n_wells`` span every loaded well, in scope or not —
+    # they are the population the crop is being measured against, not the
+    # population it reaches. Saying "loaded" rather than "scoped" keeps the two
+    # numbers from reading as a contradiction of the scope the button states.
+    ctx.notify.set_status(
+        f"Crop scope updated: now excluding {removed:,} of {total_incl:,} "
+        f"otherwise-included cell(s) across {n_wells} loaded well(s)."
+    )
+
+
+CROP_SCOPE = ScopeSpec(
+    state_attr="dataset",
+    fields=SCOPE_FIELDS,
+    title="Crop scope",
+    unarmed_text="all frames",
+    unarmed_field_words=("all wells", "all FOVs", "all TPs"),
+    button_key=CROP_SCOPE_BTN,
+    seed_current_frame=False,
+    hint="Apply the crop to:",
+    tooltip=(
+        "Which frames the crop rectangle filters.\n"
+        "• A cell is excluded when its centroid is outside the box and its "
+        "frame is in scope.\n"
+        "• Cells in every other frame are left alone, crop or no crop.\n"
+        "The scope is saved with the crop and applies until you reset it."
+    ),
+    reset_label="Reset to all frames",
+    reset_tooltip=(
+        "Widen the crop back to every well, FOV and timepoint in the dataset."
+    ),
+    reset_status="Crop scope: all frames.",
+    plate_status_ok="Crop scope: {n} well(s) from the plate selection.",
+    plate_status_empty="Crop scope: no wells are selected on the plate.",
+    on_change=lambda ctx: _on_crop_scope_changed(ctx),
+)
+
+
+def refresh_crop_scope_button(ctx) -> None:
+    """Re-label the Crop-scope button. Safe when the tab was never built."""
+    refresh_scope_button(ctx, CROP_SCOPE)
+
+
+def crop_covers_frame(ctx, well: str, fov, tp) -> bool:
+    """Whether the crop, as scoped, reaches any cell of one displayed frame.
+
+    The question the Segmentation canvas asks before it decides whether to draw
+    the crop outline solid or dashed. It lives here rather than in the renderer
+    so the answer comes from the same place the ``Crop_Pass`` verdict does — the
+    scope, and the well's own rows — instead of from a second comparison of the
+    same tokens, which disagreed with the verdict in both directions.
+    """
+    from well_viewer.data.data_loading import get_rows
+    scope = get_crop_scope(ctx)
+    if not scope.is_armed:
+        return True
+    df = None
+    if well and well in ctx.state.dataset.well_paths:
+        try:
+            df = get_rows(ctx, well)
+        except Exception:
+            # A well whose rows will not load still deserves its outline drawn;
+            # ``frame_in_scope`` falls back to the tokens when it gets nothing.
+            swallowed()
+    return frame_in_scope(df, scope, well, fov, tp)
+
+
+def clear_crop_region(ctx) -> None:
+    """Remove the crop and the frames it was scoped to (no warning).
+
+    Cropped-out cells return to included; manual deletes are untouched.
+
+    The scope goes with the box for the reason ``clear_curation`` gives for
+    doing the same: a scope left armed behind a cleared crop silently narrows
+    the *next* box the user draws to frames they thought they had cleared, and
+    it would not survive a restart either (the section is dropped once there is
+    no region to save), so the two would then disagree.
+    """
+    ds = ctx.state.dataset
+    was_scoped = get_crop_scope(ctx).is_armed
+    if ds.crop_region is None and not was_scoped:
+        ctx.notify.set_status("Crop region: nothing to clear.")
+        return
+    ds.crop_region = None
+    ds.reset_crop_scope()
+    refresh_crop_scope_button(ctx)
+    recompute_crop_all(ctx)
+    _save_redraw_refresh(ctx)
+    ctx.notify.set_status(
+        "Crop region and scope cleared." if was_scoped else "Crop region cleared."
+    )
 
 
 # ── draw-mode toggle ─────────────────────────────────────────────────────────
@@ -186,9 +335,12 @@ def set_crop_edit_mode(ctx, enabled: bool) -> None:
     if btn is not None:
         btn.setChecked(enabled)
     if enabled:
+        # Name the armed scope rather than a fixed "all FOVs/wells": with the
+        # Crop scope narrowed, that sentence would be describing a crop the user
+        # is not about to draw.
         ctx.notify.set_status(
             "Crop mode ON — drag a rectangle to keep only cells whose centroid "
-            "is inside (applies to all FOVs/wells)."
+            f"is inside. {describe_scope(ctx, CROP_SCOPE)}."
         )
     else:
         ctx.notify.set_status("Crop mode OFF.")
@@ -211,7 +363,7 @@ def reset_crop_and_overrides(ctx) -> None:
         "Resetting will:\n"
         "  • Return ALL cells to the Included state, including cells you "
         "manually deleted.\n"
-        "  • Remove the crop region.\n\n"
+        "  • Remove the crop region and the frames it was scoped to.\n\n"
         "This applies to every well and cannot be undone. Continue?",
         QMessageBox.Yes | QMessageBox.No,
         QMessageBox.No,
@@ -238,6 +390,9 @@ def reset_crop_and_overrides_now(ctx) -> None:
     from well_viewer.persistence.reset_scopes import clear_curation
 
     clear_curation(ctx)
+    # ``clear_curation`` widens the scope back to every frame; the button that
+    # advertises it is this side's to relabel.
+    refresh_crop_scope_button(ctx)
     try:
         invalidate_stats_cache(ctx)
     except Exception:

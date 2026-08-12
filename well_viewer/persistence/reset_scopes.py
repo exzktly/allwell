@@ -177,6 +177,9 @@ def clear_curation(ctx) -> None:
     """
     ctx.runtime.review.included_overrides.clear()
     ctx.state.dataset.crop_region = None
+    # The frames the crop was armed for go with it. Leaving them would silently
+    # narrow the *next* crop the user draws to a scope they reset away.
+    ctx.state.dataset.reset_crop_scope()
     # Clearing the override dict is not enough on its own: the cached rows still
     # carry the previously-projected Included=0, and apply_review_overrides_to_cache
     # early-returns on an empty dict (it never *un-writes* a 0). Drop the dataset

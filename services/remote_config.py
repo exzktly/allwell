@@ -932,6 +932,133 @@ print(json.dumps({"ok": True, "source": used, "profiles": uniq}))
 '''
 
 
+# The longest a held allocation may be scaled to ask for. Batched remote mode
+# runs every batch inside one allocation, so the ``--time`` a user sized for a
+# single batch has to cover the whole plate — but multiplying it by the batch
+# count can walk straight past a partition's MaxTime, and a job that asks for
+# more than the partition allows is rejected outright or queues far worse. This
+# is the ceiling that scaling clamps to.
+MAX_HELD_ALLOCATION_S = 24 * 60 * 60
+
+# Slurm accepts six spellings of a time limit. All of them, so a launcher that
+# works on the cluster is not rejected here.
+_SLURM_TIME_RE = re.compile(
+    r"^(?:(?P<d>\d+)-)?(?P<a>\d+)(?::(?P<b>\d+))?(?::(?P<c>\d+))?$")
+
+
+def parse_slurm_time(spec: str) -> int | None:
+    """Seconds in a Slurm ``--time`` value, or ``None`` if it is not one.
+
+    The six forms, which differ by how many colons are present and whether a
+    day is prefixed: ``MM``, ``MM:SS``, ``HH:MM:SS``, ``DD-HH``, ``DD-HH:MM``,
+    ``DD-HH:MM:SS``. The ambiguity is real — ``5`` is five *minutes* while
+    ``1-5`` is one day and five *hours* — so the day prefix changes what the
+    first field means, which is why this is a parser rather than a split.
+    """
+    m = _SLURM_TIME_RE.match((spec or "").strip())
+    if not m:
+        return None
+    days = int(m.group("d") or 0)
+    a, b, c = m.group("a"), m.group("b"), m.group("c")
+    if m.group("d"):
+        # DD-HH[:MM[:SS]] — the first field is hours.
+        hours, minutes, seconds = int(a), int(b or 0), int(c or 0)
+    elif c is not None:
+        hours, minutes, seconds = int(a), int(b), int(c)
+    elif b is not None:
+        hours, minutes, seconds = 0, int(a), int(b)      # MM:SS
+    else:
+        hours, minutes, seconds = 0, int(a), 0           # MM
+    return days * 86400 + hours * 3600 + minutes * 60 + seconds
+
+
+def render_slurm_time(seconds: int) -> str:
+    """*seconds* as a Slurm time limit, in the shortest unambiguous form."""
+    seconds = max(60, int(seconds))
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, secs = divmod(rem, 60)
+    if days:
+        return f"{days}-{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def launcher_time_seconds(launcher: str) -> int:
+    """The launcher's ``--time`` in seconds, or ``0`` if it does not set one.
+
+    Read rather than scaled: batched mode uses it as the budget for a *single*
+    batch, which is what the number meant before one allocation started
+    covering the whole plate.
+    """
+    if not launcher.strip():
+        return 0
+    try:
+        tokens = shlex.split(launcher)
+    except ValueError:
+        return 0
+    for i, token in enumerate(tokens):
+        if token.startswith("--time="):
+            return parse_slurm_time(token.split("=", 1)[1]) or 0
+        if token in ("--time", "-t") and i + 1 < len(tokens):
+            return parse_slurm_time(tokens[i + 1]) or 0
+    return 0
+
+
+def scale_launcher_time(
+    launcher: str, factor: int, *, ceiling_s: int = MAX_HELD_ALLOCATION_S,
+) -> tuple[str, str]:
+    """*launcher* with its ``--time`` multiplied by *factor*, and why.
+
+    Returns ``(launcher, explanation)``. The explanation is empty when nothing
+    changed, and is a log line otherwise — the app is editing scheduler
+    arguments the user wrote, so it says so rather than doing it quietly.
+
+    A launcher with no time limit is returned **byte-identical**: the cluster's
+    own default applies and inventing a number here would be worse than
+    inheriting theirs. So is one already at or above the ceiling.
+
+    Pure, so the six Slurm spellings and the clamp are unit-testable without a
+    cluster.
+    """
+    if factor <= 1 or not launcher.strip():
+        return launcher, ""
+    try:
+        tokens = shlex.split(launcher)
+    except ValueError:
+        return launcher, ""      # unbalanced quotes: not ours to rewrite
+
+    def _replace(index: int, spec: str, rebuild) -> tuple[str, str] | None:
+        current = parse_slurm_time(spec)
+        if current is None:
+            return None
+        wanted = current * factor
+        capped = min(wanted, int(ceiling_s))
+        if capped <= current:
+            return None
+        tokens[index] = rebuild(render_slurm_time(capped))
+        note = (
+            f"[remote] scheduler: one allocation for all {factor} batches, so "
+            f"--time is scaled {spec} → {render_slurm_time(capped)}"
+        )
+        if capped < wanted:
+            note += (f" (clamped at {render_slurm_time(int(ceiling_s))}; "
+                     f"{render_slurm_time(wanted)} was asked for)")
+        return shlex.join(tokens), note + ".\n"
+
+    for i, token in enumerate(tokens):
+        if token.startswith("--time="):
+            out = _replace(i, token.split("=", 1)[1], lambda v: f"--time={v}")
+            if out:
+                return out
+            return launcher, ""
+        if token in ("--time", "-t") and i + 1 < len(tokens):
+            out = _replace(i + 1, tokens[i + 1], lambda v: v)
+            if out:
+                return out
+            return launcher, ""
+    return launcher, ""
+
+
 # batchspawner req_* kwarg → srun flag. Order is the rendered flag order.
 _REQ_FLAG_MAP: tuple[tuple[str, str], ...] = (
     ("req_partition", "--partition="),

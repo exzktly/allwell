@@ -2723,6 +2723,8 @@ records the unit of its coordinates the converter recovers from that by itself;
 when it does not, enter the grid and FOVs per well and the plate map follows what
 you typed.
 
+**A batched remote run queues once, not once per batch.** With **Remote batch size** set, the plate is uploaded and processed in slices so the cluster never holds all of it at once. The compute node is now requested a single time and held for the whole run, so on a busy cluster you wait in the queue once instead of once per batch. Two consequences worth knowing: the `--time` in your host's launcher is scaled up automatically (it sized one batch and now covers the plate, capped at 24 hours — the log says what it asked for), and a batch that fails no longer ends the run. The remaining batches still process, and the summary names which ones failed so you can re-run just those.
+
 **The stage path is drawn under the plate**, at the same scale, whenever the
 file carries coordinates. **Scroll on it to zoom, drag to move around, and
 double-click to fit the whole run again.** Each position numbers itself in

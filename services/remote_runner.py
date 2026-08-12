@@ -56,6 +56,8 @@ from services.remote_config import (
     DEFAULT_CONDA_ENV,
     DEFAULT_REMOTE_PYTHON,
     RemoteHost,
+    launcher_time_seconds,
+    scale_launcher_time,
     resolve_rsync_binary,
     resolve_ssh_for_rsync,
     to_rsync_path,
@@ -2390,6 +2392,159 @@ class _UploadHeartbeat:
             self._thread.join(timeout=2.0)
 
 
+# Per-batch handshake files inside the run directory. The local side writes
+# ``ready``; the driver writes ``done`` holding that batch's exit code. Names
+# are formatted with the 1-based batch number.
+BATCH_READY = ".aw_batch_{i}_ready"
+BATCH_DONE = ".aw_batch_{i}_done"
+
+# What the driver prints when a batch ends. The local side reads its own
+# progress off this rather than polling the remote for the ``done`` file: the
+# stream is already being read, so a marker costs no extra ssh and has no poll
+# interval to wait out.
+BATCH_DONE_MARKER = "[remote] batch-driver: batch {i} finished rc={rc}"
+_BATCH_DONE_RE = re.compile(
+    r"\[remote\] batch-driver: batch (\d+) finished rc=(-?\d+)")
+
+
+def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
+                          heartbeat: str = "",
+                          per_batch_timeout_s: int = 0) -> str:
+    """A loop that runs the pipeline once per batch **inside one allocation**.
+
+    Batched mode launched every batch separately, so on a scheduler-backed host
+    each one queued on its own: an eight-batch plate paid eight queue waits, and
+    between them the node was handed back only to be asked for again. An
+    allocation is the expensive thing to obtain and the cheap thing to keep.
+
+    So the job holds the node and the batches come to it. For each batch the
+    driver waits for that batch's ``ready`` file, runs the pipeline over the
+    input directory as it stands, writes the exit code into the matching
+    ``done`` file, and prints :data:`BATCH_DONE_MARKER`.
+
+    **A failed batch does not end the run.** The loop carries on and the local
+    side collects the codes, so one bad well does not cost the plate its node —
+    the end-of-run tally names which batches failed and the run's own exit code
+    reflects that any did.
+
+    Two things *do* end it, both meaning "the app is gone rather than slow": a
+    heartbeat that stopped advancing, and a batch that never arrived inside
+    :data:`UPLOAD_WAIT_TIMEOUT_S`. Both exit :data:`_UPLOAD_WAIT_EXIT` so they
+    read as that rather than as a pipeline crash.
+    """
+    pipeline = _remote_join(argv)
+    waits = int(UPLOAD_WAIT_TIMEOUT_S // UPLOAD_WAIT_POLL_S)
+    stale = ""
+    if heartbeat:
+        hb_q = _remote_quote(heartbeat)
+        stale = (
+            f'_aw_hb=$(stat -c %Y {hb_q} 2>/dev/null || echo 0); '
+            f'_aw_now=$(date +%s); '
+            f'if [ "$_aw_hb" -eq 0 ] || '
+            f'[ "$((_aw_now - _aw_hb))" -gt {UPLOAD_HEARTBEAT_STALE_S} ]; then '
+            f'echo "[remote] ERROR the app stopped responding — giving the '
+            f'node back"; exit {_UPLOAD_WAIT_EXIT}; fi; '
+        )
+    # The batch number is a shell variable, so the filename cannot be quoted
+    # whole: `_remote_quote` single-quotes, which would leave the loop watching
+    # for a file literally called ".aw_batch_$_aw_i_ready". The directory keeps
+    # its quoting (it may contain ~ or spaces) and the leaf is appended in
+    # double quotes, which bash concatenates. Braces around the variable are
+    # load-bearing too — bare `$_aw_i_ready` names a *different*, unset
+    # variable, so every batch would wait on the same empty path.
+    in_q = _remote_quote(f"{run_dir}/in")
+    staged = _remote_quote(run_dir) + '"/b${_aw_i}"'
+    marker_fail = BATCH_DONE_MARKER.format(i="$_aw_i", rc="90")
+    # One batch may not outlive the budget the operator sized for one batch.
+    # Without this a single wedged well holds the node for the whole run's
+    # scaled walltime, which is strictly worse than the per-batch launches this
+    # replaces — there, a hang cost one batch's allocation and no more.
+    budget = f"timeout {int(per_batch_timeout_s)} " if per_batch_timeout_s else ""
+    ready = (_remote_quote(run_dir)
+             + '"/' + BATCH_READY.format(i="${_aw_i}") + '"')
+    done = (_remote_quote(run_dir)
+            + '"/' + BATCH_DONE.format(i="${_aw_i}") + '"')
+    marker = BATCH_DONE_MARKER.format(i="$_aw_i", rc="$_aw_rc")
+    return (
+        f'_aw_i=1; '
+        f'while [ "$_aw_i" -le {int(n_batches)} ]; do '
+        f'echo "[remote] batch-driver: waiting for batch $_aw_i of '
+        f'{int(n_batches)}"; '
+        f'_aw_w=0; '
+        f'while [ ! -f {ready} ]; do '
+        f'_aw_w=$((_aw_w+1)); '
+        f'{stale}'
+        f'if [ "$_aw_w" -gt {waits} ]; then '
+        f'echo "[remote] ERROR batch $_aw_i never arrived"; '
+        f'exit {_UPLOAD_WAIT_EXIT}; fi; '
+        f'sleep {UPLOAD_WAIT_POLL_S}; done; '
+        # Swap this batch's staged directory into the place the pipeline
+        # reads. `mv` within one filesystem is atomic and instant, so the
+        # pipeline cannot see a partially-populated input dir, and it cannot
+        # see the previous batch's leftovers either — the whole directory is
+        # replaced rather than being emptied well by well as downloads land.
+        f'rm -rf {in_q} && mv {staged} {in_q} || {{ '
+        f'echo "[remote] ERROR batch $_aw_i: could not stage its input"; '
+        f'echo "90" > {done}; echo "{marker_fail}"; '
+        f'_aw_i=$((_aw_i+1)); continue; }}; '
+        f'echo "[remote] batch-driver: batch $_aw_i starting"; '
+        f'{budget}{pipeline}; _aw_rc=$?; '
+        f'echo "$_aw_rc" > {done}; '
+        f'echo "{marker}"; '
+        f'_aw_i=$((_aw_i+1)); done; '
+        f'echo "[remote] batch-driver: all {int(n_batches)} batch(es) done"'
+    )
+
+
+def _compose_driver_cmd(
+    launcher: str,
+    remote_pidfile: str,
+    driver_script: str,
+    *,
+    env_selector: EnvSelector = DEFAULT_ENV_SELECTOR,
+) -> str:
+    """The login-shell command that puts :func:`_batch_driver_snippet` on a node.
+
+    The same shape as :func:`_compose_remote_cmd` — record the login PID, exec
+    the launcher, activate conda and record ``$SLURM_JOB_ID`` inside the
+    allocation so both cancel paths keep working — but the thing it ends by
+    running is the driver loop rather than a single pipeline invocation.
+
+    A separate function rather than another parameter on ``_compose_remote_cmd``
+    because that one's exact output is pinned by two test modules, and because
+    the driver has no ``cache_hit`` and no upload sentinel: the batches announce
+    themselves one at a time, which is what the loop is for.
+
+    With no *launcher* there is no allocation to hold and nothing to save, so
+    the driver runs on the login shell — the batched path is then exactly as
+    cheap as it was, and the caller keeps its per-batch behaviour either way.
+    """
+    pidfile_q = _remote_quote(remote_pidfile)
+    launcher = launcher.strip()
+    guard = f"{_conda_env_guard(env_selector)}; "
+    if not launcher:
+        return (
+            f"echo $$ > {pidfile_q}; "
+            f"{_CONDA_ACTIVATE_SNIPPET}; "
+            f"{guard}"
+            f"{driver_script}"
+        )
+    slurm_sidecar_q = _remote_quote(f"{remote_pidfile}.slurm")
+    inner = (
+        f"{_CONDA_ACTIVATE_SNIPPET}; "
+        f"{guard}"
+        f'echo "${{SLURM_JOB_ID:-}}" > {slurm_sidecar_q} 2>/dev/null || true; '
+        f'echo "[remote] scheduler: allocation granted — job ${{SLURM_JOB_ID:-?}} '
+        f'on ${{SLURMD_NODENAME:-$(hostname)}} '
+        f'(partition ${{SLURM_JOB_PARTITION:-?}}) — held for every batch"; '
+        f"{driver_script}"
+    )
+    return (
+        f"echo $$ > {pidfile_q}; "
+        f"exec {' '.join(shlex.split(launcher))} bash -lc {shlex.quote(inner)}"
+    )
+
+
 def _compose_remote_cmd(
     launcher: str,
     remote_pidfile: str,
@@ -3793,6 +3948,17 @@ class _BatchedRemoteProcess:
         # Guards _current_proc: the worker thread reassigns it per batch while
         # the GUI thread reads it in terminate()/kill()/pid/send_signal (E20).
         self._current_proc_lock = threading.Lock()
+        # Set by the reader thread as each batch's marker arrives, and read by
+        # the batch loop. One Event per batch rather than a single condition,
+        # so a marker that lands early (the driver is ahead of the loop) is not
+        # missed — an Event that is already set returns immediately.
+        self._batch_events: dict[int, threading.Event] = {}
+        self._batch_rc: dict[int, int] = {}
+        # The driver's stdout has ended: it finished, the node died, or a Stop
+        # killed the ssh. Whichever it was, no further batch will report back.
+        self._stream_ended = threading.Event()
+        self._reader: threading.Thread | None = None
+        self._heartbeat: _UploadHeartbeat | None = None
 
         # Set up the shared run identifiers and remote dirs.
         # Keep the single-shot path's layout: input goes into the
@@ -3806,7 +3972,17 @@ class _BatchedRemoteProcess:
         # evidence.
         key = runner._cache.cache_key(zipped)
         run_id = "run-" + _compute_run_id(key, pipeline_argv)
-        remote_input = runner._cache.remote_dataset_dir(key)
+        self._run_id = run_id
+        # Batched input lives in the *run* directory, not the shared dataset
+        # cache. Each batch is staged beside it as ``b<i>`` and moved into
+        # place by the driver, so the pipeline for a batch sees exactly that
+        # batch's zips. The old shared directory relied on the Fetcher having
+        # deleted the previous batch's input in time, which nothing waited for
+        # — the next batch's startup scan could pick up leftovers and process
+        # them twice, which is what `ProgressTracker.well_repeats` counts. The
+        # cache is no warmer for it: the Fetcher deletes each zip as it lands
+        # either way.
+        remote_input = f"{runner.host.remote_staging_dir}/runs/{run_id}/in"
         remote_output = (
             f"{runner.host.remote_staging_dir}/runs/{run_id}/out"
         )
@@ -3913,6 +4089,168 @@ class _BatchedRemoteProcess:
             proc.send_signal(sig)
 
     # Internals ────────────────────────────────────────────────────────
+
+    def _batch_flag(self, template: str, index: int) -> str:
+        """The remote path of one batch's handshake file."""
+        run_dir = f"{self._runner.host.remote_staging_dir}/runs/{self._run_id}"
+        return f"{run_dir}/{template.format(i=index)}"
+
+    def _batch_staging_dir(self, index: int) -> str:
+        """Where batch *index* is uploaded, before the driver swaps it in."""
+        return f"{self._runner.host.remote_staging_dir}/runs/{self._run_id}/b{index}"
+
+    def _start_driver(self, n_batches: int) -> None:
+        """Put one allocation on a node and leave it there for the whole run.
+
+        Every batch used to be its own ``srun``, so a scheduler-backed host
+        queued once per batch and handed the node back in between. The driver
+        holds it and takes the batches as they arrive
+        (:func:`_batch_driver_snippet`).
+
+        The ``--time`` in the launcher is scaled here, because it sized one
+        batch and now has to cover the plate. The user's own launcher is never
+        rewritten on disk — only the copy this run hands to the scheduler.
+        """
+        run = self._runner._run
+        host = self._runner.host
+        run_dir = f"{host.remote_staging_dir}/runs/{self._run_id}"
+        heartbeat = f"{run_dir}/{UPLOAD_HEARTBEAT}"
+
+        # Clear any handshake files a previous run of this same dataset left:
+        # `run_id` is deterministic, so the driver would otherwise find batch 1
+        # already flagged ready and start against an empty input directory.
+        self._runner._cache._ssh_run(["mkdir", "-p", run_dir], check=False)
+        self._runner._cache._ssh_run(
+            ["rm", "-f"] + [self._batch_flag(t, i)
+                            for i in range(1, n_batches + 1)
+                            for t in (BATCH_READY, BATCH_DONE)],
+            check=False,
+        )
+        # …and any batch a previous, aborted run of this same dataset staged.
+        # `run_id` is deterministic, so those directories are still sitting
+        # there and the driver would swap one in as though it were ours.
+        self._runner._cache._ssh_run(
+            ["rm", "-rf", f"{run_dir}/in"]
+            + [self._batch_staging_dir(i) for i in range(1, n_batches + 1)],
+            check=False,
+        )
+        self._runner._sweep_orphaned_allocation(
+            run.remote_pidfile, heartbeat, log_fn=self._log)
+
+        # The heartbeat runs for the whole run, not just one upload: the driver
+        # checks it at every batch boundary, so an app that dies between
+        # batches gives the node back instead of parking it on a `ready` file
+        # nobody will ever write.
+        self._heartbeat = _UploadHeartbeat(self._runner._cache, heartbeat)
+        self._heartbeat.beat()
+        self._heartbeat.__enter__()
+
+        remote_argv = self._runner._build_remote_argv(
+            self._pipeline_argv, run.remote_input_dir, run.remote_output_dir,
+            self._output_filter, self._zipped.mode,
+        )
+        # Each batch still sees only its own slice, so the in-pipeline
+        # auto-threshold pass would write defaults from a fraction of the plate
+        # — it is suppressed here and re-run once locally over everything.
+        if "--no_auto_threshold" not in remote_argv:
+            remote_argv = list(remote_argv) + ["--no_auto_threshold"]
+
+        # The budget for one batch is what the operator wrote before this
+        # change: their --time sized a single launch.
+        per_batch_s = launcher_time_seconds(host.compute_launcher)
+        launcher, note = scale_launcher_time(host.compute_launcher, n_batches)
+        if note:
+            self._log(note)
+        # One hand-off for the run rather than one per batch — there is one
+        # queue wait now, and this is the line that says it is happening.
+        self._log(_scheduler_handoff_lines(launcher))
+
+        driver = _batch_driver_snippet(run_dir, n_batches, remote_argv,
+                                       heartbeat, per_batch_s)
+        ssh_argv = host.ssh_argv(allocate_tty=True) + [
+            _compose_driver_cmd(launcher, run.remote_pidfile, driver,
+                                env_selector=self._runner.env_selector)
+        ]
+        proc = subprocess.Popen(
+            ssh_argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            # The remote (Linux) pipeline logs UTF-8 — including the em-dash in
+            # "Well X — done." Decode as UTF-8 so those markers survive on a
+            # cp1252 Windows client; otherwise the dashboard's per-well Process
+            # tracking never matches.
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            start_new_session=(os.name == "posix"),
+        )
+        with self._current_proc_lock:
+            self._current_proc = proc
+        self._reader = threading.Thread(
+            target=self._read_driver, args=(proc,), daemon=True,
+            name="aw-batch-driver-reader")
+        self._reader.start()
+
+    def _read_driver(self, proc: subprocess.Popen) -> None:
+        """Tee the driver's output, and note where each batch ended.
+
+        One reader for the whole run, where the old code teed inline inside
+        each batch's own loop. It also watches for the driver's per-batch
+        marker, which is how the batch loop learns a batch is finished: the
+        stream is already being read, so that costs no extra ssh and has no
+        poll interval to wait out.
+        """
+        try:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                m = _BATCH_DONE_RE.search(line)
+                if m:
+                    # Consumed, not forwarded: this is the handshake between the
+                    # driver and this loop, and `ProgressTracker` has no reason
+                    # to see it.
+                    index, rc = int(m.group(1)), int(m.group(2))
+                    self._batch_rc[index] = rc
+                    self._batch_events.setdefault(
+                        index, threading.Event()).set()
+                    continue
+                self._fetcher.observe(line)
+                self._line_q.put(line)
+        except Exception:
+            swallowed("batch driver reader")
+        finally:
+            # Whatever ended the stream — the driver finishing, the node dying,
+            # a Stop killing the ssh — every batch still waiting has to be
+            # released or the loop would block for ever.
+            self._stream_ended.set()
+            for event in self._batch_events.values():
+                event.set()
+
+    def _await_batch(self, index: int, n_batches: int) -> int | None:
+        """This batch's exit code, or ``None`` if the driver went away."""
+        event = self._batch_events.setdefault(index, threading.Event())
+        while not event.wait(timeout=1.0):
+            if self._stop.is_set() or self._stream_ended.is_set():
+                break
+        if index in self._batch_rc:
+            return self._batch_rc[index]
+        # No code came back. Either the user stopped the run, or the allocation
+        # is gone — a walltime expiry, a node failure, somebody else's scancel.
+        if self._stop.is_set():
+            self._log(f"[remote] stopped during batch {index}/{n_batches}\n")
+            self._returncode = 130
+        else:
+            # A Stop that arrives as a process-group kill sets none of this
+            # object's state (it never reaches `terminate`), so the run would
+            # otherwise carry on downloading as though nothing had happened.
+            self._log(
+                f"[remote] the allocation ended during batch {index}/"
+                f"{n_batches} — no more batches will run\n")
+            self._stop.set()
+            self._fetcher.cancel()
+            self._returncode = self._returncode or 1
+        return None
 
     def _run_batches(self) -> None:
         try:
@@ -4037,6 +4375,19 @@ class _BatchedRemoteProcess:
                 f"(peak remote disk ≈ {self._batch_size} well-input)\n"
             )
 
+            if self._stop.is_set():
+                # Before anything reaches the remote. A Stop that arrives while
+                # the plate is still being planned must not leave an allocation
+                # behind, and the tests that drive this method with a pre-set
+                # stop event build the object without a `_runner` at all — so
+                # this ordering is load-bearing twice over.
+                self._log("[remote] stopped before the first batch\n")
+                self._returncode = 130
+                return
+
+            self._start_driver(n_batches)
+            failed: dict[int, int] = {}
+
             for batch_idx, batch_zips in enumerate(batches):
                 if self._stop.is_set():
                     self._log(
@@ -4072,7 +4423,7 @@ class _BatchedRemoteProcess:
                     inner_progress = None
                 sent_bytes, _elapsed, rc = self._runner._cache.upload_subset(
                     batch_zips,
-                    self._runner._run.remote_input_dir,
+                    self._batch_staging_dir(batch_idx + 1),
                     log_fn=self._log,
                     progress_fn=inner_progress,
                     stop_event=self._stop,
@@ -4126,64 +4477,45 @@ class _BatchedRemoteProcess:
                     remote_argv = list(remote_argv) + ["--no_auto_threshold"]
                 # Each batch is its own pipeline launch, so on a
                 # scheduler-backed host (``compute_launcher``) each batch
-                # gets its own fresh allocation on a scheduled compute
-                # node. No cache-hit fast path exists in batched mode.
-                remote_cmd = _compose_remote_cmd(
-                    self._runner.host.compute_launcher,
-                    self._runner._run.remote_pidfile,
-                    remote_argv,
-                    cache_hit=False,
-                    env_selector=self._runner.env_selector,
+                # The pipeline for this batch runs inside the allocation the
+                # driver is already holding: hand it the batch and wait for the
+                # code it reports back.
+                self._runner._cache._ssh_run(
+                    ["touch", self._batch_flag(BATCH_READY, batch_idx + 1)],
+                    check=False,
                 )
-                ssh_argv = (
-                    self._runner.host.ssh_argv(allocate_tty=True)
-                    + [remote_cmd]
-                )
-                proc = subprocess.Popen(
-                    ssh_argv,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    # The remote (Linux) pipeline logs UTF-8 — including the
-                    # em-dash in "Well X — done." Decode the ssh stream as UTF-8
-                    # so those markers survive on a Windows client (whose locale
-                    # is cp1252); otherwise they arrive mojibake'd and the
-                    # dashboard's per-well Process tracking never matches.
-                    encoding="utf-8",
-                    errors="replace",
-                    bufsize=1,
-                    env={**os.environ, "PYTHONUNBUFFERED": "1"},
-                    start_new_session=(os.name == "posix"),
-                )
-                # Publish under the lock so a concurrent Stop (terminate/kill on
-                # the GUI thread) reads a consistent handle, not a half-updated
-                # attribute or a stale value at a batch boundary (audit E20).
-                with self._current_proc_lock:
-                    self._current_proc = proc
-                assert proc.stdout is not None
-                for line in proc.stdout:
-                    if self._stop.is_set():
-                        proc.terminate()
-                        break
-                    self._fetcher.observe(line)
-                    self._line_q.put(line)
-                rc = proc.wait()
-                with self._current_proc_lock:
-                    self._current_proc = None
-
-                if rc != 0:
-                    self._log(
-                        f"[remote] batch {batch_idx + 1} pipeline exited "
-                        f"{rc}; aborting remaining batches\n"
-                    )
-                    self._returncode = rc
+                rc = self._await_batch(batch_idx + 1, n_batches)
+                if rc is None:
+                    # The driver is gone. Nothing further will ever be run, and
+                    # whether that was a Stop or a dead node the outcome is the
+                    # same for the batches left.
                     return
+                if rc != 0:
+                    # Kept, not fatal: one bad well should not cost the plate
+                    # the node it already holds. The tally after the loop names
+                    # every batch that did this, and the run's own code carries
+                    # the first of them.
+                    failed[batch_idx + 1] = rc
+                    self._log(
+                        f"[remote] batch {batch_idx + 1} pipeline exited {rc}; "
+                        f"continuing with the remaining batches\n"
+                    )
+                else:
+                    self._log(
+                        f"[remote] batch {batch_idx + 1}/{n_batches} complete\n"
+                    )
 
+
+            if failed:
+                names = ", ".join(str(i) for i in sorted(failed))
                 self._log(
-                    f"[remote] batch {batch_idx + 1}/{n_batches} complete\n"
+                    f"[remote] {len(failed)} of {n_batches} batch(es) failed "
+                    f"({names}); the rest completed. Wells from a failed batch "
+                    f"are missing from the output.\n"
                 )
-
-            self._returncode = 0
+                self._returncode = failed[min(failed)]
+            else:
+                self._returncode = 0
         except BaseException as exc:
             # A crash anywhere in the batch loop (ssh spawn failure, argv
             # build, upload, stdout iteration) must NOT leave ``_returncode``

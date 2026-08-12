@@ -16,11 +16,13 @@ time out.
 
 from __future__ import annotations
 
+import subprocess
 from unittest.mock import MagicMock
 
 import pytest
 
 from services.remote_runner import (
+    UPLOAD_HEARTBEAT,
     UPLOAD_SENTINEL,
     UPLOAD_WAIT_TIMEOUT_S,
     DatasetCache,
@@ -163,6 +165,15 @@ def _spawn_recording_order(monkeypatch, tmp_path, launcher, *, upload_raises=Non
 
     monkeypatch.setattr("services.remote_runner.subprocess.Popen", fake_popen)
 
+    # ``subprocess.run`` is Popen underneath, so the fake above would answer the
+    # sweep's ssh as though it were the pipeline launch. Give it its own stub:
+    # an empty stdout is "no leftover job", which is the ordinary case.
+    def fake_run(argv, **kw):
+        order.append("sweep")
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
+
     zip_path = tmp_path / "A01.zip"
     zip_path.write_bytes(b"PK\x05\x06" + b"\0" * 18)
     zipped = ZippedInput(zip_dir=tmp_path, mode=LocalInputMode.ZIP,
@@ -183,10 +194,19 @@ def test_the_allocation_is_requested_before_the_upload_starts(monkeypatch, tmp_p
     assert order.index("allocate") < order.index("upload")
     # And the sentinel is written after the bytes, not before them — the job
     # is watching for exactly that file.
-    touches = [i for i, step in enumerate(order) if step.startswith("touch ")]
-    assert touches, f"the sentinel was never written: {order}"
-    assert order.index("upload") < touches[0]
-    assert UPLOAD_SENTINEL in order[touches[0]]
+    sentinel_at = [i for i, step in enumerate(order) if UPLOAD_SENTINEL in step]
+    assert sentinel_at, f"the sentinel was never written: {order}"
+    assert order.index("upload") < sentinel_at[0]
+
+    # The heartbeat starts before the job can look at it, so the first thing a
+    # granted node sees is a heartbeat that exists rather than a missing one it
+    # would read as a dead uploader.
+    beats = [i for i, step in enumerate(order) if UPLOAD_HEARTBEAT in step]
+    assert beats, f"no heartbeat was ever written: {order}"
+    assert beats[0] < order.index("allocate")
+
+    # And a leftover allocation is swept before we add one of our own.
+    assert order.index("sweep") < order.index("allocate")
 
 
 def test_a_host_with_no_scheduler_still_uploads_first(monkeypatch, tmp_path):
@@ -204,3 +224,88 @@ def test_a_failed_upload_hands_the_allocation_back(monkeypatch, tmp_path):
     with pytest.raises(RuntimeError):
         _spawn_recording_order(monkeypatch, tmp_path, "srun -N1",
                                upload_raises=boom)
+
+
+# ── surviving a crash ────────────────────────────────────────────────────────
+
+
+def test_the_job_gives_up_on_a_dead_uploader_not_just_a_slow_one():
+    """The deadline is for an uploader that is alive but wedged. The case that
+    actually happens is the app being killed — force-quit, laptop closed,
+    power gone — and waiting out two hours of idle, billed node for that is the
+    wrong behaviour. A heartbeat that stops advancing frees the node in about a
+    minute however long the upload legitimately needed."""
+    from services.remote_runner import UPLOAD_HEARTBEAT_STALE_S
+
+    cmd = _compose_remote_cmd(
+        "srun -N1", _PIDFILE, _ARGV, cache_hit=False,
+        upload_sentinel=_SENTINEL,
+        upload_heartbeat=f"/scratch/runs/run-abc/{UPLOAD_HEARTBEAT}",
+    )
+    assert UPLOAD_HEARTBEAT in cmd
+    assert str(UPLOAD_HEARTBEAT_STALE_S) in cmd
+    assert "stopped responding" in cmd
+    # Remote clocks on both sides of the comparison — the mtime comes from a
+    # touch made over ssh, so this is not measuring skew between two machines.
+    assert "stat -c %Y" in cmd and "date +%s" in cmd
+    # Checked inside the wait, before the deadline that follows it.
+    assert cmd.index("stopped responding") < cmd.index("never completed")
+
+
+def test_the_heartbeat_stops_when_the_upload_does(monkeypatch):
+    """Whatever ends the upload has to end the beat, or a crashed app would go
+    on reassuring the job that its input is coming."""
+    from services.remote_runner import _UploadHeartbeat
+
+    beats = []
+
+    class _Cache:
+        def _ssh_run(self, argv, *, check):
+            beats.append(tuple(argv))
+            return MagicMock(stdout="", returncode=0)
+
+    hb = _UploadHeartbeat(_Cache(), "/scratch/runs/run-abc/.aw_upload_alive",
+                          interval_s=0.02)
+    with hb:
+        import time as _t
+        _t.sleep(0.12)
+    during = len(beats)
+    assert during >= 2, f"the heartbeat never beat: {beats}"
+
+    import time as _t
+    _t.sleep(0.12)
+    assert len(beats) == during, "the heartbeat outlived the upload"
+
+
+def test_a_leftover_job_is_cancelled_but_a_live_one_is_not(monkeypatch, tmp_path):
+    """``run_id`` is deterministic in the input and the arguments, which is what
+    lets a new run find the job a crashed one left — and also what would let two
+    sessions running the same plate cancel each other. The guard is the
+    heartbeat and the sidecar's own age."""
+    runner = RemoteRunner(_host("srun -N1"))
+    seen = {}
+
+    def fake_run(argv, **kw):
+        seen["script"] = argv[-1]
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
+    runner._sweep_orphaned_allocation("/r/run.pid", "/r/.aw_upload_alive")
+
+    script = seen["script"]
+    assert "scancel" in script
+    # It reads the id the crashed run left on the shared filesystem...
+    assert "/r/run.pid.slurm" in script
+    # ...and refuses to touch it while someone is still beating, or while the
+    # sidecar itself is only moments old.
+    assert "AW_OWNED" in script
+    assert script.count("AW_OWNED") == 2
+
+
+def test_a_host_without_a_scheduler_has_nothing_to_sweep(monkeypatch, tmp_path):
+    ran = []
+    monkeypatch.setattr("services.remote_runner.subprocess.run",
+                        lambda *a, **k: ran.append(a) or
+                        subprocess.CompletedProcess([], 0, stdout=""))
+    RemoteRunner(_host(""))._sweep_orphaned_allocation("/r/run.pid", "/r/.hb")
+    assert not ran

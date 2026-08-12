@@ -2259,8 +2259,22 @@ UPLOAD_WAIT_TIMEOUT_S = 7200
 UPLOAD_WAIT_POLL_S = 3
 _UPLOAD_WAIT_EXIT = 75
 
+# Touched on the remote every ``UPLOAD_HEARTBEAT_S`` for as long as an upload is
+# actually in flight. The deadline above is a backstop against a hung uploader;
+# this is the answer to a *dead* one — the app being killed, the laptop closing,
+# the network going — where waiting out two hours of idle, billed node is the
+# wrong behaviour. A heartbeat that stops advancing frees the node in about a
+# minute regardless of how long the upload legitimately needed.
+#
+# The file is touched over ssh, so its mtime is the *remote* clock and the job
+# comparing it against its own ``date`` is not measuring clock skew between two
+# machines.
+UPLOAD_HEARTBEAT = ".aw_upload_alive"
+UPLOAD_HEARTBEAT_S = 30
+UPLOAD_HEARTBEAT_STALE_S = 120
 
-def _wait_for_upload_snippet(sentinel: str) -> str:
+
+def _wait_for_upload_snippet(sentinel: str, heartbeat: str = "") -> str:
     """Shell that blocks until *sentinel* exists, or gives the node back.
 
     Runs **inside** the allocation, so its output reaches the user on the same
@@ -2271,6 +2285,22 @@ def _wait_for_upload_snippet(sentinel: str) -> str:
     """
     sentinel_q = _remote_quote(sentinel)
     waited = int(UPLOAD_WAIT_TIMEOUT_S // UPLOAD_WAIT_POLL_S)
+    # A stale heartbeat means the uploader is gone — killed, disconnected,
+    # asleep — and nothing will ever write the sentinel. Checked before the
+    # deadline because it is the case that actually happens; the deadline is
+    # for an uploader that is alive but wedged.
+    stale = ""
+    if heartbeat:
+        hb_q = _remote_quote(heartbeat)
+        stale = (
+            f'_aw_hb=$(stat -c %Y {hb_q} 2>/dev/null || echo 0); '
+            f'_aw_now=$(date +%s); '
+            f'if [ "$_aw_hb" -eq 0 ] || '
+            f'[ "$((_aw_now - _aw_hb))" -gt {UPLOAD_HEARTBEAT_STALE_S} ]; then '
+            f'echo "[remote] ERROR the uploader stopped responding '
+            f'({UPLOAD_HEARTBEAT_STALE_S}s without a heartbeat) — giving the '
+            f'node back"; exit {_UPLOAD_WAIT_EXIT}; fi; '
+        )
     return (
         f'if [ ! -f {sentinel_q} ]; then '
         f'echo "[remote] scheduler: node granted; waiting for the upload to '
@@ -2278,12 +2308,63 @@ def _wait_for_upload_snippet(sentinel: str) -> str:
         f'_aw_w=0; '
         f'while [ ! -f {sentinel_q} ]; do '
         f'_aw_w=$((_aw_w+1)); '
+        f'{stale}'
         f'if [ "$_aw_w" -gt {waited} ]; then '
         f'echo "[remote] ERROR the upload never completed — giving the node '
         f'back after {UPLOAD_WAIT_TIMEOUT_S}s"; exit {_UPLOAD_WAIT_EXIT}; fi; '
         f'sleep {UPLOAD_WAIT_POLL_S}; done; '
         f'echo "[remote] scheduler: input is complete — starting the pipeline"; '
     )
+
+
+class _UploadHeartbeat:
+    """Touches the remote heartbeat while an upload is in flight.
+
+    A daemon thread rather than a hook inside the transfer: rsync can be busy
+    with one large archive for minutes without returning to any per-file
+    callback, and a heartbeat that only advances between files would read as
+    dead exactly during the slowest part of the upload.
+
+    Stopping is the point. Whatever ends the upload — success, failure, the
+    Stop button, the process being killed — takes the beat with it, and the
+    waiting job frees its node about a minute later instead of holding it for
+    the full deadline.
+    """
+
+    def __init__(self, cache: "DatasetCache", path: str,
+                 interval_s: float = UPLOAD_HEARTBEAT_S) -> None:
+        self._cache = cache
+        self._path = path
+        self._interval = interval_s
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def beat(self) -> None:
+        """One touch, now. Called once before the job starts waiting, so the
+        first thing it looks at is a heartbeat that already exists."""
+        self._cache._ssh_run(["touch", self._path], check=False)
+
+    def __enter__(self) -> "_UploadHeartbeat":
+        self.beat()
+        self._thread = threading.Thread(
+            target=self._run, name="aw-upload-heartbeat", daemon=True)
+        self._thread.start()
+        return self
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval):
+            try:
+                self.beat()
+            except Exception:
+                # A missed beat is not fatal on its own — the job tolerates
+                # `UPLOAD_HEARTBEAT_STALE_S` of silence — and an ssh blip must
+                # not take down an upload that is otherwise fine.
+                swallowed("upload heartbeat")
+
+    def __exit__(self, *_exc) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
 
 
 def _compose_remote_cmd(
@@ -2294,6 +2375,7 @@ def _compose_remote_cmd(
     cache_hit: bool,
     env_selector: EnvSelector = DEFAULT_ENV_SELECTOR,
     upload_sentinel: str = "",
+    upload_heartbeat: str = "",
 ) -> str:
     """Build the bash command string ssh runs on the remote login node.
 
@@ -2352,7 +2434,7 @@ def _compose_remote_cmd(
     # The wait goes first, before conda and before the pipeline: the job may
     # have been granted its node while the plate was still uploading, which is
     # the point of requesting it early.
-    wait_snippet = (_wait_for_upload_snippet(upload_sentinel)
+    wait_snippet = (_wait_for_upload_snippet(upload_sentinel, upload_heartbeat)
                     if upload_sentinel else "")
     inner = (
         f"{_CONDA_ACTIVATE_SNIPPET}; "
@@ -5294,6 +5376,8 @@ class RemoteRunner:
         remote_pidfile = f"{self.host.remote_staging_dir}/runs/{run_id}/run.pid"
         remote_sentinel = (
             f"{self.host.remote_staging_dir}/runs/{run_id}/{UPLOAD_SENTINEL}")
+        remote_heartbeat = (
+            f"{self.host.remote_staging_dir}/runs/{run_id}/{UPLOAD_HEARTBEAT}")
 
         # The sentinel is cleared with the same call that makes the directory:
         # ``run_id`` is deterministic in (input, arguments), so a re-run lands
@@ -5426,6 +5510,7 @@ class RemoteRunner:
             cache_hit=cache_hit,
             env_selector=self.env_selector,
             upload_sentinel=remote_sentinel if overlap else "",
+            upload_heartbeat=remote_heartbeat if overlap else "",
         )
         ssh_argv = self.host.ssh_argv(allocate_tty=True) + [remote_cmd]
 
@@ -5483,13 +5568,22 @@ class RemoteRunner:
             return sent, elapsed
 
         if overlap:
+            # Before adding an allocation of our own, hand back one a crashed
+            # run of this same dataset may have left holding a node.
+            self._sweep_orphaned_allocation(
+                remote_pidfile, remote_heartbeat, log_fn=log)
+            heartbeat = _UploadHeartbeat(self._cache, remote_heartbeat)
+            # One beat before the job can look, so the first thing it sees is a
+            # heartbeat that exists rather than one that is missing.
+            heartbeat.beat()
             popen = _start_ssh()
             try:
-                _upload()
+                with heartbeat:
+                    _upload()
             except BaseException:
                 # An allocation is already in flight and nothing will ever
-                # write its sentinel, so it would sit on a node until the
-                # timeout. Hand it back now rather than in two hours.
+                # write its sentinel. The stopped heartbeat would free it
+                # within the minute anyway; this is the direct route.
                 log("[remote] upload failed — releasing the allocation\n")
                 try:
                     self.cancel(popen)
@@ -6109,6 +6203,69 @@ class RemoteRunner:
             # teardown so the log has a definite end-of-job marker rather
             # than silence.
             log("[remote] scheduler: job already finished — nothing to cancel.\n")
+
+    def _sweep_orphaned_allocation(
+        self, remote_pidfile: str, heartbeat: str,
+        *, log_fn: Callable[[str], None] | None = None,
+    ) -> None:
+        """Cancel an allocation a *previous* run of this app left behind.
+
+        The scancel backstop covers every exit the app survives: a clean quit,
+        a finished run, a Stop click. It cannot cover the ones where no Python
+        of ours runs at all — SIGKILL, a segfault, a force-quit, the power
+        going — because it needs the job id held in memory. The id is on the
+        shared filesystem the whole time (`<pidfile>.slurm`), and ``run_id`` is
+        deterministic in the input and the arguments, so the next run of the
+        same plate can find exactly the job the crashed one left.
+
+        **Guarded, because that determinism cuts both ways.** Two instances
+        running the same plate compute the same ``run_id``, so an unconditional
+        sweep would have each cancel the other's live job. A run that is still
+        owned is beating its heartbeat, and one that started moments ago has a
+        fresh sidecar; either is left alone. What gets cancelled is a job whose
+        owner has been silent for longer than a stalled upload would be.
+        """
+        if not self.host.compute_launcher.strip():
+            return
+        log = log_fn or (lambda _m: None)
+        sidecar_q = _remote_quote(f"{remote_pidfile}.slurm")
+        hb_q = _remote_quote(heartbeat)
+        # One round trip: read the id, and the two ages that decide whether it
+        # is anyone's. Ages are computed remotely so no clock is compared
+        # against another machine's.
+        script = (
+            f'_jid=$(cat {sidecar_q} 2>/dev/null); '
+            f'[ -z "$_jid" ] && exit 0; '
+            f'_now=$(date +%s); '
+            f'_hb=$(stat -c %Y {hb_q} 2>/dev/null || echo 0); '
+            f'_sc=$(stat -c %Y {sidecar_q} 2>/dev/null || echo "$_now"); '
+            f'if [ "$_hb" -ne 0 ] && '
+            f'[ "$((_now - _hb))" -le {UPLOAD_HEARTBEAT_STALE_S} ]; then '
+            f'echo "AW_OWNED $_jid"; exit 0; fi; '
+            f'if [ "$((_now - _sc))" -le {UPLOAD_HEARTBEAT_STALE_S} ]; then '
+            f'echo "AW_OWNED $_jid"; exit 0; fi; '
+            f'command -v scancel >/dev/null 2>&1 && scancel "$_jid" '
+            f'2>/dev/null && echo "AW_SWEPT $_jid" || true'
+        )
+        try:
+            result = subprocess.run(
+                self.host.ssh_argv(allocate_tty=False) + [script],
+                capture_output=True, text=True, timeout=15,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            log(f"[remote] WARN scheduler: could not check for a leftover "
+                f"allocation ({exc}).\n")
+            return
+        out = result.stdout or ""
+        if "AW_SWEPT" in out:
+            jid = out.split("AW_SWEPT", 1)[1].strip().split()[:1]
+            log(f"[remote] scheduler: cancelled a job left over from an "
+                f"earlier run of this dataset ({jid[0] if jid else '?'}) — "
+                f"the app it belonged to is gone.\n")
+        elif "AW_OWNED" in out:
+            jid = out.split("AW_OWNED", 1)[1].strip().split()[:1]
+            log(f"[remote] scheduler: another session is running this same "
+                f"dataset (job {jid[0] if jid else '?'}); leaving it alone.\n")
 
     def cancel(self, ssh_proc: subprocess.Popen) -> None:
         """Best-effort remote kill. The local pgid kill (handled by

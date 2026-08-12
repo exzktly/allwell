@@ -2317,6 +2317,29 @@ def _wait_for_upload_snippet(sentinel: str, heartbeat: str = "") -> str:
     )
 
 
+def _only_my_job(jid_var: str, marker: str) -> str:
+    """Shell that refuses to cancel a job belonging to somebody else.
+
+    Two locks rather than one. The id is read from a file this app wrote, so in
+    the ordinary case it is our own job — but ``remote_staging_dir`` can point
+    at shared scratch, and ``run_id`` is deterministic in (input, arguments),
+    so two people processing the same plate share a run directory and therefore
+    a sidecar. Slurm would refuse a non-owner's ``scancel`` anyway; that is the
+    scheduler's policy, not this app's promise, and a cluster where operators
+    run the GUI would not have it.
+
+    So: ask the scheduler whose job it is and stop if the answer is not us, and
+    pass ``-u`` to ``scancel`` as well, so even a job that changed hands between
+    the question and the answer cannot be cancelled by us.
+    """
+    return (
+        f'_aw_me=$(id -un 2>/dev/null || echo "$USER"); '
+        f'_aw_owner=$(squeue -h -j "${jid_var}" -o %u 2>/dev/null | head -n1); '
+        f'if [ -n "$_aw_owner" ] && [ "$_aw_owner" != "$_aw_me" ]; then '
+        f'echo "{marker} ${jid_var} $_aw_owner"; exit 0; fi; '
+    )
+
+
 class _UploadHeartbeat:
     """Touches the remote heartbeat while an upload is in flight.
 
@@ -6176,8 +6199,11 @@ class RemoteRunner:
         slurm_sidecar_q = _remote_quote(f"{run.remote_pidfile}.slurm")
         cmd = (
             f"_jid=$(cat {slurm_sidecar_q} 2>/dev/null); "
-            '[ -n "$_jid" ] && command -v scancel >/dev/null 2>&1 '
-            '&& scancel "$_jid" 2>/dev/null && echo "AW_SCANCELLED $_jid" || true'
+            '[ -z "$_jid" ] && exit 0; '
+            + _only_my_job("_jid", "AW_NOTMINE") +
+            'command -v scancel >/dev/null 2>&1 '
+            '&& scancel -u "$_aw_me" "$_jid" 2>/dev/null '
+            '&& echo "AW_SCANCELLED $_jid" || true'
         )
         try:
             result = subprocess.run(
@@ -6244,8 +6270,10 @@ class RemoteRunner:
             f'echo "AW_OWNED $_jid"; exit 0; fi; '
             f'if [ "$((_now - _sc))" -le {UPLOAD_HEARTBEAT_STALE_S} ]; then '
             f'echo "AW_OWNED $_jid"; exit 0; fi; '
-            f'command -v scancel >/dev/null 2>&1 && scancel "$_jid" '
-            f'2>/dev/null && echo "AW_SWEPT $_jid" || true'
+            + _only_my_job("_jid", "AW_NOTMINE") +
+            'command -v scancel >/dev/null 2>&1 '
+            '&& scancel -u "$_aw_me" "$_jid" '
+            '2>/dev/null && echo "AW_SWEPT $_jid" || true'
         )
         try:
             result = subprocess.run(
@@ -6262,6 +6290,12 @@ class RemoteRunner:
             log(f"[remote] scheduler: cancelled a job left over from an "
                 f"earlier run of this dataset ({jid[0] if jid else '?'}) — "
                 f"the app it belonged to is gone.\n")
+        elif "AW_NOTMINE" in out:
+            rest = out.split("AW_NOTMINE", 1)[1].strip().split()
+            log(f"[remote] scheduler: the job in this dataset's run directory "
+                f"({rest[0] if rest else '?'}) belongs to "
+                f"{rest[1] if len(rest) > 1 else 'another user'} — not touching "
+                f"it.\n")
         elif "AW_OWNED" in out:
             jid = out.split("AW_OWNED", 1)[1].strip().split()[:1]
             log(f"[remote] scheduler: another session is running this same "

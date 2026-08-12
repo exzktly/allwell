@@ -309,3 +309,56 @@ def test_a_host_without_a_scheduler_has_nothing_to_sweep(monkeypatch, tmp_path):
                         subprocess.CompletedProcess([], 0, stdout=""))
     RemoteRunner(_host(""))._sweep_orphaned_allocation("/r/run.pid", "/r/.hb")
     assert not ran
+
+
+def test_neither_cancel_path_will_touch_another_user_s_job(monkeypatch):
+    """The id comes from a file this app wrote, which in the ordinary case
+    makes it our own job — but ``remote_staging_dir`` can point at shared
+    scratch and ``run_id`` is deterministic in (input, arguments), so two
+    people processing the same plate share a sidecar. Slurm would refuse a
+    non-owner's scancel anyway; that is the scheduler's policy rather than this
+    app's promise, and it does not hold for an operator account."""
+    runner = RemoteRunner(_host("srun -N1"))
+    scripts = []
+
+    def fake_run(argv, **kw):
+        scripts.append(argv[-1])
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
+    runner._sweep_orphaned_allocation("/r/run.pid", "/r/.aw_upload_alive")
+
+    from services.remote_runner import _RemoteRun
+
+    runner._run = _RemoteRun(
+        run_id="run-x", cache_key="k", remote_input_dir="/r/in",
+        remote_output_dir="/r/out", remote_pidfile="/r/run.pid",
+        local_output_dir=None, local_input_mode=LocalInputMode.ZIP,
+    )
+    runner.close_remote_job()
+
+    assert len(scripts) == 2, "both cancel paths should have run"
+    for script in scripts:
+        # Asks the scheduler who owns it, and stops if the answer is not us...
+        assert "squeue -h -j" in script
+        assert "%u" in script
+        assert "AW_NOTMINE" in script
+        # ...and scopes the cancel itself, so a job that changed hands between
+        # the question and the answer is still not ours to kill.
+        assert "scancel -u" in script
+        assert 'scancel "$_jid"' not in script
+
+
+def test_a_job_owned_by_someone_else_is_reported_not_cancelled(monkeypatch):
+    runner = RemoteRunner(_host("srun -N1"))
+    said = []
+    monkeypatch.setattr(
+        "services.remote_runner.subprocess.run",
+        lambda argv, **kw: subprocess.CompletedProcess(
+            argv, 0, stdout="AW_NOTMINE 4242 alice\n", stderr=""),
+    )
+    runner._sweep_orphaned_allocation("/r/run.pid", "/r/.hb",
+                                      log_fn=said.append)
+    joined = "".join(said)
+    assert "4242" in joined and "alice" in joined
+    assert "not touching it" in joined

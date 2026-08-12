@@ -23,7 +23,6 @@ from pathlib import Path
 from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QCheckBox, QFileDialog, QHBoxLayout, QLineEdit, QMessageBox, QPushButton, QScrollArea,
     QSizePolicy, QSplitter, QVBoxLayout, QWidget,
@@ -59,6 +58,17 @@ from analyze_tab_form import (  # form builders (split out)
 # flag; mesh_ratio=0 caused a downstream division-by-zero). Validate them at the
 # entry boundary instead (audit X4/X6). Pure + module-level so it's unit-tested.
 
+# How long one drain slice may hold the GUI thread. Short enough that a click
+# always lands within a frame or two, long enough that the per-slice overhead
+# (one text insert, one timer hop) stays negligible against the work.
+_POLL_BUDGET_S = 0.015
+
+# …and how many log lines one slice may carry. The budget above bounds the
+# *collecting*; writing them costs about four times as much again per line, so
+# a slice that collected for its whole budget would spend four more on the
+# insert. Whichever limit is reached first ends the slice.
+_POLL_MAX_LINES = 500
+
 _PREVIEW_TOKENS = {
     "experiment": "Exp01",
     "well":       "B03",
@@ -88,16 +98,6 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzeProgressMixin,
     # this is truly the last statement so a queue bridge's slot starting the
     # next job can't race anything after its own emit.
     jobFinished = Signal(bool, str, str)
-
-    @staticmethod
-    def _log_color(tag: str) -> str:
-        return {
-            "INFO":    theme.Colors.text_primary,
-            "WARNING": theme.Colors.warn,
-            "ERROR":   theme.Colors.danger,
-            "DONE":    theme.Colors.success,
-            "CMD":     theme.Colors.text_muted,
-        }.get(tag, theme.Colors.text_primary)
 
     def __init__(
         self,
@@ -576,73 +576,81 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzeProgressMixin,
     # ------------------------------------------------------------------
     # Log helpers
     # ------------------------------------------------------------------
-    def _log_line(self, text: str, tag: str = "INFO") -> None:
-        # Snapshot the user's scroll position before appending. Auto-
-        # scroll-to-bottom only if they were already pinned there;
-        # otherwise leave the viewport alone so a user scrolled up to
-        # read an earlier line isn't yanked back every time a new line
-        # arrives.
-        vsb = self._log.verticalScrollBar()
-        at_bottom = vsb.value() >= vsb.maximum() - 4  # 4-px tolerance
-
-        # v5.4.7: compensate for ``setMaximumBlockCount(10000)``-driven
-        # trimming. When a new line pushes the block count over the
-        # cap, Qt removes blocks from the TOP. From the scrollbar's
-        # view that shifts every following pixel up — a user scrolled
-        # to read an earlier line still LOOKS like they're at the
-        # same value() but the content under that pixel has moved.
-        # Without an explicit compensation the viewport drifts toward
-        # the bottom (toward newer lines) every time trimming fires,
-        # which felt extra-broken once the rsync progress2 stream
-        # made trimming common during a remote run. Solution:
-        # snapshot block count before insert, count lines added,
-        # derive how many blocks were trimmed, subtract that many
-        # line-heights from the saved scroll value.
-        old_value = vsb.value()
-        doc = self._log.document()
-        old_block_count = doc.blockCount()
-        lines_added = text.count("\n") if text else 0
-        # An ``insertText`` of "foo\nbar" appends 1 hard newline +
-        # bar (no trailing newline) → blockCount goes up by 1.
-        # "foo\nbar\n" → up by 1. "foo" (no newline) → up by 0.
-        # The text we receive always has a trailing "\n" (see
-        # callers), so ``\n``-count == new blocks added.
-
-        # Use a *fresh* QTextCursor for the insert — setting the active
-        # text cursor (the old code) is what forced the viewport to
-        # follow the caret. The doc-bound cursor leaves the visible
-        # cursor / selection alone.
-        cursor = QTextCursor(doc)
-        cursor.movePosition(QTextCursor.End)
-        fmt = QTextCharFormat()
-        fmt.setForeground(QColor(self._log_color(tag)))
-        cursor.insertText(text, fmt)
-
-        if at_bottom:
-            vsb.setValue(vsb.maximum())
-            return
-
-        # User was scrolled up. Did setMaximumBlockCount trim
-        # blocks from the top? If so, shift the saved scroll value
-        # up by the corresponding pixel height so the user stays
-        # anchored to the SAME content they were reading instead
-        # of drifting toward the new lines at the bottom.
-        new_block_count = doc.blockCount()
-        blocks_trimmed = max(0, old_block_count + lines_added - new_block_count)
-        if blocks_trimmed > 0:
-            line_height = max(1, self._log.fontMetrics().lineSpacing())
-            vsb.setValue(max(0, old_value - blocks_trimmed * line_height))
-        else:
-            # No trimming — explicitly restore the pre-insert value
-            # in case Qt did anything implicit.
-            vsb.setValue(old_value)
-
     def _clear_log(self) -> None:
         self._log.clear()
 
+    def _on_run_done(self, payload, pending) -> None:
+        """The run ended well. Split out of ``_poll_log`` to keep that
+        loop under the complexity ratchet — it is the one branch long
+        enough to be a paragraph rather than a line."""
+        # Everything collected so far goes down before the ending
+        # does. A run's last words are written straight through
+        # (they are one line each, once per run), so the buffer has
+        # to be emptied first or the summary lands above the output
+        # it summarises.
+        self._log_lines(pending)
+        self._run_ok = True
+        n = self._well_done or getattr(self, "_zipper_done", 0)
+        missing = max(0, self._well_total - self._well_done)
+        if missing:
+            # Fewer wells finished than the run announced. Leave the
+            # bar short and name the shortfall: a full bar over a
+            # partial plate is the one thing this display must never
+            # show, because nothing else in the window says so.
+            self._dashboard.set_overall(self._well_done)
+            self._dashboard.set_headline(
+                f"Complete — {self._well_done} of {self._well_total} "
+                f"well(s) processed; {missing} never reported completion")
+            self._log_line(
+                f"[warn] Run finished with {missing} of "
+                f"{self._well_total} well(s) never reporting "
+                f"completion. Check the log above for FAILED / "
+                f"PARTIAL lines and the output dir's errors/ "
+                f"folder.\n",
+                "WARNING",
+            )
+        else:
+            self._dashboard.set_overall(self._dashboard.overall_maximum() or 100)
+            self._dashboard.set_headline(f"Complete — {n} well(s) processed")
+        self._dashboard.set_status("")
+        self._dashboard.set_eta("")
+        self._log_line(payload, "DONE")
+        self._log_line(
+            "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "  Processing Complete\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
+            "DONE",
+        )
+        if self._on_pipeline_complete is not None and self._last_output_dir is not None:
+            try:
+                self._on_pipeline_complete(self._last_output_dir)
+            except Exception as exc:
+                self._log_line(f"[warn] Could not open Review tab: {exc}\n", "WARNING")
+
     def _poll_log(self) -> None:
+        """Drain what the run has said, in bounded slices.
+
+        Bounded because this runs on the GUI thread and the queue is fed by a
+        subprocess that can talk faster than any painter. The loop used to run
+        until the queue reported empty, which on a remote run's segmentation
+        phase it does not do for minutes at a time — and while it spins the
+        window answers nothing, which is how "Show raw log" came to be
+        unclickable exactly when there was most to read. It also feeds *itself*
+        (a parsed line puts more events back), so "until empty" was never a
+        bound the producer alone could satisfy.
+
+        A slice ends on ``_POLL_BUDGET_S`` and re-arms immediately when there is
+        more, so throughput is unchanged while the event loop gets a turn
+        between slices. Log lines are collected and written once per slice —
+        see :meth:`_log_lines` for why one insert per line is the expensive
+        part.
+        """
+        deadline = _time.monotonic() + _POLL_BUDGET_S
+        pending: list[tuple[str, str]] = []
         try:
             while True:
+                if _time.monotonic() >= deadline or len(pending) >= _POLL_MAX_LINES:
+                    break
                 kind, payload = self._log_q.get_nowait()
                 if kind == "line":
                     for ev_kind, ev_payload in self._progress_tracker.parse(payload):
@@ -653,7 +661,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzeProgressMixin,
                         else:
                             self._apply_progress_event(ev_kind, ev_payload)
                     if not is_transient_progress(payload):
-                        self._log_line(payload, classify_log_line(payload))
+                        pending.append((payload, classify_log_line(payload)))
                 elif kind in ("zipper_start", "stage_total"):
                     self._apply_grouping_event(kind, payload)
                 elif kind == "zipper_well":
@@ -683,7 +691,8 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzeProgressMixin,
                         self._pipeline_workers = max(1, int(payload))
                     except (TypeError, ValueError):
                         self._pipeline_workers = 1
-                    self._log_line(f"[info] Workers: {payload} parallel well(s).\n", "INFO")
+                    pending.append(
+                        (f"[info] Workers: {payload} parallel well(s).\n", "INFO"))
                 elif kind == "remote_xfer":
                     # Remote upload/download progress in [0,1]. The dashboard
                     # owns the label so the compute phase can retract it.
@@ -693,44 +702,11 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzeProgressMixin,
                         pct = 0.0
                     self._dashboard.set_transfer(pct)
                 elif kind == "done":
-                    self._run_ok = True
-                    n = self._well_done or getattr(self, "_zipper_done", 0)
-                    missing = max(0, self._well_total - self._well_done)
-                    if missing:
-                        # Fewer wells finished than the run announced. Leave the
-                        # bar short and name the shortfall: a full bar over a
-                        # partial plate is the one thing this display must never
-                        # show, because nothing else in the window says so.
-                        self._dashboard.set_overall(self._well_done)
-                        self._dashboard.set_headline(
-                            f"Complete — {self._well_done} of {self._well_total} "
-                            f"well(s) processed; {missing} never reported completion")
-                        self._log_line(
-                            f"[warn] Run finished with {missing} of "
-                            f"{self._well_total} well(s) never reporting "
-                            f"completion. Check the log above for FAILED / "
-                            f"PARTIAL lines and the output dir's errors/ "
-                            f"folder.\n",
-                            "WARNING",
-                        )
-                    else:
-                        self._dashboard.set_overall(self._dashboard.overall_maximum() or 100)
-                        self._dashboard.set_headline(f"Complete — {n} well(s) processed")
-                    self._dashboard.set_status("")
-                    self._dashboard.set_eta("")
-                    self._log_line(payload, "DONE")
-                    self._log_line(
-                        "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        "  Processing Complete\n"
-                        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
-                        "DONE",
-                    )
-                    if self._on_pipeline_complete is not None and self._last_output_dir is not None:
-                        try:
-                            self._on_pipeline_complete(self._last_output_dir)
-                        except Exception as exc:
-                            self._log_line(f"[warn] Could not open Review tab: {exc}\n", "WARNING")
+                    self._on_run_done(payload, pending)
+                    pending = []
                 elif kind == "error":
+                    self._log_lines(pending)      # see the "done" branch
+                    pending = []
                     self._log_line(payload, "ERROR")
                     # First message only, on both surfaces. The first is the
                     # cause and anything after it is that cause's fallout, so
@@ -773,8 +749,14 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzeProgressMixin,
             pass
         except Exception:  # a bad event must not kill the poller
             swallowed()    # (would freeze the live log/dashboard permanently)
+        if pending:
+            self._log_lines(pending)
         if getattr(self, "_alive", True):
-            QTimer.singleShot(80, self._poll_log)
+            # Straight back round while the queue still holds work — through the
+            # event loop, so a click lands between slices rather than after the
+            # flood — and at the idle cadence once it is drained.
+            more = not self._log_q.empty()
+            QTimer.singleShot(0 if more else 80, self._poll_log)
 
     def closeEvent(self, event) -> None:
         if self._runner.is_running:

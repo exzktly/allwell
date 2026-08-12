@@ -2662,7 +2662,24 @@ top-hat radii, segmentation method, smFISH options, worker count) plus a
 live-streaming log panel and a Run / Stop button. `AnalyzeTab` itself is a thin
 host: it owns the runner, the queue drain (`_poll_log`), the run-state latch and
 the signals a job queue binds to, and it mixes in the three modules that hold
-everything else. Each of the three files carries a line budget
+everything else.
+
+**The drain runs in bounded slices, and writes its lines in batches.** Both
+because it is on the GUI thread and the queue is fed by a subprocess that can
+talk faster than any painter. It used to loop until the queue reported empty —
+which a remote run's segmentation phase does not do for minutes — and to write
+each line through its own insert. The scroll bookkeeping around an insert reads
+`verticalScrollBar().maximum()`, and on a `NoWrap` document that forces a full
+re-layout, so a line's cost grew with the document under it: 3.4 ms into an
+empty log, 19.1 ms at three thousand lines, 57 seconds for the batch. The
+window answered nothing throughout, which is how the "Show raw log" checkbox
+came to be unclickable exactly when there was most to read. `PipelineRunner`'s
+`_LOG_QUEUE_MAXSIZE` had long anticipated the same failure in its own comment —
+it caps the queue so "a stalled UI thread" cannot exhaust memory. A slice now
+ends on `_POLL_BUDGET_S` or `_POLL_MAX_LINES` and re-arms immediately when work
+remains, and `_log_lines` writes a slice's lines in one insert per colour run:
+0.03 ms per line, flat. Terminal `done` / `error` lines flush the buffer first,
+so a run's summary cannot land above the output it summarises. Each of the three files carries a line budget
 (`test_monolith_budgets.py`).
 
 The split follows the pane's three jobs. *Gathering* what a run is launched with

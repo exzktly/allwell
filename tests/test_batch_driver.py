@@ -139,11 +139,20 @@ def test_junk_is_not_guessed_at():
         assert parse_slurm_time(spec) is None
 
 
-def test_the_walltime_is_scaled_by_the_batch_count():
-    """It sized one batch; one allocation now covers the plate."""
+def test_the_walltime_covers_the_batches_and_the_transfers_between_them():
+    """It sized one batch's compute; one allocation now covers the plate — and
+    the node also sits through every upload after the first, because the driver
+    waits for each batch inside the allocation. Budgeting only the compute puts
+    the walltime expiry somewhere in the last batch of any run whose transfers
+    are not free."""
     out, note = scale_launcher_time("srun --partition=gpu --time=4:00:00", 3)
-    assert "--time=12:00:00" in out
+    assert "--time=16:00:00" in out, "3 batches + 1 batch of transfer budget"
     assert "scaled" in note and "4:00:00" in note
+    assert "transfers between them" in note, "a guess has to say it is one"
+
+    # The allowance is a parameter, not a constant baked into the arithmetic.
+    bare, _ = scale_launcher_time("srun --time=4:00:00", 3, transfer_allowance=0)
+    assert "--time=12:00:00" in bare
 
 
 def test_scaling_is_clamped_and_says_so():
@@ -171,7 +180,7 @@ def test_an_odd_flag_survives_the_round_trip():
     """`--constraint=a|b` has to reach the scheduler literally."""
     out, _ = scale_launcher_time("srun --constraint='a|b' --time=1:00:00", 2)
     assert "a|b" in out
-    assert "--time=02:00:00" in out
+    assert "--time=03:00:00" in out    # 2 batches + the transfer allowance
 
 
 # ── the local side of the handshake ──────────────────────────────────────────
@@ -184,12 +193,14 @@ class _FakeProc:
         self._q: queue.Queue = queue.Queue()
         self.returncode = 0
         self.terminated = False
+        self._done = False
         self.pid = 4242
 
     def say(self, line):
         self._q.put(line)
 
     def finish(self):
+        self._done = True
         self._q.put(None)
 
     @property
@@ -201,6 +212,9 @@ class _FakeProc:
                     return
                 yield item
         return _iter()
+
+    def poll(self):
+        return self.returncode if self._done else None
 
     def wait(self, timeout=None):
         return self.returncode
@@ -232,6 +246,9 @@ def _batched(tmp_path, wells, batch_size=1):
     p._batch_events = {}
     p._batch_rc = {}
     p._stream_ended = threading.Event()
+    p._driver_lost = threading.Event()
+    p._n_batches = 0
+    p._owns_allocation = False
     p._reader = None
     p._heartbeat = None
     p._run_id = "run-test"
@@ -251,7 +268,7 @@ def _batched(tmp_path, wells, batch_size=1):
 
 def _stub_runner(p, proc, ordering):
     """Give *p* a runner whose remote calls only record what was asked."""
-    def ssh_run(argv, *, check):
+    def ssh_run(argv, *, check, **kw):
         ordering.append(" ".join(str(a) for a in argv[:2]))
         return types.SimpleNamespace(stdout="", returncode=0)
 
@@ -372,6 +389,54 @@ def test_a_dead_driver_stops_the_run_and_the_downloads(tmp_path, monkeypatch):
     assert "upload:b3" not in ordering, "kept sending batches to a dead driver"
 
 
+def test_a_stop_during_an_upload_ends_the_upload(tmp_path, monkeypatch):
+    """The regression the single long-lived driver introduced.
+
+    Stop reaches this object through ``signal_subprocess``, which reads
+    ``proc.pid``. In batched mode that used to be ``-1`` between batches, so the
+    kill fell back to ``terminate()`` — which sets ``_stop``. With one driver
+    held for the whole run there is always a real pid, the process group is
+    killed instead, and ``terminate()`` never runs. Nothing but the stream
+    ending says the run is over, and the worker is inside an rsync at the time:
+    ``upload_subset`` watches ``_stop``, so the beat has to be set from the
+    reader or the app keeps pushing wells at a node that is already gone.
+    """
+    proc = _FakeProc()
+    ordering: list[str] = []
+    p = _batched(tmp_path, ["A01", "A02", "A03"])
+    _stub_runner(p, proc, ordering)
+
+    uploading = threading.Event()
+
+    def blocking_upload(zips, dest, *, stop_event=None, **kw):
+        ordering.append(f"upload:{dest.rsplit('/', 1)[-1]}")
+        uploading.set()
+        # What the real rsync wrapper does: transfer until told to stop, then
+        # report the non-zero code of the interrupted child.
+        assert stop_event is not None, "the upload cannot see the Stop at all"
+        stop_event.wait(timeout=20)
+        return (0, 0.0, 0 if not stop_event.is_set() else 20)
+
+    p._runner._cache.upload_subset = blocking_upload
+    monkeypatch.setattr("services.remote_runner.subprocess.Popen",
+                        lambda argv, **kw: proc)
+
+    worker = threading.Thread(target=p._run_batches, daemon=True)
+    worker.start()
+    assert uploading.wait(timeout=20), "batch 1 never started uploading"
+    proc.finish()                       # the process-group kill, seen as EOF
+
+    worker.join(timeout=20)
+    assert not worker.is_alive(), "the upload outlived the allocation"
+    assert p._stop.is_set()
+    assert p._cancelled, "downloads carried on after the run was killed"
+    assert [o for o in ordering if o.startswith("upload:")] == ["upload:b1"]
+    assert p._returncode not in (0, None)
+    assert not any("upload failed" in m for m in p._logged), (
+        "an interrupted upload is not a fault to report as one")
+    assert any("upload interrupted" in m for m in p._logged)
+
+
 def test_a_stop_before_the_first_batch_reaches_nothing_remote(tmp_path):
     """Ordering that is load-bearing twice: no allocation should be left
     behind, and the object is built without a `_runner` in this state."""
@@ -379,3 +444,30 @@ def test_a_stop_before_the_first_batch_reaches_nothing_remote(tmp_path):
     p._stop.set()
     p._run_batches()
     assert p._returncode == 130
+
+
+def test_a_second_session_on_the_same_plate_does_not_clear_the_first_s_input(
+        tmp_path, monkeypatch):
+    """`run_id` is deterministic in (input, arguments), so two sessions running
+    the same plate land on the same remote run directory — which `_start_driver`
+    empties before it launches. Emptying one that is in use takes a running
+    pipeline's input away mid-run, so the second session stops instead."""
+    proc = _FakeProc()
+    ordering: list[str] = []
+    p = _batched(tmp_path, ["A01", "A02"])
+    _stub_runner(p, proc, ordering)
+    p._runner._sweep_orphaned_allocation = lambda *a, **k: "owned"
+
+    spawns = []
+    monkeypatch.setattr("services.remote_runner.subprocess.Popen",
+                        lambda argv, **kw: spawns.append(argv) or proc)
+
+    p._run_batches()
+
+    assert not spawns, "launched a driver into somebody else's run directory"
+    assert not any(o.startswith("rm") for o in ordering), "cleared it anyway"
+    assert not any(o.startswith("upload") for o in ordering)
+    assert p._returncode == 1
+    assert "already running this exact dataset" in "".join(p._logged)
+    # And nothing of ours is on the scheduler, so nothing may be cancelled.
+    assert p._owns_allocation is False

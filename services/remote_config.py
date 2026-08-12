@@ -1006,12 +1006,22 @@ def launcher_time_seconds(launcher: str) -> int:
 
 def scale_launcher_time(
     launcher: str, factor: int, *, ceiling_s: int = MAX_HELD_ALLOCATION_S,
+    transfer_allowance: int = 1,
 ) -> tuple[str, str]:
-    """*launcher* with its ``--time`` multiplied by *factor*, and why.
+    """*launcher* sized for a whole batched run instead of one batch, and why.
 
     Returns ``(launcher, explanation)``. The explanation is empty when nothing
     changed, and is a log line otherwise — the app is editing scheduler
     arguments the user wrote, so it says so rather than doing it quietly.
+
+    The multiplier is ``factor + transfer_allowance``, not ``factor``. A held
+    allocation is not busy for exactly the compute it was sized for: the node
+    also sits through every upload after the first, because the driver waits
+    inside the allocation for each batch to arrive. Budgeting only the compute
+    guarantees the walltime expires somewhere in the last batch of any run
+    whose transfers are not free. One batch's budget is the allowance for all
+    of them — a guess, so the log line says it is there and the tally names any
+    batch the walltime cut short.
 
     A launcher with no time limit is returned **byte-identical**: the cluster's
     own default applies and inventing a number here would be worse than
@@ -1022,6 +1032,7 @@ def scale_launcher_time(
     """
     if factor <= 1 or not launcher.strip():
         return launcher, ""
+    scale = factor + max(0, int(transfer_allowance))
     try:
         tokens = shlex.split(launcher)
     except ValueError:
@@ -1031,13 +1042,14 @@ def scale_launcher_time(
         current = parse_slurm_time(spec)
         if current is None:
             return None
-        wanted = current * factor
+        wanted = current * scale
         capped = min(wanted, int(ceiling_s))
         if capped <= current:
             return None
         tokens[index] = rebuild(render_slurm_time(capped))
         note = (
-            f"[remote] scheduler: one allocation for all {factor} batches, so "
+            f"[remote] scheduler: one allocation for all {factor} batches "
+            f"(plus one batch's budget for the transfers between them), so "
             f"--time is scaled {spec} → {render_slurm_time(capped)}"
         )
         if capped < wanted:

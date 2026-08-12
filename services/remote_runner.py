@@ -81,7 +81,7 @@ from pipeline.incremental_keys import (
     read_done_fov_keys,
     read_done_fov_keys_from_zip,
 )
-from util.aw_safe import swallowed
+from util.aw_safe import swallow, swallowed
 # The shared "retry an OSError with a backoff, then fail with an actionable
 # message" shield. A remote run does as much I/O on the user's own volumes as a
 # local one — it reads the whole plate off the input volume to stage the upload
@@ -2275,6 +2275,62 @@ UPLOAD_HEARTBEAT = ".aw_upload_alive"
 UPLOAD_HEARTBEAT_S = 30
 UPLOAD_HEARTBEAT_STALE_S = 120
 
+# Ceiling on one short ssh control command (mkdir, touch, rm -rf). Generous
+# enough for an ``rm -rf`` of a run directory on a slow shared filesystem, and
+# far short of the hours an unbounded one can park a thread for.
+SSH_CONTROL_TIMEOUT_S = 120.0
+
+
+def _heartbeat_stale_snippet(heartbeat: str, message: str) -> tuple[str, str]:
+    """``(init, check)`` shell for "has the app stopped beating?".
+
+    Both waiting loops — the single-shot job waiting for its upload and the
+    batch driver waiting for its next batch — ask the same question, so they
+    ask it with the same shell rather than each carrying a copy that can drift.
+
+    Two things it deliberately does not do, because the cost of a wrong answer
+    is a granted node thrown away:
+
+    * **``stat`` is not assumed to be GNU.** ``stat -c %Y`` is coreutils;
+      ``stat -f %m`` is the BSD spelling. A login node with only the latter used
+      to yield an empty mtime, which read as "epoch 0" and therefore as
+      infinitely stale — every run on such a host aborted the instant it was
+      granted a node, blaming the app. When neither spelling works the timestamp
+      is unknowable, so the check says so once and stops judging: losing the
+      early hand-back is a far smaller harm than never running at all. The ssh
+      dying still tears the job down.
+    * **A missing file is not instantly fatal.** The app touches the heartbeat
+      before the job can look, but the two see it across a shared filesystem
+      whose metadata may lag. An absent file is tolerated for the same window as
+      a stale one before the node is handed back.
+    """
+    if not heartbeat:
+        return "", ""
+    hb_q = _remote_quote(heartbeat)
+    misses = max(1, int(UPLOAD_HEARTBEAT_STALE_S // UPLOAD_WAIT_POLL_S))
+    init = "_aw_miss=0; _aw_warn=0; "
+    check = (
+        f'if [ -e {hb_q} ]; then '
+        f'_aw_miss=0; '
+        f'_aw_hb=$(stat -c %Y {hb_q} 2>/dev/null || '
+        f'stat -f %m {hb_q} 2>/dev/null || echo ""); '
+        f'_aw_now=$(date +%s); '
+        f'if [ -z "$_aw_hb" ]; then '
+        f'if [ "$_aw_warn" -eq 0 ]; then _aw_warn=1; '
+        f'echo "[remote] WARN this host cannot report a file\'s modification '
+        f'time, so the job cannot tell whether the app is still there — it '
+        f'will hold the node until the pipeline runs or the walltime ends"; '
+        f'fi; '
+        f'elif [ "$((_aw_now - $_aw_hb))" -gt {UPLOAD_HEARTBEAT_STALE_S} ]; '
+        f'then echo "{message}"; exit {_UPLOAD_WAIT_EXIT}; fi; '
+        f'else '
+        f'_aw_miss=$((_aw_miss+1)); '
+        f'if [ "$_aw_miss" -gt {misses} ]; then '
+        f'echo "{message}"; exit {_UPLOAD_WAIT_EXIT}; fi; '
+        f'fi; '
+    )
+    return init, check
+
 
 def _wait_for_upload_snippet(sentinel: str, heartbeat: str = "") -> str:
     """Shell that blocks until *sentinel* exists, or gives the node back.
@@ -2291,23 +2347,16 @@ def _wait_for_upload_snippet(sentinel: str, heartbeat: str = "") -> str:
     # asleep — and nothing will ever write the sentinel. Checked before the
     # deadline because it is the case that actually happens; the deadline is
     # for an uploader that is alive but wedged.
-    stale = ""
-    if heartbeat:
-        hb_q = _remote_quote(heartbeat)
-        stale = (
-            f'_aw_hb=$(stat -c %Y {hb_q} 2>/dev/null || echo 0); '
-            f'_aw_now=$(date +%s); '
-            f'if [ "$_aw_hb" -eq 0 ] || '
-            f'[ "$((_aw_now - _aw_hb))" -gt {UPLOAD_HEARTBEAT_STALE_S} ]; then '
-            f'echo "[remote] ERROR the uploader stopped responding '
-            f'({UPLOAD_HEARTBEAT_STALE_S}s without a heartbeat) — giving the '
-            f'node back"; exit {_UPLOAD_WAIT_EXIT}; fi; '
-        )
+    init, stale = _heartbeat_stale_snippet(
+        heartbeat,
+        f"[remote] ERROR the uploader stopped responding "
+        f"({UPLOAD_HEARTBEAT_STALE_S}s without a heartbeat) — giving the "
+        f"node back")
     return (
         f'if [ ! -f {sentinel_q} ]; then '
         f'echo "[remote] scheduler: node granted; waiting for the upload to '
         f'finish before starting the pipeline…"; fi; '
-        f'_aw_w=0; '
+        f'_aw_w=0; {init}'
         f'while [ ! -f {sentinel_q} ]; do '
         f'_aw_w=$((_aw_w+1)); '
         f'{stale}'
@@ -2343,17 +2392,24 @@ def _only_my_job(jid_var: str, marker: str) -> str:
 
 
 class _UploadHeartbeat:
-    """Touches the remote heartbeat while an upload is in flight.
+    """Touches the remote heartbeat for as long as this app owns the run.
 
     A daemon thread rather than a hook inside the transfer: rsync can be busy
     with one large archive for minutes without returning to any per-file
     callback, and a heartbeat that only advances between files would read as
     dead exactly during the slowest part of the upload.
 
-    Stopping is the point. Whatever ends the upload — success, failure, the
-    Stop button, the process being killed — takes the beat with it, and the
-    waiting job frees its node about a minute later instead of holding it for
-    the full deadline.
+    Stopping is the point. Whatever ends the run — success, failure, the Stop
+    button, the process being killed — takes the beat with it, and a job still
+    waiting for its input frees its node about a minute later instead of
+    holding it for the full deadline.
+
+    It beats for the whole run, not only the upload, because it is also what
+    :meth:`RemoteRunner._sweep_orphaned_allocation` reads to decide whether an
+    allocation still has an owner. ``run_id`` is deterministic in the plate, so
+    two sessions on the same plate meet at the same sidecar; a beat that
+    stopped when the upload finished would make an hour-long compute look
+    abandoned and get itself cancelled by the second session.
     """
 
     def __init__(self, cache: "DatasetCache", path: str,
@@ -2366,14 +2422,40 @@ class _UploadHeartbeat:
 
     def beat(self) -> None:
         """One touch, now. Called once before the job starts waiting, so the
-        first thing it looks at is a heartbeat that already exists."""
-        self._cache._ssh_run(["touch", self._path], check=False)
+        first thing it looks at is a heartbeat that already exists.
 
-    def __enter__(self) -> "_UploadHeartbeat":
-        self.beat()
+        Bounded by the beat interval rather than the default: a touch that has
+        not landed by the time the next one is due is not going to help, and
+        letting them queue up would leave the thread minutes behind while the
+        remote reads the silence as an app that died.
+        """
+        self._cache._ssh_run(["touch", self._path], check=False,
+                             timeout_s=self._interval)
+
+    def start(self) -> None:
+        """Begin beating. Paired with :meth:`stop` — see the class docstring."""
+        if self._thread is not None:
+            return
         self._thread = threading.Thread(
             target=self._run, name="aw-upload-heartbeat", daemon=True)
         self._thread.start()
+
+    def stop(self) -> None:
+        """Stop beating, and wait for the thread to notice.
+
+        The whole mechanism is "a beat that stops means the app is gone", so a
+        beat that outlives its run is not a leak of one thread — it tells the
+        remote a dead run is alive, holds the node for the full deadline, and
+        keeps the orphan sweep from ever sweeping.
+        """
+        self._stop.set()
+        thread, self._thread = self._thread, None
+        if thread is not None:
+            thread.join(timeout=2.0)
+
+    def __enter__(self) -> "_UploadHeartbeat":
+        self.beat()
+        self.start()
         return self
 
     def _run(self) -> None:
@@ -2387,9 +2469,7 @@ class _UploadHeartbeat:
                 swallowed("upload heartbeat")
 
     def __exit__(self, *_exc) -> None:
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=2.0)
+        self.stop()
 
 
 # Per-batch handshake files inside the run directory. The local side writes
@@ -2434,17 +2514,9 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
     """
     pipeline = _remote_join(argv)
     waits = int(UPLOAD_WAIT_TIMEOUT_S // UPLOAD_WAIT_POLL_S)
-    stale = ""
-    if heartbeat:
-        hb_q = _remote_quote(heartbeat)
-        stale = (
-            f'_aw_hb=$(stat -c %Y {hb_q} 2>/dev/null || echo 0); '
-            f'_aw_now=$(date +%s); '
-            f'if [ "$_aw_hb" -eq 0 ] || '
-            f'[ "$((_aw_now - _aw_hb))" -gt {UPLOAD_HEARTBEAT_STALE_S} ]; then '
-            f'echo "[remote] ERROR the app stopped responding — giving the '
-            f'node back"; exit {_UPLOAD_WAIT_EXIT}; fi; '
-        )
+    hb_init, stale = _heartbeat_stale_snippet(
+        heartbeat,
+        "[remote] ERROR the app stopped responding — giving the node back")
     # The batch number is a shell variable, so the filename cannot be quoted
     # whole: `_remote_quote` single-quotes, which would leave the loop watching
     # for a file literally called ".aw_batch_$_aw_i_ready". The directory keeps
@@ -2470,7 +2542,7 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
         f'while [ "$_aw_i" -le {int(n_batches)} ]; do '
         f'echo "[remote] batch-driver: waiting for batch $_aw_i of '
         f'{int(n_batches)}"; '
-        f'_aw_w=0; '
+        f'_aw_w=0; {hb_init}'
         f'while [ ! -f {ready} ]; do '
         f'_aw_w=$((_aw_w+1)); '
         f'{stale}'
@@ -2541,7 +2613,11 @@ def _compose_driver_cmd(
     )
     return (
         f"echo $$ > {pidfile_q}; "
-        f"exec {' '.join(shlex.split(launcher))} bash -lc {shlex.quote(inner)}"
+        # `shlex.join`, not `' '.join`: the split alone drops the quoting, so a
+        # token carrying a shell metacharacter (`--constraint=a|b`) reaches the
+        # login shell as a pipe and the launch dies with "b: command not found".
+        # `_compose_remote_cmd` has always done this; this one had not.
+        f"exec {shlex.join(shlex.split(launcher))} bash -lc {shlex.quote(inner)}"
     )
 
 
@@ -3077,8 +3153,22 @@ class DatasetCache:
                 log_fn(f"[remote] gc: evicted dataset {name} ({b // (1024**2)} MB)\n")
 
     def _ssh_run(
-        self, remote_argv: list[str], *, check: bool
+        self, remote_argv: list[str], *, check: bool,
+        timeout_s: float = SSH_CONTROL_TIMEOUT_S,
     ) -> subprocess.CompletedProcess[str] | None:
+        """Run one short control command over ssh.
+
+        Every caller is a ``mkdir`` / ``touch`` / ``rm -rf`` — seconds of work —
+        so the call is bounded. Unbounded, a dead network with no keepalive
+        parks the calling thread for ever: the batch loop stops on its
+        ``touch <ready>`` and never reaches the wait that would notice the run
+        is over, and the heartbeat thread stops beating while believing it is
+        still beating.
+
+        A timeout is reported as return code 124 (``timeout``'s own
+        convention) so a ``check=False`` caller reading ``returncode`` sees a
+        failure rather than a success it never had.
+        """
         # v5.2.11: use the tilde-aware joiner so ``mkdir -p ~/foo`` reaches
         # the remote shell as ``mkdir -p "$HOME"/foo`` rather than as
         # ``mkdir -p '~/foo'`` (which creates a literal ``~`` directory).
@@ -3087,12 +3177,20 @@ class DatasetCache:
         ]
         try:
             return subprocess.run(
-                cmd, capture_output=True, text=True, check=check
+                cmd, capture_output=True, text=True, check=check,
+                timeout=timeout_s,
             )
         except subprocess.CalledProcessError as exc:
             if check:
                 raise
             return exc  # type: ignore[return-value]
+        except subprocess.TimeoutExpired as exc:
+            if check:
+                raise RuntimeError(
+                    f"the remote did not answer within {timeout_s:g}s: "
+                    f"{' '.join(str(a) for a in remote_argv[:3])}"
+                ) from exc
+            return subprocess.CompletedProcess(cmd, 124, "", "")
 
     def _ssh_script(
         self, script: str, *, check: bool,
@@ -3752,10 +3850,17 @@ class _RemoteProcess:
         ssh_proc: subprocess.Popen,
         run: _RemoteRun,
         fetcher: Fetcher,
+        *,
+        heartbeat: "_UploadHeartbeat | None" = None,
     ):
         self._ssh = ssh_proc
         self._run = run
         self._fetcher = fetcher
+        # Beats for as long as this process owns the allocation; every exit
+        # from the run goes through wait(), terminate() or kill(), and each of
+        # them stops it. See _UploadHeartbeat's docstring for why it may not
+        # end with the upload.
+        self._heartbeat = heartbeat
         self._stdout_pipe: io.TextIOBase | None = None
         # Tee the ssh stdout into the fetcher AND back out to the caller.
         # The caller (PipelineRunner._run_pipeline_subprocess) reads from
@@ -3784,6 +3889,7 @@ class _RemoteProcess:
 
     def wait(self, timeout: float | None = None) -> int:
         rc = self._ssh.wait(timeout=timeout)
+        self._stop_heartbeat()
         # Drain remaining lines, then close the queue.
         if self._tee_thread is not None:
             self._tee_thread.join(timeout=5)
@@ -3792,12 +3898,23 @@ class _RemoteProcess:
         return rc
 
     def terminate(self) -> None:
+        self._stop_heartbeat()
         self._fetcher.cancel()
         self._ssh.terminate()
 
     def kill(self) -> None:
+        self._stop_heartbeat()
         self._fetcher.cancel()
         self._ssh.kill()
+
+    def _stop_heartbeat(self) -> None:
+        """End the beat once, on whichever exit path gets here first."""
+        hb, self._heartbeat = self._heartbeat, None
+        if hb is not None:
+            try:
+                hb.stop()
+            except Exception:
+                swallowed("stopping the run heartbeat")
 
     def send_signal(self, sig: int) -> None:
         self._ssh.send_signal(sig)
@@ -3905,13 +4022,20 @@ class _BatchedRemoteProcess:
     """``_RemoteProcess``-compatible wrapper that runs the pipeline in
     sequential batches of ``batch_size`` wells.
 
-    Each batch: upload that batch's zips into the shared remote input
-    dir, spawn the pipeline (sees just those zips because the Fetcher
-    cleaned out the prior batch), tee its stdout to the caller +
-    Fetcher, wait for it to exit. Combined returncode is the first
-    non-zero or 0 on all-success. A single ``Fetcher`` instance
-    persists across all batches with ``delete_after_download=True``
-    so peak remote disk = ``(M wells of input) + (~1 well of output)``.
+    One process runs for the whole plate: a driver
+    (:func:`_batch_driver_snippet`) inside a single allocation, which the
+    batches are fed to as they finish uploading. Per batch, this side uploads
+    that batch's zips into a staging directory of its own, touches the batch's
+    ``ready`` file, and waits for the driver's marker naming the exit code. The
+    driver swaps the staged directory into the pipeline's input path whole, so
+    a batch's pipeline sees that batch's zips and nothing else.
+
+    **A failed batch does not end the run.** The node is already held and the
+    remaining batches still need it, so the loop continues and the end-of-run
+    tally names which batches failed; the run's own code carries the first of
+    them. A single ``Fetcher`` instance persists across all batches with
+    ``delete_after_download=True``, so peak remote disk stays at
+    ``(M wells of input) + (~1 well of output)``.
 
     Exposes the same Popen-compatible surface as ``_RemoteProcess``
     (``stdout``, ``poll()``, ``wait()``, ``terminate()``, ``kill()``,
@@ -3957,6 +4081,15 @@ class _BatchedRemoteProcess:
         # The driver's stdout has ended: it finished, the node died, or a Stop
         # killed the ssh. Whichever it was, no further batch will report back.
         self._stream_ended = threading.Event()
+        # The stream ended with batches still unaccounted for — so it was not
+        # the driver finishing. Read by `_await_batch` to say which of the two
+        # happened, because "you stopped it" and "the node went away" call for
+        # different words and only one of them is the user's doing.
+        self._driver_lost = threading.Event()
+        self._n_batches = 0
+        # True once this object has launched a driver of its own. Until then
+        # there is nothing of ours on the scheduler to cancel.
+        self._owns_allocation = False
         self._reader: threading.Thread | None = None
         self._heartbeat: _UploadHeartbeat | None = None
 
@@ -4099,7 +4232,7 @@ class _BatchedRemoteProcess:
         """Where batch *index* is uploaded, before the driver swaps it in."""
         return f"{self._runner.host.remote_staging_dir}/runs/{self._run_id}/b{index}"
 
-    def _start_driver(self, n_batches: int) -> None:
+    def _start_driver(self, n_batches: int) -> bool:
         """Put one allocation on a node and leave it there for the whole run.
 
         Every batch used to be its own ``srun``, so a scheduler-backed host
@@ -4115,6 +4248,21 @@ class _BatchedRemoteProcess:
         host = self._runner.host
         run_dir = f"{host.remote_staging_dir}/runs/{self._run_id}"
         heartbeat = f"{run_dir}/{UPLOAD_HEARTBEAT}"
+
+        # Ask *before* clearing anything. Everything below assumes this run
+        # directory is ours to empty, and `run_id` is deterministic in the
+        # plate and the arguments, so a second session on the same plate lands
+        # on the same path — its `rm -rf` would take the first session's staged
+        # batches and input directory out from under a running pipeline.
+        if self._runner._sweep_orphaned_allocation(
+                run.remote_pidfile, heartbeat, log_fn=self._log) == "owned":
+            self._log(
+                "[remote] ERROR another session is already running this exact "
+                "dataset and configuration on this host. Both would use the "
+                "same remote run directory, so this run stops here rather "
+                "than corrupting the one already going.\n")
+            self._returncode = 1
+            return False
 
         # Clear any handshake files a previous run of this same dataset left:
         # `run_id` is deterministic, so the driver would otherwise find batch 1
@@ -4134,8 +4282,6 @@ class _BatchedRemoteProcess:
             + [self._batch_staging_dir(i) for i in range(1, n_batches + 1)],
             check=False,
         )
-        self._runner._sweep_orphaned_allocation(
-            run.remote_pidfile, heartbeat, log_fn=self._log)
 
         # The heartbeat runs for the whole run, not just one upload: the driver
         # checks it at every batch boundary, so an app that dies between
@@ -4143,7 +4289,7 @@ class _BatchedRemoteProcess:
         # nobody will ever write.
         self._heartbeat = _UploadHeartbeat(self._runner._cache, heartbeat)
         self._heartbeat.beat()
-        self._heartbeat.__enter__()
+        self._heartbeat.start()
 
         remote_argv = self._runner._build_remote_argv(
             self._pipeline_argv, run.remote_input_dir, run.remote_output_dir,
@@ -4188,10 +4334,51 @@ class _BatchedRemoteProcess:
         )
         with self._current_proc_lock:
             self._current_proc = proc
+        self._n_batches = n_batches
+        # From here on there is an allocation of ours to hand back, which is
+        # what `_release_driver` acts on. Set only after the launch: an abort
+        # before it would otherwise `scancel` a sidecar written by a *previous*
+        # run of this same dataset, or by the other session that made us stop.
+        self._owns_allocation = True
         self._reader = threading.Thread(
             target=self._read_driver, args=(proc,), daemon=True,
             name="aw-batch-driver-reader")
         self._reader.start()
+        return True
+
+    def _release_driver(self) -> None:
+        """Stop the heartbeat and hand back an allocation nobody is feeding.
+
+        Called from ``_run_batches``' ``finally``, so it covers the ends the
+        old per-batch loop never had to think about: an upload that failed
+        before the first batch, a driver that died, a Stop. The job may still
+        be *queued* at this point, in which case its ``.slurm`` sidecar does
+        not exist yet and ``close_remote_job`` has nothing to read — so the ssh
+        that is holding the queue position is terminated directly as well.
+        """
+        # Read through `getattr`: this runs in a ``finally``, so it also runs
+        # for a crash that happened before `_start_driver` ever set any of it.
+        heartbeat = getattr(self, "_heartbeat", None)
+        self._heartbeat = None
+        if heartbeat is not None:
+            with swallow("stopping the upload heartbeat"):
+                heartbeat.stop()
+        if not getattr(self, "_owns_allocation", False):
+            return          # never launched: nothing here is ours to cancel
+        if self._returncode in (0, None):
+            return          # a clean run: the driver exited on its own
+        lock = getattr(self, "_current_proc_lock", None)
+        if lock is None or getattr(self, "_runner", None) is None:
+            return          # nothing was ever launched
+        with lock:
+            proc = self._current_proc
+        if proc is not None:
+            self._log("[remote] releasing the allocation\n")
+            with swallow("terminating the batch driver"):
+                if proc.poll() is None:
+                    proc.terminate()
+        with swallow("cancelling the scheduler job"):
+            self._runner.close_remote_job(log_fn=self._log)
 
     def _read_driver(self, proc: subprocess.Popen) -> None:
         """Tee the driver's output, and note where each batch ended.
@@ -4224,7 +4411,24 @@ class _BatchedRemoteProcess:
             # a Stop killing the ssh — every batch still waiting has to be
             # released or the loop would block for ever.
             self._stream_ended.set()
-            for event in self._batch_events.values():
+            # Batches still unreported means the driver did not finish. This is
+            # the only place that learns of it: a Stop reaches this object as a
+            # kill of the ssh's process group (`signal_subprocess` uses
+            # `proc.pid`, which is the driver's, so `terminate` never runs),
+            # and a walltime expiry or a node failure never touches the app at
+            # all. Without this the worker thread would sit inside the next
+            # batch's rsync — `upload_subset` takes `_stop` and watches it —
+            # pushing wells at a node that no longer exists.
+            if not self._stop.is_set() and len(self._batch_rc) < self._n_batches:
+                self._driver_lost.set()
+                self._stop.set()
+                with swallow("cancelling downloads after the driver went away"):
+                    self._fetcher.cancel()
+            # A snapshot: `_await_batch` may be adding an entry from the worker
+            # thread at this instant, and iterating the live dict would raise
+            # inside a ``finally``. `_stream_ended` is set first, so a batch
+            # whose event is created after this still stops within the poll.
+            for event in list(self._batch_events.values()):
                 event.set()
 
     def _await_batch(self, index: int, n_batches: int) -> int | None:
@@ -4237,19 +4441,16 @@ class _BatchedRemoteProcess:
             return self._batch_rc[index]
         # No code came back. Either the user stopped the run, or the allocation
         # is gone — a walltime expiry, a node failure, somebody else's scancel.
-        if self._stop.is_set():
-            self._log(f"[remote] stopped during batch {index}/{n_batches}\n")
-            self._returncode = 130
-        else:
-            # A Stop that arrives as a process-group kill sets none of this
-            # object's state (it never reaches `terminate`), so the run would
-            # otherwise carry on downloading as though nothing had happened.
+        # `_driver_lost` is checked first because the reader sets `_stop` in
+        # that case too, to get the worker out of whatever it is blocked in.
+        if self._driver_lost.is_set():
             self._log(
                 f"[remote] the allocation ended during batch {index}/"
                 f"{n_batches} — no more batches will run\n")
-            self._stop.set()
-            self._fetcher.cancel()
             self._returncode = self._returncode or 1
+        else:
+            self._log(f"[remote] stopped during batch {index}/{n_batches}\n")
+            self._returncode = 130
         return None
 
     def _run_batches(self) -> None:
@@ -4385,7 +4586,8 @@ class _BatchedRemoteProcess:
                 self._returncode = 130
                 return
 
-            self._start_driver(n_batches)
+            if not self._start_driver(n_batches):
+                return
             failed: dict[int, int] = {}
 
             for batch_idx, batch_zips in enumerate(batches):
@@ -4429,6 +4631,16 @@ class _BatchedRemoteProcess:
                     stop_event=self._stop,
                 )
                 if rc != 0:
+                    # `upload_subset` watches `_stop`, so a Stop mid-transfer
+                    # comes back here as a non-zero rsync code. Saying "upload
+                    # failed" for a stop the user asked for reads as a fault.
+                    if self._stop.is_set():
+                        self._log(
+                            f"[remote] batch {batch_idx + 1}/{n_batches}: "
+                            f"upload interrupted\n")
+                        self._returncode = (
+                            1 if self._driver_lost.is_set() else 130)
+                        return
                     self._log(
                         f"[remote] batch {batch_idx + 1} upload failed "
                         f"(rsync rc={rc}); aborting remaining batches\n"
@@ -4437,48 +4649,12 @@ class _BatchedRemoteProcess:
                     return
                 self._log(
                     f"[remote] batch {batch_idx + 1}: upload complete "
-                    f"({sent_bytes / (1024**2):.1f} MB); launching pipeline\n"
+                    f"({sent_bytes / (1024**2):.1f} MB); handing it to the "
+                    f"driver\n"
                 )
-                # Each batch is its own launch, so on a scheduler-backed host
-                # each one queues separately. Say which batch is waiting — with
-                # several of them that is the first thing worth knowing.
-                self._log(_scheduler_handoff_lines(
-                    self._runner.host.compute_launcher, batch=batch_idx + 1))
-
-                # Build the remote command for this batch. Input dir
-                # is shared across batches; the pipeline scans it
-                # once at startup and only sees the zips currently
-                # present (i.e. just this batch's, because the
-                # Fetcher cleaned out the previous one).
-                remote_argv = self._runner._build_remote_argv(
-                    self._pipeline_argv,
-                    self._runner._run.remote_input_dir,
-                    self._runner._run.remote_output_dir,
-                    self._output_filter,
-                    self._zipped.mode,
-                )
-                # v5.4.7: suppress the per-batch auto-threshold pass.
-                # Each batch sees only its own outputs (the Fetcher
-                # downloads + deletes them as soon as they land), so
-                # the in-pipeline auto-threshold would compute
-                # thresholds from a sliver of the plate and overwrite
-                # the previous batch's defaults each time. We run a
-                # single auto-threshold pass locally after every
-                # batch drains (see ``_run_local_auto_threshold``
-                # below).
-                # Whether the flag was already there is the *user's* choice
-                # (the Analyze checkbox, off); appending it here is the
-                # batcher's own suppression, for the unrelated reason above.
-                # Once appended the two are indistinguishable, which is why
-                # __init__ reads the answer off the incoming argv before this
-                # runs — otherwise the local re-run below writes thresholds for
-                # someone who asked for none.
-                if "--no_auto_threshold" not in remote_argv:
-                    remote_argv = list(remote_argv) + ["--no_auto_threshold"]
-                # Each batch is its own pipeline launch, so on a
-                # scheduler-backed host (``compute_launcher``) each batch
                 # The pipeline for this batch runs inside the allocation the
-                # driver is already holding: hand it the batch and wait for the
+                # driver is already holding — there is no second queue wait and
+                # no second argv to build. Hand it the batch and wait for the
                 # code it reports back.
                 self._runner._cache._ssh_run(
                     ["touch", self._batch_flag(BATCH_READY, batch_idx + 1)],
@@ -4505,7 +4681,6 @@ class _BatchedRemoteProcess:
                         f"[remote] batch {batch_idx + 1}/{n_batches} complete\n"
                     )
 
-
             if failed:
                 names = ", ".join(str(i) for i in sorted(failed))
                 self._log(
@@ -4529,6 +4704,11 @@ class _BatchedRemoteProcess:
             self._log(f"[remote] batched run failed: {exc}\n")
             _logging.getLogger(__name__).exception("batched remote run crashed")
         finally:
+            # Whatever ended the run, the beat has to end with it: the driver
+            # reads a fresh heartbeat as "the app is alive and the next batch is
+            # coming", so one left running holds the node for the full deadline
+            # and keeps `_sweep_orphaned_allocation` from ever sweeping.
+            self._release_driver()
             # The stdout sentinel MUST be enqueued no matter what — if
             # flush_and_join (or the auto-threshold pass) raises, the reader
             # loop in pipeline_runner would otherwise block forever waiting on
@@ -5667,15 +5847,16 @@ class RemoteRunner:
           (StarDist loads once, full parallelism inside the pipeline).
           Peak remote disk = ``(all inputs) + (all outputs accumulated
           before fetch)``.
-        * ``> 0`` — split into batches of this many wells. Each batch:
-          upload → spawn pipeline → wait → next batch. The Fetcher
-          deletes each well's input + output zip on the remote as
-          soon as the local download lands, so peak disk ≈
-          ``batch_size`` wells of input + ~1 well of output. Tradeoff:
-          StarDist reloads once per batch (~5–10 s overhead per
-          batch). Pick ``batch_size`` based on your remote's free
-          disk; the smaller it is, the more loads and the lower the
-          peak.
+        * ``> 0`` — split into batches of this many wells, fed one at a
+          time to a driver that holds a single allocation for the whole
+          run: upload → hand it to the driver → wait for its exit code →
+          next batch. The Fetcher deletes each well's input + output zip
+          on the remote as soon as the local download lands, so peak disk
+          ≈ ``batch_size`` wells of input + ~1 well of output. Tradeoff:
+          the pipeline starts once per batch, so StarDist reloads each
+          time (~5–10 s per batch). Pick ``batch_size`` based on your
+          remote's free disk; the smaller it is, the more loads and the
+          lower the peak.
 
         Returns a Popen-compatible handle the GUI's stdout reader can
         consume unchanged.
@@ -5922,6 +6103,7 @@ class RemoteRunner:
                 f"{_fmt_secs(elapsed)}\n")
             return sent, elapsed
 
+        heartbeat: _UploadHeartbeat | None = None
         if overlap:
             # Before adding an allocation of our own, hand back one a crashed
             # run of this same dataset may have left holding a node.
@@ -5933,12 +6115,13 @@ class RemoteRunner:
             heartbeat.beat()
             popen = _start_ssh()
             try:
-                with heartbeat:
-                    _upload()
+                heartbeat.start()
+                _upload()
             except BaseException:
                 # An allocation is already in flight and nothing will ever
                 # write its sentinel. The stopped heartbeat would free it
                 # within the minute anyway; this is the direct route.
+                heartbeat.stop()
                 log("[remote] upload failed — releasing the allocation\n")
                 try:
                     self.cancel(popen)
@@ -5961,7 +6144,7 @@ class RemoteRunner:
         # Keep a handle so cancel() can stop an in-flight per-well download.
         self._fetcher = fetcher
         self._cancelled.clear()
-        return _RemoteProcess(popen, self._run, fetcher)
+        return _RemoteProcess(popen, self._run, fetcher, heartbeat=heartbeat)
 
     # ── Verify + cleanup ────────────────────────────────────────────────
 
@@ -6555,6 +6738,15 @@ class RemoteRunner:
                 f"[remote] scheduler: cancelled lingering job "
                 f"{jid[0] if jid else ''}.\n"
             )
+        elif "AW_NOTMINE" in out:
+            # Not "already finished": it is running, and it is somebody else's.
+            # Reporting it as a clean teardown would say the opposite of what
+            # happened, and this is the log a user reads when a node is still
+            # busy after they stopped.
+            rest = out.split("AW_NOTMINE", 1)[1].strip().split()
+            log(f"[remote] scheduler: job {rest[0] if rest else '?'} belongs to "
+                f"{rest[1] if len(rest) > 1 else 'another user'} — left "
+                f"running.\n")
         else:
             # The common case: ``srun`` already exited with the pipeline, so
             # there was no allocation left to cancel. Confirm the clean
@@ -6565,7 +6757,7 @@ class RemoteRunner:
     def _sweep_orphaned_allocation(
         self, remote_pidfile: str, heartbeat: str,
         *, log_fn: Callable[[str], None] | None = None,
-    ) -> None:
+    ) -> str:
         """Cancel an allocation a *previous* run of this app left behind.
 
         The scancel backstop covers every exit the app survives: a clean quit,
@@ -6582,25 +6774,44 @@ class RemoteRunner:
         owned is beating its heartbeat, and one that started moments ago has a
         fresh sidecar; either is left alone. What gets cancelled is a job whose
         owner has been silent for longer than a stalled upload would be.
+
+        Every step that cannot answer refuses to cancel rather than guessing.
+        A job that is somebody else's, or one whose age this host's ``stat``
+        cannot report, is left running: the cost of not sweeping is an idle
+        node until its walltime, and the cost of sweeping wrongly is somebody's
+        half-finished plate.
+
+        Returns which of those it found — ``"swept"``, ``"owned"``,
+        ``"notmine"``, ``"unknown"`` or ``"none"`` — because the batched path
+        also has to know whether the run directory it is about to empty
+        currently belongs to somebody.
         """
         if not self.host.compute_launcher.strip():
-            return
+            return "none"
         log = log_fn or (lambda _m: None)
         sidecar_q = _remote_quote(f"{remote_pidfile}.slurm")
         hb_q = _remote_quote(heartbeat)
+        stale = UPLOAD_HEARTBEAT_STALE_S
         # One round trip: read the id, and the two ages that decide whether it
         # is anyone's. Ages are computed remotely so no clock is compared
-        # against another machine's.
+        # against another machine's, and both spellings of ``stat`` are tried
+        # — GNU's ``-c %Y`` and BSD's ``-f %m`` — because a host with only the
+        # second used to report every age as zero, which reads as "long dead"
+        # and would cancel a job that had started seconds earlier.
         script = (
             f'_jid=$(cat {sidecar_q} 2>/dev/null); '
             f'[ -z "$_jid" ] && exit 0; '
             f'_now=$(date +%s); '
-            f'_hb=$(stat -c %Y {hb_q} 2>/dev/null || echo 0); '
-            f'_sc=$(stat -c %Y {sidecar_q} 2>/dev/null || echo "$_now"); '
+            f'_sc=$(stat -c %Y {sidecar_q} 2>/dev/null || '
+            f'stat -f %m {sidecar_q} 2>/dev/null || echo ""); '
+            f'if [ -z "$_sc" ]; then echo "AW_UNKNOWN $_jid"; exit 0; fi; '
+            f'_hb=0; if [ -e {hb_q} ]; then '
+            f'_hb=$(stat -c %Y {hb_q} 2>/dev/null || '
+            f'stat -f %m {hb_q} 2>/dev/null || echo 0); fi; '
             f'if [ "$_hb" -ne 0 ] && '
-            f'[ "$((_now - _hb))" -le {UPLOAD_HEARTBEAT_STALE_S} ]; then '
+            f'[ "$((_now - $_hb))" -le {stale} ]; then '
             f'echo "AW_OWNED $_jid"; exit 0; fi; '
-            f'if [ "$((_now - _sc))" -le {UPLOAD_HEARTBEAT_STALE_S} ]; then '
+            f'if [ "$((_now - $_sc))" -le {stale} ]; then '
             f'echo "AW_OWNED $_jid"; exit 0; fi; '
             + _only_my_job("_jid", "AW_NOTMINE") +
             'command -v scancel >/dev/null 2>&1 '
@@ -6615,23 +6826,34 @@ class RemoteRunner:
         except (subprocess.TimeoutExpired, OSError) as exc:
             log(f"[remote] WARN scheduler: could not check for a leftover "
                 f"allocation ({exc}).\n")
-            return
+            return "unknown"
         out = result.stdout or ""
         if "AW_SWEPT" in out:
             jid = out.split("AW_SWEPT", 1)[1].strip().split()[:1]
             log(f"[remote] scheduler: cancelled a job left over from an "
                 f"earlier run of this dataset ({jid[0] if jid else '?'}) — "
                 f"the app it belonged to is gone.\n")
-        elif "AW_NOTMINE" in out:
+            return "swept"
+        if "AW_NOTMINE" in out:
             rest = out.split("AW_NOTMINE", 1)[1].strip().split()
             log(f"[remote] scheduler: the job in this dataset's run directory "
                 f"({rest[0] if rest else '?'}) belongs to "
                 f"{rest[1] if len(rest) > 1 else 'another user'} — not touching "
                 f"it.\n")
-        elif "AW_OWNED" in out:
+            return "notmine"
+        if "AW_OWNED" in out:
             jid = out.split("AW_OWNED", 1)[1].strip().split()[:1]
             log(f"[remote] scheduler: another session is running this same "
                 f"dataset (job {jid[0] if jid else '?'}); leaving it alone.\n")
+            return "owned"
+        if "AW_UNKNOWN" in out:
+            jid = out.split("AW_UNKNOWN", 1)[1].strip().split()[:1]
+            log(f"[remote] WARN scheduler: this host cannot report a file's "
+                f"modification time, so there is no way to tell whether job "
+                f"{jid[0] if jid else '?'} in this dataset's run directory is "
+                f"still in use. Leaving it running.\n")
+            return "unknown"
+        return "none"
 
     def cancel(self, ssh_proc: subprocess.Popen) -> None:
         """Best-effort remote kill. The local pgid kill (handled by

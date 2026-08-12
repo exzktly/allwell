@@ -16,7 +16,10 @@ time out.
 
 from __future__ import annotations
 
+import os
+import pathlib
 import subprocess
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -130,7 +133,7 @@ def _spawn_recording_order(monkeypatch, tmp_path, launcher, *, upload_raises=Non
     order: list[str] = []
     key = "cachekey" + "0" * 24
 
-    def ssh_run(self, argv, *, check):
+    def ssh_run(self, argv, *, check, **kw):
         order.append(" ".join(str(a) for a in argv[:2]))
         return MagicMock(stdout="", returncode=0)
 
@@ -260,7 +263,7 @@ def test_the_heartbeat_stops_when_the_upload_does(monkeypatch):
     beats = []
 
     class _Cache:
-        def _ssh_run(self, argv, *, check):
+        def _ssh_run(self, argv, *, check, **kw):
             beats.append(tuple(argv))
             return MagicMock(stdout="", returncode=0)
 
@@ -362,3 +365,91 @@ def test_a_job_owned_by_someone_else_is_reported_not_cancelled(monkeypatch):
     joined = "".join(said)
     assert "4242" in joined and "alice" in joined
     assert "not touching it" in joined
+
+
+# ── the sweep's decision, run rather than read ───────────────────────────────
+#
+# The tests above assert the *shape* of the script. These run it under bash on
+# six shapes of host, because both mistakes this guard can make are silent:
+# cancelling a live job, and never cancelling a dead one.
+#
+# `stat -c %Y` is GNU coreutils, and a login node carrying only BSD's
+# `stat -f %m` used to answer neither question. The two fallbacks disagreed
+# about what an unreadable timestamp meant — the heartbeat's was "epoch 0", i.e.
+# infinitely stale, and the sidecar's was "now", i.e. brand new — so such a host
+# always landed on the sidecar's answer and no orphan was ever swept on it, for
+# ever, with nothing in the log to say why. Now the answer is asked for in both
+# spellings, and a genuinely unknowable one is reported as unknown and left
+# alone rather than being given a default that happens to look decisive.
+
+def _bin(directory, name, body):
+    path = os.path.join(directory, name)
+    with open(path, "w") as fh:
+        fh.write(body)
+    os.chmod(path, 0o755)
+
+
+_GNU_STAT = '#!/bin/bash\nexec /usr/bin/stat "$@"\n'
+_BSD_STAT = ('#!/bin/bash\n'
+             'if [ "$1" = "-c" ]; then exit 1; fi\n'
+             'if [ "$1" = "-f" ]; then exec /usr/bin/stat -c %Y "$3"; fi\n'
+             'exit 1\n')
+_NO_STAT = '#!/bin/bash\nexit 1\n'
+
+
+def _sweep_under_bash(monkeypatch, tmp_path, stat_shim, *, heartbeat_age,
+                      sidecar_age, heartbeat_exists=True, owner=None):
+    """Run the real sweep script through bash against a fabricated remote."""
+    me = subprocess.run(["id", "-un"], capture_output=True,
+                        text=True).stdout.strip()
+    pidfile = str(tmp_path / "run.pid")
+    sidecar, hb = pidfile + ".slurm", str(tmp_path / ".aw_upload_alive")
+    pathlib.Path(sidecar).write_text("991234\n")
+    os.utime(sidecar, ((time.time() - sidecar_age),) * 2)
+    if heartbeat_exists:
+        pathlib.Path(hb).touch()
+        os.utime(hb, ((time.time() - heartbeat_age),) * 2)
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    _bin(str(bindir), "stat", stat_shim)
+    _bin(str(bindir), "scancel", "#!/bin/bash\nexit 0\n")
+    _bin(str(bindir), "squeue", f'#!/bin/bash\necho "{owner or me}"\n')
+
+    real_run = subprocess.run
+
+    def fake_run(argv, **kw):
+        kw.pop("timeout", None)
+        return real_run(["bash", "-c", argv[-1]], **{
+            **kw,
+            "env": {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}"},
+            "timeout": 30,
+        })
+
+    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
+    runner = RemoteRunner(_host("srun --time=1:00:00"))
+    return runner._sweep_orphaned_allocation(pidfile, hb, log_fn=lambda _m: None)
+
+
+@pytest.mark.parametrize("shim,hb_age,sc_age,hb_exists,owner,expected", [
+    # Beating now: somebody is there, whatever the sidecar says.
+    (_GNU_STAT, 0, 9999, True, None, "owned"),
+    # Silent for ten minutes and the sidecar is old too: nobody is coming back.
+    (_GNU_STAT, 600, 9999, True, None, "swept"),
+    # No heartbeat yet, but the job was submitted moments ago.
+    (_GNU_STAT, 0, 10, False, None, "owned"),
+    # Dead by every measure — and not ours.
+    (_GNU_STAT, 600, 9999, True, "alice", "notmine"),
+    # BSD-only `stat`: the age is readable, so the beat decides, same as GNU.
+    (_BSD_STAT, 0, 9999, True, None, "owned"),
+    # …and it can now reach a verdict a GNU-only reader never could.
+    (_BSD_STAT, 600, 9999, True, None, "swept"),
+    # No usable `stat` at all: unknowable, so left running.
+    (_NO_STAT, 600, 9999, True, None, "unknown"),
+])
+def test_the_sweep_only_cancels_what_it_can_prove_is_dead(
+        monkeypatch, tmp_path, shim, hb_age, sc_age, hb_exists, owner, expected):
+    got = _sweep_under_bash(monkeypatch, tmp_path, shim,
+                            heartbeat_age=hb_age, sidecar_age=sc_age,
+                            heartbeat_exists=hb_exists, owner=owner)
+    assert got == expected

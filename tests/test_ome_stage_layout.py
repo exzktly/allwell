@@ -623,3 +623,42 @@ def test_a_spacing_that_is_not_a_96_well_plate_falls_back_to_the_ratios():
     layout = infer_stage_layout(other, in_um=True)
     assert (layout.rows, layout.cols) == (2, 3)          # read from the ratios
     assert layout.pitch == 4500.0
+
+
+def test_a_dense_montage_still_reads_as_a_plate_when_the_unit_is_known():
+    """The reported failure. Sixteen fields per well on a 2.25 mm step tile the
+    9 mm pitch *exactly*, so every step in the file is 2.25 mm and there is no
+    wider gap anywhere to mark a well boundary. A perfectly regular 6x6 plate
+    then read as 24x24 wells of one field each — far too big for a plate, so
+    the drawing was scaled to fit and told the user a square was no longer a
+    well. Nothing about well *shape* is involved; the split is purely spacing.
+    """
+    def scan(step, side=4, wells=6):
+        return [(c * WELL_PITCH_UM + (f % side) * step,
+                 r * WELL_PITCH_UM + (f // side) * step)
+                for r in range(wells) for c in range(wells)
+                for f in range(side * side)]
+
+    # Sparse fields: the boundary stands out, and the gaps alone find it.
+    for step in (300.0, 600.0, 1200.0):
+        layout = infer_stage_layout(scan(step))
+        assert (layout.rows, layout.cols, layout.fovs_per_well) == (6, 6, 16), step
+
+    # Dense fields: no gap to find. Without a unit this is what the user saw.
+    for step in (1800.0, 2250.0):
+        blind = infer_stage_layout(scan(step))
+        assert blind.rows > 8 or blind.cols > 12, step      # cannot be a plate
+        assert blind.fovs_per_well == 1, step
+
+        told = infer_stage_layout(scan(step), in_um=True)
+        assert (told.rows, told.cols, told.fovs_per_well) == (6, 6, 16), step
+        assert told.pitch == WELL_PITCH_UM, step
+
+
+def test_the_known_pitch_is_not_forced_onto_a_scan_it_does_not_fit():
+    """The fallback is taken only when it produces a plate. A file on another
+    format's pitch is better read by its own ratios than by this one's 9 mm."""
+    other = [(c * 4500.0, r * 4500.0) for r in range(2) for c in range(3)]
+    layout = infer_stage_layout(other, in_um=True)
+    assert (layout.rows, layout.cols) == (2, 3)
+    assert layout.pitch == 4500.0

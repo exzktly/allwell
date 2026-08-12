@@ -3076,7 +3076,17 @@ on every file that omits the attribute. With a unit, `_known_pitch` uses the
 nominal `WELL_PITCH_UM` where the measured steps agree with whole multiples of
 it, and that is what maps an **arbitrary selection of wells**: a scattered set
 (B02, D07, G11) has no adjacent pair anywhere to learn a pitch from, so relative
-spacing alone reads it as three neighbouring wells or refuses outright. It also
+spacing alone reads it as three neighbouring wells or refuses outright. It also rescues the case the gap split cannot see at all: sixteen fields on a
+2.25 mm step tile the 9 mm pitch *exactly*, so every step in the file is the same
+and there is no wider gap anywhere to mark a well boundary — a perfectly regular
+6×6 plate read as 24×24 wells of one field, far too big for a plate, and the
+drawing said so. `_um_axis_groups` places the boundary instead of finding it:
+each coordinate's residue modulo the known pitch says where in a well it sits,
+and the boundary goes in the widest empty arc of those residues (the wrap-around
+one on a tie, which keeps the first well whole). Taken only when the gap split
+produced something that cannot be a plate *and* the result can, so a scan the
+gaps already read correctly is untouched and another format's pitch still falls
+back to the ratios. It also
 settles the oldest ambiguity here — `_one_well` reports a montage across a
 single well as one well of N fields, where without a unit a montage and a grid
 of wells holding one field each are the same pattern at two scales and the grid

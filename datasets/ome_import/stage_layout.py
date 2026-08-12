@@ -344,6 +344,48 @@ def _one_well(xs: list[float], ys: list[float], tol: float) -> bool:
     return not _well_scale_gaps(xs, ys, tol)
 
 
+def _um_axis_groups(values: list[float], tol: float) -> dict[float, int]:
+    """Well index per coordinate on one axis, using the known 9 mm pitch.
+
+    The gap-based split (:func:`_group_axis`) needs the space *between* wells to
+    stand out against the space between fields, by `_WELL_GAP_RATIO`. A well
+    imaged as a dense montage leaves no such gap: sixteen fields on a 2.25 mm
+    step tile the 9 mm pitch exactly, so every step in the file is 2.25 mm and
+    there is no boundary to find. That scan reads as 24x24 wells of one field —
+    which is why a perfectly regular 6x6 plate could be reported as not fitting
+    a 96-well plate at all.
+
+    With the unit known the boundary does not have to be *found*, only placed:
+    wells are 9 mm apart, so every coordinate's residue modulo the pitch says
+    where in a well it sits. The boundary goes in the widest empty arc of those
+    residues — the space no field occupies — and where the montage tiles the
+    pitch exactly and every arc is equal, the wrap-around one wins, which puts
+    the first coordinate at the start of a well rather than in the middle of
+    one.
+    """
+    unique = _distinct(values, tol)
+    if not unique:
+        return {}
+    lo = min(unique)
+    residues = sorted({(v - lo) % WELL_PITCH_UM for v in unique})
+    # ``>=`` so a tie is settled by the *last* arc, which is the one that wraps:
+    # see the docstring — an exactly-tiled well has no emptiest arc, and cutting
+    # at the wrap keeps the well whole instead of splitting its first field off.
+    best, boundary = -1.0, 0.0
+    for a, b in zip(residues, residues[1:] + [residues[0] + WELL_PITCH_UM]):
+        if b - a >= best:
+            best, boundary = b - a, (a + b) / 2.0
+    return {v: int(((v - lo - boundary) // WELL_PITCH_UM)) + 1 for v in unique}
+
+
+def _fits_a_plate(by_x: dict[float, int], by_y: dict[float, int]) -> bool:
+    """True when these groupings describe a block inside one 96-well plate."""
+    if not by_x or not by_y:
+        return False
+    return (max(by_y.values()) - min(by_y.values()) < _PLATE_ROWS
+            and max(by_x.values()) - min(by_x.values()) < _PLATE_COLS)
+
+
 def _known_pitch(xs: list[float], ys: list[float], tol: float) -> float | None:
     """``WELL_PITCH_UM`` when these micrometre coordinates are on a 96-well plate.
 
@@ -577,6 +619,16 @@ def infer_stage_layout(positions, *, in_um: bool = False) -> StageLayout | None:
     pitch = (_known_pitch(xs, ys, tol) if in_um else None) or _pitch(xs, ys, tol)
     by_x = _group_axis(xs, pitch, tol)
     by_y = _group_axis(ys, pitch, tol)
+    if in_um and not _fits_a_plate(by_x, by_y):
+        # The gap split found no plate, and the unit says where the wells are
+        # regardless of whether anything in the file *looks* like a boundary.
+        # Taken only on failure, so a scan the gaps already read correctly is
+        # untouched, and only when the result is itself a plate — a file on
+        # another format's pitch is better served by the ratios than by this
+        # one's nominal 9 mm.
+        um_x, um_y = _um_axis_groups(xs, tol), _um_axis_groups(ys, tol)
+        if _fits_a_plate(um_x, um_y):
+            by_x, by_y, pitch = um_x, um_y, WELL_PITCH_UM
     ux, uy = sorted(by_x), sorted(by_y)
     cells = [(by_y[_nearest(uy, y)], by_x[_nearest(ux, x)]) for x, y in points]
     # The *step* between wells, which is not the gap `_axis_scale` found: that

@@ -2713,6 +2713,16 @@ starting well is the one thing the coordinates can get wrong in a way only you
 can see. Clicking the plate still takes the order over completely, and *then*
 the grid controls grey out, because a hand-drawn path replaces them.
 
+**If it says the run does not fit a plate, check the field spacing.** The well
+grid is read from the *spacing* of the coordinates — nothing about the shape of a
+well is involved — by looking for gaps between wells that are wider than the gaps
+between fields inside one. A dense montage leaves no such gap: sixteen fields
+spaced a quarter of the well pitch apart tile the well exactly, every step in the
+file is identical, and the scan reads as one well per field. When the file
+records the unit of its coordinates the converter recovers from that by itself;
+when it does not, enter the grid and FOVs per well and the plate map follows what
+you typed.
+
 **The stage path is drawn under the plate**, at the same scale, whenever the
 file carries coordinates. **Scroll on it to zoom, drag to move around, and
 double-click to fit the whole run again.** Each position numbers itself in

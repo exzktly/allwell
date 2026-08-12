@@ -33,10 +33,12 @@ from __future__ import annotations
 import logging
 import sys as _sys
 
+from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QCheckBox, QLabel, QPushButton, QTextEdit, QWidget,
 )
 
+import theme
 from well_viewer.core.safe import swallowed
 from well_viewer.core.ui_helpers import build_hline_separator
 from widgets.run_dashboard import RunDashboard
@@ -243,6 +245,110 @@ class AnalyzeLogPaneMixin:
         cb = getattr(self, "_raw_log_cb", None)
         if cb is not None and cb.isChecked():
             cb.setChecked(False)
+
+    @staticmethod
+    def _log_color(tag: str) -> str:
+        return {
+            "INFO":    theme.Colors.text_primary,
+            "WARNING": theme.Colors.warn,
+            "ERROR":   theme.Colors.danger,
+            "DONE":    theme.Colors.success,
+            "CMD":     theme.Colors.text_muted,
+        }.get(tag, theme.Colors.text_primary)
+
+    def _log_line(self, text: str, tag: str = "INFO") -> None:
+        """Append one line. See :meth:`_log_lines` — this is the batch of one."""
+        self._log_lines([(text, tag)])
+
+    def _log_lines(self, batch) -> None:
+        """Append many ``(text, tag)`` lines in as few inserts as the colours allow.
+
+        One insert per line is what a log pane naturally wants and what this did
+        until a remote run produced thousands of lines a second. The scroll
+        bookkeeping either side of the insert reads ``verticalScrollBar()
+        .maximum()``, and on a ``NoWrap`` document that forces a full re-layout
+        — so the cost of a line grew with the document under it: measured at
+        3.4 ms per line into an empty log, 19.1 ms once three thousand lines
+        were in it, 57 seconds for the batch as a whole. All of it on the GUI
+        thread, which is why the window stopped responding to anything —
+        including the "Show raw log" checkbox — for as long as the flood lasted.
+
+        Batching does not make an insert cheaper; it makes the *layout* happen
+        once instead of once per line. Consecutive lines sharing a colour go in
+        as one insert, so a run of ordinary output costs a single one.
+        """
+        if not batch:
+            return
+        # Snapshot the user's scroll position before appending. Auto-
+        # scroll-to-bottom only if they were already pinned there;
+        # otherwise leave the viewport alone so a user scrolled up to
+        # read an earlier line isn't yanked back every time a new line
+        # arrives.
+        vsb = self._log.verticalScrollBar()
+        at_bottom = vsb.value() >= vsb.maximum() - 4  # 4-px tolerance
+
+        # v5.4.7: compensate for ``setMaximumBlockCount(10000)``-driven
+        # trimming. When a new line pushes the block count over the
+        # cap, Qt removes blocks from the TOP. From the scrollbar's
+        # view that shifts every following pixel up — a user scrolled
+        # to read an earlier line still LOOKS like they're at the
+        # same value() but the content under that pixel has moved.
+        # Without an explicit compensation the viewport drifts toward
+        # the bottom (toward newer lines) every time trimming fires,
+        # which felt extra-broken once the rsync progress2 stream
+        # made trimming common during a remote run. Solution:
+        # snapshot block count before insert, count lines added,
+        # derive how many blocks were trimmed, subtract that many
+        # line-heights from the saved scroll value.
+        old_value = vsb.value()
+        doc = self._log.document()
+        old_block_count = doc.blockCount()
+        lines_added = sum(t.count("\n") for t, _ in batch if t)
+        # An ``insertText`` of "foo\nbar" appends 1 hard newline +
+        # bar (no trailing newline) → blockCount goes up by 1.
+        # "foo\nbar\n" → up by 1. "foo" (no newline) → up by 0.
+        # The text we receive always has a trailing "\n" (see
+        # callers), so ``\n``-count == new blocks added.
+
+        # Use a *fresh* QTextCursor for the insert — setting the active
+        # text cursor (the old code) is what forced the viewport to
+        # follow the caret. The doc-bound cursor leaves the visible
+        # cursor / selection alone.
+        cursor = QTextCursor(doc)
+        cursor.movePosition(QTextCursor.End)
+        run: list[str] = []
+        run_tag = batch[0][1]
+        for text, tag in batch:
+            if tag != run_tag and run:
+                fmt = QTextCharFormat()
+                fmt.setForeground(QColor(self._log_color(run_tag)))
+                cursor.insertText("".join(run), fmt)
+                run, run_tag = [], tag
+            run_tag = tag if not run else run_tag
+            run.append(text)
+        if run:
+            fmt = QTextCharFormat()
+            fmt.setForeground(QColor(self._log_color(run_tag)))
+            cursor.insertText("".join(run), fmt)
+
+        if at_bottom:
+            vsb.setValue(vsb.maximum())
+            return
+
+        # User was scrolled up. Did setMaximumBlockCount trim
+        # blocks from the top? If so, shift the saved scroll value
+        # up by the corresponding pixel height so the user stays
+        # anchored to the SAME content they were reading instead
+        # of drifting toward the new lines at the bottom.
+        new_block_count = doc.blockCount()
+        blocks_trimmed = max(0, old_block_count + lines_added - new_block_count)
+        if blocks_trimmed > 0:
+            line_height = max(1, self._log.fontMetrics().lineSpacing())
+            vsb.setValue(max(0, old_value - blocks_trimmed * line_height))
+        else:
+            # No trimming — explicitly restore the pre-insert value
+            # in case Qt did anything implicit.
+            vsb.setValue(old_value)
 
     def _surface_run_failure(self, message: str) -> None:
         """Put an ended-badly run where the user is already looking.

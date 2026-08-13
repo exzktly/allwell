@@ -95,8 +95,13 @@ they're shell-wide:
   drawer and status bar advertise.
 - **Application Log drawer** — a bottom-edge, full-width `Drawer` opened by the
   status-bar log tray (`_log_btn`). Its ring handler attaches to the
-  `well_viewer` logger (which sets `propagate = False`) at startup, so it
-  captures history before first open and appends live.
+  `well_viewer` logger (which sets `propagate = False`) *and* to root — the
+  latter is how it sees the `services.*` loggers the Analyze runners use — at
+  startup, so it captures history before first open and appends live. `emit`
+  fills the ring and hands the formatted line to a
+  `core.worker_bridge.GuiLogRelay`; it reads no widget state at all, because it
+  runs on whichever thread logged the record. Whether the drawer is open is
+  decided on the other side of that relay, in `_append_log_line`.
 - **Status bar** (bottom of the window) with a status-message label and
   key-hint chips.
 - **App icon, window geometry persistence.**
@@ -272,7 +277,8 @@ well_viewer/
 │   ├── lazy.py                       ← call-time proxy so core never imports a feature
 │   ├── frame_render.py               ← build_frame_rgb: one frame + label mask → RGB
 │   ├── worker_bridge.py              ← run_off_thread: the one-shot queued-signal bridge
-│   │                                   (+ progress / stage reporting for long jobs)
+│   │                                   (+ progress / stage reporting for long jobs,
+│   │                                    and GuiLogRelay for logging.Handlers)
 │   ├── bus_wiring.py, redraw_coordinator.py, selection_coordinator.py,
 │   │   scope_registry.py, projector_registry.py
 │   ├── load_controller.py, tab_controller.py, selection_controller.py,
@@ -2042,7 +2048,7 @@ Cross-cutting controllers (in `well_viewer/core/`):
 | `core/bus_wiring.py`, `core/redraw_coordinator.py` | Wire the `EventBus` signals to the redraw coalescer. |
 | `core/frame_scope.py` | "Which wells / FOVs / timepoints does this act on?" — the Qt-free half of the Segmentation tab's two scope controls. A `ScopeSpec` names the three `set \| None` fields on typed state plus the wording and the un-armed meaning; `scope_options` / `current_frame` / `describe_scope` / `refresh_scope_button` and the state writers are shared by both, so the delete's scope and the crop's cannot drift in normalisation or in readout grammar. **Writing a field and re-deriving from it are separate calls** (`write_scope_field(..., apply=False)` then `apply_scope_change`) because their costs differ by orders of magnitude: the write is an attribute set, while the crop's re-derivation re-projects `Crop_Pass` over every cached well, redraws the active plot and re-renders the canvas. A `CheckableDropdown` emits `changed` once per ticked item, so the popover has to be able to do the first eleven times and the second once. The `None`-vs-empty-set distinction is load-bearing on both: `None` is the un-armed field (the spec says whether that means "this frame" or "all frames"), an empty set names no frames at all, and collapsing the two would turn a stray click into either a plate-wide delete or a silently disabled crop. Lives in core because two features consume it — `crop` owns one spec, `preview` builds both popovers — and a shared module that either one owned would be a feature the other had to import to reach its own control. |
 | `core/scope_registry.py` | Register each feature's fold-change scope with its redraw callable (`features.barplot.renderer.redraw_bars`, `core.plot_orchestrator.redraw_app`). Called once from `wire_event_bus` during construction so the domain-layer `fold_change_scopes` module stays free of `features/` imports. |
-| `core/status_view.py` | The status/log footer, and `_GUILogHandler`, which routes `well_viewer` log records into the drawer's `QTextEdit` via a queued `QTimer.singleShot` (records can arrive off the GUI thread). Two rules keep it from outliving its widget badly. **It never logs from its own failure path.** A failed append is caught as `RuntimeError` and handled silently — deliberately *not* `swallowed()`, whose DEBUG record would propagate straight back to the logger this handler is attached to, fail in the same place, and log again; a redraw's `processEvents()` drains that queue forever, which is a hang, not a slow run. **A handler whose widget is gone detaches itself** from every logger holding it, because nothing removes it on teardown — in a process that builds more than one window (the test suite) the dead handlers otherwise stay subscribed and every record fans out to widgets that cannot receive it. The document is capped at `_LOG_MAX_BLOCKS`, so the drawer is a bounded tail rather than an unbounded archive. |
+| `core/status_view.py` | The status/log footer, and `_GUILogHandler`, which routes `well_viewer` log records into the drawer's `QTextEdit`. It is attached at DEBUG and gated on nothing, so it sees every record the app produces — including the `well_viewer.swallowed` breadcrumbs written from inside `except` blocks on worker threads — and `emit` is therefore entered off the GUI thread as a matter of course. It crosses that boundary through a `core.worker_bridge.GuiLogRelay`, never a timer; §10.1 has the mechanism and why the distinction is not cosmetic. Two further rules keep it from outliving its widget badly. **It never logs from its own failure path.** A failed append is caught as `RuntimeError` and handled silently — deliberately *not* `swallowed()`, whose DEBUG record would propagate straight back to the logger this handler is attached to, fail in the same place, and log again; a redraw's `processEvents()` drains that queue forever, which is a hang, not a slow run. **A handler whose widget is gone detaches itself** from every logger holding it, because nothing removes it on teardown — in a process that builds more than one window (the test suite) the dead handlers otherwise stay subscribed and every record fans out to widgets that cannot receive it. The document is capped at `_LOG_MAX_BLOCKS`, so the drawer is a bounded tail rather than an unbounded archive. |
 | `core/ui_helpers.py` | Cross-cutting widget helpers (combo population, button factories, theme application). |
 
 Per-feature controllers / renderers (under `well_viewer/features/`):
@@ -6824,6 +6830,20 @@ remote UTF-8 stream is decoded on a cp1252 Windows client).
 - `allwell._attach_log_ring_buffer` captures every record into a ring
   buffer that the Help drawer's log tab and the Analyze tab's live log
   view both read from.
+- **A `logging.Handler` runs on whichever thread logged the record**, and in
+  this app that includes every background thread there is: the remote runner's
+  batch loop and its fetcher, the smFISH and cell-browser loaders, the gating
+  `QThread`s, and every `swallowed()` breadcrumb any of them writes. So a
+  handler that writes to a widget has to marshal, and `QTimer.singleShot(0, …)`
+  is not a way to marshal even though it reads like one — the timer is created
+  on the *calling* thread, so the callback never fires there (the line is lost)
+  and destroying the abandoned `QObject` as the thread ends raises
+  `QObject::killTimer: Timers cannot be stopped from another thread`. Both of
+  the app's GUI log handlers go through `core.worker_bridge.GuiLogRelay`, a
+  `QObject` built on the GUI thread whose queued signal may be emitted from
+  anywhere. `tests/test_log_handler_marshalling.py` forbids the timer shape
+  statically; `tests/test_log_handler_thread_safety.py` shows a worker-thread
+  line arriving at both widgets.
 
 ### 10.2 Debug flags
 
@@ -7454,6 +7474,7 @@ The map (each rule links to the test that holds it):
 | Never hardcode a colour or a pixel size (§3, §8) — allowlisted for colormap/palette data and the `__main__` demo blocks; `datasets/` is out of scope while its tool pages consolidate | `tests/test_hardcoded_tokens.py` |
 | Every divider frame carries a name the QSS styles, so it paints a 1 px `border_subtle` hairline rather than Qt's 3 px etched default (§8) | `tests/test_divider_naming.py` |
 | A well token is judged by `util.well_token`, never a local whole-token regex (§15) | `tests/test_well_token_single_parser.py` |
+| No `logging.Handler.emit` creates or arms a Qt timer — `emit` runs on the thread that logged the record, so a timer built there never fires and its teardown raises `killTimer` from another thread. Handlers marshal through `core.worker_bridge.GuiLogRelay` (§10.1) | `tests/test_log_handler_marshalling.py` (static) + `tests/test_log_handler_thread_safety.py` (behavioural), with bite cases in `tests/test_guards_bite.py` |
 | `pipeline/`, `util/`, `services/` and `domain/` import no Qt and no `widgets` at any nesting; `data/` too, but for one allowlisted module (§5, §13) | `tests/test_qt_free_layers.py` |
 | No Datasets tool imports another Datasets tool, so each stays independently deletable (§6b) | `tests/test_datasets_tool_isolation.py` |
 | Every Datasets dashboard ends a run through the shared outcome setters rather than its own copies (§6b) | `tests/test_datasets_dashboard_outcomes.py` |

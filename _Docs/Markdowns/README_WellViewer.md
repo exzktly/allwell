@@ -3354,7 +3354,7 @@ architecture-specific and can't produce a universal binary.
 | `⌘←` / `Ctrl+←` | Back through tab history |
 | `⌘→` / `Ctrl+→` | Forward through tab history |
 | `⌘/` / `Ctrl+/` | Open the help drawer |
-| `⌘L` / `Ctrl+L` | Open the application log drawer |
+| `⌘L` / `Ctrl+L` | Open the application log drawer — including the lines background work writes while a run is going |
 | `⌘B` / `Ctrl+B` | Collapse / expand the left sidebar (same as the top-bar panel button) |
 | `⌘W` / `Ctrl+W` | Close window |
 

@@ -15,13 +15,18 @@ through them, the widgets and the app.
 Lives in ``core`` rather than in the Playground, its present sole caller, because
 the Playground is a removable feature: a bridge every background job in the app
 may want cannot sit inside a package that a build profile can drop.
+
+:class:`GuiLogRelay` at the bottom of this module is the same shape for the one
+case that is not a job at all: a ``logging.Handler``. A handler is entered on
+whatever thread called ``logger.info(...)``, which for this app includes every
+worker in it, so a handler that writes to a widget needs exactly this route.
 """
 
 from __future__ import annotations
 
 import threading
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Qt, Signal
 
 
 class WorkerBridge(QObject):
@@ -116,3 +121,41 @@ def run_off_thread(fn, *, on_done, on_failed=None, on_progress=None,
 
     threading.Thread(target=_run, daemon=True).start()
     return bridge
+
+
+class GuiLogRelay(QObject):
+    """Hand one formatted log line to a GUI-thread callable, from any thread.
+
+    A ``logging.Handler`` runs on whichever thread emitted the record. Every
+    background worker in this app logs — the remote runner's batch loop and its
+    fetcher, the smFISH and cell-browser loaders, the gating ``QThread``s, and
+    every ``swallowed()`` call any of them makes — so a handler that appends to a
+    ``QTextEdit`` is entered off the GUI thread routinely. Touching the widget
+    there is illegal, and ``QTimer.singleShot(0, …)`` is not the escape hatch it
+    reads as: it builds its timer on the *calling* thread, so the callback never
+    fires and the stray ``QObject`` is left owned by a thread that is about to
+    end — which is what raises ``QObject::killTimer: Timers cannot be stopped
+    from another thread`` at teardown.
+
+    Construct one on the GUI thread (the handler's ``__init__`` is the natural
+    place, since the handler itself is built there) and call :meth:`post` from
+    anywhere. The connection is explicitly queued rather than automatic so that
+    delivery is deferred to the event loop from *both* sides: a line logged on
+    the GUI thread must not append re-entrantly in the middle of whatever was
+    running when it was logged, which is the one property the ``singleShot``
+    spelling did have.
+
+    Keep a reference to the relay for as long as the handler lives — a
+    garbage-collected ``QObject`` delivers nothing. Holding it on the handler is
+    enough.
+    """
+
+    _line = Signal(str)
+
+    def __init__(self, deliver) -> None:
+        super().__init__()
+        self._line.connect(deliver, Qt.QueuedConnection)
+
+    def post(self, text: str) -> None:
+        """Queue *text* for delivery on the thread that built this relay."""
+        self._line.emit(text)

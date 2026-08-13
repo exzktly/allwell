@@ -961,6 +961,21 @@ print(json.dumps({"ok": True, "source": used, "profiles": uniq}))
 # is the ceiling that scaling clamps to.
 MAX_HELD_ALLOCATION_S = 24 * 60 * 60
 
+
+# How much of an archive the channel filter has to be dropping before it is
+# worth rewriting that archive locally instead of uploading it as it stands.
+#
+# Rewriting is not free: the source is read, a new zip is written to a local
+# volume, and only then does the upload start. It buys a smaller transfer. When
+# the filter is shedding a couple of small frames out of a multi-gigabyte well,
+# that trade is plainly bad — the local copy costs more than the bytes saved,
+# and the remote pipeline ignores unrequested channels anyway, so the only cost
+# of sending them is bandwidth.
+#
+# Measured on *compressed* bytes, which is what actually crosses the wire and
+# what the zip's central directory reports without reading a member.
+REWRITE_MIN_SAVING = 0.10
+
 # Slurm accepts six spellings of a time limit. All of them, so a launcher that
 # works on the cluster is not rejected here.
 _SLURM_TIME_RE = re.compile(

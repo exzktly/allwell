@@ -62,12 +62,14 @@ from services.remote_config import (
     resolve_ssh_for_rsync,
     to_rsync_path,
     update_bandwidth,
+    REWRITE_MIN_SAVING,
 )
 # Stdlib-only (fov, tp) done-key helpers — shared with pipeline.io (audit A2).
 # This module import must stay imaging-stack-free; incremental_keys is csv/
 # zipfile/pathlib only, so it never drags numpy/tifffile into the remote client.
 from util.channel_roles import LABELFREE_METHODS, quantified_channel_tokens
 from util.fov import sort_key as fov_sort_key
+from util.image_exts import GROUP_IMAGE_EXTS
 from util.timepoint import sort_key as tp_sort_key
 from pipeline.run_report import (
     merge_fetched_run_report,
@@ -395,6 +397,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # retry shield below rewrites an ENOSPC through it, so a remote run that
     # runs its output volume dry says which volume and how much is left.
     "util/disk_space.py",
+    # "Would the pipeline group this file as input?" — one set, read by
+    # process_microscopy's scanners and by this module's upload planner.
+    "util/image_exts.py",
     # Atomic + verified publication of the per-well archives, imported by
     # process_microscopy and pipeline.io — without it the remote run aborts
     # before it compresses its first well.
@@ -519,6 +524,19 @@ class RunEstimate:
     def format(self) -> str:
         gb = self.bytes_to_transfer / (1024**3)
         return f"transfer {gb:.2f} GB ({_fmt_secs(self.transfer_s)}) to the remote"
+
+
+def _fmt_bytes(n: float) -> str:
+    """Bytes at a unit a human reads without counting zeros.
+
+    A fixed MB format renders every archive under a megabyte as "0 MB", which
+    reads as a broken measurement rather than a small one — and the planner
+    reports sizes for archives that legitimately span kilobytes to gigabytes.
+    """
+    for unit, scale in (("GB", 1024**3), ("MB", 1024**2), ("KB", 1024)):
+        if n >= scale:
+            return f"{n / scale:.1f} {unit}"
+    return f"{int(n)} B"
 
 
 def _fmt_secs(s: float) -> str:
@@ -1313,6 +1331,40 @@ class _StagePlan:
     note: str = ""
 
 
+def _drop_reason(dropped_channel: list[str], dropped_done: int,
+                 filename_schema: str, filename_sep: str) -> str:
+    """Say *what* the planner dropped, in the words the user can act on.
+
+    The log used to report only that an archive was being rewritten. That is the
+    one thing the user can already see happening; what they cannot see is which
+    channel caused it — and "all my channels are selected, so why is it copying
+    my plate?" is not answerable from any other line the run emits.
+
+    Channels are named by the filename's own ``channel`` slot under the run's
+    schema. A member whose name does not decompose under that schema is reported
+    by its filename instead: "this file's name means nothing to the schema you
+    gave" is itself the answer often enough to be worth saying plainly, and a
+    guessed channel token would be worse than none.
+    """
+    parts: list[str] = []
+    if dropped_channel:
+        fields = [f.strip().lower() for f in (filename_schema or "").split(":")]
+        ci = fields.index("channel") if "channel" in fields else -1
+        counts: dict[str, int] = {}
+        for member in dropped_channel:
+            stem = Path(member).stem
+            tokens = stem.split(filename_sep)
+            token = tokens[ci] if 0 <= ci < len(tokens) else ""
+            counts[token or Path(member).name] = counts.get(
+                token or Path(member).name, 0) + 1
+        named = ", ".join(f"{tok} ({n})" for tok, n in
+                          sorted(counts.items(), key=lambda kv: -kv[1]))
+        parts.append(f"no channel match: {named}")
+    if dropped_done:
+        parts.append(f"already processed: {dropped_done} FOV-group(s)")
+    return "; ".join(parts) if parts else "reason not recorded"
+
+
 def _raise_on_zero_channel_match(zero_match: list[str]) -> None:
     """Fail naming every well whose channel filter matched nothing.
 
@@ -1360,7 +1412,13 @@ def _plan_staging(
     for idx, wz in enumerate(well_zips, start=1):
         try:
             with zipfile.ZipFile(wz, "r") as zf:
-                members = zf.namelist()
+                # ``infolist`` over ``namelist``: the compressed size of every
+                # member comes from the same central-directory read, at no extra
+                # I/O, and it is what decides below whether rewriting this
+                # archive is worth more than it costs.
+                infos = zf.infolist()
+                members = [i.filename for i in infos]
+                sizes = {i.filename: i.compress_size for i in infos}
         except (OSError, zipfile.BadZipFile) as exc:
             # Unreadable here means unreadable later too, but staging it whole
             # keeps the previous behaviour: the remote gets the archive and
@@ -1372,6 +1430,7 @@ def _plan_staging(
             plans.append(_StagePlan(src=wz, keep=None, n_members=0,
                                     note="unreadable"))
             continue
+
         if not members:
             if log_fn:
                 log_fn(f"[remote] plan ({idx}/{n_total}): {wz.stem} → "
@@ -1388,8 +1447,11 @@ def _plan_staging(
         # skips dotfiles and anything without an image extension.
         images = [m for m in members if _is_image_member(m)]
         keep = list(images)
+        dropped_channel: list[str] = []
+        dropped_done = 0
         if keep_tokens:
             keep = [m for m in keep if _member_matches(m, keep_tokens)]
+            dropped_channel = [m for m in images if m not in set(keep)]
             if images and not keep:
                 zero_match.append(wz.stem)
                 if log_fn:
@@ -1419,11 +1481,13 @@ def _plan_staging(
                 prior_output_dir / f"{well}_out.zip",
                 schema=filename_schema, sep=filename_sep)
             if done:
+                before = len(keep)
                 keep = [
                     m for m in keep
                     if fov_tp_from_name(m, schema=filename_schema,
                                         sep=filename_sep) not in done
                 ]
+                dropped_done = before - len(keep)
                 if images and not keep:
                     up_to_date.append(well)
                     if log_fn:
@@ -1436,6 +1500,32 @@ def _plan_staging(
         # archive is used exactly as it is, junk members and all; when something
         # is, the rewrite carries only the images the remote will actually read.
         take_all = len(keep) == len(images)
+        if not take_all:
+            # Rewriting costs a full local read and write of this archive before
+            # a byte is uploaded, and it buys a smaller transfer. Below a
+            # worthwhile saving that trade is plainly bad — the remote ignores
+            # channels it was not asked for, so sending them costs bandwidth and
+            # nothing else. Decided on compressed bytes, which is what crosses
+            # the wire, not on member counts: two frames out of twelve can be
+            # 40% of an archive or 0.4% of it.
+            dropped = [m for m in images if m not in set(keep)]
+            drop_bytes = sum(sizes.get(m, 0) for m in dropped)
+            total_bytes = sum(sizes.get(m, 0) for m in images)
+            saving = (drop_bytes / total_bytes) if total_bytes else 0.0
+            if saving < REWRITE_MIN_SAVING:
+                take_all = True
+                if log_fn:
+                    log_fn(f"[remote] plan ({idx}/{n_total}): {wz.stem} → "
+                           f"{len(dropped)} of {len(images)} image(s) could be "
+                           f"dropped, worth {saving * 100:.1f}% of "
+                           f"{_fmt_bytes(total_bytes)} — uploading it as it is "
+                           f"rather than rewriting it to save that.\n")
+            elif log_fn:
+                log_fn(f"[remote] plan ({idx}/{n_total}): {wz.stem} → "
+                       f"rewriting, {len(dropped)} of {len(images)} image(s) "
+                       f"dropped ({saving * 100:.0f}% of "
+                       f"{_fmt_bytes(total_bytes)}): "
+                       f"{_drop_reason(dropped_channel, dropped_done, filename_schema, filename_sep)}\n")
         plans.append(_StagePlan(
             src=wz, keep=None if take_all else tuple(keep),
             n_members=len(images),
@@ -1679,7 +1769,12 @@ def _filter_channels_in_staging(
     return ZippedInput(zip_dir=zip_dir, mode=mode, well_zips=well_zips, cleanup=None)
 
 
-_IMAGE_MEMBER_EXTS = (".tif", ".tiff")
+# Shared with the pipeline (`process_microscopy._GROUP_IMAGE_EXTS`) rather
+# than restated here. These two lists disagreed: this one omitted .png /
+# .jpg / .jpeg, so such a member was invisible to the planner and was
+# silently dropped from any archive rewritten for another reason — input
+# the remote would have processed, gone with nothing said.
+_IMAGE_MEMBER_EXTS = tuple(sorted(GROUP_IMAGE_EXTS))
 
 
 def _is_image_member(member: str) -> bool:

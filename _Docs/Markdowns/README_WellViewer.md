@@ -742,6 +742,16 @@ message about space. Set it to your site's real scratch: `$TMPDIR`,
 on the remote, not here. This is separate from **Scratch disk** in the form
 above, which governs local runs and is not used when the pipeline runs remotely.
 
+**"Rewriting N well archive(s)" in the log** means the plate holds images this
+run does not want — most often a transmitted-light or brightfield channel that
+is in the files but not in your channel list, and on a re-run it can instead be
+fields a previous run already processed. Those archives are rebuilt without them
+so the upload is smaller, and the log now names which channel and how many
+frames. If the saving would be trivial — a couple of small frames out of a large
+well — it says so and uploads the archive untouched instead, because copying it
+locally to save that would cost more than it saves. An archive with nothing to
+drop is never copied and never mentioned.
+
 Your own machine's home volume is not used by a remote run either. Wells arrive
 into a hidden `.allwell-transit` folder inside your chosen output folder and
 move into place from there, so the only volumes a remote run needs room on are

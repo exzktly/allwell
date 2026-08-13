@@ -2009,6 +2009,10 @@ def test_required_files_list_is_what_we_promised():
         "util/disk_space.py",
         # Atomic + verified per-well archive publication (util.zip_write),
         # imported by process_microscopy and pipeline.io.
+        # "Would the pipeline group this file as input?" — one set, read by
+        # process_microscopy's scanners and by the upload planner, which
+        # decides from the same question which members survive a rewrite.
+        "util/image_exts.py",
         "util/zip_write.py",
         # The Qt-free ``pipeline`` package (analysis-domain modules +
         # segmenters/writers), re-imported at module top level.

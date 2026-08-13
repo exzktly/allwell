@@ -70,6 +70,7 @@ from skimage.filters import threshold_otsu
 from skimage.segmentation import watershed
 from util.channel_roles import phase_role_conflicts, quantified_channel_tokens
 from util.fov import sort_key as _fov_sort_key
+from util.image_exts import GROUP_IMAGE_EXTS
 from util.timepoint import parse_hours as _tp_parse_hours, sort_key as _tp_sort_key
 from util.well_token import (
     split_background_wells as _split_background_wells,
@@ -2002,7 +2003,10 @@ def process_image_group(
 # Directory scan
 # ---------------------------------------------------------------------------
 
-_GROUP_IMAGE_EXTS = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
+# The one definition of "would the pipeline group this file as input?" —
+# shared with the remote upload planner, which decides from the same
+# question which members survive a rewritten archive. See util/image_exts.
+_GROUP_IMAGE_EXTS = set(GROUP_IMAGE_EXTS)
 
 
 def _grouping_channel_idx(schema: list[str]) -> int | None:

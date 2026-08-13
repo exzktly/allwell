@@ -91,10 +91,12 @@ def space_message(what: str, path: Path | str | None, *, need: int | None = None
         ". A run needs far more room than its inputs occupy: the input archives "
         "are compressed, while the per-well staging (~6 float32 intermediates "
         "per FOV-group, times as many wells as run at once) and every "
-        "<well>_out.zip the plate has produced so far are not. Unless "
-        "ALLWELL_SCRATCH_DIR (Analyze -> Scratch disk) points elsewhere, that "
-        "staging is on ~/.allwell/scratch and may be competing with the output "
-        "for this same volume. Free space or move the scratch, then re-run with "
-        "--incremental to resume what is missing."
+        "<well>_out.zip the plate has produced so far are not. For a local run, "
+        "unless ALLWELL_SCRATCH_DIR (Analyze -> Scratch disk) points elsewhere, "
+        "that staging is on ~/.allwell/scratch and may be competing with the "
+        "output for this same volume. For a remote run it is the remote's own "
+        "scratch that carries it (the host's Remote scratch dir), and on this "
+        "machine only the input and output volumes are used. Free space or move "
+        "the scratch, then re-run with --incremental to resume what is missing."
     )
     return "".join(parts)

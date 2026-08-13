@@ -88,6 +88,21 @@ class RemoteHost:
     ssh_alias: str
     remote_project_dir: str = "~/allwell"
     remote_staging_dir: str = "~/.allwell-staging"
+    remote_scratch_dir: str = ""
+    """Where the pipeline keeps its transient working files **on the remote**.
+
+    Exported as ``ALLWELL_SCRATCH_DIR`` inside the composed remote command, which
+    is what ``pipeline.io.scratch_base_for`` reads. Empty (the default, and every
+    pre-existing config) leaves the pipeline on the remote's ``~/.allwell/scratch``
+    — byte-identical to previous behaviour.
+
+    It matters most on a cluster, where that default is the worst available
+    choice: a run's working set is roughly six float32 intermediates per
+    FOV-group for every well running at once, and an HPC home directory is
+    exactly the volume the site gives a small quota. ``$TMPDIR``, ``$SLURM_TMPDIR``
+    or ``/scratch/$USER`` are the usual answers, and the value is expanded on the
+    remote so those spellings work verbatim.
+    """
     remote_python: str = DEFAULT_REMOTE_PYTHON
     cpu_only: bool = False
     extra_args: tuple[str, ...] = field(default_factory=tuple)
@@ -592,6 +607,10 @@ def _format_block(host: RemoteHost) -> str:
         f"jupyterhub_config_path = {_toml_string(host.jupyterhub_config_path)}\n"
         if host.jupyterhub_config_path else ""
     )
+    scratch_line = (
+        f"remote_scratch_dir = {_toml_string(host.remote_scratch_dir)}\n"
+        if host.remote_scratch_dir else ""
+    )
     return (
         f"[remote.{host.name}]\n"
         f"ssh_alias = {_toml_string(host.ssh_alias)}\n"
@@ -600,6 +619,7 @@ def _format_block(host: RemoteHost) -> str:
         f"{jhub_line}"
         f"remote_project_dir = {_toml_string(host.remote_project_dir)}\n"
         f"remote_staging_dir = {_toml_string(host.remote_staging_dir)}\n"
+        f"{scratch_line}"
         f"remote_python = {_toml_string(host.remote_python)}\n"
         f"cpu_only = {'true' if host.cpu_only else 'false'}\n"
         f"extra_args = [{extras}]\n"
@@ -765,6 +785,7 @@ def _parse_entry(name: str, entry: dict[str, Any]) -> RemoteHost:
         defaults,
         remote_project_dir=str(entry.get("remote_project_dir", defaults.remote_project_dir)),
         remote_staging_dir=str(entry.get("remote_staging_dir", defaults.remote_staging_dir)),
+        remote_scratch_dir=str(entry.get("remote_scratch_dir", defaults.remote_scratch_dir)),
         remote_python=str(entry.get("remote_python", defaults.remote_python)),
         cpu_only=bool(entry.get("cpu_only", defaults.cpu_only)),
         extra_args=tuple(extra_args),

@@ -731,6 +731,24 @@ a host (bootstrap installs the pipeline and its Python environment on a machine
 that has never run All-Well). A malformed `remotes.toml` never blocks the app —
 the run log carries a warning and the dropdown stays on `Local`.
 
+**Remote scratch dir**, under *Advanced (remote paths)* in that dialog, is worth
+setting on a cluster. It is where the pipeline keeps its per-well working files
+*on the remote* — every extracted input image and roughly six uncompressed
+intermediates per field, for as many wells as run at once. Left empty it uses
+the remote's home directory, which on an HPC system is exactly the volume with
+the small quota, and a run that overflows it fails partway through with a
+message about space. Set it to your site's real scratch: `$TMPDIR`,
+`$SLURM_TMPDIR` and `/scratch/$USER` all work as written — the value is expanded
+on the remote, not here. This is separate from **Scratch disk** in the form
+above, which governs local runs and is not used when the pipeline runs remotely.
+
+Your own machine's home volume is not used by a remote run either. Wells arrive
+into a hidden `.allwell-transit` folder inside your chosen output folder and
+move into place from there, so the only volumes a remote run needs room on are
+the ones holding your input and your output. If that output folder cannot take
+the folder — a read-only share, say — the run falls back to `~/.allwell/scratch`
+and says so in the log rather than doing it quietly.
+
 Choosing a remote reveals a **Remote options** group, hidden for a local run
 because none of it applies:
 
@@ -792,6 +810,13 @@ and by `remote_fetch_report.txt` in the output folder.
   left short of full, with a warning in the log pointing at the `errors/` folder
   in the output directory. A finished-looking bar over a part-finished plate is
   the one thing the run view will not show you.
+- **The full log sits under the dashboard, open.** Everything the run says,
+  line by line, appears there as it happens — and some of it appears nowhere
+  else: why a run refused to start, which volume ran out of room, the path of
+  the `errors/` folder when wells failed. Untick **Show raw log** in the
+  Pipeline Output header if you would rather watch the dashboard alone; the
+  app re-opens it on its own only when a run fails with an explanation you
+  would otherwise not see, and hands the toggle back at the next run.
 - During a remote transfer the **status line** beside the progress bar carries
   the live figure (how much has come across, how long it has taken) and updates
   in place. The log gets the events — each well starting, each one landing, the

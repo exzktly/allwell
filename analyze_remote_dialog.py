@@ -307,6 +307,7 @@ class RemoteFormDialog(QDialog):
             (host.remote_project_dir and host.remote_project_dir != defaults.remote_project_dir)
             or (host.remote_staging_dir and host.remote_staging_dir != defaults.remote_staging_dir)
             or (host.remote_python and host.remote_python != defaults.remote_python)
+            or bool(host.remote_scratch_dir)
         )
 
         self._advanced_btn = QToolButton(self)
@@ -351,6 +352,24 @@ class RemoteFormDialog(QDialog):
         )
         self._staging_dir_edit.setPlaceholderText(defaults.remote_staging_dir)
         adv_form.addRow("Remote staging dir", self._staging_dir_edit)
+
+        # Where the *pipeline* keeps its transient working files on the remote,
+        # as distinct from the staging dir above (which holds the plate). Left
+        # empty it lands on the remote's home directory, which on a cluster is
+        # the volume with the small quota — so the placeholder and the tooltip
+        # name the values a site actually uses, because someone who does not
+        # already know their cluster's scratch path will not guess it.
+        self._scratch_dir_edit = QLineEdit(host.remote_scratch_dir,
+                                           self._advanced_frame)
+        self._scratch_dir_edit.setPlaceholderText("~/.allwell/scratch (default)")
+        self._scratch_dir_edit.setToolTip(
+            "Where the pipeline writes its per-well working files on the remote.\n"
+            "Leave empty to use the remote's home directory. On a cluster set it "
+            "to real scratch —\n$TMPDIR, $SLURM_TMPDIR or /scratch/$USER — since "
+            "a run's working set is several\nuncompressed images per field, and a "
+            "home quota is the wrong volume for it."
+        )
+        adv_form.addRow("Remote scratch dir", self._scratch_dir_edit)
 
         self._python_edit = QLineEdit(
             "" if host.remote_python == defaults.remote_python else host.remote_python,
@@ -435,6 +454,7 @@ class RemoteFormDialog(QDialog):
             ssh_alias=self._ssh_alias_edit.text().strip(),
             remote_project_dir=self._project_dir_edit.text().strip() or "~/allwell",
             remote_staging_dir=self._staging_dir_edit.text().strip() or "~/.allwell-staging",
+            remote_scratch_dir=self._scratch_dir_edit.text().strip(),
             remote_python=self._python_edit.text().strip()
                 or "~/miniforge3/envs/allwell/bin/python",
             cpu_only=self._cpu_only_cb.isChecked(),

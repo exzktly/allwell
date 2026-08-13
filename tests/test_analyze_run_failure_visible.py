@@ -72,10 +72,34 @@ def test_a_failed_run_puts_the_reason_on_the_dashboard(tab):
     assert "scratch space" in headline, headline
 
 
+def test_the_raw_log_is_open_before_anything_has_run(tab):
+    """The log carries things nothing else says — the reason a run refused to
+    start, the volume that filled, where the errors/ folder is — so it is open
+    and the toggle is there to put it away.
+
+    isVisibleTo, not isVisible: the tab is never shown in these tests, so
+    isVisible() is False for every widget in it and an assertion built on it
+    would hold whether the log were revealed or not.
+    """
+    assert tab._raw_log_cb.isChecked() is True
+    assert tab._log.isVisibleTo(tab) is True
+    assert tab._log_sep.isVisibleTo(tab) is True
+
+    # And it is genuinely a toggle, not a fixture.
+    tab._raw_log_cb.setChecked(False)
+    assert tab._log.isVisibleTo(tab) is False
+    assert tab._log_sep.isVisibleTo(tab) is False
+
+
 def test_a_failed_run_reveals_the_raw_log(tab):
-    """The reason is written into a pane that is closed by default. Opening it
-    on failure is what turns "nothing happened" into an explanation."""
-    assert tab._raw_log_cb.isChecked() is False      # closed at build
+    """The reason is written into a pane the user can close. Re-opening it on
+    failure is what turns "nothing happened" into an explanation.
+
+    The pane is open at build, so the precondition below stands in for the user
+    having put it away — without it `force_raw_log_open` returns early on an
+    already-ticked box and the assertion passes while measuring nothing.
+    """
+    tab._raw_log_cb.setChecked(False)                # the user closed it
     _fail_run(tab)
     assert tab._raw_log_cb.isChecked() is True
     # isVisibleTo, not isVisible: the tab is never shown in this test, so
@@ -157,7 +181,7 @@ def test_a_cancel_does_not_force_the_log_open(tab):
     never opened the pane for anything. It pins the exemption so the failure
     path added beside it cannot later grow to cover cancels.
     """
-    assert tab._raw_log_cb.isChecked() is False
+    tab._raw_log_cb.setChecked(False)                # the user closed it
     _end_run(tab, stopped=True)
     assert tab._raw_log_cb.isChecked() is False
 
@@ -240,7 +264,7 @@ def test_the_next_run_hands_the_raw_log_toggle_back(tab):
     which is what ``test_a_failed_run_reveals_the_raw_log`` already proves, so
     neither has ever been red for the behaviour it names.
     """
-    assert tab._raw_log_cb.isChecked() is False
+    tab._raw_log_cb.setChecked(False)                # the user closed it
     _fail_run(tab)
     assert tab._raw_log_cb.isChecked() is True
     tab._set_running_ui_state()
@@ -251,6 +275,7 @@ def test_a_toggle_the_user_worked_themselves_is_not_taken_back(tab):
     """Once they have opened it deliberately, it is theirs — a later run must
     not close a pane the user asked for. See the note above on what this can
     and cannot prove against the pre-fix code."""
+    tab._raw_log_cb.setChecked(False)                # the user closed it
     _fail_run(tab)
     assert tab._raw_log_cb.isChecked() is True
     tab._raw_log_cb.setChecked(False)      # the user closes it …
@@ -268,6 +293,7 @@ def test_a_stop_clicked_after_the_failure_does_not_hide_it(tab):
     leaves the raw log shut and never states the reason. The runner snapshots
     the answer when it queues the failure instead.
     """
+    tab._raw_log_cb.setChecked(False)                # the user closed it
     tab._run_ok = False
     tab._run_error = None
     # Failure queued while nothing was cancelled …

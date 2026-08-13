@@ -1564,10 +1564,13 @@ def test_fetch_one_keeps_complete_zip_despite_rsync_error(host, tmp_path):
     with patch.object(Fetcher, "_loop", lambda self: None):
         f = Fetcher(host, run, output_filter=OutputFilter.FULL, log_fn=logs.append)
     well = "A01"
-    # Where the Fetcher looks for the transit zip — the client scratch base,
-    # not the OS temp dir (they are only the same when home is unwritable).
-    from services.remote_runner import _scratch_dir
-    tmp_zip = _scratch_dir() / f"allwell-{run.run_id}-{well}_out.zip"
+    # Where the Fetcher looks for the transit zip: the transit directory beside
+    # the run's own output, not the home scratch volume. A remote run has no
+    # reason to touch home, and writing a whole well's output there and then
+    # copying it across is what used to fill it.
+    from services.remote_runner import _transit_dir
+    tmp_zip = (_transit_dir(run.local_output_dir)
+               / f"allwell-{run.run_id}-{well}_out.zip")
     with zipfile.ZipFile(tmp_zip, "w") as z:            # a COMPLETE zip on disk
         z.writestr("A01_overlay.tif", b"data")
     try:

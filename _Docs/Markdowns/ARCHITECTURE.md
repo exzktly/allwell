@@ -1408,6 +1408,28 @@ Everything computable lives in `collect.py`, Qt-free and ctx-first, so the whole
 page is exercised in the fast lane against a plain namespace; `controller.py`
 paints widgets from what it returns and `tab_view.py` holds the arrangement.
 
+**The Run parameters card names the settings that shaped the numbers, and only
+those.** A method's name alone is not a receipt: two plates corrected with
+`robust_mesh` at different mesh ratios read identically, and an `empty_well`
+correction that never says which wells it measured cannot be reproduced. So
+`collect._correction_parameter_rows` renders the radius, the FFT small-structure
+cutoff, the mesh ratio and sigma, and the reference wells — but each only when
+the chosen method actually consults it. Which those are is
+`pipeline.background.BACKGROUND_METHOD_PARAMS` and
+`pipeline.flatfield.FLATFIELD_MODE_PARAMS`, kept beside the dispatches that
+define them so the receipt cannot drift from the code: listing a mesh ratio
+beside `sliding_disk`, which never sees one, asserts an effect that did not
+happen, and that is the same class of untruth as omitting the ones that did.
+`tests/test_correction_parameter_roster.py` fails if a method is added without
+an entry, or if an entry names a parameter `subtract_background` does not take.
+The two per-channel-role settings (radius, FFT cutoff) print as one value when
+the nuclear and fluorescence roles share it and name both when they differ.
+A reference-well correction with **no** well named is painted as a warning
+rather than an em-dash: no field was built, so every frame passed through
+untouched and the output is bit-for-bit identical to a corrected one — the
+silent substitution §7 of `CLAUDE.md` is about, and the reason `severity` is
+honoured on a receipt row at all.
+
 **Before a dataset is open, the page is not shown at all.** Home's body is
 wrapped in the shared `wrap_with_empty_state` stack like every other Review
 page, so the same "Load a directory." placeholder covers it and the same

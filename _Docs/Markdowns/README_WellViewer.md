@@ -1015,9 +1015,18 @@ What is on it:
 - **Health.** Only what needs attention. A dataset with nothing wrong says so in
   one line instead of listing zeros.
 - **Run parameters.** What the run was told to do — segmentation method and its
-  thresholds, the background method named in full, flat-field, debris gating,
-  where it ran and for how long. A threshold that came from the model's own
-  defaults says so, rather than being shown as a number somebody chose.
+  thresholds, the background method named in full and the flat-field mode,
+  **the settings each of those used**, debris gating, where it ran and for how
+  long. A threshold that came from the model's own defaults says so, rather
+  than being shown as a number somebody chose. The settings shown are the ones
+  that method actually reads: a radius for the morphological methods, the mesh
+  ratio and sigma for `robust_mesh`, the small-structure cutoff for
+  `fft_bandpass`, and the wells for an `empty_well` background or flat-field.
+  Nothing else is listed, because a number beside a method that never consults
+  it reads as though it had an effect. Where the nuclear and fluorescence
+  channels were given different values, both are shown. A reference-well
+  correction with no well named is flagged: nothing was measured, so the frames
+  went through uncorrected, and the images look no different for it.
 - **Your work here.** Replicate sets, plot groups, labelled wells, smFISH
   thresholds, ratios, notes — with what you have not started yet reading "None
   yet", because that is a real answer rather than a missing one.

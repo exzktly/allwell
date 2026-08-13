@@ -23,6 +23,10 @@ from well_viewer.data.image_resolver import resolve_ref_by_fov_tp as _resolve_re
 from well_viewer.core.ui_helpers import safe_int_or_none as _safe_int_or_none
 from well_viewer.core.ui_helpers import norm_timepoint
 from well_viewer.core.safe import swallowed
+# The one background-well parser (ARCHITECTURE §15). This module carried a
+# second copy that split on ';' where the shared one did not; the shared one
+# takes both now. Kept under the private name the controller re-exports.
+from util.well_token import split_background_wells as _split_background_wells
 # The region-delete verdict shares its geometry with the crop layer. ``crop`` is
 # an always-present support library whose ``region`` module is pure pandas and
 # imports nothing back, so this is a plain module-scope dependency, not a cycle.
@@ -99,18 +103,6 @@ def _flatfield_qc(ctx, key: str, default: str = "") -> str:
     info = ctx.state.dataset.pipeline_info or {}
     qc = info.get("qc_options") or {}
     return str(qc.get(key, default) or default).strip()
-
-
-def _split_background_wells(value) -> list[str]:
-    """Parse a comma-separated ``background_well`` value into a deduped well list
-    (case-insensitive). A single ``"H12"`` → ``["H12"]`` (back-compat)."""
-    seen, out = set(), []
-    for tok in str(value or "").replace(";", ",").split(","):
-        w = tok.strip()
-        if w and w.lower() not in seen:
-            seen.add(w.lower())
-            out.append(w)
-    return out
 
 
 def _load_arrays_from_refs(refs, *, limit: int, tp=None):

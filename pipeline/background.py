@@ -40,6 +40,35 @@ def apply_tophat(image: np.ndarray, radius: int) -> np.ndarray:
 BACKGROUND_METHODS = ("none", "top_hat", "sliding_disk", "fov_median", "empty_well",
                       "robust_mesh", "fft_bandpass")
 
+#: Which settings each background method actually consults, read straight off
+#: :func:`subtract_background`'s dispatch below.
+#:
+#: A run's receipt has to name the settings that shaped its numbers, and only
+#: those. Listing a mesh ratio beside ``sliding_disk`` — which never sees one —
+#: states that a number had an effect it did not have, and that is the same
+#: class of untruth as omitting the ones that did. Kept here rather than in the
+#: reader so the mapping cannot drift from the dispatch it describes;
+#: ``tests/test_correction_parameter_roster.py`` fails if a method is added
+#: without an entry, or if an entry names a parameter the dispatch does not take.
+#:
+#: ``background_well`` is not an argument of ``subtract_background`` — it is
+#: what produced the ``bg_field`` handed to it — but it belongs here because it
+#: is the setting a reader has to know to reproduce the run.
+BACKGROUND_METHOD_PARAMS: dict[str, tuple[str, ...]] = {
+    "none": (),
+    "top_hat": ("radius",),
+    "sliding_disk": ("radius",),
+    "fov_median": (),
+    "empty_well": ("background_well",),
+    "robust_mesh": ("radius", "mesh_ratio", "mesh_sigma"),
+    "fft_bandpass": ("radius", "fft_small"),
+}
+
+
+def background_params_used(method: str) -> tuple[str, ...]:
+    """The settings *method* consults; empty for an unknown or parameterless one."""
+    return BACKGROUND_METHOD_PARAMS.get(str(method or "").strip().lower(), ())
+
 
 def estimate_background_field(stack, sigma: float | None = None) -> np.ndarray | None:
     """Additive background field from a stack of (empty-well) single-channel

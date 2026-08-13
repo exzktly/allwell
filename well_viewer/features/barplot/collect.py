@@ -110,12 +110,16 @@ def _fc_scale(value, err, *, eff_ctrl, eff_ctrl_spread, t0, t0_spread,
     )
 
 
-FC_STATE_OFF: tuple[bool, str, bool] = (False, "", False)
+# Re-exported from the domain layer so the many callers that import it from
+# here (barplot.controller, export.service, batch_export.bar_panel) keep their
+# import path. It is a frozen ``FoldChangeState`` that still compares equal to
+# the ``(False, "", False)`` tuple it used to be.
+FC_STATE_OFF = _fc.FC_STATE_OFF
 
 
 def collect_bar_items(
     ctx, target_t, *,
-    fc_state: tuple[bool, str, bool] | None = None,
+    fc_state=None,
     fc_baseline_tp: float | None = None,
     miss_sink: set | None = None,
 ) -> tuple[bool, list[BarItem], str]:
@@ -171,7 +175,8 @@ def collect_bar_items(
 
     if fc_state is None:
         fc_state = _fc.fold_change_state(ctx)
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
+    fc = _fc.coerce_fc_state(fc_state)
+    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc
     if fc_baseline_tp is None:
         fc_baseline_tp = _fc.parse_baseline_tp(ctx)
     fc_op_ctrl = _fc.parse_fc_op_ctrl(ctx)
@@ -626,7 +631,7 @@ def collect_bar_items_for_group(
     threshold: float,
     use_sem: bool,
     per_fov_spread: bool,
-    fc_state: tuple[bool, str, bool],
+    fc_state,
     fc_baseline_tp: float | None = None,
     fluor_gates: dict | None = None,
     pool_replicates: bool = True,
@@ -657,7 +662,8 @@ def collect_bar_items_for_group(
     if not target_ts:
         return []
 
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
+    fc = _fc.coerce_fc_state(fc_state)
+    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc
 
     # Build (key, display, wells, rset_name_or_None, color) member list.
     from well_viewer.domain.plate_layout import WELL_COLORS as _WELL_COLORS

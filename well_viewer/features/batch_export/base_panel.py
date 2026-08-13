@@ -1030,12 +1030,18 @@ class BatchExportPanel(QWidget):
         finally:
             combo.blockSignals(blocked)
 
-    def _fc_state(self) -> tuple:
-        """Return ``(vs_control_on, control_label, vs_t0_on)`` for this panel."""
-        return (
-            bool(self._fc_vs_control_on),
-            str(self._fc_control_label or ""),
-            bool(self._fc_vs_t0_on),
+    def _fc_state(self):
+        """This panel's own fold-change request.
+
+        Panel-local by design: a batch job must not be tied to whatever the
+        on-screen plot currently has set, so these fields are seeded from
+        ``ctx.state.plot`` at construction and never written back.
+        """
+        from well_viewer.domain.fold_change_state import FoldChangeState
+        return FoldChangeState(
+            vs_control_on=bool(self._fc_vs_control_on),
+            control_label=str(self._fc_control_label or ""),
+            vs_t0_on=bool(self._fc_vs_t0_on),
         )
 
     def _build_timepoints_section(self, layout: QVBoxLayout) -> None:
@@ -1783,7 +1789,7 @@ class BatchExportPanel(QWidget):
     def _render_group_figure(
         self, grp: BarGroup, threshold: float, use_sem: bool, band_lbl: str,
         *,
-        fc_state: tuple = (False, "", False),
+        fc_state=None,
         val_col: str | None = None,
     ):
         """Render the batch line figure for *grp*, reusing the Line-Graphs tab's
@@ -1801,7 +1807,8 @@ class BatchExportPanel(QWidget):
             collect_line_series_for_group,
         )
 
-        fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
+        fc = _fc.coerce_fc_state(fc_state)
+        fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc
         fc_active = fc_vs_ctrl or fc_vs_t0
         _val_col = val_col if val_col is not None else self._export_val_col_for("_line_channel_cb")
 

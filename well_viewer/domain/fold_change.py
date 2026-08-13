@@ -63,6 +63,11 @@ from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
 from well_viewer.domain.stats_compute import compute_rep_n_above
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.domain.stats_compute import aggregate_group
+from well_viewer.domain.fold_change_state import (  # noqa: F401 - re-exported
+    FC_STATE_OFF,
+    FoldChangeState,
+    coerce_fc_state,
+)
 
 
 CONTROL_NONE = ""
@@ -586,16 +591,30 @@ def normalize_pts(
 
 # ── State accessors / ctx integration ───────────────────────────────────────
 
-def fold_change_state(ctx) -> tuple[bool, str, bool]:
-    """Return the active ``(vs_control_on, control_label, vs_t0_on)`` triple.
+def fold_change_state(ctx) -> FoldChangeState:
+    """Return the active fold-change request.
 
     Used by both the on-screen plot tabs and the per-tab CSV exporter so the
-    plot and the export stay in sync.
+    plot and the export stay in sync. The result still unpacks as the legacy
+    ``(vs_control_on, control_label, vs_t0_on)`` triple — see
+    :mod:`well_viewer.domain.fold_change_state`.
+
+    ``control_label`` is deliberately empty in per-member mode: no single label
+    describes the plot any more, so anything that would print one (the axis
+    suffix, the CSV column, the status line) must read the resolved mapping
+    instead. It carries ``per_member=True`` and no ``controls``, which is the
+    signal every collector branches on to emit placeholders until a caller
+    builds and attaches the mapping.
     """
-    return (
-        bool(ctx.state.plot.fc_vs_control_on),
-        str(ctx.state.plot.fc_control_label or ""),
-        bool(ctx.state.plot.fc_vs_t0_on),
+    plot = ctx.state.plot
+    per_member = str(getattr(plot, "fc_control_mode", "single") or "single") == "per_member"
+    return FoldChangeState(
+        vs_control_on=bool(plot.fc_vs_control_on),
+        control_label="" if per_member else str(plot.fc_control_label or ""),
+        vs_t0_on=bool(plot.fc_vs_t0_on),
+        per_member=per_member,
+        controls=None,
+        render=str(getattr(plot, "fc_control_render", "self") or "self"),
     )
 
 

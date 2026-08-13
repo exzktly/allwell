@@ -65,7 +65,7 @@ def collect_line_series_for_group(
     use_sem: bool,
     val_col: str,
     fluor_gates,
-    fc_state: tuple[bool, str, bool] = (False, "", False),
+    fc_state=_fc.FC_STATE_OFF,
     fc_baseline_tp: float | None = None,
     include_cdf: bool = False,
 ) -> list[LineSeries]:
@@ -77,7 +77,8 @@ def collect_line_series_for_group(
     ``fc_state=(False, "", False)`` to skip normalization and emit raw series —
     the additive CSV writer makes that call alongside the active-state call.
     """
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
+    fc = _fc.coerce_fc_state(fc_state)
+    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc
     fc_active = fc_vs_ctrl or fc_vs_t0
 
     rep_per_fov = bool(ctx.state.plot.use_fov_replicates)

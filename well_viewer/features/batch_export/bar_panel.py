@@ -405,7 +405,7 @@ class BarBatchExportPanel(BatchExportPanel):
         self, grp: BarGroup, target_t, tp_str,
         threshold: float, use_sem: bool, band_lbl: str,
         *,
-        fc_state: tuple = (False, "", False),
+        fc_state=None,
         pool_replicates: bool = True,
         group_mode: str = "well",
         display_mode: str = "bar",
@@ -415,7 +415,8 @@ class BarBatchExportPanel(BatchExportPanel):
         from well_viewer.domain import fold_change as _fc
         from well_viewer.features.barplot.controller import collect_bar_items_for_group
 
-        fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
+        fc = _fc.coerce_fc_state(fc_state)
+        fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc
         fc_active = fc_vs_ctrl or fc_vs_t0
         # Normalise the (target_t, tp_str) inputs into the multi-shape the
         # collector expects. Both legacy single-tp calls (float, str) and
@@ -536,7 +537,7 @@ class BarBatchExportPanel(BatchExportPanel):
         self, *, fig, ax_mean, ax_frac, ax_n,
         grp: BarGroup, target_ts: list[float], tp_strs: list[str],
         threshold: float, use_sem: bool, band_lbl: str,
-        fc_state: tuple,
+        fc_state,
         pool_replicates: bool,
         group_mode: str,
         display_mode: str,

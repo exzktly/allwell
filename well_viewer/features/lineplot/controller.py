@@ -186,7 +186,7 @@ def collect_line_series(
     threshold: float,
     use_sem: bool,
     val_col: str | None = None,
-    fc_state: tuple[bool, str, bool] | None = None,
+    fc_state=None,
     fc_baseline_tp: float | None = None,
     miss_sink: set[float] | None = None,
     include_cdf: bool = True,
@@ -219,7 +219,8 @@ def collect_line_series(
 
     if fc_state is None:
         fc_state = _fc.fold_change_state(ctx)
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
+    fc = _fc.coerce_fc_state(fc_state)
+    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc
     if fc_baseline_tp is None:
         fc_baseline_tp = _fc.parse_baseline_tp(ctx)
     fc_op_ctrl = _fc.parse_fc_op_ctrl(ctx)

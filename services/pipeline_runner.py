@@ -937,6 +937,15 @@ class PipelineRunner:
                 prior_output_dir=output_dir,
                 csv_prefix=opts.get("csv_prefix", "measurements"),
                 force_wells=opts.get("force_wells"),
+                # The empty-well blank is a reference the correction is built
+                # from, not a well whose own output is wanted — so the staging
+                # filters must not diff it away. Passed whenever either
+                # empty-well mode is on; ignored otherwise.
+                background_wells=(
+                    opts.get("background_well", "")
+                    if "empty_well" in (opts.get("background"),
+                                        opts.get("flatfield"))
+                    else ""),
             )
             # Incremental: wells whose local output already covers every input
             # FOV were dropped from the upload. Surface a synthetic per-well

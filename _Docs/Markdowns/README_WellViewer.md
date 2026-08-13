@@ -742,6 +742,8 @@ message about space. Set it to your site's real scratch: `$TMPDIR`,
 on the remote, not here. This is separate from **Scratch disk** in the form
 above, which governs local runs and is not used when the pipeline runs remotely.
 
+**Empty-well correction works with batching.** If you set background or flat-field correction to **empty_well** and name a blank well, that well is uploaded once, on its own, before the batches start — every batch then corrects against the same reference. A blank that still needs processing is run once, with the last batch; one that a re-run has already completed is uploaded as a reference only and not processed again. The blank is never diffed or skipped by the incremental filters either, since it is the input the correction is built from rather than a well whose output you are waiting for. If it cannot be found at all, the run stops and says which well it looked for and where, instead of quietly producing uncorrected numbers.
+
 **"Rewriting N well archive(s)" in the log** means the plate holds images this
 run does not want — most often a transmitted-light or brightfield channel that
 is in the files but not in your channel list, and on a re-run it can instead be

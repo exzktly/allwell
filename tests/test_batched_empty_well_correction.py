@@ -400,3 +400,189 @@ def _stub_runner(p, proc, upload_subset):
         _sweep_orphaned_allocation=lambda *a, **k: None,
     )
     return proc
+
+
+# ── what an adversarial review of the first two commits turned up ────────────
+
+
+def test_an_incremental_re_run_stages_the_blank_whole(tmp_path):
+    """The severest of them. The incremental split drops a well whose every FOV
+    is already processed — which is the normal state of a blank on every re-run,
+    and it `unlink()`s the staged copy on the way out. The blank then vanished
+    before anything could treat it as a reference: no upload, no
+    `--background_dir`, and with the new guard in place the run *aborted*
+    instead of merely producing uncorrected numbers.
+
+    A partial blank would be worse than either: the split rewrites a well that
+    has *some* new FOVs down to those members, so the field would be estimated
+    from a fraction of the reference while the log reported it as built.
+    """
+    from services.remote_runner import _plan_staging, _required_tokens
+    from util.well_token import background_well_key
+
+    prior = tmp_path / "prior"
+    prior.mkdir()
+    src = tmp_path / "in"
+    src.mkdir()
+    for well in ("A01", "H12"):
+        with zipfile.ZipFile(src / f"{well}.zip", "w") as zf:
+            for chan in ("RFP", "GFP"):
+                for fov in ("f0", "f1"):
+                    zf.writestr(f"Exp_{chan}_{well}_{fov}_t0.tif", b"x" * 400)
+        (prior / f"measurements_{well}.csv").write_text(
+            "well,fov,timepoint\n"
+            + "".join(f"{well},{f},t0\n" for f in ("f0", "f1")))
+    with zipfile.ZipFile(src / "A01.zip", "a") as zf:      # one new field
+        for chan in ("RFP", "GFP"):
+            zf.writestr(f"Exp_{chan}_A01_f2_t0.tif", b"x" * 400)
+
+    def plan(background_wells):
+        plans, up_to_date, _ = _plan_staging(
+            tuple(sorted(src.glob("*.zip"))),
+            keep_tokens=_required_tokens("RFP", ["GFP"]),
+            incremental=True, prior_output_dir=prior,
+            filename_schema="experiment:channel:well:fov:timepoint",
+            filename_sep="_", background_wells=background_wells)
+        return {p.src.stem: p for p in plans}, list(up_to_date)
+
+    without, up = plan(frozenset())
+    assert "H12" not in without and up == ["H12"], (
+        "characterising the defect: the blank is dropped as up to date")
+
+    with_exempt, up = plan(frozenset({background_well_key("H12")}))
+    assert "H12" in with_exempt, "the reference was diffed away"
+    assert with_exempt["H12"].keep is None, (
+        "the blank was thinned to its new FOVs — the field would be estimated "
+        "from a fraction of the reference")
+    assert up == []
+    # And the exemption is narrow: an ordinary well is still diffed.
+    assert with_exempt["A01"].keep is not None
+
+
+def test_with_nothing_but_blanks_left_the_run_still_completes(tmp_path):
+    """Every sample well complete locally. Holding the blank out would leave an
+    empty batch, uploaded to a directory the driver then cannot `mv`, ending the
+    run at 90 with the blank never processed. It is treated as an ordinary well
+    instead — it corrects itself, as a single-shot run of it alone would — and
+    it still crosses the wire exactly once."""
+    uploads, _drivers, p, _lines = _drive(
+        tmp_path, ["A01", "A02", "H12"], complete=("A01", "A02"))
+
+    assert p._returncode == 0, p._logged
+    crossings = [d for d, stems in uploads if "H12" in stems]
+    assert len(crossings) == 1, f"the blank crossed the wire {crossings}"
+
+
+def test_only_a_blank_that_still_needs_processing_is_linked_back_in(tmp_path):
+    """`--background_well G12,H12` with G12 already complete. A single flag for
+    all blanks, or a glob over `bg/*.zip`, reprocesses the well the user's own
+    re-run just declined."""
+    _uploads, drivers, _p, _lines = _drive(
+        tmp_path, ["A01", "A02", "G12", "H12"], complete=("G12",),
+        argv=["--background", "empty_well", "--background_well", "G12,H12"])
+
+    assert drivers, "no driver was composed"
+    assert "/bg/H12.zip" in drivers[0]
+    assert "/bg/G12.zip" not in drivers[0], (
+        "a blank the re-run declined was linked back in and reprocessed")
+
+
+def test_a_reference_only_blank_does_not_sit_painted_as_uploading(tmp_path):
+    """Its SKIP marker lands first, then the reference upload's own per-well
+    line repaints the cell "uploading" — and nothing moves it off, because the
+    well is never processed or downloaded. The count stays truthful; only the
+    colour lies, which is its own kind of silent wrong."""
+    _uploads, _drivers, _p, lines = _drive(
+        tmp_path, ["A01", "A02", "H12"], complete=("H12",))
+
+    settled = [ln for ln in lines if "reference only" in ln]
+    assert settled, "the reference-only blank is left painted mid-upload"
+    assert "SKIP well H12" in settled[0]
+
+
+def test_a_stop_during_the_reference_upload_is_not_a_fault(tmp_path):
+    """`upload_subset` watches the stop event, so a Stop returns a non-zero
+    rsync code. Reporting the user's own Stop as a failure — with rsync's number
+    rather than 130 — is what the batch-upload path already avoids."""
+    import services.remote_runner as rr
+    import unittest.mock as mock
+
+    proc = _FakeProc()
+    p = _batched(tmp_path, ["A01", "H12"], batch_size=1)
+
+    def stopping_upload(zips, dest, *, stop_event=None, **kw):
+        stop_event.set()                    # the user clicks Stop mid-transfer
+        return (0, 0.0, 20)
+
+    _stub_runner(p, proc, stopping_upload)
+    p._pipeline_argv = ["--background", "empty_well", "--background_well", "H12"]
+
+    with mock.patch.object(rr.subprocess, "Popen", lambda a, **k: proc):
+        p._run_batches()
+
+    assert p._returncode == 130, p._logged
+    joined = "".join(p._logged)
+    assert "stopped while uploading" in joined
+    assert "ERROR" not in joined, "a Stop the user asked for is not a fault"
+
+
+def test_the_blank_list_is_parsed_the_way_the_pipeline_parses_it(tmp_path):
+    """A local `re.split(r"[,\\s]+", …)` read `"H12 G12"` as two wells where the
+    pipeline's own `split_background_wells` reads it as one — so batched mode
+    held out and uploaded two archives the pipeline then matched neither of, and
+    the run died on the guard in every batch. One parser, one answer."""
+    from services.remote_runner import _empty_well_blanks
+    from util.well_token import background_well_key, split_background_wells
+
+    zips = [tmp_path / f"{w}.zip" for w in ("A01", "G12", "H12")]
+    for spelling in ("H12 G12", "H12;G12", "H12,G12", "h12"):
+        argv = ["--background", "empty_well", "--background_well", spelling]
+        held_out = set(_empty_well_blanks(argv, zips))
+        pipeline_sees = {background_well_key(w)
+                         for w in split_background_wells(spelling)}
+        assert {background_well_key(s) for s in held_out} <= pipeline_sees, (
+            f"{spelling!r}: staging holds out {held_out}, pipeline matches "
+            f"{pipeline_sees}")
+
+
+def _drive(tmp_path, wells, *, complete=(), argv=None, batch_size=1):
+    """Run `_run_batches` with the remote stubbed; return uploads, driver cmds,
+    the object, and whatever reached the stdout queue."""
+    import services.remote_runner as rr
+    import unittest.mock as mock
+
+    uploads: list[tuple[str, tuple[str, ...]]] = []
+    drivers: list[str] = []
+
+    def fake_upload(zips, dest, **kw):
+        uploads.append((dest.rsplit("/", 1)[-1],
+                        tuple(sorted(Path(z).stem for z in zips))))
+        return (0, 0.0, 0)
+
+    proc = _FakeProc()
+    p = _batched(tmp_path, wells, batch_size=batch_size)
+    _stub_runner(p, proc, fake_upload)
+    p._pipeline_argv = argv or ["--background", "empty_well",
+                                "--background_well", "H12"]
+    out = tmp_path / "out"
+    out.mkdir(exist_ok=True)
+    p._local_output_dir = out
+    for well in complete:
+        (out / f"measurements_{well}.csv").write_text(f"well\n{well}\n")
+
+    with mock.patch.object(rr.subprocess, "Popen",
+                           lambda a, **k: drivers.append(a[-1]) or proc):
+        import threading
+        worker = threading.Thread(target=p._run_batches, daemon=True)
+        worker.start()
+        for i in range(1, 7):
+            proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+        proc.finish()
+        worker.join(timeout=20)
+
+    lines = []
+    while not p._line_q.empty():
+        item = p._line_q.get()
+        if item:
+            lines.append(item)
+    return uploads, drivers, p, lines

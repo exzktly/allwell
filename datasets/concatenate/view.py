@@ -3,8 +3,10 @@
 One equation-style input row — dataset 1 (the base / earlier timepoints) +
 dataset 2 (the one appended after) = a fresh destination — over an
 Analyze-style status view: a live per-well :class:`~datasets.concatenate.dashboard.ConcatDashboard`
-with the raw text log demoted to a collapsible "Show raw log" checkbox
-(mirrors ``analyze_tab_log.py``'s ``_build_log``/``_on_toggle_raw_log``).
+with the raw text log demoted to a collapsible "Show raw log" checkbox (the
+same furniture as ``analyze_tab_log.py``'s ``_build_log``/``_on_toggle_raw_log``,
+though Analyze starts its log open and this page starts it closed — see
+:mod:`datasets._common.log_panel` for why).
 
 Pure view: it owns widgets and emits intent (``runRequested``,
 ``openInReviewRequested``); the worker wiring lives in

@@ -792,6 +792,13 @@ and by `remote_fetch_report.txt` in the output folder.
   left short of full, with a warning in the log pointing at the `errors/` folder
   in the output directory. A finished-looking bar over a part-finished plate is
   the one thing the run view will not show you.
+- **The full log sits under the dashboard, open.** Everything the run says,
+  line by line, appears there as it happens — and some of it appears nowhere
+  else: why a run refused to start, which volume ran out of room, the path of
+  the `errors/` folder when wells failed. Untick **Show raw log** in the
+  Pipeline Output header if you would rather watch the dashboard alone; the
+  app re-opens it on its own only when a run fails with an explanation you
+  would otherwise not see, and hands the toggle back at the next run.
 - During a remote transfer the **status line** beside the progress bar carries
   the live figure (how much has come across, how long it has taken) and updates
   in place. The log gets the events — each well starting, each one landing, the

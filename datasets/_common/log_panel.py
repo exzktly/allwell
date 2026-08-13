@@ -73,8 +73,13 @@ class LogPanelMixin:
         hl.addStretch(1)
 
         # The dashboard below IS the summary view; the verbose text log is off
-        # by default and revealed on demand, matching Analyze's own pattern
-        # (analyze_tab_log.py::_build_log / _on_toggle_raw_log).
+        # by default and revealed on demand. Analyze builds the same furniture
+        # (analyze_tab_log.py::_build_log / _on_toggle_raw_log) but starts its
+        # log open, and the difference is deliberate: a tool page here reports
+        # a short, bounded job whose dashboard genuinely is the whole story,
+        # where an Analyze run takes hours and says several things — why it
+        # refused to start, which volume filled, where the errors/ folder is —
+        # only in the log.
         self._raw_log_cb = QCheckBox("Show raw log", hdr)
         if toggle_tooltip:
             self._raw_log_cb.setToolTip(toggle_tooltip)

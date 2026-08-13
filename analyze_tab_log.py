@@ -8,11 +8,14 @@ mixins start it and drain its queue; this shows what the run then said.
 
 * ``_build_log`` — the "Pipeline Output" band (the raw-log toggle and Clear)
   over the log view itself.
-* ``_on_toggle_raw_log`` — reveal or hide that view. It is hidden at build.
+* ``_on_toggle_raw_log`` — reveal or hide that view. It is open at build; the
+  toggle is there to put it away.
 * ``force_raw_log_open`` / ``restore_raw_log`` — open that view on the user's
   behalf when a run fails, since the sentence explaining why is written here
   and nowhere else they can see, then hand the toggle back at the next run
-  unless they have since made the choice their own.
+  unless they have since made the choice their own. Only reachable once the
+  user has closed the view themselves, which is the whole of what they are for
+  now that it starts open.
 * ``_surface_run_failure`` — the whole outcome path: the dashboard's failed or
   cancelled state, the raw log, and unfolding whichever form section the
   message names.
@@ -156,10 +159,20 @@ class AnalyzeLogPaneMixin:
 
         title = QLabel("Pipeline Output", band)
         band.add_scope("", title)
-        # F4: the dashboard above IS the summary view; the verbose text log is
-        # off by default and revealed on demand, so progress reads cleanly.
+        # The dashboard above is the summary; the log is where several things
+        # are said and nowhere else — why a run refused to start, the `errors/`
+        # folder a partial run points at, the scheduler's queue-wait
+        # breadcrumbs, the volume that filled. So it is open to begin with and
+        # the toggle is there to put it away, not to find it.
+        #
+        # Ticked before the signal is connected, deliberately: the handler
+        # below shows `self._log` and `self._log_sep`, neither of which exists
+        # until further down this method. It would survive that (both are read
+        # through `getattr`), but a build order that only works by accident is
+        # a trap for whoever moves these lines next.
         self._raw_log_cb = QCheckBox("Show raw log", band)
         self._raw_log_cb.setToolTip("Show the full per-image pipeline log beneath the progress dashboard")
+        self._raw_log_cb.setChecked(True)
         self._raw_log_cb.toggled.connect(self._on_toggle_raw_log)
         band.add_action(self._raw_log_cb)
         clear_btn = QPushButton("Clear", band)
@@ -203,12 +216,13 @@ class AnalyzeLogPaneMixin:
         self._log.setFont(font)
         rl.addWidget(self._log, 1)
 
-        # F4: raw log hidden until the user asks for it (dashboard is the summary).
-        self._on_toggle_raw_log(False)
+        # Sync the widgets to the checkbox rather than to a second copy of the
+        # answer: the default is stated once, where the box is built.
+        self._on_toggle_raw_log(self._raw_log_cb.isChecked())
 
     def _on_toggle_raw_log(self, show: bool) -> None:
-        """Show/hide the verbose text log (F4). The progress dashboard stays
-        visible either way; this only toggles the raw per-image stream."""
+        """Show/hide the verbose text log. The progress dashboard stays visible
+        either way; this only toggles the raw per-image stream."""
         if not getattr(self, "_forcing_raw_log", False):
             # Anything that is not ``force_raw_log_open`` below is the user
             # working the toggle, and their choice outranks ours from here on.
@@ -220,11 +234,12 @@ class AnalyzeLogPaneMixin:
     def force_raw_log_open(self) -> bool:
         """Reveal the raw log on the user's behalf, remembering that we did.
 
-        Returns True when the toggle actually moved. A failure writes its
-        reason into the log view and nowhere else, so opening the view is the
-        only way that reason reaches the screen — but the toggle is a setting
-        the user chose, so the change is recorded rather than kept. The next
-        run calls ``restore_raw_log`` to hand it back.
+        Returns True when the toggle actually moved, which happens only when
+        the user had closed the view — it starts open. A failure writes its
+        reason into the log view and nowhere else, so re-opening it is the only
+        way that reason reaches the screen for someone who had put it away; but
+        closing it was their choice, so the change is recorded rather than
+        kept, and the next run calls ``restore_raw_log`` to hand it back.
         """
         cb = getattr(self, "_raw_log_cb", None)
         if cb is None or cb.isChecked():
@@ -354,11 +369,15 @@ class AnalyzeLogPaneMixin:
         """Put an ended-badly run where the user is already looking.
 
         The reason a run stopped reaches exactly one place on its own: a red
-        line in ``self._log``, a QTextEdit hidden behind the "Show raw log"
-        toggle and off by default. So a pipeline that refused to start — the
-        disk preflight exiting before the first well, say — is otherwise
-        indistinguishable from a run that was never clicked: progress stops at
-        Grouped, the Run button returns, nothing states a reason.
+        line in ``self._log``, the QTextEdit behind the "Show raw log" toggle.
+        That view is open by default now, so most users see the line where it
+        lands — but the toggle can close it, and for someone who has, a
+        pipeline that refused to start (the disk preflight exiting before the
+        first well, say) is indistinguishable from a run that was never
+        clicked: progress stops at Grouped, the Run button returns, nothing
+        states a reason. Hence the dashboard state and the forced re-open
+        below; both also carry the reason to a user who is watching the
+        dashboard rather than the log.
 
         **A cancel is not a failure.** ``stop()`` and ``suspend()`` both end the
         subprocess by signal, so both arrive here as an ``("error", …)`` event

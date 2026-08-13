@@ -259,9 +259,6 @@ def test_staging_writes_only_the_members_that_will_be_uploaded(tmp_path, monkeyp
                     for tp in ("t0", "t1"):
                         w.writerow({"well": well, "fov": fov, "timepoint": tp})
 
-    staging = tmp_path / "stage"
-    staging.mkdir()
-    monkeypatch.setattr(rr, "_new_scratch_dir", lambda prefix: staging)
     monkeypatch.setattr(rr, "sweep_stale_scratch", lambda **kw: 0)
 
     lines: list[str] = []
@@ -287,7 +284,17 @@ def test_staging_writes_only_the_members_that_will_be_uploaded(tmp_path, monkeyp
     # about it changes, it is never copied: the upload list names the source.
     assert len(c03) == 12
     assert staged["C03"] == src / "C03.zip"
+
+    # Read the staging directory off the archive that was actually written,
+    # rather than monkeypatching the helper that creates it: the seam moved once
+    # already (staging lives beside the input volume now, not on the home
+    # scratch), and a patched seam goes quietly wrong the next time it moves.
+    staging = staged["C02"].parent
     assert sorted(p.name for p in staging.iterdir()) == ["C02.zip"]
+    # Beside the input, and nowhere near the home volume — a remote run has no
+    # reason to touch it.
+    assert src in staging.parents, staging
+    assert rr._scratch_dir() not in staging.parents, staging
 
     text = "".join(lines)
     assert "scanning input" in text, "the first slow step must announce itself"
@@ -379,9 +386,6 @@ def test_mixed_mode_stages_the_same_way_as_zip_mode(tmp_path, monkeypatch):
 
     assert rr._detect_local_input_mode(src) is rr.LocalInputMode.MIXED
 
-    staging = tmp_path / "stage"
-    staging.mkdir()
-    monkeypatch.setattr(rr, "_new_scratch_dir", lambda prefix: staging)
     monkeypatch.setattr(rr, "sweep_stale_scratch", lambda **kw: 0)
 
     lines: list[str] = []
@@ -399,8 +403,12 @@ def test_mixed_mode_stages_the_same_way_as_zip_mode(tmp_path, monkeypatch):
         # DAPI was not requested and must never have been written.
         assert not any("DAPI" in n for n in names), names
         assert len(names) == 2, names
-    # The staged archives are the filtered ones, not full copies.
-    assert (staging / "C02.zip").stat().st_size < (src / "C02.zip").stat().st_size
+    # The staged archives are the filtered ones, not full copies. The staged
+    # path is read back from the result rather than from a patched helper —
+    # see the note in the ZIP-mode test above.
+    staged_c02 = next(p for p in out.well_zips if p.stem == "C02")
+    assert staged_c02.stat().st_size < (src / "C02.zip").stat().st_size
+    assert src in staged_c02.parents, staged_c02
     assert "staged (" in "".join(lines)
 
 

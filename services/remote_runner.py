@@ -2715,7 +2715,8 @@ _BATCH_DONE_RE = re.compile(
 
 def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
                           heartbeat: str = "",
-                          per_batch_timeout_s: int = 0) -> str:
+                          per_batch_timeout_s: int = 0,
+                          link_blanks_into_last: bool = False) -> str:
     """A loop that runs the pipeline once per batch **inside one allocation**.
 
     Batched mode launched every batch separately, so on a scheduler-backed host
@@ -2758,6 +2759,18 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
     # scaled walltime, which is strictly worse than the per-batch launches this
     # replaces — there, a hang cost one batch's allocation and no more.
     budget = f"timeout {int(per_batch_timeout_s)} " if per_batch_timeout_s else ""
+    # The empty-well blank lives in `bg/` for the whole run so every batch can
+    # build the same correction from it without it crossing the wire again. It
+    # is still one of the plate's wells, so it is hard-linked into the final
+    # batch to be processed once for its own output — `ln` on one filesystem
+    # moves no bytes, and `cp` is the fallback where it cannot.
+    blank_link = (
+        f'if [ "$_aw_i" -eq {int(n_batches)} ]; then '
+        f'for _aw_b in {_remote_quote(run_dir)}"/bg/"*.zip; do '
+        f'[ -e "$_aw_b" ] || continue; '
+        f'ln "$_aw_b" {in_q}"/" 2>/dev/null || cp "$_aw_b" {in_q}"/"; '
+        f'done; fi; '
+    ) if link_blanks_into_last else ""
     ready = (_remote_quote(run_dir)
              + '"/' + BATCH_READY.format(i="${_aw_i}") + '"')
     done = (_remote_quote(run_dir)
@@ -2785,6 +2798,7 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
         f'echo "[remote] ERROR batch $_aw_i: could not stage its input"; '
         f'echo "90" > {done}; echo "{marker_fail}"; '
         f'_aw_i=$((_aw_i+1)); continue; }}; '
+        f'{blank_link}'
         f'echo "[remote] batch-driver: batch $_aw_i starting"; '
         f'{budget}{pipeline}; _aw_rc=$?; '
         f'echo "$_aw_rc" > {done}; '
@@ -4180,6 +4194,33 @@ class _RemoteProcess:
         self._tee_thread.start()
 
 
+def _empty_well_blanks(argv, well_zips) -> tuple[str, ...]:
+    """The blank well archives this run needs for empty-well correction.
+
+    Returns their stems, or empty when the run asks for no empty-well
+    correction. Batched mode has to know about them because it slices the plate
+    into batches and stages one at a time: the pipeline builds its correction
+    from whatever wells are in the input directory *at that moment*, so a blank
+    sitting in the last batch corrects the last batch and nothing else. Every
+    earlier batch produced numbers with the background left in, and the output
+    carried no sign of it.
+    """
+    flags = _parse_argv_flags(argv, multi=set(),
+                              single={"--background", "--flatfield",
+                                      "--background_well"})
+    if "empty_well" not in (flags.get("--background"), flags.get("--flatfield")):
+        return ()
+    wanted = {_canonical_well_label(w) or w.strip().upper()
+              for w in re.split(r"[,\s]+", flags.get("--background_well", "") or "")
+              if w.strip()}
+    if not wanted:
+        return ()
+    return tuple(
+        z.stem for z in well_zips
+        if (_canonical_well_label(z.stem) or z.stem.upper()) in wanted
+    )
+
+
 def _parse_argv_flags(argv, multi: set[str], single: set[str]) -> dict:
     """Read *multi*- and *single*-valued flags out of a pipeline argv.
 
@@ -4517,10 +4558,32 @@ class _BatchedRemoteProcess:
         # `run_id` is deterministic, so those directories are still sitting
         # there and the driver would swap one in as though it were ours.
         self._runner._cache._ssh_run(
-            ["rm", "-rf", f"{run_dir}/in"]
+            ["rm", "-rf", f"{run_dir}/in", f"{run_dir}/bg"]
             + [self._batch_staging_dir(i) for i in range(1, n_batches + 1)],
             check=False,
         )
+
+        # The empty-well blank(s), uploaded once for the whole run. They sit
+        # outside the batch staging so the driver's `rm -rf in && mv b<i> in`
+        # never touches them, and every batch builds its correction from the
+        # same reference. Unconditional: a blank whose CSV is already complete
+        # locally is skipped by the batch filter, which on a re-run would
+        # otherwise leave the whole plate uncorrected.
+        blanks = [z for z in self._zipped.well_zips
+                  if z.stem in getattr(self, "_blank_stems", ())]
+        if blanks:
+            sent, _elapsed, rc = self._runner._cache.upload_subset(
+                blanks, f"{run_dir}/bg", log_fn=self._log, stop_event=self._stop)
+            if rc != 0:
+                self._log(
+                    f"[remote] ERROR could not upload the empty-well blank(s) "
+                    f"(rsync rc={rc}). Every batch would run without the "
+                    f"background correction this run asked for, and the output "
+                    f"would not show it — stopping instead.\n")
+                self._returncode = rc
+                return False
+            self._log(f"[remote] empty-well reference uploaded once "
+                      f"({sent / (1024**2):.1f} MB) → {run_dir}/bg\n")
 
         # The heartbeat runs for the whole run, not just one upload: the driver
         # checks it at every batch boundary, so an app that dies between
@@ -4533,6 +4596,7 @@ class _BatchedRemoteProcess:
         remote_argv = self._runner._build_remote_argv(
             self._pipeline_argv, run.remote_input_dir, run.remote_output_dir,
             self._output_filter, self._zipped.mode,
+            background_dir=f"{run_dir}/bg" if blanks else "",
         )
         # Each batch still sees only its own slice, so the in-pipeline
         # auto-threshold pass would write defaults from a fraction of the plate
@@ -4551,7 +4615,8 @@ class _BatchedRemoteProcess:
         self._log(_scheduler_handoff_lines(launcher))
 
         driver = _batch_driver_snippet(run_dir, n_batches, remote_argv,
-                                       heartbeat, per_batch_s)
+                                       heartbeat, per_batch_s,
+                                       link_blanks_into_last=bool(blanks))
         ssh_argv = host.ssh_argv(allocate_tty=True) + [
             _compose_driver_cmd(launcher, run.remote_pidfile, driver,
                                 env_selector=self._runner.env_selector,
@@ -4805,10 +4870,30 @@ class _BatchedRemoteProcess:
 
             self._fetcher.run.well_count_total = len(all_zips)
 
+            # Empty-well correction reads the blank from the input directory at
+            # model-build time, and batched mode stages one batch at a time — so
+            # a blank left in the ordinary slicing corrects the batch it lands
+            # in and nothing else. It is held out here, uploaded once to its own
+            # directory beside the batches, and named to the pipeline with
+            # `--background_dir`. A blank is a full well of uncompressed frames,
+            # the same size as any other, so uploading it per batch is not an
+            # option; it crosses the wire exactly once and the driver links it
+            # into the final batch so it is still processed for its own output.
+            self._blank_stems = _empty_well_blanks(self._pipeline_argv, all_zips)
+            blanks = [z for z in all_zips if z.stem in self._blank_stems]
+            sliceable = [z for z in all_zips if z.stem not in self._blank_stems]
+            if blanks:
+                self._log(
+                    f"[remote] empty-well correction: {len(blanks)} blank "
+                    f"well(s) ({', '.join(sorted(self._blank_stems))}) upload "
+                    f"once, outside the batches, so every batch corrects "
+                    f"against the same reference\n"
+                )
+
             batches = [
-                all_zips[i:i + self._batch_size]
-                for i in range(0, len(all_zips), self._batch_size)
-            ]
+                sliceable[i:i + self._batch_size]
+                for i in range(0, len(sliceable), self._batch_size)
+            ] or [[]]
             n_batches = len(batches)
             self._log(
                 f"[remote] batched mode: {len(all_zips)} well(s) in "
@@ -7161,6 +7246,7 @@ class RemoteRunner:
         remote_output: str,
         output_filter: OutputFilter,
         mode: LocalInputMode,
+        background_dir: str = "",
     ) -> list[str]:
         """Rewrite the local pipeline argv for remote execution.
 
@@ -7221,6 +7307,13 @@ class RemoteRunner:
                 i += 1
         if suppress_run_check:
             out.append("--no_run_check")
+        # Batched mode stages one batch at a time, so the empty-well blank is
+        # not in most batches' input. It is uploaded once to its own directory
+        # and named here, which is what lets every batch build the same
+        # correction. Empty on every other path, where the whole plate is in
+        # `--input_dir` and the pipeline's default already finds it.
+        if background_dir:
+            out.append(f"--background_dir={background_dir}")
         # Apply the output filter.
         if output_filter is OutputFilter.CSV_ONLY and "--no_save_tophat" not in out:
             out.append("--no_save_tophat")

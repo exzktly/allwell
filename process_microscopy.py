@@ -1021,6 +1021,36 @@ def sample_empty_well_images(
 
 
 
+def _require_empty_well_models(what: str, mode: str, models, wells, source) -> None:
+    """Stop a run that asked for empty-well correction and could not build it.
+
+    A missing model is not a degraded correction, it is **no correction**:
+    ``_empty_well_field`` returns None and the frame passes through untouched.
+    The output then carries the raw background while looking exactly like a
+    corrected well — there is no marker on the image, no column in the CSV and
+    nothing in the run record to tell the two apart later.
+
+    That is the one thing this codebase is not allowed to do (CLAUDE.md §7), so
+    it fails instead. It fired for real: a batched remote run stages one batch at
+    a time, and every batch that did not happen to contain the blank silently
+    produced uncorrected numbers.
+
+    Only when blanks were actually named — a run with none is a configuration
+    the GUI already refuses, and failing here would only restate it worse.
+    """
+    if mode != "empty_well" or not wells or models:
+        return
+    raise SystemExit(
+        f"--{what.replace('-', '')} empty_well was requested with background "
+        f"well(s) {', '.join(wells)}, but no usable frames for them were found "
+        f"in {source}. Nothing would be corrected, and the output would be "
+        f"indistinguishable from a corrected run — so this run stops instead. "
+        f"Check the well name(s) against the archives present, and on a batched "
+        f"remote run check that --background_dir points at the directory the "
+        f"blank was uploaded to."
+    )
+
+
 def build_background_models(
     input_dir: Path,
     *,
@@ -1029,6 +1059,7 @@ def build_background_models(
     sep: str,
     background_wells: list[str] | str = "",
     max_samples: int = 30,
+    background_dir: Path | None = None,
 ) -> dict[str, dict[str, np.ndarray]]:
     """Per-channel, **per-timepoint** additive background fields from the empty/
     background well(s) (for ``--background empty_well``). Pools frames across all
@@ -1038,7 +1069,7 @@ def build_background_models(
     _POOLED_TP: field}}``; channels with no usable empty-well images omitted.
     """
     stacks = sample_empty_well_images(
-        input_dir, tokens=tokens, schema=schema, sep=sep,
+        background_dir or input_dir, tokens=tokens, schema=schema, sep=sep,
         background_wells=background_wells, max_samples=max_samples)
     models: dict[str, dict[str, np.ndarray]] = {}
     for tok, by_tp in stacks.items():
@@ -1206,6 +1237,7 @@ def build_flatfield_models(
     mode: str,
     background_wells: list[str] | str = "",
     max_samples: int = 30,
+    background_dir: Path | None = None,
 ) -> dict[str, dict[str, np.ndarray]]:
     """Precompute per-channel flat-field models for the ``basic`` / ``empty_well`` modes.
 
@@ -1230,8 +1262,10 @@ def build_flatfield_models(
     if mode == "empty_well":
         if not _split_background_wells(background_wells):
             return {}
+        # Only the empty-well branch reads the blank; `basic` samples the whole
+        # plate and must keep looking at the run's own input.
         stacks = sample_empty_well_images(
-            input_dir, tokens=tokens, schema=schema, sep=sep,
+            background_dir or input_dir, tokens=tokens, schema=schema, sep=sep,
             background_wells=background_wells, max_samples=max_samples)
         for tok, by_tp in stacks.items():
             per_tp: dict[str, np.ndarray] = {}
@@ -3956,6 +3990,14 @@ def build_parser() -> argparse.ArgumentParser:
                         "'gaussian' self-estimates a field per image; 'basic' estimates "
                         "one field per channel from a sample of the dataset (pure-numpy "
                         "BaSiC); 'empty_well' uses --background_well as the reference.")
+    p.add_argument("--background_dir", default="",
+                   help="Directory to read the --background_well blank(s) from, "
+                        "when they do not live in --input_dir. A batched remote "
+                        "run stages one batch at a time, so the blank is not in "
+                        "most batches' input; it is uploaded once to its own "
+                        "directory and named here, which is what lets every "
+                        "batch build the same correction from it. Defaults to "
+                        "--input_dir.")
     p.add_argument("--background_well", default="",
                    help="Empty/background well(s) used as the reference for "
                         "--flatfield=empty_well and/or --background=empty_well. One "
@@ -4444,6 +4486,12 @@ def main() -> None:
     # gaussian mode needs no precompute (estimated per image in the worker), and
     # 'none' is a no-op. Done after the loose-TIF organize so the files are on
     # disk under input_dir.
+    # Where the empty-well blank(s) are read from. Normally the run's own input,
+    # but a batched remote run stages one batch at a time and the blank is not in
+    # most batches — it is uploaded once to its own directory and named here.
+    bg_wells = _split_background_wells(args.background_well)
+    bg_src = Path(args.background_dir).expanduser() if args.background_dir else input_dir
+
     if args.flatfield in ("basic", "empty_well"):
         shared_kwargs["flatfield_models"] = build_flatfield_models(
             input_dir,
@@ -4451,10 +4499,14 @@ def main() -> None:
             schema=schema,
             sep=sep,
             mode=args.flatfield,
-            background_wells=_split_background_wells(args.background_well),
+            background_wells=bg_wells,
+            background_dir=bg_src,
         )
         log.info("Flat-field (%s): built field(s) for channel(s): %s",
                  args.flatfield, sorted(shared_kwargs["flatfield_models"]) or "(none found)")
+        _require_empty_well_models(
+            "flat-field", args.flatfield, shared_kwargs["flatfield_models"],
+            bg_wells, bg_src)
 
     # Precompute per-channel additive background fields once (--background
     # empty_well). top_hat / sliding_disk estimate per image in the worker.
@@ -4464,10 +4516,14 @@ def main() -> None:
             tokens=[args.nuclear_token] + list(fluor_tokens_for_quant),
             schema=schema,
             sep=sep,
-            background_wells=_split_background_wells(args.background_well),
+            background_wells=bg_wells,
+            background_dir=bg_src,
         )
         log.info("Background (empty_well): built field(s) for channel(s): %s",
                  sorted(shared_kwargs["background_models"]) or "(none found)")
+        _require_empty_well_models(
+            "background", args.background, shared_kwargs["background_models"],
+            bg_wells, bg_src)
 
     # ── Decide mode: zip, folder, or flat ───────────────────────────────────
     well_zips    = find_well_zips(input_dir)

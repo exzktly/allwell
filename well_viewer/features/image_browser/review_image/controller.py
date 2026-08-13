@@ -26,9 +26,7 @@ from well_viewer.features.image_browser.review_image.callbacks import (  # noqa:
 from well_viewer.core.channel_state_controller import set_active_image_channel
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 from well_viewer.core.ui_helpers import norm_timepoint
-from util.fov import sort_key as fov_sort_key
-from util.timepoint import sort_key as tp_sort_key
-from well_viewer.data.data_loading import get_rows
+# The FOV / timepoint sort orders and the row fetch live in collect.py now.
 from well_viewer.domain.selections_model import active_replicate_sets
 from well_viewer.domain.viewer_state import parse_rc
 import numpy as _np
@@ -43,20 +41,29 @@ from well_viewer.features.image_browser.review_image.collect import (  # noqa: F
     _flatfield_qc,
     _load_arrays_from_refs,
     _split_background_wells,
+    any_review_rows,
     apply_review_overrides_to_cache,
     flatfield_field_for,
     review_build_include_map,
     review_build_threshold_map,
     review_collect_timepoints,
     review_effective_included,
+    review_filter_values,
     review_load_rows,
     review_norm_fov,
+    review_pooled_rows,
     review_resolve_image_refs,
     review_row_keys,
     review_row_keys_series,
 )
 
 _logger = logging.getLogger(__name__)
+
+#: Hard cap on the rows the Review CSV table materialises. Passed to
+#: ``collect.review_pooled_rows`` as its ``limit``, so it bounds the row dicts
+#: as they are fetched and not merely the widget built from them — see that
+#: function for what the unbounded pool cost.
+MAX_TABLE_ROWS = 5000
 
 
 def _guard_event(fn):
@@ -676,15 +683,13 @@ def _refresh_review_csv_impl(ctx) -> None:
     well_lbl.setText(
         ", ".join(sels[:3]) + (f" (+{len(sels) - 3} more)" if len(sels) > 3 else "")
     )
-    rows: list[dict] = []
-    for label in sels:
-        try:
-            df = get_rows(ctx, label)
-        except Exception:
-            df = None
-        if df is not None and not df.empty:
-            rows.extend(df.to_dict("records"))
-    if not rows:
+    # The combo values come from each frame's DISTINCT column values, not from
+    # a pooled list of one dict per cell. A well has a handful of FOVs and
+    # timepoints however many cells it holds, so this is a per-well constant
+    # where the pooled build scaled with the plate — see
+    # ``collect.review_pooled_rows`` for what that cost.
+    fovs, tps = review_filter_values(ctx, sels)
+    if not any_review_rows(ctx, sels):
         _set_combo_values(fov_cb, [])
         _set_combo_values(tp_cb, [])
         fov_cb.setCurrentText("")
@@ -699,29 +704,15 @@ def _refresh_review_csv_impl(ctx) -> None:
     # a click calls setCurrentText("1"), the select silently no-ops, the filter
     # lands on the wrong (or an empty) FOV, and refresh_review_csv_rows falls
     # back to materialising *every* loaded row — the OOM that SIGKILLs the app.
-    fovs = sorted(
-        {review_norm_fov(r.get("fov", r.get("FOV", "")))
-         for r in rows
-         if review_norm_fov(r.get("fov", r.get("FOV", "")))},
-        key=fov_sort_key,
-    )
-    tps: list[str] = []
-    seen_tps: set[str] = set()
-    for row in rows:
-        raw_tp = str(row.get("timepoint", row.get("tp", row.get("time", "")))).strip()
-        norm_tp = norm_timepoint(ctx, raw_tp)
-        if not norm_tp or norm_tp in seen_tps:
-            continue
-        seen_tps.add(norm_tp)
-        tps.append(norm_tp)
-    tps.sort(key=tp_sort_key)
     _set_combo_values(fov_cb, fovs)
     _set_combo_values(tp_cb, tps)
     if fovs and fov_cb.currentText() not in fovs:
         fov_cb.setCurrentText(fovs[0])
     if tps and tp_cb.currentText() not in tps:
         tp_cb.setCurrentText(tps[0])
-    refresh_review_csv_rows(ctx, rows)
+    # ``None`` rather than a pooled list: the row builder below fetches only the
+    # rows the combos actually select, and only as many as the table can show.
+    refresh_review_csv_rows(ctx, None)
 
 
 def refresh_review_csv_rows(ctx, rows: list[dict] | None = None) -> None:
@@ -747,39 +738,58 @@ def _refresh_review_csv_rows_impl(ctx, rows: list[dict] | None = None) -> None:
     ctx.runtime.review.csv_render_sig = None
     msg_lbl = w.get_or_none("_review_csv_msg_lbl")
 
-    if rows is None:
-        sels = sorted(ctx.state.selection.selected_wells, key=parse_rc)
-        rows = []
-        for label in sels:
-            rows.extend(review_load_rows(ctx, label))
-
     fov_cb = w.get_or_none("_review_fov_cb")
     tp_cb = w.get_or_none("_review_tp_cb")
     fov_sel = review_norm_fov(fov_cb.currentText()) if fov_cb is not None else ""
     tp_sel = norm_timepoint(ctx, tp_cb.currentText()) if tp_cb is not None else ""
-    filtered = []
-    for row in rows:
-        row_fov = review_norm_fov(row.get("fov", row.get("FOV", "")))
-        row_tp = norm_timepoint(ctx, row.get("timepoint", row.get("tp", row.get("time", ""))))
-        if fov_sel and row_fov != fov_sel:
-            continue
-        if tp_sel and row_tp != tp_sel:
-            continue
-        filtered.append(row)
+
+    _MAX_TABLE_ROWS = MAX_TABLE_ROWS
+
+    if rows is None:
+        sels = sorted(ctx.state.selection.selected_wells, key=parse_rc)
+        filtered, n_total = review_pooled_rows(
+            ctx, sels, fov_sel=fov_sel, tp_sel=tp_sel, limit=_MAX_TABLE_ROWS)
+        any_rows = bool(filtered) or any_review_rows(ctx, sels)
+    else:
+        # A caller-supplied list (the empty-selection branches, and tests).
+        # Filter it in place; it is already materialised, so there is nothing
+        # to bound here.
+        filtered = [
+            row for row in rows
+            if (not fov_sel
+                or review_norm_fov(row.get("fov", row.get("FOV", ""))) == fov_sel)
+            and (not tp_sel
+                 or norm_timepoint(
+                     ctx, row.get("timepoint", row.get("tp", row.get("time", "")))
+                 ) == tp_sel)
+        ]
+        n_total = len(filtered)
+        any_rows = bool(rows)
 
     if not filtered:
         _logger.warning(
-            "No Review CSV rows matched filters: selected_wells=%s fov=%s tp=%s total_rows=%d",
+            "No Review CSV rows matched filters: selected_wells=%s fov=%s tp=%s",
             sorted(ctx.state.selection.selected_wells, key=parse_rc),
-            fov_sel, tp_sel, len(rows),
+            fov_sel, tp_sel,
         )
-        if not rows:
+        if not any_rows:
             table.setColumnCount(0)
             msg_lbl.setText("No rows are available for the selected well(s).")
             return
-        # Fallback: if the filters are mismatched for any reason, still
-        # show all loaded rows from selected well(s) instead of an empty table.
-        filtered = list(rows)
+        # Fallback: if the filters are mismatched for any reason, still show
+        # rows from the selected well(s) instead of an empty table — bounded
+        # the same way, because this is the path that used to materialise the
+        # entire plate.
+        if rows is None:
+            sels = sorted(ctx.state.selection.selected_wells, key=parse_rc)
+            filtered, n_total = review_pooled_rows(ctx, sels, limit=_MAX_TABLE_ROWS)
+        else:
+            n_total = len(rows)
+            filtered = list(rows[:_MAX_TABLE_ROWS])
+        if not filtered:
+            table.setColumnCount(0)
+            msg_lbl.setText("No rows are available for the selected well(s).")
+            return
         msg_lbl.setText(
             "No exact Well/FOV/Timepoint match. Showing all selected rows instead."
         )
@@ -789,20 +799,10 @@ def _refresh_review_csv_rows_impl(ctx, rows: list[dict] | None = None) -> None:
             if lookup else ""
         )
         ctx.notify.set_status(
-            f"Review CSV fallback active: no exact match for FOV={fov_sel}, TP={tp_sel}; showing {len(filtered)} row(s).{ctx_txt}"
+            f"Review CSV fallback active: no exact match for FOV={fov_sel}, TP={tp_sel}; showing {len(filtered)} of {n_total} row(s).{ctx_txt}"
         )
 
-    # Hard cap on materialised rows. A QTableWidget builds one heavyweight
-    # QTableWidgetItem per cell, so an unbounded build (e.g. the all-rows
-    # fallback above, or a multi-well selection spanning every FOV/timepoint)
-    # can allocate millions of items and get the process OOM-killed. The table
-    # is an inspection aid for a single FOV/timepoint (a few hundred cells), so
-    # truncating past the cap costs nothing real while removing the crash.
-    _MAX_TABLE_ROWS = 5000
-    n_total = len(filtered)
-    truncated = n_total > _MAX_TABLE_ROWS
-    if truncated:
-        filtered = filtered[:_MAX_TABLE_ROWS]
+    truncated = n_total > len(filtered)
 
     cols = list(filtered[0].keys())
     table.setColumnCount(len(cols))

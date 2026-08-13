@@ -23,6 +23,10 @@ from well_viewer.data.image_resolver import resolve_ref_by_fov_tp as _resolve_re
 from well_viewer.core.ui_helpers import safe_int_or_none as _safe_int_or_none
 from well_viewer.core.ui_helpers import norm_timepoint
 from well_viewer.core.safe import swallowed
+# The one background-well parser (ARCHITECTURE §15). This module carried a
+# second copy that split on ';' where the shared one did not; the shared one
+# takes both now. Kept under the private name the controller re-exports.
+from util.well_token import split_background_wells as _split_background_wells
 # The region-delete verdict shares its geometry with the crop layer. ``crop`` is
 # an always-present support library whose ``region`` module is pure pandas and
 # imports nothing back, so this is a plain module-scope dependency, not a cycle.
@@ -99,18 +103,6 @@ def _flatfield_qc(ctx, key: str, default: str = "") -> str:
     info = ctx.state.dataset.pipeline_info or {}
     qc = info.get("qc_options") or {}
     return str(qc.get(key, default) or default).strip()
-
-
-def _split_background_wells(value) -> list[str]:
-    """Parse a comma-separated ``background_well`` value into a deduped well list
-    (case-insensitive). A single ``"H12"`` → ``["H12"]`` (back-compat)."""
-    seen, out = set(), []
-    for tok in str(value or "").replace(";", ",").split(","):
-        w = tok.strip()
-        if w and w.lower() not in seen:
-            seen.add(w.lower())
-            out.append(w)
-    return out
 
 
 def _load_arrays_from_refs(refs, *, limit: int, tp=None):
@@ -544,6 +536,141 @@ def review_load_rows(ctx, label: str) -> list[dict]:
     if df is None or df.empty:
         return []
     return df.to_dict("records")
+
+
+#: Column spellings the Review CSV has to tolerate, in preference order. The
+#: table is fed from whatever the pipeline wrote, and older outputs used the
+#: shorter timepoint names.
+_FOV_COLS = ("fov", "FOV")
+_TP_COLS = ("timepoint", "tp", "time")
+
+
+def _first_col(df: pd.DataFrame, names: tuple[str, ...]) -> str | None:
+    return next((c for c in names if c in df.columns), None)
+
+
+def any_review_rows(ctx, labels) -> bool:
+    """Whether any of *labels* has a non-empty cached frame.
+
+    The question the Review CSV used to answer with ``if not rows:`` over a
+    fully materialised pool. It only ever needed to know whether the pool would
+    have been empty.
+    """
+    for label in labels:
+        try:
+            df = get_rows(ctx, label)
+        except Exception:
+            swallowed(f"review rows for {label!r}")
+            continue
+        if df is not None and not df.empty:
+            return True
+    return False
+
+
+def review_filter_values(ctx, labels) -> tuple[list[str], list[str]]:
+    """The FOV and timepoint values the Review CSV combos offer, for *labels*.
+
+    Derived from each frame's **distinct** column values rather than from a
+    pooled list of row dicts. A well has on the order of ten FOVs and a handful
+    of timepoints however many cells it holds, so this is a per-well constant
+    where the previous shape was one Python dict per cell across the whole
+    selection — see :func:`review_pooled_rows`.
+
+    Both values are normalised the same way the row filter and the cell-click
+    navigation normalise them (``review_norm_fov`` / ``norm_timepoint``), which
+    is what makes a combo entry selectable: the combo is non-editable, so a
+    raw ``"1.0"`` item against a ``setCurrentText("1")`` click silently no-ops.
+    """
+    fovs: set[str] = set()
+    tps: list[str] = []
+    seen_tps: set[str] = set()
+    for label in labels:
+        try:
+            df = get_rows(ctx, label)
+        except Exception:
+            swallowed(f"review rows for {label!r}")
+            continue
+        if df is None or df.empty:
+            continue
+        fov_col = _first_col(df, _FOV_COLS)
+        if fov_col is not None:
+            for raw in pd.unique(df[fov_col]):
+                norm = review_norm_fov(raw)
+                if norm:
+                    fovs.add(norm)
+        tp_col = _first_col(df, _TP_COLS)
+        if tp_col is not None:
+            for raw in pd.unique(df[tp_col]):
+                norm = norm_timepoint(ctx, str(raw).strip())
+                if norm and norm not in seen_tps:
+                    seen_tps.add(norm)
+                    tps.append(norm)
+    from util.fov import sort_key as _fov_sort_key
+
+    return (sorted(fovs, key=_fov_sort_key),
+            sorted(tps, key=_review_tp_sort_key))
+
+
+def _match_mask(ctx, df: pd.DataFrame, fov_sel: str, tp_sel: str):
+    """Boolean mask of *df*'s rows passing the FOV / timepoint filters.
+
+    An empty selection matches everything, which is what the combos mean when
+    they carry no value.
+    """
+    mask = pd.Series(True, index=df.index)
+    if fov_sel:
+        fov_col = _first_col(df, _FOV_COLS)
+        if fov_col is None:
+            return pd.Series(False, index=df.index)
+        mask &= df[fov_col].map(review_norm_fov) == fov_sel
+    if tp_sel:
+        tp_col = _first_col(df, _TP_COLS)
+        if tp_col is None:
+            return pd.Series(False, index=df.index)
+        mask &= df[tp_col].map(lambda v: norm_timepoint(ctx, str(v).strip())) == tp_sel
+    return mask
+
+
+def review_pooled_rows(ctx, labels, *, fov_sel: str = "", tp_sel: str = "",
+                       limit: int | None = None) -> tuple[list[dict], int]:
+    """Matching rows for *labels* as dicts, materialising at most *limit* of them.
+
+    Returns ``(rows, n_matched)`` — ``n_matched`` is the true total, counted
+    vectorised, so a caller can report an honest "showing N of M" without
+    holding M of anything.
+
+    **The limit is the point.** The Review CSV table is an inspection aid for
+    one FOV/timepoint and caps itself at a few thousand rows, but it used to
+    reach that cap by first building one Python dict per cell for every
+    selected well and then slicing. Measured on a 24-well plate of 28,800 rows
+    and 40 columns, that pooled list costs ~200 MB resident — about 7 KB per
+    row — and it scales with the plate, so a full plate of several hundred
+    thousand cells reaches several gigabytes before the cap is consulted. The
+    controller's own comment already described the unbounded build as "the OOM
+    that SIGKILLs the app"; the cap it added protected the ``QTableWidget``
+    below it and not the list above it.
+
+    Filtering happens on the frame, so an unmatched well contributes nothing at
+    all rather than contributing every row it has.
+    """
+    rows: list[dict] = []
+    matched = 0
+    for label in labels:
+        try:
+            df = get_rows(ctx, label)
+        except Exception:
+            swallowed(f"review rows for {label!r}")
+            continue
+        if df is None or df.empty:
+            continue
+        sub = df[_match_mask(ctx, df, fov_sel, tp_sel)]
+        matched += len(sub)
+        if limit is not None and len(rows) >= limit:
+            continue          # keep counting; stop materialising
+        if limit is not None:
+            sub = sub.head(limit - len(rows))
+        rows.extend(sub.to_dict("records"))
+    return rows, matched
 
 
 def review_effective_included(ctx, label: str, row: dict) -> str:

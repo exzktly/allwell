@@ -6,12 +6,13 @@ import logging
 
 import theme
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit,
     QVBoxLayout, QWidget,
 )
 from well_viewer.core.ui_helpers import build_hline_separator
+from well_viewer.core.worker_bridge import GuiLogRelay
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -26,6 +27,15 @@ _LOG_MAX_BLOCKS = 5000
 class _GUILogHandler(logging.Handler):
     """Routes logging records into a QTextEdit on the Qt main thread.
 
+    This handler is attached to the ``well_viewer`` logger at DEBUG, and it is
+    gated on nothing, so it runs for every record the app produces — including
+    the ``well_viewer.swallowed`` breadcrumb that
+    :func:`well_viewer.core.safe.swallowed` writes from inside an ``except``
+    block. Plenty of those happen on worker threads, so ``emit`` is entered off
+    the GUI thread as a matter of course and must never touch the widget
+    directly. It hands the line to a :class:`~well_viewer.core.worker_bridge.
+    GuiLogRelay`, whose queued signal is the app's one way across that boundary.
+
     Detaches itself the moment its widget is gone. A handler outlives the window
     it writes into — nothing removes it on teardown, and in a process that builds
     more than one window (the test suite does) the dead ones stay subscribed to
@@ -35,6 +45,9 @@ class _GUILogHandler(logging.Handler):
     def __init__(self, widget: QTextEdit) -> None:
         super().__init__()
         self._w = widget
+        # Built here, so its thread affinity is whichever thread constructs the
+        # handler — the GUI thread, since ``build_bottom`` runs there.
+        self._relay = GuiLogRelay(self._append)
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
@@ -48,8 +61,8 @@ class _GUILogHandler(logging.Handler):
             }
             color = color_map.get(level, theme.Colors.text_secondary)
             html = f'<span style="color:{color};">{msg}</span>'
-            # Marshal to the Qt main thread.
-            QTimer.singleShot(0, lambda h=html: self._append(h))
+            # Marshal to the Qt main thread. Never a QTimer: see GuiLogRelay.
+            self._relay.post(html)
         except Exception:
             self.handleError(record)
 

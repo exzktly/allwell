@@ -555,6 +555,15 @@ def _row_widget(parent: QWidget, row: dict, *, kind: str) -> QWidget:
         label.setObjectName("HomeTileLabel")
         line.addWidget(label)
         value = QLabel(str(row.get("value") or ""), host)
+        value.setWordWrap(True)
+        # A receipt line is normally a plain statement of what was set, but a
+        # setting can record that a step did not run — a reference-well
+        # correction with no well named leaves every frame untouched, and the
+        # output is bit-for-bit identical to a corrected one. That reads as
+        # ordinary text unless it is coloured like the warning it is.
+        if row.get("severity"):
+            value.setStyleSheet(
+                f"color:{_SEVERITY_COLORS.get(row['severity'], theme.Colors.text_muted)};")
         line.addWidget(value, 1)
         if row.get("is_default"):
             chip = QLabel("default", host)

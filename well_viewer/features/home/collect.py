@@ -440,20 +440,110 @@ def run_parameters(ctx) -> list:
         else:
             rows.append({"label": label, "value": f"{number:g}", "is_default": False})
 
+    background = str(qc.get("background") or "—")
     rows.append({"label": "Background subtraction",
-                 "value": str(qc.get("background") or "—").replace("_", " ")})
-    rows.append({"label": "Flat-field",
-                 "value": str(qc.get("flatfield") or "none").replace("_", " ")})
-    if qc.get("qc_remove_debris"):
+                 "value": background.replace("_", " ")})
+    rows.extend(_correction_parameter_rows(background, qc, execution,
+                                           which="background"))
+
+    flatfield = str(qc.get("flatfield") or "none")
+    rows.append({"label": "Flat-field", "value": flatfield.replace("_", " ")})
+    rows.extend(_correction_parameter_rows(flatfield, qc, execution,
+                                           which="flatfield"))
+
+    if qc.get("remove_debris"):
         rows.append({"label": "Debris gating",
-                     "value": f"area {qc.get('qc_min_area', '—')} – "
-                              f"{qc.get('qc_max_area', '—')} px²"})
+                     "value": f"area {_number(qc.get('min_area'))} – "
+                              f"{_number(qc.get('max_area'))} px²"})
     block = _record(ctx)
     if block.get("host"):
         rows.append({"label": "Ran on", "value": str(block["host"])})
     if block.get("duration_s"):
         rows.append({"label": "Duration",
                      "value": _duration(float(block["duration_s"]))})
+    return rows
+
+
+def _number(value, fallback: str = "—") -> str:
+    """A sidecar number as the user would write it — ``100``, not ``100.0``."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    return f"{number:g}"
+
+
+def _per_channel(qc: dict, execution: dict, nuclear_key: str, fluor_key: str,
+                 unit: str) -> str:
+    """One value when both channel roles share it, both named when they differ.
+
+    The pipeline takes these per channel role — a nuclear stain and a
+    fluorescence readout can want different sizes — and they are usually left
+    equal. Printing "100 px (nuclear), 100 px (fluorescence)" for the common
+    case buries the number in punctuation; printing one value when they differ
+    would be a different run than the one that produced the plate.
+    """
+    nuclear = _number(qc.get(nuclear_key, execution.get(nuclear_key)))
+    fluor = _number(qc.get(fluor_key, execution.get(fluor_key)))
+    if nuclear == fluor:
+        return f"{nuclear} {unit}" if nuclear != "—" else "—"
+    return f"{nuclear} {unit} (nuclear), {fluor} {unit} (fluorescence)"
+
+
+def _correction_parameter_rows(method: str, qc: dict, execution: dict, *,
+                               which: str) -> list:
+    """The settings *method* actually consulted, and nothing else.
+
+    Which those are is :data:`pipeline.background.BACKGROUND_METHOD_PARAMS` /
+    :data:`pipeline.flatfield.FLATFIELD_MODE_PARAMS`, read off the dispatch that
+    defines them, so this cannot list a mesh ratio beside ``sliding_disk``
+    (which never sees one) or drop the ratio from ``robust_mesh`` (which is
+    built on it). A receipt that names a setting the run ignored asserts an
+    effect that did not happen, which is the same kind of untruth as leaving
+    out the ones that did.
+
+    Imported inside the call: this is the only place in the Review side that
+    needs the imaging package's rosters, and a collect module should not pull
+    the pipeline in at import time.
+    """
+    if which == "flatfield":
+        from pipeline.flatfield import flatfield_params_used as params_used
+    else:
+        from pipeline.background import background_params_used as params_used
+
+    rows = []
+    for name in params_used(method):
+        if name == "radius":
+            rows.append({"label": "Radius",
+                         "value": _per_channel(qc, execution, "tophat_radius_nir",
+                                               "tophat_radius_fluor", "px")})
+        elif name == "fft_small":
+            rows.append({"label": "Small-structure cutoff",
+                         "value": _per_channel(qc, execution, "fft_small_nir",
+                                               "fft_small_fluor", "px")})
+        elif name == "mesh_ratio":
+            rows.append({"label": "Mesh ratio",
+                         "value": _number(qc.get("mesh_ratio",
+                                                 execution.get("mesh_ratio")))})
+        elif name == "mesh_sigma":
+            rows.append({"label": "Mesh sigma",
+                         "value": _number(qc.get("mesh_sigma",
+                                                 execution.get("mesh_sigma")))})
+        elif name == "background_well":
+            from util.well_token import split_background_wells
+            wells = split_background_wells(
+                qc.get("background_well", execution.get("background_well")))
+            label = ("Reference well(s)" if which == "flatfield"
+                     else "Empty well(s)")
+            if wells:
+                rows.append({"label": label, "value": ", ".join(wells)})
+            else:
+                # The run asked for a reference-well correction and named no
+                # well, so no field was built and every frame passed through
+                # untouched — output bit-for-bit identical to a corrected one.
+                # Saying "—" here would read as a formatting gap.
+                rows.append({"label": label, "severity": "warn",
+                             "value": "none named — the correction did not run"})
     return rows
 
 

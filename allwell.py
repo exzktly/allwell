@@ -1260,8 +1260,17 @@ class AllWellApp(QMainWindow):
             self._log_drawer.open()
 
     def _append_log_line(self, text: str) -> None:
-        """Append one formatted record to the open drawer view (main-thread only)."""
+        """Append one formatted record to the open drawer view (main-thread only).
+
+        The "is the drawer even open?" test lives here rather than in the
+        handler that produces the line, because the handler runs on whichever
+        thread logged the record and ``isVisible()`` reads Qt widget state.
+        Deciding it here means one thread — this one — ever asks.
+        """
         try:
+            drawer = getattr(self, "_log_drawer", None)
+            if drawer is None or not drawer.isVisible():
+                return
             view = getattr(self, "_log_view", None)
             if view is not None:
                 view.append(text)
@@ -1283,10 +1292,17 @@ class AllWellApp(QMainWindow):
         if getattr(self, "_log_ring_attached", False):
             return
         import logging as _logging
-        from PySide6.QtCore import QTimer as _QTimer
+
+        from well_viewer.core.worker_bridge import GuiLogRelay
 
         ring = self._log_ring
-        app = self
+        # Built on the GUI thread (this method is only reached from the drawer
+        # toggle and from startup), which is what makes its queued signal land
+        # there. Records reach this handler on whichever thread logged them —
+        # the remote runner's batch loop and fetcher both log from their own —
+        # so nothing below may touch a widget.
+        relay = GuiLogRelay(self._append_log_line)
+        self._log_relay = relay
 
         class _RingHandler(_logging.Handler):
             def emit(self, record):
@@ -1295,11 +1311,9 @@ class AllWellApp(QMainWindow):
                     ring.append(line)
                     if len(ring) > 1000:
                         del ring[:500]
-                    drawer = getattr(app, "_log_drawer", None)
-                    if drawer is not None and drawer.isVisible():
-                        # Marshal to the Qt main thread (records may come from
-                        # worker threads).
-                        _QTimer.singleShot(0, lambda t=line: app._append_log_line(t))
+                    # Unconditionally; ``_append_log_line`` decides on the GUI
+                    # thread whether the drawer wants it.
+                    relay.post(line)
                 except Exception:
                     swallowed()  # was: pass (silent except)
 

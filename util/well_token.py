@@ -54,8 +54,16 @@ def split_background_wells(value) -> list[str]:
 
     Accepts a single well (``"H12"``), a comma-separated string (``"H12, G12"``),
     or an already-split list. Order-preserving; case-insensitive de-dupe.
+
+    Semicolons separate too. The Review-image side had its own copy of this
+    parser that accepted them where this one did not, and this one accepted a
+    pre-split list where that one did not — two spellings of one question,
+    disagreeing in both directions. A well name cannot contain either
+    character, so taking both here is a superset of what each did and lets the
+    copy go.
     """
-    items = value if isinstance(value, (list, tuple)) else str(value or "").split(",")
+    items = (value if isinstance(value, (list, tuple))
+             else str(value or "").replace(";", ",").split(","))
     out: list[str] = []
     seen: set = set()
     for it in items:

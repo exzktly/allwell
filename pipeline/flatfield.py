@@ -28,6 +28,29 @@ FLATFIELD_FLOOR = 0.1
 _FLATFIELD_SIGMA = FLATFIELD_SIGMA
 _FLATFIELD_FLOOR = FLATFIELD_FLOOR
 
+#: Which settings each flat-field mode consults — the counterpart of
+#: :data:`pipeline.background.BACKGROUND_METHOD_PARAMS`, and read the same way
+#: by a run's receipt.
+#:
+#: Three of the four take nothing a user chose: ``gaussian`` estimates its field
+#: from the frame in front of it, and ``basic`` estimates one from the plate's
+#: own images. Only ``empty_well`` is told which wells to measure, and that is
+#: the setting somebody has to know to reproduce the run.
+#:
+#: The mode roster itself is ``process_microscopy.FLATFIELD_MODES``;
+#: ``tests/test_correction_parameter_roster.py`` holds the two in step.
+FLATFIELD_MODE_PARAMS: dict[str, tuple[str, ...]] = {
+    "none": (),
+    "gaussian": (),
+    "basic": (),
+    "empty_well": ("background_well",),
+}
+
+
+def flatfield_params_used(mode: str) -> tuple[str, ...]:
+    """The settings *mode* consults; empty for an unknown or parameterless one."""
+    return FLATFIELD_MODE_PARAMS.get(str(mode or "").strip().lower(), ())
+
 
 def normalize_flatfield(field: np.ndarray) -> np.ndarray | None:
     """Normalize an illumination field to mean 1.0 so dividing by it preserves

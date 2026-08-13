@@ -803,3 +803,79 @@ def test_home_topic_guard_catches_a_subtab_with_no_topic(tmp_path, monkeypatch):
 def test_home_topic_guard_clears_a_subtab_that_has_one(tmp_path, monkeypatch):
     assert _run_home_topic_scan(
         monkeypatch, tmp_path, {"Home": "Home", "Ratios": "Ratios"}) is None
+
+
+# ── timers inside a logging handler ─────────────────────────────────────────
+
+# Both shipped shapes, plus the two spellings that would have slipped past a
+# guard written to match only the first. `nested_in_a_function` is how the shell
+# defines `_RingHandler` — inside the method that installs it, invisible to a
+# scan that reads `tree.body`. `aliased` is that same site's `import QTimer as
+# _QTimer`. `deferred_in_a_lambda` and `constructed` are the two other ways to
+# bind a timer to the emitting thread.
+LOG_TIMER_VIOLATIONS = {
+    "module_level": (
+        "class _GUILogHandler(logging.Handler):\n"
+        "    def emit(self, record):\n"
+        "        QTimer.singleShot(0, lambda: self._append(record))\n"),
+    "nested_in_a_function": (
+        "def install(app):\n"
+        "    class _RingHandler(logging.Handler):\n"
+        "        def emit(self, record):\n"
+        "            QTimer.singleShot(0, lambda: app.append(record))\n"),
+    "aliased": (
+        "class _H(logging.Handler):\n"
+        "    def emit(self, record):\n"
+        "        _QTimer.singleShot(0, lambda: self._append(record))\n"),
+    "deferred_in_a_lambda": (
+        "class _H(Handler):\n"
+        "    def emit(self, record):\n"
+        "        run_later(lambda: QTimer.singleShot(0, self._append))\n"),
+    "constructed": (
+        "class _H(logging.Handler):\n"
+        "    def emit(self, record):\n"
+        "        t = QTimer()\n"
+        "        t.timeout.connect(self._append)\n"),
+    "start_timer": (
+        "class _H(logging.Handler):\n"
+        "    def emit(self, record):\n"
+        "        self.startTimer(0)\n"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(LOG_TIMER_VIOLATIONS))
+def test_log_handler_guard_catches_a_timer_in_emit(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_handler.py", LOG_TIMER_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_log_handler_marshalling",
+                    "test_no_timer_inside_a_logging_handler_emit", [bad])
+    assert exc is not None, f"the {shape} timer violation went uncaught"
+    assert "bad_handler.py" in str(exc)
+
+
+LOG_TIMER_CLEAN = {
+    # The sanctioned route: a GuiLogRelay built on the GUI thread.
+    "relay": (
+        "class _H(logging.Handler):\n"
+        "    def emit(self, record):\n"
+        "        self._relay.post(self.format(record))\n"),
+    # A timer outside emit is fine — that method runs where it was called from,
+    # and the rule is about the thread emit() is entered on.
+    "timer_outside_emit": (
+        "class _H(logging.Handler):\n"
+        "    def emit(self, record):\n"
+        "        self._relay.post(record.msg)\n"
+        "    def flush_later(self):\n"
+        "        QTimer.singleShot(0, self.flush)\n"),
+    # A plain class with an emit method is not a logging handler.
+    "not_a_handler": (
+        "class Sparkline:\n"
+        "    def emit(self, value):\n"
+        "        QTimer.singleShot(0, lambda: self._draw(value))\n"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(LOG_TIMER_CLEAN))
+def test_log_handler_guard_clears_the_sanctioned_shapes(tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, "good_handler.py", LOG_TIMER_CLEAN[shape])
+    assert _run_scan(monkeypatch, "tests.test_log_handler_marshalling",
+                     "test_no_timer_inside_a_logging_handler_emit", [good]) is None

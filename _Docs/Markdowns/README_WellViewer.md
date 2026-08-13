@@ -1015,9 +1015,18 @@ What is on it:
 - **Health.** Only what needs attention. A dataset with nothing wrong says so in
   one line instead of listing zeros.
 - **Run parameters.** What the run was told to do — segmentation method and its
-  thresholds, the background method named in full, flat-field, debris gating,
-  where it ran and for how long. A threshold that came from the model's own
-  defaults says so, rather than being shown as a number somebody chose.
+  thresholds, the background method named in full and the flat-field mode,
+  **the settings each of those used**, debris gating, where it ran and for how
+  long. A threshold that came from the model's own defaults says so, rather
+  than being shown as a number somebody chose. The settings shown are the ones
+  that method actually reads: a radius for the morphological methods, the mesh
+  ratio and sigma for `robust_mesh`, the small-structure cutoff for
+  `fft_bandpass`, and the wells for an `empty_well` background or flat-field.
+  Nothing else is listed, because a number beside a method that never consults
+  it reads as though it had an effect. Where the nuclear and fluorescence
+  channels were given different values, both are shown. A reference-well
+  correction with no well named is flagged: nothing was measured, so the frames
+  went through uncorrected, and the images look no different for it.
 - **Your work here.** Replicate sets, plot groups, labelled wells, smFISH
   thresholds, ratios, notes — with what you have not started yet reading "None
   yet", because that is a real answer rather than a missing one.
@@ -1598,6 +1607,26 @@ count) — plus a CDF.
   only the images it will upload, so it is roughly as fast as the upload itself.
   Whether an archive counts as unchanged is judged on its images only, so the
   `.DS_Store` and other stray files a zip picks up never cause a rebuild.
+- **If the app dies, the error dialog holds the whole traceback** — open
+  *Show Details* and copy it; that text names the exact line that failed and is
+  the single most useful thing to put in a bug report. It is also written to a
+  log file, whose path the dialog gives you: `~/.cache/allwell/allwell-boot.log`
+  on macOS and Linux, `%LOCALAPPDATA%\allwell\allwell-boot.log` on Windows. That
+  file is normally rewritten each time the app starts, **but a copy carrying a
+  crash is kept** — as `allwell-boot.log.1`, `.2`, `.3`, newest first — so
+  relaunching to try again no longer throws away the record of what went wrong.
+- **You can look at the finished wells while the rest are still running** —
+  Analyze and Review are two panes of one window, and the run is a separate
+  process (or on the cluster), so switching to Review does not touch it. Open
+  the run's output folder there and you get every well that has finished so far;
+  press the refresh button in the title bar to pick up the ones that have
+  landed since. Wells that have not finished yet are simply absent. Nothing is
+  read half-written: each well's CSV and `_out.zip` appear complete or not at
+  all. On a remote run the plate becomes openable a few seconds after the job
+  starts on the cluster (not when it is still queued); until the run ends, the
+  dataset description it reads is the running job's own, which for a batched
+  run covers that batch's wells rather than the whole plate — so the timepoint
+  and FOV lists can be short until the run finishes.
 - **Remote runs: what came back, in a file you can read later** — a remote run
   writes `remote_fetch_report.txt` into the output folder listing every well the
   remote produced output for and what happened to it: `fetched`, `skipped`
@@ -3354,7 +3383,7 @@ architecture-specific and can't produce a universal binary.
 | `⌘←` / `Ctrl+←` | Back through tab history |
 | `⌘→` / `Ctrl+→` | Forward through tab history |
 | `⌘/` / `Ctrl+/` | Open the help drawer |
-| `⌘L` / `Ctrl+L` | Open the application log drawer |
+| `⌘L` / `Ctrl+L` | Open the application log drawer — including the lines background work writes while a run is going |
 | `⌘B` / `Ctrl+B` | Collapse / expand the left sidebar (same as the top-bar panel button) |
 | `⌘W` / `Ctrl+W` | Close window |
 

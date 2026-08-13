@@ -199,33 +199,109 @@ def _new_scratch_dir(prefix: str) -> Path:
     return Path(tempfile.mkdtemp(prefix=prefix, dir=str(_scratch_dir())))
 
 
+# Working directory for bytes in transit, created on the volume they are coming
+# from or going to. Dot-prefixed so every dataset scan in the app skips it —
+# `image_discovery`, `auto_threshold` and `zip_members` all drop a name starting
+# with a dot — and removed as soon as the file it held is in place.
+TRANSIT_SUBDIR = ".allwell-transit"
+
+# Volumes that have already refused a transit directory this process. Without
+# it, a fallback on a read-only output folder would repeat its warning once per
+# well for the whole plate.
+_transit_refused: set[str] = set()
+
+
+def _transit_dir(near: Path | str,
+                 *, log_fn: Callable[[str], None] | None = None) -> Path:
+    """A working directory beside *near*, for a file on its way to or from it.
+
+    A remote run's compute happens on the cluster; locally it only sends inputs
+    and receives results. It has no reason to touch the home volume, and it used
+    to touch it for every well: each downloaded ``<well>_out.zip`` was written to
+    ``~/.allwell/scratch`` and then materialised into the output directory, so
+    every byte of a plate's results crossed two volumes, and a full home volume
+    stopped a run whose own input and output volumes had room to spare. That is
+    the ``ENOSPC`` users hit.
+
+    **Why this does not re-create the problem ``pipeline.io.scratch_base_for``
+    warns about.** That docstring is right that putting churn on a
+    network-mounted volume is what caused the macOS SMB "Bad file descriptor"
+    well failures — but it is describing the *pipeline's* working set: roughly
+    six float32 intermediates per FOV-group, each written tmp → fsync → rename,
+    from every worker process at once. This is one file per well, written once
+    and moved once. And the destination volume already receives exactly these
+    bytes today, by copy from the home volume; the number of writes it sees does
+    not change. What changes is that the home volume stops seeing them, and the
+    move into place becomes a same-volume rename instead of a cross-device copy.
+
+    Falls back to :func:`_scratch_dir` when *near* will not take a directory (a
+    read-only or quota'd volume) — and says so, once per volume. A run that
+    silently reverted to the volume the user is trying to get off would be the
+    original failure with the explanation removed.
+    """
+    base = Path(near)
+    path = base / TRANSIT_SUBDIR
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    except OSError as exc:
+        key = str(base)
+        if key not in _transit_refused:
+            _transit_refused.add(key)
+            if log_fn is not None:
+                log_fn(f"[remote] WARN cannot use {path} for files in transit "
+                       f"({exc}); falling back to {_scratch_dir()}. That volume "
+                       f"has to hold a well's output on its way through, so a "
+                       f"large plate can fill it.\n")
+        return _scratch_dir()
+
+
+def _new_transit_dir(near: Path | str, prefix: str,
+                     *, log_fn: Callable[[str], None] | None = None) -> Path:
+    """``mkdtemp`` rooted at :func:`_transit_dir`."""
+    return Path(tempfile.mkdtemp(
+        prefix=prefix, dir=str(_transit_dir(near, log_fn=log_fn))))
+
+
 def sweep_stale_scratch(*, max_age_h: float = 6.0,
+                        also: Iterable[Path | str] = (),
                         log_fn: Callable[[str], None] | None = None) -> int:
     """Best-effort removal of leftover ``allwell-*`` scratch from runs killed
     before their cleanup ran (a hard quit skips the ``finally`` that deletes the
     staging dir, leaking a full input copy onto the scratch volume). Only
     removes entries older than *max_age_h* so a concurrent run's live staging is
-    never touched. Returns the number removed."""
-    base = _scratch_dir()
+    never touched. Returns the number removed.
+
+    *also* names further bases to sweep — the transit directories beside the
+    run's own input and output volumes. Without them the leak does not go away
+    when transit moves off the scratch volume, it just moves with it.
+    """
     cutoff = time.time() - max_age_h * 3600.0
     removed = 0
-    try:
-        entries = list(base.glob("allwell-*"))
-    except OSError:
-        return 0
-    for p in entries:
+    seen: set[Path] = set()
+    for base in [_scratch_dir(), *[Path(p) / TRANSIT_SUBDIR for p in also]]:
+        if base in seen:
+            continue
+        seen.add(base)
         try:
-            if p.stat().st_mtime > cutoff:
-                continue
-            if p.is_dir():
-                shutil.rmtree(p, ignore_errors=True)
-            else:
-                p.unlink()
-            removed += 1
+            entries = list(base.glob("allwell-*"))
         except OSError:
             continue
-    if removed and log_fn:
-        log_fn(f"[remote] cleaned {removed} stale scratch item(s) from {base}\n")
+        here = 0
+        for p in entries:
+            try:
+                if p.stat().st_mtime > cutoff:
+                    continue
+                if p.is_dir():
+                    shutil.rmtree(p, ignore_errors=True)
+                else:
+                    p.unlink()
+                here += 1
+            except OSError:
+                continue
+        if here and log_fn:
+            log_fn(f"[remote] cleaned {here} stale scratch item(s) from {base}\n")
+        removed += here
     return removed
 
 
@@ -532,11 +608,13 @@ def stage_local_zips(
     """
     from services.input_resolution_service import run_zipper
 
-    # Reclaim local scratch leaked by a previously-killed run before we stage a
-    # fresh (potentially multi-GB) copy of the input.
-    sweep_stale_scratch(log_fn=log_fn)
-
     input_dir = input_dir.resolve()
+    # Reclaim local scratch leaked by a previously-killed run before we stage a
+    # fresh (potentially multi-GB) copy of the input. The input volume's own
+    # transit directory is swept too — that is where a rewritten archive is
+    # staged now, so sweeping only the home scratch would have moved the leak
+    # rather than removed it.
+    sweep_stale_scratch(also=[input_dir], log_fn=log_fn)
     # Scanning the input volume to classify the layout is itself slow enough to
     # look like a hang on a spinning external disk, and it is the very first
     # thing that happens after "[remote] target:". Say so before starting.
@@ -1382,6 +1460,12 @@ def _open_staging_if_needed(
     in the plate takes the filtered path with a filter that drops nothing — and
     used to copy the whole plate into the OS temp dir to achieve it. Returning
     ``None`` here is what makes that run upload directly from the source.
+
+    When it *is* opened it sits beside the input archives rather than on the
+    home volume: what it holds is a rewritten copy of those archives, so the
+    volume that already has room for the originals is the one likeliest to have
+    room for the copies — and the home volume, which a remote run otherwise has
+    no reason to touch, stays out of it.
     """
     rewrites = sum(1 for p in plans if p.keep is not None)
     if log_fn is not None and rewrites < len(plans):
@@ -1390,7 +1474,10 @@ def _open_staging_if_needed(
                f"locally\n")
     if not rewrites:
         return None
-    return _new_scratch_dir("allwell-stage-")
+    near = next((p.src.parent for p in plans if p.keep is not None), None)
+    if near is None:                       # unreachable: rewrites > 0
+        return _new_scratch_dir("allwell-stage-")
+    return _new_transit_dir(near, "allwell-stage-", log_fn=log_fn)
 
 
 def _materialize_staging(
@@ -2005,6 +2092,50 @@ def _remote_join(remote_argv: list[str]) -> str:
     return " ".join(_remote_quote(a) for a in remote_argv)
 
 
+# Characters that would end the assignment and start something else. The value
+# comes from the user's own remotes.toml, so this is not about a hostile input —
+# it is about a typo taking the whole command down with a shell error nobody can
+# read back to a config field.
+_SCRATCH_FORBIDDEN = ('"', "`", "$(", ";", "&", "|", "<", ">", "\\", "\n", "\r")
+
+
+def _remote_scratch_export(value: str) -> str:
+    """``export ALLWELL_SCRATCH_DIR=…;`` for the remote, or ``""`` when unset.
+
+    This is the one place a path is deliberately **not** run through
+    :func:`_remote_quote`. That helper single-quotes, which is right for a path
+    the user typed literally and wrong for this one: the values a cluster user
+    reaches for are ``$TMPDIR``, ``$SLURM_TMPDIR`` and ``/scratch/$USER``, and
+    single quotes would send the literal string ``$TMPDIR`` to the pipeline,
+    which would then create a directory named ``$TMPDIR``. (The batch driver hit
+    the same class of bug with ``$_aw_i``.)
+
+    So the value is emitted inside double quotes, where ``$VAR`` expands and
+    spaces are still safe — and a leading ``~`` is rewritten to ``$HOME`` first,
+    because tilde expansion is exactly what double quotes *do* suppress. That
+    combination is the whole reason this cannot reuse either existing helper.
+
+    Raises ``ValueError`` on a value carrying shell syntax, rather than
+    composing a command that will fail on the remote with an error that names
+    nothing the user can act on.
+    """
+    value = (value or "").strip()
+    if not value:
+        return ""
+    bad = [c for c in _SCRATCH_FORBIDDEN if c in value]
+    if bad:
+        raise ValueError(
+            f"remote_scratch_dir contains shell syntax ({', '.join(bad)!r}) and "
+            f"cannot be used as a directory: {value!r}. Use a plain path; "
+            f"environment variables such as $TMPDIR or /scratch/$USER are fine."
+        )
+    if value == "~":
+        value = "$HOME"
+    elif value.startswith("~/"):
+        value = "$HOME/" + value[2:]
+    return f'export ALLWELL_SCRATCH_DIR="{value}"; '
+
+
 # v5.2.13: bash snippet that locates conda.sh wherever conda is
 # installed (``$HOME/miniforge3`` for bootstrap-managed installs OR
 # whatever ``conda info --base`` reports for pre-existing system
@@ -2574,6 +2705,7 @@ def _compose_driver_cmd(
     driver_script: str,
     *,
     env_selector: EnvSelector = DEFAULT_ENV_SELECTOR,
+    scratch_dir: str = "",
 ) -> str:
     """The login-shell command that puts :func:`_batch_driver_snippet` on a node.
 
@@ -2594,17 +2726,23 @@ def _compose_driver_cmd(
     pidfile_q = _remote_quote(remote_pidfile)
     launcher = launcher.strip()
     guard = f"{_conda_env_guard(env_selector)}; "
+    # Both shapes carry it: a batched run on a launcher-less host still writes
+    # the pipeline's working set somewhere, and leaving one shape out would put
+    # only *some* runs on the configured volume with nothing saying which.
+    scratch = _remote_scratch_export(scratch_dir)
     if not launcher:
         return (
             f"echo $$ > {pidfile_q}; "
             f"{_CONDA_ACTIVATE_SNIPPET}; "
             f"{guard}"
+            f"{scratch}"
             f"{driver_script}"
         )
     slurm_sidecar_q = _remote_quote(f"{remote_pidfile}.slurm")
     inner = (
         f"{_CONDA_ACTIVATE_SNIPPET}; "
         f"{guard}"
+        f"{scratch}"
         f'echo "${{SLURM_JOB_ID:-}}" > {slurm_sidecar_q} 2>/dev/null || true; '
         f'echo "[remote] scheduler: allocation granted — job ${{SLURM_JOB_ID:-?}} '
         f'on ${{SLURMD_NODENAME:-$(hostname)}} '
@@ -2630,6 +2768,7 @@ def _compose_remote_cmd(
     env_selector: EnvSelector = DEFAULT_ENV_SELECTOR,
     upload_sentinel: str = "",
     upload_heartbeat: str = "",
+    scratch_dir: str = "",
 ) -> str:
     """Build the bash command string ssh runs on the remote login node.
 
@@ -2670,6 +2809,9 @@ def _compose_remote_cmd(
     pidfile_q = _remote_quote(remote_pidfile)
     launcher = launcher.strip()
     guard = "" if cache_hit else f"{_conda_env_guard(env_selector)}; "
+    # Where the pipeline puts its transient working set on the remote. A cache
+    # hit execs `true` and writes nothing, so it needs no scratch at all.
+    scratch = "" if cache_hit else _remote_scratch_export(scratch_dir)
     if cache_hit or not launcher:
         # PID echoed first so the cancel path can target the pipeline
         # directly; conda activated on the login shell; then exec.
@@ -2677,6 +2819,7 @@ def _compose_remote_cmd(
             f"echo $$ > {pidfile_q}; "
             f"{_CONDA_ACTIVATE_SNIPPET}; "
             f"{guard}"
+            f"{scratch}"
             f"exec {_remote_join(remote_argv)}"
         )
 
@@ -2693,6 +2836,7 @@ def _compose_remote_cmd(
     inner = (
         f"{_CONDA_ACTIVATE_SNIPPET}; "
         f"{guard}"
+        f"{scratch}"
         f'echo "${{SLURM_JOB_ID:-}}" > {slurm_sidecar_q} 2>/dev/null || true; '
         f'echo "[remote] scheduler: allocation granted — job ${{SLURM_JOB_ID:-?}} '
         f'on ${{SLURMD_NODENAME:-$(hostname)}} '
@@ -4315,7 +4459,8 @@ class _BatchedRemoteProcess:
                                        heartbeat, per_batch_s)
         ssh_argv = host.ssh_argv(allocate_tty=True) + [
             _compose_driver_cmd(launcher, run.remote_pidfile, driver,
-                                env_selector=self._runner.env_selector)
+                                env_selector=self._runner.env_selector,
+                                scratch_dir=host.remote_scratch_dir)
         ]
         proc = subprocess.Popen(
             ssh_argv,
@@ -5206,7 +5351,12 @@ class Fetcher:
             self.run.skipped_wells[well] = skip_reason
             self.run.fetched_wells.add(well)
             return
-        tmp_zip = _scratch_dir() / f"allwell-{self.run.run_id}-{well}_out.zip"
+        # On the output volume, not the home one: this file is the well's
+        # output on its way to `local_output_dir`, so the move at the end is a
+        # rename rather than a copy across two filesystems, and a full home
+        # volume no longer stops a run whose output volume has room.
+        tmp_zip = (_transit_dir(self.run.local_output_dir, log_fn=self._log)
+                   / f"allwell-{self.run.run_id}-{well}_out.zip")
         zip_src = f"{self.host.ssh_alias}:{self.run.remote_output_dir}/{well}_out.zip"
         csv_glob_src = f"{self.host.ssh_alias}:{self.run.remote_output_dir}/*_{well}.csv"
 
@@ -5331,7 +5481,9 @@ class Fetcher:
         if self.run.incremental:
             # Partial CSV (new FOV rows only) — merge into the local full CSV
             # rather than overwriting it.
-            tmp_csv_dir = _new_scratch_dir(f"allwell-csv-{well}-")
+            tmp_csv_dir = _new_transit_dir(
+                self.run.local_output_dir, f"allwell-csv-{well}-",
+                log_fn=self._log)
             try:
                 with _csv_dir_heartbeat(tmp_csv_dir):
                     csv_count = self._pull_listed(csv_host, csv_files, tmp_csv_dir)
@@ -5341,7 +5493,7 @@ class Fetcher:
                 shutil.rmtree(tmp_csv_dir, ignore_errors=True)
             # The temp dir is gone by now; name the volume it lived on, which is
             # what the user would have to look at.
-            csv_dest = _scratch_dir()
+            csv_dest = tmp_csv_dir.parent
         else:
             csv_dest = self.run.local_output_dir
             with _csv_dir_heartbeat(csv_dest):
@@ -5550,7 +5702,10 @@ class Fetcher:
         copy — audit X2)."""
         from pipeline.io import merge_images_into_zip
 
-        tmp_dir = _new_scratch_dir(f"allwell-merge-{well}-")
+        # Beside the destination, for the same reason as the transit zip above:
+        # this holds one well's extracted output on its way into `dest`.
+        tmp_dir = _new_transit_dir(dest, f"allwell-merge-{well}-",
+                                   log_fn=self._log)
         try:
             try:
                 with zipfile.ZipFile(well_zip, "r") as zf:
@@ -6047,6 +6202,7 @@ class RemoteRunner:
             env_selector=self.env_selector,
             upload_sentinel=remote_sentinel if overlap else "",
             upload_heartbeat=remote_heartbeat if overlap else "",
+            scratch_dir=self.host.remote_scratch_dir,
         )
         ssh_argv = self.host.ssh_argv(allocate_tty=True) + [remote_cmd]
 

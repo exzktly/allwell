@@ -285,7 +285,7 @@ def _stub_runner(p, proc, ordering):
             remote_pidfile="/r/run-test/run.pid"),
         host=types.SimpleNamespace(
             remote_staging_dir="/r", compute_launcher="srun --time=1:00:00",
-            ssh_argv=lambda **kw: ["ssh", "h"]),
+            remote_scratch_dir="", ssh_argv=lambda **kw: ["ssh", "h"]),
         env_selector=("name", "allwell"),
         _build_remote_argv=lambda *a, **k: ["python", "pm.py"],
         _sweep_orphaned_allocation=lambda *a, **k: None,

@@ -731,6 +731,24 @@ a host (bootstrap installs the pipeline and its Python environment on a machine
 that has never run All-Well). A malformed `remotes.toml` never blocks the app —
 the run log carries a warning and the dropdown stays on `Local`.
 
+**Remote scratch dir**, under *Advanced (remote paths)* in that dialog, is worth
+setting on a cluster. It is where the pipeline keeps its per-well working files
+*on the remote* — every extracted input image and roughly six uncompressed
+intermediates per field, for as many wells as run at once. Left empty it uses
+the remote's home directory, which on an HPC system is exactly the volume with
+the small quota, and a run that overflows it fails partway through with a
+message about space. Set it to your site's real scratch: `$TMPDIR`,
+`$SLURM_TMPDIR` and `/scratch/$USER` all work as written — the value is expanded
+on the remote, not here. This is separate from **Scratch disk** in the form
+above, which governs local runs and is not used when the pipeline runs remotely.
+
+Your own machine's home volume is not used by a remote run either. Wells arrive
+into a hidden `.allwell-transit` folder inside your chosen output folder and
+move into place from there, so the only volumes a remote run needs room on are
+the ones holding your input and your output. If that output folder cannot take
+the folder — a read-only share, say — the run falls back to `~/.allwell/scratch`
+and says so in the log rather than doing it quietly.
+
 Choosing a remote reveals a **Remote options** group, hidden for a local run
 because none of it applies:
 

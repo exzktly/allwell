@@ -167,6 +167,64 @@ def test_the_blank_is_held_out_of_the_batches_and_uploaded_once(tmp_path):
         ["A01", "A02", "A03"]
 
 
+def test_a_re_run_still_uploads_the_blank_it_no_longer_needs_to_process(tmp_path):
+    """The half that is easy to miss, and did get missed.
+
+    Batched mode skips wells whose per-well CSV is already complete locally. A
+    blank processed by an earlier run has one — so on a re-run the filter drops
+    it before anything sees it as a blank, no reference is uploaded, and **no**
+    batch gets correction, including the last. Worse than the original defect,
+    which at least corrected one batch.
+
+    The blank is input to the correction, not a well whose output is wanted, so
+    the filter's verdict must not reach it. It is still not re-processed: it is
+    uploaded as a reference and left out of the final batch's link.
+    """
+    import services.remote_runner as rr
+
+    uploads: list[tuple[str, tuple[str, ...]]] = []
+
+    def fake_upload(zips, dest, **kw):
+        uploads.append((dest.rsplit("/", 1)[-1],
+                        tuple(sorted(Path(z).stem for z in zips))))
+        return (0, 0.0, 0)
+
+    proc = _FakeProc()
+    p = _batched(tmp_path, ["A01", "A02", "H12"], batch_size=1)
+    _stub_runner(p, proc, fake_upload)
+    p._pipeline_argv = ["--background", "empty_well", "--background_well", "H12"]
+
+    # An earlier run finished the blank *and* one sample well.
+    out = tmp_path / "out"
+    out.mkdir()
+    p._local_output_dir = out
+    for well in ("H12", "A02"):
+        (out / f"measurements_{well}.csv").write_text("well\n" + well + "\n")
+
+    drivers: list[str] = []
+    import unittest.mock as mock
+    with mock.patch.object(rr.subprocess, "Popen",
+                           lambda argv, **kw: drivers.append(argv[-1]) or proc):
+        import threading
+        worker = threading.Thread(target=p._run_batches, daemon=True)
+        worker.start()
+        for i in (1, 2):
+            proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+        proc.finish()
+        worker.join(timeout=20)
+
+    assert [d for d, _ in uploads if d == "bg"] == ["bg"], (
+        f"the blank was not uploaded as a reference: {uploads}")
+    # The ordinary complete well is still skipped, which is the behaviour the
+    # filter exists for — only the blank is exempt.
+    uploaded = {stem for d, stems in uploads if re.fullmatch(r"b\d+", d)
+                for stem in stems}
+    assert uploaded == {"A01"}, uploaded
+    # And it is not linked back in for processing: the user's re-run declined it.
+    assert drivers and "/bg/" not in drivers[0], (
+        "a blank the re-run skipped was linked in and reprocessed")
+
+
 def test_the_pipeline_is_told_where_the_blank_is(tmp_path):
     """A one-line omission here would put the blank on the remote and leave
     every batch still unable to find it."""

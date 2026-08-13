@@ -4616,7 +4616,8 @@ class _BatchedRemoteProcess:
 
         driver = _batch_driver_snippet(run_dir, n_batches, remote_argv,
                                        heartbeat, per_batch_s,
-                                       link_blanks_into_last=bool(blanks))
+                                       link_blanks_into_last=bool(blanks)
+                                       and getattr(self, "_link_blanks", True))
         ssh_argv = host.ssh_argv(allocate_tty=True) + [
             _compose_driver_cmd(launcher, run.remote_pidfile, driver,
                                 env_selector=self._runner.env_selector,
@@ -4770,6 +4771,15 @@ class _BatchedRemoteProcess:
             staged_total = len(all_zips)
             skipped: list[Path] = []
 
+            # Worked out before the local-completion filter below, from the
+            # unfiltered plate. The blank is needed as *input to the
+            # correction*, not for its own output, so a re-run that legitimately
+            # skips it for processing must still upload it — otherwise the
+            # filter silently leaves the whole plate uncorrected, which is the
+            # worse half of the defect this path exists to fix.
+            self._blank_stems = _empty_well_blanks(self._pipeline_argv, all_zips)
+            blank_zips = [z for z in all_zips if z.stem in self._blank_stems]
+
             # v5.4.7: local-completion filter. The remote pipeline's
             # own skip check (``output_exists_for_well``) looks at the
             # REMOTE output dir — but per-well Fetcher cleanup deletes
@@ -4877,18 +4887,24 @@ class _BatchedRemoteProcess:
             # directory beside the batches, and named to the pipeline with
             # `--background_dir`. A blank is a full well of uncompressed frames,
             # the same size as any other, so uploading it per batch is not an
-            # option; it crosses the wire exactly once and the driver links it
-            # into the final batch so it is still processed for its own output.
-            self._blank_stems = _empty_well_blanks(self._pipeline_argv, all_zips)
-            blanks = [z for z in all_zips if z.stem in self._blank_stems]
+            # option: it crosses the wire exactly once.
+            blanks = blank_zips
             sliceable = [z for z in all_zips if z.stem not in self._blank_stems]
+            # A blank the completion filter already skipped is uploaded for the
+            # correction but must not be linked back in for processing — that
+            # would reprocess a well the user's own re-run just declined.
+            needs_processing = any(z.stem in self._blank_stems for z in all_zips)
             if blanks:
                 self._log(
                     f"[remote] empty-well correction: {len(blanks)} blank "
                     f"well(s) ({', '.join(sorted(self._blank_stems))}) upload "
                     f"once, outside the batches, so every batch corrects "
-                    f"against the same reference\n"
+                    f"against the same reference"
+                    + ("" if needs_processing else
+                       " (already complete locally, so uploaded as a reference "
+                       "only)") + "\n"
                 )
+            self._link_blanks = needs_processing
 
             batches = [
                 sliceable[i:i + self._batch_size]

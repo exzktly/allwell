@@ -1598,6 +1598,18 @@ count) — plus a CDF.
   only the images it will upload, so it is roughly as fast as the upload itself.
   Whether an archive counts as unchanged is judged on its images only, so the
   `.DS_Store` and other stray files a zip picks up never cause a rebuild.
+- **You can look at the finished wells while the rest are still running** —
+  Analyze and Review are two panes of one window, and the run is a separate
+  process (or on the cluster), so switching to Review does not touch it. Open
+  the run's output folder there and you get every well that has finished so far;
+  press the refresh button in the title bar to pick up the ones that have
+  landed since. Wells that have not finished yet are simply absent. Nothing is
+  read half-written: each well's CSV and `_out.zip` appear complete or not at
+  all. On a remote run the plate becomes openable a few seconds after the job
+  starts on the cluster (not when it is still queued); until the run ends, the
+  dataset description it reads is the running job's own, which for a batched
+  run covers that batch's wells rather than the whole plate — so the timepoint
+  and FOV lists can be short until the run finishes.
 - **Remote runs: what came back, in a file you can read later** — a remote run
   writes `remote_fetch_report.txt` into the output folder listing every well the
   remote produced output for and what happened to it: `fetched`, `skipped`

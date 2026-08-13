@@ -4462,6 +4462,7 @@ class _BatchedRemoteProcess:
             output_filter=output_filter,
             log_fn=log_fn, progress_fn=progress_fn,
             delete_after_download=True,
+            poll_sidecar=True,
         )
         # ``well_count_total`` is set in ``_run_batches`` AFTER the
         # local-completion filter runs (a pre-filter set would lock
@@ -5245,10 +5246,24 @@ class _QueueLineIterator:
 # ────────────────────────────────────────────────────────────────────────────
 
 
+#: How often the mid-run sidecar poller retries, and how long it keeps trying.
+#: The remote pipeline writes ``pipeline_info.json`` before any image work, but
+#: the job it is in can sit in the scheduler's queue first, so the window has to
+#: cover a wait rather than a start-up. The poll itself is one rsync of a file
+#: measured in kilobytes.
+SIDECAR_POLL_S = 15.0
+SIDECAR_POLL_MAX_S = 12 * 3600.0
+
+
 class Fetcher:
     """Per-well output puller. Triggered by stdout markers from the
     running pipeline; runs each pull in a small thread pool so the
     upload of well N+1 doesn't block the download of well N's output.
+
+    It also pulls ``pipeline_info.json`` once, as early as the remote has one.
+    That file is not a per-well output and nothing in the stdout stream
+    announces it, so it has its own poller rather than a marker: see
+    :meth:`_sidecar_loop`.
     """
 
     def __init__(
@@ -5260,6 +5275,7 @@ class Fetcher:
         log_fn: Callable[[str], None] | None = None,
         progress_fn: Callable[[float], None] | None = None,
         delete_after_download: bool = False,
+        poll_sidecar: bool = False,
     ):
         self.host = host
         self.run = run
@@ -5271,6 +5287,18 @@ class Fetcher:
         self._pending: queue.Queue[str | None] = queue.Queue()
         self._worker = threading.Thread(target=self._loop, daemon=True)
         self._worker.start()
+        # Ends the sidecar poll on its own, without stopping the well fetches:
+        # the file lands once and the poller has nothing left to do.
+        self._sidecar_done = threading.Event()
+        self._sidecar: threading.Thread | None = None
+        # Off unless asked. The poller reaches the network on a timer, which a
+        # Fetcher built to exercise one method in a unit test must not do; both
+        # production sites turn it on, and
+        # `tests/test_remote_midrun_sidecar.py` fails if a third one forgets.
+        if poll_sidecar:
+            self._sidecar = threading.Thread(target=self._sidecar_loop,
+                                             daemon=True)
+            self._sidecar.start()
 
     def observe(self, stdout_line: str) -> None:
         """Hand a pipeline-stdout line to the Fetcher.
@@ -5303,6 +5331,7 @@ class Fetcher:
 
     def cancel(self) -> None:
         self._stop.set()
+        self._sidecar_done.set()
         self._pending.put(None)
 
     def flush_and_join(self, timeout: float = 60.0) -> None:
@@ -5317,6 +5346,10 @@ class Fetcher:
         stop event — and exit, so Stop is immediate instead of blocking on the
         remaining queue.
         """
+        # Whatever ends the run ends the sidecar poll with it: from here on
+        # `verify_and_cleanup` fetches the finished sidecar, and a poller still
+        # running would be racing it for the same path.
+        self._sidecar_done.set()
         if self._stop.is_set():
             self._pending.put(None)          # unblock the worker's queue.get()
             self._worker.join(timeout=timeout)
@@ -5987,6 +6020,129 @@ class Fetcher:
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
+    # Mid-run sidecar ────────────────────────────────────────────────────
+
+    def _sidecar_loop(self) -> None:
+        """Pull ``pipeline_info.json`` as soon as the remote has written one.
+
+        Review reads that sidecar for the filename schema, the channel tokens,
+        and ``available_timepoints`` / ``available_fovs``; without it a dataset
+        opens with no schema metadata and falls back to detecting channels from
+        CSV column names. On a remote run it used to arrive only in
+        :meth:`RemoteRunner.verify_and_cleanup`, at the very end — so a plate
+        opened mid-run had its per-well CSVs (the Fetcher brings those down as
+        each well finishes) and nothing to interpret them with.
+
+        The remote writes it *before any image work*, so it exists within
+        seconds of the pipeline starting. What it has to wait out is the
+        scheduler: the job can queue for hours before that happens. Hence a
+        poll rather than a one-shot, and a window measured in hours.
+
+        Two rules make this safe to run alongside everything else that writes
+        this file:
+
+        * **It never overwrites.** A local sidecar already present belongs to a
+          previous run of this dataset and carries blocks the remote's does not
+          — cell-gating thresholds, sample definitions, ratios, notes, the
+          run_report. It is authoritative; the poller stands down.
+        * **It stamps what it wrote as provisional.** The sidecar a running job
+          has produced describes only the input that job was given, which for a
+          batched run is one batch's split — so its ``available_timepoints`` /
+          ``available_fovs`` are a subset of the plate's, and the run_report is
+          absent entirely. ``verify_and_cleanup`` replaces the file wholesale at
+          the end of the run and the mark goes with it; a run that never got
+          there leaves the mark in place, which is the honest outcome.
+        """
+        dest = self.run.local_output_dir / "pipeline_info.json"
+        if dest.exists():
+            return
+        src = (f"{self.host.ssh_alias}:"
+               f"{self.run.remote_output_dir}/pipeline_info.json")
+        deadline = time.monotonic() + SIDECAR_POLL_MAX_S
+        while not (self._stop.is_set() or self._sidecar_done.is_set()):
+            # Wait *before* the first attempt, not only between attempts. This
+            # thread starts in the same breath as the ssh that launches the
+            # pipeline, so at t=0 the remote cannot have written the file yet
+            # and an immediate pull is a round trip that is guaranteed to miss.
+            self._sidecar_done.wait(SIDECAR_POLL_S)
+            if self._stop.is_set() or self._sidecar_done.is_set():
+                return
+            if time.monotonic() > deadline:
+                self._log(
+                    "[remote] note: pipeline_info.json never appeared on the "
+                    f"remote within {SIDECAR_POLL_MAX_S / 3600:.0f}h; Review "
+                    "will get it when the run finishes.\n")
+                return
+            if self._pull_sidecar_once(src, dest):
+                return
+            self._sidecar_done.wait(SIDECAR_POLL_S)
+
+    def _pull_sidecar_once(self, src: str, dest: Path) -> bool:
+        """One quiet attempt. True once the local sidecar exists.
+
+        Quiet on failure by design: the overwhelmingly common failure is "the
+        remote has not written it yet", which is not news, and this runs every
+        `SIDECAR_POLL_S` seconds. Only the success is worth a line, and it is
+        worth one — it is the moment the plate becomes openable mid-run.
+        """
+        if dest.exists():
+            return True
+        tmp = dest.with_name(f".{dest.name}.midrun.tmp")
+        result = _rsync_with_retry(
+            [resolve_rsync_binary(), *_rsync_ssh_transport(self.host),
+             "-a", src, to_rsync_path(tmp)],
+            log_fn=None, timeout=60, stop_event=self._stop,
+        )
+        if result.returncode != 0 or not tmp.exists():
+            with swallow("mid-run sidecar temp cleanup"):
+                tmp.unlink()
+            return False
+        try:
+            self._install_provisional_sidecar(tmp, dest)
+        except (OSError, ValueError) as exc:
+            self._log(f"[remote] note: could not install the mid-run "
+                      f"pipeline_info.json ({exc}); Review will get it when "
+                      f"the run finishes.\n")
+            with swallow("mid-run sidecar temp cleanup"):
+                tmp.unlink()
+            return False
+        self._log(
+            "[remote] ↓ pipeline_info.json (provisional — this run's input "
+            "only). The plate can be opened in Review now; wells appear as "
+            "they finish.\n")
+        return True
+
+    def _install_provisional_sidecar(self, tmp: Path, dest: Path) -> None:
+        """Stamp *tmp* as mid-run and put it at *dest*, unless *dest* appeared.
+
+        The stamp is in the artifact rather than only in the run log because
+        the artifact is what outlives the session: a run that is stopped, or
+        whose app is closed, leaves this file behind as the dataset's only
+        description of itself, and it describes less than a finished one does.
+        """
+        info = json.loads(tmp.read_text())
+        if not isinstance(info, dict):
+            raise ValueError("pipeline_info.json is not a JSON object")
+        info["provisional"] = {
+            "source": "mid_run_fetch",
+            "run_id": self.run.run_id,
+            "note": (
+                "Fetched while the run was still going, so it describes only "
+                "the input this run was handed — for a batched run, one "
+                "batch's split. available_timepoints / available_fovs may be "
+                "short of the plate and there is no run_report. The finished "
+                "sidecar replaces this file at the end of the run."
+            ),
+        }
+        from pipeline.io import _safe_atomic_text_write
+
+        if dest.exists():          # a re-run's own sidecar, or Review's saves
+            return
+        with _safe_atomic_text_write(dest) as fh:
+            json.dump(info, fh, indent=2)
+        with swallow("mid-run sidecar temp cleanup"):
+            tmp.unlink()
+
     def _rsync(self, argv: list[str]) -> bool:
         # Routed through the shared retry helper (v5.1.1) so transient
         # network glitches during the Fetcher's per-well pull don't
@@ -6564,6 +6720,7 @@ class RemoteRunner:
             output_filter=output_filter,
             log_fn=log,
             progress_fn=progress_fn,
+            poll_sidecar=True,
         )
         # Keep a handle so cancel() can stop an in-flight per-well download.
         self._fetcher = fetcher

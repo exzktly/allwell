@@ -17,6 +17,15 @@ useless, so this module leaves a trail on disk instead:
   (best-effort) a GUI message box, so a headless/pythonw launch still surfaces
   the error.
 
+**A log that recorded a crash is kept.** The boot log is truncated per launch so
+it always describes the *current* attempt — which is right for a hang, and was
+wrong for a crash: the thing a user does after a crash is restart the app, and
+that restart erased the traceback the dialog had just told them to go and read.
+A log carrying a crash marker is therefore moved aside first
+(:func:`crash_log_paths`), and only logs from launches that ended quietly are
+overwritten. The dialog also carries the traceback itself now, so the common
+case needs no file at all.
+
 Stdlib-only and fully defensive: importing or calling anything here never blocks
 or breaks startup. Import it FIRST in ``allwell.py`` — before PySide6 — so the
 riskiest imports are already bracketed.
@@ -60,13 +69,88 @@ def log_path() -> Path:
     return _LOG_PATH
 
 
+#: How many crashed boot logs are kept, newest first.
+CRASH_LOG_KEEP = 3
+
+#: Text that means the previous launch left a diagnosis in its log. The first is
+#: what :func:`install_excepthook` writes; the rest are ``faulthandler``'s, which
+#: is the only record a native abort leaves (it never reaches Python at all).
+_CRASH_MARKERS = (
+    "FATAL uncaught exception",
+    "Fatal Python error",
+    "Current thread 0x",
+    "Stack (most recent call first)",
+)
+
+#: Cap on how much of a previous log is scanned for those markers. A boot log is
+#: normally a few KB; a faulthandler dump from a process with many threads is the
+#: only thing that makes one big, and its marker is at the top of the dump.
+_SCAN_BYTES = 1 << 20
+
+
+def crash_log_paths() -> list[Path]:
+    """The kept logs from previous launches that ended in a crash, newest first.
+
+    Only the ones that exist. Named so a caller — the dialog, a bug report, a
+    support question — can point at them without knowing the rotation scheme.
+    """
+    base = log_path()
+    kept = [base.with_name(f"{base.name}.{i}") for i in range(1, CRASH_LOG_KEEP + 1)]
+    return [p for p in kept if p.exists()]
+
+
+def _looks_like_a_crash(path: Path) -> bool:
+    """Whether *path* holds a traceback or a native dump. False on any error.
+
+    False is the safe direction: it means the log is treated as an ordinary
+    launch record and overwritten, which is what every version before this did.
+    """
+    try:
+        size = path.stat().st_size
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            if size > _SCAN_BYTES:
+                # Read both ends. The excepthook's marker lands wherever the
+                # crash happened, and a faulthandler dump appends at the end.
+                head = fh.read(_SCAN_BYTES // 2)
+                fh.seek(max(0, size - _SCAN_BYTES // 2))
+                text = head + fh.read()
+            else:
+                text = fh.read()
+    except OSError:
+        return False
+    return any(marker in text for marker in _CRASH_MARKERS)
+
+
+def _rotate_if_it_recorded_a_crash() -> None:
+    """Move a crashed log aside so this launch's truncation cannot erase it.
+
+    Ordinary launches are overwritten as before, so a user who restarts the app
+    a dozen times does not push their one crash out of the ring. Never raises —
+    a rotation that fails must not stop the app from starting.
+    """
+    base = log_path()
+    try:
+        if not base.exists() or not _looks_like_a_crash(base):
+            return
+        for i in range(CRASH_LOG_KEEP, 1, -1):
+            older = base.with_name(f"{base.name}.{i}")
+            newer = base.with_name(f"{base.name}.{i - 1}")
+            if newer.exists():
+                os.replace(newer, older)
+        os.replace(base, base.with_name(f"{base.name}.1"))
+    except OSError:
+        pass
+
+
 def _handle():
     """Lazily open (truncating) the boot-log append handle, or None on failure.
 
     Truncated once per process so the log always reflects the *current* launch
-    attempt rather than growing without bound across runs."""
+    attempt rather than growing without bound across runs — except when the
+    previous launch crashed, in which case its log is kept first."""
     global _LOG_FILE
     if _LOG_FILE is None:
+        _rotate_if_it_recorded_a_crash()
         try:
             _LOG_FILE = open(log_path(), "w", encoding="utf-8", buffering=1)
         except OSError:
@@ -133,15 +217,26 @@ def install_excepthook() -> None:
         # create one here: if the failure IS Qt (missing platform plugin / DLL),
         # constructing QApplication would re-crash or hang, and a modal box with
         # no event loop / no display would block the process forever.
+        #
+        # The traceback goes IN the dialog, not just its path. This hook fires
+        # for a crash at any point in a session, not only during start-up, and
+        # the one thing the reader needs is the last few frames — sending them
+        # to find a file in a hidden directory loses that record the moment they
+        # relaunch. The path is still named, for the native dumps that only ever
+        # reach the file.
         try:
             from PySide6.QtWidgets import QApplication, QMessageBox
             app = QApplication.instance()
             if app is not None:
-                QMessageBox.critical(
-                    None,
-                    "AllWell failed to start",
-                    f"{exc_type.__name__}: {exc}\n\nDetails written to:\n{log_path()}",
+                box = QMessageBox(QMessageBox.Critical, "AllWell — unexpected error",
+                                  f"{exc_type.__name__}: {exc}")
+                box.setInformativeText(
+                    "The full traceback is under “Show Details”, and is also "
+                    f"written to:\n{log_path()}\n\nPlease include it in a bug "
+                    "report — it names the exact line that failed."
                 )
+                box.setDetailedText(text)
+                box.exec()
         except Exception:
             pass
 

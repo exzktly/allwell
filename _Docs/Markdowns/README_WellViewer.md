@@ -1598,6 +1598,14 @@ count) — plus a CDF.
   only the images it will upload, so it is roughly as fast as the upload itself.
   Whether an archive counts as unchanged is judged on its images only, so the
   `.DS_Store` and other stray files a zip picks up never cause a rebuild.
+- **If the app dies, the error dialog holds the whole traceback** — open
+  *Show Details* and copy it; that text names the exact line that failed and is
+  the single most useful thing to put in a bug report. It is also written to a
+  log file, whose path the dialog gives you: `~/.cache/allwell/allwell-boot.log`
+  on macOS and Linux, `%LOCALAPPDATA%\allwell\allwell-boot.log` on Windows. That
+  file is normally rewritten each time the app starts, **but a copy carrying a
+  crash is kept** — as `allwell-boot.log.1`, `.2`, `.3`, newest first — so
+  relaunching to try again no longer throws away the record of what went wrong.
 - **You can look at the finished wells while the rest are still running** —
   Analyze and Review are two panes of one window, and the run is a separate
   process (or on the cluster), so switching to Review does not touch it. Open

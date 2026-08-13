@@ -7277,10 +7277,28 @@ Three places to check:
 
 ### 12.8 "The app died with no Python traceback (segfault / access violation)"
 
-`allwell.main()` calls `faulthandler.enable()` at startup (guarded — skipped in a
-windowed PyInstaller build that has no `stderr`), so a hard native crash dumps a
-C/Python stack to `stderr` instead of vanishing. Run from a terminal to capture
-it. These usually come from touching a Qt widget tree mid-event-dispatch or after
+`boot_diag` is imported before PySide6 and arms `faulthandler` onto a per-launch
+**boot log** — `%LOCALAPPDATA%\allwell\allwell-boot.log` on Windows,
+`~/.cache/allwell/allwell-boot.log` elsewhere — so a hard native crash dumps a
+C/Python stack there even from a windowed build with no console, and a *hang*
+leaves its last-reached milestone as the log's final line. `install_excepthook`
+writes any uncaught Python exception to the same file.
+
+**A log that recorded a crash is kept.** The boot log is truncated per launch so
+it describes the current attempt, which is what makes it useful after a hang.
+That erased the evidence in the one case it mattered most: the thing a user does
+after a crash is relaunch, and the relaunch deleted the traceback the crash
+dialog had just told them to read. `_rotate_if_it_recorded_a_crash` therefore
+moves a log carrying a crash marker (`FATAL uncaught exception`, or one of
+`faulthandler`'s) aside to `allwell-boot.log.1` … `.CRASH_LOG_KEEP` first;
+`crash_log_paths()` lists the survivors, newest first. Logs from launches that
+ended quietly are still overwritten, so a dozen ordinary restarts cannot push
+the one crash out of the ring. The crash dialog also carries the traceback in
+its "Show Details" section, so the usual case needs no file at all — and it no
+longer says "failed to start", which was untrue for every crash that happened
+after start-up.
+
+Run from a terminal to capture the same output live. These usually come from touching a Qt widget tree mid-event-dispatch or after
 its C++ object is deleted — e.g. the Split View focus filter (§5.10) defers its
 pane switch with `QTimer.singleShot(0, …)` precisely to avoid reparenting during
 `MouseButtonPress` delivery.

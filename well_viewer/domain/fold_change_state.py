@@ -34,18 +34,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from well_viewer.domain.control_ref import ControlRef
+
 
 @dataclass(frozen=True)
 class FoldChangeState:
     """What normalization a collection pass should apply.
 
-    ``control_label`` names the control every member is divided by; an empty
-    string means the control axis has nothing to resolve. Equality and hashing
-    are the dataclass defaults, so this is safe as a dict key and in a set.
+    ``control`` is the reference every member is divided by, or ``None`` when
+    the control axis has nothing to resolve. It is a
+    :class:`~well_viewer.domain.control_ref.ControlRef` rather than a string
+    because a string cannot say whether ``A01`` means a well or a replicate set
+    of the same name. Equality and hashing are the dataclass defaults, so this
+    is safe as a dict key and in a set.
     """
 
     vs_control_on: bool = False
-    control_label: str = ""
+    control: ControlRef | None = None
     vs_t0_on: bool = False
 
     @property
@@ -58,10 +63,10 @@ class FoldChangeState:
         """True when a control denominator is both requested and named.
 
         The condition every collector guards its control lookup with. Keeping
-        it here rather than re-spelling ``vs_control_on and control_label`` at
-        each site is what stops the two halves drifting apart.
+        it here rather than re-spelling ``vs_control_on and control`` at each
+        site is what stops the two halves drifting apart.
         """
-        return bool(self.vs_control_on and self.control_label)
+        return bool(self.vs_control_on and self.control is not None)
 
 
 #: The "give me raw values" sentinel. Frozen, so sharing one module-level
@@ -91,7 +96,9 @@ def coerce_fc_state(value: Any) -> FoldChangeState:
         vs_ctrl, label, vs_t0 = value
         return FoldChangeState(
             vs_control_on=bool(vs_ctrl),
-            control_label=str(label or ""),
+            # A tuple's middle element predates the kind being recorded, so it
+            # is read as a legacy reference and resolved by the old precedence.
+            control=ControlRef.coerce(label),
             vs_t0_on=bool(vs_t0),
         )
     raise TypeError(

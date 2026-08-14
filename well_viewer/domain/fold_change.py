@@ -601,7 +601,7 @@ def fold_change_state(ctx) -> FoldChangeState:
     plot = ctx.state.plot
     return FoldChangeState(
         vs_control_on=bool(plot.fc_vs_control_on),
-        control_label=str(plot.fc_control_label or ""),
+        control=plot.fc_control,
         vs_t0_on=bool(plot.fc_vs_t0_on),
     )
 
@@ -838,9 +838,9 @@ def _member_series(
     ``well_stat(pt)``; either returns ``None`` to omit that timepoint.
     """
     # Classification is shared with the well resolver (see
-    # ``classify_control_label``). Deciding it here independently is what let a
+    # ``resolve_control``). Deciding it here independently is what let a
     # suffixed label resolve in one place and return nothing in this one.
-    kind, name = classify_control_label(ctx, label)
+    kind, name = resolve_control(ctx, label)
     if kind == "set":
         rset = _label_to_replicate_set(ctx, label)
         if rset is None:
@@ -1036,7 +1036,9 @@ def fold_change_suffix_for(ctx) -> str:
     return fold_change_suffix(
         bool(getattr(plot, "fc_vs_control_on", False)),
         bool(getattr(plot, "fc_vs_t0_on", False)),
-        str(getattr(plot, "fc_control_label", "") or ""),
+        # The plain token: the combo's disambiguation suffix is chrome and
+        # must never reach a figure title.
+        (plot.fc_control.display_name if plot.fc_control is not None else ""),
         op_ctrl=str(getattr(plot, "fc_op_ctrl", "ratio") or "ratio"),
         op_t0=str(getattr(plot, "fc_op_t0", "ratio") or "ratio"),
         baseline_label=baseline_label,
@@ -1062,10 +1064,12 @@ def resolve_control_wells(ctx, control_label: str) -> list[str]:
     form for the well entry, so picking it bypasses the rep-set
     precedence in (2). Unknown / empty selections return ``[]``.
 
-    The order above is :func:`classify_control_label`'s, and this function is
-    one of its three callers rather than a second implementation of it.
+    The order above is what :func:`resolve_control` applies to a legacy
+    reference; this function is one of its callers rather than a second
+    implementation of it. A reference that states its own kind skips the
+    precedence entirely.
     """
-    kind, name = classify_control_label(ctx, control_label)
+    kind, name = resolve_control(ctx, control_label)
     if kind == "set":
         return [w for w in _selection_wells(ctx, name)
                 if w in (ctx.state.dataset.well_paths or {})]
@@ -1093,8 +1097,44 @@ def control_pts_for_line(ctx, control_label: str, *, threshold: float,
     )
 
 
+def resolve_control(ctx, ref) -> tuple[str, str]:
+    """Decide what a control reference points at: ``("set"|"well"|"", name)``.
+
+    **The single answer to "what does this control mean".** Every path that
+    turns a control into data goes through here — the well resolver, the
+    replicate-set view and the denominator series builder — because when they
+    each decided for themselves they disagreed, and silently: one resolved a
+    label the others returned nothing for, so the Bar tab NaNed every bar while
+    the Line tab drew raw values under a fold-change axis.
+
+    A :class:`~well_viewer.domain.control_ref.ControlRef` states its own kind,
+    so there is nothing to guess: a well reference resolves against the loaded
+    wells and can never be captured by a replicate set of the same name, hidden
+    or not. Only a *legacy* reference — one read from a document written before
+    the kind was recorded, or a bare string — falls through to
+    :func:`classify_control_label`, which applies the precedence that value was
+    saved under.
+    """
+    from well_viewer.domain.control_ref import KIND_SET, KIND_WELL, ControlRef
+
+    ref = ControlRef.coerce(ref)
+    if ref is None:
+        return "", ""
+    well_paths = ctx.state.dataset.well_paths or {}
+    if ref.kind == KIND_WELL:
+        return ("well", ref.name) if ref.name in well_paths else ("", "")
+    if ref.kind == KIND_SET:
+        for s in (ctx.state.selection.selections or []):
+            if s.get("name") == ref.name:
+                if any(w in well_paths for w in (s.get("wells") or [])):
+                    return "set", ref.name
+                break
+        return "", ""
+    return classify_control_label(ctx, ref.name)
+
+
 def classify_control_label(ctx, label: str) -> tuple[str, str]:
-    """Decide what a control label names: ``("set"|"well"|"", name)``.
+    """Resolve a *legacy* control label: ``("set"|"well"|"", name)``.
 
     **The single answer to "what does this label refer to".** Every path that
     turns a control label into data goes through here — the well resolver, the
@@ -1145,9 +1185,9 @@ def _label_to_replicate_set(ctx, label: str):
     label names one (and the selection has ≥1 loaded well). Returns ``None``
     for unknown labels and well tokens — the caller falls back to per-well
     handling in the well-token case. Classification is
-    :func:`classify_control_label`; do not re-decide it here.
+    :func:`resolve_control`; do not re-decide it here.
     """
-    kind, name = classify_control_label(ctx, label)
+    kind, name = resolve_control(ctx, label)
     if kind != "set":
         return None
     wells = [w for w in (_selection_wells(ctx, name) or [])
@@ -1309,7 +1349,7 @@ def build_cell_scaling(
     """
     _fc_req = coerce_fc_state(fc_state)
     fc_vs_ctrl = _fc_req.vs_control_on
-    fc_ctrl_lbl = _fc_req.control_label
+    fc_ctrl_lbl = _fc_req.control
     fc_vs_t0 = _fc_req.vs_t0_on
 
     # t0 baseline is per-well and tp-independent — resolve once up front.

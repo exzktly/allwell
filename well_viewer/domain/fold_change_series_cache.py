@@ -62,27 +62,36 @@ class ControlSeriesCache:
 
     # ── series accessors ─────────────────────────────────────────────────────
 
-    def _memo(self, store: dict, label: str, build: Callable) -> dict:
-        key = str(label or "")
+    def _memo(self, store: dict, ref, build: Callable) -> dict:
+        """Memoise one series, keyed on the control reference itself.
+
+        The key must be the reference, not a rendering of it, and the builder
+        must receive the reference unchanged. Stringifying it here — which this
+        did while a control was a plain string — silently handed the resolver a
+        ``repr`` once references became objects, so every series came back
+        empty and every bar went NaN. ``ControlRef`` is a frozen dataclass and
+        hashes by value, so it is a key in its own right.
+        """
+        key = ref if ref is not None else ""
         if key not in store:
             self.builds += 1
-            store[key] = build(self._ctx, key, **self._kw) or {}
+            store[key] = build(self._ctx, ref, **self._kw) or {}
         return store[key]
 
-    def stats_series(self, label: str) -> dict:
-        """``{t: (mean, spread)}`` for *label*."""
+    def stats_series(self, ref) -> dict:
+        """``{t: (mean, spread)}`` for *ref*."""
         from well_viewer.domain.fold_change import member_stats_series
-        return self._memo(self._stats, label, member_stats_series)
+        return self._memo(self._stats, ref, member_stats_series)
 
-    def frac_series(self, label: str) -> dict:
-        """``{t: (frac, frac_spread)}`` for *label*."""
+    def frac_series(self, ref) -> dict:
+        """``{t: (frac, frac_spread)}`` for *ref*."""
         from well_viewer.domain.fold_change import member_frac_series
-        return self._memo(self._frac, label, member_frac_series)
+        return self._memo(self._frac, ref, member_frac_series)
 
-    def n_series(self, label: str) -> dict:
-        """``{t: (n_above, n_above_spread)}`` for *label*."""
+    def n_series(self, ref) -> dict:
+        """``{t: (n_above, n_above_spread)}`` for *ref*."""
         from well_viewer.domain.fold_change import member_n_series
-        return self._memo(self._n, label, member_n_series)
+        return self._memo(self._n, ref, member_n_series)
 
     # ── point lookups ────────────────────────────────────────────────────────
     #
@@ -90,22 +99,22 @@ class ControlSeriesCache:
     # relative-tolerance timepoint match, so a caller can swap one for the
     # other without changing which timepoint it resolves to.
 
-    def stats_at(self, label: str, t: float):
+    def stats_at(self, ref, t: float):
         """``(mean, spread)`` at *t*, or ``None`` when not sampled there."""
         from well_viewer.domain.fold_change import _series_at
-        return _series_at(self.stats_series(label), t)
+        return _series_at(self.stats_series(ref), t)
 
-    def frac_at(self, label: str, t: float):
+    def frac_at(self, ref, t: float):
         """``(frac, spread)`` at *t*, or ``None`` when not sampled there."""
         from well_viewer.domain.fold_change import _series_at
-        return _series_at(self.frac_series(label), t)
+        return _series_at(self.frac_series(ref), t)
 
-    def n_at(self, label: str, t: float):
+    def n_at(self, ref, t: float):
         """``(n_above, spread)`` at *t*, or ``None`` when not sampled there."""
         from well_viewer.domain.fold_change import _series_at
-        return _series_at(self.n_series(label), t)
+        return _series_at(self.n_series(ref), t)
 
-    def mean_at(self, label: str, t: float):
+    def mean_at(self, ref, t: float):
         """The mean alone at *t* — the ``control_mean_at_for_bar`` shape."""
-        got = self.stats_at(label, t)
+        got = self.stats_at(ref, t)
         return None if got is None else got[0]

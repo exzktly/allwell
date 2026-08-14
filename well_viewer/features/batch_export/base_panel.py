@@ -214,7 +214,9 @@ class BatchExportPanel(QWidget):
         # time so opening the panel "feels like" the active plot tab.
         _plot = ctx.state.plot
         self._fc_vs_control_on: bool = bool(_plot.fc_vs_control_on)
-        self._fc_control_label: str = str(_plot.fc_control_label or "")
+        # This panel's own control, seeded from the plot tab and never
+        # written back — a batch job must not follow the live figure.
+        self._fc_control = _plot.fc_control
         self._fc_vs_t0_on: bool = bool(_plot.fc_vs_t0_on)
 
         # Hydrate from the persisted export groups (persistence.json), else start
@@ -979,13 +981,10 @@ class BatchExportPanel(QWidget):
         row.addWidget(self._fc_baseline_combo)
 
         def _on_ctrl_change(_i: int) -> None:
-            text = self._fc_ctrl_combo.currentText()
-            if text == self._FC_NONE_LABEL or not text:
-                self._fc_vs_control_on = False
-                self._fc_control_label = ""
-            else:
-                self._fc_vs_control_on = True
-                self._fc_control_label = text
+            # Read the reference the item carries, not its text.
+            ref = self._fc_ctrl_combo.currentData()
+            self._fc_vs_control_on = ref is not None
+            self._fc_control = ref
 
         def _on_baseline_change(_i: int) -> None:
             self._fc_vs_t0_on = (
@@ -999,34 +998,43 @@ class BatchExportPanel(QWidget):
         combo = getattr(self, "_fc_ctrl_combo", None)
         if combo is None:
             return
-        members: list[str] = []
-        seen: set = set()
+        from well_viewer.domain.control_ref import ControlRef
+
+        # Replicate-set names and well tokens are tracked apart. One shared
+        # "seen" set made a solo well whose token equalled a group name look
+        # like a duplicate of it, so the well vanished from the list entirely —
+        # the same collision the plot tab's combo had.
+        entries: list[tuple[str, object]] = []
+        set_names: set = set()
+        seen_wells: set = set()
         for grp in self._groups_for_export() if hasattr(self, "_groups_for_export") else self._groups:
             for rset in grp.members:
-                if rset.name and rset.name not in seen:
-                    members.append(rset.name)
-                    seen.add(rset.name)
+                if rset.name and rset.name not in set_names:
+                    entries.append((rset.name, ControlRef.for_replicate_set(rset.name)))
+                    set_names.add(rset.name)
             for w in grp.solo_wells:
-                if w and w not in seen:
-                    members.append(w)
-                    seen.add(w)
+                if w and w not in seen_wells:
+                    ref = ControlRef.for_well(w)
+                    entries.append((ref.combo_text(disambiguate=w in set_names), ref))
+                    seen_wells.add(w)
         # Fall back to plate-loaded wells when no groups are defined yet —
         # users may want to pick a control before they've finished building
         # the group editor.
-        if not members:
+        if not entries:
             for w in sorted((self._ctx.state.dataset.well_paths or {})):
-                members.append(w)
-        saved = self._fc_control_label
+                entries.append((w, ControlRef.for_well(w)))
+        saved = self._fc_control
         blocked = combo.blockSignals(True)
         try:
             combo.clear()
-            combo.addItem(self._FC_NONE_LABEL)
-            for m in members:
-                combo.addItem(m)
-            if saved:
-                idx = combo.findText(saved)
-                if idx >= 0:
-                    combo.setCurrentIndex(idx)
+            combo.addItem(self._FC_NONE_LABEL, None)
+            for text, ref in entries:
+                combo.addItem(text, ref)
+            if saved is not None:
+                for i in range(combo.count()):
+                    if combo.itemData(i) == saved:
+                        combo.setCurrentIndex(i)
+                        break
         finally:
             combo.blockSignals(blocked)
 
@@ -1040,7 +1048,7 @@ class BatchExportPanel(QWidget):
         from well_viewer.domain.fold_change_state import FoldChangeState
         return FoldChangeState(
             vs_control_on=bool(self._fc_vs_control_on),
-            control_label=str(self._fc_control_label or ""),
+            control=self._fc_control,
             vs_t0_on=bool(self._fc_vs_t0_on),
         )
 
@@ -1645,7 +1653,7 @@ class BatchExportPanel(QWidget):
 
         _panel_fc = self._fc_state()
         fc_vs_ctrl = _panel_fc.vs_control_on
-        fc_ctrl_lbl = _panel_fc.control_label
+        fc_ctrl_lbl = _panel_fc.control
         fc_vs_t0 = _panel_fc.vs_t0_on
         fc_active = fc_vs_ctrl or fc_vs_t0
         used_stems: set = set()
@@ -1839,7 +1847,8 @@ class BatchExportPanel(QWidget):
         _thr_q = threshold_qualifier(_metric_key)
         _fov_active = bool(self._ctx.state.plot.use_fov_replicates)
         _fc_suffix = _fc.fold_change_suffix(
-            fc_vs_ctrl, fc_vs_t0, self._fc_control_label,
+            fc_vs_ctrl, fc_vs_t0,
+            self._fc_control.display_name if self._fc_control is not None else "",
         ) if fc_active else ""
         apply_ax_style(ax_mean, f"{_ch} {_metric_label}{_thr_q} \u00b1 {band_lbl}{_fc_suffix}", f"{_ch} {_metric_label}{_fc_suffix}")
         apply_ax_style(ax_frac, f"{fraction_title(_metric_key)}{_fc_suffix}", "Fraction" + _fc_suffix)

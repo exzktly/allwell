@@ -14,6 +14,8 @@ for no user benefit.
 
 from __future__ import annotations
 
+from well_viewer.domain.control_ref import ControlRef
+
 import logging
 from typing import Any
 
@@ -138,7 +140,15 @@ def snapshot(ctx) -> dict:
         "focus_timepoint": ctx.state.plot.focus_timepoint,
         "fold_change": {
             "vs_control_on": bool(ctx.state.plot.fc_vs_control_on),
-            "control_label": str(ctx.state.plot.fc_control_label or ""),
+            # The authoritative form: an object, because a string cannot say
+            # whether a name means a well or a replicate set and group names
+            # are unrestricted free text. ``control_label`` is still written
+            # beside it, carrying the plain token, so a rolled-back build finds
+            # something it understands rather than nothing.
+            "control": (ctx.state.plot.fc_control.to_storage()
+                        if ctx.state.plot.fc_control is not None else None),
+            "control_label": (ctx.state.plot.fc_control.display_name
+                              if ctx.state.plot.fc_control is not None else ""),
             "vs_t0_on": bool(ctx.state.plot.fc_vs_t0_on),
             "baseline_tp": str(getattr(ctx.state.plot, "fc_baseline_tp", "") or ""),
             "op_ctrl": str(getattr(ctx.state.plot, "fc_op_ctrl", "ratio") or "ratio"),
@@ -433,8 +443,15 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> None:
     if isinstance(fc, dict):
         if "vs_control_on" in fc:
             ctx.state.plot.fc_vs_control_on = bool(fc.get("vs_control_on"))
-        if "control_label" in fc:
-            ctx.state.plot.fc_control_label = str(fc.get("control_label") or "")
+        # ``control`` wins when present. A document written before it existed
+        # carries only ``control_label``, which is read as a legacy reference
+        # and resolved by the precedence it was saved under; the next save
+        # writes the concrete form, so the ambiguity is retired once per
+        # document rather than living forever.
+        if "control" in fc and fc.get("control") is not None:
+            ctx.state.plot.fc_control = ControlRef.from_storage(fc.get("control"))
+        elif "control_label" in fc:
+            ctx.state.plot.fc_control = ControlRef.legacy(fc.get("control_label"))
         if "vs_t0_on" in fc:
             ctx.state.plot.fc_vs_t0_on = bool(fc.get("vs_t0_on"))
         if "baseline_tp" in fc:

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import pytest
 
+from well_viewer.domain.control_ref import ControlRef
 from well_viewer.domain.fold_change_state import (
     FC_STATE_OFF,
     FoldChangeState,
@@ -27,24 +28,24 @@ from well_viewer.domain.fold_change_state import (
 # ── the hash/equality contract ───────────────────────────────────────────────
 
 def test_equal_states_hash_equal():
-    a = FoldChangeState(vs_control_on=True, control_label="DMSO", vs_t0_on=True)
-    b = FoldChangeState(vs_control_on=True, control_label="DMSO", vs_t0_on=True)
+    a = FoldChangeState(vs_control_on=True, control=ControlRef.legacy("DMSO"), vs_t0_on=True)
+    b = FoldChangeState(vs_control_on=True, control=ControlRef.legacy("DMSO"), vs_t0_on=True)
     assert a == b
     assert hash(a) == hash(b)
 
 
 def test_usable_as_a_set_member_and_dict_key():
     """The property the tuple emulation broke: ``fc in {fc}`` was False."""
-    a = FoldChangeState(vs_control_on=True, control_label="DMSO")
-    b = FoldChangeState(vs_control_on=True, control_label="DMSO")
+    a = FoldChangeState(vs_control_on=True, control=ControlRef.legacy("DMSO"))
+    b = FoldChangeState(vs_control_on=True, control=ControlRef.legacy("DMSO"))
     assert a in {b}
     assert {a: "x"}[b] == "x"
     assert len({a, b}) == 1
 
 
 def test_differing_states_are_distinct():
-    a = FoldChangeState(vs_control_on=True, control_label="DMSO")
-    b = FoldChangeState(vs_control_on=True, control_label="Vehicle")
+    a = FoldChangeState(vs_control_on=True, control=ControlRef.legacy("DMSO"))
+    b = FoldChangeState(vs_control_on=True, control=ControlRef.legacy("Vehicle"))
     assert a != b
     assert len({a, b}) == 2
 
@@ -87,21 +88,21 @@ def test_fc_state_off_is_off():
     assert FC_STATE_OFF.wants_control is False
 
 
-@pytest.mark.parametrize("vs_ctrl,label,expected", [
-    (True, "DMSO", True),
-    (True, "", False),      # axis on, nothing named — nothing to resolve
-    (False, "DMSO", False),  # a remembered label with the axis off
-    (False, "", False),
+@pytest.mark.parametrize("vs_ctrl,ref,expected", [
+    (True, ControlRef.legacy("DMSO"), True),
+    (True, None, False),      # axis on, nothing named — nothing to resolve
+    (False, ControlRef.legacy("DMSO"), False),  # a remembered control, axis off
+    (False, None, False),
 ])
-def test_wants_control(vs_ctrl, label, expected):
-    fc = FoldChangeState(vs_control_on=vs_ctrl, control_label=label)
+def test_wants_control(vs_ctrl, ref, expected):
+    fc = FoldChangeState(vs_control_on=vs_ctrl, control=ref)
     assert fc.wants_control is expected
 
 
 # ── coercion ─────────────────────────────────────────────────────────────────
 
 def test_coerce_passes_an_instance_through_unchanged():
-    fc = FoldChangeState(vs_control_on=True, control_label="DMSO")
+    fc = FoldChangeState(vs_control_on=True, control=ControlRef.legacy("DMSO"))
     assert coerce_fc_state(fc) is fc
 
 
@@ -113,12 +114,14 @@ def test_coerce_a_legacy_tuple():
     fc = coerce_fc_state((True, "DMSO", True))
     assert isinstance(fc, FoldChangeState)
     assert fc.vs_control_on is True
-    assert fc.control_label == "DMSO"
+    # A tuple predates the kind being recorded, so its middle element is a
+    # legacy reference resolved by the old precedence.
+    assert fc.control == ControlRef.legacy("DMSO")
     assert fc.vs_t0_on is True
 
 
-def test_coerce_a_legacy_tuple_normalises_a_none_label():
-    assert coerce_fc_state((True, None, False)).control_label == ""
+def test_coerce_a_legacy_tuple_reads_an_absent_control_as_none():
+    assert coerce_fc_state((True, None, False)).control is None
 
 
 def test_coerce_rejects_nonsense():

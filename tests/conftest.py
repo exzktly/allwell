@@ -192,7 +192,13 @@ class MockApp:
         # set it by mutating the returned AppState.
         st.plot.time_scale = getattr(self, "_time_scale", 1.0)
         st.plot.fc_vs_control_on = self.fc_vs_control_on
-        st.plot.fc_control_label = self.fc_control_label
+        # MockApp keeps a plain string as its input knob, mapped here to a
+        # legacy reference — resolved by the precedence a pre-ControlRef
+        # document was saved under, which is exactly what these fixtures
+        # have always meant. Tests that care about the well-vs-set
+        # distinction set ``st.plot.fc_control`` to a concrete ref.
+        from well_viewer.domain.control_ref import ControlRef
+        st.plot.fc_control = ControlRef.legacy(self.fc_control_label)
         st.plot.fc_vs_t0_on = self.fc_vs_t0_on
         st.plot.fc_baseline_tp = self.fc_baseline_tp
         # ``fc_op`` is the legacy single-op back-compat alias; setting it

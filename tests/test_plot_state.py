@@ -7,6 +7,7 @@ fold-change triple and its mutator, and the SEM / FOV toggles.
 from __future__ import annotations
 
 from well_viewer.core.plot_state import PlotState
+from well_viewer.domain.control_ref import ControlRef
 
 
 def test_defaults():
@@ -16,7 +17,7 @@ def test_defaults():
     assert ps.legend_visible == {"mean": True, "frac": True, "cdf": True, "n": True}
     assert ps.bar_order is None
     assert ps.fc_vs_control_on is False
-    assert ps.fc_control_label == ""
+    assert ps.fc_control is None
     assert ps.fc_vs_t0_on is False
 
 
@@ -29,9 +30,11 @@ def test_legend_visible_is_per_instance():
 # ── fold change ──────────────────────────────────────────────────────────────
 
 def test_fold_change_fields_round_trip():
-    ps = PlotState(fc_vs_control_on=True, fc_control_label="A01", fc_vs_t0_on=True)
-    assert (ps.fc_vs_control_on, ps.fc_control_label, ps.fc_vs_t0_on) \
-        == (True, "A01", True)
+    ps = PlotState(fc_vs_control_on=True,
+                   fc_control=ControlRef.for_well("A01"), fc_vs_t0_on=True)
+    assert ps.fc_vs_control_on is True
+    assert ps.fc_control == ControlRef.for_well("A01")
+    assert ps.fc_vs_t0_on is True
 
 
 def test_fold_change_active():
@@ -42,16 +45,18 @@ def test_fold_change_active():
 
 def test_set_fold_change_partial_update():
     ps = PlotState()
-    ps.set_fold_change(vs_control_on=True, control_label="CTRL")
+    ps.set_fold_change(vs_control_on=True, control="CTRL")
     assert ps.fc_vs_control_on is True
-    assert ps.fc_control_label == "CTRL"
+    # A bare string is read as a legacy reference — resolved by the precedence
+    # a pre-ControlRef document was saved under.
+    assert ps.fc_control == ControlRef.legacy("CTRL")
     assert ps.fc_vs_t0_on is False
 
 
 def test_set_fold_change_none_leaves_field_unchanged():
-    ps = PlotState(fc_control_label="CTRL")
+    ps = PlotState(fc_control=ControlRef.legacy("CTRL"))
     ps.set_fold_change(vs_t0_on=True)
-    assert ps.fc_control_label == "CTRL"  # untouched
+    assert ps.fc_control == ControlRef.legacy("CTRL")  # untouched
     assert ps.fc_vs_t0_on is True
 
 

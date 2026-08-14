@@ -879,3 +879,59 @@ def test_log_handler_guard_clears_the_sanctioned_shapes(tmp_path, monkeypatch, s
     good = _write(tmp_path, "good_handler.py", LOG_TIMER_CLEAN[shape])
     assert _run_scan(monkeypatch, "tests.test_log_handler_marshalling",
                      "test_no_timer_inside_a_logging_handler_emit", [good]) is None
+
+
+# ── the Events total stays out of drawing code ──────────────────────────────
+#
+# The violations are the real shapes. `compute_rep_n_above` — a near-synonym of
+# `compute_rep_n_above_stats` differing only by an absent suffix — was read by
+# the Line tab's numerator and by both fold-change denominators, so the two
+# tabs drew different numbers for the same replicate set and a set divided by
+# itself came out at 1/n. Its replacement is named for its consumer, and this
+# is what keeps that meaning from eroding.
+
+EVENTS_TOTAL_VIOLATIONS = {
+    "from-import": (
+        "from well_viewer.domain.stats_compute import compute_rep_n_above_total\n"
+        "def draw(ctx, rset, t):\n"
+        "    return compute_rep_n_above_total(ctx, rset, t)\n"
+    ),
+    # The attribute spelling, which a from-import guard alone would walk past.
+    "attribute": (
+        "from well_viewer.domain import stats_compute as sc\n"
+        "def draw(ctx, rset, t):\n"
+        "    return sc.compute_rep_n_above_total(ctx, rset, t)\n"
+    ),
+    # Aliased on import — the shape that hides the name from a text search.
+    "aliased": (
+        "from well_viewer.domain.stats_compute import (\n"
+        "    compute_rep_n_above_total as _n,\n"
+        ")\n"
+        "def draw(ctx, rset, t):\n"
+        "    return _n(ctx, rset, t)\n"
+    ),
+}
+
+EVENTS_TOTAL_CLEAN = (
+    "from well_viewer.domain.stats_compute import compute_rep_n_above_stats\n"
+    "def draw(ctx, rset, t):\n"
+    "    mean, spread = compute_rep_n_above_stats(ctx, rset, t, True)\n"
+    "    return mean, spread\n"
+)
+
+
+@pytest.mark.parametrize("shape", sorted(EVENTS_TOTAL_VIOLATIONS))
+def test_events_total_guard_catches(tmp_path, monkeypatch, shape):
+    f = _write(tmp_path, "well_viewer/features/barplot/renderer.py",
+               EVENTS_TOTAL_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_events_total_isolation",
+                    "test_the_events_total_stays_out_of_drawing_code", [f])
+    assert exc is not None, f"the {shape} spelling walked past the guard"
+
+
+def test_events_total_guard_clears_the_plotted_statistic(tmp_path, monkeypatch):
+    f = _write(tmp_path, "well_viewer/features/barplot/renderer.py",
+               EVENTS_TOTAL_CLEAN)
+    exc = _run_scan(monkeypatch, "tests.test_events_total_isolation",
+                    "test_the_events_total_stays_out_of_drawing_code", [f])
+    assert exc is None, f"the guard fired on the statistic every panel draws: {exc}"

@@ -214,7 +214,7 @@ class BarBatchExportPanel(BatchExportPanel):
         fmt = self._fmt_cb.currentText()
         _panel_fc = self._fc_state()
         fc_vs_ctrl = _panel_fc.vs_control_on
-        fc_ctrl_lbl = _panel_fc.control_label
+        fc_ctrl_lbl = _panel_fc.control
         fc_vs_t0 = _panel_fc.vs_t0_on
         fc_active = fc_vs_ctrl or fc_vs_t0
         # Layout options collected once here so each job sees a stable
@@ -426,7 +426,7 @@ class BarBatchExportPanel(BatchExportPanel):
 
         fc = _fc.coerce_fc_state(fc_state)
         fc_vs_ctrl = fc.vs_control_on
-        fc_ctrl_lbl = fc.control_label
+        fc_ctrl_lbl = fc.control
         fc_vs_t0 = fc.vs_t0_on
         fc_active = fc_vs_ctrl or fc_vs_t0
         # Normalise the (target_t, tp_str) inputs into the multi-shape the

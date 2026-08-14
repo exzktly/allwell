@@ -80,7 +80,7 @@ def collect_line_series_for_group(
     """
     fc = _fc.coerce_fc_state(fc_state)
     fc_vs_ctrl = fc.vs_control_on
-    fc_ctrl_lbl = fc.control_label
+    fc_ctrl_lbl = fc.control
     fc_vs_t0 = fc.vs_t0_on
     fc_active = fc_vs_ctrl or fc_vs_t0
 

@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from well_viewer.domain.control_ref import ControlRef
+
 
 def _default_legend() -> dict[str, bool]:
     return {"mean": True, "frac": True, "cdf": True, "n": True}
@@ -87,7 +89,10 @@ class PlotState:
     focus_timepoint: float | None = None
 
     fc_vs_control_on: bool = False
-    fc_control_label: str = ""
+    #: What the control axis divides by — a ``ControlRef``, or None.
+    #: Not a string: a string cannot say whether ``A01`` means the well
+    #: or a replicate set someone named ``A01``.
+    fc_control: object | None = None
     fc_vs_t0_on: bool = False
     # User-chosen baseline timepoint (the dataset's tp string, e.g. ``"24"``).
     # Empty when the user wants the **earliest** finite-mean point per member
@@ -134,7 +139,7 @@ class PlotState:
         return self.fc_vs_control_on or self.fc_vs_t0_on
 
     def set_fold_change(self, *, vs_control_on: bool | None = None,
-                        control_label: str | None = None,
+                        control=None, clear_control: bool = False,
                         vs_t0_on: bool | None = None,
                         baseline_tp: str | None = None,
                         op: str | None = None,
@@ -142,10 +147,9 @@ class PlotState:
                         op_t0: str | None = None,
                         order: str | None = None) -> None:
         """Apply a fold-change state change. A ``None`` argument leaves that
-        field unchanged. ``control_label`` is stored exactly as the combo
-        offered it, disambiguation suffix included: the suffix is what tells
-        ``domain.fold_change.classify_control_label`` that a token naming both
-        a well and a replicate set means the well.
+        field unchanged — except ``control``, where "unchanged" and "clear it"
+        cannot both be ``None``, so clearing is the explicit ``clear_control``
+        flag. A bare string is accepted and read as a legacy reference.
         ``baseline_tp`` is the dataset's timepoint string the user picked as
         the per-member baseline; empty means "use the earliest finite point"
         (the original behaviour). ``op_ctrl`` / ``op_t0`` are the per-axis
@@ -153,8 +157,10 @@ class PlotState:
         single-op kwarg — sets both axes for back-compat."""
         if vs_control_on is not None:
             self.fc_vs_control_on = bool(vs_control_on)
-        if control_label is not None:
-            self.fc_control_label = control_label
+        if control is not None:
+            self.fc_control = ControlRef.coerce(control)
+        elif clear_control:
+            self.fc_control = None
         if vs_t0_on is not None:
             self.fc_vs_t0_on = bool(vs_t0_on)
         if baseline_tp is not None:

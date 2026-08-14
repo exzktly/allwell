@@ -335,7 +335,7 @@ def export_plot_data(ctx) -> None:
 
     fc = _fc.fold_change_state(ctx)
     fc_vs_ctrl = fc.vs_control_on
-    fc_ctrl_lbl = fc.control_label
+    fc_ctrl_lbl = fc.control
     fc_vs_t0 = fc.vs_t0_on
     fc_control_means: dict = {}
     if fc_vs_ctrl and fc_ctrl_lbl:
@@ -425,7 +425,7 @@ def export_bar_plot_data(ctx) -> None:
     target_t_arg = target_ts[0] if len(target_ts) == 1 else target_ts
     fc = _fc.fold_change_state(ctx)
     fc_vs_ctrl = fc.vs_control_on
-    fc_ctrl_lbl = fc.control_label
+    fc_ctrl_lbl = fc.control
     fc_vs_t0 = fc.vs_t0_on
     fc_active = fc_vs_ctrl or fc_vs_t0
     # Additive CSV: raw values in the standard ``mean_*`` / ``err_*``

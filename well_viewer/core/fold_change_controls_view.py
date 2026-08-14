@@ -55,17 +55,26 @@ _ORDER_COMBO_MIN_W = 130
 _WELL_DISAMBIG_SUFFIX = " (well)"
 
 
-def _all_member_labels(ctx) -> list[str]:
-    """Replicate-set names + selected well tokens currently plotted.
+def _all_member_entries(ctx) -> list[tuple[str, object]]:
+    """``(display text, ControlRef)`` for everything the Control combo offers.
 
-    When a well token collides with a rep-set name (e.g. someone named a
-    rep-set "A01"), the well entry is suffixed with " (well)" so the
-    user can pick either unambiguously.
+    Replicate-set names first, then the plotted wells, then every remaining
+    dataset well — so a well used purely as a reference (a background well
+    subtracted from the samples, say) can be chosen even when it is not part
+    of the current plot selection.
+
+    Each entry carries its own :class:`~well_viewer.domain.control_ref.ControlRef`,
+    which is what makes the choice unambiguous. The ``" (well)"`` suffix on a
+    well whose token equals a replicate-set name is now **display only**:
+    nothing parses it back, so a set that happens to be *named* ``A01 (well)``
+    can no longer be mistaken for the well ``A01``.
 
     A8 teardown: reads typed ``ctx.state.selection`` / ``ctx.state.dataset``
     so it takes ``ctx`` and names no god-object.
     """
-    names: list[str] = []
+    from well_viewer.domain.control_ref import ControlRef
+
+    entries: list[tuple[str, object]] = []
     repset_names: set[str] = set()
     # Replicate-set names and well tokens are tracked apart. Sharing one "seen"
     # set makes a well whose token equals a replicate-set name look like a
@@ -81,13 +90,13 @@ def _all_member_labels(ctx) -> list[str]:
             continue
         wells = s.get("wells") or []
         if any(w in (ctx.state.dataset.well_paths or {}) for w in wells):
-            names.append(name)
+            entries.append((name, ControlRef.for_replicate_set(name)))
             repset_names.add(name)
     well_paths = ctx.state.dataset.well_paths or {}
     for w in sorted(ctx.state.selection.selected_wells or [], key=lambda x: x):
         if w in well_paths and w not in seen_wells:
-            entry = w + _WELL_DISAMBIG_SUFFIX if w in repset_names else w
-            names.append(entry)
+            ref = ControlRef.for_well(w)
+            entries.append((ref.combo_text(disambiguate=w in repset_names), ref))
             seen_wells.add(w)
     # Expose every remaining dataset well too, so a well used purely as a
     # reference — e.g. a negative-control or background well subtracted from the
@@ -96,10 +105,20 @@ def _all_member_labels(ctx) -> list[str]:
     # selection. Plotted members stay first; the rest follow in plate order.
     for w in sorted(well_paths.keys(), key=lambda x: x):
         if w not in seen_wells:
-            entry = w + _WELL_DISAMBIG_SUFFIX if w in repset_names else w
-            names.append(entry)
+            ref = ControlRef.for_well(w)
+            entries.append((ref.combo_text(disambiguate=w in repset_names), ref))
             seen_wells.add(w)
-    return names
+    return entries
+
+
+def _all_member_labels(ctx) -> list[str]:
+    """Just the display texts of :func:`_all_member_entries`.
+
+    Kept for the Cell Gating optimizer, which builds its own combo and hands
+    the text straight to the resolver — a legacy reference, resolved by the
+    old precedence.
+    """
+    return [text for text, _ref in _all_member_entries(ctx)]
 
 
 def _repopulate_control_combo(ctx, combo: QComboBox) -> None:
@@ -110,19 +129,21 @@ def _repopulate_control_combo(ctx, combo: QComboBox) -> None:
     candidate list is identical to what the combo already shows. The
     selected index is still re-synced from ctx state.
     """
-    members = _all_member_labels(ctx)
-    saved = ctx.state.plot.fc_control_label or ""
-    # If the saved label matches a bare well token AND there's a
-    # collision-suffixed entry in the candidate list, prefer the suffixed
-    # form so the user-visible state is unambiguous.
-    if saved and saved in members:
-        saved_display = saved
-    elif saved + _WELL_DISAMBIG_SUFFIX in members:
-        saved_display = saved + _WELL_DISAMBIG_SUFFIX
-    else:
-        saved_display = saved
+    entries = _all_member_entries(ctx)
+    saved = ctx.state.plot.fc_control
 
-    candidate_items = [_NONE_LABEL, *members]
+    candidate_items: list[tuple[str, object]] = [(_NONE_LABEL, None), *entries]
+    # A stored control that matches nothing on offer is **not** dropped back to
+    # "—". It stays selected, under a label saying so. Silently resetting the
+    # combo left the panel claiming no control while the plot went on dividing
+    # by one — the control panel misreporting live state, which is worse than
+    # an entry the user has to deal with. This happens whenever the thing the
+    # control named goes away: a replicate set deleted, a well not in this
+    # dataset.
+    if saved is not None and not any(ref == saved for _t, ref in candidate_items):
+        candidate_items.append(
+            (f"{saved.display_name} — not in current selections", saved))
+
     current_items = [combo.itemText(i) for i in range(combo.count())]
     popup_visible = False
     try:
@@ -133,12 +154,18 @@ def _repopulate_control_combo(ctx, combo: QComboBox) -> None:
 
     blocked = combo.blockSignals(True)
     try:
-        if current_items != candidate_items and not popup_visible:
+        if current_items != [t for t, _r in candidate_items] and not popup_visible:
             combo.clear()
-            for m in candidate_items:
-                combo.addItem(m)
-        idx = combo.findText(saved_display) if saved_display else 0
-        combo.setCurrentIndex(idx if idx >= 0 else 0)
+            for text, ref in candidate_items:
+                combo.addItem(text, ref)
+        # Matched on the reference, never on the text: the text carries a
+        # display-only suffix that changes as collisions come and go.
+        idx = 0
+        for i in range(combo.count()):
+            if combo.itemData(i) == saved:
+                idx = i
+                break
+        combo.setCurrentIndex(idx)
     finally:
         combo.blockSignals(blocked)
 
@@ -315,7 +342,8 @@ def _reset_bar_ylim_edits(ctx) -> None:
 def set_fold_change_state(
     ctx, *,
     vs_control_on: bool | None = None,
-    control_label: str | None = None,
+    control=None,
+    clear_control: bool = False,
     vs_t0_on: bool | None = None,
     baseline_tp: str | None = None,
     op: str | None = None,
@@ -350,7 +378,8 @@ def set_fold_change_state(
     # they always did — the ambiguity they were saved with cannot be recovered.
     ctx.state.plot.set_fold_change(
         vs_control_on=vs_control_on,
-        control_label=control_label,
+        control=control,
+        clear_control=clear_control,
         vs_t0_on=vs_t0_on,
         baseline_tp=baseline_tp,
         op=op,
@@ -448,15 +477,18 @@ def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) ->
     layout.addWidget(order_combo)
 
     def _on_ctrl_changed(_idx: int) -> None:
-        text = ctrl_combo.currentText()
-        if text == _NONE_LABEL or not text:
+        # The reference, not the text. The text is chrome and may carry a
+        # display-only suffix; parsing it back is what made a replicate set
+        # named "A01 (well)" unselectable.
+        ref = ctrl_combo.currentData()
+        if ref is None:
             set_fold_change_state(
-                ctx, vs_control_on=False, control_label="",
+                ctx, vs_control_on=False, clear_control=True,
                 initiating_scope=scope,
             )
         else:
             set_fold_change_state(
-                ctx, vs_control_on=True, control_label=text,
+                ctx, vs_control_on=True, control=ref,
                 initiating_scope=scope,
             )
 

@@ -15,6 +15,7 @@ are the control.
 from __future__ import annotations
 
 from well_viewer.domain import fold_change as _fc
+from well_viewer.domain.control_ref import ControlRef
 from well_viewer.domain.fold_change_series_cache import ControlSeriesCache
 
 from tests.conftest import MockApp, make_agg
@@ -165,7 +166,7 @@ def test_a_multi_member_redraw_builds_each_control_series_once():
         collect_bar_items(
             ctx, [float(t) for t in range(n_tps)],
             fc_state=_fc.FoldChangeState(
-                vs_control_on=True, control_label="S00", vs_t0_on=True),
+                vs_control_on=True, control=ControlRef.legacy("S00"), vs_t0_on=True),
         )
     finally:
         for name, orig in originals.items():

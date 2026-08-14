@@ -307,7 +307,10 @@ def collect_bar_items(
                 eff_ctrl_frac_spread = fc_control_frac_spread_at_t
                 eff_ctrl_n = fc_control_n_at_t
                 eff_ctrl_n_spread = fc_control_n_spread_at_t
-                if fc_vs_t0:
+                # Guarded on the control having resolved, mirroring the
+                # per-well branch below. Without it the stacking runs first and
+                # divides a None control by the baseline.
+                if fc_vs_t0 and not fc_force_nan:
                     stats = _member_baseline(
                         _fc.member_first_tp_stats_resolved, rset.name, rset_per_fov)
                     if stats is not None:
@@ -336,10 +339,11 @@ def collect_bar_items(
                             ctrl_bf = ctrl_cache.frac_at(fc_ctrl_lbl, resolved_tp_f)
                             if ctrl_bf is not None:
                                 if fc_order == "t0_first":
-                                    eff_ctrl_frac, eff_ctrl_frac_spread = _fc._apply_axis(
-                                        eff_ctrl_frac, eff_ctrl_frac_spread or 0.0,
-                                        ctrl_bf[0], ctrl_bf[1], fc_op_t0,
-                                    )
+                                    if eff_ctrl_frac is not None:
+                                        eff_ctrl_frac, eff_ctrl_frac_spread = _fc._apply_axis(
+                                            eff_ctrl_frac, eff_ctrl_frac_spread or 0.0,
+                                            ctrl_bf[0], ctrl_bf[1], fc_op_t0,
+                                        )
                                 else:
                                     t0_frac, t0_frac_spread = _fc._apply_axis(
                                         t0_frac, t0_frac_spread,
@@ -353,10 +357,11 @@ def collect_bar_items(
                             ctrl_bn = ctrl_cache.n_at(fc_ctrl_lbl, resolved_tp_n)
                             if ctrl_bn is not None:
                                 if fc_order == "t0_first":
-                                    eff_ctrl_n, eff_ctrl_n_spread = _fc._apply_axis(
-                                        eff_ctrl_n, eff_ctrl_n_spread or 0.0,
-                                        ctrl_bn[0], ctrl_bn[1], fc_op_t0,
-                                    )
+                                    if eff_ctrl_n is not None:
+                                        eff_ctrl_n, eff_ctrl_n_spread = _fc._apply_axis(
+                                            eff_ctrl_n, eff_ctrl_n_spread or 0.0,
+                                            ctrl_bn[0], ctrl_bn[1], fc_op_t0,
+                                        )
                                 else:
                                     t0_n, t0_n_spread = _fc._apply_axis(
                                         t0_n, t0_n_spread,
@@ -510,10 +515,11 @@ def collect_bar_items(
                             ctrl_bf = ctrl_cache.frac_at(fc_ctrl_lbl, resolved_tp_f)
                             if ctrl_bf is not None:
                                 if fc_order == "t0_first":
-                                    eff_ctrl_frac, eff_ctrl_frac_spread = _fc._apply_axis(
-                                        eff_ctrl_frac, eff_ctrl_frac_spread or 0.0,
-                                        ctrl_bf[0], ctrl_bf[1], fc_op_t0,
-                                    )
+                                    if eff_ctrl_frac is not None:
+                                        eff_ctrl_frac, eff_ctrl_frac_spread = _fc._apply_axis(
+                                            eff_ctrl_frac, eff_ctrl_frac_spread or 0.0,
+                                            ctrl_bf[0], ctrl_bf[1], fc_op_t0,
+                                        )
                                 else:
                                     t0_frac, t0_frac_spread = _fc._apply_axis(
                                         t0_frac, t0_frac_spread,
@@ -523,10 +529,11 @@ def collect_bar_items(
                             ctrl_bn = ctrl_cache.n_at(fc_ctrl_lbl, resolved_tp_n)
                             if ctrl_bn is not None:
                                 if fc_order == "t0_first":
-                                    eff_ctrl_n, eff_ctrl_n_spread = _fc._apply_axis(
-                                        eff_ctrl_n, eff_ctrl_n_spread or 0.0,
-                                        ctrl_bn[0], ctrl_bn[1], fc_op_t0,
-                                    )
+                                    if eff_ctrl_n is not None:
+                                        eff_ctrl_n, eff_ctrl_n_spread = _fc._apply_axis(
+                                            eff_ctrl_n, eff_ctrl_n_spread or 0.0,
+                                            ctrl_bn[0], ctrl_bn[1], fc_op_t0,
+                                        )
                                 else:
                                     t0_n, t0_n_spread = _fc._apply_axis(
                                         t0_n, t0_n_spread,

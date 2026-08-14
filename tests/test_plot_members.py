@@ -19,6 +19,7 @@ import pytest
 from well_viewer.domain.plot_members import (
     bar_member_keys,
     line_member_keys,
+    member_wells,
     member_replicate_sets,
     plotted_member_keys,
 )
@@ -159,6 +160,45 @@ def test_the_scope_name_dispatches():
 
 def test_an_unknown_scope_is_empty_rather_than_a_guess():
     assert plotted_member_keys(_ctx(selections=_TWO_SETS), "heatmap") == []
+
+
+def test_member_wells_is_keyed_exactly_like_the_key_list():
+    for selections in (_TWO_SETS, []):
+        for pool in (True, False):
+            ctx = _ctx(selections=selections, pool_reps=pool)
+            assert list(member_wells(ctx, "bar")) == bar_member_keys(ctx)
+    ctx = _ctx(selections=_TWO_SETS)
+    assert list(member_wells(ctx, "line")) == line_member_keys(ctx)
+
+
+def test_a_pooled_member_is_made_of_its_sets_wells():
+    ctx = _ctx(selections=_TWO_SETS, pool_reps=True)
+    assert member_wells(ctx, "bar") == {
+        "CTRL": ["A01", "A02"], "TREAT": ["B01", "B02"]}
+
+
+def test_an_unpooled_member_is_made_of_itself():
+    ctx = _ctx(selections=_TWO_SETS, pool_reps=False)
+    assert member_wells(ctx, "bar") == {
+        "A01": ["A01"], "A02": ["A02"], "B01": ["B01"], "B02": ["B02"]}
+
+
+def test_a_set_named_like_a_well_is_made_of_the_sets_wells_not_the_wells():
+    """The whole reason the caller supplies this rather than a resolver
+    guessing: the key ``A01`` is the set here, and its wells are B01/B02."""
+    app = MockApp(
+        per_well_pts={"A01": [make_agg(0.0, 1.0)],
+                      "B01": [make_agg(0.0, 2.0)],
+                      "B02": [make_agg(0.0, 3.0)]},
+        selections=[{"name": "A01", "wells": ["B01", "B02"], "hidden": False}],
+    )
+    ctx = app._ctx
+    ctx.state.plot.bar_pool_replicates = True
+    assert member_wells(ctx, "bar") == {"A01": ["B01", "B02"]}
+
+
+def test_member_wells_for_an_unknown_scope_is_empty():
+    assert member_wells(_ctx(selections=_TWO_SETS), "heatmap") == {}
 
 
 def test_member_replicate_sets_maps_each_well_to_its_owner():

@@ -101,6 +101,46 @@ def plotted_member_keys(ctx, scope: str) -> list[str]:
     return []
 
 
+def member_wells(ctx, scope: str) -> dict[str, list[str]]:
+    """``member key -> the loaded wells it is drawn from``, same keys as above.
+
+    A key alone cannot say what it is made of: ``A01`` is a well token in
+    per-well mode and a replicate set someone named ``A01`` in grouped mode,
+    and the two have different wells. Asking a resolver to guess reintroduces
+    exactly the ambiguity ``ControlRef`` exists to remove, so the mode decides
+    here — where it is already known — and the answer travels with the keys.
+
+    This is what lets "is this member its own control?" be decided by comparing
+    resolved wells rather than comparing names, which is the only comparison
+    that survives a well and a set sharing a token.
+    """
+    keys = plotted_member_keys(ctx, scope)
+    well_paths = ctx.state.dataset.well_paths or {}
+    by_name = {
+        r.name: r
+        for r in active_replicate_sets(ctx.state.selection.selections, well_paths)
+    }
+    grouped = _keys_are_replicate_sets(ctx, scope)
+    out: dict[str, list[str]] = {}
+    for key in keys:
+        rset = by_name.get(key) if grouped else None
+        if rset is not None:
+            out[key] = [w for w in rset.wells if w in well_paths]
+        else:
+            out[key] = [key] if key in well_paths else []
+    return out
+
+
+def _keys_are_replicate_sets(ctx, scope: str) -> bool:
+    """Whether *scope*'s keys name replicate sets rather than wells."""
+    well_paths = ctx.state.dataset.well_paths or {}
+    if not active_replicate_sets(ctx.state.selection.selections, well_paths):
+        return False
+    if scope == "bar":
+        return bool(getattr(ctx.state.plot, "bar_pool_replicates", True))
+    return scope == "line"
+
+
 def member_replicate_sets(ctx) -> dict[str, str]:
     """``well token -> the replicate set that owns it``.
 

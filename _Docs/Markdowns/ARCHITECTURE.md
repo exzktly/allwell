@@ -301,7 +301,7 @@ well_viewer/
 │   ├── batch_models.py, ratio_models.py, selections_model.py, plate_layout.py
 │   ├── fold_change.py, fold_change_scopes.py, fold_change_state.py
 │   ├── fold_change_series_cache.py, control_ref.py
-│   ├── plot_members.py, plot_order.py
+│   ├── plot_members.py, plot_order.py, fold_change_pairing.py
 │   ├── gating_state.py, sample_definitions.py, viewer_state.py, stats_compute.py
 │   ├── bar_groups.py, plot_groups.py, metric_registry.py, qc_params.py, tp_match.py
 │   ├── multivariate_compute.py       ← PCA/correlation/clustering/faceting math (Qt-free)
@@ -421,7 +421,7 @@ The codebase uses a suffix-based scheme so the file name tells the reader the ro
 - `features/export/` (service.py + style.py) and `features/review_csv/` (tab_view.py) intentionally have **no `controller.py`**: `export/` is a stateless service layer (figure-style application + save), and `review_csv/` is a thin read-only CSV inspector tab with no behaviour to orchestrate. Adding an empty controller would be ceremony, not structure.
 - `features/heatmap/models.py` is the only `models.py` in `features/` (the convention under `domain/` is `_models.py`).
 - `data/` modules use bare names (`data_loading.py`, `auto_threshold.py`, `crop_tool.py`, `image_discovery.py`, `image_resolver.py`, `metric_labels.py`, `zipfile_cache.py`) — each is one self-contained utility, no internal suffix scheme.
-- `domain/` mixes suffixed (`stats_compute`, `fold_change_scopes`, `fold_change_state`, `fold_change_series_cache`, `gating_state`) and bare (`fold_change.py`, `control_ref.py`, `plot_members.py`, `plot_order.py`, `selections_model.py`, `viewer_state.py`, `plate_layout.py`) names.
+- `domain/` mixes suffixed (`stats_compute`, `fold_change_scopes`, `fold_change_state`, `fold_change_series_cache`, `fold_change_pairing`, `gating_state`) and bare (`fold_change.py`, `control_ref.py`, `plot_members.py`, `plot_order.py`, `selections_model.py`, `viewer_state.py`, `plate_layout.py`) names.
 - `persistence/` modules are named for the `pipeline_info.json` block they persist (`bar_groups.py`, `ratios.py`, `cell_gating.py`) — no `_persistence.py` suffix.
 - `features/image_browser/image_table/view_state_io.py` and `features/heatmap/view_state_io.py` — feature-owned `view_state` (de)serialization modules (the `view_state_io` descriptor hook, §5.3); a persistence-IO role, not a view/compute one.
 - `runtime_app.py`, `viewer_context.py` — top-level singletons; no suffix.
@@ -546,7 +546,8 @@ layers:
 │              plate_layout, gating_state, sample_definitions,         │
 │              viewer_state, stats_compute, fold_change,               │
 │              fold_change_scopes, fold_change_state, control_ref,     │
-│              fold_change_series_cache, plot_members, plot_order      │
+│              fold_change_series_cache, fold_change_pairing,          │
+│              plot_members, plot_order                                │
 ├──────────────────────────────────────────────────────────────────────┤
 │  persistence/  ← JSON read/write + debounced save registry           │
 │                  (one module per on-disk file)                       │
@@ -2112,6 +2113,7 @@ Shared domain helpers (under `well_viewer/domain/`):
 | `domain/control_ref.py` | `ControlRef` — the frozen `(kind, name)` a fold-change control is addressed by, plus its storage form. The kind travels beside the name because replicate-set names are unrestricted free text, so no single string can distinguish a well from a set that shares its token (§9.5). |
 | `domain/fold_change_state.py` | `FoldChangeState` — the request object every collection path is handed, replacing the `(vs_control_on, control_label, vs_t0_on)` tuple it used to be. Read by name: it briefly emulated the tuple, which both broke the `__eq__`/`__hash__` contract and let a call site drop a newly added field by unpacking three values, and for this object a dropped field means raw values drawn under a fold-change axis. `coerce_fc_state` still accepts a tuple as input, since many tests spell a request inline; nothing hands one back. |
 | `domain/fold_change_series_cache.py` | `ControlSeriesCache` — a per-redraw memo of control denominator series, keyed on the reference. The cross-axis stacking blocks resolve a control inside the member loop and each call rebuilds the whole series, so a 24-member plate over 6 timepoints issued 882 builds on the vs-control + vs-t0 path against 75 with the memo. It captures the threshold, value column, spread mode and gates it was built with and has no invalidation, so it is a collector local and must not outlive one redraw. |
+| `domain/fold_change_pairing.py` | `build_per_member_controls` resolves a whole per-sample control mapping in one pass, returning a `PerMemberControls` of `MemberControl` records — each carrying the member's control, the wells it resolved to, and a `ControlOutcome` saying **why**. A single global control either resolves or it does not; per-sample pairing makes partial failure the normal case, and `unmapped` / `control_unresolved` / `control_no_sample` are three different things to tell a user that all produce the same empty `fold_change_mean`. The renderer's annotations, the status line, the CSV's `fold_change_outcome` column and the editor's Status column read the same record rather than re-deriving the decision. Four outcomes are decidable here; `control_no_sample` is a function of *(member, control, timepoint)* and is stamped by the collector. `self` is decided by comparing resolved wells, never names. Also holds `auto_pair` (the chunk-along-the-plot-order bulk assignment) and the summary / shortfall strings. |
 | `domain/plot_members.py` | `bar_member_keys` / `line_member_keys` / `plotted_member_keys` — which members a plot draws, in the order it draws them, plus `member_replicate_sets` for the well → owning-set map. One question with one answer, because more than one consumer asks it: `ctx.runtime.barplot.current_keys()` returns replicate-set names whenever any set is active, while `collect_bar_items` emits **well tokens** once the pool-replicates toggle is off, so anything built on the runtime's list disagrees with the plot in that case. It reaches the bar tab's drag order through a runtime attribute lookup rather than an import, which is what keeps `domain/` free of `features/`. `tests/test_plot_members.py` asserts the keys **equal** those the collectors emit; that equality is the guard, not the extraction. |
 | `domain/plot_order.py` | `apply_order` — reorder members so the ones named in a saved drag order come first, the rest in natural order. Pure list manipulation with no notion of what a member is. It lives here because the Line tab, the Scatter tab and member enumeration all need it, and while it sat in the Line controller the Scatter collector imported one feature from another to get at it. |
 | `domain/stats_compute.py` | `compute_rep_stats`, `aggregate_well`, `aggregate_group` — the pure-math layer the bar / line / scatter controllers share. `aggregate_well` / `aggregate_group` resolve an optional delegate through `ctx.runtime.aggregate.well` / `.group`, which is the hook the pure-logic test `MockApp` uses to short-circuit aggregation (its `_aggregate_well` / `_aggregate_group` methods surface through the runtime's back-compat view); the production `WellViewerApp` provides no such delegate, so the value is `None` and the DataFrame path is taken at runtime. The result cache is keyed on everything that can move a number, including `_gate_cache_sig` — the scatter-gate state for **both** layers. Thresholding is in there because gate membership defines the on-population; inclusion is in there because "Use scatter gates" replaces the per-channel intensity floors, and the `fluor_gates` already in the key do not move when that checkbox is toggled. Mode-on-with-no-gates still differs from mode-off (the floors are bypassed either way), so the flag itself is part of the signature, not just the gate geometry. It returns `None` when neither layer is active, leaving a plain threshold-mode session's keys byte-identical. |
@@ -6728,7 +6730,10 @@ between them — `"single"`, where `fc_control` divides everything, and
 `"per_member"`, where `fc_control_map` gives each plotted member its own
 reference. The mapping is keyed on the plot's own bar/trace keys, which
 `domain/plot_members.py` enumerates: replicate-set names when sets are pooled,
-well tokens otherwise. `fc_control_render` says what a member that is itself
+well tokens otherwise. `plot_members.member_wells` gives each key the wells it
+is drawn from, which is what lets "is this member its own control?" be answered
+by comparing resolved wells rather than names — the only comparison that
+survives a well and a set sharing a token. `fc_control_render` says what a member that is itself
 somebody's control draws as — `"self"` (normalized against itself, a flat 1.0
 for ratio or 0.0 for subtract) or `"hidden"`. There is deliberately no "raw"
 value, because a raw control beside ratio bars puts two units on one axis.

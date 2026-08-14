@@ -755,13 +755,23 @@ def baseline_frac_from_points(
 
 
 def _pt_n_above(pt, per_fov_spread: bool = False) -> tuple[float, float]:
-    """Extract ``(n_above, n_above_spread)`` from an AggPoint."""
+    """Extract ``(n_above, n_above_spread)`` from an AggPoint.
+
+    Index 4 is **not** always an integer count. A point built by a collector for
+    a replicate set carries the per-well *mean* there, which is fractional, and
+    its cross-well spread at index 9. Rounding the one down and returning zero
+    for the other was harmless only while nothing but ``aggregate_well`` points
+    — 9-tuples holding a true count and no index 9 — reached this function. The
+    length check is what preserves that case: a well point has no index 9, so it
+    still reports no spread, without a flag saying which kind of point it is.
+    """
     if per_fov_spread:
         n = float(pt[7]) if len(pt) >= 8 else 0.0
         ns = float(pt[8]) if len(pt) >= 9 else 0.0
         return n, ns
-    n = float(int(pt[4])) if len(pt) >= 5 else 0.0
-    return n, 0.0
+    n = float(pt[4]) if len(pt) >= 5 else 0.0
+    ns = float(pt[9]) if len(pt) >= 10 and pt[9] is not None else 0.0
+    return n, (ns if math.isfinite(ns) else 0.0)
 
 
 def baseline_n_from_points_resolved(

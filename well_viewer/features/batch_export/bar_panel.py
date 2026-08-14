@@ -505,14 +505,22 @@ class BarBatchExportPanel(BatchExportPanel):
             apply_ax_style(ax_mean,
                            f"{_ch} {_metric_label}{_thr_q} \u00b1 {band_lbl}{_fc_suffix}",
                            f"{_ch} {_metric_label}{_fc_suffix}")
-        apply_ax_style(ax_frac, fraction_title(_metric_key), "Fraction")
+        # All three panels are normalized, so all three say so. The Fraction
+        # panel has been fold-changed on this path all along and carried no
+        # suffix — a normalized number under a title that names a raw one is
+        # the same defect as a raw number under a fold-change title, and the
+        # tab and the batch line figure already suffix all three.
+        apply_ax_style(ax_frac, f"{fraction_title(_metric_key)}{_fc_suffix}",
+                       "Fraction" + _fc_suffix)
         if bool(self._ctx.state.plot.use_fov_replicates):
             apply_ax_style(
-                ax_n, events_per_fov_title(_metric_key, band_lbl), "N(above)/FOV",
+                ax_n, f"{events_per_fov_title(_metric_key, band_lbl)}{_fc_suffix}",
+                "N(above)/FOV" + _fc_suffix,
             )
         else:
             apply_ax_style(
-                ax_n, events_total_title(_metric_key), "N(above)",
+                ax_n, f"{events_total_title(_metric_key)}{_fc_suffix}",
+                "N(above)" + _fc_suffix,
             )
         ax_frac.set_ylim(-0.05, 1.05)
 

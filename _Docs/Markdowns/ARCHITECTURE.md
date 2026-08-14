@@ -6868,6 +6868,25 @@ disagrees with the one on screen. Picking a single control in the panel's combo
 switches it out of per-sample mode, because naming one control is a request for
 one control.
 
+`_app_group_scope` is what a batch group's collection runs inside, and it does
+not add the group to the app's selections — it **replaces** them with one entry
+per member. `resolve_control` finds a `kind="set"` reference by scanning exactly
+that list, so a control naming a replicate set in another batch group is not
+there, and one batch group per condition with the control as its own group is
+the normal layout. Every curve in the group drew blank. The scope therefore
+carries any replicate set the panel's control names in **hidden**: hiding a
+group takes it off the plot and does not stop it being usable as a control, so
+`active_replicate_sets` skips the carried entry and `resolve_control` finds it.
+A control naming nothing loaded is left absent rather than stood in for by an
+empty group, because that is what lets the outcome vocabulary report it.
+
+The bar path does not enter that scope at all — it enters only
+`_app_val_col_scope`, and `collect_bar_items_for_group` computes a replicate
+set's statistics from the `ReplicateSet` object rather than by name. Which is
+why its fold-change baselines come from each member's own points rather than
+through `member_first_tp_*_resolved`, and why that asymmetry is deliberate
+rather than an oversight.
+
 ### 9.6 Running the pipeline
 
 ```

@@ -1565,7 +1565,9 @@ it, so a batch run reproduces the figure on screen. The panel's own Control
 dropdown offers no per-sample entry — picking a control there switches that
 panel back to a single control. A group member the inherited mapping does not
 name is exported blank rather than falling back to one control, since the
-panel's groups are its own and need not match the plot tab's.
+panel's groups are its own and need not match the plot tab's. A control naming a replicate
+set in a *different* batch group works: one group per condition, with the
+control as its own group, is the layout batch export is for.
 
 **CSV exports — additive schema.** Both the line and bar exporters
 keep the standard `mean_<ch>_<metric>` and `err_<band>_<ch>_<metric>`

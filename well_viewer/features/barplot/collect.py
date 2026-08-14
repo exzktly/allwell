@@ -148,6 +148,66 @@ def _panel_nan_flags(axis_on, outcome, ctrl_mean, ctrl_frac, ctrl_n):
             live and ctrl_n is None)
 
 
+def _scale_group_bar(mean_pair, frac_pair, n_pair, *, pts, ctrl, outcome,
+                     fc_vs_ctrl, fc_vs_t0, baseline_tp, per_fov_spread):
+    """Fold-change one batch-group bar's three panels.
+
+    The batch counterpart of what ``_items_for_tp`` does on the tab, kept out
+    of line because it is the only part of that loop with any decisions in it.
+    *ctrl* is the ``(mean, frac, n)`` denominator triple ``ControlDenominators``
+    returned for this member; each element is a ``(value, spread)`` pair or
+    ``None``.
+
+    Every baseline comes from the member's **own** points. By name it could
+    not: the bar path does not enter ``_app_group_scope``, so a group's
+    replicate set is not in the app's selections while this runs.
+
+    Returns ``(mean, spread, frac, frac_spread, n_above, n_above_spread)``.
+    """
+    ctrl_stats, ctrl_frac, ctrl_n = ctrl
+    ctrl_mean_v, ctrl_mean_s = ctrl_stats or (None, None)
+    ctrl_frac_v, ctrl_frac_s = ctrl_frac or (None, None)
+    ctrl_n_v, ctrl_n_s = ctrl_n or (None, None)
+    nan_mean, nan_frac, nan_n = _panel_nan_flags(
+        fc_vs_ctrl, outcome, ctrl_mean_v, ctrl_frac_v, ctrl_n)
+
+    if nan_mean:
+        # The tab's collector NaNs a bar whose control did not resolve; this
+        # one used to hand ``scale_bar_value`` a None denominator, which
+        # returns the value untouched — a raw number on a fold-change axis, in
+        # an exported figure nobody is watching being drawn.
+        return (float("nan"), 0.0, float("nan"), 0.0, float("nan"), 0.0)
+    if not (fc_vs_ctrl or fc_vs_t0):
+        return (*mean_pair, *frac_pair, *n_pair)
+
+    t0_mean = t0_spread = t0_frac = t0_frac_spread = t0_n = t0_n_spread = None
+    if fc_vs_t0:
+        t0_mean, t0_spread = _fc.baseline_from_points(pts, baseline_tp=baseline_tp)
+        t0_frac, t0_frac_spread = _fc.baseline_frac_from_points(
+            pts, baseline_tp=baseline_tp)
+        _rtp, t0_n, t0_n_spread = _fc.baseline_n_from_points_resolved(
+            pts, per_fov_spread=per_fov_spread, baseline_tp=baseline_tp)
+
+    def _scaled(pair, ctrl_v, ctrl_s, t0_v, t0_s):
+        return _fc.scale_bar_value(
+            pair[0], pair[1],
+            control_mean=ctrl_v if fc_vs_ctrl else None,
+            control_spread=ctrl_s if fc_vs_ctrl else None,
+            t0_mean=t0_v if fc_vs_t0 else None,
+            t0_spread=t0_s if fc_vs_t0 else None,
+        )
+
+    m, s = _scaled(mean_pair, ctrl_mean_v, ctrl_mean_s, t0_mean, t0_spread)
+    f, fs = _scaled(frac_pair, ctrl_frac_v, ctrl_frac_s, t0_frac, t0_frac_spread)
+    n, ns = _scaled(n_pair, ctrl_n_v, ctrl_n_s, t0_n, t0_n_spread)
+    # Each panel drops on its own denominator, as on the tab.
+    if nan_frac:
+        f, fs = float("nan"), 0.0
+    if nan_n:
+        n, ns = float("nan"), 0.0
+    return (m, s, f, fs, n, ns)
+
+
 def _stack_axes(ctrl_at_baseline, *, eff, eff_spread, t0, t0_spread,
                 fc_order, fc_op_ctrl, fc_op_t0):
     """Compose the two fold-change axes onto one another's denominator.
@@ -822,54 +882,12 @@ def collect_bar_items_for_group(
                 else:
                     n_above_val = float(pt[4]) if len(pt) >= 5 else 0.0
                     n_above_err = n_above_rep_spread
-                fc_force_nan, fc_nan_frac, _fc_nan_n = _panel_nan_flags(
-                    fc_vs_ctrl, fc_outcome, fc_control_mean_at_t,
-                    fc_control_frac_at_t, ctrl_n_t)
-                if fc_force_nan:
-                    # The tab's collector NaNs a bar whose control did not
-                    # resolve; this one used to hand ``scale_bar_value`` a None
-                    # denominator, which returns the value untouched — a raw
-                    # number on a fold-change axis, in an exported figure
-                    # nobody is watching being drawn.
-                    m = float("nan"); s = 0.0
-                    f = float("nan"); frac_spread = 0.0
-                    n_above_val = float("nan"); n_above_err = 0.0
-                elif fc_vs_ctrl or fc_vs_t0:
-                    t0_mean = None
-                    t0_spread = None
-                    t0_frac = None
-                    t0_frac_spread = None
-                    if fc_vs_t0:
-                        t0_mean, t0_spread = _fc.baseline_from_points(
-                            pts, baseline_tp=fc_baseline_tp,
-                        )
-                        t0_frac, t0_frac_spread = _fc.baseline_frac_from_points(
-                            pts, baseline_tp=fc_baseline_tp,
-                        )
-                    m, s = _fc.scale_bar_value(
-                        m, s,
-                        control_mean=fc_control_mean_at_t if fc_vs_ctrl else None,
-                        control_spread=fc_control_spread_at_t if fc_vs_ctrl else None,
-                        t0_mean=t0_mean if fc_vs_t0 else None,
-                        t0_spread=t0_spread if fc_vs_t0 else None,
-                    )
-                    f, frac_spread = _fc.scale_bar_value(
-                        f, frac_spread,
-                        control_mean=fc_control_frac_at_t if fc_vs_ctrl else None,
-                        control_spread=fc_control_frac_spread_at_t if fc_vs_ctrl else None,
-                        t0_mean=t0_frac if fc_vs_t0 else None,
-                        t0_spread=t0_frac_spread if fc_vs_t0 else None,
-                    )
-                    # The Fraction panel drops on its own denominator, as on
-                    # the tab. The Events panel is **not** normalised on this
-                    # path and its axis title carries no fold-change suffix, so
-                    # it is left as the raw statistic rather than given a ratio
-                    # whose numerator (``aggregate_group``) and denominator
-                    # (``member_n_series``) are not the same statistic. An
-                    # unverified ratio on a panel that does not claim to be
-                    # normalised would be the worse of the two.
-                    if fc_nan_frac:
-                        f, frac_spread = float("nan"), 0.0
+                (m, s, f, frac_spread, n_above_val, n_above_err) = _scale_group_bar(
+                    (m, s), (f, frac_spread), (n_above_val, n_above_err),
+                    pts=pts, ctrl=(ctrl_stats_t, ctrl_frac_t, ctrl_n_t),
+                    outcome=fc_outcome, fc_vs_ctrl=fc_vs_ctrl,
+                    fc_vs_t0=fc_vs_t0, baseline_tp=fc_baseline_tp,
+                    per_fov_spread=per_fov_spread)
                 has_mean = not math.isnan(m)
                 has_frac = has_mean and not math.isnan(f)
             else:

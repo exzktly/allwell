@@ -682,7 +682,19 @@ class BatchExportPanel(QWidget):
         ``active_replicate_sets`` treats any non-hidden selection with a loaded
         well as a rep-set, and a one-well rep-set's stat equals the raw well's,
         so solos are numerically unchanged while pooled members get the tab's
-        mean-of-per-well-means."""
+        mean-of-per-well-means.
+
+        The swap **replaces** the list rather than adding to it, which is what
+        made a fold-change control naming a replicate set in a *different* batch
+        group resolve to nothing: ``resolve_control`` finds a ``kind="set"``
+        reference by scanning exactly this list, and one batch group per
+        condition with the control as its own group is the normal layout. Every
+        curve in the group then drew blank. So any replicate set the panel's
+        control names is carried in **hidden**, which is not a trick — hiding a
+        group takes it off the plot and does not stop it being usable as a
+        control: ``active_replicate_sets`` skips hidden entries, so nothing
+        extra is drawn, and ``resolve_control`` does not, so the control
+        resolves."""
         from well_viewer.domain.selections_model import make_selection
         sel = self._ctx.state.selection
         saved = (sel.selections, sel.current_selection_id, sel.selected_wells)
@@ -701,12 +713,50 @@ class BatchExportPanel(QWidget):
                                    used_names=used_names, used_ids=used_ids,
                                    fallback_color_idx=len(grp.members) + j)
                 )
+            selections.extend(self._control_selections(
+                saved[0], used_names, used_ids, len(selections)))
             sel.selections = selections
             sel.current_selection_id = None
             sel.selected_wells = set(grp.solo_wells)
             yield
         finally:
             (sel.selections, sel.current_selection_id, sel.selected_wells) = saved
+
+    def _control_selections(self, live_selections, used_names: set,
+                            used_ids: set, color_idx: int) -> list:
+        """Hidden entries for the replicate sets this panel's control names.
+
+        Carried into the group scope so a control belonging to another batch
+        group still resolves. Hidden, so nothing new is drawn. Their wells come
+        from the pre-swap list: the group being scoped does not contain them,
+        which is the whole problem.
+        """
+        from well_viewer.domain.control_ref import KIND_SET
+        from well_viewer.domain.selections_model import make_selection
+
+        wanted: list[str] = []
+        for ref in [self._fc_control, *(self._fc_control_map or {}).values()]:
+            if ref is None or getattr(ref, "kind", "") != KIND_SET:
+                continue
+            if ref.name not in wanted:
+                wanted.append(ref.name)
+        by_name = {s.get("name"): s for s in (live_selections or [])}
+        out: list = []
+        for i, name in enumerate(wanted):
+            if name in used_names:
+                continue    # the group already carries it
+            src = by_name.get(name)
+            if src is None:
+                # Names nothing that is loaded. Left alone so the outcome
+                # vocabulary reports it as unresolved rather than a synthetic
+                # empty group standing in for one the user deleted.
+                continue
+            out.append(make_selection(
+                name=name, wells=list(src.get("wells") or []), source="rep_set",
+                hidden=True, used_names=used_names, used_ids=used_ids,
+                fallback_color_idx=color_idx + i,
+            ))
+        return out
 
     def _export_val_col_for(self, channel_attr: str) -> str:
         """Resolve the (Channel, Property) pair to a CSV column / ratio key.

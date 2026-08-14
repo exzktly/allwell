@@ -96,10 +96,25 @@ class MockApp:
                          use_sem: bool, val_col: str, fluor_gates,
                          per_fov_spread: bool = False,
                          tp_col: str = "timepoint_hours") -> list[tuple]:
-        # Pool-of-cells approximation: average means across wells per tp.
-        # The mock doesn't keep per-cell granularity, so this collapses to
-        # "mean of per-well means" — that's fine for fold_change tests
-        # since they don't compare the two stats numerically.
+        # One well is the well, exactly as ``stats_compute.aggregate_group``
+        # does it. This is not a convenience: rebuilding the point discarded
+        # the per-well ``n_above`` / ``frac`` / per-FOV fields a test had set
+        # and handed back ``make_agg`` defaults, so a solo well's numerator
+        # came from the mock while its fold-change denominator — which reads
+        # ``aggregate_well`` — came from the fixture. The two disagreed, and
+        # that invented disagreement is why the batch bar Events panel was
+        # left un-normalized. A fixture that diverges from production
+        # manufactures bugs as readily as one that is too clean hides them.
+        valid = [w for w in wells if w in self.per_well_pts]
+        if len(valid) == 1:
+            return self._aggregate_well(
+                valid[0], threshold=threshold, use_sem=use_sem,
+                val_col=val_col, fluor_gates=fluor_gates,
+                per_fov_spread=per_fov_spread, tp_col=tp_col)
+        # Pool-of-cells approximation for the multi-well case: average means
+        # across wells per tp. The mock keeps no per-cell granularity, so this
+        # collapses to "mean of per-well means" and the other AggPoint fields
+        # carry ``make_agg`` defaults — do not assert on them.
         by_t: dict[float, list[float]] = {}
         for w in wells:
             for pt in self.per_well_pts.get(w, []):

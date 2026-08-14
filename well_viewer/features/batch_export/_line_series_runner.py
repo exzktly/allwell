@@ -14,11 +14,16 @@ fold-change source functions per member, so batch curves match the tab:
   statistic the on-tab per-well branch uses, so a solo well's error band is
   the same whether exported on-tab or in batch (byte-for-byte parity).
 
-Fold-change is resolved once for the whole group via the same
-``member_stats_series`` helpers the tab uses and threaded through
-``normalize_pts`` — identical error propagation. The caller runs this inside
-``BatchExportPanel._app_group_scope`` so a replicate-set control label resolves
-against the group's selections.
+Fold-change is resolved per member through the same
+``fold_change_pairing.ControlDenominators`` the tab uses and threaded through
+``normalize_member_pts`` — identical error propagation.
+
+The caller runs this inside ``BatchExportPanel._app_group_scope``, and that is
+what a replicate-set control has to survive rather than what makes it work: the
+scope **replaces** the app's selections with this group's members, so a control
+naming a set in another batch group — the normal layout, one group per
+condition — used to resolve to nothing and blank every curve. The scope carries
+those sets in hidden for that reason; see its own docstring.
 """
 
 from __future__ import annotations

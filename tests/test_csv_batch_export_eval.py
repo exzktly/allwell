@@ -169,10 +169,14 @@ def test_ontab_line_single_wells(ctx, tmp_path):
         "24.0000": "151.500000",
         "48.0000": "199.500000",
     }
-    # column schema
+    # Column schema. ``n_above_threshold`` is the integer count; the
+    # ``n_above_replicate_mean`` beside it is the value the Events panel draws,
+    # which for a replicate set is the per-well mean and therefore fractional.
+    # For a single well like this one the two agree.
     assert set(a01[0]) == {
         "well", "well_name", "time_h", "mean_gfp_mean_intensity",
-        "sem_gfp_mean_intensity", "n_above_threshold", "fraction_above",
+        "sem_gfp_mean_intensity", "n_above_threshold",
+        "n_above_replicate_mean", "fraction_above",
         "n_total", "threshold", "metric",
     }
 
@@ -521,7 +525,13 @@ def test_cross_path_solo_well_bytes_match(ctx, tmp_path):
     metric_cols = [
         "timepoint_h", "mean_gfp_mean_intensity", "err_SEM_gfp_mean_intensity",
         "fraction_above", "err_frac_SEM", "n_above_threshold",
-        "err_n_above_SEM", "threshold", "metric",
+        "err_n_above_SEM",
+        # The Events columns are in the parity list on purpose: the batch bar
+        # path truncated the drawn mean to an int and dropped its spread, so
+        # on-tab and batch disagreed here without any test noticing.
+        "n_above_replicate_mean", "err_n_above_replicate_SEM",
+        "n_above_replicate_unit",
+        "threshold", "metric",
     ]
     for col in metric_cols:
         assert ontab_a01[col] == batch_a01[col], (

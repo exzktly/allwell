@@ -377,6 +377,51 @@ def compute_rep_per_fov_stats(
     return result
 
 
+def compute_rep_n_above_total(ctx, rset: ReplicateSet, target_t: float) -> int:
+    """Cross-well **total** events-above-threshold for *rset* at *target_t*.
+
+    A reporting figure, not a plotted one. The CSV's ``n_above_threshold``
+    column has always carried the number of cells that exceeded the threshold
+    across the whole replicate set, and downstream scripts read it as an
+    integer count.
+
+    **Never use this as a plotted value.** Every panel draws
+    :func:`compute_rep_n_above_stats` — the mean of the per-well counts with
+    the cross-well spread — because that is the statistic the Mean and
+    Fraction panels beside it use, and because a set normalised against itself
+    has to land on 1.0 rather than 1/n. Reaching for a total because its name
+    was shorter is exactly how the two plotting tabs came to disagree; the
+    guard in ``tests/test_events_total_isolation.py`` fails if a renderer or a
+    collector of plotted values imports this.
+    """
+    threshold = on_cutoff_for_column(
+        ctx, ctx.state.channel.active_val_col,
+        channel=ctx.state.channel.active_channel)
+    fluor_gates = get_all_fluor_gates(ctx)
+    cache_key = ("rep_n_above_total", rset.name, tuple(rset.wells), target_t,
+                 threshold, ctx.state.channel.active_val_col,
+                 tuple(sorted(fluor_gates.items())), _gate_cache_sig(ctx))
+    if cache_key in ctx.state.stats_cache.cache:
+        return ctx.state.stats_cache.cache[cache_key]
+
+    total = 0
+    for lbl in rset.wells:
+        if lbl not in ctx.state.dataset.well_paths:
+            continue
+        pts = aggregate_well(
+            ctx,
+            lbl, threshold=threshold, use_sem=False,
+            val_col=ctx.state.channel.active_val_col,
+            fluor_gates=fluor_gates,
+        )
+        matched = [pt for pt in pts if tp_close(pt[0], target_t)]
+        if matched:
+            # AggPoint index 4 = n_above; index 5 = n_total.
+            total += int(matched[0][4])
+    ctx.state.stats_cache.cache[cache_key] = total
+    return total
+
+
 def compute_rep_n_above_stats(ctx, rset: ReplicateSet, target_t: float,
                               use_sem: bool) -> tuple:
     """Mean and SD/SEM of events-above-threshold *across the set's wells*.

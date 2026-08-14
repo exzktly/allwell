@@ -30,6 +30,7 @@ from well_viewer.domain.stats_compute import (
     aggregate_group,
     aggregate_well,
     compute_rep_n_above_stats,
+    compute_rep_n_above_total,
     compute_rep_per_fov_stats,
     compute_rep_stats,
     replicate_unit,
@@ -60,11 +61,15 @@ class BarItem:
         threshold panel. Fold-changed independently of ``mean`` when
         fold-change is on (FC denominator is the control / baseline's
         frac — frac and mean are independent quantities).
-      * ``n_above`` / ``n_above_spread`` — events-above-threshold panel.
-        ``n_above_spread > 0`` indicates per-FOV spread mode; in that
-        case ``n_above`` is the per-FOV mean (float), otherwise it's
-        the total count (kept as float for storage uniformity, cast on
-        display).
+      * ``n_above`` / ``n_above_spread`` — events-above-threshold panel,
+        the value actually drawn. For a replicate set it is the mean of
+        the per-well counts with the cross-well spread; per-FOV mode
+        substitutes the per-FOV mean and spread. For a single well it is
+        that well's own count.
+      * ``n_above_total`` — the cross-well **total**, for the CSV's
+        ``n_above_threshold`` column, which has always been an integer
+        count. ``None`` for a row that is not a replicate aggregation,
+        never ``0`` — nothing computed is not the same as counted zero.
     """
     key: str
     display: str
@@ -77,6 +82,7 @@ class BarItem:
     has_frac: bool
     n_above: float
     n_above_spread: float
+    n_above_total: int | None = None
     # Multi-timepoint plotting. ``tp`` is the timepoint this item was
     # computed at; ``group_key`` is the cluster identity the renderer uses
     # to lay out adjacent x positions (well/rset name in "Group by well"
@@ -293,6 +299,9 @@ def collect_bar_items(
                     # rather than a spread-less total.
                     n_above_val, n_above_err = compute_rep_n_above_stats(
                         ctx, rset, target_t, use_sem)
+                # The CSV's integer column keeps meaning the cross-well total,
+                # which is a different number from the mean drawn above.
+                n_above_total = compute_rep_n_above_total(ctx, rset, target_t)
                 t0_mean = None
                 t0_spread = None
                 t0_frac = None
@@ -400,6 +409,7 @@ def collect_bar_items(
                     mean=gm, spread=g_err_m, has_mean=has_mean,
                     frac=gf, frac_spread=g_err_f, has_frac=has_frac,
                     n_above=n_above_val, n_above_spread=n_above_err,
+                    n_above_total=n_above_total,
                     tp=float(target_t), group_key=gk,
                 ))
             return out
@@ -563,6 +573,7 @@ def collect_bar_items(
                     mean=m, spread=s, has_mean=has_mean,
                     frac=f, frac_spread=fs, has_frac=has_frac,
                     n_above=n_above_val, n_above_spread=n_above_err,
+                    n_above_total=n_above_total,
                     tp=float(target_t), group_key=gk,
                 ))
             else:
@@ -693,16 +704,23 @@ def collect_bar_items_for_group(
                     all_tps.add(t)
             out_pts: list = []
             for t in sorted(all_tps):
+                # Index 4 is the value the Events panel draws; index 9 is its
+                # replicate spread and index 10 the cross-well total the CSV's
+                # integer column keeps. The spread used to be dropped on the
+                # floor here and the total conflated with index 4, so the batch
+                # bar truncated a 7.5 mean to 7 and drew no error bar.
+                ntotal = compute_rep_n_above_total(ctx, rset, t)
                 if rset_per_fov:
                     gm, gerr, gf, gfe, gnpf_m, gnpf_s = compute_rep_per_fov_stats(
                         ctx, rset, t, threshold, use_sem)
-                    nval = 0
+                    nval, nspread = 0, 0.0
                 else:
                     gm, gerr, gf, _ = compute_rep_stats(ctx, rset, t, threshold, use_sem)
                     # Per-well mean, matching the Bar tab's own numerator.
-                    nval, _ = compute_rep_n_above_stats(ctx, rset, t, use_sem)
+                    nval, nspread = compute_rep_n_above_stats(ctx, rset, t, use_sem)
                     gfe, gnpf_m, gnpf_s = 0.0, 0.0, 0.0
-                out_pts.append((t, gm, gerr, gf, nval, 0, gfe, gnpf_m, gnpf_s))
+                out_pts.append(
+                    (t, gm, gerr, gf, nval, 0, gfe, gnpf_m, gnpf_s, nspread, ntotal))
             return out_pts
         return aggregate_group(ctx,
             wells, threshold=threshold, use_sem=use_sem,
@@ -767,16 +785,21 @@ def collect_bar_items_for_group(
             if matched:
                 pt = matched[0]
                 m, s, f = pt[1], pt[2], pt[3]
-                n_above_total = int(pt[4]) if len(pt) >= 5 else 0
+                # A solo well's point carries its own count at index 4 and no
+                # index 10; a replicate set's carries the drawn mean there and
+                # the total at index 10.
+                n_above_total = (int(pt[10]) if len(pt) >= 11
+                                 else (int(pt[4]) if len(pt) >= 5 else 0))
                 frac_spread = float(pt[6]) if len(pt) >= 7 else 0.0
                 n_above_pf_mean = float(pt[7]) if len(pt) >= 8 else 0.0
                 n_above_pf_spread = float(pt[8]) if len(pt) >= 9 else 0.0
+                n_above_rep_spread = float(pt[9]) if len(pt) >= 10 else 0.0
                 if per_fov_spread:
                     n_above_val = n_above_pf_mean
                     n_above_err = n_above_pf_spread
                 else:
-                    n_above_val = float(n_above_total)
-                    n_above_err = 0.0
+                    n_above_val = float(pt[4]) if len(pt) >= 5 else 0.0
+                    n_above_err = n_above_rep_spread
                 if fc_vs_ctrl or fc_vs_t0:
                     t0_mean = None
                     t0_spread = None
@@ -826,6 +849,7 @@ def collect_bar_items_for_group(
                 mean=m, spread=s, has_mean=has_mean,
                 frac=f, frac_spread=frac_spread, has_frac=has_frac,
                 n_above=n_above_val, n_above_spread=n_above_err,
+                    n_above_total=n_above_total,
                 tp=float(target_t), group_key=gk,
             ))
         return out

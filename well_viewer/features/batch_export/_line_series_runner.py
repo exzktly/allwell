@@ -36,6 +36,7 @@ _aggpoint_to_linepoint = _lazy("well_viewer.features.lineplot.controller", "_agg
 from well_viewer.domain.stats_compute import (
     aggregate_well,
     compute_rep_n_above_stats,
+    compute_rep_n_above_total,
     compute_rep_per_fov_stats,
     compute_rep_stats,
     replicate_unit,
@@ -153,6 +154,11 @@ def collect_line_series_for_group(
                 all_tps.add(t)
         raw_pts: list = []
         for t in sorted(all_tps):
+            # Index 10 carries the cross-well total for the CSV's integer
+            # column; index 4 stays the drawn per-well mean and index 9 its
+            # spread, which used to be discarded here.
+            n_above_total = compute_rep_n_above_total(ctx, rset, t)
+            n_above_spread = 0.0
             if rset_per_fov:
                 gm, gerr, gf, gfe, gnpf_m, gnpf_s = compute_rep_per_fov_stats(
                     ctx, rset, t, threshold, use_sem)
@@ -160,10 +166,14 @@ def collect_line_series_for_group(
             else:
                 gm, gerr, gf, _ = compute_rep_stats(ctx, rset, t, threshold, use_sem)
                 # Per-well mean, matching the Line tab's own numerator.
-                n_above_val, _ = compute_rep_n_above_stats(ctx, rset, t, use_sem)
+                n_above_val, n_above_spread = compute_rep_n_above_stats(
+                    ctx, rset, t, use_sem)
                 gfe, gnpf_m, gnpf_s = 0.0, 0.0, 0.0
             if not (isinstance(gm, float) and math.isnan(gm)):
-                raw_pts.append((t, gm, gerr, gf, n_above_val, 0, gfe, gnpf_m, gnpf_s))
+                raw_pts.append((
+                    t, gm, gerr, gf, n_above_val, 0, gfe, gnpf_m, gnpf_s,
+                    n_above_spread, n_above_total,
+                ))
         points = [_aggpoint_to_linepoint(pt) for pt in _normalize(raw_pts)]
         series_out.append(LineSeries(
             key=rset.name, display=_replicate_display_label(ctx, rset),

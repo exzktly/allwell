@@ -101,6 +101,7 @@ def line_metric_fieldnames(ch: str, metric: str, band_lbl: str) -> list:
         f"mean_{ch}_{metric}",
         f"{band_lbl.lower()}_{ch}_{metric}",
         "n_above_threshold",
+        "n_above_replicate_mean",
         "fraction_above",
         "n_total",
         "threshold",
@@ -117,17 +118,40 @@ def line_metric_row(pt, *, ch: str, metric: str, threshold: float, band_lbl: str
     otherwise; *band_lbl* must be set accordingly so the column header
     reflects what the data represents.
     """
-    t, mean, spread, frac, n_above, n_total, *_ = pt
+    t, mean, spread, frac, n_above, n_total, *_rest = pt
+    # Index 10, when present, is the cross-well total for a replicate set; the
+    # drawn value at index 4 is that set's per-well mean and is fractional, so
+    # the integer column cannot be derived from it.
+    n_above_total = _rest[4] if len(_rest) > 4 and _rest[4] is not None else None
     return {
         "time_h": f"{t:.4f}",
         f"mean_{ch}_{metric}": f"{mean:.6f}" if not math.isnan(mean) else "",
         f"{band_lbl.lower()}_{ch}_{metric}": f"{spread:.6f}",
-        "n_above_threshold": n_above,
+        "n_above_threshold": (
+            int(n_above_total) if n_above_total is not None else n_above),
+        "n_above_replicate_mean": (
+            f"{float(n_above):.6f}"
+            if isinstance(n_above, (int, float)) and math.isfinite(float(n_above))
+            else ""),
         "fraction_above": f"{frac:.6f}" if not math.isnan(frac) else "",
         "n_total": n_total,
         "threshold": f"{threshold:.4f}",
         "metric": metric,
     }
+
+
+def _replicate_unit_for(item, *, per_fov: bool) -> str:
+    """What ``n_above_replicate_mean`` averages over, for the CSV.
+
+    ``fov`` when Aggregate-FOVs is on, ``well`` for a pooled replicate set,
+    and empty for a single well — where the drawn value is the count itself
+    and there is nothing to average. Recorded because no other column in the
+    row says whether the FOV toggle was on, which would leave the mean and its
+    spread ambiguous.
+    """
+    if item.n_above_total is None:
+        return ""
+    return "fov" if per_fov else "well"
 
 
 def bar_metric_fieldnames(ch: str, metric: str, band_lbl: str) -> list:
@@ -140,6 +164,9 @@ def bar_metric_fieldnames(ch: str, metric: str, band_lbl: str) -> list:
         f"err_frac_{band_lbl}",
         "n_above_threshold",
         f"err_n_above_{band_lbl}",
+        "n_above_replicate_mean",
+        f"err_n_above_replicate_{band_lbl}",
+        "n_above_replicate_unit",
         "threshold",
         "metric",
     ]
@@ -159,6 +186,8 @@ def bar_metric_row(
     tp_str: str,
     threshold: float,
     band_lbl: str,
+    n_above_total: int | None = None,
+    replicate_unit: str = "",
 ) -> dict:
     """Metric-column dict for one bar-plot bar at a single timepoint.
 
@@ -166,6 +195,18 @@ def bar_metric_row(
     (per-tab) and direct ``_aggregate_*`` calls (batch). ``n_above_spread > 0``
     indicates per-FOV spread is in use, which switches *n_above* to a float
     and exposes the per-FOV error column.
+
+    Two quantities are reported for Events, because they are different
+    numbers. ``n_above_threshold`` is the integer count this column has always
+    carried — for a replicate set, the total across its wells, supplied as
+    *n_above_total*. ``n_above_replicate_mean`` is what the panel actually
+    draws: the mean of the per-well counts, with its cross-well spread. A
+    two-well set holding 7 and 8 events reports 15 and 7.5 respectively, and
+    neither is a rounding of the other.
+
+    *replicate_unit* names what the mean is over (``well`` / ``fov``, empty for
+    a single well). Without it the two new columns are ambiguous, since nothing
+    else in the row records whether Aggregate-FOVs was on.
     """
     # An undefined spread is written as an EMPTY cell, never as 0.000000 — the
     # zero reads as "the replicates agreed exactly" when in fact there was only
@@ -183,10 +224,19 @@ def bar_metric_row(
         f"err_frac_{band_lbl}": _num(frac_spread) if has and not math.isnan(frac) else "",
         "n_above_threshold": (
             "" if not has or not math.isfinite(float(n_above))
+            # A replicate set reports its cross-well total, which is what this
+            # column has always meant. Falling back to ``n_above`` keeps the
+            # per-well rows — where the drawn value IS the count — unchanged,
+            # and preserves the historic float form under per-FOV spread.
+            else f"{int(n_above_total)}" if n_above_total is not None
             else f"{n_above:.6f}" if math.isfinite(float(n_above_spread)) and n_above_spread > 0
             else f"{int(n_above)}"
         ),
         f"err_n_above_{band_lbl}": f"{n_above_spread:.6f}" if n_above_spread > 0 else "",
+        "n_above_replicate_mean": _num(n_above) if has else "",
+        f"err_n_above_replicate_{band_lbl}": (
+            _num(n_above_spread) if n_above_spread > 0 else ""),
+        "n_above_replicate_unit": replicate_unit,
         "threshold": f"{threshold:.4f}",
         "metric": metric,
     }
@@ -422,6 +472,9 @@ def export_bar_plot_data(ctx) -> None:
             has=item.has_mean,
             n_above=float(item.n_above),
             n_above_spread=float(item.n_above_spread),
+            n_above_total=item.n_above_total,
+            replicate_unit=_replicate_unit_for(
+                item, per_fov=bool(ctx.state.plot.use_fov_replicates)),
             ch=ch, metric=metric, tp_str=item_tp_str,
             threshold=threshold, band_lbl=band_lbl,
         ))

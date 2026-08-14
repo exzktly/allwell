@@ -10,6 +10,7 @@ from well_viewer.domain.stats_compute import compute_rep_stats
 from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.domain.stats_compute import compute_rep_n_above_stats
+from well_viewer.domain.stats_compute import compute_rep_n_above_total
 from well_viewer.domain.stats_compute import replicate_unit
 from well_viewer.domain.selections_model import (
     active_replicate_sets, color_for_replicate_set, color_for_well,
@@ -60,18 +61,32 @@ class LinePoint:
     frac_spread: float = 0.0
     n_above_pf_mean: float = 0.0
     n_above_pf_spread: float = 0.0
+    #: Cross-well total events, for the CSV's integer ``n_above_threshold``
+    #: column. ``n_above`` is the plotted value and is a per-well mean for a
+    #: replicate set, so the two differ and the CSV needs its own. ``None``
+    #: for a non-aggregated row, never ``0``.
+    n_above_total: int | None = None
+    n_above_spread: float = 0.0
     has_mean: bool = True
     has_frac: bool = True
 
     def as_aggpoint(self) -> tuple:
-        """Convert back to the AggPoint tuple shape ``line_metric_row`` expects."""
-        n_above = (int(self.n_above)
+        """Convert back to the AggPoint tuple shape ``line_metric_row`` expects.
+
+        Index 4 carries the **drawn** value, which for a replicate set is a
+        per-well mean and therefore fractional. It used to be rounded down with
+        ``int()`` here, which is how a curve at 7.5 reached the batch line CSV
+        as 7; the CSV's integer count now comes from index 10 instead.
+        """
+        n_above = (float(self.n_above)
                    if isinstance(self.n_above, (int, float)) and math.isfinite(self.n_above)
                    else float("nan"))
         return (
             self.t, self.mean, self.spread, self.frac,
             n_above, int(self.n_total), self.frac_spread,
             self.n_above_pf_mean, self.n_above_pf_spread,
+            self.n_above_spread,
+            self.n_above_total,
         )
 
 
@@ -171,10 +186,13 @@ def _aggpoint_to_linepoint(pt) -> LinePoint:
     frac_spread = float(pt[6]) if len(pt) > 6 else 0.0
     n_above_pf_mean = float(pt[7]) if len(pt) > 7 else 0.0
     n_above_pf_spread = float(pt[8]) if len(pt) > 8 else 0.0
+    n_above_spread = float(pt[9]) if len(pt) > 9 else 0.0
+    n_above_total = int(pt[10]) if (len(pt) > 10 and pt[10] is not None) else None
     return LinePoint(
         t=t, mean=mean, spread=spread, frac=frac,
         n_above=n_above, n_total=n_total, frac_spread=frac_spread,
         n_above_pf_mean=n_above_pf_mean, n_above_pf_spread=n_above_pf_spread,
+        n_above_spread=n_above_spread, n_above_total=n_above_total,
         has_mean=not (isinstance(mean, float) and math.isnan(mean)),
         has_frac=not (isinstance(frac, float) and math.isnan(frac)),
     )
@@ -297,6 +315,10 @@ def collect_line_series(
                     ))
             _raw_pts: list = []
             for t in sorted(all_tps):
+                # Index 10 is the cross-well total the CSV's integer column
+                # keeps; index 4 stays the drawn value.
+                _n_above_total = compute_rep_n_above_total(ctx, rset, t)
+                _n_above_spread = 0.0
                 if rset_per_fov:
                     gm, gerr, gf, gfe, gnpf_m, gnpf_s = compute_rep_per_fov_stats(ctx,
                         rset, t, threshold, use_sem,
@@ -311,14 +333,21 @@ def collect_line_series(
                     # total across the set's wells, so the two tabs plotted
                     # different numbers for the same replicate set: 5 per well
                     # on a bar against 10 on a curve.
-                    _n_above_val, _ = compute_rep_n_above_stats(ctx, rset, t, use_sem)
+                    _n_above_val, _n_above_spread = compute_rep_n_above_stats(
+                        ctx, rset, t, use_sem)
                     gfe, gnpf_m, gnpf_s = 0.0, 0.0, 0.0
                 if not (isinstance(gm, float) and math.isnan(gm)):
                     # AggPoint idx 6 = frac_spread (per-FOV fraction error), 7/8 =
                     # per-FOV n-above mean/spread. These were previously dropped,
                     # so the "fraction above threshold" subplot had no FOV error
                     # to draw and fell back to shading the area under the line.
-                    _raw_pts.append((t, gm, gerr, gf, _n_above_val if not rset_per_fov else 0, 0, gfe, gnpf_m, gnpf_s))
+                    _raw_pts.append((
+                        t, gm, gerr, gf,
+                        _n_above_val if not rset_per_fov else 0, 0,
+                        gfe, gnpf_m, gnpf_s,
+                        _n_above_spread if not rset_per_fov else 0.0,
+                        _n_above_total,
+                    ))
             if _raw_pts and (fc_control_stats or fc_vs_t0):
                 _raw_pts = _fc.normalize_pts(
                     _raw_pts,

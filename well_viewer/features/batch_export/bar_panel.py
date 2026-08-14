@@ -269,6 +269,7 @@ class BarBatchExportPanel(BatchExportPanel):
                 from well_viewer.features.export.service import (
                     _well_labels_map, attach_bar_fold_change_columns,
                     bar_fold_change_fieldnames,
+                    _replicate_unit_for,
                     bar_metric_fieldnames, bar_metric_row,
                     well_name_for, well_names_joined,
                 )
@@ -356,6 +357,8 @@ class BarBatchExportPanel(BatchExportPanel):
                         has=item.has_mean,
                         n_above=float(item.n_above),
                         n_above_spread=float(item.n_above_spread),
+                        n_above_total=item.n_above_total,
+                        replicate_unit=_replicate_unit_for(item, per_fov=_per_fov_spread),
                         ch=_ch, metric=_metric, tp_str=item_tp_str,
                         threshold=threshold, band_lbl=band_lbl,
                     ))

@@ -37,7 +37,7 @@ from well_viewer.domain.fold_change_scopes import (
     get_scope as _get_scope,
     registered_scopes,
 )
-from well_viewer.core.safe import swallowed
+from well_viewer.core.safe import swallow, swallowed
 from well_viewer.domain.control_ref import KIND_LEGACY
 import theme
 
@@ -663,7 +663,7 @@ def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) ->
 
     def _open_editor() -> None:
         from well_viewer.core.fold_change_pairing_view import open_pairing_editor
-        with swallowed():
+        with swallow("open the per-sample control editor"):
             open_pairing_editor(ctx, scope)
 
     def _on_render_changed(_idx: int) -> None:

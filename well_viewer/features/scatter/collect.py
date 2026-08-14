@@ -31,6 +31,7 @@ from well_viewer.domain.selections_model import (
     active_replicate_sets, color_for_replicate_set, color_for_well,
     replicate_display_label, well_display_label,
 )
+from well_viewer.domain.plot_order import apply_order
 from well_viewer.domain.viewer_state import parse_rc
 
 _logger = logging.getLogger(__name__)
@@ -241,8 +242,7 @@ def collect_scatter_data(
         ctx.state.selection.selections, ctx.state.dataset.well_paths)
 
     if active_rsets:
-        from well_viewer.features.lineplot.controller import _apply_order as _apply_rs_order
-        active_rsets = _apply_rs_order(
+        active_rsets = apply_order(
             active_rsets,
             list(ctx.state.plot.line_order_rsets or []),
             key=lambda r: getattr(r, "name", ""),
@@ -287,12 +287,11 @@ def collect_scatter_data(
                     'label': replicate_display_label(ctx, rset),
                 }
     else:
-        from well_viewer.features.lineplot.controller import _apply_order as _apply_well_order
         selected_wells = sorted(
             (lbl for lbl in ctx.state.selection.selected_wells if lbl in ctx.state.dataset.well_paths),
             key=lambda lbl: parse_rc(lbl),
         )
-        selected_wells = _apply_well_order(
+        selected_wells = apply_order(
             selected_wells,
             list(ctx.state.plot.line_order_wells or []),
             key=lambda x: x,

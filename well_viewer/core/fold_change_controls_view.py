@@ -67,34 +67,38 @@ def _all_member_labels(ctx) -> list[str]:
     """
     names: list[str] = []
     repset_names: set[str] = set()
-    seen: set[str] = set()
+    # Replicate-set names and well tokens are tracked apart. Sharing one "seen"
+    # set makes a well whose token equals a replicate-set name look like a
+    # duplicate of it, so the well is dropped from the list entirely and the
+    # suffixed entry below is never reached — which is the case the suffix
+    # exists for.
+    seen_wells: set[str] = set()
     for s in (ctx.state.selection.selections or []):
         if s.get("hidden"):
             continue
         name = s.get("name") or ""
-        if not name or name in seen:
+        if not name or name in repset_names:
             continue
         wells = s.get("wells") or []
         if any(w in (ctx.state.dataset.well_paths or {}) for w in wells):
             names.append(name)
-            seen.add(name)
             repset_names.add(name)
     well_paths = ctx.state.dataset.well_paths or {}
     for w in sorted(ctx.state.selection.selected_wells or [], key=lambda x: x):
-        if w in well_paths and w not in seen:
+        if w in well_paths and w not in seen_wells:
             entry = w + _WELL_DISAMBIG_SUFFIX if w in repset_names else w
             names.append(entry)
-            seen.add(w)
+            seen_wells.add(w)
     # Expose every remaining dataset well too, so a well used purely as a
     # reference — e.g. a negative-control or background well subtracted from the
     # samples via "vs Control → Subtract" at each matching timepoint — can be
     # chosen as the Control even when it isn't part of the current plot
     # selection. Plotted members stay first; the rest follow in plate order.
     for w in sorted(well_paths.keys(), key=lambda x: x):
-        if w not in seen:
+        if w not in seen_wells:
             entry = w + _WELL_DISAMBIG_SUFFIX if w in repset_names else w
             names.append(entry)
-            seen.add(w)
+            seen_wells.add(w)
     return names
 
 
@@ -330,11 +334,20 @@ def set_fold_change_state(
     into the widget that just wrote the value (it already holds it,
     and re-applying could yank an open popup).
     """
-    # Normalize the control label here (UI layer): drop the disambiguation
-    # suffix so the stored state stays a bare well token / rep-set name —
-    # PlotState.set_fold_change keeps the UI artefact out of the state object.
-    if control_label is not None and control_label.endswith(_WELL_DISAMBIG_SUFFIX):
-        control_label = control_label[: -len(_WELL_DISAMBIG_SUFFIX)]
+    # The control label is stored exactly as the combo offered it, suffix and
+    # all. Stripping the " (well)" suffix here — which this did — defeated the
+    # only thing the suffix is for: ``resolve_control_wells`` tries the
+    # suffixed spelling against the well tokens *before* it tries a replicate
+    # set name, and that ordering is what lets a user address the well `A01`
+    # when a replicate set is also called `A01`. With the suffix stripped that
+    # branch is unreachable, so picking the well entry silently normalised
+    # against the replicate set instead.
+    #
+    # Nothing downstream needs the bare form: ``resolve_control_wells``
+    # understands both spellings, and ``_repopulate_control_combo`` already
+    # matches the saved value against the suffixed candidate first. Documents
+    # written before this keep their bare labels and keep resolving the way
+    # they always did — the ambiguity they were saved with cannot be recovered.
     ctx.state.plot.set_fold_change(
         vs_control_on=vs_control_on,
         control_label=control_label,

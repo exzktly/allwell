@@ -138,23 +138,7 @@ def snapshot(ctx) -> dict:
         "line_order_rsets": [str(x) for x in (ctx.state.plot.line_order_rsets or [])],
         "line_order_wells": [str(x) for x in (ctx.state.plot.line_order_wells or [])],
         "focus_timepoint": ctx.state.plot.focus_timepoint,
-        "fold_change": {
-            "vs_control_on": bool(ctx.state.plot.fc_vs_control_on),
-            # The authoritative form: an object, because a string cannot say
-            # whether a name means a well or a replicate set and group names
-            # are unrestricted free text. ``control_label`` is still written
-            # beside it, carrying the plain token, so a rolled-back build finds
-            # something it understands rather than nothing.
-            "control": (ctx.state.plot.fc_control.to_storage()
-                        if ctx.state.plot.fc_control is not None else None),
-            "control_label": (ctx.state.plot.fc_control.display_name
-                              if ctx.state.plot.fc_control is not None else ""),
-            "vs_t0_on": bool(ctx.state.plot.fc_vs_t0_on),
-            "baseline_tp": str(getattr(ctx.state.plot, "fc_baseline_tp", "") or ""),
-            "op_ctrl": str(getattr(ctx.state.plot, "fc_op_ctrl", "ratio") or "ratio"),
-            "op_t0": str(getattr(ctx.state.plot, "fc_op_t0", "ratio") or "ratio"),
-            "order": str(getattr(ctx.state.plot, "fc_order", "ctrl_first") or "ctrl_first"),
-        },
+        "fold_change": _snapshot_fold_change(ctx),
         "export_style_prefs": _nondefault_export_prefs(ctx),
         "export_axis_prefs": {
             str(k): dict(v)
@@ -162,6 +146,45 @@ def snapshot(ctx) -> dict:
             if isinstance(v, dict)
         },
         "tabs": _snapshot_tabs(ctx),
+    }
+
+
+def _snapshot_fold_change(ctx) -> dict:
+    """The ``fold_change`` block: everything the normalization needs to come back.
+
+    Split out of :func:`snapshot` so it can be exercised against a bare
+    ``PlotState`` — the whole-app snapshot needs a built window, which put the
+    only round-trip test for this block in the slow lane and left the per-member
+    mapping with no fast-lane coverage at all.
+    """
+    plot = ctx.state.plot
+    return {
+        "vs_control_on": bool(plot.fc_vs_control_on),
+        # The authoritative form: an object, because a string cannot say
+        # whether a name means a well or a replicate set and group names
+        # are unrestricted free text. ``control_label`` is still written
+        # beside it, carrying the plain token, so a rolled-back build finds
+        # something it understands rather than nothing.
+        "control": (plot.fc_control.to_storage()
+                    if plot.fc_control is not None else None),
+        "control_label": (plot.fc_control.display_name
+                          if plot.fc_control is not None else ""),
+        "control_mode": str(plot.fc_control_mode or "single"),
+        "control_render": str(plot.fc_control_render or "self"),
+        # Written verbatim and unfiltered — entries for members that are not
+        # currently plotted are exactly what the retain-don't-drop contract is
+        # about, and filtering here would quietly enforce the opposite across a
+        # save/load cycle.
+        "control_map": {
+            str(k): v.to_storage()
+            for k, v in (plot.fc_control_map or {}).items()
+            if v is not None
+        },
+        "vs_t0_on": bool(plot.fc_vs_t0_on),
+        "baseline_tp": str(getattr(plot, "fc_baseline_tp", "") or ""),
+        "op_ctrl": str(getattr(plot, "fc_op_ctrl", "ratio") or "ratio"),
+        "op_t0": str(getattr(plot, "fc_op_t0", "ratio") or "ratio"),
+        "order": str(getattr(plot, "fc_order", "ctrl_first") or "ctrl_first"),
     }
 
 
@@ -325,6 +348,64 @@ def _snapshot_scatter(ctx) -> dict:
 
 # ── restore ────────────────────────────────────────────────────────────────
 
+def _apply_fold_change(ctx, fc) -> None:
+    """Read the ``fold_change`` block back onto ``ctx.state.plot``.
+
+    Every key is guarded, and every enum falls back to its default rather than
+    raising: this runs inside :func:`restore`, where an exception costs the
+    user the *entire* view state, so a block written by a different build
+    should cost its own settings and nothing else.
+    """
+    if not isinstance(fc, dict) or not fc:
+        return
+    plot = ctx.state.plot
+    if "vs_control_on" in fc:
+        plot.fc_vs_control_on = bool(fc.get("vs_control_on"))
+    # ``control`` wins when present. A document written before it existed
+    # carries only ``control_label``, which is read as a legacy reference and
+    # resolved by the precedence it was saved under; the next save writes the
+    # concrete form, so the ambiguity is retired once per document rather than
+    # living forever.
+    if "control" in fc and fc.get("control") is not None:
+        plot.fc_control = ControlRef.from_storage(fc.get("control"))
+    elif "control_label" in fc:
+        plot.fc_control = ControlRef.legacy(fc.get("control_label"))
+    if "control_mode" in fc:
+        mode_in = str(fc.get("control_mode") or "single")
+        plot.fc_control_mode = (
+            mode_in if mode_in in ("single", "per_member") else "single")
+    if "control_render" in fc:
+        render_in = str(fc.get("control_render") or "self")
+        plot.fc_control_render = (
+            render_in if render_in in ("self", "hidden") else "self")
+    raw_map = fc.get("control_map")
+    if isinstance(raw_map, dict):
+        restored: dict = {}
+        for key, raw_ref in raw_map.items():
+            ref = ControlRef.from_storage(raw_ref)
+            if ref is not None:
+                restored[str(key)] = ref
+        plot.fc_control_map = restored
+    if "vs_t0_on" in fc:
+        plot.fc_vs_t0_on = bool(fc.get("vs_t0_on"))
+    if "baseline_tp" in fc:
+        plot.fc_baseline_tp = str(fc.get("baseline_tp") or "")
+    # Legacy single-op snapshot: fan out to both axes via the ``fc_op``
+    # property setter so old saved state restores cleanly.
+    if "op" in fc:
+        op_in = str(fc.get("op") or "ratio")
+        plot.fc_op = op_in if op_in in ("ratio", "subtract") else "ratio"
+    if "op_ctrl" in fc:
+        op_in = str(fc.get("op_ctrl") or "ratio")
+        plot.fc_op_ctrl = op_in if op_in in ("ratio", "subtract") else "ratio"
+    if "op_t0" in fc:
+        op_in = str(fc.get("op_t0") or "ratio")
+        plot.fc_op_t0 = op_in if op_in in ("ratio", "subtract") else "ratio"
+    if "order" in fc:
+        o_in = str(fc.get("order") or "ctrl_first")
+        plot.fc_order = o_in if o_in in ("ctrl_first", "t0_first") else "ctrl_first"
+
+
 def restore(ctx, state: dict, *, prefer_home: bool = False) -> None:
     """Apply *state* in two phases — cross-cutting now, per-tab deferred.
 
@@ -439,47 +520,16 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> None:
         except Exception:
             swallowed()  # was: pass (silent except)
 
-    fc = state.get("fold_change") or {}
-    if isinstance(fc, dict):
-        if "vs_control_on" in fc:
-            ctx.state.plot.fc_vs_control_on = bool(fc.get("vs_control_on"))
-        # ``control`` wins when present. A document written before it existed
-        # carries only ``control_label``, which is read as a legacy reference
-        # and resolved by the precedence it was saved under; the next save
-        # writes the concrete form, so the ambiguity is retired once per
-        # document rather than living forever.
-        if "control" in fc and fc.get("control") is not None:
-            ctx.state.plot.fc_control = ControlRef.from_storage(fc.get("control"))
-        elif "control_label" in fc:
-            ctx.state.plot.fc_control = ControlRef.legacy(fc.get("control_label"))
-        if "vs_t0_on" in fc:
-            ctx.state.plot.fc_vs_t0_on = bool(fc.get("vs_t0_on"))
-        if "baseline_tp" in fc:
-            ctx.state.plot.fc_baseline_tp = str(fc.get("baseline_tp") or "")
-        # Legacy single-op snapshot: fan out to both axes via the
-        # ``fc_op`` property setter so old saved state restores cleanly.
-        if "op" in fc:
-            op_in = str(fc.get("op") or "ratio")
-            ctx.state.plot.fc_op = op_in if op_in in ("ratio", "subtract") else "ratio"
-        if "op_ctrl" in fc:
-            op_in = str(fc.get("op_ctrl") or "ratio")
-            ctx.state.plot.fc_op_ctrl = op_in if op_in in ("ratio", "subtract") else "ratio"
-        if "op_t0" in fc:
-            op_in = str(fc.get("op_t0") or "ratio")
-            ctx.state.plot.fc_op_t0 = op_in if op_in in ("ratio", "subtract") else "ratio"
-        if "order" in fc:
-            o_in = str(fc.get("order") or "ctrl_first")
-            ctx.state.plot.fc_order = o_in if o_in in ("ctrl_first", "t0_first") else "ctrl_first"
-        # Push the restored state into any fold-change combos that have
-        # already been built. Lazily-built tabs (Bar) will pick the
-        # values up on first install via _repopulate_*_combo, which both
-        # read app._fc_* directly — so this only matters for combos that
-        # exist at restore time (e.g. Line, built eagerly).
-        try:
-            from well_viewer.core.fold_change_controls_view import _sync_widgets_to_state
-            _sync_widgets_to_state(ctx)
-        except Exception:
-            _logger.debug("view_state: fold-change combo sync failed", exc_info=True)
+    _apply_fold_change(ctx, state.get("fold_change") or {})
+    # Push the restored state into any fold-change combos that have already
+    # been built. Lazily-built tabs (Bar) pick the values up on first install
+    # via _repopulate_*_combo, which read the state directly — so this only
+    # matters for combos that exist at restore time (e.g. Line, built eagerly).
+    try:
+        from well_viewer.core.fold_change_controls_view import _sync_widgets_to_state
+        _sync_widgets_to_state(ctx)
+    except Exception:
+        _logger.debug("view_state: fold-change combo sync failed", exc_info=True)
 
     prefs_in = state.get("export_style_prefs")
     if isinstance(prefs_in, dict):

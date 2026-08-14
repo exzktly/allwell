@@ -6723,6 +6723,36 @@ CSV cell and the saved-plot summary; the suffix never appears in a figure or an
 export. The sample-definitions UI does not prevent the name collision at input
 time, and does not need to.
 
+**One control, or one control per member.** `PlotState.fc_control_mode` selects
+between them — `"single"`, where `fc_control` divides everything, and
+`"per_member"`, where `fc_control_map` gives each plotted member its own
+reference. The mapping is keyed on the plot's own bar/trace keys, which
+`domain/plot_members.py` enumerates: replicate-set names when sets are pooled,
+well tokens otherwise. `fc_control_render` says what a member that is itself
+somebody's control draws as — `"self"` (normalized against itself, a flat 1.0
+for ratio or 0.0 for subtract) or `"hidden"`. There is deliberately no "raw"
+value, because a raw control beside ratio bars puts two units on one axis.
+
+The mode is a field rather than an absence. Emptying the control to signal
+per-member mode would not fail visibly: the bar collector's force-NaN guard
+ANDs with the control, so an empty one makes it falsy, and `_apply_axis`
+returns its input unchanged when the denominator is `None` — the plot would
+draw **raw** values under a fold-change axis label.
+
+Entries whose member is not currently plotted are retained, not dropped: the
+save writes the map unfiltered, `sel_delete` leaves a deleted group's pairings
+alone, and the editor collects them under an unused section. A user who hides a
+group, or switches pooling off and back on, gets their pairing back instead of
+an emptied table. A **rename** is the one thing that rewrites them, and it has
+to rewrite all three places a group is named — the map's keys, the map's
+values, and `fc_control` — which is what `PlotState.rename_member` does, hooked
+into `core/selection_controller.sel_rename`. Rewriting only the keys leaves the
+map pointing at a control that no longer exists while the group sits on the
+plate under its new name. Because a legacy reference means "whatever this name
+resolves to right now", `sel_rename` resolves every reference to a concrete
+kind through `fold_change.concrete_control` *before* the group changes name —
+afterwards there is no way left to ask.
+
 ### 9.6 Running the pipeline
 
 ```

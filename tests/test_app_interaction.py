@@ -16,6 +16,7 @@ from tests.fixtures.mini_dataset import WELLS
 from well_viewer.features.barplot.controller import collect_bar_items
 from well_viewer.core.channel_state_controller import set_active_channel
 from well_viewer.core.fold_change_controls_view import set_fold_change_state
+from well_viewer.domain.control_ref import ControlRef
 
 pytestmark = pytest.mark.qt
 
@@ -71,9 +72,10 @@ def test_set_fold_change_vs_t0_makes_baseline_one(loaded_app):
 
 def test_set_fold_change_vs_control_self_is_one(loaded_app):
     loaded_app._set_selected_wells(set(WELLS))
-    set_fold_change_state(loaded_app._ctx, vs_control_on=True, control_label="A01")
+    set_fold_change_state(loaded_app._ctx, vs_control_on=True,
+                          control=ControlRef.for_well("A01"))
     assert loaded_app._app_state.plot.fc_vs_control_on is True
-    assert loaded_app._app_state.plot.fc_control_label == "A01"
+    assert loaded_app._app_state.plot.fc_control == ControlRef.for_well("A01")
     _, items, _ = collect_bar_items(loaded_app._ctx, 24.0)
     by_key = {it.key: it.mean for it in items}
     assert math.isclose(by_key["A01"], 1.0, rel_tol=1e-9)

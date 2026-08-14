@@ -1142,10 +1142,34 @@ def sel_rename(ctx, sid, name) -> None:
     if s is None:
         return
     new = _uq(name, {x.get("name") for x in ctx.state.selection.selections if x.get("id") != sid})
-    if new == s.get("name"):
+    old = s.get("name")
+    if new == old:
         return
+    # Resolve any still-ambiguous control *before* the group changes name: a
+    # legacy reference means "whatever `A01` resolves to today", and after the
+    # rename today's answer is gone. Then follow the rename through the
+    # fold-change state, which names groups in three places.
+    _upgrade_fc_controls(ctx)
     s["name"] = new
+    ctx.state.plot.rename_member(old, new)
     ctx.coordinator.rebuild_all()
+
+
+def _upgrade_fc_controls(ctx) -> None:
+    """Give every fold-change control reference a concrete kind."""
+    from well_viewer.domain.fold_change import concrete_control
+    plot = ctx.state.plot
+    if plot.fc_control is not None:
+        plot.fc_control = concrete_control(ctx, plot.fc_control)
+    if plot.fc_control_map:
+        upgraded = {}
+        for key, ref in plot.fc_control_map.items():
+            concrete = concrete_control(ctx, ref)
+            # A reference that resolves to nothing is kept as it was, not
+            # dropped: the retain-don't-drop contract is what lets a user
+            # reload the missing group and get their pairing back.
+            upgraded[key] = concrete if concrete is not None else ref
+        plot.fc_control_map = upgraded
 
 
 

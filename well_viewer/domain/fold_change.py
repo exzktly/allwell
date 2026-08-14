@@ -1133,6 +1133,28 @@ def resolve_control(ctx, ref) -> tuple[str, str]:
     return classify_control_label(ctx, ref.name)
 
 
+def concrete_control(ctx, ref):
+    """Return *ref* with its kind decided, or ``None`` if it names nothing.
+
+    A legacy reference carries a name whose meaning depends on what is loaded
+    right now, which is fine while it is only being read and wrong the moment
+    something wants to *rewrite* it — renaming a replicate set has to know
+    whether the control was that set or a well that happens to share its
+    token, and after the rename there is no longer any way to find out. So a
+    rename resolves first and rewrites second.
+
+    A reference that already states its kind is returned unchanged even when it
+    currently resolves to nothing: an unloaded well is still that well.
+    """
+    from well_viewer.domain.control_ref import KIND_LEGACY, ControlRef
+
+    ref = ControlRef.coerce(ref)
+    if ref is None or ref.kind != KIND_LEGACY:
+        return ref
+    kind, name = classify_control_label(ctx, ref.name)
+    return ControlRef(kind, name) if kind else None
+
+
 def classify_control_label(ctx, label: str) -> tuple[str, str]:
     """Resolve a *legacy* control label: ``("set"|"well"|"", name)``.
 

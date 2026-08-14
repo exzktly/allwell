@@ -6789,6 +6789,36 @@ the bars would normalize per member while the distribution drawn on top of them
 divided by something else — two denominators on one axis, looking like one
 measurement.
 
+**Saying which control, everywhere it matters.** The axis title branches on how
+many *distinct* controls are actually in use, counted by resolved wells:
+`control_axis_phrase` names one exactly as the single-control title does (which
+matters, because `Set all to DMSO` is mathematically identical to
+single-control mode), names both when there are two, and collapses to
+`vs own control` at three. A mapping where nothing resolved reads
+`vs own control (none resolved)` rather than claiming a normalization that did
+not happen. `fold_change_suffix_for(ctx, scope)` needs the scope because the
+member list differs per tab; a caller that names none gets the single-control
+reading rather than a guess.
+
+The CSV columns are per row: `fold_change_control` carries **that row's**
+control, and `fold_change_outcome` carries its `ControlOutcome`. Without the
+outcome column a reader with an empty `fold_change_mean` cannot tell a
+normalization that failed from one that was never asked for, and the three
+failures are three different things. Both writers — `export/service.py` for the
+on-tab CSV and `batch_export/base_panel.py` for the batch one — carry the same
+shape, because a plate exported one way and a tab exported the other have to be
+comparable.
+
+The bar tab's status line is derived from the collected items' outcomes rather
+than from the set of timepoints where a control was missing. Under one global
+control that set was the whole story; per-sample controls make partial failure
+ordinary, and "control missing at t=24" says nothing about which control, how
+many bars it cost, or a bar whose control was never assigned at all.
+`saved_plots/collect._fc_summary` reads the persisted block with no `ctx`, so
+it counts the entries the document carries and names them when there are few —
+it must not claim a resolution count it has no way to compute, since the
+document may have been saved against a dataset this session never loaded.
+
 ### 9.6 Running the pipeline
 
 ```

@@ -1007,10 +1007,41 @@ def _fc_op_word(op: str) -> str:
     return "subtraction" if str(op) == "subtract" else "ratio"
 
 
+def control_axis_phrase(control_label: str = "", *, controls=None) -> str:
+    """What the control half of an axis title says: ``vs …``.
+
+    Three branches on how many distinct controls are actually in use, because
+    an axis label that names one denominator while the bars under it used four
+    is a figure that misstates itself:
+
+    * one — today's string, unchanged. That matters beyond nostalgia:
+      ``Set all to DMSO`` is mathematically identical to single-control mode,
+      so it has to read identically too;
+    * two — both named, since two fit;
+    * three or more — ``vs own control``, with the per-bar tick lines and the
+      ``fold_change_control`` CSV column carrying which is which.
+
+    *controls* is a ``PerMemberControls``; without one this is the single
+    control's own label and the count is one.
+    """
+    if controls is None:
+        return f"vs {control_label}" if control_label else "vs control"
+    distinct = controls.distinct_controls()
+    if not distinct:
+        # The user asked for per-sample controls and nothing resolved. Saying
+        # "vs control" here would describe a normalization that did not happen.
+        return "vs own control (none resolved)"
+    if len(distinct) == 1:
+        return f"vs {distinct[0].display_name}"
+    if len(distinct) == 2:
+        return f"vs {distinct[0].display_name} / {distinct[1].display_name}"
+    return "vs own control"
+
+
 def fold_change_suffix(vs_control_on: bool, vs_t0_on: bool,
                        control_label: str = "",
                        op_ctrl: str = "ratio", op_t0: str = "ratio",
-                       baseline_label: str = "") -> str:
+                       baseline_label: str = "", *, controls=None) -> str:
     """Compact " (fold-change …)" label fragment for axis titles.
 
     Names the operator (ratio vs subtraction) for each active axis so the plot
@@ -1018,11 +1049,15 @@ def fold_change_suffix(vs_control_on: bool, vs_t0_on: bool,
     axis — *which* timepoint is the baseline (``baseline_label``, e.g.
     ``"t=24h"``; falls back to ``"t0"``). Example:
     ``"  (fold change vs DMSO (ratio), vs t=0h (subtraction))"``.
+
+    The positional signature is unchanged — ``base_panel`` calls it
+    positionally — and *controls* is keyword-only. See
+    :func:`control_axis_phrase` for what it changes.
     """
     parts: list[str] = []
     if vs_control_on:
-        lbl = f"vs {control_label}" if control_label else "vs control"
-        parts.append(f"{lbl} ({_fc_op_word(op_ctrl)})")
+        parts.append(f"{control_axis_phrase(control_label, controls=controls)}"
+                     f" ({_fc_op_word(op_ctrl)})")
     if vs_t0_on:
         base = baseline_label or "t0"
         parts.append(f"vs {base} ({_fc_op_word(op_t0)})")
@@ -1031,12 +1066,29 @@ def fold_change_suffix(vs_control_on: bool, vs_t0_on: bool,
     return "  (fold change " + ", ".join(parts) + ")"
 
 
-def fold_change_suffix_for(ctx) -> str:
-    """``fold_change_suffix`` built from the live fold-change state
-    (per-axis ratio/subtract operators + the resolved baseline timepoint)."""
+def fold_change_suffix_for(ctx, scope: str = "") -> str:
+    """``fold_change_suffix`` built from the live fold-change state.
+
+    *scope* (``"bar"`` / ``"line"``) is what lets the control half count the
+    distinct controls actually in use — the member list differs per tab, so a
+    caller that does not say which tab it is labelling gets the single-control
+    reading. Every on-tab caller passes one.
+    """
     plot = ctx.state.plot
     base_tp = parse_baseline_tp(ctx)
     baseline_label = f"t={base_tp:g}h" if base_tp is not None else "first timepoint"
+    controls = None
+    if scope and bool(getattr(plot, "fc_vs_control_on", False)) \
+            and str(getattr(plot, "fc_control_mode", "single")) == "per_member":
+        from well_viewer.domain import plot_members as _members
+        from well_viewer.domain.fold_change_pairing import build_per_member_controls
+        controls = build_per_member_controls(
+            ctx, _members.plotted_member_keys(ctx, scope),
+            dict(getattr(plot, "fc_control_map", {}) or {}),
+            member_wells=_members.member_wells(ctx, scope),
+            member_rsets=_members.member_replicate_sets(ctx),
+            render=str(getattr(plot, "fc_control_render", "self") or "self"),
+        )
     return fold_change_suffix(
         bool(getattr(plot, "fc_vs_control_on", False)),
         bool(getattr(plot, "fc_vs_t0_on", False)),
@@ -1046,6 +1098,7 @@ def fold_change_suffix_for(ctx) -> str:
         op_ctrl=str(getattr(plot, "fc_op_ctrl", "ratio") or "ratio"),
         op_t0=str(getattr(plot, "fc_op_t0", "ratio") or "ratio"),
         baseline_label=baseline_label,
+        controls=controls,
     )
 
 

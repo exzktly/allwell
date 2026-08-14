@@ -10,6 +10,9 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.domain.selections_model import active_replicate_sets
+from well_viewer.domain import fold_change_pairing as _pairing
+from well_viewer.domain import fold_change_series_cache as _fc_cache
+from well_viewer.domain import plot_members as _members
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates,
     on_cutoff_for_column,
@@ -242,6 +245,16 @@ def bar_metric_row(
     }
 
 
+def _control_cell(ref) -> str:
+    """What a ``fold_change_control`` cell says for one row.
+
+    The plain token. The combo's ``" (well)"`` disambiguation is chrome and has
+    no business in an exported column — it was part of the stored value once,
+    and it leaked into exactly here.
+    """
+    return getattr(ref, "display_name", "") if ref is not None else ""
+
+
 def _fc_mode_str(vs_control: bool, vs_t0: bool) -> str:
     """Compact textual mode for the fold-change CSV columns."""
     parts: list = []
@@ -259,6 +272,7 @@ def bar_fold_change_fieldnames(band_lbl: str) -> list:
         f"fold_change_{band_lbl.lower()}",
         "fold_change_mode",
         "fold_change_control",
+        "fold_change_outcome",
     ]
 
 
@@ -272,13 +286,22 @@ def attach_bar_fold_change_columns(
     vs_control: bool,
     vs_t0: bool,
     control_label: str,
+    outcome: str = "",
 ) -> None:
-    """Append the four fold-change columns to a bar-plot CSV row in place.
+    """Append the fold-change columns to a bar-plot CSV row in place.
 
     The raw ``mean_*`` / ``err_*`` columns stay as written by
     :func:`bar_metric_row`; this helper carries the post-normalization
     values plus mode / control annotations on the right of the row. Used
     by both the on-tab CSV (``export_bar_plot_data``) and the batch CSV.
+
+    ``control_label`` is **this row's** control, not the figure's: under
+    per-sample controls the rows differ, and a single value repeated down the
+    column would misstate every denominator but one. ``outcome`` is the only
+    thing separating "nobody assigned a control" from "the control is gone"
+    from "the control has no data at this timepoint" — all three leave
+    ``fold_change_mean`` empty, and a reader with only that column cannot tell
+    a normalization that failed from one that was never asked for.
     """
     row["fold_change_mean"] = (
         f"{fc_mean:.6f}" if fc_has and not math.isnan(fc_mean) else ""
@@ -288,6 +311,7 @@ def attach_bar_fold_change_columns(
     )
     row["fold_change_mode"] = _fc_mode_str(vs_control, vs_t0)
     row["fold_change_control"] = control_label if vs_control else ""
+    row["fold_change_outcome"] = str(outcome or "") if vs_control else ""
 
 
 def _warn(parent, title: str, msg: str) -> None:
@@ -335,18 +359,28 @@ def export_plot_data(ctx) -> None:
 
     fc = _fc.fold_change_state(ctx)
     fc_vs_ctrl = fc.vs_control_on
-    fc_ctrl_lbl = fc.control
     fc_vs_t0 = fc.vs_t0_on
-    fc_control_means: dict = {}
-    if fc_vs_ctrl and fc_ctrl_lbl:
-        fc_control_means = _fc.pts_to_mean_by_t(
-            _fc.control_pts_for_line(
-                ctx, fc_ctrl_lbl, threshold=threshold,
-                val_col=ctx.state.channel.active_val_col,
-                fluor_gates=fluor_gates,
-            )
-        )
-    fc_active = fc_vs_ctrl or fc_vs_t0
+    fc_active = fc.active
+    # The same resolver the tab's collector uses. This path used to build one
+    # pooled control series by hand and hand it to ``normalize_pts``, which
+    # gave it three separate ways to disagree with the figure it claims to
+    # describe: no per-sample mapping, no blanking when the control did not
+    # resolve, and a control column that printed the reference's repr.
+    _ctrl_cache = _fc_cache.ControlSeriesCache(
+        ctx, threshold=threshold, val_col=ctx.state.channel.active_val_col,
+        use_sem=use_sem, per_fov_spread=bool(ctx.state.plot.use_fov_replicates),
+        fluor_gates=fluor_gates,
+    )
+    _denoms = _pairing.control_denominators(
+        ctx, _ctrl_cache, fc,
+        _members.line_member_keys(ctx) if fc.per_member else (),
+        scope_wells=_members.member_wells(ctx, "line") if fc.per_member else None,
+        member_rsets=_members.member_replicate_sets(ctx) if fc.per_member else None,
+    )
+    _norm_kw = dict(fc=fc, n_per_fov=bool(ctx.state.plot.use_fov_replicates),
+                    baseline_tp=_fc.parse_baseline_tp(ctx),
+                    op_ctrl=_fc.parse_fc_op_ctrl(ctx),
+                    op_t0=_fc.parse_fc_op_t0(ctx))
 
     rows_out = []
     for label in selected:
@@ -355,9 +389,14 @@ def export_plot_data(ctx) -> None:
             val_col=ctx.state.channel.active_val_col,
             fluor_gates=fluor_gates,
         )
+        # A rep-set member exports as its own wells here, so the mapping is
+        # asked about the set that owns the well when one does; falling back to
+        # the well token covers the per-well case.
+        _member_key = well_to_repset.get(label) or label
+        _ctrl_ref, _outcome = _denoms.control_for(_member_key)
         norm_pts = (
-            _fc.normalize_pts(pts, control_means=fc_control_means or None,
-                              use_t0=fc_vs_t0)
+            _pairing.normalize_member_pts(
+                list(pts), _denoms, _member_key, **_norm_kw)
             if fc_active else None
         )
         for i, pt in enumerate(pts):
@@ -380,7 +419,10 @@ def export_plot_data(ctx) -> None:
                     f"{fspread:.6f}" if isinstance(fspread, (int, float)) and not math.isnan(fspread) else ""
                 )
                 row["fold_change_mode"] = _fc_mode_str(fc_vs_ctrl, fc_vs_t0)
-                row["fold_change_control"] = fc_ctrl_lbl if fc_vs_ctrl else ""
+                row["fold_change_control"] = (
+                    _control_cell(_ctrl_ref) if fc_vs_ctrl else "")
+                row["fold_change_outcome"] = (
+                    str(_outcome or "") if fc_vs_ctrl else "")
             rows_out.append(row)
     if not rows_out:
         _warn(ctx.window, "Export", "No data to export for the current selection.")
@@ -396,6 +438,7 @@ def export_plot_data(ctx) -> None:
             f"fold_change_{band_lbl.lower()}",
             "fold_change_mode",
             "fold_change_control",
+            "fold_change_outcome",
         ]
     try:
         with open(out_path, "w", newline="") as fh:
@@ -425,7 +468,6 @@ def export_bar_plot_data(ctx) -> None:
     target_t_arg = target_ts[0] if len(target_ts) == 1 else target_ts
     fc = _fc.fold_change_state(ctx)
     fc_vs_ctrl = fc.vs_control_on
-    fc_ctrl_lbl = fc.control
     fc_vs_t0 = fc.vs_t0_on
     fc_active = fc_vs_ctrl or fc_vs_t0
     # Additive CSV: raw values in the standard ``mean_*`` / ``err_*``
@@ -485,7 +527,8 @@ def export_bar_plot_data(ctx) -> None:
                     row, fc_mean=fc_item.mean, fc_spread=fc_item.spread,
                     fc_has=fc_item.has_mean, band_lbl=band_lbl,
                     vs_control=fc_vs_ctrl, vs_t0=fc_vs_t0,
-                    control_label=fc_ctrl_lbl,
+                    control_label=_control_cell(fc_item.fc_control),
+                    outcome=fc_item.fc_outcome,
                 )
         rows_out.append(row)
     if not rows_out:

@@ -449,6 +449,42 @@ def summary_text(controls: PerMemberControls) -> str:
     return f"Per-sample control ({resolved}/{total})"
 
 
+def shortfall_from_items(items, *, timepoints=None) -> str:
+    """The status line for a collected plot, coalesced by reason.
+
+    Reads each item's own ``fc_outcome`` rather than a set of timepoints
+    collected on the side. Under one global control a set of timepoints was
+    the whole story — every bar failed or none did — but per-sample controls
+    make partial failure ordinary, and "control missing at t=24" says nothing
+    about *which* control or *how many* bars it cost.
+
+    *timepoints* is the collector's miss set, still worth naming when the only
+    problem is that the control has no sample somewhere.
+    """
+    counts: dict = {}
+    for item in items:
+        outcome = getattr(item, "fc_outcome", "")
+        if not outcome or outcome in (ControlOutcome.OK, ControlOutcome.SELF):
+            continue
+        counts[outcome] = counts.get(outcome, 0) + 1
+    if not counts:
+        return ""
+    parts = []
+    if counts.get(ControlOutcome.UNMAPPED):
+        parts.append(f"{counts[ControlOutcome.UNMAPPED]} with no control")
+    if counts.get(ControlOutcome.CONTROL_UNRESOLVED):
+        parts.append(
+            f"{counts[ControlOutcome.CONTROL_UNRESOLVED]} whose control is missing")
+    if counts.get(ControlOutcome.CONTROL_NO_SAMPLE):
+        when = ""
+        if timepoints:
+            when = " t=" + ", ".join(f"{t:g}" for t in sorted(timepoints))
+        parts.append(
+            f"{counts[ControlOutcome.CONTROL_NO_SAMPLE]} whose control has no "
+            f"data at{when or ' this timepoint'}")
+    return "Fold change: " + ", ".join(parts) + " — drawn blank."
+
+
 def shortfall_text(controls: PerMemberControls) -> str:
     """A phrase naming what fell short, or ``""`` when nothing did.
 

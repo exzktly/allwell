@@ -156,11 +156,38 @@ def _safe(fn):
         return None
 
 
+def _fc_control_phrase(fc: dict) -> str:
+    """``vs …`` for the control half, from the saved block alone."""
+    if str(fc.get("control_mode") or "single") != "per_member":
+        return f"vs {fc.get('control_label') or '?'}"
+    raw_map = fc.get("control_map")
+    if not isinstance(raw_map, dict) or not raw_map:
+        return "vs own control (none set)"
+    names = []
+    for value in raw_map.values():
+        name = (value.get("name") if isinstance(value, dict) else value) or ""
+        if name and name not in names:
+            names.append(str(name))
+    if len(names) == 1:
+        return f"vs {names[0]}"
+    if len(names) == 2:
+        return f"vs {names[0]} / {names[1]}"
+    return f"vs own control (\u00d7{len(raw_map)})"
+
+
 def _fc_summary(fc: dict) -> str:
+    """The fold-change line of a saved plot's summary.
+
+    Read from the persisted block, not from live state, so it has no ``ctx``
+    and cannot resolve anything. Under per-sample controls that means it can
+    count the *entries* the document carries and name them when there are few,
+    but it must not claim a resolution count it has no way to compute — the
+    document may have been saved against a dataset this session has not loaded.
+    """
     parts = []
     if fc.get("vs_control_on"):
         op = fc.get("op_ctrl", "ratio")
-        parts.append(f"vs {fc.get('control_label') or '?'} ({op})")
+        parts.append(f"{_fc_control_phrase(fc)} ({op})")
     if fc.get("vs_t0_on"):
         op = fc.get("op_t0", "ratio")
         base = fc.get("baseline_tp") or "t0"

@@ -214,7 +214,6 @@ class BarBatchExportPanel(BatchExportPanel):
         fmt = self._fmt_cb.currentText()
         _panel_fc = self._fc_state()
         fc_vs_ctrl = _panel_fc.vs_control_on
-        fc_ctrl_lbl = _panel_fc.control
         fc_vs_t0 = _panel_fc.vs_t0_on
         fc_active = fc_vs_ctrl or fc_vs_t0
         # Layout options collected once here so each job sees a stable
@@ -267,7 +266,8 @@ class BarBatchExportPanel(BatchExportPanel):
                     FC_STATE_OFF, collect_bar_items_for_group,
                 )
                 from well_viewer.features.export.service import (
-                    _well_labels_map, attach_bar_fold_change_columns,
+                    _control_cell, _well_labels_map,
+                    attach_bar_fold_change_columns,
                     bar_fold_change_fieldnames,
                     _replicate_unit_for,
                     bar_metric_fieldnames, bar_metric_row,
@@ -368,7 +368,8 @@ class BarBatchExportPanel(BatchExportPanel):
                             row, fc_mean=fc_match.mean, fc_spread=fc_match.spread,
                             fc_has=fc_match.has_mean, band_lbl=band_lbl,
                             vs_control=fc_vs_ctrl, vs_t0=fc_vs_t0,
-                            control_label=fc_ctrl_lbl,
+                            control_label=_control_cell(fc_match.fc_control),
+                            outcome=fc_match.fc_outcome,
                         )
                     rows_csv.append(row)
                 if rows_csv:

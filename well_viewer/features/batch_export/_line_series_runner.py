@@ -175,10 +175,12 @@ def collect_line_series_for_group(
                     n_above_spread, n_above_total,
                 ))
         points = [_aggpoint_to_linepoint(pt) for pt in _normalize(raw_pts, rset.name)]
+        _ctrl_ref, _outcome = denoms.control_for(rset.name)
         series_out.append(LineSeries(
             key=rset.name, display=_replicate_display_label(ctx, rset),
             color=_rank_color_rset(ctx, rset), kind="repset",
             wells=valid_wells, points=points, cdf_vals=_cdf_for(valid_wells),
+            fc_control=_ctrl_ref, fc_outcome=str(_outcome or ""),
         ))
 
     # ── Solo wells: the tab's per-well (within-well) statistic ───────────────
@@ -189,9 +191,11 @@ def collect_line_series_for_group(
                              val_col=val_col, fluor_gates=fluor_gates,
                              per_fov_spread=rep_per_fov)
         points = [_aggpoint_to_linepoint(pt) for pt in _normalize(list(pts or []), w)]
+        _ctrl_ref, _outcome = denoms.control_for(w)
         series_out.append(LineSeries(
             key=w, display=_well_display_label(ctx, w), color=_color_for_well(w),
             kind="well", wells=[w], points=points, cdf_vals=_cdf_for([w]),
+            fc_control=_ctrl_ref, fc_outcome=str(_outcome or ""),
         ))
 
     return series_out

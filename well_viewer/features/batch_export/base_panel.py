@@ -123,11 +123,19 @@ def _norm_well_token(tok: str) -> str:
 
 
 def _attach_fc_row(row: dict, npt: tuple, band_lbl: str,
-                   vs_control: bool, vs_t0: bool, control_label: str) -> None:
-    """Add the four fold-change columns to a per-timepoint CSV row.
+                   vs_control: bool, vs_t0: bool, control_label: str,
+                   outcome: str = "") -> None:
+    """Add the fold-change columns to a per-timepoint CSV row.
 
     Used by both the line and bar batch exporters so the column shape stays
-    identical across paths.
+    identical across paths — and identical to the on-tab CSV's, which is what
+    lets someone compare an exported plate against a tab export at all.
+
+    ``control_label`` is **this row's** control. Under per-sample controls the
+    rows differ, and one value repeated down the column would misstate every
+    denominator but one. ``outcome`` says why an empty ``fold_change_mean`` is
+    empty; without it a normalization that failed reads the same as one that
+    was never asked for.
     """
     fmean = npt[1] if len(npt) > 1 else float("nan")
     fspread = npt[2] if len(npt) > 2 else 0.0
@@ -142,6 +150,7 @@ def _attach_fc_row(row: dict, npt: tuple, band_lbl: str,
         parts.append("t0")
     row["fold_change_mode"] = "+".join(parts) or "off"
     row["fold_change_control"] = control_label if vs_control else ""
+    row["fold_change_outcome"] = str(outcome or "") if vs_control else ""
 
 
 def _apply_split_sep_orientation(sep: QFrame, *, stacked: bool) -> None:
@@ -1653,7 +1662,6 @@ class BatchExportPanel(QWidget):
 
         _panel_fc = self._fc_state()
         fc_vs_ctrl = _panel_fc.vs_control_on
-        fc_ctrl_lbl = _panel_fc.control
         fc_vs_t0 = _panel_fc.vs_t0_on
         fc_active = fc_vs_ctrl or fc_vs_t0
         used_stems: set = set()
@@ -1693,7 +1701,7 @@ class BatchExportPanel(QWidget):
                         collect_line_series_for_group,
                     )
                     from well_viewer.features.export.service import (
-                        _well_labels_map,
+                        _control_cell, _well_labels_map,
                         line_metric_fieldnames, line_metric_row,
                         well_name_for, well_names_joined,
                     )
@@ -1715,9 +1723,9 @@ class BatchExportPanel(QWidget):
                             val_col=_val_col, fluor_gates=_fluor_gates,
                             fc_state=panel_fc_state,
                         )
-                        fc_points_by_key = {s.key: s.points for s in series_fc}
+                        fc_series_by_key = {s.key: s for s in series_fc}
                     else:
-                        fc_points_by_key = {}
+                        fc_series_by_key = {}
                     rows_out: list[dict] = []
                     for series in series_raw:
                         if series.kind == "repset":
@@ -1730,7 +1738,8 @@ class BatchExportPanel(QWidget):
                             well_names_str = well_name_for(wells_str, _well_labels)
                             member_type = "solo_well"
                             n_wells = 1
-                        fc_pts = fc_points_by_key.get(series.key, [])
+                        fc_series = fc_series_by_key.get(series.key)
+                        fc_pts = fc_series.points if fc_series is not None else []
                         for i, pt in enumerate(series.points):
                             row = {
                                 "group": grp.name,
@@ -1747,7 +1756,9 @@ class BatchExportPanel(QWidget):
                             if fc_active and i < len(fc_pts):
                                 _attach_fc_row(
                                     row, fc_pts[i].as_aggpoint(), band_lbl,
-                                    fc_vs_ctrl, fc_vs_t0, fc_ctrl_lbl,
+                                    fc_vs_ctrl, fc_vs_t0,
+                                    _control_cell(getattr(fc_series, "fc_control", None)),
+                                    getattr(fc_series, "fc_outcome", ""),
                                 )
                             rows_out.append(row)
                     if rows_out:
@@ -1762,6 +1773,7 @@ class BatchExportPanel(QWidget):
                                 f"fold_change_{band_lbl.lower()}",
                                 "fold_change_mode",
                                 "fold_change_control",
+                                "fold_change_outcome",
                             ]
                         with open(csv_path, "w", newline="") as fh:
                             writer = csv.DictWriter(fh, fieldnames=fieldnames)

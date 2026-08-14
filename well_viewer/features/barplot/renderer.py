@@ -285,7 +285,7 @@ def draw_violin(
     from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB, fraction_title
     from well_viewer.domain import fold_change as _fc
     _metric_label = _MLB.get(ctx.state.channel.active_metric, "Mean Intensity")
-    _fc_suffix = _fc.fold_change_suffix_for(ctx) if cell_scale else ""
+    _fc_suffix = _fc.fold_change_suffix_for(ctx, "bar") if cell_scale else ""
     _tp_suffix = _format_tp_title(target_ts_per_col, tp_str)
     ax_mean.set_title(
         f"{ctx.state.channel.active_channel.upper()} {_metric_label} distribution (violin, bw={bw:.2f}){_fc_suffix}  —  {_tp_suffix}",
@@ -440,7 +440,7 @@ def draw_beeswarm(
     from well_viewer.domain import fold_change as _fc
     _metric_label = _MLB.get(ctx.state.channel.active_metric, "Mean Intensity")
     _thr_q = threshold_qualifier(ctx.state.channel.active_metric)
-    _fc_suffix = _fc.fold_change_suffix_for(ctx) if cell_scale else ""
+    _fc_suffix = _fc.fold_change_suffix_for(ctx, "bar") if cell_scale else ""
     _tp_suffix = _format_tp_title(target_ts_per_col, tp_str)
     ax_mean.set_title(
         f"{ctx.state.channel.active_channel.upper()} {_metric_label} per cell{_thr_q}{_fc_suffix}  —  {_tp_suffix}",
@@ -666,7 +666,7 @@ def draw_grouped_bar_mode(
     _metric_label = _MLB.get(ctx.state.channel.active_metric, "Mean Intensity")
     _metric_key = ctx.state.channel.active_metric
     _thr_q = threshold_qualifier(_metric_key)
-    _fc_suffix = _fc.fold_change_suffix_for(ctx)
+    _fc_suffix = _fc.fold_change_suffix_for(ctx, "bar")
     _tp_suffix = _format_tp_title(target_ts, tp_str)
     # Cluster headers (_annotate_cluster_headers) sit at y≈1.02 on ax_mean only;
     # when any survive normalization, push the title up so it clears them rather
@@ -699,11 +699,13 @@ def draw_grouped_bar_mode(
     # ``apply_export_style_to_current`` at the end of ``redraw_bars``.
     draw_significance_brackets(ctx, items, ax_mean=ax_mean, ax_frac=ax_frac,
                                target_ts=target_ts)
-    if fc_misses:
-        _tps = ", ".join(f"{t:g}" for t in sorted(fc_misses))
-        ctx.notify.set_status(
-            f"Fold change: control missing at t={_tps} — bars dropped."
-        )
+    # Derived from the items' own outcomes rather than from the timepoint set
+    # alone: with a control per member, "control missing at t=24" does not say
+    # which control or how many bars it cost, and it cannot say anything at all
+    # about a bar whose control was never assigned.
+    _shortfall = _pairing_mod.shortfall_from_items(items, timepoints=fc_misses)
+    if _shortfall:
+        ctx.notify.set_status(_shortfall)
     ctx.runtime.barplot.canvas.draw_idle()
 
 
@@ -745,7 +747,7 @@ def redraw_bars(ctx) -> None:
     _metric_label = _MLB.get(ctx.state.channel.active_metric, "Mean Intensity")
     _metric_key = ctx.state.channel.active_metric
     _thr_q = threshold_qualifier(_metric_key)
-    _fc_suffix = _fc.fold_change_suffix_for(ctx)
+    _fc_suffix = _fc.fold_change_suffix_for(ctx, "bar")
     apply_ax_style(ax_mean,
                    f"{_ch} {_metric_label}{_thr_q} ± {band_lbl}{_fc_suffix}",
                    f"{_ch} {_metric_label}{_fc_suffix}")

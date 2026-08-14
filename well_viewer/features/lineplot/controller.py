@@ -116,6 +116,12 @@ class LineSeries:
       * ``cdf_vals`` — raw per-cell values for the CDF panel (the
         distribution panel doesn't fold-change-normalize naturally;
         always raw).
+      * ``fc_control`` / ``fc_outcome`` — which control **this trace** was
+        divided by and why it is what it is, mirroring the same pair on
+        ``BarItem``. They live on the series rather than the point
+        because a member's control does not change with time; what
+        changes with time is whether the control had a sample there,
+        which the blanked points already say.
     """
     key: str
     display: str
@@ -124,6 +130,8 @@ class LineSeries:
     wells: list[str]
     points: list[LinePoint] = field(default_factory=list)
     cdf_vals: list[float] = field(default_factory=list)
+    fc_control: object | None = None
+    fc_outcome: str = ""
 
 
 @dataclass
@@ -319,9 +327,11 @@ def collect_line_series(
             display = (
                 f"{rset.name} (n={n_wells})" if n_wells != 1 else rset.name
             )
+            _ctrl_ref, _outcome = denoms.control_for(rset.name)
             series_out.append(LineSeries(
                 key=rset.name, display=display, color=color, kind="repset",
                 wells=valid_wells, points=points, cdf_vals=cdf_vals,
+                fc_control=_ctrl_ref, fc_outcome=str(_outcome or ""),
             ))
         return series_out, band_lbl
 
@@ -356,9 +366,11 @@ def collect_line_series(
                 ratios=ctx.state.channel.ratio_index,
             ))
         display = well_display_label(ctx, label)
+        _ctrl_ref, _outcome = denoms.control_for(label)
         series_out.append(LineSeries(
             key=label, display=display, color=color, kind="well",
             wells=[label], points=points, cdf_vals=cdf_vals,
+            fc_control=_ctrl_ref, fc_outcome=str(_outcome or ""),
         ))
     return series_out, band_lbl
 
@@ -626,7 +638,7 @@ def redraw_line_plots(
     legend_kw = dict(fontsize=7, framealpha=0.0, facecolor="none", edgecolor=_spine, labelcolor=_title_fg)
 
     _ch = ctx.state.channel.active_channel.upper()
-    _fc_suffix = _fc.fold_change_suffix_for(ctx)
+    _fc_suffix = _fc.fold_change_suffix_for(ctx, "line")
     from well_viewer.data.metric_labels import threshold_qualifier, fraction_title, events_per_fov_title, events_total_title
     _thr_q = threshold_qualifier(ctx.state.channel.active_metric)
     apply_ax_style(ax_mean, f"{_ch} {metric_label}{_thr_q} ± {band_lbl}{_fc_suffix}", metric_label + _fc_suffix)

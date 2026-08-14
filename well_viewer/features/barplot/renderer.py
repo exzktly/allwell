@@ -71,12 +71,13 @@ def _set_frac_ylim(ctx, ax_frac) -> None:
     (``apply_export_style_to_current`` at the end of ``redraw_bars``).
     """
     from well_viewer.domain import fold_change as _fc
-    fc_on, _, fc_t0 = _fc.fold_change_state(ctx)
-    if fc_on or fc_t0:
+    if _fc.fold_change_state(ctx).active:
         return
     ax_frac.set_ylim(-0.05, 1.05)
 
 
+from well_viewer.domain import fold_change_pairing as _pairing_mod
+from well_viewer.domain import plot_members as _members
 from well_viewer.data.data_loading import (
     _beeswarm_jitter,
     df_included_mask,
@@ -1024,8 +1025,26 @@ def draw_per_cell_bar_mode(
     # timepoint instead of collapsing multi-tp selections to the first (S3).
     _fc_state = _fc.fold_change_state(ctx)
     if _fc_state.active:
+        # The overlay resolves the same control the bar under it did. Without
+        # this the bars normalize per member while the distribution drawn on
+        # top of them divides by a different denominator, and the two sit on
+        # one axis looking like one measurement.
+        _cell_controls = None
+        if _fc_state.vs_control_on and _fc_state.per_member:
+            _pairing = _pairing_mod.build_per_member_controls(
+                ctx, base_wells, _fc_state.control_map_dict,
+                member_wells=_members.member_wells(ctx, "bar"),
+                member_rsets=_members.member_replicate_sets(ctx),
+                render=_fc_state.control_render,
+            )
+            _cell_controls = {
+                key: (_pairing.get(key).control
+                      if _pairing.get(key).resolved else None)
+                for key in base_wells
+            }
         cell_scale = _fc.build_cell_scaling(
             ctx, base_wells, fc_state=_fc_state,
+            control_by_member=_cell_controls,
             threshold=threshold, val_col=ctx.state.channel.active_val_col,
             use_sem=ctx.state.plot.use_sem,
             per_fov_spread=ctx.state.plot.use_fov_replicates,

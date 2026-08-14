@@ -6773,6 +6773,22 @@ is how a control missing at the drawn timepoint could crash a `t0_first`
 redraw); `_panel_nan_flags` decides which panels lost their denominator; and
 `_fc_scale` applies one axis' `scale_bar_value`.
 
+The Line tab and the batch line runner share `normalize_member_pts`, which
+resolves a member's own control series and either normalizes its points or —
+when the control did not resolve — blanks them with `fold_change.blank_point`.
+Blanking rather than skipping is the point: an empty control series makes
+`normalize_pts` skip the control axis without complaint, so the figure carried
+raw values under a fold-change axis label, and on the batch path in an export
+nobody watched being drawn. A blanked point keeps its timepoint and its cell
+counts, because dropping it would leave a gap the renderer bridges with a
+straight line between the neighbours, which reads as data.
+
+`fold_change.build_cell_scaling` takes a `control_by_member` map for the same
+reason. It is the violin/beeswarm overlay's own resolver; left on one control
+the bars would normalize per member while the distribution drawn on top of them
+divided by something else — two denominators on one axis, looking like one
+measurement.
+
 ### 9.6 Running the pipeline
 
 ```

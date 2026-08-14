@@ -935,3 +935,67 @@ def test_events_total_guard_clears_the_plotted_statistic(tmp_path, monkeypatch):
     exc = _run_scan(monkeypatch, "tests.test_events_total_isolation",
                     "test_the_events_total_stays_out_of_drawing_code", [f])
     assert exc is None, f"the guard fired on the statistic every panel draws: {exc}"
+
+
+# ── the fold-change request is read by name, never unpacked ─────────────────
+#
+# The shapes below are the ones that really shipped. Both were live defects on
+# a branch whose CI was green, because both sit on paths only the slow lane
+# reaches — a `TypeError` on every bar redraw, and a helper every caller of
+# "is fold change on?" goes through.
+
+FC_UNPACK_VIOLATIONS = {
+    # `barplot/renderer._set_frac_ylim`, verbatim.
+    "attribute-call": (
+        "from well_viewer.domain import fold_change as _fc\n"
+        "def f(ctx):\n"
+        "    fc_on, _, fc_t0 = _fc.fold_change_state(ctx)\n"
+        "    return fc_on or fc_t0\n"
+    ),
+    # `fold_change.is_active`, verbatim — the bare-name spelling, which a guard
+    # matching only on the attribute form would walk past.
+    "bare-call": (
+        "def f(ctx):\n"
+        "    vs_ctrl, _, vs_t0 = fold_change_state(ctx)\n"
+        "    return vs_ctrl or vs_t0\n"
+    ),
+    # The coercion helper produces the same object from a caller's argument.
+    "coerce": (
+        "from well_viewer.domain import fold_change as _fc\n"
+        "def f(fc_state):\n"
+        "    on, label, t0 = _fc.coerce_fc_state(fc_state)\n"
+        "    return on, label, t0\n"
+    ),
+    # A list target unpacks exactly the same way and reads as deliberate.
+    "list-target": (
+        "def f(ctx):\n"
+        "    [on, label, t0] = fold_change_state(ctx)\n"
+        "    return on\n"
+    ),
+}
+
+FC_UNPACK_CLEAN = (
+    "from well_viewer.domain import fold_change as _fc\n"
+    "def f(ctx):\n"
+    "    fc = _fc.fold_change_state(ctx)\n"
+    "    if fc.per_member:\n"
+    "        return fc.control_map_dict\n"
+    "    return fc.active and fc.control\n"
+)
+
+
+@pytest.mark.parametrize("shape", sorted(FC_UNPACK_VIOLATIONS))
+def test_fc_unpack_guard_catches(tmp_path, monkeypatch, shape):
+    f = _write(tmp_path, "well_viewer/features/barplot/renderer.py",
+               FC_UNPACK_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_fc_state_is_not_unpacked",
+                    "test_the_fold_change_request_is_read_by_name", [f])
+    assert exc is not None, f"the {shape} spelling walked past the guard"
+
+
+def test_fc_unpack_guard_clears_reading_it_by_name(tmp_path, monkeypatch):
+    f = _write(tmp_path, "well_viewer/features/barplot/renderer.py",
+               FC_UNPACK_CLEAN)
+    exc = _run_scan(monkeypatch, "tests.test_fc_state_is_not_unpacked",
+                    "test_the_fold_change_request_is_read_by_name", [f])
+    assert exc is None, f"the guard fired on the correct spelling: {exc}"

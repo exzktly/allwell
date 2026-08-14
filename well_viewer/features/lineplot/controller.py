@@ -18,6 +18,14 @@ from well_viewer.domain.selections_model import (
 )
 from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.domain.plot_order import apply_order as _apply_order
+from well_viewer.domain.fold_change_series_cache import (
+    ControlSeriesCache as _ControlSeriesCache,
+)
+from well_viewer.domain.fold_change_pairing import (
+    control_denominators,
+    normalize_member_pts,
+)
+from well_viewer.domain import plot_members as _members
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates, on_cutoff_for_column,
 )
@@ -203,9 +211,6 @@ def collect_line_series(
     if fc_state is None:
         fc_state = _fc.fold_change_state(ctx)
     fc = _fc.coerce_fc_state(fc_state)
-    fc_vs_ctrl = fc.vs_control_on
-    fc_ctrl_lbl = fc.control
-    fc_vs_t0 = fc.vs_t0_on
     if fc_baseline_tp is None:
         fc_baseline_tp = _fc.parse_baseline_tp(ctx)
     fc_op_ctrl = _fc.parse_fc_op_ctrl(ctx)
@@ -219,34 +224,26 @@ def collect_line_series(
     per_fov_spread = ctx.state.plot.use_fov_replicates if not active_rsets else False
 
     # Control series — mean-of-per-well-means / per-FOV / per-well agg
-    # matching each member's own stat (post-PR-3). Pass {t: (mean, spread)}
-    # so error propagation through normalize_pts has the right
-    # denominator uncertainty.
-    fc_control_stats: dict = {}
-    fc_control_frac_stats: dict = {}
-    fc_control_n_stats: dict = {}
-    # The N panel plots the per-FOV-mean count when FOV-spread is on, else the
-    # total count — the control denominator and the scaled field must match.
+    # matching each member's own stat. ``normalize_pts`` is handed
+    # {t: (mean, spread)} so error propagation has the right denominator
+    # uncertainty. The N panel plots the per-FOV-mean count when FOV-spread is
+    # on, else the per-well statistic — the control denominator and the scaled
+    # field must match.
     fc_n_per_fov = bool(rep_per_fov or per_fov_spread)
-    if fc_vs_ctrl and fc_ctrl_lbl:
-        fc_control_stats = _fc.member_stats_series(
-            ctx, fc_ctrl_lbl,
-            threshold=threshold, val_col=val_col,
-            use_sem=use_sem, per_fov_spread=fc_n_per_fov,
-            fluor_gates=fluor_gates,
-        )
-        fc_control_frac_stats = _fc.member_frac_stats_series(
-            ctx, fc_ctrl_lbl,
-            threshold=threshold, val_col=val_col,
-            use_sem=use_sem, per_fov_spread=fc_n_per_fov,
-            fluor_gates=fluor_gates,
-        )
-        fc_control_n_stats = _fc.member_n_stats_series(
-            ctx, fc_ctrl_lbl,
-            threshold=threshold, val_col=val_col,
-            per_fov_spread=fc_n_per_fov,
-            fluor_gates=fluor_gates,
-        )
+    ctrl_cache = _ControlSeriesCache(
+        ctx, threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=fc_n_per_fov, fluor_gates=fluor_gates,
+    )
+    denoms = control_denominators(
+        ctx, ctrl_cache, fc,
+        _members.line_member_keys(ctx) if fc.per_member else (),
+        scope_wells=_members.member_wells(ctx, "line") if fc.per_member else None,
+        member_rsets=_members.member_replicate_sets(ctx) if fc.per_member else None,
+        miss_sink=miss_sink,
+    )
+    hidden_members = denoms.hidden_members
+    _norm_kw = dict(fc=fc, n_per_fov=fc_n_per_fov, baseline_tp=fc_baseline_tp,
+                    op_ctrl=fc_op_ctrl, op_t0=fc_op_t0, miss_sink=miss_sink)
 
     series_out: list[LineSeries] = []
 
@@ -257,6 +254,8 @@ def collect_line_series(
             key=lambda r: getattr(r, "name", ""),
         )
         for rset in ordered_rsets:
+            if rset.name in hidden_members:
+                continue
             color = color_for_replicate_set(rset, ctx.state.selection.selections)
             valid_wells = [w for w in rset.wells if w in ctx.state.dataset.well_paths]
             # Unified replicate rule: per-FOV (FOVs pooled across the set's wells)
@@ -313,20 +312,8 @@ def collect_line_series(
                         _n_above_spread if not rset_per_fov else 0.0,
                         _n_above_total,
                     ))
-            if _raw_pts and (fc_control_stats or fc_vs_t0):
-                _raw_pts = _fc.normalize_pts(
-                    _raw_pts,
-                    control_stats=fc_control_stats or None,
-                    control_frac_stats=fc_control_frac_stats or None,
-                    control_n_stats=fc_control_n_stats or None,
-                    normalize_frac_n=True,
-                    n_per_fov=fc_n_per_fov,
-                    use_t0=fc_vs_t0,
-                    baseline_tp=fc_baseline_tp,
-                    op_ctrl=fc_op_ctrl,
-                    op_t0=fc_op_t0,
-                    miss_sink=miss_sink,
-                )
+            _raw_pts = normalize_member_pts(
+                _raw_pts, denoms, rset.name, **_norm_kw)
             points = [_aggpoint_to_linepoint(pt) for pt in _raw_pts]
             n_wells = len(valid_wells)
             display = (
@@ -349,6 +336,8 @@ def collect_line_series(
         key=lambda x: x,
     )
     for label in ordered_selected:
+        if label in hidden_members:
+            continue
         color = color_for_well(label)
         pts = aggregate_well(ctx,
             label, threshold=threshold, use_sem=use_sem,
@@ -356,20 +345,7 @@ def collect_line_series(
             fluor_gates=fluor_gates,
             per_fov_spread=per_fov_spread,
         )
-        if pts and (fc_control_stats or fc_vs_t0):
-            pts = _fc.normalize_pts(
-                pts,
-                control_stats=fc_control_stats or None,
-                control_frac_stats=fc_control_frac_stats or None,
-                control_n_stats=fc_control_n_stats or None,
-                normalize_frac_n=True,
-                n_per_fov=fc_n_per_fov,
-                use_t0=fc_vs_t0,
-                baseline_tp=fc_baseline_tp,
-                op_ctrl=fc_op_ctrl,
-                op_t0=fc_op_t0,
-                miss_sink=miss_sink,
-            )
+        pts = normalize_member_pts(list(pts or []), denoms, label, **_norm_kw)
         points = [_aggpoint_to_linepoint(pt) for pt in (pts or [])]
         cdf_vals: list = []
         if include_cdf and all_fluor_values_filtered is not None:

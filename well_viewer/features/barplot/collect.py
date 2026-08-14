@@ -682,7 +682,6 @@ def collect_bar_items_for_group(
 
     fc = _fc.coerce_fc_state(fc_state)
     fc_vs_ctrl = fc.vs_control_on
-    fc_ctrl_lbl = fc.control
     fc_vs_t0 = fc.vs_t0_on
 
     # Build (key, display, wells, rset_name_or_None, color) member list.
@@ -774,12 +773,16 @@ def collect_bar_items_for_group(
         ctx, threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
     )
-    _ctrl_frac_series: dict = {}
-    if fc_vs_ctrl and fc_ctrl_lbl is not None:
-        _ctrl_frac_series = _fc.member_frac_stats_series(
-            ctx, fc_ctrl_lbl, threshold=threshold, val_col=val_col,
-            use_sem=use_sem, per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
-        )
+    # The batch panel carries its own mapping, so the same per-member resolver
+    # serves it — the member keys here are the group's own, not the tab's.
+    denoms = control_denominators(
+        ctx, ctrl_cache, fc, [key for (key, _d, _w, _r, _c) in members],
+        scope_wells={key: wells for (key, _d, wells, _r, _c) in members},
+        member_rsets={w: rset_name
+                      for (_k, _d, wells, rset_name, _c) in members
+                      if rset_name for w in wells},
+    )
+    hidden_members = denoms.hidden_members
 
     def _format_tp(t: float) -> str:
         # Label only. ``BarItem.key`` keeps the unscaled ``t{t:.4g}`` form,
@@ -788,33 +791,17 @@ def collect_bar_items_for_group(
         # should move when the user changes how the axis is *printed*.
         return _rescale_tp(t, ctx.state.plot.time_scale)
 
-    def _lookup_at(series: dict, target_t: float):
-        if target_t in series:
-            return series[target_t]
-        for ct, val in series.items():
-            if abs(ct - target_t) < 1e-6:
-                return val
-        return None
-
     def _items_for_tp(target_t: float) -> list[BarItem]:
-        # Resolve control denominator once per tp — the rep-set statistic
-        # (``control_stats_at_for_bar``), matching the members' numerator.
-        fc_control_mean_at_t = None
-        fc_control_spread_at_t = None
-        fc_control_frac_at_t = None
-        fc_control_frac_spread_at_t = None
-        if fc_vs_ctrl and fc_ctrl_lbl is not None:
-            ctrl_stats = ctrl_cache.stats_at(fc_ctrl_lbl, target_t)
-            if ctrl_stats is not None:
-                fc_control_mean_at_t, fc_control_spread_at_t = ctrl_stats
-            _cfrac = _lookup_at(_ctrl_frac_series, target_t)
-            if _cfrac is not None:
-                fc_control_frac_at_t, fc_control_frac_spread_at_t = _cfrac
-
         out: list[BarItem] = []
         tp_str = _format_tp(target_t)
         multi_tp = len(target_ts) > 1
         for (key, base_display, wells, rset_name, color) in members:
+            if key in hidden_members:
+                continue
+            (fc_ctrl_ref, fc_outcome, ctrl_stats_t, ctrl_frac_t,
+             _ctrl_n_t) = denoms.at(key, target_t)
+            fc_control_mean_at_t, fc_control_spread_at_t = ctrl_stats_t or (None, None)
+            fc_control_frac_at_t, fc_control_frac_spread_at_t = ctrl_frac_t or (None, None)
             pts = member_pts_by_key[key]
             matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
             if matched:
@@ -835,7 +822,16 @@ def collect_bar_items_for_group(
                 else:
                     n_above_val = float(pt[4]) if len(pt) >= 5 else 0.0
                     n_above_err = n_above_rep_spread
-                if fc_vs_ctrl or fc_vs_t0:
+                if fc_vs_ctrl and fc_outcome and fc_control_mean_at_t is None:
+                    # The tab's collector NaNs a bar whose control did not
+                    # resolve; this one used to hand ``scale_bar_value`` a None
+                    # denominator, which returns the value untouched — a raw
+                    # number on a fold-change axis, in an exported figure
+                    # nobody is watching being drawn.
+                    m = float("nan"); s = 0.0
+                    f = float("nan"); frac_spread = 0.0
+                    n_above_val = float("nan"); n_above_err = 0.0
+                elif fc_vs_ctrl or fc_vs_t0:
                     t0_mean = None
                     t0_spread = None
                     t0_frac = None
@@ -884,7 +880,8 @@ def collect_bar_items_for_group(
                 mean=m, spread=s, has_mean=has_mean,
                 frac=f, frac_spread=frac_spread, has_frac=has_frac,
                 n_above=n_above_val, n_above_spread=n_above_err,
-                    n_above_total=n_above_total,
+                n_above_total=n_above_total,
+                fc_control=fc_ctrl_ref, fc_outcome=str(fc_outcome or ""),
                 tp=float(target_t), group_key=gk,
             ))
         return out

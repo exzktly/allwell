@@ -27,6 +27,13 @@ import math
 
 from well_viewer.domain import fold_change as _fc
 from well_viewer.domain.batch_models import BarGroup
+from well_viewer.domain.fold_change_pairing import (
+    control_denominators,
+    normalize_member_pts,
+)
+from well_viewer.domain.fold_change_series_cache import (
+    ControlSeriesCache as _ControlSeriesCache,
+)
 from well_viewer.core.lazy import lazy as _lazy
 # Lazy so batch export imports without the lineplot tab present (keeps it
 # deletable). LineSeries is a class — the proxy is callable so constructor
@@ -79,10 +86,6 @@ def collect_line_series_for_group(
     the additive CSV writer makes that call alongside the active-state call.
     """
     fc = _fc.coerce_fc_state(fc_state)
-    fc_vs_ctrl = fc.vs_control_on
-    fc_ctrl_lbl = fc.control
-    fc_vs_t0 = fc.vs_t0_on
-    fc_active = fc_vs_ctrl or fc_vs_t0
 
     rep_per_fov = bool(ctx.state.plot.use_fov_replicates)
     fc_n_per_fov = rep_per_fov
@@ -91,37 +94,34 @@ def collect_line_series_for_group(
     fc_op_ctrl = _fc.parse_fc_op_ctrl(ctx)
     fc_op_t0 = _fc.parse_fc_op_t0(ctx)
 
-    # Control series — same helpers the on-tab collector uses, so the
-    # denominator statistic matches each member's numerator.
-    fc_control_stats: dict = {}
-    fc_control_frac_stats: dict = {}
-    fc_control_n_stats: dict = {}
-    if fc_vs_ctrl and fc_ctrl_lbl:
-        fc_control_stats = _fc.member_stats_series(
-            ctx, fc_ctrl_lbl, threshold=threshold, val_col=val_col,
-            use_sem=use_sem, per_fov_spread=fc_n_per_fov, fluor_gates=fluor_gates,
-        )
-        fc_control_frac_stats = _fc.member_frac_stats_series(
-            ctx, fc_ctrl_lbl, threshold=threshold, val_col=val_col,
-            use_sem=use_sem, per_fov_spread=fc_n_per_fov, fluor_gates=fluor_gates,
-        )
-        fc_control_n_stats = _fc.member_n_stats_series(
-            ctx, fc_ctrl_lbl, threshold=threshold, val_col=val_col,
-            per_fov_spread=fc_n_per_fov, fluor_gates=fluor_gates,
-        )
+    # Control denominators — the same resolver and the same series helpers the
+    # on-tab collector uses, so the denominator statistic matches each member's
+    # numerator and a per-sample mapping reaches the exported figure too.
+    member_keys = ([r.name for r in group.members if any(
+        w in ctx.state.dataset.well_paths for w in r.wells)]
+        + [w for w in group.solo_wells if w in ctx.state.dataset.well_paths])
+    member_well_map = {
+        r.name: [w for w in r.wells if w in ctx.state.dataset.well_paths]
+        for r in group.members
+    }
+    member_well_map.update({w: [w] for w in group.solo_wells})
+    ctrl_cache = _ControlSeriesCache(
+        ctx, threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=fc_n_per_fov, fluor_gates=fluor_gates,
+    )
+    denoms = control_denominators(
+        ctx, ctrl_cache, fc, member_keys, scope_wells=member_well_map,
+        member_rsets={w: r.name for r in group.members for w in r.wells},
+    )
+    hidden_members = denoms.hidden_members
 
-    def _normalize(pts: list) -> list:
-        if not (pts and fc_active):
-            return pts
-        return _fc.normalize_pts(
-            pts,
-            control_stats=fc_control_stats or None,
-            control_frac_stats=fc_control_frac_stats or None,
-            control_n_stats=fc_control_n_stats or None,
-            normalize_frac_n=True, n_per_fov=fc_n_per_fov,
-            use_t0=fc_vs_t0, baseline_tp=fc_baseline_tp,
-            op_ctrl=fc_op_ctrl, op_t0=fc_op_t0,
-        )
+    # Same helper the on-tab collector uses, so the exported figure and the
+    # on-screen one are the same plot.
+    _norm_kw = dict(fc=fc, n_per_fov=fc_n_per_fov, baseline_tp=fc_baseline_tp,
+                    op_ctrl=fc_op_ctrl, op_t0=fc_op_t0)
+
+    def _normalize(pts: list, member_key: str) -> list:
+        return normalize_member_pts(pts, denoms, member_key, **_norm_kw)
 
     def _cdf_for(wells: list[str]) -> list[float]:
         if not (include_cdf and wells):
@@ -143,7 +143,7 @@ def collect_line_series_for_group(
     # ── Replicate-set members: the tab's rep-set statistic ───────────────────
     for rset in group.members:
         valid_wells = [w for w in rset.wells if w in ctx.state.dataset.well_paths]
-        if not valid_wells:
+        if not valid_wells or rset.name in hidden_members:
             continue
         rset_per_fov = replicate_unit(len(valid_wells), rep_per_fov) == "fov"
         all_tps: set = set()
@@ -174,7 +174,7 @@ def collect_line_series_for_group(
                     t, gm, gerr, gf, n_above_val, 0, gfe, gnpf_m, gnpf_s,
                     n_above_spread, n_above_total,
                 ))
-        points = [_aggpoint_to_linepoint(pt) for pt in _normalize(raw_pts)]
+        points = [_aggpoint_to_linepoint(pt) for pt in _normalize(raw_pts, rset.name)]
         series_out.append(LineSeries(
             key=rset.name, display=_replicate_display_label(ctx, rset),
             color=_rank_color_rset(ctx, rset), kind="repset",
@@ -183,12 +183,12 @@ def collect_line_series_for_group(
 
     # ── Solo wells: the tab's per-well (within-well) statistic ───────────────
     for w in group.solo_wells:
-        if w not in ctx.state.dataset.well_paths:
+        if w not in ctx.state.dataset.well_paths or w in hidden_members:
             continue
         pts = aggregate_well(ctx, w, threshold=threshold, use_sem=use_sem,
                              val_col=val_col, fluor_gates=fluor_gates,
                              per_fov_spread=rep_per_fov)
-        points = [_aggpoint_to_linepoint(pt) for pt in _normalize(list(pts or []))]
+        points = [_aggpoint_to_linepoint(pt) for pt in _normalize(list(pts or []), w)]
         series_out.append(LineSeries(
             key=w, display=_well_display_label(ctx, w), color=_color_for_well(w),
             kind="well", wells=[w], points=points, cdf_vals=_cdf_for([w]),

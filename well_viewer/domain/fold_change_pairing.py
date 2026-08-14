@@ -274,6 +274,32 @@ class ControlDenominators:
             return frozenset()
         return frozenset(self._controls.hidden_members())
 
+    def control_for(self, member_key: str):
+        """``(control, outcome)`` for *member_key*, before any timepoint."""
+        if not self._on:
+            return None, ""
+        if self._controls is None:
+            return self._single, self._single_outcome
+        rec = self._controls.get(member_key)
+        return rec.control, rec.outcome
+
+    def series_for(self, member_key: str):
+        """``(control, outcome, stats, frac, n)`` with whole ``{t: …}`` series.
+
+        The Line tab normalizes a member's entire curve in one call rather than
+        timepoint by timepoint, so it wants the series rather than a sample.
+        An unresolvable control yields three empty dicts — never a partially
+        populated one, which is how a trace ends up half normalized.
+        """
+        ref, outcome = self.control_for(member_key)
+        if not outcome or outcome in (ControlOutcome.UNMAPPED,
+                                      ControlOutcome.CONTROL_UNRESOLVED):
+            return ref, outcome, {}, {}, {}
+        return (ref, outcome,
+                self._cache.stats_series(ref),
+                self._cache.frac_series(ref),
+                self._cache.n_series(ref))
+
     def at(self, member_key: str, target_t: float):
         """``(control, outcome, mean, frac, n)`` — each of the last three a
         ``(value, spread)`` pair or ``None``.
@@ -326,6 +352,40 @@ def control_denominators(ctx, cache, fc, member_keys, *, scope_wells=None,
     )
     return ControlDenominators(cache, on=True, single=fc.control,
                                single_outcome=outcome, miss_sink=miss_sink)
+
+
+def normalize_member_pts(pts, denoms: ControlDenominators, member_key: str, *,
+                         fc, n_per_fov: bool, baseline_tp,
+                         op_ctrl: str, op_t0: str, miss_sink=None) -> list:
+    """Normalize one member's AggPoints against **its own** control.
+
+    The Line tab and the batch line runner both do this, and both used to hand
+    ``normalize_pts`` a control series that could be empty. An empty one skips
+    the control axis without complaint, so the figure carried raw values under
+    a fold-change axis label with nothing to say so — on the batch path, in an
+    export nobody watched being drawn. A member whose control did not resolve
+    is blanked instead, which is the answer its bar gets.
+    """
+    from well_viewer.domain.fold_change import blank_point, normalize_pts
+
+    if not pts or not fc.active:
+        return pts
+    _ref, outcome, ctrl_stats, ctrl_frac, ctrl_n = denoms.series_for(member_key)
+    if fc.vs_control_on and outcome and not ctrl_stats:
+        return [blank_point(pt) for pt in pts]
+    return normalize_pts(
+        pts,
+        control_stats=ctrl_stats or None,
+        control_frac_stats=ctrl_frac or None,
+        control_n_stats=ctrl_n or None,
+        normalize_frac_n=True,
+        n_per_fov=n_per_fov,
+        use_t0=fc.vs_t0_on,
+        baseline_tp=baseline_tp,
+        op_ctrl=op_ctrl,
+        op_t0=op_t0,
+        miss_sink=miss_sink,
+    )
 
 
 # ── bulk entry ───────────────────────────────────────────────────────────────

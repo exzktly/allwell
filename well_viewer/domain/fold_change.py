@@ -999,8 +999,7 @@ def parse_baseline_tp(ctx) -> float | None:
 
 
 def is_active(ctx) -> bool:
-    vs_ctrl, _, vs_t0 = fold_change_state(ctx)
-    return vs_ctrl or vs_t0
+    return fold_change_state(ctx).active
 
 
 def _fc_op_word(op: str) -> str:
@@ -1100,6 +1099,23 @@ def control_pts_for_line(ctx, control_label: str, *, threshold: float,
         val_col=val_col,
         fluor_gates=fluor_gates,
     )
+
+
+def blank_point(pt) -> tuple:
+    """An AggPoint with its three plotted values replaced by NaN.
+
+    What a trace becomes when its control cannot be resolved. Dropping the
+    point entirely would leave a gap the renderer bridges with a straight line
+    between the neighbours, which reads as data; NaN reads as absent, which is
+    what it is. The timepoint, the cell counts and the CDF values are untouched
+    — they were measured and are still true.
+    """
+    out = list(pt) + [None] * max(0, 11 - len(pt))
+    out[1] = float("nan")   # mean
+    out[3] = float("nan")   # fraction above threshold
+    out[4] = float("nan")   # events above threshold
+    out[2] = out[6] = out[9] = 0.0
+    return tuple(out[:max(11, len(pt))])
 
 
 def resolve_control(ctx, ref) -> tuple[str, str]:
@@ -1350,12 +1366,13 @@ def apply_cell_scale(vals, spec: CellScaleSpec | None):
 
 
 def build_cell_scaling(
-    ctx, wells, *, fc_state: tuple[bool, str, bool],
+    ctx, wells, *, fc_state,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
     op_ctrl: str = "ratio", op_t0: str = "ratio",
     order: str = "ctrl_first", baseline_tp: float | None = None,
+    control_by_member=None,
 ) -> Callable[[str, float], CellScaleSpec]:
     """Build a ``scale_for(well, tp) -> CellScaleSpec`` resolver for per-cell
     violin/beeswarm fold-change overlays.
@@ -1368,11 +1385,19 @@ def build_cell_scaling(
     call, so a multi-timepoint selection scales each column at its own
     timepoint instead of collapsing to the first (audit S3).
 
-      * control_mean — single scalar across all wells at the requested tp,
-        from :func:`control_mean_at_for_bar` (the bar's stat), cached per tp.
-        ``None`` / ``missing`` when vs-control is requested but unresolved.
+      * control_mean — the control's value at the requested tp, from
+        :func:`control_mean_at_for_bar` (the bar's stat), memoised per
+        ``(control, tp)``. ``None`` / ``missing`` when vs-control is requested
+        but unresolved.
       * t0_mean — each well's own baseline from :func:`member_baseline_value`
         (honouring ``baseline_tp``), resolved once per well.
+
+    *control_by_member* maps a member key to its own control reference. Without
+    it every member shares ``fc_state.control``, which is what a single global
+    control means. **With** per-sample controls it is not optional: the bars
+    would normalize per member while the violin drawn on top of them
+    normalized against a different denominator, and the two would sit on one
+    axis looking like one measurement.
     """
     _fc_req = coerce_fc_state(fc_state)
     fc_vs_ctrl = _fc_req.vs_control_on
@@ -1389,24 +1414,34 @@ def build_cell_scaling(
                 per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
             )
 
-    control_cache: dict[float, float | None] = {}
+    control_cache: dict = {}
 
-    def _control_at(tp: float) -> float | None:
-        if not (fc_vs_ctrl and fc_ctrl_lbl):
+    def _control_ref(member: str):
+        if control_by_member is None:
+            return fc_ctrl_lbl
+        return control_by_member.get(member)
+
+    def _control_at(member: str, tp: float) -> float | None:
+        ref = _control_ref(member)
+        if not (fc_vs_ctrl and ref is not None):
             return None
-        if tp not in control_cache:
-            control_cache[tp] = control_mean_at_for_bar(
-                ctx, fc_ctrl_lbl, tp,
+        key = (ref, tp)
+        if key not in control_cache:
+            control_cache[key] = control_mean_at_for_bar(
+                ctx, ref, tp,
                 threshold=threshold, val_col=val_col, use_sem=use_sem,
                 per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
             )
-        return control_cache[tp]
+        return control_cache[key]
 
     def scale_for(well: str, tp: float) -> CellScaleSpec:
         missing = False
         cm: float | None = None
-        if fc_vs_ctrl and fc_ctrl_lbl:
-            cm = _control_at(float(tp))
+        if fc_vs_ctrl:
+            # An unmapped member has no denominator, so its overlay is blank —
+            # the same answer its bar gets. Falling through to "no control
+            # requested" would draw the raw distribution on a fold-change axis.
+            cm = _control_at(well, float(tp))
             if cm is None:
                 missing = True
             elif op_ctrl == "ratio" and (not math.isfinite(cm) or cm == 0):

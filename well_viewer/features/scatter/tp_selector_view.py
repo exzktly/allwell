@@ -17,6 +17,7 @@ from collections.abc import Callable
 
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QCheckBox, QMenu, QWidgetAction
+from widgets import menu_exec
 
 
 def open_timepoint_selector(
@@ -77,4 +78,4 @@ def open_timepoint_selector(
     none_action.triggered.connect(lambda _=False: _set_all(False))
     menu.addAction(none_action)
 
-    menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+    menu_exec.exec_menu(menu, btn.mapToGlobal(btn.rect().bottomLeft()))

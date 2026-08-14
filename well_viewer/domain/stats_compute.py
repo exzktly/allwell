@@ -377,20 +377,29 @@ def compute_rep_per_fov_stats(
     return result
 
 
-def compute_rep_n_above(ctx, rset: ReplicateSet, target_t: float) -> int:
-    """Total events-above-threshold contributing to *rset* at *target_t*.
+def compute_rep_n_above_total(ctx, rset: ReplicateSet, target_t: float) -> int:
+    """Cross-well **total** events-above-threshold for *rset* at *target_t*.
 
-    Sums ``n_above`` (AggPoint index 4) across loaded wells of the set
-    after gating, so the bar plot's third panel reports the count of
-    cells that actually exceeded the active threshold — the same
-    numerator that drives the fraction-above-threshold value.
+    A reporting figure, not a plotted one. The CSV's ``n_above_threshold``
+    column has always carried the number of cells that exceeded the threshold
+    across the whole replicate set, and downstream scripts read it as an
+    integer count.
+
+    **Never use this as a plotted value.** Every panel draws
+    :func:`compute_rep_n_above_stats` — the mean of the per-well counts with
+    the cross-well spread — because that is the statistic the Mean and
+    Fraction panels beside it use, and because a set normalised against itself
+    has to land on 1.0 rather than 1/n. Reaching for a total because its name
+    was shorter is exactly how the two plotting tabs came to disagree; the
+    guard in ``tests/test_events_total_isolation.py`` fails if a renderer or a
+    collector of plotted values imports this.
     """
     threshold = on_cutoff_for_column(
         ctx, ctx.state.channel.active_val_col,
         channel=ctx.state.channel.active_channel)
     fluor_gates = get_all_fluor_gates(ctx)
-    cache_key = ("rep_n_above", rset.name, tuple(rset.wells), target_t, threshold,
-                 ctx.state.channel.active_val_col,
+    cache_key = ("rep_n_above_total", rset.name, tuple(rset.wells), target_t,
+                 threshold, ctx.state.channel.active_val_col,
                  tuple(sorted(fluor_gates.items())), _gate_cache_sig(ctx))
     if cache_key in ctx.state.stats_cache.cache:
         return ctx.state.stats_cache.cache[cache_key]

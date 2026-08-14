@@ -15,6 +15,25 @@ from well_viewer.core.channel_state_controller import get_all_fluor_gates, on_cu
 from well_viewer.data.data_loading import get_rows
 from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.domain.time_rescale import format_scaled as _rescale_tp
+from well_viewer.domain import fold_change_pairing as _pairing_mod
+from well_viewer.domain import plot_members as _members
+from well_viewer.data.data_loading import (
+    _beeswarm_jitter,
+    df_included_mask,
+    parse_timepoint_hours,
+    resolve_value_series,
+)
+from well_viewer.core.plot_style import (
+    apply_ax_style,
+    apply_export_style_to_current,
+    mark_time_rescale,
+    tokens_for,
+)
+from well_viewer.domain.stats_compute import aggregate_well
+from well_viewer.core.safe import swallowed
+
+import numpy as np
+import pandas as pd
 
 import logging
 import math
@@ -55,8 +74,6 @@ def _annotate_cluster_footers(items, axes, fontsize=8) -> None:
                         xytext=(0, -32), textcoords="offset points",
                         ha="center", va="top", fontsize=_fs, fontweight="bold",
                         color=_muted_fg, annotation_clip=False)
-import numpy as np
-import pandas as pd
 
 
 def _set_frac_ylim(ctx, ax_frac) -> None:
@@ -71,28 +88,9 @@ def _set_frac_ylim(ctx, ax_frac) -> None:
     (``apply_export_style_to_current`` at the end of ``redraw_bars``).
     """
     from well_viewer.domain import fold_change as _fc
-    fc_on, _, fc_t0 = _fc.fold_change_state(ctx)
-    if fc_on or fc_t0:
+    if _fc.fold_change_state(ctx).active:
         return
     ax_frac.set_ylim(-0.05, 1.05)
-
-
-from well_viewer.data.data_loading import (
-    _beeswarm_jitter,
-    df_included_mask,
-    parse_timepoint_hours,
-    resolve_value_series,
-)
-from well_viewer.core.plot_style import (
-    apply_ax_style,
-    apply_export_style_to_current,
-    mark_time_rescale,
-    tokens_for,
-)
-from well_viewer.domain.stats_compute import aggregate_well
-from well_viewer.core.safe import swallowed
-
-
 
 
 def _pooled_rows(ctx, lbl: str, pool_groups: dict[str, list[str]] | None):
@@ -284,7 +282,7 @@ def draw_violin(
     from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB, fraction_title
     from well_viewer.domain import fold_change as _fc
     _metric_label = _MLB.get(ctx.state.channel.active_metric, "Mean Intensity")
-    _fc_suffix = _fc.fold_change_suffix_for(ctx) if cell_scale else ""
+    _fc_suffix = _fc.fold_change_suffix_for(ctx, "bar") if cell_scale else ""
     _tp_suffix = _format_tp_title(target_ts_per_col, tp_str)
     ax_mean.set_title(
         f"{ctx.state.channel.active_channel.upper()} {_metric_label} distribution (violin, bw={bw:.2f}){_fc_suffix}  —  {_tp_suffix}",
@@ -439,7 +437,7 @@ def draw_beeswarm(
     from well_viewer.domain import fold_change as _fc
     _metric_label = _MLB.get(ctx.state.channel.active_metric, "Mean Intensity")
     _thr_q = threshold_qualifier(ctx.state.channel.active_metric)
-    _fc_suffix = _fc.fold_change_suffix_for(ctx) if cell_scale else ""
+    _fc_suffix = _fc.fold_change_suffix_for(ctx, "bar") if cell_scale else ""
     _tp_suffix = _format_tp_title(target_ts_per_col, tp_str)
     ax_mean.set_title(
         f"{ctx.state.channel.active_channel.upper()} {_metric_label} per cell{_thr_q}{_fc_suffix}  —  {_tp_suffix}",
@@ -665,7 +663,7 @@ def draw_grouped_bar_mode(
     _metric_label = _MLB.get(ctx.state.channel.active_metric, "Mean Intensity")
     _metric_key = ctx.state.channel.active_metric
     _thr_q = threshold_qualifier(_metric_key)
-    _fc_suffix = _fc.fold_change_suffix_for(ctx)
+    _fc_suffix = _fc.fold_change_suffix_for(ctx, "bar")
     _tp_suffix = _format_tp_title(target_ts, tp_str)
     # Cluster headers (_annotate_cluster_headers) sit at y≈1.02 on ax_mean only;
     # when any survive normalization, push the title up so it clears them rather
@@ -698,11 +696,13 @@ def draw_grouped_bar_mode(
     # ``apply_export_style_to_current`` at the end of ``redraw_bars``.
     draw_significance_brackets(ctx, items, ax_mean=ax_mean, ax_frac=ax_frac,
                                target_ts=target_ts)
-    if fc_misses:
-        _tps = ", ".join(f"{t:g}" for t in sorted(fc_misses))
-        ctx.notify.set_status(
-            f"Fold change: control missing at t={_tps} — bars dropped."
-        )
+    # Derived from the items' own outcomes rather than from the timepoint set
+    # alone: with a control per member, "control missing at t=24" does not say
+    # which control or how many bars it cost, and it cannot say anything at all
+    # about a bar whose control was never assigned.
+    _shortfall = _pairing_mod.shortfall_from_items(items, timepoints=fc_misses)
+    if _shortfall:
+        ctx.notify.set_status(_shortfall)
     ctx.runtime.barplot.canvas.draw_idle()
 
 
@@ -744,7 +744,7 @@ def redraw_bars(ctx) -> None:
     _metric_label = _MLB.get(ctx.state.channel.active_metric, "Mean Intensity")
     _metric_key = ctx.state.channel.active_metric
     _thr_q = threshold_qualifier(_metric_key)
-    _fc_suffix = _fc.fold_change_suffix_for(ctx)
+    _fc_suffix = _fc.fold_change_suffix_for(ctx, "bar")
     apply_ax_style(ax_mean,
                    f"{_ch} {_metric_label}{_thr_q} ± {band_lbl}{_fc_suffix}",
                    f"{_ch} {_metric_label}{_fc_suffix}")
@@ -900,6 +900,43 @@ def selected_bar_wells(ctx, active_rsets) -> list[str]:
     )
 
 
+def _drop_hidden_columns(ctx, wells, colors, short, full, pool_groups):
+    """Remove the columns ``Controls: hide from plot`` takes out of the plot.
+
+    The bar collector already drops them, but the per-cell modes build their
+    own column list straight from the drag order — so without this, switching
+    the tab to violin or beeswarm re-exposed the columns bar mode removed.
+    """
+    hidden = _hidden_per_cell_members(ctx)
+    if not hidden:
+        return wells, colors, short, full, pool_groups
+    keep = [i for i, w in enumerate(wells) if w not in hidden]
+    return (
+        [wells[i] for i in keep],
+        [colors[i] for i in keep],
+        [short[i] for i in keep],
+        [full[i] for i in keep],
+        None if pool_groups is None
+        else {k: v for k, v in pool_groups.items() if k not in hidden},
+    )
+
+
+def _hidden_per_cell_members(ctx) -> frozenset:
+    """Members the ``Controls: hide from plot`` toggle removes, for this tab."""
+    from well_viewer.domain import fold_change as _fc
+
+    fc = _fc.fold_change_state(ctx)
+    if not (fc.vs_control_on and fc.per_member and fc.control_render == "hidden"):
+        return frozenset()
+    controls = _pairing_mod.build_per_member_controls(
+        ctx, _members.plotted_member_keys(ctx, "bar"), fc.control_map_dict,
+        member_wells=_members.member_wells(ctx, "bar"),
+        member_rsets=_members.member_replicate_sets(ctx),
+        render=fc.control_render,
+    )
+    return frozenset(controls.hidden_members())
+
+
 def draw_per_cell_bar_mode(
     ctx,
     *,
@@ -985,6 +1022,13 @@ def draw_per_cell_bar_mode(
     # for. Labels stay single-line: cluster headers carry the primary
     # identity so per-bar labels only need to carry the secondary axis
     # (the variable that changes inside the cluster).
+    # ``Controls: hide from plot`` drops a member from the bar collector, so it
+    # has to drop it here too — the per-cell modes build their own column list
+    # straight from the drag order, and without this switching the tab to
+    # violin or beeswarm re-exposed the columns bar mode had removed.
+    base_wells, base_colors, base_short, base_full, pool_groups = _drop_hidden_columns(
+        ctx, base_wells, base_colors, base_short, base_full, pool_groups)
+
     plot_wells: list[str] = []
     plot_colors: list[str] = []
     plot_labels: list[str] = []
@@ -1023,9 +1067,27 @@ def draw_per_cell_bar_mode(
     # baseline-tp the bars use (audit S1) and scales each column at its own
     # timepoint instead of collapsing multi-tp selections to the first (S3).
     _fc_state = _fc.fold_change_state(ctx)
-    if _fc_state[0] or _fc_state[2]:
+    if _fc_state.active:
+        # The overlay resolves the same control the bar under it did. Without
+        # this the bars normalize per member while the distribution drawn on
+        # top of them divides by a different denominator, and the two sit on
+        # one axis looking like one measurement.
+        _cell_controls = None
+        if _fc_state.vs_control_on and _fc_state.per_member:
+            _pairing = _pairing_mod.build_per_member_controls(
+                ctx, base_wells, _fc_state.control_map_dict,
+                member_wells=_members.member_wells(ctx, "bar"),
+                member_rsets=_members.member_replicate_sets(ctx),
+                render=_fc_state.control_render,
+            )
+            _cell_controls = {
+                key: (_pairing.get(key).control
+                      if _pairing.get(key).resolved else None)
+                for key in base_wells
+            }
         cell_scale = _fc.build_cell_scaling(
             ctx, base_wells, fc_state=_fc_state,
+            control_by_member=_cell_controls,
             threshold=threshold, val_col=ctx.state.channel.active_val_col,
             use_sem=ctx.state.plot.use_sem,
             per_fov_spread=ctx.state.plot.use_fov_replicates,
@@ -1043,7 +1105,13 @@ def draw_per_cell_bar_mode(
     # keys; the hit-test guards on length+identity so a per-well expansion that
     # doesn't match simply falls back to integer positions).
     ctx.runtime.barplot.xs = list(xs)
-    ctx.runtime.barplot.xs_keys = list(ordered_keys)
+    # The **surviving** column keys, not the pre-drop drag order:
+    # ``_drop_hidden_columns`` above shortened the column list, so recording
+    # the full order left ``bar_drag_xs``'s length/identity guard failing and
+    # drag-reorder falling back to integer positions, which is wrong as soon as
+    # clusters insert gaps. A per-well or multi-tp expansion still mismatches
+    # and still falls back — that case is what the guard is for.
+    ctx.runtime.barplot.xs_keys = list(base_wells)
     if ctx.state.bar.violin:
         draw_violin(
             ctx, ax_mean, ax_frac, plot_wells, plot_colors, plot_labels,
@@ -1092,6 +1160,14 @@ def draw_per_well_n_bars(
     mean of its per-FOV above-threshold counts and an error bar spans ±
     the per-FOV SD/SEM. When the toggle is off, the bar is the well's
     total above-threshold count with no error bar.
+
+    **Nothing here is fold-changed**, on either surface that calls it, so this
+    function also writes the panel's title and ylabel — plain, with no
+    fold-change suffix — overwriting whatever the caller put there. Both
+    callers title all three panels before dispatching on display mode, and both
+    would otherwise leave a raw count under a title reading "fold change vs
+    …". ``draw_violin`` and ``draw_beeswarm`` re-title the two panels they draw
+    for the same reason.
     """
     from matplotlib.ticker import MaxNLocator
     from well_viewer.domain.stats_compute import aggregate_group
@@ -1155,3 +1231,19 @@ def draw_per_well_n_bars(
     ax_n.set_ylim(0, max(cur_hi, 1))
     ax_n.yaxis.set_major_locator(MaxNLocator(integer=not per_fov_spread))
     setattr(ax_n, "_categorical_xaxis", True)
+    from well_viewer.data.metric_labels import (
+        events_per_fov_title, events_total_title,
+    )
+    _metric_key = ctx.state.channel.active_metric
+    if per_fov_spread:
+        _n_title = events_per_fov_title(_metric_key, "SEM" if use_sem else "SD")
+        _n_ylabel = "N(above)/FOV"
+    else:
+        _n_title = events_total_title(_metric_key)
+        _n_ylabel = "N(above)"
+    # Set directly rather than through ``apply_ax_style``: that helper also
+    # calls ``tick_params(labelsize=8)``, which would undo the size-7 tick
+    # labels set above. The colour token is the one it would have used.
+    ax_n.set_title(_n_title, color=tokens_for(ax_n)[1], fontsize=9,
+                   fontweight="bold", pad=6)
+    ax_n.set_ylabel(_n_ylabel, fontsize=8, labelpad=5)

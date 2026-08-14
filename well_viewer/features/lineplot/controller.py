@@ -9,13 +9,24 @@ from well_viewer.domain import fold_change as _fc
 from well_viewer.domain.stats_compute import compute_rep_stats
 from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
 from well_viewer.domain.stats_compute import aggregate_well
-from well_viewer.domain.stats_compute import compute_rep_n_above
+from well_viewer.domain.stats_compute import compute_rep_n_above_stats
+from well_viewer.domain.stats_compute import compute_rep_n_above_total
 from well_viewer.domain.stats_compute import replicate_unit
 from well_viewer.domain.selections_model import (
     active_replicate_sets, color_for_replicate_set, color_for_well,
     well_display_label,
 )
 from well_viewer.domain.viewer_state import parse_rc
+from well_viewer.domain.plot_order import apply_order as _apply_order
+from well_viewer.domain.fold_change_series_cache import (
+    ControlSeriesCache as _ControlSeriesCache,
+)
+from well_viewer.domain.fold_change_pairing import (
+    control_denominators,
+    normalize_member_pts,
+    shortfall_from_items,
+)
+from well_viewer.domain import plot_members as _members
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates, on_cutoff_for_column,
 )
@@ -60,18 +71,32 @@ class LinePoint:
     frac_spread: float = 0.0
     n_above_pf_mean: float = 0.0
     n_above_pf_spread: float = 0.0
+    #: Cross-well total events, for the CSV's integer ``n_above_threshold``
+    #: column. ``n_above`` is the plotted value and is a per-well mean for a
+    #: replicate set, so the two differ and the CSV needs its own. ``None``
+    #: for a non-aggregated row, never ``0``.
+    n_above_total: int | None = None
+    n_above_spread: float = 0.0
     has_mean: bool = True
     has_frac: bool = True
 
     def as_aggpoint(self) -> tuple:
-        """Convert back to the AggPoint tuple shape ``line_metric_row`` expects."""
-        n_above = (int(self.n_above)
+        """Convert back to the AggPoint tuple shape ``line_metric_row`` expects.
+
+        Index 4 carries the **drawn** value, which for a replicate set is a
+        per-well mean and therefore fractional. It used to be rounded down with
+        ``int()`` here, which is how a curve at 7.5 reached the batch line CSV
+        as 7; the CSV's integer count now comes from index 10 instead.
+        """
+        n_above = (float(self.n_above)
                    if isinstance(self.n_above, (int, float)) and math.isfinite(self.n_above)
                    else float("nan"))
         return (
             self.t, self.mean, self.spread, self.frac,
             n_above, int(self.n_total), self.frac_spread,
             self.n_above_pf_mean, self.n_above_pf_spread,
+            self.n_above_spread,
+            self.n_above_total,
         )
 
 
@@ -92,6 +117,12 @@ class LineSeries:
       * ``cdf_vals`` — raw per-cell values for the CDF panel (the
         distribution panel doesn't fold-change-normalize naturally;
         always raw).
+      * ``fc_control`` / ``fc_outcome`` — which control **this trace** was
+        divided by and why it is what it is, mirroring the same pair on
+        ``BarItem``. They live on the series rather than the point
+        because a member's control does not change with time; what
+        changes with time is whether the control had a sample there,
+        which the blanked points already say.
     """
     key: str
     display: str
@@ -100,6 +131,8 @@ class LineSeries:
     wells: list[str]
     points: list[LinePoint] = field(default_factory=list)
     cdf_vals: list[float] = field(default_factory=list)
+    fc_control: object | None = None
+    fc_outcome: str = ""
 
 
 @dataclass
@@ -115,42 +148,6 @@ class LineAxes:
     frac: object
     n: object
     cdf: object
-
-
-def _apply_order(items, saved_order, key):
-    """Reorder ``items`` so entries matching ``saved_order`` come first.
-
-    Items whose ``key(item)`` appears in ``saved_order`` are emitted in the
-    saved order; the remainder follow in their natural (input) order. An empty
-    or missing saved_order is a no-op (returns items unchanged).
-    """
-    if not saved_order:
-        return list(items)
-    items = list(items)
-    by_key: dict[str, list[int]] = {}  # str-key -> indices into items
-    for idx, it in enumerate(items):
-        try:
-            k = str(key(it))
-        except Exception:
-            k = ""
-        by_key.setdefault(k, []).append(idx)
-    # Track which item *indices* have already been emitted. id()-based
-    # dedup was unsafe for small interned strings or any items the
-    # iterator might compare equal — distinct list positions could
-    # share an id, producing spurious dedup.
-    seen_indices: set[int] = set()
-    out: list = []
-    for k in saved_order:
-        bucket = by_key.get(str(k))
-        if not bucket:
-            continue
-        for idx in bucket:
-            out.append(items[idx])
-            seen_indices.add(idx)
-    for idx, it in enumerate(items):
-        if idx not in seen_indices:
-            out.append(it)
-    return out
 
 
 def _aggpoint_to_linepoint(pt) -> LinePoint:
@@ -171,10 +168,13 @@ def _aggpoint_to_linepoint(pt) -> LinePoint:
     frac_spread = float(pt[6]) if len(pt) > 6 else 0.0
     n_above_pf_mean = float(pt[7]) if len(pt) > 7 else 0.0
     n_above_pf_spread = float(pt[8]) if len(pt) > 8 else 0.0
+    n_above_spread = float(pt[9]) if len(pt) > 9 else 0.0
+    n_above_total = int(pt[10]) if (len(pt) > 10 and pt[10] is not None) else None
     return LinePoint(
         t=t, mean=mean, spread=spread, frac=frac,
         n_above=n_above, n_total=n_total, frac_spread=frac_spread,
         n_above_pf_mean=n_above_pf_mean, n_above_pf_spread=n_above_pf_spread,
+        n_above_spread=n_above_spread, n_above_total=n_above_total,
         has_mean=not (isinstance(mean, float) and math.isnan(mean)),
         has_frac=not (isinstance(frac, float) and math.isnan(frac)),
     )
@@ -186,7 +186,7 @@ def collect_line_series(
     threshold: float,
     use_sem: bool,
     val_col: str | None = None,
-    fc_state: tuple[bool, str, bool] | None = None,
+    fc_state=None,
     fc_baseline_tp: float | None = None,
     miss_sink: set[float] | None = None,
     include_cdf: bool = True,
@@ -219,7 +219,7 @@ def collect_line_series(
 
     if fc_state is None:
         fc_state = _fc.fold_change_state(ctx)
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
+    fc = _fc.coerce_fc_state(fc_state)
     if fc_baseline_tp is None:
         fc_baseline_tp = _fc.parse_baseline_tp(ctx)
     fc_op_ctrl = _fc.parse_fc_op_ctrl(ctx)
@@ -233,34 +233,26 @@ def collect_line_series(
     per_fov_spread = ctx.state.plot.use_fov_replicates if not active_rsets else False
 
     # Control series — mean-of-per-well-means / per-FOV / per-well agg
-    # matching each member's own stat (post-PR-3). Pass {t: (mean, spread)}
-    # so error propagation through normalize_pts has the right
-    # denominator uncertainty.
-    fc_control_stats: dict = {}
-    fc_control_frac_stats: dict = {}
-    fc_control_n_stats: dict = {}
-    # The N panel plots the per-FOV-mean count when FOV-spread is on, else the
-    # total count — the control denominator and the scaled field must match.
+    # matching each member's own stat. ``normalize_pts`` is handed
+    # {t: (mean, spread)} so error propagation has the right denominator
+    # uncertainty. The N panel plots the per-FOV-mean count when FOV-spread is
+    # on, else the per-well statistic — the control denominator and the scaled
+    # field must match.
     fc_n_per_fov = bool(rep_per_fov or per_fov_spread)
-    if fc_vs_ctrl and fc_ctrl_lbl:
-        fc_control_stats = _fc.member_stats_series(
-            ctx, fc_ctrl_lbl,
-            threshold=threshold, val_col=val_col,
-            use_sem=use_sem, per_fov_spread=fc_n_per_fov,
-            fluor_gates=fluor_gates,
-        )
-        fc_control_frac_stats = _fc.member_frac_stats_series(
-            ctx, fc_ctrl_lbl,
-            threshold=threshold, val_col=val_col,
-            use_sem=use_sem, per_fov_spread=fc_n_per_fov,
-            fluor_gates=fluor_gates,
-        )
-        fc_control_n_stats = _fc.member_n_stats_series(
-            ctx, fc_ctrl_lbl,
-            threshold=threshold, val_col=val_col,
-            per_fov_spread=fc_n_per_fov,
-            fluor_gates=fluor_gates,
-        )
+    ctrl_cache = _ControlSeriesCache(
+        ctx, threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=fc_n_per_fov, fluor_gates=fluor_gates,
+    )
+    denoms = control_denominators(
+        ctx, ctrl_cache, fc,
+        _members.line_member_keys(ctx) if fc.per_member else (),
+        scope_wells=_members.member_wells(ctx, "line") if fc.per_member else None,
+        member_rsets=_members.member_replicate_sets(ctx) if fc.per_member else None,
+        miss_sink=miss_sink,
+    )
+    hidden_members = denoms.hidden_members
+    _norm_kw = dict(fc=fc, n_per_fov=fc_n_per_fov, baseline_tp=fc_baseline_tp,
+                    op_ctrl=fc_op_ctrl, op_t0=fc_op_t0, miss_sink=miss_sink)
 
     series_out: list[LineSeries] = []
 
@@ -271,6 +263,8 @@ def collect_line_series(
             key=lambda r: getattr(r, "name", ""),
         )
         for rset in ordered_rsets:
+            if rset.name in hidden_members:
+                continue
             color = color_for_replicate_set(rset, ctx.state.selection.selections)
             valid_wells = [w for w in rset.wells if w in ctx.state.dataset.well_paths]
             # Unified replicate rule: per-FOV (FOVs pooled across the set's wells)
@@ -294,6 +288,10 @@ def collect_line_series(
                     ))
             _raw_pts: list = []
             for t in sorted(all_tps):
+                # Index 10 is the cross-well total the CSV's integer column
+                # keeps; index 4 stays the drawn value.
+                _n_above_total = compute_rep_n_above_total(ctx, rset, t)
+                _n_above_spread = 0.0
                 if rset_per_fov:
                     gm, gerr, gf, gfe, gnpf_m, gnpf_s = compute_rep_per_fov_stats(ctx,
                         rset, t, threshold, use_sem,
@@ -302,37 +300,39 @@ def collect_line_series(
                     gm, gerr, gf, _ = compute_rep_stats(ctx,
                         rset, t, threshold, use_sem,
                     )
-                    # compute_rep_n_above reads threshold from app state internally
-                    _n_above_val = compute_rep_n_above(ctx, rset, t)
+                    # Mean of the set's per-well counts — the same statistic
+                    # the Mean and Fraction panels beside it use, and the one
+                    # the Bar tab draws. This read ``compute_rep_n_above``, a
+                    # total across the set's wells, so the two tabs plotted
+                    # different numbers for the same replicate set: 5 per well
+                    # on a bar against 10 on a curve.
+                    _n_above_val, _n_above_spread = compute_rep_n_above_stats(
+                        ctx, rset, t, use_sem)
                     gfe, gnpf_m, gnpf_s = 0.0, 0.0, 0.0
                 if not (isinstance(gm, float) and math.isnan(gm)):
                     # AggPoint idx 6 = frac_spread (per-FOV fraction error), 7/8 =
                     # per-FOV n-above mean/spread. These were previously dropped,
                     # so the "fraction above threshold" subplot had no FOV error
                     # to draw and fell back to shading the area under the line.
-                    _raw_pts.append((t, gm, gerr, gf, _n_above_val if not rset_per_fov else 0, 0, gfe, gnpf_m, gnpf_s))
-            if _raw_pts and (fc_control_stats or fc_vs_t0):
-                _raw_pts = _fc.normalize_pts(
-                    _raw_pts,
-                    control_stats=fc_control_stats or None,
-                    control_frac_stats=fc_control_frac_stats or None,
-                    control_n_stats=fc_control_n_stats or None,
-                    normalize_frac_n=True,
-                    n_per_fov=fc_n_per_fov,
-                    use_t0=fc_vs_t0,
-                    baseline_tp=fc_baseline_tp,
-                    op_ctrl=fc_op_ctrl,
-                    op_t0=fc_op_t0,
-                    miss_sink=miss_sink,
-                )
+                    _raw_pts.append((
+                        t, gm, gerr, gf,
+                        _n_above_val if not rset_per_fov else 0, 0,
+                        gfe, gnpf_m, gnpf_s,
+                        _n_above_spread if not rset_per_fov else 0.0,
+                        _n_above_total,
+                    ))
+            _raw_pts = normalize_member_pts(
+                _raw_pts, denoms, rset.name, **_norm_kw)
             points = [_aggpoint_to_linepoint(pt) for pt in _raw_pts]
             n_wells = len(valid_wells)
             display = (
                 f"{rset.name} (n={n_wells})" if n_wells != 1 else rset.name
             )
+            _ctrl_ref, _outcome = denoms.control_for(rset.name)
             series_out.append(LineSeries(
                 key=rset.name, display=display, color=color, kind="repset",
                 wells=valid_wells, points=points, cdf_vals=cdf_vals,
+                fc_control=_ctrl_ref, fc_outcome=str(_outcome or ""),
             ))
         return series_out, band_lbl
 
@@ -347,6 +347,8 @@ def collect_line_series(
         key=lambda x: x,
     )
     for label in ordered_selected:
+        if label in hidden_members:
+            continue
         color = color_for_well(label)
         pts = aggregate_well(ctx,
             label, threshold=threshold, use_sem=use_sem,
@@ -354,20 +356,7 @@ def collect_line_series(
             fluor_gates=fluor_gates,
             per_fov_spread=per_fov_spread,
         )
-        if pts and (fc_control_stats or fc_vs_t0):
-            pts = _fc.normalize_pts(
-                pts,
-                control_stats=fc_control_stats or None,
-                control_frac_stats=fc_control_frac_stats or None,
-                control_n_stats=fc_control_n_stats or None,
-                normalize_frac_n=True,
-                n_per_fov=fc_n_per_fov,
-                use_t0=fc_vs_t0,
-                baseline_tp=fc_baseline_tp,
-                op_ctrl=fc_op_ctrl,
-                op_t0=fc_op_t0,
-                miss_sink=miss_sink,
-            )
+        pts = normalize_member_pts(list(pts or []), denoms, label, **_norm_kw)
         points = [_aggpoint_to_linepoint(pt) for pt in (pts or [])]
         cdf_vals: list = []
         if include_cdf and all_fluor_values_filtered is not None:
@@ -378,9 +367,11 @@ def collect_line_series(
                 ratios=ctx.state.channel.ratio_index,
             ))
         display = well_display_label(ctx, label)
+        _ctrl_ref, _outcome = denoms.control_for(label)
         series_out.append(LineSeries(
             key=label, display=display, color=color, kind="well",
             wells=[label], points=points, cdf_vals=cdf_vals,
+            fc_control=_ctrl_ref, fc_outcome=str(_outcome or ""),
         ))
     return series_out, band_lbl
 
@@ -589,6 +580,42 @@ def render_line_series(
     return any_ts, any_cdf, any_n
 
 
+def line_status_text(ctx, series_list, fc_misses, active_rsets, selected) -> str:
+    """What the status bar says after a line redraw.
+
+    Pure and separate from the redraw so the sentence can be asserted without
+    building a window — which matters because the failure it exists to prevent
+    is a status line that reports business as usual while traces are missing
+    from the plot.
+
+    Fold-change shortfalls come first, read off each trace's own outcome rather
+    than off the timepoint miss set. A trace whose control was never assigned,
+    or names a group that is not loaded, is blanked without any timepoint being
+    recorded as missed, so a status keyed on ``fc_misses`` alone said nothing
+    while curves vanished under a legend that still named them. The bar
+    renderer reads the same records for the same reason.
+
+    ``fc_misses`` still carries the one shortfall no outcome records — a
+    control that resolved but has no sample at some timepoints, which
+    ``normalize_pts`` drops point by point — so it is reported when the
+    per-trace outcomes are all clean.
+    """
+    shortfall = shortfall_from_items(series_list, timepoints=fc_misses)
+    if shortfall:
+        return shortfall
+    if fc_misses:
+        tps = ", ".join(f"{t:g}" for t in sorted(fc_misses))
+        return f"Fold change: control missing at t={tps} — those points dropped."
+    if active_rsets:
+        well_paths = ctx.state.dataset.well_paths
+        n_wells = sum(sum(1 for w in r.wells if w in well_paths)
+                      for r in active_rsets)
+        # threshold + band now live in the always-visible status chips (F1).
+        return f"{len(active_rsets)} replicate set(s)  ·  {n_wells} well(s)"
+    n_total = sum(len(get_rows(ctx, lbl)) for lbl in selected)
+    return f"{len(selected)} well(s)  |  {n_total:,} nuclei"
+
+
 def redraw_line_plots(
     ctx,
     *,
@@ -634,7 +661,9 @@ def redraw_line_plots(
     # control-series resolution + per-trace normalization happens inside
     # ``collect_line_series`` (single source of truth, mirrors the
     # bar plot's ``collect_bar_items``).
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = _fc.fold_change_state(ctx)
+    _live_fc = _fc.fold_change_state(ctx)
+    fc_vs_ctrl = _live_fc.vs_control_on
+    fc_vs_t0 = _live_fc.vs_t0_on
     fc_misses: set = set()
     # Theme-aware chrome colors (track the active PlotCard's Publication/Screen
     # state) — the renderer's *trace* colours stay rank-based.
@@ -646,7 +675,7 @@ def redraw_line_plots(
     legend_kw = dict(fontsize=7, framealpha=0.0, facecolor="none", edgecolor=_spine, labelcolor=_title_fg)
 
     _ch = ctx.state.channel.active_channel.upper()
-    _fc_suffix = _fc.fold_change_suffix_for(ctx)
+    _fc_suffix = _fc.fold_change_suffix_for(ctx, "line")
     from well_viewer.data.metric_labels import threshold_qualifier, fraction_title, events_per_fov_title, events_total_title
     _thr_q = threshold_qualifier(ctx.state.channel.active_metric)
     apply_ax_style(ax_mean, f"{_ch} {metric_label}{_thr_q} ± {band_lbl}{_fc_suffix}", metric_label + _fc_suffix)
@@ -753,21 +782,8 @@ def redraw_line_plots(
         draggable_legends=True,
     )
 
-    if fc_misses:
-        # Tell the user which timepoints lost their bars/points to a
-        # missing control sample, so an unexpectedly empty plot isn't a
-        # silent surprise.
-        _tps = ", ".join(f"{t:g}" for t in sorted(fc_misses))
-        ctx.notify.set_status(
-            f"Fold change: control missing at t={_tps} — those points dropped."
-        )
-    elif active_rsets:
-        n_wells = sum(sum(1 for w in r.wells if w in ctx.state.dataset.well_paths) for r in active_rsets)
-        # threshold + band now live in the always-visible status chips (F1).
-        ctx.notify.set_status(f"{len(active_rsets)} replicate set(s)  ·  {n_wells} well(s)")
-    else:
-        n_total = sum(len(get_rows(ctx, l)) for l in selected)
-        ctx.notify.set_status(f"{len(selected)} well(s)  |  {n_total:,} nuclei")
+    ctx.notify.set_status(line_status_text(
+        ctx, series_list, fc_misses, active_rsets, selected))
 
     # Re-apply the Export Style sidebar's prefs so font sizes, axis
     # limits, log scale, etc. survive a redraw (matches what the bar,

@@ -123,11 +123,19 @@ def _norm_well_token(tok: str) -> str:
 
 
 def _attach_fc_row(row: dict, npt: tuple, band_lbl: str,
-                   vs_control: bool, vs_t0: bool, control_label: str) -> None:
-    """Add the four fold-change columns to a per-timepoint CSV row.
+                   vs_control: bool, vs_t0: bool, control_label: str,
+                   outcome: str = "") -> None:
+    """Add the fold-change columns to a per-timepoint CSV row.
 
     Used by both the line and bar batch exporters so the column shape stays
-    identical across paths.
+    identical across paths — and identical to the on-tab CSV's, which is what
+    lets someone compare an exported plate against a tab export at all.
+
+    ``control_label`` is **this row's** control. Under per-sample controls the
+    rows differ, and one value repeated down the column would misstate every
+    denominator but one. ``outcome`` says why an empty ``fold_change_mean`` is
+    empty; without it a normalization that failed reads the same as one that
+    was never asked for.
     """
     fmean = npt[1] if len(npt) > 1 else float("nan")
     fspread = npt[2] if len(npt) > 2 else 0.0
@@ -142,6 +150,7 @@ def _attach_fc_row(row: dict, npt: tuple, band_lbl: str,
         parts.append("t0")
     row["fold_change_mode"] = "+".join(parts) or "off"
     row["fold_change_control"] = control_label if vs_control else ""
+    row["fold_change_outcome"] = str(outcome or "") if vs_control else ""
 
 
 def _apply_split_sep_orientation(sep: QFrame, *, stacked: bool) -> None:
@@ -214,7 +223,18 @@ class BatchExportPanel(QWidget):
         # time so opening the panel "feels like" the active plot tab.
         _plot = ctx.state.plot
         self._fc_vs_control_on: bool = bool(_plot.fc_vs_control_on)
-        self._fc_control_label: str = str(_plot.fc_control_label or "")
+        # This panel's own control, seeded from the plot tab and never
+        # written back — a batch job must not follow the live figure.
+        self._fc_control = _plot.fc_control
+        # Per-sample controls are seeded the same way and for the same reason:
+        # a panel opened while the tab shows a per-sample figure should export
+        # that figure. The panel's own control combo offers no per-sample
+        # entry, so the mapping is inherited and not editable here — a member
+        # of an export group that the mapping does not name comes out blank
+        # and says so, rather than quietly falling back to one control.
+        self._fc_control_mode: str = str(_plot.fc_control_mode or "single")
+        self._fc_control_map: dict = dict(_plot.fc_control_map or {})
+        self._fc_control_render: str = str(_plot.fc_control_render or "self")
         self._fc_vs_t0_on: bool = bool(_plot.fc_vs_t0_on)
 
         # Hydrate from the persisted export groups (persistence.json), else start
@@ -662,7 +682,19 @@ class BatchExportPanel(QWidget):
         ``active_replicate_sets`` treats any non-hidden selection with a loaded
         well as a rep-set, and a one-well rep-set's stat equals the raw well's,
         so solos are numerically unchanged while pooled members get the tab's
-        mean-of-per-well-means."""
+        mean-of-per-well-means.
+
+        The swap **replaces** the list rather than adding to it, which is what
+        made a fold-change control naming a replicate set in a *different* batch
+        group resolve to nothing: ``resolve_control`` finds a ``kind="set"``
+        reference by scanning exactly this list, and one batch group per
+        condition with the control as its own group is the normal layout. Every
+        curve in the group then drew blank. So any replicate set the panel's
+        control names is carried in **hidden**, which is not a trick — hiding a
+        group takes it off the plot and does not stop it being usable as a
+        control: ``active_replicate_sets`` skips hidden entries, so nothing
+        extra is drawn, and ``resolve_control`` does not, so the control
+        resolves."""
         from well_viewer.domain.selections_model import make_selection
         sel = self._ctx.state.selection
         saved = (sel.selections, sel.current_selection_id, sel.selected_wells)
@@ -681,12 +713,50 @@ class BatchExportPanel(QWidget):
                                    used_names=used_names, used_ids=used_ids,
                                    fallback_color_idx=len(grp.members) + j)
                 )
+            selections.extend(self._control_selections(
+                saved[0], used_names, used_ids, len(selections)))
             sel.selections = selections
             sel.current_selection_id = None
             sel.selected_wells = set(grp.solo_wells)
             yield
         finally:
             (sel.selections, sel.current_selection_id, sel.selected_wells) = saved
+
+    def _control_selections(self, live_selections, used_names: set,
+                            used_ids: set, color_idx: int) -> list:
+        """Hidden entries for the replicate sets this panel's control names.
+
+        Carried into the group scope so a control belonging to another batch
+        group still resolves. Hidden, so nothing new is drawn. Their wells come
+        from the pre-swap list: the group being scoped does not contain them,
+        which is the whole problem.
+        """
+        from well_viewer.domain.control_ref import KIND_SET
+        from well_viewer.domain.selections_model import make_selection
+
+        wanted: list[str] = []
+        for ref in [self._fc_control, *(self._fc_control_map or {}).values()]:
+            if ref is None or getattr(ref, "kind", "") != KIND_SET:
+                continue
+            if ref.name not in wanted:
+                wanted.append(ref.name)
+        by_name = {s.get("name"): s for s in (live_selections or [])}
+        out: list = []
+        for i, name in enumerate(wanted):
+            if name in used_names:
+                continue    # the group already carries it
+            src = by_name.get(name)
+            if src is None:
+                # Names nothing that is loaded. Left alone so the outcome
+                # vocabulary reports it as unresolved rather than a synthetic
+                # empty group standing in for one the user deleted.
+                continue
+            out.append(make_selection(
+                name=name, wells=list(src.get("wells") or []), source="rep_set",
+                hidden=True, used_names=used_names, used_ids=used_ids,
+                fallback_color_idx=color_idx + i,
+            ))
+        return out
 
     def _export_val_col_for(self, channel_attr: str) -> str:
         """Resolve the (Channel, Property) pair to a CSV column / ratio key.
@@ -979,13 +1049,13 @@ class BatchExportPanel(QWidget):
         row.addWidget(self._fc_baseline_combo)
 
         def _on_ctrl_change(_i: int) -> None:
-            text = self._fc_ctrl_combo.currentText()
-            if text == self._FC_NONE_LABEL or not text:
-                self._fc_vs_control_on = False
-                self._fc_control_label = ""
-            else:
-                self._fc_vs_control_on = True
-                self._fc_control_label = text
+            # Read the reference the item carries, not its text.
+            ref = self._fc_ctrl_combo.currentData()
+            self._fc_vs_control_on = ref is not None
+            self._fc_control = ref
+            # Naming one control here is a request for one control. Leaving the
+            # inherited per-sample mapping on would ignore the pick silently.
+            self._fc_control_mode = "single"
 
         def _on_baseline_change(_i: int) -> None:
             self._fc_vs_t0_on = (
@@ -999,43 +1069,61 @@ class BatchExportPanel(QWidget):
         combo = getattr(self, "_fc_ctrl_combo", None)
         if combo is None:
             return
-        members: list[str] = []
-        seen: set = set()
+        from well_viewer.domain.control_ref import ControlRef
+
+        # Replicate-set names and well tokens are tracked apart. One shared
+        # "seen" set made a solo well whose token equalled a group name look
+        # like a duplicate of it, so the well vanished from the list entirely —
+        # the same collision the plot tab's combo had.
+        entries: list[tuple[str, object]] = []
+        set_names: set = set()
+        seen_wells: set = set()
         for grp in self._groups_for_export() if hasattr(self, "_groups_for_export") else self._groups:
             for rset in grp.members:
-                if rset.name and rset.name not in seen:
-                    members.append(rset.name)
-                    seen.add(rset.name)
+                if rset.name and rset.name not in set_names:
+                    entries.append((rset.name, ControlRef.for_replicate_set(rset.name)))
+                    set_names.add(rset.name)
             for w in grp.solo_wells:
-                if w and w not in seen:
-                    members.append(w)
-                    seen.add(w)
+                if w and w not in seen_wells:
+                    ref = ControlRef.for_well(w)
+                    entries.append((ref.combo_text(disambiguate=w in set_names), ref))
+                    seen_wells.add(w)
         # Fall back to plate-loaded wells when no groups are defined yet —
         # users may want to pick a control before they've finished building
         # the group editor.
-        if not members:
+        if not entries:
             for w in sorted((self._ctx.state.dataset.well_paths or {})):
-                members.append(w)
-        saved = self._fc_control_label
+                entries.append((w, ControlRef.for_well(w)))
+        saved = self._fc_control
         blocked = combo.blockSignals(True)
         try:
             combo.clear()
-            combo.addItem(self._FC_NONE_LABEL)
-            for m in members:
-                combo.addItem(m)
-            if saved:
-                idx = combo.findText(saved)
-                if idx >= 0:
-                    combo.setCurrentIndex(idx)
+            combo.addItem(self._FC_NONE_LABEL, None)
+            for text, ref in entries:
+                combo.addItem(text, ref)
+            if saved is not None:
+                for i in range(combo.count()):
+                    if combo.itemData(i) == saved:
+                        combo.setCurrentIndex(i)
+                        break
         finally:
             combo.blockSignals(blocked)
 
-    def _fc_state(self) -> tuple:
-        """Return ``(vs_control_on, control_label, vs_t0_on)`` for this panel."""
-        return (
-            bool(self._fc_vs_control_on),
-            str(self._fc_control_label or ""),
-            bool(self._fc_vs_t0_on),
+    def _fc_state(self):
+        """This panel's own fold-change request.
+
+        Panel-local by design: a batch job must not be tied to whatever the
+        on-screen plot currently has set, so these fields are seeded from
+        ``ctx.state.plot`` at construction and never written back.
+        """
+        from well_viewer.domain.fold_change_state import FoldChangeState
+        return FoldChangeState(
+            vs_control_on=bool(self._fc_vs_control_on),
+            control=self._fc_control,
+            vs_t0_on=bool(self._fc_vs_t0_on),
+            control_mode=str(self._fc_control_mode or "single"),
+            control_map=tuple(sorted((self._fc_control_map or {}).items())),
+            control_render=str(self._fc_control_render or "self"),
         )
 
     def _build_timepoints_section(self, layout: QVBoxLayout) -> None:
@@ -1637,7 +1725,9 @@ class BatchExportPanel(QWidget):
         def _progress(grp: BarGroup, step: int, total: int) -> str:
             return f"Exporting '{grp.name}' ({step}/{total})\u2026"
 
-        fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = self._fc_state()
+        _panel_fc = self._fc_state()
+        fc_vs_ctrl = _panel_fc.vs_control_on
+        fc_vs_t0 = _panel_fc.vs_t0_on
         fc_active = fc_vs_ctrl or fc_vs_t0
         used_stems: set = set()
 
@@ -1658,7 +1748,10 @@ class BatchExportPanel(QWidget):
             _ch = _ch_selected
             _metric = self._selected_export_metric_key("_line_channel_cb")
             _fluor_gates = _get_all_fluor_gates(self._ctx)
-            panel_fc_state = (fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0)
+            # The panel's own request object, passed through rather than
+            # rebuilt as a tuple — rebuilding it drops any field the
+            # three legacy names do not cover.
+            panel_fc_state = _panel_fc
 
             # ``collect_line_series_for_group`` is the thin batch orchestrator
             # that reuses the tab's rep-set statistic (``compute_rep_stats``) for
@@ -1673,7 +1766,7 @@ class BatchExportPanel(QWidget):
                         collect_line_series_for_group,
                     )
                     from well_viewer.features.export.service import (
-                        _well_labels_map,
+                        _control_cell, _well_labels_map,
                         line_metric_fieldnames, line_metric_row,
                         well_name_for, well_names_joined,
                     )
@@ -1695,9 +1788,9 @@ class BatchExportPanel(QWidget):
                             val_col=_val_col, fluor_gates=_fluor_gates,
                             fc_state=panel_fc_state,
                         )
-                        fc_points_by_key = {s.key: s.points for s in series_fc}
+                        fc_series_by_key = {s.key: s for s in series_fc}
                     else:
-                        fc_points_by_key = {}
+                        fc_series_by_key = {}
                     rows_out: list[dict] = []
                     for series in series_raw:
                         if series.kind == "repset":
@@ -1710,7 +1803,8 @@ class BatchExportPanel(QWidget):
                             well_names_str = well_name_for(wells_str, _well_labels)
                             member_type = "solo_well"
                             n_wells = 1
-                        fc_pts = fc_points_by_key.get(series.key, [])
+                        fc_series = fc_series_by_key.get(series.key)
+                        fc_pts = fc_series.points if fc_series is not None else []
                         for i, pt in enumerate(series.points):
                             row = {
                                 "group": grp.name,
@@ -1723,11 +1817,15 @@ class BatchExportPanel(QWidget):
                             row.update(line_metric_row(
                                 pt.as_aggpoint(), ch=_ch, metric=_metric,
                                 threshold=threshold, band_lbl=band_lbl,
+                                per_fov=bool(
+                                    self._ctx.state.plot.use_fov_replicates),
                             ))
                             if fc_active and i < len(fc_pts):
                                 _attach_fc_row(
                                     row, fc_pts[i].as_aggpoint(), band_lbl,
-                                    fc_vs_ctrl, fc_vs_t0, fc_ctrl_lbl,
+                                    fc_vs_ctrl, fc_vs_t0,
+                                    _control_cell(getattr(fc_series, "fc_control", None)),
+                                    getattr(fc_series, "fc_outcome", ""),
                                 )
                             rows_out.append(row)
                     if rows_out:
@@ -1742,6 +1840,7 @@ class BatchExportPanel(QWidget):
                                 f"fold_change_{band_lbl.lower()}",
                                 "fold_change_mode",
                                 "fold_change_control",
+                                "fold_change_outcome",
                             ]
                         with open(csv_path, "w", newline="") as fh:
                             writer = csv.DictWriter(fh, fieldnames=fieldnames)
@@ -1783,7 +1882,7 @@ class BatchExportPanel(QWidget):
     def _render_group_figure(
         self, grp: BarGroup, threshold: float, use_sem: bool, band_lbl: str,
         *,
-        fc_state: tuple = (False, "", False),
+        fc_state=None,
         val_col: str | None = None,
     ):
         """Render the batch line figure for *grp*, reusing the Line-Graphs tab's
@@ -1801,8 +1900,10 @@ class BatchExportPanel(QWidget):
             collect_line_series_for_group,
         )
 
-        fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
-        fc_active = fc_vs_ctrl or fc_vs_t0
+        _panel_fc = _fc.coerce_fc_state(fc_state)
+        fc_vs_ctrl = _panel_fc.vs_control_on
+        fc_vs_t0 = _panel_fc.vs_t0_on
+        fc_active = _panel_fc.active
         _val_col = val_col if val_col is not None else self._export_val_col_for("_line_channel_cb")
 
         # Four stacked panels — identical to the tab (lineplot/tab_view.py).
@@ -1826,8 +1927,27 @@ class BatchExportPanel(QWidget):
         _metric_label = _MLB.get(_metric_key, "Mean Intensity")
         _thr_q = threshold_qualifier(_metric_key)
         _fov_active = bool(self._ctx.state.plot.use_fov_replicates)
+        # The exported figure's title counts the controls the exported figure
+        # used, not the tab's — the panel carries its own groups, so its member
+        # list and therefore its distinct-control count can differ.
+        _fc_controls = None
+        if fc_vs_ctrl and _panel_fc.per_member:
+            from well_viewer.domain.fold_change_pairing import (
+                build_per_member_controls,
+            )
+            _fc_members = (
+                [r.name for r in grp.members] + list(grp.solo_wells))
+            _fc_controls = build_per_member_controls(
+                self._ctx, _fc_members, _panel_fc.control_map_dict,
+                member_wells=(
+                    {r.name: list(r.wells) for r in grp.members}
+                    | {w: [w] for w in grp.solo_wells}),
+                render=_panel_fc.control_render,
+            )
         _fc_suffix = _fc.fold_change_suffix(
-            fc_vs_ctrl, fc_vs_t0, self._fc_control_label,
+            fc_vs_ctrl, fc_vs_t0,
+            self._fc_control.display_name if self._fc_control is not None else "",
+            controls=_fc_controls,
         ) if fc_active else ""
         apply_ax_style(ax_mean, f"{_ch} {_metric_label}{_thr_q} \u00b1 {band_lbl}{_fc_suffix}", f"{_ch} {_metric_label}{_fc_suffix}")
         apply_ax_style(ax_frac, f"{fraction_title(_metric_key)}{_fc_suffix}", "Fraction" + _fc_suffix)

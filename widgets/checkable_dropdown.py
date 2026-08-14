@@ -30,6 +30,7 @@ if _ROOT not in _sys.path:
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction
+from widgets import menu_exec
 from PySide6.QtWidgets import (
     QCheckBox, QMenu, QPushButton, QSizePolicy, QVBoxLayout, QWidgetAction, QWidget,
 )
@@ -155,4 +156,4 @@ class CheckableDropdown(QWidget):
         none_action.triggered.connect(lambda _=False: self._set_all(False))
         menu.addAction(none_action)
         btn = self._button
-        menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+        menu_exec.exec_menu(menu, btn.mapToGlobal(btn.rect().bottomLeft()))

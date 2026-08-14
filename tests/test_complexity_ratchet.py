@@ -134,7 +134,10 @@ ALLOWLIST = {
     # function is now CC 30. Removed from the allowlist.
     "well_viewer/features/barplot/controller.py::render_bar_items",
     "well_viewer/core/load_controller.py::load_directory",
-    "well_viewer/features/lineplot/controller.py::collect_line_series",
+    # DONE: collect_line_series dropped below the threshold once the control
+    # denominators moved behind ``fold_change_pairing.ControlDenominators`` and
+    # the per-member normalize call became ``normalize_member_pts``, shared with
+    # the batch line runner. Removed from the allowlist.
     # DONE: draw_per_cell_bar_mode dropped below the threshold once the "Pooled"
     # toggle unified the two rset base-column branches (the old pool_rset_cells
     # and pool_reps branches merged into one). Removed from the allowlist.

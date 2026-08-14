@@ -879,3 +879,277 @@ def test_log_handler_guard_clears_the_sanctioned_shapes(tmp_path, monkeypatch, s
     good = _write(tmp_path, "good_handler.py", LOG_TIMER_CLEAN[shape])
     assert _run_scan(monkeypatch, "tests.test_log_handler_marshalling",
                      "test_no_timer_inside_a_logging_handler_emit", [good]) is None
+
+
+# ── the Events total stays out of drawing code ──────────────────────────────
+#
+# The violations are the real shapes. `compute_rep_n_above` — a near-synonym of
+# `compute_rep_n_above_stats` differing only by an absent suffix — was read by
+# the Line tab's numerator and by both fold-change denominators, so the two
+# tabs drew different numbers for the same replicate set and a set divided by
+# itself came out at 1/n. Its replacement is named for its consumer, and this
+# is what keeps that meaning from eroding.
+
+EVENTS_TOTAL_VIOLATIONS = {
+    "from-import": (
+        "from well_viewer.domain.stats_compute import compute_rep_n_above_total\n"
+        "def draw(ctx, rset, t):\n"
+        "    return compute_rep_n_above_total(ctx, rset, t)\n"
+    ),
+    # The attribute spelling, which a from-import guard alone would walk past.
+    "attribute": (
+        "from well_viewer.domain import stats_compute as sc\n"
+        "def draw(ctx, rset, t):\n"
+        "    return sc.compute_rep_n_above_total(ctx, rset, t)\n"
+    ),
+    # Aliased on import — the shape that hides the name from a text search.
+    "aliased": (
+        "from well_viewer.domain.stats_compute import (\n"
+        "    compute_rep_n_above_total as _n,\n"
+        ")\n"
+        "def draw(ctx, rset, t):\n"
+        "    return _n(ctx, rset, t)\n"
+    ),
+}
+
+EVENTS_TOTAL_CLEAN = (
+    "from well_viewer.domain.stats_compute import compute_rep_n_above_stats\n"
+    "def draw(ctx, rset, t):\n"
+    "    mean, spread = compute_rep_n_above_stats(ctx, rset, t, True)\n"
+    "    return mean, spread\n"
+)
+
+
+@pytest.mark.parametrize("shape", sorted(EVENTS_TOTAL_VIOLATIONS))
+def test_events_total_guard_catches(tmp_path, monkeypatch, shape):
+    f = _write(tmp_path, "well_viewer/features/barplot/renderer.py",
+               EVENTS_TOTAL_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_events_total_isolation",
+                    "test_the_events_total_stays_out_of_drawing_code", [f])
+    assert exc is not None, f"the {shape} spelling walked past the guard"
+
+
+def test_events_total_guard_clears_the_plotted_statistic(tmp_path, monkeypatch):
+    f = _write(tmp_path, "well_viewer/features/barplot/renderer.py",
+               EVENTS_TOTAL_CLEAN)
+    exc = _run_scan(monkeypatch, "tests.test_events_total_isolation",
+                    "test_the_events_total_stays_out_of_drawing_code", [f])
+    assert exc is None, f"the guard fired on the statistic every panel draws: {exc}"
+
+
+# ── the fold-change request is read by name, never unpacked ─────────────────
+#
+# The shapes below are the ones that really shipped. Both were live defects on
+# a branch whose CI was green, because both sit on paths only the slow lane
+# reaches — a `TypeError` on every bar redraw, and a helper every caller of
+# "is fold change on?" goes through.
+
+FC_UNPACK_VIOLATIONS = {
+    # `barplot/renderer._set_frac_ylim`, verbatim.
+    "attribute-call": (
+        "from well_viewer.domain import fold_change as _fc\n"
+        "def f(ctx):\n"
+        "    fc_on, _, fc_t0 = _fc.fold_change_state(ctx)\n"
+        "    return fc_on or fc_t0\n"
+    ),
+    # `fold_change.is_active`, verbatim — the bare-name spelling, which a guard
+    # matching only on the attribute form would walk past.
+    "bare-call": (
+        "def f(ctx):\n"
+        "    vs_ctrl, _, vs_t0 = fold_change_state(ctx)\n"
+        "    return vs_ctrl or vs_t0\n"
+    ),
+    # The coercion helper produces the same object from a caller's argument.
+    "coerce": (
+        "from well_viewer.domain import fold_change as _fc\n"
+        "def f(fc_state):\n"
+        "    on, label, t0 = _fc.coerce_fc_state(fc_state)\n"
+        "    return on, label, t0\n"
+    ),
+    # A list target unpacks exactly the same way and reads as deliberate.
+    "list-target": (
+        "def f(ctx):\n"
+        "    [on, label, t0] = fold_change_state(ctx)\n"
+        "    return on\n"
+    ),
+}
+
+FC_UNPACK_CLEAN = (
+    "from well_viewer.domain import fold_change as _fc\n"
+    "def f(ctx):\n"
+    "    fc = _fc.fold_change_state(ctx)\n"
+    "    if fc.per_member:\n"
+    "        return fc.control_map_dict\n"
+    "    return fc.active and fc.control\n"
+)
+
+
+@pytest.mark.parametrize("shape", sorted(FC_UNPACK_VIOLATIONS))
+def test_fc_unpack_guard_catches(tmp_path, monkeypatch, shape):
+    f = _write(tmp_path, "well_viewer/features/barplot/renderer.py",
+               FC_UNPACK_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_fc_state_is_not_unpacked",
+                    "test_the_fold_change_request_is_read_by_name", [f])
+    assert exc is not None, f"the {shape} spelling walked past the guard"
+
+
+def test_fc_unpack_guard_clears_reading_it_by_name(tmp_path, monkeypatch):
+    f = _write(tmp_path, "well_viewer/features/barplot/renderer.py",
+               FC_UNPACK_CLEAN)
+    exc = _run_scan(monkeypatch, "tests.test_fc_state_is_not_unpacked",
+                    "test_the_fold_change_request_is_read_by_name", [f])
+    assert exc is None, f"the guard fired on the correct spelling: {exc}"
+
+
+FC_UNPACK_METHOD_VIOLATION = (
+    "class Panel:\n"
+    "    def run(self):\n"
+    "        fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = self._fc_state()\n"
+    "        return fc_vs_ctrl\n"
+)
+
+
+def test_fc_unpack_guard_sees_the_panels_own_accessor(tmp_path, monkeypatch):
+    """The spelling both Batch Export panels carried before the typed object.
+
+    A guard that only knew the two module-level producers would have been
+    blind to exactly the shape it was written for.
+    """
+    f = _write(tmp_path, "well_viewer/features/batch_export/bar_panel.py",
+               FC_UNPACK_METHOD_VIOLATION)
+    exc = _run_scan(monkeypatch, "tests.test_fc_state_is_not_unpacked",
+                    "test_the_fold_change_request_is_read_by_name", [f])
+    assert exc is not None, "the method-call spelling walked past the guard"
+
+
+# ── no function reads a name nothing binds ──────────────────────────────────
+#
+# The shapes below are the two that really shipped, plus the closure and
+# comprehension forms a hand-rolled AST walk gets wrong — those must stay
+# *clear*, or the guard drowns in false positives and gets deleted.
+
+UNBOUND_VIOLATIONS = {
+    # `barplot/renderer._set_frac_ylim`, after the tuple unpack was replaced.
+    "renamed-binding": (
+        "def f(ctx):\n"
+        "    fc = get_state(ctx)\n"
+        "    if fc_on or fc_t0:\n"
+        "        return\n"
+    ),
+    # `base_panel._render_group_figure`: a method, so a scan that only walks
+    # module-level functions never reaches it.
+    "inside-a-method": (
+        "class Panel:\n"
+        "    def render(self, fc_state):\n"
+        "        fc = coerce(fc_state)\n"
+        "        return fc_vs_ctrl and fc.active\n"
+    ),
+}
+
+UNBOUND_CLEAN = {
+    # A closure reading its enclosing function's locals.
+    "closure": (
+        "def outer(ctx, threshold):\n"
+        "    def inner(key):\n"
+        "        return ctx.get(key), threshold\n"
+        "    return inner\n"
+    ),
+    # A comprehension reading the enclosing scope.
+    "comprehension": (
+        "def f(items, gate):\n"
+        "    return [i for i in items if i > gate]\n"
+    ),
+    # `except … as` and `global`.
+    "except-and-global": (
+        "COUNT = 0\n"
+        "def f():\n"
+        "    global COUNT\n"
+        "    try:\n"
+        "        COUNT += 1\n"
+        "    except ValueError as exc:\n"
+        "        return str(exc)\n"
+    ),
+    # A method reading its own module's globals and its own class.
+    "module-globals": (
+        "import math\n"
+        "LIMIT = 3\n"
+        "class C:\n"
+        "    def f(self):\n"
+        "        return math.sqrt(LIMIT) + self.x\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(UNBOUND_VIOLATIONS))
+def test_unbound_name_guard_catches(shape):
+    from tests.test_no_unbound_names import offenders_in
+    found = offenders_in(UNBOUND_VIOLATIONS[shape], "probe.py")
+    assert found, f"the {shape} spelling walked past the guard"
+
+
+@pytest.mark.parametrize("shape", sorted(UNBOUND_CLEAN))
+def test_unbound_name_guard_clears(shape):
+    """A false positive here gets the guard deleted, so these matter as much
+    as the violations do."""
+    from tests.test_no_unbound_names import offenders_in
+    found = offenders_in(UNBOUND_CLEAN[shape], "probe.py")
+    assert not found, f"the guard fired on a legitimate {shape}: {found}"
+
+
+# ── the context-menu seam ────────────────────────────────────────────────────
+#
+# Both spellings matter. The direct `menu.exec(...)` is the hang the guard
+# exists to prevent; the by-name import is subtler — it leaves the seam in
+# place and still unpatchable, because the function is bound into the importing
+# module's globals before the fixture ever runs.
+
+MENU_VIOLATIONS = {
+    "direct-exec": (
+        "def open_it(menu, btn):\n"
+        "    menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))\n"
+    ),
+    "exec-underscore": (
+        "def open_it(menu, pos):\n"
+        "    menu.exec_(pos)\n"
+    ),
+    "attribute-menu": (
+        "class W:\n"
+        "    def open_it(self, pos):\n"
+        "        self._menu.exec(pos)\n"
+    ),
+    "imported-by-name": (
+        "from widgets.menu_exec import exec_menu\n"
+        "def open_it(menu, pos):\n"
+        "    return exec_menu(menu, pos)\n"
+    ),
+}
+
+MENU_CLEAN = {
+    "through-the-seam": (
+        "from widgets import menu_exec\n"
+        "def open_it(menu, btn):\n"
+        "    return menu_exec.exec_menu(\n"
+        "        menu, btn.mapToGlobal(btn.rect().bottomLeft()))\n"
+    ),
+    # A dialog's exec is the *other* guard's business, and is patchable.
+    "a-dialog-not-a-menu": (
+        "def ask(dlg):\n"
+        "    return dlg.exec()\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(MENU_VIOLATIONS))
+def test_menu_seam_guard_catches(tmp_path, monkeypatch, shape):
+    path = _write(tmp_path, f"probe_{shape}.py", MENU_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_menu_exec_seam",
+                    "test_no_module_opens_a_context_menu_directly", [path])
+    assert exc is not None, f"the {shape} spelling walked past the guard"
+
+
+@pytest.mark.parametrize("shape", sorted(MENU_CLEAN))
+def test_menu_seam_guard_clears(tmp_path, monkeypatch, shape):
+    path = _write(tmp_path, f"probe_{shape}.py", MENU_CLEAN[shape])
+    exc = _run_scan(monkeypatch, "tests.test_menu_exec_seam",
+                    "test_no_module_opens_a_context_menu_directly", [path])
+    assert exc is None, f"the guard fired on a legitimate {shape}: {exc}"

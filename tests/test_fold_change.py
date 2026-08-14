@@ -213,7 +213,10 @@ def test_first_tp_value_empty():
 def test_fold_change_state_reads_app(mock_app):
     mock_app.fc_vs_control_on = True
     mock_app.fc_control_label = "CTRL"
-    assert fold_change_state(mock_app._ctx) == (True, "CTRL", False)
+    fc = fold_change_state(mock_app._ctx)
+    assert fc.vs_control_on is True
+    assert fc.control.name == "CTRL"
+    assert fc.vs_t0_on is False
 
 
 def test_fold_change_suffix_off():
@@ -250,7 +253,7 @@ def test_fold_change_suffix_for_uses_resolved_baseline():
 
     def _app(baseline_tp):
         plot = SimpleNamespace(
-            fc_vs_control_on=False, fc_vs_t0_on=True, fc_control_label="",
+            fc_vs_control_on=False, fc_vs_t0_on=True, fc_control=None,
             fc_op_ctrl="ratio", fc_op_t0="subtract", fc_baseline_tp=baseline_tp,
         )
         return SimpleNamespace(state=SimpleNamespace(plot=plot))

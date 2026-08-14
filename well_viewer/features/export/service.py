@@ -10,6 +10,9 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.domain.selections_model import active_replicate_sets
+from well_viewer.domain import fold_change_pairing as _pairing
+from well_viewer.domain import fold_change_series_cache as _fc_cache
+from well_viewer.domain import plot_members as _members
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates,
     on_cutoff_for_column,
@@ -101,6 +104,9 @@ def line_metric_fieldnames(ch: str, metric: str, band_lbl: str) -> list:
         f"mean_{ch}_{metric}",
         f"{band_lbl.lower()}_{ch}_{metric}",
         "n_above_threshold",
+        "n_above_replicate_mean",
+        f"err_n_above_replicate_{band_lbl}",
+        "n_above_replicate_unit",
         "fraction_above",
         "n_total",
         "threshold",
@@ -108,7 +114,8 @@ def line_metric_fieldnames(ch: str, metric: str, band_lbl: str) -> list:
     ]
 
 
-def line_metric_row(pt, *, ch: str, metric: str, threshold: float, band_lbl: str) -> dict:
+def line_metric_row(pt, *, ch: str, metric: str, threshold: float,
+                    band_lbl: str, per_fov: bool = False) -> dict:
     """Metric-column dict for one line-plot AggPoint.
 
     *pt* is an aggregation tuple ``(t, mean, spread, frac, n_above, n_total, ...)``
@@ -116,18 +123,60 @@ def line_metric_row(pt, *, ch: str, metric: str, threshold: float, band_lbl: str
     field is SEM when the aggregator was called with ``use_sem=True``, SD
     otherwise; *band_lbl* must be set accordingly so the column header
     reflects what the data represents.
+
+    The three Events columns are the bar CSV's, for the same reason: the
+    integer ``n_above_threshold`` and the fractional
+    ``n_above_replicate_mean`` are different numbers, and without
+    ``n_above_replicate_unit`` naming what the mean is over, nothing else in
+    the row records whether Aggregate-FOVs was on. *per_fov* supplies that —
+    the point itself cannot say.
     """
-    t, mean, spread, frac, n_above, n_total, *_ = pt
+    t, mean, spread, frac, n_above, n_total, *_rest = pt
+    # Index 10, when present, is the cross-well total for a replicate set; the
+    # drawn value at index 4 is that set's per-well mean and is fractional, so
+    # the integer column cannot be derived from it.
+    n_above_total = _rest[4] if len(_rest) > 4 and _rest[4] is not None else None
+    # Index 9 is the cross-well spread behind that mean. Only a replicate
+    # aggregation has one, which is the same condition the unit column reports:
+    # a single well's row leaves both empty rather than writing 0.000000, which
+    # would read as "the replicates agreed" on a row that had no replicates.
+    n_above_spread = _rest[3] if len(_rest) > 3 and _rest[3] is not None else None
+    is_replicate = n_above_total is not None
     return {
         "time_h": f"{t:.4f}",
         f"mean_{ch}_{metric}": f"{mean:.6f}" if not math.isnan(mean) else "",
         f"{band_lbl.lower()}_{ch}_{metric}": f"{spread:.6f}",
-        "n_above_threshold": n_above,
+        "n_above_threshold": (
+            int(n_above_total) if n_above_total is not None else n_above),
+        "n_above_replicate_mean": (
+            f"{float(n_above):.6f}"
+            if isinstance(n_above, (int, float)) and math.isfinite(float(n_above))
+            else ""),
+        f"err_n_above_replicate_{band_lbl}": (
+            f"{float(n_above_spread):.6f}"
+            if is_replicate and n_above_spread is not None
+            and math.isfinite(float(n_above_spread)) else ""),
+        "n_above_replicate_unit": (
+            ("fov" if per_fov else "well") if is_replicate else ""),
         "fraction_above": f"{frac:.6f}" if not math.isnan(frac) else "",
         "n_total": n_total,
         "threshold": f"{threshold:.4f}",
         "metric": metric,
     }
+
+
+def _replicate_unit_for(item, *, per_fov: bool) -> str:
+    """What ``n_above_replicate_mean`` averages over, for the CSV.
+
+    ``fov`` when Aggregate-FOVs is on, ``well`` for a pooled replicate set,
+    and empty for a single well — where the drawn value is the count itself
+    and there is nothing to average. Recorded because no other column in the
+    row says whether the FOV toggle was on, which would leave the mean and its
+    spread ambiguous.
+    """
+    if item.n_above_total is None:
+        return ""
+    return "fov" if per_fov else "well"
 
 
 def bar_metric_fieldnames(ch: str, metric: str, band_lbl: str) -> list:
@@ -140,6 +189,9 @@ def bar_metric_fieldnames(ch: str, metric: str, band_lbl: str) -> list:
         f"err_frac_{band_lbl}",
         "n_above_threshold",
         f"err_n_above_{band_lbl}",
+        "n_above_replicate_mean",
+        f"err_n_above_replicate_{band_lbl}",
+        "n_above_replicate_unit",
         "threshold",
         "metric",
     ]
@@ -159,6 +211,8 @@ def bar_metric_row(
     tp_str: str,
     threshold: float,
     band_lbl: str,
+    n_above_total: int | None = None,
+    replicate_unit: str = "",
 ) -> dict:
     """Metric-column dict for one bar-plot bar at a single timepoint.
 
@@ -166,6 +220,18 @@ def bar_metric_row(
     (per-tab) and direct ``_aggregate_*`` calls (batch). ``n_above_spread > 0``
     indicates per-FOV spread is in use, which switches *n_above* to a float
     and exposes the per-FOV error column.
+
+    Two quantities are reported for Events, because they are different
+    numbers. ``n_above_threshold`` is the integer count this column has always
+    carried — for a replicate set, the total across its wells, supplied as
+    *n_above_total*. ``n_above_replicate_mean`` is what the panel actually
+    draws: the mean of the per-well counts, with its cross-well spread. A
+    two-well set holding 7 and 8 events reports 15 and 7.5 respectively, and
+    neither is a rounding of the other.
+
+    *replicate_unit* names what the mean is over (``well`` / ``fov``, empty for
+    a single well). Without it the two new columns are ambiguous, since nothing
+    else in the row records whether Aggregate-FOVs was on.
     """
     # An undefined spread is written as an EMPTY cell, never as 0.000000 — the
     # zero reads as "the replicates agreed exactly" when in fact there was only
@@ -183,13 +249,40 @@ def bar_metric_row(
         f"err_frac_{band_lbl}": _num(frac_spread) if has and not math.isnan(frac) else "",
         "n_above_threshold": (
             "" if not has or not math.isfinite(float(n_above))
+            # A replicate set reports its cross-well total, which is what this
+            # column has always meant. A single well has no total — the
+            # collectors pass ``None`` — so it falls through to ``n_above``,
+            # which is the count itself with Aggregate-FOVs off and the
+            # per-FOV mean, in the historic float form, with it on.
+            else f"{int(n_above_total)}" if n_above_total is not None
             else f"{n_above:.6f}" if math.isfinite(float(n_above_spread)) and n_above_spread > 0
             else f"{int(n_above)}"
         ),
         f"err_n_above_{band_lbl}": f"{n_above_spread:.6f}" if n_above_spread > 0 else "",
+        "n_above_replicate_mean": _num(n_above) if has else "",
+        # A two-well set holding 5 and 5 events has a spread of exactly 0.0,
+        # which is a measurement. Blanking it here conflated "the replicates
+        # agreed" with "there was one replicate and nothing could be computed"
+        # — the second is what the header row's own documentation promises the
+        # blank means. The unit column beside it says which case it is: empty
+        # there, and only there, means there was nothing to spread over.
+        f"err_n_above_replicate_{band_lbl}": (
+            _num(n_above_spread) if replicate_unit and math.isfinite(
+                float(n_above_spread)) else ""),
+        "n_above_replicate_unit": replicate_unit,
         "threshold": f"{threshold:.4f}",
         "metric": metric,
     }
+
+
+def _control_cell(ref) -> str:
+    """What a ``fold_change_control`` cell says for one row.
+
+    The plain token. The combo's ``" (well)"`` disambiguation is chrome and has
+    no business in an exported column — it was part of the stored value once,
+    and it leaked into exactly here.
+    """
+    return getattr(ref, "display_name", "") if ref is not None else ""
 
 
 def _fc_mode_str(vs_control: bool, vs_t0: bool) -> str:
@@ -209,6 +302,7 @@ def bar_fold_change_fieldnames(band_lbl: str) -> list:
         f"fold_change_{band_lbl.lower()}",
         "fold_change_mode",
         "fold_change_control",
+        "fold_change_outcome",
     ]
 
 
@@ -222,13 +316,22 @@ def attach_bar_fold_change_columns(
     vs_control: bool,
     vs_t0: bool,
     control_label: str,
+    outcome: str = "",
 ) -> None:
-    """Append the four fold-change columns to a bar-plot CSV row in place.
+    """Append the fold-change columns to a bar-plot CSV row in place.
 
     The raw ``mean_*`` / ``err_*`` columns stay as written by
     :func:`bar_metric_row`; this helper carries the post-normalization
     values plus mode / control annotations on the right of the row. Used
     by both the on-tab CSV (``export_bar_plot_data``) and the batch CSV.
+
+    ``control_label`` is **this row's** control, not the figure's: under
+    per-sample controls the rows differ, and a single value repeated down the
+    column would misstate every denominator but one. ``outcome`` is the only
+    thing separating "nobody assigned a control" from "the control is gone"
+    from "the control has no data at this timepoint" — all three leave
+    ``fold_change_mean`` empty, and a reader with only that column cannot tell
+    a normalization that failed from one that was never asked for.
     """
     row["fold_change_mean"] = (
         f"{fc_mean:.6f}" if fc_has and not math.isnan(fc_mean) else ""
@@ -238,6 +341,7 @@ def attach_bar_fold_change_columns(
     )
     row["fold_change_mode"] = _fc_mode_str(vs_control, vs_t0)
     row["fold_change_control"] = control_label if vs_control else ""
+    row["fold_change_outcome"] = str(outcome or "") if vs_control else ""
 
 
 def _warn(parent, title: str, msg: str) -> None:
@@ -283,17 +387,30 @@ def export_plot_data(ctx) -> None:
     well_labels = _well_labels_map(ctx)
     include_repset_col = bool(well_to_repset)
 
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = _fc.fold_change_state(ctx)
-    fc_control_means: dict = {}
-    if fc_vs_ctrl and fc_ctrl_lbl:
-        fc_control_means = _fc.pts_to_mean_by_t(
-            _fc.control_pts_for_line(
-                ctx, fc_ctrl_lbl, threshold=threshold,
-                val_col=ctx.state.channel.active_val_col,
-                fluor_gates=fluor_gates,
-            )
-        )
-    fc_active = fc_vs_ctrl or fc_vs_t0
+    fc = _fc.fold_change_state(ctx)
+    fc_vs_ctrl = fc.vs_control_on
+    fc_vs_t0 = fc.vs_t0_on
+    fc_active = fc.active
+    # The same resolver the tab's collector uses. This path used to build one
+    # pooled control series by hand and hand it to ``normalize_pts``, which
+    # gave it three separate ways to disagree with the figure it claims to
+    # describe: no per-sample mapping, no blanking when the control did not
+    # resolve, and a control column that printed the reference's repr.
+    _ctrl_cache = _fc_cache.ControlSeriesCache(
+        ctx, threshold=threshold, val_col=ctx.state.channel.active_val_col,
+        use_sem=use_sem, per_fov_spread=bool(ctx.state.plot.use_fov_replicates),
+        fluor_gates=fluor_gates,
+    )
+    _denoms = _pairing.control_denominators(
+        ctx, _ctrl_cache, fc,
+        _members.line_member_keys(ctx) if fc.per_member else (),
+        scope_wells=_members.member_wells(ctx, "line") if fc.per_member else None,
+        member_rsets=_members.member_replicate_sets(ctx) if fc.per_member else None,
+    )
+    _norm_kw = dict(fc=fc, n_per_fov=bool(ctx.state.plot.use_fov_replicates),
+                    baseline_tp=_fc.parse_baseline_tp(ctx),
+                    op_ctrl=_fc.parse_fc_op_ctrl(ctx),
+                    op_t0=_fc.parse_fc_op_t0(ctx))
 
     rows_out = []
     for label in selected:
@@ -302,9 +419,14 @@ def export_plot_data(ctx) -> None:
             val_col=ctx.state.channel.active_val_col,
             fluor_gates=fluor_gates,
         )
+        # A rep-set member exports as its own wells here, so the mapping is
+        # asked about the set that owns the well when one does; falling back to
+        # the well token covers the per-well case.
+        _member_key = well_to_repset.get(label) or label
+        _ctrl_ref, _outcome = _denoms.control_for(_member_key)
         norm_pts = (
-            _fc.normalize_pts(pts, control_means=fc_control_means or None,
-                              use_t0=fc_vs_t0)
+            _pairing.normalize_member_pts(
+                list(pts), _denoms, _member_key, **_norm_kw)
             if fc_active else None
         )
         for i, pt in enumerate(pts):
@@ -314,8 +436,10 @@ def export_plot_data(ctx) -> None:
             }
             if include_repset_col:
                 row["replicate_set"] = well_to_repset.get(label, "")
-            row.update(line_metric_row(pt, ch=ch, metric=metric,
-                                       threshold=threshold, band_lbl=band_lbl))
+            row.update(line_metric_row(
+                pt, ch=ch, metric=metric, threshold=threshold,
+                band_lbl=band_lbl,
+                per_fov=bool(ctx.state.plot.use_fov_replicates)))
             if fc_active and norm_pts is not None and i < len(norm_pts):
                 npt = norm_pts[i]
                 fmean = npt[1] if not (isinstance(npt[1], float) and math.isnan(npt[1])) else float("nan")
@@ -327,7 +451,10 @@ def export_plot_data(ctx) -> None:
                     f"{fspread:.6f}" if isinstance(fspread, (int, float)) and not math.isnan(fspread) else ""
                 )
                 row["fold_change_mode"] = _fc_mode_str(fc_vs_ctrl, fc_vs_t0)
-                row["fold_change_control"] = fc_ctrl_lbl if fc_vs_ctrl else ""
+                row["fold_change_control"] = (
+                    _control_cell(_ctrl_ref) if fc_vs_ctrl else "")
+                row["fold_change_outcome"] = (
+                    str(_outcome or "") if fc_vs_ctrl else "")
             rows_out.append(row)
     if not rows_out:
         _warn(ctx.window, "Export", "No data to export for the current selection.")
@@ -343,6 +470,7 @@ def export_plot_data(ctx) -> None:
             f"fold_change_{band_lbl.lower()}",
             "fold_change_mode",
             "fold_change_control",
+            "fold_change_outcome",
         ]
     try:
         with open(out_path, "w", newline="") as fh:
@@ -370,7 +498,9 @@ def export_bar_plot_data(ctx) -> None:
         return
     target_ts = [t for t, _ in tp_list]
     target_t_arg = target_ts[0] if len(target_ts) == 1 else target_ts
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = _fc.fold_change_state(ctx)
+    fc = _fc.fold_change_state(ctx)
+    fc_vs_ctrl = fc.vs_control_on
+    fc_vs_t0 = fc.vs_t0_on
     fc_active = fc_vs_ctrl or fc_vs_t0
     # Additive CSV: raw values in the standard ``mean_*`` / ``err_*``
     # columns, fold-change values in their own columns. The aggregation
@@ -416,6 +546,9 @@ def export_bar_plot_data(ctx) -> None:
             has=item.has_mean,
             n_above=float(item.n_above),
             n_above_spread=float(item.n_above_spread),
+            n_above_total=item.n_above_total,
+            replicate_unit=_replicate_unit_for(
+                item, per_fov=bool(ctx.state.plot.use_fov_replicates)),
             ch=ch, metric=metric, tp_str=item_tp_str,
             threshold=threshold, band_lbl=band_lbl,
         ))
@@ -426,7 +559,8 @@ def export_bar_plot_data(ctx) -> None:
                     row, fc_mean=fc_item.mean, fc_spread=fc_item.spread,
                     fc_has=fc_item.has_mean, band_lbl=band_lbl,
                     vs_control=fc_vs_ctrl, vs_t0=fc_vs_t0,
-                    control_label=fc_ctrl_lbl,
+                    control_label=_control_cell(fc_item.fc_control),
+                    outcome=fc_item.fc_outcome,
                 )
         rows_out.append(row)
     if not rows_out:

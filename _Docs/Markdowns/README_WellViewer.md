@@ -1472,9 +1472,18 @@ Fold change:  Control [— ▾]   Baseline [— ▾]
 - **Control** — pick a loaded well or replicate set to divide every bar
   / curve by its mean at the matching timepoint. `—` disables this
   axis. (The Bar Plots control combo also includes any replicate sets
-  defined on Home → Groups.) When a rep-set name happens to match
-  a well token, the well's combo entry is suffixed with `(well)` so
-  the two are unambiguous.
+  defined on Home → Groups.) When a group name happens to match a well
+  token, the well's entry is shown as `A01 (well)` so the two can be told
+  apart on screen. The suffix is only a label: the entry records which of
+  the two you picked, so a group named `A01 (well)` is still selectable
+  and still means the group, and hiding a group cannot make its name
+  capture a well. Titles and CSV exports print the plain name.
+- **Per-sample control…** — the entry directly under `—`. Instead of one
+  control for the whole figure, each plotted sample names its own, so a
+  plate carrying four conditions each with its own paired control goes on
+  one fold-change axis. Picking it opens the editor described below; once
+  active the dropdown reads `Per-sample control (22/24)`, counting the
+  samples whose control actually resolved.
 - **Baseline** — pick `t0 (first timepoint)` to divide every bar / curve
   by its own value at the earliest available timepoint, so each
   member's first point becomes 1.0. `—` disables this axis.
@@ -1506,10 +1515,59 @@ units and would be misleading on a normalized axis; the CDF panel's
 threshold line stays because per-cell distributions aren't
 normalized).
 
-When a control is requested but has no sample at one of the plotted
-timepoints, the affected bars / points are rendered as dashed
-placeholders and the status bar names the missing timepoints — no
-silent NaN drops.
+When a control is requested but cannot be used — nobody assigned one, the
+one assigned no longer exists, or it has no sample at the plotted timepoint
+— the affected bars / points are rendered as dashed placeholders and the
+status bar says how many fell short and why. They are never drawn raw: a
+value that is not a fold change has no business on an axis that says it is.
+
+##### Per-sample controls
+
+Picking **Per-sample control…** opens a window listing one row per plotted
+sample, in the order the plot draws them:
+
+| Column | What it says |
+| --- | --- |
+| Sample | The bar or curve, in its own colour |
+| Control | Its control — the same list the single-control dropdown offers |
+| Status | `paired`, `own control`, `no control set`, `control not found`, or `no data at this timepoint` |
+| Resolves to | The wells actually used as the denominator |
+
+Read **Resolves to** when checking your work: the other columns describe what
+was asked for, and this one shows what happened.
+
+Edits apply to the plot immediately, so the window stays open beside it —
+there is no OK/Cancel, only **Close**. Two bulk actions sit in the footer:
+**Set all to ▾** assigns one control to every sample (which is exactly the
+single-control behaviour, and the axis title says so), and **Auto-pair ▾**
+walks the samples in blocks of 2, 3, 4 or 6 and makes the first or last of
+each block that block's control — the layout a plate of "control then
+treatments" repeats.
+
+A sample that is itself another sample's control draws as a flat 1.0 (0 for
+subtract) with a propagated error bar, which is the ΔΔCt convention; the
+**Controls: hide from plot** toggle leaves it out instead. There is no
+option to draw it raw, because a raw control beside ratio bars would put two
+units on one axis.
+
+Assignments are kept, never silently reset. A control whose group is deleted
+shows as `Veh_old (missing)` and comes back when the group does; an
+assignment for a sample that is no longer plotted collects under **Unused
+assignments** rather than disappearing. Renaming a group follows it through
+every assignment that names it.
+
+The axis title says how many controls are in play: one is named as usual,
+two are both named, and three or more read `vs own control` — with the CSV's
+`fold_change_control` column carrying which sample used which.
+
+A Batch Export panel inherits the per-sample mapping in force when you open
+it, so a batch run reproduces the figure on screen. The panel's own Control
+dropdown offers no per-sample entry — picking a control there switches that
+panel back to a single control. A group member the inherited mapping does not
+name is exported blank rather than falling back to one control, since the
+panel's groups are its own and need not match the plot tab's. A control naming a replicate
+set in a *different* batch group works: one group per condition, with the
+control as its own group, is the layout batch export is for.
 
 **CSV exports — additive schema.** Both the line and bar exporters
 keep the standard `mean_<ch>_<metric>` and `err_<band>_<ch>_<metric>`
@@ -1519,11 +1577,34 @@ fold-change is active:
 * `fold_change_mean` — normalized mean
 * `fold_change_<sd|sem>` — normalized spread
 * `fold_change_mode` — `control`, `t0`, or `control+t0`
-* `fold_change_control` — the chosen well / rep-set name
+* `fold_change_control` — **that row's** control (they differ under
+  per-sample controls)
+* `fold_change_outcome` — why the row is what it is: `ok`, `self`,
+  `unmapped`, `control_unresolved`, or `control_no_sample`. All but the
+  first two leave `fold_change_mean` empty, and this column is what tells
+  a normalization that failed from one that was never asked for.
 
 (Earlier versions of the bar CSV overwrote the raw mean column with
 the normalized value; downstream tools that depended on that behaviour
 should switch to reading the `fold_change_mean` column.)
+
+**Events columns.** `n_above_threshold` keeps its long-standing meaning — the
+integer count of events, summed across a replicate set's wells. The number the
+Events panel *draws* is the per-well mean, which is a different quantity and
+gets its own columns:
+
+* `n_above_replicate_mean` — the plotted value
+* `err_n_above_replicate_<band>` — its spread across replicates, empty when
+  there was only one and nothing could be computed
+* `n_above_replicate_unit` — `well` or `fov`, empty for a single well
+
+The unit column matters because nothing else in the row records whether
+Aggregate-FOVs was on, which would leave the other two ambiguous. A single well
+is not a replicate aggregation, so its row leaves the spread and the unit
+**empty** — a `0.000000` there would read as "the replicates agreed" on a row
+that had no replicates — and reports the count itself under both
+`n_above_threshold` and `n_above_replicate_mean` (the per-FOV mean under both,
+with Aggregate-FOVs on).
 
 **Statistical consistency.** The control denominator uses the same
 averaging statistic as the displayed bar / curve — mean-of-per-well-means
@@ -1571,8 +1652,13 @@ of individual cells. This is the default Plotting sub-tab.
 ### Line Graphs
 
 **What it shows.** A metric over time as three stacked panels — **mean ±
-SD/SEM**, **fraction above threshold** (fraction-on), and **N events** (cell
-count) — plus a CDF.
+SD/SEM**, **fraction above threshold** (fraction-on), and **N events** — plus a
+CDF. For a replicate set, **N events is the mean of its per-well counts**, the
+same way the mean and fraction panels average their wells, so all three panels
+describe one well's worth of signal and the three can be read together. A
+two-well set of 5 events each plots 5, not 10. The Bar Plots tab reports the
+same number, so the two tabs can be compared directly; the cross-well total is
+still exported (see below).
 
 - **Needs** — selected wells spanning more than one timepoint to see a trend
   (single-timepoint data draws a single point).

@@ -1,0 +1,620 @@
+"""Which control each plotted member is normalized against, and what came of it.
+
+A single global control either resolves or it does not, and an empty plot says
+so on its own. Per-sample pairing has no such luxury: **partial failure is the
+normal case**. Twenty-two members pair and two do not, and the two that did not
+must not be indistinguishable from the twenty-two that did — not in the figure,
+not in the CSV, and not in the table the user edits.
+
+So this module resolves the whole mapping in one pass and hands back a record
+per member carrying *why*. ``ControlOutcome`` is the vocabulary: five reasons a
+member can end up where it does, four of which are decidable here and one of
+which is not (see :class:`ControlOutcome`). The renderer's annotations, the
+status line, the CSV's ``fold_change_outcome`` column and the editor's Status
+column all read the same record, rather than three consumers re-deriving the
+same decision from a value that came out empty.
+
+Qt-free, and free of ``features/`` imports: ``build_per_member_controls`` is
+handed the member keys and their wells rather than reaching for a collector to
+compute them. The collector has already worked out its draw order by the time it
+needs a control, and the editor gets the same answer from
+``domain/plot_members.py`` — which is the point of that module.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum
+
+from well_viewer.domain.control_ref import ControlRef
+from well_viewer.domain.fold_change import resolve_control_wells
+
+
+class ControlOutcome(str, Enum):
+    """Why a member's control is what it is.
+
+    Four of these are decidable from the mapping and what is loaded, so they
+    are settled here, once, before any aggregation runs. The fifth is not:
+    ``CONTROL_NO_SAMPLE`` is a function of *(member, control, timepoint)* and
+    only the collector knows whether the control had a measurement at the
+    timepoint being drawn, so it is stamped onto the collected item instead.
+
+    They exist as a closed set because without them every failure produces the
+    same empty cell. ``unmapped``, ``control_unresolved`` and
+    ``control_no_sample`` are three different things to tell a user — nobody
+    picked one, the one picked is gone, the one picked has no data here — and a
+    blank ``fold_change_mean`` says none of them.
+    """
+
+    #: Paired with a control that resolved to wells other than its own.
+    OK = "ok"
+    #: The member *is* its control. Draws as 1.0 (or 0.0 for subtract) with a
+    #: propagated error bar — not a short-circuit, because x/x is already
+    #: exactly 1.0 in IEEE for the same float and short-circuiting would hide a
+    #: numerator/denominator mismatch rather than show it.
+    SELF = "self"
+    #: Nobody assigned this member a control.
+    UNMAPPED = "unmapped"
+    #: A control was assigned and resolves to no loaded wells — a deleted
+    #: group, a well that is not in this dataset, a group whose wells all
+    #: unloaded. The assignment is kept; only the plot drops the member.
+    CONTROL_UNRESOLVED = "control_unresolved"
+    #: The control resolved, but has no measurement at the timepoint drawn.
+    #: Stamped by the collector, never by :func:`build_per_member_controls`.
+    CONTROL_NO_SAMPLE = "control_no_sample"
+
+    def __str__(self) -> str:
+        """The bare value, because these are written to CSV cells.
+
+        A ``str``-mixin enum inherits ``Enum.__str__``, so ``str(OK)`` is
+        ``"ControlOutcome.OK"`` — which is what would have landed in the
+        ``fold_change_outcome`` column and in every figure annotation. It reads
+        like a leaked repr because it is one.
+        """
+        return self.value
+
+
+#: Outcomes that leave a member with a usable denominator.
+RESOLVED_OUTCOMES = frozenset({ControlOutcome.OK, ControlOutcome.SELF})
+
+
+@dataclass(frozen=True)
+class MemberControl:
+    """One member's pairing, resolved."""
+
+    member: str
+    control: ControlRef | None
+    wells: tuple[str, ...]
+    outcome: ControlOutcome
+    #: The replicate set this pairing was inherited from, or ``""`` when the
+    #: member was mapped in its own right. Carried so the editor can show an
+    #: inherited row as inherited rather than as an edit the user made.
+    inherited_from: str = ""
+
+    @property
+    def resolved(self) -> bool:
+        return self.outcome in RESOLVED_OUTCOMES
+
+
+@dataclass(frozen=True)
+class PerMemberControls:
+    """The whole mapping for one plot, in draw order."""
+
+    order: tuple[str, ...] = ()
+    by_member: dict = field(default_factory=dict)
+    render: str = "self"
+    #: ``(member key, control)`` pairs whose member is not currently plotted.
+    #: Kept rather than dropped — switching pooling off, or hiding a group,
+    #: must not be a way to silently lose a mapping the user built.
+    unused: tuple = ()
+
+    def get(self, member: str) -> MemberControl:
+        """The record for *member*; an unmapped one for a member never seen."""
+        found = self.by_member.get(member)
+        if found is not None:
+            return found
+        return MemberControl(member, None, (), ControlOutcome.UNMAPPED)
+
+    def counts(self) -> dict:
+        """``outcome -> how many members`` — what the status line coalesces."""
+        out: dict = {}
+        for key in self.order:
+            outcome = self.get(key).outcome
+            out[outcome] = out.get(outcome, 0) + 1
+        return out
+
+    def resolved_count(self) -> int:
+        return sum(1 for k in self.order if self.get(k).resolved)
+
+    def distinct_controls(self) -> tuple:
+        """The distinct controls actually in use, in first-drawn order.
+
+        Distinct by **resolved wells**, not by name: ``A01`` the well and
+        ``A01`` the replicate set are two controls, and two references that
+        resolve to the same wells are one. This count is what the axis label
+        branches on — one control reads exactly as today's single-control
+        title, two name both, three or more read ``vs own control``.
+        """
+        seen: set = set()
+        out: list = []
+        for key in self.order:
+            rec = self.get(key)
+            if not rec.resolved or rec.control is None:
+                continue
+            if rec.wells in seen:
+                continue
+            seen.add(rec.wells)
+            out.append(rec.control)
+        return tuple(out)
+
+    def is_pure_control(self, member: str) -> bool:
+        """True when *member* is somebody's control and normalizes to itself.
+
+        Both halves are the rule. A member nobody points at is an ordinary
+        sample however it is normalized, and a member that points at something
+        *other* than itself is a sample too, even while other members use it —
+        it carries its own normalization and hiding it would delete a real
+        measurement from the figure. Only the intersection is the flat 1.0 bar
+        the ``Plotted controls`` toggle governs.
+        """
+        rec = self.get(member)
+        if rec.outcome is not ControlOutcome.SELF:
+            return False
+        return any(
+            other != member and self.get(other).wells == rec.wells
+            for other in self.order
+        )
+
+    def hidden_members(self) -> tuple:
+        """Members the render mode removes from the plot entirely."""
+        if self.render != "hidden":
+            return ()
+        return tuple(k for k in self.order if self.is_pure_control(k))
+
+
+def build_per_member_controls(ctx, member_keys, control_map, *,
+                              member_wells=None, member_rsets=None,
+                              render: str = "self") -> PerMemberControls:
+    """Resolve *control_map* against what is loaded, for *member_keys* in order.
+
+    *member_wells* maps each key to the wells it is drawn from — see
+    ``domain/plot_members.member_wells`` for why the caller supplies it rather
+    than a resolver guessing. Without it a member cannot be compared to its
+    control by wells, so self-normalization would have to be detected by
+    matching names, which is wrong in exactly the case ``ControlRef`` exists
+    for.
+
+    *member_rsets* maps a well token to the replicate set that owns it. When
+    pooling is switched off, the key space flips from set names to well tokens
+    and a mapping written against the sets would be silently orphaned by a
+    toggle that has nothing to do with fold change — so a well inherits its
+    set's control. **One hop, explicit wins**: a well with its own entry keeps
+    it, and an inherited control is never itself looked up for further
+    inheritance.
+    """
+    keys = [str(k) for k in (member_keys or [])]
+    mapping = dict(control_map or {})
+    wells_for = dict(member_wells or {})
+    owner_of = dict(member_rsets or {})
+
+    records: dict = {}
+    for key in keys:
+        ref, inherited_from = _control_for(key, mapping, owner_of)
+        own_wells = tuple(sorted(wells_for.get(key) or ()))
+        if ref is None:
+            records[key] = MemberControl(key, None, (), ControlOutcome.UNMAPPED)
+            continue
+        ctrl_wells = tuple(sorted(resolve_control_wells(ctx, ref)))
+        if not ctrl_wells:
+            records[key] = MemberControl(
+                key, ref, (), ControlOutcome.CONTROL_UNRESOLVED, inherited_from)
+            continue
+        outcome = (ControlOutcome.SELF if ctrl_wells == own_wells and own_wells
+                   else ControlOutcome.OK)
+        records[key] = MemberControl(
+            key, ref, ctrl_wells, outcome, inherited_from)
+
+    # "Unused" means no member is pairing through this entry — which is not the
+    # same as "no plotted member is named by it". An entry keyed on a replicate
+    # set whose *wells* are the plotted members is consumed by every one of them
+    # through ``_control_for``'s inheritance path, and reporting it unused put
+    # the window in contradiction with itself: rows reading "paired (from
+    # TREAT)" above a footer reading "Unused assignments (1): TREAT → CTRL".
+    consumed = set(keys) | {
+        rec.inherited_from for rec in records.values() if rec.inherited_from}
+    unused = tuple(
+        (str(k), ControlRef.coerce(v))
+        for k, v in mapping.items()
+        if str(k) not in consumed and ControlRef.coerce(v) is not None
+    )
+    return PerMemberControls(
+        order=tuple(keys), by_member=records,
+        render=render if render in ("self", "hidden") else "self",
+        unused=unused,
+    )
+
+
+def _control_for(member: str, mapping: dict, owner_of: dict):
+    """``(control ref, inherited-from)`` for *member*, explicit entry winning."""
+    own = ControlRef.coerce(mapping.get(member))
+    if own is not None:
+        return own, ""
+    owner = owner_of.get(member)
+    if owner:
+        inherited = ControlRef.coerce(mapping.get(owner))
+        if inherited is not None:
+            return inherited, str(owner)
+    return None, ""
+
+
+# ── what a collector asks, member by member ──────────────────────────────────
+
+class ControlDenominators:
+    """The control's mean / fraction / events for one member at one timepoint.
+
+    Both plotting tabs need the same three lookups plus the same outcome
+    bookkeeping, and both used to hoist the three values once per timepoint and
+    share them across every member — which is why one missing denominator NaNed
+    every bar on the plate. This makes the lookup per member and reports each
+    panel's denominator separately, because a single "the control is missing"
+    flag that only tested the mean left the Fraction panel drawing a raw value
+    under a fold-change label.
+
+    Construct one per redraw over a :class:`ControlSeriesCache`; it holds no
+    state of its own beyond the resolved mapping, so it must not outlive the
+    redraw the cache belongs to.
+    """
+
+    def __init__(self, cache, *, on: bool, controls: PerMemberControls | None = None,
+                 single=None, single_outcome: str = "", miss_sink: set | None = None):
+        self._cache = cache
+        self._on = bool(on)
+        self._controls = controls
+        self._single = single
+        self._single_outcome = single_outcome
+        self._miss_sink = miss_sink
+
+    @property
+    def hidden_members(self) -> frozenset:
+        """Members the render mode drops from the plot entirely."""
+        if self._controls is None:
+            return frozenset()
+        return frozenset(self._controls.hidden_members())
+
+    def control_for(self, member_key: str):
+        """``(control, outcome)`` for *member_key*, before any timepoint."""
+        if not self._on:
+            return None, ""
+        if self._controls is None:
+            return self._single, self._single_outcome
+        rec = self._controls.get(member_key)
+        return rec.control, rec.outcome
+
+    def series_for(self, member_key: str):
+        """``(control, outcome, stats, frac, n)`` with whole ``{t: …}`` series.
+
+        The Line tab normalizes a member's entire curve in one call rather than
+        timepoint by timepoint, so it wants the series rather than a sample.
+        An unresolvable control yields three empty dicts — never a partially
+        populated one, which is how a trace ends up half normalized.
+        """
+        ref, outcome = self.control_for(member_key)
+        if not outcome or outcome in (ControlOutcome.UNMAPPED,
+                                      ControlOutcome.CONTROL_UNRESOLVED):
+            return ref, outcome, {}, {}, {}
+        return (ref, outcome,
+                self._cache.stats_series(ref),
+                self._cache.frac_series(ref),
+                self._cache.n_series(ref))
+
+    def at(self, member_key: str, target_t: float):
+        """``(control, outcome, mean, frac, n)`` — each of the last three a
+        ``(value, spread)`` pair or ``None``.
+
+        ``outcome`` is ``""`` when the control axis does not apply here at all;
+        anything else is a :class:`ControlOutcome`.
+        """
+        if not self._on:
+            return None, "", None, None, None
+        if self._controls is None:
+            ref, outcome = self._single, self._single_outcome
+        else:
+            rec = self._controls.get(member_key)
+            ref, outcome = rec.control, rec.outcome
+        if outcome in (ControlOutcome.UNMAPPED, ControlOutcome.CONTROL_UNRESOLVED):
+            return ref, outcome, None, None, None
+        stats = self._cache.stats_at(ref, target_t)
+        if stats is None:
+            if self._miss_sink is not None:
+                self._miss_sink.add(float(target_t))
+            outcome = ControlOutcome.CONTROL_NO_SAMPLE
+        return (ref, outcome, stats,
+                self._cache.frac_at(ref, target_t),
+                self._cache.n_at(ref, target_t))
+
+    def baseline_at(self, member_key: str, target_t):
+        """``(mean, frac, n)`` for this member's control at a **baseline** tp.
+
+        What cross-axis stacking needs and :meth:`at` is wrong for: the
+        baseline timepoint is not a timepoint being drawn, so a control with no
+        sample there is not a shortfall in the plot and must not land in the
+        miss sink or turn the member's outcome into ``control_no_sample``. Each
+        element is a ``(value, spread)`` pair or ``None``; all three are
+        ``None`` when the axis is off or the control did not resolve.
+        """
+        none3 = (None, None, None)
+        if not self._on or target_t is None:
+            return none3
+        ref, outcome = self.control_for(member_key)
+        if ref is None or outcome in (ControlOutcome.UNMAPPED,
+                                      ControlOutcome.CONTROL_UNRESOLVED):
+            return none3
+        return (self._cache.stats_at(ref, target_t),
+                self._cache.frac_at(ref, target_t),
+                self._cache.n_at(ref, target_t))
+
+
+def control_denominators(ctx, cache, fc, member_keys, *, scope_wells=None,
+                         member_rsets=None, miss_sink=None) -> ControlDenominators:
+    """Build a :class:`ControlDenominators` for one collection pass.
+
+    Resolves the per-member mapping when *fc* asks for one, and otherwise
+    settles the single control's own outcome once — which separates "the
+    control names nothing that is loaded" from "the control has no data at the
+    timepoint drawn". Those are the same empty bar and different sentences.
+    """
+    if not fc.vs_control_on:
+        return ControlDenominators(cache, on=False)
+    if fc.per_member:
+        controls = build_per_member_controls(
+            ctx, member_keys, fc.control_map_dict,
+            member_wells=scope_wells, member_rsets=member_rsets,
+            render=fc.control_render,
+        )
+        return ControlDenominators(cache, on=True, controls=controls,
+                                   miss_sink=miss_sink)
+    outcome = (
+        ControlOutcome.CONTROL_UNRESOLVED
+        if fc.control is None or not resolve_control_wells(ctx, fc.control)
+        else ControlOutcome.OK
+    )
+    return ControlDenominators(cache, on=True, single=fc.control,
+                               single_outcome=outcome, miss_sink=miss_sink)
+
+
+def panel_nan_flags(axis_on, outcome, ctrl_mean, ctrl_frac, ctrl_n):
+    """Which of the three panels lost their denominator, ``(mean, frac, n)``.
+
+    Each panel drops on its **own** denominator. While one flag governed all
+    three it tested only the mean, so a control with a mean but no fraction
+    series left the Fraction panel drawing a raw value under a fold-change
+    label — a number that is not a fold change on an axis that says it is.
+
+    All three arguments are the denominator *value* (or ``None``), never the
+    ``(value, spread)`` pair: a pair whose value is ``None`` would read as
+    present here, and only the caches happening to return ``None`` for the
+    whole pair kept that from mattering.
+    """
+    live = bool(axis_on and outcome)
+    return (live and ctrl_mean is None,
+            live and ctrl_frac is None,
+            live and ctrl_n is None)
+
+
+def normalize_member_pts(pts, denoms: ControlDenominators, member_key: str, *,
+                         fc, n_per_fov: bool, baseline_tp,
+                         op_ctrl: str, op_t0: str, miss_sink=None) -> list:
+    """Normalize one member's AggPoints against **its own** control.
+
+    The Line tab and the batch line runner both do this, and both would
+    otherwise hand ``normalize_pts`` a control series that can be empty. An
+    empty one skips its axis without complaint, so the figure carries raw
+    values under a fold-change axis label with nothing to say so — on the batch
+    path, in an export nobody watched being drawn.
+
+    The rule is per panel, the same one :func:`panel_nan_flags` applies on the
+    bar side: a member whose control has a mean but no fraction series keeps
+    its normalized mean and loses only the fraction. Blanking all three on the
+    mean's denominator alone would throw away two panels that were computable,
+    and blanking none of them would draw the raw fraction.
+    """
+    from well_viewer.domain.fold_change import blank_point, normalize_pts
+
+    if not pts or not fc.active:
+        return pts
+    _ref, outcome, ctrl_stats, ctrl_frac, ctrl_n = denoms.series_for(member_key)
+    nan_mean, nan_frac, nan_n = panel_nan_flags(
+        fc.vs_control_on, outcome,
+        ctrl_stats or None, ctrl_frac or None, ctrl_n or None)
+    if nan_mean and nan_frac and nan_n:
+        return [blank_point(pt) for pt in pts]
+    out = normalize_pts(
+        pts,
+        control_stats=ctrl_stats or None,
+        control_frac_stats=ctrl_frac or None,
+        control_n_stats=ctrl_n or None,
+        normalize_frac_n=True,
+        n_per_fov=n_per_fov,
+        use_t0=fc.vs_t0_on,
+        baseline_tp=baseline_tp,
+        op_ctrl=op_ctrl,
+        op_t0=op_t0,
+        miss_sink=miss_sink,
+    )
+    if nan_mean or nan_frac or nan_n:
+        out = [blank_point(pt, mean=nan_mean, frac=nan_frac, n=nan_n)
+               for pt in out]
+    return out
+
+
+# ── bulk entry ───────────────────────────────────────────────────────────────
+
+#: Where the control sits inside each chunk.
+CONTROL_FIRST = "first"
+CONTROL_LAST = "last"
+
+
+def auto_pair(member_keys, member_controls, *, size: int,
+              position: str = CONTROL_FIRST) -> dict:
+    """Walk *member_keys* in chunks of *size*, pairing each chunk to one of its own.
+
+    This is Home → Groups' Quick Replicates one level up, deliberately: a plate
+    laid out in repeating blocks of "control then treatments" is the layout
+    that makes per-sample controls worth having, and the vocabulary is one the
+    user already has.
+
+    *member_controls* maps a member key to the control reference that addresses
+    **that member** — a set name resolves to a set reference, a well token to a
+    well reference — because the chunk's control is one of the plotted members
+    and a plain name could not say which. A trailing chunk shorter than *size*
+    is still paired, against whichever of its own members *position* names; it
+    is a real block of samples, and skipping it would leave a tail of unmapped
+    members that looks like a bug rather than a choice.
+
+    A plate-geometry rule (row, column, quadrant) is deliberately **not**
+    offered: it is undefined the moment the members are replicate sets, which
+    is a domain predicate applied outside its domain. Name-pattern matching is
+    not offered either — every near-miss looks like a working feature.
+    """
+    keys = [str(k) for k in (member_keys or [])]
+    if size < 1 or not keys:
+        return {}
+    refs = dict(member_controls or {})
+    out: dict = {}
+    for start in range(0, len(keys), size):
+        chunk = keys[start:start + size]
+        anchor = chunk[-1] if position == CONTROL_LAST else chunk[0]
+        ref = ControlRef.coerce(refs.get(anchor))
+        if ref is None:
+            continue
+        for key in chunk:
+            out[key] = ref
+    return out
+
+
+# ── what the popover and the status line say ─────────────────────────────────
+
+def summary_text(controls: PerMemberControls) -> str:
+    """The one-line state of the mapping, for the combo and the summary label.
+
+    It reports **resolved out of plotted**, not entries out of entries: a
+    mapping with twenty-four entries of which two name deleted groups is not
+    complete, and a count taken from the mapping would call it complete.
+
+    "Plotted" excludes the members the ``hidden`` render mode removes, so the
+    denominator counts what is on screen. Counting a hidden pure control read
+    ``2/2`` beside a single visible bar.
+    """
+    hidden = set(controls.hidden_members())
+    visible = [k for k in controls.order if k not in hidden]
+    if not visible:
+        return "Per-sample control (nothing plotted)"
+    resolved = sum(1 for k in visible if controls.get(k).resolved)
+    return f"Per-sample control ({resolved}/{len(visible)})"
+
+
+def tick_labels(items) -> list[str]:
+    """The x-tick text for each bar, naming its control when they differ.
+
+    Under one global control the axis title already says which one and every
+    bar shares it, so a per-bar line would repeat it n times. Under per-sample
+    controls the axis title collapses to ``vs own control`` once three or more
+    are in play, and without this the figure cannot be read without its CSV
+    beside it — the shortfall the whole feature exists to prevent, applied to
+    the feature itself.
+
+    A member that failed to pair always says so, however many controls are in
+    play: an empty slot beside bars that drew is the exact ambiguity the
+    outcome vocabulary exists for.
+    """
+    # Distinct by the **reference**, matching ``distinct_controls``. Keying on
+    # ``display_name`` collapsed ``A01`` the well and ``A01`` the replicate set
+    # into one control — the exact collision ``ControlRef`` exists to make
+    # unrepresentable — so a plate using both would drop the per-bar lines that
+    # say which is which, on the one layout that needs them most.
+    distinct = {
+        it.fc_control
+        for it in items
+        if getattr(it, "fc_outcome", "") in (ControlOutcome.OK, ControlOutcome.SELF)
+        and getattr(it, "fc_control", None) is not None
+    }
+    name_them = len(distinct) > 1
+    out: list[str] = []
+    for item in items:
+        outcome = getattr(item, "fc_outcome", "")
+        if not outcome:
+            out.append(item.display)
+        elif outcome == ControlOutcome.UNMAPPED:
+            out.append(f"{item.display}\nno control")
+        elif outcome in (ControlOutcome.CONTROL_UNRESOLVED,
+                         ControlOutcome.CONTROL_NO_SAMPLE):
+            out.append(f"{item.display}\ncontrol missing")
+        elif not name_them:
+            out.append(item.display)
+        elif outcome == ControlOutcome.SELF:
+            out.append(f"{item.display}\n(ctrl)")
+        else:
+            name = getattr(item.fc_control, "display_name", "")
+            out.append(f"{item.display}\n\u00f7 {name}" if name else item.display)
+    return out
+
+
+def _shortfall_phrase(counts: dict, timepoints=None) -> str:
+    """Outcome counts, coalesced by reason into one comma-joined phrase.
+
+    Coalesced rather than listed per member, so a plate where every member is
+    unmapped reads as one sentence instead of twenty-four. The two callers
+    below differ only in where the counts come from and what wraps the phrase;
+    they each carried their own copy of this, which is two wordings for one
+    fact and no way to keep them equal.
+    """
+    parts = []
+    if counts.get(ControlOutcome.UNMAPPED):
+        parts.append(f"{counts[ControlOutcome.UNMAPPED]} with no control")
+    if counts.get(ControlOutcome.CONTROL_UNRESOLVED):
+        parts.append(
+            f"{counts[ControlOutcome.CONTROL_UNRESOLVED]} whose control is missing")
+    if counts.get(ControlOutcome.CONTROL_NO_SAMPLE):
+        when = ""
+        if timepoints:
+            when = " t=" + ", ".join(f"{t:g}" for t in sorted(timepoints))
+        parts.append(
+            f"{counts[ControlOutcome.CONTROL_NO_SAMPLE]} whose control has no "
+            f"data at{when or ' this timepoint'}")
+    return ", ".join(parts)
+
+
+def shortfall_from_items(items, *, timepoints=None) -> str:
+    """The status line for a collected plot, coalesced by reason.
+
+    Reads each item's own ``fc_outcome`` rather than a set of timepoints
+    collected on the side. Under one global control a set of timepoints was
+    the whole story — every bar failed or none did — but per-sample controls
+    make partial failure ordinary, and "control missing at t=24" says nothing
+    about *which* control or *how many* bars it cost.
+
+    *timepoints* is the collector's miss set, still worth naming when the only
+    problem is that the control has no sample somewhere. This is the one path
+    that can report ``control_no_sample`` at all: the collectors stamp it, and
+    :func:`build_per_member_controls` — which knows nothing of timepoints —
+    cannot.
+    """
+    counts: dict = {}
+    for item in items:
+        outcome = getattr(item, "fc_outcome", "")
+        if not outcome or outcome in (ControlOutcome.OK, ControlOutcome.SELF):
+            continue
+        counts[outcome] = counts.get(outcome, 0) + 1
+    if not counts:
+        return ""
+    return "Fold change: " + _shortfall_phrase(counts, timepoints) + " — drawn blank."
+
+
+def shortfall_text(controls: PerMemberControls) -> str:
+    """A phrase naming what fell short, or ``""`` when nothing did.
+
+    The editor's and the combo's version: the same phrase
+    :func:`shortfall_from_items` builds, from a resolved mapping instead of a
+    collected plot, and without the sentence around it.
+    """
+    return _shortfall_phrase(controls.counts())

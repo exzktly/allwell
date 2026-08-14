@@ -15,6 +15,7 @@ shared ``ctx._fc_*`` state so the same selection applies to both tabs.
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox, QLabel, QWidget,
 )
@@ -37,6 +38,7 @@ from well_viewer.domain.fold_change_scopes import (
     registered_scopes,
 )
 from well_viewer.core.safe import swallowed
+from well_viewer.domain.control_ref import KIND_LEGACY
 import theme
 
 # Pixel geometry for this module's controls. Named rather than written
@@ -45,6 +47,7 @@ import theme
 _OP_CTRL_COMBO_MIN_W = 110
 _OP_T0_COMBO_MIN_W = 110
 _ORDER_COMBO_MIN_W = 130
+_RENDER_COMBO_MIN_W = 170
 
 # Disambiguation suffix appended to a well-token combo entry when there is
 # a replicate set with the same name. Without this, picking the entry
@@ -54,51 +57,150 @@ _ORDER_COMBO_MIN_W = 130
 # without collisions are unaffected.
 _WELL_DISAMBIG_SUFFIX = " (well)"
 
+#: What the per-sample entry reads before it is switched on.
+_PER_SAMPLE_LABEL = "Per-sample control…"
 
-def _all_member_labels(ctx) -> list[str]:
-    """Replicate-set names + selected well tokens currently plotted.
 
-    When a well token collides with a rep-set name (e.g. someone named a
-    rep-set "A01"), the well entry is suffixed with " (well)" so the
-    user can pick either unambiguously.
+def _all_member_entries(ctx) -> list[tuple[str, object]]:
+    """``(display text, ControlRef)`` for everything the Control combo offers.
+
+    Replicate-set names first, then the plotted wells, then every remaining
+    dataset well — so a well used purely as a reference (a background well
+    subtracted from the samples, say) can be chosen even when it is not part
+    of the current plot selection.
+
+    Each entry carries its own :class:`~well_viewer.domain.control_ref.ControlRef`,
+    which is what makes the choice unambiguous. The ``" (well)"`` suffix on a
+    well whose token equals a replicate-set name is now **display only**:
+    nothing parses it back, so a set that happens to be *named* ``A01 (well)``
+    can no longer be mistaken for the well ``A01``.
 
     A8 teardown: reads typed ``ctx.state.selection`` / ``ctx.state.dataset``
     so it takes ``ctx`` and names no god-object.
     """
-    names: list[str] = []
+    from well_viewer.domain.control_ref import ControlRef
+
+    entries: list[tuple[str, object]] = []
     repset_names: set[str] = set()
-    seen: set[str] = set()
+    # Replicate-set names and well tokens are tracked apart. Sharing one "seen"
+    # set makes a well whose token equals a replicate-set name look like a
+    # duplicate of it, so the well is dropped from the list entirely and the
+    # suffixed entry below is never reached — which is the case the suffix
+    # exists for.
+    seen_wells: set[str] = set()
     for s in (ctx.state.selection.selections or []):
         if s.get("hidden"):
             continue
         name = s.get("name") or ""
-        if not name or name in seen:
+        if not name or name in repset_names:
             continue
         wells = s.get("wells") or []
         if any(w in (ctx.state.dataset.well_paths or {}) for w in wells):
-            names.append(name)
-            seen.add(name)
+            entries.append((name, ControlRef.for_replicate_set(name)))
             repset_names.add(name)
     well_paths = ctx.state.dataset.well_paths or {}
     for w in sorted(ctx.state.selection.selected_wells or [], key=lambda x: x):
-        if w in well_paths and w not in seen:
-            entry = w + _WELL_DISAMBIG_SUFFIX if w in repset_names else w
-            names.append(entry)
-            seen.add(w)
+        if w in well_paths and w not in seen_wells:
+            ref = ControlRef.for_well(w)
+            entries.append((ref.combo_text(disambiguate=w in repset_names), ref))
+            seen_wells.add(w)
     # Expose every remaining dataset well too, so a well used purely as a
     # reference — e.g. a negative-control or background well subtracted from the
     # samples via "vs Control → Subtract" at each matching timepoint — can be
     # chosen as the Control even when it isn't part of the current plot
     # selection. Plotted members stay first; the rest follow in plate order.
     for w in sorted(well_paths.keys(), key=lambda x: x):
-        if w not in seen:
-            entry = w + _WELL_DISAMBIG_SUFFIX if w in repset_names else w
-            names.append(entry)
-            seen.add(w)
-    return names
+        if w not in seen_wells:
+            ref = ControlRef.for_well(w)
+            entries.append((ref.combo_text(disambiguate=w in repset_names), ref))
+            seen_wells.add(w)
+    return entries
 
 
-def _repopulate_control_combo(ctx, combo: QComboBox) -> None:
+def _all_member_labels(ctx) -> list[str]:
+    """Just the display texts of :func:`_all_member_entries`.
+
+    Kept for the Cell Gating optimizer, which builds its own combo and hands
+    the text straight to the resolver — a legacy reference, resolved by the
+    old precedence.
+    """
+    return [text for text, _ref in _all_member_entries(ctx)]
+
+
+#: Item data marking the "one control per sample" entry. A sentinel object
+#: rather than a magic string, so it can never collide with a group someone
+#: named "Per-sample control…".
+PER_SAMPLE = object()
+
+#: A separator row. Its text is empty so the "did the item list change?"
+#: comparison below still lines up with what ``itemText`` reports.
+_SEPARATOR = object()
+_SEPARATOR_TEXT = ""
+
+
+def controls_for_scope(ctx, scope: str):
+    """The resolved mapping for one tab's members.
+
+    *scope* is not optional and not defaulted. The Bar and Line tabs draw
+    different member lists — switch pooling off and Bar keys on eight well
+    tokens while Line keys on four set names — so a count taken against one
+    and shown on the other reports a plot that is not on screen.
+    """
+    from well_viewer.domain import plot_members as _members
+    from well_viewer.domain.fold_change_pairing import build_per_member_controls
+
+    plot = ctx.state.plot
+    return build_per_member_controls(
+        ctx, _members.plotted_member_keys(ctx, scope),
+        dict(getattr(plot, "fc_control_map", {}) or {}),
+        member_wells=_members.member_wells(ctx, scope),
+        member_rsets=_members.member_replicate_sets(ctx),
+        render=str(getattr(plot, "fc_control_render", "self") or "self"),
+    )
+
+
+def per_sample_combo_text(ctx, scope: str) -> str:
+    """What *scope*'s Control combo reads while per-sample mode is on.
+
+    Resolved-out-of-plotted, not entries-out-of-entries: a mapping with
+    twenty-four entries of which two name deleted groups is not complete, and
+    a count taken from the mapping would call it complete.
+    """
+    from well_viewer.domain.fold_change_pairing import summary_text
+
+    return summary_text(controls_for_scope(ctx, scope))
+
+
+def _upgrade_saved_control(ctx):
+    """Give a document's legacy control reference a concrete kind, in place.
+
+    A reference read from a document written before the kind was recorded is
+    ``ControlRef(kind="legacy", …)``, and the combo matches items by equality
+    — so a legacy ``CTRL`` never equals the ``kind="set"`` entry offered for
+    the same group. Every pre-existing saved plot therefore reopened with its
+    control shown as "not in current selections" while the plot went on
+    normalizing correctly: the control panel misreporting live state, which is
+    exactly what that fallback entry exists to prevent.
+
+    Resolving it here is what makes the ambiguity retire once per document
+    rather than living forever: this runs whenever the combo is populated, and
+    the next save writes the concrete form. A reference that resolves to
+    nothing — a dataset that has not finished loading, a group that is gone —
+    is left legacy, because guessing at it is what the kind exists to stop.
+    """
+    from well_viewer.domain.fold_change import concrete_control
+
+    saved = ctx.state.plot.fc_control
+    if saved is None or getattr(saved, "kind", "") != KIND_LEGACY:
+        return saved
+    concrete = concrete_control(ctx, saved)
+    if concrete is None:
+        return saved
+    ctx.state.plot.fc_control = concrete
+    return concrete
+
+
+def _repopulate_control_combo(ctx, combo: QComboBox, *, scope: str = "bar") -> None:
     """Refresh the Control combo's item list from current selections.
 
     Skips the clear-and-repopulate if (a) the combo's popup is currently
@@ -106,19 +208,32 @@ def _repopulate_control_combo(ctx, combo: QComboBox) -> None:
     candidate list is identical to what the combo already shows. The
     selected index is still re-synced from ctx state.
     """
-    members = _all_member_labels(ctx)
-    saved = ctx.state.plot.fc_control_label or ""
-    # If the saved label matches a bare well token AND there's a
-    # collision-suffixed entry in the candidate list, prefer the suffixed
-    # form so the user-visible state is unambiguous.
-    if saved and saved in members:
-        saved_display = saved
-    elif saved + _WELL_DISAMBIG_SUFFIX in members:
-        saved_display = saved + _WELL_DISAMBIG_SUFFIX
-    else:
-        saved_display = saved
+    entries = _all_member_entries(ctx)
+    saved = _upgrade_saved_control(ctx)
+    per_member = str(getattr(ctx.state.plot, "fc_control_mode", "single")) == "per_member"
 
-    candidate_items = [_NONE_LABEL, *members]
+    # The per-sample entry sits directly under "—", above a separator, so the
+    # member list below it stays byte-identical to what it has always been.
+    candidate_items: list[tuple[str, object]] = [
+        (_NONE_LABEL, None),
+        (per_sample_combo_text(ctx, scope) if per_member else _PER_SAMPLE_LABEL,
+         PER_SAMPLE),
+        (_SEPARATOR_TEXT, _SEPARATOR),
+        *entries,
+    ]
+    # A stored control that matches nothing on offer is **not** dropped back to
+    # "—". It stays selected, under a label saying so. Silently resetting the
+    # combo left the panel claiming no control while the plot went on dividing
+    # by one — the control panel misreporting live state, which is worse than
+    # an entry the user has to deal with. This happens whenever the thing the
+    # control named goes away: a replicate set deleted, a well not in this
+    # dataset.
+    if (saved is not None and not per_member
+            and not any(ref is not PER_SAMPLE and ref is not _SEPARATOR
+                        and ref == saved for _t, ref in candidate_items)):
+        candidate_items.append(
+            (f"{saved.display_name} — not in current selections", saved))
+
     current_items = [combo.itemText(i) for i in range(combo.count())]
     popup_visible = False
     try:
@@ -129,12 +244,28 @@ def _repopulate_control_combo(ctx, combo: QComboBox) -> None:
 
     blocked = combo.blockSignals(True)
     try:
-        if current_items != candidate_items and not popup_visible:
+        if current_items != [t for t, _r in candidate_items] and not popup_visible:
             combo.clear()
-            for m in candidate_items:
-                combo.addItem(m)
-        idx = combo.findText(saved_display) if saved_display else 0
-        combo.setCurrentIndex(idx if idx >= 0 else 0)
+            for text, ref in candidate_items:
+                if ref is _SEPARATOR:
+                    combo.insertSeparator(combo.count())
+                else:
+                    combo.addItem(text, ref)
+        # Matched on the reference, never on the text: the text carries a
+        # display-only suffix that changes as collisions come and go.
+        wanted = PER_SAMPLE if per_member else saved
+        idx = 0
+        for i in range(combo.count()):
+            data = combo.itemData(i)
+            if data is PER_SAMPLE or wanted is PER_SAMPLE:
+                if data is wanted:
+                    idx = i
+                    break
+                continue
+            if data == wanted:
+                idx = i
+                break
+        combo.setCurrentIndex(idx)
     finally:
         combo.blockSignals(blocked)
 
@@ -247,6 +378,37 @@ class _BaselineCombo(QComboBox):
         super().showPopup()
 
 
+def _refresh_per_sample_row(ctx, scope: str, summary, render_combo) -> None:
+    """Show or hide the per-sample summary + render toggle, and fill them in.
+
+    The summary carries an ``Edit…`` link because ``currentIndexChanged`` does
+    not fire when a user re-selects the item already showing, so the combo
+    cannot be the only way back into the editor.
+    """
+    plot = ctx.state.plot
+    on = (str(getattr(plot, "fc_control_mode", "single")) == "per_member"
+          and bool(getattr(plot, "fc_vs_control_on", False)))
+    if summary is not None:
+        if on:
+            from well_viewer.domain.fold_change_pairing import shortfall_text
+            short = shortfall_text(controls_for_scope(ctx, scope))
+            summary.setText(
+                (f"{short} &nbsp; " if short else "")
+                + '<a href="#edit">Edit…</a>')
+        summary.setVisible(on)
+    if render_combo is not None:
+        blocked = render_combo.blockSignals(True)
+        try:
+            want = str(getattr(plot, "fc_control_render", "self") or "self")
+            for i in range(render_combo.count()):
+                if render_combo.itemData(i) == want:
+                    render_combo.setCurrentIndex(i)
+                    break
+        finally:
+            render_combo.blockSignals(blocked)
+        render_combo.setVisible(on)
+
+
 def _sync_widgets_to_state(ctx, *, skip_scope: str = "") -> None:
     """Mirror ``ctx._fc_*`` state into every installed widget set.
 
@@ -264,7 +426,7 @@ def _sync_widgets_to_state(ctx, *, skip_scope: str = "") -> None:
         ctrl = reg.get_or_none(scope.ctrl_combo_attr)
         base = reg.get_or_none(scope.baseline_combo_attr)
         if ctrl is not None:
-            _repopulate_control_combo(ctx, ctrl)
+            _repopulate_control_combo(ctx, ctrl, scope=scope.name)
         if base is not None:
             _repopulate_baseline_combo(ctx, base)
         op_ctrl_combo = reg.get_or_none(f"_fc_op_ctrl_combo_{scope.name}")
@@ -276,6 +438,15 @@ def _sync_widgets_to_state(ctx, *, skip_scope: str = "") -> None:
         order_combo = reg.get_or_none(f"_fc_order_combo_{scope.name}")
         if order_combo is not None:
             _repopulate_order_combo(ctx, order_combo)
+        _refresh_per_sample_row(
+            ctx, scope.name,
+            reg.get_or_none(f"_fc_summary_label_{scope.name}"),
+            reg.get_or_none(f"_fc_render_combo_{scope.name}"),
+        )
+        from well_viewer.core.fold_change_pairing_view import (
+            refresh_pairing_window,
+        )
+        refresh_pairing_window(ctx, scope.name)
 
 
 _BAR_LIMIT_KEYS = ("x_lim_min", "x_lim_max", "y_lim_min", "y_lim_max")
@@ -311,7 +482,11 @@ def _reset_bar_ylim_edits(ctx) -> None:
 def set_fold_change_state(
     ctx, *,
     vs_control_on: bool | None = None,
-    control_label: str | None = None,
+    control=None,
+    clear_control: bool = False,
+    control_mode: str | None = None,
+    control_map: dict | None = None,
+    control_render: str | None = None,
     vs_t0_on: bool | None = None,
     baseline_tp: str | None = None,
     op: str | None = None,
@@ -330,14 +505,21 @@ def set_fold_change_state(
     into the widget that just wrote the value (it already holds it,
     and re-applying could yank an open popup).
     """
-    # Normalize the control label here (UI layer): drop the disambiguation
-    # suffix so the stored state stays a bare well token / rep-set name —
-    # PlotState.set_fold_change keeps the UI artefact out of the state object.
-    if control_label is not None and control_label.endswith(_WELL_DISAMBIG_SUFFIX):
-        control_label = control_label[: -len(_WELL_DISAMBIG_SUFFIX)]
+    # The control travels as a ``ControlRef``, not as text. The combo's
+    # " (well)" suffix is display chrome and nothing parses it back: the item
+    # carries the reference, and the reference states its own kind. That is
+    # what makes a group named `A01 (well)` selectable and stops a hidden
+    # group named `A01` from capturing the real well. A document written
+    # before the kind was recorded loads as a *legacy* reference, resolves by
+    # the precedence it was saved under, and is written concrete the first
+    # time the combo is populated against a loaded dataset.
     ctx.state.plot.set_fold_change(
         vs_control_on=vs_control_on,
-        control_label=control_label,
+        control=control,
+        clear_control=clear_control,
+        control_mode=control_mode,
+        control_map=control_map,
+        control_render=control_render,
         vs_t0_on=vs_t0_on,
         baseline_tp=baseline_tp,
         op=op,
@@ -382,8 +564,31 @@ def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) ->
         "Divide each bar / curve by the picked well or replicate set's "
         "mean at the same timepoint. — disables this axis."
     )
-    _repopulate_control_combo(ctx, ctrl_combo)
+    _repopulate_control_combo(ctx, ctrl_combo, scope=scope)
     layout.addWidget(ctrl_combo)
+
+    # Hidden unless per-sample mode is on. ``currentIndexChanged`` does not
+    # fire when the user re-selects the item already showing, so the combo
+    # cannot be the only way back into the editor — this link is the other one.
+    summary = QLabel("", parent)
+    summary.setTextFormat(Qt.RichText)
+    summary.setOpenExternalLinks(False)
+    summary.setVisible(False)
+    layout.addWidget(summary)
+
+    # What a member that is itself somebody's control draws as. There is no
+    # "raw" option: a raw control beside ratio bars puts two units on one axis.
+    render_combo = QComboBox(parent)
+    render_combo.setMinimumWidth(_RENDER_COMBO_MIN_W)
+    render_combo.setToolTip(
+        "What a sample that is itself another sample's control draws as. "
+        "'Normalize to itself' gives a flat 1.0 bar (0 for subtract) with a "
+        "propagated error bar; 'Hide from plot' leaves it out."
+    )
+    render_combo.addItem("Controls: normalize to self", "self")
+    render_combo.addItem("Controls: hide from plot", "hidden")
+    render_combo.setVisible(False)
+    layout.addWidget(render_combo)
 
     # Per-axis operator selector for the control axis.
     op_ctrl_combo = QComboBox(parent)
@@ -435,17 +640,37 @@ def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) ->
     layout.addWidget(order_combo)
 
     def _on_ctrl_changed(_idx: int) -> None:
-        text = ctrl_combo.currentText()
-        if text == _NONE_LABEL or not text:
+        # The reference, not the text. The text is chrome and may carry a
+        # display-only suffix; parsing it back is what made a replicate set
+        # named "A01 (well)" unselectable.
+        ref = ctrl_combo.currentData()
+        if ref is PER_SAMPLE:
             set_fold_change_state(
-                ctx, vs_control_on=False, control_label="",
+                ctx, vs_control_on=True, control_mode="per_member",
                 initiating_scope=scope,
+            )
+            _open_editor()
+        elif ref is None:
+            set_fold_change_state(
+                ctx, vs_control_on=False, clear_control=True,
+                control_mode="single", initiating_scope=scope,
             )
         else:
             set_fold_change_state(
-                ctx, vs_control_on=True, control_label=text,
+                ctx, vs_control_on=True, control=ref, control_mode="single",
                 initiating_scope=scope,
             )
+
+    def _open_editor() -> None:
+        from well_viewer.core.fold_change_pairing_view import open_pairing_editor
+        with swallowed():
+            open_pairing_editor(ctx, scope)
+
+    def _on_render_changed(_idx: int) -> None:
+        set_fold_change_state(
+            ctx, control_render=render_combo.currentData() or "self",
+            initiating_scope=scope,
+        )
 
     def _on_baseline_changed(_idx: int) -> None:
         text = baseline_combo.currentText()
@@ -482,6 +707,8 @@ def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) ->
         set_fold_change_state(ctx, order=order_v, initiating_scope=scope)
 
     ctrl_combo.currentIndexChanged.connect(_on_ctrl_changed)
+    render_combo.currentIndexChanged.connect(_on_render_changed)
+    summary.linkActivated.connect(lambda _href: _open_editor())
     baseline_combo.currentIndexChanged.connect(_on_baseline_changed)
     op_ctrl_combo.currentIndexChanged.connect(_on_op_ctrl_changed)
     op_t0_combo.currentIndexChanged.connect(_on_op_t0_changed)
@@ -507,3 +734,6 @@ def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) ->
     ctx.widgets.register(f"_fc_op_ctrl_combo_{scope}", op_ctrl_combo)
     ctx.widgets.register(f"_fc_op_t0_combo_{scope}", op_t0_combo)
     ctx.widgets.register(f"_fc_order_combo_{scope}", order_combo)
+    ctx.widgets.register(f"_fc_summary_label_{scope}", summary)
+    ctx.widgets.register(f"_fc_render_combo_{scope}", render_combo)
+    _refresh_per_sample_row(ctx, scope, summary, render_combo)

@@ -212,7 +212,9 @@ class BarBatchExportPanel(BatchExportPanel):
         use_sem = self._ctx.state.plot.use_sem
         band_lbl = "SEM" if use_sem else "SD"
         fmt = self._fmt_cb.currentText()
-        fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = self._fc_state()
+        _panel_fc = self._fc_state()
+        fc_vs_ctrl = _panel_fc.vs_control_on
+        fc_vs_t0 = _panel_fc.vs_t0_on
         fc_active = fc_vs_ctrl or fc_vs_t0
         # Layout options collected once here so each job sees a stable
         # snapshot of the panel state.
@@ -264,8 +266,10 @@ class BarBatchExportPanel(BatchExportPanel):
                     FC_STATE_OFF, collect_bar_items_for_group,
                 )
                 from well_viewer.features.export.service import (
-                    _well_labels_map, attach_bar_fold_change_columns,
+                    _control_cell, _well_labels_map,
+                    attach_bar_fold_change_columns,
                     bar_fold_change_fieldnames,
+                    _replicate_unit_for,
                     bar_metric_fieldnames, bar_metric_row,
                     well_name_for, well_names_joined,
                 )
@@ -276,7 +280,10 @@ class BarBatchExportPanel(BatchExportPanel):
                 _fluor_gates = _get_all_fluor_gates(self._ctx)
                 _per_fov_spread = bool(self._ctx.state.plot.use_fov_replicates)
 
-                panel_fc_state = (fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0)
+                # The panel's own request object, passed through rather than
+                # rebuilt as a tuple — rebuilding it drops any field the
+                # three legacy names do not cover.
+                panel_fc_state = _panel_fc
                 # ``collect_bar_items_for_group`` now aggregates pooled rep-set
                 # members with the tab's ``compute_rep_stats`` (which reads
                 # ``active_val_col``), so swap the column for the duration —
@@ -350,6 +357,8 @@ class BarBatchExportPanel(BatchExportPanel):
                         has=item.has_mean,
                         n_above=float(item.n_above),
                         n_above_spread=float(item.n_above_spread),
+                        n_above_total=item.n_above_total,
+                        replicate_unit=_replicate_unit_for(item, per_fov=_per_fov_spread),
                         ch=_ch, metric=_metric, tp_str=item_tp_str,
                         threshold=threshold, band_lbl=band_lbl,
                     ))
@@ -359,7 +368,8 @@ class BarBatchExportPanel(BatchExportPanel):
                             row, fc_mean=fc_match.mean, fc_spread=fc_match.spread,
                             fc_has=fc_match.has_mean, band_lbl=band_lbl,
                             vs_control=fc_vs_ctrl, vs_t0=fc_vs_t0,
-                            control_label=fc_ctrl_lbl,
+                            control_label=_control_cell(fc_match.fc_control),
+                            outcome=fc_match.fc_outcome,
                         )
                     rows_csv.append(row)
                 if rows_csv:
@@ -405,7 +415,7 @@ class BarBatchExportPanel(BatchExportPanel):
         self, grp: BarGroup, target_t, tp_str,
         threshold: float, use_sem: bool, band_lbl: str,
         *,
-        fc_state: tuple = (False, "", False),
+        fc_state=None,
         pool_replicates: bool = True,
         group_mode: str = "well",
         display_mode: str = "bar",
@@ -415,7 +425,10 @@ class BarBatchExportPanel(BatchExportPanel):
         from well_viewer.domain import fold_change as _fc
         from well_viewer.features.barplot.controller import collect_bar_items_for_group
 
-        fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
+        fc = _fc.coerce_fc_state(fc_state)
+        fc_vs_ctrl = fc.vs_control_on
+        fc_ctrl_lbl = fc.control
+        fc_vs_t0 = fc.vs_t0_on
         fc_active = fc_vs_ctrl or fc_vs_t0
         # Normalise the (target_t, tp_str) inputs into the multi-shape the
         # collector expects. Both legacy single-tp calls (float, str) and
@@ -452,8 +465,26 @@ class BarBatchExportPanel(BatchExportPanel):
         _metric_key = self._selected_export_metric_key("_bar_channel_cb")
         _metric_label = _MLB.get(_metric_key, "Mean Intensity")
         _thr_q = threshold_qualifier(_metric_key)
+        # The plain token, and the controls the *exported* figure used. Passing
+        # the reference itself printed its dataclass repr into the title; its
+        # sibling in ``base_panel`` was converted and this one was not.
+        _fc_controls = None
+        if fc_vs_ctrl and fc.per_member:
+            from well_viewer.domain.fold_change_pairing import (
+                build_per_member_controls,
+            )
+            _fc_controls = build_per_member_controls(
+                self._ctx,
+                [r.name for r in grp.members] + list(grp.solo_wells),
+                fc.control_map_dict,
+                member_wells=({r.name: list(r.wells) for r in grp.members}
+                              | {w: [w] for w in grp.solo_wells}),
+                render=fc.control_render,
+            )
         _fc_suffix = _fc.fold_change_suffix(
-            fc_vs_ctrl, fc_vs_t0, fc_ctrl_lbl,
+            fc_vs_ctrl, fc_vs_t0,
+            fc_ctrl_lbl.display_name if fc_ctrl_lbl is not None else "",
+            controls=_fc_controls,
         ) if fc_active else ""
         # The mean panel's title varies by display mode; the bar path
         # below preserves the legacy "\u00b1 SD/SEM" suffix, beeswarm /
@@ -474,14 +505,25 @@ class BarBatchExportPanel(BatchExportPanel):
             apply_ax_style(ax_mean,
                            f"{_ch} {_metric_label}{_thr_q} \u00b1 {band_lbl}{_fc_suffix}",
                            f"{_ch} {_metric_label}{_fc_suffix}")
-        apply_ax_style(ax_frac, fraction_title(_metric_key), "Fraction")
+        # All three panels are normalized in the grouped bar mode, so all three
+        # say so. The Fraction panel has been fold-changed on this path all
+        # along and carried no suffix — a normalized number under a title that
+        # names a raw one is the same defect as a raw number under a
+        # fold-change title, and the tab and the batch line figure already
+        # suffix all three. In the violin / beeswarm modes below the Events
+        # panel is drawn by ``draw_per_well_n_bars``, which is not fold-changed
+        # and rewrites this title without the suffix.
+        apply_ax_style(ax_frac, f"{fraction_title(_metric_key)}{_fc_suffix}",
+                       "Fraction" + _fc_suffix)
         if bool(self._ctx.state.plot.use_fov_replicates):
             apply_ax_style(
-                ax_n, events_per_fov_title(_metric_key, band_lbl), "N(above)/FOV",
+                ax_n, f"{events_per_fov_title(_metric_key, band_lbl)}{_fc_suffix}",
+                "N(above)/FOV" + _fc_suffix,
             )
         else:
             apply_ax_style(
-                ax_n, events_total_title(_metric_key), "N(above)",
+                ax_n, f"{events_total_title(_metric_key)}{_fc_suffix}",
+                "N(above)" + _fc_suffix,
             )
         ax_frac.set_ylim(-0.05, 1.05)
 
@@ -536,7 +578,7 @@ class BarBatchExportPanel(BatchExportPanel):
         self, *, fig, ax_mean, ax_frac, ax_n,
         grp: BarGroup, target_ts: list[float], tp_strs: list[str],
         threshold: float, use_sem: bool, band_lbl: str,
-        fc_state: tuple,
+        fc_state,
         pool_replicates: bool,
         group_mode: str,
         display_mode: str,

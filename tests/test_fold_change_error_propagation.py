@@ -23,6 +23,7 @@ from tests.fixtures.mini_dataset import WELLS
 from well_viewer.features.barplot.collect import FC_STATE_OFF, collect_bar_items
 from well_viewer.core.channel_state_controller import set_active_channel
 from well_viewer.core.fold_change_controls_view import set_fold_change_state
+from well_viewer.domain.control_ref import ControlRef
 
 pytestmark = pytest.mark.qt
 
@@ -50,7 +51,8 @@ def test_vs_control_propagates_the_control_spread_into_every_bar(loaded_app):
     assert sig_c > 0 and sig_t > 0
 
     # Control-normalised fold-change through the real app state.
-    set_fold_change_state(app._ctx, vs_control_on=True, control_label=_CONTROL)
+    set_fold_change_state(app._ctx, vs_control_on=True,
+                          control=ControlRef.for_well(_CONTROL))
     assert app._app_state.plot.fc_vs_control_on is True
     _, fc_items, _ = collect_bar_items(app._ctx, _TP)
     fc = _by_key(fc_items)

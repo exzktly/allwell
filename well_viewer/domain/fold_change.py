@@ -60,9 +60,14 @@ from typing import NamedTuple
 from collections.abc import Callable
 from well_viewer.domain.stats_compute import compute_rep_stats
 from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
-from well_viewer.domain.stats_compute import compute_rep_n_above
+from well_viewer.domain.stats_compute import compute_rep_n_above_stats
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.domain.stats_compute import aggregate_group
+from well_viewer.domain.fold_change_state import (  # noqa: F401 - re-exported
+    FC_STATE_OFF,
+    FoldChangeState,
+    coerce_fc_state,
+)
 
 
 CONTROL_NONE = ""
@@ -428,7 +433,7 @@ def normalize_pts(
     which AggPoint field the N panel actually plots: the per-FOV-mean count
     ([7]/[8]) when FOV-spread is on, else the total count ([4], no spread).
     The control denominator in *control_n_stats* must be computed for the
-    matching representation (see ``member_n_stats_series``).
+    matching representation (see :func:`member_n_series`).
 
     The vs-t0 baseline applies to the mean, fraction, and N fields alike, so
     every panel responds to "vs t0" consistently. When only ``use_t0`` is set
@@ -586,16 +591,23 @@ def normalize_pts(
 
 # ── State accessors / ctx integration ───────────────────────────────────────
 
-def fold_change_state(ctx) -> tuple[bool, str, bool]:
-    """Return the active ``(vs_control_on, control_label, vs_t0_on)`` triple.
+def fold_change_state(ctx) -> FoldChangeState:
+    """Return the active fold-change request.
 
     Used by both the on-screen plot tabs and the per-tab CSV exporter so the
-    plot and the export stay in sync.
+    plot and the export stay in sync. Read it by name — see
+    :mod:`well_viewer.domain.fold_change_state` for why it is not a tuple.
     """
-    return (
-        bool(ctx.state.plot.fc_vs_control_on),
-        str(ctx.state.plot.fc_control_label or ""),
-        bool(ctx.state.plot.fc_vs_t0_on),
+    plot = ctx.state.plot
+    return FoldChangeState(
+        vs_control_on=bool(plot.fc_vs_control_on),
+        control=plot.fc_control,
+        vs_t0_on=bool(plot.fc_vs_t0_on),
+        control_mode=str(plot.fc_control_mode or "single"),
+        # Sorted so two reads of unchanged state produce equal — and equally
+        # hashing — objects, whatever order the mapping happens to iterate in.
+        control_map=tuple(sorted((plot.fc_control_map or {}).items())),
+        control_render=str(plot.fc_control_render or "self"),
     )
 
 
@@ -743,13 +755,23 @@ def baseline_frac_from_points(
 
 
 def _pt_n_above(pt, per_fov_spread: bool = False) -> tuple[float, float]:
-    """Extract ``(n_above, n_above_spread)`` from an AggPoint."""
+    """Extract ``(n_above, n_above_spread)`` from an AggPoint.
+
+    Index 4 is **not** always an integer count. A point built by a collector for
+    a replicate set carries the per-well *mean* there, which is fractional, and
+    its cross-well spread at index 9. Rounding the one down and returning zero
+    for the other was harmless only while nothing but ``aggregate_well`` points
+    — 9-tuples holding a true count and no index 9 — reached this function. The
+    length check is what preserves that case: a well point has no index 9, so it
+    still reports no spread, without a flag saying which kind of point it is.
+    """
     if per_fov_spread:
         n = float(pt[7]) if len(pt) >= 8 else 0.0
         ns = float(pt[8]) if len(pt) >= 9 else 0.0
         return n, ns
-    n = float(int(pt[4])) if len(pt) >= 5 else 0.0
-    return n, 0.0
+    n = float(pt[4]) if len(pt) >= 5 else 0.0
+    ns = float(pt[9]) if len(pt) >= 10 and pt[9] is not None else 0.0
+    return n, (ns if math.isfinite(ns) else 0.0)
 
 
 def baseline_n_from_points_resolved(
@@ -830,11 +852,14 @@ def _member_series(
     *rset_stat* is called as ``rset_stat(rset, t)`` and *well_stat* as
     ``well_stat(pt)``; either returns ``None`` to omit that timepoint.
     """
-    label = (label or "").strip()
-    if not label:
-        return {}
-    rset = _label_to_replicate_set(ctx, label)
-    if rset is not None:
+    # Classification is shared with the well resolver (see
+    # ``resolve_control``). Deciding it here independently is what let a
+    # suffixed label resolve in one place and return nothing in this one.
+    kind, name = resolve_control(ctx, label)
+    if kind == "set":
+        rset = _label_to_replicate_set(ctx, label)
+        if rset is None:
+            return {}
         out: dict = {}
         for t in _rset_timepoints(ctx, rset, threshold=threshold, val_col=val_col,
                                   per_fov_spread=per_fov_spread, fluor_gates=fluor_gates):
@@ -842,9 +867,9 @@ def _member_series(
             if value is not None:
                 out[t] = value
         return out
-    if label in (ctx.state.dataset.well_paths or {}):
+    if kind == "well":
         pts = aggregate_well(ctx,
-            label, threshold=threshold, use_sem=use_sem,
+            name, threshold=threshold, use_sem=use_sem,
             val_col=val_col, fluor_gates=fluor_gates,
             per_fov_spread=per_fov_spread,
         )
@@ -890,7 +915,14 @@ def member_n_series(
             # conflation §7 of CLAUDE.md names.
             return (float(n_mean),
                     float(n_spread) if math.isfinite(n_spread) else 0.0)
-        return (float(compute_rep_n_above(ctx, rset, t)), 0.0)
+        # Mean of the per-well counts, with the cross-well spread — the same
+        # statistic both plotting tabs draw for a replicate set's Events panel.
+        # This used to be ``compute_rep_n_above``, a *total* across the set's
+        # wells, so a set normalised against itself came out at 1/n rather than
+        # 1.0: a per-well mean of 5 over a total of 10 reads 0.5.
+        n_mean, n_spread = compute_rep_n_above_stats(ctx, rset, t, use_sem)
+        return (float(n_mean),
+                float(n_spread) if math.isfinite(n_spread) else 0.0)
 
     return _member_series(ctx, label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
@@ -977,8 +1009,7 @@ def parse_baseline_tp(ctx) -> float | None:
 
 
 def is_active(ctx) -> bool:
-    vs_ctrl, _, vs_t0 = fold_change_state(ctx)
-    return vs_ctrl or vs_t0
+    return fold_change_state(ctx).active
 
 
 def _fc_op_word(op: str) -> str:
@@ -986,10 +1017,44 @@ def _fc_op_word(op: str) -> str:
     return "subtraction" if str(op) == "subtract" else "ratio"
 
 
+def control_axis_phrase(control_label: str = "", *, controls=None) -> str:
+    """What the control half of an axis title says: ``vs …``.
+
+    Three branches on how many distinct controls are actually in use, because
+    an axis label that names one denominator while the bars under it used four
+    is a figure that misstates itself:
+
+    * one — today's string, unchanged. That matters beyond nostalgia:
+      ``Set all to DMSO`` is mathematically identical to single-control mode,
+      so it has to read identically too;
+    * two — both named, since two fit;
+    * three or more — ``vs own control``, with the per-bar tick lines and the
+      ``fold_change_control`` CSV column carrying which is which.
+
+    *controls* is a ``PerMemberControls``; without one this is the single
+    control's own label and the count is one.
+    """
+    if controls is None:
+        # A single-control plot with nothing named is the same state, one mode
+        # over: the axis is on, every bar came back NaN, and "vs control"
+        # describes a normalization against a denominator that does not exist.
+        return f"vs {control_label}" if control_label else "vs control (none resolved)"
+    distinct = controls.distinct_controls()
+    if not distinct:
+        # The user asked for per-sample controls and nothing resolved. Saying
+        # "vs control" here would describe a normalization that did not happen.
+        return "vs own control (none resolved)"
+    if len(distinct) == 1:
+        return f"vs {distinct[0].display_name}"
+    if len(distinct) == 2:
+        return f"vs {distinct[0].display_name} / {distinct[1].display_name}"
+    return "vs own control"
+
+
 def fold_change_suffix(vs_control_on: bool, vs_t0_on: bool,
                        control_label: str = "",
                        op_ctrl: str = "ratio", op_t0: str = "ratio",
-                       baseline_label: str = "") -> str:
+                       baseline_label: str = "", *, controls=None) -> str:
     """Compact " (fold-change …)" label fragment for axis titles.
 
     Names the operator (ratio vs subtraction) for each active axis so the plot
@@ -997,11 +1062,15 @@ def fold_change_suffix(vs_control_on: bool, vs_t0_on: bool,
     axis — *which* timepoint is the baseline (``baseline_label``, e.g.
     ``"t=24h"``; falls back to ``"t0"``). Example:
     ``"  (fold change vs DMSO (ratio), vs t=0h (subtraction))"``.
+
+    The positional signature is unchanged — ``base_panel`` calls it
+    positionally — and *controls* is keyword-only. See
+    :func:`control_axis_phrase` for what it changes.
     """
     parts: list[str] = []
     if vs_control_on:
-        lbl = f"vs {control_label}" if control_label else "vs control"
-        parts.append(f"{lbl} ({_fc_op_word(op_ctrl)})")
+        parts.append(f"{control_axis_phrase(control_label, controls=controls)}"
+                     f" ({_fc_op_word(op_ctrl)})")
     if vs_t0_on:
         base = baseline_label or "t0"
         parts.append(f"vs {base} ({_fc_op_word(op_t0)})")
@@ -1010,19 +1079,39 @@ def fold_change_suffix(vs_control_on: bool, vs_t0_on: bool,
     return "  (fold change " + ", ".join(parts) + ")"
 
 
-def fold_change_suffix_for(ctx) -> str:
-    """``fold_change_suffix`` built from the live fold-change state
-    (per-axis ratio/subtract operators + the resolved baseline timepoint)."""
+def fold_change_suffix_for(ctx, scope: str = "") -> str:
+    """``fold_change_suffix`` built from the live fold-change state.
+
+    *scope* (``"bar"`` / ``"line"``) is what lets the control half count the
+    distinct controls actually in use — the member list differs per tab, so a
+    caller that does not say which tab it is labelling gets the single-control
+    reading. Every on-tab caller passes one.
+    """
     plot = ctx.state.plot
     base_tp = parse_baseline_tp(ctx)
     baseline_label = f"t={base_tp:g}h" if base_tp is not None else "first timepoint"
+    controls = None
+    if scope and bool(getattr(plot, "fc_vs_control_on", False)) \
+            and str(getattr(plot, "fc_control_mode", "single")) == "per_member":
+        from well_viewer.domain import plot_members as _members
+        from well_viewer.domain.fold_change_pairing import build_per_member_controls
+        controls = build_per_member_controls(
+            ctx, _members.plotted_member_keys(ctx, scope),
+            dict(getattr(plot, "fc_control_map", {}) or {}),
+            member_wells=_members.member_wells(ctx, scope),
+            member_rsets=_members.member_replicate_sets(ctx),
+            render=str(getattr(plot, "fc_control_render", "self") or "self"),
+        )
     return fold_change_suffix(
         bool(getattr(plot, "fc_vs_control_on", False)),
         bool(getattr(plot, "fc_vs_t0_on", False)),
-        str(getattr(plot, "fc_control_label", "") or ""),
+        # The plain token: the combo's disambiguation suffix is chrome and
+        # must never reach a figure title.
+        (plot.fc_control.display_name if plot.fc_control is not None else ""),
         op_ctrl=str(getattr(plot, "fc_op_ctrl", "ratio") or "ratio"),
         op_t0=str(getattr(plot, "fc_op_t0", "ratio") or "ratio"),
         baseline_label=baseline_label,
+        controls=controls,
     )
 
 
@@ -1044,22 +1133,18 @@ def resolve_control_wells(ctx, control_label: str) -> list[str]:
     (someone named a rep-set "A01"): the UI combo emits the suffixed
     form for the well entry, so picking it bypasses the rep-set
     precedence in (2). Unknown / empty selections return ``[]``.
+
+    The order above is what :func:`resolve_control` applies to a legacy
+    reference; this function is one of its callers rather than a second
+    implementation of it. A reference that states its own kind skips the
+    precedence entirely.
     """
-    label = str(control_label or "").strip()
-    if not label:
-        return []
-    if label.endswith(_WELL_DISAMBIG_SUFFIX):
-        bare = label[: -len(_WELL_DISAMBIG_SUFFIX)]
-        if bare in (ctx.state.dataset.well_paths or {}):
-            return [bare]
-        return []
-    for s in (ctx.state.selection.selections or []):
-        if s.get("name") == label:
-            wells = [w for w in (s.get("wells") or []) if w in ctx.state.dataset.well_paths]
-            if wells:
-                return wells
-    if label in (ctx.state.dataset.well_paths or {}):
-        return [label]
+    kind, name = resolve_control(ctx, control_label)
+    if kind == "set":
+        return [w for w in _selection_wells(ctx, name)
+                if w in (ctx.state.dataset.well_paths or {})]
+    if kind == "well":
+        return [name]
     return []
 
 
@@ -1082,25 +1167,173 @@ def control_pts_for_line(ctx, control_label: str, *, threshold: float,
     )
 
 
+def blank_point(pt, *, mean: bool = True, frac: bool = True,
+                n: bool = True) -> tuple:
+    """An AggPoint with the named plotted values replaced by NaN.
+
+    What a trace becomes when its control cannot be resolved. Dropping the
+    point entirely would leave a gap the renderer bridges with a straight line
+    between the neighbours, which reads as data; NaN reads as absent, which is
+    what it is. The timepoint, the cell counts and the CDF values are untouched
+    — they were measured and are still true.
+
+    The three flags let a caller blank one panel and keep the others, which is
+    the rule everywhere a control can supply a mean and not a fraction (see
+    ``fold_change_pairing.panel_nan_flags``). Blanking all three is the default
+    because that is the whole-member case.
+
+    The Events panel has **two** representations and both are blanked together:
+    index 4 is the count the panel plots with Aggregate-FOVs off, index 7 the
+    per-FOV mean it plots with the toggle on. Blanking only index 4 left the
+    per-FOV figure drawing a raw count on a fold-change axis — the very defect
+    this function exists to prevent, in the representation it did not check.
+    Index 10 (``n_above_total``) is deliberately left alone: it is the CSV's
+    integer cross-well count, a measurement that no normalization applies to.
+    """
+    out = list(pt) + [None] * max(0, 11 - len(pt))
+    if mean:
+        out[1] = float("nan")   # mean
+        out[2] = 0.0            # its spread
+    if frac:
+        out[3] = float("nan")   # fraction above threshold
+        out[6] = 0.0            # its spread
+    if n:
+        out[4] = float("nan")   # events above threshold (count)
+        out[9] = 0.0            # its replicate spread
+        out[7] = float("nan")   # events above threshold (per-FOV mean)
+        out[8] = 0.0            # its per-FOV spread
+    return tuple(out[:max(11, len(pt))])
+
+
+def resolve_control(ctx, ref) -> tuple[str, str]:
+    """Decide what a control reference points at: ``("set"|"well"|"", name)``.
+
+    **The single answer to "what does this control mean".** Every path that
+    turns a control into data goes through here — the well resolver, the
+    replicate-set view and the denominator series builder — because when they
+    each decided for themselves they disagreed, and silently: one resolved a
+    label the others returned nothing for, so the Bar tab NaNed every bar while
+    the Line tab drew raw values under a fold-change axis.
+
+    A :class:`~well_viewer.domain.control_ref.ControlRef` states its own kind,
+    so there is nothing to guess: a well reference resolves against the loaded
+    wells and can never be captured by a replicate set of the same name, hidden
+    or not. Only a *legacy* reference — one read from a document written before
+    the kind was recorded, or a bare string — falls through to
+    :func:`classify_control_label`, which applies the precedence that value was
+    saved under.
+    """
+    from well_viewer.domain.control_ref import KIND_SET, KIND_WELL, ControlRef
+
+    ref = ControlRef.coerce(ref)
+    if ref is None:
+        return "", ""
+    well_paths = ctx.state.dataset.well_paths or {}
+    if ref.kind == KIND_WELL:
+        return ("well", ref.name) if ref.name in well_paths else ("", "")
+    if ref.kind == KIND_SET:
+        for s in (ctx.state.selection.selections or []):
+            if s.get("name") == ref.name:
+                if any(w in well_paths for w in (s.get("wells") or [])):
+                    return "set", ref.name
+                break
+        return "", ""
+    return classify_control_label(ctx, ref.name)
+
+
+def concrete_control(ctx, ref):
+    """Return *ref* with its kind decided, or ``None`` if it names nothing.
+
+    A legacy reference carries a name whose meaning depends on what is loaded
+    right now, which is fine while it is only being read and wrong the moment
+    something wants to *rewrite* it — renaming a replicate set has to know
+    whether the control was that set or a well that happens to share its
+    token, and after the rename there is no longer any way to find out. So a
+    rename resolves first and rewrites second.
+
+    A reference that already states its kind is returned unchanged even when it
+    currently resolves to nothing: an unloaded well is still that well.
+    """
+    from well_viewer.domain.control_ref import KIND_LEGACY, ControlRef
+
+    ref = ControlRef.coerce(ref)
+    if ref is None or ref.kind != KIND_LEGACY:
+        return ref
+    kind, name = classify_control_label(ctx, ref.name)
+    return ControlRef(kind, name) if kind else None
+
+
+def classify_control_label(ctx, label: str) -> tuple[str, str]:
+    """Resolve a *legacy* control label: ``("set"|"well"|"", name)``.
+
+    **The single answer to "what does this label refer to".** Every path that
+    turns a control label into data goes through here — the well resolver, the
+    replicate-set view, and the denominator series builder — because when they
+    each decided for themselves they disagreed, and the disagreement was
+    silent: a ``" (well)"``-suffixed label resolved to the well in one and to
+    nothing in the others, so the Bar tab NaNed every bar while the Line tab
+    drew raw values under a fold-change axis.
+
+    Resolution order, unchanged from what the well resolver has always done:
+
+      1. A ``" (well)"`` suffix is an explicit "this is a well token". The
+         suffix is stripped and the bare token looked up. It exists for the
+         collision case — someone naming a replicate set ``A01`` while a well
+         ``A01`` is loaded — and it must be tried *first*, or the set wins and
+         the user has no way to address the well.
+      2. A replicate-set name, when that selection has at least one loaded well.
+      3. A bare well token.
+
+    An empty label, or one matching nothing, returns ``("", "")``.
+    """
+    label = str(label or "").strip()
+    if not label:
+        return "", ""
+    well_paths = ctx.state.dataset.well_paths or {}
+    if label.endswith(_WELL_DISAMBIG_SUFFIX):
+        bare = label[: -len(_WELL_DISAMBIG_SUFFIX)]
+        return ("well", bare) if bare in well_paths else ("", "")
+    for s in (ctx.state.selection.selections or []):
+        if s.get("name") == label:
+            if any(w in well_paths for w in (s.get("wells") or [])):
+                return "set", label
+            # A set whose wells are all unloaded does NOT claim the label —
+            # it falls through to the well lookup below, so a plate holding
+            # well ``A01`` and an empty set also called ``A01`` still resolves
+            # to the well. Returning "unresolved" here instead would have been
+            # a silent behaviour change.
+            break
+    if label in well_paths:
+        return "well", label
+    return "", ""
+
+
 def _label_to_replicate_set(ctx, label: str):
     """Resolve a control label to a ReplicateSet OR ``None``.
 
-    Returns the ReplicateSet view of a Sample-Definitions selection when
-    the label matches one (and the selection has ≥1 loaded well). Returns
-    ``None`` for unknown labels and bare well tokens — the caller should
-    fall back to per-well handling in the well-token case.
+    Returns the ReplicateSet view of a Sample-Definitions selection when the
+    label names one (and the selection has ≥1 loaded well). Returns ``None``
+    for unknown labels and well tokens — the caller falls back to per-well
+    handling in the well-token case. Classification is
+    :func:`resolve_control`; do not re-decide it here.
     """
-    if not label:
+    kind, name = resolve_control(ctx, label)
+    if kind != "set":
         return None
+    wells = [w for w in (_selection_wells(ctx, name) or [])
+             if w in (ctx.state.dataset.well_paths or {})]
+    if not wells:
+        return None
+    from well_viewer.domain.batch_models import ReplicateSet
+    return ReplicateSet(name, wells)
+
+
+def _selection_wells(ctx, name: str) -> list:
+    """The raw ``wells`` list of the selection called *name*, or ``[]``."""
     for s in (ctx.state.selection.selections or []):
-        if s.get("name") == label:
-            wells = [w for w in (s.get("wells") or [])
-                     if w in ctx.state.dataset.well_paths]
-            if not wells:
-                return None
-            from well_viewer.domain.batch_models import ReplicateSet
-            return ReplicateSet(label, wells)
-    return None
+        if s.get("name") == name:
+            return list(s.get("wells") or [])
+    return []
 
 
 def member_mean_series(
@@ -1220,12 +1453,13 @@ def apply_cell_scale(vals, spec: CellScaleSpec | None):
 
 
 def build_cell_scaling(
-    ctx, wells, *, fc_state: tuple[bool, str, bool],
+    ctx, wells, *, fc_state,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
     op_ctrl: str = "ratio", op_t0: str = "ratio",
     order: str = "ctrl_first", baseline_tp: float | None = None,
+    control_by_member=None,
 ) -> Callable[[str, float], CellScaleSpec]:
     """Build a ``scale_for(well, tp) -> CellScaleSpec`` resolver for per-cell
     violin/beeswarm fold-change overlays.
@@ -1238,13 +1472,24 @@ def build_cell_scaling(
     call, so a multi-timepoint selection scales each column at its own
     timepoint instead of collapsing to the first (audit S3).
 
-      * control_mean — single scalar across all wells at the requested tp,
-        from :func:`control_mean_at_for_bar` (the bar's stat), cached per tp.
-        ``None`` / ``missing`` when vs-control is requested but unresolved.
+      * control_mean — the control's value at the requested tp, from
+        :func:`control_mean_at_for_bar` (the bar's stat), memoised per
+        ``(control, tp)``. ``None`` / ``missing`` when vs-control is requested
+        but unresolved.
       * t0_mean — each well's own baseline from :func:`member_baseline_value`
         (honouring ``baseline_tp``), resolved once per well.
+
+    *control_by_member* maps a member key to its own control reference. Without
+    it every member shares ``fc_state.control``, which is what a single global
+    control means. **With** per-sample controls it is not optional: the bars
+    would normalize per member while the violin drawn on top of them
+    normalized against a different denominator, and the two would sit on one
+    axis looking like one measurement.
     """
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
+    _fc_req = coerce_fc_state(fc_state)
+    fc_vs_ctrl = _fc_req.vs_control_on
+    fc_ctrl_lbl = _fc_req.control
+    fc_vs_t0 = _fc_req.vs_t0_on
 
     # t0 baseline is per-well and tp-independent — resolve once up front.
     t0_by_well: dict[str, float | None] = {}
@@ -1256,24 +1501,34 @@ def build_cell_scaling(
                 per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
             )
 
-    control_cache: dict[float, float | None] = {}
+    control_cache: dict = {}
 
-    def _control_at(tp: float) -> float | None:
-        if not (fc_vs_ctrl and fc_ctrl_lbl):
+    def _control_ref(member: str):
+        if control_by_member is None:
+            return fc_ctrl_lbl
+        return control_by_member.get(member)
+
+    def _control_at(member: str, tp: float) -> float | None:
+        ref = _control_ref(member)
+        if not (fc_vs_ctrl and ref is not None):
             return None
-        if tp not in control_cache:
-            control_cache[tp] = control_mean_at_for_bar(
-                ctx, fc_ctrl_lbl, tp,
+        key = (ref, tp)
+        if key not in control_cache:
+            control_cache[key] = control_mean_at_for_bar(
+                ctx, ref, tp,
                 threshold=threshold, val_col=val_col, use_sem=use_sem,
                 per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
             )
-        return control_cache[tp]
+        return control_cache[key]
 
     def scale_for(well: str, tp: float) -> CellScaleSpec:
         missing = False
         cm: float | None = None
-        if fc_vs_ctrl and fc_ctrl_lbl:
-            cm = _control_at(float(tp))
+        if fc_vs_ctrl:
+            # An unmapped member has no denominator, so its overlay is blank —
+            # the same answer its bar gets. Falling through to "no control
+            # requested" would draw the raw distribution on a fold-change axis.
+            cm = _control_at(well, float(tp))
             if cm is None:
                 missing = True
             elif op_ctrl == "ratio" and (not math.isfinite(cm) or cm == 0):
@@ -1420,53 +1675,6 @@ def member_frac_stats_series(
 
     return _member_series(ctx, label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
-        per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
-        rset_stat=rset_stat, well_stat=well_stat,
-    )
-
-
-def member_n_stats_series(
-    ctx, label: str, *,
-    threshold: float, val_col: str,
-    per_fov_spread: bool,
-    fluor_gates,
-) -> dict[float, tuple[float, float]]:
-    """``{t: (n, spread)}`` for a member — N-events denominator for the N panel.
-
-    Returns the value in the SAME representation the N panel plots, selected by
-    *per_fov_spread*: the per-FOV-mean count (± per-FOV spread) when FOV-spread
-    is on, else the total events-above-threshold (spread 0, counts have none).
-    Used by line-plot FC to scale the N panel; the caller passes ``n_per_fov``
-    to :func:`normalize_pts` so the scaled field matches this denominator.
-
-    Unlike its siblings this takes no ``use_sem``: a count has no standard
-    error, so every call underneath it passes ``False``.
-    """
-    def rset_stat(rset, t):
-        if per_fov_spread:
-            res = compute_rep_per_fov_stats(ctx, rset, t, threshold, False)
-            n_mean, n_spread = res[4], res[5]
-            if not (isinstance(n_mean, (int, float)) and math.isfinite(n_mean)):
-                return None
-            return (float(n_mean), _finite_spread(n_spread))
-        n_above = compute_rep_n_above(ctx, rset, t)
-        if not (isinstance(n_above, int) and n_above >= 0):
-            return None
-        return (float(n_above), 0.0)
-
-    def well_stat(pt):
-        if per_fov_spread:
-            n = pt[7] if len(pt) > 7 else None
-            s = pt[8] if len(pt) > 8 else 0.0
-        else:
-            n = pt[4] if len(pt) > 4 else None
-            s = 0.0
-        if not (isinstance(n, (int, float)) and math.isfinite(n)):
-            return None
-        return (float(n), _finite_spread(s))
-
-    return _member_series(ctx, label,
-        threshold=threshold, val_col=val_col, use_sem=False,
         per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
         rset_stat=rset_stat, well_stat=well_stat,
     )

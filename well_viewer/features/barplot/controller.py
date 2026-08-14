@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from well_viewer.domain.selections_model import well_display_label, active_replicate_sets
 from well_viewer.domain.viewer_state import parse_rc
+from widgets import menu_exec
 
 import logging
 import math
 import re
 
 from well_viewer.domain.batch_models import ReplicateSet
+from well_viewer.domain.fold_change_pairing import (
+    tick_labels as _tick_labels,
+)
 from well_viewer.core import debug_flags as debug_flags
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 from well_viewer.core.ui_helpers import multiselect_button_text
@@ -161,7 +165,7 @@ def render_bar_items(
     # otherwise a redundant bold label renders atop the Mean panel, overlapping
     # the figure title.
     drop_redundant_cluster_keys(items)
-    xlabels = [item.display for item in items]
+    xlabels = _tick_labels(items)
     keys = [item.key for item in items]
     _bar_debug(
         f"render_bar_items use_groups={use_groups} n={n} keys={keys!r} xlabels={xlabels!r}"
@@ -662,7 +666,7 @@ def open_bar_timepoint_selector(ctx) -> None:
     menu.addAction(none_action)
 
     btn = ctx.runtime.barplot.tp_button
-    menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+    menu_exec.exec_menu(menu, btn.mapToGlobal(btn.rect().bottomLeft()))
 
 
 def refresh_bar_layout_btn_state(ctx) -> None:

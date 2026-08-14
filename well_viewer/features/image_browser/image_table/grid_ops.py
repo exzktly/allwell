@@ -10,6 +10,7 @@ and the grid re-renders.
 """
 
 from __future__ import annotations
+from widgets import menu_exec
 
 from well_viewer.features.image_browser.image_table.controller import (
     image_table_generate,
@@ -55,4 +56,4 @@ def image_table_cell_override_menu(ctx, r: int, c: int, global_pos) -> None:
             act.setCheckable(True)
             act.setChecked(val == cur)
             act.triggered.connect(lambda _c=False, k=cell_key, v=val: _set(k, v))
-    menu.exec(global_pos)
+    menu_exec.exec_menu(menu, global_pos)

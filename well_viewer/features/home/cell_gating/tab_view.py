@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.core.safe import swallowed
+from widgets import menu_exec
 from well_viewer.core.ui_helpers import (
     build_hline_separator,
     build_section_header,
@@ -531,4 +532,4 @@ def _open_gate_filter_menu(ctx, mode: str) -> None:
         none_a.triggered.connect(
             lambda _=False: _cell_gating_set_gate_choices(ctx, mode, set()))
         menu.addAction(none_a)
-    menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+    menu_exec.exec_menu(menu, btn.mapToGlobal(btn.rect().bottomLeft()))

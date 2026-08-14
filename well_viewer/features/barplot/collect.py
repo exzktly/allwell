@@ -22,12 +22,20 @@ from dataclasses import dataclass
 
 from well_viewer.domain.batch_models import BarGroup, ReplicateSet
 from well_viewer.domain import fold_change as _fc
+from well_viewer.domain.fold_change_series_cache import (
+    ControlSeriesCache as _ControlSeriesCache,
+)
+from well_viewer.domain.fold_change_pairing import (
+    control_denominators,
+    panel_nan_flags,
+)
+from well_viewer.domain import plot_members as _members
 from well_viewer.domain.time_rescale import format_scaled as _rescale_tp
 from well_viewer.domain.stats_compute import (
     aggregate_group,
     aggregate_well,
-    compute_rep_n_above,
     compute_rep_n_above_stats,
+    compute_rep_n_above_total,
     compute_rep_per_fov_stats,
     compute_rep_stats,
     replicate_unit,
@@ -58,11 +66,27 @@ class BarItem:
         threshold panel. Fold-changed independently of ``mean`` when
         fold-change is on (FC denominator is the control / baseline's
         frac — frac and mean are independent quantities).
-      * ``n_above`` / ``n_above_spread`` — events-above-threshold panel.
-        ``n_above_spread > 0`` indicates per-FOV spread mode; in that
-        case ``n_above`` is the per-FOV mean (float), otherwise it's
-        the total count (kept as float for storage uniformity, cast on
-        display).
+      * ``n_above`` / ``n_above_spread`` — events-above-threshold panel,
+        the value actually drawn. For a replicate set it is the mean of
+        the per-well counts with the cross-well spread; per-FOV mode
+        substitutes the per-FOV mean and spread. For a single well it is
+        that well's own count.
+      * ``n_above_total`` — the cross-well **total**, for the CSV's
+        ``n_above_threshold`` column, which has always been an integer
+        count. ``None`` for a row that is not a replicate aggregation,
+        never ``0`` — nothing computed is not the same as counted zero.
+      * ``fc_control`` — the control reference **this bar** was divided
+        by, or ``None``. Under a single global control every bar carries
+        the same one; under per-sample controls they differ, and the
+        x-tick's second line, the CSV's ``fold_change_control`` column
+        and the figure's annotations all read this rather than
+        re-deriving it.
+      * ``fc_outcome`` — a ``ControlOutcome`` value saying *why* this bar
+        is what it is, or ``""`` when the control axis is off. It is the
+        only thing separating "nobody assigned a control" from "the
+        control is gone" from "the control has no data at this
+        timepoint", all three of which otherwise produce the same empty
+        bar and the same empty CSV cell.
     """
     key: str
     display: str
@@ -75,6 +99,9 @@ class BarItem:
     has_frac: bool
     n_above: float
     n_above_spread: float
+    n_above_total: int | None = None
+    fc_control: object | None = None
+    fc_outcome: str = ""
     # Multi-timepoint plotting. ``tp`` is the timepoint this item was
     # computed at; ``group_key`` is the cluster identity the renderer uses
     # to lay out adjacent x positions (well/rset name in "Group by well"
@@ -110,12 +137,132 @@ def _fc_scale(value, err, *, eff_ctrl, eff_ctrl_spread, t0, t0_spread,
     )
 
 
-FC_STATE_OFF: tuple[bool, str, bool] = (False, "", False)
+def _scale_group_bar(mean_pair, frac_pair, n_pair, *, pts, ctrl, outcome,
+                     fc_vs_ctrl, fc_vs_t0, baseline_tp, per_fov_spread,
+                     fc_op_ctrl, fc_op_t0, fc_order, baseline_ctrl):
+    """Fold-change one batch-group bar's three panels.
+
+    The batch counterpart of what ``_items_for_tp`` does on the tab, kept out
+    of line because it is the only part of that loop with any decisions in it.
+    *ctrl* is the ``(mean, frac, n)`` denominator triple ``ControlDenominators``
+    returned for this member; each element is a ``(value, spread)`` pair or
+    ``None``.
+
+    Every baseline comes from the member's **own** points. By name it could
+    not: the bar path does not enter ``_app_group_scope``, so a group's
+    replicate set is not in the app's selections while this runs.
+
+    *fc_op_ctrl* / *fc_op_t0* / *fc_order* are the user's operator and stacking
+    choices, and *baseline_ctrl* is a ``tp -> (mean, frac, n)`` lookup of the
+    control at a baseline timepoint — the extra input :func:`_stack_axes`
+    needs. All four exist because without them this figure silently took the
+    ``ratio`` / ``ctrl_first`` defaults: a plate exported under **subtract**,
+    or with both axes on, carried numbers that did not match the tab it was
+    exported from, on every bar.
+
+    Returns ``(mean, spread, frac, frac_spread, n_above, n_above_spread)``.
+    """
+    ctrl_stats, ctrl_frac, ctrl_n = ctrl
+    eff_mean, eff_mean_s = ctrl_stats or (None, None)
+    eff_frac, eff_frac_s = ctrl_frac or (None, None)
+    eff_n, eff_n_s = ctrl_n or (None, None)
+    nan_mean, nan_frac, nan_n = panel_nan_flags(
+        fc_vs_ctrl, outcome, eff_mean, eff_frac, eff_n)
+
+    if nan_mean:
+        # The tab's collector NaNs a bar whose control did not resolve; this
+        # one used to hand ``scale_bar_value`` a None denominator, which
+        # returns the value untouched — a raw number on a fold-change axis, in
+        # an exported figure nobody is watching being drawn.
+        return (float("nan"), 0.0, float("nan"), 0.0, float("nan"), 0.0)
+    if not (fc_vs_ctrl or fc_vs_t0):
+        return (*mean_pair, *frac_pair, *n_pair)
+
+    t0_mean = t0_spread = t0_frac = t0_frac_spread = t0_n = t0_n_spread = None
+    if fc_vs_t0:
+        _stack_kw = dict(fc_order=fc_order, fc_op_ctrl=fc_op_ctrl,
+                         fc_op_t0=fc_op_t0)
+        rtp_m, t0_mean, t0_spread = _fc.baseline_from_points_resolved(
+            pts, baseline_tp=baseline_tp)
+        rtp_f, t0_frac, t0_frac_spread = _fc.baseline_frac_from_points_resolved(
+            pts, baseline_tp=baseline_tp)
+        rtp_n, t0_n, t0_n_spread = _fc.baseline_n_from_points_resolved(
+            pts, per_fov_spread=per_fov_spread, baseline_tp=baseline_tp)
+        # Cross-axis stacking, one lookup of the control per resolved baseline
+        # timepoint. Each panel resolves its own baseline tp, exactly as the
+        # tab's three ``_member_baseline`` calls do.
+        if fc_vs_ctrl:
+            eff_mean, eff_mean_s, t0_mean, t0_spread = _stack_axes(
+                baseline_ctrl(rtp_m)[0], eff=eff_mean, eff_spread=eff_mean_s,
+                t0=t0_mean, t0_spread=t0_spread, **_stack_kw)
+            eff_frac, eff_frac_s, t0_frac, t0_frac_spread = _stack_axes(
+                baseline_ctrl(rtp_f)[1], eff=eff_frac, eff_spread=eff_frac_s,
+                t0=t0_frac, t0_spread=t0_frac_spread, **_stack_kw)
+            eff_n, eff_n_s, t0_n, t0_n_spread = _stack_axes(
+                baseline_ctrl(rtp_n)[2], eff=eff_n, eff_spread=eff_n_s,
+                t0=t0_n, t0_spread=t0_n_spread, **_stack_kw)
+
+    _fc_kw = dict(fc_vs_ctrl=fc_vs_ctrl, fc_vs_t0=fc_vs_t0,
+                  fc_op_ctrl=fc_op_ctrl, fc_op_t0=fc_op_t0, fc_order=fc_order)
+    m, s = _fc_scale(*mean_pair, eff_ctrl=eff_mean, eff_ctrl_spread=eff_mean_s,
+                     t0=t0_mean, t0_spread=t0_spread, **_fc_kw)
+    f, fs = _fc_scale(*frac_pair, eff_ctrl=eff_frac, eff_ctrl_spread=eff_frac_s,
+                      t0=t0_frac, t0_spread=t0_frac_spread, **_fc_kw)
+    n, ns = _fc_scale(*n_pair, eff_ctrl=eff_n, eff_ctrl_spread=eff_n_s,
+                      t0=t0_n, t0_spread=t0_n_spread, **_fc_kw)
+    # Each panel drops on its own denominator, as on the tab.
+    if nan_frac:
+        f, fs = float("nan"), 0.0
+    if nan_n:
+        n, ns = float("nan"), 0.0
+    return (m, s, f, fs, n, ns)
+
+
+def _stack_axes(ctrl_at_baseline, *, eff, eff_spread, t0, t0_spread,
+                fc_order, fc_op_ctrl, fc_op_t0):
+    """Compose the two fold-change axes onto one another's denominator.
+
+    With both axes active one of them has to be applied to the other's
+    denominator, and which one is what ``fc_order`` selects: ``ctrl_first``
+    turns the baseline into a post-control baseline, ``t0_first`` turns the
+    control into a post-t0 control. *ctrl_at_baseline* is the control's
+    ``(mean, spread)`` at the **baseline** timepoint, which is the only extra
+    input either direction needs.
+
+    This shape appeared six times — mean, fraction and events, in each of the
+    grouped and per-well branches — with the three copies in one branch
+    carrying a ``None`` guard the others lacked. Returns
+    ``(eff, eff_spread, t0, t0_spread)`` with exactly one of the two pairs
+    changed.
+    """
+    if ctrl_at_baseline is None:
+        return eff, eff_spread, t0, t0_spread
+    ctrl_mean, ctrl_spread = ctrl_at_baseline
+    if fc_order == "t0_first":
+        if eff is None:
+            return eff, eff_spread, t0, t0_spread
+        eff, eff_spread = _fc._apply_axis(
+            eff, eff_spread or 0.0, ctrl_mean, ctrl_spread, fc_op_t0)
+        return eff, eff_spread, t0, t0_spread
+    if t0 is None:
+        return eff, eff_spread, t0, t0_spread
+    t0, t0_spread = _fc._apply_axis(
+        t0, t0_spread, ctrl_mean, ctrl_spread, fc_op_ctrl)
+    return eff, eff_spread, t0, t0_spread
+
+
+# Re-exported from the domain layer so the many callers that import it from
+# here (barplot.controller, export.service, batch_export.bar_panel) keep their
+# import path. A frozen ``FoldChangeState``, read by name only —
+# ``tests/test_fc_state_is_not_unpacked.py`` fails on any site that unpacks it,
+# because a call site that drops a newly added field by unpacking three values
+# draws raw numbers under a fold-change axis.
+FC_STATE_OFF = _fc.FC_STATE_OFF
 
 
 def collect_bar_items(
     ctx, target_t, *,
-    fc_state: tuple[bool, str, bool] | None = None,
+    fc_state=None,
     fc_baseline_tp: float | None = None,
     miss_sink: set | None = None,
 ) -> tuple[bool, list[BarItem], str]:
@@ -171,14 +318,58 @@ def collect_bar_items(
 
     if fc_state is None:
         fc_state = _fc.fold_change_state(ctx)
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
+    fc = _fc.coerce_fc_state(fc_state)
+    fc_vs_ctrl = fc.vs_control_on
+    fc_vs_t0 = fc.vs_t0_on
     if fc_baseline_tp is None:
         fc_baseline_tp = _fc.parse_baseline_tp(ctx)
     fc_op_ctrl = _fc.parse_fc_op_ctrl(ctx)
     fc_op_t0 = _fc.parse_fc_op_t0(ctx)
     fc_order = _fc.parse_fc_order(ctx)
+    _stack_kw = dict(fc_order=fc_order, fc_op_ctrl=fc_op_ctrl, fc_op_t0=fc_op_t0)
     fluor_gates = get_all_fluor_gates(ctx)
     per_fov_spread = ctx.state.plot.use_fov_replicates
+
+    # One memo for every control denominator this redraw asks for. The vs-t0
+    # stacking blocks below resolve a control inside the member loop, so
+    # without it a 24-member plate rebuilt the control's whole series 882
+    # times; with it, three times per distinct control.
+    ctrl_cache = _ControlSeriesCache(
+        ctx, threshold=threshold, val_col=ctx.state.channel.active_val_col,
+        use_sem=use_sem, per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
+    )
+
+    # A member's own baseline does not depend on the timepoint being drawn —
+    # ``member_first_tp_*_resolved`` takes no target tp — but it is asked for
+    # inside the per-tp loop, so a rep-set's whole series was rebuilt once per
+    # member per timepoint per axis. Memoised on the arguments that do vary.
+    _baseline_memo: dict = {}
+
+    def _member_baseline(fn, label: str, per_fov: bool):
+        """One ``member_first_tp_*_resolved`` call, memoised for this redraw."""
+        key = (fn.__name__, label, bool(per_fov))
+        if key not in _baseline_memo:
+            _baseline_memo[key] = fn(
+                ctx, label,
+                threshold=threshold, val_col=ctx.state.channel.active_val_col,
+                use_sem=use_sem, per_fov_spread=per_fov,
+                fluor_gates=fluor_gates, baseline_tp=fc_baseline_tp,
+            )
+        return _baseline_memo[key]
+
+    # Per-member pairing, resolved once for the whole redraw. The member keys
+    # come from ``domain/plot_members.py`` rather than being re-derived here,
+    # which is what keeps the editor's rows and this loop's normalization from
+    # describing two different plots; ``tests/test_plot_members.py`` pins the
+    # two key lists equal.
+    denoms = control_denominators(
+        ctx, ctrl_cache, fc,
+        _members.bar_member_keys(ctx) if fc.per_member else (),
+        scope_wells=_members.member_wells(ctx, "bar") if fc.per_member else None,
+        member_rsets=_members.member_replicate_sets(ctx) if fc.per_member else None,
+        miss_sink=miss_sink,
+    )
+    hidden_members = denoms.hidden_members
 
     ordered_keys = ctx.runtime.barplot.current_keys()
     rset_by_name = {r.name: r for r in active_rsets}
@@ -196,42 +387,6 @@ def collect_bar_items(
         Fold-change resolution runs once here per tp so the control / t0
         denominators are not re-aggregated for every bar.
         """
-        fc_control_mean_at_t = None
-        fc_control_spread_at_t = None
-        fc_control_frac_at_t = None
-        fc_control_frac_spread_at_t = None
-        fc_control_n_at_t = None
-        fc_control_n_spread_at_t = None
-        if fc_vs_ctrl and fc_ctrl_lbl:
-            ctrl_stats = _fc.control_stats_at_for_bar(
-                ctx, fc_ctrl_lbl, target_t,
-                threshold=threshold, val_col=ctx.state.channel.active_val_col,
-                use_sem=use_sem, per_fov_spread=per_fov_spread,
-                fluor_gates=fluor_gates,
-            )
-            if ctrl_stats is None:
-                if miss_sink is not None:
-                    miss_sink.add(float(target_t))
-            else:
-                fc_control_mean_at_t, fc_control_spread_at_t = ctrl_stats
-            ctrl_frac = _fc.control_frac_at_for_bar(
-                ctx, fc_ctrl_lbl, target_t,
-                threshold=threshold, val_col=ctx.state.channel.active_val_col,
-                use_sem=use_sem, per_fov_spread=per_fov_spread,
-                fluor_gates=fluor_gates,
-            )
-            if ctrl_frac is not None:
-                fc_control_frac_at_t, fc_control_frac_spread_at_t = ctrl_frac
-            ctrl_n = _fc.control_n_at_for_bar(
-                ctx, fc_ctrl_lbl, target_t,
-                threshold=threshold, val_col=ctx.state.channel.active_val_col,
-                use_sem=use_sem, per_fov_spread=per_fov_spread,
-                fluor_gates=fluor_gates,
-            )
-            if ctrl_n is not None:
-                fc_control_n_at_t, fc_control_n_spread_at_t = ctrl_n
-        fc_force_nan = fc_vs_ctrl and fc_ctrl_lbl and fc_control_mean_at_t is None
-
         out: list[BarItem] = []
         tp_str = _format_tp(target_t)
 
@@ -243,6 +398,10 @@ def collect_bar_items(
                 rset = rset_by_name.get(key)
                 if rset is None:
                     continue
+                if key in hidden_members:
+                    continue
+                (fc_ctrl_ref, fc_outcome, ctrl_stats_t, ctrl_frac_t,
+                 ctrl_n_t) = denoms.at(key, target_t)
                 color = color_for_replicate_set(rset, ctx.state.selection.selections)
                 rset_disp = replicate_display_label(ctx, rset)
                 # In multi-tp group-by-well mode the cluster header is the
@@ -272,110 +431,62 @@ def collect_bar_items(
                     # rather than a spread-less total.
                     n_above_val, n_above_err = compute_rep_n_above_stats(
                         ctx, rset, target_t, use_sem)
+                # The CSV's integer column keeps meaning the cross-well total,
+                # which is a different number from the mean drawn above.
+                n_above_total = compute_rep_n_above_total(ctx, rset, target_t)
                 t0_mean = None
                 t0_spread = None
                 t0_frac = None
                 t0_frac_spread = None
                 t0_n = None
                 t0_n_spread = None
-                # Per-rset effective control denominator. Outer-scope
-                # fc_control_mean_at_t / _spread_at_t are the raw ctrl@t —
-                # in t0_first mode we replace them locally with the post-t0
-                # control without leaking into the next rset.
-                eff_ctrl_mean = fc_control_mean_at_t
-                eff_ctrl_spread = fc_control_spread_at_t
-                eff_ctrl_frac = fc_control_frac_at_t
-                eff_ctrl_frac_spread = fc_control_frac_spread_at_t
-                eff_ctrl_n = fc_control_n_at_t
-                eff_ctrl_n_spread = fc_control_n_spread_at_t
-                if fc_vs_t0:
-                    stats = _fc.member_first_tp_stats_resolved(
-                        ctx, rset.name,
-                        threshold=threshold, val_col=ctx.state.channel.active_val_col,
-                        use_sem=use_sem, per_fov_spread=rset_per_fov,
-                        fluor_gates=fluor_gates,
-                        baseline_tp=fc_baseline_tp,
-                    )
+                # Per-rset effective control denominator. ``ctrl_*_t`` are this
+                # member's raw ctrl@t — in t0_first mode we replace them
+                # locally with the post-t0 control without leaking into the
+                # next rset.
+                eff_ctrl_mean, eff_ctrl_spread = ctrl_stats_t or (None, None)
+                eff_ctrl_frac, eff_ctrl_frac_spread = ctrl_frac_t or (None, None)
+                eff_ctrl_n, eff_ctrl_n_spread = ctrl_n_t or (None, None)
+                fc_force_nan, fc_nan_frac, fc_nan_n = panel_nan_flags(
+                    fc_vs_ctrl, fc_outcome,
+                    eff_ctrl_mean, eff_ctrl_frac, eff_ctrl_n)
+                # Guarded on the control having resolved, mirroring the
+                # per-well branch below. Without it the stacking runs first and
+                # divides a None control by the baseline.
+                if fc_vs_t0 and not fc_force_nan:
+                    stats = _member_baseline(
+                        _fc.member_first_tp_stats_resolved, rset.name, rset_per_fov)
                     if stats is not None:
                         resolved_tp, t0_mean, t0_spread = stats
                         # Cross-axis stacking when both axes are active.
                         # ctrl_first: t0 denom becomes post-control baseline.
                         # t0_first:   control denom becomes post-t0 control.
-                        if fc_vs_ctrl and fc_ctrl_lbl:
-                            ctrl_b = _fc.control_stats_at_for_bar(
-                                ctx, fc_ctrl_lbl, resolved_tp,
-                                threshold=threshold,
-                                val_col=ctx.state.channel.active_val_col,
-                                use_sem=use_sem, per_fov_spread=per_fov_spread,
-                                fluor_gates=fluor_gates,
-                            )
-                            if ctrl_b is not None:
-                                if fc_order == "t0_first":
-                                    eff_ctrl_mean, eff_ctrl_spread = _fc._apply_axis(
-                                        eff_ctrl_mean, eff_ctrl_spread or 0.0,
-                                        ctrl_b[0], ctrl_b[1], fc_op_t0,
-                                    )
-                                else:
-                                    t0_mean, t0_spread = _fc._apply_axis(
-                                        t0_mean, t0_spread,
-                                        ctrl_b[0], ctrl_b[1], fc_op_ctrl,
-                                    )
-                    fstats = _fc.member_first_tp_frac_resolved(
-                        ctx, rset.name,
-                        threshold=threshold, val_col=ctx.state.channel.active_val_col,
-                        use_sem=use_sem, per_fov_spread=per_fov_spread,
-                        fluor_gates=fluor_gates,
-                        baseline_tp=fc_baseline_tp,
-                    )
+                        if fc_vs_ctrl and fc_ctrl_ref is not None:
+                            (eff_ctrl_mean, eff_ctrl_spread,
+                             t0_mean, t0_spread) = _stack_axes(
+                                ctrl_cache.stats_at(fc_ctrl_ref, resolved_tp),
+                                eff=eff_ctrl_mean, eff_spread=eff_ctrl_spread,
+                                t0=t0_mean, t0_spread=t0_spread, **_stack_kw)
+                    fstats = _member_baseline(
+                        _fc.member_first_tp_frac_resolved, rset.name, per_fov_spread)
                     if fstats is not None:
                         resolved_tp_f, t0_frac, t0_frac_spread = fstats
-                        if fc_vs_ctrl and fc_ctrl_lbl:
-                            ctrl_bf = _fc.control_frac_at_for_bar(
-                                ctx, fc_ctrl_lbl, resolved_tp_f,
-                                threshold=threshold,
-                                val_col=ctx.state.channel.active_val_col,
-                                use_sem=use_sem, per_fov_spread=per_fov_spread,
-                                fluor_gates=fluor_gates,
-                            )
-                            if ctrl_bf is not None:
-                                if fc_order == "t0_first":
-                                    eff_ctrl_frac, eff_ctrl_frac_spread = _fc._apply_axis(
-                                        eff_ctrl_frac, eff_ctrl_frac_spread or 0.0,
-                                        ctrl_bf[0], ctrl_bf[1], fc_op_t0,
-                                    )
-                                else:
-                                    t0_frac, t0_frac_spread = _fc._apply_axis(
-                                        t0_frac, t0_frac_spread,
-                                        ctrl_bf[0], ctrl_bf[1], fc_op_ctrl,
-                                    )
-                    nstats = _fc.member_first_tp_n_resolved(
-                        ctx, rset.name,
-                        threshold=threshold, val_col=ctx.state.channel.active_val_col,
-                        use_sem=use_sem, per_fov_spread=per_fov_spread,
-                        fluor_gates=fluor_gates,
-                        baseline_tp=fc_baseline_tp,
-                    )
+                        if fc_vs_ctrl and fc_ctrl_ref is not None:
+                            (eff_ctrl_frac, eff_ctrl_frac_spread,
+                             t0_frac, t0_frac_spread) = _stack_axes(
+                                ctrl_cache.frac_at(fc_ctrl_ref, resolved_tp_f),
+                                eff=eff_ctrl_frac, eff_spread=eff_ctrl_frac_spread,
+                                t0=t0_frac, t0_spread=t0_frac_spread, **_stack_kw)
+                    nstats = _member_baseline(
+                        _fc.member_first_tp_n_resolved, rset.name, per_fov_spread)
                     if nstats is not None:
                         resolved_tp_n, t0_n, t0_n_spread = nstats
-                        if fc_vs_ctrl and fc_ctrl_lbl:
-                            ctrl_bn = _fc.control_n_at_for_bar(
-                                ctx, fc_ctrl_lbl, resolved_tp_n,
-                                threshold=threshold,
-                                val_col=ctx.state.channel.active_val_col,
-                                use_sem=use_sem, per_fov_spread=per_fov_spread,
-                                fluor_gates=fluor_gates,
-                            )
-                            if ctrl_bn is not None:
-                                if fc_order == "t0_first":
-                                    eff_ctrl_n, eff_ctrl_n_spread = _fc._apply_axis(
-                                        eff_ctrl_n, eff_ctrl_n_spread or 0.0,
-                                        ctrl_bn[0], ctrl_bn[1], fc_op_t0,
-                                    )
-                                else:
-                                    t0_n, t0_n_spread = _fc._apply_axis(
-                                        t0_n, t0_n_spread,
-                                        ctrl_bn[0], ctrl_bn[1], fc_op_ctrl,
-                                    )
+                        if fc_vs_ctrl and fc_ctrl_ref is not None:
+                            (eff_ctrl_n, eff_ctrl_n_spread,
+                             t0_n, t0_n_spread) = _stack_axes(
+                                ctrl_cache.n_at(fc_ctrl_ref, resolved_tp_n),
+                                eff=eff_ctrl_n, eff_spread=eff_ctrl_n_spread,
+                                t0=t0_n, t0_spread=t0_n_spread, **_stack_kw)
                 if fc_force_nan:
                     gm = float("nan")
                     g_err_m = 0.0
@@ -399,6 +510,10 @@ def collect_bar_items(
                         n_above_val, n_above_err, eff_ctrl=eff_ctrl_n,
                         eff_ctrl_spread=eff_ctrl_n_spread, t0=t0_n,
                         t0_spread=t0_n_spread, **_fc_kw)
+                    if fc_nan_frac:
+                        gf, g_err_f = float("nan"), 0.0
+                    if fc_nan_n:
+                        n_above_val, n_above_err = float("nan"), 0.0
                 has_mean = not math.isnan(gm)
                 has_frac = has_mean and not math.isnan(gf)
                 gk = rset_disp if group_mode == "well" else tp_str
@@ -407,6 +522,8 @@ def collect_bar_items(
                     mean=gm, spread=g_err_m, has_mean=has_mean,
                     frac=gf, frac_spread=g_err_f, has_frac=has_frac,
                     n_above=n_above_val, n_above_spread=n_above_err,
+                    n_above_total=n_above_total,
+                    fc_control=fc_ctrl_ref, fc_outcome=str(fc_outcome or ""),
                     tp=float(target_t), group_key=gk,
                 ))
             return out
@@ -456,6 +573,16 @@ def collect_bar_items(
                 label_iter.append((label, color, display, gk))
 
         for label, color, display, gk in label_iter:
+            if label in hidden_members:
+                continue
+            (fc_ctrl_ref, fc_outcome, ctrl_stats_t, ctrl_frac_t,
+             ctrl_n_t) = denoms.at(label, target_t)
+            eff_ctrl_mean_t, eff_ctrl_spread_t = ctrl_stats_t or (None, None)
+            eff_ctrl_frac_t, eff_ctrl_frac_spread_t = ctrl_frac_t or (None, None)
+            eff_ctrl_n_t, eff_ctrl_n_spread_t = ctrl_n_t or (None, None)
+            fc_force_nan, fc_nan_frac, fc_nan_n = panel_nan_flags(
+                fc_vs_ctrl, fc_outcome,
+                eff_ctrl_mean_t, eff_ctrl_frac_t, eff_ctrl_n_t)
             pts = aggregate_well(ctx,
                 label, threshold=threshold, use_sem=use_sem,
                 val_col=ctx.state.channel.active_val_col,
@@ -466,7 +593,17 @@ def collect_bar_items(
             if matched:
                 pt = matched[0]
                 m, s, f = pt[1], pt[2], pt[3]
-                n_above_total = int(pt[4])
+                # ``n_above_total`` stays ``None`` on this branch: it means "the
+                # cross-well total behind a replicate aggregation", and one well
+                # is not an aggregation of anything. Setting it here filled the
+                # CSV's replicate columns for a solo well — a unit of ``well``
+                # beside a spread of ``0.000000``, which reads as "the
+                # replicates agreed" for a row that had no replicates — and made
+                # the integer total win over the per-FOV mean in
+                # ``n_above_threshold``. The count itself is still what this
+                # bar draws with Aggregate-FOVs off.
+                n_above_total = None
+                own_count = float(pt[4])
                 fs = float(pt[6]) if len(pt) >= 7 else 0.0
                 n_above_pf_mean = float(pt[7]) if len(pt) >= 8 else 0.0
                 n_above_pf_spread = float(pt[8]) if len(pt) >= 9 else 0.0
@@ -474,7 +611,7 @@ def collect_bar_items(
                     n_above_val = n_above_pf_mean
                     n_above_err = n_above_pf_spread
                 else:
-                    n_above_val = float(n_above_total)
+                    n_above_val = own_count
                     n_above_err = 0.0
                 if fc_force_nan:
                     m = float("nan")
@@ -490,12 +627,12 @@ def collect_bar_items(
                     t0_frac_spread = None
                     t0_n = None
                     t0_n_spread = None
-                    eff_ctrl_mean = fc_control_mean_at_t
-                    eff_ctrl_spread = fc_control_spread_at_t
-                    eff_ctrl_frac = fc_control_frac_at_t
-                    eff_ctrl_frac_spread = fc_control_frac_spread_at_t
-                    eff_ctrl_n = fc_control_n_at_t
-                    eff_ctrl_n_spread = fc_control_n_spread_at_t
+                    eff_ctrl_mean = eff_ctrl_mean_t
+                    eff_ctrl_spread = eff_ctrl_spread_t
+                    eff_ctrl_frac = eff_ctrl_frac_t
+                    eff_ctrl_frac_spread = eff_ctrl_frac_spread_t
+                    eff_ctrl_n = eff_ctrl_n_t
+                    eff_ctrl_n_spread = eff_ctrl_n_spread_t
                     if fc_vs_t0:
                         resolved_tp, t0_mean, t0_spread = _fc.baseline_from_points_resolved(
                             pts, baseline_tp=fc_baseline_tp,
@@ -507,63 +644,24 @@ def collect_bar_items(
                             pts, per_fov_spread=per_fov_spread, baseline_tp=fc_baseline_tp,
                         )
                         # Cross-axis stacking: ctrl_first → adjust t0 denom; t0_first → adjust control denom.
-                        if fc_vs_ctrl and fc_ctrl_lbl and resolved_tp is not None and t0_mean is not None:
-                            ctrl_b = _fc.control_stats_at_for_bar(
-                                ctx, fc_ctrl_lbl, resolved_tp,
-                                threshold=threshold,
-                                val_col=ctx.state.channel.active_val_col,
-                                use_sem=use_sem, per_fov_spread=per_fov_spread,
-                                fluor_gates=fluor_gates,
-                            )
-                            if ctrl_b is not None:
-                                if fc_order == "t0_first":
-                                    eff_ctrl_mean, eff_ctrl_spread = _fc._apply_axis(
-                                        eff_ctrl_mean, eff_ctrl_spread or 0.0,
-                                        ctrl_b[0], ctrl_b[1], fc_op_t0,
-                                    )
-                                else:
-                                    t0_mean, t0_spread = _fc._apply_axis(
-                                        t0_mean, t0_spread,
-                                        ctrl_b[0], ctrl_b[1], fc_op_ctrl,
-                                    )
-                        if fc_vs_ctrl and fc_ctrl_lbl and resolved_tp_f is not None and t0_frac is not None:
-                            ctrl_bf = _fc.control_frac_at_for_bar(
-                                ctx, fc_ctrl_lbl, resolved_tp_f,
-                                threshold=threshold,
-                                val_col=ctx.state.channel.active_val_col,
-                                use_sem=use_sem, per_fov_spread=per_fov_spread,
-                                fluor_gates=fluor_gates,
-                            )
-                            if ctrl_bf is not None:
-                                if fc_order == "t0_first":
-                                    eff_ctrl_frac, eff_ctrl_frac_spread = _fc._apply_axis(
-                                        eff_ctrl_frac, eff_ctrl_frac_spread or 0.0,
-                                        ctrl_bf[0], ctrl_bf[1], fc_op_t0,
-                                    )
-                                else:
-                                    t0_frac, t0_frac_spread = _fc._apply_axis(
-                                        t0_frac, t0_frac_spread,
-                                        ctrl_bf[0], ctrl_bf[1], fc_op_ctrl,
-                                    )
-                        if fc_vs_ctrl and fc_ctrl_lbl and resolved_tp_n is not None and t0_n is not None:
-                            ctrl_bn = _fc.control_n_at_for_bar(
-                                ctx, fc_ctrl_lbl, resolved_tp_n,
-                                threshold=threshold,
-                                val_col=ctx.state.channel.active_val_col,
-                                use_sem=use_sem, per_fov_spread=per_fov_spread,
-                                fluor_gates=fluor_gates,
-                            )
-                            if ctrl_bn is not None:
-                                if fc_order == "t0_first":
-                                    eff_ctrl_n, eff_ctrl_n_spread = _fc._apply_axis(
-                                        eff_ctrl_n, eff_ctrl_n_spread or 0.0,
-                                        ctrl_bn[0], ctrl_bn[1], fc_op_t0,
-                                    )
-                                else:
-                                    t0_n, t0_n_spread = _fc._apply_axis(
-                                        t0_n, t0_n_spread,
-                                        ctrl_bn[0], ctrl_bn[1], fc_op_ctrl,
-                                    )
+                        if fc_vs_ctrl and fc_ctrl_ref is not None and resolved_tp is not None and t0_mean is not None:
+                            (eff_ctrl_mean, eff_ctrl_spread,
+                             t0_mean, t0_spread) = _stack_axes(
+                                ctrl_cache.stats_at(fc_ctrl_ref, resolved_tp),
+                                eff=eff_ctrl_mean, eff_spread=eff_ctrl_spread,
+                                t0=t0_mean, t0_spread=t0_spread, **_stack_kw)
+                        if fc_vs_ctrl and fc_ctrl_ref is not None and resolved_tp_f is not None and t0_frac is not None:
+                            (eff_ctrl_frac, eff_ctrl_frac_spread,
+                             t0_frac, t0_frac_spread) = _stack_axes(
+                                ctrl_cache.frac_at(fc_ctrl_ref, resolved_tp_f),
+                                eff=eff_ctrl_frac, eff_spread=eff_ctrl_frac_spread,
+                                t0=t0_frac, t0_spread=t0_frac_spread, **_stack_kw)
+                        if fc_vs_ctrl and fc_ctrl_ref is not None and resolved_tp_n is not None and t0_n is not None:
+                            (eff_ctrl_n, eff_ctrl_n_spread,
+                             t0_n, t0_n_spread) = _stack_axes(
+                                ctrl_cache.n_at(fc_ctrl_ref, resolved_tp_n),
+                                eff=eff_ctrl_n, eff_spread=eff_ctrl_n_spread,
+                                t0=t0_n, t0_spread=t0_n_spread, **_stack_kw)
                     _fc_kw = dict(fc_vs_ctrl=fc_vs_ctrl, fc_vs_t0=fc_vs_t0,
                                   fc_op_ctrl=fc_op_ctrl, fc_op_t0=fc_op_t0,
                                   fc_order=fc_order)
@@ -579,6 +677,10 @@ def collect_bar_items(
                         n_above_val, n_above_err, eff_ctrl=eff_ctrl_n,
                         eff_ctrl_spread=eff_ctrl_n_spread, t0=t0_n,
                         t0_spread=t0_n_spread, **_fc_kw)
+                    if fc_nan_frac:
+                        f, fs = float("nan"), 0.0
+                    if fc_nan_n:
+                        n_above_val, n_above_err = float("nan"), 0.0
                 has_mean = not math.isnan(m)
                 has_frac = not math.isnan(f)
                 out.append(BarItem(
@@ -586,6 +688,8 @@ def collect_bar_items(
                     mean=m, spread=s, has_mean=has_mean,
                     frac=f, frac_spread=fs, has_frac=has_frac,
                     n_above=n_above_val, n_above_spread=n_above_err,
+                    n_above_total=n_above_total,
+                    fc_control=fc_ctrl_ref, fc_outcome=str(fc_outcome or ""),
                     tp=float(target_t), group_key=gk,
                 ))
             else:
@@ -594,6 +698,7 @@ def collect_bar_items(
                     mean=float("nan"), spread=0.0, has_mean=False,
                     frac=float("nan"), frac_spread=0.0, has_frac=False,
                     n_above=0.0, n_above_spread=0.0,
+                    fc_control=fc_ctrl_ref, fc_outcome=str(fc_outcome or ""),
                     tp=float(target_t), group_key=gk,
                 ))
         return out
@@ -626,7 +731,7 @@ def collect_bar_items_for_group(
     threshold: float,
     use_sem: bool,
     per_fov_spread: bool,
-    fc_state: tuple[bool, str, bool],
+    fc_state,
     fc_baseline_tp: float | None = None,
     fluor_gates: dict | None = None,
     pool_replicates: bool = True,
@@ -657,7 +762,15 @@ def collect_bar_items_for_group(
     if not target_ts:
         return []
 
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
+    fc = _fc.coerce_fc_state(fc_state)
+    fc_vs_ctrl = fc.vs_control_on
+    fc_vs_t0 = fc.vs_t0_on
+    # Read from the same place the tab reads them. Taking the defaults here
+    # instead is what made this figure disagree with its on-tab twin under
+    # ``subtract`` and whenever both axes were on.
+    fc_op_ctrl = _fc.parse_fc_op_ctrl(ctx)
+    fc_op_t0 = _fc.parse_fc_op_t0(ctx)
+    fc_order = _fc.parse_fc_order(ctx)
 
     # Build (key, display, wells, rset_name_or_None, color) member list.
     from well_viewer.domain.plate_layout import WELL_COLORS as _WELL_COLORS
@@ -713,15 +826,23 @@ def collect_bar_items_for_group(
                     all_tps.add(t)
             out_pts: list = []
             for t in sorted(all_tps):
+                # Index 4 is the value the Events panel draws; index 9 is its
+                # replicate spread and index 10 the cross-well total the CSV's
+                # integer column keeps. The spread used to be dropped on the
+                # floor here and the total conflated with index 4, so the batch
+                # bar truncated a 7.5 mean to 7 and drew no error bar.
+                ntotal = compute_rep_n_above_total(ctx, rset, t)
                 if rset_per_fov:
                     gm, gerr, gf, gfe, gnpf_m, gnpf_s = compute_rep_per_fov_stats(
                         ctx, rset, t, threshold, use_sem)
-                    nval = 0
+                    nval, nspread = 0, 0.0
                 else:
                     gm, gerr, gf, _ = compute_rep_stats(ctx, rset, t, threshold, use_sem)
-                    nval = compute_rep_n_above(ctx, rset, t)
+                    # Per-well mean, matching the Bar tab's own numerator.
+                    nval, nspread = compute_rep_n_above_stats(ctx, rset, t, use_sem)
                     gfe, gnpf_m, gnpf_s = 0.0, 0.0, 0.0
-                out_pts.append((t, gm, gerr, gf, nval, 0, gfe, gnpf_m, gnpf_s))
+                out_pts.append(
+                    (t, gm, gerr, gf, nval, 0, gfe, gnpf_m, gnpf_s, nspread, ntotal))
             return out_pts
         return aggregate_group(ctx,
             wells, threshold=threshold, use_sem=use_sem,
@@ -733,13 +854,23 @@ def collect_bar_items_for_group(
         key: _member_pts(wells, rset_name)
         for (key, _bd, wells, rset_name, _c) in members
     }
-    # Control frac series (rep-set stat) — resolved once, indexed per tp below.
-    _ctrl_frac_series: dict = {}
-    if fc_vs_ctrl and fc_ctrl_lbl:
-        _ctrl_frac_series = _fc.member_frac_stats_series(
-            ctx, fc_ctrl_lbl, threshold=threshold, val_col=val_col,
-            use_sem=use_sem, per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
-        )
+    # Control denominators, memoised for this call. The frac series was already
+    # hoisted here by hand; the cache does the same for the mean side and will
+    # hold every distinct control once per-sample mapping lands.
+    ctrl_cache = _ControlSeriesCache(
+        ctx, threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
+    )
+    # The batch panel carries its own mapping, so the same per-member resolver
+    # serves it — the member keys here are the group's own, not the tab's.
+    denoms = control_denominators(
+        ctx, ctrl_cache, fc, [key for (key, _d, _w, _r, _c) in members],
+        scope_wells={key: wells for (key, _d, wells, _r, _c) in members},
+        member_rsets={w: rset_name
+                      for (_k, _d, wells, rset_name, _c) in members
+                      if rset_name for w in wells},
+    )
+    hidden_members = denoms.hidden_members
 
     def _format_tp(t: float) -> str:
         # Label only. ``BarItem.key`` keeps the unscaled ``t{t:.4g}`` form,
@@ -748,85 +879,62 @@ def collect_bar_items_for_group(
         # should move when the user changes how the axis is *printed*.
         return _rescale_tp(t, ctx.state.plot.time_scale)
 
-    def _lookup_at(series: dict, target_t: float):
-        if target_t in series:
-            return series[target_t]
-        for ct, val in series.items():
-            if abs(ct - target_t) < 1e-6:
-                return val
-        return None
-
     def _items_for_tp(target_t: float) -> list[BarItem]:
-        # Resolve control denominator once per tp — the rep-set statistic
-        # (``control_stats_at_for_bar``), matching the members' numerator.
-        fc_control_mean_at_t = None
-        fc_control_spread_at_t = None
-        fc_control_frac_at_t = None
-        fc_control_frac_spread_at_t = None
-        if fc_vs_ctrl and fc_ctrl_lbl:
-            ctrl_stats = _fc.control_stats_at_for_bar(
-                ctx, fc_ctrl_lbl, target_t,
-                threshold=threshold, val_col=val_col,
-                use_sem=use_sem, per_fov_spread=per_fov_spread,
-                fluor_gates=fluor_gates,
-            )
-            if ctrl_stats is not None:
-                fc_control_mean_at_t, fc_control_spread_at_t = ctrl_stats
-            _cfrac = _lookup_at(_ctrl_frac_series, target_t)
-            if _cfrac is not None:
-                fc_control_frac_at_t, fc_control_frac_spread_at_t = _cfrac
-
         out: list[BarItem] = []
         tp_str = _format_tp(target_t)
         multi_tp = len(target_ts) > 1
         for (key, base_display, wells, rset_name, color) in members:
+            if key in hidden_members:
+                continue
+            (fc_ctrl_ref, fc_outcome, ctrl_stats_t, ctrl_frac_t,
+             ctrl_n_t) = denoms.at(key, target_t)
+            fc_control_mean_at_t, fc_control_spread_at_t = ctrl_stats_t or (None, None)
+            fc_control_frac_at_t, fc_control_frac_spread_at_t = ctrl_frac_t or (None, None)
             pts = member_pts_by_key[key]
             matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
             if matched:
                 pt = matched[0]
                 m, s, f = pt[1], pt[2], pt[3]
-                n_above_total = int(pt[4]) if len(pt) >= 5 else 0
+                # A replicate set's point carries the drawn mean at index 4 and
+                # the cross-well total at index 10. A solo well has no index 10
+                # and no total to report — it is not an aggregation of
+                # anything — so it stays ``None`` and its CSV replicate columns
+                # stay empty, the way the tab's per-well branch does it.
+                n_above_total = (int(pt[10]) if len(pt) >= 11
+                                 and pt[10] is not None else None)
                 frac_spread = float(pt[6]) if len(pt) >= 7 else 0.0
                 n_above_pf_mean = float(pt[7]) if len(pt) >= 8 else 0.0
                 n_above_pf_spread = float(pt[8]) if len(pt) >= 9 else 0.0
+                n_above_rep_spread = float(pt[9]) if len(pt) >= 10 else 0.0
                 if per_fov_spread:
                     n_above_val = n_above_pf_mean
                     n_above_err = n_above_pf_spread
                 else:
-                    n_above_val = float(n_above_total)
-                    n_above_err = 0.0
-                if fc_vs_ctrl or fc_vs_t0:
-                    t0_mean = None
-                    t0_spread = None
-                    t0_frac = None
-                    t0_frac_spread = None
-                    if fc_vs_t0:
-                        t0_mean, t0_spread = _fc.baseline_from_points(
-                            pts, baseline_tp=fc_baseline_tp,
-                        )
-                        t0_frac, t0_frac_spread = _fc.baseline_frac_from_points(
-                            pts, baseline_tp=fc_baseline_tp,
-                        )
-                    m, s = _fc.scale_bar_value(
-                        m, s,
-                        control_mean=fc_control_mean_at_t if fc_vs_ctrl else None,
-                        control_spread=fc_control_spread_at_t if fc_vs_ctrl else None,
-                        t0_mean=t0_mean if fc_vs_t0 else None,
-                        t0_spread=t0_spread if fc_vs_t0 else None,
-                    )
-                    f, frac_spread = _fc.scale_bar_value(
-                        f, frac_spread,
-                        control_mean=fc_control_frac_at_t if fc_vs_ctrl else None,
-                        control_spread=fc_control_frac_spread_at_t if fc_vs_ctrl else None,
-                        t0_mean=t0_frac if fc_vs_t0 else None,
-                        t0_spread=t0_frac_spread if fc_vs_t0 else None,
-                    )
+                    n_above_val = float(pt[4]) if len(pt) >= 5 else 0.0
+                    n_above_err = n_above_rep_spread
+                (m, s, f, frac_spread, n_above_val, n_above_err) = _scale_group_bar(
+                    (m, s), (f, frac_spread), (n_above_val, n_above_err),
+                    pts=pts, ctrl=(ctrl_stats_t, ctrl_frac_t, ctrl_n_t),
+                    outcome=fc_outcome, fc_vs_ctrl=fc_vs_ctrl,
+                    fc_vs_t0=fc_vs_t0, baseline_tp=fc_baseline_tp,
+                    per_fov_spread=per_fov_spread,
+                    fc_op_ctrl=fc_op_ctrl, fc_op_t0=fc_op_t0, fc_order=fc_order,
+                    baseline_ctrl=lambda tp, _k=key: denoms.baseline_at(_k, tp))
                 has_mean = not math.isnan(m)
                 has_frac = has_mean and not math.isnan(f)
             else:
+                # Nothing measured here. ``n_above_total`` is bound in this
+                # branch too: it was set only inside the ``if matched:`` arm, so
+                # a member with no point at this timepoint either inherited the
+                # previous member's count into its own CSV cell — a fabricated
+                # integer on a row whose mean is NaN — or, when it came first,
+                # raised ``UnboundLocalError`` and killed the whole group.
+                # ``None`` rather than ``0``: nothing computed is not a count
+                # of zero, and the CSV writer already renders it as empty.
                 m = float("nan"); s = 0.0
                 f = float("nan"); frac_spread = 0.0
-                n_above_val = 0.0; n_above_err = 0.0
+                n_above_val = float("nan"); n_above_err = 0.0
+                n_above_total = None
                 has_mean = False; has_frac = False
             # Labels stay single-line: cluster headers show the primary
             # identity; per-bar labels show the secondary.
@@ -844,6 +952,8 @@ def collect_bar_items_for_group(
                 mean=m, spread=s, has_mean=has_mean,
                 frac=f, frac_spread=frac_spread, has_frac=has_frac,
                 n_above=n_above_val, n_above_spread=n_above_err,
+                n_above_total=n_above_total,
+                fc_control=fc_ctrl_ref, fc_outcome=str(fc_outcome or ""),
                 tp=float(target_t), group_key=gk,
             ))
         return out

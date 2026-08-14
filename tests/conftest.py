@@ -96,10 +96,25 @@ class MockApp:
                          use_sem: bool, val_col: str, fluor_gates,
                          per_fov_spread: bool = False,
                          tp_col: str = "timepoint_hours") -> list[tuple]:
-        # Pool-of-cells approximation: average means across wells per tp.
-        # The mock doesn't keep per-cell granularity, so this collapses to
-        # "mean of per-well means" — that's fine for fold_change tests
-        # since they don't compare the two stats numerically.
+        # One well is the well, exactly as ``stats_compute.aggregate_group``
+        # does it. This is not a convenience: rebuilding the point discarded
+        # the per-well ``n_above`` / ``frac`` / per-FOV fields a test had set
+        # and handed back ``make_agg`` defaults, so a solo well's numerator
+        # came from the mock while its fold-change denominator — which reads
+        # ``aggregate_well`` — came from the fixture. The two disagreed, and
+        # that invented disagreement is why the batch bar Events panel was
+        # left un-normalized. A fixture that diverges from production
+        # manufactures bugs as readily as one that is too clean hides them.
+        valid = [w for w in wells if w in self.per_well_pts]
+        if len(valid) == 1:
+            return self._aggregate_well(
+                valid[0], threshold=threshold, use_sem=use_sem,
+                val_col=val_col, fluor_gates=fluor_gates,
+                per_fov_spread=per_fov_spread, tp_col=tp_col)
+        # Pool-of-cells approximation for the multi-well case: average means
+        # across wells per tp. The mock keeps no per-cell granularity, so this
+        # collapses to "mean of per-well means" and the other AggPoint fields
+        # carry ``make_agg`` defaults — do not assert on them.
         by_t: dict[float, list[float]] = {}
         for w in wells:
             for pt in self.per_well_pts.get(w, []):
@@ -136,9 +151,6 @@ class MockApp:
             rset, target_t, threshold, use_sem,
         )
         return (gm, gerr, gf, ferr, 5.0, 0.0)
-
-    def _compute_rep_n_above(self, rset, target_t: float) -> int:
-        return 10
 
     def _get_thresh_frac_on(self, channel: str) -> float:
         return 50.0
@@ -195,7 +207,13 @@ class MockApp:
         # set it by mutating the returned AppState.
         st.plot.time_scale = getattr(self, "_time_scale", 1.0)
         st.plot.fc_vs_control_on = self.fc_vs_control_on
-        st.plot.fc_control_label = self.fc_control_label
+        # MockApp keeps a plain string as its input knob, mapped here to a
+        # legacy reference — resolved by the precedence a pre-ControlRef
+        # document was saved under, which is exactly what these fixtures
+        # have always meant. Tests that care about the well-vs-set
+        # distinction set ``st.plot.fc_control`` to a concrete ref.
+        from well_viewer.domain.control_ref import ControlRef
+        st.plot.fc_control = ControlRef.legacy(self.fc_control_label)
         st.plot.fc_vs_t0_on = self.fc_vs_t0_on
         st.plot.fc_baseline_tp = self.fc_baseline_tp
         # ``fc_op`` is the legacy single-op back-compat alias; setting it
@@ -322,6 +340,14 @@ _MODAL_CALLS = (
     ("PySide6.QtWidgets", "QColorDialog", ("getColor",)),
     ("PySide6.QtWidgets", "QFontDialog", ("getFont",)),
     ("PySide6.QtWidgets", "QDialog", ("exec", "exec_")),
+    # A context menu blocks in Qt's C++ event loop exactly as a dialog does,
+    # and offscreen it never gets the click that would close it. ``QMenu.exec``
+    # itself cannot be patched — Shiboken exposes it as a static/instance
+    # overload, so assigning to the class attribute writes something instance
+    # lookup ignores, and the entry would sit here doing nothing. Every call
+    # site goes through ``widgets/menu_exec.py`` instead, which is ordinary
+    # Python; ``tests/test_menu_exec_seam.py`` fails on any raw call.
+    ("widgets.menu_exec", None, ("exec_menu",)),
 )
 
 
@@ -336,14 +362,17 @@ def _no_modal_dialogs(monkeypatch):
 
     for mod_name, cls_name, methods in _MODAL_CALLS:
         try:
-            cls = getattr(importlib.import_module(mod_name), cls_name)
+            mod = importlib.import_module(mod_name)
+            # ``cls_name is None`` means the entry names module-level functions
+            # rather than a class's methods — the menu seam is one.
+            cls = mod if cls_name is None else getattr(mod, cls_name)
         except (ImportError, AttributeError):  # pragma: no cover - Qt build skew
             continue
         for method in methods:
             if not hasattr(cls, method):
                 continue
 
-            def _blocked(*_a, _c=cls_name, _m=method, **_kw):
+            def _blocked(*_a, _c=cls_name or mod_name, _m=method, **_kw):
                 raise ModalDialogInTest(
                     f"{_c}.{_m}() opened a modal dialog. Under the offscreen QPA "
                     "it would block forever and pytest's signal timeout cannot "

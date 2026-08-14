@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 import theme
 
 from well_viewer.core.safe import swallow
+from widgets import menu_exec
 from well_viewer.core.ui_helpers import parse_float_edit
 from widgets.stepper import Stepper
 from widgets.lut_cmaps import resolve_channel_tint
@@ -1585,4 +1586,4 @@ def _open_root_filter(ctx, dim: str, anchor: QWidget) -> None:
         return
     menu = _root_filter_menu(ctx, dim, anchor)
     if menu is not None:
-        menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
+        menu_exec.exec_menu(menu, anchor.mapToGlobal(anchor.rect().bottomLeft()))

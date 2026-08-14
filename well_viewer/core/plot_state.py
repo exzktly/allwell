@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from well_viewer.domain.control_ref import KIND_SET, ControlRef
+
 
 def _default_legend() -> dict[str, bool]:
     return {"mean": True, "frac": True, "cdf": True, "n": True}
@@ -25,9 +27,10 @@ def _default_legend() -> dict[str, bool]:
 class PlotState:
     """Cross-tab plot options + fold-change normalization state.
 
-    ``fc_state`` is the ``(vs_control, control_label, vs_t0)`` tuple the
-    collection pipeline (``collect_bar_items`` / ``collect_line_series``)
-    consumes — :meth:`set_fold_change` is the single place that triple is
+    The fold-change fields are read by the collection pipeline
+    (``collect_bar_items`` / ``collect_line_series``) through
+    ``domain.fold_change.fold_change_state``, which packages them into a
+    ``FoldChangeState``. :meth:`set_fold_change` is the single place they are
     mutated.
     """
 
@@ -86,7 +89,30 @@ class PlotState:
     focus_timepoint: float | None = None
 
     fc_vs_control_on: bool = False
-    fc_control_label: str = ""
+    #: What the control axis divides by — a ``ControlRef``, or None.
+    #: Not a string: a string cannot say whether ``A01`` means the well
+    #: or a replicate set someone named ``A01``.
+    fc_control: object | None = None
+    #: Whether the control axis divides everything by one reference
+    #: (``"single"``) or each member by its own (``"per_member"``). A mode
+    #: field rather than an absence: emptying ``fc_control`` to mean
+    #: "per member" would make every untaught caller draw **raw** values under
+    #: a fold-change axis label, because the bar collector's force-NaN guard
+    #: ANDs with the control and ``_apply_axis`` returns its input unchanged
+    #: when the denominator is None.
+    fc_control_mode: str = "single"
+    #: ``member key -> ControlRef`` for ``per_member`` mode. The keys are the
+    #: plot's own bar/trace keys — replicate-set names when sets are pooled,
+    #: well tokens otherwise — which is what ``domain/plot_members.py``
+    #: enumerates. Entries for members that are not currently plotted are kept,
+    #: not dropped: a user who hides a group and shows it again gets their
+    #: pairing back rather than a silently emptied table.
+    fc_control_map: dict = field(default_factory=dict)
+    #: What a member that is itself somebody's control draws as — ``"self"``
+    #: (normalized against itself, so a flat 1.0 or 0.0) or ``"hidden"``.
+    #: There is no "raw" option: a raw control beside ratio bars puts two
+    #: units on one axis.
+    fc_control_render: str = "self"
     fc_vs_t0_on: bool = False
     # User-chosen baseline timepoint (the dataset's tp string, e.g. ``"24"``).
     # Empty when the user wants the **earliest** finite-mean point per member
@@ -128,17 +154,15 @@ class PlotState:
         self.fc_op_t0 = v
 
     @property
-    def fc_state(self) -> tuple[bool, str, bool]:
-        """The fold-change tuple consumed by the bar / line collection pipeline."""
-        return (self.fc_vs_control_on, self.fc_control_label, self.fc_vs_t0_on)
-
-    @property
     def fold_change_active(self) -> bool:
         """True when either fold-change mode is on."""
         return self.fc_vs_control_on or self.fc_vs_t0_on
 
     def set_fold_change(self, *, vs_control_on: bool | None = None,
-                        control_label: str | None = None,
+                        control=None, clear_control: bool = False,
+                        control_mode: str | None = None,
+                        control_map: dict | None = None,
+                        control_render: str | None = None,
                         vs_t0_on: bool | None = None,
                         baseline_tp: str | None = None,
                         op: str | None = None,
@@ -146,17 +170,33 @@ class PlotState:
                         op_t0: str | None = None,
                         order: str | None = None) -> None:
         """Apply a fold-change state change. A ``None`` argument leaves that
-        field unchanged. ``control_label`` is stored verbatim — the UI layer
-        strips its display-only disambiguation suffix before calling.
+        field unchanged — except ``control``, where "unchanged" and "clear it"
+        cannot both be ``None``, so clearing is the explicit ``clear_control``
+        flag. A bare string is accepted and read as a legacy reference.
         ``baseline_tp`` is the dataset's timepoint string the user picked as
         the per-member baseline; empty means "use the earliest finite point"
         (the original behaviour). ``op_ctrl`` / ``op_t0`` are the per-axis
         operators (``"ratio"`` / ``"subtract"``). ``op`` is the legacy
-        single-op kwarg — sets both axes for back-compat."""
+        single-op kwarg — sets both axes for back-compat. ``control_map``
+        replaces the mapping wholesale and is **copied**, because the editor
+        holds a working copy it mutates as the user types; sharing the dict
+        would apply half-finished edits to the plot."""
         if vs_control_on is not None:
             self.fc_vs_control_on = bool(vs_control_on)
-        if control_label is not None:
-            self.fc_control_label = control_label
+        if control is not None:
+            self.fc_control = ControlRef.coerce(control)
+        elif clear_control:
+            self.fc_control = None
+        if control_mode is not None and str(control_mode) in ("single", "per_member"):
+            self.fc_control_mode = str(control_mode)
+        if control_map is not None:
+            self.fc_control_map = {
+                str(k): ControlRef.coerce(v)
+                for k, v in dict(control_map).items()
+                if ControlRef.coerce(v) is not None
+            }
+        if control_render is not None and str(control_render) in ("self", "hidden"):
+            self.fc_control_render = str(control_render)
         if vs_t0_on is not None:
             self.fc_vs_t0_on = bool(vs_t0_on)
         if baseline_tp is not None:
@@ -169,6 +209,75 @@ class PlotState:
             self.fc_op_t0 = str(op_t0)
         if order is not None and str(order) in ("ctrl_first", "t0_first"):
             self.fc_order = str(order)
+
+    def rename_member(self, old: str, new: str) -> bool:
+        """Follow a replicate-set rename through the fold-change state.
+
+        Three things name a group, and rewriting fewer than all three is worse
+        than rewriting none: the map's **keys** (which member a pairing is
+        for), the map's **values** (which member is the control), and
+        ``fc_control`` (the single global control). Rewrite only the keys and
+        the map holds one entry pointing at a control that no longer exists
+        while the group sits on the plate under its new name; leave
+        ``fc_control`` alone and renaming the group used as the single control
+        silently unresolves the whole plot.
+
+        Only references that name a *replicate set* move. A well token is not
+        renameable, and a legacy reference is ambiguous by construction — the
+        caller resolves those to a concrete kind first (see
+        ``core/selection_controller.sel_rename``), so anything still legacy
+        here named nothing that could be resolved and is left as it is rather
+        than guessed at.
+
+        The map's *keys* are plain member keys, so they cannot say whether they
+        mean the set or a well of the same token. Within one plot they never
+        both appear — pooled mode keys on set names, unpooled on well tokens —
+        but a retained entry from the other mode can collide with *new*. The
+        **renamed** entry wins that collision: it belongs to the group the user
+        just acted on, while the entry already sitting on *new* is a leftover
+        from the other pooling mode. Keeping the leftover instead would discard
+        a live pairing to preserve a dormant one, and the user would have no
+        way to tell it had happened.
+
+        Returns True when something changed, so a caller can decide whether a
+        redraw is owed.
+        """
+        old, new = str(old), str(new)
+        if not old or not new or old == new:
+            return False
+
+        def _moved(ref):
+            if ref is None or getattr(ref, "kind", "") != KIND_SET:
+                return None
+            if ref.name != old:
+                return None
+            return ControlRef.for_replicate_set(new)
+
+        changed = False
+        moved_single = _moved(self.fc_control)
+        if moved_single is not None:
+            self.fc_control = moved_single
+            changed = True
+
+        remapped: dict = {}
+        renamed: list = []          # 0 or 1 entries — the one keyed on *old*
+        for key, ref in (self.fc_control_map or {}).items():
+            moved_value = _moved(ref)
+            if moved_value is not None:
+                ref = moved_value
+                changed = True
+            if key == old:
+                renamed.append(ref)
+                changed = True
+                continue
+            remapped[key] = ref
+        if renamed:
+            # Written last so it overwrites any entry already keyed on *new*
+            # rather than being overwritten by one. See the collision note above.
+            remapped[new] = renamed[0]
+        if changed:
+            self.fc_control_map = remapped
+        return changed
 
     # ── toggles ──────────────────────────────────────────────────────────────
 

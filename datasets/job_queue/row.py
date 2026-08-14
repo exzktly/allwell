@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 
 import theme
 from widgets.icon_button import IconButton
+from widgets import menu_exec
 from widgets.icons import make_icon
 from widgets.status_dot import StatusDot
 from services.job_kinds import KIND_LABEL, describe, describe_detail
@@ -303,7 +304,8 @@ class JobRow(QWidget):
 
     def _open_menu(self) -> None:
         menu = self.build_menu()
-        menu.exec(self._menu_btn.mapToGlobal(self._menu_btn.rect().bottomLeft()))
+        menu_exec.exec_menu(
+            menu, self._menu_btn.mapToGlobal(self._menu_btn.rect().bottomLeft()))
 
     # ── drag-handle reorder ──────────────────────────────────────────────
     def _handle_press(self, event) -> None:

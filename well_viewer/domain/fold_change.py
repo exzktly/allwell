@@ -849,11 +849,14 @@ def _member_series(
     *rset_stat* is called as ``rset_stat(rset, t)`` and *well_stat* as
     ``well_stat(pt)``; either returns ``None`` to omit that timepoint.
     """
-    label = (label or "").strip()
-    if not label:
-        return {}
-    rset = _label_to_replicate_set(ctx, label)
-    if rset is not None:
+    # Classification is shared with the well resolver (see
+    # ``classify_control_label``). Deciding it here independently is what let a
+    # suffixed label resolve in one place and return nothing in this one.
+    kind, name = classify_control_label(ctx, label)
+    if kind == "set":
+        rset = _label_to_replicate_set(ctx, label)
+        if rset is None:
+            return {}
         out: dict = {}
         for t in _rset_timepoints(ctx, rset, threshold=threshold, val_col=val_col,
                                   per_fov_spread=per_fov_spread, fluor_gates=fluor_gates):
@@ -861,9 +864,9 @@ def _member_series(
             if value is not None:
                 out[t] = value
         return out
-    if label in (ctx.state.dataset.well_paths or {}):
+    if kind == "well":
         pts = aggregate_well(ctx,
-            label, threshold=threshold, use_sem=use_sem,
+            name, threshold=threshold, use_sem=use_sem,
             val_col=val_col, fluor_gates=fluor_gates,
             per_fov_spread=per_fov_spread,
         )
@@ -1070,22 +1073,16 @@ def resolve_control_wells(ctx, control_label: str) -> list[str]:
     (someone named a rep-set "A01"): the UI combo emits the suffixed
     form for the well entry, so picking it bypasses the rep-set
     precedence in (2). Unknown / empty selections return ``[]``.
+
+    The order above is :func:`classify_control_label`'s, and this function is
+    one of its three callers rather than a second implementation of it.
     """
-    label = str(control_label or "").strip()
-    if not label:
-        return []
-    if label.endswith(_WELL_DISAMBIG_SUFFIX):
-        bare = label[: -len(_WELL_DISAMBIG_SUFFIX)]
-        if bare in (ctx.state.dataset.well_paths or {}):
-            return [bare]
-        return []
-    for s in (ctx.state.selection.selections or []):
-        if s.get("name") == label:
-            wells = [w for w in (s.get("wells") or []) if w in ctx.state.dataset.well_paths]
-            if wells:
-                return wells
-    if label in (ctx.state.dataset.well_paths or {}):
-        return [label]
+    kind, name = classify_control_label(ctx, control_label)
+    if kind == "set":
+        return [w for w in _selection_wells(ctx, name)
+                if w in (ctx.state.dataset.well_paths or {})]
+    if kind == "well":
+        return [name]
     return []
 
 
@@ -1108,25 +1105,77 @@ def control_pts_for_line(ctx, control_label: str, *, threshold: float,
     )
 
 
+def classify_control_label(ctx, label: str) -> tuple[str, str]:
+    """Decide what a control label names: ``("set"|"well"|"", name)``.
+
+    **The single answer to "what does this label refer to".** Every path that
+    turns a control label into data goes through here — the well resolver, the
+    replicate-set view, and the denominator series builder — because when they
+    each decided for themselves they disagreed, and the disagreement was
+    silent: a ``" (well)"``-suffixed label resolved to the well in one and to
+    nothing in the others, so the Bar tab NaNed every bar while the Line tab
+    drew raw values under a fold-change axis.
+
+    Resolution order, unchanged from what the well resolver has always done:
+
+      1. A ``" (well)"`` suffix is an explicit "this is a well token". The
+         suffix is stripped and the bare token looked up. It exists for the
+         collision case — someone naming a replicate set ``A01`` while a well
+         ``A01`` is loaded — and it must be tried *first*, or the set wins and
+         the user has no way to address the well.
+      2. A replicate-set name, when that selection has at least one loaded well.
+      3. A bare well token.
+
+    An empty label, or one matching nothing, returns ``("", "")``.
+    """
+    label = str(label or "").strip()
+    if not label:
+        return "", ""
+    well_paths = ctx.state.dataset.well_paths or {}
+    if label.endswith(_WELL_DISAMBIG_SUFFIX):
+        bare = label[: -len(_WELL_DISAMBIG_SUFFIX)]
+        return ("well", bare) if bare in well_paths else ("", "")
+    for s in (ctx.state.selection.selections or []):
+        if s.get("name") == label:
+            if any(w in well_paths for w in (s.get("wells") or [])):
+                return "set", label
+            # A set whose wells are all unloaded does NOT claim the label —
+            # it falls through to the well lookup below, so a plate holding
+            # well ``A01`` and an empty set also called ``A01`` still resolves
+            # to the well. Returning "unresolved" here instead would have been
+            # a silent behaviour change.
+            break
+    if label in well_paths:
+        return "well", label
+    return "", ""
+
+
 def _label_to_replicate_set(ctx, label: str):
     """Resolve a control label to a ReplicateSet OR ``None``.
 
-    Returns the ReplicateSet view of a Sample-Definitions selection when
-    the label matches one (and the selection has ≥1 loaded well). Returns
-    ``None`` for unknown labels and bare well tokens — the caller should
-    fall back to per-well handling in the well-token case.
+    Returns the ReplicateSet view of a Sample-Definitions selection when the
+    label names one (and the selection has ≥1 loaded well). Returns ``None``
+    for unknown labels and well tokens — the caller falls back to per-well
+    handling in the well-token case. Classification is
+    :func:`classify_control_label`; do not re-decide it here.
     """
-    if not label:
+    kind, name = classify_control_label(ctx, label)
+    if kind != "set":
         return None
+    wells = [w for w in (_selection_wells(ctx, name) or [])
+             if w in (ctx.state.dataset.well_paths or {})]
+    if not wells:
+        return None
+    from well_viewer.domain.batch_models import ReplicateSet
+    return ReplicateSet(name, wells)
+
+
+def _selection_wells(ctx, name: str) -> list:
+    """The raw ``wells`` list of the selection called *name*, or ``[]``."""
     for s in (ctx.state.selection.selections or []):
-        if s.get("name") == label:
-            wells = [w for w in (s.get("wells") or [])
-                     if w in ctx.state.dataset.well_paths]
-            if not wells:
-                return None
-            from well_viewer.domain.batch_models import ReplicateSet
-            return ReplicateSet(label, wells)
-    return None
+        if s.get("name") == name:
+            return list(s.get("wells") or [])
+    return []
 
 
 def member_mean_series(

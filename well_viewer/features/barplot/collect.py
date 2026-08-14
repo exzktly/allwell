@@ -22,6 +22,9 @@ from dataclasses import dataclass
 
 from well_viewer.domain.batch_models import BarGroup, ReplicateSet
 from well_viewer.domain import fold_change as _fc
+from well_viewer.domain.fold_change_series_cache import (
+    ControlSeriesCache as _ControlSeriesCache,
+)
 from well_viewer.domain.time_rescale import format_scaled as _rescale_tp
 from well_viewer.domain.stats_compute import (
     aggregate_group,
@@ -185,6 +188,33 @@ def collect_bar_items(
     fluor_gates = get_all_fluor_gates(ctx)
     per_fov_spread = ctx.state.plot.use_fov_replicates
 
+    # One memo for every control denominator this redraw asks for. The vs-t0
+    # stacking blocks below resolve a control inside the member loop, so
+    # without it a 24-member plate rebuilt the control's whole series 882
+    # times; with it, three times per distinct control.
+    ctrl_cache = _ControlSeriesCache(
+        ctx, threshold=threshold, val_col=ctx.state.channel.active_val_col,
+        use_sem=use_sem, per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
+    )
+
+    # A member's own baseline does not depend on the timepoint being drawn —
+    # ``member_first_tp_*_resolved`` takes no target tp — but it is asked for
+    # inside the per-tp loop, so a rep-set's whole series was rebuilt once per
+    # member per timepoint per axis. Memoised on the arguments that do vary.
+    _baseline_memo: dict = {}
+
+    def _member_baseline(fn, label: str, per_fov: bool):
+        """One ``member_first_tp_*_resolved`` call, memoised for this redraw."""
+        key = (fn.__name__, label, bool(per_fov))
+        if key not in _baseline_memo:
+            _baseline_memo[key] = fn(
+                ctx, label,
+                threshold=threshold, val_col=ctx.state.channel.active_val_col,
+                use_sem=use_sem, per_fov_spread=per_fov,
+                fluor_gates=fluor_gates, baseline_tp=fc_baseline_tp,
+            )
+        return _baseline_memo[key]
+
     ordered_keys = ctx.runtime.barplot.current_keys()
     rset_by_name = {r.name: r for r in active_rsets}
 
@@ -208,31 +238,16 @@ def collect_bar_items(
         fc_control_n_at_t = None
         fc_control_n_spread_at_t = None
         if fc_vs_ctrl and fc_ctrl_lbl:
-            ctrl_stats = _fc.control_stats_at_for_bar(
-                ctx, fc_ctrl_lbl, target_t,
-                threshold=threshold, val_col=ctx.state.channel.active_val_col,
-                use_sem=use_sem, per_fov_spread=per_fov_spread,
-                fluor_gates=fluor_gates,
-            )
+            ctrl_stats = ctrl_cache.stats_at(fc_ctrl_lbl, target_t)
             if ctrl_stats is None:
                 if miss_sink is not None:
                     miss_sink.add(float(target_t))
             else:
                 fc_control_mean_at_t, fc_control_spread_at_t = ctrl_stats
-            ctrl_frac = _fc.control_frac_at_for_bar(
-                ctx, fc_ctrl_lbl, target_t,
-                threshold=threshold, val_col=ctx.state.channel.active_val_col,
-                use_sem=use_sem, per_fov_spread=per_fov_spread,
-                fluor_gates=fluor_gates,
-            )
+            ctrl_frac = ctrl_cache.frac_at(fc_ctrl_lbl, target_t)
             if ctrl_frac is not None:
                 fc_control_frac_at_t, fc_control_frac_spread_at_t = ctrl_frac
-            ctrl_n = _fc.control_n_at_for_bar(
-                ctx, fc_ctrl_lbl, target_t,
-                threshold=threshold, val_col=ctx.state.channel.active_val_col,
-                use_sem=use_sem, per_fov_spread=per_fov_spread,
-                fluor_gates=fluor_gates,
-            )
+            ctrl_n = ctrl_cache.n_at(fc_ctrl_lbl, target_t)
             if ctrl_n is not None:
                 fc_control_n_at_t, fc_control_n_spread_at_t = ctrl_n
         fc_force_nan = fc_vs_ctrl and fc_ctrl_lbl and fc_control_mean_at_t is None
@@ -294,26 +309,15 @@ def collect_bar_items(
                 eff_ctrl_n = fc_control_n_at_t
                 eff_ctrl_n_spread = fc_control_n_spread_at_t
                 if fc_vs_t0:
-                    stats = _fc.member_first_tp_stats_resolved(
-                        ctx, rset.name,
-                        threshold=threshold, val_col=ctx.state.channel.active_val_col,
-                        use_sem=use_sem, per_fov_spread=rset_per_fov,
-                        fluor_gates=fluor_gates,
-                        baseline_tp=fc_baseline_tp,
-                    )
+                    stats = _member_baseline(
+                        _fc.member_first_tp_stats_resolved, rset.name, rset_per_fov)
                     if stats is not None:
                         resolved_tp, t0_mean, t0_spread = stats
                         # Cross-axis stacking when both axes are active.
                         # ctrl_first: t0 denom becomes post-control baseline.
                         # t0_first:   control denom becomes post-t0 control.
                         if fc_vs_ctrl and fc_ctrl_lbl:
-                            ctrl_b = _fc.control_stats_at_for_bar(
-                                ctx, fc_ctrl_lbl, resolved_tp,
-                                threshold=threshold,
-                                val_col=ctx.state.channel.active_val_col,
-                                use_sem=use_sem, per_fov_spread=per_fov_spread,
-                                fluor_gates=fluor_gates,
-                            )
+                            ctrl_b = ctrl_cache.stats_at(fc_ctrl_lbl, resolved_tp)
                             if ctrl_b is not None:
                                 if fc_order == "t0_first":
                                     eff_ctrl_mean, eff_ctrl_spread = _fc._apply_axis(
@@ -325,23 +329,12 @@ def collect_bar_items(
                                         t0_mean, t0_spread,
                                         ctrl_b[0], ctrl_b[1], fc_op_ctrl,
                                     )
-                    fstats = _fc.member_first_tp_frac_resolved(
-                        ctx, rset.name,
-                        threshold=threshold, val_col=ctx.state.channel.active_val_col,
-                        use_sem=use_sem, per_fov_spread=per_fov_spread,
-                        fluor_gates=fluor_gates,
-                        baseline_tp=fc_baseline_tp,
-                    )
+                    fstats = _member_baseline(
+                        _fc.member_first_tp_frac_resolved, rset.name, per_fov_spread)
                     if fstats is not None:
                         resolved_tp_f, t0_frac, t0_frac_spread = fstats
                         if fc_vs_ctrl and fc_ctrl_lbl:
-                            ctrl_bf = _fc.control_frac_at_for_bar(
-                                ctx, fc_ctrl_lbl, resolved_tp_f,
-                                threshold=threshold,
-                                val_col=ctx.state.channel.active_val_col,
-                                use_sem=use_sem, per_fov_spread=per_fov_spread,
-                                fluor_gates=fluor_gates,
-                            )
+                            ctrl_bf = ctrl_cache.frac_at(fc_ctrl_lbl, resolved_tp_f)
                             if ctrl_bf is not None:
                                 if fc_order == "t0_first":
                                     eff_ctrl_frac, eff_ctrl_frac_spread = _fc._apply_axis(
@@ -353,23 +346,12 @@ def collect_bar_items(
                                         t0_frac, t0_frac_spread,
                                         ctrl_bf[0], ctrl_bf[1], fc_op_ctrl,
                                     )
-                    nstats = _fc.member_first_tp_n_resolved(
-                        ctx, rset.name,
-                        threshold=threshold, val_col=ctx.state.channel.active_val_col,
-                        use_sem=use_sem, per_fov_spread=per_fov_spread,
-                        fluor_gates=fluor_gates,
-                        baseline_tp=fc_baseline_tp,
-                    )
+                    nstats = _member_baseline(
+                        _fc.member_first_tp_n_resolved, rset.name, per_fov_spread)
                     if nstats is not None:
                         resolved_tp_n, t0_n, t0_n_spread = nstats
                         if fc_vs_ctrl and fc_ctrl_lbl:
-                            ctrl_bn = _fc.control_n_at_for_bar(
-                                ctx, fc_ctrl_lbl, resolved_tp_n,
-                                threshold=threshold,
-                                val_col=ctx.state.channel.active_val_col,
-                                use_sem=use_sem, per_fov_spread=per_fov_spread,
-                                fluor_gates=fluor_gates,
-                            )
+                            ctrl_bn = ctrl_cache.n_at(fc_ctrl_lbl, resolved_tp_n)
                             if ctrl_bn is not None:
                                 if fc_order == "t0_first":
                                     eff_ctrl_n, eff_ctrl_n_spread = _fc._apply_axis(
@@ -513,13 +495,7 @@ def collect_bar_items(
                         )
                         # Cross-axis stacking: ctrl_first → adjust t0 denom; t0_first → adjust control denom.
                         if fc_vs_ctrl and fc_ctrl_lbl and resolved_tp is not None and t0_mean is not None:
-                            ctrl_b = _fc.control_stats_at_for_bar(
-                                ctx, fc_ctrl_lbl, resolved_tp,
-                                threshold=threshold,
-                                val_col=ctx.state.channel.active_val_col,
-                                use_sem=use_sem, per_fov_spread=per_fov_spread,
-                                fluor_gates=fluor_gates,
-                            )
+                            ctrl_b = ctrl_cache.stats_at(fc_ctrl_lbl, resolved_tp)
                             if ctrl_b is not None:
                                 if fc_order == "t0_first":
                                     eff_ctrl_mean, eff_ctrl_spread = _fc._apply_axis(
@@ -532,13 +508,7 @@ def collect_bar_items(
                                         ctrl_b[0], ctrl_b[1], fc_op_ctrl,
                                     )
                         if fc_vs_ctrl and fc_ctrl_lbl and resolved_tp_f is not None and t0_frac is not None:
-                            ctrl_bf = _fc.control_frac_at_for_bar(
-                                ctx, fc_ctrl_lbl, resolved_tp_f,
-                                threshold=threshold,
-                                val_col=ctx.state.channel.active_val_col,
-                                use_sem=use_sem, per_fov_spread=per_fov_spread,
-                                fluor_gates=fluor_gates,
-                            )
+                            ctrl_bf = ctrl_cache.frac_at(fc_ctrl_lbl, resolved_tp_f)
                             if ctrl_bf is not None:
                                 if fc_order == "t0_first":
                                     eff_ctrl_frac, eff_ctrl_frac_spread = _fc._apply_axis(
@@ -551,13 +521,7 @@ def collect_bar_items(
                                         ctrl_bf[0], ctrl_bf[1], fc_op_ctrl,
                                     )
                         if fc_vs_ctrl and fc_ctrl_lbl and resolved_tp_n is not None and t0_n is not None:
-                            ctrl_bn = _fc.control_n_at_for_bar(
-                                ctx, fc_ctrl_lbl, resolved_tp_n,
-                                threshold=threshold,
-                                val_col=ctx.state.channel.active_val_col,
-                                use_sem=use_sem, per_fov_spread=per_fov_spread,
-                                fluor_gates=fluor_gates,
-                            )
+                            ctrl_bn = ctrl_cache.n_at(fc_ctrl_lbl, resolved_tp_n)
                             if ctrl_bn is not None:
                                 if fc_order == "t0_first":
                                     eff_ctrl_n, eff_ctrl_n_spread = _fc._apply_axis(
@@ -739,7 +703,13 @@ def collect_bar_items_for_group(
         key: _member_pts(wells, rset_name)
         for (key, _bd, wells, rset_name, _c) in members
     }
-    # Control frac series (rep-set stat) — resolved once, indexed per tp below.
+    # Control denominators, memoised for this call. The frac series was already
+    # hoisted here by hand; the cache does the same for the mean side and will
+    # hold every distinct control once per-sample mapping lands.
+    ctrl_cache = _ControlSeriesCache(
+        ctx, threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
+    )
     _ctrl_frac_series: dict = {}
     if fc_vs_ctrl and fc_ctrl_lbl:
         _ctrl_frac_series = _fc.member_frac_stats_series(
@@ -770,12 +740,7 @@ def collect_bar_items_for_group(
         fc_control_frac_at_t = None
         fc_control_frac_spread_at_t = None
         if fc_vs_ctrl and fc_ctrl_lbl:
-            ctrl_stats = _fc.control_stats_at_for_bar(
-                ctx, fc_ctrl_lbl, target_t,
-                threshold=threshold, val_col=val_col,
-                use_sem=use_sem, per_fov_spread=per_fov_spread,
-                fluor_gates=fluor_gates,
-            )
+            ctrl_stats = ctrl_cache.stats_at(fc_ctrl_lbl, target_t)
             if ctrl_stats is not None:
                 fc_control_mean_at_t, fc_control_spread_at_t = ctrl_stats
             _cfrac = _lookup_at(_ctrl_frac_series, target_t)

@@ -35,7 +35,7 @@ LineSeries = _lazy("well_viewer.features.lineplot.controller", "LineSeries")
 _aggpoint_to_linepoint = _lazy("well_viewer.features.lineplot.controller", "_aggpoint_to_linepoint")
 from well_viewer.domain.stats_compute import (
     aggregate_well,
-    compute_rep_n_above,
+    compute_rep_n_above_stats,
     compute_rep_per_fov_stats,
     compute_rep_stats,
     replicate_unit,
@@ -157,7 +157,8 @@ def collect_line_series_for_group(
                 n_above_val = 0
             else:
                 gm, gerr, gf, _ = compute_rep_stats(ctx, rset, t, threshold, use_sem)
-                n_above_val = compute_rep_n_above(ctx, rset, t)
+                # Per-well mean, matching the Line tab's own numerator.
+                n_above_val, _ = compute_rep_n_above_stats(ctx, rset, t, use_sem)
                 gfe, gnpf_m, gnpf_s = 0.0, 0.0, 0.0
             if not (isinstance(gm, float) and math.isnan(gm)):
                 raw_pts.append((t, gm, gerr, gf, n_above_val, 0, gfe, gnpf_m, gnpf_s))

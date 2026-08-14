@@ -137,9 +137,6 @@ class MockApp:
         )
         return (gm, gerr, gf, ferr, 5.0, 0.0)
 
-    def _compute_rep_n_above(self, rset, target_t: float) -> int:
-        return 10
-
     def _get_thresh_frac_on(self, channel: str) -> float:
         return 50.0
 

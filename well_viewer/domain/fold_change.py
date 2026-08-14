@@ -60,7 +60,7 @@ from typing import NamedTuple
 from collections.abc import Callable
 from well_viewer.domain.stats_compute import compute_rep_stats
 from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
-from well_viewer.domain.stats_compute import compute_rep_n_above
+from well_viewer.domain.stats_compute import compute_rep_n_above_stats
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.domain.stats_compute import aggregate_group
 from well_viewer.domain.fold_change_state import (  # noqa: F401 - re-exported
@@ -909,7 +909,14 @@ def member_n_series(
             # conflation §7 of CLAUDE.md names.
             return (float(n_mean),
                     float(n_spread) if math.isfinite(n_spread) else 0.0)
-        return (float(compute_rep_n_above(ctx, rset, t)), 0.0)
+        # Mean of the per-well counts, with the cross-well spread — the same
+        # statistic both plotting tabs draw for a replicate set's Events panel.
+        # This used to be ``compute_rep_n_above``, a *total* across the set's
+        # wells, so a set normalised against itself came out at 1/n rather than
+        # 1.0: a per-well mean of 5 over a total of 10 reads 0.5.
+        n_mean, n_spread = compute_rep_n_above_stats(ctx, rset, t, use_sem)
+        return (float(n_mean),
+                float(n_spread) if math.isfinite(n_spread) else 0.0)
 
     return _member_series(ctx, label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
@@ -1454,7 +1461,7 @@ def member_n_stats_series(
 
     Returns the value in the SAME representation the N panel plots, selected by
     *per_fov_spread*: the per-FOV-mean count (± per-FOV spread) when FOV-spread
-    is on, else the total events-above-threshold (spread 0, counts have none).
+    is on, else the mean of the per-well counts (± the cross-well spread).
     Used by line-plot FC to scale the N panel; the caller passes ``n_per_fov``
     to :func:`normalize_pts` so the scaled field matches this denominator.
 
@@ -1468,10 +1475,14 @@ def member_n_stats_series(
             if not (isinstance(n_mean, (int, float)) and math.isfinite(n_mean)):
                 return None
             return (float(n_mean), _finite_spread(n_spread))
-        n_above = compute_rep_n_above(ctx, rset, t)
-        if not (isinstance(n_above, int) and n_above >= 0):
+        # Mean of the per-well counts with the cross-well spread, matching what
+        # both tabs draw for a replicate set's Events panel. A *total* here
+        # (what this used to read) put a per-well mean over a cross-well sum,
+        # so a set normalised against itself landed on 1/n instead of 1.0.
+        n_mean, n_spread = compute_rep_n_above_stats(ctx, rset, t, False)
+        if not (isinstance(n_mean, (int, float)) and math.isfinite(n_mean)):
             return None
-        return (float(n_above), 0.0)
+        return (float(n_mean), _finite_spread(n_spread))
 
     def well_stat(pt):
         if per_fov_spread:

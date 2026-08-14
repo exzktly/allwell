@@ -377,42 +377,6 @@ def compute_rep_per_fov_stats(
     return result
 
 
-def compute_rep_n_above(ctx, rset: ReplicateSet, target_t: float) -> int:
-    """Total events-above-threshold contributing to *rset* at *target_t*.
-
-    Sums ``n_above`` (AggPoint index 4) across loaded wells of the set
-    after gating, so the bar plot's third panel reports the count of
-    cells that actually exceeded the active threshold — the same
-    numerator that drives the fraction-above-threshold value.
-    """
-    threshold = on_cutoff_for_column(
-        ctx, ctx.state.channel.active_val_col,
-        channel=ctx.state.channel.active_channel)
-    fluor_gates = get_all_fluor_gates(ctx)
-    cache_key = ("rep_n_above", rset.name, tuple(rset.wells), target_t, threshold,
-                 ctx.state.channel.active_val_col,
-                 tuple(sorted(fluor_gates.items())), _gate_cache_sig(ctx))
-    if cache_key in ctx.state.stats_cache.cache:
-        return ctx.state.stats_cache.cache[cache_key]
-
-    total = 0
-    for lbl in rset.wells:
-        if lbl not in ctx.state.dataset.well_paths:
-            continue
-        pts = aggregate_well(
-            ctx,
-            lbl, threshold=threshold, use_sem=False,
-            val_col=ctx.state.channel.active_val_col,
-            fluor_gates=fluor_gates,
-        )
-        matched = [pt for pt in pts if tp_close(pt[0], target_t)]
-        if matched:
-            # AggPoint index 4 = n_above; index 5 = n_total.
-            total += int(matched[0][4])
-    ctx.state.stats_cache.cache[cache_key] = total
-    return total
-
-
 def compute_rep_n_above_stats(ctx, rset: ReplicateSet, target_t: float,
                               use_sem: bool) -> tuple:
     """Mean and SD/SEM of events-above-threshold *across the set's wells*.

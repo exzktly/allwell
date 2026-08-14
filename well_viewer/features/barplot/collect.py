@@ -29,7 +29,6 @@ from well_viewer.domain.time_rescale import format_scaled as _rescale_tp
 from well_viewer.domain.stats_compute import (
     aggregate_group,
     aggregate_well,
-    compute_rep_n_above,
     compute_rep_n_above_stats,
     compute_rep_per_fov_stats,
     compute_rep_stats,
@@ -689,7 +688,8 @@ def collect_bar_items_for_group(
                     nval = 0
                 else:
                     gm, gerr, gf, _ = compute_rep_stats(ctx, rset, t, threshold, use_sem)
-                    nval = compute_rep_n_above(ctx, rset, t)
+                    # Per-well mean, matching the Bar tab's own numerator.
+                    nval, _ = compute_rep_n_above_stats(ctx, rset, t, use_sem)
                     gfe, gnpf_m, gnpf_s = 0.0, 0.0, 0.0
                 out_pts.append((t, gm, gerr, gf, nval, 0, gfe, gnpf_m, gnpf_s))
             return out_pts

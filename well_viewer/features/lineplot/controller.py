@@ -9,7 +9,7 @@ from well_viewer.domain import fold_change as _fc
 from well_viewer.domain.stats_compute import compute_rep_stats
 from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
 from well_viewer.domain.stats_compute import aggregate_well
-from well_viewer.domain.stats_compute import compute_rep_n_above
+from well_viewer.domain.stats_compute import compute_rep_n_above_stats
 from well_viewer.domain.stats_compute import replicate_unit
 from well_viewer.domain.selections_model import (
     active_replicate_sets, color_for_replicate_set, color_for_well,
@@ -303,8 +303,13 @@ def collect_line_series(
                     gm, gerr, gf, _ = compute_rep_stats(ctx,
                         rset, t, threshold, use_sem,
                     )
-                    # compute_rep_n_above reads threshold from app state internally
-                    _n_above_val = compute_rep_n_above(ctx, rset, t)
+                    # Mean of the set's per-well counts — the same statistic
+                    # the Mean and Fraction panels beside it use, and the one
+                    # the Bar tab draws. This read ``compute_rep_n_above``, a
+                    # total across the set's wells, so the two tabs plotted
+                    # different numbers for the same replicate set: 5 per well
+                    # on a bar against 10 on a curve.
+                    _n_above_val, _ = compute_rep_n_above_stats(ctx, rset, t, use_sem)
                     gfe, gnpf_m, gnpf_s = 0.0, 0.0, 0.0
                 if not (isinstance(gm, float) and math.isnan(gm)):
                     # AggPoint idx 6 = frac_spread (per-FOV fraction error), 7/8 =

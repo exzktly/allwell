@@ -220,7 +220,9 @@ def collect_line_series(
     if fc_state is None:
         fc_state = _fc.fold_change_state(ctx)
     fc = _fc.coerce_fc_state(fc_state)
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc
+    fc_vs_ctrl = fc.vs_control_on
+    fc_ctrl_lbl = fc.control_label
+    fc_vs_t0 = fc.vs_t0_on
     if fc_baseline_tp is None:
         fc_baseline_tp = _fc.parse_baseline_tp(ctx)
     fc_op_ctrl = _fc.parse_fc_op_ctrl(ctx)
@@ -640,7 +642,9 @@ def redraw_line_plots(
     # control-series resolution + per-trace normalization happens inside
     # ``collect_line_series`` (single source of truth, mirrors the
     # bar plot's ``collect_bar_items``).
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = _fc.fold_change_state(ctx)
+    _live_fc = _fc.fold_change_state(ctx)
+    fc_vs_ctrl = _live_fc.vs_control_on
+    fc_vs_t0 = _live_fc.vs_t0_on
     fc_misses: set = set()
     # Theme-aware chrome colors (track the active PlotCard's Publication/Screen
     # state) — the renderer's *trace* colours stay rank-based.

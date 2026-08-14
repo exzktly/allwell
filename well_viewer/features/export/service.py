@@ -284,7 +284,9 @@ def export_plot_data(ctx) -> None:
     include_repset_col = bool(well_to_repset)
 
     fc = _fc.fold_change_state(ctx)
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc
+    fc_vs_ctrl = fc.vs_control_on
+    fc_ctrl_lbl = fc.control_label
+    fc_vs_t0 = fc.vs_t0_on
     fc_control_means: dict = {}
     if fc_vs_ctrl and fc_ctrl_lbl:
         fc_control_means = _fc.pts_to_mean_by_t(
@@ -372,7 +374,9 @@ def export_bar_plot_data(ctx) -> None:
     target_ts = [t for t, _ in tp_list]
     target_t_arg = target_ts[0] if len(target_ts) == 1 else target_ts
     fc = _fc.fold_change_state(ctx)
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc
+    fc_vs_ctrl = fc.vs_control_on
+    fc_ctrl_lbl = fc.control_label
+    fc_vs_t0 = fc.vs_t0_on
     fc_active = fc_vs_ctrl or fc_vs_t0
     # Additive CSV: raw values in the standard ``mean_*`` / ``err_*``
     # columns, fold-change values in their own columns. The aggregation

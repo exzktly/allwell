@@ -1023,7 +1023,7 @@ def draw_per_cell_bar_mode(
     # baseline-tp the bars use (audit S1) and scales each column at its own
     # timepoint instead of collapsing multi-tp selections to the first (S3).
     _fc_state = _fc.fold_change_state(ctx)
-    if _fc_state[0] or _fc_state[2]:
+    if _fc_state.active:
         cell_scale = _fc.build_cell_scaling(
             ctx, base_wells, fc_state=_fc_state,
             threshold=threshold, val_col=ctx.state.channel.active_val_col,

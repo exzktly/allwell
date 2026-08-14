@@ -15,7 +15,9 @@ def test_defaults():
     assert ps.use_fov_replicates is False
     assert ps.legend_visible == {"mean": True, "frac": True, "cdf": True, "n": True}
     assert ps.bar_order is None
-    assert ps.fc_state == (False, "", False)
+    assert ps.fc_vs_control_on is False
+    assert ps.fc_control_label == ""
+    assert ps.fc_vs_t0_on is False
 
 
 def test_legend_visible_is_per_instance():
@@ -26,9 +28,10 @@ def test_legend_visible_is_per_instance():
 
 # ── fold change ──────────────────────────────────────────────────────────────
 
-def test_fc_state_tuple():
+def test_fold_change_fields_round_trip():
     ps = PlotState(fc_vs_control_on=True, fc_control_label="A01", fc_vs_t0_on=True)
-    assert ps.fc_state == (True, "A01", True)
+    assert (ps.fc_vs_control_on, ps.fc_control_label, ps.fc_vs_t0_on) \
+        == (True, "A01", True)
 
 
 def test_fold_change_active():

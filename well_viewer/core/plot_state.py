@@ -25,9 +25,10 @@ def _default_legend() -> dict[str, bool]:
 class PlotState:
     """Cross-tab plot options + fold-change normalization state.
 
-    ``fc_state`` is the ``(vs_control, control_label, vs_t0)`` tuple the
-    collection pipeline (``collect_bar_items`` / ``collect_line_series``)
-    consumes — :meth:`set_fold_change` is the single place that triple is
+    The fold-change fields are read by the collection pipeline
+    (``collect_bar_items`` / ``collect_line_series``) through
+    ``domain.fold_change.fold_change_state``, which packages them into a
+    ``FoldChangeState``. :meth:`set_fold_change` is the single place they are
     mutated.
     """
 
@@ -128,11 +129,6 @@ class PlotState:
         self.fc_op_t0 = v
 
     @property
-    def fc_state(self) -> tuple[bool, str, bool]:
-        """The fold-change tuple consumed by the bar / line collection pipeline."""
-        return (self.fc_vs_control_on, self.fc_control_label, self.fc_vs_t0_on)
-
-    @property
     def fold_change_active(self) -> bool:
         """True when either fold-change mode is on."""
         return self.fc_vs_control_on or self.fc_vs_t0_on
@@ -146,8 +142,10 @@ class PlotState:
                         op_t0: str | None = None,
                         order: str | None = None) -> None:
         """Apply a fold-change state change. A ``None`` argument leaves that
-        field unchanged. ``control_label`` is stored verbatim — the UI layer
-        strips its display-only disambiguation suffix before calling.
+        field unchanged. ``control_label`` is stored exactly as the combo
+        offered it, disambiguation suffix included: the suffix is what tells
+        ``domain.fold_change.classify_control_label`` that a token naming both
+        a well and a replicate set means the well.
         ``baseline_tp`` is the dataset's timepoint string the user picked as
         the per-member baseline; empty means "use the earliest finite point"
         (the original behaviour). ``op_ctrl`` / ``op_t0`` are the per-axis

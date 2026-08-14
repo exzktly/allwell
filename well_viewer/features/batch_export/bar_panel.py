@@ -212,7 +212,10 @@ class BarBatchExportPanel(BatchExportPanel):
         use_sem = self._ctx.state.plot.use_sem
         band_lbl = "SEM" if use_sem else "SD"
         fmt = self._fmt_cb.currentText()
-        fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = self._fc_state()
+        _panel_fc = self._fc_state()
+        fc_vs_ctrl = _panel_fc.vs_control_on
+        fc_ctrl_lbl = _panel_fc.control_label
+        fc_vs_t0 = _panel_fc.vs_t0_on
         fc_active = fc_vs_ctrl or fc_vs_t0
         # Layout options collected once here so each job sees a stable
         # snapshot of the panel state.
@@ -276,7 +279,10 @@ class BarBatchExportPanel(BatchExportPanel):
                 _fluor_gates = _get_all_fluor_gates(self._ctx)
                 _per_fov_spread = bool(self._ctx.state.plot.use_fov_replicates)
 
-                panel_fc_state = (fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0)
+                # The panel's own request object, passed through rather than
+                # rebuilt as a tuple — rebuilding it drops any field the
+                # three legacy names do not cover.
+                panel_fc_state = _panel_fc
                 # ``collect_bar_items_for_group`` now aggregates pooled rep-set
                 # members with the tab's ``compute_rep_stats`` (which reads
                 # ``active_val_col``), so swap the column for the duration —
@@ -416,7 +422,9 @@ class BarBatchExportPanel(BatchExportPanel):
         from well_viewer.features.barplot.controller import collect_bar_items_for_group
 
         fc = _fc.coerce_fc_state(fc_state)
-        fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc
+        fc_vs_ctrl = fc.vs_control_on
+        fc_ctrl_lbl = fc.control_label
+        fc_vs_t0 = fc.vs_t0_on
         fc_active = fc_vs_ctrl or fc_vs_t0
         # Normalise the (target_t, tp_str) inputs into the multi-shape the
         # collector expects. Both legacy single-tp calls (float, str) and

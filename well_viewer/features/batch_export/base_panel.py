@@ -1643,7 +1643,10 @@ class BatchExportPanel(QWidget):
         def _progress(grp: BarGroup, step: int, total: int) -> str:
             return f"Exporting '{grp.name}' ({step}/{total})\u2026"
 
-        fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = self._fc_state()
+        _panel_fc = self._fc_state()
+        fc_vs_ctrl = _panel_fc.vs_control_on
+        fc_ctrl_lbl = _panel_fc.control_label
+        fc_vs_t0 = _panel_fc.vs_t0_on
         fc_active = fc_vs_ctrl or fc_vs_t0
         used_stems: set = set()
 
@@ -1664,7 +1667,10 @@ class BatchExportPanel(QWidget):
             _ch = _ch_selected
             _metric = self._selected_export_metric_key("_line_channel_cb")
             _fluor_gates = _get_all_fluor_gates(self._ctx)
-            panel_fc_state = (fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0)
+            # The panel's own request object, passed through rather than
+            # rebuilt as a tuple — rebuilding it drops any field the
+            # three legacy names do not cover.
+            panel_fc_state = _panel_fc
 
             # ``collect_line_series_for_group`` is the thin batch orchestrator
             # that reuses the tab's rep-set statistic (``compute_rep_stats``) for
@@ -1808,8 +1814,7 @@ class BatchExportPanel(QWidget):
         )
 
         fc = _fc.coerce_fc_state(fc_state)
-        fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc
-        fc_active = fc_vs_ctrl or fc_vs_t0
+        fc_active = fc.active
         _val_col = val_col if val_col is not None else self._export_val_col_for("_line_channel_cb")
 
         # Four stacked panels — identical to the tab (lineplot/tab_view.py).

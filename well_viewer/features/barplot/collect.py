@@ -178,7 +178,9 @@ def collect_bar_items(
     if fc_state is None:
         fc_state = _fc.fold_change_state(ctx)
     fc = _fc.coerce_fc_state(fc_state)
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc
+    fc_vs_ctrl = fc.vs_control_on
+    fc_ctrl_lbl = fc.control_label
+    fc_vs_t0 = fc.vs_t0_on
     if fc_baseline_tp is None:
         fc_baseline_tp = _fc.parse_baseline_tp(ctx)
     fc_op_ctrl = _fc.parse_fc_op_ctrl(ctx)
@@ -633,7 +635,9 @@ def collect_bar_items_for_group(
         return []
 
     fc = _fc.coerce_fc_state(fc_state)
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc
+    fc_vs_ctrl = fc.vs_control_on
+    fc_ctrl_lbl = fc.control_label
+    fc_vs_t0 = fc.vs_t0_on
 
     # Build (key, display, wells, rset_name_or_None, color) member list.
     from well_viewer.domain.plate_layout import WELL_COLORS as _WELL_COLORS

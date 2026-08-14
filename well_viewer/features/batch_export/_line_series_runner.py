@@ -78,7 +78,9 @@ def collect_line_series_for_group(
     the additive CSV writer makes that call alongside the active-state call.
     """
     fc = _fc.coerce_fc_state(fc_state)
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc
+    fc_vs_ctrl = fc.vs_control_on
+    fc_ctrl_lbl = fc.control_label
+    fc_vs_t0 = fc.vs_t0_on
     fc_active = fc_vs_ctrl or fc_vs_t0
 
     rep_per_fov = bool(ctx.state.plot.use_fov_replicates)

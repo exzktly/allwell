@@ -1,12 +1,17 @@
 """``FoldChangeState`` — the object that replaced the fold-change 3-tuple.
 
-The compatibility surface tested here is deliberate, not incidental. Roughly
-ten call sites unpack this object as ``a, b, c = fc_state``, the batch panels
-compare it against ``(False, "", False)`` literals, and ``barplot/renderer``
-indexes it positionally. Those behaviours are what let per-sample controls
-widen the request object without rewriting every assertion in the suite, so
-each of them is pinned here — if one breaks, the breakage is silent at the
-call site and shows up as a wrong plot.
+It briefly emulated that tuple (iterating, indexing, comparing equal to one) so
+the widening could land without touching call sites. The emulation is gone, and
+these tests pin why it must not come back:
+
+* it broke ``a == b implies hash(a) == hash(b)``, so a state compared equal to
+  the tuple while hashing differently and ``fc in {tuple}`` was False;
+* it let a call site unpack three values and silently drop anything added
+  later — and for this object, dropping a field means drawing raw values under
+  a fold-change axis label.
+
+``coerce_fc_state`` still accepts a tuple as *input*, because a lot of tests
+spell a request inline. Nothing hands one back out.
 """
 from __future__ import annotations
 
@@ -19,57 +24,50 @@ from well_viewer.domain.fold_change_state import (
 )
 
 
-# ── legacy tuple compatibility ───────────────────────────────────────────────
+# ── the hash/equality contract ───────────────────────────────────────────────
 
-def test_unpacks_as_the_legacy_three_tuple():
-    fc = FoldChangeState(vs_control_on=True, control_label="DMSO", vs_t0_on=True)
-    vs_ctrl, label, vs_t0 = fc
-    assert (vs_ctrl, label, vs_t0) == (True, "DMSO", True)
-
-
-def test_unpacking_ignores_the_new_fields():
-    """Three-value unpack must still work when the new fields are set.
-
-    This is the sharp edge the guard in test_guards_bite.py exists for: a
-    collector that unpacks three values drops ``per_member`` silently.
-    """
-    fc = FoldChangeState(vs_control_on=True, per_member=True, controls=object())
-    vs_ctrl, label, vs_t0 = fc
-    assert (vs_ctrl, label, vs_t0) == (True, "", False)
+def test_equal_states_hash_equal():
+    a = FoldChangeState(vs_control_on=True, control_label="DMSO", vs_t0_on=True)
+    b = FoldChangeState(vs_control_on=True, control_label="DMSO", vs_t0_on=True)
+    assert a == b
+    assert hash(a) == hash(b)
 
 
-def test_compares_equal_to_the_legacy_off_tuple():
-    assert FC_STATE_OFF == (False, "", False)
-    assert FoldChangeState(vs_control_on=True, control_label="A01", vs_t0_on=False) \
-        == (True, "A01", False)
+def test_usable_as_a_set_member_and_dict_key():
+    """The property the tuple emulation broke: ``fc in {fc}`` was False."""
+    a = FoldChangeState(vs_control_on=True, control_label="DMSO")
+    b = FoldChangeState(vs_control_on=True, control_label="DMSO")
+    assert a in {b}
+    assert {a: "x"}[b] == "x"
+    assert len({a, b}) == 1
 
 
-def test_not_equal_to_a_different_tuple():
-    assert FC_STATE_OFF != (True, "", False)
-
-
-def test_indexes_positionally():
-    """``barplot/renderer`` reads ``_fc_state[0]`` and ``[2]``."""
-    fc = FoldChangeState(vs_control_on=True, control_label="X", vs_t0_on=True)
-    assert fc[0] is True
-    assert fc[1] == "X"
-    assert fc[2] is True
-
-
-def test_instance_equality_includes_the_new_fields():
-    a = FoldChangeState(vs_control_on=True, per_member=True)
-    b = FoldChangeState(vs_control_on=True, per_member=False)
+def test_differing_states_are_distinct():
+    a = FoldChangeState(vs_control_on=True, control_label="DMSO")
+    b = FoldChangeState(vs_control_on=True, control_label="Vehicle")
     assert a != b
+    assert len({a, b}) == 2
+
+
+def test_it_is_not_equal_to_a_tuple():
+    """Cross-type equality is what made the hash contract unsatisfiable."""
+    assert FC_STATE_OFF != (False, "", False)
+
+
+def test_it_does_not_unpack():
+    """A three-value unpack is how a new field gets dropped in silence."""
+    with pytest.raises(TypeError):
+        _a, _b, _c = FoldChangeState()
+
+
+def test_it_does_not_index():
+    with pytest.raises(TypeError):
+        FC_STATE_OFF[0]
 
 
 def test_is_frozen():
     with pytest.raises(Exception):
         FC_STATE_OFF.vs_control_on = True
-
-
-def test_fc_state_off_is_off():
-    assert FC_STATE_OFF.active is False
-    assert FC_STATE_OFF.needs_controls is False
 
 
 # ── derived properties ───────────────────────────────────────────────────────
@@ -84,36 +82,26 @@ def test_active(vs_ctrl, vs_t0, expected):
     assert FoldChangeState(vs_control_on=vs_ctrl, vs_t0_on=vs_t0).active is expected
 
 
-def test_needs_controls_is_the_untaught_caller_signal():
-    """per-member requested, no mapping resolved => the caller must placeholder."""
-    assert FoldChangeState(vs_control_on=True, per_member=True).needs_controls is True
+def test_fc_state_off_is_off():
+    assert FC_STATE_OFF.active is False
+    assert FC_STATE_OFF.wants_control is False
 
 
-def test_needs_controls_false_once_a_mapping_is_attached():
-    fc = FoldChangeState(vs_control_on=True, per_member=True).with_controls(object())
-    assert fc.needs_controls is False
-
-
-def test_needs_controls_false_in_single_control_mode():
-    assert FoldChangeState(vs_control_on=True, control_label="DMSO").needs_controls is False
-
-
-def test_needs_controls_false_when_the_control_axis_is_off():
-    """vs-t0-only with per_member set is not a missing denominator."""
-    assert FoldChangeState(vs_t0_on=True, per_member=True).needs_controls is False
-
-
-def test_with_controls_leaves_the_original_alone():
-    base = FoldChangeState(vs_control_on=True, per_member=True)
-    derived = base.with_controls(object())
-    assert base.controls is None
-    assert derived.controls is not None
+@pytest.mark.parametrize("vs_ctrl,label,expected", [
+    (True, "DMSO", True),
+    (True, "", False),      # axis on, nothing named — nothing to resolve
+    (False, "DMSO", False),  # a remembered label with the axis off
+    (False, "", False),
+])
+def test_wants_control(vs_ctrl, label, expected):
+    fc = FoldChangeState(vs_control_on=vs_ctrl, control_label=label)
+    assert fc.wants_control is expected
 
 
 # ── coercion ─────────────────────────────────────────────────────────────────
 
 def test_coerce_passes_an_instance_through_unchanged():
-    fc = FoldChangeState(vs_control_on=True, per_member=True)
+    fc = FoldChangeState(vs_control_on=True, control_label="DMSO")
     assert coerce_fc_state(fc) is fc
 
 
@@ -124,9 +112,9 @@ def test_coerce_none_gives_the_raw_default():
 def test_coerce_a_legacy_tuple():
     fc = coerce_fc_state((True, "DMSO", True))
     assert isinstance(fc, FoldChangeState)
-    assert (fc.vs_control_on, fc.control_label, fc.vs_t0_on) == (True, "DMSO", True)
-    assert fc.per_member is False
-    assert fc.controls is None
+    assert fc.vs_control_on is True
+    assert fc.control_label == "DMSO"
+    assert fc.vs_t0_on is True
 
 
 def test_coerce_a_legacy_tuple_normalises_a_none_label():
@@ -136,3 +124,9 @@ def test_coerce_a_legacy_tuple_normalises_a_none_label():
 def test_coerce_rejects_nonsense():
     with pytest.raises(TypeError):
         coerce_fc_state("DMSO")
+
+
+def test_coerce_rejects_a_wrong_length_tuple():
+    """Better a loud unpack error than a silently mis-bound field."""
+    with pytest.raises(ValueError):
+        coerce_fc_state((True, "DMSO"))

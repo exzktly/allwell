@@ -595,26 +595,14 @@ def fold_change_state(ctx) -> FoldChangeState:
     """Return the active fold-change request.
 
     Used by both the on-screen plot tabs and the per-tab CSV exporter so the
-    plot and the export stay in sync. The result still unpacks as the legacy
-    ``(vs_control_on, control_label, vs_t0_on)`` triple — see
-    :mod:`well_viewer.domain.fold_change_state`.
-
-    ``control_label`` is deliberately empty in per-member mode: no single label
-    describes the plot any more, so anything that would print one (the axis
-    suffix, the CSV column, the status line) must read the resolved mapping
-    instead. It carries ``per_member=True`` and no ``controls``, which is the
-    signal every collector branches on to emit placeholders until a caller
-    builds and attaches the mapping.
+    plot and the export stay in sync. Read it by name — see
+    :mod:`well_viewer.domain.fold_change_state` for why it is not a tuple.
     """
     plot = ctx.state.plot
-    per_member = str(getattr(plot, "fc_control_mode", "single") or "single") == "per_member"
     return FoldChangeState(
         vs_control_on=bool(plot.fc_vs_control_on),
-        control_label="" if per_member else str(plot.fc_control_label or ""),
+        control_label=str(plot.fc_control_label or ""),
         vs_t0_on=bool(plot.fc_vs_t0_on),
-        per_member=per_member,
-        controls=None,
-        render=str(getattr(plot, "fc_control_render", "self") or "self"),
     )
 
 
@@ -1319,7 +1307,10 @@ def build_cell_scaling(
       * t0_mean — each well's own baseline from :func:`member_baseline_value`
         (honouring ``baseline_tp``), resolved once per well.
     """
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
+    _fc_req = coerce_fc_state(fc_state)
+    fc_vs_ctrl = _fc_req.vs_control_on
+    fc_ctrl_lbl = _fc_req.control_label
+    fc_vs_t0 = _fc_req.vs_t0_on
 
     # t0 baseline is per-well and tp-independent — resolve once up front.
     t0_by_well: dict[str, float | None] = {}

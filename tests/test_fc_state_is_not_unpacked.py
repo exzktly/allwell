@@ -23,7 +23,12 @@ import ast
 from tests._repo_scan import python_sources, rel
 
 #: Producers of a ``FoldChangeState``. A tuple target on any of them is the bug.
-_PRODUCERS = frozenset({"fold_change_state", "coerce_fc_state"})
+#: ``_fc_state`` is the Batch Export panels' own accessor, and it is here
+#: because ``fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = self._fc_state()`` is the
+#: exact spelling both panels carried before this object existed — a guard
+#: that could not see the method call would have been blind to the shape it
+#: was written for.
+_PRODUCERS = frozenset({"fold_change_state", "coerce_fc_state", "_fc_state"})
 
 
 def _callee_name(node: ast.AST) -> str:

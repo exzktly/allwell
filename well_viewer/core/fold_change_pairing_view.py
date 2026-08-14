@@ -148,6 +148,26 @@ def member_control_refs(ctx, scope: str) -> dict:
 
 # ── the window ───────────────────────────────────────────────────────────────
 
+def member_color(ctx, scope: str, member: str) -> str:
+    """The colour the plot draws *member* in.
+
+    A key is a replicate-set name whenever pooling is on, and
+    ``color_for_well`` hands an unparseable token the same fallback colour for
+    every group — so every row's chip came out identical, and identical to no
+    bar on the plate. The row is meant to be findable in the figure.
+    """
+    from well_viewer.domain.selections_model import (
+        active_replicate_sets, color_for_replicate_set, color_for_well,
+    )
+
+    if _members._keys_are_replicate_sets(ctx, scope):
+        well_paths = ctx.state.dataset.well_paths or {}
+        for rset in active_replicate_sets(ctx.state.selection.selections, well_paths):
+            if rset.name == member:
+                return color_for_replicate_set(rset, ctx.state.selection.selections)
+    return color_for_well(member)
+
+
 def _window_attr(scope: str) -> str:
     return f"_fc_pairing_window_{scope}"
 
@@ -313,8 +333,7 @@ def _fill_row(ctx, scope: str, table: QTableWidget, r: int, row: dict,
     chip = QTableWidgetItem(f"{_CHIP}  {member}")
     with swallow("pairing row chrome"):
         from PySide6.QtGui import QColor
-        from well_viewer.domain.selections_model import color_for_well
-        chip.setForeground(QColor(color_for_well(member)))
+        chip.setForeground(QColor(member_color(ctx, scope, member)))
     table.setItem(r, COL_SAMPLE, chip)
 
     combo = QComboBox(table)

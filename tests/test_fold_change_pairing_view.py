@@ -13,6 +13,7 @@ where pytest's signal timeout cannot interrupt Qt's C++ exec loop.
 from __future__ import annotations
 
 import os
+import types
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -39,6 +40,17 @@ _SETS = [
 ]
 
 
+class _StubBus:
+    """``set_fold_change_state`` announces on the bus; MockApp has none."""
+
+    class _Sig:
+        @staticmethod
+        def emit(*_a):
+            return None
+
+    plot_options_changed = _Sig()
+
+
 @pytest.fixture(scope="module")
 def qapp():
     return QApplication.instance() or QApplication([])
@@ -55,6 +67,14 @@ def ctx():
     c = app._ctx
     c.state.plot.fc_vs_control_on = True
     c.state.plot.fc_control_mode = "per_member"
+    # ``set_fold_change_state`` announces on the bus and mirrors the change into
+    # every *registered* scope's widgets. The scope registry is module-global,
+    # so whether that sync runs at all depends on which other tests registered a
+    # scope earlier in the session — these pass alone and fail in the full suite
+    # without the stubs. MockApp has neither collaborator.
+    c.bus = _StubBus()
+    c.widgets = types.SimpleNamespace(get_or_none=lambda _n: None,
+                                      register=lambda *_a: None)
     return c
 
 
@@ -181,7 +201,6 @@ def test_an_unresolvable_control_keeps_its_slot_labelled(qapp, ctx):
 def test_changing_a_row_writes_through_to_the_plot(qapp, ctx):
     from PySide6.QtWidgets import QComboBox, QTableWidget
 
-    ctx.bus = _StubBus()
     ctx.state.plot.fc_control_map = {}
     win = view.build_pairing_window(ctx, "bar")
     table = win.findChild(QTableWidget)
@@ -201,7 +220,6 @@ def test_changing_a_row_writes_through_to_the_plot(qapp, ctx):
 def test_clearing_a_row_removes_the_entry_rather_than_storing_an_empty_one(qapp, ctx):
     from PySide6.QtWidgets import QComboBox, QTableWidget
 
-    ctx.bus = _StubBus()
     ctx.state.plot.fc_control_map = {"DRUG": _SET("CTRL")}
     win = view.build_pairing_window(ctx, "bar")
     table = win.findChild(QTableWidget)
@@ -211,17 +229,6 @@ def test_clearing_a_row_removes_the_entry_rather_than_storing_an_empty_one(qapp,
     combo.setCurrentIndex(0)   # the "—" entry
     assert "DRUG" not in ctx.state.plot.fc_control_map
     win.deleteLater()
-
-
-class _StubBus:
-    """``set_fold_change_state`` announces on the bus; MockApp has none."""
-
-    class _Sig:
-        @staticmethod
-        def emit(*_a):
-            return None
-
-    plot_options_changed = _Sig()
 
 
 # ── the popover's entry point ────────────────────────────────────────────────

@@ -799,7 +799,7 @@ def collect_bar_items_for_group(
             if key in hidden_members:
                 continue
             (fc_ctrl_ref, fc_outcome, ctrl_stats_t, ctrl_frac_t,
-             _ctrl_n_t) = denoms.at(key, target_t)
+             ctrl_n_t) = denoms.at(key, target_t)
             fc_control_mean_at_t, fc_control_spread_at_t = ctrl_stats_t or (None, None)
             fc_control_frac_at_t, fc_control_frac_spread_at_t = ctrl_frac_t or (None, None)
             pts = member_pts_by_key[key]
@@ -822,7 +822,10 @@ def collect_bar_items_for_group(
                 else:
                     n_above_val = float(pt[4]) if len(pt) >= 5 else 0.0
                     n_above_err = n_above_rep_spread
-                if fc_vs_ctrl and fc_outcome and fc_control_mean_at_t is None:
+                fc_force_nan, fc_nan_frac, _fc_nan_n = _panel_nan_flags(
+                    fc_vs_ctrl, fc_outcome, fc_control_mean_at_t,
+                    fc_control_frac_at_t, ctrl_n_t)
+                if fc_force_nan:
                     # The tab's collector NaNs a bar whose control did not
                     # resolve; this one used to hand ``scale_bar_value`` a None
                     # denominator, which returns the value untouched — a raw
@@ -857,12 +860,31 @@ def collect_bar_items_for_group(
                         t0_mean=t0_frac if fc_vs_t0 else None,
                         t0_spread=t0_frac_spread if fc_vs_t0 else None,
                     )
+                    # The Fraction panel drops on its own denominator, as on
+                    # the tab. The Events panel is **not** normalised on this
+                    # path and its axis title carries no fold-change suffix, so
+                    # it is left as the raw statistic rather than given a ratio
+                    # whose numerator (``aggregate_group``) and denominator
+                    # (``member_n_series``) are not the same statistic. An
+                    # unverified ratio on a panel that does not claim to be
+                    # normalised would be the worse of the two.
+                    if fc_nan_frac:
+                        f, frac_spread = float("nan"), 0.0
                 has_mean = not math.isnan(m)
                 has_frac = has_mean and not math.isnan(f)
             else:
+                # Nothing measured here. ``n_above_total`` is bound in this
+                # branch too: it was set only inside the ``if matched:`` arm, so
+                # a member with no point at this timepoint either inherited the
+                # previous member's count into its own CSV cell — a fabricated
+                # integer on a row whose mean is NaN — or, when it came first,
+                # raised ``UnboundLocalError`` and killed the whole group.
+                # ``None`` rather than ``0``: nothing computed is not a count
+                # of zero, and the CSV writer already renders it as empty.
                 m = float("nan"); s = 0.0
                 f = float("nan"); frac_spread = 0.0
-                n_above_val = 0.0; n_above_err = 0.0
+                n_above_val = float("nan"); n_above_err = 0.0
+                n_above_total = None
                 has_mean = False; has_frac = False
             # Labels stay single-line: cluster headers show the primary
             # identity; per-bar labels show the secondary.

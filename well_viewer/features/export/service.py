@@ -237,8 +237,15 @@ def bar_metric_row(
         ),
         f"err_n_above_{band_lbl}": f"{n_above_spread:.6f}" if n_above_spread > 0 else "",
         "n_above_replicate_mean": _num(n_above) if has else "",
+        # A two-well set holding 5 and 5 events has a spread of exactly 0.0,
+        # which is a measurement. Blanking it here conflated "the replicates
+        # agreed" with "there was one replicate and nothing could be computed"
+        # — the second is what the header row's own documentation promises the
+        # blank means. The unit column beside it says which case it is: empty
+        # there, and only there, means there was nothing to spread over.
         f"err_n_above_replicate_{band_lbl}": (
-            _num(n_above_spread) if n_above_spread > 0 else ""),
+            _num(n_above_spread) if replicate_unit and math.isfinite(
+                float(n_above_spread)) else ""),
         "n_above_replicate_unit": replicate_unit,
         "threshold": f"{threshold:.4f}",
         "metric": metric,

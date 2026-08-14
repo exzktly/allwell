@@ -1848,8 +1848,10 @@ class BatchExportPanel(QWidget):
             collect_line_series_for_group,
         )
 
-        fc = _fc.coerce_fc_state(fc_state)
-        fc_active = fc.active
+        _panel_fc = _fc.coerce_fc_state(fc_state)
+        fc_vs_ctrl = _panel_fc.vs_control_on
+        fc_vs_t0 = _panel_fc.vs_t0_on
+        fc_active = _panel_fc.active
         _val_col = val_col if val_col is not None else self._export_val_col_for("_line_channel_cb")
 
         # Four stacked panels — identical to the tab (lineplot/tab_view.py).

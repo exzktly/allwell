@@ -903,6 +903,43 @@ def selected_bar_wells(ctx, active_rsets) -> list[str]:
     )
 
 
+def _drop_hidden_columns(ctx, wells, colors, short, full, pool_groups):
+    """Remove the columns ``Controls: hide from plot`` takes out of the plot.
+
+    The bar collector already drops them, but the per-cell modes build their
+    own column list straight from the drag order — so without this, switching
+    the tab to violin or beeswarm re-exposed the columns bar mode removed.
+    """
+    hidden = _hidden_per_cell_members(ctx)
+    if not hidden:
+        return wells, colors, short, full, pool_groups
+    keep = [i for i, w in enumerate(wells) if w not in hidden]
+    return (
+        [wells[i] for i in keep],
+        [colors[i] for i in keep],
+        [short[i] for i in keep],
+        [full[i] for i in keep],
+        None if pool_groups is None
+        else {k: v for k, v in pool_groups.items() if k not in hidden},
+    )
+
+
+def _hidden_per_cell_members(ctx) -> frozenset:
+    """Members the ``Controls: hide from plot`` toggle removes, for this tab."""
+    from well_viewer.domain import fold_change as _fc
+
+    fc = _fc.fold_change_state(ctx)
+    if not (fc.vs_control_on and fc.per_member and fc.control_render == "hidden"):
+        return frozenset()
+    controls = _pairing_mod.build_per_member_controls(
+        ctx, _members.plotted_member_keys(ctx, "bar"), fc.control_map_dict,
+        member_wells=_members.member_wells(ctx, "bar"),
+        member_rsets=_members.member_replicate_sets(ctx),
+        render=fc.control_render,
+    )
+    return frozenset(controls.hidden_members())
+
+
 def draw_per_cell_bar_mode(
     ctx,
     *,
@@ -988,6 +1025,13 @@ def draw_per_cell_bar_mode(
     # for. Labels stay single-line: cluster headers carry the primary
     # identity so per-bar labels only need to carry the secondary axis
     # (the variable that changes inside the cluster).
+    # ``Controls: hide from plot`` drops a member from the bar collector, so it
+    # has to drop it here too — the per-cell modes build their own column list
+    # straight from the drag order, and without this switching the tab to
+    # violin or beeswarm re-exposed the columns bar mode had removed.
+    base_wells, base_colors, base_short, base_full, pool_groups = _drop_hidden_columns(
+        ctx, base_wells, base_colors, base_short, base_full, pool_groups)
+
     plot_wells: list[str] = []
     plot_colors: list[str] = []
     plot_labels: list[str] = []

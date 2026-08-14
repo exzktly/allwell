@@ -7701,6 +7701,9 @@ The map (each rule links to the test that holds it):
 | One definition of "is this well complete" — no module outside `pipeline/completeness.py` spells out the dataset-health states as its own roster, so the states a plate legend paints cannot diverge from the states the classifier returns (§6.2, §6b) | `tests/test_no_second_completeness_predicate.py`, with its bite cases in `tests/test_guards_bite.py` |
 | `domain/` & `data/` never import `features/` (the layering) | `tests/test_layering.py` |
 | No silent broad-except anywhere (§15) | `tests/test_no_silent_except.py` |
+| No function reads a name nothing binds. Ruff does not flag it, and the shape it misses is what a rename leaves behind — replace `a, b, c = thing()` with `obj = thing()` and every downstream `a` becomes a `NameError` no linter mentions, often on a path only the slow lane reaches | `tests/test_no_unbound_names.py` (`symtable`, so closures and comprehensions are not false positives), with bite cases in `tests/test_guards_bite.py` |
+| The fold-change request is read by name, never unpacked as the tuple it used to be | `tests/test_fc_state_is_not_unpacked.py`, with bite cases in `tests/test_guards_bite.py` |
+| Every `ControlOutcome` is produced by a real collection and consumed by the editor, the status line and the CSV | `tests/test_control_outcome_roster.py` |
 | `runtime_app` line/attr ratchets + state-package import boundary | `tests/test_guardrails.py` |
 | No `ctx.app` — features reach the window shell only through the frozen `ViewerContext` accessors (§5.9) | `tests/test_ctx_app_burndown.py` (`CTX_APP_BUDGET = 0`) |
 | No `ctx._x` scratch attributes, and no `ctx`-taking function called with the raw `app` / `self` — including the module-qualified `sc.foo(app)` spelling. Call sites are scanned in `well_viewer/` **and** `tests/`, since a test handing a real-app fixture to a `ctx` function is the same defect (§5.9) | `tests/test_frozen_ctx_guardrail.py` |

@@ -999,3 +999,98 @@ def test_fc_unpack_guard_clears_reading_it_by_name(tmp_path, monkeypatch):
     exc = _run_scan(monkeypatch, "tests.test_fc_state_is_not_unpacked",
                     "test_the_fold_change_request_is_read_by_name", [f])
     assert exc is None, f"the guard fired on the correct spelling: {exc}"
+
+
+FC_UNPACK_METHOD_VIOLATION = (
+    "class Panel:\n"
+    "    def run(self):\n"
+    "        fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = self._fc_state()\n"
+    "        return fc_vs_ctrl\n"
+)
+
+
+def test_fc_unpack_guard_sees_the_panels_own_accessor(tmp_path, monkeypatch):
+    """The spelling both Batch Export panels carried before the typed object.
+
+    A guard that only knew the two module-level producers would have been
+    blind to exactly the shape it was written for.
+    """
+    f = _write(tmp_path, "well_viewer/features/batch_export/bar_panel.py",
+               FC_UNPACK_METHOD_VIOLATION)
+    exc = _run_scan(monkeypatch, "tests.test_fc_state_is_not_unpacked",
+                    "test_the_fold_change_request_is_read_by_name", [f])
+    assert exc is not None, "the method-call spelling walked past the guard"
+
+
+# ── no function reads a name nothing binds ──────────────────────────────────
+#
+# The shapes below are the two that really shipped, plus the closure and
+# comprehension forms a hand-rolled AST walk gets wrong — those must stay
+# *clear*, or the guard drowns in false positives and gets deleted.
+
+UNBOUND_VIOLATIONS = {
+    # `barplot/renderer._set_frac_ylim`, after the tuple unpack was replaced.
+    "renamed-binding": (
+        "def f(ctx):\n"
+        "    fc = get_state(ctx)\n"
+        "    if fc_on or fc_t0:\n"
+        "        return\n"
+    ),
+    # `base_panel._render_group_figure`: a method, so a scan that only walks
+    # module-level functions never reaches it.
+    "inside-a-method": (
+        "class Panel:\n"
+        "    def render(self, fc_state):\n"
+        "        fc = coerce(fc_state)\n"
+        "        return fc_vs_ctrl and fc.active\n"
+    ),
+}
+
+UNBOUND_CLEAN = {
+    # A closure reading its enclosing function's locals.
+    "closure": (
+        "def outer(ctx, threshold):\n"
+        "    def inner(key):\n"
+        "        return ctx.get(key), threshold\n"
+        "    return inner\n"
+    ),
+    # A comprehension reading the enclosing scope.
+    "comprehension": (
+        "def f(items, gate):\n"
+        "    return [i for i in items if i > gate]\n"
+    ),
+    # `except … as` and `global`.
+    "except-and-global": (
+        "COUNT = 0\n"
+        "def f():\n"
+        "    global COUNT\n"
+        "    try:\n"
+        "        COUNT += 1\n"
+        "    except ValueError as exc:\n"
+        "        return str(exc)\n"
+    ),
+    # A method reading its own module's globals and its own class.
+    "module-globals": (
+        "import math\n"
+        "LIMIT = 3\n"
+        "class C:\n"
+        "    def f(self):\n"
+        "        return math.sqrt(LIMIT) + self.x\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(UNBOUND_VIOLATIONS))
+def test_unbound_name_guard_catches(shape):
+    from tests.test_no_unbound_names import offenders_in
+    found = offenders_in(UNBOUND_VIOLATIONS[shape], "probe.py")
+    assert found, f"the {shape} spelling walked past the guard"
+
+
+@pytest.mark.parametrize("shape", sorted(UNBOUND_CLEAN))
+def test_unbound_name_guard_clears(shape):
+    """A false positive here gets the guard deleted, so these matter as much
+    as the violations do."""
+    from tests.test_no_unbound_names import offenders_in
+    found = offenders_in(UNBOUND_CLEAN[shape], "probe.py")
+    assert not found, f"the guard fired on a legitimate {shape}: {found}"

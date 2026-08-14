@@ -449,6 +449,47 @@ def summary_text(controls: PerMemberControls) -> str:
     return f"Per-sample control ({resolved}/{total})"
 
 
+def tick_labels(items) -> list[str]:
+    """The x-tick text for each bar, naming its control when they differ.
+
+    Under one global control the axis title already says which one and every
+    bar shares it, so a per-bar line would repeat it n times. Under per-sample
+    controls the axis title collapses to ``vs own control`` once three or more
+    are in play, and without this the figure cannot be read without its CSV
+    beside it — the shortfall the whole feature exists to prevent, applied to
+    the feature itself.
+
+    A member that failed to pair always says so, however many controls are in
+    play: an empty slot beside bars that drew is the exact ambiguity the
+    outcome vocabulary exists for.
+    """
+    distinct = {
+        getattr(it.fc_control, "display_name", "")
+        for it in items
+        if getattr(it, "fc_outcome", "") in (ControlOutcome.OK, ControlOutcome.SELF)
+        and getattr(it, "fc_control", None) is not None
+    }
+    name_them = len(distinct) > 1
+    out: list[str] = []
+    for item in items:
+        outcome = getattr(item, "fc_outcome", "")
+        if not outcome:
+            out.append(item.display)
+        elif outcome == ControlOutcome.UNMAPPED:
+            out.append(f"{item.display}\nno control")
+        elif outcome in (ControlOutcome.CONTROL_UNRESOLVED,
+                         ControlOutcome.CONTROL_NO_SAMPLE):
+            out.append(f"{item.display}\ncontrol missing")
+        elif not name_them:
+            out.append(item.display)
+        elif outcome == ControlOutcome.SELF:
+            out.append(f"{item.display}\n(ctrl)")
+        else:
+            name = getattr(item.fc_control, "display_name", "")
+            out.append(f"{item.display}\n\u00f7 {name}" if name else item.display)
+    return out
+
+
 def shortfall_from_items(items, *, timepoints=None) -> str:
     """The status line for a collected plot, coalesced by reason.
 

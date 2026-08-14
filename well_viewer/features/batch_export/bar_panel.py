@@ -465,8 +465,26 @@ class BarBatchExportPanel(BatchExportPanel):
         _metric_key = self._selected_export_metric_key("_bar_channel_cb")
         _metric_label = _MLB.get(_metric_key, "Mean Intensity")
         _thr_q = threshold_qualifier(_metric_key)
+        # The plain token, and the controls the *exported* figure used. Passing
+        # the reference itself printed its dataclass repr into the title; its
+        # sibling in ``base_panel`` was converted and this one was not.
+        _fc_controls = None
+        if fc_vs_ctrl and fc.per_member:
+            from well_viewer.domain.fold_change_pairing import (
+                build_per_member_controls,
+            )
+            _fc_controls = build_per_member_controls(
+                self._ctx,
+                [r.name for r in grp.members] + list(grp.solo_wells),
+                fc.control_map_dict,
+                member_wells=({r.name: list(r.wells) for r in grp.members}
+                              | {w: [w] for w in grp.solo_wells}),
+                render=fc.control_render,
+            )
         _fc_suffix = _fc.fold_change_suffix(
-            fc_vs_ctrl, fc_vs_t0, fc_ctrl_lbl,
+            fc_vs_ctrl, fc_vs_t0,
+            fc_ctrl_lbl.display_name if fc_ctrl_lbl is not None else "",
+            controls=_fc_controls,
         ) if fc_active else ""
         # The mean panel's title varies by display mode; the bar path
         # below preserves the legacy "\u00b1 SD/SEM" suffix, beeswarm /

@@ -24,13 +24,17 @@ from well_viewer.domain.fold_change_pairing import (
     PerMemberControls,
     auto_pair,
     build_per_member_controls,
+    control_denominators,
     shortfall_text,
     summary_text,
 )
+from well_viewer.domain.fold_change_state import FoldChangeState
 from well_viewer.domain.plot_members import member_wells, plotted_member_keys
 
 from tests.conftest import MockApp, make_agg
 
+
+_SET = ControlRef.for_replicate_set
 
 _SETS = [
     {"name": "CTRL", "wells": ["A01", "A02"], "hidden": False},
@@ -301,6 +305,81 @@ def test_self_render_hides_nothing(ctx):
 
 def test_an_unknown_render_falls_back_to_self(ctx):
     assert _build(ctx, {}, render="raw").render == "self"
+
+
+# ── the per-member denominator lookup the collectors share ───────────────────
+
+class _FakeCache:
+    """A ``ControlSeriesCache``-shaped stub that records what it was asked."""
+
+    def __init__(self, stats=None, frac=None, n=None):
+        self._stats, self._frac, self._n = stats, frac, n
+        self.asked: list = []
+
+    def stats_at(self, ref, t):
+        self.asked.append((ref, t))
+        return self._stats
+
+    def frac_at(self, ref, t):
+        return self._frac
+
+    def n_at(self, ref, t):
+        return self._n
+
+
+def test_the_axis_being_off_asks_the_cache_nothing(ctx):
+    cache = _FakeCache(stats=(1.0, 0.0))
+    denoms = control_denominators(ctx, cache, FoldChangeState(), [])
+    assert denoms.at("DRUG", 0.0) == (None, "", None, None, None)
+    assert cache.asked == []
+
+
+def test_an_unresolved_member_asks_the_cache_nothing(ctx):
+    """No point aggregating a denominator that cannot exist."""
+    cache = _FakeCache(stats=(1.0, 0.0))
+    fc = FoldChangeState(vs_control_on=True, control_mode="per_member",
+                         control_map=(("DRUG", _SET("DELETED")),))
+    denoms = control_denominators(
+        ctx, cache, fc, ["DRUG"], scope_wells={"DRUG": ["B01", "B02"]})
+    _ref, outcome, mean, _f, _n = denoms.at("DRUG", 0.0)
+    assert outcome is ControlOutcome.CONTROL_UNRESOLVED
+    assert mean is None
+    assert cache.asked == []
+
+
+def test_a_control_absent_at_the_timepoint_becomes_the_timepoint_outcome(ctx):
+    cache = _FakeCache(stats=None)
+    sink: set = set()
+    fc = FoldChangeState(vs_control_on=True, control=_SET("CTRL"))
+    denoms = control_denominators(ctx, cache, fc, [], miss_sink=sink)
+    _ref, outcome, mean, _f, _n = denoms.at("DRUG", 7.0)
+    assert outcome is ControlOutcome.CONTROL_NO_SAMPLE
+    assert mean is None
+    assert sink == {7.0}, "the renderer's status line reads this"
+
+
+def test_a_single_control_naming_nothing_is_unresolved_not_absent(ctx):
+    """Two different sentences for the user, and the same empty bar."""
+    cache = _FakeCache(stats=(1.0, 0.0))
+    fc = FoldChangeState(vs_control_on=True, control=_SET("DELETED"))
+    denoms = control_denominators(ctx, cache, fc, [])
+    assert denoms.at("DRUG", 0.0)[1] is ControlOutcome.CONTROL_UNRESOLVED
+
+
+def test_each_panel_reports_its_own_denominator(ctx):
+    """A control with a mean but no fraction series."""
+    cache = _FakeCache(stats=(2.0, 0.1), frac=None, n=(5.0, 0.0))
+    fc = FoldChangeState(vs_control_on=True, control=_SET("CTRL"))
+    denoms = control_denominators(ctx, cache, fc, [])
+    _ref, outcome, mean, frac, n = denoms.at("DRUG", 0.0)
+    assert outcome is ControlOutcome.OK
+    assert (mean, frac, n) == ((2.0, 0.1), None, (5.0, 0.0))
+
+
+def test_hidden_members_are_empty_under_a_single_control(ctx):
+    fc = FoldChangeState(vs_control_on=True, control=_SET("CTRL"))
+    denoms = control_denominators(ctx, _FakeCache(), fc, [])
+    assert denoms.hidden_members == frozenset()
 
 
 # ── the auto-pair chunker ────────────────────────────────────────────────────

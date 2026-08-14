@@ -603,6 +603,11 @@ def fold_change_state(ctx) -> FoldChangeState:
         vs_control_on=bool(plot.fc_vs_control_on),
         control=plot.fc_control,
         vs_t0_on=bool(plot.fc_vs_t0_on),
+        control_mode=str(plot.fc_control_mode or "single"),
+        # Sorted so two reads of unchanged state produce equal — and equally
+        # hashing — objects, whatever order the mapping happens to iterate in.
+        control_map=tuple(sorted((plot.fc_control_map or {}).items())),
+        control_render=str(plot.fc_control_render or "self"),
     )
 
 

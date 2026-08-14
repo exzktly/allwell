@@ -52,6 +52,15 @@ class FoldChangeState:
     vs_control_on: bool = False
     control: ControlRef | None = None
     vs_t0_on: bool = False
+    #: ``"single"`` — ``control`` divides everything. ``"per_member"`` —
+    #: ``control_map`` gives each plotted member its own.
+    control_mode: str = "single"
+    #: ``((member key, ControlRef), …)``, sorted. A tuple rather than a dict so
+    #: the state stays hashable; :attr:`control_map_dict` is the lookup form.
+    control_map: tuple = ()
+    #: What a member that is itself somebody's control draws as — ``"self"``
+    #: or ``"hidden"``.
+    control_render: str = "self"
 
     @property
     def active(self) -> bool:
@@ -59,14 +68,32 @@ class FoldChangeState:
         return bool(self.vs_control_on or self.vs_t0_on)
 
     @property
+    def per_member(self) -> bool:
+        """True when each member resolves its own control."""
+        return self.control_mode == "per_member"
+
+    @property
+    def control_map_dict(self) -> dict:
+        return dict(self.control_map)
+
+    @property
     def wants_control(self) -> bool:
-        """True when a control denominator is both requested and named.
+        """True when a control denominator is requested and there is one to find.
 
         The condition every collector guards its control lookup with. Keeping
         it here rather than re-spelling ``vs_control_on and control`` at each
         site is what stops the two halves drifting apart.
+
+        In per-member mode this is True even with an empty mapping, and that is
+        deliberate: "the user asked for per-sample controls and mapped nobody"
+        is a state to report, member by member, not a quiet fall-through to raw
+        values under a fold-change axis.
         """
-        return bool(self.vs_control_on and self.control is not None)
+        if not self.vs_control_on:
+            return False
+        if self.per_member:
+            return True
+        return self.control is not None
 
 
 #: The "give me raw values" sentinel. Frozen, so sharing one module-level

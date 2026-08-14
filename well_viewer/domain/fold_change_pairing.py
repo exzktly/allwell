@@ -63,6 +63,16 @@ class ControlOutcome(str, Enum):
     #: Stamped by the collector, never by :func:`build_per_member_controls`.
     CONTROL_NO_SAMPLE = "control_no_sample"
 
+    def __str__(self) -> str:
+        """The bare value, because these are written to CSV cells.
+
+        A ``str``-mixin enum inherits ``Enum.__str__``, so ``str(OK)`` is
+        ``"ControlOutcome.OK"`` — which is what would have landed in the
+        ``fold_change_outcome`` column and in every figure annotation. It reads
+        like a leaked repr because it is one.
+        """
+        return self.value
+
 
 #: Outcomes that leave a member with a usable denominator.
 RESOLVED_OUTCOMES = frozenset({ControlOutcome.OK, ControlOutcome.SELF})
@@ -228,6 +238,94 @@ def _control_for(member: str, mapping: dict, owner_of: dict):
         if inherited is not None:
             return inherited, str(owner)
     return None, ""
+
+
+# ── what a collector asks, member by member ──────────────────────────────────
+
+class ControlDenominators:
+    """The control's mean / fraction / events for one member at one timepoint.
+
+    Both plotting tabs need the same three lookups plus the same outcome
+    bookkeeping, and both used to hoist the three values once per timepoint and
+    share them across every member — which is why one missing denominator NaNed
+    every bar on the plate. This makes the lookup per member and reports each
+    panel's denominator separately, because a single "the control is missing"
+    flag that only tested the mean left the Fraction panel drawing a raw value
+    under a fold-change label.
+
+    Construct one per redraw over a :class:`ControlSeriesCache`; it holds no
+    state of its own beyond the resolved mapping, so it must not outlive the
+    redraw the cache belongs to.
+    """
+
+    def __init__(self, cache, *, on: bool, controls: PerMemberControls | None = None,
+                 single=None, single_outcome: str = "", miss_sink: set | None = None):
+        self._cache = cache
+        self._on = bool(on)
+        self._controls = controls
+        self._single = single
+        self._single_outcome = single_outcome
+        self._miss_sink = miss_sink
+
+    @property
+    def hidden_members(self) -> frozenset:
+        """Members the render mode drops from the plot entirely."""
+        if self._controls is None:
+            return frozenset()
+        return frozenset(self._controls.hidden_members())
+
+    def at(self, member_key: str, target_t: float):
+        """``(control, outcome, mean, frac, n)`` — each of the last three a
+        ``(value, spread)`` pair or ``None``.
+
+        ``outcome`` is ``""`` when the control axis does not apply here at all;
+        anything else is a :class:`ControlOutcome`.
+        """
+        if not self._on:
+            return None, "", None, None, None
+        if self._controls is None:
+            ref, outcome = self._single, self._single_outcome
+        else:
+            rec = self._controls.get(member_key)
+            ref, outcome = rec.control, rec.outcome
+        if outcome in (ControlOutcome.UNMAPPED, ControlOutcome.CONTROL_UNRESOLVED):
+            return ref, outcome, None, None, None
+        stats = self._cache.stats_at(ref, target_t)
+        if stats is None:
+            if self._miss_sink is not None:
+                self._miss_sink.add(float(target_t))
+            outcome = ControlOutcome.CONTROL_NO_SAMPLE
+        return (ref, outcome, stats,
+                self._cache.frac_at(ref, target_t),
+                self._cache.n_at(ref, target_t))
+
+
+def control_denominators(ctx, cache, fc, member_keys, *, scope_wells=None,
+                         member_rsets=None, miss_sink=None) -> ControlDenominators:
+    """Build a :class:`ControlDenominators` for one collection pass.
+
+    Resolves the per-member mapping when *fc* asks for one, and otherwise
+    settles the single control's own outcome once — which separates "the
+    control names nothing that is loaded" from "the control has no data at the
+    timepoint drawn". Those are the same empty bar and different sentences.
+    """
+    if not fc.vs_control_on:
+        return ControlDenominators(cache, on=False)
+    if fc.per_member:
+        controls = build_per_member_controls(
+            ctx, member_keys, fc.control_map_dict,
+            member_wells=scope_wells, member_rsets=member_rsets,
+            render=fc.control_render,
+        )
+        return ControlDenominators(cache, on=True, controls=controls,
+                                   miss_sink=miss_sink)
+    outcome = (
+        ControlOutcome.CONTROL_UNRESOLVED
+        if fc.control is None or not resolve_control_wells(ctx, fc.control)
+        else ControlOutcome.OK
+    )
+    return ControlDenominators(cache, on=True, single=fc.control,
+                               single_outcome=outcome, miss_sink=miss_sink)
 
 
 # ── bulk entry ───────────────────────────────────────────────────────────────

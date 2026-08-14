@@ -85,18 +85,6 @@ def test_active(vs_ctrl, vs_t0, expected):
 
 def test_fc_state_off_is_off():
     assert FC_STATE_OFF.active is False
-    assert FC_STATE_OFF.wants_control is False
-
-
-@pytest.mark.parametrize("vs_ctrl,ref,expected", [
-    (True, ControlRef.legacy("DMSO"), True),
-    (True, None, False),      # axis on, nothing named — nothing to resolve
-    (False, ControlRef.legacy("DMSO"), False),  # a remembered control, axis off
-    (False, None, False),
-])
-def test_wants_control(vs_ctrl, ref, expected):
-    fc = FoldChangeState(vs_control_on=vs_ctrl, control=ref)
-    assert fc.wants_control is expected
 
 
 # ── coercion ─────────────────────────────────────────────────────────────────

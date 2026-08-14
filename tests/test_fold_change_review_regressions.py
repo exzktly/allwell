@@ -69,11 +69,15 @@ def test_a_member_with_no_point_reports_no_count(sparse_group_ctx, order):
         fc_state=FC_STATE_OFF)
     by_key = {i.key: i for i in items}
     assert by_key["A02"].has_mean is False
-    assert by_key["A02"].n_above_total is None, (
+    assert math.isnan(by_key["A02"].n_above), (
         "a count inherited from the member before it, on a row with no data"
     )
-    assert math.isnan(by_key["A02"].n_above)
-    assert by_key["A01"].n_above_total is not None, "the member that has data"
+    # Solo wells are not replicate aggregations, so neither reports a
+    # cross-well total. What separates them is the drawn value: the member with
+    # a point has a finite one, the member without it does not.
+    assert by_key["A01"].n_above_total is None
+    assert by_key["A02"].n_above_total is None
+    assert by_key["A01"].n_above == 5.0, "the member that has data"
 
 
 def test_the_order_of_the_members_does_not_change_the_answer(sparse_group_ctx):

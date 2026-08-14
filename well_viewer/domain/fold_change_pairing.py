@@ -214,11 +214,18 @@ def build_per_member_controls(ctx, member_keys, control_map, *,
         records[key] = MemberControl(
             key, ref, ctrl_wells, outcome, inherited_from)
 
-    plotted = set(keys)
+    # "Unused" means no member is pairing through this entry — which is not the
+    # same as "no plotted member is named by it". An entry keyed on a replicate
+    # set whose *wells* are the plotted members is consumed by every one of them
+    # through ``_control_for``'s inheritance path, and reporting it unused put
+    # the window in contradiction with itself: rows reading "paired (from
+    # TREAT)" above a footer reading "Unused assignments (1): TREAT → CTRL".
+    consumed = set(keys) | {
+        rec.inherited_from for rec in records.values() if rec.inherited_from}
     unused = tuple(
         (str(k), ControlRef.coerce(v))
         for k, v in mapping.items()
-        if str(k) not in plotted and ControlRef.coerce(v) is not None
+        if str(k) not in consumed and ControlRef.coerce(v) is not None
     )
     return PerMemberControls(
         order=tuple(keys), by_member=records,
@@ -325,6 +332,27 @@ class ControlDenominators:
                 self._cache.frac_at(ref, target_t),
                 self._cache.n_at(ref, target_t))
 
+    def baseline_at(self, member_key: str, target_t):
+        """``(mean, frac, n)`` for this member's control at a **baseline** tp.
+
+        What cross-axis stacking needs and :meth:`at` is wrong for: the
+        baseline timepoint is not a timepoint being drawn, so a control with no
+        sample there is not a shortfall in the plot and must not land in the
+        miss sink or turn the member's outcome into ``control_no_sample``. Each
+        element is a ``(value, spread)`` pair or ``None``; all three are
+        ``None`` when the axis is off or the control did not resolve.
+        """
+        none3 = (None, None, None)
+        if not self._on or target_t is None:
+            return none3
+        ref, outcome = self.control_for(member_key)
+        if ref is None or outcome in (ControlOutcome.UNMAPPED,
+                                      ControlOutcome.CONTROL_UNRESOLVED):
+            return none3
+        return (self._cache.stats_at(ref, target_t),
+                self._cache.frac_at(ref, target_t),
+                self._cache.n_at(ref, target_t))
+
 
 def control_denominators(ctx, cache, fc, member_keys, *, scope_wells=None,
                          member_rsets=None, miss_sink=None) -> ControlDenominators:
@@ -354,26 +382,53 @@ def control_denominators(ctx, cache, fc, member_keys, *, scope_wells=None,
                                single_outcome=outcome, miss_sink=miss_sink)
 
 
+def panel_nan_flags(axis_on, outcome, ctrl_mean, ctrl_frac, ctrl_n):
+    """Which of the three panels lost their denominator, ``(mean, frac, n)``.
+
+    Each panel drops on its **own** denominator. While one flag governed all
+    three it tested only the mean, so a control with a mean but no fraction
+    series left the Fraction panel drawing a raw value under a fold-change
+    label — a number that is not a fold change on an axis that says it is.
+
+    All three arguments are the denominator *value* (or ``None``), never the
+    ``(value, spread)`` pair: a pair whose value is ``None`` would read as
+    present here, and only the caches happening to return ``None`` for the
+    whole pair kept that from mattering.
+    """
+    live = bool(axis_on and outcome)
+    return (live and ctrl_mean is None,
+            live and ctrl_frac is None,
+            live and ctrl_n is None)
+
+
 def normalize_member_pts(pts, denoms: ControlDenominators, member_key: str, *,
                          fc, n_per_fov: bool, baseline_tp,
                          op_ctrl: str, op_t0: str, miss_sink=None) -> list:
     """Normalize one member's AggPoints against **its own** control.
 
-    The Line tab and the batch line runner both do this, and both used to hand
-    ``normalize_pts`` a control series that could be empty. An empty one skips
-    the control axis without complaint, so the figure carried raw values under
-    a fold-change axis label with nothing to say so — on the batch path, in an
-    export nobody watched being drawn. A member whose control did not resolve
-    is blanked instead, which is the answer its bar gets.
+    The Line tab and the batch line runner both do this, and both would
+    otherwise hand ``normalize_pts`` a control series that can be empty. An
+    empty one skips its axis without complaint, so the figure carries raw
+    values under a fold-change axis label with nothing to say so — on the batch
+    path, in an export nobody watched being drawn.
+
+    The rule is per panel, the same one :func:`panel_nan_flags` applies on the
+    bar side: a member whose control has a mean but no fraction series keeps
+    its normalized mean and loses only the fraction. Blanking all three on the
+    mean's denominator alone would throw away two panels that were computable,
+    and blanking none of them would draw the raw fraction.
     """
     from well_viewer.domain.fold_change import blank_point, normalize_pts
 
     if not pts or not fc.active:
         return pts
     _ref, outcome, ctrl_stats, ctrl_frac, ctrl_n = denoms.series_for(member_key)
-    if fc.vs_control_on and outcome and not ctrl_stats:
+    nan_mean, nan_frac, nan_n = panel_nan_flags(
+        fc.vs_control_on, outcome,
+        ctrl_stats or None, ctrl_frac or None, ctrl_n or None)
+    if nan_mean and nan_frac and nan_n:
         return [blank_point(pt) for pt in pts]
-    return normalize_pts(
+    out = normalize_pts(
         pts,
         control_stats=ctrl_stats or None,
         control_frac_stats=ctrl_frac or None,
@@ -386,6 +441,10 @@ def normalize_member_pts(pts, denoms: ControlDenominators, member_key: str, *,
         op_t0=op_t0,
         miss_sink=miss_sink,
     )
+    if nan_mean or nan_frac or nan_n:
+        out = [blank_point(pt, mean=nan_mean, frac=nan_frac, n=nan_n)
+               for pt in out]
+    return out
 
 
 # ── bulk entry ───────────────────────────────────────────────────────────────
@@ -441,12 +500,17 @@ def summary_text(controls: PerMemberControls) -> str:
     It reports **resolved out of plotted**, not entries out of entries: a
     mapping with twenty-four entries of which two name deleted groups is not
     complete, and a count taken from the mapping would call it complete.
+
+    "Plotted" excludes the members the ``hidden`` render mode removes, so the
+    denominator counts what is on screen. Counting a hidden pure control read
+    ``2/2`` beside a single visible bar.
     """
-    total = len(controls.order)
-    if not total:
+    hidden = set(controls.hidden_members())
+    visible = [k for k in controls.order if k not in hidden]
+    if not visible:
         return "Per-sample control (nothing plotted)"
-    resolved = controls.resolved_count()
-    return f"Per-sample control ({resolved}/{total})"
+    resolved = sum(1 for k in visible if controls.get(k).resolved)
+    return f"Per-sample control ({resolved}/{len(visible)})"
 
 
 def tick_labels(items) -> list[str]:
@@ -463,8 +527,13 @@ def tick_labels(items) -> list[str]:
     play: an empty slot beside bars that drew is the exact ambiguity the
     outcome vocabulary exists for.
     """
+    # Distinct by the **reference**, matching ``distinct_controls``. Keying on
+    # ``display_name`` collapsed ``A01`` the well and ``A01`` the replicate set
+    # into one control — the exact collision ``ControlRef`` exists to make
+    # unrepresentable — so a plate using both would drop the per-bar lines that
+    # say which is which, on the one layout that needs them most.
     distinct = {
-        getattr(it.fc_control, "display_name", "")
+        it.fc_control
         for it in items
         if getattr(it, "fc_outcome", "") in (ControlOutcome.OK, ControlOutcome.SELF)
         and getattr(it, "fc_control", None) is not None
@@ -490,26 +559,15 @@ def tick_labels(items) -> list[str]:
     return out
 
 
-def shortfall_from_items(items, *, timepoints=None) -> str:
-    """The status line for a collected plot, coalesced by reason.
+def _shortfall_phrase(counts: dict, timepoints=None) -> str:
+    """Outcome counts, coalesced by reason into one comma-joined phrase.
 
-    Reads each item's own ``fc_outcome`` rather than a set of timepoints
-    collected on the side. Under one global control a set of timepoints was
-    the whole story — every bar failed or none did — but per-sample controls
-    make partial failure ordinary, and "control missing at t=24" says nothing
-    about *which* control or *how many* bars it cost.
-
-    *timepoints* is the collector's miss set, still worth naming when the only
-    problem is that the control has no sample somewhere.
+    Coalesced rather than listed per member, so a plate where every member is
+    unmapped reads as one sentence instead of twenty-four. The two callers
+    below differ only in where the counts come from and what wraps the phrase;
+    they each carried their own copy of this, which is two wordings for one
+    fact and no way to keep them equal.
     """
-    counts: dict = {}
-    for item in items:
-        outcome = getattr(item, "fc_outcome", "")
-        if not outcome or outcome in (ControlOutcome.OK, ControlOutcome.SELF):
-            continue
-        counts[outcome] = counts.get(outcome, 0) + 1
-    if not counts:
-        return ""
     parts = []
     if counts.get(ControlOutcome.UNMAPPED):
         parts.append(f"{counts[ControlOutcome.UNMAPPED]} with no control")
@@ -523,24 +581,40 @@ def shortfall_from_items(items, *, timepoints=None) -> str:
         parts.append(
             f"{counts[ControlOutcome.CONTROL_NO_SAMPLE]} whose control has no "
             f"data at{when or ' this timepoint'}")
-    return "Fold change: " + ", ".join(parts) + " — drawn blank."
+    return ", ".join(parts)
+
+
+def shortfall_from_items(items, *, timepoints=None) -> str:
+    """The status line for a collected plot, coalesced by reason.
+
+    Reads each item's own ``fc_outcome`` rather than a set of timepoints
+    collected on the side. Under one global control a set of timepoints was
+    the whole story — every bar failed or none did — but per-sample controls
+    make partial failure ordinary, and "control missing at t=24" says nothing
+    about *which* control or *how many* bars it cost.
+
+    *timepoints* is the collector's miss set, still worth naming when the only
+    problem is that the control has no sample somewhere. This is the one path
+    that can report ``control_no_sample`` at all: the collectors stamp it, and
+    :func:`build_per_member_controls` — which knows nothing of timepoints —
+    cannot.
+    """
+    counts: dict = {}
+    for item in items:
+        outcome = getattr(item, "fc_outcome", "")
+        if not outcome or outcome in (ControlOutcome.OK, ControlOutcome.SELF):
+            continue
+        counts[outcome] = counts.get(outcome, 0) + 1
+    if not counts:
+        return ""
+    return "Fold change: " + _shortfall_phrase(counts, timepoints) + " — drawn blank."
 
 
 def shortfall_text(controls: PerMemberControls) -> str:
     """A phrase naming what fell short, or ``""`` when nothing did.
 
-    Coalesced by reason rather than listed per member, so a plate where every
-    member is unmapped reads as one sentence instead of twenty-four.
+    The editor's and the combo's version: the same phrase
+    :func:`shortfall_from_items` builds, from a resolved mapping instead of a
+    collected plot, and without the sentence around it.
     """
-    counts = controls.counts()
-    parts = []
-    if counts.get(ControlOutcome.UNMAPPED):
-        parts.append(f"{counts[ControlOutcome.UNMAPPED]} with no control")
-    if counts.get(ControlOutcome.CONTROL_UNRESOLVED):
-        parts.append(
-            f"{counts[ControlOutcome.CONTROL_UNRESOLVED]} whose control is missing")
-    if counts.get(ControlOutcome.CONTROL_NO_SAMPLE):
-        parts.append(
-            f"{counts[ControlOutcome.CONTROL_NO_SAMPLE]} whose control has no "
-            "data at this timepoint")
-    return ", ".join(parts)
+    return _shortfall_phrase(controls.counts())

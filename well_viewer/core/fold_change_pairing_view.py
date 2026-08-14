@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
 
 import theme
 from well_viewer.core.safe import swallow
+from widgets import menu_exec
 from well_viewer.domain import plot_members as _members
 from well_viewer.domain.control_ref import ControlRef
 from well_viewer.domain.fold_change_pairing import (
@@ -49,7 +50,6 @@ from well_viewer.domain.fold_change_pairing import (
     CONTROL_LAST,
     ControlOutcome,
     auto_pair,
-    build_per_member_controls,
     summary_text,
 )
 
@@ -98,14 +98,7 @@ def pairing_rows(ctx, scope: str) -> list[dict]:
     because the failure this editor exists to prevent is a *table* that
     describes a plot which does not exist.
     """
-    plot = ctx.state.plot
-    keys = _members.plotted_member_keys(ctx, scope)
-    controls = build_per_member_controls(
-        ctx, keys, dict(getattr(plot, "fc_control_map", {}) or {}),
-        member_wells=_members.member_wells(ctx, scope),
-        member_rsets=_members.member_replicate_sets(ctx),
-        render=str(getattr(plot, "fc_control_render", "self") or "self"),
-    )
+    controls = _controls(ctx, scope)
     rows: list[dict] = []
     for key in controls.order:
         rec = controls.get(key)
@@ -121,14 +114,8 @@ def pairing_rows(ctx, scope: str) -> list[dict]:
 
 
 def unused_rows(ctx, scope: str) -> list[tuple[str, object]]:
-    """Assignments whose member is not currently plotted, kept not dropped."""
-    plot = ctx.state.plot
-    controls = build_per_member_controls(
-        ctx, _members.plotted_member_keys(ctx, scope),
-        dict(getattr(plot, "fc_control_map", {}) or {}),
-        member_wells=_members.member_wells(ctx, scope),
-    )
-    return list(controls.unused)
+    """Assignments no plotted member pairs through, kept not dropped."""
+    return list(_controls(ctx, scope).unused)
 
 
 def member_control_refs(ctx, scope: str) -> dict:
@@ -277,7 +264,8 @@ def build_pairing_window(ctx, scope: str) -> QDialog | None:
             if ref is None:
                 continue
             menu.addAction(text).setData(ref)
-        chosen = menu.exec(set_all_btn.mapToGlobal(set_all_btn.rect().bottomLeft()))
+        chosen = menu_exec.exec_menu(
+            menu, set_all_btn.mapToGlobal(set_all_btn.rect().bottomLeft()))
         if chosen is None:
             return
         keys = _members.plotted_member_keys(ctx, scope)
@@ -292,7 +280,8 @@ def build_pairing_window(ctx, scope: str) -> QDialog | None:
                 act = menu.addAction(
                     f"Every {size} samples — {word} is the control")
                 act.setData((size, position))
-        chosen = menu.exec(auto_btn.mapToGlobal(auto_btn.rect().bottomLeft()))
+        chosen = menu_exec.exec_menu(
+            menu, auto_btn.mapToGlobal(auto_btn.rect().bottomLeft()))
         if chosen is None:
             return
         size, position = chosen.data()
@@ -312,13 +301,18 @@ def build_pairing_window(ctx, scope: str) -> QDialog | None:
 
 
 def _controls(ctx, scope: str):
-    plot = ctx.state.plot
-    return build_per_member_controls(
-        ctx, _members.plotted_member_keys(ctx, scope),
-        dict(getattr(plot, "fc_control_map", {}) or {}),
-        member_wells=_members.member_wells(ctx, scope),
-        member_rsets=_members.member_replicate_sets(ctx),
-    )
+    """The resolved mapping this whole window describes.
+
+    One builder for the table, the unused footer and the row chrome alike.
+    They each called ``build_per_member_controls`` themselves with slightly
+    different arguments — the footer omitted ``member_rsets``, so it could not
+    see the inheritance the table could, and the window contradicted itself on
+    screen: rows reading "paired (from TREAT)" above a footer calling the same
+    entry unused. The tab's combo builds it from ``controls_for_scope``, which
+    is this same call; sharing it is what keeps the two surfaces from drifting.
+    """
+    from well_viewer.core.fold_change_controls_view import controls_for_scope
+    return controls_for_scope(ctx, scope)
 
 
 def _control_choices(ctx) -> list[tuple[str, object]]:
@@ -339,6 +333,17 @@ def _fill_row(ctx, scope: str, table: QTableWidget, r: int, row: dict,
     combo = QComboBox(table)
     choices = _control_choices(ctx)
     saved = row["control"]
+    # Match on what the reference *resolves to*, not on the reference as
+    # stored. A mapping read from a document written before the kind was
+    # recorded is ``kind="legacy"``, which never equals the ``well`` / ``set``
+    # choice for the same token — so a control that resolves perfectly was
+    # labelled "(missing)" and pushed to the end of the list. The single
+    # control is upgraded the same way when its own combo populates.
+    if saved is not None:
+        from well_viewer.domain.fold_change import concrete_control
+        concrete = concrete_control(ctx, saved)
+        if concrete is not None:
+            saved = concrete
     # A retained assignment whose control no longer resolves keeps its slot,
     # labelled. Dropping it back to "—" would make the table agree with itself
     # and disagree with what the user set.

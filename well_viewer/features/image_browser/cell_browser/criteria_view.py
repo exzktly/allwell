@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.core.safe import swallowed
+from widgets import menu_exec
 from well_viewer.features.image_browser.cell_browser import controller as ctl
 from well_viewer.features.image_browser.cell_browser.collect import (
     cell_browser_source_wells,
@@ -270,7 +271,7 @@ def _open_gate_select(ctx) -> None:
         ctl.apply_filters(ctx)
 
     menu.aboutToHide.connect(_commit)
-    menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+    menu_exec.exec_menu(menu, btn.mapToGlobal(btn.rect().bottomLeft()))
 
 
 def _add_row(ctx, column: str = "") -> None:
@@ -343,7 +344,7 @@ def _open_multiselect(ctx, btn, selections: dict, label) -> None:
     a_all = QAction("All", menu); a_all.triggered.connect(lambda _=False: _set_all(True))
     a_none = QAction("None", menu); a_none.triggered.connect(lambda _=False: _set_all(False))
     menu.addAction(a_all); menu.addAction(a_none)
-    menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+    menu_exec.exec_menu(menu, btn.mapToGlobal(btn.rect().bottomLeft()))
 
 
 def _refresh_multiselect_label(selections: dict, label) -> None:

@@ -24,6 +24,7 @@ from well_viewer.domain.fold_change_series_cache import (
 from well_viewer.domain.fold_change_pairing import (
     control_denominators,
     normalize_member_pts,
+    shortfall_from_items,
 )
 from well_viewer.domain import plot_members as _members
 from well_viewer.core.channel_state_controller import (
@@ -579,6 +580,42 @@ def render_line_series(
     return any_ts, any_cdf, any_n
 
 
+def line_status_text(ctx, series_list, fc_misses, active_rsets, selected) -> str:
+    """What the status bar says after a line redraw.
+
+    Pure and separate from the redraw so the sentence can be asserted without
+    building a window — which matters because the failure it exists to prevent
+    is a status line that reports business as usual while traces are missing
+    from the plot.
+
+    Fold-change shortfalls come first, read off each trace's own outcome rather
+    than off the timepoint miss set. A trace whose control was never assigned,
+    or names a group that is not loaded, is blanked without any timepoint being
+    recorded as missed, so a status keyed on ``fc_misses`` alone said nothing
+    while curves vanished under a legend that still named them. The bar
+    renderer reads the same records for the same reason.
+
+    ``fc_misses`` still carries the one shortfall no outcome records — a
+    control that resolved but has no sample at some timepoints, which
+    ``normalize_pts`` drops point by point — so it is reported when the
+    per-trace outcomes are all clean.
+    """
+    shortfall = shortfall_from_items(series_list, timepoints=fc_misses)
+    if shortfall:
+        return shortfall
+    if fc_misses:
+        tps = ", ".join(f"{t:g}" for t in sorted(fc_misses))
+        return f"Fold change: control missing at t={tps} — those points dropped."
+    if active_rsets:
+        well_paths = ctx.state.dataset.well_paths
+        n_wells = sum(sum(1 for w in r.wells if w in well_paths)
+                      for r in active_rsets)
+        # threshold + band now live in the always-visible status chips (F1).
+        return f"{len(active_rsets)} replicate set(s)  ·  {n_wells} well(s)"
+    n_total = sum(len(get_rows(ctx, lbl)) for lbl in selected)
+    return f"{len(selected)} well(s)  |  {n_total:,} nuclei"
+
+
 def redraw_line_plots(
     ctx,
     *,
@@ -745,21 +782,8 @@ def redraw_line_plots(
         draggable_legends=True,
     )
 
-    if fc_misses:
-        # Tell the user which timepoints lost their bars/points to a
-        # missing control sample, so an unexpectedly empty plot isn't a
-        # silent surprise.
-        _tps = ", ".join(f"{t:g}" for t in sorted(fc_misses))
-        ctx.notify.set_status(
-            f"Fold change: control missing at t={_tps} — those points dropped."
-        )
-    elif active_rsets:
-        n_wells = sum(sum(1 for w in r.wells if w in ctx.state.dataset.well_paths) for r in active_rsets)
-        # threshold + band now live in the always-visible status chips (F1).
-        ctx.notify.set_status(f"{len(active_rsets)} replicate set(s)  ·  {n_wells} well(s)")
-    else:
-        n_total = sum(len(get_rows(ctx, l)) for l in selected)
-        ctx.notify.set_status(f"{len(selected)} well(s)  |  {n_total:,} nuclei")
+    ctx.notify.set_status(line_status_text(
+        ctx, series_list, fc_misses, active_rsets, selected))
 
     # Re-apply the Export Style sidebar's prefs so font sizes, axis
     # limits, log scale, etc. survive a redraw (matches what the bar,

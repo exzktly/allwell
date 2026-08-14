@@ -1817,6 +1817,8 @@ class BatchExportPanel(QWidget):
                             row.update(line_metric_row(
                                 pt.as_aggpoint(), ch=_ch, metric=_metric,
                                 threshold=threshold, band_lbl=band_lbl,
+                                per_fov=bool(
+                                    self._ctx.state.plot.use_fov_replicates),
                             ))
                             if fc_active and i < len(fc_pts):
                                 _attach_fc_row(

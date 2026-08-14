@@ -433,7 +433,7 @@ def normalize_pts(
     which AggPoint field the N panel actually plots: the per-FOV-mean count
     ([7]/[8]) when FOV-spread is on, else the total count ([4], no spread).
     The control denominator in *control_n_stats* must be computed for the
-    matching representation (see ``member_n_stats_series``).
+    matching representation (see :func:`member_n_series`).
 
     The vs-t0 baseline applies to the mean, fraction, and N fields alike, so
     every panel responds to "vs t0" consistently. When only ``use_t0`` is set
@@ -1035,7 +1035,10 @@ def control_axis_phrase(control_label: str = "", *, controls=None) -> str:
     control's own label and the count is one.
     """
     if controls is None:
-        return f"vs {control_label}" if control_label else "vs control"
+        # A single-control plot with nothing named is the same state, one mode
+        # over: the axis is on, every bar came back NaN, and "vs control"
+        # describes a normalization against a denominator that does not exist.
+        return f"vs {control_label}" if control_label else "vs control (none resolved)"
     distinct = controls.distinct_controls()
     if not distinct:
         # The user asked for per-sample controls and nothing resolved. Saying
@@ -1164,20 +1167,41 @@ def control_pts_for_line(ctx, control_label: str, *, threshold: float,
     )
 
 
-def blank_point(pt) -> tuple:
-    """An AggPoint with its three plotted values replaced by NaN.
+def blank_point(pt, *, mean: bool = True, frac: bool = True,
+                n: bool = True) -> tuple:
+    """An AggPoint with the named plotted values replaced by NaN.
 
     What a trace becomes when its control cannot be resolved. Dropping the
     point entirely would leave a gap the renderer bridges with a straight line
     between the neighbours, which reads as data; NaN reads as absent, which is
     what it is. The timepoint, the cell counts and the CDF values are untouched
     — they were measured and are still true.
+
+    The three flags let a caller blank one panel and keep the others, which is
+    the rule everywhere a control can supply a mean and not a fraction (see
+    ``fold_change_pairing.panel_nan_flags``). Blanking all three is the default
+    because that is the whole-member case.
+
+    The Events panel has **two** representations and both are blanked together:
+    index 4 is the count the panel plots with Aggregate-FOVs off, index 7 the
+    per-FOV mean it plots with the toggle on. Blanking only index 4 left the
+    per-FOV figure drawing a raw count on a fold-change axis — the very defect
+    this function exists to prevent, in the representation it did not check.
+    Index 10 (``n_above_total``) is deliberately left alone: it is the CSV's
+    integer cross-well count, a measurement that no normalization applies to.
     """
     out = list(pt) + [None] * max(0, 11 - len(pt))
-    out[1] = float("nan")   # mean
-    out[3] = float("nan")   # fraction above threshold
-    out[4] = float("nan")   # events above threshold
-    out[2] = out[6] = out[9] = 0.0
+    if mean:
+        out[1] = float("nan")   # mean
+        out[2] = 0.0            # its spread
+    if frac:
+        out[3] = float("nan")   # fraction above threshold
+        out[6] = 0.0            # its spread
+    if n:
+        out[4] = float("nan")   # events above threshold (count)
+        out[9] = 0.0            # its replicate spread
+        out[7] = float("nan")   # events above threshold (per-FOV mean)
+        out[8] = 0.0            # its per-FOV spread
     return tuple(out[:max(11, len(pt))])
 
 
@@ -1651,57 +1675,6 @@ def member_frac_stats_series(
 
     return _member_series(ctx, label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
-        per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
-        rset_stat=rset_stat, well_stat=well_stat,
-    )
-
-
-def member_n_stats_series(
-    ctx, label: str, *,
-    threshold: float, val_col: str,
-    per_fov_spread: bool,
-    fluor_gates,
-) -> dict[float, tuple[float, float]]:
-    """``{t: (n, spread)}`` for a member — N-events denominator for the N panel.
-
-    Returns the value in the SAME representation the N panel plots, selected by
-    *per_fov_spread*: the per-FOV-mean count (± per-FOV spread) when FOV-spread
-    is on, else the mean of the per-well counts (± the cross-well spread).
-    Used by line-plot FC to scale the N panel; the caller passes ``n_per_fov``
-    to :func:`normalize_pts` so the scaled field matches this denominator.
-
-    Unlike its siblings this takes no ``use_sem``: a count has no standard
-    error, so every call underneath it passes ``False``.
-    """
-    def rset_stat(rset, t):
-        if per_fov_spread:
-            res = compute_rep_per_fov_stats(ctx, rset, t, threshold, False)
-            n_mean, n_spread = res[4], res[5]
-            if not (isinstance(n_mean, (int, float)) and math.isfinite(n_mean)):
-                return None
-            return (float(n_mean), _finite_spread(n_spread))
-        # Mean of the per-well counts with the cross-well spread, matching what
-        # both tabs draw for a replicate set's Events panel. A *total* here
-        # (what this used to read) put a per-well mean over a cross-well sum,
-        # so a set normalised against itself landed on 1/n instead of 1.0.
-        n_mean, n_spread = compute_rep_n_above_stats(ctx, rset, t, False)
-        if not (isinstance(n_mean, (int, float)) and math.isfinite(n_mean)):
-            return None
-        return (float(n_mean), _finite_spread(n_spread))
-
-    def well_stat(pt):
-        if per_fov_spread:
-            n = pt[7] if len(pt) > 7 else None
-            s = pt[8] if len(pt) > 8 else 0.0
-        else:
-            n = pt[4] if len(pt) > 4 else None
-            s = 0.0
-        if not (isinstance(n, (int, float)) and math.isfinite(n)):
-            return None
-        return (float(n), _finite_spread(s))
-
-    return _member_series(ctx, label,
-        threshold=threshold, val_col=val_col, use_sem=False,
         per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
         rset_stat=rset_stat, well_stat=well_stat,
     )

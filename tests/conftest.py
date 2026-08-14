@@ -340,6 +340,14 @@ _MODAL_CALLS = (
     ("PySide6.QtWidgets", "QColorDialog", ("getColor",)),
     ("PySide6.QtWidgets", "QFontDialog", ("getFont",)),
     ("PySide6.QtWidgets", "QDialog", ("exec", "exec_")),
+    # A context menu blocks in Qt's C++ event loop exactly as a dialog does,
+    # and offscreen it never gets the click that would close it. ``QMenu.exec``
+    # itself cannot be patched — Shiboken exposes it as a static/instance
+    # overload, so assigning to the class attribute writes something instance
+    # lookup ignores, and the entry would sit here doing nothing. Every call
+    # site goes through ``widgets/menu_exec.py`` instead, which is ordinary
+    # Python; ``tests/test_menu_exec_seam.py`` fails on any raw call.
+    ("widgets.menu_exec", None, ("exec_menu",)),
 )
 
 
@@ -354,14 +362,17 @@ def _no_modal_dialogs(monkeypatch):
 
     for mod_name, cls_name, methods in _MODAL_CALLS:
         try:
-            cls = getattr(importlib.import_module(mod_name), cls_name)
+            mod = importlib.import_module(mod_name)
+            # ``cls_name is None`` means the entry names module-level functions
+            # rather than a class's methods — the menu seam is one.
+            cls = mod if cls_name is None else getattr(mod, cls_name)
         except (ImportError, AttributeError):  # pragma: no cover - Qt build skew
             continue
         for method in methods:
             if not hasattr(cls, method):
                 continue
 
-            def _blocked(*_a, _c=cls_name, _m=method, **_kw):
+            def _blocked(*_a, _c=cls_name or mod_name, _m=method, **_kw):
                 raise ModalDialogInTest(
                     f"{_c}.{_m}() opened a modal dialog. Under the offscreen QPA "
                     "it would block forever and pytest's signal timeout cannot "

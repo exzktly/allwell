@@ -15,6 +15,25 @@ from well_viewer.core.channel_state_controller import get_all_fluor_gates, on_cu
 from well_viewer.data.data_loading import get_rows
 from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.domain.time_rescale import format_scaled as _rescale_tp
+from well_viewer.domain import fold_change_pairing as _pairing_mod
+from well_viewer.domain import plot_members as _members
+from well_viewer.data.data_loading import (
+    _beeswarm_jitter,
+    df_included_mask,
+    parse_timepoint_hours,
+    resolve_value_series,
+)
+from well_viewer.core.plot_style import (
+    apply_ax_style,
+    apply_export_style_to_current,
+    mark_time_rescale,
+    tokens_for,
+)
+from well_viewer.domain.stats_compute import aggregate_well
+from well_viewer.core.safe import swallowed
+
+import numpy as np
+import pandas as pd
 
 import logging
 import math
@@ -55,8 +74,6 @@ def _annotate_cluster_footers(items, axes, fontsize=8) -> None:
                         xytext=(0, -32), textcoords="offset points",
                         ha="center", va="top", fontsize=_fs, fontweight="bold",
                         color=_muted_fg, annotation_clip=False)
-import numpy as np
-import pandas as pd
 
 
 def _set_frac_ylim(ctx, ax_frac) -> None:
@@ -74,26 +91,6 @@ def _set_frac_ylim(ctx, ax_frac) -> None:
     if _fc.fold_change_state(ctx).active:
         return
     ax_frac.set_ylim(-0.05, 1.05)
-
-
-from well_viewer.domain import fold_change_pairing as _pairing_mod
-from well_viewer.domain import plot_members as _members
-from well_viewer.data.data_loading import (
-    _beeswarm_jitter,
-    df_included_mask,
-    parse_timepoint_hours,
-    resolve_value_series,
-)
-from well_viewer.core.plot_style import (
-    apply_ax_style,
-    apply_export_style_to_current,
-    mark_time_rescale,
-    tokens_for,
-)
-from well_viewer.domain.stats_compute import aggregate_well
-from well_viewer.core.safe import swallowed
-
-
 
 
 def _pooled_rows(ctx, lbl: str, pool_groups: dict[str, list[str]] | None):
@@ -1108,7 +1105,13 @@ def draw_per_cell_bar_mode(
     # keys; the hit-test guards on length+identity so a per-well expansion that
     # doesn't match simply falls back to integer positions).
     ctx.runtime.barplot.xs = list(xs)
-    ctx.runtime.barplot.xs_keys = list(ordered_keys)
+    # The **surviving** column keys, not the pre-drop drag order:
+    # ``_drop_hidden_columns`` above shortened the column list, so recording
+    # the full order left ``bar_drag_xs``'s length/identity guard failing and
+    # drag-reorder falling back to integer positions, which is wrong as soon as
+    # clusters insert gaps. A per-well or multi-tp expansion still mismatches
+    # and still falls back — that case is what the guard is for.
+    ctx.runtime.barplot.xs_keys = list(base_wells)
     if ctx.state.bar.violin:
         draw_violin(
             ctx, ax_mean, ax_frac, plot_wells, plot_colors, plot_labels,
@@ -1157,6 +1160,14 @@ def draw_per_well_n_bars(
     mean of its per-FOV above-threshold counts and an error bar spans ±
     the per-FOV SD/SEM. When the toggle is off, the bar is the well's
     total above-threshold count with no error bar.
+
+    **Nothing here is fold-changed**, on either surface that calls it, so this
+    function also writes the panel's title and ylabel — plain, with no
+    fold-change suffix — overwriting whatever the caller put there. Both
+    callers title all three panels before dispatching on display mode, and both
+    would otherwise leave a raw count under a title reading "fold change vs
+    …". ``draw_violin`` and ``draw_beeswarm`` re-title the two panels they draw
+    for the same reason.
     """
     from matplotlib.ticker import MaxNLocator
     from well_viewer.domain.stats_compute import aggregate_group
@@ -1220,3 +1231,19 @@ def draw_per_well_n_bars(
     ax_n.set_ylim(0, max(cur_hi, 1))
     ax_n.yaxis.set_major_locator(MaxNLocator(integer=not per_fov_spread))
     setattr(ax_n, "_categorical_xaxis", True)
+    from well_viewer.data.metric_labels import (
+        events_per_fov_title, events_total_title,
+    )
+    _metric_key = ctx.state.channel.active_metric
+    if per_fov_spread:
+        _n_title = events_per_fov_title(_metric_key, "SEM" if use_sem else "SD")
+        _n_ylabel = "N(above)/FOV"
+    else:
+        _n_title = events_total_title(_metric_key)
+        _n_ylabel = "N(above)"
+    # Set directly rather than through ``apply_ax_style``: that helper also
+    # calls ``tick_params(labelsize=8)``, which would undo the size-7 tick
+    # labels set above. The colour token is the one it would have used.
+    ax_n.set_title(_n_title, color=tokens_for(ax_n)[1], fontsize=9,
+                   fontweight="bold", pad=6)
+    ax_n.set_ylabel(_n_ylabel, fontsize=8, labelpad=5)

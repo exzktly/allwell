@@ -111,14 +111,6 @@ def test_member_n_series_returns_the_per_well_mean(two_well_set):
     assert series[0.0][0] == PER_WELL_N
 
 
-def test_member_n_stats_series_returns_the_per_well_mean(two_well_set):
-    """The line-side denominator, which had its own copy of the sum."""
-    series = _fc.member_n_stats_series(
-        two_well_set, "CTRL", threshold=0.0, val_col="mean_gfp_intensity",
-        per_fov_spread=False, fluor_gates=None)
-    assert series[0.0][0] == PER_WELL_N
-
-
 def test_a_solo_well_is_unaffected(two_well_set):
     """A one-well member has no sum-versus-mean distinction; it must not move."""
     series = _fc.member_n_series(

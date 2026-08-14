@@ -232,10 +232,12 @@ class PlotState:
         The map's *keys* are plain member keys, so they cannot say whether they
         mean the set or a well of the same token. Within one plot they never
         both appear — pooled mode keys on set names, unpooled on well tokens —
-        but a retained entry from the other mode can collide. That entry moves
-        with the rename and lands in the editor's unused section, which is
-        visible; the alternative, leaving the key behind, breaks the common
-        case silently.
+        but a retained entry from the other mode can collide with *new*. The
+        **renamed** entry wins that collision: it belongs to the group the user
+        just acted on, while the entry already sitting on *new* is a leftover
+        from the other pooling mode. Keeping the leftover instead would discard
+        a live pairing to preserve a dormant one, and the user would have no
+        way to tell it had happened.
 
         Returns True when something changed, so a caller can decide whether a
         redraw is owed.
@@ -258,15 +260,21 @@ class PlotState:
             changed = True
 
         remapped: dict = {}
+        renamed: list = []          # 0 or 1 entries — the one keyed on *old*
         for key, ref in (self.fc_control_map or {}).items():
             moved_value = _moved(ref)
             if moved_value is not None:
                 ref = moved_value
                 changed = True
-            new_key = new if key == old else key
-            if new_key != key:
+            if key == old:
+                renamed.append(ref)
                 changed = True
-            remapped[new_key] = ref
+                continue
+            remapped[key] = ref
+        if renamed:
+            # Written last so it overwrites any entry already keyed on *new*
+            # rather than being overwritten by one. See the collision note above.
+            remapped[new] = renamed[0]
         if changed:
             self.fc_control_map = remapped
         return changed

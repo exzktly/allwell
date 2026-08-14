@@ -35,6 +35,7 @@ from datasets._common.log_panel import hrule as _hrule
 from services.job_kinds import KIND_LABEL
 from services.job_queue import JobSpec, JobState
 from datasets.job_queue.row import JobRow
+from widgets import menu_exec
 
 # The order the "+ Add job" menu offers the tools in — Analyze first because
 # it is the run everything else exists to prepare for or tidy up after, then
@@ -210,7 +211,8 @@ class JobQueuePage(QWidget):
 
     def _open_add_menu(self) -> None:
         menu = self.build_add_menu()
-        menu.exec(self._add_btn.mapToGlobal(self._add_btn.rect().bottomLeft()))
+        menu_exec.exec_menu(
+            menu, self._add_btn.mapToGlobal(self._add_btn.rect().bottomLeft()))
 
     def build_add_menu(self) -> QMenu:
         """The "+ Add job" menu, returned rather than opened.

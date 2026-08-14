@@ -505,11 +505,14 @@ class BarBatchExportPanel(BatchExportPanel):
             apply_ax_style(ax_mean,
                            f"{_ch} {_metric_label}{_thr_q} \u00b1 {band_lbl}{_fc_suffix}",
                            f"{_ch} {_metric_label}{_fc_suffix}")
-        # All three panels are normalized, so all three say so. The Fraction
-        # panel has been fold-changed on this path all along and carried no
-        # suffix — a normalized number under a title that names a raw one is
-        # the same defect as a raw number under a fold-change title, and the
-        # tab and the batch line figure already suffix all three.
+        # All three panels are normalized in the grouped bar mode, so all three
+        # say so. The Fraction panel has been fold-changed on this path all
+        # along and carried no suffix — a normalized number under a title that
+        # names a raw one is the same defect as a raw number under a
+        # fold-change title, and the tab and the batch line figure already
+        # suffix all three. In the violin / beeswarm modes below the Events
+        # panel is drawn by ``draw_per_well_n_bars``, which is not fold-changed
+        # and rewrites this title without the suffix.
         apply_ax_style(ax_frac, f"{fraction_title(_metric_key)}{_fc_suffix}",
                        "Fraction" + _fc_suffix)
         if bool(self._ctx.state.plot.use_fov_replicates):

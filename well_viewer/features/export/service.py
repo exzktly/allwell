@@ -105,6 +105,8 @@ def line_metric_fieldnames(ch: str, metric: str, band_lbl: str) -> list:
         f"{band_lbl.lower()}_{ch}_{metric}",
         "n_above_threshold",
         "n_above_replicate_mean",
+        f"err_n_above_replicate_{band_lbl}",
+        "n_above_replicate_unit",
         "fraction_above",
         "n_total",
         "threshold",
@@ -112,7 +114,8 @@ def line_metric_fieldnames(ch: str, metric: str, band_lbl: str) -> list:
     ]
 
 
-def line_metric_row(pt, *, ch: str, metric: str, threshold: float, band_lbl: str) -> dict:
+def line_metric_row(pt, *, ch: str, metric: str, threshold: float,
+                    band_lbl: str, per_fov: bool = False) -> dict:
     """Metric-column dict for one line-plot AggPoint.
 
     *pt* is an aggregation tuple ``(t, mean, spread, frac, n_above, n_total, ...)``
@@ -120,12 +123,25 @@ def line_metric_row(pt, *, ch: str, metric: str, threshold: float, band_lbl: str
     field is SEM when the aggregator was called with ``use_sem=True``, SD
     otherwise; *band_lbl* must be set accordingly so the column header
     reflects what the data represents.
+
+    The three Events columns are the bar CSV's, for the same reason: the
+    integer ``n_above_threshold`` and the fractional
+    ``n_above_replicate_mean`` are different numbers, and without
+    ``n_above_replicate_unit`` naming what the mean is over, nothing else in
+    the row records whether Aggregate-FOVs was on. *per_fov* supplies that —
+    the point itself cannot say.
     """
     t, mean, spread, frac, n_above, n_total, *_rest = pt
     # Index 10, when present, is the cross-well total for a replicate set; the
     # drawn value at index 4 is that set's per-well mean and is fractional, so
     # the integer column cannot be derived from it.
     n_above_total = _rest[4] if len(_rest) > 4 and _rest[4] is not None else None
+    # Index 9 is the cross-well spread behind that mean. Only a replicate
+    # aggregation has one, which is the same condition the unit column reports:
+    # a single well's row leaves both empty rather than writing 0.000000, which
+    # would read as "the replicates agreed" on a row that had no replicates.
+    n_above_spread = _rest[3] if len(_rest) > 3 and _rest[3] is not None else None
+    is_replicate = n_above_total is not None
     return {
         "time_h": f"{t:.4f}",
         f"mean_{ch}_{metric}": f"{mean:.6f}" if not math.isnan(mean) else "",
@@ -136,6 +152,12 @@ def line_metric_row(pt, *, ch: str, metric: str, threshold: float, band_lbl: str
             f"{float(n_above):.6f}"
             if isinstance(n_above, (int, float)) and math.isfinite(float(n_above))
             else ""),
+        f"err_n_above_replicate_{band_lbl}": (
+            f"{float(n_above_spread):.6f}"
+            if is_replicate and n_above_spread is not None
+            and math.isfinite(float(n_above_spread)) else ""),
+        "n_above_replicate_unit": (
+            ("fov" if per_fov else "well") if is_replicate else ""),
         "fraction_above": f"{frac:.6f}" if not math.isnan(frac) else "",
         "n_total": n_total,
         "threshold": f"{threshold:.4f}",
@@ -228,9 +250,10 @@ def bar_metric_row(
         "n_above_threshold": (
             "" if not has or not math.isfinite(float(n_above))
             # A replicate set reports its cross-well total, which is what this
-            # column has always meant. Falling back to ``n_above`` keeps the
-            # per-well rows — where the drawn value IS the count — unchanged,
-            # and preserves the historic float form under per-FOV spread.
+            # column has always meant. A single well has no total — the
+            # collectors pass ``None`` — so it falls through to ``n_above``,
+            # which is the count itself with Aggregate-FOVs off and the
+            # per-FOV mean, in the historic float form, with it on.
             else f"{int(n_above_total)}" if n_above_total is not None
             else f"{n_above:.6f}" if math.isfinite(float(n_above_spread)) and n_above_spread > 0
             else f"{int(n_above)}"
@@ -413,8 +436,10 @@ def export_plot_data(ctx) -> None:
             }
             if include_repset_col:
                 row["replicate_set"] = well_to_repset.get(label, "")
-            row.update(line_metric_row(pt, ch=ch, metric=metric,
-                                       threshold=threshold, band_lbl=band_lbl))
+            row.update(line_metric_row(
+                pt, ch=ch, metric=metric, threshold=threshold,
+                band_lbl=band_lbl,
+                per_fov=bool(ctx.state.plot.use_fov_replicates)))
             if fc_active and norm_pts is not None and i < len(norm_pts):
                 npt = norm_pts[i]
                 fmean = npt[1] if not (isinstance(npt[1], float) and math.isnan(npt[1])) else float("nan")

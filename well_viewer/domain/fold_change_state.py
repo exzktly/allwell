@@ -76,25 +76,6 @@ class FoldChangeState:
     def control_map_dict(self) -> dict:
         return dict(self.control_map)
 
-    @property
-    def wants_control(self) -> bool:
-        """True when a control denominator is requested and there is one to find.
-
-        The condition every collector guards its control lookup with. Keeping
-        it here rather than re-spelling ``vs_control_on and control`` at each
-        site is what stops the two halves drifting apart.
-
-        In per-member mode this is True even with an empty mapping, and that is
-        deliberate: "the user asked for per-sample controls and mapped nobody"
-        is a state to report, member by member, not a quiet fall-through to raw
-        values under a fold-change axis.
-        """
-        if not self.vs_control_on:
-            return False
-        if self.per_member:
-            return True
-        return self.control is not None
-
 
 #: The "give me raw values" sentinel. Frozen, so sharing one module-level
 #: instance is safe; callers pass it to skip normalization entirely (the

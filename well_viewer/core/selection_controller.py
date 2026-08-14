@@ -1156,20 +1156,29 @@ def sel_rename(ctx, sid, name) -> None:
 
 
 def _upgrade_fc_controls(ctx) -> None:
-    """Give every fold-change control reference a concrete kind."""
+    """Give every fold-change control reference a concrete kind.
+
+    A reference that resolves to nothing is kept exactly as it was, never
+    dropped — the retain-don't-drop contract is what lets a user reload the
+    missing group and get their pairing back. The single control needs that
+    rule as much as the map does: ``fc_vs_control_on`` is a separate flag, so
+    clearing the reference under it leaves the plot claiming a control it no
+    longer names, every bar NaN, and the loss written to disk on the next save
+    with nothing on screen saying it happened.
+    """
     from well_viewer.domain.fold_change import concrete_control
+
+    def _keep(ref):
+        concrete = concrete_control(ctx, ref)
+        return concrete if concrete is not None else ref
+
     plot = ctx.state.plot
     if plot.fc_control is not None:
-        plot.fc_control = concrete_control(ctx, plot.fc_control)
+        plot.fc_control = _keep(plot.fc_control)
     if plot.fc_control_map:
-        upgraded = {}
-        for key, ref in plot.fc_control_map.items():
-            concrete = concrete_control(ctx, ref)
-            # A reference that resolves to nothing is kept as it was, not
-            # dropped: the retain-don't-drop contract is what lets a user
-            # reload the missing group and get their pairing back.
-            upgraded[key] = concrete if concrete is not None else ref
-        plot.fc_control_map = upgraded
+        plot.fc_control_map = {
+            key: _keep(ref) for key, ref in plot.fc_control_map.items()
+        }
 
 
 

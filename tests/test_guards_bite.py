@@ -1094,3 +1094,62 @@ def test_unbound_name_guard_clears(shape):
     from tests.test_no_unbound_names import offenders_in
     found = offenders_in(UNBOUND_CLEAN[shape], "probe.py")
     assert not found, f"the guard fired on a legitimate {shape}: {found}"
+
+
+# ── the context-menu seam ────────────────────────────────────────────────────
+#
+# Both spellings matter. The direct `menu.exec(...)` is the hang the guard
+# exists to prevent; the by-name import is subtler — it leaves the seam in
+# place and still unpatchable, because the function is bound into the importing
+# module's globals before the fixture ever runs.
+
+MENU_VIOLATIONS = {
+    "direct-exec": (
+        "def open_it(menu, btn):\n"
+        "    menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))\n"
+    ),
+    "exec-underscore": (
+        "def open_it(menu, pos):\n"
+        "    menu.exec_(pos)\n"
+    ),
+    "attribute-menu": (
+        "class W:\n"
+        "    def open_it(self, pos):\n"
+        "        self._menu.exec(pos)\n"
+    ),
+    "imported-by-name": (
+        "from widgets.menu_exec import exec_menu\n"
+        "def open_it(menu, pos):\n"
+        "    return exec_menu(menu, pos)\n"
+    ),
+}
+
+MENU_CLEAN = {
+    "through-the-seam": (
+        "from widgets import menu_exec\n"
+        "def open_it(menu, btn):\n"
+        "    return menu_exec.exec_menu(\n"
+        "        menu, btn.mapToGlobal(btn.rect().bottomLeft()))\n"
+    ),
+    # A dialog's exec is the *other* guard's business, and is patchable.
+    "a-dialog-not-a-menu": (
+        "def ask(dlg):\n"
+        "    return dlg.exec()\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(MENU_VIOLATIONS))
+def test_menu_seam_guard_catches(tmp_path, monkeypatch, shape):
+    path = _write(tmp_path, f"probe_{shape}.py", MENU_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_menu_exec_seam",
+                    "test_no_module_opens_a_context_menu_directly", [path])
+    assert exc is not None, f"the {shape} spelling walked past the guard"
+
+
+@pytest.mark.parametrize("shape", sorted(MENU_CLEAN))
+def test_menu_seam_guard_clears(tmp_path, monkeypatch, shape):
+    path = _write(tmp_path, f"probe_{shape}.py", MENU_CLEAN[shape])
+    exc = _run_scan(monkeypatch, "tests.test_menu_exec_seam",
+                    "test_no_module_opens_a_context_menu_directly", [path])
+    assert exc is None, f"the guard fired on a legitimate {shape}: {exc}"

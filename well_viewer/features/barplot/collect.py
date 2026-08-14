@@ -25,7 +25,10 @@ from well_viewer.domain import fold_change as _fc
 from well_viewer.domain.fold_change_series_cache import (
     ControlSeriesCache as _ControlSeriesCache,
 )
-from well_viewer.domain.fold_change_pairing import control_denominators
+from well_viewer.domain.fold_change_pairing import (
+    control_denominators,
+    panel_nan_flags,
+)
 from well_viewer.domain import plot_members as _members
 from well_viewer.domain.time_rescale import format_scaled as _rescale_tp
 from well_viewer.domain.stats_compute import (
@@ -134,22 +137,9 @@ def _fc_scale(value, err, *, eff_ctrl, eff_ctrl_spread, t0, t0_spread,
     )
 
 
-def _panel_nan_flags(axis_on, outcome, ctrl_mean, ctrl_frac, ctrl_n):
-    """Which of the three panels lost their denominator, ``(mean, frac, n)``.
-
-    Each panel drops on its **own** denominator. While one flag governed all
-    three it tested only the mean, so a control with a mean but no fraction
-    series left the Fraction panel drawing a raw value under a fold-change
-    label — a number that is not a fold change on an axis that says it is.
-    """
-    live = bool(axis_on and outcome)
-    return (live and ctrl_mean is None,
-            live and ctrl_frac is None,
-            live and ctrl_n is None)
-
-
 def _scale_group_bar(mean_pair, frac_pair, n_pair, *, pts, ctrl, outcome,
-                     fc_vs_ctrl, fc_vs_t0, baseline_tp, per_fov_spread):
+                     fc_vs_ctrl, fc_vs_t0, baseline_tp, per_fov_spread,
+                     fc_op_ctrl, fc_op_t0, fc_order, baseline_ctrl):
     """Fold-change one batch-group bar's three panels.
 
     The batch counterpart of what ``_items_for_tp`` does on the tab, kept out
@@ -162,14 +152,22 @@ def _scale_group_bar(mean_pair, frac_pair, n_pair, *, pts, ctrl, outcome,
     not: the bar path does not enter ``_app_group_scope``, so a group's
     replicate set is not in the app's selections while this runs.
 
+    *fc_op_ctrl* / *fc_op_t0* / *fc_order* are the user's operator and stacking
+    choices, and *baseline_ctrl* is a ``tp -> (mean, frac, n)`` lookup of the
+    control at a baseline timepoint — the extra input :func:`_stack_axes`
+    needs. All four exist because without them this figure silently took the
+    ``ratio`` / ``ctrl_first`` defaults: a plate exported under **subtract**,
+    or with both axes on, carried numbers that did not match the tab it was
+    exported from, on every bar.
+
     Returns ``(mean, spread, frac, frac_spread, n_above, n_above_spread)``.
     """
     ctrl_stats, ctrl_frac, ctrl_n = ctrl
-    ctrl_mean_v, ctrl_mean_s = ctrl_stats or (None, None)
-    ctrl_frac_v, ctrl_frac_s = ctrl_frac or (None, None)
-    ctrl_n_v, ctrl_n_s = ctrl_n or (None, None)
-    nan_mean, nan_frac, nan_n = _panel_nan_flags(
-        fc_vs_ctrl, outcome, ctrl_mean_v, ctrl_frac_v, ctrl_n)
+    eff_mean, eff_mean_s = ctrl_stats or (None, None)
+    eff_frac, eff_frac_s = ctrl_frac or (None, None)
+    eff_n, eff_n_s = ctrl_n or (None, None)
+    nan_mean, nan_frac, nan_n = panel_nan_flags(
+        fc_vs_ctrl, outcome, eff_mean, eff_frac, eff_n)
 
     if nan_mean:
         # The tab's collector NaNs a bar whose control did not resolve; this
@@ -182,24 +180,36 @@ def _scale_group_bar(mean_pair, frac_pair, n_pair, *, pts, ctrl, outcome,
 
     t0_mean = t0_spread = t0_frac = t0_frac_spread = t0_n = t0_n_spread = None
     if fc_vs_t0:
-        t0_mean, t0_spread = _fc.baseline_from_points(pts, baseline_tp=baseline_tp)
-        t0_frac, t0_frac_spread = _fc.baseline_frac_from_points(
+        _stack_kw = dict(fc_order=fc_order, fc_op_ctrl=fc_op_ctrl,
+                         fc_op_t0=fc_op_t0)
+        rtp_m, t0_mean, t0_spread = _fc.baseline_from_points_resolved(
             pts, baseline_tp=baseline_tp)
-        _rtp, t0_n, t0_n_spread = _fc.baseline_n_from_points_resolved(
+        rtp_f, t0_frac, t0_frac_spread = _fc.baseline_frac_from_points_resolved(
+            pts, baseline_tp=baseline_tp)
+        rtp_n, t0_n, t0_n_spread = _fc.baseline_n_from_points_resolved(
             pts, per_fov_spread=per_fov_spread, baseline_tp=baseline_tp)
+        # Cross-axis stacking, one lookup of the control per resolved baseline
+        # timepoint. Each panel resolves its own baseline tp, exactly as the
+        # tab's three ``_member_baseline`` calls do.
+        if fc_vs_ctrl:
+            eff_mean, eff_mean_s, t0_mean, t0_spread = _stack_axes(
+                baseline_ctrl(rtp_m)[0], eff=eff_mean, eff_spread=eff_mean_s,
+                t0=t0_mean, t0_spread=t0_spread, **_stack_kw)
+            eff_frac, eff_frac_s, t0_frac, t0_frac_spread = _stack_axes(
+                baseline_ctrl(rtp_f)[1], eff=eff_frac, eff_spread=eff_frac_s,
+                t0=t0_frac, t0_spread=t0_frac_spread, **_stack_kw)
+            eff_n, eff_n_s, t0_n, t0_n_spread = _stack_axes(
+                baseline_ctrl(rtp_n)[2], eff=eff_n, eff_spread=eff_n_s,
+                t0=t0_n, t0_spread=t0_n_spread, **_stack_kw)
 
-    def _scaled(pair, ctrl_v, ctrl_s, t0_v, t0_s):
-        return _fc.scale_bar_value(
-            pair[0], pair[1],
-            control_mean=ctrl_v if fc_vs_ctrl else None,
-            control_spread=ctrl_s if fc_vs_ctrl else None,
-            t0_mean=t0_v if fc_vs_t0 else None,
-            t0_spread=t0_s if fc_vs_t0 else None,
-        )
-
-    m, s = _scaled(mean_pair, ctrl_mean_v, ctrl_mean_s, t0_mean, t0_spread)
-    f, fs = _scaled(frac_pair, ctrl_frac_v, ctrl_frac_s, t0_frac, t0_frac_spread)
-    n, ns = _scaled(n_pair, ctrl_n_v, ctrl_n_s, t0_n, t0_n_spread)
+    _fc_kw = dict(fc_vs_ctrl=fc_vs_ctrl, fc_vs_t0=fc_vs_t0,
+                  fc_op_ctrl=fc_op_ctrl, fc_op_t0=fc_op_t0, fc_order=fc_order)
+    m, s = _fc_scale(*mean_pair, eff_ctrl=eff_mean, eff_ctrl_spread=eff_mean_s,
+                     t0=t0_mean, t0_spread=t0_spread, **_fc_kw)
+    f, fs = _fc_scale(*frac_pair, eff_ctrl=eff_frac, eff_ctrl_spread=eff_frac_s,
+                      t0=t0_frac, t0_spread=t0_frac_spread, **_fc_kw)
+    n, ns = _fc_scale(*n_pair, eff_ctrl=eff_n, eff_ctrl_spread=eff_n_s,
+                      t0=t0_n, t0_spread=t0_n_spread, **_fc_kw)
     # Each panel drops on its own denominator, as on the tab.
     if nan_frac:
         f, fs = float("nan"), 0.0
@@ -243,8 +253,10 @@ def _stack_axes(ctrl_at_baseline, *, eff, eff_spread, t0, t0_spread,
 
 # Re-exported from the domain layer so the many callers that import it from
 # here (barplot.controller, export.service, batch_export.bar_panel) keep their
-# import path. It is a frozen ``FoldChangeState`` that still compares equal to
-# the ``(False, "", False)`` tuple it used to be.
+# import path. A frozen ``FoldChangeState``, read by name only —
+# ``tests/test_fc_state_is_not_unpacked.py`` fails on any site that unpacks it,
+# because a call site that drops a newly added field by unpacking three values
+# draws raw numbers under a fold-change axis.
 FC_STATE_OFF = _fc.FC_STATE_OFF
 
 
@@ -435,7 +447,7 @@ def collect_bar_items(
                 eff_ctrl_mean, eff_ctrl_spread = ctrl_stats_t or (None, None)
                 eff_ctrl_frac, eff_ctrl_frac_spread = ctrl_frac_t or (None, None)
                 eff_ctrl_n, eff_ctrl_n_spread = ctrl_n_t or (None, None)
-                fc_force_nan, fc_nan_frac, fc_nan_n = _panel_nan_flags(
+                fc_force_nan, fc_nan_frac, fc_nan_n = panel_nan_flags(
                     fc_vs_ctrl, fc_outcome,
                     eff_ctrl_mean, eff_ctrl_frac, eff_ctrl_n)
                 # Guarded on the control having resolved, mirroring the
@@ -568,7 +580,7 @@ def collect_bar_items(
             eff_ctrl_mean_t, eff_ctrl_spread_t = ctrl_stats_t or (None, None)
             eff_ctrl_frac_t, eff_ctrl_frac_spread_t = ctrl_frac_t or (None, None)
             eff_ctrl_n_t, eff_ctrl_n_spread_t = ctrl_n_t or (None, None)
-            fc_force_nan, fc_nan_frac, fc_nan_n = _panel_nan_flags(
+            fc_force_nan, fc_nan_frac, fc_nan_n = panel_nan_flags(
                 fc_vs_ctrl, fc_outcome,
                 eff_ctrl_mean_t, eff_ctrl_frac_t, eff_ctrl_n_t)
             pts = aggregate_well(ctx,
@@ -581,7 +593,17 @@ def collect_bar_items(
             if matched:
                 pt = matched[0]
                 m, s, f = pt[1], pt[2], pt[3]
-                n_above_total = int(pt[4])
+                # ``n_above_total`` stays ``None`` on this branch: it means "the
+                # cross-well total behind a replicate aggregation", and one well
+                # is not an aggregation of anything. Setting it here filled the
+                # CSV's replicate columns for a solo well — a unit of ``well``
+                # beside a spread of ``0.000000``, which reads as "the
+                # replicates agreed" for a row that had no replicates — and made
+                # the integer total win over the per-FOV mean in
+                # ``n_above_threshold``. The count itself is still what this
+                # bar draws with Aggregate-FOVs off.
+                n_above_total = None
+                own_count = float(pt[4])
                 fs = float(pt[6]) if len(pt) >= 7 else 0.0
                 n_above_pf_mean = float(pt[7]) if len(pt) >= 8 else 0.0
                 n_above_pf_spread = float(pt[8]) if len(pt) >= 9 else 0.0
@@ -589,7 +611,7 @@ def collect_bar_items(
                     n_above_val = n_above_pf_mean
                     n_above_err = n_above_pf_spread
                 else:
-                    n_above_val = float(n_above_total)
+                    n_above_val = own_count
                     n_above_err = 0.0
                 if fc_force_nan:
                     m = float("nan")
@@ -743,6 +765,12 @@ def collect_bar_items_for_group(
     fc = _fc.coerce_fc_state(fc_state)
     fc_vs_ctrl = fc.vs_control_on
     fc_vs_t0 = fc.vs_t0_on
+    # Read from the same place the tab reads them. Taking the defaults here
+    # instead is what made this figure disagree with its on-tab twin under
+    # ``subtract`` and whenever both axes were on.
+    fc_op_ctrl = _fc.parse_fc_op_ctrl(ctx)
+    fc_op_t0 = _fc.parse_fc_op_t0(ctx)
+    fc_order = _fc.parse_fc_order(ctx)
 
     # Build (key, display, wells, rset_name_or_None, color) member list.
     from well_viewer.domain.plate_layout import WELL_COLORS as _WELL_COLORS
@@ -867,11 +895,13 @@ def collect_bar_items_for_group(
             if matched:
                 pt = matched[0]
                 m, s, f = pt[1], pt[2], pt[3]
-                # A solo well's point carries its own count at index 4 and no
-                # index 10; a replicate set's carries the drawn mean there and
-                # the total at index 10.
+                # A replicate set's point carries the drawn mean at index 4 and
+                # the cross-well total at index 10. A solo well has no index 10
+                # and no total to report — it is not an aggregation of
+                # anything — so it stays ``None`` and its CSV replicate columns
+                # stay empty, the way the tab's per-well branch does it.
                 n_above_total = (int(pt[10]) if len(pt) >= 11
-                                 else (int(pt[4]) if len(pt) >= 5 else 0))
+                                 and pt[10] is not None else None)
                 frac_spread = float(pt[6]) if len(pt) >= 7 else 0.0
                 n_above_pf_mean = float(pt[7]) if len(pt) >= 8 else 0.0
                 n_above_pf_spread = float(pt[8]) if len(pt) >= 9 else 0.0
@@ -887,7 +917,9 @@ def collect_bar_items_for_group(
                     pts=pts, ctrl=(ctrl_stats_t, ctrl_frac_t, ctrl_n_t),
                     outcome=fc_outcome, fc_vs_ctrl=fc_vs_ctrl,
                     fc_vs_t0=fc_vs_t0, baseline_tp=fc_baseline_tp,
-                    per_fov_spread=per_fov_spread)
+                    per_fov_spread=per_fov_spread,
+                    fc_op_ctrl=fc_op_ctrl, fc_op_t0=fc_op_t0, fc_order=fc_order,
+                    baseline_ctrl=lambda tp, _k=key: denoms.baseline_at(_k, tp))
                 has_mean = not math.isnan(m)
                 has_frac = has_mean and not math.isnan(f)
             else:

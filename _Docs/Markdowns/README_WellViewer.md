@@ -1599,8 +1599,12 @@ gets its own columns:
 * `n_above_replicate_unit` — `well` or `fov`, empty for a single well
 
 The unit column matters because nothing else in the row records whether
-Aggregate-FOVs was on, which would leave the other two ambiguous. For a
-single-well row all three agree with `n_above_threshold`.
+Aggregate-FOVs was on, which would leave the other two ambiguous. A single well
+is not a replicate aggregation, so its row leaves the spread and the unit
+**empty** — a `0.000000` there would read as "the replicates agreed" on a row
+that had no replicates — and reports the count itself under both
+`n_above_threshold` and `n_above_replicate_mean` (the per-FOV mean under both,
+with Aggregate-FOVs on).
 
 **Statistical consistency.** The control denominator uses the same
 averaging statistic as the displayed bar / curve — mean-of-per-well-means

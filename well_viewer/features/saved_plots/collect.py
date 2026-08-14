@@ -172,7 +172,10 @@ def _fc_control_phrase(fc: dict) -> str:
         return f"vs {names[0]}"
     if len(names) == 2:
         return f"vs {names[0]} / {names[1]}"
-    return f"vs own control (\u00d7{len(raw_map)})"
+    # ``names``, not ``raw_map``: the two branches above already dedupe, so
+    # counting entries here made five assignments naming three controls read
+    # "\u00d75" \u2014 a count of the mapping's size dressed up as a count of controls.
+    return f"vs own control (\u00d7{len(names)})"
 
 
 def _fc_summary(fc: dict) -> str:

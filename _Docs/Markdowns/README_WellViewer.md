@@ -1478,6 +1478,12 @@ Fold change:  Control [— ▾]   Baseline [— ▾]
   the two you picked, so a group named `A01 (well)` is still selectable
   and still means the group, and hiding a group cannot make its name
   capture a well. Titles and CSV exports print the plain name.
+- **Per-sample control…** — the entry directly under `—`. Instead of one
+  control for the whole figure, each plotted sample names its own, so a
+  plate carrying four conditions each with its own paired control goes on
+  one fold-change axis. Picking it opens the editor described below; once
+  active the dropdown reads `Per-sample control (22/24)`, counting the
+  samples whose control actually resolved.
 - **Baseline** — pick `t0 (first timepoint)` to divide every bar / curve
   by its own value at the earliest available timepoint, so each
   member's first point becomes 1.0. `—` disables this axis.
@@ -1509,10 +1515,50 @@ units and would be misleading on a normalized axis; the CDF panel's
 threshold line stays because per-cell distributions aren't
 normalized).
 
-When a control is requested but has no sample at one of the plotted
-timepoints, the affected bars / points are rendered as dashed
-placeholders and the status bar names the missing timepoints — no
-silent NaN drops.
+When a control is requested but cannot be used — nobody assigned one, the
+one assigned no longer exists, or it has no sample at the plotted timepoint
+— the affected bars / points are rendered as dashed placeholders and the
+status bar says how many fell short and why. They are never drawn raw: a
+value that is not a fold change has no business on an axis that says it is.
+
+##### Per-sample controls
+
+Picking **Per-sample control…** opens a window listing one row per plotted
+sample, in the order the plot draws them:
+
+| Column | What it says |
+| --- | --- |
+| Sample | The bar or curve, in its own colour |
+| Control | Its control — the same list the single-control dropdown offers |
+| Status | `paired`, `own control`, `no control set`, `control not found`, or `no data at this timepoint` |
+| Resolves to | The wells actually used as the denominator |
+
+Read **Resolves to** when checking your work: the other columns describe what
+was asked for, and this one shows what happened.
+
+Edits apply to the plot immediately, so the window stays open beside it —
+there is no OK/Cancel, only **Close**. Two bulk actions sit in the footer:
+**Set all to ▾** assigns one control to every sample (which is exactly the
+single-control behaviour, and the axis title says so), and **Auto-pair ▾**
+walks the samples in blocks of 2, 3, 4 or 6 and makes the first or last of
+each block that block's control — the layout a plate of "control then
+treatments" repeats.
+
+A sample that is itself another sample's control draws as a flat 1.0 (0 for
+subtract) with a propagated error bar, which is the ΔΔCt convention; the
+**Controls: hide from plot** toggle leaves it out instead. There is no
+option to draw it raw, because a raw control beside ratio bars would put two
+units on one axis.
+
+Assignments are kept, never silently reset. A control whose group is deleted
+shows as `Veh_old (missing)` and comes back when the group does; an
+assignment for a sample that is no longer plotted collects under **Unused
+assignments** rather than disappearing. Renaming a group follows it through
+every assignment that names it.
+
+The axis title says how many controls are in play: one is named as usual,
+two are both named, and three or more read `vs own control` — with the CSV's
+`fold_change_control` column carrying which sample used which.
 
 **CSV exports — additive schema.** Both the line and bar exporters
 keep the standard `mean_<ch>_<metric>` and `err_<band>_<ch>_<metric>`
@@ -1522,7 +1568,12 @@ fold-change is active:
 * `fold_change_mean` — normalized mean
 * `fold_change_<sd|sem>` — normalized spread
 * `fold_change_mode` — `control`, `t0`, or `control+t0`
-* `fold_change_control` — the chosen well / rep-set name
+* `fold_change_control` — **that row's** control (they differ under
+  per-sample controls)
+* `fold_change_outcome` — why the row is what it is: `ok`, `self`,
+  `unmapped`, `control_unresolved`, or `control_no_sample`. All but the
+  first two leave `fold_change_mean` empty, and this column is what tells
+  a normalization that failed from one that was never asked for.
 
 (Earlier versions of the bar CSV overwrote the raw mean column with
 the normalized value; downstream tools that depended on that behaviour

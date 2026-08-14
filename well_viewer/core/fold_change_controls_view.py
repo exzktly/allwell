@@ -15,6 +15,7 @@ shared ``ctx._fc_*`` state so the same selection applies to both tabs.
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox, QLabel, QWidget,
 )
@@ -45,6 +46,7 @@ import theme
 _OP_CTRL_COMBO_MIN_W = 110
 _OP_T0_COMBO_MIN_W = 110
 _ORDER_COMBO_MIN_W = 130
+_RENDER_COMBO_MIN_W = 170
 
 # Disambiguation suffix appended to a well-token combo entry when there is
 # a replicate set with the same name. Without this, picking the entry
@@ -53,6 +55,9 @@ _ORDER_COMBO_MIN_W = 130
 # before the label is stored / dispatched, so existing saved selections
 # without collisions are unaffected.
 _WELL_DISAMBIG_SUFFIX = " (well)"
+
+#: What the per-sample entry reads before it is switched on.
+_PER_SAMPLE_LABEL = "Per-sample control…"
 
 
 def _all_member_entries(ctx) -> list[tuple[str, object]]:
@@ -121,6 +126,41 @@ def _all_member_labels(ctx) -> list[str]:
     return [text for text, _ref in _all_member_entries(ctx)]
 
 
+#: Item data marking the "one control per sample" entry. A sentinel object
+#: rather than a magic string, so it can never collide with a group someone
+#: named "Per-sample control…".
+PER_SAMPLE = object()
+
+#: A separator row. Its text is empty so the "did the item list change?"
+#: comparison below still lines up with what ``itemText`` reports.
+_SEPARATOR = object()
+_SEPARATOR_TEXT = ""
+
+
+def per_sample_combo_text(ctx) -> str:
+    """What the Control combo reads while per-sample mode is on.
+
+    Resolved-out-of-plotted, not entries-out-of-entries: a mapping with
+    twenty-four entries of which two name deleted groups is not complete, and
+    a count taken from the mapping would call it complete.
+    """
+    from well_viewer.domain.fold_change_pairing import (
+        build_per_member_controls,
+        summary_text,
+    )
+    from well_viewer.domain import plot_members as _members
+
+    plot = ctx.state.plot
+    scope = "bar"
+    controls = build_per_member_controls(
+        ctx, _members.plotted_member_keys(ctx, scope),
+        dict(getattr(plot, "fc_control_map", {}) or {}),
+        member_wells=_members.member_wells(ctx, scope),
+        member_rsets=_members.member_replicate_sets(ctx),
+    )
+    return summary_text(controls)
+
+
 def _repopulate_control_combo(ctx, combo: QComboBox) -> None:
     """Refresh the Control combo's item list from current selections.
 
@@ -131,8 +171,17 @@ def _repopulate_control_combo(ctx, combo: QComboBox) -> None:
     """
     entries = _all_member_entries(ctx)
     saved = ctx.state.plot.fc_control
+    per_member = str(getattr(ctx.state.plot, "fc_control_mode", "single")) == "per_member"
 
-    candidate_items: list[tuple[str, object]] = [(_NONE_LABEL, None), *entries]
+    # The per-sample entry sits directly under "—", above a separator, so the
+    # member list below it stays byte-identical to what it has always been.
+    candidate_items: list[tuple[str, object]] = [
+        (_NONE_LABEL, None),
+        (per_sample_combo_text(ctx) if per_member else _PER_SAMPLE_LABEL,
+         PER_SAMPLE),
+        (_SEPARATOR_TEXT, _SEPARATOR),
+        *entries,
+    ]
     # A stored control that matches nothing on offer is **not** dropped back to
     # "—". It stays selected, under a label saying so. Silently resetting the
     # combo left the panel claiming no control while the plot went on dividing
@@ -140,7 +189,9 @@ def _repopulate_control_combo(ctx, combo: QComboBox) -> None:
     # an entry the user has to deal with. This happens whenever the thing the
     # control named goes away: a replicate set deleted, a well not in this
     # dataset.
-    if saved is not None and not any(ref == saved for _t, ref in candidate_items):
+    if (saved is not None and not per_member
+            and not any(ref is not PER_SAMPLE and ref is not _SEPARATOR
+                        and ref == saved for _t, ref in candidate_items)):
         candidate_items.append(
             (f"{saved.display_name} — not in current selections", saved))
 
@@ -157,12 +208,22 @@ def _repopulate_control_combo(ctx, combo: QComboBox) -> None:
         if current_items != [t for t, _r in candidate_items] and not popup_visible:
             combo.clear()
             for text, ref in candidate_items:
-                combo.addItem(text, ref)
+                if ref is _SEPARATOR:
+                    combo.insertSeparator(combo.count())
+                else:
+                    combo.addItem(text, ref)
         # Matched on the reference, never on the text: the text carries a
         # display-only suffix that changes as collisions come and go.
+        wanted = PER_SAMPLE if per_member else saved
         idx = 0
         for i in range(combo.count()):
-            if combo.itemData(i) == saved:
+            data = combo.itemData(i)
+            if data is PER_SAMPLE or wanted is PER_SAMPLE:
+                if data is wanted:
+                    idx = i
+                    break
+                continue
+            if data == wanted:
                 idx = i
                 break
         combo.setCurrentIndex(idx)
@@ -278,6 +339,47 @@ class _BaselineCombo(QComboBox):
         super().showPopup()
 
 
+def _refresh_per_sample_row(ctx, summary, render_combo) -> None:
+    """Show or hide the per-sample summary + render toggle, and fill them in.
+
+    The summary carries an ``Edit…`` link because ``currentIndexChanged`` does
+    not fire when a user re-selects the item already showing, so the combo
+    cannot be the only way back into the editor.
+    """
+    plot = ctx.state.plot
+    on = (str(getattr(plot, "fc_control_mode", "single")) == "per_member"
+          and bool(getattr(plot, "fc_vs_control_on", False)))
+    if summary is not None:
+        if on:
+            from well_viewer.domain.fold_change_pairing import shortfall_text
+            from well_viewer.domain import plot_members as _members
+            from well_viewer.domain.fold_change_pairing import (
+                build_per_member_controls,
+            )
+            controls = build_per_member_controls(
+                ctx, _members.plotted_member_keys(ctx, "bar"),
+                dict(getattr(plot, "fc_control_map", {}) or {}),
+                member_wells=_members.member_wells(ctx, "bar"),
+                member_rsets=_members.member_replicate_sets(ctx),
+            )
+            short = shortfall_text(controls)
+            summary.setText(
+                (f"{short} &nbsp; " if short else "")
+                + '<a href="#edit">Edit…</a>')
+        summary.setVisible(on)
+    if render_combo is not None:
+        blocked = render_combo.blockSignals(True)
+        try:
+            want = str(getattr(plot, "fc_control_render", "self") or "self")
+            for i in range(render_combo.count()):
+                if render_combo.itemData(i) == want:
+                    render_combo.setCurrentIndex(i)
+                    break
+        finally:
+            render_combo.blockSignals(blocked)
+        render_combo.setVisible(on)
+
+
 def _sync_widgets_to_state(ctx, *, skip_scope: str = "") -> None:
     """Mirror ``ctx._fc_*`` state into every installed widget set.
 
@@ -307,6 +409,15 @@ def _sync_widgets_to_state(ctx, *, skip_scope: str = "") -> None:
         order_combo = reg.get_or_none(f"_fc_order_combo_{scope.name}")
         if order_combo is not None:
             _repopulate_order_combo(ctx, order_combo)
+        _refresh_per_sample_row(
+            ctx,
+            reg.get_or_none(f"_fc_summary_label_{scope.name}"),
+            reg.get_or_none(f"_fc_render_combo_{scope.name}"),
+        )
+        from well_viewer.core.fold_change_pairing_view import (
+            refresh_pairing_window,
+        )
+        refresh_pairing_window(ctx, scope.name)
 
 
 _BAR_LIMIT_KEYS = ("x_lim_min", "x_lim_max", "y_lim_min", "y_lim_max")
@@ -344,6 +455,9 @@ def set_fold_change_state(
     vs_control_on: bool | None = None,
     control=None,
     clear_control: bool = False,
+    control_mode: str | None = None,
+    control_map: dict | None = None,
+    control_render: str | None = None,
     vs_t0_on: bool | None = None,
     baseline_tp: str | None = None,
     op: str | None = None,
@@ -380,6 +494,9 @@ def set_fold_change_state(
         vs_control_on=vs_control_on,
         control=control,
         clear_control=clear_control,
+        control_mode=control_mode,
+        control_map=control_map,
+        control_render=control_render,
         vs_t0_on=vs_t0_on,
         baseline_tp=baseline_tp,
         op=op,
@@ -426,6 +543,29 @@ def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) ->
     )
     _repopulate_control_combo(ctx, ctrl_combo)
     layout.addWidget(ctrl_combo)
+
+    # Hidden unless per-sample mode is on. ``currentIndexChanged`` does not
+    # fire when the user re-selects the item already showing, so the combo
+    # cannot be the only way back into the editor — this link is the other one.
+    summary = QLabel("", parent)
+    summary.setTextFormat(Qt.RichText)
+    summary.setOpenExternalLinks(False)
+    summary.setVisible(False)
+    layout.addWidget(summary)
+
+    # What a member that is itself somebody's control draws as. There is no
+    # "raw" option: a raw control beside ratio bars puts two units on one axis.
+    render_combo = QComboBox(parent)
+    render_combo.setMinimumWidth(_RENDER_COMBO_MIN_W)
+    render_combo.setToolTip(
+        "What a sample that is itself another sample's control draws as. "
+        "'Normalize to itself' gives a flat 1.0 bar (0 for subtract) with a "
+        "propagated error bar; 'Hide from plot' leaves it out."
+    )
+    render_combo.addItem("Controls: normalize to self", "self")
+    render_combo.addItem("Controls: hide from plot", "hidden")
+    render_combo.setVisible(False)
+    layout.addWidget(render_combo)
 
     # Per-axis operator selector for the control axis.
     op_ctrl_combo = QComboBox(parent)
@@ -481,16 +621,33 @@ def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) ->
         # display-only suffix; parsing it back is what made a replicate set
         # named "A01 (well)" unselectable.
         ref = ctrl_combo.currentData()
-        if ref is None:
+        if ref is PER_SAMPLE:
+            set_fold_change_state(
+                ctx, vs_control_on=True, control_mode="per_member",
+                initiating_scope=scope,
+            )
+            _open_editor()
+        elif ref is None:
             set_fold_change_state(
                 ctx, vs_control_on=False, clear_control=True,
-                initiating_scope=scope,
+                control_mode="single", initiating_scope=scope,
             )
         else:
             set_fold_change_state(
-                ctx, vs_control_on=True, control=ref,
+                ctx, vs_control_on=True, control=ref, control_mode="single",
                 initiating_scope=scope,
             )
+
+    def _open_editor() -> None:
+        from well_viewer.core.fold_change_pairing_view import open_pairing_editor
+        with swallowed():
+            open_pairing_editor(ctx, scope)
+
+    def _on_render_changed(_idx: int) -> None:
+        set_fold_change_state(
+            ctx, control_render=render_combo.currentData() or "self",
+            initiating_scope=scope,
+        )
 
     def _on_baseline_changed(_idx: int) -> None:
         text = baseline_combo.currentText()
@@ -527,6 +684,8 @@ def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) ->
         set_fold_change_state(ctx, order=order_v, initiating_scope=scope)
 
     ctrl_combo.currentIndexChanged.connect(_on_ctrl_changed)
+    render_combo.currentIndexChanged.connect(_on_render_changed)
+    summary.linkActivated.connect(lambda _href: _open_editor())
     baseline_combo.currentIndexChanged.connect(_on_baseline_changed)
     op_ctrl_combo.currentIndexChanged.connect(_on_op_ctrl_changed)
     op_t0_combo.currentIndexChanged.connect(_on_op_t0_changed)
@@ -552,3 +711,6 @@ def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) ->
     ctx.widgets.register(f"_fc_op_ctrl_combo_{scope}", op_ctrl_combo)
     ctx.widgets.register(f"_fc_op_t0_combo_{scope}", op_t0_combo)
     ctx.widgets.register(f"_fc_order_combo_{scope}", order_combo)
+    ctx.widgets.register(f"_fc_summary_label_{scope}", summary)
+    ctx.widgets.register(f"_fc_render_combo_{scope}", render_combo)
+    _refresh_per_sample_row(ctx, summary, render_combo)

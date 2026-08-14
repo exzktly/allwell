@@ -6819,6 +6819,43 @@ it counts the entries the document carries and names them when there are few —
 it must not claim a resolution count it has no way to compute, since the
 document may have been saved against a dataset this session never loaded.
 
+**The editor.** `core/fold_change_pairing_view.py` is a non-modal `QDialog`,
+built lazily and hidden rather than destroyed, following
+`cell_gating/optimizer_view.build_optimizer_window` — the answer is judged
+against the plot behind it, so the window stays open while the user looks. A
+`Qt.Popup` dismisses on the first click outside it, and a modal dialog cannot
+be reached from a test at all (`tests/conftest.py::_no_modal_dialogs`). Four
+columns: **Sample**, **Control**, **Status**, **Resolves to**. The last is the
+one that answers the question — the other three describe intent, and intent is
+what was already wrong. `pairing_rows` builds them as plain dicts so the
+table's content is testable without a window, which matters because the failure
+this editor exists to prevent is a table describing a plot that does not exist;
+`tests/test_fold_change_pairing_view.py` asserts its members equal the keys
+`collect_bar_items` emits.
+
+Stale assignments are retained and labelled `… (missing)`, never reset: a user
+who unloads a plate and reloads it gets their pairing back. Assignments whose
+member is not currently plotted collect under an unused line rather than
+disappearing. Edits live-apply and the footer carries `Close` alone, because a
+Cancel that cannot un-draw the plot behind it is a lie.
+
+The Control dropdown reaches it. `Per-sample control…` sits directly under `—`,
+above a separator, so the member list below stays exactly as it was; once
+active it reads `Per-sample control (22/24)` — resolved out of plotted, not
+entries out of entries. `currentIndexChanged` does not fire when the user
+re-selects the item already showing, so the combo cannot be the only way back
+in: a summary label below it carries an `Edit…` link, hidden unless per-sample
+mode is on, alongside the `Controls: normalize to self / hide from plot`
+toggle. There is deliberately no "show raw" option — a raw control beside ratio
+bars puts two units on one axis.
+
+`Auto-pair` chunks the plotted members N at a time and pairs each chunk to its
+first or last, which is Home → Groups' Quick Replicates one level up and reuses
+vocabulary the user already has. A plate-geometry rule (row, column, quadrant)
+is deliberately absent: it is undefined the moment the members are replicate
+sets, which is a domain predicate applied outside its domain. Name-pattern
+matching is absent too, because every near-miss looks like a working feature.
+
 ### 9.6 Running the pipeline
 
 ```

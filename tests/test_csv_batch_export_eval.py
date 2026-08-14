@@ -172,13 +172,18 @@ def test_ontab_line_single_wells(ctx, tmp_path):
     # Column schema. ``n_above_threshold`` is the integer count; the
     # ``n_above_replicate_mean`` beside it is the value the Events panel draws,
     # which for a replicate set is the per-well mean and therefore fractional.
-    # For a single well like this one the two agree.
+    # For a single well like this one the two agree, and the spread and unit
+    # columns are empty — one well is not a replicate aggregation, and a
+    # ``0.000000`` spread there would read as "the replicates agreed".
     assert set(a01[0]) == {
         "well", "well_name", "time_h", "mean_gfp_mean_intensity",
         "sem_gfp_mean_intensity", "n_above_threshold",
-        "n_above_replicate_mean", "fraction_above",
+        "n_above_replicate_mean", "err_n_above_replicate_SEM",
+        "n_above_replicate_unit", "fraction_above",
         "n_total", "threshold", "metric",
     }
+    assert a01[0]["err_n_above_replicate_SEM"] == ""
+    assert a01[0]["n_above_replicate_unit"] == ""
 
 
 def test_ontab_line_replicate_set_fallback(ctx, tmp_path):

@@ -6856,6 +6856,18 @@ is deliberately absent: it is undefined the moment the members are replicate
 sets, which is a domain predicate applied outside its domain. Name-pattern
 matching is absent too, because every near-miss looks like a working feature.
 
+A Batch Export panel keeps its own copy of the fold-change request, seeded from
+the tab at construction and never written back, so a batch job is not tied to
+whatever the live figure has set. The per-sample mapping is seeded the same way
+and for the same reason, but the panel's own control combo offers no per-sample
+entry: the mapping is inherited, not editable there. A member of an export group
+that the inherited mapping does not name comes out blank and says so, rather
+than falling back to one control — the panel's groups are its own, so its member
+keys need not match the tab's, and a quiet fallback would export a figure that
+disagrees with the one on screen. Picking a single control in the panel's combo
+switches it out of per-sample mode, because naming one control is a request for
+one control.
+
 ### 9.6 Running the pipeline
 
 ```

@@ -1560,6 +1560,13 @@ The axis title says how many controls are in play: one is named as usual,
 two are both named, and three or more read `vs own control` — with the CSV's
 `fold_change_control` column carrying which sample used which.
 
+A Batch Export panel inherits the per-sample mapping in force when you open
+it, so a batch run reproduces the figure on screen. The panel's own Control
+dropdown offers no per-sample entry — picking a control there switches that
+panel back to a single control. A group member the inherited mapping does not
+name is exported blank rather than falling back to one control, since the
+panel's groups are its own and need not match the plot tab's.
+
 **CSV exports — additive schema.** Both the line and bar exporters
 keep the standard `mean_<ch>_<metric>` and `err_<band>_<ch>_<metric>`
 columns carrying the RAW values, and append four columns when

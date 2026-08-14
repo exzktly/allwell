@@ -226,6 +226,15 @@ class BatchExportPanel(QWidget):
         # This panel's own control, seeded from the plot tab and never
         # written back — a batch job must not follow the live figure.
         self._fc_control = _plot.fc_control
+        # Per-sample controls are seeded the same way and for the same reason:
+        # a panel opened while the tab shows a per-sample figure should export
+        # that figure. The panel's own control combo offers no per-sample
+        # entry, so the mapping is inherited and not editable here — a member
+        # of an export group that the mapping does not name comes out blank
+        # and says so, rather than quietly falling back to one control.
+        self._fc_control_mode: str = str(_plot.fc_control_mode or "single")
+        self._fc_control_map: dict = dict(_plot.fc_control_map or {})
+        self._fc_control_render: str = str(_plot.fc_control_render or "self")
         self._fc_vs_t0_on: bool = bool(_plot.fc_vs_t0_on)
 
         # Hydrate from the persisted export groups (persistence.json), else start
@@ -994,6 +1003,9 @@ class BatchExportPanel(QWidget):
             ref = self._fc_ctrl_combo.currentData()
             self._fc_vs_control_on = ref is not None
             self._fc_control = ref
+            # Naming one control here is a request for one control. Leaving the
+            # inherited per-sample mapping on would ignore the pick silently.
+            self._fc_control_mode = "single"
 
         def _on_baseline_change(_i: int) -> None:
             self._fc_vs_t0_on = (
@@ -1059,6 +1071,9 @@ class BatchExportPanel(QWidget):
             vs_control_on=bool(self._fc_vs_control_on),
             control=self._fc_control,
             vs_t0_on=bool(self._fc_vs_t0_on),
+            control_mode=str(self._fc_control_mode or "single"),
+            control_map=tuple(sorted((self._fc_control_map or {}).items())),
+            control_render=str(self._fc_control_render or "self"),
         )
 
     def _build_timepoints_section(self, layout: QVBoxLayout) -> None:
@@ -1858,9 +1873,27 @@ class BatchExportPanel(QWidget):
         _metric_label = _MLB.get(_metric_key, "Mean Intensity")
         _thr_q = threshold_qualifier(_metric_key)
         _fov_active = bool(self._ctx.state.plot.use_fov_replicates)
+        # The exported figure's title counts the controls the exported figure
+        # used, not the tab's — the panel carries its own groups, so its member
+        # list and therefore its distinct-control count can differ.
+        _fc_controls = None
+        if fc_vs_ctrl and _panel_fc.per_member:
+            from well_viewer.domain.fold_change_pairing import (
+                build_per_member_controls,
+            )
+            _fc_members = (
+                [r.name for r in grp.members] + list(grp.solo_wells))
+            _fc_controls = build_per_member_controls(
+                self._ctx, _fc_members, _panel_fc.control_map_dict,
+                member_wells=(
+                    {r.name: list(r.wells) for r in grp.members}
+                    | {w: [w] for w in grp.solo_wells}),
+                render=_panel_fc.control_render,
+            )
         _fc_suffix = _fc.fold_change_suffix(
             fc_vs_ctrl, fc_vs_t0,
             self._fc_control.display_name if self._fc_control is not None else "",
+            controls=_fc_controls,
         ) if fc_active else ""
         apply_ax_style(ax_mean, f"{_ch} {_metric_label}{_thr_q} \u00b1 {band_lbl}{_fc_suffix}", f"{_ch} {_metric_label}{_fc_suffix}")
         apply_ax_style(ax_frac, f"{fraction_title(_metric_key)}{_fc_suffix}", "Fraction" + _fc_suffix)

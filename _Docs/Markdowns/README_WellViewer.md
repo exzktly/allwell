@@ -1472,9 +1472,12 @@ Fold change:  Control [— ▾]   Baseline [— ▾]
 - **Control** — pick a loaded well or replicate set to divide every bar
   / curve by its mean at the matching timepoint. `—` disables this
   axis. (The Bar Plots control combo also includes any replicate sets
-  defined on Home → Groups.) When a rep-set name happens to match
-  a well token, the well's combo entry is suffixed with `(well)` so
-  the two are unambiguous.
+  defined on Home → Groups.) When a group name happens to match a well
+  token, the well's entry is shown as `A01 (well)` so the two can be told
+  apart on screen. The suffix is only a label: the entry records which of
+  the two you picked, so a group named `A01 (well)` is still selectable
+  and still means the group, and hiding a group cannot make its name
+  capture a well. Titles and CSV exports print the plain name.
 - **Baseline** — pick `t0 (first timepoint)` to divide every bar / curve
   by its own value at the earliest available timepoint, so each
   member's first point becomes 1.0. `—` disables this axis.
@@ -1525,6 +1528,20 @@ fold-change is active:
 the normalized value; downstream tools that depended on that behaviour
 should switch to reading the `fold_change_mean` column.)
 
+**Events columns.** `n_above_threshold` keeps its long-standing meaning — the
+integer count of events, summed across a replicate set's wells. The number the
+Events panel *draws* is the per-well mean, which is a different quantity and
+gets its own columns:
+
+* `n_above_replicate_mean` — the plotted value
+* `err_n_above_replicate_<band>` — its spread across replicates, empty when
+  there was only one and nothing could be computed
+* `n_above_replicate_unit` — `well` or `fov`, empty for a single well
+
+The unit column matters because nothing else in the row records whether
+Aggregate-FOVs was on, which would leave the other two ambiguous. For a
+single-well row all three agree with `n_above_threshold`.
+
 **Statistical consistency.** The control denominator uses the same
 averaging statistic as the displayed bar / curve — mean-of-per-well-means
 for rep-set controls, single-well aggregation for solo wells, per-FOV
@@ -1571,8 +1588,13 @@ of individual cells. This is the default Plotting sub-tab.
 ### Line Graphs
 
 **What it shows.** A metric over time as three stacked panels — **mean ±
-SD/SEM**, **fraction above threshold** (fraction-on), and **N events** (cell
-count) — plus a CDF.
+SD/SEM**, **fraction above threshold** (fraction-on), and **N events** — plus a
+CDF. For a replicate set, **N events is the mean of its per-well counts**, the
+same way the mean and fraction panels average their wells, so all three panels
+describe one well's worth of signal and the three can be read together. A
+two-well set of 5 events each plots 5, not 10. The Bar Plots tab reports the
+same number, so the two tabs can be compared directly; the cross-well total is
+still exported (see below).
 
 - **Needs** — selected wells spanning more than one timepoint to see a trend
   (single-timepoint data draws a single point).

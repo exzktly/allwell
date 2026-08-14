@@ -299,7 +299,8 @@ well_viewer/
 │   ├── image_identity.py             ← single source of truth for filenames + CellKey
 ├── domain/                        ← Qt-free models + pure logic
 │   ├── batch_models.py, ratio_models.py, selections_model.py, plate_layout.py
-│   ├── fold_change.py, fold_change_scopes.py
+│   ├── fold_change.py, fold_change_scopes.py, fold_change_state.py
+│   ├── fold_change_series_cache.py, control_ref.py
 │   ├── gating_state.py, sample_definitions.py, viewer_state.py, stats_compute.py
 │   ├── bar_groups.py, plot_groups.py, metric_registry.py, qc_params.py, tp_match.py
 │   ├── multivariate_compute.py       ← PCA/correlation/clustering/faceting math (Qt-free)
@@ -419,7 +420,7 @@ The codebase uses a suffix-based scheme so the file name tells the reader the ro
 - `features/export/` (service.py + style.py) and `features/review_csv/` (tab_view.py) intentionally have **no `controller.py`**: `export/` is a stateless service layer (figure-style application + save), and `review_csv/` is a thin read-only CSV inspector tab with no behaviour to orchestrate. Adding an empty controller would be ceremony, not structure.
 - `features/heatmap/models.py` is the only `models.py` in `features/` (the convention under `domain/` is `_models.py`).
 - `data/` modules use bare names (`data_loading.py`, `auto_threshold.py`, `crop_tool.py`, `image_discovery.py`, `image_resolver.py`, `metric_labels.py`, `zipfile_cache.py`) — each is one self-contained utility, no internal suffix scheme.
-- `domain/` mixes suffixed (`stats_compute`, `fold_change_scopes`, `gating_state`) and bare (`fold_change.py`, `selections_model.py`, `viewer_state.py`, `plate_layout.py`) names.
+- `domain/` mixes suffixed (`stats_compute`, `fold_change_scopes`, `fold_change_state`, `fold_change_series_cache`, `gating_state`) and bare (`fold_change.py`, `control_ref.py`, `selections_model.py`, `viewer_state.py`, `plate_layout.py`) names.
 - `persistence/` modules are named for the `pipeline_info.json` block they persist (`bar_groups.py`, `ratios.py`, `cell_gating.py`) — no `_persistence.py` suffix.
 - `features/image_browser/image_table/view_state_io.py` and `features/heatmap/view_state_io.py` — feature-owned `view_state` (de)serialization modules (the `view_state_io` descriptor hook, §5.3); a persistence-IO role, not a view/compute one.
 - `runtime_app.py`, `viewer_context.py` — top-level singletons; no suffix.
@@ -543,7 +544,8 @@ layers:
 │           ── batch_models, ratio_models, selections_model,           │
 │              plate_layout, gating_state, sample_definitions,         │
 │              viewer_state, stats_compute, fold_change,               │
-│              fold_change_scopes                                     │
+│              fold_change_scopes, fold_change_state, control_ref,     │
+│              fold_change_series_cache                                │
 ├──────────────────────────────────────────────────────────────────────┤
 │  persistence/  ← JSON read/write + debounced save registry           │
 │                  (one module per on-disk file)                       │
@@ -1880,12 +1882,13 @@ excluded features' `paths`/`tests` per `profiles/full.toml`.
 
 One Qt builder sits in `core/` rather than under a feature package:
 `core/fold_change_controls_view.py` exposes
-`install_fold_change_controls(app, parent, layout, scope=…)` — the
+`install_fold_change_controls(ctx, parent, layout, scope=…)` — the
 Control + Baseline dropdown pair installed on both the Bar Plots and
-Line Graphs control rows. It is in `core/` because both of its consumers
+Line Graphs control rows (inside each tab's `Fold change ▾` popover, not
+on a visible row). It is in `core/` because both of its consumers
 are features, and because it owns the cross-tab widget sync
 (`_sync_widgets_to_state`) that mirrors each state change into the
-other tab's widget instances, so the shared `app._fc_*` state stays
+other tab's widget instances, so the shared `state.plot.fc_*` values stay
 visually in lockstep across tab switches. Its pure-logic half — the
 scope registry and dirty-flag helpers it re-exports — stays in
 `domain/fold_change_scopes.py`, which is what lets the unit tests reach
@@ -2105,6 +2108,9 @@ Shared domain helpers (under `well_viewer/domain/`):
 | Module | Role |
 |--------|------|
 | `domain/fold_change.py` | Fold-change normalization helpers (vs control well/rep-set, vs each member's first timepoint). Consumed by line / bar plot, batch export, and `features/export/service.py`. |
+| `domain/control_ref.py` | `ControlRef` — the frozen `(kind, name)` a fold-change control is addressed by, plus its storage form. The kind travels beside the name because replicate-set names are unrestricted free text, so no single string can distinguish a well from a set that shares its token (§9.5). |
+| `domain/fold_change_state.py` | `FoldChangeState` — the request object every collection path is handed, replacing the `(vs_control_on, control_label, vs_t0_on)` tuple it used to be. Read by name: it briefly emulated the tuple, which both broke the `__eq__`/`__hash__` contract and let a call site drop a newly added field by unpacking three values, and for this object a dropped field means raw values drawn under a fold-change axis. `coerce_fc_state` still accepts a tuple as input, since many tests spell a request inline; nothing hands one back. |
+| `domain/fold_change_series_cache.py` | `ControlSeriesCache` — a per-redraw memo of control denominator series, keyed on the reference. The cross-axis stacking blocks resolve a control inside the member loop and each call rebuilds the whole series, so a 24-member plate over 6 timepoints issued 882 builds on the vs-control + vs-t0 path against 75 with the memo. It captures the threshold, value column, spread mode and gates it was built with and has no invalidation, so it is a collector local and must not outlive one redraw. |
 | `domain/stats_compute.py` | `compute_rep_stats`, `aggregate_well`, `aggregate_group` — the pure-math layer the bar / line / scatter controllers share. `aggregate_well` / `aggregate_group` resolve an optional delegate through `ctx.runtime.aggregate.well` / `.group`, which is the hook the pure-logic test `MockApp` uses to short-circuit aggregation (its `_aggregate_well` / `_aggregate_group` methods surface through the runtime's back-compat view); the production `WellViewerApp` provides no such delegate, so the value is `None` and the DataFrame path is taken at runtime. The result cache is keyed on everything that can move a number, including `_gate_cache_sig` — the scatter-gate state for **both** layers. Thresholding is in there because gate membership defines the on-population; inclusion is in there because "Use scatter gates" replaces the per-channel intensity floors, and the `fluor_gates` already in the key do not move when that checkbox is toggled. Mode-on-with-no-gates still differs from mode-off (the floors are bypassed either way), so the flag itself is part of the signature, not just the gate geometry. It returns `None` when neither layer is active, leaving a plain threshold-mode session's keys byte-identical. |
 | `domain/batch_models.py`, `domain/ratio_models.py`, `domain/selections_model.py` | Plain dataclass models. |
 
@@ -6494,6 +6500,23 @@ member it's `_aggregate_well`. Mixing statistics gave biased ratios in
 the original implementation. The helpers in `fold_change.py` enforce
 this — see `member_mean_series` for the dispatch.
 
+The Events (N-above) panel is the same rule applied to a count: a replicate
+set's value is the **mean of its per-well counts** with the cross-well spread,
+matching the Mean and Fraction panels beside it, on both plotting tabs and both
+batch paths. `compute_rep_n_above_stats` is that statistic. A cross-well
+**total** is a different number and is reporting-only — it is what the CSV's
+integer `n_above_threshold` column has always carried, it comes from
+`compute_rep_n_above_total`, and `tests/test_events_total_isolation.py` keeps it
+out of anything that draws. The two are easy to substitute for one another by
+name, and substituting them is what made a set divided by itself land on 1/n
+rather than 1.0.
+
+The bar and line CSVs therefore report both: `n_above_threshold` (the integer
+count) alongside `n_above_replicate_mean`, `err_n_above_replicate_<band>` and
+`n_above_replicate_unit` (`well` / `fov`, empty for a single well). The unit
+column is not decoration — nothing else in the row records whether
+Aggregate-FOVs was on, which would leave the mean and its spread ambiguous.
+
 Stacking when both axes are active is **ΔΔCt-style**:
 ```
    Y(t) = (X(t) / C(t)) / (X(0) / C(0))
@@ -6517,24 +6540,24 @@ recovers the legacy "treat denominator as exact" `spread / factor`
 behaviour and is the backwards-compatible default.
 
 ```
-                            app._fc_vs_control_on   ─┐
-User → Control combo  ─→    app._fc_control_label   ─┼─→ fold_change.fold_change_state(app)
-                            app._fc_vs_t0_on        ─┘
-User → Baseline combo ─→ (sets _fc_vs_t0_on)
+                            state.plot.fc_vs_control_on ─┐
+User → Control combo  ─→    state.plot.fc_control       ─┼─→ fold_change.fold_change_state(ctx)
+                            state.plot.fc_vs_t0_on      ─┘        → FoldChangeState
+User → Baseline combo ─→ (sets fc_vs_t0_on)
 
-core/fold_change_controls_view.set_fold_change_state(app, *, …, initiating_scope)
+core/fold_change_controls_view.set_fold_change_state(ctx, *, …, initiating_scope)
         │   mirrors the shape of channel_state_controller.set_active_channel:
         │   updates state → _sync_widgets_to_state →
         │     redraw_scopes_or_defer(app) (scope coalescer: visible scope's
         │     callable runs now, the rest are marked dirty)
         ▼
 Line tab — lineplot_controller.redraw_line_plots(…) →
-            collect_line_series(app, …) → list[LineSeries]
+            collect_line_series(ctx, …) → list[LineSeries]
    1. Single source of truth, mirrors the bar plot's
       ``collect_bar_items``. Each member becomes a ``LineSeries``
       with a list of ``LinePoint``s (full AggPoint shape so the
       renderer and CSV writers consume the same record).
-   2. fold_change.member_stats_series(app, fc_ctrl_lbl, …) →
+   2. fold_change.member_stats_series(ctx, fc.control, …) →
       {t: (control_mean, control_spread)} — mean-of-per-well-means
       for rep-set controls (per-FOV pool when Aggregate-FOVs is on),
       single-well agg for well controls. Spreads thread through
@@ -6558,23 +6581,27 @@ Line tab — lineplot_controller.redraw_line_plots(…) →
       the same shape: ``barplot.collect.collect_bar_items_for_group`` pools
       multi-well members via ``compute_rep_stats`` and keeps solos on
       ``aggregate_well``.
-   5. After redraw, app._set_status(…) surfaces a one-line warning
+   5. After redraw, ctx.notify.set_status(…) surfaces a one-line warning
       naming any timepoints where the control had no sample.
 
-Bar tab — barplot_controller.collect_bar_items(app, target_t,
+Bar tab — barplot_controller.collect_bar_items(ctx, target_t,
                                                 miss_sink=fc_misses)
           → list[BarItem]  (single source of truth)
-   1. fold_change.control_mean_at_for_bar(app, label, target_t, …)
+   1. fold_change.control_mean_at_for_bar(ctx, ref, target_t, …)
       → single float (or None). Uses the same stat as the bar's
       numerator (mean-of-per-well-means for rep-set, per-FOV pool
       when Aggregate-FOVs is on).
    2. For each bar's (mean, spread): scale_bar_value(…).
-   3. t0 baseline = member_first_tp_value(app, member_label, …) for
+   3. t0 baseline = member_first_tp_value(ctx, member_label, …) for
       rep-sets (same stat) or first_tp_value(pts) for per-well bars.
-   4. If vs-control was requested but the resolver returned None,
-      every bar is forced to NaN (no silent fall-back to raw values)
-      and the target_t is recorded in miss_sink for the status
-      warning surfaced by barplot_renderer.draw_grouped_bar_mode.
+   4. If vs-control was requested but the resolver returned None, the
+      affected bars are forced to NaN (no silent fall-back to raw values)
+      and the target_t is recorded in miss_sink for the status warning
+      surfaced by barplot_renderer.draw_grouped_bar_mode. The cross-axis
+      stacking that runs when the baseline axis is also on is guarded on
+      the same condition, in both the grouped and per-well branches — it
+      divides by the control, so reaching it with an unresolved one raised
+      a TypeError rather than drawing a placeholder.
 
 Bar tab violin / beeswarm — runtime_app._draw_per_cell_bar_mode →
 fold_change.build_cell_scaling(…) → {well: factor}, where each cell
@@ -6661,13 +6688,37 @@ Cross-tab widget sync:
    policy. The dirty set lives on ``PlotState.fc_dirty_scopes``
    (``app._app_state.plot.fc_dirty_scopes``).
 
-When a rep-set name collides with a loaded well token, the well's
-combo entry is suffixed with " (well)"; resolve_control_wells
-accepts both bare and suffixed forms, and set_fold_change_state
-strips the suffix before storage so the underlying state stays a
-bare token. This is the only collision-resolution mechanism — the
-The sample-definitions UI does not currently prevent the collision at
-input time.
+**A control is a reference, not a name.** `PlotState.fc_control` holds a
+`domain/control_ref.ControlRef` — a frozen `(kind, name)` where `kind` is
+`"well"`, `"set"`, or `"legacy"` — and `None` means no control. The kind is
+carried beside the name rather than encoded into it because replicate-set names
+are unrestricted free text: `selections_model._unique_name` strips whitespace
+and ensures uniqueness, and reserves no character. A set may therefore be named
+`A01 (well)`, or share a token with a loaded well, and no spelling of a single
+string can tell the two apart. The combo still shows `A01 (well)` when a well's
+token collides with a set name, but that suffix is display chrome: the combo
+carries the reference as item data, matches its selection on it, and nothing
+parses the text back.
+
+`domain/fold_change.resolve_control` is the single place a control becomes
+wells, returning `("set"|"well"|"", name)`. Every path that needs a denominator
+goes through it — `resolve_control_wells`, `_label_to_replicate_set` and
+`_member_series` are its callers rather than three implementations of the same
+decision. A reference that states its kind is believed, so a hidden set can
+never capture a well of the same name. Only a `"legacy"` reference — a bare
+string, or a document written before the kind was recorded — falls through to
+`classify_control_label`, which applies the precedence such a value was saved
+under: suffixed-well first, then set name, then bare well token, with a set
+whose wells are all unloaded falling through rather than claiming the label.
+
+Persistence writes the object under `control` and keeps the plain token in the
+older `control_label` key, so a rolled-back build finds a value it understands.
+A legacy string is upgraded when it loads and written concrete on the next
+save, which retires the ambiguity once per document. `ControlRef.display_name`
+is the plain token and is what reaches an axis title, the `fold_change_control`
+CSV cell and the saved-plot summary; the suffix never appears in a figure or an
+export. The sample-definitions UI does not prevent the name collision at input
+time, and does not need to.
 
 ### 9.6 Running the pipeline
 

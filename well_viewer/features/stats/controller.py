@@ -130,10 +130,14 @@ def draw_ks_cdf(ctx, group_vals: list[tuple[str, list[float]]], tp_str: str, wel
     for (name, vals), color in zip(group_vals, colors):
         if not vals:
             continue
-        sv = sorted(vals)
-        n = len(sv)
-        xs = [sv[0]] + sv + [sv[-1]]
-        ys = [0.0] + [(i + 1) / n for i in range(n)] + [1.0]
+        # Arrays, not list comprehensions: the same shape the Line tab's CDF
+        # panel carried, where a plate-sized group ran out of memory building
+        # the y-values. ``np.concatenate`` keeps the duplicated end points that
+        # make ``step(where="post")`` close the curve at 0 and 1.
+        sv = np.sort(np.asarray(vals, dtype=float))
+        n = sv.size
+        xs = np.concatenate(([sv[0]], sv, [sv[-1]]))
+        ys = np.concatenate(([0.0], np.arange(1, n + 1, dtype=float) / n, [1.0]))
         ax.step(xs, ys, where="post", label=name, color=color, linewidth=1.5)
     ax.set_xlabel(_channel_label_for_val_col(val_col) or "value", fontsize=8)
     ax.set_ylabel("Cumulative fraction", fontsize=8)

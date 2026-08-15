@@ -206,8 +206,15 @@ def _restore_stats(ctx, cfg) -> None:
             threshold=cfg.get("threshold"), test=cfg.get("test", ""),
             use_fov=bool(cfg.get("use_fov", True)),
         )
-        ctx.state.stats.groups = groups
-        ctx.state.stats.pairwise = pairwise
+        # Same gate as the bar renderer's. Saved Plots and Statistics are
+        # separately removable, so a build with one and not the other reaches
+        # here — and this sits inside a broad ``except`` that logs at DEBUG, so
+        # the AttributeError did not crash, it just meant a restored plot
+        # silently came back without its comparisons.
+        stats_state = ctx.state.feature_slice("stats")
+        if stats_state is not None:
+            stats_state.groups = groups
+            stats_state.pairwise = pairwise
     except Exception:
         _logger.debug("saved_plots: stats re-run failed", exc_info=True)
 

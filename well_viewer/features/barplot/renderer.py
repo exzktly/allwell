@@ -480,7 +480,17 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
     per-cell mode (this is only called from the aggregate bar path)."""
     if not getattr(ctx.state.plot, "show_significance", False):
         return
-    pairwise = list(getattr(ctx.state.stats, "pairwise", []) or [])
+    # ``feature_slice`` rather than attribute access: Statistics is removable,
+    # this renderer is not, and ``ctx.state.stats`` *raises* when the feature is
+    # absent. The old spelling was ``getattr(ctx.state.stats, "pairwise", [])``,
+    # which reads as defensive and is not — ``getattr``'s default only covers a
+    # missing *attribute*, and its first argument is evaluated before it is ever
+    # called. A profile build without Statistics raised on every bar redraw with
+    # the significance toggle on.
+    stats_state = ctx.state.feature_slice("stats")
+    if stats_state is None:
+        return
+    pairwise = list(getattr(stats_state, "pairwise", []) or [])
     if not pairwise:
         return
     rec0 = pairwise[0]

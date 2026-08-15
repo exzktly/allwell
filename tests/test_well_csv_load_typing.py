@@ -102,11 +102,28 @@ CASES = {
 }
 
 
+def _text_as_str(df):
+    """Text columns back to plain strings, for comparison only.
+
+    The loader stores the repeating text columns as categories — see
+    ``tests/test_text_columns_are_categories.py``, which pins that separately
+    along with the three ways it could have changed an answer. This file is
+    about the *typed read*, so it compares the values and lets that dtype
+    difference through rather than re-asserting the old storage.
+    """
+    out = df.copy()
+    for col in out.columns:
+        if isinstance(out[col].dtype, pd.CategoricalDtype):
+            out[col] = out[col].astype(str)
+    return out
+
+
 @pytest.mark.parametrize("name", sorted(CASES))
 def test_the_typed_read_returns_what_the_string_read_returned(tmp_path, name):
     path = tmp_path / f"measurements_{name}_A01.csv"
     path.write_text(CASES[name])
-    pd.testing.assert_frame_equal(load_well_csv(path), _old_load(path))
+    pd.testing.assert_frame_equal(
+        _text_as_str(load_well_csv(path)), _text_as_str(_old_load(path)))
 
 
 def test_a_well_literally_named_NA_is_still_text(tmp_path):

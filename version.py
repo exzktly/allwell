@@ -12,4 +12,4 @@ inside a frozen PyInstaller bundle, where package metadata is not available.
 
 from __future__ import annotations
 
-__version__ = "8.30.1"
+__version__ = "8.30.2"

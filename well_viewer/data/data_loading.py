@@ -60,6 +60,18 @@ def normalize_fov_series(fov: pd.Series) -> pd.Series:
     return _normalize_fov_series(fov)
 
 
+def _string_column_dtypes(path: Path) -> dict:
+    """``{column: str}`` for the text columns, keyed on their on-disk names.
+
+    A one-row-free header read, so the main read below can be told which
+    columns are text and left to type the rest itself. The names are the
+    *unrenamed* ones because the rename happens after the read.
+    """
+    header = pd.read_csv(path, nrows=0)
+    return {c: str for c in header.columns
+            if str(c).strip().lower() in _STRING_COLS}
+
+
 def load_well_csv(path: Path) -> pd.DataFrame:
     """Load a per-well CSV into a DataFrame.
 
@@ -70,10 +82,33 @@ def load_well_csv(path: Path) -> pd.DataFrame:
     ("W3Cy5_smfish_count" → "w3cy5_smfish_count"). The ``Included`` column
     is added with default value 1 if missing. Empty/"-1" FOVs are normalised
     to "1".
+
+    **Only the text columns are read as text.** Reading the whole file with
+    ``dtype=str`` makes pandas allocate one consolidated object block of every
+    column at once — ``(n_columns, n_rows)`` — and fill it with a Python string
+    per cell, including for the columns that are numbers and are about to be
+    converted back. On a 537,393-row × 37-column file that is a 152 MiB pointer
+    array plus roughly 16.6 million short strings, and it is where a plate that
+    size died with ``Unable to allocate 152 MiB for an array with shape
+    (37, 537393) and dtype object``. Measured on a file of exactly that shape:
+    1749 MiB peak before, 1073 MiB after.
+
+    Chunking the old read does **not** help — the coerced chunks stay alive
+    until the concat — which is why this types the read instead.
+
+    ``na_values=[""]`` with ``keep_default_na=False`` is what keeps the result
+    byte-identical to the old path: a blank becomes NaN in every column (then
+    ``""`` again in the text ones), while a cell holding the literal text
+    ``NA`` / ``NaN`` / ``null`` stays that text in a string column and still
+    coerces to NaN in a numeric one, exactly as before.
     """
-    df = pd.read_csv(path, dtype=str, keep_default_na=False)
+    df = pd.read_csv(path, dtype=_string_column_dtypes(path),
+                     keep_default_na=False, na_values=[""])
     if df.empty:
         return df
+    for col in df.columns:
+        if str(col).strip().lower() in _STRING_COLS:
+            df[col] = df[col].fillna("")
 
     def _should_lower(col: str) -> bool:
         lc = str(col).strip().lower()
@@ -98,7 +133,12 @@ def load_well_csv(path: Path) -> pd.DataFrame:
     for col in df.columns:
         if str(col).strip().lower() in _STRING_COLS:
             continue
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+        # A column the reader already typed needs nothing: re-running
+        # ``to_numeric`` over a float64 column would rebuild it for no gain.
+        # ``object`` is what is left when a numeric column carries a stray
+        # non-numeric cell, and that is exactly the case this coerces.
+        if df[col].dtype == object:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # Backfill circularity for datasets processed before it became always-on,
     # when its inputs are present (perimeter + an area column). 4π·area/perimeter²

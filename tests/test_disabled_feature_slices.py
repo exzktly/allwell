@@ -23,6 +23,8 @@ the bottom is therefore mechanical rather than a promise to remember.
 from __future__ import annotations
 
 import os
+import tempfile
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -179,3 +181,47 @@ def test_no_code_outside_a_feature_reaches_its_slice_by_attribute():
         assert exempt_hits, (
             f"{exempt} no longer reaches any removable feature's slice — drop "
             "the exemption rather than leaving one that describes nothing")
+
+
+# ── a reduced build says so ──────────────────────────────────────────────────
+
+def test_a_reduced_profile_announces_itself_once(monkeypatch, caplog):
+    """A subset build is degraded output, so it must not be silent.
+
+    Until this line existed, an app running a profile simply had fewer tabs and
+    then raised ``AttributeError: AppState.<slice> is unavailable`` the first
+    time something reached past the gap — with nothing anywhere naming the
+    profile. A stray ``active_profile.txt`` left in a working tree by a profile
+    build does that permanently, and it is the case this exists for, so the
+    message names *where* the choice came from and not only what it was.
+    """
+    import logging
+
+    from well_viewer.core import profile as profile_mod
+
+    monkeypatch.setattr(profile_mod, "_announced", False)
+    monkeypatch.setenv("ALLWELL_PROFILE", "plotting_only")
+    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+        profile_mod.active_profile()
+        profile_mod.active_profile()
+
+    hits = [r for r in caplog.records if "feature profile" in r.getMessage()]
+    assert len(hits) == 1, "announced once per process, not once per call"
+    msg = hits[0].getMessage()
+    assert "plotting_only" in msg
+    assert "ALLWELL_PROFILE" in msg, "the message has to name where it came from"
+
+
+def test_the_full_app_says_nothing(monkeypatch, caplog):
+    """Silence is correct for the norm — a warning on every launch would be
+    noise, and noise is what gets a real warning ignored."""
+    import logging
+
+    from well_viewer.core import profile as profile_mod
+
+    monkeypatch.setattr(profile_mod, "_announced", False)
+    monkeypatch.delenv("ALLWELL_PROFILE", raising=False)
+    monkeypatch.setattr(profile_mod, "_repo_root", lambda: Path(tempfile.mkdtemp()))
+    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+        profile_mod.active_profile()
+    assert not [r for r in caplog.records if "feature profile" in r.getMessage()]

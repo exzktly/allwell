@@ -32,6 +32,7 @@ profile), so the TOML backend must resolve on Python 3.10 — a bare
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from dataclasses import dataclass, field
@@ -139,21 +140,43 @@ def load_profile(source) -> Profile:
 _BAKED_MARKER = "active_profile.txt"
 
 
+#: Announced once per process, not per call — this resolver runs on every
+#: registry build.
+_announced = False
+
+
 def active_profile() -> Profile:
     """Resolve the active profile.
 
     Precedence: the ``ALLWELL_PROFILE`` env var (dev / explicit override), then a
     baked ``active_profile.txt`` marker in the bundle root (set at build time),
     then the full feature set.
+
+    **A reduced profile announces itself**, once, at WARNING, naming the profile
+    and where the choice came from. A subset build is degraded output: whole
+    features and their state slices are absent, and until this line existed
+    nothing said so — the app simply had fewer tabs and then raised
+    ``AttributeError: AppState.<slice> is unavailable`` the first time something
+    reached past the gap. A stray ``active_profile.txt`` left in a working tree
+    by a profile build does that silently and permanently, which is the case
+    this is written for. The full app says nothing, because that is the norm.
     """
+    global _announced
     name = os.environ.get(_ENV_VAR, "").strip()
+    source = f"the {_ENV_VAR} environment variable"
     if not name:
         marker = _repo_root() / _BAKED_MARKER
         try:
             if marker.exists():
                 name = marker.read_text(encoding="utf-8").strip()
+                source = str(marker)
         except OSError:
             name = ""
     if not name or name.lower() == "full":
         return FULL
+    if not _announced:
+        _announced = True
+        logging.getLogger("well_viewer").warning(
+            "Running the %r feature profile, from %s — features outside it are "
+            "absent from this build. Unset it for the full app.", name, source)
     return load_profile(name)

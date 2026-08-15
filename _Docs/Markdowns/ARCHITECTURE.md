@@ -1760,7 +1760,15 @@ the pipeline side too). It applies at three levels, all sharing the one
   descriptors, so `ALLWELL_PROFILE=thin python -m allwell` runs the subset off
   the *full* tree with nothing deleted. The active profile is the
   `ALLWELL_PROFILE` env var, or a baked `active_profile.txt` marker in a frozen
-  bundle, else the full app.
+  bundle, else the full app. **A reduced profile announces itself**, once per
+  process, at WARNING, naming the profile and which of those two chose it. A
+  subset build is degraded output — whole features and their state slices are
+  absent — and without the line it is indistinguishable from the full app until
+  something reaches past the gap and raises `AttributeError: AppState.<slice>
+  is unavailable`. A stray `active_profile.txt` left in a working tree by a
+  profile build does exactly that, permanently and silently, which is the case
+  the message is written for. The full app says nothing, because a warning on
+  every launch is the noise that gets real warnings ignored.
 - **Binary** — `all_well.spec` reads the same profile: it omits excluded
   features' source from the bundle and **drops their unique heavy deps
   automatically** from the catalog (`profiles/full.toml`'s per-feature `deps`).

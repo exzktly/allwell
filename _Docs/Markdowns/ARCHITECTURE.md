@@ -1760,7 +1760,15 @@ the pipeline side too). It applies at three levels, all sharing the one
   descriptors, so `ALLWELL_PROFILE=thin python -m allwell` runs the subset off
   the *full* tree with nothing deleted. The active profile is the
   `ALLWELL_PROFILE` env var, or a baked `active_profile.txt` marker in a frozen
-  bundle, else the full app.
+  bundle, else the full app. **A reduced profile announces itself**, once per
+  process, at WARNING, naming the profile and which of those two chose it. A
+  subset build is degraded output — whole features and their state slices are
+  absent — and without the line it is indistinguishable from the full app until
+  something reaches past the gap and raises `AttributeError: AppState.<slice>
+  is unavailable`. A stray `active_profile.txt` left in a working tree by a
+  profile build does exactly that, permanently and silently, which is the case
+  the message is written for. The full app says nothing, because a warning on
+  every launch is the noise that gets real warnings ignored.
 - **Binary** — `all_well.spec` reads the same profile: it omits excluded
   features' source from the bundle and **drops their unique heavy deps
   automatically** from the catalog (`profiles/full.toml`'s per-feature `deps`).
@@ -7767,6 +7775,7 @@ The map (each rule links to the test that holds it):
 | Never hardcode a colour or a pixel size (§3, §8) — allowlisted for colormap/palette data and the `__main__` demo blocks; `datasets/` is out of scope while its tool pages consolidate | `tests/test_hardcoded_tokens.py` |
 | Every divider frame carries a name the QSS styles, so it paints a 1 px `border_subtle` hairline rather than Qt's 3 px etched default (§8) | `tests/test_divider_naming.py` |
 | A well token is judged by `util.well_token`, never a local whole-token regex (§15) | `tests/test_well_token_single_parser.py` |
+| A removable feature's state slice is reached from outside that feature through `state.feature_slice(name)`, never by attribute. `AppState.__getattr__` **raises** for a slice whose feature is not in `FEATURES`, so a profile build without it fails at the access — and `getattr(ctx.state.stats, "pairwise", [])` does not help, because the default covers a missing *attribute* on an object that already exists and reaching the object is what raises. Removability is read from `profiles/full.toml`, so a slice whose feature is kept forever (`bar`, `preview`, `review_image`) is not the subject; `features/registry.py` is exempt because every access there sits inside that feature's own activation hook, and the guard fails if that exemption stops describing a real access | `tests/test_disabled_feature_slices.py`, with bite cases in `tests/test_guards_bite.py` |
 | `swallow` and `swallowed` are not swapped. They are near-identical names with opposite call shapes — a context manager and a call for inside an `except` block — and swapping them fails only when the line runs. `with swallowed():` raises **before** the body, so the work it was meant to guard never happens; `swallowed()` outside a handler logs a suppression with no exception in flight, which reads as a failure that did not occur | `tests/test_safe_helpers_used_right.py`, with bite cases in `tests/test_guards_bite.py` |
 | A context menu is opened through `widgets/menu_exec.exec_menu`, never `QMenu.exec` directly. `QMenu.exec` blocks in Qt's C++ event loop with nothing offscreen to close it, and unlike a dialog's `exec` it **cannot** be monkeypatched — Shiboken exposes it as a static/instance overload, so an entry in `_MODAL_CALLS` would write a class attribute that instance lookup ignores and measure nothing. The seam is ordinary Python, so the autouse fixture patches that instead; the guard also rejects `from widgets.menu_exec import exec_menu`, which binds the name past the patch's reach | `tests/test_menu_exec_seam.py`, with bite cases in `tests/test_guards_bite.py` |
 | No `logging.Handler.emit` creates or arms a Qt timer — `emit` runs on the thread that logged the record, so a timer built there never fires and its teardown raises `killTimer` from another thread. Handlers marshal through `core.worker_bridge.GuiLogRelay` (§10.1) | `tests/test_log_handler_marshalling.py` (static) + `tests/test_log_handler_thread_safety.py` (behavioural), with bite cases in `tests/test_guards_bite.py` |

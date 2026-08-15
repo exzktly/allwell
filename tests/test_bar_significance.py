@@ -35,14 +35,21 @@ def _app(pairwise, *, rsets=(), active_val_col="gfp_mean_intensity"):
     _sels = [{"name": r.name, "wells": list(getattr(r, "wells", []) or [])}
              for r in rsets]
     _wp = {w: None for r in rsets for w in (getattr(r, "wells", []) or [])}
+    state = SimpleNamespace(
+        plot=SimpleNamespace(show_significance=True),
+        stats=SimpleNamespace(pairwise=pairwise),
+        channel=SimpleNamespace(active_val_col=active_val_col),
+        selection=SimpleNamespace(selections=_sels, selected_wells=set()),
+        dataset=SimpleNamespace(well_paths=_wp),
+    )
+    # The real ``AppState`` answers ``feature_slice(name)`` with the slice or
+    # ``None``, and core code reaches a removable feature's state that way —
+    # attribute access *raises* when the feature is absent. A stand-in without
+    # the method sends the renderer down a path production never takes, which
+    # is the fixture-diverges-from-production trap CLAUDE.md §7.1 #4 names.
+    state.feature_slice = lambda name: getattr(state, name, None)
     app = SimpleNamespace(
-        _app_state=SimpleNamespace(
-            plot=SimpleNamespace(show_significance=True),
-            stats=SimpleNamespace(pairwise=pairwise),
-            channel=SimpleNamespace(active_val_col=active_val_col),
-            selection=SimpleNamespace(selections=_sels, selected_wells=set()),
-            dataset=SimpleNamespace(well_paths=_wp),
-        ),
+        _app_state=state,
         _bar_xs_keys=["CTRL", "DRUG"],
         _bar_xs=[0.0, 1.0],
         _rep_sets_active=lambda: list(rsets),

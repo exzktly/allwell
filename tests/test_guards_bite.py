@@ -1244,3 +1244,71 @@ def test_safe_helper_guard_clears(shape):
     from tests.test_safe_helpers_used_right import offenders_in
     found = offenders_in(SAFE_CLEAN[shape], "probe.py")
     assert not found, f"the guard fired on a legitimate {shape}: {found}"
+
+
+# ── a disabled feature's state slice ─────────────────────────────────────────
+#
+# `AppState.__getattr__` raises for a removable feature's slice when that
+# feature is not in FEATURES. The bar renderer reached `ctx.state.stats` behind
+# a `getattr` default, which cannot help — the default covers a missing
+# attribute on an object that already exists, and reaching the object is what
+# raises. A profile build without Statistics hit it on every bar redraw.
+
+SLICE_VIOLATIONS = {
+    "plain-attribute": (
+        "def draw(ctx):\n"
+        "    return ctx.state.stats.pairwise\n"
+    ),
+    "behind-a-getattr-default": (
+        "def draw(ctx):\n"
+        "    return list(getattr(ctx.state.stats, 'pairwise', []) or [])\n"
+    ),
+    "assignment-into-the-slice": (
+        "def restore(ctx, groups):\n"
+        "    ctx.state.stats.groups = groups\n"
+    ),
+    "another-removable-feature": (
+        "def draw(ctx):\n"
+        "    return ctx.state.multivariate.loadings\n"
+    ),
+}
+
+SLICE_CLEAN = {
+    "through-feature-slice": (
+        "def draw(ctx):\n"
+        "    st = ctx.state.feature_slice('stats')\n"
+        "    if st is None:\n"
+        "        return []\n"
+        "    return list(getattr(st, 'pairwise', []) or [])\n"
+    ),
+    # Kept-forever slices cannot be absent, so they are not the subject.
+    "a-slice-that-is-never-removed": (
+        "def draw(ctx):\n"
+        "    return ctx.state.bar.tp_selections\n"
+    ),
+    # A same-named attribute on something that is not the state bundle.
+    "not-the-state-bundle": (
+        "def draw(run):\n"
+        "    return run.results.stats.mean\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(SLICE_VIOLATIONS))
+def test_feature_slice_guard_catches(tmp_path, monkeypatch, shape):
+    path = _write(tmp_path, f"probe_{shape}.py", SLICE_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_disabled_feature_slices",
+                    "test_no_code_outside_a_feature_reaches_its_slice_by_attribute",
+                    [path])
+    assert exc is not None, f"the {shape} spelling walked past the guard"
+
+
+@pytest.mark.parametrize("shape", sorted(SLICE_CLEAN))
+def test_feature_slice_guard_clears(tmp_path, monkeypatch, shape):
+    """The kept-forever case matters most: flagging `state.bar` would push
+    every caller through a `None` check for something that cannot be None."""
+    path = _write(tmp_path, f"probe_{shape}.py", SLICE_CLEAN[shape])
+    exc = _run_scan(monkeypatch, "tests.test_disabled_feature_slices",
+                    "test_no_code_outside_a_feature_reaches_its_slice_by_attribute",
+                    [path])
+    assert exc is None, f"the guard fired on a legitimate {shape}: {exc}"

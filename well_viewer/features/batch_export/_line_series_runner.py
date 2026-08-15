@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
+
 from well_viewer.domain import fold_change as _fc
 from well_viewer.domain.batch_models import BarGroup
 from well_viewer.domain.fold_change_pairing import (
@@ -128,20 +130,26 @@ def collect_line_series_for_group(
     def _normalize(pts: list, member_key: str) -> list:
         return normalize_member_pts(pts, denoms, member_key, **_norm_kw)
 
-    def _cdf_for(wells: list[str]) -> list[float]:
+    def _cdf_for(wells: list[str]) -> np.ndarray:
+        """The CDF panel's raw values for *wells*, as one array.
+
+        ``.tolist()`` into a growing Python list boxed every cell at four times
+        the memory of the array it came from — the same waste the tab's own
+        collector carried, and this is its batch twin, so it goes the same way.
+        """
         if not (include_cdf and wells):
-            return []
+            return np.empty(0, dtype=float)
         from well_viewer.data.data_loading import _all_fluor_values_filtered
-        vals: list[float] = []
+        parts: list = []
         for lbl in wells:
             df = _get_rows(ctx, lbl)
             if df is None or df.empty:
                 continue
-            vals.extend(_all_fluor_values_filtered(
+            parts.append(_all_fluor_values_filtered(
                 df, val_col=val_col, fluor_gates=fluor_gates,
                 ratios=ctx.state.channel.ratio_index,
-            ).tolist())
-        return vals
+            ))
+        return np.concatenate(parts) if parts else np.empty(0, dtype=float)
 
     series_out: list[LineSeries] = []
 

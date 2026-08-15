@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
+import numpy as np
+
 from well_viewer.domain import fold_change as _fc
 from well_viewer.domain.stats_compute import compute_rep_stats
 from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
@@ -116,7 +118,13 @@ class LineSeries:
         chronological order. Empty when no usable data.
       * ``cdf_vals`` — raw per-cell values for the CDF panel (the
         distribution panel doesn't fold-change-normalize naturally;
-        always raw).
+        always raw). A **numpy array**, and it matters at plate scale:
+        ``_all_fluor_values_filtered`` already returns one, and boxing it
+        into a Python list costs 32 bytes a value against 8 — a plate of
+        537,393 cells is 4.3 MB as an array and 17 MB as a list, before
+        the sorted copy and the y-values the CDF panel then builds from
+        it. Readers coerce with ``np.asarray`` rather than assuming, so a
+        caller handing in a plain list still works.
       * ``fc_control`` / ``fc_outcome`` — which control **this trace** was
         divided by and why it is what it is, mirroring the same pair on
         ``BarItem``. They live on the series rather than the point
@@ -130,7 +138,8 @@ class LineSeries:
     kind: str
     wells: list[str]
     points: list[LinePoint] = field(default_factory=list)
-    cdf_vals: list[float] = field(default_factory=list)
+    cdf_vals: np.ndarray = field(
+        default_factory=lambda: np.empty(0, dtype=float))
     fc_control: object | None = None
     fc_outcome: str = ""
 
@@ -271,7 +280,7 @@ def collect_line_series(
             # when FOV mode is on, else per-well — matching the stats n.
             rset_per_fov = replicate_unit(len(valid_wells), rep_per_fov) == "fov"
             all_tps: set = set()
-            cdf_vals: list = []
+            cdf_parts: list = []
             for lbl in valid_wells:
                 for t, *_ in aggregate_well(ctx,
                     lbl, threshold=threshold, use_sem=False,
@@ -281,7 +290,11 @@ def collect_line_series(
                     all_tps.add(t)
                 if include_cdf and all_fluor_values_filtered is not None:
                     rows = get_rows(ctx, lbl)
-                    cdf_vals.extend(all_fluor_values_filtered(
+                    # Collect the arrays and concatenate once. ``.extend`` here
+                    # boxed every value into a Python float, four times the
+                    # memory of the array it was handed and the reason a large
+                    # plate ran out of it in the CDF panel.
+                    cdf_parts.append(all_fluor_values_filtered(
                         rows, val_col=val_col,
                         fluor_gates=fluor_gates,
                         ratios=ctx.state.channel.ratio_index,
@@ -331,7 +344,9 @@ def collect_line_series(
             _ctrl_ref, _outcome = denoms.control_for(rset.name)
             series_out.append(LineSeries(
                 key=rset.name, display=display, color=color, kind="repset",
-                wells=valid_wells, points=points, cdf_vals=cdf_vals,
+                wells=valid_wells, points=points,
+                cdf_vals=(np.concatenate(cdf_parts) if cdf_parts
+                          else np.empty(0, dtype=float)),
                 fc_control=_ctrl_ref, fc_outcome=str(_outcome or ""),
             ))
         return series_out, band_lbl
@@ -358,10 +373,12 @@ def collect_line_series(
         )
         pts = normalize_member_pts(list(pts or []), denoms, label, **_norm_kw)
         points = [_aggpoint_to_linepoint(pt) for pt in (pts or [])]
-        cdf_vals: list = []
+        cdf_vals = np.empty(0, dtype=float)
         if include_cdf and all_fluor_values_filtered is not None:
             rows = get_rows(ctx, label)
-            cdf_vals = list(all_fluor_values_filtered(
+            # Straight through as the array it already is; ``list()`` here was
+            # a boxed copy of every cell in the well.
+            cdf_vals = (all_fluor_values_filtered(
                 rows, val_col=val_col,
                 fluor_gates=fluor_gates,
                 ratios=ctx.state.channel.ratio_index,
@@ -446,16 +463,20 @@ def _paint_series(axes: LineAxes, series, *, fov_active: bool) -> tuple[bool, bo
                 hi = [v + e for v, e in zip(vnv, vne)]
                 ax_n.fill_between(vnt, lo, hi, color=color, alpha=0.15, zorder=2)
             any_n = True
-    if series.cdf_vals:
-        fluor_s = sorted(series.cdf_vals)
-        n = len(fluor_s)
+    # ``np.asarray`` rather than assuming: the field is an array, but a caller
+    # handing in a plain list must not silently draw nothing — and an array's
+    # truthiness raises, so the emptiness test is on ``.size``.
+    cdf_vals = np.asarray(series.cdf_vals, dtype=float)
+    if cdf_vals.size:
+        fluor_s = np.sort(cdf_vals)
+        n = fluor_s.size
         cdf_label = (
             f"{series.display} (n={n:,})"
             if series.kind == "repset"
             else f"{series.display} (n={n:,})"
         )
         ax_cdf.plot(
-            fluor_s, [(k + 1) / n for k in range(n)],
+            fluor_s, np.arange(1, n + 1, dtype=float) / n,
             color=color, lw=1.8, label=cdf_label, zorder=3,
         )
         any_cdf = True
@@ -566,9 +587,21 @@ def render_line_series(
         any_cdf = any_cdf or cdf
         any_n = any_n or n
     if cdf_xrange is None and any_cdf:
-        _vals = [v for s in series_list for v in (s.cdf_vals or [])]
-        if _vals:
-            cdf_xrange = (min(_vals), max(_vals))
+        # Per series, never flattened. Building one list of every value across
+        # every series held the whole plate a second time, as boxed floats, to
+        # compute two numbers. The values are finite by construction
+        # (``_all_fluor_values_filtered`` masks on ``np.isfinite``), so
+        # ``min``/``max`` over the flattened list and these agree exactly.
+        lo = hi = None
+        for s in series_list:
+            v = np.asarray(s.cdf_vals, dtype=float)
+            if not v.size:
+                continue
+            v_lo, v_hi = float(v.min()), float(v.max())
+            lo = v_lo if lo is None else min(lo, v_lo)
+            hi = v_hi if hi is None else max(hi, v_hi)
+        if lo is not None:
+            cdf_xrange = (lo, hi)
     _finalize_line_axes(
         axes, any_ts=any_ts, any_cdf=any_cdf, any_n=any_n,
         fov_active=fov_active, fc_active=fc_active, legend_kw=legend_kw,

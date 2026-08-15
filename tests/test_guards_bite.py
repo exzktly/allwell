@@ -1153,3 +1153,94 @@ def test_menu_seam_guard_clears(tmp_path, monkeypatch, shape):
     exc = _run_scan(monkeypatch, "tests.test_menu_exec_seam",
                     "test_no_module_opens_a_context_menu_directly", [path])
     assert exc is None, f"the guard fired on a legitimate {shape}: {exc}"
+
+
+# ── swallow / swallowed ──────────────────────────────────────────────────────
+#
+# `with swallowed():` raises AttributeError: __enter__ *before* its body, so
+# the guarded work never runs at all. It shipped in
+# `fold_change_controls_view._open_editor`, where it meant the per-sample
+# control editor could not be opened by the one control that opens it.
+
+SAFE_VIOLATIONS = {
+    # The shape that shipped.
+    "with-swallowed": (
+        "from well_viewer.core.safe import swallowed\n"
+        "def f(ctx):\n"
+        "    with swallowed():\n"
+        "        risky(ctx)\n"
+    ),
+    # Same thing reached through the module, which a name-only check misses.
+    "with-swallowed-qualified": (
+        "from well_viewer.core import safe\n"
+        "def f(ctx):\n"
+        "    with safe.swallowed('note'):\n"
+        "        risky(ctx)\n"
+    ),
+    # The mirror image: the context manager called and dropped.
+    "swallow-as-statement": (
+        "from well_viewer.core.safe import swallow\n"
+        "def f(ctx):\n"
+        "    swallow('note')\n"
+        "    risky(ctx)\n"
+    ),
+    # A suppression logged where nothing was suppressed.
+    "swallowed-outside-except": (
+        "from well_viewer.core.safe import swallowed\n"
+        "def f(gate):\n"
+        "    if gate is None:\n"
+        "        swallowed('no gate')\n"
+    ),
+}
+
+SAFE_CLEAN = {
+    "with-swallow": (
+        "from well_viewer.core.safe import swallow\n"
+        "def f(ctx):\n"
+        "    with swallow('note'):\n"
+        "        risky(ctx)\n"
+    ),
+    # The overwhelmingly common correct use, and the one a naive rule would
+    # flag: `swallowed()` as a bare statement, inside a handler.
+    "swallowed-in-except": (
+        "from well_viewer.core.safe import swallowed\n"
+        "def f(ctx):\n"
+        "    try:\n"
+        "        risky(ctx)\n"
+        "    except Exception:\n"
+        "        swallowed('note')\n"
+    ),
+    # Nested a level down inside the handler — still covered.
+    "swallowed-nested-in-except": (
+        "from well_viewer.core.safe import swallowed\n"
+        "def f(items):\n"
+        "    try:\n"
+        "        risky(items)\n"
+        "    except Exception:\n"
+        "        for _ in items:\n"
+        "            swallowed('note')\n"
+    ),
+    # The pipeline-side twin, used correctly.
+    "aw_safe-context-manager": (
+        "from util.aw_safe import swallow\n"
+        "def f(p):\n"
+        "    with swallow('io'):\n"
+        "        p.unlink()\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(SAFE_VIOLATIONS))
+def test_safe_helper_guard_catches(shape):
+    from tests.test_safe_helpers_used_right import offenders_in
+    found = offenders_in(SAFE_VIOLATIONS[shape], "probe.py")
+    assert found, f"the {shape} spelling walked past the guard"
+
+
+@pytest.mark.parametrize("shape", sorted(SAFE_CLEAN))
+def test_safe_helper_guard_clears(shape):
+    """A false positive gets this guard deleted, so the clean cases matter as
+    much as the violations — `swallowed()` in an except block is the norm."""
+    from tests.test_safe_helpers_used_right import offenders_in
+    found = offenders_in(SAFE_CLEAN[shape], "probe.py")
+    assert not found, f"the guard fired on a legitimate {shape}: {found}"

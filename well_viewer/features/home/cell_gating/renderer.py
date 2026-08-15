@@ -118,12 +118,14 @@ def _cell_gating_plot_cdf(ctx) -> None:
         ax.grid(True, alpha=0.2, color=txt_mut)
         ax.tick_params(colors=txt_mut, labelsize=8)
 
+        # No gate for this channel means no line to draw — an ordinary branch,
+        # not a suppressed failure. ``swallowed()`` here logged one anyway, with
+        # ``exc_info`` and no exception in flight, so the record read as
+        # something having gone wrong on a channel that is simply ungated.
         fluor_gate = ctx.state.cell_gating.fluor_gates.get(channel)
         if fluor_gate is not None:
             ax.axvline(x=float(fluor_gate), color=warn,
                        linestyle="--", linewidth=2, alpha=0.7)
-        else:
-            swallowed("cell gating CDF: no fluor-gate line (channel not in slice)")
         _focus_cdf_xaxis(ax, vals)
 
     for ratio_label, values in sorted(ratio_data.items()):

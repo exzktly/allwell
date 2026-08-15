@@ -706,16 +706,77 @@ Three of these are commands now. Run them instead of recalling them.
     deleting a binding, AST-scan the touched files for names loaded but never
     bound in scope.
 
-## 7.6 Debugging entry points
+## 7.6 A control that exists is not a control that works
+
+§7.4 #1 says put the assertion at the boundary. This is what happens when you
+write that rule down, apply it to the values a figure draws, and never once
+apply it to the widget the user has to touch to get there.
+
+The per-sample control editor shipped unopenable. `_open_editor` wrapped its one
+call in `with swallowed():` — `swallowed` is the call for *inside* an `except`
+block, the context manager is `swallow` — so the `with` raised before its body.
+Both routes into the feature go through that closure, so selecting
+`Per-sample control…` left the plot in per-member mode with nothing to configure
+it, and the `Edit…` link did nothing at all. It survived a lane of ~4,950 tests,
+three adversarial review rounds, and a reviewer whose half of the diff contained
+the line.
+
+1. **Test that the button does something, not that the button is there.** Two
+   tests came within one line: they built a `QComboBox`, called
+   `_repopulate_control_combo`, and asserted the per-sample entry was present.
+   Neither ever selected it, so `currentIndexChanged` never fired and the
+   callback was never reached. Eighteen test files import that module and not one
+   drives a widget a user drives. Asserting a control is *offered* is not
+   asserting it *works*, and the gap between those two is where every callback
+   bug in a Qt app lives.
+2. **Testability bias picks the wrong seam, silently.** `open_pairing_editor(ctx,
+   scope)` is one line to call; reaching it through the combo needs a built
+   popover, a real widget registry and a stub bus — about forty lines of fixture.
+   Every editor test took the cheap route, so every editor test entered one step
+   past the bug. When the convenient seam is *underneath* the thing that is
+   actually wired up, convenience is choosing what you cannot see. Pay the
+   fixture cost once, in a file that drives the real control, and let the rest
+   stay cheap.
+3. **Guards get written for the last war.** Four AST guards landed on that branch
+   — unbound names, tuple unpacking, Events-total isolation, the menu seam — and
+   every one of them guards a class that had already bitten. The guard that would
+   have caught this took two seconds to run and twenty minutes to write, and
+   nothing prompted it because nothing had gone wrong that way *yet*. After
+   fixing a defect, ask what *else* is decidable from the syntax tree in the same
+   file, not only what just broke.
+4. **Two helpers with near-identical names and opposite call shapes will get
+   swapped.** `swallow` / `swallowed` here; `util/aw_safe` carries the same pair
+   for the pipeline side. Nothing catches it — ruff does not type-check, and the
+   failure is a runtime `AttributeError: __enter__` (a `TypeError` on 3.11) on a
+   line that reads as correct code. `tests/test_safe_helpers_used_right.py` is
+   the guard; it also caught a second live site nobody had reported, where
+   `swallowed()` sat outside any handler and logged a suppressed failure, with
+   `exc_info` and no exception in flight, every time a channel simply had no gate
+   to draw.
+5. **A reviewer reading for contracts will not find a typo in a wrapper.** Three
+   rounds found twenty-two real defects between them — wrong denominators,
+   half-swept predicates, labels that lied, layering, dead code — because that is
+   what they were pointed at. None of them was a two-token substitution inside a
+   suppression wrapper, because such a line is *plausible*: it parses, it reads
+   right, and it is not where a reader hunting wrong numbers slows down. More
+   reviewers would not have found this one. The remedy is mechanical (a guard) or
+   behavioural (a test that presses the button), never another pair of eyes.
+
+## 7.7 Debugging entry points
 
 - Widget you can't find: `grep -rn '_line_fig\b' well_viewer/ widgets/` — every
   Review widget is stored as `_<noun>`. Rail pages → `core/centre_view.py`;
   title bar → `allwell.py`.
 - Tab body doesn't appear: its lazy builder raised. Check the log drawer or run
   from a terminal.
-- Native crash with no traceback: `allwell.main()` enables `faulthandler`; run
-  from a terminal to capture the C stack. Usually a widget touched
-  mid-event-dispatch or after C++ deletion.
+- Native crash with no traceback: `boot_diag.arm_faulthandler()` runs at import
+  and writes the C stack to the **boot log**, so it survives a crash that left
+  nothing in the terminal. `~/.cache/allwell/allwell-boot.log`
+  (`%LOCALAPPDATA%\allwell` on Windows, the temp dir if neither is writable),
+  truncated per launch with the last three crashes kept beside it as `.1` / `.2`
+  / `.3`. Ask for that file before theorising: the cause is usually a widget
+  touched mid-event-dispatch or after C++ deletion, and no amount of reading
+  narrows that down the way one stack does.
 - Review can't see channels: check `pipeline_info.json` (`fluor_tokens`, `schema`,
   `available_timepoints`) — the viewer reads it in `domain/viewer_state.read_pipeline_info`.
 - More: ARCHITECTURE.md §12 (debugging recipes) and §17 (build/environment).

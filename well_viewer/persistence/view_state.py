@@ -140,12 +140,27 @@ def snapshot(ctx) -> dict:
         "focus_timepoint": ctx.state.plot.focus_timepoint,
         "fold_change": _snapshot_fold_change(ctx),
         "export_style_prefs": _nondefault_export_prefs(ctx),
-        "export_axis_prefs": {
-            str(k): dict(v)
-            for k, v in (ctx.state.export_prefs.axis_prefs or {}).items()
-            if isinstance(v, dict)
-        },
+        "export_axis_prefs": _snapshot_axis_prefs(ctx),
         "tabs": _snapshot_tabs(ctx),
+    }
+
+
+def _snapshot_axis_prefs(ctx) -> dict:
+    """The ``export_axis_prefs`` block: per-figure axis and mark preferences.
+
+    Keys produced by ``plot_style.figure_pref_key``'s fallback are dropped
+    rather than written. That fallback spells the key ``fig:<id(fig)>``, a
+    memory address — stable within a session and different in the next one, so
+    such an entry can never match on reload. Writing it saves nothing and
+    accumulates: every session added another dead block to the file, and
+    ``figure_prefs`` creates one on *read*, so simply opening a tab grew it.
+    A figure that lands here has a real bug behind it (its registry name is
+    missing from ``_FIG_PREF_KEY_MAP``), which is why the fallback also warns.
+    """
+    return {
+        str(k): dict(v)
+        for k, v in (ctx.state.export_prefs.axis_prefs or {}).items()
+        if isinstance(v, dict) and not str(k).startswith("fig:")
     }
 
 

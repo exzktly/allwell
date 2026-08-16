@@ -1411,3 +1411,56 @@ def test_unarchived_delete_guard_clears(shape):
     from tests.test_no_unarchived_delete import offenders_in
     found = offenders_in(UNARCHIVED_DELETE_CLEAN[shape], "probe.py")
     assert not found, f"the guard fired on a legitimate {shape}: {found}"
+
+
+# ── figures registered without a stable preference key ───────────────────────
+#
+# The guard reads `_FIG_PREF_KEY_MAP` from the real module, so what these
+# exercise is the half that can drift silently: which call sites the scan
+# recognises as registering a figure, and which lookalikes it must not.
+
+FIGURE_REGISTRATION_SEEN = {
+    "plain-register": (
+        "def build(ctx, frame):\n"
+        "    reg = ctx.widgets\n"
+        "    reg.register('_sp_fig', card.figure)\n"
+    ),
+    "register-through-the-context": (
+        "def build(ctx, frame):\n"
+        "    ctx.widgets.register('_mv_fig', card.figure)\n"
+    ),
+    "register-used-as-an-expression": (
+        "def build(ctx, frame):\n"
+        "    fig = reg.register('_stats_fig', _StatsFigure(figsize=(5, 2.8)))\n"
+        "    return fig\n"
+    ),
+}
+
+FIGURE_REGISTRATION_UNSEEN = {
+    # `_is_line_fig` is a predicate on the export sidebar, not a figure, and it
+    # appears as a bare literal elsewhere in the tree. Matching every string
+    # that ends in `_fig` would drag it in and demand a key for it.
+    "a-bare-literal-that-is-not-a-registration": (
+        "def f(app, fig):\n"
+        "    if getattr(app, '_line_fig', None) is fig:\n"
+        "        return '_is_line_fig'\n"
+    ),
+    "registering-something-that-is-not-a-figure": (
+        "def build(ctx, frame):\n"
+        "    ctx.widgets.register('_sp_canvas', card.canvas)\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(FIGURE_REGISTRATION_SEEN))
+def test_figure_pref_key_guard_sees(shape):
+    from tests.test_figure_pref_keys import _registered_figure_names
+    found = _registered_figure_names(FIGURE_REGISTRATION_SEEN[shape])
+    assert found, f"the {shape} spelling registered a figure the guard cannot see"
+
+
+@pytest.mark.parametrize("shape", sorted(FIGURE_REGISTRATION_UNSEEN))
+def test_figure_pref_key_guard_ignores(shape):
+    from tests.test_figure_pref_keys import _registered_figure_names
+    found = _registered_figure_names(FIGURE_REGISTRATION_UNSEEN[shape])
+    assert not found, f"the guard read a {shape} as a figure registration: {found}"

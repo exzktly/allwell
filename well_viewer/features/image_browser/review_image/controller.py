@@ -2,13 +2,7 @@
 
 from __future__ import annotations
 
-# Names used only in annotations. Under ``from __future__ import
-# annotations`` these are never evaluated, so importing them for real would
-# add startup cost and, for several of these, an import cycle.
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from typing import Any
+from typing import Any
 
 
 import logging

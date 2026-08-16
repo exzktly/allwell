@@ -1,23 +1,11 @@
 """A section title keeps one line for as long as the row can hold one.
 
-``build_section_header`` word-wraps its title deliberately: the title's *minimum*
-width has to be its longest single word, or a long title reports its full
-one-line width as the header's minimum, which widens a narrow rail past its peers
-and clips the action buttons sitting beside the title.
-
-The trap is that a word-wrapped ``QLabel`` also changes what it reports as its
-*preferred* width. It stops being the one-line width and becomes the roughly
-square block Qt lays the string into — for the Cell Gating titles, 163 px against
-a one-line 246 px, and 193 px against 347 px. A title handed its preference in a
-row over a thousand pixels wide therefore wrapped to two lines with hundreds of
-pixels of the row left empty beside it.
-
-So this file pins both halves of the rule at once, because fixing either one
-alone reintroduces the other:
-
-* a title in a wide row occupies one line, and
-* the header's minimum width is still bounded by the longest word, not by the
-  whole title.
+Both halves of the rule are pinned here, because fixing either alone
+reintroduces the other. The title is word-wrapped so its *minimum* width is its
+longest word — otherwise a long title forces a narrow rail wider than its peers
+and clips the buttons beside it. But wrapping also drops its *preferred* width
+from the one-line width to the squarish block Qt lays the string into (193 px
+against 347 px here), which is what made a title wrap inside a 1260 px row.
 """
 
 from __future__ import annotations
@@ -34,8 +22,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QWidget
 
 from well_viewer.core.ui_helpers import build_section_header
 
-# The real Cell Gating / Statistics strings, so the numbers this file reasons
-# about are the ones the app actually lays out.
+# The real Cell Gating / Statistics strings, so the numbers are the app's own.
 _LONG_TITLE = "Fraction-on — which included cells count as ON"
 _HINT = ("Which of the included cells count as ON. Removes no cells — it only "
          "sets what 'on' means in the fraction-on statistics.")
@@ -56,17 +43,15 @@ def _title_label(header: QWidget) -> QLabel:
 
 
 def _line_count(label: QLabel, width: int) -> int:
-    """How many lines *label* needs at *width*, in whole line heights."""
     return round(label.heightForWidth(width) / label.fontMetrics().lineSpacing())
 
 
 def _laid_out(qapp, header: QWidget, width: int) -> tuple[QWidget, QWidget]:
     """Give *header* a real width and let its layout settle.
 
-    Returns ``(host, header)``: the host has to be handed back and held by the
-    caller, because it owns the header once reparented and a host collected at
-    the end of this call takes the whole widget tree down with it — every
-    subsequent read then raises ``RuntimeError`` on a deleted C++ object.
+    The host is returned for the caller to hold: it owns the header once
+    reparented, and a host collected here takes the widget tree with it, so
+    every later read raises ``RuntimeError`` on a deleted C++ object.
     """
     host = QWidget()
     host.resize(width, 400)
@@ -89,9 +74,8 @@ def test_long_title_keeps_one_line_in_a_wide_row(qapp):
         "fixture no longer exercises the bug: this title needs more than the "
         "row's whole width even on one line")
 
-    # The trap this file exists for, stated as a fixture check rather than
-    # assumed: a plain word-wrapped QLabel prefers a squarish block, so anything
-    # handing the title its bare preference gets a wrapped title in a wide row.
+    # The trap, checked rather than assumed: a plain wrapped QLabel prefers a
+    # squarish block, so a title handed its bare preference wraps in a wide row.
     plain = QLabel(_LONG_TITLE)
     plain.setWordWrap(True)
     assert plain.sizeHint().width() < one_line, (
@@ -110,24 +94,14 @@ def test_title_still_wraps_when_the_row_is_genuinely_narrow(qapp):
         "a title far wider than the row must wrap rather than force the row wider")
 
 
-def test_header_minimum_width_is_bounded_by_the_longest_word(qapp):
+def test_header_minimum_width_is_bounded_by_a_word_not_the_string(qapp):
     """The invariant the word-wrap was added for, in the other direction.
 
-    A header whose minimum width tracked the whole title would push a narrow rail
-    wider than its peers, so the bound is the longest word plus the layout's own
-    margins — not the one-line width of the title.
-
-    The bound is stated as a ratio against each label's own text rather than as
-    an arithmetic budget, because "the longest word" is not a number this test
-    can recompute. Qt derives a word-wrapped label's minimum from its own text
-    layout, and that lands on either side of a bare ``horizontalAdvance`` of the
-    longest word depending on the font in use: below it locally, above it on the
-    CI runner's faces, where a reconstructed budget missed by a single pixel
-    while the invariant itself held four times over.
-
-    What is font-independent is the shape of the answer. A minimum bounded by a
-    word is a small fraction of the whole string's width; a minimum tracking the
-    string is all of it.
+    Stated as a ratio, not as a rebuilt "longest word plus margins" budget: Qt
+    derives a wrapped label's minimum from its own text layout, which sits below
+    a bare ``horizontalAdvance`` of the longest word under the local faces and
+    above it on CI, so two versions of that arithmetic missed by a pixel while
+    the invariant held four times over.
     """
     header = build_section_header(None, _LONG_TITLE, hint=_HINT)
     labels = header.findChildren(QLabel)
@@ -140,8 +114,6 @@ def test_header_minimum_width_is_bounded_by_the_longest_word(qapp):
             f"{one_line} px — it is sizing itself to the string, not to a word, "
             f"so a narrow rail would be forced wider by it")
 
-    # And the header asks for no more than the widest of the two plus its own
-    # margins, so nothing between the labels and the block adds width of its own.
     margins = header.layout().contentsMargins()
     widest = max(lbl.minimumSizeHint().width() for lbl in labels)
     measured = header.minimumSizeHint().width()
@@ -151,14 +123,11 @@ def test_header_minimum_width_is_bounded_by_the_longest_word(qapp):
 
 
 def test_buttons_beside_a_title_are_never_clipped(qapp):
-    """The Statistics rail case: a title plus two action buttons in a narrow rail.
+    """The Statistics rail case, measured at the header's *own* minimum width.
 
-    Measured at the header's *own* minimum width rather than at an arbitrary
-    narrow number: a widget squeezed below its stated minimum clips by
-    definition, and asserting against that measures the squeeze, not the layout.
-    What matters is that the minimum the header asks for is one the buttons
-    survive — and the previous test bounds that minimum to the title's longest
-    word, so the two together say the rail is neither widened nor clipped.
+    A widget squeezed below its stated minimum clips by definition; what matters
+    is that the minimum it asks for is one the buttons survive, and the test
+    above bounds that minimum to a word.
     """
     clear = QPushButton("Clear All")
     add = QPushButton("+ Add")

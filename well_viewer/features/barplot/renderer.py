@@ -15,6 +15,7 @@ from well_viewer.core.channel_state_controller import get_all_fluor_gates, on_cu
 from well_viewer.core.empty_state_copy import NO_DATASET_MESSAGE
 from well_viewer.data.data_loading import get_rows
 from well_viewer.domain.viewer_state import parse_rc
+from well_viewer.domain.text_columns import timepoint_text
 from well_viewer.domain.time_rescale import format_scaled as _rescale_tp
 from well_viewer.domain import fold_change_pairing as _pairing_mod
 from well_viewer.domain import plot_members as _members
@@ -343,8 +344,7 @@ def draw_beeswarm(
                 tp = np.full(len(df), np.nan)
             need = ~np.isfinite(tp)
             if need.any() and "timepoint" in df.columns:
-                fallback = (df.loc[need, "timepoint"].fillna("").astype(str)
-                            .map(parse_timepoint_hours))
+                fallback = timepoint_text(df.loc[need]).map(parse_timepoint_hours)
                 tp[need] = fallback.fillna(np.nan).to_numpy(dtype=float)
             with np.errstate(invalid="ignore"):
                 mask &= np.isfinite(tp) & (np.abs(tp - col_tp) <= 1e-6)

@@ -13,6 +13,7 @@ from __future__ import annotations
 from well_viewer.domain.selections_model import (color_for_replicate_set, color_for_well, replicate_display_label, well_display_label, active_replicate_sets)
 from well_viewer.core.channel_state_controller import get_all_fluor_gates, on_cutoff_for_column
 from well_viewer.data.data_loading import get_rows
+from well_viewer.domain.text_columns import fov_text
 from well_viewer.domain.viewer_state import parse_rc
 
 import logging
@@ -1071,11 +1072,7 @@ def collect_bar_items_fov_pooled(
         else:
             tp = _np.full(len(df), _np.nan)
         val = _resolve_vals(df, val_col, ratios).to_numpy()
-        if "fov" in df.columns:
-            fov_series = (df["fov"].fillna("1").astype(str).str.strip().replace("", "1"))
-        else:
-            fov_series = _pd.Series(["1"] * len(df), index=df.index)
-        fov_arr = fov_series.to_numpy()
+        fov_arr = fov_text(df).to_numpy()
         final = mask & _np.isfinite(tp) & _np.isfinite(val)
         if not final.any():
             continue

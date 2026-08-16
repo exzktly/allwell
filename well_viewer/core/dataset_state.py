@@ -21,6 +21,7 @@ import pandas as pd
 from util.fov import sort_key as _fov_sort_key
 from well_viewer.data.data_loading import parse_timepoint_hours
 from well_viewer.data.image_resolver import normalize_numeric_token
+from well_viewer.domain.text_columns import text_column, timepoint_text
 
 # Local alias for the shared numeric-token normaliser: a raw FOV token collapses
 # to ``%g`` form so ``1``, ``01`` and ``1.0`` index the same field of view.
@@ -142,7 +143,7 @@ class DatasetState:
             else:
                 missing = pd.Series(True, index=df.index)
             if "timepoint" in df.columns and missing.any():
-                for s in df.loc[missing, "timepoint"].fillna("").astype(str).unique():
+                for s in timepoint_text(df.loc[missing]).unique():
                     parsed = parse_timepoint_hours(s)
                     if parsed is not None:
                         all_tps.add(parsed)
@@ -162,7 +163,7 @@ class DatasetState:
         for df in self.cache.values():
             if df is None or df.empty or "fov" not in df.columns:
                 continue
-            for raw in df["fov"].fillna("").astype(str).unique():
+            for raw in text_column(df, "fov").unique():
                 fov = _norm_fov(raw)
                 if fov:
                     all_fovs.add(fov)

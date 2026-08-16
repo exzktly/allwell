@@ -1555,3 +1555,43 @@ def test_optional_return_guard_clears(shape):
     from tests.test_optional_returns_declared import offenders_in
     found = offenders_in(OPTIONAL_RETURN_CLEAN[shape], "probe.py")
     assert not found, f"the guard fired on a legitimate {shape}: {found}"
+
+
+# ── text columns of a loaded plate ──────────────────────────────────────────
+
+TEXT_COLUMN_VIOLATIONS = {
+    # The shape that shipped: five call sites normalised the FOV column this
+    # way, and every one raised on the first plate whose fields are not
+    # numbered from one.
+    "direct-fov-fill": 'def f(df):\n    return df["fov"].fillna("1")\n',
+    # The `.loc[mask, "timepoint"]` spelling, whose slice is a tuple — the
+    # barplot renderer's fallback read the timepoint column that way.
+    "loc-tuple-slice": 'def f(df, m):\n    return df.loc[m, "timepoint"].fillna("")\n',
+    # A category-preserving call in between changes nothing: `copy()` returns a
+    # categorical, so the fill still validates against the category list.
+    "through-a-copy": 'def f(df):\n    return df["fov"].copy().fillna("1")\n',
+}
+
+TEXT_COLUMN_CLEAN = {
+    # `astype` has already widened the column away from the categorical, so
+    # there is no category list left to validate against.
+    "after-astype": 'def f(df):\n    return df["fov"].astype(str).fillna("")\n',
+    # A numeric column is never stored as categories.
+    "numeric-column": 'def f(df):\n    return df["QC_Pass"].fillna(1)\n',
+    # The helper is the sanctioned route.
+    "through-the-helper": "def f(df):\n    return fov_text(df)\n",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(TEXT_COLUMN_VIOLATIONS))
+def test_text_column_guard_catches(shape):
+    from tests.test_text_column_access import offenders_in
+    found = offenders_in(TEXT_COLUMN_VIOLATIONS[shape], "probe.py")
+    assert found, f"the {shape} spelling walked past the guard"
+
+
+@pytest.mark.parametrize("shape", sorted(TEXT_COLUMN_CLEAN))
+def test_text_column_guard_clears(shape):
+    from tests.test_text_column_access import offenders_in
+    found = offenders_in(TEXT_COLUMN_CLEAN[shape], "probe.py")
+    assert not found, f"the guard fired on a legitimate {shape}: {found}"

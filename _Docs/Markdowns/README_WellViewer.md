@@ -1072,7 +1072,7 @@ applied, and each question offers the same two sources as a pair of radio
 buttons — you pick one or the other, because choosing the scatter option
 *replaces* the per-channel numbers rather than adding to them.
 
-- **Cell inclusion — which cells count.** The **QC debris gate** leads and is
+- **Cell inclusion** — which cells count at all. The **QC debris gate** leads and is
   marked *always applied*: it composes with everything else on the tab. It reads
   as one row per measured quantity — Area, Solidity, Region area, Circularity —
   with its lower and upper bound in the `min` and `max` columns. Solidity has no
@@ -1124,7 +1124,7 @@ buttons — you pick one or the other, because choosing the scatter option
   falls as an outline becomes jagged or elongated, and it is bounded on both
   sides — a maximum is useful when something in the image is *too* perfectly
   round to be a cell.
-- **Fraction-on — which included cells count as ON.** Removes no cells. Choose
+- **Fraction-on** — which of the included cells count as ON. Removes no cells. Choose
   the per-channel **ON cutoff**, or a scatter gate. The two questions have
   **independent** gate pickers, so you can include cells by one set of gates and
   compute fraction-on from a different set.

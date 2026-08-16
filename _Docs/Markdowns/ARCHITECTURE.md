@@ -1912,10 +1912,11 @@ The most control-dense tab in Review, and the one whose layout carries the most
 meaning, because it composes four gating layers that are easy to confuse. It is
 laid out as the two questions it answers, in the order the app applies them:
 
-1. **Cell inclusion — which cells count.** The QC debris gate leads, labelled
-   *always applied*: it composes with everything below and is not one of the
-   alternatives. Then a radio pair for the source of the inclusion decision —
-   per-channel intensity floors, or the Scatter Plot's rectangular gates.
+1. **Cell inclusion**, glossed by its hint as *which cells count at all*. The QC
+   debris gate leads, labelled *always applied*: it composes with everything
+   below and is not one of the alternatives. Then a radio pair for the source of
+   the inclusion decision — per-channel intensity floors, or the Scatter Plot's
+   rectangular gates.
 
    `qc/tab_view.build_qc_gate_controls` lays the gate out as a grid with one row
    per *measured quantity* — Area, Solidity, Region area, Circularity — and its
@@ -1923,9 +1924,18 @@ laid out as the two questions it answers, in the order the app applies them:
    six independently-labelled fields it was. A quantity that admits only one
    bound (solidity has no upper, region area no lower) renders an em-dash in the
    other column: a bound that does not exist must not look like one left blank.
-2. **Fraction-on — which included cells count as ON.** The same radio pair
-   shape: per-channel cutoffs, or a scatter gate. Then Auto-threshold and the
-   button that opens the optimizer.
+2. **Fraction-on**, glossed as *which of the included cells count as ON*. The
+   same radio pair shape: per-channel cutoffs, or a scatter gate. Then
+   Auto-threshold and the button that opens the optimizer.
+
+Each section title is a short noun phrase and the sentence explaining it lives
+in the header's hint, one line below. The gloss used to sit in the title itself
+("Cell inclusion — which cells count"), where it made the title long enough to
+wrap in a header row over a thousand pixels wide. A lead-in line above each
+radio pair — *Always applied:*, *Then include cells by (choose one):*, *Count an
+included cell as ON by (choose one):* — names the choice and states that the
+pair is exclusive; the lead-ins take the `Secondary` object name so the section
+reads heading → lead-in → controls rather than as one flat column of body text.
 
 Radio pairs rather than checkboxes because the code has always treated the two
 sources as exclusive — ticking the scatter option *replaces* the per-channel
@@ -6262,6 +6272,35 @@ let a theme override it, add the attribute to the relevant bundle in
 `THEMES`. **Do not** hardcode hex / px values inline, and never add a new
 entry to `ui/theme/styles.py` — that module is a two-token legacy remnant
 (see above), not a place to route new colours.
+
+### Section headers
+
+`core/ui_helpers.build_section_header(parent, title, *, hint=..., buttons=...)`
+builds the labelled block that heads a divided section — the Cell Gating and
+Statistics tabs are its main users. It stacks two rows: the title (styled by the
+single `QLabel[role="section"]` theme rule) with any action buttons at its right
+edge, and, beneath it, an optional muted hint sentence spanning the block's full
+width.
+
+The hint goes below the title rather than beside it because a `QHBoxLayout`
+cannot give both the width each wants. It hands the non-stretchy item exactly
+its preferred width and dumps the remainder on the stretchy one, so one of the
+two ends up in a narrow column while the other keeps hundreds of pixels of empty
+space beside it.
+
+The title's own sizing is the subtle half, and both directions of it are pinned
+by `tests/test_section_header_layout.py`:
+
+* The title is **word-wrapped**, so its *minimum* width is its longest single
+  word. Without that, a long title reports its full one-line width as the
+  header's minimum, which forces a narrow rail wider than its peers and clips
+  the action buttons sitting beside it.
+* Word-wrapping also changes what a `QLabel` reports as its *preferred* width:
+  no longer the one-line width, but the roughly square block Qt lays the string
+  into. `SectionTitleLabel` overrides `sizeHint()` to report the single-line
+  width while inheriting the longest-word `minimumSizeHint()`, so a title takes
+  one line for as long as the row can hold one and wraps only when it genuinely
+  cannot.
 
 ### Dividers
 

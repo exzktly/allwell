@@ -185,6 +185,19 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     _cell_gating_plot_cdf(ctx)
 
 
+def _lead_in(parent: QWidget, text: str) -> QLabel:
+    """A line that introduces the controls indented beneath it.
+
+    Styled a step back from body text so the section reads as heading → lead-in →
+    controls. A lead-in set in the same weight and colour as the radio labels it
+    governs carries no structure at all, and shrinking it to caption size would
+    put a structural line below the muted hints it outranks.
+    """
+    lbl = QLabel(text, parent)
+    lbl.setObjectName("Secondary")
+    return lbl
+
+
 def _source_radio(parent: QWidget, layout: QVBoxLayout, label: str,
                   tooltip: str) -> QRadioButton:
     """The "per-channel numbers" half of a layer's radio pair, indented to sit
@@ -245,19 +258,20 @@ def _gate_source_row(ctx, parent: QWidget, mode: str, *, label: str,
 def _build_inclusion_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
     """Section 1 — which cells count at all."""
     layout.addWidget(build_section_header(
-        frame, "Cell inclusion — which cells count",
-        hint="Layers that remove cells from every plot, statistic and export.",
+        frame, "Cell inclusion",
+        hint="Which cells count at all. These layers remove cells from every "
+             "plot, statistic and export.",
     ))
 
     # The QC debris gate leads: it is applied to every cell no matter what the
     # rest of this section says, so it cannot be one of the alternatives below.
-    layout.addWidget(QLabel("Always applied:", frame))
+    layout.addWidget(_lead_in(frame, "Always applied:"))
     try:
         layout.addWidget(build_qc_gate_controls(ctx, frame))
     except Exception:
         swallowed()  # QC controls are best-effort; never block the tab build
 
-    layout.addWidget(QLabel("Then include cells by:", frame))
+    layout.addWidget(_lead_in(frame, "Then include cells by (choose one):"))
     per_channel = _source_radio(
         frame, layout, "Per-channel intensity minimum (table below)",
         "Exclude cells whose mean fluorescence intensity falls below the "
@@ -286,11 +300,14 @@ def _build_fraction_on_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None
     """Section 2 — which of the included cells count as ON."""
     layout.addWidget(build_hline_separator(frame))
     layout.addWidget(build_section_header(
-        frame, "Fraction-on — which included cells count as ON",
-        hint="Removes no cells; decides which of the included ones are 'on' for "
-             "fraction-on statistics.",
+        frame, "Fraction-on",
+        hint="Which of the included cells count as ON. Removes no cells — it "
+             "only sets what 'on' means in the fraction-on statistics.",
     ))
 
+    # Mirrors the "Then include cells by" lead-in above: both sections offer the
+    # same exclusive pair, so both name the choice before presenting it.
+    layout.addWidget(_lead_in(frame, "Count an included cell as ON by (choose one):"))
     per_channel = _source_radio(
         frame, layout, "Per-channel ON cutoff (table below)",
         "Count an included cell as 'on' when its mean fluorescence intensity "
@@ -298,7 +315,7 @@ def _build_fraction_on_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None
 
     scatter = _gate_source_row(
         ctx, frame, "thresh",
-        label="Scatter-plot gate",
+        label="Scatter-plot gates",
         tooltip="Count the cells inside the selected gate(s) as 'on' instead of "
                 "the cells above the per-channel cutoff. Independent of cell "
                 "inclusion — no cells are removed.",
@@ -446,8 +463,7 @@ def _build_cdf_section(ctx, parent: QWidget, root: QVBoxLayout,
     root.addWidget(build_hline_separator(parent))
     root.addWidget(build_section_header(
         parent, "Cumulative distributions (CDF)",
-        hint="Where the thresholds above fall in the data. The optimizer used "
-             "to sit between these and the controls they explain.",
+        hint="Where the thresholds above fall in the data.",
     ))
     root.addWidget(status)
     root.addWidget(plot_scroll)

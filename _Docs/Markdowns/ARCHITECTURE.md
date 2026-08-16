@@ -195,7 +195,9 @@ allwell/
 │   │                              and pipeline.capacity)
 │   ├── frozen_io.py            ← reading bundled data from a PyInstaller bundle
 │   └── zip_write.py            ← atomic_zip(): the one verified writer for the
-│                                  per-well archives (pipeline, services, remote)
+│                                  per-well archives (pipeline, services, remote),
+│                                  and replace_folder_with_archive(): the one way
+│                                  to consume the folder an archive was built from
 ├── WellPlateZipper.py           ← input-folder packing utility (96-well .zip set)
 ├── theme.py                     ← v2 design tokens (Colors / Typography / Spacing / Radii)
 ├── well_viewer/                 ← Review pane (the bulk of the app)
@@ -2317,7 +2319,8 @@ Properties widget → figure_prefs(ctx, fig)  ── shared style ─→ export_
 are deliberately app-wide: one setting gives a whole figure set a consistent
 look for a paper. Two families are per figure instead, keyed by
 `figure_pref_key` (`line` / `bar` / `scatter_cells` / `scatter_agg` / `heatmap`
-/ `distribution`) — see `plot_style.FIGURE_SCOPED_PREF_KEYS`:
+/ `distribution` / `spatial` / `multivariate` / `stats`) — see
+`plot_style.FIGURE_SCOPED_PREF_KEYS`:
 
 - `AXIS_SCOPED_PREF_KEYS` — limits, log scaling, and the per-axis bucket
   bookkeeping. A bar chart's y-limit means nothing on the scatter tab, so an
@@ -2346,6 +2349,17 @@ horizontal alignment with the applied angle** — `ha="center"` at 0°,
 panel's own prefs bucket (like the font sizes), not as a single flat `y_lim` —
 so a limit set on the Fraction or Events panel sticks instead of that panel
 auto-scaling.
+
+**Every registered figure needs a key.** `figure_pref_key` falls back to
+`f"fig:{id(fig)}"` for a figure it does not recognise, and that is a memory
+address: stable within a session, different in the next, so prefs stored under it
+are written to `persistence.json` and can never match again — the styling
+silently does not come back, and the dead entry stays in the file, because
+nothing prunes it and `figure_prefs` creates one on *read*. The fallback
+therefore warns, `view_state` drops `fig:`-prefixed keys as it writes, and
+`tests/test_figure_pref_keys.py` requires every `register("_*_fig", …)` call in
+the tree to have a `_FIG_PREF_KEY_MAP` entry, no entry to name a figure nothing
+registers, and no two figures to share a key.
 
 ### 5.9 Typed state, the event bus, and the DI context
 
@@ -4073,24 +4087,48 @@ missing groups back. The plate returns looking done.
 `AnalyzeSuspendMixin.resume_aware_spec`, which `start_from_queue` routes through,
 forces incremental when a suspend record names the same input directory.
 
-**Grouping consumes each well folder as it goes.** The FOLDER / FLAT staging
-path (and the MIXED leftover zip-up) turns every `<well>/` into `<well>.zip`, and
-removes that folder the moment its own archive is published rather than at the
-end of the run. `_zip_well_folder` writes through `util.zip_write.atomic_zip`,
-which renames a verified archive into place or leaves nothing at all, so a folder
-is only ever removed once a complete archive sits beside it — the same standard
-`process_microscopy.compress_folder_images_to_zip_and_remove` and the Datasets
-pane's `_zip_well_folders` already apply. Deferring the deletion to the
-post-success hook meant the input dir carried both `<well>/` and `<well>.zip` for
-every well for the whole run: two full copies of the plate on the user's own
-volume at peak, on exactly the runs where the input is largest. Two folders are
-left alone — one holding no TIFs (there is no archive to replace it with, and it
-may hold other content) and one whose well already had a user-written zip (that
-archive was not written by this run and nothing here verified it covers the
-folder). There is no rollback of the archives written in the pass: unlinking them
-on a later well's failure would now delete the only remaining copy of every well
-that had already succeeded, and a part-zipped plate is the correct resume state
-anyway — the finished wells read as ZIP mode on the next run.
+**Grouping consumes each well folder as it goes, but deletes only what it
+archived.** The FOLDER / FLAT staging path (and the MIXED leftover zip-up) turns
+every `<well>/` into `<well>.zip` and drops that folder's images the moment its
+own archive is published rather than at the end of the run. `_zip_well_folder`
+writes through `util.zip_write.atomic_zip`, which renames a verified archive into
+place or leaves nothing at all, so nothing is dropped until a complete archive
+sits beside it. Deferring the deletion to the post-success hook meant the input
+dir carried both `<well>/` and `<well>.zip` for every well for the whole run: two
+full copies of the plate on the user's own volume at peak, on exactly the runs
+where the input is largest.
+
+**The folder is not the unit of deletion; the archived files are.** Every one of
+these paths packs an *extension-filtered* subset — the folder zippers take
+`.tif`/`.tiff` only, and `compress_images_to_zip` adds `.png` — so removing the
+folder destroyed everything the filter skipped: OME companion XML, acquisition
+logs, mask subdirectories, and on macOS the `.DS_Store` in every folder a user
+has opened in Finder, with no copy anywhere.
+`util.zip_write.replace_folder_with_archive` is the one answer: it deletes
+exactly the files that went into the archive and removes the directory only when
+nothing is left in it. A folder still holding something survives carrying just
+that remainder, and the caller's log line names what it kept rather than
+reporting the folder gone. Four paths route through it —
+`remote_runner._zip_well_folder`'s two callers (plus the post-success hook, which
+skips any folder the pass preserved),
+`input_resolution_service._consolidate_mixed_to_zips`, the Datasets pane's
+`_zip_well_folders`, and
+`process_microscopy.compress_folder_images_to_zip_and_remove`. The extension
+filter stays with each caller: `util/image_exts.py` records why the folder
+zipper's set is a different question from what the pipeline will group as input.
+`tests/test_no_unarchived_delete.py` holds the rule, following archive-writing
+one call deep within a module so a site that zips through a one-line helper is
+still caught.
+
+Two folders are still left whole — one holding no images (there is no archive to
+replace it with) and one whose well already had a user-written zip (that archive
+was not written by this run and nothing here verified it covers the folder).
+There is no rollback of the archives written in the pass: unlinking them on a
+later well's failure would now delete the only remaining copy of every well that
+had already succeeded, and a part-zipped plate is the correct resume state
+anyway — the finished wells read as ZIP mode on the next run. A stripped folder
+does not change that reading: `_detect_local_input_mode` reports MIXED only for a
+well folder with **no** matching zip, and a stripped one always has one.
 
 The remote client resolves its own scratch base — the staging rewrites, transit
 output zips, and incremental merge temps — through `remote_runner._scratch_dir`,
@@ -7649,12 +7687,20 @@ control row, so only a per-mode pass exercises the one that makes the row wrap.
   Use `well_viewer.core.safe.swallow(...)` / `swallowed(...)` (GUI side) or
   `aw_safe.swallow(...)` / `swallowed(...)` (pipeline / `services` / `widgets`,
   none of which may import `well_viewer`) so a suppressed failure still leaves a
-  DEBUG breadcrumb. Enforced by `tests/test_no_silent_except.py`, which guards
-  `well_viewer/`, `widgets/`, and the pipeline modules. (Two near-identical
-  helpers exist on purpose: the pipeline must not import `well_viewer` — see
-  §6.2.) `widgets/` is the newest of the three and was the last un-guarded body
-  of GUI code: a widget that quietly fails to paint or to recolour is
-  indistinguishable from one that was never asked to.
+  DEBUG breadcrumb. Enforced by `tests/test_no_silent_except.py`, which names
+  `well_viewer/`, `widgets/`, `datasets/` and the pipeline modules one area at a
+  time — each with the helper that area may use — and then runs the rule over
+  **everything `tests/_repo_scan.py` calls application code**, root modules and
+  `scripts/` included. The area tests were the whole surface until that last one
+  landed, and between them they left exactly the files the remaining handlers
+  were in. (Two near-identical helpers exist on purpose: the pipeline must not
+  import `well_viewer` — see §6.2.) The handful of sites where swallowing is
+  correct are allowlisted by *file and function*, never by file, so an exemption
+  cannot cover the next handler added beside it; a liveness test fails when an
+  entry stops naming a real handler. Those sites are the crash reporter in
+  `boot_diag.py` — where an escaping exception loses the crash report, the one
+  artifact that makes a native crash diagnosable — matplotlib's font-cache
+  rebuild, and `_bootstrap_lib._quietly`'s own last-resort note to stderr.
 - **Never hardcode colours.** Use `theme.Colors.*` or QSS object names.
 - **Never block the UI thread.** Heavy operations spawn workers (see
   `well_viewer/features/smfish/worker.py` and the `services.pipeline_runner`
@@ -7759,7 +7805,10 @@ The map (each rule links to the test that holds it):
 | Feature-module naming scheme (§3) | `test_architecture_contracts.py::test_feature_module_naming` |
 | One definition of "is this well complete" — no module outside `pipeline/completeness.py` spells out the dataset-health states as its own roster, so the states a plate legend paints cannot diverge from the states the classifier returns (§6.2, §6b) | `tests/test_no_second_completeness_predicate.py`, with its bite cases in `tests/test_guards_bite.py` |
 | `domain/` & `data/` never import `features/` (the layering) | `tests/test_layering.py` |
-| No silent broad-except anywhere (§15) | `tests/test_no_silent_except.py` |
+| No silent broad-except anywhere (§15) — the four area tests, plus one over the whole `_repo_scan` surface (root modules and `scripts/` included) with a per-site, file-and-function allowlist and a liveness test | `tests/test_no_silent_except.py` |
+| Nothing deletes a directory it only partly archived. Every path that turns a `<well>/` into `<well>.zip` packs an extension-filtered subset, so removing the folder destroyed the companion XML, acquisition logs and mask subdirectories the filter skipped. Archive-writing is followed one call deep within a module, because the two worst sites zipped through a one-line helper and a guard matching only a literal `atomic_zip` found two of the four (§6.5) | `tests/test_no_unarchived_delete.py`, with its bite cases in `tests/test_guards_bite.py` |
+| Every figure registered as `_*_fig` has a `_FIG_PREF_KEY_MAP` entry, so its axis and mark prefs key on a stable name rather than on `id(fig)` and survive a reload (§5.8) | `tests/test_figure_pref_keys.py`, with bite cases in `tests/test_guards_bite.py` |
+| A function that returns a value on one path and an explicit `None` on another declares it. Without the annotation a caller cannot tell "no value" from "computed zero" by signature, which is the conflation behind this codebase's silently-wrong numbers | `tests/test_optional_returns_declared.py`, with bite cases in `tests/test_guards_bite.py` |
 | No function reads a name nothing binds. Ruff does not flag it, and the shape it misses is what a rename leaves behind — replace `a, b, c = thing()` with `obj = thing()` and every downstream `a` becomes a `NameError` no linter mentions, often on a path only the slow lane reaches | `tests/test_no_unbound_names.py` (`symtable`, so closures and comprehensions are not false positives), with bite cases in `tests/test_guards_bite.py` |
 | The fold-change request is read by name, never unpacked | `tests/test_fc_state_is_not_unpacked.py`, with bite cases in `tests/test_guards_bite.py` |
 | Every `ControlOutcome` is produced by a real collection and consumed by the editor, the status line and the CSV | `tests/test_control_outcome_roster.py` |

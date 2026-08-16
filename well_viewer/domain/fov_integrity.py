@@ -34,6 +34,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from well_viewer.domain.text_columns import text_column, timepoint_text
+
 
 @dataclass(frozen=True)
 class FovIntegrity:
@@ -77,7 +79,7 @@ def check_fov_labels(df) -> FovIntegrity:
             )
         return _TRUSTED
 
-    fov = df["fov"].fillna("").astype(str).str.strip()
+    fov = text_column(df, "fov")
     n_labels = int(fov.nunique())
 
     # Signal 1: more distinct source images than field labels, within a single
@@ -85,7 +87,7 @@ def check_fov_labels(df) -> FovIntegrity:
     # timepoints while the field labels do not.
     if "filename" in cols:
         if "timepoint" in cols:
-            key = df["timepoint"].fillna("").astype(str)
+            key = timepoint_text(df)
         else:
             key = fov * 0  # one group; still a valid comparison
         grouped = df.groupby(key, sort=False)

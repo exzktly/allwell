@@ -33,6 +33,7 @@ from pipeline.threshold_optimize import (  # noqa: F401 (re-export)
     sweep_thresholds as _sweep_thresholds,
 )
 from well_viewer.data.data_loading import resolve_value_series
+from well_viewer.domain.text_columns import fov_text, timepoint_text
 from well_viewer.core.lazy import lazy as _lazy
 
 # Lazy so this pure-compute module imports without eagerly pulling the scatter
@@ -371,7 +372,7 @@ def _distinct_timepoints(df) -> list[tuple[str, object]]:
         if len(h):
             return [("hours", float(v)) for v in sorted(float(x) for x in h)]
     if "timepoint" in df.columns:
-        s = df["timepoint"].fillna("").astype(str).str.strip()
+        s = timepoint_text(df)
         vals = [v for v in s.unique() if v != ""]
 
         def _key(v: str):
@@ -405,7 +406,7 @@ def _filter_rows_by_timepoint(df, timepoint):
         col = pd.to_numeric(df["timepoint_hours"], errors="coerce")
         return df.loc[col == value]
     if "timepoint" in df.columns:
-        col = df["timepoint"].fillna("").astype(str).str.strip()
+        col = timepoint_text(df)
         sel = col == str(value)
         if not sel.any():
             num = pd.to_numeric(col, errors="coerce")
@@ -497,9 +498,7 @@ def _cell_gating_first_frame_rows(df) -> tuple:
     if df is None or df.empty:
         return df, ""
 
-    fov_series = (df["fov"].fillna("1").astype(str).str.strip().replace("", "1")
-                  if "fov" in df.columns
-                  else pd.Series(["1"] * len(df), index=df.index))
+    fov_series = fov_text(df)
 
     unique_fovs = sorted(fov_series.unique(), key=fov_sort_key)
     first_fov = unique_fovs[0] if unique_fovs else "1"
@@ -510,9 +509,7 @@ def _cell_gating_first_frame_rows(df) -> tuple:
     tp_h = (pd.to_numeric(same_fov.get("timepoint_hours"), errors="coerce")
             if "timepoint_hours" in same_fov.columns
             else pd.Series(np.nan, index=same_fov.index, dtype=float))
-    tp_str = (same_fov.get("timepoint", pd.Series([""] * len(same_fov),
-                                                   index=same_fov.index))
-              .fillna("").astype(str).str.strip())
+    tp_str = timepoint_text(same_fov)
     tp_str_num = pd.to_numeric(tp_str, errors="coerce")
 
     if tp_h.notna().any():

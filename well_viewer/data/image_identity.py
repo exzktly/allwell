@@ -593,6 +593,8 @@ def frame_token_series(df):
     means for it rather than assume a match. Lazy pandas import.
     """
     import pandas as pd
+
+    from well_viewer.domain.text_columns import as_text
     if df is None or df.empty:
         empty = pd.Series([], dtype=object)
         return empty, empty
@@ -600,10 +602,10 @@ def frame_token_series(df):
     tp_col = resolve_identity_column(
         df, "timepoint", "tp", "time", "time_h", "timepoint_hours",
     )
-    fov_n = (normalize_fov_series(df[fov_col].fillna("").astype(str))
+    fov_n = (normalize_fov_series(as_text(df[fov_col]))
              if fov_col else
              pd.Series(["1"] * len(df), index=df.index))
-    tp_raw = (df[tp_col].fillna("").astype(str)
+    tp_raw = (as_text(df[tp_col])
               if tp_col else
               pd.Series([""] * len(df), index=df.index))
     return fov_n, tp_raw.map(normalize_tp)
@@ -619,6 +621,8 @@ def cell_keys_for_dataframe(
     writer and Review-Image's CSV-row lookup so both sides build keys
     from the same constructor. Lazy pandas import."""
     import pandas as pd
+
+    from well_viewer.domain.text_columns import as_text
     if df is None or df.empty:
         return pd.Series([], dtype=object)
 
@@ -631,7 +635,7 @@ def cell_keys_for_dataframe(
     )
 
     if well_col is not None:
-        well_series = df[well_col].fillna("").astype(str).str.strip()
+        well_series = as_text(df[well_col])
         if default_well is not None:
             well_series = well_series.where(well_series != "", str(default_well))
     elif default_well is not None:
@@ -641,7 +645,7 @@ def cell_keys_for_dataframe(
 
     well_n = well_series.map(normalize_well)
     fov_n, tp_n = frame_token_series(df)
-    nid_raw = (df[nid_col].fillna("").astype(str)
+    nid_raw = (as_text(df[nid_col])
                if nid_col else
                pd.Series([""] * len(df), index=df.index))
     nid_n = nid_raw.map(normalize_nucleus_id)

@@ -19,6 +19,11 @@ import pandas as pd
 from well_viewer.data.cache_projectors import iter_cache_projectors
 from well_viewer.domain.fov_integrity import check_fov_labels
 from well_viewer.domain.ratio_models import RatioMetric, is_ratio_key
+from well_viewer.domain.text_columns import (
+    TEXT_COLUMNS,
+    fov_text,
+    timepoint_text,
+)
 from well_viewer.domain.tp_match import tp_close_mask
 
 
@@ -31,8 +36,11 @@ _missing_col_warned: set[str] = set()
 
 # ── CSV loading and channel detection ────────────────────────────────────────
 
-# Columns kept as strings (not coerced to float)
-_STRING_COLS = {"filename", "experiment", "channel", "well", "fov", "timepoint"}
+# Columns kept as strings (not coerced to float). Defined once in
+# `domain.text_columns`, beside the helpers that read them back out, so the
+# loader that types them and the guard that watches how they are read cannot
+# disagree about which columns are involved.
+_STRING_COLS = TEXT_COLUMNS
 
 # Per-channel measurement column suffixes — the prefix is a channel token,
 # which the rest of the app handles in lower-case (normalize_channel_tokens).
@@ -496,7 +504,7 @@ def _ordinal_timepoints_df(df: pd.DataFrame, tp_col: str = "timepoint_hours") ->
         tp_num = pd.to_numeric(df[tp_col], errors="coerce").to_numpy()
     else:
         tp_num = np.full(len(df), np.nan)
-    tp_str = df["timepoint"].fillna("").astype(str).to_numpy()
+    tp_str = timepoint_text(df).to_numpy()
     not_finite = ~np.isfinite(tp_num)
     raw_strings: set[str] = set()
     for s in tp_str[not_finite]:
@@ -580,10 +588,7 @@ def aggregate_with_threshold_df(
     else:
         tp_num = np.full(n, np.nan)
 
-    if "timepoint" in df.columns:
-        tp_str = df["timepoint"].fillna("").astype(str).str.strip().to_numpy()
-    else:
-        tp_str = np.array([""] * n, dtype=object)
+    tp_str = timepoint_text(df).to_numpy()
 
     need = ~np.isfinite(tp_num)
     if need.any():
@@ -628,12 +633,7 @@ def aggregate_with_threshold_df(
     # a per-field mean.
     fov_trusted = True
     if per_fov_spread:
-        if "fov" in df.columns:
-            fov_series = (df["fov"].fillna("1").astype(str).str.strip()
-                          .replace("", "1"))
-        else:
-            fov_series = pd.Series(["1"] * n, index=df.index)
-        fov_arr = fov_series.to_numpy()[final]
+        fov_arr = fov_text(df).to_numpy()[final]
         verdict = check_fov_labels(df)
         fov_trusted = verdict.trusted
         if not fov_trusted:

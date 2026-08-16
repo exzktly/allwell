@@ -31,7 +31,6 @@ class ReviewImageState:
 
     # selection / include-edit
     selected_nucleus: int | None = None
-    nucleus_to_iid: dict[int, str] = field(default_factory=dict)
     include_edit_mode: bool = False
     crop_edit_mode: bool = False
     box_anchor: tuple[float, float] | None = None

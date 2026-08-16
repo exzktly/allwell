@@ -147,8 +147,6 @@ class PlateProgress(QWidget):
     ) -> None:
         super().__init__(parent)
         self.setObjectName("PlateProgress")
-        self._show_plate = show_plate
-        self._show_legend = show_legend
         # Which terminal state the run reached, or "" while it is still running
         # (or before it started). Subclass rails read it to decide whether to
         # draw a live count or a finished one.

@@ -572,6 +572,8 @@ class _PlotDockHost(QWidget):
         self._overlay_dock: QWidget | None = None
 
     def set_overlay_dock(self, dock: QWidget, width: int = 0) -> None:
+        # Written, never read: the host keeps a reference to the dock it is
+        # sizing itself around, so the dock outlives the call that mounted it.
         self._overlay_dock = dock
         if width > 0:
             dock.setFixedWidth(int(width))

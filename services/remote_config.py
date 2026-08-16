@@ -20,8 +20,10 @@ Example::
     measured_bandwidth_mbps = 0.0
 
 On an HPC lobby/login node, add ``compute_launcher`` to run the pipeline on
-a scheduler-allocated compute node instead of the SSH host itself (see
-``_Docs/Markdowns/REMOTE_EXECUTION_SLURM.md``)::
+a scheduler-allocated compute node instead of the SSH host itself. The value is
+the command that wraps the pipeline invocation, so anything that takes an argv
+and runs it elsewhere works — ``srun`` here, but ``salloc``/``qsub`` wrappers
+the same way::
 
     [remote.cluster]
     ssh_alias = "hpc-login"

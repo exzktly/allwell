@@ -448,11 +448,10 @@ def update_bar_tp_menu(ctx) -> None:
 
     if not ctx.state.dataset.well_paths:
         bar_state.tp_selections = {}
-        if (ctx.runtime.barplot.tp_cb is not None) and ctx.runtime.barplot.tp_cb is not None:
+        if ctx.runtime.barplot.tp_cb is not None:
             _set_combo_values(ctx.runtime.barplot.tp_cb, ["—"])
             ctx.runtime.barplot.tp_cb.setCurrentText("—")
-        if True:
-            update_bar_tp_selection_display(ctx)
+        update_bar_tp_selection_display(ctx)
         return
 
     all_tps: set = set(ctx.state.dataset.all_timepoints_cache)
@@ -464,7 +463,7 @@ def update_bar_tp_menu(ctx) -> None:
     sorted_tps = sorted(all_tps)
     tp_strs = [f"{t:.4g}" for t in sorted_tps]
 
-    cur = ctx.runtime.barplot.tp_cb.currentText() if ((ctx.runtime.barplot.tp_cb is not None) and ctx.runtime.barplot.tp_cb is not None) else ""
+    cur = ctx.runtime.barplot.tp_cb.currentText() if (ctx.runtime.barplot.tp_cb is not None) else ""
 
     # Preserve any existing selections; default-check the previously
     # selected single tp on first build, falling back to the first tp.
@@ -483,7 +482,7 @@ def update_bar_tp_menu(ctx) -> None:
             new_selections[tp_strs[0]] = True
     bar_state.tp_selections = new_selections
 
-    if (ctx.runtime.barplot.tp_cb is not None) and ctx.runtime.barplot.tp_cb is not None:
+    if ctx.runtime.barplot.tp_cb is not None:
         _set_combo_values(ctx.runtime.barplot.tp_cb, tp_strs)
         first_on = next((s for s in tp_strs if new_selections.get(s)), None)
         if first_on is not None:
@@ -492,8 +491,7 @@ def update_bar_tp_menu(ctx) -> None:
             ctx.runtime.barplot.tp_cb.setCurrentText(tp_strs[0])
         else:
             ctx.runtime.barplot.tp_cb.setCurrentText("—")
-    if True:
-        update_bar_tp_selection_display(ctx)
+    update_bar_tp_selection_display(ctx)
 
 
 
@@ -600,7 +598,7 @@ def sync_hidden_bar_tp_combo(ctx) -> None:
     text to the first checked tp here.
     """
     sels = ctx.state.bar.tp_selections
-    if not ((ctx.runtime.barplot.tp_cb is not None) and ctx.runtime.barplot.tp_cb is not None):
+    if not (ctx.runtime.barplot.tp_cb is not None):
         return
     if not sels:
         return

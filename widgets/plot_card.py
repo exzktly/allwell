@@ -144,6 +144,9 @@ if _HAVE_MPL:
             self._plot_theme = "screen"
             self._stat = "Mean"
             self._error = "SEM"
+            # Anchors the stats popover: this attribute is the only Python
+            # reference keeping it alive once it is shown, so it is written
+            # and never read — dead-looking, and load-bearing.
             self._stats_pop = None
 
             self.figure = _Figure(figsize=figsize,

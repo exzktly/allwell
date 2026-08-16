@@ -4174,7 +4174,6 @@ class _RemoteProcess:
         # them stops it. See _UploadHeartbeat's docstring for why it may not
         # end with the upload.
         self._heartbeat = heartbeat
-        self._stdout_pipe: io.TextIOBase | None = None
         # Tee the ssh stdout into the fetcher AND back out to the caller.
         # The caller (PipelineRunner._run_pipeline_subprocess) reads from
         # self.stdout one line at a time; the fetcher also receives

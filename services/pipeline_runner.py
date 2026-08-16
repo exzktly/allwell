@@ -292,7 +292,6 @@ class ProgressTracker:
     """
 
     def __init__(self) -> None:
-        self.zip_mode_warning_logged = False
         self.well_total = 0
         self.well_done = 0
         self.well_repeats = 0
@@ -301,7 +300,6 @@ class ProgressTracker:
         self._done_wells: set[str] = set()       # wells already counted done
 
     def reset(self) -> None:
-        self.zip_mode_warning_logged = False
         self.well_total = 0
         self.well_done = 0
         self.well_repeats = 0
@@ -366,8 +364,6 @@ class ProgressTracker:
         # _run_pipeline_thread (before the pipeline launches) so it
         # arrives even on early failures. No second emission needed
         # when the pipeline echoes the same banner via stdout.
-        if "Zip mode:" in line or "Zip mode complete" in line:
-            self.zip_mode_warning_logged = True
         if line.lstrip().startswith(WELL_XFER_PREFIX):
             # Per-well upload/download progress: a gauge position for one
             # well's dial, and nothing else. Claimed before the generic

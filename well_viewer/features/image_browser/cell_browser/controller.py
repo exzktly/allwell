@@ -396,8 +396,7 @@ def _update_count(ctx) -> None:
 
 
 def _set_status(ctx, msg: str) -> None:
-    if True:
-        try:
-            ctx.notify.set_status(msg)
-        except Exception:
-            swallowed()
+    try:
+        ctx.notify.set_status(msg)
+    except Exception:
+        swallowed()

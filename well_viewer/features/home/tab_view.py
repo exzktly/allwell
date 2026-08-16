@@ -220,7 +220,7 @@ def build_home_overview(ctx, parent: QWidget) -> None:
     # dataset" cannot come to mean two things.
     placeholder = getattr(stack, "_empty_placeholder", None)
     if placeholder is not None:
-        placeholder.setAction("Open a dataset…", _action_handler(ctx, "open"))
+        placeholder.setAction("Open a dataset", _action_handler(ctx, "open"))
 
     page = QWidget(scroll)
     scroll.setWidget(page)

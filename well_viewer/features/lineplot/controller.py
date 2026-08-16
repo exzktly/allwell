@@ -33,6 +33,7 @@ from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates, on_cutoff_for_column,
 )
 from well_viewer.data.data_loading import get_rows
+from well_viewer.core.empty_state_copy import NO_DATASET_MESSAGE
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current
 from well_viewer.core.plot_style import apply_time_rescale
@@ -42,7 +43,7 @@ from well_viewer.domain.time_rescale import axis_label as time_axis_label
 #: Written onto an otherwise-empty figure so an *exported* copy states its
 #: own shortfall; the on-screen placeholder covers this canvas.
 EMPTY_SELECTION_EXPORT_NOTE = "No wells selected — nothing to plot."
-NO_DATA_MSG = "Load a directory.\nOpen… is at the top of the left rail (⌘O)."
+NO_DATA_MSG = NO_DATASET_MESSAGE
 
 
 # ── LineSeries data model ───────────────────────────────────────────────────

@@ -3,7 +3,7 @@ well_viewer.py
 --------------
 GUI for exploring per-well fluorescence measurement CSVs from process_microscopy.py.
 
-Open a directory or archive (zip / tar.gz) with the single "Open…" button.
+Open a directory or archive (zip / tar.gz) with the single "Open" button.
 CSVs are loaded automatically; per-well image zips in the same folder are
 discovered on demand for the preview panel.
 

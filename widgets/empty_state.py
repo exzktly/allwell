@@ -8,12 +8,9 @@ API
 ---
 * ``EmptyState(text="", icon="image", parent=None, *, hint="")``
 * ``setText(text)`` / ``setHint(text)`` / ``setIconName(name)``
-* ``setAction(label, on_click)`` / ``clearAction()`` — an optional button under
-  the hint, for a placeholder on a page where the way out is a single action.
-  Absent unless asked for, so a site that only describes its emptiness looks
-  exactly as it did. Note that the shared refresher
-  (``well_viewer.core.ui_helpers._apply_reason``) rewrites only the text, hint
-  and icon, so an action set once at build time survives every refresh.
+* ``setAction(label, on_click)`` / ``clearAction()`` — an optional button that
+  takes the hint's place. Absent unless asked for, so a site that only describes
+  its emptiness looks exactly as it did.
 """
 
 from __future__ import annotations
@@ -105,18 +102,20 @@ class EmptyState(QWidget):
 
     def setHint(self, text: str) -> None:
         self._hint.setText(text or "")
-        self._hint.setVisible(bool(text))
+        self._sync_hint_visibility()
 
     def setIconName(self, name: str) -> None:
         self._icon_name = name
         self._refresh_glyph()
 
     def setAction(self, label: str, on_click) -> None:
-        """Show a button under the hint, replacing any previously set one.
+        """Show a button in place of the hint, replacing any previously set one.
 
         For a placeholder whose way out is one action the page can perform
         itself. Most sites have no such action — the hint names a control
-        somewhere else — and those keep no button at all.
+        somewhere else — and those keep no button at all. The hint's text is
+        kept, so ``clearAction`` brings the line back. ARCHITECTURE.md
+        § "Empty states" has why the button replaces it rather than joining it.
         """
         if self._action_slot is not None:
             self._action.clicked.disconnect(self._action_slot)
@@ -128,6 +127,7 @@ class EmptyState(QWidget):
             self._action.clicked.connect(_slot)
             self._action_slot = _slot
         self._action.setVisible(bool(label))
+        self._sync_hint_visibility()
 
     def clearAction(self) -> None:
         if self._action_slot is not None:
@@ -135,6 +135,22 @@ class EmptyState(QWidget):
             self._action_slot = None
         self._action.setText("")
         self._action.setVisible(False)
+        self._sync_hint_visibility()
+
+    def _sync_hint_visibility(self) -> None:
+        """Show the hint only when no action button is standing in for it.
+
+        Called from both action setters as well as from ``setHint``, because the
+        shared refresher (``ui_helpers._apply_reason``) rewrites the hint on
+        every refresh: a site that suppressed the line once at build time would
+        have it painted back the first time a dataset was closed.
+
+        Whether an action exists is read off the button's *text*, not off
+        ``isVisible()``: a child of a widget that has not been shown yet reports
+        itself invisible however it was configured, and a placeholder is built
+        long before the page it covers is first painted.
+        """
+        self._hint.setVisible(bool(self._hint.text()) and not self._action.text())
 
     # ── internals ────────────────────────────────────────────────────────
     def _icon_px(self) -> int:

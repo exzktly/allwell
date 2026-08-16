@@ -53,7 +53,7 @@ def _dataset_button(win, parent):
     """The rail head: the loaded dataset's name, and the actions on it.
 
     Full rail width, so it reads as the rail's own heading rather than a control
-    dropped into it. ``Open…`` lives here rather than at the far end of the
+    dropped into it. ``Open`` lives here rather than at the far end of the
     topbar, next to the name of the folder it would replace.
 
     Long folder names elide in the *middle*: dataset folders differ in their
@@ -70,7 +70,7 @@ def _dataset_button(win, parent):
     from widgets.icons import make_icon
     btn.setIcon(make_icon("folder-open", 14))
     menu = QMenu(btn)
-    menu.addAction("Open…").triggered.connect(lambda _=False: win._browse())
+    menu.addAction("Open").triggered.connect(lambda _=False: win._browse())
     btn.setMenu(menu)
     win._dataset_menu = menu
     # Assign before refreshing: ``refresh_dataset_button`` reads the button off
@@ -90,7 +90,7 @@ def refresh_dataset_button(win) -> None:
     dataset = getattr(state, "dataset", None) if state is not None else None
     path = str(getattr(dataset, "data_dir", "") or "")
     if not path:
-        btn.setText("No dataset — Open…")
+        btn.setText("No dataset — Open")
         btn.setToolTip("No dataset loaded. Choose a folder to review.")
         return
     from pathlib import Path
@@ -382,7 +382,7 @@ def build_ui(win) -> None:
     # The rail's collapse toggle is not in this band — it floats on the rail's
     # own right margin (see ``_build_rail_toggle``).
     #
-    # "Open…" is not here any more either. It moved into the rail's dataset control
+    # "Open" is not here any more either. It moved into the rail's dataset control
     # (below), where the folder it opens is also *named* — the button and the
     # thing it acts on in one place, instead of a button at one end of the
     # window and a caption at the other.

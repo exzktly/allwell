@@ -73,4 +73,4 @@ def test_no_dataset_loaded_shows_placeholder(qapp):
     win = _FakeWin(None)
     refresh_dataset_button(win)
 
-    assert win._dataset_btn.text() == "No dataset — Open…"
+    assert win._dataset_btn.text() == "No dataset — Open"

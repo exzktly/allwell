@@ -1083,8 +1083,8 @@ by keeping every segment filled (§7).
 
 Directly beneath it, as the rail's own head, is the **dataset control**:
 `app_shell_view._dataset_button`, full rail width, naming the loaded folder and
-carrying `Open…`. It replaces both the `SECTION` caption (the rail's items are
-self-evidently sections) and the `Open…` button that sat alone at the far end of
+carrying `Open`. It replaces both the `SECTION` caption (the rail's items are
+self-evidently sections) and the `Open` button that sat alone at the far end of
 the topbar — the action and the thing it acts on are now in one place, and the
 loaded dataset finally has a durable on-screen identity rather than living in a
 hidden label and the OS window title. `refresh_dataset_button` is called from
@@ -1116,13 +1116,32 @@ failure. The wrap registers a `QStackedWidget` on `win._plot_empty_stacks`
 them together, which is what keeps the wording and the moment of the swap
 identical across tabs.
 
-**A placeholder may carry one action.** `EmptyState.setAction(label, on_click)`
-adds a button under the hint; without it there is no button at all, which is
-what every site but Home wants — their hint names a control somewhere else and
-a button would be a second way to say it. Home is the page the application opens
-on, so its placeholder is the first screen and gets an explicit *Open a
-dataset…*. The refresher rewrites only a placeholder's text, hint and icon, so
-an action set once at build time survives every pass.
+**A placeholder may carry one action, and the action replaces the hint.**
+`EmptyState.setAction(label, on_click)` adds a button *in place of* the hint;
+without it there is no button at all, which is what every site but Home wants —
+their hint names a control somewhere else, and that sentence is the only
+instruction they have. Home is the page the application opens on, so its
+placeholder is the first screen and gets an explicit *Open a dataset*. The
+hint's job is to say where the way out is; where the way out is the button
+itself, a sentence pointing at another corner of the window is a second answer
+to the question the button already answers, so the button hides it. The hint's
+text is kept, so clearing the action brings the line back.
+
+The suppression lives in the widget rather than at the call site because the
+refresher rewrites every placeholder's text, hint and icon on each pass (an
+action set once at build time survives it): a site that blanked its own hint at
+build time would have it painted back the first time a dataset was closed.
+`EmptyState._sync_hint_visibility` carries the one Qt trap involved.
+
+**The wording lives in one module.** `core/empty_state_copy.py` holds
+`NO_DATASET_TITLE`, `NO_DATASET_HINT` and the `NO_DATASET_MESSAGE` that joins
+them with a newline, and imports nothing. The sentence is said in two media —
+this placeholder, and matplotlib text painted onto an empty figure so an
+*exported* copy states its own shortfall (`barplot/renderer.py`,
+`lineplot/controller.py`) — and the canvas sites cannot reach a Qt widget
+module, which is how three spellings of it came to exist and drift apart in
+punctuation. `ui_helpers` re-exports the two names for the widget side;
+`tests/test_no_dataset_copy.py` fails on a fourth hand-typed copy.
 
 **The placeholder says which "nothing" it is; the axes carry per-plot causes.**
 Each wrap site may pass a `reason(ctx) -> EmptyReason | None`, called on every
@@ -1443,8 +1462,10 @@ refresher flips it — a landing page reporting on nothing would otherwise open
 the application on a masthead reading "No dataset open" above an empty plate and
 a column of em-dashes. The one thing Home adds is an action on the placeholder
 itself (`EmptyState.setAction`, optional and unused by the other twelve sites):
-the hint names a control in the rail, and on the page the app launches on it is
-worth also being able to press the thing. The button runs `run_home_action(ctx,
+elsewhere the hint names a control in the rail, and on the page the app launches
+on it is worth being able to press the thing instead. The button stands in the
+hint's place rather than beneath it, so Home shows the title and the button and
+not also a sentence directing the eye to the rail. It runs `run_home_action(ctx,
 "open")`, the same route the next-step row takes, which reaches the window's own
 `_browse` rather than opening a second file dialog of its own.
 
@@ -1912,10 +1933,11 @@ The most control-dense tab in Review, and the one whose layout carries the most
 meaning, because it composes four gating layers that are easy to confuse. It is
 laid out as the two questions it answers, in the order the app applies them:
 
-1. **Cell inclusion — which cells count.** The QC debris gate leads, labelled
-   *always applied*: it composes with everything below and is not one of the
-   alternatives. Then a radio pair for the source of the inclusion decision —
-   per-channel intensity floors, or the Scatter Plot's rectangular gates.
+1. **Cell inclusion**, glossed by its hint as *which cells count at all*. The QC
+   debris gate leads, labelled *always applied*: it composes with everything
+   below and is not one of the alternatives. Then a radio pair for the source of
+   the inclusion decision — per-channel intensity floors, or the Scatter Plot's
+   rectangular gates.
 
    `qc/tab_view.build_qc_gate_controls` lays the gate out as a grid with one row
    per *measured quantity* — Area, Solidity, Region area, Circularity — and its
@@ -1923,9 +1945,18 @@ laid out as the two questions it answers, in the order the app applies them:
    six independently-labelled fields it was. A quantity that admits only one
    bound (solidity has no upper, region area no lower) renders an em-dash in the
    other column: a bound that does not exist must not look like one left blank.
-2. **Fraction-on — which included cells count as ON.** The same radio pair
-   shape: per-channel cutoffs, or a scatter gate. Then Auto-threshold and the
-   button that opens the optimizer.
+2. **Fraction-on**, glossed as *which of the included cells count as ON*. The
+   same radio pair shape: per-channel cutoffs, or a scatter gate. Then
+   Auto-threshold and the button that opens the optimizer.
+
+Each section title is a short noun phrase and the sentence explaining it lives
+in the header's hint, one line below. The gloss used to sit in the title itself
+("Cell inclusion — which cells count"), where it made the title long enough to
+wrap in a header row over a thousand pixels wide. A lead-in line above each
+radio pair — *Always applied:*, *Then include cells by (choose one):*, *Count an
+included cell as ON by (choose one):* — names the choice and states that the
+pair is exclusive; the lead-ins take the `Secondary` object name so the section
+reads heading → lead-in → controls rather than as one flat column of body text.
 
 Radio pairs rather than checkboxes because the code has always treated the two
 sources as exclusive — ticking the scatter option *replaces* the per-channel
@@ -6264,6 +6295,35 @@ let a theme override it, add the attribute to the relevant bundle in
 entry to `ui/theme/styles.py` — that module is a two-token legacy remnant
 (see above), not a place to route new colours.
 
+### Section headers
+
+`core/ui_helpers.build_section_header(parent, title, *, hint=..., buttons=...)`
+builds the labelled block that heads a divided section — the Cell Gating and
+Statistics tabs are its main users. It stacks two rows: the title (styled by the
+single `QLabel[role="section"]` theme rule) with any action buttons at its right
+edge, and, beneath it, an optional muted hint sentence spanning the block's full
+width.
+
+The hint goes below the title rather than beside it because a `QHBoxLayout`
+cannot give both the width each wants. It hands the non-stretchy item exactly
+its preferred width and dumps the remainder on the stretchy one, so one of the
+two ends up in a narrow column while the other keeps hundreds of pixels of empty
+space beside it.
+
+The title's own sizing is the subtle half, and both directions of it are pinned
+by `tests/test_section_header_layout.py`:
+
+* The title is **word-wrapped**, so its *minimum* width is its longest single
+  word. Without that, a long title reports its full one-line width as the
+  header's minimum, which forces a narrow rail wider than its peers and clips
+  the action buttons sitting beside it.
+* Word-wrapping also changes what a `QLabel` reports as its *preferred* width:
+  no longer the one-line width, but the roughly square block Qt lays the string
+  into. `SectionTitleLabel` overrides `sizeHint()` to report the single-line
+  width while inheriting the longest-word `minimumSizeHint()`, so a title takes
+  one line for as long as the row can hold one and wraps only when it genuinely
+  cannot.
+
 ### Dividers
 
 Every hairline in the app — the rule under the topbar, the rules between
@@ -6365,7 +6425,7 @@ succeeds (§6b).
 ### 9.1 Opening a dataset
 
 ```
-User clicks Open…  or  Ctrl+O  or  --data_dir argv
+User clicks Open  or  Ctrl+O  or  --data_dir argv
         │
         ▼
 WellViewerApp._load_path(path)        ← runtime_app.py

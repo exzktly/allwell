@@ -93,7 +93,7 @@ def test_open_does_nothing_when_the_shell_has_no_picker():
 def test_a_placeholder_has_no_button_until_one_is_asked_for(qtbot):
     """The twelve existing empty states describe their emptiness and name a
     control elsewhere. None of them grows a button because Home wanted one."""
-    empty = EmptyState("Load a directory.", hint="Open… is in the rail.")
+    empty = EmptyState("Load a directory.", hint="The Open button is in the rail.")
     qtbot.addWidget(empty)
     assert empty._action.isVisible() is False
     assert empty._action.text() == ""

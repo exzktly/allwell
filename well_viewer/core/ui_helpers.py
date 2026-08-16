@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout,
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 import theme
+from well_viewer.core import empty_state_copy
 from well_viewer.data.image_identity import normalize_tp
 from well_viewer.core.safe import swallowed
 
@@ -146,8 +147,10 @@ def set_combo_values_sectioned(combo: object, sections: list[tuple[str, list[str
 
 
 #: The one wording for "no dataset is loaded", shared by every wrapped tab.
-NO_DATASET_TITLE = "Load a directory."
-NO_DATASET_HINT = "Open… is at the top of the left rail (⌘O)."
+#: Re-exported from :mod:`well_viewer.core.empty_state_copy` so the canvas sites
+#: that paint the same sentence onto a figure can reach it without importing Qt.
+NO_DATASET_TITLE = empty_state_copy.NO_DATASET_TITLE
+NO_DATASET_HINT = empty_state_copy.NO_DATASET_HINT
 
 
 class EmptyReason:
@@ -339,6 +342,33 @@ def refresh_plot_empty_states(win: Any) -> None:
                 swallowed()
 
 
+# Gap between a section title and the hint beneath it. Tight enough that the two
+# read as one header block rather than as a heading followed by body text.
+_SECTION_HEADER_SPACING = 2
+
+
+class SectionTitleLabel(QLabel):
+    """A word-wrapped section title that *prefers* one line.
+
+    Reports the single-line width as its preference while inheriting Qt's
+    longest-word ``minimumSizeHint()``. ARCHITECTURE.md § "Section headers" has
+    the mechanism and why both halves are needed.
+
+    Plain text only: the width is measured with font metrics, so rich text would
+    be measured including its markup.
+    """
+
+    def __init__(self, text: str, parent: QWidget | None = None) -> None:
+        super().__init__(text, parent)
+        self.setWordWrap(True)
+
+    def sizeHint(self) -> QSize:
+        margins = self.contentsMargins()
+        width = (self.fontMetrics().horizontalAdvance(self.text())
+                 + margins.left() + margins.right() + 2 * self.margin() + 2)
+        return QSize(width, self.heightForWidth(width))
+
+
 def build_section_header(
     parent: QWidget,
     title: str,
@@ -347,41 +377,39 @@ def build_section_header(
     buttons: tuple = (),
     margins: tuple = (8, 4, 8, 4),
 ) -> QWidget:
-    """Return a "Sidebar"-styled header row with a section title.
+    """Return a header block with a section title, and optionally a hint below.
 
-    ``buttons`` is a sequence of already-constructed QWidgets that are added
-    after a stretch. ``hint`` is an optional muted label shown right after
-    the title.
+    ``buttons`` is a sequence of already-constructed QWidgets, laid out on the
+    title's own row at its right edge. ``hint`` is an optional muted sentence
+    placed on its own line beneath the title, taking the block's full width —
+    see ARCHITECTURE.md § "Section headers" for why it is not beside it.
     """
     hdr = QWidget(parent)
     hdr.setObjectName("Sidebar")
-    hl = QHBoxLayout(hdr)
-    hl.setContentsMargins(*margins)
-    lbl = QLabel(title, hdr)
+    outer = QVBoxLayout(hdr)
+    outer.setContentsMargins(*margins)
+    outer.setSpacing(_SECTION_HEADER_SPACING)
+
+    title_row = QHBoxLayout()
+    title_row.setContentsMargins(0, 0, 0, 0)
+    lbl = SectionTitleLabel(title, hdr)
     lbl.setProperty("role", "section")
-    # Word-wrap the title so a long one (e.g. "COMPARISON GROUPS" with two action
-    # buttons) does NOT report its full one-line width as the header's minimum —
-    # that made the row wider than a narrow rail, which then either clipped the
-    # buttons or forced the whole sidebar wider than its peers. With wrap on, the
-    # title's minimum is its longest word, so the row fits the rail and the title
-    # wraps to a second line only when there isn't room for one line.
-    lbl.setWordWrap(True)
+    # The title takes the stretch so the buttons sit at the right edge; being the
+    # stretchy item, it also absorbs the shrink and wraps only once the row is
+    # genuinely too narrow for one line.
+    title_row.addWidget(lbl, 1)
+    for btn in buttons:
+        title_row.addWidget(btn, 0, Qt.AlignTop)
+    outer.addLayout(title_row)
+
     if hint:
-        hl.addWidget(lbl)
         hint_lbl = QLabel(hint, hdr)
         hint_lbl.setObjectName("Muted")
-        # Word-wrap so a long inline hint doesn't report its full text width as
-        # the header's minimum — which forced the whole (non-h-scrolling) Cell
-        # Gating pane wider than a narrow window and clipped its controls. Given
-        # a stretch factor so it takes the row's leftover width and wraps into it.
+        # Word-wrap so a long hint doesn't report its full text width as the
+        # header's minimum — which forced the whole (non-h-scrolling) Cell Gating
+        # pane wider than a narrow window and clipped its controls.
         hint_lbl.setWordWrap(True)
-        hl.addWidget(hint_lbl, 1)
-    else:
-        # The title takes the stretch so the buttons sit at the right edge; being
-        # the stretchy item, it also absorbs the shrink and wraps when narrow.
-        hl.addWidget(lbl, 1)
-    for btn in buttons:
-        hl.addWidget(btn)
+        outer.addWidget(hint_lbl)
     return hdr
 
 

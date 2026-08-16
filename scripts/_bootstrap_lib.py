@@ -76,6 +76,29 @@ def say(msg: str) -> None:
 _LOG_FILE: object | None = None  # the open file or None
 
 
+def _quietly(what: str, fn, *args) -> None:
+    """Run *fn*, and on failure leave a breadcrumb instead of nothing.
+
+    This is the local twin of ``util.aw_safe.swallowed``, and it is local on
+    purpose. Everything this module imports at module scope is stdlib: it is
+    loaded by file path out of the frozen bundle
+    (``all_well_launcher._dispatch``, the ``--run-bootstrap`` sentinel), and it
+    puts ``REPO_ROOT`` on ``sys.path`` lazily, inside the functions that need
+    it. An ``import util.aw_safe`` up here would run before that ever happens.
+
+    The failures it covers are the log tee's own writes and flushes, where the
+    thing that failed *is* the reporting channel — so the note goes to the real
+    stderr, which is the one stream this class has not wrapped.
+    """
+    try:
+        fn(*args)
+    except Exception as exc:  # noqa: BLE001 - the reporting channel is what failed
+        try:
+            sys.__stderr__.write(f"[bootstrap] {what} failed: {exc!r}\n")
+        except Exception:  # noqa: BLE001 - nothing left to report to
+            pass
+
+
 class _TeeStream:
     """File-like that writes to both a primary stream (real stdout /
     stderr) and a secondary log file. Installed as ``sys.stdout`` and
@@ -95,29 +118,14 @@ class _TeeStream:
 
     def write(self, data: str) -> int:
         self._primary.write(data)
-        try:
-            self._log.write(data)
-        except Exception:  # never let logging break runtime
-            pass
-        try:
-            self._primary.flush()
-        except Exception:
-            pass
-        try:
-            self._log.flush()
-        except Exception:
-            pass
+        _quietly("tee write", self._log.write, data)
+        _quietly("tee flush", self._primary.flush)
+        _quietly("tee flush", self._log.flush)
         return len(data)
 
     def flush(self) -> None:
-        try:
-            self._primary.flush()
-        except Exception:
-            pass
-        try:
-            self._log.flush()
-        except Exception:
-            pass
+        _quietly("tee flush", self._primary.flush)
+        _quietly("tee flush", self._log.flush)
 
     def fileno(self) -> int:
         return self._primary.fileno()
@@ -135,11 +143,12 @@ def _log_to_file(text: str) -> None:
     """
     if _LOG_FILE is None:
         return
-    try:
+
+    def _append() -> None:
         _LOG_FILE.write(text if text.endswith("\n") else text + "\n")
         _LOG_FILE.flush()
-    except Exception:
-        pass
+
+    _quietly("log append", _append)
 
 
 _BOOTSTRAP_LOG_RETENTION = 20

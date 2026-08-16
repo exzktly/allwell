@@ -122,3 +122,107 @@ def test_no_silent_broad_except_in_pipeline():
         "aw_safe.swallowed()/swallow() or catch a specific exception type "
         "instead of a bare pass/continue:\n  " + "\n  ".join(offenders)
     )
+
+
+# ── the whole application surface ────────────────────────────────────────────
+#
+# The four tests above name the areas the rule was introduced for, one at a
+# time, and each says which helper that area may use. Between them they left
+# the root modules and `scripts/` uncovered, which is where the remaining
+# handlers were: this module built its own scan surface (`_walk` over four
+# hand-listed roots) rather than the shared one, so widening `_repo_scan` did
+# not widen this. That is the same defect as the areas themselves — a rule
+# applied to most of its domain and not the rest — so the rule now runs over
+# everything `_repo_scan` calls application code.
+
+#: Sites where swallowing really is the correct behaviour, keyed on
+#: ``(file, line-relative-to-nothing)`` — a *site*, named by file and by the
+#: function containing it, not a whole file. A file-level exemption would
+#: excuse every future handler added to the same file.
+#: ``test_silent_except_allowlist_is_live`` fails when an entry stops naming a
+#: real handler.
+SILENT_EXCEPT_ALLOWLIST = {
+    # The crash reporter. Everything here runs *while* the app is already
+    # failing — the last-resort log writer, the faulthandler arming, and
+    # `sys.excepthook` itself. An exception escaping any of them loses the
+    # crash report, which is the one artifact that makes a native crash
+    # diagnosable (ARCHITECTURE §12.8). There is nowhere left to report to.
+    ("boot_diag.py", "boot"),
+    ("boot_diag.py", "arm_faulthandler"),
+    ("boot_diag.py", "_hook"),
+    ("boot_diag.py", "install_excepthook"),
+    # The bootstrap's own last-resort note. `_quietly` reports a failed log
+    # write to the real stderr; when *that* write fails too there is no
+    # remaining channel to report on, which is the one honest case for a bare
+    # pass. Everything else in this module now goes through `_quietly`.
+    ("scripts/_bootstrap_lib.py", "_quietly"),
+    # Rebuilding matplotlib's font cache. The handler's own comment states the
+    # trade: "a functioning (if unlimited) font manager beats a crash", and the
+    # fallback is a working app with the system font list rather than the
+    # bundled one.
+    ("mpl_bootstrap.py", "configure"),
+}
+
+
+def _silent_sites():
+    """``(file, innermost enclosing function, line)`` per silent broad handler.
+
+    *Innermost* matters: ``boot_diag.install_excepthook`` defines the ``_hook``
+    it installs, and attributing ``_hook``'s handlers to the outer function
+    would let one exemption cover two different functions' worth of swallowing.
+    A handler outside any function is reported under ``"<module>"``.
+    """
+    from tests._repo_scan import python_sources, rel
+
+    found = []
+    for path in python_sources():
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except SyntaxError:  # pragma: no cover - the tree parses
+            continue
+        stack: list[str] = []
+
+        def visit(node, stack=stack, where=rel(path)):
+            is_fn = isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            if is_fn:
+                stack.append(node.name)
+            if isinstance(node, ast.ExceptHandler) and _is_broad(node) \
+                    and _silent_body(node):
+                found.append((where, stack[-1] if stack else "<module>",
+                              node.body[0].lineno))
+            for child in ast.iter_child_nodes(node):
+                visit(child)
+            if is_fn:
+                stack.pop()
+
+        visit(tree)
+    return found
+
+
+def test_no_silent_broad_except_anywhere():
+    offenders = [
+        f"{file}:{line} (in {func})"
+        for file, func, line in _silent_sites()
+        if (file, func) not in SILENT_EXCEPT_ALLOWLIST
+    ]
+    assert not offenders, (
+        "Silent broad-except handler(s) found. Use the swallow()/swallowed() "
+        "pair for the area (well_viewer.core.safe on the GUI side, "
+        "util.aw_safe elsewhere), or catch a specific exception type:\n  "
+        + "\n  ".join(sorted(offenders))
+    )
+
+
+def test_silent_except_allowlist_is_live():
+    """Every exemption still names a real handler.
+
+    An entry that has stopped describing anything reads as a reviewed decision
+    while covering nothing, and goes on covering whatever lands next under the
+    same name.
+    """
+    real = {(file, func) for file, func, _line in _silent_sites()}
+    stale = sorted(SILENT_EXCEPT_ALLOWLIST - real)
+    assert not stale, (
+        "These allowlist entries no longer name a silent broad-except handler "
+        "— delete them:\n  " + "\n  ".join(f"{file}::{func}" for file, func in stale)
+    )

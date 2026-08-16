@@ -21,7 +21,7 @@ from typing import Any
 
 from well_viewer.persistence import _doc
 from well_viewer.core.channel_state_controller import set_active_channel
-from well_viewer.core.safe import swallowed
+from well_viewer.core.safe import swallow, swallowed
 from well_viewer.core.ui_helpers import multiselect_button_text
 
 _logger = logging.getLogger("well_viewer")
@@ -421,7 +421,7 @@ def _apply_fold_change(ctx, fc) -> None:
         plot.fc_order = o_in if o_in in ("ctrl_first", "t0_first") else "ctrl_first"
 
 
-def restore(ctx, state: dict, *, prefer_home: bool = False) -> None:
+def restore(ctx, state: dict, *, prefer_home: bool = False) -> list[str]:
     """Apply *state* in two phases — cross-cutting now, per-tab deferred.
 
     Per-tab combo values are stashed on ``ctx.runtime.view_state.pending`` and
@@ -431,9 +431,24 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> None:
     ``active_centre_tab``. It is for the arrival of a dataset and nothing else;
     every other caller wants the tab the snapshot names, because it is
     re-applying a view the user asked to see rather than opening a folder.
+
+    Returns the names of the settings that could **not** be restored, in the
+    order they were attempted, and empty when everything applied.
+
+    Every block here is applied independently and a failure in one must not
+    cost the others: a saved view referring to a channel this dataset does not
+    have should still bring back the wells, the draw order and the tab. But
+    that means a restore can half-succeed, and it used to do so silently —
+    fourteen handlers logged at DEBUG and the function returned ``None``, so a
+    caller could not tell a complete restore from one that applied four blocks
+    of fourteen. The user asked to see a particular figure, got a different one,
+    and nothing said why. :func:`_report_restore_gaps` is the other half of
+    that: the shortfall is stated on the status line and in the app log, not
+    only in a debug breadcrumb.
     """
+    failed: list[str] = []
     if not isinstance(state, dict):
-        return
+        return failed
 
     # Cross-cutting state — apply eagerly.
 
@@ -450,6 +465,7 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> None:
             try:
                 set_selected_wells(ctx, valid, commit=False)
             except Exception:
+                failed.append("selected wells")
                 _logger.debug("view_state: set_selected_wells failed", exc_info=True)
 
     # Rep-set visibility (group mode) — re-apply each selection's hidden flag and
@@ -471,24 +487,28 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> None:
         try:
             ctx.coordinator.refresh_sidebar_map()
         except Exception:
+            failed.append("group visibility")
             swallowed()
 
     if "use_sem" in state:
         try:
             ctx.state.plot.use_sem = bool(state["use_sem"])
         except Exception:
+            failed.append("error-bar mode")
             swallowed()  # was: pass (silent except)
 
     if "show_threshold_line" in state:
         try:
             ctx.state.plot.show_threshold_line = bool(state["show_threshold_line"])
         except Exception:
+            failed.append("threshold line")
             swallowed()
 
     if "show_significance" in state:
         try:
             ctx.state.plot.show_significance = bool(state["show_significance"])
         except Exception:
+            failed.append("significance marks")
             swallowed()
 
     if "time_scale" in state:
@@ -499,6 +519,7 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> None:
             from well_viewer.domain.time_rescale import coerce_factor
             ctx.state.plot.time_scale = coerce_factor(state["time_scale"])
         except Exception:
+            failed.append("time scale")
             swallowed()
 
     lv = state.get("legend_visible")
@@ -506,6 +527,7 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> None:
         try:
             ctx.state.plot.legend_visible = {str(k): bool(v) for k, v in lv.items()}
         except Exception:
+            failed.append("legend visibility")
             swallowed()
 
     for _key in ("line_order_rsets", "line_order_wells"):
@@ -514,6 +536,7 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> None:
             try:
                 setattr(ctx.state.plot, _key, [str(x) for x in _val])
             except Exception:
+                failed.append("draw order")
                 swallowed()
 
     if "focus_timepoint" in state:
@@ -521,6 +544,7 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> None:
         try:
             ctx.state.plot.focus_timepoint = None if _ft is None else float(_ft)
         except Exception:
+            failed.append("focus timepoint")
             swallowed()
 
     if "use_fov_replicates" in state:
@@ -533,6 +557,7 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> None:
             from well_viewer.core.plot_toggles import refresh_fov_btn_state
             refresh_fov_btn_state(ctx)
         except Exception:
+            failed.append("FOV replicates")
             swallowed()  # was: pass (silent except)
 
     _apply_fold_change(ctx, state.get("fold_change") or {})
@@ -544,6 +569,7 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> None:
         from well_viewer.core.fold_change_controls_view import _sync_widgets_to_state
         _sync_widgets_to_state(ctx)
     except Exception:
+        failed.append("fold-change controls")
         _logger.debug("view_state: fold-change combo sync failed", exc_info=True)
 
     prefs_in = state.get("export_style_prefs")
@@ -589,6 +615,7 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> None:
             ctx.state.channel.active_channel = ch
             set_active_channel(ctx, ch)
         except Exception:
+            failed.append("active channel")
             _logger.debug("view_state: active_channel restore failed", exc_info=True)
 
     metric = state.get("active_metric")
@@ -609,6 +636,7 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> None:
             from well_viewer.core.channel_state_controller import sync_metric_combos
             sync_metric_combos(ctx, metric)
         except Exception:
+            failed.append("metric")
             _logger.debug("view_state: metric combo sync failed", exc_info=True)
 
     # Re-derive the value column from the *restored* channel + metric. The
@@ -620,6 +648,7 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> None:
     try:
         ctx.state.channel.sync_val_col()
     except Exception:
+        failed.append("value column")
         _logger.debug("view_state: active_val_col re-derive failed", exc_info=True)
 
     # Stash per-tab state for deferred apply on first tab visit.
@@ -643,9 +672,37 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> None:
     target = state.get("active_centre_tab")
     if prefer_home and _has_home(ctx):
         _activate_tab(ctx, "Home")
-        return
+        _report_restore_gaps(ctx, failed)
+        return failed
     if isinstance(target, str) and target:
         _activate_tab(ctx, target)
+    # After the tab activation, not before: activating a tab triggers its
+    # redraw, and those write their own text to the status line. Reporting
+    # first would put this message on screen and then have it overwritten
+    # before the user could read it.
+    _report_restore_gaps(ctx, failed)
+    return failed
+
+
+def _report_restore_gaps(ctx, failed: list[str]) -> None:
+    """Say on the status line and in the app log what did not come back.
+
+    Silence here is the failure mode the whole change exists to remove, so
+    this is deliberately not conditional on a debug flag: a restored view that
+    differs from the saved one is a wrong answer presented as a right one, and
+    the user is the only one who can tell whether the difference matters.
+    """
+    if not failed:
+        return
+    _logger.warning(
+        "Restored the saved view with %d setting(s) missing: %s",
+        len(failed), ", ".join(failed),
+    )
+    with swallow("view_state: reporting restore gaps"):
+        ctx.notify.set_status(
+            f"Restored with {len(failed)} setting(s) missing: "
+            f"{', '.join(failed)}"
+        )
 
 
 def _has_home(ctx) -> bool:

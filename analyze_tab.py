@@ -687,10 +687,6 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzeProgressMixin,
                     # isn't biased by the (typically short) grouping phase.
                     self._pipeline_started_at = _time.monotonic()
                 elif kind == "workers":
-                    try:
-                        self._pipeline_workers = max(1, int(payload))
-                    except (TypeError, ValueError):
-                        self._pipeline_workers = 1
                     pending.append(
                         (f"[info] Workers: {payload} parallel well(s).\n", "INFO"))
                 elif kind == "remote_xfer":

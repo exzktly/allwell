@@ -127,7 +127,7 @@ def _load_arrays_from_refs(refs, *, limit: int, tp=None):
     return out
 
 
-def flatfield_field_for(ctx, channel: str, fluor_arr, tp=None):
+def flatfield_field_for(ctx, channel: str, fluor_arr, tp=None) -> np.ndarray | None:
     """Return the mean-1 flat-field field for the current view, or None (identity).
 
     Recomputes the flat-field METHOD the pipeline used (read from

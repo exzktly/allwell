@@ -93,7 +93,7 @@ def _set_frac_ylim(ctx, ax_frac) -> None:
     ax_frac.set_ylim(-0.05, 1.05)
 
 
-def _pooled_rows(ctx, lbl: str, pool_groups: dict[str, list[str]] | None):
+def _pooled_rows(ctx, lbl: str, pool_groups: dict[str, list[str]] | None) -> pd.DataFrame | None:
     """Return cells for ``lbl``. When ``pool_groups[lbl]`` exists, concat
     the per-well DataFrames of every well in the group; otherwise just
     return ``get_rows(ctx, lbl)`` unchanged."""
@@ -554,7 +554,7 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
             continue
         wells_to_key.setdefault(frozenset({key}), key)
 
-    def _bar_key_for(name, wells):
+    def _bar_key_for(name, wells) -> str | None:
         if name in top_by_key:
             return name
         fw = frozenset(wells or [])

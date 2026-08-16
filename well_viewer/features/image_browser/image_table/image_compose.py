@@ -11,6 +11,18 @@ three wrappers below bind this tab's per-pass diagnostics to them.
 
 from __future__ import annotations
 
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Any
+    from pathlib import Path
+    from PySide6.QtGui import QPixmap
+    from well_viewer.domain.ratio_models import RatioMetric
+    import numpy as np
+
 from well_viewer.core.ui_helpers import norm_timepoint
 
 import logging
@@ -191,7 +203,7 @@ def _row_cmap_name(ctx, r: int, chan=None) -> str | None:
     return None if (not name or name == "Greys") else name
 
 
-def _export_binary_mask(ctx, cache, well, chan, tp, fov, binary_mode, crop_tool):
+def _export_binary_mask(ctx, cache, well, chan, tp, fov, binary_mode, crop_tool) -> np.ndarray | None:
     """Compute the shown-cells array for a binary-mode cell (cropped).
 
     Mirrors the live ``_render_mask_binary`` / ``_render_threshold_binary``
@@ -254,7 +266,7 @@ def _compose_image_table_rgb(
     show_boundaries: bool,
     log_scale: bool = False,
     label_colors: bool = False,
-):
+) -> np.ndarray | None:
     """Render the cell's display state to a uint8 RGB array.
 
     Single source of truth for the image-table cell pixel content,
@@ -468,7 +480,7 @@ def _raw_fallbacks(ctx) -> set:
     return rec if isinstance(rec, set) else set()
 
 
-def _load_ratio_array(ctx, cache, well, ratio, tp, fov, *, use_tophat):
+def _load_ratio_array(ctx, cache, well, ratio, tp, fov, *, use_tophat) -> Path | None:
     """Compute the pixel-wise ratio for a RatioMetric.  Returns float32 or None."""
     try:
         import numpy as _np
@@ -551,7 +563,7 @@ def _format_pixel_intensity(arr, y: int, x: int) -> str:
         return _fmt(px)
     return ",".join(_fmt(v) for v in np.atleast_1d(px).tolist())
 
-def _render_mask_binary(ctx, cache, well, tp, fov, crop_tool, sz):
+def _render_mask_binary(ctx, cache, well, tp, fov, crop_tool, sz) -> QPixmap | None:
     """White-on-black image of every segmented cell (full mask)."""
     from well_viewer.core.ui_helpers import make_overlay_thumb
     import numpy as _np
@@ -564,7 +576,7 @@ def _render_mask_binary(ctx, cache, well, tp, fov, crop_tool, sz):
     rgb = _np.stack([binary, binary, binary], axis=-1)
     return make_overlay_thumb(rgb, sz, sz, None, None)
 
-def _render_threshold_binary(ctx, cache, well, chan, tp, fov, crop_tool, sz):
+def _render_threshold_binary(ctx, cache, well, chan, tp, fov, crop_tool, sz) -> QPixmap | None:
     """White-on-black image of only the cells above the active ON threshold.
 
     Reuses the Review Image gating logic (``review_build_threshold_map``) so
@@ -614,7 +626,7 @@ def _render_threshold_binary(ctx, cache, well, chan, tp, fov, crop_tool, sz):
 # ── Composite row: additive merge of the LUT-colored rows above ─────────────
 
 
-def cell_display_rgb(ctx, cache, cell, r: int, crop_tool, arr):
+def cell_display_rgb(ctx, cache, cell, r: int, crop_tool, arr) -> np.ndarray | None:
     """Return the uint8 (H, W, 3) RGB shown for grid cell ``cell`` in row *r*.
 
     Single source of truth for "what pixels does this cell display": applies the
@@ -689,7 +701,7 @@ def cell_display_rgb(ctx, cache, cell, r: int, crop_tool, arr):
     )
 
 
-def composite_additive_rgb(rgbs):
+def composite_additive_rgb(rgbs) -> np.ndarray | None:
     """Additively merge a list of uint8 RGB arrays, clipped to white.
 
     Sums every array that matches the reference (first non-None) shape, skipping
@@ -751,7 +763,7 @@ def composite_column_rgb(ctx, cache, cells, crop_tool, c: int, rendered):
     return composite_additive_rgb(rgbs)
 
 
-def _ratio_for_overlay(ctx, chan):
+def _ratio_for_overlay(ctx, chan) -> RatioMetric | None:
     """The RatioMetric whose display label matches *chan* (case-insensitive), else
     None. Inlined so this render layer stays free of a ``grid_layout`` import
     (which would cycle: grid_layout imports this module)."""
@@ -761,7 +773,7 @@ def _ratio_for_overlay(ctx, chan):
     return None
 
 
-def overlay_cell_rgb(ctx, cache, cell, r: int, crop_tool, channels):
+def overlay_cell_rgb(ctx, cache, cell, r: int, crop_tool, channels) -> np.ndarray | None:
     """Additively blend every channel in *channels* for one cell (well/tp/fov).
 
     The Separate↔Overlay switch collapses the channel axis: instead of one row /
@@ -813,7 +825,7 @@ def _chrome_rgb(name) -> tuple[int, int, int]:
     return _CHROME_COLORS.get(str(name or "white").strip().lower(), (255, 255, 255))
 
 
-def _corner_cell(rows: int, cols: int, code: str, occupied=None):
+def _corner_cell(rows: int, cols: int, code: str, occupied=None) -> tuple | None:
     """Grid ``(r, c)`` for a corner *code* (tl/tr/bl/br).
 
     When that grid corner is blank (``occupied`` given and the corner not in it —
@@ -847,7 +859,7 @@ def _chrome_target_cells(rows: int, cols: int, code: str, occupied) -> set:
     return {cell} if cell is not None else set()
 
 
-def _load_chrome_font(px: int):
+def _load_chrome_font(px: int) -> Any:
     """A PIL truetype font at *px* from the bundled Inter faces, else the default
     bitmap font. Import is lazy so this module stays Qt-free at import time."""
     try:
@@ -1023,7 +1035,7 @@ def resolve_chrome_plan(ctx, cells):
     return bar_px, bar_targets, label_targets
 
 
-def cell_chrome_kwargs(ctx, r: int, c: int, cell, plan, overlay_chans=None):
+def cell_chrome_kwargs(ctx, r: int, c: int, cell, plan, overlay_chans=None) -> dict | None:
     """Per-cell ``draw_cell_chrome`` kwargs for grid cell ``(r, c)``, or ``None`` when
     this cell carries no mark. *plan* is :func:`resolve_chrome_plan`'s tuple."""
     bar_px, bar_targets, label_targets = plan

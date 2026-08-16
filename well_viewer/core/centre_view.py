@@ -701,7 +701,7 @@ def build_centre(win, parent: QWidget) -> None:
     # in the background. Tabs marked lazy_only stay in ``pending`` so the
     # tab-switch handler can still build them on demand, but the drain
     # never touches them — they only construct when the user clicks them.
-    def _next_drain_title():
+    def _next_drain_title() -> str | None:
         for title in pending:
             if title not in lazy_only:
                 return title

@@ -133,8 +133,10 @@ def read_pipeline_info(
         # These are written by the pipeline only once the corresponding feature
         # ships (label-free seg / QC tooling / shape features). Datasets analyzed
         # before those features have none of them, so each reads through a
-        # ``.get`` default — the viewer must behave identically on a legacy
-        # sidecar. See _Docs/Markdowns/TODO_segmentation_qc_shape_tracking.md §2.
+        # ``.get`` default and the viewer behaves identically on a legacy
+        # sidecar: an absent key is "this run predates the feature", never "the
+        # feature produced nothing". Adding a key here means giving it a default
+        # that a pre-feature dataset can be read through unchanged.
         "schema_version": _safe_int("schema_version", 1),
         "segmentation_method": str(data.get("segmentation_method", "") or "").strip().lower(),
         "phase_token": str(data.get("phase_token", "") or "").strip().lower(),

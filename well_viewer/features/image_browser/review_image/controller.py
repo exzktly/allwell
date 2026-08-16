@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 
 import logging
 
@@ -74,7 +76,7 @@ def _guard_event(fn):
     import functools
 
     @functools.wraps(fn)
-    def _wrapped(app, event, *args, **kwargs):
+    def _wrapped(app, event, *args, **kwargs) -> Any:
         try:
             return fn(app, event, *args, **kwargs)
         except Exception:  # never let a click kill the app

@@ -386,7 +386,6 @@ class ExportStyleSidebar(QWidget):
         # axis currently being viewed. Connected once (the sidebar is cached per
         # figure); the handler no-ops while the sidebar is hidden.
         self._axis_pick_cid = None
-        self._axis_highlight = None
         if self._canvas is not None:
             try:
                 self._axis_pick_cid = self._canvas.mpl_connect(

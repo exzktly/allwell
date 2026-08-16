@@ -252,7 +252,7 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     # inconsistency, not as a different gating rule. Same widget, own reason.
     from well_viewer.core.ui_helpers import EmptyReason, wrap_with_empty_state
 
-    def _no_groups(c):
+    def _no_groups(c) -> EmptyReason | None:
         # Two, not one: this tab compares groups, so a single group cannot run a
         # test either. Gating on "any group at all" let the old top-left QTextEdit
         # placeholder — the inconsistency this replaced — come straight back the

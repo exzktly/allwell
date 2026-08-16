@@ -20,9 +20,13 @@ belongs to those three (see :class:`DestinationToolController`), not to all six.
 
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import QObject, Signal
 
 from util.aw_safe import swallowed
+
+_logger = logging.getLogger("well_viewer")
 
 
 class DatasetToolController(QObject):
@@ -73,13 +77,29 @@ class DatasetToolController(QObject):
         gone; there is nothing left to stop in that case, and a traceback on the
         way out of the app helps nobody — but it still leaves a breadcrumb
         rather than passing silently (§15).
+
+        A worker still running when the two seconds are up is **not** waited on
+        further. Quitting is the user asking for their machine back, and the
+        jobs this owns — a plate copy, a merge across a network mount — will not
+        finish inside any deadline worth holding a quit for. But it is said out
+        loud, because of what happens next: ``AllWellApp.closeEvent`` goes
+        straight on to tear down the Review pane and then the window, so a
+        worker that outlives this call is emitting into a widget tree being
+        deleted. That is the shape that ends in a native crash with no Python
+        traceback, and this line is the only thing that will name it in the
+        boot log afterwards.
         """
         worker = self._worker
         if worker is None or not worker.isRunning():
             return
         try:
             self._request_worker_stop(worker)
-            worker.wait(2000)
+            if not worker.wait(2000):
+                _logger.warning(
+                    "%s worker did not stop within 2s; quitting anyway — if the "
+                    "app crashes on exit, this is the thread that was still "
+                    "running.", self._shutdown_label,
+                )
         except RuntimeError:
             swallowed(f"{self._shutdown_label} worker shutdown")
 

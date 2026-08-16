@@ -23,6 +23,14 @@ without importing the heavy pipeline stack.
 
 from __future__ import annotations
 
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from io import TextIOWrapper
+
 import io
 import os
 import sys
@@ -36,7 +44,7 @@ def _fd_ok(fd: int) -> bool:
         return False
 
 
-def _wrap_fd(fd: int):
+def _wrap_fd(fd: int) -> TextIOWrapper | None:
     # ``closefd=False`` is critical — the wrapper may outlive this call (a
     # logging StreamHandler holds it), but it must not close the parent's pipe
     # end when GC eventually drops it.

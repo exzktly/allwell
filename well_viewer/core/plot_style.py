@@ -12,10 +12,13 @@ card), falls back directly to ``theme.CPub`` (publication-style).
 
 from __future__ import annotations
 
+import logging
 from collections.abc import MutableMapping
 
 import theme
 from well_viewer.core.safe import swallowed
+
+_logger = logging.getLogger("well_viewer")
 
 _PLOT_FONT_REGISTERED = False  # matplotlib font-manager registration runs once
 
@@ -213,7 +216,7 @@ DEFAULT_EXPORT_STYLE_PREFS = {
 }
 
 
-def _to_float_or_none(value: str):
+def _to_float_or_none(value: str) -> float | None:
     s = str(value).strip()
     if not s:
         return None
@@ -393,7 +396,9 @@ MARK_SCOPED_PREF_KEYS = frozenset({
 FIGURE_SCOPED_PREF_KEYS = AXIS_SCOPED_PREF_KEYS | MARK_SCOPED_PREF_KEYS
 
 # Stable per-figure keys (survive figure recreation across sessions, unlike
-# ``id(fig)``) so the per-figure axis prefs can persist.
+# ``id(fig)``) so the per-figure axis prefs can persist. Every figure the
+# registry holds under a ``_*_fig`` name belongs here —
+# ``tests/test_figure_pref_keys.py`` fails on one that does not.
 _FIG_PREF_KEY_MAP = (
     ("_line_fig", "line"),
     ("_bar_fig", "bar"),
@@ -401,6 +406,9 @@ _FIG_PREF_KEY_MAP = (
     ("_scatter_agg_fig", "scatter_agg"),
     ("_heatmap_fig", "heatmap"),
     ("_distribution_fig", "distribution"),
+    ("_sp_fig", "spatial"),
+    ("_mv_fig", "multivariate"),
+    ("_stats_fig", "stats"),
 )
 
 
@@ -408,10 +416,25 @@ def figure_pref_key(ctx, fig) -> str:
     """A stable identifier for *fig* used to scope its axis prefs.
 
     A8 teardown: resolves the fig through the WidgetRegistry (``ctx.widgets``),
-    so it takes ``ctx``."""
+    so it takes ``ctx``.
+
+    The fallback is a diagnostic, not a working key. ``id(fig)`` is a memory
+    address: it is stable within a session and different in the next one, so
+    prefs stored under it are written to ``persistence.json`` and never match
+    again — the styling silently does not come back, and the dead entry stays
+    in the file for ever because nothing prunes it. Three registered figures
+    (Spatial, Multivariate, Statistics) were reaching this line, and the export
+    editor opens two of them, so it was the ordinary path for those tabs rather
+    than an edge case. It says so now instead of returning quietly.
+    """
     for attr, key in _FIG_PREF_KEY_MAP:
         if ctx.widgets.get_or_none(attr) is fig:
             return key
+    _logger.warning(
+        "figure_pref_key: no stable key for %r — its axis and mark prefs will "
+        "not survive a reload. Add its registry name to _FIG_PREF_KEY_MAP.",
+        getattr(fig, "get_label", lambda: fig)() or fig,
+    )
     return f"fig:{id(fig)}"
 
 
@@ -552,7 +575,7 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
     def _axis_font_size(_idx, key, default):
         return int(float(_axis_style(_idx, key, default)))
 
-    def _axis_limit(_idx, key):
+    def _axis_limit(_idx, key) -> float | None:
         # Per-axis limit: a panel's own bucket entry wins so every subplot of a
         # multi-panel figure (e.g. the bar Value/Fraction/Events stack) keeps its
         # own x/y limits set via the "Axis #" picker. Fall back to the flat pref

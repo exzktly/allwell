@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 import sys
 import zipfile
@@ -11,7 +10,7 @@ from pathlib import Path
 from collections.abc import Callable
 from util.aw_safe import swallowed
 from util.retry_io import retry_io
-from util.zip_write import atomic_zip
+from util.zip_write import atomic_zip, replace_folder_with_archive
 
 HERE = Path(__file__).resolve().parent.parent
 ZIPPER_SCRIPT = HERE / "WellPlateZipper.py"
@@ -857,10 +856,24 @@ def _consolidate_mixed_to_zips(
         retry_io(
             _pack, what=target.name, advice=_CONSOLIDATION_ADVICE, log_fn=log_fn,
         )
-        shutil.rmtree(well_dir, ignore_errors=True)
+        # Drop the TIFs the archive now holds, and the folder only when the
+        # archive covers everything in it. The zero-TIF branch above already
+        # refuses to destroy non-image content; this is the same rule applied
+        # to the branch where the folder *does* yield images, which is where
+        # the content was actually being lost.
+        outcome = replace_folder_with_archive(well_dir, tifs)
         zipped_any = True
         if log_fn:
-            log_fn(f"[zipper]   {well}: folder → {well}.zip ({len(tifs)} file(s))\n")
+            tail = (
+                ""
+                if outcome.folder_removed
+                else (f" — folder kept, {len(outcome.kept)} file(s) not "
+                      f"archived: {', '.join(outcome.kept)}")
+            )
+            log_fn(
+                f"[zipper]   {well}: folder → {well}.zip "
+                f"({len(tifs)} file(s)){tail}\n"
+            )
     return zipped_any
 
 

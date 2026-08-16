@@ -11,6 +11,14 @@ compatibility.
 
 from __future__ import annotations
 
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
+
 import io
 import re
 import zipfile
@@ -222,7 +230,7 @@ def open_imgref_as_array(
     io_module,
     read_member_bytes_fn: Callable[[Path, str], bytes | None],
     logger,
-):
+) -> np.ndarray | None:
     """Decode an image reference (disk path or zip member) into a numpy array."""
     if not np_available:
         return None

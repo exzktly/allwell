@@ -9,6 +9,14 @@ no god-object reach-through is needed.
 
 from __future__ import annotations
 
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from well_viewer.core.ui_helpers import EmptyReason
+
 import logging
 
 from well_viewer.core.safe import swallowed
@@ -229,7 +237,7 @@ def _rep_active_wells(ctx) -> list:
     return sorted(wells)
 
 
-def spatial_empty_reason(ctx):
+def spatial_empty_reason(ctx) -> EmptyReason | None:
     """The Spatial tab's ``wrap_with_empty_state`` reason — level-dependent.
 
     Spatial has two fallbacks for an empty selection and they are not the same

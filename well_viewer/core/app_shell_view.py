@@ -150,7 +150,7 @@ def _build_rail_toggle(win) -> None:
     return btn
 
 
-def visible_left_panel(win):
+def visible_left_panel(win) -> QWidget | None:
     """The left panel currently on screen, whichever mode owns it.
 
     All three modes put a panel down the left edge and the one collapse toggle

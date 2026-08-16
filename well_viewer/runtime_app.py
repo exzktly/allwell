@@ -217,9 +217,6 @@ class WellViewerApp(QWidget):
 
     def __init__(self, parent=None, data_path: Path | None = None) -> None:
         super().__init__(parent)
-        self._NP_AVAILABLE = _NP_AVAILABLE
-        self._np = _np
-        self._theme_name = "Dark"
 
         # ── Typed domain state (runtime_app teardown, Phase 1) ───────────────
         # ChannelState owns the channel / ratio / threshold attributes that
@@ -497,7 +494,7 @@ class WellViewerApp(QWidget):
 
     def _sel_by_id(self, sid): return sel_by_id(self._ctx, sid)
 
-    def _sel_id_for_well(self, tok):
+    def _sel_id_for_well(self, tok) -> str | None:
         for s in self._app_state.selection.selections:
             if tok in (s.get("wells") or []):
                 return s.get("id")
@@ -694,14 +691,6 @@ class WellViewerApp(QWidget):
     def _norm_timepoint(self, value: object) -> str: return norm_timepoint(self._ctx, value)
 
     def _review_row_keys(self, row: dict) -> tuple[str, str, str]: return review_row_keys(self._ctx, row)
-
-    # ── Review Image color customization ──────────────────────────────────
-
-    _REVIEW_IMAGE_COLOR_DEFAULTS: dict[str, tuple[int, int, int]] = {
-        "boundary": (255, 64, 64),
-        "selected": (255, 230, 64),
-        "tint": (255, 255, 255),
-    }
 
     # ── Plotting ──────────────────────────────────────────────────────────────
 

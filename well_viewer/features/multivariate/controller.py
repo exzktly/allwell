@@ -462,7 +462,7 @@ def mv_export_csv(ctx) -> None:
         QMessageBox.critical(ctx.window, "Export failed", f"Could not write CSV:\n{exc}")
 
 
-def _write_cluster_profile_csv(ctx, st, res, matrix_path: str):
+def _write_cluster_profile_csv(ctx, st, res, matrix_path: str) -> str | None:
     """Write ``<stem>_cluster_profiles.csv`` — the mean (z-scored) value of each
     feature within each cluster, the interpretable "what does each cluster mean"
     table. Returns the path, or None when the displayed result carries no
@@ -490,7 +490,7 @@ def _write_cluster_profile_csv(ctx, st, res, matrix_path: str):
         return None
 
 
-def _write_pca_loadings_csv(ctx, st, data, matrix_path: str):
+def _write_pca_loadings_csv(ctx, st, data, matrix_path: str) -> str | None:
     """Write a ``<stem>_pca_loadings.csv`` next to the feature matrix.
 
     Rows are features; columns are PC1..PCk (each cell = that feature's loading

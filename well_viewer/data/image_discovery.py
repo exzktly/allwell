@@ -13,6 +13,14 @@ callers (the smFISH controller, scatter callbacks) avoid the GUI cost.
 
 from __future__ import annotations
 
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
+
 import io
 import logging
 import os
@@ -196,7 +204,7 @@ class _DecodedArrayCache:
         self._total_bytes = 0
         self._lock = threading.Lock()
 
-    def get(self, key: tuple):
+    def get(self, key: tuple) -> np.ndarray | None:
         with self._lock:
             hit = self._store.get(key)
             if hit is None:
@@ -249,7 +257,7 @@ def _source_mtime_ns(ref: ImgRef) -> int:
         return 0
 
 
-def open_imgref_as_array(ref: ImgRef, greyscale: bool = False):
+def open_imgref_as_array(ref: ImgRef, greyscale: bool = False) -> np.ndarray | None:
     """Load an image as a numpy array at full native bit depth (memoized).
 
     Decoded arrays are cached in a bounded LRU keyed by the *resolved* image

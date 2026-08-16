@@ -18,6 +18,14 @@ module to match the architecture of every other tab.
 
 from __future__ import annotations
 
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from well_viewer.core.ui_helpers import EmptyReason
+
 import json
 import logging
 
@@ -90,7 +98,7 @@ from util.well_token import canonical_well_label
 _THRESHOLD_EDIT_W = 90
 
 
-def _smfish_empty_reason(ctx):
+def _smfish_empty_reason(ctx) -> EmptyReason | None:
     """This tab's placeholder reason, worst-news-first.
 
     A run with no smFISH channel can never populate this tab, and that outranks

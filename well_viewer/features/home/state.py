@@ -19,13 +19,9 @@ class HomeState:
     re-runs for the same dataset is wasted work on a page the user is likely to
     pass through often.
 
-    ``pinned_legend_state`` is the plate legend row the user clicked to isolate,
-    or ``""``. Kept here rather than on the widget so that switching away and
-    back does not silently drop a filter the user is still reading through.
     """
 
     last_rendered_for: str = ""
-    pinned_legend_state: str = ""
     #: Wells the user selected from Home's plate, so the selection they made
     #: here survives a trip to another page and back.
     last_plate_selection: set = field(default_factory=set)

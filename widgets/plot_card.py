@@ -25,6 +25,14 @@ elsewhere doesn't explode.
 
 from __future__ import annotations
 
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from widgets.segmented_control import SegmentedControl
+
 import os as _os
 import sys as _sys
 
@@ -80,7 +88,7 @@ _plot_palette = plot_palette
 _plot_tokens = plot_tokens
 
 
-def _make_segmented(items, parent=None, *, current=None):
+def _make_segmented(items, parent=None, *, current=None) -> SegmentedControl | None:
     """Build a :class:`~widgets.segmented_control.SegmentedControl` from a list of
     ``(text, data)`` pairs (it has no list constructor — segments are added one at
     a time) and optionally select *current* by data. Returns ``None`` if the
@@ -144,6 +152,9 @@ if _HAVE_MPL:
             self._plot_theme = "screen"
             self._stat = "Mean"
             self._error = "SEM"
+            # Anchors the stats popover: this attribute is the only Python
+            # reference keeping it alive once it is shown, so it is written
+            # and never read — dead-looking, and load-bearing.
             self._stats_pop = None
 
             self.figure = _Figure(figsize=figsize,

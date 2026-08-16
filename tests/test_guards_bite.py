@@ -1312,3 +1312,246 @@ def test_feature_slice_guard_clears(tmp_path, monkeypatch, shape):
                     "test_no_code_outside_a_feature_reaches_its_slice_by_attribute",
                     [path])
     assert exc is None, f"the guard fired on a legitimate {shape}: {exc}"
+
+
+# ── deleting a directory the archive only partly covers ──────────────────────
+#
+# The shape that shipped is the indirect one: the two worst sites never named
+# ``atomic_zip`` in the function that did the deleting, they zipped through a
+# one-line helper in the same module. A guard that only looked for a literal
+# ``atomic_zip`` beside the ``rmtree`` found two of the four sites and read as
+# a completed sweep.
+
+UNARCHIVED_DELETE_VIOLATIONS = {
+    # Zips an extension-filtered subset, then removes the whole folder.
+    "direct": (
+        "import shutil\n"
+        "from util.zip_write import atomic_zip\n"
+        "def pack(folder, target):\n"
+        "    tifs = [p for p in folder.iterdir() if p.suffix == '.tif']\n"
+        "    with atomic_zip(target) as zf:\n"
+        "        for t in tifs:\n"
+        "            zf.write(t, arcname=t.name)\n"
+        "    shutil.rmtree(folder, ignore_errors=True)\n"
+    ),
+    # The archive write is one call away, in the same module.
+    "through-a-local-helper": (
+        "import shutil\n"
+        "from util.zip_write import atomic_zip\n"
+        "def _zip_it(folder, target):\n"
+        "    with atomic_zip(target) as zf:\n"
+        "        for t in folder.glob('*.tif'):\n"
+        "            zf.write(t, arcname=t.name)\n"
+        "def stage(folder, target):\n"
+        "    _zip_it(folder, target)\n"
+        "    shutil.rmtree(folder)\n"
+    ),
+    # Two hops, still the same module.
+    "through-two-local-helpers": (
+        "from util.zip_write import atomic_zip\n"
+        "from pipeline.io import remove_directory\n"
+        "def _write(target, files):\n"
+        "    with atomic_zip(target) as zf:\n"
+        "        for f in files:\n"
+        "            zf.write(f, arcname=f.name)\n"
+        "def _pack(folder, target):\n"
+        "    _write(target, list(folder.glob('*.tif')))\n"
+        "def consume(folder, target):\n"
+        "    _pack(folder, target)\n"
+        "    remove_directory(folder)\n"
+    ),
+}
+
+UNARCHIVED_DELETE_CLEAN = {
+    # The fixed shape: delete what was archived, keep the rest.
+    "routes-through-the-helper": (
+        "from util.zip_write import atomic_zip, replace_folder_with_archive\n"
+        "def pack(folder, target):\n"
+        "    tifs = [p for p in folder.iterdir() if p.suffix == '.tif']\n"
+        "    with atomic_zip(target) as zf:\n"
+        "        for t in tifs:\n"
+        "            zf.write(t, arcname=t.name)\n"
+        "    replace_folder_with_archive(folder, tifs)\n"
+    ),
+    # Writes an archive and removes nothing.
+    "no-removal": (
+        "from util.zip_write import atomic_zip\n"
+        "def pack(folder, target):\n"
+        "    with atomic_zip(target) as zf:\n"
+        "        for t in folder.glob('*.tif'):\n"
+        "            zf.write(t, arcname=t.name)\n"
+    ),
+    # Removes a directory and writes no archive — most of the tree.
+    "no-archive": (
+        "import shutil\n"
+        "def clear(dest):\n"
+        "    shutil.rmtree(dest, ignore_errors=True)\n"
+    ),
+    # The propagation is module-local on purpose: a same-named helper in some
+    # other module must not make this function an archive writer.
+    "same-name-helper-lives-elsewhere": (
+        "import shutil\n"
+        "from somewhere.else_ import _zip_it\n"
+        "def stage(folder, target):\n"
+        "    _zip_it(folder, target)\n"
+        "    shutil.rmtree(folder)\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(UNARCHIVED_DELETE_VIOLATIONS))
+def test_unarchived_delete_guard_catches(shape):
+    from tests.test_no_unarchived_delete import offenders_in
+    found = offenders_in(UNARCHIVED_DELETE_VIOLATIONS[shape], "probe.py")
+    assert found, f"the {shape} spelling walked past the guard"
+
+
+@pytest.mark.parametrize("shape", sorted(UNARCHIVED_DELETE_CLEAN))
+def test_unarchived_delete_guard_clears(shape):
+    from tests.test_no_unarchived_delete import offenders_in
+    found = offenders_in(UNARCHIVED_DELETE_CLEAN[shape], "probe.py")
+    assert not found, f"the guard fired on a legitimate {shape}: {found}"
+
+
+# ── figures registered without a stable preference key ───────────────────────
+#
+# The guard reads `_FIG_PREF_KEY_MAP` from the real module, so what these
+# exercise is the half that can drift silently: which call sites the scan
+# recognises as registering a figure, and which lookalikes it must not.
+
+FIGURE_REGISTRATION_SEEN = {
+    "plain-register": (
+        "def build(ctx, frame):\n"
+        "    reg = ctx.widgets\n"
+        "    reg.register('_sp_fig', card.figure)\n"
+    ),
+    "register-through-the-context": (
+        "def build(ctx, frame):\n"
+        "    ctx.widgets.register('_mv_fig', card.figure)\n"
+    ),
+    "register-used-as-an-expression": (
+        "def build(ctx, frame):\n"
+        "    fig = reg.register('_stats_fig', _StatsFigure(figsize=(5, 2.8)))\n"
+        "    return fig\n"
+    ),
+}
+
+FIGURE_REGISTRATION_UNSEEN = {
+    # `_is_line_fig` is a predicate on the export sidebar, not a figure, and it
+    # appears as a bare literal elsewhere in the tree. Matching every string
+    # that ends in `_fig` would drag it in and demand a key for it.
+    "a-bare-literal-that-is-not-a-registration": (
+        "def f(app, fig):\n"
+        "    if getattr(app, '_line_fig', None) is fig:\n"
+        "        return '_is_line_fig'\n"
+    ),
+    "registering-something-that-is-not-a-figure": (
+        "def build(ctx, frame):\n"
+        "    ctx.widgets.register('_sp_canvas', card.canvas)\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(FIGURE_REGISTRATION_SEEN))
+def test_figure_pref_key_guard_sees(shape):
+    from tests.test_figure_pref_keys import _registered_figure_names
+    found = _registered_figure_names(FIGURE_REGISTRATION_SEEN[shape])
+    assert found, f"the {shape} spelling registered a figure the guard cannot see"
+
+
+@pytest.mark.parametrize("shape", sorted(FIGURE_REGISTRATION_UNSEEN))
+def test_figure_pref_key_guard_ignores(shape):
+    from tests.test_figure_pref_keys import _registered_figure_names
+    found = _registered_figure_names(FIGURE_REGISTRATION_UNSEEN[shape])
+    assert not found, f"the guard read a {shape} as a figure registration: {found}"
+
+
+# ── a function that can return None but does not say so ──────────────────────
+
+OPTIONAL_RETURN_VIOLATIONS = {
+    "bare-return": (
+        "def f(xs):\n"
+        "    if not xs:\n"
+        "        return\n"
+        "    return xs[0]\n"
+    ),
+    "explicit-none": (
+        "def f(xs):\n"
+        "    if not xs:\n"
+        "        return None\n"
+        "    return xs[0]\n"
+    ),
+    "none-after-the-value": (
+        "def f(xs):\n"
+        "    for x in xs:\n"
+        "        if x:\n"
+        "            return x\n"
+        "    return None\n"
+    ),
+    "inside-a-method": (
+        "class C:\n"
+        "    def f(self, xs):\n"
+        "        if not xs:\n"
+        "            return None\n"
+        "        return xs[0]\n"
+    ),
+}
+
+OPTIONAL_RETURN_CLEAN = {
+    "declared": (
+        "def f(xs) -> int | None:\n"
+        "    if not xs:\n"
+        "        return None\n"
+        "    return xs[0]\n"
+    ),
+    "declared-with-Optional": (
+        "from typing import Optional\n"
+        "def f(xs) -> Optional[int]:\n"
+        "    if not xs:\n"
+        "        return\n"
+        "    return xs[0]\n"
+    ),
+    "never-returns-none": (
+        "def f(xs):\n"
+        "    if not xs:\n"
+        "        return 0\n"
+        "    return xs[0]\n"
+    ),
+    "only-returns-none": (
+        "def f(xs):\n"
+        "    if not xs:\n"
+        "        return\n"
+        "    return\n"
+    ),
+    # The None belongs to a nested function, not to this one. Counting it would
+    # flag every factory whose inner callable can return None.
+    "the-none-is-a-nested-functions": (
+        "def outer(xs):\n"
+        "    def inner():\n"
+        "        return None\n"
+        "    return inner\n"
+    ),
+    # Falling off the end is the same defect and is deliberately out of scope:
+    # separating a real fall-off from an unreachable one needs flow analysis,
+    # and a guard with false positives gets deleted.
+    "implicit-fall-off-is-not-claimed": (
+        "def f(xs):\n"
+        "    for x in xs:\n"
+        "        if x:\n"
+        "            return x\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(OPTIONAL_RETURN_VIOLATIONS))
+def test_optional_return_guard_catches(shape):
+    from tests.test_optional_returns_declared import offenders_in
+    found = offenders_in(OPTIONAL_RETURN_VIOLATIONS[shape], "probe.py")
+    assert found, f"the {shape} spelling walked past the guard"
+
+
+@pytest.mark.parametrize("shape", sorted(OPTIONAL_RETURN_CLEAN))
+def test_optional_return_guard_clears(shape):
+    from tests.test_optional_returns_declared import offenders_in
+    found = offenders_in(OPTIONAL_RETURN_CLEAN[shape], "probe.py")
+    assert not found, f"the guard fired on a legitimate {shape}: {found}"

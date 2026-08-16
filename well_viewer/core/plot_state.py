@@ -246,7 +246,7 @@ class PlotState:
         if not old or not new or old == new:
             return False
 
-        def _moved(ref):
+        def _moved(ref) -> ControlRef | None:
             if ref is None or getattr(ref, "kind", "") != KIND_SET:
                 return None
             if ref.name != old:

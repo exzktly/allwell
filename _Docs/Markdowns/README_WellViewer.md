@@ -1279,7 +1279,10 @@ It is read-only — it reports what the run recorded, not something you set here
   right and stays in that same spot in all three modes, because the manual it
   opens documents all three; `Ctrl+/` opens it too. Opening it from a Datasets
   tool lands on that tool's section of the manual, and from Analyze on the form
-  section you have scrolled to.
+  section you have scrolled to. A build that ships a reduced feature set trims
+  the manual to match, so the drawer describes only what that build has; if the
+  trim cannot be applied it says so at the top of the manual rather than
+  quietly showing you the full one.
 - **Section rail** — the left navigator lists every centre tab (Plotting, etc.),
   grouped into **Analysis**, **Images**, and **Data**, under the dataset control
   at its head. Tabs that own sub-tabs (e.g. Plotting) show them in the top band,
@@ -2630,6 +2633,12 @@ rather than a single panel.
     The status line says so by name when it happens, because a silent partial
     restore looks exactly like a broken one. Re-save the plot from the tab and
     the new card carries everything.
+  - A setting can also fail to come back for a reason particular to this
+    dataset — a saved channel it does not have, a well that is not in it. Each
+    setting is restored independently, so one failing never costs the others,
+    and the status line names how many were missed and which ones. The same
+    line goes to the log drawer, where it stays after the status line has moved
+    on.
 - **Export all** — write the whole gallery as a multi-page **PDF report** (a
   cover page plus one full-quality page per plot with its parameters). The
   Image Table grid can be saved here too.

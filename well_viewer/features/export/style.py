@@ -89,6 +89,12 @@ def get_all_profile_names_ctx(ctx) -> list[str]:
 
 
 class _ExportEditorSession:
+    """Handed back to the caller as the open editor's handle.
+
+    ``sidebar`` is written and never read inside this module; it is the
+    session's whole payload, for a caller that wants the widget.
+    """
+
     def __init__(self, sidebar) -> None:
         self.sidebar = sidebar
 

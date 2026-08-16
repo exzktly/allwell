@@ -55,6 +55,14 @@ implementation; that's fixed here.
 
 from __future__ import annotations
 
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from well_viewer.domain.batch_models import ReplicateSet
+
 import math
 from typing import NamedTuple
 from collections.abc import Callable
@@ -1308,7 +1316,7 @@ def classify_control_label(ctx, label: str) -> tuple[str, str]:
     return "", ""
 
 
-def _label_to_replicate_set(ctx, label: str):
+def _label_to_replicate_set(ctx, label: str) -> ReplicateSet | None:
     """Resolve a control label to a ReplicateSet OR ``None``.
 
     Returns the ReplicateSet view of a Sample-Definitions selection when the
@@ -1364,7 +1372,7 @@ def member_mean_series(
         gm, *_ = compute(ctx, rset, t, threshold, use_sem)
         return float(gm) if math.isfinite(gm) else None
 
-    def well_stat(pt):
+    def well_stat(pt) -> float | None:
         m = pt[1]
         if isinstance(m, (int, float)) and math.isfinite(m):
             return float(m)
@@ -1624,14 +1632,14 @@ def member_stats_series(
     ``_compute_rep_stats[_per_fov]`` for rep-set members, the
     ``_aggregate_well`` AggPoint's spread field for solo wells.
     """
-    def rset_stat(rset, t):
+    def rset_stat(rset, t) -> tuple | None:
         compute = compute_rep_per_fov_stats if per_fov_spread else compute_rep_stats
         gm, gerr, *_ = compute(ctx, rset, t, threshold, use_sem)
         if not math.isfinite(gm):
             return None
         return (float(gm), _finite_spread(gerr))
 
-    def well_stat(pt):
+    def well_stat(pt) -> tuple | None:
         m = pt[1]
         if not (isinstance(m, (int, float)) and math.isfinite(m)):
             return None
@@ -1659,7 +1667,7 @@ def member_frac_stats_series(
     ferr`` tail-unpack would wrongly grab the per-FOV count fields from the
     6-tuple. Used by line-plot FC to scale the OnFraction panel.
     """
-    def rset_stat(rset, t):
+    def rset_stat(rset, t) -> tuple | None:
         compute = compute_rep_per_fov_stats if per_fov_spread else compute_rep_stats
         res = compute(ctx, rset, t, threshold, use_sem)
         gf, ferr = res[2], res[3]
@@ -1667,7 +1675,7 @@ def member_frac_stats_series(
             return None
         return (float(gf), _finite_spread(ferr))
 
-    def well_stat(pt):
+    def well_stat(pt) -> tuple | None:
         f = pt[3] if len(pt) > 3 else None
         if not (isinstance(f, (int, float)) and math.isfinite(f)):
             return None
@@ -1783,7 +1791,7 @@ def member_frac_series(
     Fraction-on counterpart of :func:`member_stats_series`. Same rset /
     solo-well dispatch.
     """
-    def rset_stat(rset, t):
+    def rset_stat(rset, t) -> tuple | None:
         if per_fov_spread:
             _, _, gf, gerr_f, *_ = compute_rep_per_fov_stats(ctx,
                 rset, t, threshold, use_sem,

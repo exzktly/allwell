@@ -164,3 +164,72 @@ def test_the_per_tool_handlers_stay_per_tool(member):
     distinct behaviours behind a flag."""
     assert member not in vars(DatasetToolController)
     assert member not in vars(DestinationToolController)
+
+
+# ── the deadline the shutdown does not wait past ─────────────────────────────
+
+
+class _StubbornWorker:
+    """A worker that ignores the stop request, as a blocked one does.
+
+    `wait(msec)` returning False is Qt's way of saying the thread is still
+    running. Nothing read that return value, so a worker that outlived the
+    deadline was abandoned without a word — and `AllWellApp.closeEvent` goes
+    straight on to tear the widget tree down around it.
+    """
+
+    def __init__(self) -> None:
+        self.stop_requested = False
+        self.waited_ms: list[int] = []
+
+    def isRunning(self) -> bool:
+        return True
+
+    def requestInterruption(self) -> None:
+        self.stop_requested = True
+
+    def wait(self, msec: int) -> bool:
+        self.waited_ms.append(msec)
+        return False
+
+
+class _CompliantWorker(_StubbornWorker):
+    def wait(self, msec: int) -> bool:
+        self.waited_ms.append(msec)
+        return True
+
+
+def _controller_with(worker):
+    ctrl = DatasetToolController.__new__(DatasetToolController)
+    ctrl._worker = worker
+    ctrl._shutdown_label = "probe tool"
+    return ctrl
+
+
+def test_a_worker_that_outlives_the_deadline_is_named_in_the_log(caplog):
+    import logging
+
+    worker = _StubbornWorker()
+    ctrl = _controller_with(worker)
+
+    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+        ctrl.shutdown()
+
+    assert worker.stop_requested, "the worker was never asked to stop"
+    assert worker.waited_ms == [2000], "the deadline changed"
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("probe tool" in m for m in messages), (
+        f"nothing named the tool whose worker was still running: {messages}"
+    )
+
+
+def test_a_worker_that_stops_in_time_says_nothing(caplog):
+    """A warning on every quit would train the user to ignore this one."""
+    import logging
+
+    ctrl = _controller_with(_CompliantWorker())
+
+    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+        ctrl.shutdown()
+
+    assert [r.getMessage() for r in caplog.records] == []

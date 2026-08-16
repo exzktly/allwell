@@ -808,8 +808,15 @@ class AllWellApp(QMainWindow):
             # Under an active (thin) profile, trim the manual to the profile's
             # features so running from source (ALLWELL_PROFILE=thin) shows the
             # same feature help a thin *binary* ships. Idempotent — a binary's
-            # README is already trimmed at build time. Best-effort: never let a
-            # missing build-tooling import break the help drawer.
+            # README is already trimmed at build time.
+            #
+            # A failure here must not break the drawer, but it must not pass
+            # unremarked either. The untrimmed manual documents tabs a reduced
+            # build does not have, and the help drawer is exactly where a user
+            # goes to find out what their build can do — so falling back to it
+            # silently answers that question wrongly. `core.profile` already
+            # takes the trouble to announce a reduced profile at WARNING for
+            # the same reason; this is the other half of that.
             if readme_text:
                 try:
                     from scripts.profile_build import trim_readme_for_profile
@@ -818,7 +825,16 @@ class AllWellApp(QMainWindow):
                     readme_text = trim_readme_for_profile(
                         readme_text, _prof.features, _prof.subtabs)
                 except Exception:
-                    pass
+                    import logging as _logging
+                    _logging.getLogger("well_viewer").warning(
+                        "Could not trim the manual to the active feature "
+                        "profile; showing the full manual, which may describe "
+                        "features this build does not have.", exc_info=True)
+                    readme_text = (
+                        "> **Note:** this build runs a reduced feature profile, "
+                        "and the manual below could not be trimmed to it — some "
+                        "sections describe features this build does not have.\n\n"
+                    ) + readme_text
                 # A running app is already installed — drop install/build help.
                 readme_text = _strip_install_help(readme_text)
 
@@ -972,7 +988,7 @@ class AllWellApp(QMainWindow):
             return
         mv.scrollToAnchor(_gh_slug(target))
 
-    def _current_data_dir(self):
+    def _current_data_dir(self) -> Path | None:
         """Return the directory of the dataset currently loaded in the
         embedded WellViewer, or ``None`` when nothing is loaded.
 
@@ -992,7 +1008,7 @@ class AllWellApp(QMainWindow):
             cur = getattr(review, "_data_dir", None)
         return cur
 
-    def _current_dataset_root(self):
+    def _current_dataset_root(self) -> Path | None:
         """The path to feed back to ``_load_path`` to reopen the current
         dataset. For an ``in/`` + ``out/`` layout the loaded ``data_dir`` is the
         ``out/`` folder, but ``_load_path`` wants the *root* (the folder holding

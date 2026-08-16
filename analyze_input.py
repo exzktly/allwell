@@ -54,7 +54,7 @@ class AnalyzeInputMixin:
         return PACKED_OME_MESSAGE if detected is not None else None
 
     def _resolve_run_dirs_for_runner(self, opts: dict, log_q: queue.Queue,
-                                     *, proc_hook=None):
+                                     *, proc_hook=None) -> tuple | None:
         """Adapter passed to ``PipelineRunner.start``.
 
         Resolves ``opts['raw']`` into ``(input_dir, output_dir, on_success)`` via

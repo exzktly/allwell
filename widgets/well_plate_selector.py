@@ -649,7 +649,7 @@ class _PlateGrid(QWidget):
         self._changed()
 
     # ── input ────────────────────────────────────────────────────────────
-    def _hit(self, x: float, y: float):
+    def _hit(self, x: float, y: float) -> tuple | None:
         """('corner',) | ('well', r, c) | ('row', r) | ('col', c) | None."""
         _lab, cell, ox, oy = self._metrics()
         if self._corner_active() and self._corner_rect().contains(x, y):

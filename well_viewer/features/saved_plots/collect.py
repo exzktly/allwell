@@ -149,7 +149,7 @@ def _capture_stats_config(ctx) -> dict | None:
     }
 
 
-def _safe(fn):
+def _safe(fn) -> Any:
     try:
         return fn()
     except Exception:

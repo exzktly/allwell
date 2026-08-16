@@ -8,6 +8,14 @@ click/hover handlers there stay focused on canvas events.
 
 from __future__ import annotations
 
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
+
 from typing import Optional
 
 from PySide6.QtCore import Qt
@@ -77,7 +85,6 @@ class ScatterCellViewer(QWidget):
         # tab calls "corrected"), falling back to raw when absent.
         self._image_source = "raw"
         self._debug_lines: list[str] = []
-        self._pixmap_cache: QPixmap | None = None
 
         self._build_ui()
         self._load_cell_data()
@@ -336,12 +343,11 @@ class ScatterCellViewer(QWidget):
     def _load_cell_data_impl(self) -> None:
         # State hygiene — wipe everything that's tied to the *previous*
         # cell before loading the new one. update_cell() reuses the same
-        # dialog instance, so without this _cell_images / _pixmap_cache /
-        # _current_channel / _cell_bounds carry stale data forward and
+        # dialog instance, so without this _cell_images / _current_channel /
+        # _cell_bounds carry stale data forward and
         # selecting a not-yet-reloaded channel renders the previous
         # cell's pixmap.
         self._cell_images = {}
-        self._pixmap_cache = None
         self._current_channel = None
         self._cell_bounds = None
         self._channel_luts = {}
@@ -639,7 +645,7 @@ class ScatterCellViewer(QWidget):
             self._debug(f"_get_cell_bounds exception: {e!r}")
             return None
 
-    def _compute_outline_mask(self, cell_mask):
+    def _compute_outline_mask(self, cell_mask) -> np.ndarray | None:
         import numpy as np
 
         if cell_mask is None:
@@ -1050,7 +1056,6 @@ class ScatterCellViewer(QWidget):
         )
 
         if pixmap is not None:
-            self._pixmap_cache = pixmap
             self._img_label.setPixmap(pixmap)
         else:
             self._img_label.setText("Failed to render image")

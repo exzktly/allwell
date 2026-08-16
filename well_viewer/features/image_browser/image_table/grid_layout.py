@@ -12,6 +12,14 @@ its own call sites and ``controller``'s re-export block are unchanged.
 
 from __future__ import annotations
 
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from well_viewer.domain.ratio_models import RatioMetric
+
 from well_viewer.domain.viewer_state import parse_rc
 
 
@@ -30,7 +38,7 @@ from well_viewer.data.dataset_dims import (  # noqa: F401
 )
 
 
-def _find_ratio_for_channel(ctx, chan: str):
+def _find_ratio_for_channel(ctx, chan: str) -> RatioMetric | None:
     """Return the RatioMetric whose display_label matches *chan*, or None."""
     for r in (ctx.state.channel.ratio_metrics or []):
         if r.display_label().upper() == chan.strip().upper():

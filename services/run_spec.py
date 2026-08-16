@@ -21,6 +21,14 @@ Two things are deliberately **not** persisted inside a :class:`RunSpec`:
 
 from __future__ import annotations
 
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from services.remote_config import RemoteHost
+
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -84,7 +92,7 @@ class RunSpec:
             selective_channels=bool(data.get("selective_channels", True)),
         )
 
-    def resolve_remote(self):
+    def resolve_remote(self) -> RemoteHost | None:
         """Return the live ``RemoteHost`` for :attr:`remote_name`, or
         ``None`` for a local run. Raises :class:`RunSpecError` when a named
         remote no longer resolves."""

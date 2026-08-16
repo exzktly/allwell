@@ -148,7 +148,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
         ))
         fl_hl.addStretch(1)
         sec.layout().addWidget(fl_header)
-        self._fluor_header = fl_header  # hidden for OME input (role picker drives it)
+        self._fluor_header = fl_header  # for an OME-mode hide nothing performs yet
 
         self._fluor_frame = QWidget(sec)
         self._fluor_frame_layout = QVBoxLayout(self._fluor_frame)
@@ -162,7 +162,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
         add_btn.setFixedWidth(self._ADD_BTN_W)
         add_btn.clicked.connect(lambda _=False: self._fluor_add_row())
         sec.layout().addWidget(add_btn)
-        self._fluor_add_btn = add_btn  # hidden for OME input (role picker drives it)
+        self._fluor_add_btn = add_btn  # for an OME-mode hide nothing performs yet
 
         # Per-method parameter pages + the shared StarDist thresholds
         # (analyze_tab_seg_params.AnalyzeSegParamsMixin).

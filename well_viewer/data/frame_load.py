@@ -45,6 +45,14 @@ should thread a set through rather than accept the default.
 
 from __future__ import annotations
 
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
+
 import logging
 
 from well_viewer.data.image_resolver import normalize_numeric_token
@@ -301,7 +309,7 @@ def match_image_ref(images: dict, fov: str, tp: str):
 def load_frame_array(ctx, cache: dict, well: str, chan_upper: str, tp: str,
                      fov: str, *, use_tophat: bool = False,
                      raw_fallbacks: set | None = None,
-                     scan_misses: set | None = None):
+                     scan_misses: set | None = None) -> np.ndarray | None:
     """Load the float32 array for one (well, channel, timepoint, fov).
 
     The dropdown emits tokens normalized via ``norm_token`` (``"1.0"`` →
@@ -375,7 +383,7 @@ def load_frame_array(ctx, cache: dict, well: str, chan_upper: str, tp: str,
         return None
 
 
-def load_mask_array(ctx, cache, well, tp, fov):
+def load_mask_array(ctx, cache, well, tp, fov) -> np.ndarray | None:
     """Return the int32 segmentation mask for (well, tp, fov), or None.
 
     The mask dict is populated as a side effect of any prior ``load_frame_array``

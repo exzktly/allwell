@@ -85,7 +85,7 @@ def scan_well_zip(
     return source, mask
 
 
-def read_image_arrays(sm_ref: SmfishImgRef, mk_ref: SmfishImgRef):
+def read_image_arrays(sm_ref: SmfishImgRef, mk_ref: SmfishImgRef) -> tuple | None:
     """Decode a (smFISH/log image, mask) pair into ``np.ndarray``s.
 
     Returns ``(log_img, labels, sorted_inside_label_vals)`` or ``None`` when

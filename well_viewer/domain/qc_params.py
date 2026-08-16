@@ -36,7 +36,7 @@ CIRCULARITY_COL = "shape_circularity"
 REGION_AREA_COL = "qc_region_area"
 
 
-def _first_col(df, names):
+def _first_col(df, names) -> str | None:
     for n in names:
         if n in df.columns:
             return n

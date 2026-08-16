@@ -150,6 +150,8 @@ class _SelectionRow(QFrame):
         self._compact = False  # rail mode: hide drag/eye/kebab chrome, read-only.
         self._enabled_wells: list[str] = []
         self._plate_factory = None
+        # Anchors the compose popover — written, never read, and the only
+        # Python reference keeping it alive. Dropping it closes the popup.
         self._compose_pop = None
         self._compose_btn: QToolButton | None = None
 
@@ -577,6 +579,7 @@ class SavedSelectionsList(QWidget):
         self._selections: list[dict] = []
         self._current_id: str = ""
         self._rows: dict[str, _SelectionRow] = {}
+        # Same anchor role as _SelectionRow._compose_pop above.
         self._recolour_pop = None
         self._composable = False
         self._compact = False  # rail-side compact / read-only render.

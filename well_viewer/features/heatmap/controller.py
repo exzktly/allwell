@@ -8,6 +8,14 @@ selection.
 
 from __future__ import annotations
 
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from well_viewer.core.ui_helpers import EmptyReason
+
 import math
 from collections.abc import Iterable
 
@@ -86,7 +94,7 @@ def active_layout(ctx) -> HeatmapLayout:
     return make_plate_layout((ctx.state.dataset.well_paths or {}).keys())
 
 
-def heatmap_empty_reason(ctx):
+def heatmap_empty_reason(ctx) -> EmptyReason | None:
     """The Heat Map tab's ``wrap_with_empty_state`` reason: an empty layout.
 
     This page is not selection-driven. ``redraw_heatmap`` fills its array from

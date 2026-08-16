@@ -12,6 +12,7 @@ from well_viewer.features.barplot.collect import collect_bar_items_for_app
 
 from well_viewer.domain.selections_model import (color_for_replicate_set, color_for_well, well_display_label, active_replicate_sets)
 from well_viewer.core.channel_state_controller import get_all_fluor_gates, on_cutoff_for_column
+from well_viewer.core.empty_state_copy import NO_DATASET_MESSAGE
 from well_viewer.data.data_loading import get_rows
 from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.domain.time_rescale import format_scaled as _rescale_tp
@@ -776,12 +777,7 @@ def redraw_bars(ctx) -> None:
     mark_time_rescale(ax_mean, ax_frac, ax_n, factor=ctx.state.plot.time_scale)
 
     if not ctx.state.dataset.well_paths:
-        draw_bar_empty_state(
-            ctx, ax_mean, ax_frac,
-            "Load a directory.\n"
-            "Open… is at the top of the left rail (⌘O).",
-            ax_n=ax_n,
-        )
+        draw_bar_empty_state(ctx, ax_mean, ax_frac, NO_DATASET_MESSAGE, ax_n=ax_n)
         return
     if not bar_selected and not active_rsets:
         # One line, where this used to paint the same sentence onto all three

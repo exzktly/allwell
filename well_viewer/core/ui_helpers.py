@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 import theme
+from well_viewer.core import empty_state_copy
 from well_viewer.data.image_identity import normalize_tp
 from well_viewer.core.safe import swallowed
 
@@ -146,8 +147,10 @@ def set_combo_values_sectioned(combo: object, sections: list[tuple[str, list[str
 
 
 #: The one wording for "no dataset is loaded", shared by every wrapped tab.
-NO_DATASET_TITLE = "Load a directory."
-NO_DATASET_HINT = "Open… is at the top of the left rail (⌘O)."
+#: Re-exported from :mod:`well_viewer.core.empty_state_copy` so the canvas sites
+#: that paint the same sentence onto a figure can reach it without importing Qt.
+NO_DATASET_TITLE = empty_state_copy.NO_DATASET_TITLE
+NO_DATASET_HINT = empty_state_copy.NO_DATASET_HINT
 
 
 class EmptyReason:

@@ -1116,13 +1116,35 @@ failure. The wrap registers a `QStackedWidget` on `win._plot_empty_stacks`
 them together, which is what keeps the wording and the moment of the swap
 identical across tabs.
 
-**A placeholder may carry one action.** `EmptyState.setAction(label, on_click)`
-adds a button under the hint; without it there is no button at all, which is
-what every site but Home wants — their hint names a control somewhere else and
-a button would be a second way to say it. Home is the page the application opens
-on, so its placeholder is the first screen and gets an explicit *Open a
-dataset…*. The refresher rewrites only a placeholder's text, hint and icon, so
-an action set once at build time survives every pass.
+**A placeholder may carry one action, and the action replaces the hint.**
+`EmptyState.setAction(label, on_click)` adds a button *in place of* the hint;
+without it there is no button at all, which is what every site but Home wants —
+their hint names a control somewhere else, and that sentence is the only
+instruction they have. Home is the page the application opens on, so its
+placeholder is the first screen and gets an explicit *Open a dataset…*. The
+hint's job is to say where the way out is; where the way out is the button
+itself, a sentence pointing at another corner of the window is a second answer
+to the question the button already answers, so the button hides it. The hint's
+text is kept, so clearing the action brings the line back.
+
+The suppression lives in the widget rather than at the call site because the
+refresher rewrites every placeholder's text, hint and icon on each pass (an
+action set once at build time survives it): a site that blanked its own hint at
+build time would have it painted back the first time a dataset was closed.
+Whether an action exists is read off the button's text rather than its
+`isVisible()`, since a child of a widget that has not been shown yet reports
+itself invisible however it was configured, and placeholders are built long
+before the page they cover is first painted.
+
+**The wording lives in one module.** `core/empty_state_copy.py` holds
+`NO_DATASET_TITLE`, `NO_DATASET_HINT` and the `NO_DATASET_MESSAGE` that joins
+them with a newline, and imports nothing. The sentence is said in two media —
+this placeholder, and matplotlib text painted onto an empty figure so an
+*exported* copy states its own shortfall (`barplot/renderer.py`,
+`lineplot/controller.py`) — and the canvas sites cannot reach a Qt widget
+module, which is how three spellings of it came to exist and drift apart in
+punctuation. `ui_helpers` re-exports the two names for the widget side;
+`tests/test_no_dataset_copy.py` fails on a fourth hand-typed copy.
 
 **The placeholder says which "nothing" it is; the axes carry per-plot causes.**
 Each wrap site may pass a `reason(ctx) -> EmptyReason | None`, called on every
@@ -1443,8 +1465,10 @@ refresher flips it — a landing page reporting on nothing would otherwise open
 the application on a masthead reading "No dataset open" above an empty plate and
 a column of em-dashes. The one thing Home adds is an action on the placeholder
 itself (`EmptyState.setAction`, optional and unused by the other twelve sites):
-the hint names a control in the rail, and on the page the app launches on it is
-worth also being able to press the thing. The button runs `run_home_action(ctx,
+elsewhere the hint names a control in the rail, and on the page the app launches
+on it is worth being able to press the thing instead. The button stands in the
+hint's place rather than beneath it, so Home shows the title and the button and
+not also a sentence directing the eye to the rail. It runs `run_home_action(ctx,
 "open")`, the same route the next-step row takes, which reaches the window's own
 `_browse` rather than opening a second file dialog of its own.
 

@@ -37,7 +37,7 @@ def test_smfish_shows_the_shared_empty_state_before_a_dataset_loads(viewer_app, 
     """The no-dataset placeholder must be the one every other plot tab shows.
 
     smFISH used to paint its own warning as matplotlib text on the image axes —
-    a muted string with no glyph and no "Open…" hint — so the one tab a user
+    a muted string with no glyph and no "Open" hint — so the one tab a user
     might land on first looked unlike every other tab in the same state. It is
     the only plot tab that never wrapped itself in the shared EmptyState; the
     on-canvas messages it keeps are for states *within* a loaded dataset, which
@@ -71,7 +71,7 @@ def test_smfish_shows_the_shared_empty_state_before_a_dataset_loads(viewer_app, 
     # Word-for-word what the other tabs show — wrap_with_empty_state's defaults.
     texts = tuple(lbl.text() for lbl in placeholder.findChildren(QLabel) if lbl.text())
     assert "Load a directory." in texts
-    assert any("Open…" in t for t in texts)
+    assert any("Open" in t for t in texts)
 
     # The toolbar swaps out with the canvas. Wrapping the canvas alone would
     # leave a live-looking toolbar stranded under the placeholder; every other

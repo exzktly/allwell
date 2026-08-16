@@ -286,7 +286,7 @@ A common end-to-end run, from raw images to plots, takes five clicks:
 5. Pick wells in the plate map; the plots redraw immediately.
 
 Reopen a previous output folder any time from the dataset control at the top of
-Review's left rail — it names the folder you have loaded and drops `Open…` — or
+Review's left rail — it names the folder you have loaded and drops `Open` — or
 with `Ctrl+O`.
 
 ---
@@ -965,8 +965,8 @@ actually finished, what it was run with, and what you have already done to it.
 
 **Before you open anything** it shows the same "Load a directory." prompt every
 other page in Review shows when there is no dataset — with an **Open a
-dataset…** button on it, since this is the page the app starts on. Everywhere
-else that prompt points you at the **Open…** button at the top of the left rail
+dataset** button on it, since this is the page the app starts on. Everywhere
+else that prompt points you at the **Open** button at the top of the left rail
 (⌘O); here the button on the placeholder does the same thing, so the sentence is
 left off rather than sending you across the window to press the other one. There
 is one folder picker behind both. Nothing else on the page is drawn until a

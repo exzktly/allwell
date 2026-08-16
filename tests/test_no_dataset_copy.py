@@ -10,7 +10,7 @@ read ``well_viewer.core.empty_state_copy``; this file fails on a fourth copy
 typed out by hand.
 
 **A button is not an extra hint.** The hint's job is to say where the way out
-is. Home's placeholder wires an ``Open a dataset…`` button, so on that page the
+is. Home's placeholder wires an ``Open a dataset`` button, so on that page the
 way out was both a button and a sentence pointing at the opposite corner of the
 window — two answers to one question, with the sentence being the worse of them.
 The button now stands in place of the hint rather than under it, which has to
@@ -60,18 +60,22 @@ def test_the_no_dataset_sentence_is_written_in_exactly_one_module():
         "well_viewer.core.empty_state_copy:\n  " + "\n  ".join(offenders))
 
 
-def test_the_hint_names_the_control_as_a_button():
-    """The reported defect: a sentence that opens with the bare control name.
+def test_the_hint_names_the_control_as_a_button_and_carries_no_ellipsis():
+    """The reported defect, and the decision that followed it.
 
-    ``Open…`` is the control's real label and the ellipsis is the convention for
-    "opens a dialog", but a sentence *beginning* with it reads as prose trailing
-    off rather than as a name.
+    The hint opened with the control's bare name, which then carried a trailing
+    ellipsis — the convention for an item that opens a dialog. Beginning a
+    sentence with it read as prose trailing off rather than as a name. The dots
+    are gone from the control itself, and the hint says "button" instead, which
+    is what the dots were there to convey.
     """
     from well_viewer.core.empty_state_copy import NO_DATASET_HINT
-    assert not NO_DATASET_HINT.startswith("Open…"), (
-        "the hint opens with the bare control name, which reads as prose "
-        "trailing off rather than as the button's label")
-    assert "Open…" in NO_DATASET_HINT and "button" in NO_DATASET_HINT, (
+    assert "…" not in NO_DATASET_HINT, (
+        "the hint carries an ellipsis again; the Open control does not have one")
+    assert not NO_DATASET_HINT.startswith("Open"), (
+        "the hint opens with the bare control name, which reads as a verb "
+        "addressed to the user rather than as the button's label")
+    assert "Open" in NO_DATASET_HINT and "button" in NO_DATASET_HINT, (
         "the hint must still name the control by the label it wears, and say "
         "that it is a button")
 
@@ -91,7 +95,7 @@ def test_an_action_button_replaces_the_hint_rather_than_joining_it(qapp):
     assert not es._hint.isHidden(), "hint should be on before any action is set"
     assert es._hint.text() == NO_DATASET_HINT
 
-    es.setAction("Open a dataset…", lambda: None)
+    es.setAction("Open a dataset", lambda: None)
     assert es._hint.isHidden(), (
         "the placeholder shows both a button and a sentence pointing somewhere "
         "else — two answers to the one question the button already answers")

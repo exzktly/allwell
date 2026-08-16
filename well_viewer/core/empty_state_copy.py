@@ -20,12 +20,13 @@ NO_DATASET_TITLE = "Load a directory."
 
 #: What to do about it, naming the control by the label it wears on screen.
 #:
-#: "The Open… button" rather than a bare "Open…": the trailing ellipsis is part
-#: of the control's name (the convention for an item that opens a dialog rather
-#: than acting immediately), and the rail head does read ``No dataset — Open…``.
-#: But a sentence *beginning* with it reads as prose trailing off, which is how
-#: it was reported. Naming the thing as a button settles what the dots are.
-NO_DATASET_HINT = "The Open… button is at the top of the left rail (⌘O)."
+#: The rail control is called ``Open`` — no trailing ellipsis. The convention it
+#: used to follow (dots for an item that opens a dialog rather than acting
+#: immediately) cost more than it explained here: a sentence that *began* with
+#: ``Open…`` read as prose trailing off rather than as a name, which is how the
+#: defect was reported. Naming it as a button carries the same information that
+#: the dots were there to carry.
+NO_DATASET_HINT = "The Open button is at the top of the left rail (⌘O)."
 
 #: The same two lines for a matplotlib canvas, which has no second label to put
 #: the hint in.

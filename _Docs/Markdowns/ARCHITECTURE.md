@@ -1083,8 +1083,8 @@ by keeping every segment filled (§7).
 
 Directly beneath it, as the rail's own head, is the **dataset control**:
 `app_shell_view._dataset_button`, full rail width, naming the loaded folder and
-carrying `Open…`. It replaces both the `SECTION` caption (the rail's items are
-self-evidently sections) and the `Open…` button that sat alone at the far end of
+carrying `Open`. It replaces both the `SECTION` caption (the rail's items are
+self-evidently sections) and the `Open` button that sat alone at the far end of
 the topbar — the action and the thing it acts on are now in one place, and the
 loaded dataset finally has a durable on-screen identity rather than living in a
 hidden label and the OS window title. `refresh_dataset_button` is called from
@@ -1121,7 +1121,7 @@ identical across tabs.
 without it there is no button at all, which is what every site but Home wants —
 their hint names a control somewhere else, and that sentence is the only
 instruction they have. Home is the page the application opens on, so its
-placeholder is the first screen and gets an explicit *Open a dataset…*. The
+placeholder is the first screen and gets an explicit *Open a dataset*. The
 hint's job is to say where the way out is; where the way out is the button
 itself, a sentence pointing at another corner of the window is a second answer
 to the question the button already answers, so the button hides it. The hint's
@@ -6428,7 +6428,7 @@ succeeds (§6b).
 ### 9.1 Opening a dataset
 
 ```
-User clicks Open…  or  Ctrl+O  or  --data_dir argv
+User clicks Open  or  Ctrl+O  or  --data_dir argv
         │
         ▼
 WellViewerApp._load_path(path)        ← runtime_app.py

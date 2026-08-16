@@ -660,7 +660,7 @@ def _open_dataset(ctx) -> None:
     """The folder picker, reached from Home's empty state and its next-step row.
 
     The window's own ``_browse`` rather than a second ``QFileDialog`` here: the
-    rail head's Open… menu action already calls it, and it is the only place
+    rail head's Open menu action already calls it, and it is the only place
     that knows what happens after a folder is chosen — the picker is followed by
     a deferred load, not a direct one.
     """

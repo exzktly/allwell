@@ -275,7 +275,7 @@ def test_home_shows_the_load_prompt_rather_than_an_unfilled_page(viewer_app):
     assert stack.currentIndex() == 0, "an unfilled Home is showing instead"
     placeholder = stack._empty_placeholder
     assert placeholder._text.text() == NO_DATASET_TITLE
-    assert placeholder._action.text() == "Open a dataset…"
+    assert placeholder._action.text() == "Open a dataset"
 
 
 def test_the_page_comes_back_once_a_dataset_is_open(loaded_app):

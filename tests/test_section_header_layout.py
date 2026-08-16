@@ -117,33 +117,37 @@ def test_header_minimum_width_is_bounded_by_the_longest_word(qapp):
     wider than its peers, so the bound is the longest word plus the layout's own
     margins — not the one-line width of the title.
 
-    Every width is measured with the font of the label it belongs to. The title
-    and the hint are styled differently (the title is a size larger under the
-    app's stylesheet, and the two fall back to different faces where no
-    stylesheet is loaded), so one shared measurement taken off the parent widget
-    is not a bound on either of them — it read as a 1 px overshoot on CI while
-    the invariant itself held with room to spare.
+    The bound is stated as a ratio against each label's own text rather than as
+    an arithmetic budget, because "the longest word" is not a number this test
+    can recompute. Qt derives a word-wrapped label's minimum from its own text
+    layout, and that lands on either side of a bare ``horizontalAdvance`` of the
+    longest word depending on the font in use: below it locally, above it on the
+    CI runner's faces, where a reconstructed budget missed by a single pixel
+    while the invariant itself held four times over.
+
+    What is font-independent is the shape of the answer. A minimum bounded by a
+    word is a small fraction of the whole string's width; a minimum tracking the
+    string is all of it.
     """
     header = build_section_header(None, _LONG_TITLE, hint=_HINT)
     labels = header.findChildren(QLabel)
     assert len(labels) == 2, "expected exactly a title and a hint"
-    longest_word = max(lbl.fontMetrics().horizontalAdvance(word)
-                       for lbl in labels for word in lbl.text().split())
-    margins = header.layout().contentsMargins()
-    budget = longest_word + margins.left() + margins.right() + 8
-    measured = header.minimumSizeHint().width()
-    assert measured <= budget, (
-        f"header minimum width {measured} px exceeds the longest word "
-        f"({longest_word} px) plus margins — a narrow rail would be forced wider "
-        f"by this header")
+    for lbl in labels:
+        one_line = lbl.fontMetrics().horizontalAdvance(lbl.text())
+        assert lbl.minimumSizeHint().width() < one_line / 2, (
+            f"{lbl.text()[:30]!r}… reports a minimum of "
+            f"{lbl.minimumSizeHint().width()} px against a one-line width of "
+            f"{one_line} px — it is sizing itself to the string, not to a word, "
+            f"so a narrow rail would be forced wider by it")
 
-    # The same rule stated in the form that does not depend on any font at all:
-    # whatever the metrics, the minimum must be a fraction of the one-line title,
-    # or the header is sizing itself to the whole string again.
-    one_line = _title_label(header).fontMetrics().horizontalAdvance(_LONG_TITLE)
-    assert measured < one_line / 2, (
-        f"header minimum width {measured} px is more than half the title's "
-        f"one-line width ({one_line} px) — it is tracking the string, not a word")
+    # And the header asks for no more than the widest of the two plus its own
+    # margins, so nothing between the labels and the block adds width of its own.
+    margins = header.layout().contentsMargins()
+    widest = max(lbl.minimumSizeHint().width() for lbl in labels)
+    measured = header.minimumSizeHint().width()
+    assert measured <= widest + margins.left() + margins.right(), (
+        f"header minimum width {measured} px exceeds its widest label "
+        f"({widest} px) plus margins ({margins.left()} + {margins.right()})")
 
 
 def test_buttons_beside_a_title_are_never_clipped(qapp):

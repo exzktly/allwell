@@ -1221,7 +1221,7 @@ def sel_reorder(ctx, ids) -> None:
 
 
 
-def sel_duplicate(ctx, sid):
+def sel_duplicate(ctx, sid) -> dict | None:
     s = sel_by_id(ctx, sid)
     if s is None:
         return None
@@ -1230,7 +1230,7 @@ def sel_duplicate(ctx, sid):
 
 
 
-def sel_by_id(ctx, sid):
+def sel_by_id(ctx, sid) -> dict | None:
     for s in ctx.state.selection.selections:
         if s.get("id") == sid:
             return s

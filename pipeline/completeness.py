@@ -269,7 +269,7 @@ _ERRORS_DIRNAME = "errors"
 _EXCEPTION_TYPE_PREFIX = "Exception type:"
 
 
-def _member_names(container: Path):
+def _member_names(container: Path) -> set | None:
     """Every member/file basename in a well's input container, or ``None`` if
     it cannot be read.
 

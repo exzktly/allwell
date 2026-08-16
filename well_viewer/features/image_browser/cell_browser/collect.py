@@ -114,7 +114,7 @@ class CellDescriptor:
     spot_count: int | None = None
 
 
-def _sample_df(ctx):
+def _sample_df(ctx) -> pd.DataFrame | None:
     """The first selected (else first loaded) well's frame, for column probing."""
     sel = [lbl for lbl in ctx.state.selection.selected_wells
            if lbl in ctx.state.dataset.well_paths]

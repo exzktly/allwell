@@ -1464,3 +1464,94 @@ def test_figure_pref_key_guard_ignores(shape):
     from tests.test_figure_pref_keys import _registered_figure_names
     found = _registered_figure_names(FIGURE_REGISTRATION_UNSEEN[shape])
     assert not found, f"the guard read a {shape} as a figure registration: {found}"
+
+
+# ── a function that can return None but does not say so ──────────────────────
+
+OPTIONAL_RETURN_VIOLATIONS = {
+    "bare-return": (
+        "def f(xs):\n"
+        "    if not xs:\n"
+        "        return\n"
+        "    return xs[0]\n"
+    ),
+    "explicit-none": (
+        "def f(xs):\n"
+        "    if not xs:\n"
+        "        return None\n"
+        "    return xs[0]\n"
+    ),
+    "none-after-the-value": (
+        "def f(xs):\n"
+        "    for x in xs:\n"
+        "        if x:\n"
+        "            return x\n"
+        "    return None\n"
+    ),
+    "inside-a-method": (
+        "class C:\n"
+        "    def f(self, xs):\n"
+        "        if not xs:\n"
+        "            return None\n"
+        "        return xs[0]\n"
+    ),
+}
+
+OPTIONAL_RETURN_CLEAN = {
+    "declared": (
+        "def f(xs) -> int | None:\n"
+        "    if not xs:\n"
+        "        return None\n"
+        "    return xs[0]\n"
+    ),
+    "declared-with-Optional": (
+        "from typing import Optional\n"
+        "def f(xs) -> Optional[int]:\n"
+        "    if not xs:\n"
+        "        return\n"
+        "    return xs[0]\n"
+    ),
+    "never-returns-none": (
+        "def f(xs):\n"
+        "    if not xs:\n"
+        "        return 0\n"
+        "    return xs[0]\n"
+    ),
+    "only-returns-none": (
+        "def f(xs):\n"
+        "    if not xs:\n"
+        "        return\n"
+        "    return\n"
+    ),
+    # The None belongs to a nested function, not to this one. Counting it would
+    # flag every factory whose inner callable can return None.
+    "the-none-is-a-nested-functions": (
+        "def outer(xs):\n"
+        "    def inner():\n"
+        "        return None\n"
+        "    return inner\n"
+    ),
+    # Falling off the end is the same defect and is deliberately out of scope:
+    # separating a real fall-off from an unreachable one needs flow analysis,
+    # and a guard with false positives gets deleted.
+    "implicit-fall-off-is-not-claimed": (
+        "def f(xs):\n"
+        "    for x in xs:\n"
+        "        if x:\n"
+        "            return x\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(OPTIONAL_RETURN_VIOLATIONS))
+def test_optional_return_guard_catches(shape):
+    from tests.test_optional_returns_declared import offenders_in
+    found = offenders_in(OPTIONAL_RETURN_VIOLATIONS[shape], "probe.py")
+    assert found, f"the {shape} spelling walked past the guard"
+
+
+@pytest.mark.parametrize("shape", sorted(OPTIONAL_RETURN_CLEAN))
+def test_optional_return_guard_clears(shape):
+    from tests.test_optional_returns_declared import offenders_in
+    found = offenders_in(OPTIONAL_RETURN_CLEAN[shape], "probe.py")
+    assert not found, f"the guard fired on a legitimate {shape}: {found}"

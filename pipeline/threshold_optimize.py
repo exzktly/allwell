@@ -17,6 +17,14 @@ Stdlib + numpy only, and listed in
 
 from __future__ import annotations
 
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -243,7 +251,7 @@ def read_channel_values(csv_path, channel: str) -> np.ndarray:
     return np.asarray(out, dtype=float)
 
 
-def find_well_csv(output_dir, csv_prefix: str, well: str):
+def find_well_csv(output_dir, csv_prefix: str, well: str) -> Path | None:
     """The per-well CSV for *well*, or ``None``.
 
     Tries the exact spelling first, then falls back to canonicalising both sides

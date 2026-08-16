@@ -15,6 +15,14 @@ and drive the Image Table tab:
 
 from __future__ import annotations
 
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
+
 import logging
 from typing import Any
 
@@ -404,7 +412,7 @@ def image_table_set_thresh_frac(ctx, value, channel=None) -> None:
 
 
 def _cell_mfi(ctx, label, chan: str, well: str, tp: str, fov: str,
-              img_x: int, img_y: int):
+              img_x: int, img_y: int) -> float | None:
     """MFI of the segmented cell under full-image ``(img_x, img_y)``, or None.
 
     Decodes the tile's mask and builds its ``{base_chan}_mean_intensity`` nid→MFI
@@ -467,7 +475,7 @@ from well_viewer.data.crop_tool import label_source_shape as _label_source_shape
 _HOVER_ARRAY: tuple = ((), None)
 
 
-def _hover_array(ctx, well: str, chan: str, tp: str, fov: str, r: int):
+def _hover_array(ctx, well: str, chan: str, tp: str, fov: str, r: int) -> np.ndarray | None:
     """The full-resolution array behind one cell, fetched on demand.
 
     Normally a decode-cache hit; a miss re-reads that one frame. Returns None if
@@ -533,7 +541,7 @@ def _install_cell_events(
             return
         QToolTip.showText(global_pt, text, _lbl)
 
-    def _label_to_image_xy(_lbl, lx: int, ly: int):
+    def _label_to_image_xy(_lbl, lx: int, ly: int) -> tuple | None:
         """Map label-local coords to source-image (x, y). Returns None when
         cursor is outside the rendered pixmap area.
 

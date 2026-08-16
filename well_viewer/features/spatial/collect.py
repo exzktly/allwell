@@ -11,6 +11,14 @@ per-well DataFrame source.
 
 from __future__ import annotations
 
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pandas as pd
+
 import logging
 from typing import Any
 
@@ -27,7 +35,7 @@ CENTROID_ROW_COL = "shape_centroid_row"
 CENTROID_COL_COL = "shape_centroid_col"
 
 
-def _cached_df(ctx, well_label: str):
+def _cached_df(ctx, well_label: str) -> pd.DataFrame | None:
     """Return the cached per-well DataFrame or ``None`` if the well was never
     loaded. Cache-only lookup — no lazy load — so this stays a pure ``ctx.state``
     reader."""
@@ -112,7 +120,7 @@ def collect_spatial_frame(
     }
 
 
-def _sample_loaded_df(ctx):
+def _sample_loaded_df(ctx) -> pd.DataFrame | None:
     """Return the first non-empty cached DataFrame across all loaded wells
     (used for picker discovery), or ``None`` if nothing is loaded."""
     cache = getattr(ctx.state.dataset, "cache", None) or {}

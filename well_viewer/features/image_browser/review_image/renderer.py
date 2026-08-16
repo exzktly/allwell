@@ -213,7 +213,7 @@ def refresh_review_image(win) -> None:
     refresh_review_image_ctx(win._ctx)
 
 
-def _resolve_review_fov_tp(ctx, widgets, status, _set_combo_values, *, well, channel_switch_debug: bool):
+def _resolve_review_fov_tp(ctx, widgets, status, _set_combo_values, *, well, channel_switch_debug: bool) -> tuple | None:
     """Resolve + validate the active (fov_raw, fov, tp_raw, tp) for the redraw.
 
     Drives the FOV/TP combos, normalises both tokens, and writes the abort

@@ -216,7 +216,7 @@ DEFAULT_EXPORT_STYLE_PREFS = {
 }
 
 
-def _to_float_or_none(value: str):
+def _to_float_or_none(value: str) -> float | None:
     s = str(value).strip()
     if not s:
         return None
@@ -575,7 +575,7 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
     def _axis_font_size(_idx, key, default):
         return int(float(_axis_style(_idx, key, default)))
 
-    def _axis_limit(_idx, key):
+    def _axis_limit(_idx, key) -> float | None:
         # Per-axis limit: a panel's own bucket entry wins so every subplot of a
         # multi-panel figure (e.g. the bar Value/Fraction/Events stack) keeps its
         # own x/y limits set via the "Axis #" picker. Fall back to the flat pref

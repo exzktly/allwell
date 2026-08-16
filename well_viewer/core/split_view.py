@@ -195,7 +195,7 @@ def focus_split(ctx, top: str) -> None:
 
 # ── Focused-pane click watcher ───────────────────────────────────────────────
 
-def _resolve_focused_pane(ctx, obj):
+def _resolve_focused_pane(ctx, obj) -> str | None:
     """Map a clicked widget to the top-level name of the pane that contains it."""
     widgets = ctx.runtime.split.pane_widgets or {}
     if not widgets:
@@ -346,7 +346,7 @@ def on_split_pane_combo_changed(ctx, _idx: int) -> None:
 
 # ── Provider hooks registered on tab_controller (None ⇒ feature absent) ───────
 
-def _focused_leaf(ctx):
+def _focused_leaf(ctx) -> str | None:
     """Provider for ``current_centre_tab``: the focused pane's leaf, or None.
 
     A8: takes ``ctx`` — split flags via ``ctx.runtime.split``, leaf resolution
@@ -356,7 +356,7 @@ def _focused_leaf(ctx):
     return tab_controller._resolve_leaf(ctx, ctx.runtime.split.focused) or None
 
 
-def _visible_leaves(ctx):
+def _visible_leaves(ctx) -> set | None:
     """Provider for ``visible_centre_tabs``: both panes' leaves, or None.
 
     A8: takes ``ctx`` (split flags via ``ctx.runtime.split``)."""

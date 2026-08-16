@@ -167,7 +167,7 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     scroll.setWidget(grid_host)
     from well_viewer.core.ui_helpers import EmptyReason, wrap_with_empty_state
 
-    def _nothing_generated(c):
+    def _nothing_generated(c) -> EmptyReason | None:
         # Not selection-gated — this gallery follows the plotting layer's active
         # wells and its own cell filters, not the plate. What it *is* gated on is
         # having been generated: before that the grid is empty, and the body was
@@ -244,7 +244,7 @@ def cell_browser_refresh(ctx) -> None:
     cell_browser_refresh_lut_rows(ctx)
 
 
-def _cb_num(text):
+def _cb_num(text) -> float | None:
     """Parse a LUT field → float, or None for blank / 'auto' / unparseable."""
     text = (text or "").strip().lower()
     if not text or text == "auto":

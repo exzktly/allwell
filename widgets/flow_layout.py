@@ -15,6 +15,14 @@ No All-Well coupling — a plain reusable widget (belongs in ``widgets/``).
 
 from __future__ import annotations
 
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from PySide6.QtWidgets import QLayoutItem
+
 from PySide6.QtCore import QEvent, QMargins, QObject, QPoint, QRect, QSize, Qt
 import theme
 from PySide6.QtWidgets import (
@@ -185,7 +193,7 @@ class FlowLayout(QLayout):
     def count(self) -> int:
         return len(self._items)
 
-    def itemAt(self, index: int):
+    def itemAt(self, index: int) -> QLayoutItem | None:
         if 0 <= index < len(self._items):
             return self._items[index]
         return None
@@ -209,7 +217,7 @@ class FlowLayout(QLayout):
                 return True
         return False
 
-    def takeAt(self, index: int):
+    def takeAt(self, index: int) -> QLayoutItem | None:
         if 0 <= index < len(self._items):
             item = self._items.pop(index)
             widget = item.widget()

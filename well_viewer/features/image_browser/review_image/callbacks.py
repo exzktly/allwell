@@ -37,7 +37,7 @@ from well_viewer.features.image_browser.review_image.renderer import (
 _logger = logging.getLogger(__name__)
 
 
-def override_key(well: str, fov: object, tp: object, nid: object):
+def override_key(well: str, fov: object, tp: object, nid: object) -> tuple | None:
     """Canonical ``(well, fov, tp, nid)`` override-map key.
 
     The FOV / timepoint / nucleus tokens go through

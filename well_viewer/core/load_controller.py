@@ -2,6 +2,15 @@
 
 from __future__ import annotations
 
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from PySide6.QtWidgets import QProgressDialog
+
 import csv
 import logging
 from pathlib import Path
@@ -24,7 +33,7 @@ from well_viewer.core.safe import swallowed
 # pump the event loop as each file is touched, so the window stays alive and the
 # user sees live progress instead of a frozen UI.
 
-def _make_opening_dialog(ctx, text: str):
+def _make_opening_dialog(ctx, text: str) -> QProgressDialog | None:
     app = ctx.window  # transitional bridge (A3)
     try:
         from PySide6.QtCore import Qt
@@ -77,7 +86,7 @@ def _close_opening_dialog(ctx) -> None:
             swallowed()
 
 
-def _resolve_fov_tp_extractor(extractor, pipeline_info: dict):
+def _resolve_fov_tp_extractor(extractor, pipeline_info: dict) -> Callable | None:
     """Return *extractor* unchanged when read_pipeline_info gave us one;
     otherwise build a separator-aware 5-field fallback from
     ``pipeline_info["separator"]`` (matching the dataset's filename

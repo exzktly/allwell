@@ -988,7 +988,7 @@ class AllWellApp(QMainWindow):
             return
         mv.scrollToAnchor(_gh_slug(target))
 
-    def _current_data_dir(self):
+    def _current_data_dir(self) -> Path | None:
         """Return the directory of the dataset currently loaded in the
         embedded WellViewer, or ``None`` when nothing is loaded.
 
@@ -1008,7 +1008,7 @@ class AllWellApp(QMainWindow):
             cur = getattr(review, "_data_dir", None)
         return cur
 
-    def _current_dataset_root(self):
+    def _current_dataset_root(self) -> Path | None:
         """The path to feed back to ``_load_path`` to reopen the current
         dataset. For an ``in/`` + ``out/`` layout the loaded ``data_dir`` is the
         ``out/`` folder, but ``_load_path`` wants the *root* (the folder holding

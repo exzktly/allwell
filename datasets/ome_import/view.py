@@ -15,6 +15,14 @@ theme tokens — nothing hardcoded (CLAUDE.md §5).
 
 from __future__ import annotations
 
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from datasets.ome_import.ome_import_compute import OmeLayout
+
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -853,7 +861,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._run_btn.setEnabled(can)
         self._queue_btn.setEnabled(can)
 
-    def _inferred_for(self, layout):
+    def _inferred_for(self, layout) -> OmeLayout | None:
         """The stage-coordinate layout for *layout*, computed once per file.
 
         Keyed on the layout object, which ``_read_layout`` already caches per
@@ -1155,7 +1163,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
             return False
         return True
 
-    def _read_layout(self, src: str):
+    def _read_layout(self, src: str) -> OmeLayout | None:
         try:
             key = (src, Path(src).stat().st_mtime)
         except OSError:
@@ -1169,7 +1177,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._layout_cache[key] = layout
         return self._oriented(layout)
 
-    def _oriented(self, layout):
+    def _oriented(self, layout) -> OmeLayout | None:
         """*layout* in the coordinate frame the mirror checkboxes describe.
 
         Applied here, at the page's one read of the file, so the inference, the

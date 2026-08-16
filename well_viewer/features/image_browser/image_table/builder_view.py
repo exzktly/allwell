@@ -1533,7 +1533,7 @@ class _StayOpenMenu(QMenu):
         super().mouseReleaseEvent(e)
 
 
-def _root_filter_menu(ctx, dim: str, anchor: QWidget):
+def _root_filter_menu(ctx, dim: str, anchor: QWidget) -> QMenu | None:
     """Build the checkable timepoint / FOV value-filter menu (all ticked ⇒ show
     every value). Returns None when there are no values. Split from
     :func:`_open_root_filter` so the wiring is drivable without a blocking exec."""

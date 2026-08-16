@@ -9,6 +9,14 @@ unchanged.
 
 from __future__ import annotations
 
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from well_viewer.features.image_browser.image_table.facet_view import FacetPlan
+
 from pathlib import Path  # used by save dialogs
 from typing import Any
 
@@ -215,7 +223,7 @@ def _area_pool_rgb(rgb, max_side: int):
     return _np.clip(_np.rint(out), 0, 255).astype(a.dtype)
 
 
-def _facet_plan_for_export(ctx, cells):
+def _facet_plan_for_export(ctx, cells) -> FacetPlan | None:
     """The facet plan the exported figure mirrors, or ``None`` for a plain grid.
 
     ``None`` when the plan can't be computed, in which case the figure falls back to

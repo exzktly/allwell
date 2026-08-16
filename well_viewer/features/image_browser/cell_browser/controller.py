@@ -110,7 +110,7 @@ def read_sort_keys(ctx) -> list[SortKey]:
     return out
 
 
-def read_timepoints(ctx):
+def read_timepoints(ctx) -> list[float] | None:
     """Checked timepoints (strict include-list). Returns ``None`` when the
     dataset has no timepoint dimension (nothing to filter), else the list of
     checked timepoints — possibly ``[]`` (none checked → no cells)."""
@@ -127,7 +127,7 @@ def read_timepoints(ctx):
     return out
 
 
-def read_fovs(ctx):
+def read_fovs(ctx) -> list | None:
     """Checked FOVs (strict include-list); ``None`` when there's no FOV
     dimension, else the checked list (possibly ``[]`` → no cells)."""
     sel = getattr(ctx.runtime.cell_browser, "fov_selections", {}) or {}
@@ -141,7 +141,7 @@ def read_channels(ctx) -> list[str]:
     return [tok for tok, cb in chips.items() if cb.isChecked()]
 
 
-def _num(text: str):
+def _num(text: str) -> float | None:
     s = str(text).strip()
     if not s:
         return None

@@ -983,7 +983,7 @@ def apply_log_scale(arr, lo, hi):
     floor = float(pos.min()) if pos.size else 1.0
     arr_log = _np.log10(_np.clip(a, floor, None))
 
-    def _b(v):
+    def _b(v) -> float | None:
         if v is None:
             return None
         return float(_np.log10(max(float(v), floor)))
@@ -996,7 +996,7 @@ def make_fluor_thumb(arr, sz_w: int, sz_h: int,
                      crop=None,
                      tint: tuple[float, float, float] | None = None,
                      cmap: str | None = None,
-                     log_scale: bool = False):
+                     log_scale: bool = False) -> QPixmap | None:
     """Render a greyscale float32 array as a QPixmap with LUT [lo, hi].
 
     Rendering selection (in priority order):
@@ -1098,7 +1098,7 @@ def lut_colormap_to_rgb(arr, lo: float | None = None,
 
 def make_overlay_thumb(arr, sz_w: int, sz_h: int,
                        lo: float | None = None, hi: float | None = None,
-                       crop=None):
+                       crop=None) -> QPixmap | None:
     """Render a 2-D or 3-D array as a QPixmap scaled to (sz_w, sz_h).
 
     If ``lo``/``hi`` are given they override the per-image auto range so the

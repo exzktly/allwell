@@ -17,7 +17,7 @@ _logger = logging.getLogger("well_viewer")
 
 
 def _collect_settings(app) -> dict:
-    def _f(v):
+    def _f(v) -> float | None:
         if isinstance(v, (int, float)) and math.isfinite(float(v)):
             return float(v)
         return None

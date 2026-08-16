@@ -494,7 +494,7 @@ class WellViewerApp(QWidget):
 
     def _sel_by_id(self, sid): return sel_by_id(self._ctx, sid)
 
-    def _sel_id_for_well(self, tok):
+    def _sel_id_for_well(self, tok) -> str | None:
         for s in self._app_state.selection.selections:
             if tok in (s.get("wells") or []):
                 return s.get("id")

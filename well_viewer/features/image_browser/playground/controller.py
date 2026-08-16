@@ -132,7 +132,7 @@ def playground_activate(ctx) -> None:
 
 # ── widget → state ───────────────────────────────────────────────────────────
 
-def _read_combo(win, attr: str):
+def _read_combo(win, attr: str) -> str | None:
     cb = getattr(win, attr, None)
     if cb is None:
         return None
@@ -453,7 +453,7 @@ def _status_text(ctx, frame_lbl: str, ff_mode: str, bg_method: str,
 
 # ── main render ──────────────────────────────────────────────────────────────
 
-def _load_loose_frame(ctx, path: str):
+def _load_loose_frame(ctx, path: str) -> np.ndarray | None:
     """Load one image file straight from disk, cached by path.
 
     Uses the pipeline's own ``load_2d_gray``, so the array is what a batch run
@@ -788,7 +788,7 @@ def _qc_size_filtered(mask, min_area: float, max_area: float):
     return out
 
 
-def _cells_above(arr, mask, threshold: float):
+def _cells_above(arr, mask, threshold: float) -> set | None:
     """Label ids whose mean intensity in *arr* exceeds *threshold* (per-cell
     gate over the precomputed mask). None when the mask doesn't match the frame."""
     center = np.asarray(mask, dtype=np.int32)

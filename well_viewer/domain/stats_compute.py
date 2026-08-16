@@ -96,7 +96,7 @@ def _safe_rows(ctx, lbl):
     return repo.rows_or_none(lbl) if repo is not None else None
 
 
-def _point_at(pts, target_t):
+def _point_at(pts, target_t) -> tuple | None:
     """The AggPoint at *target_t* (``(t, mean, spread, frac, n_above, n_total,…)``)
     or None. Shared by every consumer so mean/frac/n come from the one aggregator
     the plots already use (delegate-aware via :func:`aggregate_well`)."""
@@ -253,7 +253,7 @@ def _thresh_on_col(ctx) -> str | None:
     return "Gate_On"
 
 
-def _gate_cache_sig(ctx):
+def _gate_cache_sig(ctx) -> tuple | None:
     """Signature of the scatter-gate state for the stats cache — both layers.
 
     Neither layer is captured by the rest of the key:

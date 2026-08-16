@@ -710,7 +710,7 @@ def _redraw(ctx) -> None:
 
 # ── gate editing (drag the edges / corners of an existing gate) ───────────────
 
-def gate_edge_at(ctx, event, tol_px: float = 8.0):
+def gate_edge_at(ctx, event, tol_px: float = 8.0) -> tuple | None:
     """Hit-test: return ``(gate_idx, handle)`` for the edge/corner under the
     pointer, else ``None``. ``handle`` is one of
     ``l/r/t/b/tl/tr/bl/br``. Works in display (pixel) space so the tolerance is

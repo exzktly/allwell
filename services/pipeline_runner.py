@@ -652,7 +652,7 @@ class PipelineRunner:
         with self._proc_lock:
             self._zipper_proc = proc
 
-    def _spawn_tracked(self, spawn_fn: Callable[[], subprocess.Popen]):
+    def _spawn_tracked(self, spawn_fn: Callable[[], subprocess.Popen]) -> subprocess.Popen | None:
         """Launch the pipeline subprocess and record it in ``_proc`` under the
         lock, but only if a Stop has not already been requested.
 

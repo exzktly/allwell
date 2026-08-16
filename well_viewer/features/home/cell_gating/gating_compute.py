@@ -384,7 +384,7 @@ def _distinct_timepoints(df) -> list[tuple[str, object]]:
     return []
 
 
-def _earliest_timepoint(df):
+def _earliest_timepoint(df) -> tuple | None:
     """The earliest ``(kind, value)`` timepoint token present in *df* (or None)."""
     tps = _distinct_timepoints(df)
     if not tps:

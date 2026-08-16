@@ -8,6 +8,14 @@ click/hover handlers there stay focused on canvas events.
 
 from __future__ import annotations
 
+# Names used only in annotations. Under ``from __future__ import
+# annotations`` these are never evaluated, so importing them for real would
+# add startup cost and, for several of these, an import cycle.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
+
 from typing import Optional
 
 from PySide6.QtCore import Qt
@@ -637,7 +645,7 @@ class ScatterCellViewer(QWidget):
             self._debug(f"_get_cell_bounds exception: {e!r}")
             return None
 
-    def _compute_outline_mask(self, cell_mask):
+    def _compute_outline_mask(self, cell_mask) -> np.ndarray | None:
         import numpy as np
 
         if cell_mask is None:

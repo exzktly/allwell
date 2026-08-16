@@ -24,6 +24,7 @@ from well_viewer.data.data_loading import (
     get_rows,
     resolve_value_series,
 )
+from well_viewer.domain.text_columns import fov_text
 from well_viewer.domain.tp_match import tp_close, tp_close_mask
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates,
@@ -78,11 +79,7 @@ class ReplicateStat:
 
 def _norm_fov(df: pd.DataFrame) -> np.ndarray:
     """Normalized FOV id per row (empty -> "1"), matching the plot aggregator."""
-    if "fov" in df.columns:
-        s = df["fov"].fillna("1").astype(str).str.strip().replace("", "1")
-    else:
-        s = pd.Series(["1"] * len(df), index=df.index)
-    return s.to_numpy()
+    return fov_text(df).to_numpy()
 
 
 def _safe_rows(ctx, lbl):
@@ -544,11 +541,7 @@ def aggregate_group(
         if per_fov_spread and len(sub) > 0:
             # Prefix FOV ids with the well label so identical FOV numbers
             # across replicate wells stay distinct when pooled.
-            if "fov" in sub.columns:
-                fov_str = (sub["fov"].fillna("1").astype(str)
-                           .str.strip().replace("", "1"))
-            else:
-                fov_str = pd.Series(["1"] * len(sub), index=sub.index)
+            fov_str = fov_text(sub)
             sub = sub.assign(fov=(w + "::" + fov_str).to_numpy())
         frames.append(sub)
     df = pd.concat(frames, ignore_index=True)

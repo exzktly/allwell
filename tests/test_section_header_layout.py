@@ -116,16 +116,34 @@ def test_header_minimum_width_is_bounded_by_the_longest_word(qapp):
     A header whose minimum width tracked the whole title would push a narrow rail
     wider than its peers, so the bound is the longest word plus the layout's own
     margins — not the one-line width of the title.
+
+    Every width is measured with the font of the label it belongs to. The title
+    and the hint are styled differently (the title is a size larger under the
+    app's stylesheet, and the two fall back to different faces where no
+    stylesheet is loaded), so one shared measurement taken off the parent widget
+    is not a bound on either of them — it read as a 1 px overshoot on CI while
+    the invariant itself held with room to spare.
     """
     header = build_section_header(None, _LONG_TITLE, hint=_HINT)
-    longest_word = max(
-        header.fontMetrics().horizontalAdvance(w) for w in _LONG_TITLE.split())
+    labels = header.findChildren(QLabel)
+    assert len(labels) == 2, "expected exactly a title and a hint"
+    longest_word = max(lbl.fontMetrics().horizontalAdvance(word)
+                       for lbl in labels for word in lbl.text().split())
     margins = header.layout().contentsMargins()
     budget = longest_word + margins.left() + margins.right() + 8
-    assert header.minimumSizeHint().width() <= budget, (
-        f"header minimum width {header.minimumSizeHint().width()} px exceeds the "
-        f"longest word ({longest_word} px) plus margins — a narrow rail would be "
-        f"forced wider by this title")
+    measured = header.minimumSizeHint().width()
+    assert measured <= budget, (
+        f"header minimum width {measured} px exceeds the longest word "
+        f"({longest_word} px) plus margins — a narrow rail would be forced wider "
+        f"by this header")
+
+    # The same rule stated in the form that does not depend on any font at all:
+    # whatever the metrics, the minimum must be a fraction of the one-line title,
+    # or the header is sizing itself to the whole string again.
+    one_line = _title_label(header).fontMetrics().horizontalAdvance(_LONG_TITLE)
+    assert measured < one_line / 2, (
+        f"header minimum width {measured} px is more than half the title's "
+        f"one-line width ({one_line} px) — it is tracking the string, not a word")
 
 
 def test_buttons_beside_a_title_are_never_clipped(qapp):

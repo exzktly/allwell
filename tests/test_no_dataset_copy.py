@@ -1,14 +1,10 @@
 """The "no dataset is open" sentence is written once, and a button replaces it.
 
-The sentence is said in two media — the ``EmptyState`` placeholder over a tab
-body, and matplotlib text on an empty figure so an exported copy states its own
-shortfall — and had three spellings, already drifting in punctuation. They now
-all read ``well_viewer.core.empty_state_copy``.
-
-Home's placeholder wires an ``Open a dataset`` button, so that page showed both
-a button and a sentence pointing at the far corner of the window. The button
-takes the hint's place, which has to survive the shared refresher rewriting the
-hint on every pass.
+Two rules from ARCHITECTURE.md § "Empty states and build failures": the sentence
+lives in one module (it had three spellings, already drifting in punctuation),
+and a placeholder that carries an action button hides its hint rather than
+showing both — which has to survive the shared refresher rewriting that hint on
+every pass.
 """
 
 from __future__ import annotations

@@ -1131,10 +1131,7 @@ The suppression lives in the widget rather than at the call site because the
 refresher rewrites every placeholder's text, hint and icon on each pass (an
 action set once at build time survives it): a site that blanked its own hint at
 build time would have it painted back the first time a dataset was closed.
-Whether an action exists is read off the button's text rather than its
-`isVisible()`, since a child of a widget that has not been shown yet reports
-itself invisible however it was configured, and placeholders are built long
-before the page they cover is first painted.
+`EmptyState._sync_hint_visibility` carries the one Qt trap involved.
 
 **The wording lives in one module.** `core/empty_state_copy.py` holds
 `NO_DATASET_TITLE`, `NO_DATASET_HINT` and the `NO_DATASET_MESSAGE` that joins

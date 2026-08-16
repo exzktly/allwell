@@ -1,11 +1,9 @@
 """A section title keeps one line for as long as the row can hold one.
 
 Both halves of the rule are pinned here, because fixing either alone
-reintroduces the other. The title is word-wrapped so its *minimum* width is its
-longest word — otherwise a long title forces a narrow rail wider than its peers
-and clips the buttons beside it. But wrapping also drops its *preferred* width
-from the one-line width to the squarish block Qt lays the string into (193 px
-against 347 px here), which is what made a title wrap inside a 1260 px row.
+reintroduces the other: the title takes one line in a wide row, and the header's
+minimum width stays bounded by a word rather than by the whole string. The
+mechanism behind them is ARCHITECTURE.md § "Section headers".
 """
 
 from __future__ import annotations

@@ -350,15 +350,9 @@ _SECTION_HEADER_SPACING = 2
 class SectionTitleLabel(QLabel):
     """A word-wrapped section title that *prefers* one line.
 
-    ``QLabel.sizeHint()`` on a word-wrapped label is not the single-line width:
-    it is the roughly-square text block Qt lays the string into, so a long title
-    sharing a row with a stretchy sibling is handed a narrow column and wraps
-    even when the row is over a thousand pixels wide. Reporting the single-line
-    width as the *preference* restores "one line for as long as it fits".
-
-    ``minimumSizeHint()`` is inherited untouched — still the longest single word
-    — so the row's minimum width is unchanged and a narrow rail neither clips
-    its buttons nor forces the sidebar wider than its peers.
+    Reports the single-line width as its preference while inheriting Qt's
+    longest-word ``minimumSizeHint()``. ARCHITECTURE.md § "Section headers" has
+    the mechanism and why both halves are needed.
 
     Plain text only: the width is measured with font metrics, so rich text would
     be measured including its markup.
@@ -387,14 +381,8 @@ def build_section_header(
 
     ``buttons`` is a sequence of already-constructed QWidgets, laid out on the
     title's own row at its right edge. ``hint`` is an optional muted sentence
-    placed on its own line beneath the title, taking the block's full width.
-
-    The hint sits below rather than beside the title because a title and a
-    sentence competing for one row cannot both be given the width they want: the
-    row hands the non-stretchy item its preferred width and dumps the remainder
-    on the other, so one of the two wraps into a narrow column while the other
-    keeps hundreds of pixels of empty space. Stacking them gives the title one
-    line and the hint the full width to run along.
+    placed on its own line beneath the title, taking the block's full width —
+    see ARCHITECTURE.md § "Section headers" for why it is not beside it.
     """
     hdr = QWidget(parent)
     hdr.setObjectName("Sidebar")

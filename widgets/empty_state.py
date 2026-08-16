@@ -9,13 +9,8 @@ API
 * ``EmptyState(text="", icon="image", parent=None, *, hint="")``
 * ``setText(text)`` / ``setHint(text)`` / ``setIconName(name)``
 * ``setAction(label, on_click)`` / ``clearAction()`` — an optional button that
-  takes the hint's place, for a placeholder on a page where the way out is a
-  single action the page can perform itself. Absent unless asked for, so a site
-  that only describes its emptiness looks exactly as it did. Note that the
-  shared refresher (``well_viewer.core.ui_helpers._apply_reason``) rewrites only
-  the text, hint and icon, so an action set once at build time survives every
-  refresh — and the hint it rewrites stays hidden for as long as the button is
-  showing.
+  takes the hint's place. Absent unless asked for, so a site that only describes
+  its emptiness looks exactly as it did.
 """
 
 from __future__ import annotations
@@ -118,13 +113,9 @@ class EmptyState(QWidget):
 
         For a placeholder whose way out is one action the page can perform
         itself. Most sites have no such action — the hint names a control
-        somewhere else — and those keep no button at all.
-
-        **The button takes the hint's place rather than sitting under it.** The
-        hint exists to say where the way out is; when the way out is the button
-        right here, a sentence pointing at a different corner of the window is
-        not extra help but a second answer to the question the button already
-        answers. The hint's text is kept, so clearing the action brings it back.
+        somewhere else — and those keep no button at all. The hint's text is
+        kept, so ``clearAction`` brings the line back. ARCHITECTURE.md
+        § "Empty states" has why the button replaces it rather than joining it.
         """
         if self._action_slot is not None:
             self._action.clicked.disconnect(self._action_slot)

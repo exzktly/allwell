@@ -136,7 +136,7 @@ _BREADCRUMB_INTERVAL_S = 60.0
 # stuck — and cheap, since the emission is one formatted string that never
 # touches the log.
 _WELL_XFER_INTERVAL_S = 1.0
-from util.zip_write import atomic_zip
+from util.zip_write import atomic_zip, replace_folder_with_archive
 from util.well_token import is_valid_well_name
 def _well_zips_in(input_dir: Path):
     """Every ``<WELL>.zip`` directly under *input_dir*.
@@ -862,31 +862,46 @@ def stage_local_zips(
         p for p in input_dir.iterdir()
         if p.is_dir() and is_valid_well_name(p.name)
     )
-    # Each folder is deleted the moment its own zip is published, rather than
-    # at the end of the run. ``_zip_well_folder`` goes through ``atomic_zip``,
-    # which renames a verified archive into place or leaves nothing at all, so
-    # by the time a folder is removed its contents are already in a complete
-    # archive beside it. Deferring the deletion left the input dir holding both
+    # The TIFs a folder gave up are deleted the moment its own zip is
+    # published, rather than at the end of the run. ``_zip_well_folder`` goes
+    # through ``atomic_zip``, which renames a verified archive into place or
+    # leaves nothing at all, so nothing is dropped until a complete archive
+    # sits beside it. Deferring the deletion left the input dir holding both
     # ``<well>/`` and ``<well>.zip`` for every well for the whole run — two full
     # copies of the plate on the user's volume at peak, on exactly the runs
     # where the input is largest.
     #
-    # A folder with no TIFs in it is left alone (``n == 0``): there is no
-    # archive to replace it with, and it may hold non-image content. A folder
-    # whose well already had a user zip is skipped and likewise left.
+    # What is deleted is the archived TIFs, never the folder as a unit: this
+    # archive holds ``.tif``/``.tiff`` only, and removing the folder took
+    # everything else in it — companion XML, acquisition logs, mask
+    # subdirectories, ``.DS_Store`` — with no copy anywhere. A folder that
+    # still holds something survives carrying just that remainder, and the log
+    # names it rather than reporting the folder gone. A folder with no TIFs is
+    # left whole (there is no archive to replace it with), and one whose well
+    # already had a user zip is skipped and likewise left.
+    preserved: set[Path] = set()
     for folder in folders_after_zipper:
         target = input_dir / f"{folder.name}.zip"
         if target.exists() and target in pre_existing_zips:
             # User-data zip from a prior run; leave it and its folder alone.
             continue
-        n = _zip_well_folder(folder, target)
-        if n <= 0:
+        tifs = _zip_well_folder(folder, target)
+        if not tifs:
             continue
-        shutil.rmtree(folder, ignore_errors=True)
+        outcome = replace_folder_with_archive(folder, tifs)
+        if not outcome.folder_removed:
+            preserved.add(folder)
         if log_fn:
+            n = len(tifs)
+            tail = (
+                "folder removed."
+                if outcome.folder_removed
+                else (f"folder kept, {len(outcome.kept)} file(s) not archived: "
+                      f"{', '.join(outcome.kept)}")
+            )
             log_fn(
                 f"[stage] zipped {folder.name} → {target.name} "
-                f"({n} TIF{'s' if n != 1 else ''}); folder removed.\n"
+                f"({n} TIF{'s' if n != 1 else ''}); {tail}\n"
             )
     # No rollback of the zips written above. It used to unlink them all if a
     # later well failed to zip — which, now that each folder is consumed as it
@@ -900,12 +915,13 @@ def stage_local_zips(
             "WellPlateZipper produced no per-well zips; check filename_schema and separator."
         )
 
-    # The post-success hook needs to delete EVERY well folder the
-    # zip-up step processed (both the snapshotted ones for FOLDER
-    # mode and the freshly-created ones for FLAT mode). Re-scan now
-    # rather than using the pre-zipper snapshot because FLAT-mode
-    # folders didn't exist when we took the snapshot.
-    folders_to_clean = tuple(folders_after_zipper)
+    # The post-success hook needs to delete every well folder the zip-up step
+    # consumed (both the snapshotted ones for FOLDER mode and the freshly
+    # created ones for FLAT mode). Re-scan now rather than using the pre-zipper
+    # snapshot because FLAT-mode folders didn't exist when we took the
+    # snapshot — but skip the folders the pass deliberately preserved, or this
+    # hook would destroy the very remainder that pass kept.
+    folders_to_clean = tuple(p for p in folders_after_zipper if p not in preserved)
 
     def _on_success() -> None:
         """Delete the source artifacts this stage consumed so the
@@ -915,10 +931,10 @@ def stage_local_zips(
           in copy mode they're the originals we need to remove; in
           move mode they're already gone and the unlink is a no-op
           caught by the OSError handler);
-        * every well folder we zipped up (whether it pre-existed
-          for FOLDER mode or the zipper just created it for FLAT
-          mode — in either case we just successfully extracted the
-          ``{well}.zip`` from it and the folder is redundant).
+        * every well folder we zipped up whose contents the archive fully
+          covers (whether it pre-existed for FOLDER mode or the zipper just
+          created it for FLAT mode). A folder holding files the archive does
+          not carry is not in this list at all.
         """
         for tif in source_loose_tifs:
             try:
@@ -1140,14 +1156,19 @@ def _required_tokens(
     return keep
 
 
-def _zip_well_folder(folder: Path, out_zip: Path) -> int:
+def _zip_well_folder(folder: Path, out_zip: Path) -> list[Path]:
     """Atomically zip the TIFs in ``folder`` to ``out_zip``.
 
     Goes through :func:`util.zip_write.atomic_zip`, so it uses the same
     ``__aw_tmp_*.pidNNN`` staging name as
     ``process_microscopy.compress_folder_images_to_zip_and_remove`` and
-    publishes only a verified archive. Returns the number of TIFs zipped
-    (0 → folder had no images, caller should skip).
+    publishes only a verified archive.
+
+    Returns the TIFs that went into the archive — the paths, not a count, so
+    the caller can hand them to
+    :func:`util.zip_write.replace_folder_with_archive` and delete exactly what
+    is now in the zip. An empty list means the folder held no images and there
+    is nothing for the caller to do.
 
     Every TIF is read off the user's input volume, so the write carries the
     shared retry shield: on a network mount a dropped session mid-plate would
@@ -1158,7 +1179,7 @@ def _zip_well_folder(folder: Path, out_zip: Path) -> int:
         if p.suffix.lower() in (".tif", ".tiff")
     )
     if not tifs:
-        return 0
+        return []
 
     def _pack() -> None:
         with atomic_zip(out_zip) as zf:
@@ -1166,7 +1187,7 @@ def _zip_well_folder(folder: Path, out_zip: Path) -> int:
                 zf.write(t, arcname=t.name)
 
     retry_io(_pack, what=out_zip.name, advice=_TRANSFER_ADVICE, path=out_zip)
-    return len(tifs)
+    return tifs
 
 
 def _stage_mixed_mode(
@@ -1248,28 +1269,38 @@ def _stage_mixed_mode(
     for label in sorted(folder_wells):
         folder = folder_wells[label]
         target = input_dir / f"{label}.zip"
-        n = _zip_well_folder(folder, target)
+        tifs = _zip_well_folder(folder, target)
         new_zip_paths.append(target)
-        # Removed as soon as its own archive is published, not at the end of
-        # the run — same reasoning as the FOLDER/FLAT zip-up above. A folder
-        # that yielded no TIFs keeps whatever it does hold.
-        if n > 0:
-            shutil.rmtree(folder, ignore_errors=True)
-            consumed.append(folder)
+        # The archived TIFs go as soon as the archive is published, not at the
+        # end of the run — same reasoning as the FOLDER/FLAT zip-up above. The
+        # folder itself only goes when the archive covers everything in it: a
+        # folder that yielded no TIFs, and one still holding non-image content,
+        # both keep what they hold.
+        n = len(tifs)
+        tail = ""
+        if tifs:
+            outcome = replace_folder_with_archive(folder, tifs)
+            if outcome.folder_removed:
+                consumed.append(folder)
+                tail = "; folder removed"
+            else:
+                tail = (f"; folder kept, {len(outcome.kept)} file(s) not "
+                        f"archived: {', '.join(outcome.kept)}")
         if log_fn:
             log_fn(
                 f"[stage] zipped {folder.name} → {target.name} "
                 f"({n} TIF{'s' if n != 1 else ''}) — persisted to "
-                f"input dir{'; folder removed' if n > 0 else ''}.\n"
+                f"input dir{tail}.\n"
             )
 
     all_zips = tuple(sorted(existing_zip_paths + new_zip_paths))
 
-    # The folders are already gone — each was removed as its archive landed —
-    # so the input dir is plain ZIP mode from here on rather than MIXED. This
-    # hook stays as the backstop for anything the loop above declined to
-    # consume (a folder that yielded no TIFs keeps its contents, so it is
-    # deliberately not in ``consumed`` and not removed here either).
+    # The consumed folders are already gone — each was removed as its archive
+    # landed — so the input dir is plain ZIP mode from here on rather than
+    # MIXED. This hook stays as the backstop for anything the loop above
+    # declined to consume. A folder that yielded no TIFs, and one still holding
+    # files the archive does not carry, are both deliberately absent from
+    # ``consumed`` and so are not removed here either.
     consumed_folders = tuple(consumed)
 
     def _on_success() -> None:

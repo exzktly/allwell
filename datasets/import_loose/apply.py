@@ -36,14 +36,13 @@ off one signal regardless of which mode is running.
 
 from __future__ import annotations
 
-import shutil
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from util.well_token import canonical_well_label
-from util.zip_write import atomic_zip
+from util.zip_write import atomic_zip, replace_folder_with_archive
 from datasets._common.concurrency import pick_workers
 from datasets._common.containers import WellFraction
 from datasets._common.dataset_paths import DatasetPaths, destination_has_content
@@ -245,9 +244,19 @@ def _zip_well_folders(
                 zf.write(t, arcname=t.name)
                 on_file(done, len(tifs))
         fraction.finish()
-        shutil.rmtree(p, ignore_errors=True)
+        # Only the TIFs the archive holds are dropped. This runs against the
+        # user's own dataset folder, and the archive takes ``.tif``/``.tiff``
+        # only — removing the folder as a unit took every companion file,
+        # acquisition log and mask subdirectory with it.
+        outcome = replace_folder_with_archive(p, tifs)
         zipped += 1
-        emit(f"  {well}: folder → {well}.zip ({len(tifs)} file(s))\n")
+        tail = (
+            ""
+            if outcome.folder_removed
+            else (f" — folder kept, {len(outcome.kept)} file(s) not archived: "
+                  f"{', '.join(outcome.kept)}")
+        )
+        emit(f"  {well}: folder → {well}.zip ({len(tifs)} file(s)){tail}\n")
         report(well, "done")
     return zipped
 

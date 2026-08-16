@@ -27,12 +27,22 @@ well archives, so the helper has to live where the pipeline can import it.
 from __future__ import annotations
 
 import os
+import shutil
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["ZipWriteError", "atomic_zip", "fsync_path", "staging_path", "zip_members"]
+__all__ = [
+    "FolderReplacement",
+    "ZipWriteError",
+    "atomic_zip",
+    "fsync_path",
+    "replace_folder_with_archive",
+    "staging_path",
+    "zip_members",
+]
 
 # Staging files are named so a later inspection can tell them apart from a
 # user's own file: the prefix is what the pipeline's image scanners skip, and
@@ -86,6 +96,97 @@ def zip_members(path: Path | str) -> list[str]:
     """
     with zipfile.ZipFile(path, "r") as zf:
         return zf.namelist()
+
+
+@dataclass(frozen=True)
+class FolderReplacement:
+    """What :func:`replace_folder_with_archive` did to one well folder.
+
+    ``kept`` names the files left behind, relative to the folder and sorted, so
+    a caller can say in its log line what did *not* go into the archive.
+    ``folder_removed`` is ``True`` only when nothing was left to keep.
+    """
+
+    kept: tuple[str, ...]
+    folder_removed: bool
+
+
+def replace_folder_with_archive(
+    folder: Path | str,
+    archived: Iterable[Path | str],
+    *,
+    remove_dir: Callable[[Path], None] | None = None,
+) -> FolderReplacement:
+    """Delete the files that went into an archive, and only those.
+
+    Every path in All-Well that turns a ``<well>/`` folder into ``<well>.zip``
+    packs an **extension-filtered** subset of the folder and then has to decide
+    what to do with the folder itself. Removing the whole thing destroys
+    everything the filter skipped — OME companion XML, acquisition logs, mask
+    subdirectories, and on macOS the ``.DS_Store`` in every folder a user has
+    opened in Finder — with no copy anywhere, because the archive beside it
+    holds only the images.
+
+    So the folder is not the unit of deletion; the archived files are. This
+    removes exactly the files named in *archived*, then removes *folder* only
+    when no file is left in it. A folder that still holds something survives
+    carrying just that remainder, and the caller reports it
+    (:attr:`FolderReplacement.kept`) instead of announcing the folder gone.
+
+    The extension filter deliberately stays with the caller. The four zipping
+    paths do not agree on it and are not meant to — see ``util/image_exts.py``
+    on why the folder zipper's ``.tif``/``.tiff`` is a different question from
+    what the pipeline will group as input — so this takes the files that were
+    actually written rather than re-deriving them from a rule of its own.
+
+    *remove_dir* replaces the directory removal for callers that already own a
+    hardened one (the pipeline's ``remove_directory`` retries a Windows
+    AV-scanner lock). The default mirrors what these call sites did before:
+    ``shutil.rmtree(..., ignore_errors=True)``, so a folder held open by
+    another process leaves the folder rather than failing the run — the files
+    are gone from it either way, and the archive beside it is complete.
+
+    Paths in *archived* that are not inside *folder* are ignored: this deletes
+    a caller's own inputs, so a mistaken path must not reach outside the folder
+    it was handed.
+    """
+    folder = Path(folder)
+    root = folder.resolve()
+
+    archived_resolved: set[Path] = set()
+    for p in archived:
+        rp = Path(p).resolve()
+        if rp != root and root in rp.parents:
+            archived_resolved.add(rp)
+
+    kept: list[str] = []
+    for p in sorted(folder.rglob("*")):
+        if not p.is_file():
+            continue
+        if p.resolve() in archived_resolved:
+            continue
+        kept.append(p.relative_to(folder).as_posix())
+
+    if kept:
+        # Leave the folder standing, holding the remainder. Drop only what the
+        # archive now carries, so the bytes exist in exactly one place.
+        for p in sorted(archived_resolved):
+            try:
+                p.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                # The archive already holds this file, so a locked original is
+                # a disk-space problem rather than a data one; the next run
+                # finds it and re-packs an identical member.
+                pass
+        return FolderReplacement(kept=tuple(kept), folder_removed=False)
+
+    if remove_dir is not None:
+        remove_dir(folder)
+    else:
+        shutil.rmtree(folder, ignore_errors=True)
+    return FolderReplacement(kept=(), folder_removed=True)
 
 
 @contextmanager

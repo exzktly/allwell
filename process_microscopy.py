@@ -84,7 +84,7 @@ from util.schema import (  # noqa: F401  (re-exported for call sites and tests)
     parse_schema,
     validate_schema,
 )
-from util.zip_write import atomic_zip, staging_path
+from util.zip_write import atomic_zip, replace_folder_with_archive, staging_path
 
 # StarDist and csbdeep (which import TensorFlow) are intentionally NOT imported
 # here at module level.  They are imported inside _worker_init, after the
@@ -574,6 +574,18 @@ def compress_images_to_zip(image_dir: Path, out_zip: Path) -> int:
     zero-byte file is logged + dropped so a partial / never-flushed write
     can't be packaged into a corrupt archive.
     """
+    return len(_compress_images_to_zip(image_dir, out_zip))
+
+
+def _compress_images_to_zip(image_dir: Path, out_zip: Path) -> list[Path]:
+    """The body of :func:`compress_images_to_zip`, returning the files packed.
+
+    A caller that then removes *image_dir* needs to know *which* files the
+    archive took, not how many: the extension filter, the ``.tmp`` skip and
+    :func:`_verify_files_complete` between them can all leave a file behind,
+    and deleting the directory takes those with it. The public function keeps
+    its count return for the call sites that only report a number.
+    """
     include_exts = {".tif", ".tiff", ".png"}
     candidate_files = sorted(
         p for p in image_dir.iterdir()
@@ -590,7 +602,7 @@ def compress_images_to_zip(image_dir: Path, out_zip: Path) -> int:
 
     if not image_files:
         log.warning("No image files found in %s to compress.", image_dir)
-        return 0
+        return []
 
     out_zip.parent.mkdir(parents=True, exist_ok=True)
     # Build the zip via the same atomic-rename pattern the imwrite helper
@@ -625,21 +637,35 @@ def compress_images_to_zip(image_dir: Path, out_zip: Path) -> int:
     log.info(
         "Compressed %d image(s)  ->  %s", len(image_files), out_zip.name
     )
-    return len(image_files)
+    return image_files
 
 
 def compress_folder_images_to_zip_and_remove(folder: Path, out_zip: Path) -> int:
     """
-    Compress image files in *folder* to *out_zip* and remove *folder*.
+    Compress image files in *folder* to *out_zip*, then delete the files the
+    archive took.
 
     Returns the number of image files added to the archive. If no image files
     are found, the source folder is left untouched.
+
+    *folder* itself is removed only when the archive covers everything in it.
+    The archive holds TIF/TIFF/PNG, so a folder carrying a companion XML, an
+    acquisition log or a mask subdirectory keeps those and survives — removing
+    it as a unit destroyed them with no copy anywhere. The same rule holds for
+    the files :func:`_verify_files_complete` drops: a zero-byte image is
+    reported and excluded, and it must not then be deleted along with the
+    directory it sits in.
     """
-    n = compress_images_to_zip(folder, out_zip)
-    if n <= 0:
+    packed = _compress_images_to_zip(folder, out_zip)
+    if not packed:
         return 0
-    remove_directory(folder)
-    return n
+    outcome = replace_folder_with_archive(folder, packed, remove_dir=remove_directory)
+    if not outcome.folder_removed:
+        log.info(
+            "Kept %s: %d file(s) the archive does not carry (%s)",
+            folder.name, len(outcome.kept), ", ".join(outcome.kept),
+        )
+    return len(packed)
 
 
 # ---------------------------------------------------------------------------

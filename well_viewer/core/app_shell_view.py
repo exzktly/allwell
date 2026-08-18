@@ -237,6 +237,10 @@ def build_page_tabs_host(win, parent):
     host.addWidget(QWidget(host))          # index 0 — the blank page
     win._page_tabs_host = host
     win._page_tabs_by_name = {}
+    # The bar itself, keyed the same way. The band holds it inside a page
+    # wrapper; Split View borrows it out of that wrapper to mount above the pane
+    # it belongs to, and hands it back on exit (``lend_page_tab_bar``).
+    win._page_tabs_bar_by_name = {}
     return host
 
 
@@ -263,6 +267,7 @@ def register_page_tabs(win, name: str, bar) -> None:
     page_layout.addWidget(bar, 0)
     host.addWidget(page)
     win._page_tabs_by_name[name] = page
+    win._page_tabs_bar_by_name[name] = bar
     # Pages build lazily, so a bar can register *after* its page is already
     # current — show it now rather than waiting for the next page change.
     nb = getattr(win, "_notebook", None)
@@ -278,11 +283,12 @@ def show_page_tabs(win, name: str) -> None:
     Review was on, the row offered Bar Plots / Line Graphs / Heat Map beside the
     Analyze form, naming views that mode cannot show.
 
-    Split View shows two top-level pages at once and detaches both from the
-    notebook, so ``currentName()`` names neither. The band can only carry one
-    strip, so it carries the **focused** pane's — the same pane the sidebar and
-    the tab dispatch already follow. Without this the band would fall through to
-    its blank page and both panes' sub-tabs would be unreachable while split.
+    Split View shows two top-level pages at once, and each of them keeps its own
+    strip: the bars are borrowed out of this band and mounted above the pane they
+    belong to (``lend_page_tab_bar``). The band therefore goes blank while split
+    — it has one slot and there are two pages on screen, and a single shared
+    strip could only ever name one of them. It kept its height, so the panes'
+    own headers line up with where the band's strip sits in single-page view.
     """
     host = getattr(win, "_page_tabs_host", None)
     if host is None:
@@ -293,9 +299,49 @@ def show_page_tabs(win, name: str) -> None:
     split = getattr(getattr(win, "_ctx", None), "runtime", None)
     split = getattr(split, "split", None)
     if split is not None and getattr(split, "active", False):
-        name = getattr(split, "focused", None) or name
+        host.setCurrentWidget(host.widget(0))
+        return
     bar = (getattr(win, "_page_tabs_by_name", None) or {}).get(name)
     host.setCurrentWidget(bar if bar is not None else host.widget(0))
+
+
+def lend_page_tab_bar(win, name: str):
+    """Take *name*'s tab bar out of the band and hand it to the caller.
+
+    Split View mounts each pane's own strip above that pane, so the two pages on
+    screen both keep their sub-tabs reachable. The bar is a single widget shared
+    with the band rather than a copy — a mirrored ``QTabBar`` is wired to the
+    ``QTabWidget`` it drives, and the Plotting/Batch Export segmented bars carry
+    their own signal connections — so it is moved, not duplicated, and
+    :func:`return_page_tab_bar` puts it back.
+
+    Returns the bar, or ``None`` when the page has no sub-tabs (six of the ten
+    top-level pages do not) or has not built its body yet.
+    """
+    bar = (getattr(win, "_page_tabs_bar_by_name", None) or {}).get(name)
+    if bar is None:
+        return None
+    page = (getattr(win, "_page_tabs_by_name", None) or {}).get(name)
+    if page is not None and page.layout() is not None:
+        page.layout().removeWidget(bar)
+    bar.setParent(None)
+    return bar
+
+
+def return_page_tab_bar(win, name: str) -> None:
+    """Put *name*'s borrowed tab bar back into its band page, bottom-aligned.
+
+    The band page keeps its stretch-then-bar layout across the loan, so the bar
+    goes back below the stretch and its selected-tab underline lands on the
+    band's bottom edge again — the alignment ``register_page_tabs`` describes.
+    """
+    bar = (getattr(win, "_page_tabs_bar_by_name", None) or {}).get(name)
+    page = (getattr(win, "_page_tabs_by_name", None) or {}).get(name)
+    if bar is None or page is None or page.layout() is None:
+        return
+    bar.setParent(page)
+    page.layout().addWidget(bar, 0)
+    bar.show()
 
 
 def mirror_tab_widget(win, name: str, tab_widget):

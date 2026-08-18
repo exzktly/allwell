@@ -1027,6 +1027,12 @@ un-nested page's body starts.
 The band is pinned to `tab_bar_height()` and carries no vertical padding of its
 own, and holds nothing but the mode bar and the current page's tabs.
 
+**Split View borrows the bars.** With two pages side by side there is one band
+and two strips to draw, so each pane mounts its own page's bar in a header of
+its own and the band shows its blank page — `lend_page_tab_bar` /
+`return_page_tab_bar` move the bar out and back, and `show_page_tabs` returns
+the blank page while a split is active. See §5.10.
+
 The **collapse toggle** is not in the band. It floats on the left panel's own
 right margin, straddling the boundary with the centre pane
 (`_build_rail_toggle`, `position_rail_toggle`). It is parented to the **window**
@@ -2535,6 +2541,23 @@ test_not_installed_is_single_tab`.)
   `app._split_pane` (a hidden `QSplitter` sibling of `_notebook`, created by
   `install_split_view`) and hides the notebook. `exit_split` reverses it,
   restoring the original tab order via `reattachPage`.
+- **Each pane carries its own sub-tab strip.** The page tab bars live in the
+  shared band above the centre (§6a), which has one slot — and two pages are on
+  screen. So `_wrap_pane` borrows each page's bar out of the band
+  (`app_shell_view.lend_page_tab_bar`) and mounts it in a header directly above
+  the pane it drives, and `_unwrap_pane` hands it back on exit
+  (`return_page_tab_bar`). The band shows its blank page for the duration.
+  A single shared strip could only ever name one of the two pages: the other
+  page's sub-tabs were drawn nowhere, and were unreachable whenever its pane
+  could not take focus (Home is cards and labels, none of them focusable), and
+  splitting *from* a page with no sub-tabs of its own left both panes without a
+  strip. The header keeps the band's `tab_bar_height()` whether or not the page
+  has a bar, closed off by the standard hairline, so the two panes' content
+  starts at the same y as it does in single-page view. The bar is *moved*, not
+  copied — a mirrored `QTabBar` is wired to the `QTabWidget` it drives — so the
+  panes hold containers (`ctx.runtime.split.pane_widgets`) wrapping the page
+  bodies (`ctx.runtime.split.pane_bodies`), and it is the bodies that go back
+  into the notebook on exit. Guard: `tests/test_split_view_pane_tabs.py`.
 - **Provider hooks (the decoupling seam).** `tab_controller` exposes three
   module globals — `split_focus_provider`, `split_visible_provider`,
   `split_nav_intercept` — all `None` until `install_split_view` registers them.
@@ -2551,7 +2574,9 @@ test_not_installed_is_single_tab`.)
   recompute that fed them — on every well click; an off-screen plot is re-rendered
   from current state by its `on_activate` hook the moment the user switches to it.
 - **Focus + lifecycle.** A `_SplitFocusFilter` (installed on the QApplication on
-  enter, removed on exit) makes a click in either pane the focused one. It
+  enter, removed on exit) makes a click in either pane the focused one. Focus
+  drives the sidebar and the per-tab dispatch only — each pane draws its own
+  sub-tabs, so neither page's strip depends on which pane is focused. It
   **defers** the actual focus switch with `QTimer.singleShot(0, …)`: `focus_split`
   reparents the panes and re-runs the visible-tab refresh, so doing it inside
   `MouseButtonPress` delivery (e.g. a click that lands while Image Table

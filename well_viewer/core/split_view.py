@@ -16,9 +16,12 @@ live-refresh chokepoints fan out to one tab, and none of the reparenting / focus
 / entry-UI code below is ever reached.
 
 Mechanics: the centre notebook is hidden and its two chosen top-level pages are
-reparented into ``ctx.runtime.split.pane`` (a horizontal ``QSplitter``). The focused
-pane drives the sidebar (via the ``split_focus_provider`` hook); both panes are
-reported visible (via ``split_visible_provider``) so the chokepoints refresh each.
+reparented into ``ctx.runtime.split.pane`` (a horizontal ``QSplitter``), each under
+a header carrying that page's own sub-tab strip, borrowed out of the shared band
+above (which goes blank while split — it has one slot and two pages are showing).
+The focused pane drives the sidebar (via the ``split_focus_provider`` hook); both
+panes are reported visible (via ``split_visible_provider``) so the chokepoints
+refresh each.
 Two instances of the *same* tab are out of scope — feature figures/state are
 singletons.
 """
@@ -29,7 +32,7 @@ import logging
 
 from PySide6.QtCore import QObject, Qt, QTimer
 from PySide6.QtWidgets import (
-    QAbstractButton, QApplication, QComboBox, QSplitter, QWidget,
+    QAbstractButton, QApplication, QComboBox, QSplitter, QVBoxLayout, QWidget,
 )
 from well_viewer.core.safe import swallowed
 
@@ -54,6 +57,73 @@ ENABLED = True
 #: content minimum for the splitter, so a pane can be dragged small (its content
 #: just narrows/clips). Restored to 0 on exit so single-tab view is unaffected.
 _SPLIT_PANE_MIN_W = 160
+
+
+# ── Per-pane chrome (each pane keeps its own sub-tab strip) ──────────────────
+
+def _wrap_pane(ctx, top: str, body: QWidget) -> QWidget:
+    """Put *body* under a header carrying *top*'s own sub-tab strip.
+
+    Single-page view draws one strip in the shared band above the centre. Split
+    View shows two pages, and the band has one slot — so pointing it at one pane
+    left the other page's sub-tabs drawn nowhere at all, and unreachable: a pane
+    whose content is not focusable (Home is cards and labels) never becomes the
+    focused one by clicking, so the band never swung round to it. Splitting from
+    a page that has no sub-tabs of its own drew no strip for either pane.
+
+    So each pane borrows its page's strip out of the band and mounts it here,
+    directly above the content it drives. The header keeps the band's height
+    whether or not the page has a strip, so both panes' content starts at the
+    same y, and a hairline closes it off the way the band's does.
+    """
+    from well_viewer.core.app_shell_view import lend_page_tab_bar
+    from well_viewer.core.ui_helpers import build_hline_separator
+    from widgets.mode_bar import tab_bar_height
+
+    container = QWidget()
+    layout = QVBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(0)
+
+    header = QWidget(container)
+    header.setFixedHeight(tab_bar_height())
+    header_layout = QVBoxLayout(header)
+    header_layout.setContentsMargins(0, 0, 0, 0)
+    header_layout.setSpacing(0)
+    # Bottom-aligned, as in the band: a QTabBar lays its tabs from the top of
+    # whatever height it is given, so stretched to the header it would draw its
+    # selected-tab underline part-way up instead of on the header's bottom edge.
+    header_layout.addStretch(1)
+    bar = lend_page_tab_bar(ctx.window, top)
+    if bar is not None:
+        bar.setParent(header)
+        header_layout.addWidget(bar, 0)
+        bar.show()
+    layout.addWidget(header)
+    layout.addWidget(build_hline_separator(container))
+
+    body.setParent(container)
+    layout.addWidget(body, 1)
+    body.show()
+    return container
+
+
+def _unwrap_pane(ctx, top: str, container, body) -> None:
+    """Undo :func:`_wrap_pane`: free the body, hand the strip back to the band.
+
+    Order matters — the body and the borrowed bar are both reparented out before
+    the container is deleted, or Qt would take them down with it. The split-time
+    min-width cap is on the container, which goes away with it, so the page's own
+    content minimum is what sizes it again on reattach.
+    """
+    if body is not None:
+        body.setParent(None)
+    if top:
+        from well_viewer.core.app_shell_view import return_page_tab_bar
+        return_page_tab_bar(ctx.window, top)
+    if container is not None:
+        container.setParent(None)
+        container.deleteLater()
 
 
 # ── Reparenting (enter / exit / focus) ───────────────────────────────────────
@@ -107,19 +177,23 @@ def enter_split(ctx, tab_a: str, tab_b: str) -> None:
         ctx.runtime.split.active = False
         ctx.runtime.split.tab_a = ctx.runtime.split.tab_b = ctx.runtime.split.focused = None
         return
-    ctx.runtime.split.pane_widgets = {tab_a: wa, tab_b: wb}
-    # Both panes are detached from the notebook now, so the band's usual source
-    # (``currentName()``) names neither — point it at the focused pane.
+    ctx.runtime.split.pane_bodies = {tab_a: wa, tab_b: wb}
+    # Each pane carries its own sub-tab strip, borrowed out of the shared band
+    # above (which goes blank for the duration — see ``show_page_tabs``).
+    ca = _wrap_pane(ctx, tab_a, wa)
+    cb = _wrap_pane(ctx, tab_b, wb)
+    ctx.runtime.split.pane_widgets = {tab_a: ca, tab_b: cb}
+    # Blanks the shared band: its two strips are in the panes now.
     from well_viewer.core.app_shell_view import show_page_tabs
     show_page_tabs(ctx.window, tab_a)
-    split.addWidget(wa)
-    split.addWidget(wb)
+    split.addWidget(ca)
+    split.addWidget(cb)
     # Cap each pane's minimum width so the divider has slack to move — otherwise
     # the panes' large content minimums fill the centre and the handle sticks.
-    wa.setMinimumWidth(_SPLIT_PANE_MIN_W)
-    wb.setMinimumWidth(_SPLIT_PANE_MIN_W)
-    wa.show()
-    wb.show()
+    ca.setMinimumWidth(_SPLIT_PANE_MIN_W)
+    cb.setMinimumWidth(_SPLIT_PANE_MIN_W)
+    ca.show()
+    cb.show()
     split.setVisible(True)
     # Equal LARGE targets force a ~50/50 split regardless of each pane's
     # minimumSizeHint. The old ``setSizes([1, 1])`` — set while the splitter was
@@ -144,18 +218,16 @@ def exit_split(ctx) -> None:
     split = ctx.runtime.split.pane
     a = ctx.runtime.split.tab_a
     b = ctx.runtime.split.tab_b
-    widgets = ctx.runtime.split.pane_widgets or {}
-    wa = widgets.get(a)
-    wb = widgets.get(b)
-    for w in (wa, wb):
-        if w is not None:
-            # Undo the split-time min-width cap so the reattached single-tab page
-            # sizes from its own content again.
-            w.setMinimumWidth(0)
-            w.setParent(None)
+    containers = ctx.runtime.split.pane_widgets or {}
+    bodies = ctx.runtime.split.pane_bodies or {}
+    wa = bodies.get(a)
+    wb = bodies.get(b)
+    for top, body in ((a, wa), (b, wb)):
+        _unwrap_pane(ctx, top, containers.get(top), body)
     ctx.runtime.split.active = False
     ctx.runtime.split.tab_a = ctx.runtime.split.tab_b = ctx.runtime.split.focused = None
     ctx.runtime.split.pane_widgets = {}
+    ctx.runtime.split.pane_bodies = {}
     _remove_split_focus_filter(ctx)
     if split is not None:
         split.setVisible(False)
@@ -179,17 +251,17 @@ def exit_split(ctx) -> None:
 
 
 def focus_split(ctx, top: str) -> None:
-    """Make pane *top* the focused one (drives the sidebar). No-op off split."""
+    """Make pane *top* the focused one (drives the sidebar). No-op off split.
+
+    Only the sidebar and the tab dispatch follow focus. Each pane draws its own
+    sub-tab strip in its own header, so neither pane's sub-tabs depend on which
+    one is focused.
+    """
     if not ctx.runtime.split.active or not top:
         return
     if ctx.runtime.split.focused == top:
         return
     ctx.runtime.split.focused = top
-    # The shell band carries one tab strip; point it at the pane that now has
-    # focus, so the split pane you are working in is the one whose sub-tabs the
-    # band offers.
-    from well_viewer.core.app_shell_view import show_page_tabs
-    show_page_tabs(ctx.window, top)
     on_tab_change(ctx, None)
 
 
@@ -433,6 +505,7 @@ def install_split_view(ctx) -> None:
     ctx.runtime.split.active = False
     ctx.runtime.split.tab_a = ctx.runtime.split.tab_b = ctx.runtime.split.focused = None
     ctx.runtime.split.pane_widgets = {}
+    ctx.runtime.split.pane_bodies = {}
 
     # 2. Entry UI — toggle button + right-pane dropdown in the top bar.
     top = getattr(app, "_top_bar", None)

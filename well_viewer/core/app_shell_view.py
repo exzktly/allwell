@@ -305,7 +305,7 @@ def show_page_tabs(win, name: str) -> None:
     host.setCurrentWidget(bar if bar is not None else host.widget(0))
 
 
-def lend_page_tab_bar(win, name: str):
+def lend_page_tab_bar(win, name: str) -> QWidget | None:
     """Take *name*'s tab bar out of the band and hand it to the caller.
 
     Split View mounts each pane's own strip above that pane, so the two pages on

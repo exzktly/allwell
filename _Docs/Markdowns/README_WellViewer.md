@@ -1351,8 +1351,12 @@ the next.
 - **Split View** — the **Split** toggle in the top bar puts two *different*
   centre tabs side-by-side, both live (e.g. Scatter Plot beside Cell Browser).
   Click into a pane to focus it — the focused pane drives the sidebar and the
-  well picker, and both panes refresh on a selection or channel change. It
-  needs a second tab to show something; a tab can't be split against itself.
+  well picker, and both panes refresh on a selection or channel change. Each
+  pane keeps its own row of page tabs at its top, so a page's sub-tabs stay
+  where its content is and either side can be switched without focusing it
+  first; the shared row across the top of the window is empty while you are
+  split. It needs a second tab to show something; a tab can't be split against
+  itself.
   A Review-only control — it's hidden while Analyze or Datasets is active,
   and switching to either exits an active split automatically.
 
@@ -1365,7 +1369,9 @@ Browser · Playground* — immediately to their right on the same line. Batch Ex
 modes — *Line · Bar · Scatter (cells) · Scatter (aggregate)* — sit there too.
 Pages without sub-tabs (Statistics, Spatial, smFISH, Review CSV, Saved Plots)
 leave that side empty; the band keeps its height so nothing below it shifts when
-you switch pages.
+you switch pages. In Split View the band is empty too — each pane draws its own
+page's tabs at the top of that pane instead, since one row cannot name two
+pages.
 
 The mode selector stays the width of whatever panel sits under it, so the two
 read as one column: Review's well-picker rail, the Analyze form (which you can

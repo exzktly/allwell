@@ -34,6 +34,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from dataclasses import dataclass
+
+from services import run_journal
 from services.run_spec import RunSpec, RunSpecError
 from services.suspend_record import (
     SuspendedRun,
@@ -44,6 +47,21 @@ from services.suspend_record import (
     save,
 )
 from well_viewer.core.safe import swallowed
+
+
+@dataclass(frozen=True)
+class _Resumable:
+    """A run the banner can offer to continue, from either record.
+
+    ``from_journal`` is not decoration: it decides which pointer is dropped
+    when the user resumes or discards, and the two records are cleared by
+    different calls.
+    """
+
+    spec: dict
+    output_dir: str
+    headline: str
+    from_journal: bool
 
 
 class AnalyzeSuspendMixin:
@@ -164,14 +182,93 @@ class AnalyzeSuspendMixin:
         banner = getattr(self, "_resume_banner", None)
         if banner is None:
             return
-        run = latest()
-        if run is None or getattr(self, "_running", False):
+        offer = self._resumable()
+        if offer is None or getattr(self, "_running", False):
             banner.setVisible(False)
             return
-        self._resume_label.setText(
-            f"A suspended run is waiting: {run.describe()}. Resuming continues "
-            f"it — only the field/timepoint groups still missing are computed.")
+        self._resume_label.setText(offer.headline + self._journal_detail(offer))
         banner.setVisible(True)
+
+    # ── what there is to resume ──────────────────────────────────────────
+    def _resumable(self) -> _Resumable | None:
+        """The run this banner is offering, from either of the two records.
+
+        A **suspended** run was wound down deliberately and is recorded by
+        ``suspend_record``. An **interrupted** one was running when the app went
+        away, and until the run journal existed left nothing at all behind —
+        no banner, no offer, nothing naming the folder. The journal's index is
+        what makes that case visible, and the two are offered through one path
+        because they need the same thing done to them: the recorded spec,
+        restarted with incremental forced on.
+
+        The suspend record wins when both describe the same folder. It is the
+        more specific statement — the user asked for it — and a suspend also
+        leaves the journal closed as ``suspended``, so it would not be offered
+        here anyway.
+        """
+        suspended = latest()
+        if suspended is not None:
+            return _Resumable(
+                spec=suspended.spec,
+                output_dir=suspended.output_dir,
+                headline=(
+                    f"A suspended run is waiting: {suspended.describe()}. "
+                    f"Resuming continues it — only the field/timepoint groups "
+                    f"still missing are computed."),
+                from_journal=False,
+            )
+        for entry in run_journal.interrupted_runs():
+            out_dir = str(entry.get("output_dir") or "")
+            journal = run_journal.read_journal(out_dir) if out_dir else None
+            # An index entry outlives the folder it names — a deleted or moved
+            # output directory must not produce a banner offering to resume it.
+            if journal is None or not journal.spec or not journal.is_open:
+                continue
+            when = time.strftime("%d %b %H:%M", time.localtime(journal.opened_at))
+            return _Resumable(
+                spec=journal.spec,
+                output_dir=out_dir,
+                headline=(
+                    f"A run in {Path(out_dir).name} started {when} and never "
+                    f"finished — All-Well closed while it was going. Resuming "
+                    f"continues it, computing only what is missing."),
+                from_journal=True,
+            )
+        return None
+
+    def _journal_detail(self, offer: _Resumable) -> str:
+        """The per-well line under the headline, or ``""`` when there is none.
+
+        Reported rather than derived: these are the states the run itself
+        recorded as it went. The counts deliberately do not claim anything
+        about how complete the *output* is — that is
+        ``pipeline.completeness``'s answer and the pane has no business
+        offering a second one.
+        """
+        journal = run_journal.read_journal(offer.output_dir)
+        if journal is None or not journal.wells:
+            return ""
+        parts = []
+        for label, states in (
+            ("finished", ("analysed", "fetched")),
+            ("failed", ("failed",)),
+            ("never fetched", ("not-fetched",)),
+        ):
+            n = len(journal.wells_in(*states))
+            if n:
+                parts.append(f"{n} {label}")
+        return f" It recorded {', '.join(parts)}." if parts else ""
+
+    def _forget_resumable(self, offer: _Resumable) -> None:
+        """Stop offering *offer*, whichever record it came from.
+
+        Neither branch deletes anything the run produced: the output folder is
+        the work, and this drops only the pointer that keeps asking about it.
+        """
+        if offer.from_journal:
+            run_journal.forget(offer.output_dir)
+        else:
+            clear(offer.output_dir)
 
     def _on_run_settled(self) -> None:
         """Called once a run reaches ``finished``, however it got there.
@@ -247,11 +344,11 @@ class AnalyzeSuspendMixin:
         still half done, with the run reporting success.
         """
         try:
-            run = latest()
-            if run is None:
+            offer = self._resumable()
+            if offer is None:
                 self.refresh_resume_banner()
                 return
-            spec = RunSpec.from_json(run.spec)
+            spec = RunSpec.from_json(offer.spec)
             opts = dict(spec.opts)
             opts["incremental"] = True
             spec = RunSpec(
@@ -268,10 +365,10 @@ class AnalyzeSuspendMixin:
                 return
             # Only once the run is actually going: a record cleared on a resume
             # that then failed to start would strand the half-finished output.
-            clear(run.output_dir)
+            self._forget_resumable(offer)
             self.refresh_resume_banner()
             self._log_line(
-                f"\n[Resuming] {run.describe()} — incremental, so only the "
+                f"\n[Resuming] {offer.headline} Incremental, so only the "
                 f"field/timepoint groups missing from the output are computed.\n",
                 "INFO",
             )
@@ -283,19 +380,19 @@ class AnalyzeSuspendMixin:
     def _discard_suspended(self) -> None:
         """Forget the record. The output folder itself is left alone."""
         try:
-            run = latest()
-            if run is None:
+            offer = self._resumable()
+            if offer is None:
                 return
             choice = QMessageBox.question(
-                self, "Discard suspended run",
-                f"Forget the suspended run?\n\n{run.describe()}\n\n"
+                self, "Discard unfinished run",
+                f"Forget this unfinished run?\n\n{offer.headline}\n\n"
                 f"Nothing is deleted — the results already written to\n"
-                f"{run.output_dir}\nstay exactly as they are. You can still "
+                f"{offer.output_dir}\nstay exactly as they are. You can still "
                 f"finish it later by re-running this input with 'incremental' "
                 f"checked.",
             )
             if choice == QMessageBox.Yes:
-                clear(run.output_dir)
+                self._forget_resumable(offer)
                 self.refresh_resume_banner()
         except Exception:
             swallowed()

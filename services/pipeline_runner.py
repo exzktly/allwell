@@ -45,6 +45,7 @@ from services.remote_runner import (
     WELL_XFER_PREFIX,
     stage_local_zips,
 )
+from services import run_journal
 from services.subprocess_kill import signal_subprocess
 from util.aw_safe import swallowed
 
@@ -542,6 +543,17 @@ class PipelineRunner:
         # see ``cancel_state_at_failure``.
         self._error_was_stopped = False
         self._error_was_suspended = False
+        # Latched by ``_enqueue_error``. The run journal has to be closed with
+        # an outcome from inside the worker thread's ``finally``, which is
+        # upstream of the GUI's ``_run_ok`` / ``_run_error`` latch and cannot
+        # see the queue it just wrote to. Reading "was there a failure" off a
+        # flag set at the moment of failure is the only answer available there
+        # — and it is the same discipline the two snapshots above already use.
+        self._had_error = False
+        # The ``RunSpec.to_json()`` payload for the run in flight, recorded
+        # into the journal so a run that dies can be offered back with the
+        # settings it had. ``None`` for a caller that supplies none.
+        self._journal_spec: dict | None = None
         # Remote-execution state. Set in start() when the user chose a
         # remote host; the runner threads it through _run_pipeline_thread
         # to swap spawn_pipeline for the SSH-staged remote run.
@@ -617,6 +629,7 @@ class PipelineRunner:
         cleanup_remote: str = "none",
         dry_run_cleanup: bool = False,
         selective_channels: bool = True,
+        journal_spec: dict | None = None,
     ) -> None:
         """Spawn the worker thread that runs the pipeline subprocess.
 
@@ -624,6 +637,14 @@ class PipelineRunner:
         ``proc_hook`` is the runner's zipper-tracking callback (forwarded
         to the grouping subprocess so Stop can reach it). Old call sites
         that ignore the kwarg still work.
+
+        ``journal_spec`` is the ``RunSpec.to_json()`` payload behind this run,
+        recorded into the output directory's run journal. It arrives here
+        rather than being rebuilt because the spec exists only at the GUI's
+        start seam, while the output directory — the journal's home — is not
+        resolved until this runner's own worker thread. Omitting it costs the
+        journal only its resume payload; everything else it records still
+        works, which is why a CLI driver can leave it out.
 
         When ``remote`` is set, the pipeline runs on the named SSH host
         instead of locally. ``output_filter``, ``cleanup_remote``,
@@ -639,6 +660,7 @@ class PipelineRunner:
         self._cleanup_remote = cleanup_remote
         self._dry_run_cleanup = dry_run_cleanup
         self._selective_channels = selective_channels
+        self._journal_spec = journal_spec
         self._thread = threading.Thread(
             target=self._run_pipeline_thread,
             args=(pipeline, opts, resolve_dirs),
@@ -724,7 +746,25 @@ class PipelineRunner:
         """Queue a failure, recording the cancel state at this instant."""
         self._error_was_stopped = self._stop_requested.is_set()
         self._error_was_suspended = self._suspend_requested.is_set()
+        self._had_error = True
         self._enqueue(("error", message))
+
+    def _journal_outcome(self) -> str:
+        """How this run ended, in the run journal's vocabulary.
+
+        Order matters and is not arbitrary. A suspend is a stop with the
+        escalation suppressed, so ``_stop_requested`` is set for both and
+        asking about the stop first would record every suspend as a cancel —
+        which is the one distinction a resume banner depends on. A failure is
+        only reported when neither flag is set: a Stop mid-run makes the
+        pipeline exit non-zero, and calling the user's own cancel an error is
+        exactly the misreport ``cancel_state_at_failure`` exists to prevent.
+        """
+        if self._suspend_requested.is_set():
+            return "suspended"
+        if self._stop_requested.is_set():
+            return "stopped"
+        return "error" if self._had_error else "ok"
 
     def stop(self, *, escalate: bool = True) -> None:
         # Flag the in-progress run as cancelled — used by the worker
@@ -782,6 +822,11 @@ class PipelineRunner:
         self._suspend_requested.clear()
         self._error_was_stopped = False
         self._error_was_suspended = False
+        self._had_error = False
+        # Cleared here rather than at ``close_run``: a setup-phase failure
+        # returns before the journal is ever opened, and a stale directory
+        # from the previous run would then be closed in this run's name.
+        self._journal_dir: Path | None = None
         # The Analyze "Scratch disk" field routes per-well working files via
         # ALLWELL_SCRATCH_DIR. Set it on this process's env so the local
         # pipeline subprocess (inherits os.environ) and the in-process remote
@@ -830,6 +875,11 @@ class PipelineRunner:
                 return
             self._last_output_dir = output_dir
             args = build_pipeline_args(pipeline, input_dir, output_dir, opts)
+            # The run begins on disk here, and not one line earlier: the output
+            # directory is resolved inside this thread, so this is the first
+            # moment the journal has a home. Opening it before the fork below
+            # means local, remote and batched runs are all covered by one call.
+            self._open_journal(input_dir, output_dir, args, opts)
             self._enqueue(("line", f"$ {' '.join(args)}\n"))
             target = (
                 f"remote:{self._remote.name}" if self._remote is not None else "local"
@@ -854,7 +904,60 @@ class PipelineRunner:
             # straight through to ``finished`` with no reason (audit E6).
             self._enqueue_error(f"Pipeline setup failed: {exc}\n")
         finally:
+            # Before ``finished``, so a queue bridge that starts the next job
+            # off that event cannot open its journal while this one is still
+            # recorded as running.
+            self._close_journal()
             self._enqueue(("finished", None))
+
+    # ── the run journal ──────────────────────────────────────────────────
+    def _open_journal(
+        self, input_dir: Path, output_dir: Path, argv: list[str], opts: dict,
+    ) -> None:
+        """Record that this run started, before it processes anything.
+
+        Best-effort throughout: a run whose journal cannot be written still
+        runs, because the artefacts remain the authoritative record of what was
+        produced and this is the narrative beside them.
+        """
+        mode = "local"
+        if self._remote is not None:
+            # Read the batch size the same way ``_run_pipeline_remote`` does —
+            # off ``opts``, not off the host — so the journal cannot name a
+            # mode the run did not take.
+            try:
+                batched = int(opts.get("remote_batch_size", 0) or 0) > 0
+            except (ValueError, TypeError):
+                batched = False
+            mode = "remote-batched" if batched else "remote"
+        try:
+            run_journal.open_run(
+                output_dir,
+                spec=self._journal_spec,
+                mode=mode,
+                input_dir=input_dir,
+                argv=argv,
+            )
+        except OSError:
+            swallowed(f"could not open the run journal in {output_dir}")
+            return
+        self._journal_dir = output_dir
+
+    def _close_journal(self) -> None:
+        """Close the journal with how this run ended, whatever ended it.
+
+        A journal left open is how the app tells, at its next start, that a run
+        died rather than finished — so this must run on every exit the process
+        survives, which is why it sits in the worker thread's ``finally``
+        rather than beside any one outcome.
+        """
+        output_dir, self._journal_dir = self._journal_dir, None
+        if output_dir is None:
+            return
+        try:
+            run_journal.close_run(output_dir, outcome=self._journal_outcome())
+        except OSError:
+            swallowed(f"could not close the run journal in {output_dir}")
 
     def _run_pipeline_subprocess(
         self,

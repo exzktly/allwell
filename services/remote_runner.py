@@ -1027,21 +1027,19 @@ def _canonical_well_from_path(stem: str) -> str | None:
     return canonical_well_label(stem)
 
 
-def _compute_run_id(cache_key: str, pipeline_argv: list[str]) -> str:
-    """Deterministic run_id from input cache_key + pipeline-args
-    hash. Same input + same pipeline config → same run_id, so
-    re-running lands in the existing remote output dir and the
-    pipeline's own ``output_exists_for_well`` logic skips wells
-    whose ``{well}_out.zip`` already exists.
+def pipeline_argv_digest(pipeline_argv: list[str]) -> str:
+    """Hash the arguments that decide the *bytes* a run produces.
 
-    v5.2.25: skips per-run-irrelevant flags so the cache slot stays
-    stable across a forced-reprocess re-run, and so input/output
-    dir paths don't churn the hash. ``--force`` users will hit the
-    same dir and overwrite the cached outputs (which is what
-    ``--force`` is supposed to mean)."""
-    # Args that affect the bytes of the run output. Excludes the
-    # input/output paths (those are derived from cache_key already)
-    # and ``--force`` (a re-processing knob, not a config change).
+    Split out of :func:`_compute_run_id` so the run journal can record "this
+    plate, configured this way" and a later run can recognise it, without a
+    second definition of which flags count. Two runs whose digests differ are
+    not producing interchangeable output, whatever else they share.
+
+    Skips the input/output paths (already implied by the cache key, which is
+    computed over the input archives) and ``--force`` (a re-processing knob, not
+    a change of configuration — which is what lets a forced re-run land in the
+    same remote directory and overwrite it).
+    """
     skip_with_value = {"--input_dir", "--output_dir"}
     skip_flags = {"--force"}
     filtered: list[str] = []
@@ -1056,8 +1054,153 @@ def _compute_run_id(cache_key: str, pipeline_argv: list[str]) -> str:
             continue
         filtered.append(a)
         i += 1
-    digest = hashlib.blake2b("|".join(filtered).encode(), digest_size=8).hexdigest()
-    return f"{cache_key[:16]}-{digest}"
+    return hashlib.blake2b("|".join(filtered).encode(), digest_size=8).hexdigest()
+
+
+def _choose_remote_output_dir(
+    fresh: str,
+    stored: str,
+    *,
+    forced: bool,
+    remote_has_outputs: bool,
+) -> tuple[str, str]:
+    """Which remote output directory this run should use, and why.
+
+    A module-level function rather than a branch inside ``spawn`` for two
+    reasons: ``spawn`` is already near the complexity ratchet's ceiling, and a
+    decision that cannot be called directly cannot be run against fixtures —
+    only read, which is how the wrong branch gets described as the app's
+    behaviour.
+
+    ``fresh`` is the address derived the usual way, from the staged archives'
+    ``(name, size, mtime)`` and the pipeline argv. ``stored`` is the one a
+    previous run of this same configuration recorded in the output directory's
+    journal, or ``""``. They differ when the previous run's upload was
+    *rewritten* into scratch — a channel filter that cleared
+    ``REWRITE_MIN_SAVING``, or an incremental split — because a fresh staging
+    copy carries a new mtime every run and so keys differently every run. The
+    work that run computed is then sitting in a directory nothing will look in
+    again.
+
+    Returns ``(chosen, reason)``. The stored address wins only when it exists,
+    differs, is not overridden by a forced run, **and** the caller has confirmed
+    it still holds output: the journal says where work was sent, which is not
+    the same claim as the work still being there. The journal proposes; the
+    remote listing decides.
+    """
+    if not stored or stored == fresh:
+        return fresh, ""
+    if forced:
+        return fresh, (
+            "a recorded prior output dir was ignored: this run was asked to "
+            "reprocess")
+    if not remote_has_outputs:
+        return fresh, (
+            f"a prior run recorded {stored}, but it holds no output now — "
+            f"using {fresh}")
+    return stored, (
+        f"re-attaching to {stored}, recorded by a prior run of this plate "
+        f"(the freshly-derived address would have been {fresh})")
+
+
+def _classify_fetched_wells(
+    remote_wells: list[str],
+    local_output_dir: Path,
+    *,
+    announced: set[str],
+    skipped: dict[str, str],
+) -> tuple[dict[str, int], list[str]]:
+    """Group the remote's wells by what became of them, and describe each one.
+
+    The journal is the preferred source: it recorded each well as the Fetcher
+    decided it, so a well that *failed* is reported as failed rather than
+    merely absent, and a well the end-of-run retry rescued is reported as
+    fetched rather than lost. Reading it back here is also what lets a run
+    killed before this method ever runs still have a record of everything it
+    got to.
+
+    The in-memory state is the fallback, and it is a real fallback rather than
+    a formality. *skipped* is the Fetcher's own ``well -> reason`` map and
+    *announced* the wells whose completion marker this run saw; together they
+    are exactly what this report was built from before the journal existed. A
+    journal that could not be written — a read-only output volume, a full disk
+    — must cost the report its *extra* answers, never the ones it already had.
+
+    Returns ``(counts, lines)``: a tally per outcome, and one report line per
+    well. Module-level and pure, so the report can be exercised without an ssh
+    connection or a live run.
+    """
+    from services import run_journal
+
+    journal = run_journal.read_journal(local_output_dir)
+    recorded = journal.wells if journal is not None else {}
+    # Every journal state gets a bucket, plus the one outcome the journal has
+    # no word for: a well the remote holds output for that this run never heard
+    # about. Seeding from ``WELL_STATES`` rather than a literal list means a
+    # state added there cannot fall silently into "never-announced" here.
+    counts = {state: 0 for state in run_journal.WELL_STATES}
+    counts["never-announced"] = 0
+    lines: list[str] = []
+    for well in remote_wells:
+        entry = recorded.get(well)
+        if entry is not None:
+            outcome, note = entry.state, entry.reason
+        elif well in skipped:
+            outcome, note = "skipped", skipped[well]
+        elif well in announced:
+            outcome, note = "fetched", "this run produced new output"
+        else:
+            outcome, note = ("never-announced",
+                             "no completion marker was seen for this well")
+        counts[outcome] += 1
+        lines.append(f"{well}  {outcome:<15}{note}")
+    return counts, lines
+
+
+def _record_remote_in_journal(
+    local_output_dir: Path, *, run: "_RemoteRun", host_alias: str, argv_digest: str,
+) -> None:
+    """Write this run's remote address into the output directory's journal.
+
+    Best-effort and deliberately quiet: a run whose journal cannot be written
+    still runs, and the only thing lost is the fallback address a later run
+    could have re-attached to.
+    """
+    from services import run_journal
+
+    try:
+        run_journal.record_remote(
+            local_output_dir,
+            run_id=run.run_id,
+            cache_key=run.cache_key,
+            host_alias=host_alias,
+            remote_input_dir=run.remote_input_dir,
+            remote_output_dir=run.remote_output_dir,
+            argv_digest=argv_digest,
+        )
+    except OSError:
+        swallowed(f"could not record the remote address in {local_output_dir}")
+
+
+def _compute_run_id(cache_key: str, pipeline_argv: list[str]) -> str:
+    """Deterministic run_id from input cache_key + pipeline-args
+    hash. Same input + same pipeline config → same run_id, so
+    re-running lands in the existing remote output dir and the
+    pipeline's own ``output_exists_for_well`` logic skips wells
+    whose ``{well}_out.zip`` already exists.
+
+    v5.2.25: skips per-run-irrelevant flags so the cache slot stays
+    stable across a forced-reprocess re-run, and so input/output
+    dir paths don't churn the hash. ``--force`` users will hit the
+    same dir and overwrite the cached outputs (which is what
+    ``--force`` is supposed to mean).
+
+    Which flags count is :func:`pipeline_argv_digest`'s answer, not a second
+    one kept here: the run journal records that digest so a later run can
+    recognise the same configuration, and two spellings of "same config"
+    would have the journal offering an address the run id says belongs
+    somewhere else."""
+    return f"{cache_key[:16]}-{pipeline_argv_digest(pipeline_argv)}"
 
 
 def _snapshot_local_artifacts(local_output_dir: Path) -> dict:
@@ -5626,6 +5769,27 @@ class Fetcher:
             if total_bytes:
                 self._log(_well_xfer_line(label, "down", 1.0))
 
+    def _journal_well(self, well: str, state: str, *, reason: str = "") -> None:
+        """Record what just became of *well*, beside the outputs.
+
+        Written at the moment the decision is made rather than gathered at the
+        end, which is the whole difference: a fetch that is interrupted has
+        already recorded every well it got to, and the end-of-run
+        reconciliation — which cannot run at all if the run dies — is then a
+        rendering of this rather than the only place it exists.
+
+        Best-effort. A well whose journal entry cannot be written is still
+        fetched, and its output on disk is still the authoritative record of
+        that.
+        """
+        from services import run_journal
+
+        try:
+            run_journal.record_well(
+                self.run.local_output_dir, well, state, reason=reason)
+        except OSError:
+            swallowed(f"could not journal {well} as {state}")
+
     def _already_local(self, well: str) -> str | None:
         """Why this well needs no transfer at all, or ``None`` to fetch it.
 
@@ -5681,6 +5845,7 @@ class Fetcher:
             self._log(f"[remote] ⤼ {well}: {skip_reason} — not re-fetched\n")
             self.run.skipped_wells[well] = skip_reason
             self.run.fetched_wells.add(well)
+            self._journal_well(well, "skipped", reason=skip_reason)
             return
         # On the output volume, not the home one: this file is the well's
         # output on its way to `local_output_dir`, so the move at the end is a
@@ -5756,6 +5921,10 @@ class Fetcher:
                 tmp_zip.unlink()   # don't leave a partial in scratch (audit X9)
             except OSError:
                 pass
+            self._journal_well(
+                well, "not-fetched",
+                reason=f"the output zip could not be pulled from "
+                       f"{self.run.remote_output_dir}")
             return
         if not ok:
             self._log(
@@ -5866,8 +6035,13 @@ class Fetcher:
                 f"[remote] ↓ {well}: WARN local materialize failed; keeping the "
                 f"remote copy and leaving the well for retry.\n"
             )
+            self._journal_well(
+                well, "failed",
+                reason="the output arrived but could not be written into the "
+                       "output directory")
             return
         self.run.fetched_wells.add(well)
+        self._journal_well(well, "fetched")
         total_elapsed = time.monotonic() - t0
         position_done = len(self.run.fetched_wells)
         tally = f"{position_done}/{total} wells" if total else f"{position_done} wells"
@@ -6524,6 +6698,18 @@ class RemoteRunner:
         remote_heartbeat = (
             f"{self.host.remote_staging_dir}/runs/{run_id}/{UPLOAD_HEARTBEAT}")
 
+        # Only the *output* directory can be re-attached, and only it is. The
+        # input dir keys on this run's own staged archives, and the pidfile /
+        # sentinel / heartbeat stay under this run's own ``run_id`` because
+        # ``_sweep_orphaned_allocation`` finds a crashed session's SLURM job by
+        # recomputing exactly that address — pointing them at a previous run's
+        # directory would make this run adopt an allocation it does not own.
+        argv_digest = pipeline_argv_digest(pipeline_argv)
+        remote_output = self._reattach_output_dir(
+            remote_output, local_output_dir, pipeline_argv,
+            argv_digest=argv_digest, log=log,
+        )
+
         # The sentinel is cleared with the same call that makes the directory:
         # ``run_id`` is deterministic in (input, arguments), so a re-run lands
         # in the directory the last one used and would otherwise find that
@@ -6551,6 +6737,15 @@ class RemoteRunner:
             incremental=zipped.incremental,
             force=_force, force_wells=_forced_wells,
             pre_run_artifacts=_snapshot_local_artifacts(local_output_dir),
+        )
+        # Where this run's work went, written down while the run is still
+        # starting rather than reconstructed afterwards. Nothing local knew a
+        # remote run existed until this line: ``run_id`` was re-derivable only
+        # for as long as the staged archives kept the same mtimes, which a
+        # rewritten upload does not.
+        _record_remote_in_journal(
+            local_output_dir, run=self._run, host_alias=self.host.ssh_alias,
+            argv_digest=argv_digest,
         )
 
         # v5.2.27: pre-flight cache-hit check. Before launching the
@@ -7118,6 +7313,37 @@ class RemoteRunner:
                 if not out_zip.exists() or out_zip.stat().st_size == 0 or stale:
                     _pull(f"{run.remote_output_dir}/{well}_out.zip")
                 _report_zip(well, time.monotonic() - zip_t0)
+            # A well this pass rescued is fetched, and the journal has to say
+            # so: the in-stream fetcher recorded it as ``not-fetched`` on its
+            # way out, and leaving that standing would have the record report a
+            # loss this backstop had already repaired.
+            self._journal_retry_result(well)
+
+    def _journal_retry_result(self, well: str) -> None:
+        """Record whether the end-of-run retry actually recovered *well*.
+
+        Read off the artefacts rather than off whether ``_pull`` was called:
+        a pull that returned is not a file that landed, and the question the
+        record has to answer is whether the user has the data.
+        """
+        from services import run_journal
+
+        run = self._run
+        if run is None:
+            return
+        csvs = list(run.local_output_dir.glob(f"*_{well}.csv"))
+        recovered = bool(csvs) and all(p.stat().st_size > 0 for p in csvs)
+        try:
+            if recovered:
+                run_journal.record_well(
+                    run.local_output_dir, well, "fetched",
+                    reason="recovered by the end-of-run retry")
+            else:
+                run_journal.record_well(
+                    run.local_output_dir, well, "not-fetched",
+                    reason="the end-of-run retry could not recover it")
+        except OSError:
+            swallowed(f"could not journal the retry result for {well}")
 
     def _reconcile_fetch(self, *, log: Callable[[str], None]) -> str:
         """Classify every well the remote holds output for, and record it.
@@ -7129,6 +7355,14 @@ class RemoteRunner:
         able to ask about afterwards, and until now the answer existed only in
         the run log as it streamed. A report written beside the outputs
         outlives the log drawer.
+
+        The classification itself is **read back out of the run journal**,
+        which recorded each well at the moment it was decided, rather than
+        re-derived here from the in-memory run. Two things follow. A run that
+        never reaches this method — killed, or the app closed — has already
+        recorded everything it got to, where before it recorded nothing. And
+        ``remote_fetch_report.txt`` becomes a rendering of that record rather
+        than a second one: one classification, two ways to read it.
         """
         run = self._run
         if run is None:
@@ -7142,22 +7376,14 @@ class RemoteRunner:
             f"wells with output on the remote: {len(remote_wells)}",
             "",
         ]
-        counts = {"fetched": 0, "skipped": 0, "never-announced": 0}
-        for well in remote_wells:
-            if well in run.skipped_wells:
-                counts["skipped"] += 1
-                lines.append(f"{well}  skipped        {run.skipped_wells[well]}")
-            elif well in run.expected_wells:
-                counts["fetched"] += 1
-                lines.append(f"{well}  fetched        this run produced new output")
-            else:
-                counts["never-announced"] += 1
-                lines.append(
-                    f"{well}  never-announced no completion marker was seen "
-                    f"for this well")
+        counts, well_lines = _classify_fetched_wells(
+            remote_wells, run.local_output_dir,
+            announced=run.expected_wells, skipped=run.skipped_wells)
+        lines.extend(well_lines)
         summary = (
             f"[remote] fetch reconciliation: {counts['fetched']} fetched, "
             f"{counts['skipped']} skipped (already complete locally), "
+            f"{counts['not-fetched']} not fetched, "
             f"{counts['never-announced']} never announced completion.\n"
         )
         log(summary)
@@ -7276,9 +7502,66 @@ class RemoteRunner:
         run = self._run
         if run is None:
             return set()
+        return self._list_completed_wells_in(run.remote_output_dir)
+
+    def _reattach_output_dir(
+        self,
+        fresh: str,
+        local_output_dir: Path,
+        pipeline_argv: list[str],
+        *,
+        argv_digest: str,
+        log: Callable[[str], None],
+    ) -> str:
+        """The remote output dir to use, preferring a recorded one that still
+        holds output.
+
+        Everything decidable without the network is decided by
+        :func:`_choose_remote_output_dir`; this method exists to supply it with
+        the two facts only an ssh round-trip can establish, and to keep that
+        round-trip off the path entirely when no stored address exists — which
+        is every first run of a plate, and every run whose upload was not
+        rewritten.
+        """
+        from services import run_journal
+
+        try:
+            stored = run_journal.stored_remote_address(
+                local_output_dir, argv_digest=argv_digest)
+        except OSError:
+            swallowed(f"could not read the run journal in {local_output_dir}")
+            return fresh
+        candidate = str((stored or {}).get("remote_output_dir") or "")
+        if not candidate or candidate == fresh:
+            return fresh
+        forced, forced_wells = _forced_from_argv(pipeline_argv)
+        # The listing is skipped for a forced run: it cannot change the answer,
+        # and an ssh round-trip whose result is discarded is a wait the user
+        # pays for twice — once here, once when the pipeline runs anyway.
+        has_outputs = False
+        if not (forced or forced_wells):
+            has_outputs = bool(self._list_completed_wells_in(candidate))
+        chosen, reason = _choose_remote_output_dir(
+            fresh, candidate,
+            forced=bool(forced or forced_wells),
+            remote_has_outputs=has_outputs,
+        )
+        if reason:
+            log(f"[remote] {reason}\n")
+        return chosen
+
+    def _list_completed_wells_in(self, remote_dir: str) -> set[str]:
+        """The same listing, for any remote directory rather than this run's.
+
+        Split out so the address the run journal recorded can be *checked*
+        before it is used: a directory a previous run wrote to is not this
+        run's, and asking whether it still holds output is the whole reason
+        re-attaching to it is safe. One implementation, so "what counts as a
+        completed well" cannot come to mean two things a few lines apart.
+        """
         try:
             listing = self._cache._ssh_script(
-                f"ls -1 {run.remote_output_dir}/*_out.zip 2>/dev/null || true",
+                f"ls -1 {remote_dir}/*_out.zip 2>/dev/null || true",
                 check=False,
             )
         except (OSError, subprocess.SubprocessError):

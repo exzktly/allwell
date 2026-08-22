@@ -278,12 +278,34 @@ class WellEvidence:
     that legitimately segmented zero cells at every timepoint, and a well whose
     measurements CSV was lost. Both have images and no CSV. Only one of them is
     a defect, and only one of them is worth re-segmenting.
+
+    A third source joins those two: ``services.run_journal``, which records
+    what a run did to each well *as it happened* rather than at the end. It is
+    the only one that survives a run dying mid-way, and the only one that can
+    say a well's output was produced on a remote host and never made it here —
+    which on disk is indistinguishable from a well that was never run.
     """
 
     groups_total: int | None = None
     groups_covered: int | None = None
     recorded_failures: tuple[str, ...] = ()
     error_files: tuple[str, ...] = ()
+    #: What the run journal last recorded for this well, or ``""``. One of
+    #: ``services.run_journal.WELL_STATES`` — never re-spelled here, so this
+    #: cannot drift from the vocabulary the runner writes.
+    journal_state: str = ""
+    journal_reason: str = ""
+
+    @property
+    def stranded_on_remote(self) -> bool:
+        """The run produced this well's output and it never arrived locally.
+
+        The one thing no artefact can report, because the evidence for it is
+        the *absence* of a file. Worth its own answer: the remedy is to fetch,
+        not to re-segment, and re-segmenting a plate to recover a transfer that
+        failed is hours of compute for nothing.
+        """
+        return self.journal_state == "not-fetched"
 
     @property
     def recorded(self) -> bool:
@@ -328,6 +350,27 @@ def _read_run_report(info: dict) -> dict[str, WellEvidence]:
             recorded_failures=tuple(
                 str(f) for f in (failed if isinstance(failed, list) else [])),
         )
+    return out
+
+
+def _read_run_journal(paths) -> dict[str, tuple[str, str]]:
+    """The run journal's per-well states, keyed by canonical well.
+
+    Read from the output directory, where the runner writes it — not from the
+    sidecar, which a remote fetch overwrites wholesale. A dataset with no
+    journal (every dataset produced before it existed, and every one produced
+    by the CLI) yields ``{}`` and the rest of the scan is unaffected: this
+    evidence adds answers, it never withholds any.
+    """
+    from services.run_journal import read_journal
+
+    journal = read_journal(paths.out_dir)
+    if journal is None:
+        return {}
+    out: dict[str, tuple[str, str]] = {}
+    for raw_well, record in journal.wells.items():
+        well = canonical_well_label(str(raw_well)) or str(raw_well)
+        out[well] = (record.state, record.reason)
     return out
 
 
@@ -596,6 +639,19 @@ def _no_csv_finding(well: str, evidence: WellEvidence) -> Finding:
                 f"Well {well}: images exist but no measurements CSV, and the "
                 f"run recorded why — {'; '.join(detail)}. Read those before "
                 f"re-running. {forced_remedy}"
+            ),
+        )
+    if evidence.stranded_on_remote:
+        detail = f" ({evidence.journal_reason})" if evidence.journal_reason else ""
+        return Finding(
+            severity="error", code="no_csv_not_fetched", well=well,
+            message=(
+                f"Well {well}: images exist but no measurements CSV, and the "
+                f"run journal says the output was produced and never reached "
+                f"this machine{detail}. Re-run this input against the same "
+                f"remote — the compute is already done, and what is missing is "
+                f"the transfer, so a forced reprocess would repeat hours of "
+                f"work to recover a download."
             ),
         )
     return Finding(
@@ -928,6 +984,10 @@ def build_report(
     for well, names in _scan_error_files(paths).items():
         prior = evidence_map.get(well, WellEvidence())
         evidence_map[well] = replace(prior, error_files=names)
+    for well, (state, reason) in _read_run_journal(paths).items():
+        prior = evidence_map.get(well, WellEvidence())
+        evidence_map[well] = replace(
+            prior, journal_state=state, journal_reason=reason)
     well_reports, well_findings, members_by_container = _scan_wells(
         paths, schema_fields=schema_fields, sep=sep,
         fov_field_present=fov_field_present, csv_candidates=csv_candidates,

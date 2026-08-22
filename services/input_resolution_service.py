@@ -5,7 +5,7 @@ import re
 import subprocess
 import sys
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Callable
 from util.aw_safe import swallowed
@@ -507,6 +507,103 @@ def count_expected_wells(raw: Path, *, filename_schema: str, filename_sep: str) 
     return len(tif_files_in(raw)) or 1
 
 
+@dataclass(frozen=True)
+class LooseAppendPlan:
+    """Which loose images would be folded into which well zips, and how many.
+
+    The read-only half of :func:`append_loose_images_to_zips`. Everything it
+    reports comes from ``iterdir`` and each archive's central directory, so it
+    can be asked before the user has committed to anything — which is what lets
+    the Analyze pane describe a run it has not started.
+    """
+
+    #: canonical well → the loose files that are not already in its archive.
+    by_well: dict[str, list[Path]] = field(default_factory=dict)
+
+    @property
+    def total(self) -> int:
+        return sum(len(v) for v in self.by_well.values())
+
+    @property
+    def wells(self) -> set[str]:
+        return set(self.by_well)
+
+
+def plan_loose_append(
+    grouped_dir: Path,
+    *,
+    filename_schema: str,
+    filename_sep: str,
+    log_fn: Callable[[str], None] | None = None,
+) -> LooseAppendPlan:
+    """Decide which loose images would be folded in, writing nothing.
+
+    Split out of :func:`append_loose_images_to_zips` so the same decision can
+    be *previewed*. Nothing here mutates: a plan that is never acted on leaves
+    the input directory exactly as it found it.
+
+    The duplicate rule is the subtle part and belongs here rather than at the
+    call site. A loose file whose basename is already a member of the target
+    archive is not new data — it is the same image the user dropped twice, or
+    the leftovers of an interrupted append — so it is neither counted nor
+    deleted, and a run whose every loose file is a duplicate has nothing new to
+    process however many files are lying there.
+    """
+    from util.well_token import canonical_well_label
+
+    empty = LooseAppendPlan()
+    # Gate: only a zip-grouped layout qualifies. Folder-only / loose-only
+    # layouts are the normal zipper's job.
+    if not has_well_zip(grouped_dir):
+        return empty
+
+    fields = [str(f).strip().lower() for f in str(filename_schema or "").split(":")]
+    if "well" not in fields:
+        return empty
+    well_idx = fields.index("well")
+
+    # Loose top-level image files (not zips, not dirs), grouped by well.
+    by_well: dict[str, list[Path]] = {}
+    try:
+        entries = sorted(grouped_dir.iterdir(), key=lambda p: p.name)
+    except OSError:
+        return empty
+    for p in entries:
+        if not p.is_file() or p.suffix.lower() not in (".tif", ".tiff"):
+            continue
+        parts = p.stem.split(filename_sep)
+        token = canonical_well_label(parts[well_idx]) if well_idx < len(parts) else None
+        if token is None:
+            if log_fn:
+                log_fn(f"[append] Skipping loose file (no valid well token): {p.name}\n")
+            continue
+        by_well.setdefault(token, []).append(p)
+
+    if not by_well:
+        return empty
+
+    planned: dict[str, list[Path]] = {}
+    for well, files in sorted(by_well.items()):
+        target = grouped_dir / f"{well}.zip"
+        existing: set[str] = set()
+        if target.exists():
+            try:
+                with zipfile.ZipFile(target, "r") as zf:
+                    existing = set(zf.namelist())
+            except (OSError, zipfile.BadZipFile):
+                existing = set()
+        new_files = [f for f in files if f.name not in existing]
+        skipped = len(files) - len(new_files)
+        if skipped and log_fn:
+            log_fn(
+                f"[append] {well}: skipped {skipped} loose file(s) already in "
+                f"{target.name} (kept existing).\n"
+            )
+        if new_files:
+            planned[well] = new_files
+    return LooseAppendPlan(by_well=planned)
+
+
 def append_loose_images_to_zips(
     grouped_dir: Path,
     *,
@@ -535,61 +632,25 @@ def append_loose_images_to_zips(
     Returns ``(files_appended, wells_touched)`` where *wells_touched* are the
     canonical well tokens whose zip gained at least one member (used by the
     caller to drive incremental reprocessing).
-    """
-    from util.well_token import canonical_well_label
 
+    **Which** files those are is :func:`plan_loose_append`'s answer, not a
+    second one kept here: the Analyze pane shows the user what a run will do
+    before they press Run, and a preview that decides "what counts as a new
+    loose image" for itself is a preview that can disagree with the run it is
+    describing.
+    """
     appended = 0
     wells_touched: set[str] = set()
 
-    # Gate: only a zip-grouped layout qualifies.
-    if not has_well_zip(grouped_dir):
-        return 0, wells_touched
-
-    fields = [str(f).strip().lower() for f in str(filename_schema or "").split(":")]
-    if "well" not in fields:
-        return 0, wells_touched
-    well_idx = fields.index("well")
-
-    # Collect loose top-level image files (not zips, not dirs) grouped by well.
-    by_well: dict[str, list[Path]] = {}
-    try:
-        entries = sorted(grouped_dir.iterdir(), key=lambda p: p.name)
-    except OSError:
-        return 0, wells_touched
-    for p in entries:
-        if not p.is_file() or p.suffix.lower() not in (".tif", ".tiff"):
-            continue
-        parts = p.stem.split(filename_sep)
-        token = canonical_well_label(parts[well_idx]) if well_idx < len(parts) else None
-        if token is None:
-            if log_fn:
-                log_fn(f"[append] Skipping loose file (no valid well token): {p.name}\n")
-            continue
-        by_well.setdefault(token, []).append(p)
-
-    if not by_well:
-        return 0, wells_touched
-
-    for well, files in sorted(by_well.items()):
+    plan = plan_loose_append(
+        grouped_dir, filename_schema=filename_schema,
+        filename_sep=filename_sep, log_fn=log_fn,
+    )
+    for well, new_files in sorted(plan.by_well.items()):
         target = grouped_dir / f"{well}.zip"
-        existing: set[str] = set()
-        if target.exists():
-            try:
-                with zipfile.ZipFile(target, "r") as zf:
-                    existing = set(zf.namelist())
-            except (OSError, zipfile.BadZipFile):
-                existing = set()
-        new_files = [f for f in files if f.name not in existing]
-        skipped = len(files) - len(new_files)
-        if skipped and log_fn:
-            log_fn(
-                f"[append] {well}: skipped {skipped} loose file(s) already in "
-                f"{target.name} (kept existing).\n"
-            )
-        if not new_files:
-            continue
+        existing = target.exists()
 
-        def _append(target=target, new_files=new_files) -> None:
+        def _append(target=target, new_files=new_files, existing=existing) -> None:
             with atomic_zip(target) as zf:
                 if target.exists():
                     with zipfile.ZipFile(target, "r") as src:
@@ -619,6 +680,109 @@ def append_loose_images_to_zips(
             )
 
     return appended, wells_touched
+
+
+@dataclass(frozen=True)
+class ScopePlan:
+    """What a run will do about work an earlier run already did, and why.
+
+    *mode* is ``"unchanged"`` (nothing new to fold in, so the run's own
+    incremental / force settings stand), ``"incremental"`` (new FOVs only), or
+    ``"force"`` (a full reprocess, because a cross-well model would otherwise
+    be built from a different set of images than the outputs it is compared
+    against). *reason* is the sentence both the run log and the Analyze pane's
+    pre-run readout print — neither composes its own, so a preview cannot
+    describe a decision the run does not then make.
+    """
+
+    mode: str
+    reason: str
+
+
+def _scope_verdict(
+    appended: int,
+    wells_touched: set[str],
+    *,
+    flatfield: str,
+    background: str,
+    bg_tokens: set[str],
+    new_bg_tps: set[str],
+    existing_bg_tps: set[str],
+) -> ScopePlan:
+    """The scope decision itself, over facts both callers can supply.
+
+    Takes counts rather than a directory so it can be reached from the preview
+    — which has planned the append but not performed it — and from the run,
+    which has performed it. One rule, asked twice.
+    """
+    basic_model = flatfield == "basic" or background == "basic"
+    empty_well_in_use = flatfield == "empty_well" or background == "empty_well"
+    bg_touched = bool(bg_tokens & wells_touched)
+    stale_existing_tp = bool(new_bg_tps & existing_bg_tps)
+    if basic_model or (empty_well_in_use and bg_touched and stale_existing_tp):
+        reason = ("basic flat-field/background is sampled across all wells"
+                  if basic_model
+                  else "the empty-well background well gained blanks at an "
+                       "already-processed timepoint")
+        return ScopePlan("force", (
+            f"Appended {appended} loose image(s) into {len(wells_touched)} "
+            f"well(s); forcing a full reprocess ({reason})."))
+    return ScopePlan("incremental", (
+        f"Appended {appended} loose image(s) into {len(wells_touched)} "
+        f"well(s); processing only new FOVs (incremental)."))
+
+
+def plan_incremental_scope(
+    opts: dict,
+    input_dir: Path,
+) -> ScopePlan:
+    """What :func:`select_incremental_scope` will decide, without doing it.
+
+    Every input to the decision is readable without writing anything: which
+    loose files would be folded in (:func:`plan_loose_append`), and which
+    timepoints the background well already holds. So the preview reaches the
+    same verdict by the same function the run uses, rather than predicting it.
+
+    The one thing it cannot foresee is an I/O failure during the append itself,
+    which makes the run skip the fold entirely. That is a fault the run reports
+    when it happens; it is not something a preview can honestly promise
+    against, and pretending otherwise would be the kind of guess this returns a
+    named ``"unchanged"`` mode to avoid.
+    """
+    from util.well_token import canonical_well_label
+
+    schema = str(opts.get("filename_schema") or "")
+    sep = str(opts.get("filename_sep") or "_")
+    try:
+        plan = plan_loose_append(
+            input_dir, filename_schema=schema, filename_sep=sep)
+    except OSError:
+        return ScopePlan("unchanged", "")
+    if not plan.total:
+        return ScopePlan("unchanged", "")
+
+    bg_tokens = {
+        canonical_well_label(w)
+        for w in re.split(r"[,\s]+", str(opts.get("background_well", "") or ""))
+        if w
+    }
+    flatfield = str(opts.get("flatfield", "none") or "none")
+    background = str(opts.get("background", "") or "")
+    empty_well_in_use = flatfield == "empty_well" or background == "empty_well"
+    new_bg_tps: set[str] = set()
+    existing_bg_tps: set[str] = set()
+    if empty_well_in_use and bg_tokens:
+        new_bg_tps = _loose_timepoints_for_wells(
+            input_dir, bg_tokens, schema=schema, sep=sep)
+        for w in bg_tokens:
+            if w:
+                existing_bg_tps |= _zip_timepoints(
+                    input_dir / f"{w}.zip", schema=schema, sep=sep)
+    return _scope_verdict(
+        plan.total, plan.wells,
+        flatfield=flatfield, background=background, bg_tokens=bg_tokens,
+        new_bg_tps=new_bg_tps, existing_bg_tps=existing_bg_tps,
+    )
 
 
 def select_incremental_scope(
@@ -690,30 +854,18 @@ def select_incremental_scope(
     if not appended:
         return
 
-    bg_touched = bool(bg_tokens & wells_touched)
-    stale_existing_tp = bool(new_bg_tps & existing_bg_tps)
-    needs_full = (
-        flatfield == "basic"
-        or background == "basic"
-        or (empty_well_in_use and bg_touched and stale_existing_tp)
+    verdict = _scope_verdict(
+        appended, wells_touched,
+        flatfield=flatfield, background=background,
+        bg_tokens=bg_tokens, new_bg_tps=new_bg_tps,
+        existing_bg_tps=existing_bg_tps,
     )
-    if needs_full:
+    if verdict.mode == "force":
         opts["force"] = True
         opts["incremental"] = False
-        reason = ("basic flat-field/background is sampled across all wells"
-                  if (flatfield == "basic" or background == "basic")
-                  else "the empty-well background well gained blanks at an "
-                       "already-processed timepoint")
-        _log(
-            f"[append] Appended {appended} loose image(s) into "
-            f"{len(wells_touched)} well(s); forcing a full reprocess ({reason}).\n"
-        )
     else:
         opts["incremental"] = True
-        _log(
-            f"[append] Appended {appended} loose image(s) into "
-            f"{len(wells_touched)} well(s); processing only new FOVs (incremental).\n"
-        )
+    _log(f"[append] {verdict.reason}\n")
 
 
 def run_zipper(

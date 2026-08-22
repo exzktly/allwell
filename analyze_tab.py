@@ -41,6 +41,7 @@ import theme
 from well_viewer.core.app_shell_view import RAIL_W
 from well_viewer.core.safe import swallowed
 from analyze_input import AnalyzeInputMixin
+from analyze_preflight import AnalyzePreflightMixin
 from analyze_progress import AnalyzeProgressMixin
 from analyze_run_spec import AnalyzeRunMixin
 from analyze_suspend import AnalyzeSuspendMixin
@@ -81,9 +82,9 @@ _PREVIEW_TOKENS = {
 # ---------------------------------------------------------------------------
 # AnalyzeTab
 # ---------------------------------------------------------------------------
-class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzeProgressMixin,
-                 AnalyzeRunMixin, AnalyzeSuspendMixin, AnalyzeTabFormMixin,
-                 QWidget):
+class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
+                 AnalyzeProgressMixin, AnalyzeRunMixin, AnalyzeSuspendMixin,
+                 AnalyzeTabFormMixin, QWidget):
     """Left: pipeline options form.  Right: live subprocess log."""
 
     # Positive-latch completion signal for a job queue: emitted exactly once
@@ -474,11 +475,18 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzeProgressMixin,
         """
         raw_str = self._input_edit.text().strip()
         if not raw_str:
-            self._output_lbl.setText("—"); self._layout_lbl.setText(""); return
+            self._output_lbl.setText("—"); self._layout_lbl.setText("")
+            self.refresh_preflight(None)
+            return
         plan = plan_input_layout(Path(raw_str))
         self._output_lbl.setText(
             str(plan.output_dir) if plan.output_dir is not None else "—")
         self._layout_lbl.setText(plan.message)
+        # The same planner that names the output folder is what makes a pre-run
+        # report possible at all: it resolves that path without writing
+        # anything, so what an earlier run left there can be read while the
+        # form is still being filled in.
+        self.refresh_preflight(plan)
 
     # ------------------------------------------------------------------
     # Run / Stop

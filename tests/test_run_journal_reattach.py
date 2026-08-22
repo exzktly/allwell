@@ -124,17 +124,62 @@ def out_dir(tmp_path, monkeypatch):
 
 
 def test_a_recorded_address_survives_to_the_next_run(out_dir):
+    """The sequence a real second run takes, not a shortcut through it.
+
+    This test named the property it was pinning and then did not exercise it:
+    it recorded an address and read it straight back, inside one run. The app
+    never does that. ``PipelineRunner`` opens the journal *before*
+    ``RemoteRunner.spawn`` reads it, so the read that matters is the one on the
+    far side of the next ``open_run`` — and with the remote block reset there,
+    ``stored_remote_address`` returned ``None`` for ever and the re-attach could
+    not fire at all. The fixture has to carry the mess of the real order
+    (CLAUDE.md §7.1 #4); without the second ``open_run`` below, this passes
+    against code where the feature is unreachable.
+    """
     argv = ["--nuclear_token", "DAPI"]
+    digest = pipeline_argv_digest(argv)
+
+    # Run one records where it sent the work, then ends.
     J.record_remote(
         out_dir, run_id="run-stored", cache_key="k1", host_alias="hpc",
         remote_input_dir="/staging/datasets/k1", remote_output_dir=STORED,
-        argv_digest=pipeline_argv_digest(argv))
-    stored = J.stored_remote_address(out_dir, argv_digest=pipeline_argv_digest(argv))
+        argv_digest=digest)
+    J.close_run(out_dir, outcome="error")
+
+    # Run two opens its own journal first — as PipelineRunner does — and only
+    # then does spawn ask what the last run's address was.
+    J.open_run(out_dir, spec={}, mode="remote", input_dir="/data/in", argv=[])
+    stored = J.stored_remote_address(out_dir, argv_digest=digest)
+    assert stored is not None, (
+        "opening the next run's journal wiped the address it exists to carry")
     assert stored["remote_output_dir"] == STORED
 
     chosen, _ = _choose_remote_output_dir(
         FRESH, stored["remote_output_dir"], forced=False, remote_has_outputs=True)
     assert chosen == STORED
+
+
+def test_opening_a_new_run_keeps_the_address_and_drops_everything_else(out_dir):
+    """The carry-forward is exactly one field wide.
+
+    The record describes *this* run — a previous run's per-well states read as
+    this one's would be a straight misreport. The remote address is the one
+    thing that legitimately outlives the run that wrote it, because it names a
+    directory on another machine that is still there.
+    """
+    J.record_remote(
+        out_dir, run_id="run-stored", cache_key="k1", host_alias="hpc",
+        remote_input_dir="/staging/datasets/k1", remote_output_dir=STORED,
+        argv_digest="d1")
+    J.record_well(out_dir, "A01", "fetched")
+    J.close_run(out_dir, outcome="error", message="boom")
+
+    J.open_run(out_dir, spec={}, mode="remote", input_dir="/data/in", argv=[])
+    journal = J.read_journal(out_dir)
+    assert journal.remote["remote_output_dir"] == STORED
+    assert journal.wells == {}
+    assert journal.outcome is None and journal.message == ""
+    assert journal.is_open
 
 
 def test_a_reconfigured_run_gets_no_address(out_dir):
@@ -268,3 +313,33 @@ def test_the_fetch_report_falls_back_to_the_in_memory_state(tmp_path):
     assert counts["skipped"] == 1
     assert counts["never-announced"] == 1
     assert any("already complete locally" in ln for ln in lines)
+
+
+def test_cleanup_leaves_a_re_attached_run_dir_alone(tmp_path):
+    """A re-attached run must not delete the directory it borrowed.
+
+    Its output lives under a *previous* run's ``runs/<id>/``, so the path
+    ``verify_and_cleanup`` derives from this run's own ``run_id`` holds nothing
+    it produced. Removing that would report a cleanup, leave the real outputs
+    on the remote for ever, and take whatever else the other run's directory
+    still holds.
+    """
+    from services.remote_runner import _RemoteRun, OutputFilter, LocalInputMode
+
+    run = _RemoteRun(
+        run_id="run-new", cache_key="k", remote_input_dir="/r/in",
+        remote_output_dir=STORED, remote_pidfile="/r/runs/run-new/run.pid",
+        local_output_dir=tmp_path, local_input_mode=LocalInputMode.ZIP,
+        output_filter=OutputFilter.FULL, reattached=True,
+    )
+    assert run.reattached
+    assert run.remote_output_dir != f"/staging/runs/{run.run_id}/out", (
+        "the fixture must actually differ, or it proves nothing")
+
+    plain = _RemoteRun(
+        run_id="run-new", cache_key="k", remote_input_dir="/r/in",
+        remote_output_dir="/staging/runs/run-new/out",
+        remote_pidfile="/r/runs/run-new/run.pid", local_output_dir=tmp_path,
+        local_input_mode=LocalInputMode.ZIP, output_filter=OutputFilter.FULL,
+    )
+    assert not plain.reattached, "an ordinary run cleans up as it always did"

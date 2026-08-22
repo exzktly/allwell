@@ -242,11 +242,25 @@ def open_run(
     wise be read as this one's. What the previous run produced is still on disk
     and still authoritative — only the narrative is reset.
 
+    **The remote address is the exception, and it is not a detail.** It names a
+    directory on a worker host that outlives the run which filled it, which is
+    the entire reason it is written down: the next run of the same plate reads
+    it to find work a churned cache key would otherwise strand. Resetting it
+    here left :func:`stored_remote_address` returning ``None`` for ever — the
+    journal is opened by ``PipelineRunner`` *before* ``RemoteRunner.spawn``
+    reads it, so every run wiped the address a moment before asking for it, and
+    the one decision this record exists to drive could not fire at all. It is
+    carried forward instead; ``argv_digest`` is what decides whether it is still
+    applicable, and ``record_remote`` overwrites it with this run's own address
+    as soon as there is one.
+
     ``spec`` is a :meth:`services.run_spec.RunSpec.to_json` payload, kept so a
     run that dies can be offered back to the user with the settings it had; the
     same serialisation ``suspend_record`` and the job queue already use, so
     there is no second form-to-JSON mapping to keep in step.
     """
+    prior = _read_run_payload(output_dir) or {}
+    carried = prior.get("remote")
     _clear_wells(output_dir)
     now = time.time()
     payload = {
@@ -261,7 +275,7 @@ def open_run(
         "argv": [str(a) for a in argv],
         "spec": spec if isinstance(spec, dict) else {},
         "expected_wells": [str(w) for w in expected_wells],
-        "remote": {},
+        "remote": carried if isinstance(carried, dict) else {},
     }
     ok = _atomic_write_json(_run_path(output_dir), payload)
     _index_upsert(str(output_dir), opened_at=now, closed_at=None,

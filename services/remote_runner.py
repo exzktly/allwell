@@ -4282,6 +4282,14 @@ class _RemoteRun:
     # a well's output has to prove it did, rather than proving the old file is
     # still there.
     pre_run_artifacts: dict = field(default_factory=dict)
+    # Set when this run's output directory came from the journal rather than
+    # from its own ``run_id`` (see ``_choose_remote_output_dir``). Cleanup has
+    # to know: the run directory it would otherwise derive from ``run_id`` is
+    # not the one holding this run's output, so removing that would report a
+    # deletion while leaving the real outputs on the remote for ever — and the
+    # directory it *did* delete belongs to a run this one only borrowed a name
+    # from.
+    reattached: bool = False
     # Why each well the Fetcher declined to transfer was declined, ``well ->
     # reason``. "Why was this well not fetched?" was answerable only from
     # stdout as it streamed, which is no help once the log window is closed;
@@ -6705,10 +6713,12 @@ class RemoteRunner:
         # recomputing exactly that address — pointing them at a previous run's
         # directory would make this run adopt an allocation it does not own.
         argv_digest = pipeline_argv_digest(pipeline_argv)
+        own_output = remote_output
         remote_output = self._reattach_output_dir(
             remote_output, local_output_dir, pipeline_argv,
             argv_digest=argv_digest, log=log,
         )
+        reattached = remote_output != own_output
 
         # The sentinel is cleared with the same call that makes the directory:
         # ``run_id`` is deterministic in (input, arguments), so a re-run lands
@@ -6737,6 +6747,7 @@ class RemoteRunner:
             incremental=zipped.incremental,
             force=_force, force_wells=_forced_wells,
             pre_run_artifacts=_snapshot_local_artifacts(local_output_dir),
+            reattached=reattached,
         )
         # Where this run's work went, written down while the run is still
         # starting rather than reconstructed afterwards. Nothing local knew a
@@ -7080,15 +7091,30 @@ class RemoteRunner:
             log("[remote] --cleanup-remote=none — leaving everything in place.\n")
             return True
 
-        run_dir = f"{self.host.remote_staging_dir}/runs/{run.run_id}"
-        if dry_run:
-            self._log_would_delete(run_dir, label=f"run dir {run.run_id}", log=log)
-        else:
-            self._cache._ssh_run(
-                ["rm", "-rf", run_dir],
-                check=False,
+        # A re-attached run wrote its output into a directory named for a
+        # *previous* run (see ``_choose_remote_output_dir``), so the path this
+        # would otherwise derive from ``run_id`` holds nothing this run
+        # produced. Deleting it would report a cleanup that removed the wrong
+        # directory and left the real outputs on the remote for ever — and
+        # would take with it whatever else that other run's directory still
+        # holds. Say so and keep both rather than guess which is safe.
+        if run.reattached:
+            log(
+                f"[remote] skipping run-dir cleanup: this run re-attached to "
+                f"{run.remote_output_dir}, which belongs to an earlier run of "
+                f"this plate. Remove it by hand once you are done with it.\n"
             )
-            log(f"[remote] removed run dir {run.run_id}.\n")
+        else:
+            run_dir = f"{self.host.remote_staging_dir}/runs/{run.run_id}"
+            if dry_run:
+                self._log_would_delete(
+                    run_dir, label=f"run dir {run.run_id}", log=log)
+            else:
+                self._cache._ssh_run(
+                    ["rm", "-rf", run_dir],
+                    check=False,
+                )
+                log(f"[remote] removed run dir {run.run_id}.\n")
         if cleanup_mode == "all":
             cache_dir = self._cache.remote_dataset_dir(run.cache_key)
             if dry_run:

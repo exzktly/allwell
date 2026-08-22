@@ -292,13 +292,18 @@ def record_remote(
     remote_input_dir: str,
     remote_output_dir: str,
     argv_digest: str = "",
+    source_key: str = "",
 ) -> bool:
     """Record where on a remote host this run's work was sent.
 
-    The one part of the journal another decision reads back. ``argv_digest`` is
-    the same pipeline-argument hash ``remote_runner`` derives the run id from,
-    stored so a later run can tell "the same plate, configured the same way"
-    from "the same plate, configured differently" without re-deriving it.
+    The one part of the journal another decision reads back, and the two keys
+    beside the address are what make reading it back safe. ``argv_digest`` is
+    the pipeline-argument hash ``remote_runner`` derives the run id from, so a
+    later run can tell "configured the same way" from "configured differently"
+    without re-deriving it. ``source_key`` fingerprints the user's own input
+    archives, so it can also tell "the same images" from "the same plate,
+    re-exported" — a distinction the upload cache key cannot make, because that
+    one churns whenever staging rewrites as well as whenever the images change.
     """
     payload = _read_run_payload(output_dir)
     if payload is None:
@@ -310,6 +315,7 @@ def record_remote(
         "remote_input_dir": str(remote_input_dir),
         "remote_output_dir": str(remote_output_dir),
         "argv_digest": str(argv_digest),
+        "source_key": str(source_key),
         "recorded_at": time.time(),
     }
     return _atomic_write_json(_run_path(output_dir), payload)
@@ -443,14 +449,22 @@ def _read_wells(output_dir: Path | str) -> dict[str, WellRecord]:
 
 
 def stored_remote_address(
-    output_dir: Path | str, *, argv_digest: str,
+    output_dir: Path | str, *, argv_digest: str, source_key: str,
 ) -> dict | None:
-    """The remote address a prior run of this same configuration recorded.
+    """The remote address a prior run of the same images and settings recorded.
 
     ``None`` unless a journal exists, carries a remote block with an output
-    directory, and was run with the same pipeline arguments — a different
-    ``argv_digest`` means a differently-configured run whose outputs are not
-    interchangeable with this one's.
+    directory, and **both** keys match.
+
+    A differing ``argv_digest`` means a differently-configured run, whose
+    outputs are not interchangeable with this one's. A differing ``source_key``
+    means the images themselves changed, and that is the dangerous one: the
+    recorded directory holds results computed from pictures the user has since
+    replaced, and handing it back would let the pre-flight check find it
+    complete, skip the pipeline entirely, and fetch the old numbers as though
+    they were this run's. Both keys are required, and an empty ``source_key``
+    on either side matches nothing — a record written before the key existed,
+    or an input directory that cannot be read, declines rather than guesses.
 
     The caller must still verify the address against the remote before using
     it. This says where a previous run *sent* work, which is not the same claim
@@ -463,6 +477,9 @@ def stored_remote_address(
     if not remote.get("remote_output_dir"):
         return None
     if str(remote.get("argv_digest") or "") != str(argv_digest):
+        return None
+    stored_source = str(remote.get("source_key") or "")
+    if not stored_source or not source_key or stored_source != str(source_key):
         return None
     return dict(remote)
 

@@ -143,13 +143,14 @@ def test_a_recorded_address_survives_to_the_next_run(out_dir):
     J.record_remote(
         out_dir, run_id="run-stored", cache_key="k1", host_alias="hpc",
         remote_input_dir="/staging/datasets/k1", remote_output_dir=STORED,
-        argv_digest=digest)
+        argv_digest=digest, source_key="src1")
     J.close_run(out_dir, outcome="error")
 
     # Run two opens its own journal first — as PipelineRunner does — and only
     # then does spawn ask what the last run's address was.
     J.open_run(out_dir, spec={}, mode="remote", input_dir="/data/in", argv=[])
-    stored = J.stored_remote_address(out_dir, argv_digest=digest)
+    stored = J.stored_remote_address(
+        out_dir, argv_digest=digest, source_key="src1")
     assert stored is not None, (
         "opening the next run's journal wiped the address it exists to carry")
     assert stored["remote_output_dir"] == STORED
@@ -170,7 +171,7 @@ def test_opening_a_new_run_keeps_the_address_and_drops_everything_else(out_dir):
     J.record_remote(
         out_dir, run_id="run-stored", cache_key="k1", host_alias="hpc",
         remote_input_dir="/staging/datasets/k1", remote_output_dir=STORED,
-        argv_digest="d1")
+        argv_digest="d1", source_key="src1")
     J.record_well(out_dir, "A01", "fetched")
     J.close_run(out_dir, outcome="error", message="boom")
 
@@ -186,10 +187,12 @@ def test_a_reconfigured_run_gets_no_address(out_dir):
     J.record_remote(
         out_dir, run_id="run-stored", cache_key="k1", host_alias="hpc",
         remote_input_dir="/staging/datasets/k1", remote_output_dir=STORED,
-        argv_digest=pipeline_argv_digest(["--nuclear_token", "DAPI"]))
+        argv_digest=pipeline_argv_digest(["--nuclear_token", "DAPI"]),
+        source_key="src1")
     assert J.stored_remote_address(
         out_dir,
-        argv_digest=pipeline_argv_digest(["--nuclear_token", "NIR"])) is None
+        argv_digest=pipeline_argv_digest(["--nuclear_token", "NIR"]),
+        source_key="src1") is None
 
 
 # ── the churn this exists for, measured rather than asserted ────────────────
@@ -343,3 +346,59 @@ def test_cleanup_leaves_a_re_attached_run_dir_alone(tmp_path):
         local_input_mode=LocalInputMode.ZIP, output_filter=OutputFilter.FULL,
     )
     assert not plain.reattached, "an ordinary run cleans up as it always did"
+
+
+# ── the discrimination the whole re-attach rests on ─────────────────────────
+
+def _record_run_one(out_dir, in_dir):
+    from services.remote_runner import source_fingerprint
+    J.open_run(out_dir, spec={}, mode="remote", input_dir=in_dir, argv=[])
+    J.record_remote(
+        out_dir, run_id="run-OLD", cache_key="keyOLD", host_alias="hpc",
+        remote_input_dir="/staging/datasets/keyOLD", remote_output_dir=STORED,
+        argv_digest="d1", source_key=source_fingerprint(in_dir))
+    J.close_run(out_dir, outcome="ok")
+
+
+def _run_two_chooses(out_dir, in_dir):
+    from services.remote_runner import source_fingerprint
+    J.open_run(out_dir, spec={}, mode="remote", input_dir=in_dir, argv=[])
+    stored = J.stored_remote_address(
+        out_dir, argv_digest="d1", source_key=source_fingerprint(in_dir))
+    chosen, _ = _choose_remote_output_dir(
+        FRESH, (stored or {}).get("remote_output_dir", ""),
+        forced=False, remote_has_outputs=True)
+    return chosen
+
+
+def test_the_same_images_re_attach_even_though_the_upload_key_churned(tmp_path,
+                                                                     monkeypatch):
+    """The case the feature exists for, end to end over real archives."""
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    out = tmp_path / "out"
+    out.mkdir()
+    in_dir = _plate(tmp_path)
+    _record_run_one(out, in_dir)
+    assert _run_two_chooses(out, in_dir) == STORED
+
+
+def test_replaced_images_do_not_re_attach(tmp_path, monkeypatch):
+    """The case that would have handed back the previous run's numbers.
+
+    Nothing the user can see distinguishes this from the test above — same
+    plate, same folder, same settings, Force not ticked — and the upload cache
+    key churns identically in both. Only the input fingerprint separates them,
+    and getting it wrong means the pre-flight check finds the stale directory
+    complete, skips the pipeline, and reports the old results as this run's.
+    """
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    out = tmp_path / "out"
+    out.mkdir()
+    in_dir = _plate(tmp_path)
+    _record_run_one(out, in_dir)
+
+    for archive in sorted(in_dir.glob("*.zip")):
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("Exp_A01_F001_T01_DAPI.tif", b"corrected images")
+
+    assert _run_two_chooses(out, in_dir) == FRESH

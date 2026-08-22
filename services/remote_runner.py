@@ -153,6 +153,64 @@ def _well_zips_in(input_dir: Path):
 
 
 
+def fingerprint_archives(paths) -> str:
+    """Hash a set of archives by ``(basename, size, whole-second mtime)``.
+
+    One definition, two questions. :meth:`DatasetCache.cache_key` asks it of the
+    archives being *uploaded*, to decide whether the remote already holds them.
+    :func:`source_fingerprint` asks it of the archives the user actually has, to
+    decide whether two runs are looking at the same images at all. Those answers
+    diverge exactly when staging rewrites — which is the whole reason the second
+    one is needed — so they must not be two hashes that could drift apart in
+    any other way.
+    """
+    h = hashlib.blake2b(digest_size=16)
+    for path in paths:
+        stat = path.stat()
+        h.update(path.name.encode("utf-8"))
+        h.update(b"\0")
+        h.update(str(stat.st_size).encode("ascii"))
+        h.update(b"\0")
+        h.update(str(int(stat.st_mtime)).encode("ascii"))
+        h.update(b"\0")
+    return h.hexdigest()
+
+
+def source_fingerprint(input_dir: "Path | None") -> str:
+    """Fingerprint the user's **own** input archives, or ``""`` if unreadable.
+
+    The discriminator the re-attach turns on, and the reason it is not enough to
+    key a recorded remote address on the pipeline arguments alone.
+
+    The upload cache key churns for two completely different reasons: staging
+    rewrote the archives (same images, new files, new mtimes) or the user
+    replaced the images. Only the first is a reason to go looking for a previous
+    run's output — the second means the old outputs describe images that no
+    longer exist. Keyed on the argv alone the two are indistinguishable, and a
+    user who re-exported a plate with corrected images, changed no setting and
+    did not tick Force would have re-attached to the stale directory, been given
+    a full cache hit against it, and had the previous run's numbers fetched back
+    and reported as a successful run of the new data.
+
+    Hashing the input directory tells them apart: it does not move when staging
+    rewrites, and it moves the moment the images do. An input directory that
+    cannot be resolved or read fingerprints as ``""``, which never matches a
+    stored value, so the re-attach declines rather than guesses.
+    """
+    if input_dir is None:
+        return ""
+    try:
+        archives = sorted(_well_zips_in(Path(input_dir)))
+    except OSError:
+        return ""
+    if not archives:
+        return ""
+    try:
+        return fingerprint_archives(archives)
+    except OSError:
+        return ""
+
+
 def _scratch_dir() -> Path:
     """Base directory for AllWell's local scratch — input staging, transit
     output zips, and incremental merge temps.
@@ -1158,7 +1216,8 @@ def _classify_fetched_wells(
 
 
 def _record_remote_in_journal(
-    local_output_dir: Path, *, run: "_RemoteRun", host_alias: str, argv_digest: str,
+    local_output_dir: Path, *, run: "_RemoteRun", host_alias: str,
+    argv_digest: str, source_key: str,
 ) -> None:
     """Write this run's remote address into the output directory's journal.
 
@@ -1177,6 +1236,7 @@ def _record_remote_in_journal(
             remote_input_dir=run.remote_input_dir,
             remote_output_dir=run.remote_output_dir,
             argv_digest=argv_digest,
+            source_key=source_key,
         )
     except OSError:
         swallowed(f"could not record the remote address in {local_output_dir}")
@@ -3334,17 +3394,13 @@ class DatasetCache:
         """Stable hash of the (basename, size, mtime) triple for each
         well zip in ``zipped.zip_dir``. blake2b at 16 bytes is more than
         enough collision resistance for a per-user cache.
+
+        This hashes the archives as *uploaded*, which for a rewritten upload
+        means files staging created moments ago — see
+        :func:`fingerprint_archives` for the one that hashes what the user
+        actually has.
         """
-        h = hashlib.blake2b(digest_size=16)
-        for wz in zipped.well_zips:
-            stat = wz.stat()
-            h.update(wz.name.encode("utf-8"))
-            h.update(b"\0")
-            h.update(str(stat.st_size).encode("ascii"))
-            h.update(b"\0")
-            h.update(str(int(stat.st_mtime)).encode("ascii"))
-            h.update(b"\0")
-        return h.hexdigest()
+        return fingerprint_archives(zipped.well_zips)
 
     def remote_dataset_dir(self, key: str) -> str:
         """Return the remote-side absolute path for a cache entry.
@@ -6713,10 +6769,14 @@ class RemoteRunner:
         # recomputing exactly that address — pointing them at a previous run's
         # directory would make this run adopt an allocation it does not own.
         argv_digest = pipeline_argv_digest(pipeline_argv)
+        # Fingerprint what the *user* has, not what staging produced. See
+        # ``source_fingerprint``: the upload key churns for two different
+        # reasons and only one of them is a reason to re-attach.
+        source_key = source_fingerprint(_local_input_dir_from_argv(pipeline_argv))
         own_output = remote_output
         remote_output = self._reattach_output_dir(
             remote_output, local_output_dir, pipeline_argv,
-            argv_digest=argv_digest, log=log,
+            argv_digest=argv_digest, source_key=source_key, log=log,
         )
         reattached = remote_output != own_output
 
@@ -6756,7 +6816,7 @@ class RemoteRunner:
         # rewritten upload does not.
         _record_remote_in_journal(
             local_output_dir, run=self._run, host_alias=self.host.ssh_alias,
-            argv_digest=argv_digest,
+            argv_digest=argv_digest, source_key=source_key,
         )
 
         # v5.2.27: pre-flight cache-hit check. Before launching the
@@ -7537,6 +7597,7 @@ class RemoteRunner:
         pipeline_argv: list[str],
         *,
         argv_digest: str,
+        source_key: str,
         log: Callable[[str], None],
     ) -> str:
         """The remote output dir to use, preferring a recorded one that still
@@ -7553,7 +7614,7 @@ class RemoteRunner:
 
         try:
             stored = run_journal.stored_remote_address(
-                local_output_dir, argv_digest=argv_digest)
+                local_output_dir, argv_digest=argv_digest, source_key=source_key)
         except OSError:
             swallowed(f"could not read the run journal in {local_output_dir}")
             return fresh

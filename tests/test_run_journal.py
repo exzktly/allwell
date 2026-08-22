@@ -221,17 +221,18 @@ def test_wells_in_groups_states(out_dir):
 
 # ── the remote address ──────────────────────────────────────────────────────
 
-def _record_remote(out_dir, digest="d1", remote_out="/staging/runs/run-1/out"):
+def _record_remote(out_dir, digest="d1", remote_out="/staging/runs/run-1/out",
+                   source="src1"):
     return J.record_remote(
         out_dir, run_id="run-1", cache_key="k1", host_alias="hpc",
         remote_input_dir="/staging/datasets/k1",
-        remote_output_dir=remote_out, argv_digest=digest)
+        remote_output_dir=remote_out, argv_digest=digest, source_key=source)
 
 
 def test_a_recorded_address_comes_back_for_the_same_configuration(out_dir):
     _open(out_dir)
     _record_remote(out_dir)
-    stored = J.stored_remote_address(out_dir, argv_digest="d1")
+    stored = J.stored_remote_address(out_dir, argv_digest="d1", source_key="src1")
     assert stored["remote_output_dir"] == "/staging/runs/run-1/out"
     assert stored["host_alias"] == "hpc"
 
@@ -241,12 +242,42 @@ def test_a_different_configuration_gets_no_address(out_dir):
     output, so the earlier one's directory is not a place to re-attach to."""
     _open(out_dir)
     _record_remote(out_dir, digest="d1")
-    assert J.stored_remote_address(out_dir, argv_digest="d2") is None
+    assert J.stored_remote_address(
+        out_dir, argv_digest="d2", source_key="src1") is None
+
+
+def test_replaced_images_get_no_address(out_dir):
+    """The dangerous half, and the reason the argv digest alone is not enough.
+
+    The upload cache key churns both when staging rewrites the archives (same
+    images, new files) and when the user replaces the images. Keyed on the argv
+    alone those are indistinguishable, so a plate re-exported with corrected
+    images — no setting touched, Force not ticked — re-attached to the stale
+    directory, the pre-flight check found it complete, the pipeline never ran,
+    and the previous run's numbers came back reported as a successful run of
+    the new data.
+    """
+    _open(out_dir)
+    _record_remote(out_dir, source="images-v1")
+    assert J.stored_remote_address(
+        out_dir, argv_digest="d1", source_key="images-v2") is None
+    assert J.stored_remote_address(
+        out_dir, argv_digest="d1", source_key="images-v1") is not None
+
+
+def test_an_unreadable_input_dir_gets_no_address(out_dir):
+    """``source_fingerprint`` returns "" for an input it cannot read. That must
+    decline rather than match a record that also happens to carry ""."""
+    _open(out_dir)
+    _record_remote(out_dir, source="")
+    assert J.stored_remote_address(
+        out_dir, argv_digest="d1", source_key="") is None
 
 
 def test_no_remote_block_gets_no_address(out_dir):
     _open(out_dir)
-    assert J.stored_remote_address(out_dir, argv_digest="d1") is None
+    assert J.stored_remote_address(
+        out_dir, argv_digest="d1", source_key="src1") is None
 
 
 def test_recording_an_address_without_a_run_does_nothing(out_dir):

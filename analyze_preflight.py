@@ -178,6 +178,49 @@ class AnalyzePreflightMixin:
         self._render_preflight(headline)
         self._preflight_timer.start()
 
+    def _refresh_folder_banners(self, plan) -> None:
+        """Re-read both strips against the folder the form now names.
+
+        They answer one question between them — what does this folder already
+        hold — so they move together. The resume offer in particular *has* to
+        be recomputed here: it is scoped to the folder on the form, so a banner
+        left over from a different folder is precisely the contradiction the
+        scoping exists to prevent.
+        """
+        self.refresh_preflight(plan)
+        self.refresh_resume_banner()
+
+    def suspend_preflight(self) -> None:
+        """Hide the report for the duration of a run.
+
+        What it says is a statement about the folder as it stood *before* this
+        run, and the run is in the middle of making it untrue. Leaving it up
+        would have the sidebar describing the previous run while this one is
+        overwriting exactly what it describes.
+        """
+        banner = getattr(self, "_preflight_banner", None)
+        if banner is not None:
+            banner.setVisible(False)
+
+    def resync_preflight(self) -> None:
+        """Re-read the output folder once a run has settled, however it ended.
+
+        Without this the report is only ever computed from ``textChanged``, so
+        after a run the sidebar still describes the run *before* it — which on
+        a failure is the one case where the user most needs to be told what
+        just happened, and is told the opposite.
+
+        Two pieces of state have to go first. The coverage line was measured
+        against the pre-run output and the folder has not changed, so nothing
+        else would clear it. And a dismissal is scoped to a folder as it stood
+        when it was dismissed; a run that has since written to that folder is
+        new information, not the thing the user waved away.
+        """
+        self._preflight_coverage = ""
+        self._preflight_dismissed = ""
+        with swallow("re-reading the output folder after a run"):
+            self._refresh_output()
+
     def _preflight_headline(self, out_dir: Path) -> str:
         """What the last run against *out_dir* did, or ``""`` if none did.
 

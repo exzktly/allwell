@@ -255,12 +255,34 @@ def test_recording_an_address_without_a_run_does_nothing(out_dir):
 
 # ── the index ───────────────────────────────────────────────────────────────
 
-def test_an_open_run_is_listed_as_interrupted_and_a_closed_one_is_not(out_dir):
+def test_an_open_run_is_listed_as_unfinished_and_a_completed_one_is_not(out_dir):
     _open(out_dir)
-    assert [e["output_dir"] for e in J.interrupted_runs()] == [str(out_dir)]
+    assert [e["output_dir"] for e in J.unfinished_runs()] == [str(out_dir)]
 
     J.close_run(out_dir, outcome="ok")
-    assert J.interrupted_runs() == []
+    assert J.unfinished_runs() == []
+
+
+@pytest.mark.parametrize("outcome", J.UNFINISHED_OUTCOMES)
+def test_a_run_that_did_not_complete_stays_listed(out_dir, outcome):
+    """The gap this widening closes.
+
+    Only a killed run used to qualify, so a run that *failed* offered nothing —
+    even though the wells that got through are on disk exactly as they are
+    after a crash, and an incremental re-run would skip them. A failure is the
+    case where picking up matters most.
+    """
+    _open(out_dir)
+    J.close_run(out_dir, outcome=outcome)
+    assert [e["output_dir"] for e in J.unfinished_runs()] == [str(out_dir)]
+    assert J.read_journal(out_dir).is_unfinished
+
+
+def test_a_completed_run_is_not_unfinished(out_dir):
+    _open(out_dir)
+    J.close_run(out_dir, outcome="ok")
+    journal = J.read_journal(out_dir)
+    assert not journal.is_unfinished and not journal.is_open
 
 
 def test_forget_drops_the_pointer_and_keeps_the_record(out_dir):
@@ -269,7 +291,7 @@ def test_forget_drops_the_pointer_and_keeps_the_record(out_dir):
     _open(out_dir)
     J.record_well(out_dir, "A01", "fetched")
     J.forget(out_dir)
-    assert J.interrupted_runs() == []
+    assert J.unfinished_runs() == []
     assert J.read_journal(out_dir).wells["A01"].state == "fetched"
 
 
@@ -278,10 +300,10 @@ def test_a_corrupt_index_reads_as_empty(tmp_path, monkeypatch):
     path.parent.mkdir(parents=True)
     path.write_text("[[[")
     monkeypatch.setattr(J, "index_path", lambda: path)
-    assert J.interrupted_runs() == []
+    assert J.unfinished_runs() == []
 
 
 def test_re_running_the_same_folder_replaces_its_index_entry(out_dir):
     for _ in range(3):
         _open(out_dir)
-    assert len(J.interrupted_runs()) == 1
+    assert len(J.unfinished_runs()) == 1

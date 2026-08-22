@@ -96,6 +96,15 @@ WELL_STATES = (
 #: after a restart means the run died without closing its own record.
 RUN_OUTCOMES = ("ok", "error", "stopped", "suspended")
 
+#: The closed outcomes that leave work worth picking up. Every one of them
+#: leaves each finished well's CSV and out-zip on disk, which is what an
+#: incremental re-run reads as its done-set — so what separates them from
+#: ``"ok"`` is only that the plate is not done yet. Named once here rather than
+#: restated by each surface that offers a resume; the roster is the same shape
+#: as ``JobState.RESUMABLE``, which the job queue already applies to the same
+#: question.
+UNFINISHED_OUTCOMES = ("error", "stopped", "suspended")
+
 #: The run modes, matching what ``PipelineRunner`` actually launched.
 RUN_MODES = ("local", "remote", "remote-batched")
 
@@ -140,6 +149,18 @@ class RunJournal:
         one case nothing else on disk can report.
         """
         return self.closed_at is None
+
+    @property
+    def is_unfinished(self) -> bool:
+        """Whether this run left a plate that is not done.
+
+        Wider than :attr:`is_open` and the question a resume offer actually
+        asks. A run that failed, was stopped or was suspended closed its record
+        properly — the app was there — but the plate is no more finished than
+        if the process had been killed, and every well that got through is on
+        disk either way.
+        """
+        return self.is_open or self.outcome in UNFINISHED_OUTCOMES
 
     def wells_in(self, *states: str) -> tuple[str, ...]:
         """The wells currently recorded in any of *states*, sorted."""
@@ -470,15 +491,28 @@ def _index_upsert(
     return _atomic_write_json(index_path(), [entry, *keep][:_INDEX_MAX])
 
 
-def interrupted_runs() -> list[dict]:
-    """Index entries whose run never closed its record, newest first.
+def unfinished_runs() -> list[dict]:
+    """Index entries for runs that did not finish, newest first.
 
-    Each of these is a run the app was killed during. The entry alone is not
-    enough to act on — read the journal in the named directory for the spec and
-    the per-well detail — but it is what makes the app aware a run exists at
-    all, which is the thing no artefact on disk can say.
+    Two shapes qualify and the distinction matters to what the user is told,
+    not to whether they are offered. An entry with no ``closed_at`` is a run the
+    app was killed during — the case no artefact can report, since a killed run
+    and a run that simply processed fewer wells leave the same output. One
+    closed with any outcome in :data:`UNFINISHED_OUTCOMES` ended for a reason
+    the app was there to record.
+
+    All of them leave every finished well's CSV and out-zip on disk, which is
+    what ``--incremental`` reads as its done-set, so all of them can be picked
+    up. A failure especially: it is the case where the user most wants to carry
+    on, and offering nothing there was the gap this list exists to close.
+
+    The entry alone is not enough to act on — read the journal in the named
+    directory for the spec and the per-well detail.
     """
-    entries = [e for e in _load_index() if e.get("closed_at") is None]
+    entries = [
+        e for e in _load_index()
+        if e.get("closed_at") is None or e.get("outcome") in UNFINISHED_OUTCOMES
+    ]
     entries.sort(key=lambda e: float(e.get("opened_at") or 0.0), reverse=True)
     return entries
 

@@ -40,13 +40,13 @@ from services import run_journal
 from services.run_spec import RunSpec, RunSpecError
 from services.suspend_record import (
     SuspendedRun,
+    plate_name,
     same_dir,
     clear,
-    latest,
     load_all,
     save,
 )
-from well_viewer.core.safe import swallowed
+from well_viewer.core.safe import swallow, swallowed
 
 
 @dataclass(frozen=True)
@@ -62,6 +62,28 @@ class _Resumable:
     output_dir: str
     headline: str
     from_journal: bool
+
+
+#: How each unfinished outcome is said, in the user's terms rather than the
+#: journal's. Every one of them leaves the same thing behind — the wells that
+#: got through — so what differs is only the account of why it stopped, and a
+#: run that failed must not be described as one the app was closed during.
+_UNFINISHED_PHRASES = {
+    "error": "stopped on an error",
+    "stopped": "was stopped",
+    "suspended": "was suspended",
+}
+
+
+def _unfinished_headline(out_dir: str, journal) -> str:
+    """One sentence naming the plate, when the run started, and how it ended."""
+    when = time.strftime("%d %b %H:%M", time.localtime(journal.opened_at))
+    if journal.is_open:
+        ended = "never finished — All-Well closed while it was going"
+    else:
+        ended = _UNFINISHED_PHRASES.get(journal.outcome or "", "did not finish")
+    return (f"A run on {plate_name(out_dir)} started {when} and {ended}. "
+            f"Resuming continues it, computing only what is missing.")
 
 
 class AnalyzeSuspendMixin:
@@ -194,47 +216,87 @@ class AnalyzeSuspendMixin:
         """The run this banner is offering, from either of the two records.
 
         A **suspended** run was wound down deliberately and is recorded by
-        ``suspend_record``. An **interrupted** one was running when the app went
-        away, and until the run journal existed left nothing at all behind —
-        no banner, no offer, nothing naming the folder. The journal's index is
-        what makes that case visible, and the two are offered through one path
-        because they need the same thing done to them: the recorded spec,
-        restarted with incremental forced on.
+        ``suspend_record``. An **unfinished** one — killed, failed or stopped —
+        is recorded by the run journal, and until that existed left nothing at
+        all behind: no banner, no offer, nothing naming the folder. The two are
+        offered through one path because they need the same thing done to them,
+        the recorded spec restarted with incremental forced on.
 
-        The suspend record wins when both describe the same folder. It is the
-        more specific statement — the user asked for it — and a suspend also
-        leaves the journal closed as ``suspended``, so it would not be offered
-        here anyway.
+        **The folder on the form wins.** Both records are ordered newest-first
+        across every plate, so taking the newest outright can offer a run
+        against a dataset the user is not looking at — and with the pre-run
+        report sitting directly below describing a *different* folder, the
+        sidebar then contradicts itself and Resume acts on the plate that is
+        not on screen. So a record for the folder currently in the form is
+        preferred, and newest-anywhere is the fallback for a form with no
+        folder in it yet, which is the state the app opens in and the one this
+        banner was built for.
+
+        Between the two records for the same folder the suspend record wins: it
+        is the more specific statement, since the user asked for it.
         """
-        suspended = latest()
-        if suspended is not None:
-            return _Resumable(
-                spec=suspended.spec,
-                output_dir=suspended.output_dir,
+        current = self._current_output_dir()
+        offers = [*self._suspended_offers(), *self._journal_offers()]
+        if current:
+            for offer in offers:
+                if same_dir(offer.output_dir, current):
+                    return offer
+            # A folder is on the form and neither record describes it. Offering
+            # some other plate here would be answering a question the user did
+            # not ask; the pre-run report is what speaks for this folder.
+            return None
+        return offers[0] if offers else None
+
+    def _current_output_dir(self) -> str:
+        """The output folder the form is pointing at, or ``""``.
+
+        Read through the same planner the readout and the run both use, so
+        "which folder is on screen" cannot come to mean two things.
+        """
+        raw = ""
+        with swallow("reading the input field for the resume banner"):
+            raw = self._input_edit.text().strip()
+        if not raw:
+            return ""
+        with swallow("resolving the output folder for the resume banner"):
+            from services.input_resolution_service import plan_input_layout
+
+            plan = plan_input_layout(Path(raw))
+            return str(plan.output_dir) if plan.output_dir is not None else ""
+        return ""
+
+    def _suspended_offers(self) -> list[_Resumable]:
+        """Every suspended run on record, newest first."""
+        return [
+            _Resumable(
+                spec=run.spec,
+                output_dir=run.output_dir,
                 headline=(
-                    f"A suspended run is waiting: {suspended.describe()}. "
-                    f"Resuming continues it — only the field/timepoint groups "
-                    f"still missing are computed."),
+                    f"A suspended run is waiting: {run.describe()}. Resuming "
+                    f"continues it — only the field/timepoint groups still "
+                    f"missing are computed."),
                 from_journal=False,
             )
-        for entry in run_journal.interrupted_runs():
+            for run in load_all()
+        ]
+
+    def _journal_offers(self) -> list[_Resumable]:
+        """Every unfinished run the journal index knows of, newest first."""
+        offers: list[_Resumable] = []
+        for entry in run_journal.unfinished_runs():
             out_dir = str(entry.get("output_dir") or "")
             journal = run_journal.read_journal(out_dir) if out_dir else None
             # An index entry outlives the folder it names — a deleted or moved
             # output directory must not produce a banner offering to resume it.
-            if journal is None or not journal.spec or not journal.is_open:
+            if journal is None or not journal.spec or not journal.is_unfinished:
                 continue
-            when = time.strftime("%d %b %H:%M", time.localtime(journal.opened_at))
-            return _Resumable(
+            offers.append(_Resumable(
                 spec=journal.spec,
                 output_dir=out_dir,
-                headline=(
-                    f"A run in {Path(out_dir).name} started {when} and never "
-                    f"finished — All-Well closed while it was going. Resuming "
-                    f"continues it, computing only what is missing."),
+                headline=_unfinished_headline(out_dir, journal),
                 from_journal=True,
-            )
-        return None
+            ))
+        return offers
 
     def _journal_detail(self, offer: _Resumable) -> str:
         """The per-well line under the headline, or ``""`` when there is none.
@@ -286,6 +348,11 @@ class AnalyzeSuspendMixin:
             if completed and out_dir is not None:
                 clear(str(out_dir))
             self.refresh_resume_banner()
+            # The run has just rewritten the folder the pre-run report
+            # describes, so that report is now about the run before this
+            # one. Re-read it here rather than waiting for the input field
+            # to change, which after a run it never does.
+            self.resync_preflight()
         except Exception:
             swallowed()
 

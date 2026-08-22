@@ -885,11 +885,16 @@ and by `remote_fetch_report.txt` in the output folder.
 - Either way the wells already finished keep their results, so nothing you have
   waited for is thrown away — Suspend just also keeps the fields in progress and
   saves you re-entering the form.
-- **A run that ends because All-Well closed or crashed is offered back the same
-  way.** You do not have to have pressed Suspend. The same strip appears, saying
-  when the run started and how many wells it recorded as finished, failed, or
-  produced on a remote machine but never downloaded — and **Resume** picks it up
-  from there.
+- **A run that does not finish is offered back the same way, whatever ended it.**
+  You do not have to have pressed Suspend: a run that failed, one you stopped,
+  and one cut short because All-Well closed or crashed all leave the wells that
+  got through on disk, and all three are offered. The strip names the plate, says
+  when the run started and how it ended, and how many wells it recorded as
+  finished, failed, or produced on a remote machine but never downloaded —
+  **Resume** picks it up from there.
+- The offer is about **the folder in the input field**. If you have not chosen
+  one yet — the state the pane opens in — it offers the most recent unfinished
+  run on any plate, which is how you carry on with something from yesterday.
 - On success the app switches to Review and loads the output folder.
 - The **Job Queue** (Datasets pane) works the same way. **Pause queue** winds
   the running job down and keeps what it finished; the job stays in the list

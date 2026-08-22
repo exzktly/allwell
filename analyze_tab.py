@@ -133,6 +133,12 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
         self._fluor_rows: list[tuple[QLineEdit, QCheckBox, QCheckBox, QPushButton]] = []
 
         self._build_ui()
+        # Both strips are built hidden and were only ever refreshed by a run
+        # ending or the folder changing, so a record written in a previous
+        # session had nothing to reveal it: "close All-Well, reopen it
+        # tomorrow, and it offers to carry on" never survived the restart it
+        # names. Ask once, here, with the form still empty.
+        self._refresh_folder_banners(None)
         self._poll_log()
 
     @property
@@ -476,7 +482,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
         raw_str = self._input_edit.text().strip()
         if not raw_str:
             self._output_lbl.setText("—"); self._layout_lbl.setText("")
-            self.refresh_preflight(None)
+            self._refresh_folder_banners(None)
             return
         plan = plan_input_layout(Path(raw_str))
         self._output_lbl.setText(
@@ -486,7 +492,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
         # report possible at all: it resolves that path without writing
         # anything, so what an earlier run left there can be read while the
         # form is still being filled in.
-        self.refresh_preflight(plan)
+        self._refresh_folder_banners(plan)
 
     # ------------------------------------------------------------------
     # Run / Stop
@@ -562,6 +568,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
         self._stop_btn.setEnabled(True)
         self._suspend_btn.setEnabled(True)
         self.refresh_resume_banner()      # hidden while a run is going
+        self.suspend_preflight()          # ...and so is the pre-run report
         self._dashboard.set_status("Running…")
 
     def _expected_well_count(self, opts: dict) -> int:

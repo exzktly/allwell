@@ -3087,6 +3087,15 @@ field groups covered than the input was measured to hold, which means the
 filename schema is not parsing both sides the same way) is reported as such
 rather than printed as a ratio over 1.
 
+The report is refreshed on every change to the input field, once at construction,
+and again when a run settles (`resync_preflight`, from `_on_run_settled`) —
+hidden for the duration of the run in between. Without that last refresh it would
+only ever be computed from `textChanged`, which after a run never fires, so the
+sidebar would go on describing the run *before* the one that just ended: on a
+failure, reporting the previous run as completed. Its coverage line and any
+dismissal are dropped at the same moment, since both described the folder as it
+stood before this run rewrote it.
+
 That scope sentence is possible because `select_incremental_scope` is now
 plan-then-act like the rest of this module: `plan_loose_append` decides which
 loose images would be folded in and `plan_incremental_scope` reaches the verdict,
@@ -4207,18 +4216,45 @@ cannot be mistaken for each other; `tests/test_no_second_journal_vocabulary.py`
 fails on a second literal roster anywhere in the tree.
 
 `analyze_suspend.AnalyzeSuspendMixin` is the seam both records reach the user
-through. `_resumable` reads them in order — the suspend record first, since a
-suspend is the more specific statement and closes the journal as `suspended`
-anyway — and offers whichever it finds through one banner, one Resume and one
-Discard. So a run the app was **killed** during is offered back exactly as a
-suspended one is, which matches `JobState.RESUMABLE` already treating
-`INTERRUPTED` and `SUSPENDED` alike. Resuming forces `incremental=True` into the
-spec: that flag is not a preference here — without it the pipeline skips any well
-whose CSV exists and reprocesses nothing, so a half-done plate would come back
-still half-done with the run reporting success. The banner's second line is the
-journal's own per-well tally (finished / failed / never fetched), reported rather
-than derived, and it says nothing about how complete the *output* is — that is
-`completeness`'s answer and §6.1's pre-run readout carries it.
+through, and `_resumable` decides which run one banner, one Resume and one
+Discard are about.
+
+**What qualifies is "did not finish", not "was killed".** `unfinished_runs`
+returns an index entry with no `closed_at` — a run the process did not survive —
+*and* one closed with any outcome in `UNFINISHED_OUTCOMES` (`error`, `stopped`,
+`suspended`). All of them leave every finished well's CSV and out-zip on disk,
+which is what `--incremental` reads as its done-set, so what separates them from
+`ok` is only that the plate is not done yet. A failure especially: it is the case
+where a user most wants to carry on. That roster is named once in `run_journal`
+rather than restated by each surface, and it is the same shape as
+`JobState.RESUMABLE`, which the job queue already applies to the same question.
+
+**Which one is offered is decided by the folder on the form.** Both records are
+ordered newest-first across every plate, so taking the newest outright can
+propose a run against a dataset the user is not looking at — and with §6.1's
+pre-run report directly beneath describing a different folder, the sidebar
+contradicts itself and Resume acts on the plate that is not on screen. So a
+record matching the form's own output directory wins, a form naming a folder
+neither record describes gets no offer at all (the pre-run report is what speaks
+for that folder), and newest-anywhere is the fallback only for an empty form —
+the state the app opens in, and the one this banner exists for. That is also why
+both strips refresh together through `_refresh_folder_banners`, on every change
+to the input field and once at construction: a resume offer left over from a
+different folder is precisely the contradiction the scoping prevents, and a
+banner that is only ever refreshed by a run ending cannot reveal a record written
+in a previous session.
+
+Every offer names the **plate**, through `suspend_record.plate_name`. A dataset's
+output folder is `<plate>/out`, so naming the folder itself says "out" for
+essentially every run and says it identically for two different plates.
+
+Resuming forces `incremental=True` into the spec: that flag is not a preference
+here — without it the pipeline skips any well whose CSV exists and reprocesses
+nothing, so a half-done plate would come back still half-done with the run
+reporting success. The banner's second line is the journal's own per-well tally
+(finished / failed / never fetched), reported rather than derived, and it says
+nothing about how complete the *output* is — that is `completeness`'s answer and
+§6.1's pre-run readout carries it.
 
 `PipelineRunner._run_pipeline_thread` is where the journal opens and closes, one
 line after `_last_output_dir` is set and inside the `finally` beside

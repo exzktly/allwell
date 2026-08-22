@@ -284,3 +284,72 @@ def test_the_scope_line_is_the_planners_own_sentence(tab, plate):
     expected = plan_incremental_scope(tab._collect_run_options(), plate / "in")
     assert expected.reason, "the fixture should have loose images to fold in"
     assert tab._scope_line() == expected.reason
+
+
+# ── after a run ends ────────────────────────────────────────────────────────
+
+def _finish(tab, outcome, out_dir, in_dir, wells=()):
+    """Close a journal the way a run does, then settle the tab as _poll_log does."""
+    J.open_run(out_dir, mode="local", input_dir=in_dir, argv=[], spec={
+        "opts": {"filename_schema": SCHEMA, "filename_sep": SEP}})
+    for well, state in wells:
+        J.record_well(out_dir, well, state)
+    J.close_run(out_dir, outcome=outcome)
+    tab._run_ok = outcome == "ok"
+    tab._running = False
+    tab._on_run_settled()
+
+
+def test_the_readout_is_hidden_while_a_run_is_going(tab, plate):
+    """What it says describes the folder as it stood *before* the run, and the
+    run is in the middle of making that untrue."""
+    _journal(plate / "out", plate / "in", closed="ok")
+    tab._input_edit.setText(str(plate))
+    assert not tab._preflight_banner.isHidden()
+    tab._set_running_ui_state(remote=None)
+    assert tab._preflight_banner.isHidden()
+
+
+def test_the_readout_re_reads_the_folder_after_a_failure(tab, plate):
+    """The defect this closes: nothing re-read the folder after a run, because
+    the readout is driven by ``textChanged`` and after a run that never fires.
+    So a failure left the sidebar reporting the run *before* it — as completed.
+    """
+    _journal(plate / "out", plate / "in", closed="ok")
+    tab._input_edit.setText(str(plate))
+    assert "completed" in _text(tab)
+
+    tab._set_running_ui_state(remote=None)
+    _finish(tab, "error", plate / "out", plate / "in", wells=[("A01", "analysed")])
+
+    assert not tab._preflight_banner.isHidden()
+    assert "failed" in _text(tab)
+    assert "completed" not in _text(tab)
+
+
+def test_a_dismissal_does_not_outlive_the_run_that_followed_it(tab, plate):
+    """A dismissal is scoped to the folder as it stood when it was waved away.
+    A run has since written to that folder, which is new information."""
+    _journal(plate / "out", plate / "in", closed="ok")
+    tab._input_edit.setText(str(plate))
+    tab._dismiss_preflight()
+    assert tab._preflight_banner.isHidden()
+
+    _finish(tab, "error", plate / "out", plate / "in")
+    assert not tab._preflight_banner.isHidden()
+
+
+def test_the_stale_coverage_line_is_dropped_after_a_run(tab, plate):
+    """The folder has not changed, so nothing else would clear it — but it was
+    measured against the output as it stood before the run rewrote it."""
+    from analyze_preflight import _scan_coverage
+    _journal(plate / "out", plate / "in", closed="ok")
+    tab._input_edit.setText(str(plate))
+    tab._apply_pipeline_info({"execution_options": {
+        "filename_schema": SCHEMA, "filename_sep": SEP}})
+    block = _scan_coverage(plate / "in", plate / "out", tab._collect_run_options())
+    tab._on_coverage_scanned(str(plate / "out"), block)
+    assert "field group(s) already covered" in _text(tab)
+
+    _finish(tab, "error", plate / "out", plate / "in")
+    assert "field group(s) already covered" not in _text(tab)

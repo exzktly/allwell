@@ -80,6 +80,19 @@ def tab(qtbot):
     return widget
 
 
+def _point_at(tab, path) -> None:
+    """Point the form at *path* and let the field settle, as a user does.
+
+    Setting the text is a keystroke; the banners read the folder once the field
+    stops changing (``analyze_preflight._SETTLE_MS``). Driving the settle here
+    rather than waiting out a real 400 ms in every test runs the same code the
+    timer runs — it is not a way around the debounce.
+    """
+    tab._input_edit.setText(str(path))
+    tab._preflight_timer.stop()
+    tab.settle_folder_banners()
+
+
 def _text(tab) -> str:
     return tab._resume_label.text()
 
@@ -96,7 +109,7 @@ def test_a_run_that_did_not_finish_is_offered(tab, tmp_path, outcome, phrase):
     same thing behind, and only the account of why differs."""
     plate = _plate(tmp_path, "PlateA")
     _journal(plate, outcome=outcome)
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
     assert not tab._resume_banner.isHidden()
     assert phrase in _text(tab)
 
@@ -104,7 +117,7 @@ def test_a_run_that_did_not_finish_is_offered(tab, tmp_path, outcome, phrase):
 def test_a_completed_run_is_not_offered(tab, tmp_path):
     plate = _plate(tmp_path, "PlateA")
     _journal(plate, outcome="ok")
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
     assert tab._resume_banner.isHidden()
 
 
@@ -113,7 +126,7 @@ def test_the_per_well_tally_is_reported(tab, tmp_path):
     _journal(plate, outcome="error",
              wells=[("A01", "analysed"), ("A02", "failed"),
                     ("A03", "not-fetched")])
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
     assert "1 finished" in _text(tab)
     assert "1 failed" in _text(tab)
     assert "1 never fetched" in _text(tab)
@@ -130,7 +143,7 @@ def test_the_offer_stays_on_the_folder_in_the_form(tab, tmp_path):
     _journal(shown, outcome="error")
     _journal(other, outcome=None)          # newer, and still open
 
-    tab._input_edit.setText(str(shown))
+    _point_at(tab, shown)
     assert "PlateShown" in _text(tab)
     assert "PlateOther" not in _text(tab)
 
@@ -142,7 +155,7 @@ def test_no_offer_when_the_form_names_a_folder_with_no_record(tab, tmp_path):
     other = _plate(tmp_path, "PlateOther")
     _journal(other, outcome="error")
 
-    tab._input_edit.setText(str(tmp_path / "PlateShown"))
+    _point_at(tab, tmp_path / "PlateShown")
     assert tab._resume_banner.isHidden()
 
 
@@ -173,7 +186,7 @@ def test_the_offer_names_the_plate_not_the_output_folder(tab, tmp_path):
     identifies nothing and identifies it identically for two plates."""
     plate = _plate(tmp_path, "PlateA")
     _journal(plate, outcome="error")
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
     assert "PlateA" in _text(tab)
     assert "A run on out " not in _text(tab)
 
@@ -196,7 +209,7 @@ def test_resume_starts_a_run_against_the_offered_plate(tab, tmp_path, qtbot,
     whole risk of an unscoped offer is a run against the wrong plate."""
     plate = _plate(tmp_path, "PlateA")
     _journal(plate, outcome="error")
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
 
     started: list = []
     monkeypatch.setattr(type(tab), "start_run",
@@ -216,7 +229,7 @@ def test_resume_starts_a_run_against_the_offered_plate(tab, tmp_path, qtbot,
 def test_resuming_stops_the_offer_repeating(tab, tmp_path, qtbot, monkeypatch):
     plate = _plate(tmp_path, "PlateA")
     _journal(plate, outcome="error")
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
     monkeypatch.setattr(type(tab), "start_run", lambda self, spec, **kw: None)
 
     resume_btn = next(b for b in tab._resume_banner.findChildren(type(tab._run_btn))

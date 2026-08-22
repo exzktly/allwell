@@ -104,6 +104,12 @@ class WellReport:
     #: its empty output is a measurement, not a gap, so it must not be swept
     #: into a forced reprocess that would produce the same empty result.
     zero_cell_recorded: bool = False
+    #: The run journal recorded this well's output as produced remotely and
+    #: never transferred. Like ``zero_cell_recorded`` this is an *exemption from
+    #: forcing*, not a health state: the well needs a download, and re-running
+    #: the segmentation would spend hours reproducing output that already
+    #: exists on the far side.
+    not_fetched_recorded: bool = False
     #: Coverage sizes, carried so a finished scan can be written back as the
     #: dataset's completeness record without a second pass over the files.
     #: ``missing`` alone cannot reconstruct them: it says how much is absent,
@@ -150,10 +156,21 @@ def wells_needing_force(report: "DatasetReport") -> tuple[str, ...]:
 
     Wells that are merely *partial* are deliberately not here: an incremental
     run does fix those, at a fraction of the cost of re-segmenting them whole.
+
+    Two kinds of well are exempt, and both for the same reason — the run's own
+    records say a forced reprocess is the wrong remedy. One segmented zero cells
+    and would produce the same empty result again. The other was **produced on a
+    remote host and never transferred**: its output exists, the gap is the
+    download, and re-segmenting the plate to recover a failed transfer is hours
+    of compute for nothing. Leaving that well on this list would have the tool
+    print "this needs a fetch, not a reprocess" in its findings and then hand
+    the very same well to the button that reprocesses it.
     """
     return tuple(
         w.well for w in report.wells
-        if well_health(w) == "missing" and not w.zero_cell_recorded
+        if well_health(w) == "missing"
+        and not w.zero_cell_recorded
+        and not w.not_fetched_recorded
     )
 
 
@@ -714,6 +731,7 @@ def _scan_one_well(
         has_in_container=container is not None, has_out_zip=out_zip is not None,
         has_out_folder=out_folder is not None,
         zero_cell_recorded=evidence.segmented_zero_cells,
+        not_fetched_recorded=evidence.stranded_on_remote,
         intent=len(intent), covered_csv=len(csv_keys), covered_any=len(done),
     )
 

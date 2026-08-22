@@ -18,6 +18,8 @@ import zipfile
 
 import pytest
 
+from pathlib import Path
+
 from services import run_journal as J
 
 SCHEMA = "experiment:well:fov:timepoint:channel"
@@ -72,6 +74,19 @@ def tab(qtbot):
     return widget
 
 
+def _point_at(tab, path) -> None:
+    """Point the form at *path* and let the field settle, as a user does.
+
+    Setting the text is a keystroke; the banners read the folder once the field
+    stops changing (``analyze_preflight._SETTLE_MS``). Driving the settle here
+    rather than waiting out a real 400 ms in every test runs the same code the
+    timer runs — it is not a way around the debounce.
+    """
+    tab._input_edit.setText(str(path))
+    tab._preflight_timer.stop()
+    tab.settle_folder_banners()
+
+
 def _text(tab) -> str:
     return tab._preflight_label.text()
 
@@ -81,7 +96,7 @@ def _text(tab) -> str:
 def test_an_unfinished_run_is_reported(tab, plate):
     _journal(plate / "out", plate / "in",
              wells=[("A01", "fetched"), ("A02", "not-fetched")])
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
     assert not tab._preflight_banner.isHidden()
     assert "never finished" in _text(tab)
     assert "1 finished" in _text(tab) and "1 never fetched" in _text(tab)
@@ -97,14 +112,14 @@ def test_a_closed_run_is_reported_by_how_it_ended(tab, plate, outcome, phrase):
     """A run that ended is not the same as one that died, and the four ways it
     can end are not the same as each other."""
     _journal(plate / "out", plate / "in", closed=outcome)
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
     assert phrase in _text(tab) and "never finished" not in _text(tab)
 
 
 def test_a_folder_with_a_sidecar_but_no_journal_is_still_reported(tab, plate):
     """Every dataset produced before the journal existed. The feature would be
     useless on exactly the plates a user already has if this were silent."""
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
     assert not tab._preflight_banner.isHidden()
     assert "earlier run" in _text(tab)
 
@@ -115,18 +130,18 @@ def test_an_empty_output_folder_reports_nothing(tab, tmp_path):
     (root / "out").mkdir(parents=True)
     with zipfile.ZipFile(root / "in" / "A01.zip", "w") as zf:
         zf.writestr("Exp_A01_F001_T01_DAPI.tif", b"x")
-    tab._input_edit.setText(str(root))
+    _point_at(tab, root)
     assert tab._preflight_banner.isHidden()
 
 
 def test_dismissing_hides_it_until_the_folder_changes(tab, plate, tmp_path):
     _journal(plate / "out", plate / "in")
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
     assert not tab._preflight_banner.isHidden()
     tab._dismiss_preflight()
     assert tab._preflight_banner.isHidden()
-    tab._input_edit.setText(str(tmp_path))
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, tmp_path)
+    _point_at(tab, plate)
     assert tab._preflight_banner.isHidden(), "a dismissal must stick for its folder"
 
 
@@ -140,7 +155,7 @@ def test_clicking_load_puts_the_recorded_settings_on_the_form(tab, plate, qtbot)
     have to reach for the coverage scan below to parse the plate at all.
     """
     _journal(plate / "out", plate / "in")
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
 
     from PySide6.QtCore import Qt
     qtbot.mouseClick(tab._preflight_load_btn, Qt.LeftButton)
@@ -157,7 +172,7 @@ def test_the_run_scope_knobs_are_never_restored(tab, plate, qtbot):
     _journal(plate / "out", plate / "in", spec_opts={
         "filename_schema": SCHEMA, "filename_sep": SEP, "nuclear_token": "DAPI",
         "force": True, "force_wells": ["A01"], "incremental": True})
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
 
     from PySide6.QtCore import Qt
     qtbot.mouseClick(tab._preflight_load_btn, Qt.LeftButton)
@@ -169,10 +184,35 @@ def test_the_run_scope_knobs_are_never_restored(tab, plate, qtbot):
 
 
 def test_the_sidecar_is_the_fallback_when_there_is_no_journal(tab, plate, qtbot):
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
     from PySide6.QtCore import Qt
     qtbot.mouseClick(tab._preflight_load_btn, Qt.LeftButton)
     assert tab._collect_run_options()["filename_schema"] == SCHEMA
+
+
+def test_loading_settings_keeps_the_folder_the_user_chose(tab, plate, qtbot):
+    """The user picked this folder; the button offers its *settings*.
+
+    ``execution_options`` is a ``vars(args)`` snapshot, so it always carries the
+    ``input_dir`` of the machine the run happened on. Applying that replaced the
+    user's own folder with a path that need not exist locally at all — which is
+    every dataset produced by anyone else, and the sidecar fallback is exactly
+    the case where the run was someone else's.
+    """
+    (plate / "out" / "pipeline_info.json").write_text(json.dumps({
+        "execution_options": {
+            "filename_schema": SCHEMA, "filename_sep": SEP,
+            "nuclear_token": "DAPI",
+            "input_dir": "/Volumes/labshare/someone-else/PlateX/in"}}))
+    _point_at(tab, plate)
+    from PySide6.QtCore import Qt
+    qtbot.mouseClick(tab._preflight_load_btn, Qt.LeftButton)
+
+    assert tab._input_edit.text() == str(plate), (
+        "the folder on the form was replaced by the one the sidecar was "
+        "written on")
+    assert tab._collect_run_options()["nuclear_token"] == "DAPI", (
+        "the settings themselves must still apply")
 
 
 # ── tier two: coverage, and refusing to state a bad one ─────────────────────
@@ -199,7 +239,7 @@ def test_coverage_is_counted_from_the_resolved_input_dir(plate):
 def test_the_coverage_line_states_the_measured_fraction(tab, plate):
     from analyze_preflight import _scan_coverage
     _journal(plate / "out", plate / "in")
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
     tab._apply_pipeline_info({"execution_options": {
         "filename_schema": SCHEMA, "filename_sep": SEP}})
     block = _scan_coverage(plate / "in", plate / "out", tab._collect_run_options())
@@ -218,7 +258,7 @@ def test_an_incoherent_fraction_is_refused_rather_than_printed(tab, plate):
     stop being the same keys, and the two counts stop being comparable.
     """
     from analyze_preflight import _scan_coverage
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
     block = _scan_coverage(plate / "in", plate / "out", {
         "filename_schema": OTHER_SCHEMA, "filename_sep": SEP,
         "csv_prefix": "measurements"})
@@ -235,7 +275,7 @@ def test_an_unmeasurable_intent_claims_no_fraction(tab, plate):
     all gives a denominator of zero, and a denominator of zero gets no
     fraction rather than a fabricated one."""
     from analyze_preflight import _scan_coverage
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
     block = _scan_coverage(plate, plate / "out", {
         "filename_schema": SCHEMA, "filename_sep": SEP,
         "csv_prefix": "measurements"})
@@ -248,7 +288,7 @@ def test_an_unmeasurable_intent_claims_no_fraction(tab, plate):
 def test_a_scan_for_another_folder_is_discarded(tab, plate):
     from analyze_preflight import _scan_coverage
     _journal(plate / "out", plate / "in")
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
     before = _text(tab)
     block = _scan_coverage(plate / "in", plate / "out", {
         "filename_schema": SCHEMA, "filename_sep": SEP,
@@ -269,6 +309,48 @@ def test_typing_a_path_starts_at_most_one_scan(tab, plate, monkeypatch):
     assert starts == [], "a scan ran before the field settled"
 
 
+def test_typing_a_path_touches_no_files_until_it_settles(tab, plate, tmp_path):
+    """Every read behind these banners is per-folder, and the field changes once
+    per keystroke. Doing them inline cost 9.6 ms and 140 file opens for a single
+    character typed, on a machine with a dozen plates on record — the journal of
+    *every* plate ever run was being read to find the one on the form.
+
+    So the keystroke path must open nothing at all, and the settle must open
+    only what this folder needs.
+    """
+    _journal(plate / "out", plate / "in", closed="error")
+    for i in range(12):                       # other plates in the index
+        other = tmp_path / f"Other{i}" / "out"
+        other.mkdir(parents=True)
+        J.open_run(other, mode="local", input_dir=tmp_path / f"Other{i}" / "in",
+                   argv=[], spec={"opts": {}})
+
+    opened: list[str] = []
+    real = Path.open
+
+    def counting(self, *a, **k):
+        opened.append(str(self))
+        return real(self, *a, **k)
+
+    text = str(plate)
+    tab._input_edit.setText(text[:-1])        # warm, and arm the timer
+    tab._preflight_timer.stop()
+    Path.open = counting
+    try:
+        tab._input_edit.setText(text)         # one keystroke
+        assert opened == [], (
+            f"the keystroke path opened {len(opened)} file(s); it must defer "
+            f"every read to the settle")
+        tab._preflight_timer.stop()
+        tab.settle_folder_banners()
+        journals = [o for o in opened if "aw_journal" in o]
+        assert len(journals) <= 4, (
+            f"the settle read {len(journals)} journal files for one folder — "
+            f"the index is filtered before its entries are opened")
+    finally:
+        Path.open = real
+
+
 # ── the scope line comes from the planner, not from here ────────────────────
 
 def test_the_scope_line_is_the_planners_own_sentence(tab, plate):
@@ -278,7 +360,7 @@ def test_the_scope_line_is_the_planners_own_sentence(tab, plate):
     from services.input_resolution_service import plan_incremental_scope
     (plate / "in" / "Exp_A01_F003_T01_DAPI.tif").write_bytes(b"x")
     _journal(plate / "out", plate / "in")
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
     tab._apply_pipeline_info({"execution_options": {
         "filename_schema": SCHEMA, "filename_sep": SEP}})
     expected = plan_incremental_scope(tab._collect_run_options(), plate / "in")
@@ -304,7 +386,7 @@ def test_the_readout_is_hidden_while_a_run_is_going(tab, plate):
     """What it says describes the folder as it stood *before* the run, and the
     run is in the middle of making that untrue."""
     _journal(plate / "out", plate / "in", closed="ok")
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
     assert not tab._preflight_banner.isHidden()
     tab._set_running_ui_state(remote=None)
     assert tab._preflight_banner.isHidden()
@@ -316,7 +398,7 @@ def test_the_readout_re_reads_the_folder_after_a_failure(tab, plate):
     So a failure left the sidebar reporting the run *before* it — as completed.
     """
     _journal(plate / "out", plate / "in", closed="ok")
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
     assert "completed" in _text(tab)
 
     tab._set_running_ui_state(remote=None)
@@ -331,7 +413,7 @@ def test_a_dismissal_does_not_outlive_the_run_that_followed_it(tab, plate):
     """A dismissal is scoped to the folder as it stood when it was waved away.
     A run has since written to that folder, which is new information."""
     _journal(plate / "out", plate / "in", closed="ok")
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
     tab._dismiss_preflight()
     assert tab._preflight_banner.isHidden()
 
@@ -344,7 +426,7 @@ def test_the_stale_coverage_line_is_dropped_after_a_run(tab, plate):
     measured against the output as it stood before the run rewrote it."""
     from analyze_preflight import _scan_coverage
     _journal(plate / "out", plate / "in", closed="ok")
-    tab._input_edit.setText(str(plate))
+    _point_at(tab, plate)
     tab._apply_pipeline_info({"execution_options": {
         "filename_schema": SCHEMA, "filename_sep": SEP}})
     block = _scan_coverage(plate / "in", plate / "out", tab._collect_run_options())

@@ -129,12 +129,16 @@ class AnalyzePreflightMixin:
         self._preflight_banner = banner
         banner.setVisible(False)
 
-        self._preflight_signals = _ScanSignals()
+        # Parented to the banner so its C++ lifetime is the widget's. A scan
+        # thread outlives the widget whenever the pane is closed mid-scan, and
+        # an unparented signals object is collected the moment Python drops it
+        # — leaving the thread to emit into a deleted C++ object.
+        self._preflight_signals = _ScanSignals(banner)
         self._preflight_signals.done.connect(self._on_coverage_scanned)
         self._preflight_timer = QTimer(banner)
         self._preflight_timer.setSingleShot(True)
         self._preflight_timer.setInterval(_SETTLE_MS)
-        self._preflight_timer.timeout.connect(self._start_coverage_scan)
+        self._preflight_timer.timeout.connect(self.settle_folder_banners)
         #: Output dir the visible report describes; guards a scan that lands
         #: after the user has moved on to a different folder.
         self._preflight_dir: str = ""
@@ -143,16 +147,22 @@ class AnalyzePreflightMixin:
         return banner
 
     # ── tier one: the journal, immediately ───────────────────────────────
-    def refresh_preflight(self, plan) -> None:
-        """Report on the folder *plan* resolves to, and queue the scan behind it.
+    def _refresh_folder_banners(self, plan, *, immediate: bool = False) -> None:
+        """Note the folder the form now names; read it once the field settles.
 
-        Takes the whole :class:`~services.input_resolution_service.InputPlan`
-        rather than a path, because the scan needs the planner's **resolved**
-        input directory and not the raw folder the user typed. Handing it the
-        raw path made it read a directory holding ``in/`` and ``out/`` as
-        though it were the plate: no well containers were found, so the field
-        groups it counted came only from the output, and the readout printed
-        more groups covered than the input was ever measured to hold.
+        Both strips answer one question between them — what does this folder
+        already hold — so they move together, and **neither touches the disk
+        from here**. This runs on `textChanged`, which fires once per keystroke,
+        and every read behind these banners is per-folder: the journal, the
+        resume index, the loose-file plan. Doing them inline cost 9.6 ms and 140
+        file opens for a single character typed into the path field, on a
+        machine with a dozen plates on record.
+
+        So this does only what must be immediate — remember the target, and take
+        a stale banner down — and starts the settle timer. Picking a folder with
+        Browse fires `textChanged` once and the delay is imperceptible; typing a
+        path fires it thirty times and now costs one read at the end instead of
+        thirty times the whole set.
         """
         banner = getattr(self, "_preflight_banner", None)
         if banner is None:
@@ -161,10 +171,39 @@ class AnalyzePreflightMixin:
         self._preflight_input = str(getattr(plan, "input_dir", "") or "")
         target = str(output_dir) if output_dir is not None else ""
         if target != self._preflight_dir:
-            # A different folder: whatever the last scan said no longer applies.
+            # A different folder: nothing either banner is showing applies to
+            # it, and leaving them up until the timer fires would have the
+            # sidebar describing a plate the form no longer names.
             self._preflight_coverage = ""
+            banner.setVisible(False)
+            self._hide_resume_banner()
         self._preflight_dir = target
         self._preflight_timer.stop()
+        if immediate:
+            # Construction and end-of-run are single events, not a keystroke
+            # storm: there is nothing more coming, and making the user wait out
+            # a settle delay to be told what is already on disk is delay for
+            # nothing.
+            self.settle_folder_banners()
+        else:
+            self._preflight_timer.start()
+
+    def settle_folder_banners(self) -> None:
+        """Read the folder and paint both strips. The timer's only job.
+
+        Public because it is also the seam a test drives: waiting out a real
+        400 ms in every test that types a path is dead time, and calling this is
+        the same code the timer calls rather than a way around it.
+        """
+        banner = getattr(self, "_preflight_banner", None)
+        if banner is None:
+            return
+        target = self._preflight_dir
+        # The resume offer is scoped to this same folder, and it is handed the
+        # already-resolved path rather than re-deriving it: `plan_input_layout`
+        # walks the input volume, and doing that twice per settle is one walk
+        # too many.
+        self.refresh_resume_banner(current_output_dir=target)
         if not target or getattr(self, "_running", False):
             banner.setVisible(False)
             return
@@ -176,19 +215,7 @@ class AnalyzePreflightMixin:
             banner.setVisible(False)
             return
         self._render_preflight(headline)
-        self._preflight_timer.start()
-
-    def _refresh_folder_banners(self, plan) -> None:
-        """Re-read both strips against the folder the form now names.
-
-        They answer one question between them — what does this folder already
-        hold — so they move together. The resume offer in particular *has* to
-        be recomputed here: it is scoped to the folder on the form, so a banner
-        left over from a different folder is precisely the contradiction the
-        scoping exists to prevent.
-        """
-        self.refresh_preflight(plan)
-        self.refresh_resume_banner()
+        self._start_coverage_scan()
 
     def suspend_preflight(self) -> None:
         """Hide the report for the duration of a run.
@@ -219,7 +246,7 @@ class AnalyzePreflightMixin:
         self._preflight_coverage = ""
         self._preflight_dismissed = ""
         with swallow("re-reading the output folder after a run"):
-            self._refresh_output()
+            self._refresh_output(immediate=True)
 
     def _preflight_headline(self, out_dir: Path) -> str:
         """What the last run against *out_dir* did, or ``""`` if none did.
@@ -315,7 +342,15 @@ class AnalyzePreflightMixin:
                 block = _scan_coverage(Path(in_dir), Path(target), opts)
             except Exception:
                 swallowed(f"scanning {target} for the pre-run readout")
-            signals.done.emit(target, block)
+            try:
+                signals.done.emit(target, block)
+            except RuntimeError:
+                # The pane was closed while this scan was walking the plate, so
+                # the receiver's C++ half is gone. There is nothing to deliver
+                # the answer to and nothing to repair — but the emit must not
+                # raise out of a daemon thread, where it would surface as an
+                # unhandled traceback with no context.
+                swallowed(f"pre-run scan of {target} outlived its window")
 
         threading.Thread(target=_work, name="aw-preflight-scan",
                          daemon=True).start()
@@ -388,7 +423,8 @@ class AnalyzePreflightMixin:
             # names by the wrong field order, and the coverage line reported a
             # dataset it had mis-read. The journal's ``opts`` *are* a
             # ``vars(args)`` snapshot, which is exactly what that block holds.
-            self._apply_pipeline_info({"execution_options": applied})
+            self._apply_pipeline_info({"execution_options": applied},
+                                      set_input_path=False)
         except Exception:
             swallowed("applying a previous run's settings")
             self._log_line(

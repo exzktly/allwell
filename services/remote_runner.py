@@ -7129,14 +7129,20 @@ class RemoteRunner:
         # back. A transient connection blip during a per-well rsync no
         # longer requires a full pipeline re-run — we re-pull the
         # missing files using the same retry-aware helpers.
-        # Record what happened to every well before verify passes judgement on
-        # it, so the classification survives whether or not verify fails.
-        self._reconcile_fetch(log=log)
-
         missing = self._verify_local_manifest(log=log)
         if missing:
             self._retry_missing_wells(missing, log=log)
             missing = self._verify_local_manifest(log=log)
+
+        # Written *after* the retry, because the retry is what turns a failed
+        # pull into a fetched well and the report has to describe the outcome
+        # rather than the low-water mark. Run before it, this recorded a
+        # rescued well as `not-fetched` permanently: the journal entry the
+        # retry wrote was correct and the report rendered from the state three
+        # lines earlier. The per-well journal entries are written as each
+        # decision is made, so a run that dies before reaching here still has
+        # them — this is only the rendering.
+        self._reconcile_fetch(log=log)
         if missing:
             log(
                 f"[remote] keeping remote files for retry — verification failed: "
@@ -7466,11 +7472,26 @@ class RemoteRunner:
             remote_wells, run.local_output_dir,
             announced=run.expected_wells, skipped=run.skipped_wells)
         lines.extend(well_lines)
+        # Every non-zero bucket, so the parts sum to the whole. Naming a fixed
+        # four dropped `failed` — which this run's own Fetcher records when a
+        # well arrives and cannot be materialised — so a materialise failure
+        # vanished from a tally printed directly under "wells with output on
+        # the remote: N", and the numbers no longer added up to N.
+        _PHRASES = {
+            "fetched": "fetched",
+            "skipped": "skipped (already complete locally)",
+            "failed": "failed",
+            "not-fetched": "not fetched",
+            "analysed": "analysed but not transferred",
+            "uploaded": "uploaded only",
+            "never-announced": "never announced completion",
+        }
+        parts = [f"{counts[k]} {_PHRASES.get(k, k)}"
+                 for k in _PHRASES if counts.get(k)]
         summary = (
-            f"[remote] fetch reconciliation: {counts['fetched']} fetched, "
-            f"{counts['skipped']} skipped (already complete locally), "
-            f"{counts['not-fetched']} not fetched, "
-            f"{counts['never-announced']} never announced completion.\n"
+            f"[remote] fetch reconciliation: "
+            f"{', '.join(parts) if parts else 'no wells'}"
+            f" (of {len(remote_wells)} with output on the remote).\n"
         )
         log(summary)
         report = run.local_output_dir / "remote_fetch_report.txt"

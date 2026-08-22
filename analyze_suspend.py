@@ -195,16 +195,33 @@ class AnalyzeSuspendMixin:
         banner.setVisible(False)
         return banner
 
-    def refresh_resume_banner(self) -> None:
+    def _hide_resume_banner(self) -> None:
+        """Take the strip down without reading anything.
+
+        The folder on the form has changed and nothing on screen describes the
+        new one yet; leaving the old offer up until the read settles would show
+        an offer for a plate the form no longer names.
+        """
+        banner = getattr(self, "_resume_banner", None)
+        if banner is not None:
+            banner.setVisible(False)
+
+    def refresh_resume_banner(self, *, current_output_dir: str | None = None) -> None:
         """Show or hide the banner against what is on disk right now.
 
-        Called at construction and after every run finishes, so a completed
-        plate stops offering to resume itself and a freshly suspended one starts.
+        Called at construction, once the input field settles, and after every
+        run finishes — so a completed plate stops offering to resume itself and
+        a freshly suspended one starts.
+
+        ``current_output_dir`` is the folder the form names, already resolved.
+        The caller usually has it, and re-deriving it here means walking the
+        input volume a second time for one banner; ``None`` means "work it out",
+        which is what the construction-time call needs.
         """
         banner = getattr(self, "_resume_banner", None)
         if banner is None:
             return
-        offer = self._resumable()
+        offer = self._resumable(current_output_dir)
         if offer is None or getattr(self, "_running", False):
             banner.setVisible(False)
             return
@@ -212,7 +229,7 @@ class AnalyzeSuspendMixin:
         banner.setVisible(True)
 
     # ── what there is to resume ──────────────────────────────────────────
-    def _resumable(self) -> _Resumable | None:
+    def _resumable(self, current: str | None = None) -> _Resumable | None:
         """The run this banner is offering, from either of the two records.
 
         A **suspended** run was wound down deliberately and is recorded by
@@ -235,16 +252,20 @@ class AnalyzeSuspendMixin:
         Between the two records for the same folder the suspend record wins: it
         is the more specific statement, since the user asked for it.
         """
-        current = self._current_output_dir()
-        offers = [*self._suspended_offers(), *self._journal_offers()]
+        if current is None:
+            current = self._current_output_dir()
+        # Filtering by folder *before* reading anything is the point: the index
+        # holds an entry per plate ever run, and reading every one of their
+        # journals to then discard all but one turned a keystroke into a
+        # hundred-odd file opens. With a folder on the form there is exactly one
+        # candidate, so read exactly one.
+        offers = [*self._suspended_offers(only_dir=current),
+                  *self._journal_offers(only_dir=current)]
         if current:
-            for offer in offers:
-                if same_dir(offer.output_dir, current):
-                    return offer
             # A folder is on the form and neither record describes it. Offering
             # some other plate here would be answering a question the user did
             # not ask; the pre-run report is what speaks for this folder.
-            return None
+            return offers[0] if offers else None
         return offers[0] if offers else None
 
     def _current_output_dir(self) -> str:
@@ -265,8 +286,8 @@ class AnalyzeSuspendMixin:
             return str(plan.output_dir) if plan.output_dir is not None else ""
         return ""
 
-    def _suspended_offers(self) -> list[_Resumable]:
-        """Every suspended run on record, newest first."""
+    def _suspended_offers(self, *, only_dir: str = "") -> list[_Resumable]:
+        """Suspended runs on record, newest first; one folder's when named."""
         return [
             _Resumable(
                 spec=run.spec,
@@ -278,13 +299,21 @@ class AnalyzeSuspendMixin:
                 from_journal=False,
             )
             for run in load_all()
+            if not only_dir or same_dir(run.output_dir, only_dir)
         ]
 
-    def _journal_offers(self) -> list[_Resumable]:
-        """Every unfinished run the journal index knows of, newest first."""
+    def _journal_offers(self, *, only_dir: str = "") -> list[_Resumable]:
+        """Unfinished runs the index knows of, newest first; one folder's when named.
+
+        The folder filter is applied to the index entry, before the journal it
+        names is opened. The index is one file; the journals are one directory
+        read each, per plate ever run.
+        """
         offers: list[_Resumable] = []
         for entry in run_journal.unfinished_runs():
             out_dir = str(entry.get("output_dir") or "")
+            if only_dir and not (out_dir and same_dir(out_dir, only_dir)):
+                continue
             journal = run_journal.read_journal(out_dir) if out_dir else None
             # An index entry outlives the folder it names — a deleted or moved
             # output directory must not produce a banner offering to resume it.

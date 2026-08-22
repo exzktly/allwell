@@ -138,7 +138,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
         # session had nothing to reveal it: "close All-Well, reopen it
         # tomorrow, and it offers to carry on" never survived the restart it
         # names. Ask once, here, with the form still empty.
-        self._refresh_folder_banners(None)
+        self._refresh_folder_banners(None, immediate=True)
         self._poll_log()
 
     @property
@@ -470,7 +470,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
             self._input_edit.setEnabled(True)
             self._autofill_from_input_scan(d)
 
-    def _refresh_output(self) -> None:
+    def _refresh_output(self, *, immediate: bool = False) -> None:
         """Show where the run will read from and write to, and what it will do.
 
         Every word of this comes from ``plan_input_layout`` — the same function
@@ -482,7 +482,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
         raw_str = self._input_edit.text().strip()
         if not raw_str:
             self._output_lbl.setText("—"); self._layout_lbl.setText("")
-            self._refresh_folder_banners(None)
+            self._refresh_folder_banners(None, immediate=immediate)
             return
         plan = plan_input_layout(Path(raw_str))
         self._output_lbl.setText(
@@ -492,7 +492,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
         # report possible at all: it resolves that path without writing
         # anything, so what an earlier run left there can be read while the
         # form is still being filled in.
-        self._refresh_folder_banners(plan)
+        self._refresh_folder_banners(plan, immediate=immediate)
 
     # ------------------------------------------------------------------
     # Run / Stop

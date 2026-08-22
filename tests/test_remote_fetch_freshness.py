@@ -312,3 +312,35 @@ def test_a_completion_marker_is_parsed_and_canonicalised(label, canonical):
     assert m is not None, line
     from util.well_token import canonical_well_label
     assert canonical_well_label(m.group("well")) == canonical
+
+
+def test_the_summary_accounts_for_every_well_it_names(tmp_path, monkeypatch):
+    """The parts must sum to the whole it prints beside them.
+
+    The summary named a fixed four outcomes, so a well recorded ``failed`` — the
+    state this run's own Fetcher writes when output arrives and cannot be
+    materialised — appeared in the per-well lines and in none of the numbers.
+    The tally sat directly under "wells with output on the remote: N" and no
+    longer added up to N, which is a report quietly dropping the one outcome a
+    user most needs to see.
+    """
+    import re
+
+    from services import run_journal as J
+
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    run = _run(tmp_path)
+    out = run.local_output_dir
+    J.open_run(out, spec={}, mode="remote", input_dir=tmp_path / "in")
+    J.record_well(out, "A01", "fetched")
+    J.record_well(out, "A02", "failed", reason="materialize failed")
+    J.record_well(out, "A03", "not-fetched", reason="the pull failed")
+
+    summary = rr.RemoteRunner._reconcile_fetch(
+        _Reconciler(run, {"A01", "A02", "A03"}), log=lambda _m: None)
+
+    assert "1 failed" in summary, f"a failed well vanished from: {summary}"
+    tally = summary.split(": ", 1)[1].split(" (of ", 1)[0]
+    counted = sum(int(n) for n in re.findall(r"(\d+) ", tally))
+    assert counted == 3, (
+        f"the summary accounts for {counted} of 3 wells: {summary}")

@@ -402,3 +402,51 @@ def test_replaced_images_do_not_re_attach(tmp_path, monkeypatch):
             zf.writestr("Exp_A01_F001_T01_DAPI.tif", b"corrected images")
 
     assert _run_two_chooses(out, in_dir) == FRESH
+
+
+# ── reachability: is the decision reached from the app's own sequence? ───────
+
+def test_the_stored_address_survives_the_app_s_real_call_order(tmp_path, monkeypatch):
+    """Drive the two callers in the order the app runs them, not the unit's.
+
+    This is the test whose absence let the feature ship dead. Everything about
+    the re-attach was unit-tested — the decision function against hand-supplied
+    arguments, the journal against its own API — and all of it passed while the
+    app could not reach the branch at all, because two different modules touch
+    this record and nothing exercised them in sequence:
+
+        PipelineRunner._run_pipeline_thread -> run_journal.open_run
+        RemoteRunner.spawn                  -> stored_remote_address
+
+    ``open_run`` reset the block ``spawn`` was about to read. Both functions
+    were correct in isolation; the order was the defect, and an order is not
+    something a unit test of either end can see.
+    """
+    from services import pipeline_runner as PR
+    from services.remote_runner import source_fingerprint
+
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    out = tmp_path / "out"
+    out.mkdir()
+    in_dir = _plate(tmp_path)
+
+    # Run one, through the runner's own opener rather than a hand-rolled one.
+    runner = PR.PipelineRunner()
+    runner._journal_spec = {"opts": {}}
+    runner._open_journal(in_dir, out, ["--x"], {})
+    J.record_remote(
+        out, run_id="run-OLD", cache_key="keyOLD", host_alias="hpc",
+        remote_input_dir="/staging/datasets/keyOLD", remote_output_dir=STORED,
+        argv_digest="d1", source_key=source_fingerprint(in_dir))
+    runner._close_journal()
+
+    # Run two: the runner opens the journal first, exactly as it does in
+    # production, and only then does spawn ask what the last run recorded.
+    runner._open_journal(in_dir, out, ["--x"], {})
+    stored = J.stored_remote_address(
+        out, argv_digest="d1", source_key=source_fingerprint(in_dir))
+
+    assert stored is not None, (
+        "opening this run's journal destroyed the address the next read needs; "
+        "the re-attach branch exists but the app cannot reach it")
+    assert stored["remote_output_dir"] == STORED

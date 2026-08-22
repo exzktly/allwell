@@ -476,11 +476,15 @@ def stored_remote_address(
     remote = journal.remote or {}
     if not remote.get("remote_output_dir"):
         return None
-    if str(remote.get("argv_digest") or "") != str(argv_digest):
-        return None
-    stored_source = str(remote.get("source_key") or "")
-    if not stored_source or not source_key or stored_source != str(source_key):
-        return None
+    for name, given in (("argv_digest", argv_digest), ("source_key", source_key)):
+        stored = str(remote.get(name) or "")
+        # An empty key on either side is "I could not determine this", never
+        # "it matched". A record written before a key existed, and an input
+        # directory that cannot be read, both look like this — and treating
+        # the absence of evidence as agreement is how a reuse decision fires
+        # in exactly the situation nobody understood.
+        if not stored or not given or stored != str(given):
+            return None
     return dict(remote)
 
 

@@ -373,6 +373,26 @@ Analyze at a raw `.ome.tif` just shows a reminder to convert it.
 
 You can also explicitly override the output folder.
 
+**If that output folder already holds a run, a strip above the form says so
+before you press anything.** It names when the last run against this folder
+started and how it ended — completed, failed, stopped, suspended, or *never
+finished*, which means All-Well was closed while it was going — followed by how
+many wells it recorded as finished, failed, or produced on a remote machine and
+never downloaded. A moment later a second sentence adds the real coverage: how
+many wells are complete, and how many of the input's field groups the output
+already accounts for, so you can see how much a re-run has left to do. If new
+images have been dropped in since, it also says what the run will do about them,
+in the same words the run log will use.
+
+**Load these settings** fills the form with the settings that produced that
+output — from the run's own record where there is one, otherwise from the
+`pipeline_info.json` beside it, so it works on plates you ran long ago. Nothing
+changes until you press it, so anything you have already typed is safe. The
+reprocessing options — **force**, the per-well force list, and **incremental** —
+are deliberately *not* restored: they describe what the last run was told to do,
+not what you want this one to do. A plate that was forced once would otherwise
+be forced again the moment you loaded its settings back. **Dismiss** hides the strip for that folder.
+
 ### 3. Channel tokens
 
 - **Nuclear (segmentation) channel.** The token used to find the image
@@ -866,6 +886,16 @@ and by `remote_fetch_report.txt` in the output folder.
 - Either way the wells already finished keep their results, so nothing you have
   waited for is thrown away — Suspend just also keeps the fields in progress and
   saves you re-entering the form.
+- **A run that does not finish is offered back the same way, whatever ended it.**
+  You do not have to have pressed Suspend: a run that failed, one you stopped,
+  and one cut short because All-Well closed or crashed all leave the wells that
+  got through on disk, and all three are offered. The strip names the plate, says
+  when the run started and how it ended, and how many wells it recorded as
+  finished, failed, or produced on a remote machine but never downloaded —
+  **Resume** picks it up from there.
+- The offer is about **the folder in the input field**. If you have not chosen
+  one yet — the state the pane opens in — it offers the most recent unfinished
+  run on any plate, which is how you carry on with something from yesterday.
 - On success the app switches to Review and loads the output folder.
 - The **Job Queue** (Datasets pane) works the same way. **Pause queue** winds
   the running job down and keeps what it finished; the job stays in the list

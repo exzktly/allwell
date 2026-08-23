@@ -740,7 +740,74 @@ the line.
    reviewers would not have found this one. The remedy is mechanical (a guard) or
    behavioural (a test that presses the button), never another pair of eyes.
 
-## 7.7 Debugging entry points
+## 7.7 A branch that exists is not a branch the app takes
+
+§7.6 is about a control that is offered and does nothing. This is its sibling
+one layer down: a *decision* that is written, tested, documented and dead — and
+then, once revived, one that reuses work it had no right to reuse. Both shipped
+in the same branch, both survived a full local suite, and a reviewer found them
+in one pass.
+
+The re-attach feature had a module docstring, a section of ARCHITECTURE, a
+measurement justifying it, and fifteen green tests. It could not fire.
+`PipelineRunner` opened the journal before `RemoteRunner` read it, and opening
+reset the field being read. Fixing that made a worse defect live: the address
+was keyed on the pipeline arguments alone, so a plate re-exported with corrected
+images — no setting touched, Force not ticked — re-attached to the previous
+run's directory, was found complete by the pre-flight check, never ran the
+pipeline, and had the old numbers fetched back and reported as success.
+
+Neither is an exotic mistake. Each has a mechanical cause and a mechanical
+answer.
+
+1. **Test the caller's sequence, not the unit's API.** Both ends were correct in
+   isolation; the *order* was the defect, and an order is invisible to a unit
+   test of either end. The test that should have caught it recorded an address
+   and read it straight back inside one run — a sequence the app never performs.
+   Whenever two modules touch one piece of state, write down the order the app
+   runs them in and drive a test through it. If you cannot name which function
+   writes and which reads, you do not yet know whether the feature works.
+   `tests/test_run_journal_reattach.py::test_the_stored_address_survives_the_app_s_real_call_order`
+   is the shape.
+2. **Kill the feature and check a test notices.** The one question that separates
+   a tested feature from a decorated one: *what edit would make this fail?* Make
+   that edit in a `git worktree` of HEAD, run the suite, and require a real
+   `AssertionError`. `scripts/prove_guard.sh` does this for guards against the
+   base branch; for a feature the base branch is useless, because the feature is
+   new there — mutate HEAD instead. Reverting one line of the fix made three
+   tests fail with the reasons in their own messages. Before that fix, all
+   fifteen passed against code where the feature was unreachable.
+3. **A reuse decision must be keyed on everything that invalidates the reuse.**
+   "We already did this, use the old result" is the highest-stakes predicate in
+   any pipeline: too narrow a key returns stale numbers and reports success —
+   §7's cardinal sin, arrived at by omission rather than by a bug. Enumerate what
+   makes the old result wrong *before* choosing the key, and write the reason
+   beside each key. `tests/test_reuse_is_keyed_completely.py` holds the half that
+   is decidable: every declared key, mutated alone, must decline. The other half
+   — that nothing outside the keys can invalidate the result — no test can
+   decide, which is exactly why the roster there carries a written justification
+   per key. That file caught a live gap in the fix that introduced it, within a
+   minute of being written.
+4. **A measurement of one cause does not license a feature that fires on all of
+   them.** I measured that the upload cache key churns when staging rewrites the
+   archives, and then built a feature triggered by the key churning *at all* —
+   and the same key also churns when the user replaces the images. When a signal
+   triggers an action, enumerate every reason that signal can appear and say
+   what the action does in each. One measured cause is one row of that table.
+5. **Writing confident documentation is not evidence.** The ARCHITECTURE prose,
+   the module docstring and the PR body all asserted the behaviour, and writing
+   them raised my confidence rather than testing it. Prose describing a branch
+   is worth exactly what the branch is worth; §7.1 #3 already says an unreachable
+   branch described as the app's behaviour is worse than saying nothing, and
+   documenting it well is how that gets worse still.
+
+**The check that costs nothing and would have caught all of it:** before
+reporting a behaviour-changing feature as done, state out loud the single edit
+that would break it, then make that edit and watch a test fail. If no edit
+comes to mind, or the suite stays green, the feature is not tested — however
+many tests are passing.
+
+## 7.8 Debugging entry points
 
 - Widget you can't find: `grep -rn '_line_fig\b' well_viewer/ widgets/` — every
   Review widget is stored as `_<noun>`. Rail pages → `core/centre_view.py`;

@@ -127,6 +127,8 @@ allwell/
 ├── analyze_input.py             ← Analyze input mixin: run-dir resolver, OME-TIFF
 │                                   redirect, channel rows, browse-time folder scan
 ├── analyze_progress.py          ← Analyze run-progress rendering mixin (ETA + progress events → dashboard)
+├── analyze_preflight.py         ← Analyze pre-run mixin: what the output folder already
+│                                   holds, and offering the settings that produced it
 ├── datasets_tab.py              ← Datasets pane (page-rail shell; see §6b)
 ├── datasets/                    ← dataset tools: Qt-free compute/apply + their feature views (§6b)
 │   ├── _common/                ← what more than one tool needs: dataset_paths,
@@ -3068,6 +3070,69 @@ stays best-effort by design, falling back to the loose-TIF count and then to 1,
 because a progress denominator cannot be zero — saying there is no input is
 `resolve_input_output`'s job, not the dial's.
 
+**And because that plan names the output directory without writing anything,
+everything an earlier run left there can be reported before this one starts.**
+`analyze_preflight.AnalyzePreflightMixin` is that report — a mixin for the same
+reason `analyze_suspend` and `analyze_progress` are, since `analyze_tab.py` sits
+against its line budget. `_refresh_output` hands it the `InputPlan`, and it
+reports in two tiers split by what each costs. Tier one is the run journal
+(§6.5) — one small JSON read — plus the scope line's `iterdir` of the input
+directory and, when loose images are sitting in it, a central-directory read of
+every well archive they belong to — the duplicate rule needs to know what each
+already holds — with a second pass over those archives when a background or
+flat-field method is set to `empty_well`: bounded by the plate's top level rather than a walk
+of it, which is what lets it run inline once the field settles. It
+says what the last run against this folder did, and whether it *finished* — a
+journal still open is a run the app was killed during, which nothing else on
+disk records. Tier two runs `completeness.scan_run` on a
+worker thread and states real coverage, the same predicate the end-of-run check
+and Validate use, because a preview computing its own idea of coverage is a
+preview that can contradict the run it describes. The input field's
+`textChanged` fires per keystroke and each scan opens every archive in the
+plate, so the scan is debounced behind a single-shot timer, its result returns
+on a queued signal (a worker thread has no event loop, so a `singleShot` armed
+there never fires), and a result that lands after the user has typed on is
+discarded rather than shown against the wrong folder.
+
+Two rules shape what it is allowed to say. **It offers; it does not apply.** The
+settings behind the existing output are restored only when the user presses
+*Load these settings*, through the same `_apply_pipeline_info` the manual **Open
+pipeline_info.json** path uses — the journal's `RunSpec` when there is one, the
+sidecar otherwise, so it works on datasets that predate the journal. The
+run-scope knobs (`force`, `force_wells`, `incremental`) are never restored: they
+say what the *last* run was told to do, and silently re-forcing a plate because
+the previous run was forced is the most expensive kind of surprise. **And it
+reports; it does not decide.** Every *claim* in the readout comes back verbatim
+from whatever owns it — `ScopePlan.preview` for what the run will do about
+images added since last time, `completeness`'s own counts for coverage, the
+journal's recorded per-well states for what happened last time — and the pane
+supplies only the connective prose between them. That is deliberately weaker
+than `test_layout_readout_single_source.py`'s rule over the layout line beside
+it, which requires the label to *be* a quoted planner value: that suits a
+one-sentence readout, not a paragraph drawn from four sources.
+`test_analyze_preflight.py::test_the_scope_line_is_the_planners_own_sentence`
+guards the piece that could drift, the scope line, by pinning it to the
+planner's own words. A coverage comparison that comes back incoherent (more
+field groups covered than the input was measured to hold, which means the
+filename schema is not parsing both sides the same way) is reported as such
+rather than printed as a ratio over 1.
+
+The report is refreshed on every change to the input field, once at construction,
+and again when a run settles (`resync_preflight`, from `_on_run_settled`) —
+hidden for the duration of the run in between. Without that last refresh it would
+only ever be computed from `textChanged`, which after a run never fires, so the
+sidebar would go on describing the run *before* the one that just ended: on a
+failure, reporting the previous run as completed. Its coverage line and any
+dismissal are dropped at the same moment, since both described the folder as it
+stood before this run rewrote it.
+
+That scope sentence is possible because `select_incremental_scope` is now
+plan-then-act like the rest of this module: `plan_loose_append` decides which
+loose images would be folded in and `plan_incremental_scope` reaches the verdict,
+both reading only; `select_incremental_scope` performs the append and asks the
+same `_scope_verdict` for its answer. One rule, two callers, so the preview
+cannot describe a decision the run does not make.
+
 The Run path:
 
 1. Validate the form.
@@ -4041,6 +4106,7 @@ Small dependency-light service modules used by `analyze_tab.py`:
 | `env.py` | `validate_env` — a pure startup check of the `ALLWELL_*` overrides (`ALLWELL_SCRATCH_DIR` / `ALLWELL_REMOTES` / `ALLWELL_SEG_DEBUG`), returning warnings for any that are set but unusable so a mistyped path is not a silent fallback. |
 | `ssh_key_setup.py` | Ed25519 keypair generation at `~/.ssh/allwell_<alias>` + the `ssh-copy-id` walkthrough behind the remote-host wizard. |
 | `subprocess_kill.py` | Kills a spawned pipeline's whole process group / session (what Stop uses). |
+| `run_journal.py` | The record of what a run intended, where it sent the work, and what became of each well — opened before the first well is processed, amended as the run goes, closed with an outcome, so a record still open at the next start-up is a run the app was killed during (§6.5). Stdlib-only. Writes `<output_dir>/.aw_journal/`: `run.json` for the run and one `wells/<WELL>.json` per well, `pipeline/run_report.py`'s one-atomic-file-per-unit shape so the orchestrator, the worker pool and the Fetcher thread all record without a lock. **Evidence, never authority** — `pipeline.completeness` stays the answer to "is this well complete" and the artefacts stay the done-set, so a journal that goes missing costs answers rather than making a good dataset look empty. It drives exactly one decision, the remote re-attach above. A well record names the run it belongs to: `open_run` returns a token and every writer hands it back, so a run whose own `open_run` failed cannot file its progress under the previous run's surviving record — while a run's *own* completion lines, which are parsed on the GUI thread and therefore arrive after the worker thread closed the record, are still accepted. Asking the cheaper question instead, "is a run open here", refused the tail of every plate: a 24-well run recorded four wells and the pre-run readout said so. `tests/test_a_run_end_to_end_records_every_well.py` drives a real run through a real drain and is the only test on either side of this record that does. `WELL_STATES` is the single roster of what a run can have done to a well, guarded by `tests/test_no_second_journal_vocabulary.py` — which walks dict keys as well as tuples, lists and sets, because a states-to-words table is presentation only for as long as the module holding it also consults the canonical roster; one that does not is holding its only copy, and anything iterating it drops every state it fails to spell. |
 
 These modules deliberately have no Qt imports beyond what the Analyze tab
 itself uses — keeping them potentially reusable for a CLI driver.
@@ -4106,6 +4172,66 @@ nothing), and with no channel filter it uploads from the input dir with no
 staging at all. `_filter_channels_in_staging` survives for the FOLDER / FLAT
 path, which filters zips it has just written itself.
 
+**An archive that *is* rewritten keys differently every run, and the run journal
+is what stops that losing work.** The pass-through above keeps the key stable
+only for archives nothing was dropped from; a channel filter that clears
+`REWRITE_MIN_SAVING`, and every incremental split, write a fresh copy into
+scratch, so the file being hashed was created moments ago and the plate resolves
+to a different `runs/<run_id>/out` on each run. Whatever the previous one
+computed but had not yet fetched then sits somewhere nothing will look again.
+So `spawn` records the address it used into the output directory's journal
+(§6.5) and `_reattach_output_dir` consults it on the next run:
+`_choose_remote_output_dir` is a module-level function, given the freshly
+derived address, the recorded one, whether the run is forced, and whether
+`_list_completed_wells_in` found anything still in the recorded directory. The
+journal proposes and the remote listing decides — a recorded address is a
+statement about where work was *sent*, not that it is still there — and a forced
+run never re-attaches, since landing in a directory already full of the previous
+run's output is exactly how a forced re-run gets skipped. Only the *output*
+directory moves: the input keys on this run's own staged archives, and the
+pidfile, sentinel and heartbeat stay under this run's own `run_id`, because
+`_sweep_orphaned_allocation` finds a crashed session's job by recomputing that
+address and must not be pointed at another run's — and both directories are
+created, since a re-attached run's output lives under a *previous* `run_id` and
+nothing else would make its own. Cleanup mirrors that split: the borrowed
+directory is left in place and named in the log, while the run's own is removed
+like any other, because nothing prunes `runs/` (`DatasetCache.gc` covers
+`datasets/`) and it holds only the pidfile, sentinel and heartbeat this run
+wrote.
+
+Which flags count as "the same configuration" is `pipeline_argv_digest`,
+extracted from `_compute_run_id` and recorded in the journal, so the address and
+the reuse key cannot come to disagree. It is computed over the local argv **plus
+`RemoteRunner._host_argv_extras`** — the flags a remote run appends that nothing
+local produces: `--no_save_tophat` for a CSV-only fetch, the host's `extra_args`,
+and `--cpu_only`. Each of those changes what the remote computes or writes, so
+leaving them out let a plate run against a CPU-only host, or with a segmentation
+threshold overridden per host, address the directory another configuration had
+already filled, be found complete by the pre-flight check, and have that
+configuration's numbers fetched back as its own. One definition feeds both the
+launched command and the digest.
+
+Every call that turns a configuration into an address or a reuse key folds
+those extras in — `spawn`'s two, and `_BatchedRemoteProcess`'s run id *and* its
+journal record. Missing one makes that call's key smaller than its siblings',
+and a smaller key matches configurations whose output is not interchangeable:
+a batched CSV-only run journalled a digest identical to a plain full run's, so
+a later full run re-attached to its directory and fetched back output with no
+tophat images. `test_every_keying_call_folds_in_the_host_extras` is the AST
+sweep that holds it.
+
+`stored_remote_address` compares three keys, and `tests/test_reuse_is_keyed_completely.py`
+carries the written reason for each: the argv digest, `source_fingerprint` (the
+user's own input archives, which separates "staging rewrote" from "the images
+changed" — the two reasons the upload key churns), and the host alias, because
+the recorded address is a path on one machine and two hosts that share a
+filesystem will happily resolve each other's.
+
+`cache_key` hashes `int(st_mtime)`, so two staged copies written inside one
+wall-clock second key identically. That is why this drift is invisible in a
+tight loop and certain in practice, and why the test that pins it stamps the
+mtimes rather than racing the clock.
+
 **Suspending a run.** Stop is a kill — SIGTERM to the process group, SIGKILL
 five seconds later — and whatever each worker was mid-way through is lost.
 Suspend (`PipelineRunner.suspend`) sends the same SIGTERM with the escalation
@@ -4118,32 +4244,118 @@ normal end-of-well path so its CSV and `<well>_out.zip` are written. A second
 signal is a hard stop — the handler restores the previous disposition before
 returning, so a suspend that hangs is still escapable.
 
-Nothing records "where the run was". The output directory already is that:
-`--incremental` reads the per-well CSVs and out-zips back as the done-set of
-`(fov, timepoint)` groups, so a resumed run recomputes only what is missing, and
-a suspended output is indistinguishable from one left by a run that ended early
-for any other reason. A group the run never attempted is deliberately **not**
-added to the well's `failed` list — it is missing, which the completeness record
-already reports as the gap between the input's group count and the CSV's, and
-calling it failed would put it in the PARTIAL warning as though the data were
-broken rather than unfinished.
+**The done-set is not recorded anywhere — the output directory is it.**
+`--incremental` reads the per-well CSVs and out-zips back as the set of
+`(fov, timepoint)` groups already processed, so a resumed run recomputes only
+what is missing, and a suspended output is indistinguishable from one left by a
+run that ended early for any other reason. A group the run never attempted is
+deliberately **not** added to the well's `failed` list — it is missing, which the
+completeness record already reports as the gap between the input's group count
+and the CSV's, and calling it failed would put it in the PARTIAL warning as
+though the data were broken rather than unfinished.
 
-What the app *does* lose across a restart is intent — which folders and which of
-the several dozen form fields produced that half-finished output — so
-`services/suspend_record.py` persists exactly the `RunSpec` that was running,
-plus enough to describe it. The same `to_json` the job queue already uses; no
-second serialisation to keep in step with the form. It lives at
+What the artefacts cannot say is what the run *intended*, and that is what the
+two records beside them are for.
+
+`services/suspend_record.py` persists the `RunSpec` that was running, plus
+enough to describe it — the same `to_json` the job queue already uses, so there
+is no second serialisation to keep in step with the form. It lives at
 `~/.allwell/suspended_runs.json` rather than in the output folder because at
 startup the app does not yet know which output folder to look in, and it holds a
-list keyed by output directory so several plates can be suspended at once.
-`analyze_suspend.AnalyzeSuspendMixin` is the seam: the Suspend button, the banner
-above the Analyze form offering the most recent record, and the resume itself,
-which forces `incremental=True` into the spec before restarting. That flag is not
-a preference here — without it the pipeline skips any well whose CSV exists and
-reprocesses nothing, so a half-done plate would come back still half-done with
-the run reporting success. The record is cleared on resume, on discard, and when
-a run completes normally; a *stopped* run keeps its record, because a hard Stop
-also leaves every finished well's CSV on disk.
+list keyed by output directory so several plates can be suspended at once. The
+record is cleared on resume, on discard, and when a run completes normally; a
+*stopped* run keeps its record, because a hard Stop also leaves every finished
+well's CSV on disk.
+
+`services/run_journal.py` is the other half, and the difference between them is
+**when** they are written. Every other record this app keeps about a run —
+`run_report`, `run_check`, the remote fetch reconciliation — is written at the
+*end*, which is precisely why a run that dies leaves nothing: the app was never
+there to write it. The journal is opened before any well is processed, amended
+as the run proceeds, and closed with an outcome, so a record still open at the
+next start-up **is** a run the process did not survive. It lives in the output
+directory as `.aw_journal/run.json` plus one `wells/<WELL>.json` per well —
+`pipeline/run_report.py`'s shape, for its reason: one small file per unit,
+written atomically and never appended to, so the orchestrator, the worker pool
+and the remote Fetcher thread all record without a lock. A small index under
+`services.remote_config.default_state_dir` points at the output directories that
+have one, since at startup the app does not know where to look.
+
+Two rules define what the journal is allowed to be. It is **evidence, never
+authority**: `pipeline.completeness` stays the only answer to "is this well
+complete" and the artefacts stay the done-set, so a journal that goes missing —
+a read-only output volume, a folder someone edited by hand — costs the user
+answers rather than making a good dataset look empty. And it **drives exactly one
+decision**, the remote re-attach described in §6.4. Everything else it holds is
+reported, not acted on. `WELL_STATES` names what a run did to a well
+(`uploaded` / `analysed` / `fetched` / `skipped` / `failed` / `not-fetched`),
+deliberately disjoint from `completeness.HEALTH_STATES` so the two vocabularies
+cannot be mistaken for each other; `tests/test_no_second_journal_vocabulary.py`
+fails on a second literal roster anywhere in the tree.
+
+`analyze_suspend.AnalyzeSuspendMixin` is the seam both records reach the user
+through, and `_resumable` decides which run one banner, one Resume and one
+Discard are about.
+
+**What qualifies is "did not finish", not "was killed".** `unfinished_runs`
+returns an index entry with no `closed_at` — a run the process did not survive —
+*and* one closed with any outcome in `UNFINISHED_OUTCOMES` (`error`, `stopped`,
+`suspended`). All of them leave every finished well's CSV and out-zip on disk,
+which is what `--incremental` reads as its done-set, so what separates them from
+`ok` is only that the plate is not done yet. A failure especially: it is the case
+where a user most wants to carry on. That roster is named once in `run_journal`
+rather than restated by each surface.
+
+It is **wider** than `JobState.RESUMABLE`, and the difference is deliberate. The
+queue treats a failed or cancelled job as terminal (`JobState.FAILURE_LIKE`),
+because the jobs chained behind it are waiting on output that is never coming and
+have to be released rather than left hanging. Nothing is chained behind a resume
+banner, so the only question it asks is whether *this* plate has work left worth
+picking up — and after a failure it does, in the wells that got through.
+
+**Which one is offered is decided by the folder on the form.** Both records are
+ordered newest-first across every plate, so taking the newest outright can
+propose a run against a dataset the user is not looking at — and with §6.1's
+pre-run report directly beneath describing a different folder, the sidebar
+contradicts itself and Resume acts on the plate that is not on screen. So a
+record matching the form's own output directory wins, a form naming a folder
+neither record describes gets no offer at all (the pre-run report is what speaks
+for that folder), and newest-anywhere is the fallback only for an empty form —
+the state the app opens in, and the one this banner exists for. That is also why
+both strips refresh together through `_refresh_folder_banners`, on every change
+to the input field and once at construction: a resume offer left over from a
+different folder is precisely the contradiction the scoping prevents, and a
+banner that is only ever refreshed by a run ending cannot reveal a record written
+in a previous session.
+
+Every offer names the **plate**, through `suspend_record.plate_name`. A dataset's
+output folder is `<plate>/out`, so naming the folder itself says "out" for
+essentially every run and says it identically for two different plates.
+
+Resuming forces `incremental=True` into the spec: that flag is not a preference
+here — without it the pipeline skips any well whose CSV exists and reprocesses
+nothing, so a half-done plate would come back still half-done with the run
+reporting success. The banner's second line is the journal's own per-well tally
+(finished / failed / never fetched), reported rather than derived, and it says
+nothing about how complete the *output* is — that is `completeness`'s answer and
+§6.1's pre-run readout carries it.
+
+`PipelineRunner._run_pipeline_thread` is where the journal opens and closes:
+just below where the output directory is created and `_last_output_dir` is set,
+and inside the `finally` beside `("finished", None)`. That is the only
+chokepoint every mode passes through: local, remote and batched all fork below
+it, and the output directory does not exist as a known path any earlier,
+because `resolve_dirs` runs inside that thread.
+
+The pipeline's argument list is built one step earlier still, *before* the
+directory is created. `build_pipeline_args` is pure string assembly but reads
+required keys off `opts` and raises on a missing one, so creating the directory
+first left an empty `out/` behind whenever the form could not produce a
+launchable command — an output folder, and nothing beside it to say what it
+was, for a run that never started. `tests/test_run_leaves_no_empty_output_dir.py`
+holds the order. The outcome comes from the runner's own flags rather than the queue it
+just wrote to — suspend is asked about before stop, since a suspend sets both and
+asking the other way round would record every suspend as a cancel.
 
 The **Datasets Job Queue** can suspend too, and carries the result across a
 session. Its Pause button winds the running job down (`suspend_current`, which
@@ -4775,6 +4987,23 @@ open only a well's output container, taking input member names and parsed CSV
 rows from whichever caller already has them — which is precisely what lets this
 scan delegate without changing how many times it touches the disk.
 
+**Three sources of evidence, because a missing CSV has more than one cause.**
+`WellEvidence` merges `pipeline_info.json`'s `run_report` block, the per-failure
+tracebacks under `out/errors/`, and the run journal (§6.5), and `_no_csv_finding`
+turns them into four different findings rather than one hedged sentence. A well
+the run recorded, covered none of, failed nothing in and left no traceback for
+*segmented zero cells* — a measurement, so reprocessing produces the same empty
+result and it is `info`. Recorded failures or tracebacks are a real gap with the
+run's own records naming it. A journal state of `not-fetched` says the output
+was produced and never reached this machine, so the remedy is to fetch rather
+than to re-segment — forcing a plate to recover a failed download is hours of
+compute for nothing, and it is the one cause no artefact can report, since the
+evidence for it is the *absence* of a file. And no record at all is reported as
+a gap rather than assumed benign, because assuming benign is how a missing CSV
+goes unnoticed. A dataset with no journal — every one produced before it
+existed, and every one produced by the CLI — simply yields fewer answers; the
+scan is unaffected.
+
 **A finished scan is recorded.** `datasets/validate/record.py` writes the scan's
 own result into `pipeline_info.json`'s `run_check` block, through the same
 `pipeline.completeness.build_block` / `well_record` pair the pipeline's end-of-run
@@ -5185,15 +5414,35 @@ output dir is unaffected. `_retry_missing_wells` treats such a well as the one
 exception to its "a present zip needs no re-pull" cost guard and re-pulls it,
 turning the report into a repair.
 
-**Every well is classified in a file beside the outputs.**
-`RemoteRunner._reconcile_fetch` runs before verify and writes
-`<output_dir>/remote_fetch_report.txt`: the run id, the force intent, and one
-line per well the remote holds output for, marked `fetched`,
-`skipped` (with the Fetcher's reason, recorded on `_RemoteRun.skipped_wells`),
-or `never-announced`. "Why was this well not fetched?" was previously answerable
-only from stdout as it streamed, which is no use once the log drawer is closed;
-a diagnostic that only exists live is not a diagnostic. A failure to write the
-report is logged and never fails the run.
+**Every well is classified as it is decided, and rendered beside the outputs.**
+The Fetcher records each well into the run journal (§6.5) at the moment it
+decides it — `skipped` with the reason from `_already_local`, `not-fetched` when
+the zip cannot be pulled, `failed` when it arrives and cannot be materialised,
+`fetched` once it is in place, and `fetched` again if the end-of-run retry
+rescues it. `RemoteRunner._reconcile_fetch` runs at the *end* of `verify_and_cleanup` —
+after the manifest check, the retry pass that re-pulls what is missing, and the
+second manifest check that records what the retry rescued — and renders
+`<output_dir>/remote_fetch_report.txt` from that record: the run id, the force
+intent, and one line per well the remote holds output for. Running it last is the point: written before the retry, the
+report named as never fetched exactly the wells the retry then recovered. Two
+things follow from the order. A run that never reaches the reconciliation — killed, or the app
+closed — has still recorded everything it got to, because each well was written
+down as it was decided rather than gathered at the end. And the report is a
+*rendering* of that record rather than a second classification derived from
+`_RemoteRun.skipped_wells` alongside it, so the two cannot come to disagree.
+
+The in-memory state is the fallback, and a real one: `_classify_fetched_wells`
+falls back to `skipped_wells` and `expected_wells` **together**, which between
+them classify every well the report needs. A journal that cannot be written — a
+read-only output volume, a full disk — therefore costs this report only its
+*extra* answers, the failed and never-fetched distinctions, and consulting just
+one of the two maps would instead turn a well the Fetcher deliberately skipped
+into one it had never heard of. A failure to write the report is logged and
+never fails the run.
+
+"Why was this well not fetched?" was previously answerable only from stdout as it
+streamed, which is no use once the log drawer is closed; a diagnostic that only
+exists live is not a diagnostic.
 
 `_filter_new_fovs_in_staging` is an **older, production-dead** split kept only by
 `tests/test_remote_incremental.py`. A change to the incremental split has to land
@@ -7972,6 +8221,7 @@ The map (each rule links to the test that holds it):
 | EventBus is a capped catalogue of exactly 5 signals (§9) | `test_architecture_contracts.py::test_event_bus_signal_catalogue_is_capped` |
 | Feature-module naming scheme (§3) | `test_architecture_contracts.py::test_feature_module_naming` |
 | One definition of "is this well complete" — no module outside `pipeline/completeness.py` spells out the dataset-health states as its own roster, so the states a plate legend paints cannot diverge from the states the classifier returns (§6.2, §6b) | `tests/test_no_second_completeness_predicate.py`, with its bite cases in `tests/test_guards_bite.py` |
+| One definition of what a run did to a well — no module outside `services/run_journal.py` spells out the run-journal well states as its own roster, so a state the runner records cannot be one a reader has never heard of and silently reports as something else (§6.5) | `tests/test_no_second_journal_vocabulary.py`, with its bite cases in `tests/test_guards_bite.py` |
 | `domain/` & `data/` never import `features/` (the layering) | `tests/test_layering.py` |
 | No silent broad-except anywhere (§15) — the four area tests, plus one over the whole `_repo_scan` surface (root modules and `scripts/` included) with a per-site, file-and-function allowlist and a liveness test | `tests/test_no_silent_except.py` |
 | Nothing deletes a directory it only partly archived. Every path that turns a `<well>/` into `<well>.zip` packs an extension-filtered subset, so removing the folder destroyed the companion XML, acquisition logs and mask subdirectories the filter skipped. Archive-writing is followed one call deep within a module, because the two worst sites zipped through a one-line helper and a guard matching only a literal `atomic_zip` found two of the four (§6.5) | `tests/test_no_unarchived_delete.py`, with its bite cases in `tests/test_guards_bite.py` |

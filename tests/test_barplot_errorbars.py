@@ -42,19 +42,28 @@ def test_n_above_stats_sem_scales_sd():
     assert math.isclose(sem, sd / math.sqrt(3), rel_tol=1e-9)
 
 
-def test_n_above_stats_single_well_zero_spread():
+def test_n_above_stats_single_well_spread_is_undefined():
+    """One well is one replicate, and one replicate has no spread.
+
+    This asserted ``spread == 0.0``, which was the defect: a set nobody could
+    compute a spread for became indistinguishable from a set whose replicates
+    agreed exactly, and it exported as ``err_SD = 0.000000``. NaN is the value
+    the CSV writers blank and matplotlib draws no whisker for.
+    """
     app = _app({"A01": 7})
     rset = ReplicateSet("R", ["A01"])
     mean, spread = compute_rep_n_above_stats(app._ctx, rset, 24.0, use_sem=False)
     assert mean == 7.0
-    assert spread == 0.0
+    assert math.isnan(spread)
 
 
-def test_n_above_stats_empty_is_zero():
+def test_n_above_stats_empty_is_undefined_not_zero():
+    """A set with no loaded wells has no events *count*, which is not the same
+    statement as "it counted zero events" — and this asserted the second."""
     app = _app({"A01": 5})
     rset = ReplicateSet("R", ["NOPE"])  # not in well_paths
     mean, spread = compute_rep_n_above_stats(app._ctx, rset, 24.0, use_sem=False)
-    assert mean == 0.0 and spread == 0.0
+    assert math.isnan(mean) and math.isnan(spread)
 
 
 def test_grouped_collect_emits_spread_on_all_three_panels():

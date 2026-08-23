@@ -833,6 +833,14 @@ def set_ratio_metrics(ctx, ratios: Iterable[RatioMetric]) -> None:
     # The typed channel slice sets the catalogue + rebuilds the ratio index in
     # lockstep (the two must never disagree).
     ctx.state.channel.set_ratio_metrics(list(ratios))
+    # Cached replicate-set statistics are keyed on the ratio's *definition*
+    # (``stats_compute._ratio_cache_sig``), but a name reused for an edited
+    # ratio produces the same ``active_val_col``, so drop the cache outright
+    # here as the other twelve state-mutating sites do. Without this, editing a
+    # ratio in place left the grouped bars showing the old numbers while the
+    # per-well bars beside them recomputed.
+    from well_viewer.core.selection_controller import invalidate_stats_cache
+    invalidate_stats_cache(ctx)
     panel = ctx.widgets.get_or_none("_ratio_panel")
     if panel is not None:
         try:

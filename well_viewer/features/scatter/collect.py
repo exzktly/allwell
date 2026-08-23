@@ -503,7 +503,13 @@ def collect_scatter_agg_data(
             # about a control that does not affect this axis.
             return
         n_total = sum(int(r.n_total) for r in reps)
-        n_above = sum(int(r.n_above) for r in reps)
+        # ``n_above`` is a float and can be NaN — a well whose FOV labels are
+        # provably wrong has no defined per-field count — so ``int()`` on it
+        # raises rather than returning a number. Undefined counts are excluded
+        # from the tally, which is what "we could not count these" means for a
+        # sum.
+        n_above = sum(int(r.n_above) for r in reps
+                      if math.isfinite(float(r.n_above)))
         if n_total > 0 and n_above == 0:
             cut_sink.setdefault(axis, {
                 "channel": channel, "col": val_col, "cutoff": threshold,

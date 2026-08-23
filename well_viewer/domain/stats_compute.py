@@ -11,12 +11,13 @@ imports surface, breaks the cycle.
 from __future__ import annotations
 
 import json
+import logging
 import math
 
 import numpy as np
 import pandas as pd
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from well_viewer.data.data_loading import (
     aggregate_with_threshold_df,
@@ -25,7 +26,10 @@ from well_viewer.data.data_loading import (
     resolve_value_series,
 )
 from well_viewer.domain.text_columns import fov_text
+from well_viewer.domain.fov_integrity import check_fov_labels
+from well_viewer.domain.ratio_models import RATIO_PREFIX
 from well_viewer.domain.tp_match import tp_close, tp_close_mask
+from well_viewer.domain.gating_state import active_fluor_gates
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates,
     on_cutoff_for_column,
@@ -63,7 +67,11 @@ class ReplicateStat:
     median: float        # median of above-threshold values
     mean_all: float      # mean of all included cells (no threshold filter)
     frac: float          # fraction above threshold (or gate-on when on_col set)
-    n_above: int
+    # Typed float, not int: a well whose FOV labels are provably wrong has a
+    # pooled mean and fraction that are still correct, and a per-field count
+    # that is undefined. NaN is how "undefined" is spelled everywhere else in
+    # this module, and an int cannot hold it.
+    n_above: float
     n_total: int
 
     def summary(self, statistic: str) -> float:
@@ -115,7 +123,10 @@ def _raw_extra(df, target_t, threshold, val_col, fluor_gates, ratios, on_col):
     area = pd.to_numeric(df["area_px"], errors="coerce").to_numpy()
     with np.errstate(invalid="ignore"):
         mask &= np.isfinite(area)
-    for channel, gate in (fluor_gates or {}).items():
+    # Same "a 0.0 gate is off" rule the aggregation applies, so the median
+    # and mean-of-all a ReplicateStat carries describe the same population
+    # as the mean, fraction and count beside them.
+    for channel, gate in active_fluor_gates(fluor_gates).items():
         col = f"{channel}_mean_intensity"
         if col not in df.columns:
             return float("nan"), float("nan")
@@ -135,6 +146,38 @@ def _raw_extra(df, target_t, threshold, val_col, fluor_gates, ratios, on_col):
         above = all_vals[all_vals > threshold]
     return ((float(np.median(above)) if above.size else float("nan")),
             (float(all_vals.mean()) if all_vals.size else float("nan")))
+
+
+_logger = logging.getLogger(__name__)
+
+
+def _fov_verdict(ctx, label: str, df):
+    """The FOV-label verdict for *label*, computed at most once per well.
+
+    ``data_loading.get_rows`` records the verdict on
+    ``ctx.state.dataset.fov_integrity`` as it builds a well's frame — but the
+    eager load path (``load_controller.load_directory``) fills
+    ``dataset.cache`` itself and never calls ``get_rows``, so in a real session
+    that dict is empty and a reader that only *consults* it recomputes every
+    time. Checking the labels is two ``groupby.nunique`` passes and a full
+    ``duplicated`` over the whole well — 14 ms on a 21k-row well — and this
+    runs per well, per timepoint, per group, per channel, which is roughly
+    fifteen hundred calls in a batch export. So a miss is written back rather
+    than merely tolerated.
+
+    (The same empty dict is why ``load_controller._report_unusable_fov_labels``
+    has nothing to name at load time. Fixing that belongs with the load path,
+    not here.)
+    """
+    store = getattr(ctx.state.dataset, "fov_integrity", None)
+    if store is None:
+        return check_fov_labels(df)
+    cached = store.get(label)
+    if cached is not None:
+        return cached
+    verdict = check_fov_labels(df)
+    store[label] = verdict
+    return verdict
 
 
 def _rep_from(df, pts, target_t, threshold, val_col, fluor_gates, ratios,
@@ -193,6 +236,34 @@ def group_replicate_stats(ctx, wells, target_t, *, use_fov, val_col, threshold,
                 if rs is not None:
                     reps.append(rs)
                 continue
+            verdict = _fov_verdict(ctx, lbl, df)
+            if not verdict.trusted:
+                # Every row of this well carries the same field label because
+                # the filenames did not match the schema, so splitting on that
+                # column yields one "replicate" holding the pooled total — the
+                # per-field mean multiplied by however many fields were pooled.
+                # ``aggregate_with_threshold_df`` is the model to copy here: it
+                # keeps the well's mean and fraction, which are correct pooled
+                # statistics whatever the field labels say, and NaNs only the
+                # quantities that are genuinely per-field. Dropping the well
+                # outright instead would remove real cells from the Mean and
+                # Fraction panels, and would make a *solo* untrusted well's bar
+                # vanish entirely — indistinguishable from having no data.
+                _logger.warning(
+                    "FOV labels are unusable for %s (%s) — it contributes one "
+                    "pooled replicate with an undefined per-field count, "
+                    "rather than a pooled total wearing a per-field label.",
+                    lbl, verdict.reason,
+                )
+                rs = _rep_from(df,
+                               aggregate_well(ctx, lbl, threshold=threshold,
+                                              use_sem=False, val_col=val_col,
+                                              fluor_gates=fluor_gates),
+                               target_t, threshold, val_col, fluor_gates, ratios,
+                               on_col)
+                if rs is not None:
+                    reps.append(replace(rs, n_above=float("nan")))
+                continue
             fov = _norm_fov(df)
             for fov_id in pd.unique(fov):
                 sub = df[fov == fov_id]
@@ -209,16 +280,29 @@ def group_replicate_stats(ctx, wells, target_t, *, use_fov, val_col, threshold,
 
 def _reduce_reps(reps, field: str, use_sem: bool) -> tuple[float, float]:
     """Mean and SD/SEM (ddof=1) across a per-replicate field — the shared
-    reducer behind every rep-set error bar and the stats spread."""
+    reducer behind every rep-set error bar and the stats spread.
+
+    **An undefined spread is ``NaN``, never ``0.0``.** One replicate has no
+    spread; that is not the same fact as a set whose replicates agreed exactly,
+    and ``0.0`` is how the two became indistinguishable — a single-well set
+    exported ``err_SD = 0.000000`` and drew a bar with no whisker beside sets
+    whose whiskers were measured. ``_aggregate_arrays`` and
+    ``export.service.bar_metric_row`` each already carry a paragraph promising
+    this; this is the producer that was not keeping it. Non-finite spreads are
+    blanked by the CSV writers and draw no whisker in matplotlib, which is the
+    rendering "undefined" should have.
+    """
     vals = [getattr(r, field) for r in reps
             if math.isfinite(getattr(r, field))]
     if not vals:
-        return float("nan"), 0.0
+        return float("nan"), float("nan")
     arr = np.asarray(vals, dtype=float)
     n = arr.size
     m = float(arr.mean())
-    sd = float(arr.std(ddof=1)) if n > 1 else 0.0
-    return m, (sd / math.sqrt(n) if (use_sem and n > 1) else sd)
+    if n < 2:
+        return m, float("nan")
+    sd = float(arr.std(ddof=1))
+    return m, (sd / math.sqrt(n) if use_sem else sd)
 
 
 def _thresh_on_col(ctx) -> str | None:
@@ -248,6 +332,43 @@ def _thresh_on_col(ctx) -> str | None:
         if not any(str(g.get("name") or "") in chosen for g in gates):
             return None
     return "Gate_On"
+
+
+def _ratio_cache_sig(ctx) -> tuple | None:
+    """Signature of the active ratio's *definition*, for the stats cache keys.
+
+    Every key folds in ``active_val_col``, which for a ratio metric is the bare
+    string ``"ratio:<name>"``. The numerator, denominator, per-channel metrics
+    and epsilon live in ``ctx.state.channel.ratio_index`` and appear in no key
+    at all, so editing a ratio *in place* — keeping its name — left every cached
+    replicate-set statistic valid by key and wrong by value, while the per-well
+    bars beside them recomputed.
+
+    Two details this has to get right, and got wrong first time round.
+    ``ratio_index`` is keyed by ``RatioMetric.key()`` — the full ``"ratio:R"``
+    string, not the bare name — so looking up the split-off name resolves
+    nothing; and the fields are ``numerator_channel`` / ``numerator_metric`` /
+    ``denominator_channel`` / ``denominator_metric``, not ``numerator`` /
+    ``denominator`` / ``aggregation``. Either mistake alone makes this a
+    constant, i.e. a signature that signs nothing.
+
+    Returns ``None`` when the active column is not a ratio, leaving a
+    plain-channel session's keys byte-identical.
+    """
+    col = str(ctx.state.channel.active_val_col or "")
+    if not col.startswith(RATIO_PREFIX):
+        return None
+    ratio = (ctx.state.channel.ratio_index or {}).get(col)
+    if ratio is None:
+        return (col,)
+    return (
+        col,
+        ratio.numerator_channel,
+        ratio.numerator_metric,
+        ratio.denominator_channel,
+        ratio.denominator_metric,
+        repr(ratio.epsilon),
+    )
 
 
 def _gate_cache_sig(ctx) -> tuple | None:
@@ -317,7 +438,7 @@ def compute_rep_stats(
     """
     fluor_gates = get_all_fluor_gates(ctx)
     cache_key = ("rep", rset.name, tuple(rset.wells), target_t, threshold, use_sem,
-                  ctx.state.channel.active_val_col, tuple(sorted(fluor_gates.items())), _gate_cache_sig(ctx))
+                  ctx.state.channel.active_val_col, tuple(sorted(fluor_gates.items())), _gate_cache_sig(ctx), _ratio_cache_sig(ctx))
     if cache_key in ctx.state.stats_cache.cache:
         return ctx.state.stats_cache.cache[cache_key]
 
@@ -352,7 +473,7 @@ def compute_rep_per_fov_stats(
     fluor_gates = get_all_fluor_gates(ctx)
     cache_key = ("rep_pf", rset.name, tuple(rset.wells), target_t, threshold,
                  use_sem, ctx.state.channel.active_val_col,
-                 tuple(sorted(fluor_gates.items())), _gate_cache_sig(ctx))
+                 tuple(sorted(fluor_gates.items())), _gate_cache_sig(ctx), _ratio_cache_sig(ctx))
     if cache_key in ctx.state.stats_cache.cache:
         return ctx.state.stats_cache.cache[cache_key]
 
@@ -368,8 +489,11 @@ def compute_rep_per_fov_stats(
     gm, gerr = _reduce_reps(reps, "mean", use_sem)
     gf, ferr = _reduce_reps(reps, "frac", use_sem)
     nm, ns = _reduce_reps(reps, "n_above", use_sem)
-    result = (gm, gerr, gf, ferr,
-              (nm if math.isfinite(nm) else 0.0), ns)
+    # ``nm`` stays NaN when it is undefined. Coercing it to 0.0 put a measured
+    # zero and a never-computed value in the same tuple as the mean and
+    # fraction beside them, which keep NaN — so the Mean and Fraction panels
+    # drew nothing while the Events panel drew a bar at exactly zero.
+    result = (gm, gerr, gf, ferr, nm, ns)
     ctx.state.stats_cache.cache[cache_key] = result
     return result
 
@@ -397,7 +521,7 @@ def compute_rep_n_above_total(ctx, rset: ReplicateSet, target_t: float) -> int:
     fluor_gates = get_all_fluor_gates(ctx)
     cache_key = ("rep_n_above_total", rset.name, tuple(rset.wells), target_t,
                  threshold, ctx.state.channel.active_val_col,
-                 tuple(sorted(fluor_gates.items())), _gate_cache_sig(ctx))
+                 tuple(sorted(fluor_gates.items())), _gate_cache_sig(ctx), _ratio_cache_sig(ctx))
     if cache_key in ctx.state.stats_cache.cache:
         return ctx.state.stats_cache.cache[cache_key]
 
@@ -436,7 +560,7 @@ def compute_rep_n_above_stats(ctx, rset: ReplicateSet, target_t: float,
     fluor_gates = get_all_fluor_gates(ctx)
     cache_key = ("rep_n_above_stats", rset.name, tuple(rset.wells), target_t,
                  threshold, use_sem, ctx.state.channel.active_val_col,
-                 tuple(sorted(fluor_gates.items())), _gate_cache_sig(ctx))
+                 tuple(sorted(fluor_gates.items())), _gate_cache_sig(ctx), _ratio_cache_sig(ctx))
     if cache_key in ctx.state.stats_cache.cache:
         return ctx.state.stats_cache.cache[cache_key]
 
@@ -446,7 +570,8 @@ def compute_rep_n_above_stats(ctx, rset: ReplicateSet, target_t: float,
         threshold=threshold, fluor_gates=fluor_gates,
     )
     mean, spread = _reduce_reps(reps, "n_above", use_sem)
-    result = ((mean if math.isfinite(mean) else 0.0), spread)
+    # NaN, not 0.0 — see the note in ``compute_rep_per_fov_stats``.
+    result = (mean, spread)
     ctx.state.stats_cache.cache[cache_key] = result
     return result
 

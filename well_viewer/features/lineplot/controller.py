@@ -311,7 +311,7 @@ def collect_line_series(
                         rset, t, threshold, use_sem,
                     )
                 else:
-                    gm, gerr, gf, _ = compute_rep_stats(ctx,
+                    gm, gerr, gf, gfe = compute_rep_stats(ctx,
                         rset, t, threshold, use_sem,
                     )
                     # Mean of the set's per-well counts — the same statistic
@@ -322,7 +322,14 @@ def collect_line_series(
                     # on a bar against 10 on a curve.
                     _n_above_val, _n_above_spread = compute_rep_n_above_stats(
                         ctx, rset, t, use_sem)
-                    gfe, gnpf_m, gnpf_s = 0.0, 0.0, 0.0
+                    # ``gfe`` is ``compute_rep_stats``'s fourth return value —
+                    # the spread of the set's per-well fractions. It was bound
+                    # to ``_`` and then overwritten with 0.0 here, which is why
+                    # the Fraction panel had no error band in well-replicate
+                    # mode while the Bar tab, reading the same producer, did.
+                    # The per-FOV fields stay 0.0: they are genuinely not
+                    # computed on this branch.
+                    gnpf_m, gnpf_s = 0.0, 0.0
                 if not (isinstance(gm, float) and math.isnan(gm)):
                     # AggPoint idx 6 = frac_spread (per-FOV fraction error), 7/8 =
                     # per-FOV n-above mean/spread. These were previously dropped,
@@ -451,7 +458,13 @@ def _paint_series(axes: LineAxes, series, *, fov_active: bool) -> tuple[bool, bo
             vn = [(p.t, p.n_above_pf_mean, p.n_above_pf_spread)
                   for p in series.points if p.has_mean]
         else:
-            vn = [(p.t, float(p.n_above), 0.0)
+            # ``n_above_spread`` is the cross-well spread of the per-well
+            # counts, computed by ``compute_rep_n_above_stats`` and carried on
+            # the point since it was built (index 9 of the AggPoint tuple).
+            # Passing a literal 0.0 here threw it away at the last step, so the
+            # Line tab's Events panel drew no replicate error band while the
+            # Bar tab, reading the same statistic, drew one.
+            vn = [(p.t, float(p.n_above), float(p.n_above_spread))
                   for p in series.points if p.has_mean]
         if vn:
             vnt, vnv, vne = zip(*vn)

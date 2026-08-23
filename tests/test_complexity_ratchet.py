@@ -143,7 +143,6 @@ ALLOWLIST = {
     # and pool_reps branches merged into one). Removed from the allowlist.
     "well_viewer/features/barplot/renderer.py::draw_significance_brackets",
     "well_viewer/features/batch_export/bar_panel.py::BarBatchExportPanel._run_batch",
-    "well_viewer/domain/fold_change.py::normalize_pts",
     "process_microscopy.py::sample_empty_well_images",
     # Was CC 40 (right at the line); the audit-E9 decode-failure counting +
     # bias WARN (mandatory correctness surfacing, mirroring the pipeline-side

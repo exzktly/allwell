@@ -11,7 +11,7 @@ from collections.abc import Callable
 from util.aw_safe import swallow, swallowed
 from util.retry_io import retry_io
 from util.zip_write import (
-    atomic_zip, replace_folder_with_archive, zip_members)
+    atomic_zip, replace_folder_with_archive)
 
 HERE = Path(__file__).resolve().parent.parent
 ZIPPER_SCRIPT = HERE / "WellPlateZipper.py"
@@ -1066,89 +1066,203 @@ def _fold_well_folders_into_existing_zips(
     when there are no zips at all — so the run reports success having analysed
     nothing new, and the source images have been deleted.
 
-    Members already in the archive win, so re-running is a no-op rather than a
-    duplication. Returns the number of wells folded.
+    **A same-named member is replaced when its bytes differ.** The folder is
+    what the zipper has just written from the user's current images, so where
+    the two disagree the folder is the newer truth; keeping the archive's copy
+    would analyse the pixels the user replaced and delete the replacement.
+    Where the bytes agree the member is carried over untouched, so re-running
+    is a no-op rather than a duplication.
+
+    Only the folder's own top level is packed, matching
+    :func:`_consolidate_mixed_to_zips`. A ``masks/`` or ``analysis/``
+    subdirectory is not run input; flattening one into the well's *input*
+    archive would both destroy it as an identifiable artefact and offer it back
+    to the next scan as an image to segment.
+
+    Returns the number of wells folded.
     """
     from util.image_exts import is_group_image
     from util.well_token import canonical_well_label
 
     folded = 0
-    with swallow(f"folding new well folders into the archives in {grouped.name}"):
+    entries: list[Path] = []
+    with swallow(f"listing the grouped directory {grouped.name}"):
         entries = sorted(grouped.iterdir(), key=lambda q: q.name)
-        zips = {
-            canonical_well_label(q.stem): q
-            for q in entries
-            if q.is_file() and q.suffix.lower() == ".zip"
-            and canonical_well_label(q.stem)
-        }
-        for entry in entries:
-            if not entry.is_dir():
-                continue
-            tok = canonical_well_label(entry.name)
-            target = zips.get(tok) if tok else None
-            if target is None:
-                continue          # no archive to fold into; the consolidator owns it
-            existing = set(zip_members(target))
-            images = [
-                q for q in sorted(entry.rglob("*"))
-                if q.is_file() and is_group_image(q.name)
-            ]
-            incoming = [q for q in images if q.name not in existing]
-            if incoming:
-                with zipfile.ZipFile(target) as src:
-                    carried = [(m, src.read(m)) for m in src.namelist()]
-                with atomic_zip(target) as zf:
-                    for name, blob in carried:
-                        zf.writestr(name, blob)
-                    for q in incoming:
-                        zf.write(q, arcname=q.name)
-                folded += 1
-            # The archive now holds every image in *images* — the ones it
-            # already carried and the ones just added — so those are the unit
-            # of deletion, not the folder. Anything the image filter skipped
-            # (an OME companion XML, an acquisition log, a mask subdirectory,
-            # a Finder ``.DS_Store``) exists nowhere else, and the folder
-            # stays behind holding exactly that remainder.
-            outcome = replace_folder_with_archive(entry, images)
-            if log_fn and (incoming or not outcome.folder_removed):
-                tail = (
-                    ""
-                    if outcome.folder_removed
-                    else (f" — folder kept, {len(outcome.kept)} file(s) not "
-                          f"archived: {', '.join(outcome.kept)}")
-                )
-                log_fn(
-                    f"[zipper] Folded {len(incoming)} new image(s) into "
-                    f"{target.name}{tail}.\n"
-                )
+    zips = {
+        canonical_well_label(q.stem): q
+        for q in entries
+        if q.is_file() and q.suffix.lower() == ".zip"
+        and canonical_well_label(q.stem)
+    }
+    for entry in entries:
+        if not entry.is_dir():
+            continue
+        tok = canonical_well_label(entry.name)
+        target = zips.get(tok) if tok else None
+        if target is None:
+            continue          # no archive to fold into; the consolidator owns it
+        # Scoped to one well on purpose. Wrapping the whole loop meant a single
+        # unreadable archive stopped folding for every well after it, and those
+        # wells then kept a `<WELL>/` folder the pipeline never reads while
+        # their loose sources were deleted as consumed.
+        with swallow(f"folding {entry.name} into {target.name}"):
+            folded += _fold_one_well(entry, target, log_fn=log_fn,
+                                     is_image=is_group_image)
     return folded
 
 
-def _grouped_member_names(grouped: Path) -> set[str]:
-    """Every image basename already inside *grouped*, in either layout.
+def _fold_one_well(entry: Path, target: Path, *,
+                   log_fn: Callable[[str], None] | None,
+                   is_image: Callable[[str], bool]) -> int:
+    """Fold one ``<WELL>/`` folder into the ``<WELL>.zip`` beside it."""
+    images = [
+        q for q in sorted(entry.iterdir())
+        if q.is_file() and is_image(q.name)
+    ]
+    by_name = {q.name: q for q in images}
 
-    A resolved input dir holds `<WELL>/` folders, `<WELL>.zip` archives, or —
-    mid-resume — both. Reading only one of them is what made every loose TIF
+    with zipfile.ZipFile(target) as src:
+        # `(size, CRC)` from the central directory, so deciding what is new
+        # costs no decompression at all.
+        carried = [
+            info for info in src.infolist()
+            if not _member_is_superseded(info, by_name.get(
+                info.filename.rsplit("/", 1)[-1]))
+        ]
+        kept_names = {i.filename.rsplit("/", 1)[-1] for i in carried}
+        incoming = [q for q in images if q.name not in kept_names]
+        if incoming:
+            with atomic_zip(target) as dst:
+                for info in carried:
+                    # One member at a time, and the original `ZipInfo` — so a
+                    # `ZIP_STORED` input archive is not silently re-deflated,
+                    # every member keeps its timestamp (the upload cache key
+                    # and rsync's quick-skip both read those), and the whole
+                    # archive is never resident in memory at once.
+                    dst.writestr(info, src.read(info))
+                for q in incoming:
+                    dst.write(q, arcname=q.name)
+
+    # The archive now holds every image in *images* — the ones it already
+    # carried and the ones just written — so those are the unit of deletion,
+    # not the folder. Anything the image filter skipped (an OME companion XML,
+    # an acquisition log, a mask subdirectory, a Finder `.DS_Store`) exists
+    # nowhere else, and the folder stays behind holding exactly that remainder.
+    outcome = replace_folder_with_archive(entry, images)
+    if log_fn and (incoming or not outcome.folder_removed):
+        tail = (
+            ""
+            if outcome.folder_removed
+            else (f" — folder kept, {len(outcome.kept)} file(s) not "
+                  f"archived: {', '.join(outcome.kept)}")
+        )
+        log_fn(
+            f"[zipper] Folded {len(incoming)} image(s) into "
+            f"{target.name}{tail}.\n"
+        )
+    return 1 if incoming else 0
+
+
+def _member_is_superseded(info: zipfile.ZipInfo, replacement: Path | None) -> bool:
+    """Whether the folder holds a *different* file under this member's name.
+
+    Same name and same bytes means the member stands. Same name, different
+    bytes means the folder wins: it is what the zipper just wrote from the
+    user's current images.
+    """
+    if replacement is None:
+        return False
+    superseded = True
+    with swallow(f"comparing {info.filename} against the folder's copy"):
+        superseded = (replacement.stat().st_size != info.file_size
+                      or _file_crc(replacement) != info.CRC)
+    return superseded
+
+
+def _file_crc(path: Path) -> int:
+    """CRC-32 of *path*, read in chunks so a large TIF does not land in RAM."""
+    import zlib
+
+    crc = 0
+    with open(path, "rb") as fh:
+        while chunk := fh.read(1 << 20):
+            crc = zlib.crc32(chunk, crc)
+    return crc
+
+
+def _grouped_member_index(grouped: Path) -> dict[str, tuple[int, int | None]]:
+    """Every image already grouped under *grouped*, as ``name -> (size, crc)``.
+
+    A resolved input dir holds ``<WELL>/`` folders, ``<WELL>.zip`` archives, or
+    — mid-resume — both. Reading only one of them is what made every loose TIF
     look unconsumed on a plate that had already been zipped.
+
+    **Identity is the bytes, not the name.** Answering "is this loose TIF
+    already grouped?" from the basename alone is a reuse predicate keyed on
+    less than what invalidates the reuse: a user who re-exports a plate with a
+    corrected exposure writes the same filenames, so every corrected image
+    reads as already consumed. The archive keeps the old pixels, the run
+    analyses them and reports success, and the loose originals are deleted as
+    redundant. So the size is recorded, and for a zip member the CRC-32 the
+    central directory already carries — both free — and the loose file is
+    hashed only when a same-named entry has the same size, which is the one
+    case a cheaper comparison cannot decide.
+
+    A folder child's CRC is ``None`` because computing it means reading the
+    file; :func:`_is_already_grouped` reads it then, and only then.
     """
     from util.image_exts import is_group_image
 
-    names: set[str] = set()
+    index: dict[str, tuple[int, int | None]] = {}
     with swallow(f"listing already-grouped members under {grouped.name}"):
         for entry in grouped.iterdir():
             if entry.is_dir():
                 for child in entry.iterdir():
                     if child.is_file() and is_group_image(child.name):
-                        names.add(child.name)
+                        with swallow(f"sizing {child.name}"):
+                            index[child.name] = (child.stat().st_size, None)
             elif entry.suffix.lower() == ".zip":
                 with swallow(f"reading {entry.name}"), \
                         zipfile.ZipFile(entry) as zf:
-                    for member in zf.namelist():
-                        base = member.rsplit("/", 1)[-1]
+                    for info in zf.infolist():
+                        base = info.filename.rsplit("/", 1)[-1]
                         if base and not base.startswith(".") \
                                 and is_group_image(base):
-                            names.add(base)
-    return names
+                            index[base] = (info.file_size, info.CRC)
+    return index
+
+
+def _is_already_grouped(tif: Path, grouped: Path,
+                        index: dict[str, tuple[int, int | None]]) -> bool:
+    """Whether *tif*'s bytes are already inside *grouped*.
+
+    False for a name that is not there at all, for one that is there at a
+    different size, and for one that is there at the same size but different
+    content — the re-exported plate. Only the last case costs a read, and it
+    costs one pass over the loose file rather than a decompression of the
+    archive.
+
+    A read that fails answers False. Being unable to tell whether a copy exists
+    is not evidence that one does, and this answer decides whether the user's
+    original is deleted.
+    """
+    entry = index.get(tif.name)
+    if entry is None:
+        return False
+    size, crc = entry
+    same = False
+    with swallow(f"comparing {tif.name} against its grouped copy"):
+        if tif.stat().st_size == size:
+            if crc is None:
+                # A folder child: its CRC was not computed up front, because
+                # doing so for a whole plate costs a read of every file that
+                # a size mismatch would have settled for free.
+                sibling = next(
+                    (q for q in grouped.rglob(tif.name) if q.is_file()), None)
+                same = sibling is not None and _file_crc(tif) == _file_crc(sibling)
+            else:
+                same = _file_crc(tif) == crc
+    return same
 
 
 def _wells_claimed_by(paths, *, filename_schema: str,
@@ -1448,9 +1562,10 @@ def resolve_input_output(
         # looks like after any completed run — this set is always empty, so
         # every loose TIF reads as unconsumed and the zipper is re-run against
         # files that are already inside the archives.
-        existing_basenames = _grouped_member_names(grouped)
+        existing = _grouped_member_index(grouped)
         leftover_tifs = [
-            p for p in loose_at_top if p.name not in existing_basenames
+            p for p in loose_at_top
+            if not _is_already_grouped(p, grouped, existing)
         ]
     else:
         leftover_tifs = []

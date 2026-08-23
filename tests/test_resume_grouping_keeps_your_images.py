@@ -205,3 +205,162 @@ def test_a_folder_holding_only_images_already_archived_is_removed(tmp_path):
     assert not folder.exists(), (
         "a folder whose every file is already in the archive was left behind, "
         "so the next scan sees a well folder that will never be read")
+
+
+# ── identity is the bytes, not the name ─────────────────────────────────────
+
+SCHEMA_CWFT = "experiment:channel:well:fov:timepoint"
+IMG = "Plate1_DAPI_A01_F1_T1.tif"
+
+
+def _resume_plate(tmp_path, *, loose: bytes, archived: bytes) -> Path:
+    root = tmp_path / "Plate1"
+    (root / "in").mkdir(parents=True)
+    with zipfile.ZipFile(root / "in" / "A01.zip", "w") as zf:
+        zf.writestr(IMG, archived)
+    (root / IMG).write_bytes(loose)
+    return root
+
+
+def test_a_re_exported_image_is_not_mistaken_for_the_one_it_replaces(tmp_path):
+    """The reuse predicate here is "is this loose TIF already grouped?".
+
+    Answering it from the basename alone keys it on less than what invalidates
+    the answer. A user who re-exports a plate with a corrected exposure writes
+    the same filenames, so every corrected image read as already consumed: the
+    archive kept the old pixels, the pipeline analysed them and reported
+    success, and the loose originals were deleted as redundant. Nothing
+    anywhere then held the corrected data.
+    """
+    root = _resume_plate(tmp_path, loose=b"NEW-CORRECTED", archived=b"OLD-WRONG")
+
+    _grouped, _out, on_success = resolve_input_output(
+        root, log_fn=lambda _m: None,
+        filename_schema=SCHEMA_CWFT, filename_sep="_", move_source_tifs=False)
+    if on_success is not None:
+        on_success()
+
+    with zipfile.ZipFile(root / "in" / "A01.zip") as zf:
+        assert zf.read(IMG) == b"NEW-CORRECTED", (
+            "the archive kept the pixels the user replaced, so the run "
+            "analyses the old exposure and reports success")
+
+
+def test_a_genuinely_redundant_copy_is_still_tidied_away(tmp_path):
+    """The other direction, or the fix would leave every copy-mode run's
+    sources behind for ever."""
+    root = _resume_plate(tmp_path, loose=b"SAME", archived=b"SAME")
+
+    _grouped, _out, on_success = resolve_input_output(
+        root, log_fn=lambda _m: None,
+        filename_schema=SCHEMA_CWFT, filename_sep="_", move_source_tifs=False)
+    if on_success is not None:
+        on_success()
+
+    assert not (root / IMG).exists(), (
+        "a byte-identical copy of an already-archived image was kept, so a "
+        "copy-mode plate never sheds its sources")
+
+
+# ── what the fold packs, and what it leaves alone ───────────────────────────
+
+def test_the_fold_does_not_flatten_a_subdirectory_into_the_input_archive(tmp_path):
+    """A `masks/` folder is not run input.
+
+    Packing it with `arcname=q.name` both destroys it as an identifiable
+    artefact and offers its contents back to the next scan as images to
+    segment. `_consolidate_mixed_to_zips` next door reads the folder's top
+    level only; this must agree with it.
+    """
+    grouped = tmp_path / "in"
+    grouped.mkdir(parents=True)
+    with zipfile.ZipFile(grouped / "A01.zip", "w") as zf:
+        zf.writestr("P_DAPI_A01_F1_T1.tif", b"one")
+
+    folder = grouped / "A01"
+    (folder / "masks").mkdir(parents=True)
+    (folder / "P_DAPI_A01_F2_T1.tif").write_bytes(b"two")
+    (folder / "masks" / "P_DAPI_A01_F1_T1_mask.tif").write_bytes(b"mask")
+
+    _fold_well_folders_into_existing_zips(grouped, log_fn=None)
+
+    with zipfile.ZipFile(grouped / "A01.zip") as zf:
+        assert sorted(zf.namelist()) == [
+            "P_DAPI_A01_F1_T1.tif", "P_DAPI_A01_F2_T1.tif"]
+    assert (folder / "masks" / "P_DAPI_A01_F1_T1_mask.tif").exists(), (
+        "the mask subdirectory was emptied into the well's input archive")
+
+
+def test_the_fold_replaces_a_member_whose_bytes_changed(tmp_path):
+    """The folder is what the zipper just wrote; where they disagree it wins."""
+    grouped = tmp_path / "in"
+    grouped.mkdir(parents=True)
+    with zipfile.ZipFile(grouped / "A01.zip", "w") as zf:
+        zf.writestr("P_DAPI_A01_F1_T1.tif", b"OLD")
+
+    folder = grouped / "A01"
+    folder.mkdir()
+    (folder / "P_DAPI_A01_F1_T1.tif").write_bytes(b"NEW")
+
+    _fold_well_folders_into_existing_zips(grouped, log_fn=None)
+
+    with zipfile.ZipFile(grouped / "A01.zip") as zf:
+        assert zf.read("P_DAPI_A01_F1_T1.tif") == b"NEW"
+
+
+def test_the_fold_keeps_a_carried_members_storage_and_timestamp(tmp_path):
+    """Re-deflating and re-stamping churns bytes nothing asked to change.
+
+    `ome_explode` writes input archives `ZIP_STORED` on purpose, and both the
+    remote upload cache key and rsync's size-and-mtime quick-skip read member
+    timestamps — so re-writing them forces a full re-upload of a well that
+    gained one image.
+    """
+    grouped = tmp_path / "in"
+    grouped.mkdir(parents=True)
+    stamp = (2020, 1, 2, 3, 4, 6)
+    with zipfile.ZipFile(grouped / "A01.zip", "w", zipfile.ZIP_STORED) as zf:
+        info = zipfile.ZipInfo("P_DAPI_A01_F1_T1.tif", date_time=stamp)
+        info.compress_type = zipfile.ZIP_STORED
+        zf.writestr(info, b"one")
+
+    folder = grouped / "A01"
+    folder.mkdir()
+    (folder / "P_DAPI_A01_F2_T1.tif").write_bytes(b"two")
+
+    _fold_well_folders_into_existing_zips(grouped, log_fn=None)
+
+    with zipfile.ZipFile(grouped / "A01.zip") as zf:
+        carried = zf.getinfo("P_DAPI_A01_F1_T1.tif")
+    assert carried.compress_type == zipfile.ZIP_STORED, (
+        "a stored member was re-deflated by a fold that only added a file")
+    assert carried.date_time == stamp, (
+        "a carried member's timestamp was reset, which churns the upload "
+        "cache key for a well that gained one image")
+
+
+def test_one_unreadable_archive_does_not_stop_the_wells_after_it(tmp_path):
+    """The `swallow` was around the whole loop.
+
+    A single bad archive aborted folding for every well after it at DEBUG
+    level. Those wells keep a `<WELL>/` folder the pipeline never reads, while
+    their loose sources are still deleted as consumed — a run that reports
+    success having analysed nothing new for most of the plate.
+    """
+    grouped = tmp_path / "in"
+    grouped.mkdir(parents=True)
+    (grouped / "A01.zip").write_bytes(b"not a zip at all")
+    (grouped / "A01").mkdir()
+    (grouped / "A01" / "P_DAPI_A01_F1_T1.tif").write_bytes(b"one")
+
+    with zipfile.ZipFile(grouped / "B02.zip", "w") as zf:
+        zf.writestr("P_DAPI_B02_F1_T1.tif", b"one")
+    (grouped / "B02").mkdir()
+    (grouped / "B02" / "P_DAPI_B02_F2_T1.tif").write_bytes(b"two")
+
+    _fold_well_folders_into_existing_zips(grouped, log_fn=None)
+
+    with zipfile.ZipFile(grouped / "B02.zip") as zf:
+        assert sorted(zf.namelist()) == [
+            "P_DAPI_B02_F1_T1.tif", "P_DAPI_B02_F2_T1.tif"], (
+            "B02 was never folded because A01's archive could not be read")

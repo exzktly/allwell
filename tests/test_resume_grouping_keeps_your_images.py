@@ -35,7 +35,8 @@ from pathlib import Path
 
 import pytest
 
-from services.input_resolution_service import resolve_input_output
+from services.input_resolution_service import (
+    _fold_well_folders_into_existing_zips, resolve_input_output)
 
 SCHEMA = "plate:well:fov:timepoint:channel"
 
@@ -151,3 +152,56 @@ def test_a_loose_image_already_inside_the_archive_is_not_re_grouped(tmp_path):
     assert "unconsumed" not in blob, (
         "an image already inside the archive was reported unconsumed and the "
         f"zipper was re-run over it. Log:\n{blob}")
+
+
+def test_folding_a_new_folder_into_an_archive_keeps_what_it_did_not_archive(tmp_path):
+    """The fold packs images; the folder holds more than images.
+
+    `_fold_well_folders_into_existing_zips` exists because a `<WELL>/` folder
+    beside a `<WELL>.zip` is invisible to `process_microscopy`, which reads
+    `well_folders` only when there are no zips at all. Its first form removed
+    the folder outright once the images were in the archive, which is the
+    deletion `tests/test_no_unarchived_delete.py` forbids: an OME companion
+    XML, an acquisition log or a mask subdirectory exists nowhere else.
+    """
+    grouped = tmp_path / "in"
+    grouped.mkdir(parents=True)
+    with zipfile.ZipFile(grouped / "A01.zip", "w") as zf:
+        zf.writestr("Plate1_A01_F1_T1_DAPI.tif", b"old")
+
+    folder = grouped / "A01"
+    folder.mkdir()
+    (folder / "Plate1_A01_F2_T1_DAPI.tif").write_bytes(b"new")
+    (folder / "A01.companion.ome").write_text("<OME/>")
+    (folder / "acquisition.log").write_text("started")
+
+    folded = _fold_well_folders_into_existing_zips(grouped, log_fn=None)
+
+    assert folded == 1
+    with zipfile.ZipFile(grouped / "A01.zip") as zf:
+        assert sorted(zf.namelist()) == [
+            "Plate1_A01_F1_T1_DAPI.tif", "Plate1_A01_F2_T1_DAPI.tif"]
+    assert not (folder / "Plate1_A01_F2_T1_DAPI.tif").exists(), (
+        "the archived image was left in the folder as well, so the same bytes "
+        "now sit in two places and the next scan re-groups them")
+    assert (folder / "A01.companion.ome").read_text() == "<OME/>", (
+        "the companion XML was destroyed by the fold; the archive beside it "
+        "holds only the images, so nothing anywhere has a copy")
+    assert (folder / "acquisition.log").exists()
+
+
+def test_a_folder_holding_only_images_already_archived_is_removed(tmp_path):
+    """The other half: nothing is kept, so the folder does go."""
+    grouped = tmp_path / "in"
+    grouped.mkdir(parents=True)
+    with zipfile.ZipFile(grouped / "A01.zip", "w") as zf:
+        zf.writestr("Plate1_A01_F1_T1_DAPI.tif", b"old")
+
+    folder = grouped / "A01"
+    folder.mkdir()
+    (folder / "Plate1_A01_F1_T1_DAPI.tif").write_bytes(b"old")
+
+    assert _fold_well_folders_into_existing_zips(grouped, log_fn=None) == 0
+    assert not folder.exists(), (
+        "a folder whose every file is already in the archive was left behind, "
+        "so the next scan sees a well folder that will never be read")

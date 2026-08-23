@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 import sys
 import zipfile
@@ -1090,27 +1089,37 @@ def _fold_well_folders_into_existing_zips(
             if target is None:
                 continue          # no archive to fold into; the consolidator owns it
             existing = set(zip_members(target))
-            incoming = [
+            images = [
                 q for q in sorted(entry.rglob("*"))
                 if q.is_file() and is_group_image(q.name)
-                and q.name not in existing
             ]
-            if not incoming:
-                shutil.rmtree(entry, ignore_errors=True)
-                continue
-            with zipfile.ZipFile(target) as src:
-                carried = [(m, src.read(m)) for m in src.namelist()]
-            with atomic_zip(target) as zf:
-                for name, blob in carried:
-                    zf.writestr(name, blob)
-                for q in incoming:
-                    zf.write(q, arcname=q.name)
-            shutil.rmtree(entry, ignore_errors=True)
-            folded += 1
-            if log_fn:
+            incoming = [q for q in images if q.name not in existing]
+            if incoming:
+                with zipfile.ZipFile(target) as src:
+                    carried = [(m, src.read(m)) for m in src.namelist()]
+                with atomic_zip(target) as zf:
+                    for name, blob in carried:
+                        zf.writestr(name, blob)
+                    for q in incoming:
+                        zf.write(q, arcname=q.name)
+                folded += 1
+            # The archive now holds every image in *images* — the ones it
+            # already carried and the ones just added — so those are the unit
+            # of deletion, not the folder. Anything the image filter skipped
+            # (an OME companion XML, an acquisition log, a mask subdirectory,
+            # a Finder ``.DS_Store``) exists nowhere else, and the folder
+            # stays behind holding exactly that remainder.
+            outcome = replace_folder_with_archive(entry, images)
+            if log_fn and (incoming or not outcome.folder_removed):
+                tail = (
+                    ""
+                    if outcome.folder_removed
+                    else (f" — folder kept, {len(outcome.kept)} file(s) not "
+                          f"archived: {', '.join(outcome.kept)}")
+                )
                 log_fn(
                     f"[zipper] Folded {len(incoming)} new image(s) into "
-                    f"{target.name}.\n"
+                    f"{target.name}{tail}.\n"
                 )
     return folded
 

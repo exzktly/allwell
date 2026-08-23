@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from process_microscopy import (
+from pipeline.fov_checkpoint import (
     _load_fov_checkpoint,
     _save_fov_checkpoint,
     _staging_dir_for,

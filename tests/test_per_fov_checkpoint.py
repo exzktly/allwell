@@ -25,15 +25,15 @@ import pytest
 pytest.importorskip("numpy")
 pytest.importorskip("tifffile")
 
-from process_microscopy import (
+from pipeline.fov_checkpoint import (
     _FOV_CHECKPOINT_SCHEMA,
     _checkpoint_paths,
     _fov_stem,
     _json_safe,
     _load_fov_checkpoint,
-    _prune_scratch_files,
     _save_fov_checkpoint,
 )
+from process_microscopy import _prune_scratch_files
 
 
 # ── _json_safe ──────────────────────────────────────────────────────────────

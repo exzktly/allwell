@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import csv
 import json
-import shutil
 import threading
+from datasets._common.containers import publish_container
 from util.json_write import write_json_atomic
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -90,10 +90,11 @@ def _remap(plan: PlateMergePlan, src_well: str, dest_well: str):
 
 
 def _copy_container_as_is(src: Path, dest_dir: Path) -> None:
-    if src.is_dir():
-        shutil.copytree(src, dest_dir / src.name, dirs_exist_ok=True)
-    else:
-        shutil.copy2(src, dest_dir / src.name)
+    """The path taken for every well this merge does not remap — which is all
+    of dataset 1's. Staged and renamed by ``publish_container`` for the same
+    reason the member-by-member path is: an interrupted copy must not leave a
+    truncated well behind."""
+    publish_container(src, dest_dir / src.name)
 
 
 def _needs_rewrite(src_well: str, dest_well: str) -> bool:
@@ -149,7 +150,7 @@ def _merge_qc_zip(
         fraction.skip()
         return
     if not _needs_rewrite(src_well, dest_well):
-        shutil.copy2(container, plan.dest.out_dir / f"{dest_well}_out.zip")
+        publish_container(container, plan.dest.out_dir / f"{dest_well}_out.zip")
         fraction.skip()
         return
     copy_container_members(
@@ -306,6 +307,8 @@ def execute_plan(
         emit(f"Note: {plan.timepoint_warning}")
     if plan.blocks_warning:
         emit(f"Note: {plan.blocks_warning}")
+        # Also carried into the run's summary below, which is what reaches the
+        # dashboard and the Job Queue row.
     emit(
         f"Wells: {len(plan.wells_ds1)} from dataset 1, {len(plan.wells_ds2)} from "
         "dataset 2 (after remap)."
@@ -383,4 +386,11 @@ def execute_plan(
     emit("Wrote merged pipeline_info.json.")
 
     total_wells = len(plan.wells_ds1) + len(plan.wells_ds2)
-    return f"Merged {total_wells} well(s) into {plan.dest.root}."
+    summary = f"Merged {total_wells} well(s) into {plan.dest.root}."
+    if plan.blocks_warning:
+        # Folded into the summary, not left as a log line: the raw log is
+        # hidden by default, so a run that quietly dropped one plate's gating
+        # would announce it only where nobody looks. The summary is what the
+        # dashboard headline shows and what the Job Queue records for the run.
+        summary = f"{summary} {plan.blocks_warning}"
+    return summary

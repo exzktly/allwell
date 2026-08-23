@@ -3836,16 +3836,7 @@ def write_pipeline_info(
             for preserved_key in USER_SIDE_BLOCKS:
                 if preserved_key in existing and preserved_key not in info:
                     info[preserved_key] = existing[preserved_key]
-    tmp = p.with_suffix(p.suffix + ".tmp")
-    try:
-        tmp.write_text(json.dumps(info, indent=2))
-        os.replace(tmp, p)
-    finally:
-        try:
-            if tmp.exists():
-                tmp.unlink()
-        except OSError:
-            pass
+    write_json_atomic(p, info)
     return p
 
 

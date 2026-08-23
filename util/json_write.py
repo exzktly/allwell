@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -46,22 +47,40 @@ def write_json_atomic(path: Path | str, data: Any, *, indent: int = 2,
     file, and a failure anywhere before the replace leaves the destination
     exactly as it was.
 
-    ``durable=False`` skips the ``fsync``, which costs the bulk of a small
-    write. Everything a *reader* can observe is unchanged either way; only
-    survival of a power loss is given up. Leave it on for anything holding a
-    decision the user made.
+    **The destination's permissions are preserved.** A truncating
+    ``write_text`` keeps the mode of the file it opens; a replace brings the
+    staging file's mode with it, and ``mkstemp`` creates at ``0600``. Silently
+    swapping in an owner-only ``pipeline_info.json`` is how a plate on a shared
+    lab volume stops being readable by the collaborator, or the remote worker,
+    who could read it yesterday — and the ``<WELL>.zip`` files beside it would
+    still be group-readable, so the folder would not even be consistently
+    broken. When there is no destination yet the staging file is widened to the
+    process umask, which is what ``open(path, "w")`` would have produced.
 
-    Raises ``OSError`` on a filesystem failure and ``TypeError`` / ``ValueError``
-    on a payload ``json.dump`` cannot serialise — both before the replace, so
-    the destination is untouched. Callers decide whether to catch; a caller
-    whose contract is that bookkeeping never fails a run should.
+    The staging name carries the repo-wide ``__aw_tmp_`` prefix, so the sweeps
+    that clean up after an interrupted run — ``datasets/validate/apply.
+    _sweep_staging_files``, ``pipeline/io``'s own scans — can see a file left
+    behind by a process that was killed mid-write. A staging file under a name
+    nothing globs for is one nothing ever removes.
+
+    ``durable=False`` skips the ``fsync``, which costs the bulk of a small
+    write and, on a network share, is a visible pause. Everything a *reader*
+    can observe is unchanged either way; only survival of a power loss is given
+    up. Pass it for a debounced autosave on the GUI thread, whose value is
+    rewritten within seconds anyway; leave it on for anything a run computed
+    once.
+
+    Raises ``OSError`` on a filesystem failure and ``TypeError`` /
+    ``ValueError`` on a payload ``json.dump`` cannot serialise — both before
+    the replace, so the destination is untouched. Callers decide whether to
+    catch; a caller whose contract is that bookkeeping never fails a run should.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_name = ""
     try:
-        fd, tmp_name = tempfile.mkstemp(dir=str(path.parent),
-                                        prefix=f".{path.name}.", suffix=".tmp")
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(path.parent), prefix=f"__aw_tmp_{path.name}.", suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=indent)
             fh.flush()
@@ -72,13 +91,32 @@ def write_json_atomic(path: Path | str, data: Any, *, indent: int = 2,
                     # Not supported on every filesystem (some network mounts).
                     # The replace below is still atomic on POSIX and Windows.
                     swallowed("write_json_atomic: fsync unsupported on this fs")
+        _carry_mode(path, tmp_name)
         os.replace(tmp_name, str(path))
         tmp_name = ""
     finally:
-        # ``mkstemp`` created a file; every failure after that point would leave
-        # it behind, and these run per-well on some paths.
+        # ``mkstemp`` created a file; a failure after that point would leave it
+        # behind, and the ``__aw_tmp_`` prefix means a sweep can find it even
+        # if this process is killed before reaching here.
         if tmp_name and os.path.exists(tmp_name):
             try:
                 os.unlink(tmp_name)
             except OSError:
                 swallowed(f"write_json_atomic: could not remove {tmp_name}")
+
+
+def _carry_mode(dest: Path, staging: str) -> None:
+    """Give *staging* the mode *dest* has, or the umask default if it is new."""
+    try:
+        mode = stat.S_IMODE(dest.stat().st_mode)
+    except OSError:
+        # No destination yet: match what ``open(dest, "w")`` would have made.
+        umask = os.umask(0)
+        os.umask(umask)
+        mode = 0o666 & ~umask
+    try:
+        os.chmod(staging, mode)
+    except OSError:
+        # Some filesystems (a few network mounts, and Windows for the group and
+        # other bits) refuse chmod. The write itself is still correct.
+        swallowed(f"write_json_atomic: could not set the mode on {staging}")

@@ -4590,11 +4590,12 @@ through `util.zip_write.atomic_zip`, the single writer shared by
 `input_resolution_service` (the mixed-input consolidation and the loose-image
 append) and `remote_runner` (upload staging and the two upload-filter rewrites).
 It stages at `__aw_tmp_<name>.pid<N>`, fsyncs, re-reads the staged file's central
-directory to confirm it holds exactly the members that were written, decompresses
-every member to check its stored CRC, and only then `os.replace`s it into
-position and fsyncs the parent directory. Three invariants come out of that, and
-all of them matter because users open these archives by hand as often as All-Well
-opens them:
+directory to confirm it holds exactly the members that were written, and —
+when `verify` is on, which it is whenever `durable` is — decompresses every
+member to check its stored CRC, before `os.replace`ing it into position and
+fsyncing the parent directory. Three invariants come out of that, the first two
+unconditional and the third following `verify`; all of them matter because users
+open these archives by hand as often as All-Well opens them:
 
 - *A published archive is readable.* A run killed mid-write — or a share that
   drops — leaves the staging file, never a truncated `<WELL>.zip`.
@@ -4626,8 +4627,13 @@ preserve. Two specialised versions stay: `well_viewer.persistence._io.atomic_wri
 wraps both the open and the replace in a retry for Windows `PermissionError`,
 and `services.run_journal._atomic_write_json` returns `False` instead of raising,
 because a run that cannot write its own bookkeeping must still produce data.
-`tests/test_dataset_tool_integrity.py` fails on a truncating write anywhere
-under `datasets/`, `pipeline/`, `services/`, `well_viewer/` or `util/`.
+`tests/test_dataset_tool_integrity.py` scans every application source file
+(`tests/_repo_scan.python_sources`) for the shapes that truncate a destination:
+`write_text` / `write_bytes` of a serialised payload, including one bound to a
+name first or encoded on the way, and `json.dump` into a handle from a plain
+`open`. A scope that renames what it wrote is doing by hand what
+`write_json_atomic` does, and clears the rule on that basis rather than by
+being named in an allowlist.
 
 The reading side stays tolerant — a `<WELL>.zip` that won't open is skipped by
 the samplers and surfaces as a failed well from the worker pool — but nothing
@@ -6087,14 +6093,17 @@ blocks through `domain.selections_model.from_block` and writes the result with
 `to_block` — the same pair the app itself saves and loads with, so a legacy (v1)
 block is migrated on the way in and the merged plate always carries the current
 schema. Going through that pair rather than the raw keys is the whole point:
-reading `rep_sets`/`groups` directly sees nothing at all in a block written by
-today's app, and since the result *replaces* dataset 1's block, a merge of two
-normally-saved plates wrote back an empty legacy shape — every selection, plot
-group, well label, note and current selection from both datasets gone, reported
-as a clean success.
+`rep_sets`/`groups` are absent from a block written by today's app, and the
+result *replaces* dataset 1's block — so a reader that finds nothing produces an
+empty block, and a merge of two normally-saved plates has discarded every
+selection, plot group, well label, note and current selection from both
+datasets while reporting a clean success.
 
-Dataset 2's well references — a selection's `wells`, its `replicates`, and each
-plot group's `wells` — are remapped through the well map, and its selection and
+Dataset 2's well references — a selection's `wells` and each plot group's
+`wells` — are remapped through the well map. A selection's `replicates` is not,
+because the field is reserved: `make_selection` collapses it to `None` on every
+selection the model builds, so nothing downstream would ever read a remapped
+one. Dataset 2's selection and
 plot-group names that collide with dataset 1's are suffixed with dataset 2's
 folder name rather than silently overwriting a same-named definition. Its
 selection ids are dropped and re-minted, because an id is unique only within
@@ -6256,8 +6265,10 @@ Qt event loop. Four layers:
   `ValidateController._run`'s "no dataset path" branch and
   `OmeImportController._launch`'s "no source or destination" branch all emit
   `jobFinished` directly rather than returning silently.
-  `tests/test_dataset_tool_integrity.py` checks every tool's launcher for a
-  pre-worker return that has no emit behind it.
+  `tests/test_dataset_tool_integrity.py` checks each of the six launchers
+  return by return, against the statement block it sits in rather than the
+  function as a whole — one emit elsewhere in the function does not excuse a
+  silent return beside it.
 
   There is one such return the bridge does **not** need an emit for, and it is
   the bridge's own job to make sure of it. Every tool's launcher opens with "if

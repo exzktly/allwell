@@ -1673,3 +1673,114 @@ def test_journal_vocabulary_guard_clears(tmp_path, monkeypatch, shape):
                   JOURNAL_ROSTER_CLEAN[shape])
     assert _run_scan(monkeypatch, *_JOURNAL_GUARD, [good]) is None, (
         f"the guard fired on a legitimate {shape}")
+
+
+# ── replacing a live JSON file by truncating it ─────────────────────────────
+
+_ATOMIC_JSON_GUARD = (
+    "tests.test_dataset_tool_integrity",
+    "test_no_live_json_file_is_replaced_by_truncating_it",
+)
+
+#: Every spelling that truncates a destination holding JSON. The first is the
+#: shape that shipped; the rest were each measured walking past an earlier
+#: version of the guard, which matched only a literal `json.dumps` argument to
+#: `write_text`.
+ATOMIC_JSON_VIOLATIONS = {
+    "direct": (
+        'import json\n'
+        'def save(p, x):\n'
+        '    p.write_text(json.dumps(x, indent=2))\n'
+    ),
+    # The payload bound to a name first — one refactor away from the above.
+    "two-step": (
+        'import json\n'
+        'def save(p, x):\n'
+        '    payload = json.dumps(x, indent=2)\n'
+        '    p.write_text(payload)\n'
+    ),
+    # `from json import dumps`, so the call has no `json.` prefix to match on.
+    "bare-dumps": (
+        'from json import dumps\n'
+        'def save(p, x):\n'
+        '    p.write_text(dumps(x))\n'
+    ),
+    # The payload is the *receiver* of `.encode()`, not an argument to it, so a
+    # guard that only walks a call's arguments never reaches the `dumps`.
+    "write-bytes": (
+        'import json\n'
+        'def save(p, x):\n'
+        '    p.write_bytes(json.dumps(x).encode("utf-8"))\n'
+    ),
+    # The streaming form, straight onto the destination.
+    "open-and-dump": (
+        'import json\n'
+        'def save(p, x):\n'
+        '    with open(p, "w", encoding="utf-8") as fh:\n'
+        '        json.dump(x, fh, indent=2)\n'
+    ),
+}
+
+#: Shapes the guard must NOT fire on. Every one of these is real code in this
+#: repository, and an earlier draft reported all of them as defects — a guard
+#: whose failures are mostly false is a guard that gets deleted.
+ATOMIC_JSON_CLEAN = {
+    # The helper itself.
+    "the-helper": (
+        'from util.json_write import write_json_atomic\n'
+        'def save(p, x):\n'
+        '    write_json_atomic(p, x)\n'
+    ),
+    # A hand-rolled stage-and-rename: doing by hand what the helper does.
+    "tmp-then-replace": (
+        'import json, os\n'
+        'def save(p, x):\n'
+        '    tmp = p.with_suffix(".tmp")\n'
+        '    tmp.write_text(json.dumps(x, indent=2))\n'
+        '    os.replace(tmp, p)\n'
+    ),
+    # mkstemp + fdopen: the handle is a staging file, so streaming into it is
+    # the rule rather than a breach of it.
+    "mkstemp-and-dump": (
+        'import json, os, tempfile\n'
+        'def save(p, x):\n'
+        '    fd, tmp = tempfile.mkstemp(dir=str(p.parent))\n'
+        '    with os.fdopen(fd, "w") as fh:\n'
+        '        json.dump(x, fh, indent=2)\n'
+        '    os.replace(tmp, p)\n'
+    ),
+    # The staging write in a nested helper, the rename in its parent — the
+    # shape `well_viewer/persistence/_io.atomic_write_json` uses, because its
+    # rename is wrapped in a retry. Judging each nested `def` separately splits
+    # the pair in half and reports the repo's most careful writer as a defect.
+    "nested-write-parent-rename": (
+        'import json, os\n'
+        'def save(p, x):\n'
+        '    tmp = p.with_suffix(".tmp")\n'
+        '    def _write():\n'
+        '        with open(tmp, "w") as fh:\n'
+        '            json.dump(x, fh)\n'
+        '    _write()\n'
+        '    os.replace(tmp, p)\n'
+    ),
+    # Not JSON at all.
+    "plain-text": (
+        'def save(p, text):\n'
+        '    p.write_text(text)\n'
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(ATOMIC_JSON_VIOLATIONS))
+def test_atomic_json_guard_catches(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, f"bad_json_{shape}.py", ATOMIC_JSON_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, *_ATOMIC_JSON_GUARD, [bad])
+    assert exc is not None and bad.name in str(exc), (
+        f"the {shape} spelling walked past the guard")
+
+
+@pytest.mark.parametrize("shape", sorted(ATOMIC_JSON_CLEAN))
+def test_atomic_json_guard_clears(tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, f"good_json_{shape}.py", ATOMIC_JSON_CLEAN[shape])
+    assert _run_scan(monkeypatch, *_ATOMIC_JSON_GUARD, [good]) is None, (
+        f"the guard fired on a legitimate {shape}")

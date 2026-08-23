@@ -630,4 +630,6 @@ def load_queue(state_dir: Path | None = None) -> JobQueue:
 def save_queue(queue: JobQueue, state_dir: Path | None = None) -> None:
     """Write the queue via a tmp file + ``os.replace`` so a crash mid-write
     can't leave a truncated ``job_queue.json`` behind."""
-    write_json_atomic(queue_path(state_dir), queue.to_json())
+    # ``durable=False``: written on every queue state change, from the GUI
+    # thread. The queue is bookkeeping about runs, not the runs' results.
+    write_json_atomic(queue_path(state_dir), queue.to_json(), durable=False)

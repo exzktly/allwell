@@ -99,6 +99,8 @@ def commit_staged_export(staging, out_dir, *, manifest_extra: dict | None = None
     manifest = {"files": committed, "count": len(committed)}
     if manifest_extra:
         manifest.update(manifest_extra)
-    write_json_atomic(out / MANIFEST_NAME, manifest)
+    # ``durable=False``: an index of files that are themselves already on
+    # disk beside it, written at the end of an export the user is watching.
+    write_json_atomic(out / MANIFEST_NAME, manifest, durable=False)
     shutil.rmtree(staging, ignore_errors=True)
     return committed

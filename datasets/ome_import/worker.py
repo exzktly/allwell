@@ -72,6 +72,13 @@ class OmeImportWorker(QThread):
                 "destination; re-running with the same settings finishes the "
                 "rest rather than repeating them."
             )
+        except OmeImportError as exc:
+            # A refusal, not a crash: the destination already holds a plate, or
+            # it holds an interrupted run of a different mapping. ``convert``
+            # raises before writing anything, so "Conversion failed: …" would
+            # describe a run that never started, and the bare handler below
+            # would log a traceback for an ordinary, expected answer.
+            self.failed.emit(str(exc))
         except Exception as exc:  # pragma: no cover — defensive
             swallowed("ome-import convert")
             self.failed.emit(f"Conversion failed: {exc}")

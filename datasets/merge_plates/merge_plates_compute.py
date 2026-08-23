@@ -175,11 +175,22 @@ def merge_sample_definitions(info1: dict, info2: dict, *, well_map: dict[str, st
         used_names.add(name)
         merged = dict(sel)
         merged["name"] = name
-        merged["wells"] = _remap_wells(sel.get("wells"), well_map)
-        reps = sel.get("replicates")
-        if reps:
-            merged["replicates"] = [_remap_wells(r, well_map) for r in reps]
-        # Dropped rather than remapped: an id is only unique within one block,
+        wells = _remap_wells(sel.get("wells"), well_map)
+        if wells != list(sel.get("wells") or []):
+            # The remap moved this condition to a different part of the plate,
+            # and a selection's colour is baked from its lowest well's rank —
+            # so the stored one now describes a position it no longer occupies.
+            # Dropping it lets ``to_block`` re-bake from where the wells landed.
+            # Left in place, dataset 1's "Control" at A01 and dataset 2's,
+            # remapped to B01, both render #6AB2FB: two conditions the user
+            # cannot tell apart in a bar chart.
+            merged.pop("color", None)
+        merged["wells"] = wells
+        # ``replicates`` is deliberately not remapped: the field is reserved and
+        # ``make_selection`` collapses it to ``None`` on every selection it
+        # builds, so ``to_block`` below discards whatever were put here. A
+        # remap would be code that runs and changes nothing.
+        # The id is dropped rather than remapped: an id is only unique within one block,
         # and ``to_block``'s validation re-mints a duplicate anyway. Letting it
         # mint them here keeps dataset 1's ids stable, which is what
         # ``current_id`` below points at.
@@ -209,6 +220,57 @@ def merge_sample_definitions(info1: dict, info2: dict, *, well_map: dict[str, st
 
     return to_block(selections, well_labels=well_labels, notes=notes,
                     current_id=current_id, plot_groups=plot_groups)
+
+
+#: Analysis blocks that cannot be combined by rule — each is a decision made
+#: under one plate's imaging conditions — paired with the words to describe it.
+_UNMERGEABLE_BLOCKS: tuple[tuple[str, str], ...] = (
+    ("cell_gating", "cell gating"),
+    ("ratios", "ratio metrics"),
+    ("qc_options", "QC parameters"),
+    ("smfish_thresholds", "smFISH thresholds"),
+)
+
+
+def _dropped_blocks_warning(info1: dict, info2: dict, *, ds1_label: str,
+                            ds2_label: str) -> str | None:
+    """Name what dataset 2 loses, in the two ways it can lose it.
+
+    A block dataset 1 also has is *replaced*: the merged plate carries dataset
+    1's version, which is a defensible choice the user should know was made. A
+    block only dataset 2 has is *gone*, because the merged sidecar starts as a
+    copy of dataset 1 — and saying "the merged plate keeps dataset 1's" about a
+    block dataset 1 never had would be the degraded-output-reported-as-clean
+    shape this warning exists to prevent, stated in the warning itself.
+
+    Blocks whose two values are equal are not mentioned at all. Nothing was
+    lost, and a note that fires on every merge trains the user to skip it.
+    """
+    replaced: list[str] = []
+    lost: list[str] = []
+    for key, label in _UNMERGEABLE_BLOCKS:
+        theirs = info2.get(key)
+        if not theirs:
+            continue
+        ours = info1.get(key)
+        if not ours:
+            lost.append(label)
+        elif ours != theirs:
+            replaced.append(label)
+    parts: list[str] = []
+    if replaced:
+        parts.append(
+            f"{ds2_label}'s " + ", ".join(replaced)
+            + f" differ from {ds1_label}'s; the merged plate keeps {ds1_label}'s"
+        )
+    if lost:
+        parts.append(
+            f"{ds2_label}'s " + ", ".join(lost)
+            + f" are not carried over ({ds1_label} has none to merge them with)"
+        )
+    if not parts:
+        return None
+    return ". ".join(parts) + ". Sample definitions from both are merged."
 
 
 @dataclass(frozen=True)
@@ -351,22 +413,13 @@ def build_plate_merge_plan(
         merged_info["sample_definitions"] = sample_defs
 
     # ``merged_info`` starts as a copy of dataset 1, so every other analysis
-    # block dataset 2 holds is silently replaced by dataset 1's. Say which.
-    _DROPPABLE = (
-        ("cell_gating", "cell gating"),
-        ("ratios", "ratio metrics"),
-        ("qc_options", "QC parameters"),
-        ("smfish_thresholds", "smFISH thresholds"),
-    )
-    dropped = [label for key, label in _DROPPABLE if info2.get(key)]
-    blocks_warning = None
-    if dropped:
-        blocks_warning = (
-            f"{ds2.root.name} also has "
-            + ", ".join(dropped)
-            + f"; the merged plate keeps {ds1.root.name}'s. Sample definitions "
-              "from both are merged."
-        )
+    # block dataset 2 holds is replaced by dataset 1's. Say which — but only
+    # where the two datasets actually disagree. ``qc_options`` in particular is
+    # written for every run as a full dict of eleven keys, so a note keyed on
+    # the block merely being *present* fires on every merge of two real plates
+    # and is noise rather than a warning.
+    blocks_warning = _dropped_blocks_warning(
+        info1, info2, ds1_label=ds1.root.name, ds2_label=ds2.root.name)
 
     return PlateMergePlan(
         ds1=ds1, ds2=ds2, dest=dest,

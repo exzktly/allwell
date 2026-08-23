@@ -95,6 +95,12 @@ class OmeLayout:
     channel_names: list[str]      # length == size_c
     timepoint_tokens: list[str]   # length == size_t (multi-image only)
     axes_per_series: list[str]    # tifffile axes string per series
+    # T/C/Z as each series actually holds them. `size_t`/`size_c`/`size_z`
+    # above come from series[0] alone, which is the whole plate's shape only if
+    # every position agrees — and a plate whose acquisition was stopped early at
+    # one well does not. Recorded so `validation_report` can say so before a
+    # single archive is written.
+    sizes_per_series: list[dict[str, int]] = field(default_factory=list)
     single_image: bool = False
     n_frames: int = 0             # single-image: the T-axis frame count
     total_planes: int = 0         # image planes the metadata declares, all series
@@ -155,6 +161,24 @@ class OmeLayout:
     # from rather than be typed.
     position_names: list[str] = field(default_factory=list)
 
+    def _ragged_positions(self) -> tuple[str, int, int, int] | None:
+        """The first axis on which the positions disagree, or ``None``.
+
+        Returns ``(axis label, series-0 size, offending index, its size)``.
+        Single-image files have one series and cannot be ragged.
+        """
+        if self.single_image or len(self.sizes_per_series) < 2:
+            return None
+        labels = {"T": "timepoints", "C": "channels", "Z": "Z slices"}
+        first = self.sizes_per_series[0]
+        for ax in ("T", "C", "Z"):
+            want = int(first.get(ax, 1))
+            for i, sizes in enumerate(self.sizes_per_series[1:], start=1):
+                got = int(sizes.get(ax, 1))
+                if got != want:
+                    return labels[ax], want, i, got
+        return None
+
     def validation_report(self, name: str = "") -> str:
         """The one blocking problem with this file, or ``""`` if it is sound.
 
@@ -184,6 +208,25 @@ class OmeLayout:
                 f"so the reader fell back to a plain sequence and the channel and "
                 f"timepoint of each plane are unknown.{detail} Re-export it from "
                 f"the acquisition software."
+            )
+        # Every position must agree about T/C/Z, because the explode loop asks
+        # each of them for `t` in `range(self.size_t)` and `size_t` is read from
+        # series[0] alone. A position holding fewer used to have its last frame
+        # written out again under each later timepoint's name — a fold-change
+        # over time of exactly 1.000, indistinguishable from a measured null.
+        # The file is not damaged and declares nothing false, so none of the
+        # checks above sees it: it is honestly describing two differently
+        # shaped Images.
+        ragged = self._ragged_positions()
+        if ragged:
+            ax, first, odd_pos, odd = ragged
+            return (
+                f"{subject} holds {self.n_positions} stage positions that do "
+                f"not agree about how many {ax} they have: position 1 has "
+                f"{first} and position {odd_pos + 1} has {odd}. Every position "
+                f"has to carry the same {ax} for the timepoints and channels to "
+                f"line up across the plate. Re-export it from the acquisition "
+                f"software, or export the affected position separately."
             )
         realised = self.n_frames if self.single_image else self.size_t
         declared_t = int(self.declared_sizes.get("T", 0))
@@ -794,6 +837,17 @@ def read_ome_layout(ome_path: Path | str) -> OmeLayout:
             axes0 = axes_per_series[0]
             shape0 = series[0].shape
 
+            def _sizes_of(ser, ax_str: str) -> dict[str, int]:
+                shp = ser.shape
+                return {
+                    ax: (int(shp[ax_str.index(ax)]) if ax in ax_str else 1)
+                    for ax in ("T", "C", "Z")
+                }
+
+            sizes_per_series = [
+                _sizes_of(ser, ax) for ser, ax in zip(series, axes_per_series)
+            ]
+
             def _size(ax: str) -> int:
                 return int(shape0[axes0.index(ax)]) if ax in axes0 else 1
 
@@ -821,6 +875,7 @@ def read_ome_layout(ome_path: Path | str) -> OmeLayout:
         channel_names=channel_names,
         timepoint_tokens=timepoint_tokens,
         axes_per_series=axes_per_series,
+        sizes_per_series=sizes_per_series,
         single_image=single_image,
         n_frames=size_t if single_image else 0,
         total_planes=total_planes,
@@ -851,18 +906,47 @@ def _extract_plane(arr: np.ndarray, axes: str, t: int, c: int) -> np.ndarray:
     Indexes the T and C axes (when present), keeps Y/X/Z, and takes index 0 of
     any other axis (e.g. a sample axis). Z is collapsed by maximum projection;
     any residual leading axes are defensively reduced to leave a 2-D result.
+
+    An out-of-range *t* or *c* **raises**, as :func:`_packed_plane` already does
+    for a page it cannot find. It used to clamp with ``min(…, shape - 1)``, and
+    the caller asks for ``t`` in ``range(layout.size_t)`` where ``size_t`` is
+    read from **series[0] only** — so a position that legitimately holds fewer
+    timepoints (an acquisition stopped early at one well) had its last frame
+    written out again under every later timepoint's name. Quantified as a real
+    second timepoint, that is a fold-change over time of exactly 1.000, and
+    nothing distinguishes it from a measured null. A series with no T axis at
+    all was worse: every timepoint got the same frame.
     """
     axes = axes.upper()
     sl: list = [slice(None)] * arr.ndim
     for pos, ax in enumerate(axes):
         if ax == "T":
-            sl[pos] = min(t, arr.shape[pos] - 1)
+            if t >= arr.shape[pos]:
+                raise ValueError(
+                    f"timepoint {t} requested from a series that holds "
+                    f"{arr.shape[pos]} (axes {axes!r})")
+            sl[pos] = t
         elif ax == "C":
-            sl[pos] = min(c, arr.shape[pos] - 1)
+            if c >= arr.shape[pos]:
+                raise ValueError(
+                    f"channel {c} requested from a series that holds "
+                    f"{arr.shape[pos]} (axes {axes!r})")
+            sl[pos] = c
         elif ax in ("Z", "Y", "X"):
             continue
         else:
             sl[pos] = 0
+    # A series with no T (or C) axis at all reaches neither branch above, so
+    # every timepoint would resolve to the same single plane — the same silent
+    # duplication by a different route.
+    if t and "T" not in axes:
+        raise ValueError(
+            f"timepoint {t} requested from a series with no T axis "
+            f"(axes {axes!r})")
+    if c and "C" not in axes:
+        raise ValueError(
+            f"channel {c} requested from a series with no C axis "
+            f"(axes {axes!r})")
     sub = arr[tuple(sl)]
 
     remaining = [ax for pos, ax in enumerate(axes) if isinstance(sl[pos], slice)]

@@ -701,6 +701,18 @@ def _kick_off_gating_after_load(ctx) -> None:
     if has_non_default_gate or use_scatter or use_thresh:
         from well_viewer.features.home.cell_gating.controller import cell_gating_start_gating_worker
         cell_gating_start_gating_worker(ctx)
+        return
+    # No worker, so nothing else repaints the tab's "Included for analysis"
+    # line and its funnel — and this is the commonest path, since a dataset
+    # whose gates are all at their defaults takes it. Without the refresh the
+    # label keeps the *previous* dataset's counts after a plate swap: a real
+    # number, for the wrong plate, with nothing to distinguish it from the
+    # right one. ``cell_gating_refresh_included_count`` recomputes from the row
+    # cache and no-ops when the label has not been built yet.
+    from well_viewer.features.home.cell_gating.controller import (
+        cell_gating_refresh_included_count,
+    )
+    cell_gating_refresh_included_count(ctx)
 
 
 def _looks_like_well_measurement_csv(path: Path) -> bool:

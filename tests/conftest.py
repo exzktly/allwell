@@ -25,6 +25,7 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 # per text draw, drowning the test output. The Agg fallback is harmless.
 logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
 
+import threading
 from dataclasses import dataclass, field
 
 import pytest
@@ -532,3 +533,91 @@ def _isolated_run_journal_index(tmp_path, monkeypatch):
     monkeypatch.setattr(
         run_journal, "index_path",
         lambda: tmp_path / "_aw_state" / "run_index.json")
+
+
+def _live_fetcher_threads():
+    """Threads still running a `Fetcher` loop, and the fetchers that own them.
+
+    A `Fetcher` runs two: `_loop`, which drains the pull queue, and
+    `_sidecar_loop`, which re-pulls `pipeline_info.json` on a timer. Both are
+    daemons, so nothing reaps them when a test ends; both call rsync. A test
+    that builds a `RemoteRunner` and never cancels it therefore leaves a
+    process-wide timer that fires inside whatever test is running fifteen
+    seconds later.
+
+    The owner comes off the thread's own target, which for a bound method is
+    the instance it was taken from. That is private, and it is the only way to
+    get from a leaked thread back to the object that can stop it without
+    production code keeping a registry for the tests' benefit.
+    """
+    out = []
+    for t in threading.enumerate():
+        target = getattr(t, "_target", None)
+        owner = getattr(target, "__self__", None)
+        if owner is None or type(owner).__name__ != "Fetcher":
+            continue
+        if owner._stop.is_set() and owner._sidecar_done.is_set():
+            continue    # cancelled; it is on its way out, not abandoned
+        out.append((t, owner))
+    return out
+
+
+@pytest.fixture(autouse=True)
+def _no_test_leaves_a_fetcher_running():
+    """Stop any `Fetcher` a test left running, and fail the test that left it.
+
+    This is not hygiene for its own sake. Eight such fetchers leaked out of one
+    file, sixteen threads between them, and one of the sidecar pollers landed
+    inside `test_remote_midrun_sidecar`'s half-second window minutes later —
+    appending a pull to *that* test's call list and failing an assertion about
+    a poller it had no connection to. In CI, where the ordering and the timing
+    differ from a local run, it presented as a test failing for no reason it
+    named.
+
+    Stopping them here rather than only reporting them keeps one leak from
+    cascading into every later file. The failure is raised afterwards so the
+    test that leaked is the one that carries it.
+    """
+    yield
+    leaked = _live_fetcher_threads()
+    for _thread, owner in leaked:
+        owner.cancel()
+    for thread, _owner in leaked:
+        thread.join(timeout=5)
+    # The predicate is *asked to stop*, not *finished stopping*. A thread that
+    # was cancelled a microsecond ago is still alive and is not a leak, so
+    # judging on liveness alone failed every test that had cleaned up
+    # correctly — the fixture teardown that cancels runs just before this one.
+    assert not leaked, (
+        "this test left a Fetcher running. Both of its threads call rsync on a "
+        "timer, so it goes on reaching the (faked) network inside later tests, "
+        "in a file that has no idea it exists. Cancel it — "
+        "`verify_and_cleanup`, or `runner._fetcher.cancel()` in a finalizer "
+        "(`RemoteRunner.cancel` is a different thing: it takes the ssh "
+        "process). Leaked: "
+        + ", ".join(t.name for t, _ in leaked))
+
+
+@pytest.fixture
+def stop_fetchers():
+    """Register a spawned ``RemoteRunner`` so its ``Fetcher`` is stopped.
+
+    Yields a one-argument callable; hand it every runner a test drives through
+    the real ``RemoteRunner.spawn``. A spawned run owns a ``Fetcher`` with two
+    daemon threads — the pull-queue drain and the sidecar poller — both of
+    which call rsync on a timer and are reaped by nothing.
+
+    A fixture rather than ``request.addfinalizer`` because the ordering
+    matters: an item-level finalizer runs *after* every fixture teardown, so
+    the autouse guard above would see the threads still uncancelled and fail
+    the tests that had in fact cleaned up. A fixture the test requests is set
+    up after that guard and therefore torn down before it.
+    """
+    started = []
+    yield started.append
+    for runner in started:
+        fetcher = getattr(runner, "_fetcher", None)
+        if fetcher is not None:
+            # `RemoteRunner.cancel` is a different thing — it takes the ssh
+            # process. The `Fetcher` is what holds the threads.
+            fetcher.cancel()

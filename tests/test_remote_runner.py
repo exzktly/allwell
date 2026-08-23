@@ -795,7 +795,8 @@ def test_rsync_with_retry_no_stop_event_behaves_normally():
 # ── v5.2.27: pre-flight cache-hit skips pipeline launch entirely ──────────
 
 
-def _make_spawn_test_runner(host, tmp_path, monkeypatch, *, completed_remote_wells):
+def _make_spawn_test_runner(
+        host, tmp_path, monkeypatch, stop_fetchers, *, completed_remote_wells):
     """Plumb a RemoteRunner whose spawn() can run end-to-end without
     real ssh/rsync: mock _ssh_run/_ssh_script, ensure_uploaded, popen,
     and _list_remote_completed_wells return value."""
@@ -843,10 +844,11 @@ def _make_spawn_test_runner(host, tmp_path, monkeypatch, *, completed_remote_wel
         return m
 
     monkeypatch.setattr("services.remote_runner.subprocess.Popen", fake_popen)
+    stop_fetchers(runner)
     return runner, captured
 
 
-def test_spawn_skips_pipeline_when_remote_has_all_wells(host, tmp_path, monkeypatch):
+def test_spawn_skips_pipeline_when_remote_has_all_wells(host, tmp_path, monkeypatch, stop_fetchers):
     """v5.2.27: previous run completed every well on the remote, then
     the local fetch was interrupted. Re-run must NOT re-launch the
     pipeline — pre-flight detects the cache hit and replaces the
@@ -858,7 +860,7 @@ def test_spawn_skips_pipeline_when_remote_has_all_wells(host, tmp_path, monkeypa
         zip_dir=tmp_path, mode=LocalInputMode.ZIP, well_zips=(z1, z2),
     )
     runner, captured = _make_spawn_test_runner(
-        host, tmp_path, monkeypatch,
+        host, tmp_path, monkeypatch, stop_fetchers,
         completed_remote_wells={"A01", "B02"},
     )
 
@@ -883,7 +885,7 @@ def test_spawn_skips_pipeline_when_remote_has_all_wells(host, tmp_path, monkeypa
     assert "process_microscopy" not in remote_cmd
 
 
-def test_spawn_runs_pipeline_when_remote_is_partial(host, tmp_path, monkeypatch):
+def test_spawn_runs_pipeline_when_remote_is_partial(host, tmp_path, monkeypatch, stop_fetchers):
     """If only some wells are complete on the remote, the pipeline
     runs normally — its own per-well skip logic handles the rest."""
     z1 = _make_well_zip(tmp_path, "A01.zip", ["x.tif"])
@@ -893,7 +895,7 @@ def test_spawn_runs_pipeline_when_remote_is_partial(host, tmp_path, monkeypatch)
         zip_dir=tmp_path, mode=LocalInputMode.ZIP, well_zips=(z1, z2, z3),
     )
     runner, captured = _make_spawn_test_runner(
-        host, tmp_path, monkeypatch,
+        host, tmp_path, monkeypatch, stop_fetchers,
         completed_remote_wells={"A01"},  # only 1 of 3 done
     )
     log_lines: list[str] = []
@@ -915,7 +917,7 @@ def test_spawn_runs_pipeline_when_remote_is_partial(host, tmp_path, monkeypatch)
     assert "process_microscopy" in remote_cmd
 
 
-def test_spawn_runs_pipeline_when_remote_is_empty(host, tmp_path, monkeypatch):
+def test_spawn_runs_pipeline_when_remote_is_empty(host, tmp_path, monkeypatch, stop_fetchers):
     """First-ever run on a fresh remote: pre-flight finds nothing,
     pipeline launches normally."""
     z1 = _make_well_zip(tmp_path, "A01.zip", ["x.tif"])
@@ -923,7 +925,7 @@ def test_spawn_runs_pipeline_when_remote_is_empty(host, tmp_path, monkeypatch):
         zip_dir=tmp_path, mode=LocalInputMode.ZIP, well_zips=(z1,),
     )
     runner, captured = _make_spawn_test_runner(
-        host, tmp_path, monkeypatch,
+        host, tmp_path, monkeypatch, stop_fetchers,
         completed_remote_wells=set(),
     )
     log_lines: list[str] = []

@@ -71,52 +71,69 @@ def _argv(plate):
             "--nuclear_token", "DAPI"]
 
 
-def _spawn(host, plate, remote, monkeypatch, *, completed=(), **kw):
-    """Drive the real ``spawn`` against the fake host; return the runner."""
-    from services.remote_runner import (
-        DatasetCache, LocalInputMode, OutputFilter, RemoteRunner, ZippedInput,
-    )
-    def _launched(_argv):
-        m = MagicMock()
-        m.stdout = MagicMock()
-        m.stdout.__iter__ = lambda self: iter([])
-        m.wait.return_value = 0
-        m.returncode = 0
-        m.pid = 4242
-        return m
+@pytest.fixture
+def spawn(stop_fetchers):
+    """Drive the real ``spawn`` against the fake host; return the runner.
 
-    remote.install(monkeypatch, host, on_launch=_launched)
+    A fixture rather than a plain helper so that stopping what it starts is
+    ordered correctly. A spawned run owns a ``Fetcher``, whose queue-drain and
+    sidecar-poll threads are daemons that call rsync on a timer and are reaped
+    by nothing; eight of them leaked out of this file, and one of the pollers
+    fired inside an unrelated test's half-second window minutes later, failing
+    an assertion about a poller that test had no connection to.
 
-    _KEY = "cachekey" + "0" * 24
-    monkeypatch.setattr(DatasetCache, "cache_key", lambda self, z: _KEY)
-    monkeypatch.setattr(DatasetCache, "ensure_uploaded",
-                        lambda self, z, **k: (_KEY, 0, 0.01))
-    monkeypatch.setattr(RemoteRunner, "sync_required_files",
-                        lambda self, **k: None)
-    monkeypatch.setattr(RemoteRunner, "_list_remote_completed_wells",
-                        lambda self: set(completed))
+    `stop_fetchers` in `conftest.py` does the stopping, so every file that
+    drives a real `spawn` uses one mechanism rather than three.
+    """
+    def _spawn(host, plate, remote, monkeypatch, *, completed=(), **kw):
+        from services.remote_runner import (
+            DatasetCache, LocalInputMode, OutputFilter, RemoteRunner, ZippedInput,
+        )
+        def _launched(_argv):
+            m = MagicMock()
+            m.stdout = MagicMock()
+            m.stdout.__iter__ = lambda self: iter([])
+            m.wait.return_value = 0
+            m.returncode = 0
+            m.pid = 4242
+            return m
 
-    in_dir = plate / "in"
-    zipped = ZippedInput(zip_dir=in_dir, mode=LocalInputMode.ZIP,
-                         well_zips=(in_dir / "A01.zip", in_dir / "B02.zip"))
-    runner = RemoteRunner(host)
-    log: list[str] = []
-    runner.spawn(zipped, plate / "out", pipeline_argv=_argv(plate),
-                 output_filter=OutputFilter.FULL, log_fn=log.append, **kw)
-    return runner, "".join(log)
+        remote.install(monkeypatch, host, on_launch=_launched)
+
+        _KEY = "cachekey" + "0" * 24
+        monkeypatch.setattr(DatasetCache, "cache_key", lambda self, z: _KEY)
+        monkeypatch.setattr(DatasetCache, "ensure_uploaded",
+                            lambda self, z, **k: (_KEY, 0, 0.01))
+        monkeypatch.setattr(RemoteRunner, "sync_required_files",
+                            lambda self, **k: None)
+        monkeypatch.setattr(RemoteRunner, "_list_remote_completed_wells",
+                            lambda self: set(completed))
+
+        in_dir = plate / "in"
+        zipped = ZippedInput(zip_dir=in_dir, mode=LocalInputMode.ZIP,
+                             well_zips=(in_dir / "A01.zip", in_dir / "B02.zip"))
+        runner = RemoteRunner(host)
+        stop_fetchers(runner)
+        log: list[str] = []
+        runner.spawn(zipped, plate / "out", pipeline_argv=_argv(plate),
+                     output_filter=OutputFilter.FULL, log_fn=log.append, **kw)
+        return runner, "".join(log)
+
+    return _spawn
+
 
 
 # ── what a run leaves on the host ───────────────────────────────────────────
 
 def test_a_run_creates_every_directory_its_control_files_need(
-        host, plate, remote, monkeypatch):
+        host, plate, remote, monkeypatch, spawn):
     """The output directory *and* the run's own, which are not the same one.
 
     A re-attaching run's output lives under a previous ``run_id`` while its
     pidfile, sentinel and heartbeat stay under its own — so "the directory was
     created" has to be asked of each separately.
     """
-    runner, _log = _spawn(host, plate, remote, monkeypatch)
+    runner, _log = spawn(host, plate, remote, monkeypatch)
     run = runner._run
 
     assert remote.exists(run.remote_output_dir), remote.tree()
@@ -127,13 +144,13 @@ def test_a_run_creates_every_directory_its_control_files_need(
 
 
 def test_the_launched_command_names_the_output_directory_it_created(
-        host, plate, remote, monkeypatch):
+        host, plate, remote, monkeypatch, spawn):
     """The address the run computed and the address it launched against.
 
     These are derived in different places, which is the shape every re-attach
     defect has taken.
     """
-    runner, _log = _spawn(host, plate, remote, monkeypatch)
+    runner, _log = spawn(host, plate, remote, monkeypatch)
 
     assert remote.launched, "no pipeline was launched"
     launched = " ".join(remote.launched[-1])
@@ -141,14 +158,14 @@ def test_the_launched_command_names_the_output_directory_it_created(
 
 
 def test_cleanup_removes_the_run_dir_and_leaves_the_dataset_cache(
-        host, plate, remote, monkeypatch):
+        host, plate, remote, monkeypatch, spawn):
     """Asserted on the host, not on the ``rm -rf`` argv.
 
     A cleanup that names the right path and never reaches the host, and one
     that reaches it and removes the wrong thing, are indistinguishable from
     the call site.
     """
-    runner, _log = _spawn(host, plate, remote, monkeypatch,
+    runner, _log = spawn(host, plate, remote, monkeypatch,
                           completed=("A01", "B02"))
     run = runner._run
     own = str(Path(run.remote_pidfile).parent)
@@ -166,9 +183,9 @@ def test_cleanup_removes_the_run_dir_and_leaves_the_dataset_cache(
         f"the run dir survived cleanup; host holds {remote.tree()}")
 
 
-def test_a_dry_run_cleanup_removes_nothing(host, plate, remote, monkeypatch):
+def test_a_dry_run_cleanup_removes_nothing(host, plate, remote, monkeypatch, spawn):
     """The mode whose whole purpose is telling the truth about what would go."""
-    runner, _log = _spawn(host, plate, remote, monkeypatch,
+    runner, _log = spawn(host, plate, remote, monkeypatch,
                           completed=("A01", "B02"))
     own = str(Path(runner._run.remote_pidfile).parent)
 
@@ -185,11 +202,11 @@ def test_a_dry_run_cleanup_removes_nothing(host, plate, remote, monkeypatch):
 
 
 def test_the_journal_records_the_address_the_run_actually_used(
-        host, plate, remote, monkeypatch):
+        host, plate, remote, monkeypatch, spawn):
     """The record and the host must agree about where the work went."""
     J.open_run(plate / "out", spec={}, mode="remote", input_dir=plate / "in",
                argv=_argv(plate))
-    runner, _log = _spawn(host, plate, remote, monkeypatch)
+    runner, _log = spawn(host, plate, remote, monkeypatch)
 
     journal = J.read_journal(plate / "out")
     assert journal is not None
@@ -227,7 +244,7 @@ def _record_a_previous_run(plate, remote):
 
 
 def test_a_re_attaching_run_still_creates_its_own_directory(
-        host, plate, remote, monkeypatch):
+        host, plate, remote, monkeypatch, spawn):
     """The one case where the two directories are not the same one.
 
     An ordinary run's ``mkdir -p …/runs/<id>/out`` makes ``runs/<id>`` on the
@@ -238,7 +255,7 @@ def test_a_re_attaching_run_still_creates_its_own_directory(
     non-re-attaching tests above cannot see.
     """
     _record_a_previous_run(plate, remote)
-    runner, log = _spawn(host, plate, remote, monkeypatch,
+    runner, log = spawn(host, plate, remote, monkeypatch,
                          completed=("A01", "B02"))
 
     assert "re-attaching" in log, "the run under test did not re-attach"
@@ -253,10 +270,10 @@ def test_a_re_attaching_run_still_creates_its_own_directory(
 
 
 def test_a_re_attached_run_leaves_the_borrowed_directory_alone(
-        host, plate, remote, monkeypatch):
+        host, plate, remote, monkeypatch, spawn):
     """Cleanup has to tell the two apart on the host, not in the argv."""
     _record_a_previous_run(plate, remote)
-    runner, log = _spawn(host, plate, remote, monkeypatch,
+    runner, log = spawn(host, plate, remote, monkeypatch,
                          completed=("A01", "B02"))
     assert "re-attaching" in log
     own = str(Path(runner._run.remote_pidfile).parent)
@@ -274,7 +291,7 @@ def test_a_re_attached_run_leaves_the_borrowed_directory_alone(
     assert not remote.exists(own), "the run's own dir survived cleanup"
 
 
-def test_a_failing_remote_command_aborts_the_run(host, plate, remote, monkeypatch):
+def test_a_failing_remote_command_aborts_the_run(host, plate, remote, monkeypatch, spawn):
     """``check=True`` has to behave like ``check=True``.
 
     The real ``_ssh_run`` hands ``check`` to ``subprocess.run``, so a failing
@@ -300,7 +317,7 @@ def test_a_failing_remote_command_aborts_the_run(host, plate, remote, monkeypatc
 
 
 def test_a_re_attaching_run_with_work_left_launches_against_the_borrowed_dir(
-        host, plate, remote, monkeypatch):
+        host, plate, remote, monkeypatch, spawn):
     """The address the run journals and the address it launches against.
 
     Both re-attach tests above hand the host *every* well, which trips the
@@ -315,7 +332,7 @@ def test_a_re_attaching_run_with_work_left_launches_against_the_borrowed_dir(
     being handed the output directory.
     """
     _record_a_previous_run(plate, remote)
-    runner, log = _spawn(host, plate, remote, monkeypatch, completed=("A01",))
+    runner, log = spawn(host, plate, remote, monkeypatch, completed=("A01",))
 
     assert "re-attaching" in log, "the run under test did not re-attach"
     assert "FULL CACHE HIT" not in log, (
@@ -436,7 +453,7 @@ def test_the_fake_refuses_a_host_it_cannot_contain(tmp_path, remote):
 
 
 def test_an_unrelated_subprocess_is_not_mistaken_for_a_pipeline_launch(
-        tmp_path, remote, monkeypatch):
+        tmp_path, remote, monkeypatch, spawn):
     """`install` patches the *shared* `subprocess` module, so its `Popen` seam
     sees every process the test session starts, not only the runner's launches.
 

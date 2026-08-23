@@ -154,11 +154,18 @@ class _FakeRemoteFs:
         return True
 
 
-def _spawn_with(host, plate, monkeypatch, *, completed_remote_wells,
-                launcher="", output_filter=OutputFilter.FULL):
-    """Drive the real ``spawn``, returning the fake remote filesystem."""
+def _spawn_with(host, plate, monkeypatch, stop_fetchers, *,
+                completed_remote_wells, launcher="",
+                output_filter=OutputFilter.FULL):
+    """Drive the real ``spawn``, returning the fake remote filesystem.
+
+    ``stop_fetchers`` is the ``conftest.py`` fixture that stops the run's
+    ``Fetcher``: its pull-queue and sidecar threads are daemons calling rsync
+    on a timer, and nothing reaps them when the test ends.
+    """
     fs = _FakeRemoteFs()
     runner = RemoteRunner(replace(host, compute_launcher=launcher))
+    stop_fetchers(runner)
 
     def _ssh_run(self, argv, *, check, **kw):
         ok = fs.run(list(argv))
@@ -208,10 +215,10 @@ def _spawn_with(host, plate, monkeypatch, *, completed_remote_wells,
 
 
 def test_a_re_attached_run_creates_the_directory_its_pidfile_lives_in(
-        host, plate, monkeypatch):
+        host, plate, monkeypatch, stop_fetchers):
     _record_a_previous_run(plate, _argv(plate))
     fs, blob, runner = _spawn_with(
-        host, plate, monkeypatch, completed_remote_wells={"A01", "B02"})
+        host, plate, monkeypatch, stop_fetchers, completed_remote_wells={"A01", "B02"})
 
     assert "re-attaching" in blob, "the run under test did not re-attach"
     own = Path(runner._run.remote_pidfile).parent.as_posix()
@@ -221,11 +228,11 @@ def test_a_re_attached_run_creates_the_directory_its_pidfile_lives_in(
 
 
 def test_the_re_attached_output_directory_is_created_too(
-        host, plate, monkeypatch):
+        host, plate, monkeypatch, stop_fetchers):
     """The fix must not trade one directory for the other."""
     _record_a_previous_run(plate, _argv(plate))
     fs, blob, runner = _spawn_with(
-        host, plate, monkeypatch, completed_remote_wells={"A01", "B02"})
+        host, plate, monkeypatch, stop_fetchers, completed_remote_wells={"A01", "B02"})
 
     assert "re-attaching" in blob
     assert runner._run.remote_output_dir in fs.dirs
@@ -233,10 +240,10 @@ def test_the_re_attached_output_directory_is_created_too(
         "this test is not exercising a re-attach")
 
 
-def test_an_ordinary_run_still_gets_its_directory(host, plate, monkeypatch):
+def test_an_ordinary_run_still_gets_its_directory(host, plate, monkeypatch, stop_fetchers):
     """No journal, so no re-attach — the common path must be untouched."""
     fs, blob, runner = _spawn_with(
-        host, plate, monkeypatch, completed_remote_wells=set())
+        host, plate, monkeypatch, stop_fetchers, completed_remote_wells=set())
 
     assert "re-attaching" not in blob
     assert runner._run.remote_output_dir in fs.dirs
@@ -244,7 +251,7 @@ def test_an_ordinary_run_still_gets_its_directory(host, plate, monkeypatch):
 
 
 def test_a_partially_complete_re_attach_can_write_its_heartbeat_and_sentinel(
-        host, plate, monkeypatch):
+        host, plate, monkeypatch, stop_fetchers):
     """The end the user feels, on the path that actually raised.
 
     One of two wells complete on the remote, so this is *not* a full cache hit:
@@ -263,7 +270,7 @@ def test_a_partially_complete_re_attach_can_write_its_heartbeat_and_sentinel(
     # A scheduler host: ``overlap`` — and with it the allocation, the heartbeat
     # and the sentinel — exists only where a ``compute_launcher`` does.
     fs, blob, runner = _spawn_with(
-        host, plate, monkeypatch, completed_remote_wells={"A01"},
+        host, plate, monkeypatch, stop_fetchers, completed_remote_wells={"A01"},
         launcher="srun -N1")
 
     assert "re-attaching" in blob, "the run under test did not re-attach"
@@ -277,10 +284,11 @@ def test_a_partially_complete_re_attach_can_write_its_heartbeat_and_sentinel(
 
 # ── the caller, not the helper ──────────────────────────────────────────────
 
-def _address_from_spawn(host, plate, monkeypatch, *, output_filter):
+def _address_from_spawn(host, plate, monkeypatch, stop_fetchers, *,
+                        output_filter):
     """The remote output directory the real ``spawn`` computed."""
     fs, _blob, runner = _spawn_with(
-        host, plate, monkeypatch, completed_remote_wells=set(),
+        host, plate, monkeypatch, stop_fetchers, completed_remote_wells=set(),
         output_filter=output_filter)
     return runner._run.remote_output_dir, runner._run
 
@@ -292,7 +300,7 @@ def _address_from_spawn(host, plate, monkeypatch, *, output_filter):
     ("output_filter", {}, OutputFilter.CSV_ONLY),
 ])
 def test_spawn_gives_a_differently_configured_run_its_own_address(
-        host, plate, monkeypatch, label, host_kw, filt):
+        host, plate, monkeypatch, stop_fetchers, label, host_kw, filt):
     """Not that the helpers can fold the extras in — that ``spawn`` passes them.
 
     ``test_reuse_is_keyed_completely`` exercises ``_host_argv_extras`` and
@@ -305,17 +313,17 @@ def test_spawn_gives_a_differently_configured_run_its_own_address(
     otherwise a run configured this way finds the other configuration's output
     already complete and fetches it back as its own.
     """
-    base, _ = _address_from_spawn(host, plate, monkeypatch,
+    base, _ = _address_from_spawn(host, plate, monkeypatch, stop_fetchers,
                                   output_filter=OutputFilter.FULL)
     other, _ = _address_from_spawn(replace(host, **host_kw), plate, monkeypatch,
-                                   output_filter=filt)
+                                   stop_fetchers, output_filter=filt)
     assert base != other, (
         f"{label} left the remote address unchanged at {base}; a run "
         f"configured this way would re-use the other configuration's output")
 
 
 def test_spawn_records_the_address_under_the_digest_it_used(
-        host, plate, monkeypatch):
+        host, plate, monkeypatch, stop_fetchers):
     """And the journal has to agree with it, or the next run cannot match.
 
     The address and the recorded key are computed from the same extras, so a
@@ -330,7 +338,7 @@ def test_spawn_records_the_address_under_the_digest_it_used(
     # into, and this would measure nothing.
     J.open_run(plate / "out", spec={}, mode="remote", input_dir=plate / "in",
                argv=_argv(plate))
-    _address_from_spawn(cpu_host, plate, monkeypatch,
+    _address_from_spawn(cpu_host, plate, monkeypatch, stop_fetchers,
                         output_filter=OutputFilter.FULL)
 
     runner = RemoteRunner(cpu_host)

@@ -7801,6 +7801,20 @@ cluster whose home is a small-quota NFS mount, would therefore run its
 assertion read the empty fake root and passed. `install` refuses such a host
 and names the field.
 
+**A test that spawns a run must stop it**, via the `stop_fetchers` fixture in
+`tests/conftest.py`. A spawned run owns a `Fetcher` with two daemon threads —
+the pull-queue drain and the sidecar poller — and both call rsync on a timer
+that nothing reaps when the test ends. Sixteen of them leaked out of one file,
+and one of the pollers fired inside `test_remote_midrun_sidecar`'s half-second
+window minutes later, appending a pull to *that* test's call list and failing
+an assertion about a poller it had no connection to. It presented as a test
+failing in CI for no reason it named, on a run whose ordering happened to
+differ from a local one. An autouse guard beside the fixture stops any that are
+left and fails the test that left them; it judges on whether the fetcher was
+*asked* to stop, not on whether its threads have finished — a thread cancelled
+a microsecond earlier is still alive, and judging on liveness failed every test
+that had cleaned up correctly.
+
 The `Popen` seam matches the same ssh prefixes `_run` does and delegates
 everything else to the real `Popen`, captured at import. Both patches land on
 the *shared* `subprocess` module — `subprocess.run` looks `Popen` up in its own

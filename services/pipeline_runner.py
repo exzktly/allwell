@@ -497,6 +497,49 @@ class ProgressTracker:
         return events
 
 
+class RunEventQueue(queue.Queue):
+    """The run's event queue, which notices a failure however it is put.
+
+    ``log_q`` is public, and it has to be: the input resolver the Analyze pane
+    passes to :meth:`PipelineRunner.start` is handed the queue directly and
+    reports its own failures on it. So a failure could reach the GUI without
+    passing through :meth:`PipelineRunner._enqueue_error`, and two pieces of
+    per-run bookkeeping that live in that method were then simply not done.
+
+    The one the user saw: ``cancel_state_at_failure`` is a snapshot of the stop
+    and suspend flags taken *when the failure was queued*, because the GUI reads
+    them a timer tick later and a Stop clicked inside that window makes a
+    genuine failure read as a deliberate cancel. An error that bypassed the
+    snapshot read ``(False, False)`` — so pressing Stop while a large plate was
+    grouping painted the dashboard red with a signal exit code as the headline
+    and forced open the raw log pane the user had closed, while the journal
+    correctly recorded ``stopped``. Two surfaces, one run, opposite verdicts.
+
+    The one nobody had reported: ``_had_error`` was not set either, so a genuine
+    input failure with no Stop in play — an input folder that no longer exists,
+    a schema the resolver rejects — was journalled ``ok``. A run that never
+    started was recorded as a run that succeeded, and was therefore never
+    offered for resume.
+
+    Latching here rather than in ``_enqueue`` is deliberate: ``_enqueue`` is one
+    of the writers, not the boundary. Every write goes through ``Queue.put``,
+    including ``put_nowait``, which CPython implements in terms of it.
+    """
+
+    def __init__(self, maxsize: int = 0) -> None:
+        super().__init__(maxsize)
+        self._on_error: Callable[[], None] | None = None
+
+    def put(self, item, block: bool = True, timeout: float | None = None) -> None:
+        # Before the put, not after: the snapshot has to be of the flags as
+        # they stood when the failure happened, and a ``put`` on a full queue
+        # blocks for as long as the GUI takes to drain it.
+        if (isinstance(item, tuple) and item and item[0] == "error"
+                and self._on_error is not None):
+            self._on_error()
+        super().put(item, block, timeout)
+
+
 class PipelineRunner:
     """Run the pipeline subprocess on a daemon thread and report progress.
 
@@ -511,9 +554,10 @@ class PipelineRunner:
     _LOG_QUEUE_MAXSIZE = 10000
 
     def __init__(self) -> None:
-        self.log_q: queue.Queue[tuple[str, object]] = queue.Queue(
+        self.log_q: RunEventQueue = RunEventQueue(
             maxsize=self._LOG_QUEUE_MAXSIZE,
         )
+        self.log_q._on_error = self._latch_error_state
         self._proc: subprocess.Popen | None = None
         # The grouping-phase subprocess (WellPlateZipper). Tracked
         # separately so a Stop click during grouping cancels it instead
@@ -821,11 +865,21 @@ class PipelineRunner:
         """
         return self._error_was_stopped, self._error_was_suspended
 
-    def _enqueue_error(self, message: str) -> None:
-        """Queue a failure, recording the cancel state at this instant."""
+    def _latch_error_state(self) -> None:
+        """Record that this run failed, and how things stood when it did.
+
+        Called by :class:`RunEventQueue` for every ``("error", …)`` event put on
+        the queue, whoever puts it — so a failure reported by the input resolver
+        (which is handed ``log_q`` directly) is bookkept exactly like one the
+        runner raises itself. Idempotent by construction: a second failure
+        re-snapshots flags that only ever move from unset to set.
+        """
         self._error_was_stopped = self._stop_requested.is_set()
         self._error_was_suspended = self._suspend_requested.is_set()
         self._had_error = True
+
+    def _enqueue_error(self, message: str) -> None:
+        """Queue a failure. The queue itself records the cancel state."""
         self._enqueue(("error", message))
 
     def _journal_outcome(self) -> str:

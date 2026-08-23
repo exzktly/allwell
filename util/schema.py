@@ -51,15 +51,26 @@ def parse_schema(schema_str: str) -> list[str]:
     ]
 
 
-def validate_schema(schema: list[str]) -> list[str]:
+#: The fields the analysis pipeline cannot run without. ``channel`` says which
+#: measurement a file holds, ``well`` which plate position it came from.
+PIPELINE_REQUIRED_FIELDS = ("channel", "well")
+
+
+def validate_schema(schema: list[str],
+                    required: tuple[str, ...] = PIPELINE_REQUIRED_FIELDS) -> list[str]:
     """Return human-readable error messages for *schema*; empty means valid.
 
-    Two fields are load-bearing and must each appear exactly once: ``channel``
-    (which measurement a file holds) and ``well`` (which plate position it came
-    from). Everything else is optional or repeatable.
+    Each name in *required* must appear exactly once; everything else is
+    optional or repeatable. The default is what the analysis pipeline needs.
+
+    A tool that reads fewer fields passes fewer: ``WellPlateZipper`` groups
+    files by well and never looks at the channel slot — its own ``--filename_schema``
+    help says so — yet it validated against the pipeline's pair, so a perfectly
+    good ``well:fov`` was rejected with an error naming a field the tool does
+    not use.
     """
     errors: list[str] = []
-    for field in ("channel", "well"):
+    for field in required:
         count = schema.count(field)
         if count != 1:
             errors.append(

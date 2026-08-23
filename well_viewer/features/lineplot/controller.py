@@ -359,6 +359,16 @@ def collect_line_series(
             ))
         return series_out, band_lbl
 
+    if ctx.state.selection.selections:
+        # Group mode (replicate sets / groups defined) with every group hidden
+        # → no series. The per-well branch below would fall back to
+        # ``selected_wells``, but in group mode the plate is passive and clicks
+        # toggle group visibility, so that set is stale: falling back
+        # resurrected every well after "Deselect all". ``ordered_bar_keys``
+        # refuses the same fallback for the same reason, and the two panes
+        # sitting side by side must not disagree about what is selected.
+        return series_out, band_lbl
+
     # Per-well branch.
     selected = sorted(
         (lbl for lbl in ctx.state.selection.selected_wells if lbl in ctx.state.dataset.well_paths),

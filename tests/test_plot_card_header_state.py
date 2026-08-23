@@ -66,6 +66,39 @@ def test_showing_the_theme_toggle_again_restores_the_preview_chip(card):
     assert card._preview_chip.isVisibleTo(card)
 
 
+def test_a_capture_does_not_fire_the_theme_signal(card):
+    """The signal is wired straight to a full tab recompute, and a capture
+    flips the theme twice — so one Copy click ran two complete recomputes, the
+    first of them between the flip and the savefig it wrapped."""
+    seen: list[str] = []
+    card.plotThemeChanged.connect(seen.append)
+
+    card.setPlotTheme("screen")
+    seen.clear()
+
+    with card._publication_capture():
+        assert card._plot_theme == "publication"
+    assert card._plot_theme == "screen", "the capture left the theme flipped"
+    assert seen == [], f"the round trip emitted {seen}"
+
+
+def test_an_ordinary_theme_change_still_fires_the_signal(card):
+    seen: list[str] = []
+    card.setPlotTheme("screen")
+    card.plotThemeChanged.connect(seen.append)
+    card.setPlotTheme("publication")
+    assert seen == ["publication"]
+
+
+def test_a_capture_that_raises_still_puts_the_theme_back(card):
+    card.setPlotTheme("screen")
+    with pytest.raises(RuntimeError):
+        with card._publication_capture():
+            raise RuntimeError("savefig blew up")
+    assert card._plot_theme == "screen"
+    assert card._theme_signal_suppressed is False
+
+
 def test_reopening_the_stats_popover_does_not_stack_popovers(card):
     from widgets.popover import Popover
 

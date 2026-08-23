@@ -220,6 +220,23 @@ def write_zip(
     return frozenset(written), frozenset(dropped)
 
 
+def container_dest(src: Path, dest_dir: Path, well: str) -> Path:
+    """Where *src* belongs in *dest_dir*, named for *well* rather than for itself.
+
+    A dataset is read back by well token: ``in/<WELL>.zip`` for a zipped well,
+    ``in/<WELL>/`` for a folder-mode one. Every path that rewrites a container
+    builds that name from the well; the copy-it-whole paths built it from
+    ``src.name`` instead, so a source plate written with unpadded tokens landed
+    as ``in/A1.zip`` beside an ``out/A01_out.zip`` produced by the same run, and
+    nothing downstream matched the two up. Merge Plates was half-swept on its
+    own: its QC branch already named the destination for the well while its
+    input branch did not.
+
+    The extension follows the source, because a folder-mode well stays a folder.
+    """
+    return dest_dir / (well if src.is_dir() else f"{well}.zip")
+
+
 def publish_container(src: Path, dest: Path) -> None:
     """Copy *src* to *dest* whole, through a staging name and a rename.
 

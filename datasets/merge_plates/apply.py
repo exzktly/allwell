@@ -14,7 +14,7 @@ from __future__ import annotations
 import csv
 import json
 import threading
-from datasets._common.containers import publish_container
+from datasets._common.containers import container_dest, publish_container
 from util.json_write import write_json_atomic
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -89,12 +89,13 @@ def _remap(plan: PlateMergePlan, src_well: str, dest_well: str):
     return _rename
 
 
-def _copy_container_as_is(src: Path, dest_dir: Path) -> None:
+def _copy_container_as_is(src: Path, dest_dir: Path, well: str) -> None:
     """The path taken for every well this merge does not remap — which is all
     of dataset 1's. Staged and renamed by ``publish_container`` for the same
     reason the member-by-member path is: an interrupted copy must not leave a
-    truncated well behind."""
-    publish_container(src, dest_dir / src.name)
+    truncated well behind. Named for the well by ``container_dest``, the way
+    the remapping branch below and the QC branch beside it already were."""
+    publish_container(src, container_dest(src, dest_dir, well))
 
 
 def _needs_rewrite(src_well: str, dest_well: str) -> bool:
@@ -122,7 +123,7 @@ def _merge_input(
         fraction.skip()
         return None
     if not _needs_rewrite(src_well, dest_well):
-        _copy_container_as_is(container, plan.dest.in_dir)
+        _copy_container_as_is(container, plan.dest.in_dir, dest_well)
         fraction.skip()
         return None
     if container.is_dir():

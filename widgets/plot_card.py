@@ -28,6 +28,7 @@ from __future__ import annotations
 # Names used only in annotations. Under ``from __future__ import
 # annotations`` these are never evaluated, so importing them for real would
 # add startup cost and, for several of these, an import cycle.
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -337,10 +338,7 @@ if _HAVE_MPL:
             )
             # Capture in publication mode (the canonical export look), then
             # revert — mirrors the whole-canvas Copy path.
-            prev = self._plot_theme
-            try:
-                if prev != "publication":
-                    self.setPlotTheme("publication")
+            with self._publication_capture():
                 bbox = axis_tight_bbox_inches(
                     ax, pad_in=theme.Spacing.xs / float(self.figure.dpi))
                 # Hide sibling panels while cropping so a neighbour's title /
@@ -352,10 +350,6 @@ if _HAVE_MPL:
                         svg_kwargs={"bbox_inches": bbox},
                         pdf_kwargs={"bbox_inches": bbox},
                     )
-            finally:
-                if self._plot_theme != prev:
-                    self.setPlotTheme(prev)
-                self.canvas.draw_idle()
             failed = status.startswith("Copy failed")
             # Neutral message: this is a clipboard copy, not tied to any one app.
             msg = status if failed else "Copied panel to clipboard"
@@ -386,11 +380,8 @@ if _HAVE_MPL:
             )
             # Render the hovered panel in publication mode (the canonical export
             # look), mirroring the Copy path, then revert.
-            prev = self._plot_theme
             png_bytes = b""
-            try:
-                if prev != "publication":
-                    self.setPlotTheme("publication")
+            with self._publication_capture():
                 bbox = axis_tight_bbox_inches(
                     ax, pad_in=theme.Spacing.xs / float(self.figure.dpi))
                 # Hide sibling panels while cropping so a neighbour's title /
@@ -402,10 +393,6 @@ if _HAVE_MPL:
                         buf, format="png", bbox_inches=bbox, dpi=300,
                         facecolor=self.figure.get_facecolor())
                 png_bytes = buf.getvalue()
-            finally:
-                if self._plot_theme != prev:
-                    self.setPlotTheme(prev)
-                self.canvas.draw_idle()
             label = ""
             try:
                 label = (ax.get_title() or "").strip()
@@ -430,20 +417,13 @@ if _HAVE_MPL:
 
             # Render the entire figure in publication mode (the canonical export
             # look), mirroring the per-panel save path, then revert.
-            prev = self._plot_theme
             png_bytes = b""
-            try:
-                if prev != "publication":
-                    self.setPlotTheme("publication")
+            with self._publication_capture():
                 buf = io.BytesIO()
                 self.figure.savefig(
                     buf, format="png", bbox_inches="tight", dpi=300,
                     facecolor=self.figure.get_facecolor())
                 png_bytes = buf.getvalue()
-            finally:
-                if self._plot_theme != prev:
-                    self.setPlotTheme(prev)
-                self.canvas.draw_idle()
             label = ""
             try:
                 sup = getattr(self.figure, "_suptitle", None)
@@ -721,6 +701,33 @@ if _HAVE_MPL:
         def traceColors(self) -> list:
             return _plot_palette(self._plot_theme)
 
+        @contextmanager
+        def _publication_capture(self):
+            """Hold the publication theme for the duration of a capture.
+
+            ``setPlotTheme`` emits ``plotThemeChanged``, and the tabs connect
+            that straight to a full recompute. A capture flips the theme twice
+            — into publication and back — so one Copy or Save click ran two
+            complete recomputes, and the first of them landed *between* the
+            flip and the ``savefig`` it was wrapping, rebuilding the figure
+            mid-capture.
+
+            The theme is back where it started before this returns, so nothing
+            outside has anything to react to; the signal is suppressed across
+            the pair rather than fired twice for a round trip.
+            """
+            prev = self._plot_theme
+            self._theme_signal_suppressed = True
+            try:
+                if prev != "publication":
+                    self.setPlotTheme("publication")
+                yield
+            finally:
+                if self._plot_theme != prev:
+                    self.setPlotTheme(prev)
+                self._theme_signal_suppressed = False
+                self.canvas.draw_idle()
+
         def setPlotTheme(self, mode: str) -> None:
             mode = "publication" if str(mode).lower().startswith("pub") else "screen"
             if mode == self._plot_theme:
@@ -746,7 +753,8 @@ if _HAVE_MPL:
             self.setStyleSheet(self._build_qss())
             self._sync_theme_ui()
             self.draw()
-            self.plotThemeChanged.emit(mode)
+            if not getattr(self, "_theme_signal_suppressed", False):
+                self.plotThemeChanged.emit(mode)
 
         def _apply_rcparams(self) -> None:
             bg, fg, muted, grid, spine = _plot_tokens(self._plot_theme)

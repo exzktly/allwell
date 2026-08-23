@@ -8,6 +8,7 @@ import argparse
 # the two entry points cannot drift. They previously kept separate copies whose
 # validate_schema reported the same verdict with different wording.
 # ---------------------------------------------------------------------------
+from util.plate_grid import PLATE_MAX_COL, PLATE_ROWS  # noqa: E402
 from util.schema import (  # noqa: E402  (module-level, after the stdlib block)
     DEFAULT_SCHEMA,
     DEFAULT_SEP,
@@ -51,7 +52,18 @@ def build_arg_parser():
 
 
 def generate_wells() -> list[str]:
-    return [f"{r}{c:02d}" for r in "ABCDEFGH" for c in range(1, 13)]
+    """Every 96-well label, A01 → H12.
+
+    The rows and the column bound come from ``util.plate_grid``, which owns the
+    plate geometry; this file used to spell ``"ABCDEFGH"`` and ``range(1, 13)``
+    out a third time, beside the copy in ``plate_grid`` and the one in
+    ``util.well_token``. Three spellings of one vocabulary is three places to
+    change should a plate format ever stop being 96 wells, and two of them
+    would be missed.
+    """
+    return [f"{r}{c:02d}"
+            for r in PLATE_ROWS
+            for c in range(1, PLATE_MAX_COL + 1)]
 
 
 def _well_index_from_schema(schema: list[str]) -> int | None:
@@ -205,7 +217,12 @@ def main():
     # a CLI invocation rejects the same schemas (e.g. two "well" slots)
     # the GUI would reject. Previously the zipper silently used
     # `schema.index("well")` and misclassified.
-    schema_errors = validate_schema(schema)
+    # ``("well",)``, not the pipeline's ``("channel", "well")``: this tool
+    # groups files by well and never reads the channel slot, and the
+    # ``--filename_schema`` help above says exactly that. Validating against the
+    # pipeline's pair rejected a valid ``well:fov`` with an error about a field
+    # the zipper does not use.
+    schema_errors = validate_schema(schema, required=("well",))
     if schema_errors:
         for msg in schema_errors:
             print(f"error: {msg}", file=sys.stderr)

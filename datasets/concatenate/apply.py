@@ -21,7 +21,7 @@ import csv
 import json
 import math
 import threading
-from datasets._common.containers import publish_container
+from datasets._common.containers import container_dest, publish_container
 from util.json_write import write_json_atomic
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -155,11 +155,12 @@ class _MemberRename:
         return new_name
 
 
-def _copy_container_as_is(src: Path, dest_in_dir: Path) -> None:
+def _copy_container_as_is(src: Path, dest_in_dir: Path, well: str) -> None:
     """Taken for a well only one of the two datasets holds — the common case
     for two plates that were imaged separately. Staged and renamed by
-    ``publish_container``, like the member-by-member path beside it."""
-    publish_container(src, dest_in_dir / src.name)
+    ``publish_container``, like the member-by-member path beside it, and named
+    for the well by ``container_dest``, like every other branch here."""
+    publish_container(src, container_dest(src, dest_in_dir, well))
 
 
 def merge_input(
@@ -190,7 +191,7 @@ def merge_input(
     frac = fraction if fraction is not None else _detached_fraction(well)
     dest_zip = plan.dest.in_dir / f"{well}.zip"
     if c1 and not c2:
-        _copy_container_as_is(c1, plan.dest.in_dir)
+        _copy_container_as_is(c1, plan.dest.in_dir, well)
         frac.skip(_INPUT_SLICES)
         return 0, None, frozenset(), 0
     if c2 and not c1:

@@ -126,6 +126,27 @@ def _format_tp_title(target_ts: list[float], tp_str: str) -> str:
     return f"t = [{tp_str}] h"
 
 
+def _timepoint_hours(df) -> np.ndarray:
+    """Numeric timepoint-in-hours per row, falling back to the text column.
+
+    ``timepoint_hours`` is the parsed column and is present on anything the
+    current pipeline wrote, but older CSVs — and any row whose parse failed —
+    carry only the text ``timepoint``. The beeswarm renderer had this fallback
+    and the violin renderer did not: it required ``timepoint_hours`` outright
+    and drew nothing without it, so the same well showed a populated beeswarm
+    and an empty violin, one toggle apart, with nothing saying why.
+    """
+    if "timepoint_hours" in df.columns:
+        tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy(dtype=float)
+    else:
+        tp = np.full(len(df), np.nan)
+    need = ~np.isfinite(tp)
+    if need.any() and "timepoint" in df.columns:
+        fallback = timepoint_text(df.loc[need]).map(parse_timepoint_hours)
+        tp[need] = fallback.fillna(np.nan).to_numpy(dtype=float)
+    return tp
+
+
 def draw_violin(
     ctx,
     ax_mean,
@@ -188,9 +209,9 @@ def draw_violin(
         df = _pooled_rows(ctx, lbl, pool_groups)
         vals = np.empty(0, dtype=float)
         n_total = n_above = 0
-        if df is not None and not df.empty and "timepoint_hours" in df.columns:
+        if df is not None and not df.empty:
             mask = df_included_mask(df).to_numpy(copy=True)
-            tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
+            tp = _timepoint_hours(df)
             with np.errstate(invalid="ignore"):
                 mask &= np.isfinite(tp) & tp_close_mask(tp, col_tp)
             v = resolve_value_series(df, ctx.state.channel.active_val_col, ratios).to_numpy()
@@ -357,14 +378,7 @@ def draw_beeswarm(
         frac_val: float | None = None
         if df is not None and not df.empty:
             mask = df_included_mask(df).to_numpy(copy=True)
-            if "timepoint_hours" in df.columns:
-                tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
-            else:
-                tp = np.full(len(df), np.nan)
-            need = ~np.isfinite(tp)
-            if need.any() and "timepoint" in df.columns:
-                fallback = timepoint_text(df.loc[need]).map(parse_timepoint_hours)
-                tp[need] = fallback.fillna(np.nan).to_numpy(dtype=float)
+            tp = _timepoint_hours(df)
             with np.errstate(invalid="ignore"):
                 mask &= np.isfinite(tp) & tp_close_mask(tp, col_tp)
             val = resolve_value_series(df, ctx.state.channel.active_val_col, ratios).to_numpy()

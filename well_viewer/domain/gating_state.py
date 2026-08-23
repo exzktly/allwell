@@ -240,6 +240,29 @@ def save_gating_to_pipeline_info(
     return info_path
 
 
+def read_nuclear_token(out_dir: Path) -> str:
+    """The dataset's nuclear/segmentation channel token, or ``""``.
+
+    :func:`build_gating_block` needs it to diff ThreshFracOn against the right
+    default — the nuclear channel's differs from every other channel's — and
+    the token is recorded in the same ``pipeline_info.json`` the gating block
+    lives in. Callers that rebuild the block from disk have no other source for
+    it, and passing nothing silently drops a nuclear cutoff that happens to
+    equal the ordinary readout default.
+    """
+    info_path = _resolve_pipeline_info_path(out_dir)
+    if not info_path.exists():
+        return ""
+    try:
+        data = json.loads(info_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        _logger.warning("Could not read %s: %s", info_path, exc)
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    return str(data.get("nuclear_token", "") or "").strip().lower()
+
+
 def read_gating_params(out_dir: Path) -> dict[str, Any] | None:
     """Return the saved cell_gating block, or None when absent."""
     info_path = _resolve_pipeline_info_path(out_dir)

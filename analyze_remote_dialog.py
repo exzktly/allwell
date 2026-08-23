@@ -68,7 +68,34 @@ _POLL_MAX_LINES = 500
 _POLL_IDLE_MS = 80
 
 
+def poll_queue_on(owner: QWidget, result_q: queue.Queue, on_result) -> QTimer:
+    """Call *on_result* on the GUI thread with the first item *result_q* yields.
+
+    The returned timer is **parented to** *owner*, which is the whole point:
+    Qt destroys a widget's children with it, so a dialog that is closed and
+    deleted while a probe is still in flight takes its poller down with it. A
+    free-standing ``QTimer.singleShot`` chain outlives the widget it was created
+    for and its callback then touches a C++ object that no longer exists. Until
+    these dialogs were destroyed on close, the leak was what hid that.
+    """
+    timer = QTimer(owner)
+    timer.setInterval(_PROBE_POLL_MS)
+
+    def _poll() -> None:
+        try:
+            result = result_q.get_nowait()
+        except queue.Empty:
+            return
+        timer.stop()
+        on_result(*result)
+
+    timer.timeout.connect(_poll)
+    timer.start()
+    return timer
+
+
 def probe_ssh_async(
+    owner: QWidget,
     ssh_alias: str,
     ssh_key_path: str,
     on_result,
@@ -85,9 +112,9 @@ def probe_ssh_async(
     all, for the probe's full 15-second timeout, with no spinner and no label to
     say why.
 
-    *on_result* is invoked exactly once. The worker always puts something, so a
-    probe that raises ends the poll rather than leaving it spinning with the
-    button stuck disabled.
+    *on_result* is invoked at most once, and never after *owner* is destroyed.
+    The worker always puts something, so a probe that raises ends the poll
+    rather than leaving it spinning with the button stuck disabled.
     """
     result_q: queue.Queue = queue.Queue()
 
@@ -99,16 +126,7 @@ def probe_ssh_async(
             result_q.put((False, f"error: {exc}"))
 
     threading.Thread(target=_runner, daemon=True).start()
-
-    def _poll() -> None:
-        try:
-            ok, detail = result_q.get_nowait()
-        except queue.Empty:
-            QTimer.singleShot(_PROBE_POLL_MS, _poll)
-            return
-        on_result(ok, detail)
-
-    QTimer.singleShot(_PROBE_POLL_MS, _poll)
+    poll_queue_on(owner, result_q, on_result)
 
 # Prefilled into the "Scheduler command" field the first time a user
 # switches a host to scheduled compute, so they have a working SLURM
@@ -711,12 +729,7 @@ class RemoteFormDialog(QDialog):
 
         threading.Thread(target=_runner, daemon=True).start()
 
-        def _poll() -> None:
-            try:
-                ok, profiles, detail = result_q.get_nowait()
-            except queue.Empty:
-                QTimer.singleShot(120, _poll)
-                return
+        def _done(ok: bool, profiles: list, detail: str) -> None:
             self._fetch_prof_btn.setEnabled(True)
             if not ok:
                 msg = detail.splitlines()[-1] if detail else "profile discovery failed"
@@ -732,7 +745,7 @@ class RemoteFormDialog(QDialog):
                 f"✓ {len(profiles)} profile(s) from {alias}'s JupyterHub config."
             )
 
-        QTimer.singleShot(120, _poll)
+        poll_queue_on(self, result_q, _done)
 
     # ── advanced expander ──────────────────────────────────────────────────
 
@@ -801,7 +814,7 @@ class RemoteFormDialog(QDialog):
                 msg = detail.splitlines()[-1] if detail else "(no error message)"
                 self._test_result_lbl.setText(f"✗ {msg[:120]}")
 
-        probe_ssh_async(alias, key_path, _done)
+        probe_ssh_async(self, alias, key_path, _done)
 
     # ── geometry persistence ──────────────────────────────────────────────
 
@@ -1063,7 +1076,10 @@ class SSHKeyWizardDialog(QDialog):
         if cb is not None:
             cb.setText(self._command_edit.text())
             self._copy_btn.setText("Copied ✓")
-            QTimer.singleShot(2000, lambda: self._copy_btn.setText("Copy"))
+            # Bound to the button, so closing the wizard inside those two
+            # seconds cannot fire it at a deleted widget.
+            QTimer.singleShot(2000, self._copy_btn,
+                              lambda: self._copy_btn.setText("Copy"))
 
     def _on_verify(self) -> None:
         """Check the remote now accepts the key, without freezing the window.
@@ -1076,7 +1092,8 @@ class SSHKeyWizardDialog(QDialog):
         """
         self._verify_btn.setEnabled(False)
         self._verify_status_lbl.setText("Verifying…")
-        probe_ssh_async(self._ssh_alias, str(self._key_path), self._on_verified)
+        probe_ssh_async(self, self._ssh_alias, str(self._key_path),
+                        self._on_verified)
 
     def _on_verified(self, ok: bool, detail: str) -> None:
         self._verify_btn.setEnabled(True)
@@ -1186,8 +1203,15 @@ class BootstrapLogDialog(QDialog):
         layout.addLayout(btn_row)
 
         self._restore_geometry()
-        QTimer.singleShot(0, self._spawn)
-        QTimer.singleShot(80, self._poll)
+        # Both bound to this dialog, so neither survives it: the dialog is
+        # destroyed when it closes, and a free-standing timer chain would go on
+        # calling into a deleted C++ object. _poll re-arms itself through
+        # ``self._poll_timer`` for the same reason.
+        QTimer.singleShot(0, self, self._spawn)
+        self._poll_timer = QTimer(self)
+        self._poll_timer.setSingleShot(True)
+        self._poll_timer.timeout.connect(self._poll)
+        self._poll_timer.start(_POLL_IDLE_MS)
 
     # ── lifecycle ────────────────────────────────────────────────────────
 
@@ -1281,7 +1305,7 @@ class BootstrapLogDialog(QDialog):
                 f"[warn] {lost} bootstrap log line(s) dropped — the reader "
                 "outran this window. The install itself is unaffected.\n")
         if self._exit_code is None:
-            QTimer.singleShot(0 if more else _POLL_IDLE_MS, self._poll)
+            self._poll_timer.start(0 if more else _POLL_IDLE_MS)
 
     def _mark_finished(self, code: int) -> None:
         if self._finished_emitted:
@@ -1583,7 +1607,7 @@ class ManageRemotesDialog(QDialog):
                     detail or "(ssh returned non-zero with no message)",
                 )
 
-        probe_ssh_async(host.ssh_alias, host.ssh_key_path, _done)
+        probe_ssh_async(self, host.ssh_alias, host.ssh_key_path, _done)
 
     def _on_bootstrap(self) -> None:
         name = self._selected_name()

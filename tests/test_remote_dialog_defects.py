@@ -431,6 +431,66 @@ def test_dropped_lines_are_reported_in_the_log(qtbot, monkeypatch):
         "the drop marker was repeated on every later slice")
 
 
+# ── the lifetime the two fixes above create between them ───────────────────
+#
+# Destroying a dialog on close (U11) and answering a probe from a timer (U4)
+# are safe apart and dangerous together: a free-standing ``QTimer.singleShot``
+# chain outlives the widget it was started for, and its callback then touches a
+# C++ object that no longer exists. Until these dialogs were destroyed, the leak
+# was what hid it. Every poller in the module is parented to its dialog instead,
+# so Qt takes it down with the widget.
+
+def test_a_poller_dies_with_the_widget_that_owns_it(qtbot):
+    import analyze_remote_dialog as ard
+    from PySide6.QtWidgets import QWidget
+
+    owner = QWidget()
+    qtbot.addWidget(owner)
+    result_q: queue.Queue = queue.Queue()
+    calls: list = []
+    ard.poll_queue_on(owner, result_q, lambda *a: calls.append(a))
+
+    owner.deleteLater()
+    qtbot.wait(50)                      # the deferred delete runs
+    result_q.put((True, ""))            # …and only then does the probe answer
+    qtbot.wait(300)
+
+    assert not calls, (
+        "the poller outlived the widget that owned it and called back into a "
+        "deleted dialog")
+
+
+def test_closing_the_form_mid_probe_does_not_reach_a_deleted_widget(qtbot, capfd, monkeypatch):
+    """The same thing end to end, through the Test SSH button.
+
+    PySide6 prints an exception raised inside a slot and lets the event loop
+    carry on, so the failure is a line on stderr rather than a raised error —
+    which is exactly why it would otherwise go unnoticed.
+    """
+    import analyze_remote_dialog as ard
+    from services import ssh_key_setup
+
+    release: queue.Queue = queue.Queue()
+    monkeypatch.setattr(ssh_key_setup, "probe_ssh_connection",
+                        lambda *_a, **_k: (release.get(timeout=5), (True, ""))[1])
+
+    dlg = ard.RemoteFormDialog(None, host=None)
+    qtbot.addWidget(dlg)
+    dlg._ssh_alias_edit.setText("hpc.example")
+    dlg._test_btn.click()
+
+    dlg.close()
+    dlg.deleteLater()
+    qtbot.wait(50)
+    capfd.readouterr()                  # ignore anything printed before this
+    release.put(None)
+    qtbot.wait(400)
+
+    err = capfd.readouterr().err
+    assert "already deleted" not in err and "RuntimeError" not in err, (
+        f"a probe answered into a destroyed dialog:\n{err}")
+
+
 # ── U11: dialogs are destroyed when they close ─────────────────────────────
 
 def test_manage_remotes_dialogs_do_not_pile_up_on_the_tab(qtbot, monkeypatch):

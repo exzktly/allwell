@@ -135,7 +135,7 @@ REVIEW_IMAGE_CONTROLLER_BUDGET = 870
 # flag + guarded log-poller re-arm so it stops on app close. Resume from 1211.
 # Ratcheted to 1063: the form-reading code moved to the form mixin where it
 # belongs — _collect_run_options, _background_well_validation_error, and the
-# module-level field parsers (_safe_qc_float / _safe_seg_float / _INT_FIELDS /
+# module-level field validation (the _INT_FIELDS / _FLOAT_FIELDS tables and
 # _numeric_option_errors). They read the form's widgets; the tab only hosts them.
 # Ratcheted to 970: run-progress rendering (the ETA cluster and
 # _apply_progress_event) moved to analyze_progress.AnalyzeProgressMixin. It is a
@@ -165,8 +165,8 @@ ANALYZE_TAB_BUDGET = 855
 # _pinfo_flat / _apply_pipeline_info → analyze_tab_pinfo.AnalyzePipelineInfoMixin)
 # and the form chrome (_section / _row / _entry / _info_icon / reveal_section →
 # analyze_tab_chrome.AnalyzeFormChromeMixin) and the entry-boundary field
-# parsers (_safe_qc_float / _safe_seg_float / _INT_FIELDS /
-# _numeric_option_errors → analyze_tab_fields.py) all did.
+# validation (the field tables and _numeric_option_errors →
+# analyze_tab_fields.py) all did.
 # 1170 -> 1107: the per-method segmentation parameter pages (the NamedPageStack
 # and its StarDist / watershed / Cellpose / label-free / classical pages) moved
 # to analyze_tab_seg_params.AnalyzeSegParamsMixin, which is also where the

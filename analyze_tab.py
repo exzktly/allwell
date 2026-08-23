@@ -238,7 +238,6 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
         self._dry_run_cleanup_cb.setEnabled(
             is_remote and self._cleanup_remote_cb.isChecked())
 
-
     def _open_manage_remotes(self) -> None:
         """Open the Manage Remotes dialog and rebuild "Run on:" from disk after.
 

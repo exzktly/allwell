@@ -154,3 +154,110 @@ def test_the_thresholds_that_mean_the_model_default_are_accepted(tab, typed):
 def test_a_fresh_form_has_nothing_to_complain_about(tab):
     """Guards the guard: none of the above fires on the defaults."""
     assert _errors(tab) == []
+
+
+# ── nan and inf parse, and then pass every bound ─────────────────────────────
+#
+# ``float("nan")`` succeeds and compares false against everything, so a check
+# written as ``value < low`` / ``value > high`` passes it through a floor, a
+# ceiling and both at once. It reached the pipeline as a real setting.
+
+@pytest.mark.parametrize("typed", ["nan", "NaN", "inf", "-inf", "Infinity"])
+def test_a_non_finite_qc_bound_blocks_the_run(tab, typed):
+    tab._qc_remove_debris_cb.setChecked(True)
+    tab._qc_min_area_edit.setText(typed)
+    errs = _errors(tab)
+    assert errs, (
+        f"{typed!r} passed the QC minimum-area bound. It compares false "
+        "against every check downstream too, so debris removal would silently "
+        "keep or drop every cell with nothing saying which."
+    )
+    assert any("QC minimum area" in e for e in errs), errs
+
+
+@pytest.mark.parametrize("typed", ["nan", "inf"])
+def test_a_non_finite_stardist_threshold_blocks_the_run(tab, typed):
+    tab._stardist_prob_thresh_edit.setText(typed)
+    errs = _errors(tab)
+    assert errs, f"{typed!r} passed as a StarDist probability threshold"
+
+
+def test_a_negative_threshold_is_refused_rather_than_read_as_the_default(tab):
+    """Any negative means "the model's own default" downstream, silently."""
+    tab._stardist_prob_thresh_edit.setText("-0.5")
+    errs = _errors(tab)
+    assert errs, (
+        "-0.5 was accepted as a threshold; parse_threshold reads it as 'use "
+        "the model's own default', so the run segments at a sensitivity "
+        "nobody chose and the form shows -0.5"
+    )
+    # ...but the recorded sentinel a loaded prior run puts back is still fine.
+    tab._stardist_prob_thresh_edit.setText("-1")
+    assert not _errors(tab), "the -1 default sentinel was refused"
+
+
+def test_a_stale_tile_size_does_not_block_a_cellpose_run(tab):
+    """A field behind an unselected routine is not read, so it cannot refuse."""
+    from analyze_tab import _numeric_option_errors as errs_for
+
+    opts = {"segmentation_method": "cellpose", "stardist_tile_px": "-4"}
+    assert errs_for(opts) == [], (
+        "a leftover StarDist tile size refused a Cellpose run, naming a "
+        "control the chosen routine does not show")
+    assert errs_for({**opts, "segmentation_method": "stardist"}), (
+        "...and it must still be checked when StarDist is the routine")
+
+
+# ── "+ Queue" is the same gate as Run ────────────────────────────────────────
+#
+# The queue button handed the sink whatever the form produced and validated
+# nothing, so an unrunnable form became a queue entry indistinguishable from a
+# valid one and failed at dequeue time, where there is no dialog to report it.
+
+@pytest.fixture
+def refusals(monkeypatch):
+    """Record every critical box instead of opening one (they are modal)."""
+    from PySide6.QtWidgets import QMessageBox
+
+    seen: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        QMessageBox, "critical",
+        staticmethod(lambda _p, title, text, *a, **k: seen.append((title, text))))
+    return seen
+
+
+def _queued(tab):
+    """Press the real "+ Queue" button; return what reached the sink."""
+    jobs: list[dict] = []
+    tab.set_queue_sink(jobs.append)
+    tab._queue_btn.click()
+    return jobs
+
+
+def test_queue_refuses_a_form_with_no_input_folder(tab, refusals):
+    tab._input_edit.setText("")
+    assert _queued(tab) == [], "an unrunnable job was queued"
+    assert refusals, "nothing told the user why the job was not queued"
+
+
+def test_queue_refuses_a_mistyped_number(tab, refusals, tmp_path):
+    tab._input_edit.setText(str(tmp_path))
+    tab._qc_remove_debris_cb.setChecked(True)
+    tab._qc_min_area_edit.setText("5oo")
+    assert _numeric_option_errors(tab._collect_run_options()), (
+        "the fixture no longer produces an invalid form")
+    assert _queued(tab) == [], (
+        "a job whose QC minimum area does not read as a number was queued; it "
+        "would fail at dequeue time with no dialog to report it")
+    assert any("5oo" in text for _t, text in refusals), (
+        f"the refusal did not name the offending value: {refusals!r}")
+
+
+def test_queue_accepts_a_form_run_would_accept(tab, refusals, monkeypatch):
+    """The two buttons have to agree, or one of them is lying about the form."""
+    from pathlib import Path as _P
+
+    monkeypatch.setattr(type(tab), "_validate_run_request", lambda self: _P("pm.py"))
+    jobs = _queued(tab)
+    assert len(jobs) == 1, f"a valid form did not queue: {refusals!r}"
+    assert not refusals

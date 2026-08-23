@@ -21,6 +21,8 @@ so every existing import path still resolves.
 
 from __future__ import annotations
 
+import math
+
 
 # ── Entry-boundary parsing + numeric validation ─────────────────────────────
 #
@@ -39,6 +41,16 @@ _INT_FIELDS = {
     "workers": "Workers",
     "remote_batch_size": "Remote batch size",
     "stardist_tile_px": "StarDist tile px",
+}
+
+#: Whole-number fields that only matter under one segmentation method, so a
+#: stale value behind an unselected routine cannot block a run it has no effect
+#: on. This is the ``gate`` column of :data:`_FLOAT_FIELDS`, for the int table:
+#: key -> the ``segmentation_method`` prefix that turns it on. Without it a
+#: leftover ``-4`` in the StarDist tile field refused a Cellpose run, naming a
+#: control the user could not see from the routine they had chosen.
+_METHOD_GATED_INT_FIELDS = {
+    "stardist_tile_px": "stardist",
 }
 
 #: Whole-number fields that must be strictly positive: key -> label. The
@@ -81,6 +93,11 @@ _THRESHOLD_FIELDS = {
     "stardist_nms_thresh": "StarDist NMS threshold",
 }
 
+#: The one negative a threshold field may carry: the value the CLI writes to
+#: mean "the model's own default", which a loaded prior run puts back in the
+#: box. Every other negative is a typo the form stops for.
+_DEFAULT_SENTINEL = "-1"
+
 
 def _raw(opts: dict, key: str) -> str:
     """The text a field carries, stripped. Blank means "pipeline default"."""
@@ -95,11 +112,36 @@ def _as_float(text: str) -> float | None:
         return None
 
 
+def _non_finite_error(label: str, raw: str, value: float) -> str | None:
+    """The error for ``nan`` / ``inf``, or ``None`` when *value* is ordinary.
+
+    ``float()`` accepts ``"nan"``, ``"inf"`` and ``"-inf"``, and a bounds check
+    written as ``value < low`` / ``value > high`` then waves ``nan`` through:
+    every comparison against it is false, so it passes a floor, a ceiling and
+    both at once. It reached the pipeline as a real setting — a NaN QC area
+    bound excludes every cell, a NaN Cellpose threshold makes every candidate
+    compare false — and the form said nothing on the way past. ``inf`` passes
+    any check that only has a floor, for the same structural reason.
+    """
+    if math.isnan(value):
+        return (f"{label} must be a real number ({raw!r} is not one — it "
+                "compares false against every bound, so nothing downstream "
+                "would reject it either). Leave it blank for the default.")
+    if math.isinf(value):
+        return (f"{label} must be a finite number (got {raw!r}). Leave it "
+                "blank for the default.")
+    return None
+
+
 def _int_field_errors(opts: dict) -> list[str]:
     """Whole-number field errors, for both the ``≥ 0`` and ``≥ 1`` tables."""
     errors: list[str] = []
+    method = str(opts.get("segmentation_method", "") or "")
     for table, floor in ((_INT_FIELDS, 0), (_POSITIVE_INT_FIELDS, 1)):
         for key, label in table.items():
+            needs = _METHOD_GATED_INT_FIELDS.get(key)
+            if needs is not None and not method.startswith(needs):
+                continue
             raw = _raw(opts, key)
             if not raw:
                 continue
@@ -124,6 +166,10 @@ def _mesh_errors(opts: dict) -> list[str]:
             val = float(raw)
         except ValueError:
             errors.append(f"{label} must be a number (got {raw!r}).")
+            continue
+        bad = _non_finite_error(label, raw, val)
+        if bad:
+            errors.append(bad)
             continue
         if allow_zero and val < 0:
             errors.append(f"{label} must be ≥ 0.")
@@ -153,6 +199,10 @@ def _float_field_errors(opts: dict) -> list[str]:
             value = float(raw)
         except ValueError:
             errors.append(f"{label} must be a number (got {raw!r}).")
+            continue
+        bad = _non_finite_error(label, raw, value)
+        if bad:
+            errors.append(bad)
             continue
         if low is not None and value < low:
             errors.append(f"{label} must be ≥ {low:g} (got {raw!r}).")
@@ -191,10 +241,25 @@ def _threshold_errors(opts: dict) -> list[str]:
                 f"{label} must be a number between 0 and 1 — leave it blank (or "
                 f"type 'auto') for the model's own default (got {raw!r}).")
             continue
+        bad = _non_finite_error(label, raw, value)
+        if bad:
+            errors.append(bad)
+            continue
         if value > 1.0:
             errors.append(
                 f"{label} must be in [0, 1] (got {raw!r}). The pipeline rejects "
                 "an out-of-range threshold, and it would do so mid-run.")
+        elif value < 0.0 and raw != _DEFAULT_SENTINEL:
+            # ``parse_threshold`` reads *any* negative as "use the model's own
+            # default", so a typed -0.5 does not fail — it silently segments
+            # with a threshold the operator did not choose and never sees. The
+            # bare -1 is the value a prior run recorded for exactly that
+            # meaning, so it stays accepted; anything else negative is a typo
+            # worth stopping for.
+            errors.append(
+                f"{label} must be in [0, 1] (got {raw!r}). A negative value is "
+                "read as \"use the model's own default\", which is what blank "
+                "or 'auto' says without looking like a threshold.")
     return errors
 
 

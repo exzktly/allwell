@@ -42,7 +42,8 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QDialog, QMessageBox     # noqa: E402
+from PySide6.QtCore import Qt, QTimer                             # noqa: E402
+from PySide6.QtWidgets import QDialog, QMessageBox, QWidget       # noqa: E402
 
 
 def _Host(name="hpc", ssh_alias="hpc.example", ssh_key_path=""):
@@ -562,3 +563,80 @@ def test_the_child_dialogs_are_destroyed_too(qtbot, monkeypatch, button, child):
         getattr(dlg, button).click()
     qtbot.wait(50)
     assert not dlg.findChildren(cls), f"{button} leaked its {child}"
+
+
+# ── one ssh probe per dialog ─────────────────────────────────────────────────
+#
+# Every Test/Verify handler disables its own button, which is not the same as
+# refusing a second probe: ManageRemotesDialog recomputes button state from
+# ``itemSelectionChanged``, so picking another row mid-probe handed the user
+# back a button still reading "Testing…".
+
+def _never_answers(monkeypatch, ard, started):
+    def _probe(alias, key, timeout=15):
+        started.append(alias)
+        time.sleep(60)                  # the test never waits for this
+        return True, ""
+    monkeypatch.setattr(ard.ssh_key_setup, "probe_ssh_connection", _probe)
+
+
+def test_selecting_another_remote_does_not_re_enable_test_mid_probe(
+        qtbot, boxes, monkeypatch):
+    import analyze_remote_dialog as ard
+
+    monkeypatch.setattr(ard, "load_remotes", lambda: {
+        "hpc": _Host(name="hpc", ssh_alias="hpc.example"),
+        "box2": _Host(name="box2", ssh_alias="box2.example"),
+    })
+    started: list[str] = []
+    _never_answers(monkeypatch, ard, started)
+
+    dlg = ard.ManageRemotesDialog()
+    qtbot.addWidget(dlg)
+    dlg._list.setCurrentRow(0)
+    dlg._test_btn.click()
+    assert started == [dlg._list.item(0).data(Qt.UserRole)] or len(started) == 1
+    assert not dlg._test_btn.isEnabled()
+
+    dlg._list.setCurrentRow(1)           # the user looks at another host
+    assert not dlg._test_btn.isEnabled(), (
+        "Test came back enabled while a probe was still running, still "
+        f"labelled {dlg._test_btn.text()!r}"
+    )
+
+    dlg._test_btn.click()                # and clicks it anyway
+    assert len(started) == 1, (
+        f"a second probe was started against {started[1:]!r} while the first "
+        "was still in flight"
+    )
+    live = [t for t in dlg.findChildren(QTimer) if t.isActive()]
+    assert len(live) == 1, f"{len(live)} pollers running on one dialog"
+
+
+def test_probe_ssh_async_refuses_a_second_probe_and_says_so(qtbot, monkeypatch):
+    """The refusal is at the helper, so a fourth call site cannot miss it."""
+    import analyze_remote_dialog as ard
+
+    started: list[str] = []
+    _never_answers(monkeypatch, ard, started)
+    owner = QWidget()
+    qtbot.addWidget(owner)
+
+    assert ard.probe_ssh_async(owner, "hpc", "", lambda *a: None) is True
+    assert ard.probe_in_flight(owner) is True
+    assert ard.probe_ssh_async(owner, "other", "", lambda *a: None) is False
+    assert started == ["hpc"]
+
+
+def test_the_flag_clears_when_the_probe_answers(qtbot, monkeypatch):
+    import analyze_remote_dialog as ard
+
+    monkeypatch.setattr(ard.ssh_key_setup, "probe_ssh_connection",
+                        lambda alias, key, timeout=15: (True, ""))
+    owner = QWidget()
+    qtbot.addWidget(owner)
+    seen: list[tuple] = []
+    assert ard.probe_ssh_async(owner, "hpc", "", lambda *a: seen.append(a))
+    qtbot.waitUntil(lambda: bool(seen), timeout=3000)
+    assert ard.probe_in_flight(owner) is False
+    assert ard.probe_ssh_async(owner, "hpc", "", lambda *a: None) is True

@@ -94,6 +94,22 @@ def poll_queue_on(owner: QWidget, result_q: queue.Queue, on_result) -> QTimer:
     return timer
 
 
+#: Set on the owning widget for the life of one probe. A dynamic property
+#: rather than an attribute so it costs no ``__init__`` line in three dialog
+#: classes and cannot be forgotten by a fourth.
+_PROBE_IN_FLIGHT = "_aw_ssh_probe_in_flight"
+
+
+def probe_in_flight(owner: QWidget) -> bool:
+    """Whether *owner* has an ssh probe running that has not answered yet.
+
+    Read it wherever a button's enabled state is recomputed from something
+    other than the probe itself — a selection change, a wizard step advancing —
+    so the recompute cannot hand back a control the probe is using.
+    """
+    return bool(owner.property(_PROBE_IN_FLIGHT))
+
+
 def probe_ssh_async(
     owner: QWidget,
     ssh_alias: str,
@@ -101,7 +117,7 @@ def probe_ssh_async(
     on_result,
     *,
     timeout: int = 15,
-) -> None:
+) -> bool:
     """Run one ``ssh <alias> echo ok`` off the GUI thread; call *on_result* with
     ``(ok, detail)`` on the GUI thread when it answers.
 
@@ -115,7 +131,21 @@ def probe_ssh_async(
     *on_result* is invoked at most once, and never after *owner* is destroyed.
     The worker always puts something, so a probe that raises ends the poll
     rather than leaving it spinning with the button stuck disabled.
+
+    **One probe per owner at a time.** Returns ``False`` without starting
+    anything when *owner* already has one in flight. Every caller disables its
+    own button for the duration, which was thought to be enough and is not: the
+    Manage Remotes list re-enables Test from ``itemSelectionChanged``, so
+    picking another row mid-probe handed back a button still reading "Testing…"
+    that started a second probe against a different host. Two pollers then ran
+    on one dialog and whichever answered first popped its message box and
+    re-enabled the button under the other. The refusal lives here rather than in
+    each handler because it is a property of the owner, not of any one button,
+    and there are three call sites that each got it wrong differently.
     """
+    if probe_in_flight(owner):
+        return False
+    owner.setProperty(_PROBE_IN_FLIGHT, True)
     result_q: queue.Queue = queue.Queue()
 
     def _runner() -> None:
@@ -125,8 +155,16 @@ def probe_ssh_async(
         except Exception as exc:
             result_q.put((False, f"error: {exc}"))
 
+    def _finish(ok: bool, detail: str) -> None:
+        # Cleared before the callback so a handler that re-tests from inside
+        # its own result — or asks ``probe_in_flight`` while rebuilding its
+        # buttons — sees the probe as finished, which it is.
+        owner.setProperty(_PROBE_IN_FLIGHT, False)
+        on_result(ok, detail)
+
     threading.Thread(target=_runner, daemon=True).start()
-    poll_queue_on(owner, result_q, on_result)
+    poll_queue_on(owner, result_q, _finish)
+    return True
 
 # Prefilled into the "Scheduler command" field the first time a user
 # switches a host to scheduled compute, so they have a working SLURM
@@ -1082,7 +1120,7 @@ class SSHKeyWizardDialog(QDialog):
         self._command_edit.setText(cmd)
         self._command_edit.setEnabled(True)
         self._copy_btn.setEnabled(True)
-        self._verify_btn.setEnabled(True)
+        self._verify_btn.setEnabled(not probe_in_flight(self))
 
     def _on_copy_command(self) -> None:
         cb = QGuiApplication.clipboard()
@@ -1517,7 +1555,10 @@ class ManageRemotesDialog(QDialog):
         has_sel = self._selected_name() is not None
         self._edit_btn.setEnabled(has_sel)
         self._delete_btn.setEnabled(has_sel)
-        self._test_btn.setEnabled(has_sel)
+        # Test is the one button this can be asked to re-enable while it is in
+        # use: the probe runs off the GUI thread, and a selection change is the
+        # commonest thing a user does while waiting for one.
+        self._test_btn.setEnabled(has_sel and not probe_in_flight(self))
         self._bootstrap_btn.setEnabled(has_sel)
 
     # ── actions ─────────────────────────────────────────────────────────

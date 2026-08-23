@@ -112,7 +112,43 @@ class AnalyzePipelineInfoMixin:
             phase=str(d.get("phase_token") or "").strip(),
         )
 
-    def _apply_pipeline_info(self, info: dict, *, source: Path | None = None) -> None:
+    def _apply_input_path(self, d: dict, source: Path | None) -> None:
+        """Point the form's input field at the dataset a sidecar describes.
+
+        Split out of :meth:`_apply_pipeline_info` because it is the one part of
+        applying a sidecar that only one of the two callers wants, and because
+        the branch it needed pushed that method past the complexity ratchet.
+
+        Prefers the recorded ``input_dir``; a sidecar that carries none is
+        located from its own folder, since it lives in the output directory and
+        the input is that directory's sibling.
+        """
+        in_dir = d.get("input_dir")
+        if not in_dir and source is not None:
+            out = source.parent
+            sib = out.parent / "in"
+            in_dir = str(sib if sib.is_dir() else out.parent)
+        if not in_dir:
+            return
+        self._input_edit.setEnabled(True)
+        if getattr(self, "_browse_btn", None) is not None:
+            self._browse_btn.setEnabled(True)
+        self._input_edit.setText(str(in_dir))
+
+    def _apply_pipeline_info(self, info: dict, *, source: Path | None = None,
+                             set_input_path: bool = True) -> None:
+        """Apply a sidecar's settings to the form.
+
+        ``set_input_path`` exists because the two callers want opposite things
+        from the same payload. **Open pipeline_info.json** is the user saying
+        "point me at the dataset this file describes", so the path is the point.
+        The pre-run readout's *Load these settings* is the user saying "keep the
+        folder I chose, take the settings from what is already in it" — and
+        ``execution_options`` is a ``vars(args)`` snapshot, so it always carries
+        the ``input_dir`` of the machine the run happened on. Applying it there
+        replaced the user's own folder with a path that need not exist locally
+        at all, on every dataset produced by anyone else.
+        """
         d = self._pinfo_flat(info)
 
         def s(attr, val):
@@ -233,18 +269,9 @@ class AnalyzePipelineInfoMixin:
             self._scratch_edit.setText(str(scratch))
             self._scratch_user_set = True
 
-        # Paths last: prefer the recorded input_dir; else infer from the
-        # sidecar's own folder (it lives in the output dir).
-        in_dir = d.get("input_dir")
-        if not in_dir and source is not None:
-            out = source.parent
-            sib = out.parent / "in"
-            in_dir = str(sib if sib.is_dir() else out.parent)
-        if in_dir:
-            self._input_edit.setEnabled(True)
-            if getattr(self, "_browse_btn", None) is not None:
-                self._browse_btn.setEnabled(True)
-            self._input_edit.setText(str(in_dir))
+        # Paths last, and only when the caller wants them — see the docstring.
+        if set_input_path:
+            self._apply_input_path(d, source)
         for refresh in ("_refresh_output", "_refresh_schema_preview",
                         "_refresh_segmentation_hints"):
             fn = getattr(self, refresh, None)

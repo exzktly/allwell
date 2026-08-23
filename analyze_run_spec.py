@@ -69,6 +69,14 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
             cleanup_remote=spec.cleanup_remote,
             dry_run_cleanup=spec.dry_run_cleanup,
             selective_channels=spec.selective_channels,
+            # The run journal's resume payload. This is the one seam that has
+            # the whole spec — the Run button, the resume banner and the job
+            # queue all pass through here — while the output directory the
+            # journal lives in is not resolved until inside the runner's own
+            # thread. The same ``to_json`` the queue and the suspend record
+            # already persist, so there is no second serialisation to keep in
+            # step with the form.
+            journal_spec=spec.to_json(),
         )
         return None
 

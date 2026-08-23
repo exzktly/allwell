@@ -194,26 +194,33 @@ def _axis_vals(cells, index: int, dims, *, along_rows: bool):
     return tuple(_cv(cell, d) for d in dims)
 
 
-def _column_values_agree(cells, col_dims, col_vals) -> bool:
-    """Whether every row's columns carry the same values as the header strip.
+def _disagreeing_columns(cells, col_dims, col_vals) -> set[int]:
+    """Which columns the single header strip is not true of.
 
     There is one column-header strip for the whole grid, and in the wrapped
     ("banded") layout the columns of the second band mean something different
     from the columns of the first — six timepoints wrapped at three put T4–T6
-    directly beneath a header that reads T1–T3. Labelling them anyway is worse
-    than not labelling them: a reader has no way to tell the header is stale.
+    directly beneath a header that reads T1–T3. Labelling those anyway is worse
+    than not labelling them: a reader has no way to tell a stale header from a
+    true one.
+
+    Per column, not per grid. The first version answered one all-or-nothing
+    question about the whole layout, so a single right-click per-cell override
+    — a supported feature — silently removed *every* column label on an
+    otherwise perfectly ordinary grid.
     """
+    bad: set[int] = set()
     for r in range(1, len(cells)):
+        row = cells[r]
         for c in range(len(col_vals)):
-            cell = cells[r][c] if c < len(cells[r]) else None
-            if cell is None:
+            if c >= len(row) or row[c] is None:
                 continue
-            vals = tuple(_cv(cell, d) for d in col_dims)
+            vals = tuple(_cv(row[c], d) for d in col_dims)
             if not any(v for v in vals):
                 continue
             if vals != col_vals[c]:
-                return False
-    return True
+                bad.add(c)
+    return bad
 
 
 def plan_facets(ctx, cells) -> FacetPlan | None:
@@ -246,18 +253,20 @@ def plan_facets(ctx, cells) -> FacetPlan | None:
     # Column axis (top): inner value per column, outer group spanning its
     # columns — but only when the strip is true of every row. See
     # ``_column_values_agree``.
-    columns_labelled = _column_values_agree(cells, col_dims, col_vals) if tl >= 1 else True
-    if not columns_labelled:
+    stale_cols = _disagreeing_columns(cells, col_dims, col_vals) if tl >= 1 else set()
+    if stale_cols:
         _logger.warning(
-            "Image Table: the column values differ between bands of this "
-            "wrapped layout, so one header strip cannot describe them — the "
-            "column labels are omitted rather than shown stale.",
+            "Image Table: %d column(s) hold different values in different rows "
+            "of this layout, so one header strip cannot describe them — those "
+            "labels are omitted rather than shown stale.", len(stale_cols),
         )
-    if tl >= 1 and columns_labelled:
+    if tl >= 1:
         for c in range(ncols):
+            if c in stale_cols:
+                continue
             plan.top.append((_fmt(ctx, col_dims[-1], col_vals[c][-1]),
                              tl - 1, grid_col_of[c], 1, 1, False))
-    if tl >= 2 and columns_labelled:
+    if tl >= 2 and not stale_cols:
         for prefix, gs, ge in _group_spans(col_vals, grid_col_of):
             plan.top.append((_fmt(ctx, col_dims[0], prefix[0]),
                              0, gs, 1, ge - gs + 1, True))

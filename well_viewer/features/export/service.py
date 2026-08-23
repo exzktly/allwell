@@ -606,7 +606,12 @@ def _axis_column_names(name_x: str, name_y: str) -> tuple[str, str]:
     colliding case gains an ``_x`` / ``_y`` suffix.
     """
     if name_x != name_y:
-        return name_x, name_y
+        # The aggregate exporter derives an ``_error`` column from each of
+        # these, so two names that differ can still collide once suffixed:
+        # ``("A", "A_error")`` yields ``A_error`` twice. Disambiguate on the
+        # derived names too.
+        if f"{name_x}_error" != name_y and f"{name_y}_error" != name_x:
+            return name_x, name_y
     return f"{name_x}_x", f"{name_y}_y"
 
 
@@ -661,7 +666,9 @@ def export_scatter_data(ctx) -> None:
     # gate boxes and the CSV used to carry the whole cloud — the two disagreed
     # about which cells the figure is about, which is the one thing an export
     # beside a plot must not do. (Batch export deliberately does not inherit
-    # this live toggle; see `_scatter_gate_note` and ARCHITECTURE §5.6.)
+    # this live toggle; see
+    # ``batch_export.scatter_panel._warn_if_live_gates_ignored`` and
+    # ARCHITECTURE §5.6.)
     scatter_data = _scatter_collect_data(
         ctx, col_x, col_y, timepoints_h,
         well_colors=[],

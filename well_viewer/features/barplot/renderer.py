@@ -79,8 +79,8 @@ def _annotate_cluster_footers(items, axes, fontsize=8) -> None:
                         color=_muted_fg, annotation_clip=False)
 
 
-def _set_frac_ylim(ctx, ax_frac) -> None:
-    """Clamp the OnFraction panel to [0, 1] unless fold-change is on.
+def _set_frac_ylim(ctx, ax_frac, *, normalised: bool = True) -> None:
+    """Clamp the OnFraction panel to [0, 1] unless it holds a fold change.
 
     Raw fractions are bounded so the clamp is a sensible default — without
     it matplotlib's autoscaler wastes the panel on a tiny range. Under
@@ -91,7 +91,12 @@ def _set_frac_ylim(ctx, ax_frac) -> None:
     (``apply_export_style_to_current`` at the end of ``redraw_bars``).
     """
     from well_viewer.domain import fold_change as _fc
-    if _fc.fold_change_state(ctx).active:
+    # *normalised* is what makes this the same question the panel's title
+    # answers. The per-cell display modes plot a raw ``n_above / n_total``
+    # whatever the fold-change state says — that is why their title carries no
+    # fold-change suffix — so for them the clamp stays correct and skipping it
+    # would waste the panel on a tiny range for no reason.
+    if normalised and _fc.fold_change_state(ctx).active:
         return
     ax_frac.set_ylim(-0.05, 1.05)
 
@@ -279,7 +284,10 @@ def draw_violin(
             cx = sum(positions) / len(positions)
             ax_mean.text(cx, 1.02, gk, transform=ax_mean.get_xaxis_transform(),
                          ha="center", va="bottom", fontsize=8, fontweight="bold")
-    _set_frac_ylim(ctx, ax_frac)
+    # The per-cell fraction is raw whatever the fold-change state
+    # says — it is ``n_above / n_total`` off the rows — which is why
+    # its title carries no fold-change suffix either.
+    _set_frac_ylim(ctx, ax_frac, normalised=False)
     mark_time_rescale(ax_mean, ax_frac, factor=ctx.state.plot.time_scale)
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB, fraction_title
@@ -435,7 +443,10 @@ def draw_beeswarm(
             cx = sum(positions) / len(positions)
             ax_mean.text(cx, 1.02, gk, transform=ax_mean.get_xaxis_transform(),
                          ha="center", va="bottom", fontsize=8, fontweight="bold")
-    _set_frac_ylim(ctx, ax_frac)
+    # The per-cell fraction is raw whatever the fold-change state
+    # says — it is ``n_above / n_total`` off the rows — which is why
+    # its title carries no fold-change suffix either.
+    _set_frac_ylim(ctx, ax_frac, normalised=False)
     mark_time_rescale(ax_mean, ax_frac, factor=ctx.state.plot.time_scale)
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     from well_viewer.data.metric_labels import (
@@ -555,8 +566,13 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
     if not tested:
         tested = list(zip(items, xs))
     x_by_key = {it.key: x for it, x in tested}
+    # Positions are restricted to the tested timepoint; **bar heights are
+    # not**. The y-limit below is computed from ``top_by_key``, so scanning
+    # only the tested timepoint shrank the axis to that timepoint's bars and
+    # clipped every other timepoint's bars off the figure — measured, a panel
+    # holding bars of 10, 12, 100 and 110 came back with a limit of 30.5.
     top_by_key: dict[str, float] = {}
-    for it, _x in tested:
+    for it in items:
         val = getattr(it, val_attr, float("nan"))
         if getattr(it, has_attr, False) and not math.isnan(val):
             sp = getattr(it, spread_attr, 0.0)

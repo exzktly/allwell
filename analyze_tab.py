@@ -41,6 +41,7 @@ import theme
 from well_viewer.core.app_shell_view import RAIL_W
 from well_viewer.core.safe import swallowed
 from analyze_input import AnalyzeInputMixin
+from analyze_preflight import AnalyzePreflightMixin
 from analyze_progress import AnalyzeProgressMixin
 from analyze_run_spec import AnalyzeRunMixin
 from analyze_suspend import AnalyzeSuspendMixin
@@ -81,9 +82,9 @@ _PREVIEW_TOKENS = {
 # ---------------------------------------------------------------------------
 # AnalyzeTab
 # ---------------------------------------------------------------------------
-class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzeProgressMixin,
-                 AnalyzeRunMixin, AnalyzeSuspendMixin, AnalyzeTabFormMixin,
-                 QWidget):
+class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
+                 AnalyzeProgressMixin, AnalyzeRunMixin, AnalyzeSuspendMixin,
+                 AnalyzeTabFormMixin, QWidget):
     """Left: pipeline options form.  Right: live subprocess log."""
 
     # Positive-latch completion signal for a job queue: emitted exactly once
@@ -132,6 +133,12 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzeProgressMixin,
         self._fluor_rows: list[tuple[QLineEdit, QCheckBox, QCheckBox, QPushButton]] = []
 
         self._build_ui()
+        # Both strips are built hidden and were only ever refreshed by a run
+        # ending or the folder changing, so a record written in a previous
+        # session had nothing to reveal it: "close All-Well, reopen it
+        # tomorrow, and it offers to carry on" never survived the restart it
+        # names. Ask once, here, with the form still empty.
+        self._refresh_folder_banners(None, immediate=True)
         self._poll_log()
 
     @property
@@ -463,7 +470,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzeProgressMixin,
             self._input_edit.setEnabled(True)
             self._autofill_from_input_scan(d)
 
-    def _refresh_output(self) -> None:
+    def _refresh_output(self, *, immediate: bool = False) -> None:
         """Show where the run will read from and write to, and what it will do.
 
         Every word of this comes from ``plan_input_layout`` — the same function
@@ -474,11 +481,18 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzeProgressMixin,
         """
         raw_str = self._input_edit.text().strip()
         if not raw_str:
-            self._output_lbl.setText("—"); self._layout_lbl.setText(""); return
+            self._output_lbl.setText("—"); self._layout_lbl.setText("")
+            self._refresh_folder_banners(None, immediate=immediate)
+            return
         plan = plan_input_layout(Path(raw_str))
         self._output_lbl.setText(
             str(plan.output_dir) if plan.output_dir is not None else "—")
         self._layout_lbl.setText(plan.message)
+        # The same planner that names the output folder is what makes a pre-run
+        # report possible at all: it resolves that path without writing
+        # anything, so what an earlier run left there can be read while the
+        # form is still being filled in.
+        self._refresh_folder_banners(plan, immediate=immediate)
 
     # ------------------------------------------------------------------
     # Run / Stop
@@ -554,6 +568,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzeProgressMixin,
         self._stop_btn.setEnabled(True)
         self._suspend_btn.setEnabled(True)
         self.refresh_resume_banner()      # hidden while a run is going
+        self.suspend_preflight()          # ...and so is the pre-run report
         self._dashboard.set_status("Running…")
 
     def _expected_well_count(self, opts: dict) -> int:

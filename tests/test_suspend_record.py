@@ -37,13 +37,13 @@ def _run(out: str, *, when: float = 1000.0, done: int = 3, total: int = 10):
 
 def test_nothing_recorded_reads_as_nothing_to_resume():
     assert sr.load_all() == []
-    assert sr.latest() is None
 
 
 def test_a_saved_run_round_trips(_fake_home):
     assert sr.save(_run("/data/out")) is True
-    got = sr.latest()
-    assert got is not None
+    runs = sr.load_all()
+    assert len(runs) == 1
+    got = runs[0]
     assert got.output_dir == "/data/out"
     assert got.spec == {"opts": {"raw": "/in"}, "remote_name": None}
     assert got.wells_done == 3 and got.wells_total == 10
@@ -66,8 +66,8 @@ def test_saving_the_same_output_dir_twice_replaces_rather_than_stacks():
 def test_several_plates_can_be_suspended_at_once():
     sr.save(_run("/data/a", when=1000.0))
     sr.save(_run("/data/b", when=2000.0))
+    # Newest first: every caller takes the head of this list.
     assert [r.output_dir for r in sr.load_all()] == ["/data/b", "/data/a"]
-    assert sr.latest().output_dir == "/data/b"      # newest first
 
 
 def test_clearing_one_leaves_the_others():
@@ -90,7 +90,6 @@ def test_a_corrupt_file_reads_as_nothing_rather_than_raising(_fake_home):
     sr.record_path().parent.mkdir(parents=True, exist_ok=True)
     sr.record_path().write_text("{not json at all")
     assert sr.load_all() == []
-    assert sr.latest() is None
 
 
 def test_a_record_from_a_future_build_is_ignored(_fake_home):

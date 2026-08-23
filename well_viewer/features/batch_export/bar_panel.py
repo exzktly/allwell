@@ -33,7 +33,7 @@ from well_viewer.features.batch_export._common import (
     _CLR_DISABLED_WELL,
     _CLR_ERR_BAR,
 )
-from well_viewer.features.batch_export.base_panel import BatchExportPanel
+from well_viewer.features.batch_export.base_panel import BatchExportPanel, SkippedJob
 # ── ctx-native god-method forms (A8 / Epic-A14 panel conversion) ─────────────
 from well_viewer.core.lazy import lazy as _lazy
 from well_viewer.core.ui_helpers import build_hline_separator
@@ -392,9 +392,12 @@ class BarBatchExportPanel(BatchExportPanel):
                 # save — axes, title, legend, tick labels, no bars — and the
                 # job would report success, so a group that produced no data
                 # was indistinguishable in the output directory from one that
-                # did, minus a CSV nobody counts.
-                return (f"{grp.name} t={tp_strs}: no data for this group — "
-                        f"nothing exported")
+                # did, minus a CSV nobody counts. It is returned as a
+                # ``SkippedJob`` rather than an error string because the runner
+                # treats any error as grounds to discard the entire staged
+                # export.
+                return SkippedJob(f"{grp.name} t={tp_strs}: no data for this "
+                                  f"group — nothing exported")
 
             try:
                 with self._app_val_col_scope(_val_col):
@@ -534,7 +537,14 @@ class BarBatchExportPanel(BatchExportPanel):
                 ax_n, f"{events_total_title(_metric_key)}{_fc_suffix}",
                 "N(above)" + _fc_suffix,
             )
-        ax_frac.set_ylim(-0.05, 1.05)
+        # Same rule as the on-tab figures (``barplot.renderer._set_frac_ylim``,
+        # ``lineplot.controller``): a raw fraction is bounded so the clamp is a
+        # good default, but under fold change the field is a ratio or a
+        # difference and the clamp silently clips the effect out of the panel.
+        # The batch twin of a fixed on-tab figure is exactly where a half-swept
+        # rule hides — the exported PNG kept clipping after the tab stopped.
+        if not fc_active:
+            ax_frac.set_ylim(-0.05, 1.05)
 
         if display_mode in ("violin", "beeswarm"):
             self._render_per_cell_panels(

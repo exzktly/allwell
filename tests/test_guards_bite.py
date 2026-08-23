@@ -1595,3 +1595,81 @@ def test_text_column_guard_clears(shape):
     from tests.test_text_column_access import offenders_in
     found = offenders_in(TEXT_COLUMN_CLEAN[shape], "probe.py")
     assert not found, f"the guard fired on a legitimate {shape}: {found}"
+
+
+# ── the run journal's well-state vocabulary ─────────────────────────────────
+
+_JOURNAL_GUARD = (
+    "tests.test_no_second_journal_vocabulary",
+    "test_no_module_restates_the_journal_well_states",
+)
+
+JOURNAL_ROSTER_VIOLATIONS = {
+    # The plain restatement — what a second reader would write for itself.
+    "tuple": 'STATES = ("uploaded", "analysed", "fetched", "skipped")\n',
+    # A list, and one state short of the real roster. A copy that has already
+    # fallen behind is the case the three-name threshold exists to catch: it is
+    # more suspect than a complete one, not less.
+    "stale-list": 'for s in ["fetched", "skipped", "failed"]:\n    pass\n',
+    # A set comprehension's source, which is still a literal collection.
+    "set": 'TERMINAL = {"fetched", "failed", "not-fetched"}\n',
+    # The shape that got past the first version of this guard. A dict of words
+    # is presentation — until the module holding it never consults the
+    # canonical roster, at which point it *is* the module's only list of the
+    # states, and `_reconcile_fetch` proved what that costs by iterating one to
+    # build a tally that then silently dropped every state it did not spell.
+    # The evasion the first exemption allowed: the roster is spelled out, and
+    # the only mention of WELL_STATES is prose. A whole-file substring test
+    # read that as "consults the canonical roster" and waved the module
+    # through — including `remote_runner.py`, where the defect happened.
+    "roster-named-only-in-a-comment": (
+        '# Ordered to match WELL_STATES.\n'
+        'PHRASES = {"fetched": "fetched", "skipped": "skipped",\n'
+        '           "failed": "failed", "not-fetched": "not fetched"}\n'
+    ),
+    "unanchored-label-dict": (
+        'PHRASES = {"fetched": "fetched", "skipped": "skipped",\n'
+        '           "failed": "failed", "not-fetched": "not fetched"}\n'
+        'parts = [PHRASES[k] for k in PHRASES]\n'
+    ),
+}
+
+JOURNAL_ROSTER_CLEAN = {
+    # One state in a comparison is ordinary code, not a roster.
+    "single-state": 'def f(rec):\n    return rec.state == "fetched"\n',
+    # Two states grouped for one count — below the threshold, and the shape
+    # `_well_tally` and the resume banner both legitimately use.
+    "pair": 'DONE = ("analysed", "fetched")\n',
+    # Labels: each state sits alone inside its own pair, so pairing a state
+    # with the words shown for it is presentation, not a second definition.
+    "label-pairs": (
+        'ROWS = (("fetched", "Fetched"), ("skipped", "Skipped"),\n'
+        '        ("failed", "Failed"), ("not-fetched", "Never fetched"))\n'
+    ),
+    # The same dict, in a module that does reach for the canonical roster. The
+    # words are still presentation, and the order and completeness now come
+    # from the one place that can supply them — which is the whole distinction.
+    "anchored-label-dict": (
+        'from services.run_journal import WELL_STATES\n'
+        'PHRASES = {"fetched": "fetched", "skipped": "skipped",\n'
+        '           "failed": "failed", "not-fetched": "not fetched"}\n'
+        'parts = [PHRASES.get(k, k) for k in WELL_STATES]\n'
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(JOURNAL_ROSTER_VIOLATIONS))
+def test_journal_vocabulary_guard_catches(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, f"bad_journal_{shape}.py",
+                 JOURNAL_ROSTER_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, *_JOURNAL_GUARD, [bad])
+    assert exc is not None and bad.name in str(exc), (
+        f"the {shape} spelling walked past the guard")
+
+
+@pytest.mark.parametrize("shape", sorted(JOURNAL_ROSTER_CLEAN))
+def test_journal_vocabulary_guard_clears(tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, f"good_journal_{shape}.py",
+                  JOURNAL_ROSTER_CLEAN[shape])
+    assert _run_scan(monkeypatch, *_JOURNAL_GUARD, [good]) is None, (
+        f"the guard fired on a legitimate {shape}")

@@ -161,6 +161,22 @@ a tracker is read every time someone picks the work up.
 10. **`_WELL_TOKEN_IN_TEXT_RE` reads a FOV token `f1` as the well `F01`**
     (`data/image_resolver.py`). Pre-existing and unrelated to any item here.
 
+## An unmeasured risk introduced by item 31
+
+Making the heatmap agree with Bar and Line replaced one pooled `aggregate_group`
+call per cell with one `aggregate_well` call **per well in the cell**. That is
+correct — the mean of each well's mean cannot be computed any other way — but
+`_compute_global_range` calls `_cell_value` on the order of timepoints × rows ×
+columns on every redraw, and the helper the change deleted carried a comment
+saying full-frame concatenation in that loop had been the bottleneck on
+timepoint-slider scrubs.
+
+**This has not been measured.** A replicate set of eight wells now does eight
+aggregations where it did one, and whether the per-well cache upstream absorbs
+that is unknown. Scrub the timepoint slider on a large plate with replicate
+averaging on, and if it drags, the fix is to memoise per well and timepoint
+rather than to go back to pooling — pooling is the wrong number.
+
 ## A lesson this work paid for
 
 Checkpointing a group's in-flight tree into `HEAD` silently invalidated the

@@ -41,6 +41,7 @@ def write_well_report(
     groups_covered: int,
     failed: list[str] | None = None,
     aborted_reason: str = "",
+    not_attempted: tuple[str, ...] | list[str] = (),
 ) -> Path | None:
     """Record one well's completeness. Best-effort: never fails the run.
 
@@ -56,6 +57,12 @@ def write_well_report(
         "groups_covered": int(groups_covered),
         "failed": sorted(failed or []),
         "aborted_reason": str(aborted_reason or ""),
+        # Kept apart from `failed`: these were never attempted, so there is no
+        # traceback in `errors/` for any of them and never will be. Folding
+        # them in made the PARTIAL warning name casualties whose evidence does
+        # not exist, and sent a user following the §7 diagnosis flow looking
+        # for twenty tracebacks when three had been written.
+        "not_attempted": sorted(not_attempted or ()),
     }
     try:
         d = _report_dir(output_dir)
@@ -90,13 +97,12 @@ def collect_run_report(output_dir: Path | str) -> dict:
                 continue
             well = str(rec.get("well") or path.stem)
             wells[well] = rec
-    incomplete = sorted(
-        w for w, r in wells.items()
-        if int(r.get("groups_total", 0)) > int(r.get("groups_covered", 0))
-    )
+    incomplete = sorted(w for w, r in wells.items() if is_incomplete(r))
+    empty = sorted(w for w, r in wells.items() if found_nothing(r))
     return {
         "wells": wells,
         "incomplete_wells": incomplete,
+        "empty_wells": empty,
         "groups_total": sum(int(r.get("groups_total", 0)) for r in wells.values()),
         "groups_covered": sum(int(r.get("groups_covered", 0)) for r in wells.values()),
     }
@@ -113,23 +119,71 @@ def clear_run_report(output_dir: Path | str) -> None:
         pass
 
 
+def _int(rec, key: str) -> int:
+    return int((rec or {}).get(key, 0) or 0)
+
+
+def is_incomplete(rec) -> bool:
+    """A well that covers fewer FOV-groups than its input holds."""
+    return _int(rec, "groups_total") > _int(rec, "groups_covered")
+
+
+def found_nothing(rec) -> bool:
+    """A well whose input yielded **no** FOV-groups at all.
+
+    Recorded as ``groups_total=0, groups_covered=0``, which passes
+    :func:`is_incomplete` — ``0 > 0`` is false — so such a well was counted
+    among the finished ones and the plate summarised as whole. It is the
+    opposite: nothing about it was computed. The cause is upstream and always
+    worth naming, because it is never the pipeline having done its job: a
+    filename schema that does not decompose the plate, a separator that groups
+    nothing, an archive whose members are all sidecars, or an empty well
+    folder.
+
+    Kept apart from ``incomplete`` rather than folded into it: "covered 8 of
+    12" and "covered nothing, and here is why that is not a number" need
+    different sentences and different remedies. Re-running with
+    ``--incremental`` recovers the first and cannot touch the second.
+    """
+    return _int(rec, "groups_total") == 0
+
+
 def summarize(report: dict) -> str:
     """One human line for the end-of-run log, or ``""`` when nothing is missing."""
     incomplete = report.get("incomplete_wells") or []
-    if not incomplete:
+    empty = report.get("empty_wells") or []
+    if not incomplete and not empty:
         return ""
     wells = report.get("wells") or {}
-    missing = sum(
-        int(wells[w].get("groups_total", 0)) - int(wells[w].get("groups_covered", 0))
-        for w in incomplete if w in wells
-    )
-    shown = ", ".join(incomplete[:8]) + ("…" if len(incomplete) > 8 else "")
-    return (
-        f"INCOMPLETE: {len(incomplete)} well(s) cover fewer FOV-groups than their "
-        f"input holds — {missing} group(s) missing ({shown}). Their CSV / out.zip "
-        f"exist and look complete; per-field statistics for them will be wrong or "
-        f"undefined. Re-run with --incremental to recover the missing groups."
-    )
+    lines: list[str] = []
+
+    if empty:
+        shown = ", ".join(empty[:8]) + ("…" if len(empty) > 8 else "")
+        lines.append(
+            f"NO INPUT GROUPS: {len(empty)} well(s) yielded no FOV-groups at "
+            f"all ({shown}). Nothing was computed for them, and they were "
+            f"previously counted among the finished wells because "
+            f"groups_total and groups_covered were both zero. This is almost "
+            f"always the filename schema or separator not decomposing the "
+            f"plate, or an archive holding no images — --incremental cannot "
+            f"recover it."
+        )
+
+    if incomplete:
+        missing = sum(
+            int(wells[w].get("groups_total", 0)) - int(wells[w].get("groups_covered", 0))
+            for w in incomplete if w in wells
+        )
+        shown = ", ".join(incomplete[:8]) + ("…" if len(incomplete) > 8 else "")
+        lines.append(
+            f"INCOMPLETE: {len(incomplete)} well(s) cover fewer FOV-groups than "
+            f"their input holds — {missing} group(s) missing ({shown}). Their "
+            f"CSV / out.zip exist and look complete; per-field statistics for "
+            f"them will be wrong or undefined. Re-run with --incremental to "
+            f"recover the missing groups."
+        )
+
+    return "\n".join(lines)
 
 
 # ── The three call sites the pipeline uses ──────────────────────────────────
@@ -141,6 +195,9 @@ def record_well_completeness(
     groups_in_input: int,
     csv_path,
     failed,
+    *,
+    aborted_reason: str = "",
+    not_attempted: tuple[str, ...] | list[str] = (),
 ) -> None:
     """Record how much of this well's input its output actually covers.
 
@@ -150,6 +207,13 @@ def record_well_completeness(
     resumed per-FOV checkpoints, and groups this run never attempted because the
     storage gave out: all of them show up as the gap between the input's group
     count and the output's.
+
+    *aborted_reason* and *not_attempted* carry why a well stopped early and
+    which groups it never tried. Both were computed by the worker and dropped
+    on the floor here: `run_report` declared `aborted_reason`, serialised it
+    and read it back, and no production caller could set a non-empty value —
+    a documented, serialised, read field that no branch could populate
+    (CLAUDE.md §7.7).
     """
     from pipeline.incremental_keys import read_done_fov_keys
 
@@ -164,6 +228,8 @@ def record_well_completeness(
         groups_total=int(groups_in_input),
         groups_covered=int(covered),
         failed=list(failed or []),
+        aborted_reason=aborted_reason,
+        not_attempted=tuple(not_attempted or ()),
     )
 
 
@@ -264,8 +330,9 @@ def merge_fetched_run_report(info_path, prior_block: dict | None) -> bool:
     info["run_report"] = {
         "wells": merged,
         "incomplete_wells": sorted(
-            w for w, r in merged.items()
-            if int((r or {}).get("groups_total", 0)) > int((r or {}).get("groups_covered", 0))),
+            w for w, r in merged.items() if is_incomplete(r)),
+        "empty_wells": sorted(
+            w for w, r in merged.items() if found_nothing(r)),
         "groups_total": sum(int((r or {}).get("groups_total", 0)) for r in merged.values()),
         "groups_covered": sum(int((r or {}).get("groups_covered", 0)) for r in merged.values()),
     }

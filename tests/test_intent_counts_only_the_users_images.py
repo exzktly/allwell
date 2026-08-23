@@ -231,3 +231,61 @@ def test_every_consumer_paints_the_new_state_rather_than_falling_through():
     assert "csv_only" in inspect.getsource(dashboard), (
         "the Validate dashboard does not name csv_only, so such a well gets "
         "no marker and no colour")
+
+
+# ── P10: a well that found nothing, counted among the finished ──────────────
+
+def test_a_well_that_yielded_no_groups_is_not_summarised_as_finished():
+    """`groups_total=0, groups_covered=0` passed the incomplete test.
+
+    The predicate was `groups_total > groups_covered`, and `0 > 0` is false, so
+    a well whose input yielded no FOV-groups at all was counted among the
+    finished wells and the plate summarised as whole. It is the opposite of
+    finished: nothing about it was computed.
+
+    The cause is always upstream and always worth naming — a filename schema
+    that does not decompose the plate, a separator that groups nothing, an
+    archive whose members are all sidecars — and unlike a genuinely partial
+    well, `--incremental` cannot recover it. That is why it is a separate
+    bucket rather than folded into `incomplete`.
+    """
+    from pipeline.run_report import found_nothing, is_incomplete, summarize
+
+    empty = {"groups_total": 0, "groups_covered": 0}
+    assert not is_incomplete(empty), (
+        "the fixture is meant to be the case the old predicate let through")
+    assert found_nothing(empty)
+
+    report = {
+        "wells": {"A01": empty, "B02": {"groups_total": 12, "groups_covered": 12}},
+        "incomplete_wells": [],
+        "empty_wells": ["A01"],
+    }
+    line = summarize(report)
+    assert line, "a plate with a well that computed nothing summarised silently"
+    assert "A01" in line and "NO INPUT GROUPS" in line, line
+    assert "--incremental cannot recover it" in line, (
+        "the remedy for a partial well is offered for a well it cannot help")
+
+
+def test_a_genuinely_complete_plate_still_summarises_to_nothing():
+    """Or every clean run grows a scary line and the signal is spent."""
+    from pipeline.run_report import summarize
+
+    assert summarize({
+        "wells": {"A01": {"groups_total": 12, "groups_covered": 12}},
+        "incomplete_wells": [], "empty_wells": [],
+    }) == ""
+
+
+def test_both_kinds_of_shortfall_are_reported_together():
+    """A plate can hold both, and reporting only one hides the other."""
+    from pipeline.run_report import summarize
+
+    line = summarize({
+        "wells": {"A01": {"groups_total": 0, "groups_covered": 0},
+                  "B02": {"groups_total": 12, "groups_covered": 8}},
+        "incomplete_wells": ["B02"], "empty_wells": ["A01"],
+    })
+    assert "NO INPUT GROUPS" in line and "INCOMPLETE" in line, line
+    assert "A01" in line and "B02" in line

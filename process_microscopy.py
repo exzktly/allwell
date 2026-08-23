@@ -2843,6 +2843,12 @@ def _process_groups_in_worker(
     # producing complete-looking output for wells it has already gutted.
     _consecutive_io_failures = 0
     aborted_reason = ""
+    #: Groups the abort skipped. Kept apart from `failed` because they are not
+    #: the same thing and the difference is what a user acts on: a failed group
+    #: has a traceback in `errors/` and a cause; a skipped one was never
+    #: attempted and has neither. Appending them to `failed` made the PARTIAL
+    #: warning name twenty casualties and point at three tracebacks.
+    not_attempted: list[str] = []
 
     def _note_failure(exc: BaseException) -> bool:
         """Count a failure; True when the well should stop attempting groups."""
@@ -2861,7 +2867,7 @@ def _process_groups_in_worker(
             if _suspend.is_suspended():
                 break            # not attempted is not the same as failed
             if aborted_reason:
-                failed.append(nuclear_path.name)
+                not_attempted.append(nuclear_path.name)
                 continue
             try:
                 all_records.extend(_process_or_resume(nuclear_path, fluor_paths))
@@ -2918,10 +2924,21 @@ def _process_groups_in_worker(
             "CSV / out.zip cover only the %d successful FOV-group(s). Re-run with "
             "--incremental to recover the missing ones.%s",
             well_label, len(failed), _fov_total, ", ".join(failed),
-            _fov_total - len(failed), _err_hint,
+            _fov_total - len(failed) - len(not_attempted), _err_hint,
         )
 
-    return all_records, failed
+    if not_attempted:
+        # Said separately, because "failed" and "never tried" send a reader to
+        # different places. These have no traceback in errors/ and never will.
+        log.warning(
+            "Well %s — NOT ATTEMPTED: %d FOV-group(s) were skipped after the "
+            "well aborted (%s): %s. There is no per-FOV traceback for these — "
+            "the reason is the abort itself.",
+            well_label, len(not_attempted), aborted_reason,
+            ", ".join(not_attempted),
+        )
+
+    return all_records, failed, aborted_reason, tuple(not_attempted)
 
 
 def process_well_zip_task(
@@ -3071,7 +3088,7 @@ def process_well_zip_task(
             )
 
             kwargs = {**shared_kwargs_template, "output_dir": tmp_images}
-            records, failed = _process_groups_in_worker(
+            records, failed, aborted_reason, not_attempted = _process_groups_in_worker(
                 groups, kwargs, well_label, errors_dir=output_dir,
                 settings_key=settings_key)
 
@@ -3091,7 +3108,9 @@ def process_well_zip_task(
                 else:
                     log.warning("Well %s: no records produced; CSV not updated.", well_label)
                 record_well_completeness(
-                    output_dir, well_label, groups_in_input, csv_path, failed)
+                    output_dir, well_label, groups_in_input, csv_path, failed,
+                    aborted_reason=aborted_reason,
+                    not_attempted=not_attempted)
                 n_compressed = merge_images_into_zip(out_zip, tmp_images)
                 log.info("Well %s: merged %d new image(s) -> %s",
                          well_label, n_compressed, out_zip.name)
@@ -3102,7 +3121,9 @@ def process_well_zip_task(
                 else:
                     log.warning("Well %s: no records produced; CSV not written.", well_label)
                 record_well_completeness(
-                    output_dir, well_label, groups_in_input, csv_path, failed)
+                    output_dir, well_label, groups_in_input, csv_path, failed,
+                    aborted_reason=aborted_reason,
+                    not_attempted=not_attempted)
 
                 n_compressed = compress_images_to_zip(tmp_images, out_zip)
                 log.info("Well %s: %d image(s) -> %s", well_label, n_compressed, out_zip.name)
@@ -3263,7 +3284,7 @@ def process_well_folder_task(
                 # else: no prior CSV or outputs → new well → process all (full).
 
             kwargs = {**shared_kwargs_template, "output_dir": tmp_images}
-            records, failed = _process_groups_in_worker(
+            records, failed, aborted_reason, not_attempted = _process_groups_in_worker(
                 groups, kwargs, well_label, errors_dir=output_dir,
                 settings_key=settings_key)
 
@@ -3276,7 +3297,9 @@ def process_well_folder_task(
                 else:
                     log.warning("Well %s: no records produced; CSV not updated.", well_label)
                 record_well_completeness(
-                    output_dir, well_label, groups_in_input, csv_path, failed)
+                    output_dir, well_label, groups_in_input, csv_path, failed,
+                    aborted_reason=aborted_reason,
+                    not_attempted=not_attempted)
                 n_out = merge_images_into_zip(out_zip, tmp_images)
                 log.info("Well %s: merged %d new image(s) -> %s",
                          well_label, n_out, out_zip.name)
@@ -3290,7 +3313,9 @@ def process_well_folder_task(
                 else:
                     log.warning("Well %s: no records produced; CSV not written.", well_label)
                 record_well_completeness(
-                    output_dir, well_label, groups_in_input, csv_path, failed)
+                    output_dir, well_label, groups_in_input, csv_path, failed,
+                    aborted_reason=aborted_reason,
+                    not_attempted=not_attempted)
 
                 # Atomically rename staging dir to final output folder.
                 if final_out.exists():

@@ -238,6 +238,99 @@ def test_the_plateau_reaches_the_run_log(tmp_path, caplog):
     assert out["gfp"] == pytest.approx(round_stored_threshold(float(tied.min())))
 
 
+def test_a_contiguous_plateau_is_described_as_a_span(tmp_path, caplog):
+    """The wording has to match the shape: adjacent grid points do span a range."""
+    rng = np.random.default_rng(11)
+    pos = np.concatenate([rng.normal(200, 20, 200), rng.normal(2000, 100, 200)])
+    neg = rng.normal(200, 20, 400)
+    _write_well_csv(tmp_path / "plate_A01.csv", pos)
+    _write_well_csv(tmp_path / "plate_H12.csv", neg)
+    thresholds = sweep_thresholds(*sweep_bounds(pos, neg), 512)
+    fa, fb = frac_curve(pos, thresholds), frac_curve(neg, thresholds)
+    result = best_from_curves(thresholds, fa, fb,
+                              relative_gap(fa, fb, n_a=pos.size, n_b=neg.size),
+                              n_a=pos.size, n_b=neg.size)
+    assert result.tie_count > 1
+    assert result.tie_contiguous, "this fixture is meant to produce one run"
+    log = logging.getLogger("test_span_wording")
+    with caplog.at_level(logging.INFO, logger="test_span_wording"):
+        estimate_thresholds_from_controls(
+            tmp_path, fluor_channels=["GFP"], csv_prefix="plate",
+            pos_well="A01", neg_well="H12", log=log)
+    assert "spanning" in caplog.text
+    assert "not adjacent on the grid" not in caplog.text
+
+
+def test_two_separated_maxima_are_not_described_as_a_span(tmp_path, caplog,
+                                                          monkeypatch):
+    """A tie is a plateau only when its points are adjacent on the grid.
+
+    ``tie_span`` is ``max - min`` of the tied thresholds, which for a bimodal
+    objective covers the lower-scoring ground between the two maxima. Printing
+    that as a span states that every threshold in it scored the best, which is
+    the degraded-output-looks-like-good-output failure the plateau line exists
+    to prevent.
+
+    The objective is replaced rather than reverse-engineered from cell values:
+    the assertion is about what the run *says* when the scan comes out bimodal,
+    and ``best_from_curves`` and the log line both still run for real.
+    """
+    import pipeline.threshold_optimize as mod
+
+    def bimodal(fa, fb, *, n_a=None, n_b=None):
+        diffs = np.full(np.asarray(fa).shape, 0.10)
+        diffs[len(diffs) // 4] = 0.90
+        diffs[(3 * len(diffs)) // 4] = 0.90
+        return diffs
+
+    monkeypatch.setattr(mod, "relative_gap", bimodal)
+    rng = np.random.default_rng(3)
+    _write_well_csv(tmp_path / "plate_A01.csv", rng.normal(900, 200, 300))
+    _write_well_csv(tmp_path / "plate_H12.csv", rng.normal(300, 200, 300))
+    log = logging.getLogger("test_separated_maxima")
+    with caplog.at_level(logging.INFO, logger="test_separated_maxima"):
+        mod.estimate_thresholds_from_controls(
+            tmp_path, fluor_channels=["GFP"], csv_prefix="plate",
+            pos_well="A01", neg_well="H12", log=log)
+    assert "is shared by 2 of" in caplog.text, caplog.text
+    assert "not adjacent on the grid" in caplog.text, (
+        "two separated maxima were reported as if every threshold between "
+        f"them had scored the best: {caplog.text!r}"
+    )
+    assert "spanning" not in caplog.text
+
+
+def test_two_separated_maxima_are_not_reported_as_one_plateau():
+    """The same fact at the seam that computes it."""
+    thresholds = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0])
+    diffs = np.array([0.1, 0.9, 0.2, 0.3, 0.2, 0.9, 0.1])
+    ones = np.ones_like(thresholds)
+    result = best_from_curves(thresholds, ones, ones, diffs, n_a=10, n_b=10)
+    assert result.tie_count == 2
+    assert result.tie_span == pytest.approx(4.0)
+    assert not result.tie_contiguous, (
+        "thresholds 2.0 and 6.0 tied with 3.0-5.0 scoring lower between them"
+    )
+
+
+def test_one_run_of_adjacent_grid_points_is_contiguous():
+    thresholds = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    diffs = np.array([0.1, 0.9, 0.9, 0.9, 0.2])
+    ones = np.ones_like(thresholds)
+    result = best_from_curves(thresholds, ones, ones, diffs, n_a=10, n_b=10)
+    assert result.tie_count == 3
+    assert result.tie_contiguous
+
+
+def test_a_lone_maximum_is_trivially_contiguous():
+    thresholds = np.array([1.0, 2.0, 3.0])
+    diffs = np.array([0.1, 0.9, 0.2])
+    ones = np.ones_like(thresholds)
+    result = best_from_curves(thresholds, ones, ones, diffs, n_a=10, n_b=10)
+    assert result.tie_count == 1
+    assert result.tie_contiguous
+
+
 def test_a_single_best_threshold_says_nothing_about_a_plateau(tmp_path, caplog):
     rng = np.random.default_rng(0)
     _write_well_csv(tmp_path / "plate_A01.csv", rng.normal(600, 250, 500))

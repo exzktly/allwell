@@ -82,6 +82,14 @@ class ThreshFracOptimizationResult:
     and how wide a range of thresholds those points span. ``argmax`` returns the
     first of them, so without these two numbers a flat run of 73 grid points is
     presented as if the optimiser had found one answer.
+
+    ``tie_span`` is the distance between the lowest and highest tied threshold,
+    which is only the width of a *plateau* when the tied points are adjacent on
+    the grid. They need not be: a bimodal objective can score its maximum at two
+    separated points with lower ground between them, and the span then covers
+    thresholds that did not tie at all. ``tie_contiguous`` says which of the two
+    a caller is holding, so a log line can describe a range or a set of runs
+    rather than claiming a plateau it did not measure.
     """
 
     threshold: float
@@ -92,6 +100,7 @@ class ThreshFracOptimizationResult:
     n_b: int
     tie_count: int = 1
     tie_span: float = 0.0
+    tie_contiguous: bool = True
 
 
 def fraction_on_for_threshold(values: np.ndarray, threshold: float) -> float:
@@ -193,7 +202,16 @@ def best_from_curves(
     thresholds = np.asarray(thresholds, dtype=float)
     best_idx = int(np.argmax(diffs))
     best = float(diffs[best_idx])
-    tied = thresholds[diffs == best]
+    tied_idx = np.flatnonzero(diffs == best)
+    tied = thresholds[tied_idx]
+    # The tied points are a plateau only when they are adjacent on the grid.
+    # Read off the indices rather than the threshold values: the sweep is
+    # uniformly spaced, so an index run is exactly the question being asked and
+    # it does not have to compare floats for equality a second time.
+    contiguous = bool(
+        tied_idx.size <= 1
+        or tied_idx.size == int(tied_idx[-1] - tied_idx[0]) + 1
+    )
     return ThreshFracOptimizationResult(
         threshold=float(thresholds[best_idx]),
         frac_a=float(fa[best_idx]),
@@ -203,6 +221,7 @@ def best_from_curves(
         n_b=int(n_b),
         tie_count=int(tied.size),
         tie_span=float(tied.max() - tied.min()) if tied.size else 0.0,
+        tie_contiguous=contiguous,
     )
 
 
@@ -422,10 +441,20 @@ def estimate_thresholds_from_controls(
         if result.tie_count > 1:
             # Rounded the same way the stored value is, so the two lines cannot
             # disagree about the number they both name.
+            #
+            # "Spanning" is only true of a contiguous run. When the tied points
+            # are separated the span covers thresholds that scored lower, so the
+            # line says "between" and names the gap rather than describing a
+            # plateau nobody measured.
+            shape = (
+                "spanning %.4g intensity unit(s) (%.4g to %.4g)"
+                if result.tie_contiguous else
+                "scattered across %.4g intensity unit(s) (between %.4g and "
+                "%.4g, not adjacent on the grid)"
+            )
             log.info(
                 "Auto-threshold %s: that score is shared by %d of %d grid "
-                "point(s), spanning %.4g intensity unit(s) (%.4g to %.4g) — the "
-                "lowest of them is reported.",
+                "point(s), " + shape + " — the lowest of them is reported.",
                 ch, result.tie_count, steps, result.tie_span, out[ch],
                 round_stored_threshold(result.threshold + result.tie_span),
             )

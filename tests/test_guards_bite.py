@@ -118,6 +118,38 @@ def test_colour_guard_clears_a_token_read(tmp_path, monkeypatch):
                      "test_no_inline_hex_colours", [good]) is None
 
 
+EMBEDDED_HEX_VIOLATIONS = {
+    # The two that shipped in analyze_remote_dialog.py: a hex inside a longer
+    # f-string, which the whole-literal `^…$` match walked straight past.
+    "fstring": ('def paint(lbl, alias):\n'
+                '    lbl.setText(f"<span style=\'color: #4caf50;\'>ok {alias}</span>")\n'),
+    "plain": 'STYLE = "QLabel { color: #e57373; }"\n',
+    "qss_block": ('def qss():\n'
+                  '    return """\n    QFrame { background: #1A2230; }\n    """\n'),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(EMBEDDED_HEX_VIOLATIONS))
+def test_colour_guard_catches_a_hex_embedded_in_a_longer_string(
+        tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_embedded.py", EMBEDDED_HEX_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_hardcoded_tokens",
+                    "test_no_inline_hex_colours", [bad])
+    assert exc is not None, f"the {shape} embedded hex went uncaught"
+    assert "bad_embedded.py" in str(exc)
+
+
+def test_colour_guard_clears_a_hex_named_in_a_docstring(tmp_path, monkeypatch):
+    """Prose that names a colour is documentation, not paint — this repository's
+    own guard file names four in its comments. Flagging those would push the
+    guard's own authors toward writing vaguer notes."""
+    good = _write(tmp_path, "good_docstring.py",
+                  '"""The [active] rule alone gives #98a2b3, which is wrong."""\n'
+                  "COLOUR = theme.Colors.accent\n")
+    assert _run_scan(monkeypatch, "tests.test_hardcoded_tokens",
+                     "test_no_inline_hex_colours", [good]) is None
+
+
 PIXEL_VIOLATIONS = {
     "bare": "def build(w):\n    w.setFixedWidth(137)\n",
     # The evasion an earlier version walked past ten times: the literal is a

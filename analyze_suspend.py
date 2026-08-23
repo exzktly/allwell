@@ -34,16 +34,61 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from dataclasses import dataclass
+
+from services import run_journal
 from services.run_spec import RunSpec, RunSpecError
 from services.suspend_record import (
     SuspendedRun,
+    plate_name,
     same_dir,
     clear,
-    latest,
     load_all,
     save,
 )
-from well_viewer.core.safe import swallowed
+from well_viewer.core.safe import swallow, swallowed
+
+
+@dataclass(frozen=True)
+class _Resumable:
+    """A run the banner can offer to continue, from either record.
+
+    ``from_journal`` is not decoration: it decides which pointer is dropped
+    when the user resumes or discards, and the two records are cleared by
+    different calls.
+    """
+
+    spec: dict
+    output_dir: str
+    headline: str
+    from_journal: bool
+    #: When the run stopped, as a unix timestamp. Only used to rank offers
+    #: across the two records when no folder is on the form — each record is
+    #: already newest-first within itself, but "the newest of both" cannot be
+    #: had by concatenating them.
+    at: float = 0.0
+
+
+#: How each unfinished outcome is said, in the user's terms rather than the
+#: journal's. Every one of them leaves the same thing behind — the wells that
+#: got through — so what differs is only the account of why it stopped, and a
+#: run that failed must not be described as one the app was closed during.
+_UNFINISHED_PHRASES = {
+    "error": "stopped on an error",
+    "stopped": "was stopped",
+    "suspended": "was suspended",
+}
+
+
+def _unfinished_headline(out_dir: str, journal) -> str:
+    """One sentence naming the plate, when the run started, and how it ended."""
+    when = time.strftime("%d %b %H:%M", time.localtime(journal.opened_at))
+    if journal.is_open:
+        ended = "never finished — All-Well closed while it was going"
+    else:
+        ended = _UNFINISHED_PHRASES.get(journal.outcome or "", "did not finish")
+    return (f"A run on {plate_name(out_dir)} started {when} and {ended}. "
+            f"Resuming continues it, computing only what is missing.")
 
 
 class AnalyzeSuspendMixin:
@@ -155,23 +200,173 @@ class AnalyzeSuspendMixin:
         banner.setVisible(False)
         return banner
 
-    def refresh_resume_banner(self) -> None:
+    def _hide_resume_banner(self) -> None:
+        """Take the strip down without reading anything.
+
+        The folder on the form has changed and nothing on screen describes the
+        new one yet; leaving the old offer up until the read settles would show
+        an offer for a plate the form no longer names.
+        """
+        banner = getattr(self, "_resume_banner", None)
+        if banner is not None:
+            banner.setVisible(False)
+
+    def refresh_resume_banner(self, *, current_output_dir: str | None = None) -> None:
         """Show or hide the banner against what is on disk right now.
 
-        Called at construction and after every run finishes, so a completed
-        plate stops offering to resume itself and a freshly suspended one starts.
+        Called at construction, once the input field settles, and after every
+        run finishes — so a completed plate stops offering to resume itself and
+        a freshly suspended one starts.
+
+        ``current_output_dir`` is the folder the form names, already resolved.
+        The caller usually has it, and re-deriving it here means walking the
+        input volume a second time for one banner; ``None`` means "work it out",
+        which is what the construction-time call needs.
         """
         banner = getattr(self, "_resume_banner", None)
         if banner is None:
             return
-        run = latest()
-        if run is None or getattr(self, "_running", False):
+        offer = self._resumable(current_output_dir)
+        if offer is None or getattr(self, "_running", False):
             banner.setVisible(False)
             return
-        self._resume_label.setText(
-            f"A suspended run is waiting: {run.describe()}. Resuming continues "
-            f"it — only the field/timepoint groups still missing are computed.")
+        self._resume_label.setText(offer.headline + self._journal_detail(offer))
         banner.setVisible(True)
+
+    # ── what there is to resume ──────────────────────────────────────────
+    def _resumable(self, current: str | None = None) -> _Resumable | None:
+        """The run this banner is offering, from either of the two records.
+
+        A **suspended** run was wound down deliberately and is recorded by
+        ``suspend_record``. An **unfinished** one — killed, failed or stopped —
+        is recorded by the run journal, and until that existed left nothing at
+        all behind: no banner, no offer, nothing naming the folder. The two are
+        offered through one path because they need the same thing done to them,
+        the recorded spec restarted with incremental forced on.
+
+        **The folder on the form wins.** Both records are ordered newest-first
+        across every plate, so taking the newest outright can offer a run
+        against a dataset the user is not looking at — and with the pre-run
+        report sitting directly below describing a *different* folder, the
+        sidebar then contradicts itself and Resume acts on the plate that is
+        not on screen. So a record for the folder currently in the form is
+        preferred, and newest-anywhere is the fallback for a form with no
+        folder in it yet, which is the state the app opens in and the one this
+        banner was built for.
+
+        Between the two records for the *same* folder the suspend record wins:
+        it is the more specific statement, since the user asked for it. Across
+        *different* folders it does not, and that is the distinction the first
+        version of this missed — it concatenated the two lists and took the
+        head, so every suspended record preceded every journal one however old.
+        A plate suspended in February beat one the app was killed on this
+        morning, in exactly the empty-form case both this docstring and the
+        manual describe as "the most recent unfinished run on any plate".
+        """
+        if current is None:
+            current = self._current_output_dir()
+        # Filtering by folder *before* reading anything is the point: the index
+        # holds an entry per plate ever run, and reading every one of their
+        # journals to then discard all but one turned a keystroke into a
+        # hundred-odd file opens. With a folder on the form there is exactly one
+        # candidate, so read exactly one.
+        suspended = self._suspended_offers(only_dir=current)
+        from_journal = self._journal_offers(only_dir=current)
+        if current:
+            # One folder, so this is the specificity rule and nothing else: the
+            # suspend record first, the journal behind it, and an empty list
+            # when neither describes the folder — offering some other plate
+            # here would answer a question the user did not ask, and the
+            # pre-run report is what speaks for this folder.
+            offers = [*suspended, *from_journal]
+        else:
+            # No folder named, so the question really is "what is the newest
+            # unfinished run anywhere". Ranked by when each stopped, with the
+            # suspend record breaking a tie for the reason above.
+            offers = sorted([*suspended, *from_journal],
+                            key=lambda o: (-o.at, o.from_journal))
+        return offers[0] if offers else None
+
+    def _current_output_dir(self) -> str:
+        """The output folder the form is pointing at, or ``""``.
+
+        Read through the same planner the readout and the run both use, so
+        "which folder is on screen" cannot come to mean two things.
+        """
+        raw = ""
+        with swallow("reading the input field for the resume banner"):
+            raw = self._input_edit.text().strip()
+        if not raw:
+            return ""
+        with swallow("resolving the output folder for the resume banner"):
+            from services.input_resolution_service import plan_input_layout
+
+            plan = plan_input_layout(Path(raw))
+            return str(plan.output_dir) if plan.output_dir is not None else ""
+        return ""
+
+    def _suspended_offers(self, *, only_dir: str = "") -> list[_Resumable]:
+        """Suspended runs on record, newest first; one folder's when named."""
+        return [
+            _Resumable(
+                spec=run.spec,
+                output_dir=run.output_dir,
+                headline=(
+                    f"A suspended run is waiting: {run.describe()}. Resuming "
+                    f"continues it — only the field/timepoint groups still "
+                    f"missing are computed."),
+                from_journal=False,
+                at=float(getattr(run, "suspended_at", 0.0) or 0.0),
+            )
+            for run in load_all()
+            if not only_dir or same_dir(run.output_dir, only_dir)
+        ]
+
+    def _journal_offers(self, *, only_dir: str = "") -> list[_Resumable]:
+        """Unfinished runs the index knows of, newest first; one folder's when named.
+
+        The folder filter is applied to the index entry, before the journal it
+        names is opened. The index is one file; the journals are one directory
+        read each, per plate ever run.
+        """
+        offers: list[_Resumable] = []
+        for entry in run_journal.unfinished_runs():
+            out_dir = str(entry.get("output_dir") or "")
+            if only_dir and not (out_dir and same_dir(out_dir, only_dir)):
+                continue
+            journal = run_journal.read_journal(out_dir) if out_dir else None
+            # An index entry outlives the folder it names — a deleted or moved
+            # output directory must not produce a banner offering to resume it.
+            if journal is None or not journal.spec or not journal.is_unfinished:
+                continue
+            offers.append(_Resumable(
+                spec=journal.spec,
+                output_dir=out_dir,
+                headline=_unfinished_headline(out_dir, journal),
+                from_journal=True,
+                # When it stopped, not when it began: a run opened yesterday
+                # and killed this morning is newer than one that began and
+                # ended in between. An open record has no closing time, so it
+                # falls back to when it was opened.
+                at=float(journal.closed_at or journal.opened_at or 0.0),
+            ))
+        return offers
+
+    def _journal_detail(self, offer: _Resumable) -> str:
+        """The per-well line under the headline, or ``""`` when there is none."""
+        journal = run_journal.read_journal(offer.output_dir)
+        return journal.tally() if journal is not None else ""
+
+    def _forget_resumable(self, offer: _Resumable) -> None:
+        """Stop offering *offer*, whichever record it came from.
+
+        Neither branch deletes anything the run produced: the output folder is
+        the work, and this drops only the pointer that keeps asking about it.
+        """
+        if offer.from_journal:
+            run_journal.forget(offer.output_dir)
+        else:
+            clear(offer.output_dir)
 
     def _on_run_settled(self) -> None:
         """Called once a run reaches ``finished``, however it got there.
@@ -189,6 +384,11 @@ class AnalyzeSuspendMixin:
             if completed and out_dir is not None:
                 clear(str(out_dir))
             self.refresh_resume_banner()
+            # The run has just rewritten the folder the pre-run report
+            # describes, so that report is now about the run before this
+            # one. Re-read it here rather than waiting for the input field
+            # to change, which after a run it never does.
+            self.resync_preflight()
         except Exception:
             swallowed()
 
@@ -247,11 +447,11 @@ class AnalyzeSuspendMixin:
         still half done, with the run reporting success.
         """
         try:
-            run = latest()
-            if run is None:
+            offer = self._resumable()
+            if offer is None:
                 self.refresh_resume_banner()
                 return
-            spec = RunSpec.from_json(run.spec)
+            spec = RunSpec.from_json(offer.spec)
             opts = dict(spec.opts)
             opts["incremental"] = True
             spec = RunSpec(
@@ -268,10 +468,10 @@ class AnalyzeSuspendMixin:
                 return
             # Only once the run is actually going: a record cleared on a resume
             # that then failed to start would strand the half-finished output.
-            clear(run.output_dir)
+            self._forget_resumable(offer)
             self.refresh_resume_banner()
             self._log_line(
-                f"\n[Resuming] {run.describe()} — incremental, so only the "
+                f"\n[Resuming] {offer.headline} Incremental, so only the "
                 f"field/timepoint groups missing from the output are computed.\n",
                 "INFO",
             )
@@ -283,19 +483,19 @@ class AnalyzeSuspendMixin:
     def _discard_suspended(self) -> None:
         """Forget the record. The output folder itself is left alone."""
         try:
-            run = latest()
-            if run is None:
+            offer = self._resumable()
+            if offer is None:
                 return
             choice = QMessageBox.question(
-                self, "Discard suspended run",
-                f"Forget the suspended run?\n\n{run.describe()}\n\n"
+                self, "Discard unfinished run",
+                f"Forget this unfinished run?\n\n{offer.headline}\n\n"
                 f"Nothing is deleted — the results already written to\n"
-                f"{run.output_dir}\nstay exactly as they are. You can still "
+                f"{offer.output_dir}\nstay exactly as they are. You can still "
                 f"finish it later by re-running this input with 'incremental' "
                 f"checked.",
             )
             if choice == QMessageBox.Yes:
-                clear(run.output_dir)
+                self._forget_resumable(offer)
                 self.refresh_resume_banner()
         except Exception:
             swallowed()

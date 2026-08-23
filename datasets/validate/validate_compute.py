@@ -104,6 +104,12 @@ class WellReport:
     #: its empty output is a measurement, not a gap, so it must not be swept
     #: into a forced reprocess that would produce the same empty result.
     zero_cell_recorded: bool = False
+    #: The run journal recorded this well's output as produced remotely and
+    #: never transferred. Like ``zero_cell_recorded`` this is an *exemption from
+    #: forcing*, not a health state: the well needs a download, and re-running
+    #: the segmentation would spend hours reproducing output that already
+    #: exists on the far side.
+    not_fetched_recorded: bool = False
     #: Coverage sizes, carried so a finished scan can be written back as the
     #: dataset's completeness record without a second pass over the files.
     #: ``missing`` alone cannot reconstruct them: it says how much is absent,
@@ -150,10 +156,21 @@ def wells_needing_force(report: "DatasetReport") -> tuple[str, ...]:
 
     Wells that are merely *partial* are deliberately not here: an incremental
     run does fix those, at a fraction of the cost of re-segmenting them whole.
+
+    Two kinds of well are exempt, and both for the same reason — the run's own
+    records say a forced reprocess is the wrong remedy. One segmented zero cells
+    and would produce the same empty result again. The other was **produced on a
+    remote host and never transferred**: its output exists, the gap is the
+    download, and re-segmenting the plate to recover a failed transfer is hours
+    of compute for nothing. Leaving that well on this list would have the tool
+    print "this needs a fetch, not a reprocess" in its findings and then hand
+    the very same well to the button that reprocesses it.
     """
     return tuple(
         w.well for w in report.wells
-        if well_health(w) == "missing" and not w.zero_cell_recorded
+        if well_health(w) == "missing"
+        and not w.zero_cell_recorded
+        and not w.not_fetched_recorded
     )
 
 
@@ -278,12 +295,34 @@ class WellEvidence:
     that legitimately segmented zero cells at every timepoint, and a well whose
     measurements CSV was lost. Both have images and no CSV. Only one of them is
     a defect, and only one of them is worth re-segmenting.
+
+    A third source joins those two: ``services.run_journal``, which records
+    what a run did to each well *as it happened* rather than at the end. It is
+    the only one that survives a run dying mid-way, and the only one that can
+    say a well's output was produced on a remote host and never made it here —
+    which on disk is indistinguishable from a well that was never run.
     """
 
     groups_total: int | None = None
     groups_covered: int | None = None
     recorded_failures: tuple[str, ...] = ()
     error_files: tuple[str, ...] = ()
+    #: What the run journal last recorded for this well, or ``""``. One of
+    #: ``services.run_journal.WELL_STATES`` — never re-spelled here, so this
+    #: cannot drift from the vocabulary the runner writes.
+    journal_state: str = ""
+    journal_reason: str = ""
+
+    @property
+    def stranded_on_remote(self) -> bool:
+        """The run produced this well's output and it never arrived locally.
+
+        The one thing no artefact can report, because the evidence for it is
+        the *absence* of a file. Worth its own answer: the remedy is to fetch,
+        not to re-segment, and re-segmenting a plate to recover a transfer that
+        failed is hours of compute for nothing.
+        """
+        return self.journal_state == "not-fetched"
 
     @property
     def recorded(self) -> bool:
@@ -328,6 +367,27 @@ def _read_run_report(info: dict) -> dict[str, WellEvidence]:
             recorded_failures=tuple(
                 str(f) for f in (failed if isinstance(failed, list) else [])),
         )
+    return out
+
+
+def _read_run_journal(paths) -> dict[str, tuple[str, str]]:
+    """The run journal's per-well states, keyed by canonical well.
+
+    Read from the output directory, where the runner writes it — not from the
+    sidecar, which a remote fetch overwrites wholesale. A dataset with no
+    journal (every dataset produced before it existed, and every one produced
+    by the CLI) yields ``{}`` and the rest of the scan is unaffected: this
+    evidence adds answers, it never withholds any.
+    """
+    from services.run_journal import read_journal
+
+    journal = read_journal(paths.out_dir)
+    if journal is None:
+        return {}
+    out: dict[str, tuple[str, str]] = {}
+    for raw_well, record in journal.wells.items():
+        well = canonical_well_label(str(raw_well)) or str(raw_well)
+        out[well] = (record.state, record.reason)
     return out
 
 
@@ -547,9 +607,9 @@ def _row_content_findings(
 def _no_csv_finding(well: str, evidence: WellEvidence) -> Finding:
     """Why this well has images and no measurements CSV, and what fixes it.
 
-    The three answers are genuinely different and used to be one hedged
-    sentence ("it may have segmented zero cells at every timepoint"), which
-    told a user neither what happened nor what to do:
+    The four answers are genuinely different and were once one hedged sentence
+    ("it may have segmented zero cells at every timepoint"), which told a user
+    neither what happened nor what to do:
 
     * the run recorded the well, covered none of its FOV-groups, failed
       nothing and left no traceback — it segmented zero cells, which is a
@@ -557,13 +617,19 @@ def _no_csv_finding(well: str, evidence: WellEvidence) -> Finding:
       ``info`` and the well is left off the force list.
     * the run recorded failures, or left tracebacks under ``out/errors/`` —
       a real gap, with the run's own records naming it. ``error``.
+    * the run journal recorded the output as produced on a remote host and
+      never transferred — the compute is done and the gap is the download, so
+      the remedy is to fetch rather than to re-segment. ``error``.
     * no record at all (the run died before writing one, or predates the
       block) — unknown, so it is reported as a gap rather than assumed
       benign, since assuming benign is how a missing CSV goes unnoticed.
 
-    The last two both need a *forced* reprocess: an incremental run counts this
-    well's own output images as already done and reports it up to date, so it
-    would skip the well forever.
+    **``no_csv_failed`` and ``no_csv`` need a forced reprocess**, because an
+    incremental run counts this well's own output images as already done and
+    reports it up to date, so it would skip the well forever. The other two do
+    not, and both are held off ``wells_needing_force`` for that reason — one
+    would reproduce the same empty result, the other would spend hours
+    recomputing output that already exists on the far side.
     """
     forced_remedy = (
         "An incremental run counts this well's own output images as already "
@@ -596,6 +662,19 @@ def _no_csv_finding(well: str, evidence: WellEvidence) -> Finding:
                 f"Well {well}: images exist but no measurements CSV, and the "
                 f"run recorded why — {'; '.join(detail)}. Read those before "
                 f"re-running. {forced_remedy}"
+            ),
+        )
+    if evidence.stranded_on_remote:
+        detail = f" ({evidence.journal_reason})" if evidence.journal_reason else ""
+        return Finding(
+            severity="error", code="no_csv_not_fetched", well=well,
+            message=(
+                f"Well {well}: images exist but no measurements CSV, and the "
+                f"run journal says the output was produced and never reached "
+                f"this machine{detail}. Re-run this input against the same "
+                f"remote — the compute is already done, and what is missing is "
+                f"the transfer, so a forced reprocess would repeat hours of "
+                f"work to recover a download."
             ),
         )
     return Finding(
@@ -658,6 +737,7 @@ def _scan_one_well(
         has_in_container=container is not None, has_out_zip=out_zip is not None,
         has_out_folder=out_folder is not None,
         zero_cell_recorded=evidence.segmented_zero_cells,
+        not_fetched_recorded=evidence.stranded_on_remote,
         intent=len(intent), covered_csv=len(csv_keys), covered_any=len(done),
     )
 
@@ -928,6 +1008,10 @@ def build_report(
     for well, names in _scan_error_files(paths).items():
         prior = evidence_map.get(well, WellEvidence())
         evidence_map[well] = replace(prior, error_files=names)
+    for well, (state, reason) in _read_run_journal(paths).items():
+        prior = evidence_map.get(well, WellEvidence())
+        evidence_map[well] = replace(
+            prior, journal_state=state, journal_reason=reason)
     well_reports, well_findings, members_by_container = _scan_wells(
         paths, schema_fields=schema_fields, sep=sep,
         fov_field_present=fov_field_present, csv_candidates=csv_candidates,

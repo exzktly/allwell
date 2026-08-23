@@ -47,7 +47,7 @@ from services.remote_runner import (
 )
 from services import run_journal
 from services.subprocess_kill import signal_subprocess
-from util.aw_safe import swallowed
+from util.aw_safe import swallow, swallowed
 
 #: How many of the pipeline's own trailing output lines ride along with a
 #: non-zero exit. Enough to carry a refusal sentence or a traceback's last
@@ -1051,11 +1051,30 @@ class PipelineRunner:
             # the user as "Pipeline exited with code 2", which names nothing, so
             # keep the tail and attach it to the failure.
             tail: collections.deque[str] = collections.deque(maxlen=_ERROR_TAIL_LINES)
-            for line in proc.stdout:
-                self._enqueue(("line", line))
-                if line.strip():
-                    tail.append(line.rstrip("\n"))
-            proc.wait()
+            try:
+                for line in proc.stdout:
+                    self._enqueue(("line", line))
+                    if line.strip():
+                        tail.append(line.rstrip("\n"))
+            except Exception as exc:
+                # Whatever ends the read, the child must still be signalled and
+                # reaped. It was started with `start_new_session=True`, so it
+                # is its own session leader and nothing else will reap it: an
+                # exception escaping here left the pipeline running against the
+                # user's plate while the GUI reported the run had never
+                # started. The decode case is now impossible (`errors="replace"`
+                # on the spawn) and this is the general guarantee, not a fix
+                # for that one cause.
+                self._enqueue((
+                    "line",
+                    f"[warn] reading the pipeline's output stopped early "
+                    f"({type(exc).__name__}: {exc}); the run is being "
+                    f"stopped.\n"))
+                self._signal_subprocess(proc)
+                raise
+            finally:
+                with swallow("waiting for the pipeline subprocess"):
+                    proc.wait()
             rc = proc.returncode
             if rc == 0:
                 # v5.x.x: zipper-fired-this-run source cleanup. Only
@@ -1188,11 +1207,30 @@ class PipelineRunner:
             # with no wells it recognises — reaches the user here too, and did so
             # as a naked exit code.
             tail: collections.deque[str] = collections.deque(maxlen=_ERROR_TAIL_LINES)
-            for line in proc.stdout:
-                self._enqueue(("line", line))
-                if line.strip():
-                    tail.append(line.rstrip("\n"))
-            proc.wait()
+            try:
+                for line in proc.stdout:
+                    self._enqueue(("line", line))
+                    if line.strip():
+                        tail.append(line.rstrip("\n"))
+            except Exception as exc:
+                # Whatever ends the read, the child must still be signalled and
+                # reaped. It was started with `start_new_session=True`, so it
+                # is its own session leader and nothing else will reap it: an
+                # exception escaping here left the pipeline running against the
+                # user's plate while the GUI reported the run had never
+                # started. The decode case is now impossible (`errors="replace"`
+                # on the spawn) and this is the general guarantee, not a fix
+                # for that one cause.
+                self._enqueue((
+                    "line",
+                    f"[warn] reading the pipeline's output stopped early "
+                    f"({type(exc).__name__}: {exc}); the run is being "
+                    f"stopped.\n"))
+                self._signal_subprocess(proc)
+                raise
+            finally:
+                with swallow("waiting for the pipeline subprocess"):
+                    proc.wait()
             rc = proc.returncode
 
             ok = self._remote_runner.verify_and_cleanup(

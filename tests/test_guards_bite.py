@@ -1597,6 +1597,62 @@ def test_text_column_guard_clears(shape):
     assert not found, f"the guard fired on a legitimate {shape}: {found}"
 
 
+# ── one definition of a run's remote directory ──────────────────────────────
+
+_RUN_DIR_GUARD = (
+    "tests.test_one_definition_of_the_run_dir",
+    "test_only_the_funnel_spells_the_run_directory",
+)
+
+#: The guard refuses to run without its anchor — a scan surface with no funnel
+#: in it means it has nothing to compare against, and it says so rather than
+#: passing. Each synthetic source therefore carries the definition, which is
+#: also what the real repo looks like.
+_FUNNEL_STUB = (
+    'def remote_run_dir(host, run_id):\n'
+    '    return f"{host.remote_staging_dir}/runs/{run_id}"\n\n\n'
+)
+
+RUN_DIR_VIOLATIONS = {
+    # The plain eleventh site, in whatever module an extraction put it.
+    "f-string": 'def d(host, run_id):\n'
+                '    return f"{host.remote_staging_dir}/runs/{run_id}/out"\n',
+    # A different spelling of the run id — three were in use, and a fourth
+    # would have been just as invisible to a guard keyed on the interpolation.
+    "attribute-spelling": 'def d(host, run):\n'
+                          '    return f"{host.remote_staging_dir}/runs/{run.run_id}"\n',
+    # Implicit concatenation, which is one JoinedStr with the static parts split.
+    "split-literal": 'def d(host, run_id):\n'
+                     '    return (f"{host.remote_staging_dir}/ru"\n'
+                     '            f"ns/{run_id}/out")\n',
+}
+
+RUN_DIR_CLEAN = {
+    # The dataset address, which is a different thing with its own definition.
+    "dataset-dir": 'def d(host, key):\n'
+                   '    return f"{host.remote_staging_dir}/datasets/{key}"\n',
+    # A path that merely mentions runs in prose.
+    "prose": 'MSG = "look under runs/ on the host"\n',
+}
+
+
+@pytest.mark.parametrize("shape", sorted(RUN_DIR_VIOLATIONS))
+def test_run_dir_guard_catches(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, f"bad_rundir_{shape}.py",
+                 _FUNNEL_STUB + RUN_DIR_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, *_RUN_DIR_GUARD, [bad])
+    assert exc is not None and bad.name in str(exc), (
+        f"the {shape} spelling walked past the guard")
+
+
+@pytest.mark.parametrize("shape", sorted(RUN_DIR_CLEAN))
+def test_run_dir_guard_clears(tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, f"good_rundir_{shape}.py",
+                  _FUNNEL_STUB + RUN_DIR_CLEAN[shape])
+    assert _run_scan(monkeypatch, *_RUN_DIR_GUARD, [good]) is None, (
+        f"the guard fired on a legitimate {shape}")
+
+
 # ── the run journal's well-state vocabulary ─────────────────────────────────
 
 _JOURNAL_GUARD = (

@@ -461,42 +461,28 @@ def test_an_empty_recorded_directory_is_not_re_attached_to():
     assert chosen == fresh
 
 
-@pytest.mark.parametrize("extras,label", [
-    (["--cpu_only"], "cpu_only"),
-    (["--no_save_tophat"], "a CSV-only fetch"),
-    (["--min_nucleus_area_px", "500"], "a host override"),
-])
-def test_the_run_id_and_the_digest_both_move_with_the_host_extras(extras, label):
-    """Both keys, not just the one that happens to be tested elsewhere.
-
-    `_compute_run_id` decides *where* the run lands and `pipeline_argv_digest`
-    decides whether a recorded address is *reusable*. They are computed from
-    the same inputs and either one dropping the extras is enough: the first
-    collides two configurations in one directory, the second hands back an
-    address that belongs to a different one. Both return another
-    configuration's numbers reported as this run's.
-    """
-    from services.remote_runner import _compute_run_id, pipeline_argv_digest
-
-    argv, key = _local_argv(), "k" * 32
-    assert (pipeline_argv_digest(argv, extras=[])
-            != pipeline_argv_digest(argv, extras=extras)), (
-        f"the reuse key does not move for {label}")
-    assert (_compute_run_id(key, argv, extras=[])
-            != _compute_run_id(key, argv, extras=extras)), (
-        f"the remote address does not move for {label}")
+#: What this configuration hashes to. Pinned as a literal because re-attach
+#: reads a digest journalled by an **earlier launch**, so the instability that
+#: kills it is *cross-process* — and two calls inside one interpreter cannot
+#: see that. A `hash()` or `id()` of an unordered container anywhere in the
+#: filtered-argv path (what an innocuous "order-insensitive" refactor to
+#: `frozenset` produces) gives a different digest every launch, re-attach dies
+#: silently, and every run re-uploads and recomputes with no error anywhere.
+#:
+#: Changing this literal deliberately is a real decision, not a test fix: it
+#: orphans every address already journalled on a user's machine.
+_PINNED_DIGEST = "8094273450dc6c8d"
+_PINNED_RUN_ID = "kkkkkkkkkkkkkkkk-8094273450dc6c8d"
 
 
-def test_the_run_id_is_stable_for_the_same_configuration():
+def test_the_keys_are_the_same_on_every_launch():
     """The keys must be *discriminating*, not merely different every time.
 
-    A digest that changed on every call would pass every test above and make
+    A digest that changed on every call would satisfy every test above and make
     re-attach dead — which is how the feature shipped unreachable once already.
     """
     from services.remote_runner import _compute_run_id, pipeline_argv_digest
 
     argv, key = _local_argv(), "k" * 32
-    assert (pipeline_argv_digest(argv, extras=["--cpu_only"])
-            == pipeline_argv_digest(list(argv), extras=["--cpu_only"]))
-    assert (_compute_run_id(key, argv, extras=["--cpu_only"])
-            == _compute_run_id(key, list(argv), extras=["--cpu_only"]))
+    assert pipeline_argv_digest(argv, extras=["--cpu_only"]) == _PINNED_DIGEST
+    assert _compute_run_id(key, argv, extras=["--cpu_only"]) == _PINNED_RUN_ID

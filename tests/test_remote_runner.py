@@ -3443,16 +3443,20 @@ def test_old_rsync_still_gets_progress_flags():
     parsers already accept."""
     from unittest import mock
 
-    from services import remote_runner as rr
+    # Patched on `remote_transport`, which is where both functions live now.
+    # `remote_runner` re-exports them, but a re-export is a *binding*: rebinding
+    # the name there leaves `_rsync_progress_flags` still reading the original
+    # out of its own module globals, so the patch would silently not apply.
+    from services import remote_transport as rt
 
-    with mock.patch.object(rr, "_rsync_supports_info_flag", lambda: True):
-        assert rr._rsync_progress_flags() == ["--info=name1,stats2,progress2"]
-    with mock.patch.object(rr, "_rsync_supports_info_flag", lambda: False):
-        assert rr._rsync_progress_flags() == ["-v", "--progress"]
+    with mock.patch.object(rt, "_rsync_supports_info_flag", lambda: True):
+        assert rt._rsync_progress_flags() == ["--info=name1,stats2,progress2"]
+    with mock.patch.object(rt, "_rsync_supports_info_flag", lambda: False):
+        assert rt._rsync_progress_flags() == ["-v", "--progress"]
     # Never empty: an rsync that narrates nothing is the bug.
     for supported in (True, False):
-        with mock.patch.object(rr, "_rsync_supports_info_flag", lambda: supported):
-            assert rr._rsync_progress_flags()
+        with mock.patch.object(rt, "_rsync_supports_info_flag", lambda: supported):
+            assert rt._rsync_progress_flags()
 
 
 def test_legacy_rsync_output_shapes_still_parse():

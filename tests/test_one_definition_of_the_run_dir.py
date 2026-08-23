@@ -1,6 +1,6 @@
 """A run's remote directory is spelled in exactly one place.
 
-``{remote_staging_dir}/runs/{run_id}`` was a format-string literal in **ten**
+``{remote_staging_dir}/runs/{run_id}`` was a format-string literal in **nine**
 places across three classes, while the *dataset* address right beside it had
 one definition (``DatasetCache.remote_dataset_dir``). The asymmetry is the
 whole problem: every change to "where does a run live" was an N-site sweep with
@@ -23,12 +23,11 @@ what already failed.
 from __future__ import annotations
 
 import ast
-from pathlib import Path
+
+from tests._repo_scan import python_sources, rel
 
 #: Where the one definition lives. Everything else must call it.
 _FUNNEL = ("remote_run_dir", "remote_run_paths")
-
-_SOURCE = Path(__file__).parent.parent / "services" / "remote_runner.py"
 
 
 def _run_dir_literals(tree: ast.AST) -> list[tuple[int, str]]:
@@ -52,18 +51,39 @@ def _run_dir_literals(tree: ast.AST) -> list[tuple[int, str]]:
 
 
 def test_only_the_funnel_spells_the_run_directory():
-    tree = ast.parse(_SOURCE.read_text(), filename=str(_SOURCE))
+    """Scanned across the repo, not against one hardcoded file.
 
-    # The funnel's own body is where the literal belongs.
-    allowed = {line
-               for fn in ast.walk(tree)
-               if isinstance(fn, ast.FunctionDef) and fn.name in _FUNNEL
-               for line, _src in _run_dir_literals(fn)}
+    The first version read `services/remote_runner.py` by name. That is the
+    file this guard exists to hold *while it is being taken apart*, so the
+    first extraction that moved a run-dir literal — or moved the funnel itself
+    — put the literal somewhere the guard could not see. Worse, it failed
+    *open*: with the funnel out of the scanned file, `allowed` was empty, the
+    guard had nothing to compare, and it passed while measuring nothing. That
+    is CLAUDE.md §7.5 #10 — an allowlist with no liveness check — in the guard
+    written to hold the whole refactor.
 
-    offenders = [f"remote_runner.py:{line} — {src}"
-                 for line, src in _run_dir_literals(tree)
-                 if line not in allowed]
+    Roots come from `tests/_repo_scan.py`, per §7.5 #3, and the funnel's own
+    literal must be found or this fails: a guard that cannot locate the one
+    definition it is written around is not passing, it is blind.
+    """
+    offenders, found_funnel = [], False
+    for path in python_sources():
+        tree = ast.parse(path.read_text(), filename=str(path))
+        allowed = set()
+        for fn in ast.walk(tree):
+            if isinstance(fn, ast.FunctionDef) and fn.name in _FUNNEL:
+                for line, _src in _run_dir_literals(fn):
+                    allowed.add(line)
+                    found_funnel = True
+        offenders += [f"{rel(path)}:{line} — {src}"
+                      for line, src in _run_dir_literals(tree)
+                      if line not in allowed]
 
+    assert found_funnel, (
+        f"none of {' / '.join(_FUNNEL)} was found building a run directory "
+        "anywhere in the scanned sources. Either the funnel was renamed or "
+        "moved out of the scan surface — and until that is fixed this guard "
+        "allows everything, because it has nothing to compare against.")
     assert not offenders, (
         "A remote run directory is built from a literal outside "
         f"{' / '.join(_FUNNEL)}. Call the funnel instead: a second spelling is "

@@ -423,3 +423,63 @@ def test_the_zipper_is_reaped_even_when_the_read_stops_early():
         break
     else:
         raise AssertionError("no try wraps the zipper's read loop")
+
+
+# ── the two halves of one operation must ask one question ───────────────────
+
+def test_a_png_channel_survives_the_run_that_consumes_it(tmp_path):
+    """The delete side and the group side are one operation.
+
+    `tif_files_in` collects what a run will consume and its `_on_success`
+    unlinks it; `WellPlateZipper.group_by_well` decides what is actually
+    grouped. Widening the first to `.png`/`.jpg` without widening the second
+    meant a two-channel plate whose fluorescent channel was PNG had that
+    channel counted, deleted, and never grouped — gone from disk with no copy
+    anywhere, on the first successful run.
+
+    Asserted on the files, not on the predicates: two functions can agree in a
+    unit test and still disagree about a real directory, and it is the
+    directory the user loses.
+    """
+    from services.input_resolution_service import resolve_input_output
+
+    root = tmp_path / "raw"
+    root.mkdir()
+    for well in ("A01", "A02"):
+        (root / f"Exp_NIR_{well}_F001_00d00h.tif").write_bytes(b"nuclear")
+        (root / f"Exp_GFP_{well}_F001_00d00h.png").write_bytes(b"fluor")
+
+    _grouped, _out, on_success = resolve_input_output(
+        root, log_fn=lambda _m: None, filename_schema=SCHEMA, filename_sep="_",
+        move_source_tifs=False)
+    if on_success is not None:
+        on_success()
+
+    survivors = set()
+    for entry in (root / "in").iterdir():
+        if entry.is_dir():
+            survivors |= {q.name for q in entry.iterdir()}
+        elif entry.suffix == ".zip":
+            with zipfile.ZipFile(entry) as zf:
+                survivors |= {n.rsplit("/", 1)[-1] for n in zf.namelist()}
+    survivors |= {q.name for q in root.iterdir() if q.is_file()}
+
+    for well in ("A01", "A02"):
+        assert f"Exp_GFP_{well}_F001_00d00h.png" in survivors, (
+            f"{well}'s PNG channel was deleted as consumed and never grouped; "
+            f"what is left is {sorted(survivors)}")
+        assert f"Exp_NIR_{well}_F001_00d00h.tif" in survivors
+
+
+def test_the_grouper_and_the_deleter_read_the_same_predicate():
+    """The structural half, so the two cannot drift apart again silently."""
+    import inspect
+
+    import WellPlateZipper
+    from services import input_resolution_service
+
+    for mod in (WellPlateZipper, input_resolution_service):
+        src = inspect.getsource(mod)
+        assert "is_run_input_member" in src, (
+            f"{mod.__name__} does not use the shared input predicate, so the "
+            f"side that deletes and the side that groups can disagree")

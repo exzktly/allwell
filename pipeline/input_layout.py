@@ -130,14 +130,52 @@ def refuse_images_only_in_ignored_folders(input_dir: Path, well_zips) -> None:
         if not images:
             continue
         archive = zip_by_well.get(str(well))
+        if archive is None or not archive.exists():
+            # **The only case worth refusing.** This well has no archive, so
+            # folder mode would have been its only route into the run — and
+            # folder mode is off because some *other* well has a zip. Its
+            # images are invisible to the run, and `organize_loose_tifs_into_
+            # well_folders` may already have moved them here from the plate
+            # root, so nothing else holds them.
+            stranded[str(well)] = images
+            continue
+        # From here the well *will* be processed, from its archive. A file the
+        # archive does not carry is not analysed, and it is also not deleted —
+        # it is still in the folder, where `replace_folder_with_archive` left
+        # it precisely because the archive did not take it. That is a warning,
+        # never a refusal: refusing here bricked every plate the pipeline
+        # itself had produced, because its own archiver deliberately skips
+        # `.jpg`, zero-byte files and `__aw_tmp_` scratch, and the remedy the
+        # refusal offered ("fold them into the archive") was the thing the
+        # pipeline had just declined to do.
         held: set[str] = set()
-        if archive is not None and archive.exists():
-            with swallow(f"reading {archive.name} to compare with {folder.name}"):
-                with zipfile.ZipFile(archive) as zf:
-                    held = {Path(n).name for n in zf.namelist()}
-        missing = [n for n in images if n not in held]
+        readable = False
+        with swallow(f"reading {archive.name} to compare with {folder.name}"):
+            with zipfile.ZipFile(archive) as zf:
+                # Case-folded: on a case-insensitive volume the archive can
+                # hold `IMG.TIF` where the folder holds `img.tif`, and they are
+                # the same file. Comparing them raw refused a plate for a
+                # difference the filesystem does not make.
+                held = {Path(n).name.lower() for n in zf.namelist()}
+            readable = True
+        if not readable:
+            # An unreadable archive is a corrupt archive, not a stranded
+            # folder. Saying "these images are not in the zip" when the zip
+            # could not be opened blames the wrong artefact and offers a
+            # remedy that cannot work.
+            log.warning(
+                "Input warning: %s could not be read, so %s's folder could "
+                "not be compared against it; the run continues and folder "
+                "mode is not used because a zip is present.",
+                archive.name, well)
+            continue
+        missing = [n for n in images if n.lower() not in held]
         if missing:
-            stranded[str(well)] = missing
+            log.warning(
+                "Input note: %s holds %d file(s) its archive does not carry "
+                "(%s). They stay on disk and are not analysed; %s.zip is what "
+                "this run reads.",
+                folder.name, len(missing), ", ".join(missing[:4]), well)
 
     if not stranded:
         return

@@ -345,8 +345,22 @@ def resolve_input_container(recorded) -> Path | None:
         return recorded
     if recorded.suffix:
         return None
-    zipped = recorded.with_suffix(".zip")
-    return zipped if zipped.exists() else None
+    # The worker names the archive from the **canonical** well label, not from
+    # the folder's own spelling — `find_well_folders` accepts `a01`, `A1` and
+    # `a1` for well A01 and hands back `(canonical, actual_path)`. Guessing
+    # `<folder>.zip` therefore found nothing for three of the four spellings,
+    # which left P4 unfixed for them *and* tripped the new empty-comparison
+    # flag, marking a perfectly finished plate's record `partial_scan`.
+    from util.well_token import canonical_well_label
+
+    candidates = [recorded.with_suffix(".zip")]
+    canon = canonical_well_label(recorded.name)
+    if canon:
+        candidates.append(recorded.with_name(f"{canon}.zip"))
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def csv_keys_and_state(path: Path) -> tuple[set[tuple[str, str]], str]:

@@ -8,6 +8,7 @@ import argparse
 # the two entry points cannot drift. They previously kept separate copies whose
 # validate_schema reported the same verdict with different wording.
 # ---------------------------------------------------------------------------
+from util.image_exts import is_run_input_member  # noqa: E402
 from util.schema import (  # noqa: E402  (module-level, after the stdlib block)
     DEFAULT_SCHEMA,
     DEFAULT_SEP,
@@ -114,7 +115,14 @@ def group_by_well(
             if examined % 5000 == 0:
                 print(f"…discovery: examined {examined} files "
                       f"({matched} image(s) matched a well so far)", flush=True)
-            if not fname.lower().endswith((".tif", ".tiff")):
+            # The same predicate the caller deletes on. `tif_files_in` in
+            # services/input_resolution_service.py collects what this run will
+            # consume and then unlinks it once the run succeeds, so a file it
+            # counts and this loop skips is a file destroyed with no copy
+            # anywhere: measured, a two-channel plate whose fluorescent channel
+            # was PNG lost that channel entirely on its first successful run.
+            # The two sides of one operation have to ask one question.
+            if not is_run_input_member(fname):
                 continue
             extracted = _extract_well_from_filename(fname, schema, sep)
             if extracted is None:

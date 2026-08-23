@@ -25,10 +25,12 @@ from well_viewer.features.home.plate_panel import (
 
 pytestmark = pytest.mark.qt
 
-ALL_STATES = (
-    hc.CELL_COMPLETE, hc.CELL_PARTIAL, hc.CELL_FAILED, hc.CELL_INPUT_ONLY,
-    hc.CELL_NO_MEASUREMENTS, hc.CELL_UNCHECKED, hc.CELL_NO_OUTPUT,
-)
+#: Derived from the renderer's own two rosters rather than restated. A
+#: hand-written list here is a third place a new cell state has to be
+#: remembered, and the one that fails as a `KeyError` deep inside a fixture
+#: rather than as a message naming what was forgotten — which is what happened
+#: when `csv_only` was added.
+ALL_STATES = tuple(dict.fromkeys((*STATE_COLORS, *NEUTRAL_STATES)))
 
 
 def _relative_luminance(c: QColor) -> float:

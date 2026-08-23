@@ -24,10 +24,12 @@ pipeline must stay free of ``well_viewer`` / ``widgets`` / Qt
 
 **Not every image-extension list in the app belongs here**, and merging them
 would be wrong. They answer different questions and legitimately differ:
-``pipeline.io._OUTPUT_IMAGE_EXTS`` is what the pipeline *writes*,
-``util.schema_infer._TIF_SUFFIXES`` is what filename inference samples, and the
-folder zipper takes ``.tif``/``.tiff`` only. This module is one question:
-*would the pipeline group this file as input?*
+``pipeline.io._OUTPUT_IMAGE_EXTS`` is what the pipeline *writes*. Filename
+inference used to keep its own ``.tif``/``.tiff`` list and no longer does —
+sampling a narrower set than the run groups meant a PNG plate had nothing to
+infer from — so ``util.schema_infer`` now asks :func:`is_run_input_member` like
+every other intent-side caller. This module is one question: *would the
+pipeline group this file as input, and is it the user's data at all?*
 """
 
 from __future__ import annotations

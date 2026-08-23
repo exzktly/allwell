@@ -53,6 +53,15 @@ _IMAGE_SUFFIXES = frozenset({
 _GOVERNED = (
     "pipeline/", "util/", "process_microscopy.py",
     "services/input_resolution_service.py",
+    # WellPlateZipper is the *other half* of the input-resolution operation:
+    # `tif_files_in` collects what a run will consume and deletes it on
+    # success, and this script decides what actually gets grouped. Leaving it
+    # outside meant the guard could not see a disagreement between the two —
+    # and one shipped: the delete side was widened to PNG and JPEG, this side
+    # was not, and a two-channel plate lost its fluorescent channel with no
+    # copy anywhere. A guard that cannot see both sides of the predicate it
+    # governs is a guard for one of them.
+    "WellPlateZipper.py",
 )
 
 #: A site is exempt only when its own line carries this marker with a reason.
@@ -75,11 +84,35 @@ _ALLOWED_FILES: dict[str, str] = {
 
 
 def _string_items(node: ast.AST) -> list[str]:
-    """Every string constant directly inside a set/list/tuple display."""
-    if not isinstance(node, (ast.Set, ast.List, ast.Tuple)):
-        return []
-    return [e.value for e in node.elts
-            if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+    """Every string constant a collection literal holds.
+
+    Set / list / tuple displays, a dict's **keys and values** (a suffix set is
+    just as much a set when it is spelled `{".tif": 1, ".tiff": 2}`), and both
+    operands of a `+` or `|` — `(".tif",) + (".tiff",)` and
+    `frozenset({".tif"}) | frozenset({".tiff"})` each hold one suffix per side
+    and so slipped under a "two or more together" rule applied per node.
+
+    All four shapes were found by a reviewer driving synthetic sources through
+    this function; none was in the paired-case roster, which is the point of
+    checking a guard against evasions rather than against the violation that
+    prompted it.
+    """
+    if isinstance(node, (ast.Set, ast.List, ast.Tuple)):
+        return [e.value for e in node.elts
+                if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+    if isinstance(node, ast.Dict):
+        return [e.value for e in (*node.keys, *node.values)
+                if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.BitOr)):
+        return _string_items(node.left) + _string_items(node.right)
+    if isinstance(node, ast.Call):
+        # `frozenset({...})`, `set([...])`, `tuple((...))` — the collection is
+        # the argument, and the call is only how it is typed.
+        out: list[str] = []
+        for arg in node.args:
+            out.extend(_string_items(arg))
+        return out
+    return []
 
 
 def _image_ext_literals(tree: ast.AST, lines: list[str] | None = None

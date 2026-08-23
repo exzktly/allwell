@@ -103,11 +103,16 @@ class ValidateDashboard(PlateProgress):
         if state == "partial":
             n = self._well_missing_count.get(w, 0)
             return f"{w}: {n} (fov, timepoint) pair(s) missing"
+        # `.get`, not `[]`: this is keyed on whatever
+        # `pipeline.completeness.HEALTH_STATES` holds, and a state added there
+        # and forgotten here raised `KeyError` out of a tooltip — a crash in a
+        # Qt slot, which PySide6 turns into process death.
         label = {
             "complete": "complete",
+            "csv_only": "measurements recorded, but the output archive is gone",
             "missing": "no measurements recorded",
             "no_output": "no output yet",
-        }[state]
+        }.get(state, state)
         return f"{w}: {label}"
 
     def _build_rail(self) -> None:

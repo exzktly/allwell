@@ -2113,6 +2113,13 @@ _IMAGE_EXT_VIOLATIONS = {
     "glob_patterns": 'PATS = ("*.tif", "*.tiff", "*.TIF", "*.TIFF")\n',
     "no_leading_dot": 'OK = ["tif", "tiff"]\n',
     "mixed_case": 'E = (".TIF", ".Tiff")\n',
+    # Found by a reviewer driving synthetic sources at the guard, not by
+    # anything that had gone wrong. None of them was in this roster.
+    "dict_keys": 'X = {".tif": 1, ".tiff": 2}\n',
+    "dict_values": 'X = {"a": ".tif", "b": ".tiff"}\n',
+    "tuple_concat": 'X = (".tif",) + (".tiff",)\n',
+    "set_union": 'X = frozenset({".tif"}) | frozenset({".tiff"})\n',
+    "frozenset_call": 'X = frozenset({".tif", ".tiff"})\n',
 }
 
 
@@ -2171,3 +2178,26 @@ def test_image_ext_guard_does_not_fire_on_a_single_mention(tmp_path, monkeypatch
     assert _run_scan(monkeypatch, "tests.test_one_definition_of_an_image",
                      "test_no_second_spelling_of_the_image_extension_set",
                      [fine]) is None
+
+
+def test_image_ext_guard_still_misses_a_split_string(tmp_path, monkeypatch):
+    """A known hole, recorded rather than left to be rediscovered.
+
+    `".tif .tiff".split()` builds the same set out of one string constant, and
+    the guard reads collection *literals*. Closing it would mean matching on
+    the contents of arbitrary strings, which reddens docstrings and log lines —
+    a guard that cries wolf is a guard somebody switches off (this file's
+    `test_image_ext_guard_does_not_fire_on_a_single_mention` is the same
+    judgement in the other direction).
+
+    This test asserts the hole so the trade-off is visible. If a future change
+    closes it, this fails and should simply be deleted.
+    """
+    import tests.test_one_definition_of_an_image as guard
+
+    monkeypatch.setattr(guard, "_GOVERNED", ("",), raising=False)
+    evasion = _write(tmp_path, "split_evasion.py", 'X = ".tif .tiff".split()\n')
+    assert _run_scan(monkeypatch, "tests.test_one_definition_of_an_image",
+                     "test_no_second_spelling_of_the_image_extension_set",
+                     [evasion]) is None, (
+        "the guard now catches a split string — good; delete this test")

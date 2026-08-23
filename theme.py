@@ -122,6 +122,15 @@ class Colors:
     success         = "#4ADE80"   # --success
     warn            = "#F59E0B"   # --warn
     danger          = "#F87171"   # --danger
+    # A well whose numbers are whole and whose output archive is gone. Its own
+    # hue because the plate's contract is that no two states share a colour:
+    # `warn` would say the run has work left, `success` would say it finished,
+    # and the uncoloured cell would say nobody checked. Chosen by measuring
+    # against every colour the plate already paints — the first two attempts
+    # (`accent2`, `threshold`) were respectively reserved for non-anomaly use
+    # and indistinguishable from `warn` once painted, which the plate's own
+    # render guard caught.
+    stale           = "#22D3EE"   # --stale : output present, archive missing
 
     # ── Data-viz / trace colors (categorical, keyed to wells) ────────────
     # The 96-colour ``WELL_COLORS_TUPLE`` is the canonical palette and is

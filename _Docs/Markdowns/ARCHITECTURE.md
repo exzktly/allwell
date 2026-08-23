@@ -5184,7 +5184,7 @@ much of the input they cover), so the FOV-level gap is otherwise invisible.
 
 **The rule it applies is not its own.** `pipeline/completeness.py` holds the
 single definition of a complete well — the CSV ∪ archive union, the
-`intent - done` diff with its single-FOV fallback, and the four health states —
+`intent - done` diff with its single-FOV fallback, and the five health states —
 and both this tool and the pipeline's own end-of-run check (§6.2) go through it,
 so the two cannot disagree about a well. Validate keeps everything built *on
 top* of that answer: run-record evidence, the twelve finding codes, the
@@ -7701,14 +7701,14 @@ Process exits. Analyze tab offers the dataset to Review.
 **The end-of-run completeness check.** `pipeline/completeness.py` holds one
 definition of "is this well complete", shared by this check and the Datasets
 **Validate & Repair** tool (§6b) — `datasets/validate/validate_compute.py`
-delegates its union, its `intent - done` diff and its four health states here,
+delegates its union, its `intent - done` diff and its five health states here,
 so a well cannot read complete on one surface and partial on another. What is
 *not* shared is the scan: Validate parallelises across wells and layers
 findings, evidence and repair on top, while `scan_run` walks a directory the run
 has just written. The shared predicate takes data the caller already holds and
 opens exactly one thing between its functions — the well's output container —
 which is what lets Validate delegate without changing its per-well read count,
-a number `tests/test_validate_compute.py` pins exactly.
+a number `tests/test_validate_compute.py` pins exactly. The fifth state is `csv_only` — measurements whole, output archive gone — added because `health` accepted `has_out_zip` and never read it, so a well whose archive had been deleted answered `complete` on the strength of its CSV alone. `pipeline/input_layout.py` holds the three questions about which layout a plate's input is in, including the refusal that stops a run whose loose images were moved into a folder no zip-mode run will read; `pipeline/cli_args.py` holds `build_parser`. Both left `process_microscopy` under its line budget and are in the remote manifest.
 
 The check runs after the auto-threshold pass and before the exit-code decision,
 and records a `run_check` block per well: how many `(fov, timepoint)` groups the

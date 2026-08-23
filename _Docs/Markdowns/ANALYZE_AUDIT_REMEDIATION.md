@@ -29,35 +29,80 @@ rather than a write-up. **Delete it in the PR that closes the last group.**
 | Group | Theme | Branch | Version | PR | State |
 |---|---|---|---|---|---|
 | 1 | Stop the data loss | `…-ugoecl` | 9.0.1 | [#842](https://github.com/exzktly/allwell/pull/842) | **merged** |
-| 2 | One definition of an image, and an honest verdict | `claude/analysis-job-failure-recovery-ugoecl` | 9.0.2 | [#846](https://github.com/exzktly/allwell/pull/846) | **open** — lane green, adversarial review running |
-| 3 | The record and the resume path | `claude/analyze-audit-group3-record` | 9.0.5 | — | **in progress** — L1, L3, X2, X4, X5, X6 done |
-| 4 | The Analyze pane | `claude/analyze-audit-group4-pane` | 9.0.3 | [#844](https://github.com/exzktly/allwell/pull/844) | **open** — CI green, adversarial review still owed |
-| 5 | Numbers and parsing | `claude/analyze-audit-group5-numbers` | 9.0.4 | [#845](https://github.com/exzktly/allwell/pull/845) | **open** — CI green, adversarial review running |
+| 2 | One definition of an image, and an honest verdict | `claude/analysis-job-failure-recovery-ugoecl` | 9.0.2 | [#846](https://github.com/exzktly/allwell/pull/846) | **open, complete** — lane 5613 passed, CI green, reviewed, findings fixed |
+| 3 | The record and the resume path | `claude/analyze-audit-group3-record` | 9.0.2 | — | **in progress** — 13 of 20 done; no PR yet |
+| 4 | The Analyze pane | `claude/analyze-audit-group4-pane` | 9.0.2 | [#844](https://github.com/exzktly/allwell/pull/844) | **open** — reviewed; 4 of 8 review findings fixed |
+| 5 | Numbers and parsing | `claude/analyze-audit-group5-numbers` | 9.0.2 | [#845](https://github.com/exzktly/allwell/pull/845) | **open** — reviewed; all 13 review findings fixed, lane re-running |
 
-Counts: **34 done** (6 Tier-1 findings and 14 review findings on those fixes),
-**2 dropped**, **2 open questions**, **48 outstanding** — Group 2: 0 (all
-14 done, plus 6 extension copies and 3 guard findings the plan had not
-counted), Group 3: 20, Group 4: 16 (in flight), Group 5: 12 (in flight).
+**All five branches carry version 9.0.2**, and that is deliberate rather than a
+mistake to correct. `scripts/preflight.sh` requires the net delta from
+`origin/main` to be exactly *one* increment, so the pre-assigned 9.0.3 / 9.0.4 /
+9.0.5 scheme in an earlier revision of this file was wrong on three branches:
+each is a separate PR off the same base, so each bumps to the same next number.
+Whichever merges first leaves the others to rebase and re-bump. Check
+`git diff origin/main -- version.py` immediately before every push.
 
-The outstanding count exceeds the audit's 69 because it also carries the
-reviewer's findings on Group 1 and the tasks (a guard, a sweep) that no single
-finding owns. It is the count of *rows below*, which is the number that can be
-checked.
+Counts: **62 done**, **2 dropped**, **2 open questions**, **19 outstanding** —
+Group 2: 0, Group 3: 7, Group 4: 4, Group 5: 0. The total exceeds the audit's 69
+because it also carries the reviewers' findings on each group's own fixes, which
+are rows in their own right.
 
-
-> **Session-limit interruption, 23 August.** Both parallel workers and the
-> Group 2 reviewer were killed mid-task by an API session limit. No work was
-> lost — every branch's commits were pushed and every worktree was clean — but
-> two things these ground rules require did **not** happen for Groups 4 and 5:
-> neither ran `scripts/test.sh` to completion, and neither had its adversarial
-> review. CI has since run green on both PRs, which closes the first gap — the
-> suite CI runs is the same `scripts/test.sh`. The adversarial reviews are the
-> half still outstanding: Group 5's is running, Group 4's is not yet started.
-> Do not read either group as reviewed until this note is removed.
+> **Two interruptions, 23 August, and what they cost.** Both parallel workers
+> and the Group 2 reviewer were killed mid-task by an API session limit; later
+> the session ran low on context mid-way through Group 4. No work was lost
+> either time — every branch's commits were pushed and every worktree was clean
+> — but the ground rules below were broken in one specific way worth recording:
+> Groups 4 and 5 opened their PRs *before* their adversarial reviews, because
+> the reviewers had been killed. Both have since been reviewed, and both reviews
+> found real defects the CI-green PRs were carrying. **CI green is not the
+> review**, and a PR opened without one is not finished.
+>
+> Group 4's review found the sharpest instance of this file's own rules failing:
+> a guard whose entire purpose is to notice a rule drifting was left *red* by a
+> later commit that changed the rule and never re-ran it. Run the guards you
+> wrote, on the branch you wrote them for, after every change to what they
+> guard.
 >
 > **This file is edited on Group 2's branch only.** It was briefly updated on
 > two branches at once, which is the same two-definitions failure the audit is
 > about, in the document tracking it.
+
+---
+
+## Resume here
+
+The state a new session needs, in the order it needs it. Everything below is
+committed and pushed; nothing lives only in a container.
+
+**Worktrees.** Each group is a `git worktree` under `/tmp/wt-<group>`, because
+subagents share one filesystem and a bare `git checkout` in one moved another's
+branch out from under it. If those are gone, re-create them from the pushed
+branches; nothing is lost.
+
+**1. Group 5 — one step from done.** Every review finding is fixed and
+committed. The fast lane was re-running when the session ended; read it, then
+push to `claude/analyze-audit-group5-numbers` and rewrite PR #845's body. The
+last two commits are substantial and the body does not describe them yet.
+
+**2. Group 4 — four review findings still owed**, listed in its table below as
+`queued`: `_fluor_add_row` left out of the `_refresh_channel_dependents` sweep;
+`probe_ssh_async`'s refusal return value discarded at all three call sites;
+`test_hardcoded_tokens.py`'s new embedded-hex scan inheriting the *file*-level
+allowlist bypass (§7.5 #10, in the file that documents the rule); and the
+tile-size gate disagreeing with the tile-size emitter about the field's domain.
+Then run the lane and push.
+
+**3. Group 3 — seven findings left**, and it has never had a lane run, a review,
+or a PR: L8, L9, L10, X7, X9, X10, X11. Read the audit's own entry for each
+before starting — the rollup rows are terse here because the audit carries the
+measurement, and `/tmp/audit.txt` (a text extraction of the published artifact)
+was how this session read them.
+
+**4. Then, for every group:** full `scripts/test.sh`, adversarial review of the
+pushed diff, fix what it finds, re-run, push, open or update the PR. Group 3
+still owes all of that; Groups 4 and 5 owe the second lane and the PR body.
+
+**5. Delete this file** in the PR that closes the last group.
 
 ---
 
@@ -166,7 +211,7 @@ same word — the half-sweep CLAUDE.md §7.5 #5 names as worse than not sweeping
 
 ---
 
-## Group 2 — One definition of an image, and an honest verdict · `in review`
+## Group 2 — One definition of an image, and an honest verdict · `complete`
 
 The predicate sweep, plus the places completeness reports something it never
 verified. They belong together: three of the four verdict bugs are *caused* by
@@ -213,71 +258,102 @@ a guard needing its own says why in the file.
 
 ---
 
-## Group 3 — The record and the resume path · `queued`
+## Group 3 — The record and the resume path · `in progress`
+
+Branch `claude/analyze-audit-group3-record`, version 9.0.2, **no PR yet**. Never
+had a full lane run and never had an adversarial review; both are owed before it
+opens one.
 
 | ID | Finding | State |
 |---|---|---|
-| L1 | The Run button never resumes a killed run, so a half-finished well is skipped whole for ever | queued |
-| L2 | The pre-run coverage line reports a scan that gave up as if it were complete | queued |
-| L3 | `close_run` has no token guard, so a failed open rewrites the previous run's record | queued |
-| L4 | Discard does not discard — the banner comes straight back | queued |
-| L5 | "Load these settings" silently drops `auto_threshold` and `run_check` | queued |
-| L6 | A late coverage scan re-shows a banner hidden for a running job, or dismissed | queued |
-| L7 | An unresolvable input path reads as "no folder", so Resume offers a different plate | queued |
+| L1 | The Run button never resumes a killed run, so a half-finished well is skipped whole for ever | done |
+| L2 | The pre-run coverage line reports a scan that gave up as if it were complete | done |
+| L3 | `close_run` has no token guard, so a failed open rewrites the previous run's record | done |
+| L4 | Discard does not discard — the banner comes straight back | done |
+| L5 | "Load these settings" silently drops `auto_threshold` and `run_check` | done |
+| L6 | A late coverage scan re-shows a banner hidden for a running job, or dismissed | done |
+| L7 | An unresolvable input path reads as "no folder", so Resume offers a different plate | done |
 | L8 | A queue-driven Suspend leaves the plate offered twice, and it runs twice concurrently | queued |
 | L9 | A well skipped as up-to-date is journalled "analysed" | queued |
 | L10 | `TALLY_GROUPS` files "analysed" under "finished" | queued |
-| L11 | (fourth lifecycle defect in the rollup — read the audit entry before starting) | queued |
-| X2 | A remote run that fails local verification is journalled "ok", so it is never offered for resume | queued |
-| X3 | Stop during grouping paints a red failure and forces the log open | queued |
-| X4 | One undecodable byte orphans the pipeline as a session leader while the GUI reports it never started | queued |
-| X5 | A `TypeError` compat shim silently runs the whole resolver twice | queued |
-| X6 | Per-run state is reset inside the worker thread, so a Stop in the scheduling gap is discarded | queued |
+| L11 | `suspend_record._write_all` never got its sibling's lesson, and Suspend became a silent no-op | done |
+| X2 | A remote run that fails local verification is journalled "ok", so it is never offered for resume | done |
+| X3 | Stop during grouping paints a red failure and forces the log open | done |
+| X4 | One undecodable byte orphans the pipeline as a session leader while the GUI reports it never started | done |
+| X5 | A `TypeError` compat shim silently runs the whole resolver twice | done |
+| X6 | Per-run state is reset inside the worker thread, so a Stop in the scheduling gap is discarded | done |
 | X7 | `plan_input_layout` describes a different run than the one that happens | queued |
-| X9 | (in the X7–X11 rollup — read the audit entry) | queued |
-| X10 | (in the X7–X11 rollup — read the audit entry) | queued |
-| X11 | (in the X7–X11 rollup — six typed silent excepts) | queued |
+| X9 | `tif_files_in` judges files it is not entitled to judge (`TIF_GLOB` matches AppleDouble sidecars) | queued |
+| X10 | "Zip mode detected" fires for any stray `.zip`, and the startup warning names a fallback that is not taken | queued |
+| X11 | Six typed silent excepts; the one at `input_resolution_service.py:1329` takes the X1 path on an unreadable `in/` | queued |
 
-Notable shapes:
+What the finished ones turned into, where the shape is worth carrying forward:
 
-- **L1** is the one that leaves a half-finished well permanently 3-of-12.
-  `resume_aware_spec` asks only `suspend_record.load_all()` and is wired into
-  `start_from_queue` alone. Widen it to the journal and route `start_run`
-  through it, so every entry point answers the same way.
-- **L3** — give `close_run` a `run_token` parameter mirroring `record_well`'s
-  refusal, and skip `_index_upsert` when `open_run`'s write failed. Then decide
-  the untokenised remote writers deliberately (`remote_runner.py:5169`, `:6320`,
-  `:6814`), which is the gap ARCHITECTURE now describes honestly.
-- **X2** is one token, plus an AST guard that no `("error", …)` literal is built
-  outside `_enqueue_error` in that module.
-- **X3** is the same root cause one layer out: `cancel_state_at_failure` latches
-  only inside `_enqueue_error` while `log_q` is public.
-- **X4** — add `encoding="utf-8", errors="replace"` to `spawn_pipeline` and
-  `run_zipper`, and independently wrap both read loops so any exception still
-  reaches `signal_subprocess(proc)` and `proc.wait()`.
+- **X3 was two defects, and the second was worse.** The audit reported that
+  `cancel_state_at_failure` latches only inside `_enqueue_error` while `log_q`
+  is public, so a Stop during grouping painted a red failure. Reproducing it
+  showed `_had_error` was not set either — so a *genuine* input failure with no
+  Stop in play journalled the run `ok`. A run that never started was recorded as
+  one that succeeded, and was therefore never offered for resume. The latch
+  moved to the queue (`RunEventQueue.put`), which is the boundary every writer
+  crosses; `_enqueue_error` keeps its name and its AST guard.
+- **L6 has the same shape one layer out.** `settle_folder_banners` checked both
+  visibility gates and `_render_preflight` — the seam every coverage-scan
+  completion paints through — checked neither. The gates moved to the paint
+  seam, so an answer arriving from a worker thread minutes later is subject to
+  the same two questions as one arriving from the settle timer.
+- **L11 was one rule with two copies.** `run_journal._atomic_write_json` and
+  `suspend_record._write_all` were the same function; the copies had diverged in
+  both available directions (one caught the `TypeError` a caller-supplied
+  `spec` raises, one did not; one unlinked its staging file, one did not). Both
+  now go through `util.json_write.try_write_json_atomic`, which is the module
+  that already held this rule and already named the journal's copy as a
+  deliberate exception — the exception was one line. Separately, `_suspend`
+  wrote the record first, which had become *only if that worked*: the write has
+  its own scope now and the wind-down happens either way.
+- **Nothing in the repo pressed the Suspend button** until
+  `tests/test_the_suspend_button_winds_the_run_down.py`.
 
 ---
 
-## Group 4 — The Analyze pane · `queued`
+## Group 4 — The Analyze pane · `in review`
+
+PR [#844](https://github.com/exzktly/allwell/pull/844), version 9.0.2. All
+seventeen `U` findings are done. The adversarial review returned **8 findings**;
+four are fixed, four are owed.
 
 | ID | Finding | State |
 |---|---|---|
-| U2 | "Run on:" silently switches from Local to a remote after any Manage-Remotes change | queued |
-| U3 | Dry-run cleanup is silently cleared by a glance at Local, and the next run really deletes | queued |
-| U4 | The Manage-Remotes Test button blocks the whole GUI for the ssh probe | queued |
-| U5 | Edit, Test and Manage do nothing at all when `remotes.toml` is malformed | queued |
-| U6 | QC bounds and every Cellpose parameter silently swap in a default | queued |
-| U7 | An unparseable StarDist threshold silently becomes the model's own default | queued |
-| U8 | The segmentation hint keeps showing the happy path after the Phase channel is removed | queued |
-| U9 | "Replace this passphrase-protected key" can silently become "reusing it" | queued |
-| U10 | `BootstrapLogDialog._poll` drains unbounded and drops lines silently | queued |
-| U11–U17 | Seven further pane defects — leaked dialogs, dead state, four small lies | queued |
+| U2 | "Run on:" silently switches from Local to a remote after any Manage-Remotes change | done |
+| U3 | Dry-run cleanup is silently cleared by a glance at Local, and the next run really deletes | done |
+| U4 | The Manage-Remotes Test button blocks the whole GUI for the ssh probe | done |
+| U5 | Edit, Test and Manage do nothing at all when `remotes.toml` is malformed | done |
+| U6 | QC bounds and every Cellpose parameter silently swap in a default | done |
+| U7 | An unparseable StarDist threshold silently becomes the model's own default | done |
+| U8 | The segmentation hint keeps showing the happy path after the Phase channel is removed | done |
+| U9 | "Replace this passphrase-protected key" can silently become "reusing it" | done |
+| U10 | `BootstrapLogDialog._poll` drains unbounded and drops lines silently | done |
+| U11–U17 | Seven further pane defects — leaked dialogs, dead state, four small lies | done |
 
-**U2 and U3 lead** — they are the two that change what the software does to
-someone's data. **U6/U7** coerce to a default *before* the validator sees them;
-keep the raw text in `opts` as the radius fields already do and extend
-`_numeric_option_errors`. **U4** lifts `RemoteFormDialog._test_ssh`'s
-thread+queue+timer idiom into one helper both Test buttons use.
+### Review findings on Group 4's own fixes
+
+| ID | Finding | State |
+|---|---|---|
+| G4-R1 | `test_stardist_threshold_rule_is_one_rule.py` left **red**: a later commit changed the rule the guard holds and never re-ran it | done |
+| G4-R2 | The QC `min ≤ max` comparison reads the shipped default `0` as a real ceiling, refusing a form that runs on `main` | done |
+| G4-R3 | `min_nucleus_area_px` validated for every routine though only one shows or reads it — and a correctly gated rule already existed | done |
+| G4-R4 | The `-1` threshold sentinel exception is justified by a restore path the repo explicitly prevents | done |
+| G4-R5 | `_fluor_add_row` left out of the `_refresh_channel_dependents` sweep — one file, two definitions of "the rows changed" | queued |
+| G4-R6 | `probe_ssh_async`'s refusal return value is discarded at all three call sites, and each has already disabled its button | queued |
+| G4-R7 | The new embedded-hex scan in `test_hardcoded_tokens.py` inherits the *file*-level `COLOUR_ALLOWLIST` bypass (§7.5 #10) | queued |
+| G4-R8 | The tile-size gate and `_emit_execution_flags` disagree about which routines `stardist_tile_px` belongs to | queued |
+
+Also raised and worth carrying: `parse_threshold("nan")` returns `nan` on this
+branch, so `--stardist_prob_thresh nan` passes argparse *and* the CLI pre-flight
+and segments the plate with a NaN threshold. Group 5 fixes that in
+`pipeline/stardist.py`; the guard's `FORM_IS_STRICTER` roster carries a liveness
+test that fails once it lands, which is the intended way for the two branches to
+meet.
 
 **Testing posture for this group specifically.** CLAUDE.md §7.6: press the
 button, do not assert it exists. The harness that found these built the real tab
@@ -286,40 +362,71 @@ offscreen and drove every control; reuse that shape. Do **not** reach for the
 
 ---
 
-## Group 5 — Numbers and parsing · `queued`
+## Group 5 — Numbers and parsing · `in review`
+
+PR [#845](https://github.com/exzktly/allwell/pull/845), version 9.0.2. Every
+audit finding and every review finding is fixed and committed; the lane was
+re-running when the session ended, and the PR body does not yet describe the
+last two commits.
 
 | ID | Finding | State |
 |---|---|---|
-| C2 | The control-based threshold objective saturates at 1.0, so one outlier sets the plate's gate | queued |
-| C3 | Both threshold estimators round to an integer, so a sub-1 channel stores `0.0` | queued |
-| C6 | Two channels normalising alike publish a duplicate zip member; one becomes unreachable | queued |
-| C7 | Seeded-watershed marker construction is 70× slower than it needs to be | queued |
-| C8 | The phase heuristic matches `dic` as a bare substring, so fluorescence skips all correction | queued |
-| C9 | `DeltaTUnit` handling covers only minutes; milliseconds are 1000× wrong | queued |
-| C10 | Three silent zero-cell outcomes in a module that warns loudly about the fourth | queued |
-| C13–C16 | Four smaller compute and util defects (`background.py` identity returns, `parse_threshold` letting `NaN` through, `\d` matching non-ASCII digits, two docstring/behaviour mismatches) | queued |
-| P12 | `qc_region_area` writes `0.0` for "could not compute" | queued |
+| C2 | The control-based threshold objective saturates at 1.0, so one outlier sets the plate's gate | done |
+| C3 | Both threshold estimators round to an integer, so a sub-1 channel stores `0.0` | done |
+| C6 | Two channels normalising alike publish a duplicate zip member; one becomes unreachable | done |
+| C7 | Seeded-watershed marker construction is 70× slower than it needs to be | done |
+| C8 | The phase heuristic matches `dic` as a bare substring, so fluorescence skips all correction | done |
+| C9 | `DeltaTUnit` handling covers only minutes; milliseconds are 1000× wrong | done |
+| C10 | Three silent zero-cell outcomes in a module that warns loudly about the fourth | done |
+| C13–C16 | Four smaller compute and util defects | done |
+| P12 | `qc_region_area` writes `0.0` for "could not compute" | done (Group 2) |
 | C17 | The Otsu sampler contrasts a per-cell mean against a single background pixel | **open question** |
 
-Notes:
+### Review findings on Group 5's own fixes
 
-- **C2** — add statistical support, and report the tie width so a plateau is
-  visible rather than presented as an argmax. Measured: 73 of 512 grid points
-  tied at the maximum.
-- **C6** — refuse in `read_ome_layout`, before an archive is written.
-  `atomic_zip`'s verification cannot see the duplicate because it is on both
-  sides.
-- **C7** — `bincount` and a vectorised `center_of_mass`; measured 23.7 s → 0.28 s
-  per FOV, roughly 2.7 hours off a 96-well seeded-watershed run.
-- **C8** was **narrowed** by PR #834, which bounded `trans` and `bf` and left
-  `dic` unbounded. Fixing one alternative short of the others is the half-sweep
-  §7.5 #5 warns about, inside the PR whose purpose was this.
-- **C9** — treat an unrecognised unit as unknown and fall back to positional
-  `t<i>` rather than to seconds.
-- **C10** is read-only: TF is not installed in this container, so it is verified
-  by reading and the PR says so.
-- **P12** and **C3** are the same defect class as §7's cardinal one: a value the
-  code never computed stored as `0.0`, which is also a legitimate measurement.
+Two adversarial passes. The first found the `GFP`/`gfp` case collision, an `Ms`
+test asserting the defect, and three overstated claims. The second found
+thirteen, four of them regressions this branch had introduced.
+
+| ID | Finding | State |
+|---|---|---|
+| G5-R1 | A **third** Otsu estimator still rounded a sub-1 gate to `0.0` — the one behind the Cell Gating tab's Auto-threshold button | done |
+| G5-R2 | `%g` renders sub-1e-4 hours in exponent form, which `util/timepoint` cannot parse — Review then sorted those tokens as text | done |
+| G5-R3 | The pipeline's and the viewer's "shared" objectives disagreed: only one passed population sizes to `relative_gap` | done |
+| G5-R4 | `TheT` was never bounds-checked, so a one-based writer mixed `t0` with `0h` and attached every time to the wrong index | done |
+| G5-R5 | The unreadable-unit warning fired on files whose timepoints resolved perfectly | done |
+| G5-R6 | `cytoplasm_mask`'s constant-image branch is unreachable — `threshold_otsu` returns the value rather than raising — while four artefacts described it | done |
+| G5-R7 | A comment named `is_run_input_member`, a function that exists in no branch of this tree | done |
+| G5-R8 | `subtract_background` has a **fourth** identity return (`empty_well`), unswept and unwarned | done |
+| G5-R9 | The relaxed trailing bound admitted `Trans647` as a phase channel | done |
+| G5-R10 | A test named for a general claim the branch had just retracted | done |
+| G5-R11 | ARCHITECTURE never documented the case-sensitive symbol table and said the unit lookup worked another way | done |
+| G5-R12 | `util/fov` and `util/schema_infer` are the digit-class siblings the `\d` sweep did not convert | done — bounded in the doc rather than converted, because neither decides identity |
+| G5-R13 | `MS` and `mS` folded to *milli*second, the exact 10⁹ error the case-sensitive table exists to prevent | done |
+
+Shapes worth carrying forward:
+
+- **C2's fix does not do what it was documented to do**, and saying so was the
+  hardest correction on this branch. Laplace smoothing shortens the tied run
+  (485 of 512 grid points → 354 on a measured pair) but does **not** move the
+  reported threshold, because `argmax` returns the run's *lower* edge and that
+  edge is set by where the negative control's fraction-on reaches zero, which
+  smoothing does not touch. One outlying control cell still shifts the gate by
+  1252 intensity units either way. What ships against the instability is
+  *visibility* — `tie_count`, `tie_span`, `tie_contiguous`, all logged — not a
+  cure. Which point of a genuine plateau ought to be reported is a question
+  about the assay.
+- **`tie_span` is `max − min` of the tied thresholds**, which is a *plateau*
+  only when those points are adjacent on the grid. A bimodal objective ties at
+  two separated points, and the log line then read "spanning 864.6 intensity
+  unit(s) (65.9 to 930)" about two grid points — degraded output presented as
+  good, from the line added to prevent exactly that.
+- **Five optimiser tests asserted a difference of exactly 1.0** on tiny
+  fixtures, which *is* the saturation C2 removes. They derive the expected score
+  from the result's own counts now; every threshold assertion was already
+  correct and is untouched.
+
+---
 
 ### Open questions
 

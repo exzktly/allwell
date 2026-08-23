@@ -83,7 +83,7 @@ def test_stale_sweep_covers_both_scratch_and_output_dir(monkeypatch, tmp_path):
     (out / "_tmp_extract_B02").mkdir()
 
     monkeypatch.setattr(pio, "scratch_base_for", lambda _out: scratch)
-    pm._sweep_stale_scratch_dirs_all(out, extra_extract=True)
+    pio._sweep_stale_scratch_dirs_all(out, extra_extract=True)
 
     assert not (scratch / "_tmp_images_A01").exists()
     assert not (out / "_tmp_images_B02").exists()
@@ -102,7 +102,7 @@ def test_stale_sweep_keeps_checkpointed_dirs(monkeypatch, tmp_path):
     (keep / ".fov_1.done").touch()
 
     monkeypatch.setattr(pio, "scratch_base_for", lambda _out: scratch)
-    pm._sweep_stale_scratch_dirs_all(out, extra_extract=False)
+    pio._sweep_stale_scratch_dirs_all(out, extra_extract=False)
 
     assert keep.exists()
 
@@ -123,7 +123,7 @@ def test_stale_sweep_does_not_double_sweep_when_equal(monkeypatch, tmp_path):
 
     monkeypatch.setattr(pio, "scratch_base_for", lambda o: o)
     monkeypatch.setattr(pio, "_sweep_stale_scratch_dirs", _spy)
-    pm._sweep_stale_scratch_dirs_all(out, extra_extract=False)
+    pio._sweep_stale_scratch_dirs_all(out, extra_extract=False)
 
     assert calls == [out]
     assert not (out / "_tmp_images_A01").exists()

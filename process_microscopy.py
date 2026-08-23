@@ -168,7 +168,6 @@ from pipeline.io import (  # noqa: F401
     _safe_imwrite,
     _safe_well,
     _sweep_stale_scratch_dirs,
-    _sweep_stale_scratch_dirs_all,
     _verify_files_complete,
     _write_single_csv,
     incremental_done_fov_keys,
@@ -182,6 +181,18 @@ from pipeline.io import (  # noqa: F401
     scratch_base_for,
     write_csvs_per_well,
 )
+from pipeline.fov_checkpoint import (
+    _fov_stem,
+    _load_fov_checkpoint,
+    _save_fov_checkpoint,
+    _staging_dir_for,
+    sweep_run_scratch,
+)
+from pipeline.settings_record import (
+    record_well_settings,
+    well_settings_allow_reuse,
+)
+from util.settings_digest import settings_digest
 from pipeline.well_skip import (
     _canonical_force_wells,
     incremental_for_well as _incremental_for_well,
@@ -2698,97 +2709,18 @@ _MAX_CONSECUTIVE_IO_FAILURES = 3
 # layout changes — older checkpoints with a different version are discarded
 # on load so a freshly-built pipeline never reads stale records that would
 # poison the per-well CSV.
-_FOV_CHECKPOINT_SCHEMA = 1
 
 
-def _json_safe(records: list[dict]) -> list[dict]:
-    """Cast numpy scalars in record dicts to plain Python types so the
-    records survive a JSON round-trip. Mutates a copy, not the input."""
-    out: list[dict] = []
-    for r in records:
-        clean: dict = {}
-        for k, v in r.items():
-            # numpy scalar → Python builtin via .item(); everything else
-            # passes through. Avoids the ``import numpy`` cost in the
-            # common case where the records are already clean.
-            item = getattr(v, "item", None)
-            clean[k] = item() if callable(item) and v is not None else v
-        out.append(clean)
-    return out
 
 
-def _fov_stem(nuclear_path: Path) -> str:
-    """Stable per-FOV identifier within a well: the source file's stem.
-    process_microscopy already keys QC filenames on this stem (see
-    ``_qc_output_path`` around line 1305), so any QC file for this FOV
-    starts with ``stem``."""
-    return nuclear_path.stem
 
 
-def _checkpoint_paths(tmp_images: Path, fov_id: str) -> tuple[Path, Path]:
-    """Return ``(records_json, done_marker)`` for a given FOV id."""
-    return (
-        tmp_images / f".fov_{fov_id}.records.json",
-        tmp_images / f".fov_{fov_id}.done",
-    )
 
 
-def _load_fov_checkpoint(tmp_images: Path, fov_id: str) -> list[dict] | None:
-    """Return cached records for ``fov_id``, or None if no valid
-    checkpoint exists.
-
-    Treats a missing marker, a missing records file, an unreadable
-    records file, or a schema-version mismatch all as "no checkpoint" —
-    in every case the caller will reprocess the FOV and overwrite the
-    on-disk state.
-    """
-    records_file, marker = _checkpoint_paths(tmp_images, fov_id)
-    if not (marker.exists() and records_file.exists()):
-        return None
-    try:
-        payload = json.loads(records_file.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(payload, dict):
-        return None
-    if payload.get("schema") != _FOV_CHECKPOINT_SCHEMA:
-        return None
-    records = payload.get("records")
-    if not isinstance(records, list):
-        return None
-    return records
 
 
-def _save_fov_checkpoint(
-    tmp_images: Path, fov_id: str, records: list[dict],
-) -> None:
-    """Atomically persist ``records`` and create the ``.done`` marker.
 
-    Writes records.json first, fsync-then-rename, then touches the marker
-    — so a process killed between the two writes leaves NO marker and
-    the next run reprocesses the FOV (rather than reading half-written
-    records).
-    """
-    records_file, marker = _checkpoint_paths(tmp_images, fov_id)
-    tmp = records_file.with_suffix(".records.json.tmp")
-    payload = {"schema": _FOV_CHECKPOINT_SCHEMA, "records": _json_safe(records)}
-    text = json.dumps(payload)
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(text)
-        fh.flush()
-        try:
-            os.fsync(fh.fileno())
-        except OSError:
-            # fsync isn't supported on every filesystem (e.g. some network
-            # mounts and external volumes on macOS, where it raises OSError
-            # "Invalid argument"/"Inappropriate ioctl for device"). The replace
-            # below is still atomic without it. Matches the guarded fsync in
-            # pipeline/io.py and well_viewer/persistence/_io.py.
-            pass
-    tmp.replace(records_file)
-    # The marker is the atomicity boundary — present iff records_file
-    # is on disk and complete.
-    marker.touch()
+
 
 
 def _prune_scratch_files(tmp_images: Path) -> None:
@@ -2814,6 +2746,7 @@ def _process_groups_in_worker(
     well_label: str,
     fov_threads: int = 1,
     errors_dir: Path | None = None,
+    settings_key: str = "",
 ) -> tuple[list[dict], list[str]]:
     """
     Process all image groups for one well within a single worker process.
@@ -2881,7 +2814,8 @@ def _process_groups_in_worker(
         # _save_fov_checkpoint so a half-written records.json never
         # appears "done" to the next invocation.
         try:
-            _save_fov_checkpoint(tmp_images, _fov_stem(nuclear_path), recs)
+            _save_fov_checkpoint(tmp_images, _fov_stem(nuclear_path), recs,
+                                 settings_key)
         except OSError as ckpt_exc:
             log.warning(
                 "FOV %s — could not write checkpoint (%s); FOV will be "
@@ -2895,7 +2829,7 @@ def _process_groups_in_worker(
         """Load cached records if a checkpoint exists, else process the
         FOV from scratch."""
         fov_id = _fov_stem(nuclear_path)
-        cached = _load_fov_checkpoint(tmp_images, fov_id)
+        cached = _load_fov_checkpoint(tmp_images, fov_id, settings_key)
         if cached is not None:
             log.info(
                 "FOV %s — resumed from checkpoint (%d records)",
@@ -3003,6 +2937,8 @@ def process_well_zip_task(
     sep: str = DEFAULT_SEP,
     incremental: bool = False,
     incremental_prior_dir: Path | None = None,
+    settings_key: str = "",
+    force: bool = False,
 ) -> tuple[list[dict], list[str]]:
     """
     Top-level picklable task: full lifecycle for one zipped well.
@@ -3028,7 +2964,13 @@ def process_well_zip_task(
         schema = parse_schema(DEFAULT_SCHEMA)
     log.info("Well %s — starting (pid %d)", well_label, os.getpid())
     tmp_extract = scratch_base_for(output_dir) / f"_tmp_extract_{well_label}"
-    tmp_images  = scratch_base_for(output_dir) / f"_tmp_images_{well_label}"
+    tmp_images  = _staging_dir_for(output_dir, well_label, settings_key)
+    if force:
+        # `--force` means recompute this well, and that has to include the
+        # per-FOV checkpoints: the task took no `force` parameter at all, so
+        # ticking Force re-ran the well and still resumed the old records —
+        # change a threshold, tick Force, get byte-identical numbers.
+        remove_directory(tmp_images)
 
     # tmp_extract is always per-run scratch: extraction can re-derive
     # itself from the source zip in seconds, no checkpoint value.
@@ -3083,12 +3025,23 @@ def process_well_zip_task(
 
             if incremental:
                 prior = incremental_prior_dir or output_dir
+                # An incremental run reuses per-FOV work, so it needs the same
+                # settings check the plain skip does — otherwise changing the
+                # segmenter left every already-covered (fov, timepoint) in the
+                # done-set and the well logged "up to date (no new FOVs)".
+                if not well_settings_allow_reuse(prior, well_label, settings_key):
+                    log.info(
+                        "Well %s — the recorded settings differ from this "
+                        "run's; recomputing every FOV-group.", well_label)
+                    prior = None
                 # CSV is the primary done-set; a processed well can have its
                 # <well>_out.zip without a sibling CSV (remote-only materialise /
                 # lost CSV) → recover done keys from the outputs too.
-                done, csv_done = incremental_done_fov_keys(
-                    prior, well_label, csv_prefix=csv_prefix,
-                    safe_well=safe_well, schema=schema, sep=sep)
+                done, csv_done = ((set(), False) if prior is None else
+                                  incremental_done_fov_keys(
+                                      prior, well_label, csv_prefix=csv_prefix,
+                                      safe_well=safe_well, schema=schema,
+                                      sep=sep))
                 if done and not csv_done:
                     log.info("Well %s — no prior CSV; recovered %d done FOV-group(s) "
                              "from processed outputs.", well_label, len(done))
@@ -3120,7 +3073,8 @@ def process_well_zip_task(
 
             kwargs = {**shared_kwargs_template, "output_dir": tmp_images}
             records, failed = _process_groups_in_worker(
-                groups, kwargs, well_label, errors_dir=output_dir)
+                groups, kwargs, well_label, errors_dir=output_dir,
+                settings_key=settings_key)
 
             # The extracted inputs are dead weight from here on, and what
             # follows — building <well>_out.zip beside a staging dir that still
@@ -3162,6 +3116,10 @@ def process_well_zip_task(
             # All user-facing artefacts (CSV + out_zip) are already
             # written at this point, so the well *is* done — the
             # cleanup is internal housekeeping.
+            # Here, and not in the parent's result loop: see
+            # `record_well_settings` on why the caller has to be past every
+            # short circuit and after both artefacts are written.
+            record_well_settings(output_dir, well_label, settings_key)
             log.info("Well %s — done.", well_label)
             return records, failed
         except BaseException as exc:
@@ -3198,6 +3156,8 @@ def process_well_folder_task(
     sep: str = DEFAULT_SEP,
     incremental: bool = False,
     incremental_prior_dir: Path | None = None,
+    settings_key: str = "",
+    force: bool = False,
 ) -> tuple[list[dict], list[str]]:
     """
     Top-level picklable task: full lifecycle for one uncompressed well folder.
@@ -3226,7 +3186,13 @@ def process_well_folder_task(
     # disk to — the single biggest source of I/O on a network-mounted output
     # dir. It now honours the scratch base like zip mode does;
     # ``_commit_staging_dir`` handles the cross-filesystem case.
-    tmp_images = scratch_base_for(output_dir) / f"_tmp_images_{well_label}"
+    tmp_images = _staging_dir_for(output_dir, well_label, settings_key)
+    if force:
+        # `--force` means recompute this well, and that has to include the
+        # per-FOV checkpoints: the task took no `force` parameter at all, so
+        # ticking Force re-ran the well and still resumed the old records —
+        # change a threshold, tick Force, get byte-identical numbers.
+        remove_directory(tmp_images)
     # v5.2.0: preserve per-FOV checkpoints if any .fov_*.done markers
     # exist; otherwise wipe stale state. Same semantics as zip-mode.
     if tmp_images.exists():
@@ -3265,11 +3231,22 @@ def process_well_folder_task(
 
             if incremental:
                 prior = incremental_prior_dir or output_dir
+                # The same settings check the zip task's incremental branch
+                # makes. Half-sweeping this left folder mode holding the old
+                # rule, which is worse than not sweeping at all: one module,
+                # two definitions of "already done", and neither looks wrong.
+                if not well_settings_allow_reuse(prior, well_label, settings_key):
+                    log.info(
+                        "Well %s — the recorded settings differ from this "
+                        "run's; recomputing every FOV-group.", well_label)
+                    prior = None
                 # CSV is primary; recover done FOV-groups from the processed
                 # outputs (zip or folder) so a missing CSV never re-segments.
-                done, csv_done = incremental_done_fov_keys(
-                    prior, well_label, csv_prefix=csv_prefix,
-                    safe_well=safe_well, schema=schema, sep=sep)
+                done, csv_done = ((set(), False) if prior is None else
+                                  incremental_done_fov_keys(
+                                      prior, well_label, csv_prefix=csv_prefix,
+                                      safe_well=safe_well, schema=schema,
+                                      sep=sep))
                 if done and not csv_done:
                     log.info("Well %s — no prior CSV; recovered %d done FOV-group(s) "
                              "from processed outputs.", well_label, len(done))
@@ -3288,7 +3265,8 @@ def process_well_folder_task(
 
             kwargs = {**shared_kwargs_template, "output_dir": tmp_images}
             records, failed = _process_groups_in_worker(
-                groups, kwargs, well_label, errors_dir=output_dir)
+                groups, kwargs, well_label, errors_dir=output_dir,
+                settings_key=settings_key)
 
             if incremental:
                 # Merge new rows / images into the existing well outputs.
@@ -3345,6 +3323,10 @@ def process_well_folder_task(
             # cleanup in the finally block — same reasoning as the zip
             # task: cleanup can hang on NAS storage and we don't want
             # that to defer the GUI's well_done event.
+            # Here, and not in the parent's result loop: see
+            # `record_well_settings` on why the caller has to be past every
+            # short circuit and after both artefacts are written.
+            record_well_settings(output_dir, well_label, settings_key)
             log.info("Well %s — done.", well_label)
             return records, failed
         except BaseException as exc:
@@ -3386,6 +3368,7 @@ def _run_well_worker_pool(
     *,
     items: list[tuple[str, Path]],
     output_dir: Path,
+    settings_key: str = "",
     workers: int,
     force: bool,
     incremental: bool,
@@ -3551,6 +3534,7 @@ def process_well_zips(
     threads_per_worker: int = 0,
     schema: list[str] | None = None,
     sep: str = DEFAULT_SEP,
+    settings_key: str = "",
 ) -> list[str]:
     """
     Dispatch one worker process per well zip.
@@ -3576,16 +3560,26 @@ def process_well_zips(
             nuclear_token, fluor_tokens, csv_prefix, schema, sep,
             _incremental_for_well(incremental, well_label, forced),
             incremental_prior_dir,
+            settings_key,
+            force or _canonical_well_label(well_label) in forced,
         )
 
     return _run_well_worker_pool(
         items=well_zips, output_dir=output_dir, workers=workers,
+        settings_key=settings_key,
         force=force, force_wells=forced, incremental=incremental, force_cpu=force_cpu,
         threads_per_worker=threads_per_worker,
         shared_kwargs_template=shared_kwargs_template, mode_label="Zip",
         # Zip staging (extract + images) lives under the scratch base.
-        stale_sweep=lambda out: _sweep_stale_scratch_dirs_all(out, extra_extract=True),
-        output_exists=lambda well: output_exists_for_well(output_dir, well, csv_prefix),
+        stale_sweep=lambda out: sweep_run_scratch(out, settings_key,
+                                                   extra_extract=True),
+        # File existence alone answered "already done" whatever the run was
+        # configured to compute, so changing the segmenter or a threshold
+        # skipped every well and kept the old numbers — while the sidecar was
+        # rewritten to advertise the new configuration.
+        output_exists=lambda well: (
+            output_exists_for_well(output_dir, well, csv_prefix)
+            and well_settings_allow_reuse(output_dir, well, settings_key)),
         submit_task=_submit,
     )
 
@@ -3607,6 +3601,7 @@ def process_well_folders(
     threads_per_worker: int = 0,
     schema: list[str] | None = None,
     sep: str = DEFAULT_SEP,
+    settings_key: str = "",
 ) -> list[str]:
     """
     Dispatch one worker process per well folder (uncompressed input).
@@ -3631,18 +3626,23 @@ def process_well_folders(
             schema, sep,
             _incremental_for_well(incremental, well_label, forced),
             incremental_prior_dir,
+            settings_key,
+            force or _canonical_well_label(well_label) in forced,
         )
 
     return _run_well_worker_pool(
         items=well_folders, output_dir=output_dir, workers=workers,
+        settings_key=settings_key,
         force=force, force_wells=forced, incremental=incremental, force_cpu=force_cpu,
         threads_per_worker=threads_per_worker,
         shared_kwargs_template=shared_kwargs_template, mode_label="Folder",
         # Folder-mode staging (_tmp_images_*) lives under the scratch base, same
         # as zip mode; there is no zip-extract scratch to sweep. Legacy runs left
         # their staging under output_dir, so sweep both when they differ.
-        stale_sweep=lambda out: _sweep_stale_scratch_dirs_all(out, extra_extract=False),
-        output_exists=lambda well: output_exists_for_well_folder(
+        stale_sweep=lambda out: sweep_run_scratch(out, settings_key,
+                                                   extra_extract=False),
+        output_exists=lambda well: well_settings_allow_reuse(
+            output_dir, well, settings_key) and output_exists_for_well_folder(
             output_dir, well, csv_prefix, compressed_output=True),
         submit_task=_submit,
     )
@@ -4585,6 +4585,12 @@ def main() -> None:
 
     # Per-well failures are surfaced here so main() can signal them via the
     # process exit code (audit E5) rather than always exiting 0.
+    # One string naming the configuration these wells are about to be computed
+    # under, so the *next* run can tell whether its own settings differ.
+    # Derived from the parsed arguments rather than from the raw argv, so the
+    # same plate computed locally and on a worker host produces the same key.
+    settings_key = settings_digest(vars(args))
+
     failed_wells: list[str] = []
     if well_zips:
         log.info("Zip mode: %d well zip(s) detected.", len(well_zips))
@@ -4608,6 +4614,7 @@ def main() -> None:
             threads_per_worker=threads_per_worker,
             schema=schema,
             sep=sep,
+            settings_key=settings_key,
         )
     elif well_folders:
         log.info("Folder mode: %d well folder(s) detected.", len(well_folders))
@@ -4631,6 +4638,7 @@ def main() -> None:
             threads_per_worker=threads_per_worker,
             schema=schema,
             sep=sep,
+            settings_key=settings_key,
         )
     else:
         # No grouped input found. Every real entry point (the Analyze tab, the

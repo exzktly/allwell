@@ -680,13 +680,24 @@ archives and outputs are always written as per-well `.zip` archives. See
   pipeline_info…** — it disarms a check that exists because a volume filling
   part-way costs hours of work, so it is a decision you make per run rather than
   one a folder you happened to open makes for you.
-- **Force re-run.** Re-processes wells whose output ZIPs already exist. On a
-  remote run this now carries all the way to the end: the run will not decide
-  the remote's existing outputs make the work unnecessary, the fetch will not
-  skip a well because its local copy looks complete, and — if a well's output
-  file comes back with the same size and timestamp it had before the run — the
-  run says so by name and fails rather than reporting success over an artefact
-  it never replaced.
+- **Force re-run.** Re-processes wells whose output ZIPs already exist. It also
+  discards the per-FOV checkpoints a stopped run left behind, so forcing really
+  does recompute: it used to re-run the well and then resume those checkpoints,
+  which meant changing a threshold and ticking Force gave you back numbers
+  identical to the ones you were trying to replace. On a remote run it carries
+  all the way to the end: the run will not decide the remote's existing outputs
+  make the work unnecessary, the fetch will not skip a well because its local
+  copy looks complete, and — if a well's output file comes back with the same
+  size and timestamp it had before the run — the run says so by name and fails
+  rather than reporting success over an artefact it never replaced.
+
+  **You usually will not need it for a settings change.** A well records which
+  configuration produced it, and a re-run whose segmentation method, thresholds,
+  channel set, corrections or filename schema differ recomputes that well on its
+  own rather than reporting it up to date. Wells written by a version of All-Well
+  that predates that record carry no such marker and are still treated as up to
+  date, so for those — a plate you last analysed some time ago — Force is still
+  how you make a settings change take effect.
 - **Force these wells.** Comma-separated wells to reprocess in full, whatever
   else the run decides. This is the only thing that recovers a well whose
   `<WELL>_out.zip` exists but whose measurements CSV is missing: its own

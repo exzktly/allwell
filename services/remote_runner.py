@@ -72,7 +72,9 @@ from pipeline.run_report import (
     merge_fetched_run_report,
     read_run_report_block,
 )
-from pipeline.sidecar import read_user_blocks, restore_user_blocks
+from pipeline.settings_record import SETTINGS_DIRNAME
+from pipeline.sidecar import (
+    install_provisional_sidecar, read_user_blocks, restore_user_blocks)
 from pipeline.well_skip import _canonical_force_wells
 from util.well_token import canonical_well_label as _canonical_well_label
 from util.well_token import (
@@ -163,6 +165,7 @@ from services.remote_transport import (  # noqa: F401
     _rsync_supports_info_flag,
     _rsync_version,
     _rsync_with_retry,
+    pull_small_file,
 )
 
 # Where a run lives, and whether an earlier one's output may be reused — the
@@ -5341,6 +5344,7 @@ class Fetcher:
                        "output directory")
             return
         self.run.fetched_wells.add(well)
+        self._pull_settings_marker(well)
         self._journal_well(well, "fetched")
         total_elapsed = time.monotonic() - t0
         position_done = len(self.run.fetched_wells)
@@ -5416,26 +5420,16 @@ class Fetcher:
     def _merge_fetched_csvs(self, tmp_csv_dir: Path) -> None:
         """Merge each partial per-well CSV pulled into *tmp_csv_dir* into the
         matching full CSV under ``local_output_dir`` (incremental remote runs).
-        New rows are appended, duplicates skipped — see
-        ``pipeline.io.merge_records_into_csv``."""
-        import csv as _csv
 
-        from pipeline.io import merge_records_into_csv
+        The loop itself lives beside `merge_records_into_csv` in `pipeline.io`,
+        because deciding what to do when one of these merges fails is a
+        property of the merge, not of the remote runner.
+        """
+        from pipeline.io import merge_fetched_csvs
 
-        for partial in sorted(tmp_csv_dir.glob("*.csv")):
-            try:
-                with open(partial, newline="") as fh:
-                    rows = list(_csv.DictReader(fh))
-            except OSError as exc:
-                self._log(f"[remote] warn: reading fetched CSV {partial.name} failed: {exc}\n")
-                continue
-            if not rows:
-                continue
-            added = merge_records_into_csv(self.run.local_output_dir / partial.name, rows)
-            self._log(
-                f"[remote] merge: {partial.name} → +{added} new row(s) "
-                f"into {self.run.local_output_dir.name}/\n"
-            )
+        merge_fetched_csvs(tmp_csv_dir, self.run.local_output_dir,
+                           log_fn=self._log)
+
 
     def _materialize(self, well: str, well_zip: Path) -> bool:
         """Place the well's outputs in ``local_output_dir`` so the result
@@ -5526,6 +5520,31 @@ class Fetcher:
 
     # Mid-run sidecar ────────────────────────────────────────────────────
 
+    def _pull_settings_marker(self, well: str) -> None:
+        """Bring back the record of which configuration produced this well.
+
+        The pipeline writes ``.aw_settings/<WELL>.json`` beside each well's
+        output, and the next run reads it to decide whether that output may
+        stand — a plate re-run with a different segmenter must not be answered
+        "already done". For a remote run the pipeline's output directory is on
+        the worker host, and the fetch pulls only ``<well>_out.zip`` and the
+        per-well CSV, so without this a remotely-computed plate lands with no
+        marker at all: permanently grandfathered, and the settings record inert
+        for every remote user.
+
+        Pulled from the worker rather than recomputed here, so there is one
+        definition of the digest and the client cannot come to disagree with
+        the process that did the work. Per well and after the well has
+        materialised, so a well whose fetch failed is not credited with output
+        it does not have.
+        """
+        pull_small_file(
+            self.host,
+            f"{self.run.remote_output_dir}/{SETTINGS_DIRNAME}/{well}.json",
+            self.run.local_output_dir / SETTINGS_DIRNAME / f"{well}.json",
+            stop_event=self._stop, what=f"the settings marker for {well}",
+        )
+
     def _sidecar_loop(self) -> None:
         """Pull ``pipeline_info.json`` as soon as the remote has written one.
 
@@ -5602,7 +5621,7 @@ class Fetcher:
                 tmp.unlink()
             return False
         try:
-            self._install_provisional_sidecar(tmp, dest)
+            install_provisional_sidecar(tmp, dest, run_id=self.run.run_id)
         except (OSError, ValueError) as exc:
             self._log(f"[remote] note: could not install the mid-run "
                       f"pipeline_info.json ({exc}); Review will get it when "
@@ -5615,37 +5634,6 @@ class Fetcher:
             "only). The plate can be opened in Review now; wells appear as "
             "they finish.\n")
         return True
-
-    def _install_provisional_sidecar(self, tmp: Path, dest: Path) -> None:
-        """Stamp *tmp* as mid-run and put it at *dest*, unless *dest* appeared.
-
-        The stamp is in the artifact rather than only in the run log because
-        the artifact is what outlives the session: a run that is stopped, or
-        whose app is closed, leaves this file behind as the dataset's only
-        description of itself, and it describes less than a finished one does.
-        """
-        info = json.loads(tmp.read_text())
-        if not isinstance(info, dict):
-            raise ValueError("pipeline_info.json is not a JSON object")
-        info["provisional"] = {
-            "source": "mid_run_fetch",
-            "run_id": self.run.run_id,
-            "note": (
-                "Fetched while the run was still going, so it describes only "
-                "the input this run was handed — for a batched run, one "
-                "batch's split. available_timepoints / available_fovs may be "
-                "short of the plate and there is no run_report. The finished "
-                "sidecar replaces this file at the end of the run."
-            ),
-        }
-        from pipeline.io import _safe_atomic_text_write
-
-        if dest.exists():          # a re-run's own sidecar, or Review's saves
-            return
-        with _safe_atomic_text_write(dest) as fh:
-            json.dump(info, fh, indent=2)
-        with swallow("mid-run sidecar temp cleanup"):
-            tmp.unlink()
 
     def _rsync(self, argv: list[str]) -> bool:
         # Routed through the shared retry helper (v5.1.1) so transient

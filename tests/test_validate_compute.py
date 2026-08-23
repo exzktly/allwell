@@ -714,3 +714,35 @@ def test_no_record_at_all_stays_a_warning_rather_than_assumed_benign(tmp_path):
     assert finding.severity == "warning"
     assert "no completeness record" in finding.message
     assert vc.wells_needing_force(report) == ("C08",)
+
+
+def test_a_well_stranded_on_the_remote_is_not_put_on_the_force_list(tmp_path):
+    """The finding says fetch, so the button must not reprocess.
+
+    ``no_csv_not_fetched`` tells the user the output exists on the far side and
+    the gap is the transfer. ``wells_needing_force`` drives *Complete this run in
+    Analyze*, so leaving the well there had the same report print "a forced
+    reprocess would repeat hours of work" and then hand that well to the control
+    that forces it.
+    """
+    from dataclasses import replace as _replace
+
+    from datasets.validate.validate_compute import (
+        WellReport, wells_needing_force, well_health,
+    )
+
+    class _Report:
+        pass
+
+    stranded = WellReport(
+        well="A01", missing=(), csv_state="missing",
+        has_in_container=True, has_out_zip=True,
+        not_fetched_recorded=True,
+    )
+    ordinary = _replace(stranded, well="A02", not_fetched_recorded=False)
+    assert well_health(stranded) == "missing", (
+        "the fixture must be a well that would otherwise be forced")
+
+    report = _Report()
+    report.wells = (stranded, ordinary)
+    assert wells_needing_force(report) == ("A02",)

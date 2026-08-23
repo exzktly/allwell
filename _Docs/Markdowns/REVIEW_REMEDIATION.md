@@ -36,7 +36,7 @@ last row.**
 | W3 | Image identity and batch export (themes 4, 7) | worker | 14 | **in progress** |
 | ME | smFISH, fold change, stats, guards, docs | lead | 11 | **in progress** |
 
-Counts: **9 done · 0 declined · 0 deferred · 33 outstanding** of 42.
+Counts: **9 done · 17 reported (unverified) · 0 declined · 0 deferred · 16 outstanding** of 42.
 
 The four groups are partitioned by file, not by theme, so that they can run at
 the same time without touching the same lines. Where a theme's items live in
@@ -109,6 +109,47 @@ closed, what is half-done and what remains of it — is in
 rather than reported in conversation so that it survives a session ending.
 Those files are the groups' claims; this file is the record.
 
+## Owed work found while doing this work
+
+Recorded here rather than in a group's report, because a report is read once and
+a tracker is read every time someone picks the work up.
+
+1. **`well_viewer/domain/sample_definitions.py::save_to_pipeline_info` is still
+   an unlocked read-modify-write of `pipeline_info.json`** — the other half of
+   item 85. The two sites the item named now go through
+   `persistence._io.update_json_atomic`, which re-reads and byte-compares
+   immediately before the replace and re-applies on a concurrent write; this one
+   was outside the owning group's files and was not converted. Keep the pre-v2
+   backup inside or before the mutate when routing it through.
+2. **`heatmap_layouts._collect_settings` overwrites the entire saved settings
+   block with defaults when the Heat Map tab was never built in the session.**
+   Found while fixing item 83 and deliberately left, because fixing only the
+   timepoint half would leave one function holding two rules. Measured: on disk
+   `{cmap: magma, scale_mode: Manual, vmin: 10.0, vmax: 900.0, repset_avg: True,
+   log_scale: True, tp_value: 72.0}`, written back as `{cmap: '', scale_mode:
+   Auto, vmin: None, vmax: None, repset_avg: False, log_scale: False, tp_value:
+   None}`. Seven of the eight fields predate the item-83 change. One guard at the
+   top of the function — decline to rewrite `hm.persisted_settings` when the tab
+   was never built — closes all eight.
+3. **`datasets/validate/validate_compute.py` should surface the well-spelling
+   collision** that the copy tools now refuse (item 70), so a user hitting that
+   refusal has somewhere to check the rest of the plate.
+4. **ARCHITECTURE.md owes the deltas** each group lists in its own file. It was
+   left untouched on purpose: three groups editing one document at once would
+   have collided, and the version-literal guard makes such a conflict expensive
+   to resolve.
+
+## A note on the commit history
+
+Several commits here were staged with `git add -A` while more than one group was
+writing, so their contents are wider than their messages. In particular the
+commit titled *Destructive dataset operations* also carries persistence work
+belonging to another group, and the `Checkpoint:` commits carry whatever was in
+the tree at that moment. The history was already pushed when this was noticed and
+is not being rewritten. Read the group status files in `_remediation/` for what
+each group actually did; the commit messages are reliable about intent and not
+about extent.
+
 ## Two cross-cutting fixes, sequenced last
 
 Two of these rows are not local edits and must land after the groups they touch,
@@ -131,28 +172,28 @@ or they will go red on files another group is still holding:
 
 | # | Sev | State | Item | Where it stands |
 |---|---|---|---|---|
-| 80 | Medium | queued | `except OSError: pass` plus an absent `<well>_out.zip` makes the v2 staleness fingerprint fail open, and the compensating warning is gated on `file_version < 2`, so a v2  | well_viewer/persistence/cell_overrides.py unchanged since PR #782: lines 64-65 and 110-111 still `except OSError: pass`; line 161 `if current_fp and stored_fp != current_fp` still fails open when the  |
-| 81 | Medium | queued | `VIEW_DOMAINS` claims `line_order` but `reset_view` never saves it, so the stale order returns on the next load and permanently reorders `selections`. The module's own pr | well_viewer/persistence/reset_scopes.py:269 still claims "line_order" in VIEW_DOMAINS, but reset_view (line 274) only calls view_state.reset, _save(ctx,"heatmap_layouts") and _save(ctx,"multivariate") |
-| 82 | Medium | queued | `absent_wells` / `absent_solo` survive a dataset swap and are reassigned only inside `restore()`, which is skipped when the new dataset has no `view_state` section: datas | ctx.runtime.view_state.absent_wells / absent_solo are assigned only in view_state.restore (lines 462, 485) and cleared only in view_state.reset (lines 1088-1089). load_controller.begin_load (lines 400 |
-| 83 | Medium | queued | The heatmap timepoint is persisted as a combo **index**, which §9.7's add-timepoints workflow invalidates. | well_viewer/persistence/heatmap_layouts.py:37 still persists `"tp_index": int(tp_cb.currentIndex())` and line 175-182 restores it by clamping to the live item count — an index, not a timepoint value,  |
-| 84 | Medium | queued | `well_labels` are hydrated pruned to loaded wells and then autosaved back, erasing labels for wells absent from a subset load. `view_state` solved this with `absent_wells | well_viewer/persistence/sample_definitions.py:216-219 hydrates well_labels only for tokens in ctx.state.dataset.well_paths, and autosave_to_pipeline_info (line 62) rebuilds the block from ds.well_labe |
-| 85 | Medium | queued | Unlocked read-modify-write of `pipeline_info.json` from a viewer sharing a window with a running Analyze pass; a lost update reverts `available_timepoints` / `fluor_token | well_viewer/persistence/smfish.py:124-160 still does an unlocked read-modify-write of pipeline_info.json (json.loads then atomic_write_json), as does domain/gating_state.py:200-238 (save_gating_to_pip |
-| 86 | Medium | queued | A bare mid-function `return` skips `apply_range` and the whole gating-hydration tail, so `threshold_min/max` keep the previous dataset's range (`begin_load` clears only t | well_viewer/core/channel_state_controller.py:187-188 still `if all_vals.size == 0: return` inside _recalculate_threshold, skipping channel_state.apply_range (line 195) and the whole cell-gating hydrat |
-| 88 | Low | queued | A plate edit rewrites a group's membership from the plate alone, permanently dropping wells the current dataset does not hold — and autosaves that. | well_viewer/features/home/groups/panel_view.py:81-91 builds `new` as `plate.selectedWellIds() ∩ well_paths` and calls sel_set_composition(ctx, sid, new); selection_controller.sel_set_composition (line |
-| 90 | Medium | queued | `_confirm_clear` falls through to clearing when the confirmation dialog raises — an unconfirmed destructive wipe of the gallery and its PNGs. | well_viewer/features/saved_plots/tab_view.py:124-134 _confirm_clear still has `except Exception: swallowed()  # no dialog (e.g. headless) — fall through to clearing` followed by an unconditional C.cle |
+| 80 | Medium | reported | `except OSError: pass` plus an absent `<well>_out.zip` makes the v2 staleness fingerprint fail open, and the compensating warning is gated on `file_version < 2`, so a v2  | well_viewer/persistence/cell_overrides.py unchanged since PR #782: lines 64-65 and 110-111 still `except OSError: pass`; line 161 `if current_fp and stored_fp != current_fp` still fails open when the  |
+| 81 | Medium | reported | `VIEW_DOMAINS` claims `line_order` but `reset_view` never saves it, so the stale order returns on the next load and permanently reorders `selections`. The module's own pr | well_viewer/persistence/reset_scopes.py:269 still claims "line_order" in VIEW_DOMAINS, but reset_view (line 274) only calls view_state.reset, _save(ctx,"heatmap_layouts") and _save(ctx,"multivariate") |
+| 82 | Medium | reported | `absent_wells` / `absent_solo` survive a dataset swap and are reassigned only inside `restore()`, which is skipped when the new dataset has no `view_state` section: datas | ctx.runtime.view_state.absent_wells / absent_solo are assigned only in view_state.restore (lines 462, 485) and cleared only in view_state.reset (lines 1088-1089). load_controller.begin_load (lines 400 |
+| 83 | Medium | reported | The heatmap timepoint is persisted as a combo **index**, which §9.7's add-timepoints workflow invalidates. | well_viewer/persistence/heatmap_layouts.py:37 still persists `"tp_index": int(tp_cb.currentIndex())` and line 175-182 restores it by clamping to the live item count — an index, not a timepoint value,  |
+| 84 | Medium | reported | `well_labels` are hydrated pruned to loaded wells and then autosaved back, erasing labels for wells absent from a subset load. `view_state` solved this with `absent_wells | well_viewer/persistence/sample_definitions.py:216-219 hydrates well_labels only for tokens in ctx.state.dataset.well_paths, and autosave_to_pipeline_info (line 62) rebuilds the block from ds.well_labe |
+| 85 | Medium | reported | Unlocked read-modify-write of `pipeline_info.json` from a viewer sharing a window with a running Analyze pass; a lost update reverts `available_timepoints` / `fluor_token | well_viewer/persistence/smfish.py:124-160 still does an unlocked read-modify-write of pipeline_info.json (json.loads then atomic_write_json), as does domain/gating_state.py:200-238 (save_gating_to_pip |
+| 86 | Medium | reported | A bare mid-function `return` skips `apply_range` and the whole gating-hydration tail, so `threshold_min/max` keep the previous dataset's range (`begin_load` clears only t | well_viewer/core/channel_state_controller.py:187-188 still `if all_vals.size == 0: return` inside _recalculate_threshold, skipping channel_state.apply_range (line 195) and the whole cell-gating hydrat |
+| 88 | Low | reported | A plate edit rewrites a group's membership from the plate alone, permanently dropping wells the current dataset does not hold — and autosaves that. | well_viewer/features/home/groups/panel_view.py:81-91 builds `new` as `plate.selectedWellIds() ∩ well_paths` and calls sel_set_composition(ctx, sid, new); selection_controller.sel_set_composition (line |
+| 90 | Medium | reported | `_confirm_clear` falls through to clearing when the confirmation dialog raises — an unconfirmed destructive wipe of the gallery and its PNGs. | well_viewer/features/saved_plots/tab_view.py:124-134 _confirm_clear still has `except Exception: swallowed()  # no dialog (e.g. headless) — fall through to clearing` followed by an unconditional C.cle |
 
 ### Group W2
 
 | # | Sev | State | Item | Where it stands |
 |---|---|---|---|---|
-| 18 | Medium | queued | The "did anything land?" check is skipped exactly when the filtered archive came out empty — "nothing to compare against" conflated with "nothing landed". | datasets/subset/apply.py:243 still reads `if fname and kept_in_names and fname not in kept_in_names:` — the `and kept_in_names` truthiness test skips the 'did anything land?' check exactly when the fi |
-| 67 | High | queued | `_remap._rename` discards `rewrite_member_field`'s `was_rewritten` flag, so a member failing the structural gate keeps dataset 2's original well token inside the destinat | datasets/merge_plates/apply.py:84-88 _remap._rename still returns _remap_well_field(...)[0] and drops the was_rewritten flag; rewrite_member_field (datasets/_common/member_names.py:119-131) returns th |
-| 68 | Medium | queued | In-place mode zips and unlinks the TIFs of **every** well-named subfolder under the source, including pre-existing ones; the preview is non-recursive and loose-TIF-only.  | datasets/import_loose/apply.py:217-235 _zip_well_folders still iterates every directory entry of the folder whose name canonicalises to a well and zips/unlinks its TIFs, with no distinction between fo |
-| 69 | Medium | queued | `row_matches` reads the `timepoint_hours` **column** and `member_matches` reads the **filename** token. A legacy CSV with a blank `timepoint_hours` loses every row while  | datasets/subset/subset_compute.py:215-225 row_matches still reads float(row['timepoint_hours']) and returns False on a blank/unparsable value, while member_matches (line 182-212) parses the filename's |
-| 70 | Medium | queued | Two containers canonicalising to the same well (`A1.zip` + `A01.zip`) collapse by plain dict overwrite in glob order. The `out_csvs` sibling documents its identical overw | datasets/_common/dataset_paths.py:187-205 in_containers still assigns containers[well] = zip_path in glob order with no collision detection or warning, so A1.zip and A01.zip collapse silently; the sib |
-| 73 | Low | queued | `replace_folder_with_archive`'s `resolve()` identity conflates symlink and hardlink aliases in both directions: an archived symlink is reported as `kept`, and a second na | util/zip_write.py:153-168 replace_folder_with_archive still builds archived_resolved from Path(p).resolve() and compares p.resolve() for each walked file; there is no st_ino/samefile handling and no m |
-| 74 | Medium | queued | `copy2`/`move` silently overwrite same-basename files under `--recursive`; the progress line counts sources, not survivors. | WellPlateZipper.py:186-195 folder_well still does place(f, os.path.join(well_dir, os.path.basename(f))) for shutil.copy2/shutil.move with no existence check, then prints f'{well}: {len(files)} files'  |
-| 76 | Low | queued | The `seg_fp` restamp is set only inside `with swallow(...)`; on a failed stat the entry silently keeps the **source** dataset's fingerprint and the carried-over override  | All three sites still assign inside the suppression: datasets/subset/apply.py:121-122, datasets/merge_plates/apply.py:271-272 and datasets/concatenate/apply.py:438-439 each do `with swallow(f"stat {zi |
+| 18 | Medium | reported | The "did anything land?" check is skipped exactly when the filtered archive came out empty — "nothing to compare against" conflated with "nothing landed". | datasets/subset/apply.py:243 still reads `if fname and kept_in_names and fname not in kept_in_names:` — the `and kept_in_names` truthiness test skips the 'did anything land?' check exactly when the fi |
+| 67 | High | reported | `_remap._rename` discards `rewrite_member_field`'s `was_rewritten` flag, so a member failing the structural gate keeps dataset 2's original well token inside the destinat | datasets/merge_plates/apply.py:84-88 _remap._rename still returns _remap_well_field(...)[0] and drops the was_rewritten flag; rewrite_member_field (datasets/_common/member_names.py:119-131) returns th |
+| 68 | Medium | reported | In-place mode zips and unlinks the TIFs of **every** well-named subfolder under the source, including pre-existing ones; the preview is non-recursive and loose-TIF-only.  | datasets/import_loose/apply.py:217-235 _zip_well_folders still iterates every directory entry of the folder whose name canonicalises to a well and zips/unlinks its TIFs, with no distinction between fo |
+| 69 | Medium | reported | `row_matches` reads the `timepoint_hours` **column** and `member_matches` reads the **filename** token. A legacy CSV with a blank `timepoint_hours` loses every row while  | datasets/subset/subset_compute.py:215-225 row_matches still reads float(row['timepoint_hours']) and returns False on a blank/unparsable value, while member_matches (line 182-212) parses the filename's |
+| 70 | Medium | reported | Two containers canonicalising to the same well (`A1.zip` + `A01.zip`) collapse by plain dict overwrite in glob order. The `out_csvs` sibling documents its identical overw | datasets/_common/dataset_paths.py:187-205 in_containers still assigns containers[well] = zip_path in glob order with no collision detection or warning, so A1.zip and A01.zip collapse silently; the sib |
+| 73 | Low | reported | `replace_folder_with_archive`'s `resolve()` identity conflates symlink and hardlink aliases in both directions: an archived symlink is reported as `kept`, and a second na | util/zip_write.py:153-168 replace_folder_with_archive still builds archived_resolved from Path(p).resolve() and compares p.resolve() for each walked file; there is no st_ino/samefile handling and no m |
+| 74 | Medium | reported | `copy2`/`move` silently overwrite same-basename files under `--recursive`; the progress line counts sources, not survivors. | WellPlateZipper.py:186-195 folder_well still does place(f, os.path.join(well_dir, os.path.basename(f))) for shutil.copy2/shutil.move with no existence check, then prints f'{well}: {len(files)} files'  |
+| 76 | Low | reported | The `seg_fp` restamp is set only inside `with swallow(...)`; on a failed stat the entry silently keeps the **source** dataset's fingerprint and the carried-over override  | All three sites still assign inside the suppression: datasets/subset/apply.py:121-122, datasets/merge_plates/apply.py:271-272 and datasets/concatenate/apply.py:438-439 each do `with swallow(f"stat {zi |
 
 ### Group W3
 

@@ -848,28 +848,30 @@ def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay
     # (cell_display_rgb returns None rather than rendering the intensity image
     # the user did not ask for).
     note = "(no mask)" if binary_mode in ("mask", "threshold") else "(render failed)"
-    # cell_display_rgb resolves render / boundary / LUT / colormap so live and
-    # exported thumbnails always agree. A pre-rendered RGB that isn't NUC+SEG goes
-    # straight to the overlay thumbnailer (cell_display_rgb only treats NUC+SEG as
-    # overlay).
-    if getattr(arr, "ndim", 2) >= 3 and not _is_nuc_seg(chan):
-        cropped = crop_tool.apply_to_array(arr) if crop_tool else arr
-        lo, hi = _parse_lut(ctx, r, chan)
-        pix = make_overlay_thumb(cropped, sz, sz, lo, hi)
-    else:
-        rgb = cell_display_rgb(ctx, cache, cell, r, crop_tool, arr)
-        if rgb is not None and chrome_kwargs:
-            rgb = draw_cell_chrome(rgb, **chrome_kwargs)
-        # After the chrome, so the mark is not painted over by a scale bar or an
-        # identity label sharing the cell.
-        rgb = mark_uncorrected(ctx, cell, rgb)
-        # Pin the window to the full 0..255 byte range (as the overlay branch
-        # above does). ``cell_display_rgb`` has already applied the channel's LUT
-        # and colormap, so letting make_overlay_thumb auto-fit its own min/max
-        # would re-stretch a finished image — visibly so on a colormap whose ends
-        # aren't black and white (viridis bottoms out around 68, tops out at 253),
-        # where the live thumbnail then disagreed with the exported cell.
-        pix = make_overlay_thumb(rgb, sz, sz, 0.0, 255.0) if rgb is not None else None
+    # EVERY non-overlay cell composes through ``cell_display_rgb``, which is what
+    # makes the live thumbnail and the exported figure the same picture — the
+    # export path (``export._build_export_figure``) has exactly this shape.
+    #
+    # A pre-rendered RGB that is not NUC+SEG used to take a shortcut here,
+    # straight to the thumbnailer with the row's LUT window. It did not need to:
+    # ``_compose_image_table_rgb`` already passes through any ``ndim >= 3`` input,
+    # NUC+SEG or not. What the shortcut did do was skip the two marks the cell is
+    # supposed to carry — the scale bar / identity label, and the uncorrected
+    # badge — and apply a different contrast from the export's, so one cell in a
+    # grid silently lost its chrome and disagreed with its own exported copy.
+    rgb = cell_display_rgb(ctx, cache, cell, r, crop_tool, arr)
+    if rgb is not None and chrome_kwargs:
+        rgb = draw_cell_chrome(rgb, **chrome_kwargs)
+    # After the chrome, so the mark is not painted over by a scale bar or an
+    # identity label sharing the cell.
+    rgb = mark_uncorrected(ctx, cell, rgb)
+    # Pin the window to the full 0..255 byte range (as the overlay branch above
+    # does). ``cell_display_rgb`` has already applied the channel's LUT and
+    # colormap, so letting make_overlay_thumb auto-fit its own min/max would
+    # re-stretch a finished image — visibly so on a colormap whose ends aren't
+    # black and white (viridis bottoms out around 68, tops out at 253), where the
+    # live thumbnail then disagreed with the exported cell.
+    pix = make_overlay_thumb(rgb, sz, sz, 0.0, 255.0) if rgb is not None else None
     return pix, arr, True, note
 
 

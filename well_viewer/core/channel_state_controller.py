@@ -94,6 +94,20 @@ def recalculate_threshold(ctx) -> None:
         _RECALC_IN_PROGRESS.discard(id(ctx))
 
 
+def reset_threshold_range(channel_state) -> None:
+    """Return the threshold slider range to ``ChannelState``'s own defaults.
+
+    Read off a freshly constructed slice rather than written as literals, so
+    the reset cannot drift from the declared defaults the way a hand-copied
+    pair would. Public because a dataset swap wants the same guarantee from
+    outside a recompute: the range names intensities, so it is per-dataset
+    state, and "the value the previous plate had" is never a valid answer for
+    the plate now open.
+    """
+    fresh = type(channel_state)()
+    channel_state.apply_range(fresh.threshold_min, fresh.threshold_max)
+
+
 def _recalculate_threshold(ctx) -> None:
     """The body of :func:`recalculate_threshold`, one re-entrancy check in."""
     from well_viewer.data.data_loading import get_rows
@@ -185,6 +199,19 @@ def _recalculate_threshold(ctx) -> None:
         ]
         all_vals = np.concatenate(chunks) if chunks else np.empty(0)
         if all_vals.size == 0:
+            # No values for this column anywhere in the loaded dataset. The
+            # range is *undefined*, which is not the same as "unchanged":
+            # returning here left ``threshold_min`` / ``threshold_max`` holding
+            # the previous dataset's numbers, because ``begin_load`` clears the
+            # per-column cache and nothing else. The sliders then spanned a
+            # range belonging to a plate that is no longer open, and every
+            # threshold read off them was silently wrong.
+            reset_threshold_range(channel_state)
+            _logger.info(
+                "No %s values in this dataset; the threshold range is back to "
+                "its default (%g, %g) rather than the previous dataset's.",
+                val_col, channel_state.threshold_min, channel_state.threshold_max,
+            )
             return
         lo, hi = float(all_vals.min()), float(all_vals.max())
         if hi <= lo:

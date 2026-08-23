@@ -26,6 +26,20 @@ from well_viewer.core.safe import swallowed
 from well_viewer.features.home.groups.controller import rep_refresh_map
 
 
+def _plate_order(well: str) -> tuple:
+    """Plate-reading sort key for a well id, total over any string.
+
+    ``parse_rc`` answers ``(None, None)`` for a token it cannot read, and a list
+    holding both that and a real ``("A", "01")`` cannot be sorted — comparing
+    ``None`` with ``str`` raises. That never came up while the sorted list was
+    filtered to loaded wells; it can now that a group's wells from outside this
+    dataset ride along, and a group edit is not the place to discover it.
+    """
+    from well_viewer.domain.viewer_state import parse_rc
+    row, col = parse_rc(well)
+    return (row is None, row or "", col or "", well)
+
+
 def build_replicate_panel(ctx, parent: QWidget) -> None:
     """Sample-Definitions LEFT sidebar: the plate map only.
 
@@ -58,7 +72,6 @@ def build_replicate_panel(ctx, parent: QWidget) -> None:
 
     def _commit_plate_to_current(*_a) -> None:
         from well_viewer.core.selection_controller import sel_by_id, sel_set_composition
-        from well_viewer.domain.viewer_state import parse_rc
         # Well-membership edits should only land while the user is on Home's
         # GROUPS tab. From Overview / Cell Gating / Well Labels / Ratios /
         # Pipeline Info, this plate's selectionDragFinished can still fire
@@ -79,13 +92,21 @@ def build_replicate_panel(ctx, parent: QWidget) -> None:
             return
         well_paths = ctx.state.dataset.well_paths
         new = sorted((w for w in plate.selectedWellIds() if w in well_paths),
-                     key=parse_rc)
+                     key=_plate_order)
         old = sorted((w for w in (sel.get("wells") or []) if w in well_paths),
-                     key=parse_rc)
+                     key=_plate_order)
         if new == old:
             return
+        # A group can name wells this dataset does not hold — a subset load, a
+        # plate re-exported with fewer wells, a definitions file shared between
+        # runs. The plate cannot show them, so a membership rebuilt from the
+        # plate alone deletes them, and the autosave that follows makes the
+        # deletion permanent in the only place they were written down. Only the
+        # wells the user could actually see are re-decided here; the rest are
+        # carried through untouched.
+        absent = [w for w in (sel.get("wells") or []) if w not in well_paths]
         # sel_set_composition enforces well-exclusivity (the current group wins)
         # and runs ctx.coordinator.rebuild_all(), which re-pushes the plate via rep_refresh_map.
-        sel_set_composition(ctx, sid, new)
+        sel_set_composition(ctx, sid, sorted(new + absent, key=_plate_order))
     # selectionDragFinished fires once per click *and* once at the end of a drag.
     plate.selectionDragFinished.connect(_commit_plate_to_current)

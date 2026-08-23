@@ -337,7 +337,7 @@ def _binary_gate_columns(ctx, channel=None):
 
 def review_build_threshold_map(
     ctx, mask_arr, well: str, fov: str, tp: str, channel=None,
-) -> dict[int, bool]:
+) -> dict[int, bool] | None:
     """Build {nid: above_threshold} for cells in the displayed FOV/timepoint.
 
     Mirrors the bar plot's gating logic: a cell is "above threshold" only when it
@@ -347,6 +347,17 @@ def review_build_threshold_map(
     the Segmentation tab is actually showing — not the global plotting channel
     (``active_val_col``), which can differ and would otherwise binarise the
     wrong channel.
+
+    Returns ``None`` when the threshold could not be evaluated for this frame at
+    all: no rows for the well, no resolvable row keys, or rows that do not cover
+    the displayed ``(fov, tp)``. That is a different fact from an all-``False``
+    map, and it used to be reported as one — every renderer paints an all-``False``
+    map as a black silhouette, which is also the correct picture for a field where
+    genuinely nothing passed. So a well whose CSV simply does not reach this field
+    drew the same cell as a measured, empty one, and nothing anywhere said which
+    had happened. ``None`` lets the caller label it instead; the all-``False``
+    dict now means only what it says, that the cells were measured and none
+    passed.
     """
     from well_viewer.core.channel_state_controller import get_all_fluor_gates
     center = _np.asarray(mask_arr)
@@ -360,14 +371,27 @@ def review_build_threshold_map(
     }
     df = get_rows(ctx, well)
     if df is None or df.empty:
-        return above_by_nid
+        _logger.info(
+            "[binary-mask] well=%s fov=%s tp=%s | no rows for this well — the "
+            "threshold cannot be evaluated, reporting unmeasured", well, fov, tp,
+        )
+        return None
     keys = review_row_keys_series(ctx, df)
     if keys is None:
-        return above_by_nid
+        _logger.info(
+            "[binary-mask] well=%s fov=%s tp=%s | row keys unresolvable — the "
+            "threshold cannot be evaluated, reporting unmeasured", well, fov, tp,
+        )
+        return None
     sel = keys.map(lambda k: k[0] == fov and k[1] == tp and k[2] != "").fillna(False).to_numpy()
     sub = df.loc[sel]
     if sub.empty:
-        return above_by_nid
+        _logger.info(
+            "[binary-mask] well=%s fov=%s tp=%s | %d row(s) for the well, none "
+            "covering this field — the threshold cannot be evaluated, reporting "
+            "unmeasured", well, fov, tp, len(df),
+        )
+        return None
 
     mask = df_included_mask(sub).to_numpy(copy=True)
     n_incl_qc = int(mask.sum())

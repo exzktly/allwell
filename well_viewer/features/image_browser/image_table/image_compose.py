@@ -243,7 +243,7 @@ def _export_binary_mask(ctx, cache, well, chan, tp, fov, binary_mode, crop_tool)
             gate_channel = chan_l if chan_l in fluor else None
             above_by_nid = review_build_threshold_map(
                 ctx, mask_arr, well, norm_fov, norm_tp, channel=gate_channel
-            ) or {}
+            )
         except Exception:
             # ``{}`` here rendered an all-black silhouette — the *same* picture
             # a cell with genuinely no nuclei above threshold produces, which
@@ -255,6 +255,19 @@ def _export_binary_mask(ctx, cache, well, chan, tp, fov, binary_mode, crop_tool)
                 "image_table: could not build the threshold map for well=%r "
                 "channel=%r tp=%r fov=%r — the cell is reported unrenderable "
                 "rather than drawn as an empty mask", well, chan, tp, fov,
+            )
+            return None
+        if above_by_nid is None:
+            # The threshold could not be evaluated for this field — no rows for
+            # the well, or none covering this (fov, tp). Drawing it would produce
+            # the all-black silhouette that means "measured, nothing passed", so
+            # the cell is reported unrenderable and the caller labels it, exactly
+            # as for the exception above. ``or {}`` used to stand here and made
+            # the two cases the same picture.
+            logger.info(
+                "image_table: no threshold measurement covers well=%r channel=%r "
+                "tp=%r fov=%r — the cell is reported unrenderable rather than "
+                "drawn as an empty mask", well, chan, tp, fov,
             )
             return None
         m = _np.asarray(mask_arr)

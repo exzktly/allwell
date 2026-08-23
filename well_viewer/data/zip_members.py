@@ -151,6 +151,58 @@ def read_member_bytes(
             return None
 
 
+class ScanResult(dict):
+    """A ``(fov, tp) -> ImgRef`` inventory that knows whether its scan finished.
+
+    ``scan_zip_members`` and its folder sibling must not lose a whole archive to
+    one unreadable member, so a mid-scan failure returns the entries gathered so
+    far. That is the right behaviour and the wrong *shape*: a short dict of real
+    images is byte-for-byte the same object as a complete inventory of a well
+    that genuinely holds that many frames, and Review draws the two identically —
+    fewer timepoints, no gap, nothing to click on. The log said so and nothing
+    else could.
+
+    So the inventory carries its own provenance. ``partial`` is True when the
+    scan stopped early, and ``reason`` says why. A plain ``dict`` is a valid
+    substitute everywhere this is consumed (``.items()``, ``in``, ``len``), so no
+    caller has to change to keep working — only the ones that want to say
+    "incomplete" out loud have to ask.
+
+    One sharp edge: ``dict(result)`` produces a plain dict and drops the flag.
+    Copy with :meth:`derive` instead wherever the answer is passed on.
+    """
+
+    #: True when the scan did not reach the end of the archive / folder.
+    partial: bool = False
+
+    #: Human-readable cause, empty when :attr:`partial` is False.
+    reason: str = ""
+
+    def mark_partial(self, reason: str) -> None:
+        """Record that this inventory stops short of the source it describes."""
+        self.partial = True
+        self.reason = str(reason)
+
+    def derive(self, items) -> "ScanResult":
+        """A new :class:`ScanResult` over *items*, carrying this one's provenance."""
+        out = ScanResult(items)
+        out.partial = self.partial
+        out.reason = self.reason
+        return out
+
+
+def merge_partial(target: "ScanResult", *sources) -> None:
+    """Carry the partial flag of every source in *sources* onto *target*.
+
+    A well is assembled from several scans (plain zip, ``_out`` zip, folders), and
+    an inventory built from one complete scan and one truncated scan is truncated.
+    """
+    reasons = [s.reason for s in sources
+               if isinstance(s, ScanResult) and s.partial and s.reason]
+    if any(isinstance(s, ScanResult) and s.partial for s in sources):
+        target.mark_partial("; ".join(reasons) or "an earlier scan stopped short")
+
+
 def scan_zip_members(
     *,
     zip_path: Path,
@@ -163,17 +215,23 @@ def scan_zip_members(
     fov_tp_extractor=None,
     pipeline_info: dict | None = None,
 ) -> tuple[dict[tuple[str, str], object], dict[tuple[str, str], object], dict[tuple[str, str], object], dict[tuple[str, str], object], dict[tuple[str, str], object]]:
-    fluor: dict[tuple[str, str], object] = {}
-    overlay: dict[tuple[str, str], object] = {}
-    mask: dict[tuple[str, str], object] = {}
-    tophat: dict[tuple[str, str], object] = {}
-    smfish: dict[tuple[str, str], object] = {}
+    fluor: ScanResult = ScanResult()
+    overlay: ScanResult = ScanResult()
+    mask: ScanResult = ScanResult()
+    tophat: ScanResult = ScanResult()
+    smfish: ScanResult = ScanResult()
+    every = (fluor, overlay, mask, tophat, smfish)
     from well_viewer.data.zipfile_cache import with_zipfile
     try:
         if member_prefix:
             raw = read_member_bytes(zip_path=zip_path, member=member_prefix, logger=logger)
             if raw is None:
                 logger.warning("Cannot read nested zip member %r from %s", member_prefix, zip_path)
+                # Nothing was scanned, which is not the same as an archive that
+                # holds no images — say so on the result, not only in the log.
+                for _d in every:
+                    _d.mark_partial(
+                        f"nested zip member {member_prefix!r} in {zip_path} could not be read")
                 return fluor, overlay, mask, tophat, smfish
             nested_handle = zipfile.ZipFile(io.BytesIO(raw), "r")
             scan_ctx = _NullContext(nested_handle)
@@ -182,6 +240,8 @@ def scan_zip_members(
 
         with scan_ctx as zf_src:
             if zf_src is None:
+                for _d in every:
+                    _d.mark_partial(f"{zip_path} could not be opened")
                 return fluor, overlay, mask, tophat, smfish
             logger.info("Scanning %s%s  (%d members)", zip_path.name, f" >> {member_prefix}" if member_prefix else "", len(zf_src.infolist()))
             for info in zf_src.infolist():
@@ -223,10 +283,13 @@ def scan_zip_members(
     except Exception as exc:
         # The dicts built so far are still returned — dropping them would lose
         # every image in the archive over one unreadable member — but they are
-        # a *partial* inventory, and the caller cannot tell that from a
-        # complete one. The "Result:" line above never printed for this
-        # archive, so say the counts here, with the reason, rather than leaving
-        # the log looking as though the scan simply had not run.
+        # a *partial* inventory. The flag is what makes that legible to the
+        # caller: a short-but-complete inventory and a truncated one are the same
+        # dict otherwise, and Review renders both as a well with fewer frames.
+        # The "Result:" line above never printed for this archive, so say the
+        # counts here too, with the reason.
+        for _d in every:
+            _d.mark_partial(f"scanning {zip_path} failed: {exc}")
         logger.warning(
             "Failed scanning %s: %s. Partial inventory returned: "
             "%d fluor, %d tophat, %d smfish, %d overlay(s), %d mask(s) — "

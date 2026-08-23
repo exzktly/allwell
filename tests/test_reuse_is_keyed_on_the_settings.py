@@ -40,7 +40,7 @@ from pipeline.settings_record import (
     well_settings_allow_reuse,
 )
 from pipeline.well_skip import output_exists_for_well
-from util.settings_digest import KEYED_ON, settings_digest
+from util.settings_digest import KEYED_ON, NOT_KEYED_ON, settings_digest
 
 BASE = {
     "segmentation_method": "stardist_nuclei",
@@ -51,8 +51,11 @@ BASE = {
     "filename_sep": "_",
 }
 
-#: A value that differs from BASE's for each key, so "mutate one alone" is a
-#: real change rather than a no-op the test cannot tell from a pass.
+#: A value that differs from the parser's default for each key, so "mutate one
+#: alone" is a real change rather than a no-op the test cannot tell from a pass.
+#: Built against `build_parser()`'s own destinations — the first version of this
+#: file invented six key names that no option uses, so every one of them passed
+#: here while contributing nothing to a real run's digest.
 OTHER = {
     "segmentation_method": "cellpose",
     "nuclear_token": "DAPI",
@@ -61,19 +64,35 @@ OTHER = {
     "min_nucleus_area_px": 200,
     "stardist_prob_thresh": 0.9,
     "stardist_nms_thresh": 0.7,
+    "stardist_tile_px": 512,
+    "cellpose_model": "nuclei",
     "cellpose_diameter": 30.0,
-    "cellpose_flow_thresh": 0.8,
-    "cellpose_cellprob": -1.0,
+    "cellpose_flow_threshold": 0.8,
+    "cellpose_cellprob_threshold": -1.0,
+    "cellpose_nuclei_channel": "DAPI",
     "fluor_tokens": ["GFP", "RFP"],
     "smfish_tokens": ["GFP"],
     "shape_features": ["area", "circularity"],
-    "qc_options": {"qc_min_area": 50},
+    "qc_remove_debris": True,
+    "qc_min_area": 50.0,
+    "qc_max_area": 5000.0,
+    "qc_min_solidity": 0.8,
     "background": "fft",
-    "tophat_radius": 40,
-    "fft_radius": 12,
-    "flatfield": True,
-    "empty_well": True,
+    "tophat_radius_nir": 40,
+    "tophat_radius_fluor": 40,
+    "no_tophat_nir": True,
+    "no_tophat_fluor": True,
+    "fft_small_nir": 12,
+    "fft_small_fluor": 12,
+    "mesh_ratio": 6.0,
+    "mesh_sigma": 12.0,
+    "flatfield": "per_channel",
+    "background_dir": "/data/blank",
     "background_well": "H12",
+    "no_save_tophat": True,
+    "no_auto_threshold": True,
+    "pos_control_well": "A01",
+    "neg_control_well": "H12",
     "filename_schema": "experiment:well:fov:timepoint:channel",
     "filename_sep": "-",
 }
@@ -84,6 +103,51 @@ def _well_on_disk(out: Path, well: str = "A01") -> None:
     (out / f"measurements_{well}.csv").write_text("well,fov\nA01,F001\n")
     with zipfile.ZipFile(out / f"{well}_out.zip", "w") as zf:
         zf.writestr("x_labels.tif", b"x")
+
+
+def _parser_dests() -> set[str]:
+    import process_microscopy as pm
+    return set(vars(pm.build_parser().parse_args(["--input_dir", "/tmp/in"])))
+
+
+def test_every_keyed_option_is_an_option_the_pipeline_actually_has():
+    """The guard that was missing, and the defect it would have caught.
+
+    The one caller is `settings_digest(vars(args))` on the pipeline's argparse
+    namespace, so a key spelled anything other than a parser *destination*
+    contributes nothing at all — silently. The first roster named six that do
+    not exist (`cellpose_flow_thresh`, `cellpose_cellprob`, `qc_options`,
+    `tophat_radius`, `fft_radius`, `empty_well`), so changing the Cellpose flow
+    threshold on a plate left the digest unmoved, every well answered "up to
+    date", and the old numbers were kept under a sidecar advertising the new
+    value — the exact defect this whole record exists to prevent.
+    """
+    unknown = sorted(set(KEYED_ON) - _parser_dests())
+    assert not unknown, (
+        "these KEYED_ON entries are not parser destinations, so they never "
+        f"reach the digest and the options they name are not keyed: {unknown}")
+
+
+def test_no_pipeline_option_is_left_unclassified():
+    """Adding an option must be a decision, not an omission.
+
+    `KEYED_ON` and `NOT_KEYED_ON` have to partition the parser exactly. A new
+    option that changes the numbers and is simply forgotten reintroduces the
+    defect one option at a time, and nothing else in the suite can see it.
+    """
+    dests = _parser_dests()
+    unclassified = sorted(dests - set(KEYED_ON) - set(NOT_KEYED_ON))
+    assert not unclassified, (
+        "these pipeline options are in neither roster, so nobody has said "
+        "whether changing them invalidates a prior result. Put each in "
+        f"KEYED_ON or NOT_KEYED_ON with its reason: {unclassified}")
+
+    stale = sorted((set(KEYED_ON) | set(NOT_KEYED_ON)) - dests)
+    assert not stale, (
+        f"these roster entries name options the parser no longer has: {stale}")
+
+    both = sorted(set(KEYED_ON) & set(NOT_KEYED_ON))
+    assert not both, f"claimed as keyed and not keyed at once: {both}"
 
 
 def test_the_roster_covers_every_key_the_digest_reads():

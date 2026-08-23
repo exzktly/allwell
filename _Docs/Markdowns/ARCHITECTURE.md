@@ -154,7 +154,9 @@ allwell/
 │   ├── stardist.py             ← StarDist segmenters + StarDistParams + per-worker model state (TF lazy)
 │   ├── ome_explode.py          ← de-interleave a packed OME-TIFF into per-well .zip
 │   │                              archives (Z max-projected; positions → wells via §OME)
+│   ├── fov_checkpoint.py      ← one well's staging dir, and whose run owns it
 │   ├── incremental_keys.py     ← what an incremental run considers already done
+│   ├── settings_record.py     ← which configuration produced each well's output
 │   ├── completeness.py         ← the one definition of "is this well complete"
 │   │                              (shared with Datasets → Validate) + the
 │   │                              end-of-run check that records run_check
@@ -4107,6 +4109,7 @@ Small dependency-light service modules used by `analyze_tab.py`:
 | `env.py` | `validate_env` — a pure startup check of the `ALLWELL_*` overrides (`ALLWELL_SCRATCH_DIR` / `ALLWELL_REMOTES` / `ALLWELL_SEG_DEBUG`), returning warnings for any that are set but unusable so a mistyped path is not a silent fallback. |
 | `ssh_key_setup.py` | Ed25519 keypair generation at `~/.ssh/allwell_<alias>` + the `ssh-copy-id` walkthrough behind the remote-host wizard. |
 | `subprocess_kill.py` | Kills a spawned pipeline's whole process group / session (what Stop uses). |
+| *(pipeline)* `settings_record.py` + `util/settings_digest.py` | Which configuration produced each well's output, recorded beside it. `KEYED_ON` is the roster of what invalidates a prior result — the segmenter and its thresholds, the channels quantified, the corrections applied, the filename schema — with the reason each entry is in it; `settings_digest` hashes whatever of them a run states. Both of the pipeline's reuse predicates consult it: the plain re-run skip (`well_skip.output_exists_for_well`) and the incremental done-set. Without it, re-running a plate with a different segmenter was answered "up to date" while `write_pipeline_info` rewrote the sidecar to advertise the new configuration, so the plate described a setup that had produced none of the numbers in it. **A well with no recorded digest is accepted**, so introducing the check forces nobody to reprocess anything; the cost is that a plate written before the record existed keeps the old behaviour until its next forced run. The digest is deliberately blind to the paths, to `--force`/`--incremental` and to anything about the machine, so a plate computed locally and on a worker host produces the same key. Registered in `tests/test_reuse_is_keyed_completely.py` against `KEYED_ON` by reference rather than restated. |
 | `run_journal.py` | The record of what a run intended, where it sent the work, and what became of each well — opened before the first well is processed, amended as the run goes, closed with an outcome, so a record still open at the next start-up is a run the app was killed during (§6.5). Stdlib-only. Writes `<output_dir>/.aw_journal/`: `run.json` for the run and one `wells/<WELL>.json` per well, `pipeline/run_report.py`'s one-atomic-file-per-unit shape so the orchestrator, the worker pool and the Fetcher thread all record without a lock. **Evidence, never authority** — `pipeline.completeness` stays the answer to "is this well complete" and the artefacts stay the done-set, so a journal that goes missing costs answers rather than making a good dataset look empty. It drives exactly one decision, the remote re-attach above. A well record can name the run it belongs to: `open_run` returns a token, and a writer that hands it back cannot file its progress under a previous run's surviving record — which is what a run whose own `open_run` failed would otherwise do. The local path passes it (`analyze_progress._journal_well_stage`); the three remote writers do not, so they are trusted writes and that protection does not extend to them — while a run's *own* completion lines, which are parsed on the GUI thread and therefore arrive after the worker thread closed the record, are still accepted. Asking the cheaper question instead, "is a run open here", refused the tail of every plate: a 24-well run recorded four wells and the pre-run readout said so. `tests/test_a_run_end_to_end_records_every_well.py` drives a real run through a real drain and is the only test on either side of this record that does. `WELL_STATES` is the single roster of what a run can have done to a well, guarded by `tests/test_no_second_journal_vocabulary.py` — which walks dict keys as well as tuples, lists and sets, because a states-to-words table is presentation only for as long as the module holding it also consults the canonical roster; one that does not is holding its only copy, and anything iterating it drops every state it fails to spell. |
 
 These modules deliberately have no Qt imports beyond what the Analyze tab
@@ -5035,7 +5038,10 @@ Analyze run actually finished, versus what `pipeline_info.json` — written
 *before* any image work, per §6.2 — claims. A crashed or partial run leaves
 the sidecar advertising the full plate while `out/` holds a fraction, and a
 plain re-run then treats a partially-done well as complete
-(`output_exists_for_well`), so the FOV-level gap is otherwise invisible.
+(`output_exists_for_well` — which now also requires the run's settings digest
+to match the one recorded beside the well, but a *partial* well still reads as
+complete, because that predicate asks whether the outputs exist and not how
+much of the input they cover), so the FOV-level gap is otherwise invisible.
 
 **The rule it applies is not its own.** `pipeline/completeness.py` holds the
 single definition of a complete well — the CSV ∪ archive union, the

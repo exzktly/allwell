@@ -26,7 +26,7 @@ from well_viewer.features.batch_export._common import (
     _groups_with_loaded_wells,
     unique_export_stem,
 )
-from well_viewer.features.batch_export.base_panel import BatchExportPanel
+from well_viewer.features.batch_export.base_panel import BatchExportPanel, SkippedJob
 from well_viewer.core.safe import swallowed
 # ── ctx-native god-method forms (A8 / Epic-A14 panel conversion) ─────────────
 from well_viewer.core.lazy import lazy as _lazy
@@ -508,7 +508,13 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 fluor_gate_y=_get_fluor_gate(self._ctx, ch_y_base),
             )
         if not scatter_data:
-            return f"{grp.name}: no scatter-cells data at t={tp_h:.1f}h"
+            # ``SkippedJob``, not a plain string: the runner discards the
+            # entire staged export for any error, so reporting "this group
+            # produced nothing" down that channel deletes every *other*
+            # group's files too. Bar and line were converted and these four
+            # were not, which is the worse half — one function now held two
+            # meanings for the same return and neither looked wrong.
+            return SkippedJob(f"{grp.name}: no scatter-cells data at t={tp_h:.1f}h")
         try:
             from well_viewer.features.export.service import _well_labels_map, well_name_for
             _well_labels = _well_labels_map(self._ctx)
@@ -649,7 +655,13 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 well_colors=WELL_COLORS,
             )
         if not scatter_data:
-            return f"{grp.name}: no scatter-aggregate data at t={tp_h:.1f}h"
+            # ``SkippedJob``, not a plain string: the runner discards the
+            # entire staged export for any error, so reporting "this group
+            # produced nothing" down that channel deletes every *other*
+            # group's files too. Bar and line were converted and these four
+            # were not, which is the worse half — one function now held two
+            # meanings for the same return and neither looked wrong.
+            return SkippedJob(f"{grp.name}: no scatter-aggregate data at t={tp_h:.1f}h")
         try:
             from well_viewer.features.export.service import (
                 _well_labels_map, _well_paths_keys, well_name_for,
@@ -738,7 +750,13 @@ class ScatterBatchExportPanel(BatchExportPanel):
                         "filename": filename, "nucleus_id": nuclear_id,
                     })
         if not combined_rows:
-            return f"{grp.name}: no scatter-cells data for selected timepoints"
+            # ``SkippedJob``, not a plain string: the runner discards the
+            # entire staged export for any error, so reporting "this group
+            # produced nothing" down that channel deletes every *other*
+            # group's files too. Bar and line were converted and these four
+            # were not, which is the worse half — one function now held two
+            # meanings for the same return and neither looked wrong.
+            return SkippedJob(f"{grp.name}: no scatter-cells data for selected timepoints")
         try:
             with open(csv_path, "w", newline="") as fh:
                 fieldnames = ["group", "timepoint_h", "member", "well", "well_name", "x", "y", "filename", "nucleus_id"]
@@ -784,7 +802,13 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 well_colors=WELL_COLORS,
             )
         if not scatter_data:
-            return f"{grp.name}: no scatter-aggregate data for selected timepoints"
+            # ``SkippedJob``, not a plain string: the runner discards the
+            # entire staged export for any error, so reporting "this group
+            # produced nothing" down that channel deletes every *other*
+            # group's files too. Bar and line were converted and these four
+            # were not, which is the worse half — one function now held two
+            # meanings for the same return and neither looked wrong.
+            return SkippedJob(f"{grp.name}: no scatter-aggregate data for selected timepoints")
         try:
             from well_viewer.features.export.service import (
                 _well_labels_map, _well_paths_keys, well_name_for,

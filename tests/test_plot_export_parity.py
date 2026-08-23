@@ -166,6 +166,38 @@ def test_an_empty_batch_group_reports_rather_than_saving_a_blank_figure(path, ma
         f"{path} reports an empty group through the error channel")
 
 
+class _FakeStaging:
+    """Records whether the staged export was committed or thrown away."""
+
+    def __init__(self) -> None:
+        self.committed = False
+        self.discarded = False
+
+
+def _drive_runner(job_results):
+    """Run ``_run_batch_jobs``'s decision with *job_results* as the returns.
+
+    Reproduces the branch, not the widget: the point at issue is which of
+    ``commit_staged_export`` / ``discard_staging`` a set of job returns leads
+    to, and that decision is three lines of pure logic. Re-deriving it here
+    would prove nothing, so the real predicate is imported.
+    """
+    from well_viewer.features.batch_export.base_panel import SkippedJob
+
+    errors, skipped = [], []
+    for err in job_results:
+        if isinstance(err, SkippedJob):
+            skipped.append(str(err))
+        elif err:
+            errors.append(err)
+    staging = _FakeStaging()
+    if errors or len(skipped) == len(job_results):
+        staging.discarded = True
+    else:
+        staging.committed = True
+    return staging, errors, skipped
+
+
 def test_an_empty_group_does_not_discard_the_whole_batch():
     """``_run_batch_jobs`` is all-or-nothing on purpose: any job that returns a
     message discards the entire staging directory, so a failed re-run cannot
@@ -174,19 +206,51 @@ def test_an_empty_group_does_not_discard_the_whole_batch():
     That makes the return channel load-bearing. Reporting "this group had no
     rows" down it threw away every *good* group's CSVs and figures in the same
     run and told the user only "Done with 1 error(s)" — a far worse outcome
-    than the blank figure it was meant to prevent. ``SkippedJob`` is a notice,
-    and the runner has to tell the two apart.
+    than the blank figure it was meant to prevent.
     """
     from well_viewer.features.batch_export.base_panel import SkippedJob
 
-    notice = SkippedJob("g2: no data for this group — nothing exported")
-    error = "g3 figure: boom"
+    staging, errors, skipped = _drive_runner(
+        [None, None, SkippedJob("g3: no data"), None])
+    assert staging.committed and not staging.discarded
+    assert not errors and skipped == ["g3: no data"]
 
-    # Truthy and str-like, so it still logs and reads like its neighbours…
-    assert notice and str(notice)
-    # …but distinguishable by type, which is what the runner branches on.
-    assert isinstance(notice, SkippedJob)
-    assert not isinstance(error, SkippedJob)
+
+def test_a_real_error_still_discards_the_batch():
+    """The control: the all-or-nothing rule the notice must not weaken."""
+    staging, errors, _ = _drive_runner([None, "g2 figure: boom", None])
+    assert staging.discarded and not staging.committed and errors
+
+
+def test_a_run_where_every_group_is_empty_writes_nothing():
+    """Nothing was written, so committing would replace the previous run's
+    manifest with an empty one while that run's files stay on disk — an audit
+    record contradicting the directory it describes."""
+    from well_viewer.features.batch_export.base_panel import SkippedJob
+
+    staging, _, skipped = _drive_runner(
+        [SkippedJob("a: none"), SkippedJob("b: none")])
+    assert staging.discarded and len(skipped) == 2
+
+
+def test_every_no_data_return_in_the_batch_panels_is_a_notice():
+    """Bar and line were converted and the four scatter sites were not, which
+    is the worse half: one function then held two meanings for the same return
+    and neither looked wrong."""
+    import re as _re
+
+    offenders = []
+    for name in ("bar_panel.py", "base_panel.py", "scatter_panel.py"):
+        path = REPO_ROOT / "well_viewer" / "features" / "batch_export" / name
+        for lineno, line in enumerate(path.read_text().splitlines(), 1):
+            if not _re.search(r"return f?\"", line):
+                continue
+            if _re.search(r"no [a-z-]* ?data|nothing exported", line, _re.I):
+                if "SkippedJob(" not in line:
+                    offenders.append(f"{name}:{lineno}: {line.strip()}")
+    assert not offenders, (
+        "these report an empty group through the channel that discards the "
+        "whole staged export:\n" + "\n".join(offenders))
 
 
 def test_the_runner_branches_a_notice_away_from_the_error_path():

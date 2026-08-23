@@ -252,7 +252,7 @@ def plan_facets(ctx, cells) -> FacetPlan | None:
 
     # Column axis (top): inner value per column, outer group spanning its
     # columns — but only when the strip is true of every row. See
-    # ``_column_values_agree``.
+    # ``_disagreeing_columns``.
     stale_cols = _disagreeing_columns(cells, col_dims, col_vals) if tl >= 1 else set()
     if stale_cols:
         _logger.warning(
@@ -266,8 +266,15 @@ def plan_facets(ctx, cells) -> FacetPlan | None:
                 continue
             plan.top.append((_fmt(ctx, col_dims[-1], col_vals[c][-1]),
                              tl - 1, grid_col_of[c], 1, 1, False))
-    if tl >= 2 and not stale_cols:
+    if tl >= 2:
+        # Per span, not per grid — the same correction the inner labels needed.
+        # Dropping every group prefix because one column disagrees reproduces
+        # the all-or-nothing defect one level up, and a group whose columns all
+        # agree is describable whatever its neighbours do.
         for prefix, gs, ge in _group_spans(col_vals, grid_col_of):
+            span_cols = {c for c in range(ncols) if gs <= grid_col_of[c] <= ge}
+            if span_cols & stale_cols:
+                continue
             plan.top.append((_fmt(ctx, col_dims[0], prefix[0]),
                              0, gs, 1, ge - gs + 1, True))
 

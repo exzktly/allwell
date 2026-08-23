@@ -1645,10 +1645,15 @@ class BatchExportPanel(QWidget):
                 elif err:
                     errors.append(err)
             self._prog_bar.setValue(len(jobs))
-            if not errors:
-                commit_staged_export(staging, out_dir)
-            else:
+            if errors or len(skipped) == len(jobs):
+                # Nothing was written when every group was skipped, and
+                # committing then replaces the previous run's manifest with
+                # ``{"files": [], "count": 0}`` while that run's actual files
+                # stay on disk — an audit record contradicting the directory it
+                # describes.
                 discard_staging(staging)
+            else:
+                commit_staged_export(staging, out_dir)
         except BaseException:
             # Never leave a half-committed export or a stray temp dir behind.
             discard_staging(staging)
@@ -1657,8 +1662,16 @@ class BatchExportPanel(QWidget):
             self._run_btn.setEnabled(True)
             self._prog_bar.setVisible(False)
 
+        for note in skipped:
+            # Logged before the error branch returns: a run that hit both a
+            # skip and a real failure used to report only the failure, so the
+            # groups that produced nothing went unmentioned in the one place
+            # the user is told to look.
+            _logger.info("Batch export: %s", note)
         if errors:
-            self._prog_lbl.setText(f"Done with {len(errors)} error(s). See log.")
+            note = (f" · {len(skipped)} with no data" if skipped else "")
+            self._prog_lbl.setText(
+                f"Done with {len(errors)} error(s){note}. See log.")
             self._prog_lbl.setStyleSheet(f"color: {get_color('CLR_DANGER')};")
             for err in errors:
                 _logger.error("Batch export error: %s", err)
@@ -1672,8 +1685,6 @@ class BatchExportPanel(QWidget):
             self._prog_lbl.setText(
                 f"✓ {done} group(s) → {out_dir.name}/ · {len(skipped)} with no data")
             self._prog_lbl.setStyleSheet(f"color: {get_color('CLR_SUCCESS_DARK')};")
-            for note in skipped:
-                _logger.info("Batch export: %s", note)
             self._ctx.notify.set_status(
                 f"{status_text} · {len(skipped)} group(s) had no data")
             return

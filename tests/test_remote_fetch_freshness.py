@@ -23,6 +23,7 @@ and the behaviours that had to survive the fix.
 from __future__ import annotations
 
 import os
+import re
 import zipfile
 from pathlib import Path
 
@@ -44,6 +45,21 @@ def _stale_well(out_dir: Path, well: str, *, days_old: int = 1) -> Path:
     for p in (zip_path, csv_path):
         os.utime(p, (old, old))
     return zip_path
+
+
+from services import run_journal as _J
+
+
+@pytest.fixture(autouse=True)
+def _isolated_index(tmp_path, monkeypatch):
+    """Keep the journal index out of the developer's real state directory.
+
+    ``run_journal.index_path()`` is ``~/.config/allwell/run_index.json``, capped
+    at fifty entries and shared by every test in the lane. A test that opens a
+    journal without redirecting it evicts the user's genuine unfinished-run
+    entries, and their resume banner stops offering their own plates.
+    """
+    monkeypatch.setattr(_J, "index_path", lambda: tmp_path / "state" / "idx.json")
 
 
 def _run(out_dir: Path, **kw) -> rr._RemoteRun:
@@ -289,6 +305,50 @@ def test_every_well_is_classified_in_a_file_beside_the_outputs(tmp_path):
     assert "force: True" in report
 
 
+def test_the_summary_accounts_for_every_well_the_report_lists(
+        tmp_path, monkeypatch):
+    """The parts have to sum to the whole, on the day a state is added.
+
+    The summary sits directly under "wells with output on the remote: N", so a
+    bucket it drops is a well the per-well lines name and the tally does not.
+    That happened once with a fixed four-outcome list, which lost ``failed``;
+    it was then re-created by driving the tally off the phrase table, which
+    loses anything that table does not spell. The order comes from
+    ``WELL_STATES`` now and an unrecognised state prints under its own name, so
+    neither omission can silently shrink the count.
+
+    Driven by adding a state to ``WELL_STATES`` — which is what a future
+    contributor does, and the moment the phrase table falls behind. Both the
+    reader and the classifier take the roster from there, so a monkeypatched
+    roster is the whole scenario.
+    """
+    import services.run_journal as J
+
+    extended = (*J.WELL_STATES, "quarantined")
+    monkeypatch.setattr(J, "WELL_STATES", extended)
+
+    run = _run(tmp_path)
+    J.open_run(tmp_path, spec={}, mode="remote", input_dir=tmp_path / "in")
+    J.record_well(tmp_path, "A01", "fetched")
+    J.record_well(tmp_path, "A02", "quarantined", reason="held back")
+    J.record_well(tmp_path, "A03", "quarantined", reason="held back")
+
+    summary = rr.RemoteRunner._reconcile_fetch(
+        _Reconciler(run, {"A01", "A02", "A03"}), log=lambda _m: None)
+
+    report = (tmp_path / "remote_fetch_report.txt").read_text()
+    listed = [ln for ln in report.splitlines()
+              if ln.startswith(("A01", "A02", "A03"))]
+    assert len(listed) == 3, listed
+    # Only the tally, not the "(of N with output…)" that follows it.
+    tally = summary.split(" (of ")[0]
+    counted = sum(int(n) for n in re.findall(r"(\d+) ", tally))
+    assert counted == 3, (
+        f"the summary accounts for {counted} of the 3 wells it lists: {tally}")
+    assert "quarantined" in tally, (
+        f"a state with no phrase was dropped rather than named: {tally}")
+
+
 def test_the_report_survives_an_unwritable_output_dir(tmp_path):
     """A diagnostic must never be the thing that fails the run."""
     run = _run(tmp_path / "gone")          # never created
@@ -312,3 +372,35 @@ def test_a_completion_marker_is_parsed_and_canonicalised(label, canonical):
     assert m is not None, line
     from util.well_token import canonical_well_label
     assert canonical_well_label(m.group("well")) == canonical
+
+
+def test_the_summary_accounts_for_every_well_it_names(tmp_path, monkeypatch):
+    """The parts must sum to the whole it prints beside them.
+
+    The summary named a fixed four outcomes, so a well recorded ``failed`` — the
+    state this run's own Fetcher writes when output arrives and cannot be
+    materialised — appeared in the per-well lines and in none of the numbers.
+    The tally sat directly under "wells with output on the remote: N" and no
+    longer added up to N, which is a report quietly dropping the one outcome a
+    user most needs to see.
+    """
+    import re
+
+    from services import run_journal as J
+
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    run = _run(tmp_path)
+    out = run.local_output_dir
+    J.open_run(out, spec={}, mode="remote", input_dir=tmp_path / "in")
+    J.record_well(out, "A01", "fetched")
+    J.record_well(out, "A02", "failed", reason="materialize failed")
+    J.record_well(out, "A03", "not-fetched", reason="the pull failed")
+
+    summary = rr.RemoteRunner._reconcile_fetch(
+        _Reconciler(run, {"A01", "A02", "A03"}), log=lambda _m: None)
+
+    assert "1 failed" in summary, f"a failed well vanished from: {summary}"
+    tally = summary.split(": ", 1)[1].split(" (of ", 1)[0]
+    counted = sum(int(n) for n in re.findall(r"(\d+) ", tally))
+    assert counted == 3, (
+        f"the summary accounts for {counted} of 3 wells: {summary}")

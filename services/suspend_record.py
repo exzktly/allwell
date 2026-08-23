@@ -90,7 +90,7 @@ class SuspendedRun:
 
     def describe(self) -> str:
         """One line for the banner: which plate, how far it got, when."""
-        name = Path(self.output_dir).name or self.output_dir
+        name = plate_name(self.output_dir)
         if self.wells_total:
             progress = f"{self.wells_done} of {self.wells_total} well(s) done"
         else:
@@ -98,6 +98,23 @@ class SuspendedRun:
         when = (time.strftime("%d %b %H:%M", time.localtime(self.suspended_at))
                 if self.suspended_at else "an earlier session")
         return f"{name} — {progress}, suspended {when}"
+
+
+def plate_name(output_dir: str) -> str:
+    """The name a user would recognise the plate by.
+
+    Every dataset's output folder is ``<plate>/out``, so the folder's own name
+    is the word "out" for essentially every run — which says nothing, and says
+    it identically for two different plates. That was survivable while the only
+    offer on screen was for the folder already in the form; it is not, now that
+    a banner can name a plate the user is not looking at. Name the dataset
+    instead, falling back to the folder's own name for a layout that does not
+    end in ``out/``.
+    """
+    path = Path(output_dir)
+    if path.name.lower() == "out" and path.parent.name:
+        return path.parent.name
+    return path.name or output_dir
 
 
 def load_all() -> list[SuspendedRun]:
@@ -111,12 +128,6 @@ def load_all() -> list[SuspendedRun]:
     runs = [r for r in (SuspendedRun.from_json(d) for d in raw) if r is not None]
     runs.sort(key=lambda r: r.suspended_at, reverse=True)
     return runs
-
-
-def latest() -> SuspendedRun | None:
-    """The most recently suspended run, or ``None``."""
-    runs = load_all()
-    return runs[0] if runs else None
 
 
 def save(run: SuspendedRun) -> bool:

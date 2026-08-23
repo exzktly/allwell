@@ -57,7 +57,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
     ``QWidget``); every method binds to the ``AnalyzeTab`` instance ``self``."""
 
     def _build_form(self, parent: QWidget) -> None:
-        parent.layout().addWidget(self._build_resume_banner(parent))
+        self._build_banner_strips(parent)
         self._build_open_pinfo_row(parent)
         self._build_schema_section(parent)
         # Folder first, then what is in it; Schema leads both (see its hint).

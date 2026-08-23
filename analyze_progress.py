@@ -26,6 +26,9 @@ import time as _time
 
 from PySide6.QtCore import QTimer
 
+from services import run_journal
+from well_viewer.core.safe import swallow
+
 
 def _fmt_secs(secs: float) -> str:
     """A duration for a label: ``42s``, ``7m03s``, ``2h15m``.
@@ -55,6 +58,41 @@ class AnalyzeProgressMixin:
     #: interval — often enough that scrolling back explains the gap, rarely
     #: enough that it does not bury the run's real events.
     _SCHED_BREADCRUMB_S = 120.0
+
+    #: The ``well_stage`` values that mean a well reached a terminal state, and
+    #: what the run journal should record for each. ``"process"`` is emitted
+    #: from exactly one place — ``ProgressTracker._count_well_done``, the method
+    #: that decides a well has finished — so it is the run's own statement that
+    #: a well is done rather than a guess made from a log line here.
+    _JOURNAL_STAGES = {"process": "analysed", "error": "failed"}
+
+    def _journal_well_stage(self, well: str, stage: str) -> None:
+        """Record a terminal well stage in the output directory's run journal.
+
+        Hung off the same event the dashboard paints from, so what the record
+        says and what the user saw cannot disagree — and written as it happens,
+        which is the point: a local run that is killed has already recorded
+        every well it finished, and nothing else on disk distinguishes those
+        from wells it never started.
+
+        Best-effort. A run whose journal cannot be written still runs, and its
+        outputs remain the authoritative account of what it produced.
+        """
+        state = self._JOURNAL_STAGES.get(stage)
+        if state is None:
+            return
+        out_dir = getattr(self._runner, "last_output_dir", None)
+        if out_dir is None:
+            return
+        # The token this run was opened with. It is what lets a completion line
+        # still queued when the worker thread closed the record be accepted
+        # anyway — these are parsed here, on the GUI thread, in bounded slices,
+        # so the tail of every plate lands after the run has ended.
+        token = getattr(self._runner, "journal_token", None)
+        if token is None:
+            return
+        with swallow(f"journalling {well} as {state}"):
+            run_journal.record_well(out_dir, well, state, run_token=token)
 
     def _on_scheduler(self, state: str, job_id: str, launcher: str) -> None:
         """A scheduler queued this run, or has just granted it a node.
@@ -308,6 +346,7 @@ class AnalyzeProgressMixin:
         elif kind == "well_stage":
             well, stage = payload  # type: ignore[misc]
             self._dashboard.set_well_stage(str(well), str(stage))
+            self._journal_well_stage(str(well), str(stage))
         elif kind == "well_fov":
             well, done, total = payload  # type: ignore[misc]
             self._dashboard.set_well_fov(str(well), int(done), int(total))

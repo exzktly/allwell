@@ -71,7 +71,7 @@ from skimage.filters import threshold_otsu
 from skimage.segmentation import watershed
 from util.channel_roles import phase_role_conflicts, quantified_channel_tokens
 from util.fov import sort_key as _fov_sort_key
-from util.image_exts import GROUP_IMAGE_EXTS
+from util.image_exts import GROUP_IMAGE_EXTS, is_run_input_member
 from util.timepoint import parse_hours as _tp_parse_hours, sort_key as _tp_sort_key
 from util.well_token import (
     split_background_wells as _split_background_wells,
@@ -3676,27 +3676,44 @@ def _pipeline_info_jsonable(value):
 
 
 def _collect_image_stems(input_dir: Path) -> set[str]:
+    """Every input image's stem, for the sidecar's timepoint and FOV lists.
+
+    Reads `util.image_exts` rather than a fourth spelling of the extension set.
+    The three loops here took `.tif`/`.tiff` only, while the pipeline groups
+    `.png`, `.jpg` and `.jpeg` too — so a PNG plate published an empty
+    `available_timepoints` and an empty `available_fovs`, which Review then
+    reads as a plate with no timepoints at all.
+
+    `is_run_input_member` rather than a bare suffix test, for the same reason
+    the disk pre-flight needs it: an AppleDouble twin has an image suffix, and
+    its stem (`._Plate_A01_F1_T1`) parses to a different well and fov than the
+    file it shadows.
+    """
     stems: set[str] = set()
-    for pat in ("*.tif", "*.tiff", "*.TIF", "*.TIFF"):
-        for p in input_dir.glob(pat):
-            stems.add(p.stem)
+
+    def _add_from(folder: Path) -> None:
+        try:
+            entries = list(folder.iterdir())
+        except OSError:
+            return
+        for q in entries:
+            if q.is_file() and is_run_input_member(q.name):
+                stems.add(q.stem)
+
+    _add_from(input_dir)
     try:
         well_dirs = [p for p in input_dir.iterdir() if p.is_dir()]
     except OSError:
         well_dirs = []
     for well_dir in well_dirs:
-        for pat in ("*.tif", "*.tiff", "*.TIF", "*.TIFF"):
-            for p in well_dir.glob(pat):
-                stems.add(p.stem)
+        _add_from(well_dir)
     for z in input_dir.glob("*.zip"):
         try:
             with zipfile.ZipFile(z, "r") as zf:
                 for member in zf.namelist():
-                    name = Path(member).name
-                    lower = name.lower()
-                    if not lower.endswith((".tif", ".tiff")):
+                    if not is_run_input_member(member):
                         continue
-                    stems.add(Path(name).stem)
+                    stems.add(Path(member).stem)
         except Exception:
             swallowed()  # silent except
             continue

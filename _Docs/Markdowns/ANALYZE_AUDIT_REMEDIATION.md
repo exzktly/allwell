@@ -26,13 +26,13 @@ rather than a write-up. **Delete it in the PR that closes the last group.**
 
 ## Status
 
-| Group | Theme | PR | State |
-|---|---|---|---|
+| Group | Theme | Branch | Version | PR | State |
+|---|---|---|---|---|---|
 | 1 | Stop the data loss | [#842](https://github.com/exzktly/allwell/pull/842) | **done** — CI green, awaiting merge |
-| 2 | One definition of an image, and an honest verdict | — | **next** |
-| 3 | The record and the resume path | — | queued |
-| 4 | The Analyze pane | — | queued |
-| 5 | Numbers and parsing | — | queued |
+| 2 | One definition of an image, and an honest verdict | `claude/analysis-job-failure-recovery-ugoecl` | 9.0.2 | — | **in progress** |
+| 3 | The record and the resume path | `claude/analyze-audit-group3-record` | 9.0.5 | — | queued — starts when Group 2's PR opens |
+| 4 | The Analyze pane | `claude/analyze-audit-group4-pane` | 9.0.3 | — | **in progress** (parallel worker) |
+| 5 | Numbers and parsing | `claude/analyze-audit-group5-numbers` | 9.0.4 | — | **in progress** (parallel worker) |
 
 Counts: **20 done** (6 Tier-1 findings and 14 review findings on those fixes),
 **2 dropped**, **2 open questions**, **62 outstanding** — Group 2: 14,
@@ -42,6 +42,42 @@ The outstanding count exceeds the audit's 69 because it also carries the
 reviewer's findings on Group 1 and the tasks (a guard, a sweep) that no single
 finding owns. It is the count of *rows below*, which is the number that can be
 checked.
+
+---
+
+## How the four groups run in parallel
+
+The PRs are **stacked, not serialised**: none waits for another to merge. Groups
+2, 4 and 5 run concurrently on three branches, each based on `main`. Group 3
+starts when Group 2's PR opens, because the two share
+`services/input_resolution_service.py`.
+
+**No two groups edit the same file.** That is the whole safety property, and it
+is enforced by assignment rather than by hoping. The partition:
+
+| Group | Owns |
+|---|---|
+| 2 | `util/image_exts.py`, `util/schema_infer.py`, `pipeline/completeness.py`, `pipeline/capacity.py`, `pipeline/io.py`, `pipeline/run_report.py`, `process_microscopy.py`, `services/input_resolution_service.py` |
+| 4 | `analyze_tab.py`, `analyze_remote_dialog.py`, `analyze_tab_form.py`, `analyze_tab_fields.py`, `analyze_tab_seg_params.py`, `analyze_input.py` |
+| 5 | `pipeline/threshold_optimize.py`, `pipeline/auto_threshold.py`, `pipeline/ome_explode.py`, `pipeline/stardist.py`, `pipeline/background.py`, `util/channel_roles.py`, `util/well_token.py`, `util/timepoint.py` |
+| 3 | `analyze_suspend.py`, `analyze_preflight.py`, `analyze_run_spec.py`, `analyze_progress.py`, `analyze_tab_pinfo.py`, `analyze_tab_log.py`, `services/run_journal.py`, `services/pipeline_runner.py`, `services/pipeline_service.py`, `services/suspend_record.py`, `services/env.py`, `services/remote_runner.py` |
+
+`tests/`, `ARCHITECTURE.md`, `README_WellViewer.md` and `version.py` are shared;
+each group edits only the parts covering its own work, and the version numbers
+are pre-assigned above so the bumps cannot collide.
+
+**Two findings moved to keep one owner per file**, and the reassignment is the
+point rather than an accident:
+
+- **C11** (`auto_threshold` hardcodes tif/tiff) is a Group 2 *sweep* item living
+  in a Group 5 *file*. Group 5 fixes it, using `util.image_exts.is_group_image`,
+  whose signature Group 2 is not changing.
+- **P12** (`qc_region_area` writes `0.0` for "could not compute") is a Group 5
+  *pattern* living in a Group 2 *file* (`completeness.py`). Group 2 fixes it.
+
+**Group 3's one known collision:** X3 needs `analyze_input.py:99`, which Group 4
+owns for U8–U17 at `:50`. Group 3 rebases onto Group 4's branch rather than
+editing it concurrently.
 
 ---
 

@@ -224,8 +224,15 @@ def coverage_for_well(
     if in_members is None:
         intent: set[tuple[str, str]] = set()
     else:
+        # `images_only` is the intent-side rule and is not the same question as
+        # `skip_hidden`: an AppleDouble twin parses to a *different* key rather
+        # than to nothing, so it survives the set and is never matched by
+        # anything in `done`. Measured on a finished two-image well carrying its
+        # two macOS twins: intent 4, two keys permanently missing, state
+        # `partial` for ever.
         intent = fov_keys_from_member_names(
-            in_members, schema=schema, sep=sep, skip_hidden=skip_hidden)
+            in_members, schema=schema, sep=sep, skip_hidden=skip_hidden,
+            images_only=True)
     done = done_keys(
         csv_keys=csv_keys, out_zip=out_zip, out_folder=out_folder,
         schema=schema, sep=sep)

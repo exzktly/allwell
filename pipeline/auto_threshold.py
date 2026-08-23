@@ -194,13 +194,24 @@ def _index_members(zf, reader: _SchemaReader, channels: set[str]):
     tophats: dict[tuple[str, str, str], str] = {}
     unplaceable: list[str] = []
     for name in zf.namelist():
-        # Directory entries, macOS sidecars and dotfiles are not this run's
-        # images; everything else is judged by the one extension set. The list
-        # spelled out here was ``tif``/``tiff`` only, while the pipeline also
-        # writes ``.png`` — and because the skip happens *before* the role and
-        # schema checks below, a PNG archive left ``unplaceable`` empty too, so
-        # the "none of its members could be placed" warning could not fire and
-        # the whole plate reported one line per channel: "only 0 sample(s)".
+        # This archive is the pipeline's own ``<WELL>_out.zip`` output, not the
+        # user's input, so the predicate is deliberately the plain suffix test
+        # ``is_group_image`` and not ``is_run_input_member``: the members here
+        # were written by ``_safe_imwrite`` at the top level of a flat archive,
+        # and a nested member is not one of them. ``is_run_input_member`` judges
+        # a member by its *basename*, which is the right question for an input
+        # archive a user assembled and the wrong one here.
+        #
+        # The two skips ahead of it are for what a user's file manager adds
+        # after the fact — opening the archive in Finder leaves a ``.DS_Store``
+        # and an ``__MACOSX/`` tree inside it.
+        #
+        # The extension test was spelled out here as ``tif``/``tiff`` only,
+        # while the pipeline also writes ``.png`` — and because the skip happens
+        # *before* the role and schema checks below, a PNG archive left
+        # ``unplaceable`` empty too, so the "none of its members could be
+        # placed" warning could not fire and the whole plate reported one line
+        # per channel: "only 0 sample(s)".
         if "/" in name or name.startswith("."):
             continue
         if not is_group_image(name):

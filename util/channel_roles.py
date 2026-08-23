@@ -44,28 +44,37 @@ _NUCLEAR_SECONDARY_RE = re.compile(r"nir|rfp", re.IGNORECASE)
 # "GFPtrans"). ``\b`` finds no boundary at an underscore, so ``\bbf\b`` never
 # matched the commonest spelling of a brightfield channel; a bare ``trans``
 # substring, on the other hand, matched a transfection marker and quietly
-# excluded it from flat-field and background correction. So: no *letter* may
-# precede the hint (which rejects "GFPtrans" and "BFP"), a digit may (which
-# accepts "w1BF"), and nothing alphanumeric may follow it.
+# excluded it from flat-field and background correction. So the bound on the
+# short hints is *letters only*, on both sides: no letter may precede one
+# (rejecting "GFPtrans" and "BFP") and none may follow, while a digit is
+# allowed on either side.
+#
+# The digit is allowed rather than merely tolerated. A trailing ``[0-9]`` in
+# the bound rejected "BF1", "BF2", "DIC1", "DIC2", "Trans1" and "NIR_BF2" —
+# every one of them a phase channel written the way a scope with two
+# transmitted-light paths names them — and it bought nothing, because no
+# fluorescent channel is spelled as one of these three tokens followed by a
+# digit. A rejected phase channel is not a cosmetic misclassification: it is
+# quantified from raw frames while every other channel is flat-field- and
+# background-corrected, under the usual ``_tophat`` filename, which gives
+# nothing downstream a way to tell.
 #
 # ``dic`` carries the same bound as ``trans`` and ``bf``, and for the same
 # reason: as a bare substring it is inside "Ca-Indicator", "Indicator" and
-# "Predicted", so a calcium-indicator channel classified as phase and was
-# quantified from raw frames while every other channel was flat-field- and
-# background-corrected — under the usual ``_tophat`` filename, which gives
-# nothing downstream a way to tell. Three letters cannot be left unbounded.
+# "Predicted". Three letters cannot be left unbounded.
 #
 # ``phase``, ``brightfield`` and ``bright?field`` stay unbounded, deliberately
-# rather than by omission. They are whole words of five letters or more; no
-# realistic channel name carries one as a fragment, and the trailing
-# ``(?![a-z0-9])`` bound that makes "BFP" and "GFPtrans" safe would reject
-# "Brightfield1" and "Phase2", which are ordinary spellings.
+# rather than by omission: they are the hints that really do appear as the head
+# of a longer word. A trailing ``(?![a-z])`` would reject "PhaseContrast",
+# "phasecontrast" and "BrightfieldLED", which are ordinary spellings, and at
+# five letters and more there is no realistic channel name that carries one of
+# them as an incidental fragment the way "Predicted" carries "dic".
 _PHASE_HINT_RE = re.compile(
     r"phase"
     r"|brightfield|bright.?field"
-    r"|(?<![a-z])trans(?:mitted|mission)?(?![a-z0-9])"
-    r"|(?<![a-z])dic(?![a-z0-9])"
-    r"|(?<![a-z])bf(?![a-z0-9])",
+    r"|(?<![a-z])trans(?:mitted|mission)?(?![a-z])"
+    r"|(?<![a-z])dic(?![a-z])"
+    r"|(?<![a-z])bf(?![a-z])",
     re.IGNORECASE,
 )
 

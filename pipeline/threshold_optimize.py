@@ -136,12 +136,28 @@ def relative_gap(fa: np.ndarray, fb: np.ndarray, *,
     taken. Without that, the ratio is exactly 1.0 at *every* threshold where one
     arm is empty and the other holds even a single cell, so the objective could
     not tell "97 % of positives on against 0 % of negatives" from "1 % on
-    against 0 %", and ``argmax``'s first-index tie-break turned the whole
-    objective into an unstated rule: *the lowest grid point above the negative
-    control's maximum*. Moving one negative-control cell then moved the plate's
-    gate by 185 intensity units. Smoothing costs nothing where the counts are
-    real (0.998 rather than 1.000 for a clean separation) and collapses the
-    score where they are not (0.5 for one cell against none, at n=500).
+    against 0 %". Smoothing costs nothing where the counts are real (0.998
+    rather than 1.000 for a clean separation) and collapses the score where they
+    are not (0.5 for one cell against none, at n=500).
+
+    **What that does and does not fix.** It shortens the tied run: measured on
+    two well-separated control populations of 400 cells each, the grid points
+    scoring the maximum fall from 485 of 512 to 354, and on overlapping
+    populations from 80 to 3. Every point it removes is at the *top* of the run,
+    where the positive arm has thinned to a handful of cells — the region the
+    unsmoothed ratio could not distinguish from a clean separation.
+
+    It does not move the reported threshold. ``argmax`` returns the *first* tied
+    index, which is the bottom of the run, and the bottom is set by where the
+    negative control's fraction-on reaches zero — a place smoothing does not
+    touch. On that same pair, moving one negative-control cell out to 1500 moves
+    the reported gate by 1252 intensity units, smoothed or not; only the tie
+    count changes (174 to 43). The instability is real and is still there. What
+    ships against it is visibility, not a cure: ``tie_count``, ``tie_span`` and
+    ``tie_contiguous`` are recorded and logged, so a gate picked off a 354-point
+    run is no longer printed like one picked off a peak. Which point of a
+    plateau *should* be reported is a domain question about the assay, not one
+    this module can decide.
 
     Counts are optional because the fold-change layer in
     ``well_viewer.features.home.cell_gating.gating_compute`` scans *adjusted*

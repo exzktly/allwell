@@ -418,6 +418,10 @@ def _safe_token(value: object, fallback: str) -> str:
 # tokens positional (``t0``, ``t1``, …), which orders correctly and states no
 # number it cannot back up.
 
+#: Named for the module so a converted OME-TIFF's warnings land in the run log
+#: beside everything else the pipeline says about that file.
+_log = logging.getLogger(__name__)
+
 #: SI symbols whose meaning depends on their case, and which therefore must be
 #: matched **before** the case-insensitive table below. OME's `UnitsTime`
 #: enumeration contains both `Ms` (megasecond) and `ms` (millisecond);
@@ -522,6 +526,8 @@ def _parse_ome_labels(
     # contributes nothing, so ``delta_by_t`` comes up short of ``size_t`` and
     # every token stays positional.
     delta_by_t: dict[int, float] = {}
+    unreadable_units: set[str] = set()
+    unreadable_planes = 0
     for el in pixels:
         if _localname(el.tag) != "Plane":
             continue
@@ -545,8 +551,30 @@ def _parse_ome_labels(
         if per_hour is None:
             per_hour = _DELTA_T_HOURS_PER_UNIT.get(unit.lower())
         if per_hour is None:
+            unreadable_units.add(unit)
+            unreadable_planes += 1
             continue
         delta_by_t.setdefault(ti, value * per_hour)
+
+    # Every route to a positional token is a *degradation*: the file stated a
+    # time and the archive will not carry it, so Review orders the timepoints by
+    # index and can put no number on an axis. Each one says so, because a
+    # ``t0``/``t1`` plate is otherwise indistinguishable from one whose writer
+    # recorded no DeltaT at all.
+    if unreadable_units:
+        _log.warning(
+            "OME timepoints: %d plane(s) carry a DeltaTUnit this converter "
+            "cannot read (%s), so the timepoints are named by position (t0, "
+            "t1, …) rather than by elapsed time.",
+            unreadable_planes, ", ".join(sorted(unreadable_units)),
+        )
+    if size_t and delta_by_t and len(delta_by_t) < size_t:
+        _log.warning(
+            "OME timepoints: only %d of %d timepoint(s) carry a readable "
+            "DeltaT, so all of them are named by position (t0, t1, …).",
+            len(delta_by_t), size_t,
+        )
+
     if delta_by_t and len(delta_by_t) >= size_t:
         from_delta = [
             f"{delta_by_t[i]:g}h" if i in delta_by_t else f"t{i}"
@@ -561,6 +589,16 @@ def _parse_ome_labels(
         # above already takes.
         if len(set(from_delta)) == len(from_delta):
             timepoint_tokens = from_delta
+        else:
+            collided = sorted({t for t in from_delta if from_delta.count(t) > 1})
+            _log.warning(
+                "OME timepoints: the elapsed times render to %d distinct "
+                "label(s) for %d timepoint(s) — %s repeat(s) — so the "
+                "timepoints are named by position (t0, t1, …) rather than by "
+                "elapsed time. Two timepoints sharing a label would write "
+                "every image of the second over the first.",
+                len(set(from_delta)), len(from_delta), ", ".join(collided),
+            )
 
     return channel_names, timepoint_tokens, raw_names
 

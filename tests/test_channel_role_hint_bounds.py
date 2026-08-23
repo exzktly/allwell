@@ -26,14 +26,23 @@ PHASE = [
     "Trans", "Transmitted", "trans_light",
     "Phase", "phase_contrast", "Phase2",
     "Brightfield", "Brightfield1", "bright_field", "bright-field",
+    # A digit may follow a short hint. A scope with two transmitted-light
+    # paths names them this way, and the bound that rejected them bought
+    # nothing: no fluorescent channel is one of these three tokens plus a
+    # digit.
+    "BF1", "BF2", "DIC1", "DIC2", "Trans1", "NIR_BF2", "w2DIC1",
+    # ...and the long words keep matching as the head of a longer one, which
+    # is the reason they carry no trailing bound.
+    "PhaseContrast", "phasecontrast", "BrightfieldLED",
 ]
 
 NOT_PHASE = [
     # The audit's measured misclassifications: all contain "dic" or "trans".
     "Ca-Indicator", "Indicator", "pH-Indicator", "Predicted",
     "Transferrin647", "TransGFP", "GFP_transfected",
-    # Bounded on the right too, which is what keeps these out.
-    "DICOM", "BFP", "dictyostelium",
+    # Bounded on the right too, which is what keeps these out. The bound is
+    # letters only, so these stay rejected while "DIC1" is accepted.
+    "DICOM", "BFP", "dictyostelium", "BFPa", "DICE", "transducer",
     # Ordinary fluorescence names.
     "GFP", "DAPI", "mCherry", "Cy5", "YFP", "TexasRed",
 ]

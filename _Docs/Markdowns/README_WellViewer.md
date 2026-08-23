@@ -413,9 +413,10 @@ be forced again the moment you loaded its settings back. **Dismiss** hides the s
 
   **All-Well pre-ticks it when a channel's name reads as brightfield** — `DIC`,
   `BF`, `Phase`, `Brightfield`, `Trans` and the usual spellings around them,
-  including prefixed forms like `w1BF`. It reads them as whole words, so a
-  fluorescence channel that merely contains those letters — `Ca-Indicator`,
-  `Transferrin647`, `BFP` — is left as an ordinary channel. The guess is only a
+  including prefixed and numbered forms like `w1BF`, `BF2` and `DIC1`. A short
+  hint has to stand on its own between the letters around it, so a fluorescence
+  channel that merely contains those letters — `Ca-Indicator`, `Transferrin647`,
+  `BFP` — is left as an ordinary channel. The guess is only a
   starting point: check the tick before you run, because a fluorescence channel
   marked Phase is quantified from uncorrected images and nothing downstream says
   so.

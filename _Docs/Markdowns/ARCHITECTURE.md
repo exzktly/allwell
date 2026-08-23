@@ -3808,21 +3808,36 @@ tail of `main()`, with three modes:
 `relative_gap` divides `|fa - fb|` by `max(|fa|, |fb|)`, which is exactly 1.0 at
 every threshold where the negative control is empty however few positive cells
 sit above the cut — so the objective could not tell "97 % of positives on
-against 0 %" from "one cell on against none", and `np.argmax`'s first-index
-tie-break turned the whole thing into an unstated rule: *the lowest grid point
-above the negative control's maximum*, moved by any single outlying control cell.
-Given the two population sizes, both fractions are smoothed to `(k + 1) / (n + 2)`
-before the ratio is taken, which costs nothing where the counts are real and
-collapses the score where they are not. The counts are a keyword rather than a
-requirement because the viewer's fold-change scan
-(`gating_compute.scan_fc_fractions`) adjusts each fraction before the gap is
-taken, so its values are no longer `k / n` — they exceed 1 and go negative — and
-there is no `k` to add one to; that path keeps the unsmoothed objective. Separately,
-`best_from_curves` records how many grid points scored the identical best
-objective and how wide a threshold range they span (`tie_count` / `tie_span` on
-`ThreshFracOptimizationResult`), and the pipeline logs it: fraction-on is a step
-function, so the best score is usually shared by a run of grid points and the
-reported threshold is merely the lowest of them.
+against 0 %" from "one cell on against none". Given the two population sizes,
+both fractions are smoothed to `(k + 1) / (n + 2)` before the ratio is taken,
+which costs nothing where the counts are real and collapses the score where they
+are not. The counts are a keyword rather than a requirement because the viewer's
+fold-change scan (`gating_compute.scan_fc_fractions`) adjusts each fraction
+before the gap is taken, so its values are no longer `k / n` — they exceed 1 and
+go negative — and there is no `k` to add one to; that path keeps the unsmoothed
+objective.
+
+Smoothing shortens the tied run without moving the answer, and the distinction
+matters because only the second half is what a user feels. `np.argmax` returns
+the *first* tied index, and the tied run's lower edge is set by where the
+negative control's fraction-on reaches zero — which smoothing does not touch.
+Measured on two well-separated 400-cell control populations, smoothing cuts the
+grid points at the maximum from 485 of 512 to 354, every one of them off the top
+of the run; the reported threshold is identical, and moving a single
+negative-control cell out to 1500 still shifts the gate by 1252 intensity units
+either way. So the instability the audit found is still present, and what ships
+against it is visibility rather than a cure. `best_from_curves` records how many
+grid points scored the identical best objective, how wide a threshold range they
+cover, and whether those points are adjacent on the grid (`tie_count`,
+`tie_span`, `tie_contiguous` on `ThreshFracOptimizationResult`), and the pipeline
+logs all three: fraction-on is a step function, so the best score is usually
+shared by a run of grid points and the reported threshold is merely the lowest of
+them. Contiguity is part of the report because `tie_span` is `max - min` of the
+tied thresholds, which for a bimodal objective covers ground that scored lower —
+describing that as a span would state that every threshold between the two
+maxima had scored the best. Which point of a genuine plateau *ought* to be
+reported is a question about the assay, and is deliberately left open rather than
+answered with a silently different default.
 
 **A stored threshold is rounded, never rounded away.** Both estimators wrote
 `float(round(x))`, which is right for camera counts — a cut of 547.7 reads better
@@ -4115,11 +4130,17 @@ quantified from raw frames with nothing downstream able to tell — which is wha
 `trans` as a bare substring did to a transfection marker, and `dic` to
 `Ca-Indicator`. The three short alternatives (`trans`, `dic`, `bf`) therefore
 carry a boundary on both sides, and neither of them `\b`: no *letter* may
-precede the hint (so `GFPtrans`, `BFP` and `Ca-Indicator` are out), a digit may
-(so `w1BF`, the ImageXpress spelling, is in), and nothing alphanumeric may follow
-it (so `DICOM` is out). `phase` and `brightfield` stay unbounded deliberately —
-they are whole words no channel name carries as a fragment, and the trailing
-bound would reject the ordinary `Brightfield1`. The secondary *nuclear* tier
+precede or follow the hint (so `GFPtrans`, `BFP`, `Ca-Indicator` and `DICOM` are
+out), while a digit may sit on either side (so `w1BF`, the ImageXpress spelling,
+is in, and so are `BF1`, `DIC2` and `NIR_BF2`, which a scope with two
+transmitted-light paths produces). The bound is letters only rather than
+alphanumeric because forbidding a trailing digit rejected those numbered phase
+channels and prevented no misreading in return — no fluorescent channel is
+spelled as one of these three tokens followed by a digit. `phase` and
+`brightfield` stay unbounded deliberately: they are the hints that genuinely do
+head longer words, and a trailing bound would reject `PhaseContrast` and
+`BrightfieldLED`, while at five letters and more neither turns up as an
+incidental fragment the way `dic` sits inside `Predicted`. The secondary *nuclear* tier
 (`nir|rfp`) is also left unbounded on purpose: `mRFP` / `TagRFP` / `iRFP` are
 RFP-family stains, which is exactly what that tier is for, and its mistake only
 proposes which channel segmentation runs on — overridden by any strong nuclear
@@ -4142,8 +4163,9 @@ prefixed run-ons (`w1BF`, the ImageXpress spelling this repo's own default token
 use), and as ordinary words that merely start the same way (`GFP_transfected`,
 `GFPtrans`). `\b` finds no boundary at an underscore, so `\bbf\b` matched neither
 of the first two spellings; a bare `trans` substring matched the last. The rule is
-that no *letter* may precede a hint (rejecting `GFPtrans` and `BFP`), a digit may
-(accepting `w1BF`), and nothing alphanumeric may follow.
+letters only, on both sides: no letter may precede a hint (rejecting `GFPtrans`
+and `BFP`) and none may follow (rejecting `DICOM`), while a digit is allowed
+either side (accepting `w1BF` and `DIC2`).
 
 **Worker-pool memory + failure accounting.** Two properties of how the
 parent process supervises the per-well worker pool:

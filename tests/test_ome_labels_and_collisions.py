@@ -21,6 +21,8 @@ Two audit findings, both about a *name* rather than a pixel:
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pytest
 
@@ -178,6 +180,41 @@ def test_an_unreadable_unit_falls_back_to_positional_tokens(unit):
     assert tokens == ["t0", "t1"], (
         f"an unreadable DeltaTUnit {unit!r} produced {tokens!r}"
     )
+
+
+def test_an_unreadable_unit_says_so_in_the_run_log(caplog):
+    """The token is positional either way; the log is what distinguishes them.
+
+    A plate whose timepoints read ``t0``/``t1`` because the writer stamped no
+    DeltaT and one whose timepoints read ``t0``/``t1`` because it stamped a unit
+    this converter cannot convert produce byte-identical archives. Only a log
+    line separates a file that stated no time from one whose time was dropped.
+    """
+    xml = _ome_xml(planes=[(0, 0, "furlong"), (1, 3600, "furlong")])
+    with caplog.at_level(logging.WARNING, logger="pipeline.ome_explode"):
+        _channels, tokens, _raw = _parse_ome_labels(xml, 1, 2)
+    assert tokens == ["t0", "t1"]
+    assert "cannot read" in caplog.text
+    assert "furlong" in caplog.text
+    assert "named by position" in caplog.text
+
+
+def test_labels_that_collide_say_which_label_repeated(caplog):
+    """Two timepoints rendering to one label is silent data loss without this."""
+    xml = _ome_xml(planes=[(0, 3600, "s"), (1, 3600, "s")])
+    with caplog.at_level(logging.WARNING, logger="pipeline.ome_explode"):
+        _channels, tokens, _raw = _parse_ome_labels(xml, 1, 2)
+    assert tokens == ["t0", "t1"]
+    assert "1h" in caplog.text, caplog.text
+    assert "named by position" in caplog.text
+
+
+def test_a_file_with_readable_units_logs_no_warning(caplog):
+    xml = _ome_xml(planes=[(0, 0, "s"), (1, 3600, "s")])
+    with caplog.at_level(logging.WARNING, logger="pipeline.ome_explode"):
+        _channels, tokens, _raw = _parse_ome_labels(xml, 1, 2)
+    assert tokens == ["0h", "1h"]
+    assert caplog.text.strip() == ""
 
 
 def test_an_empty_unit_attribute_is_read_as_the_schema_default():

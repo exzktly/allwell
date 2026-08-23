@@ -85,6 +85,21 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # remote machine is sent, and that was explicitly out of scope for this change.
 # That cluster remains the extraction to take when this budget next binds.
 PROCESS_MICROSCOPY_BUDGET = 4745
+
+# `services/remote_runner.py` is the largest module in the repo — nearly twice
+# `process_microscopy.py` — and until now the only large one with nothing
+# resisting its growth. That is not incidental to its defect history: every
+# recurring fault in it has been a half-finished sweep, where the same fact was
+# derived in N places and N was not knowable, and a module keeps acquiring
+# those for exactly as long as adding one more costs nothing.
+#
+# The complexity ratchet gives no pressure here either. `spawn` is 393 lines
+# and 12 concerns, and its cyclomatic complexity is 22 — comfortably under the
+# threshold of 40 — so length is the dimension that needs a limit and this is
+# it. Set at the count on the day it was introduced; it only moves down, and
+# the planned extractions (staging, transport, argv/run-id) each drop it by
+# what they move.
+REMOTE_RUNNER_BUDGET = 8210
 # 1494 -> 1333: the smart-layout builder cluster (flat + nested grid assembly,
 # per-channel LUT re-keying, the Build presets, and the row-channel styling
 # helper) moved into ``image_table/build_layout.py``. The nested / compound-axis
@@ -170,6 +185,17 @@ def test_process_microscopy_line_budget():
         f"{PROCESS_MICROSCOPY_BUDGET} budget. Extract a cohesive Qt-free module "
         "(and add it to services.remote_runner._REQUIRED_REMOTE_FILES) instead "
         "of appending. The ratchet only moves down."
+    )
+
+
+def test_remote_runner_line_budget():
+    n = _line_count("services/remote_runner.py")
+    assert n <= REMOTE_RUNNER_BUDGET, (
+        f"services/remote_runner.py is {n} lines, over the "
+        f"{REMOTE_RUNNER_BUDGET} budget. Extract a cohesive Qt-free module — "
+        "staging, rsync/ssh transport and argv/run-id derivation are each a "
+        "self-contained cluster — instead of appending. The ratchet only "
+        "moves down."
     )
 
 

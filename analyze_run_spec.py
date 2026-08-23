@@ -47,12 +47,22 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
 
     def start_run(self, spec: RunSpec, *, pipeline: Path | None = None) -> str | None:
         """Start ``spec`` on this tab's runner. Returns an error message on
-        failure (pipeline missing, remote no longer resolvable), or ``None``
-        once the run has been launched."""
+        failure (pipeline missing, remote no longer resolvable, a run already
+        in flight), or ``None`` once the run has been launched.
+
+        Every refusal is checked *before* any UI state is touched. This used to
+        reset the progress tracker, dashboard, ETA and last-run card first and
+        then let the runner's re-entrancy refusal escape as a `RuntimeError` —
+        so a queue dispatch that raced a manual run wiped that run's readout on
+        its way out, and `start_from_queue` never reached its `jobFinished`.
+        """
         if pipeline is None:
             pipeline = find_pipeline_script()
         if pipeline is None:
             return "process_microscopy.py not found next to allwell.py."
+        if self._runner.is_busy:
+            return ("A pipeline is already running on the Analyze pane. Wait "
+                    "for it to finish, or stop it, before starting another.")
         try:
             remote = spec.resolve_remote()
         except RunSpecError as exc:
@@ -190,8 +200,16 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
     def is_busy(self) -> bool:
         """QueueableController hook: whether a pipeline run is already in
         flight — checked by QueueBridge.show_job before it repopulates the
-        input field from a clicked queued row."""
-        return self._runner.is_running
+        input field from a clicked queued row, and by the queue's own dispatch
+        gate before it starts the next job.
+
+        Reads the runner's worker thread rather than the pipeline subprocess.
+        The subprocess does not exist while a run is resolving directories and
+        grouping input, so the narrower answer let the queue dispatch into a
+        live run: `start_run` reset the running run's progress UI and then
+        raised, leaving `_current` set with no `jobFinished` to come.
+        """
+        return self._runner.is_busy
 
     def was_cancelled(self) -> bool:
         """Whether the most recent run's failure was a user-requested Stop

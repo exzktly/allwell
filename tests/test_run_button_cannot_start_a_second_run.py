@@ -20,6 +20,8 @@ asserted `_running` would have passed throughout.
 """
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 
 pytest.importorskip("PySide6")
@@ -130,3 +132,89 @@ def test_the_runner_accepts_a_second_start_once_the_first_has_finished():
     runner._thread.join(timeout=5)
     assert len(calls) == 2, (
         f"the guard blocked a legitimate sequential run: {len(calls)} of 2")
+
+
+# ── the queue's gate, which reads a different question ──────────────────────
+
+def test_the_busy_gate_covers_the_window_before_the_subprocess_exists():
+    """`is_running` and `is_busy` answer different questions, on purpose.
+
+    The queue's dispatch gate asks "may I start another run?" and used to read
+    `is_running`, which reads the pipeline *subprocess*. That does not exist
+    while a run is resolving directories and grouping input — seconds to
+    minutes on a large plate. So the queue dispatched into a live run: it set
+    `_current`, marked the job running, reset the running run's progress UI,
+    and only then hit the runner's refusal, leaving the queue with no
+    `jobFinished` ever coming.
+    """
+    import pathlib as _pl
+    import threading
+
+    from services.pipeline_runner import PipelineRunner
+
+    runner = PipelineRunner()
+    release = threading.Event()
+
+    def _resolve(_opts, _log_q, **_kw):
+        release.wait(timeout=5)
+        return None                     # abandon the run; we only need the thread
+
+    runner.start(_pl.Path("pm.py"), {}, resolve_dirs=_resolve)
+    try:
+        assert not runner.is_running, (
+            "the fixture models the grouping window, where the pipeline "
+            "subprocess does not exist yet")
+        assert runner.is_busy, (
+            "a runner still resolving its input reported itself free, so the "
+            "queue would dispatch its next job into a running plate")
+    finally:
+        release.set()
+        if runner._thread is not None:
+            runner._thread.join(timeout=5)
+
+    assert not runner.is_busy, (
+        "a finished run stayed busy, which would stop the queue for good")
+
+
+def test_a_refused_start_touches_no_ui_state_and_returns_a_message(qtbot):
+    """§7.4 #1: the refusal is observable at the boundary, not just internally.
+
+    `start_run` reset the progress tracker, dashboard, ETA and last-run card
+    *before* the runner could refuse, and then let the `RuntimeError` escape —
+    so the damage landed on the run that was legitimately in flight, and
+    `start_from_queue` never reached the `jobFinished` its own docstring
+    promises instead of raising.
+    """
+    tab = _tab(qtbot)
+    tab._runner._thread = type("_Live", (), {"is_alive": lambda self: True})()
+
+    touched: list[str] = []
+    started: list[str] = []
+    tab._set_running_ui_state = lambda **_k: touched.append("reset")
+    tab._runner.start = lambda *_a, **_k: started.append("start")
+
+    error = tab.start_run(tab._collect_run_spec(),
+                          pipeline=pathlib.Path("process_microscopy.py"))
+
+    assert error and "already running" in error.lower(), (
+        f"a busy runner accepted a second run: {error!r}")
+    assert not touched, (
+        f"the running plate's UI was reset on the way to refusing: {touched}")
+    assert not started, "the runner was started despite being busy"
+
+
+def test_start_from_queue_reports_a_refusal_rather_than_raising(qtbot):
+    """The queue's own path. Its docstring promises jobFinished, not an
+    exception, and `_advance` has no `try` around the call."""
+    tab = _tab(qtbot)
+    tab._runner._thread = type("_Live", (), {"is_alive": lambda self: True})()
+    tab._runner.start = lambda *_a, **_k: pytest.fail("started while busy")
+
+    seen: list[tuple] = []
+    tab.jobFinished.connect(lambda ok, msg, out: seen.append((ok, msg)))
+
+    tab.start_from_queue(tab._collect_run_spec().to_json())
+
+    assert seen and seen[0][0] is False, (
+        "the queue dispatched into a live run and got an exception instead of "
+        f"a jobFinished, so _current stays set for the session: {seen}")

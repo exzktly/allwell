@@ -166,12 +166,21 @@ class OmeLayout:
 
         Returns ``(axis label, series-0 size, offending index, its size)``.
         Single-image files have one series and cannot be ragged.
+
+        **T and C only.** Those are the axes the explode loop indexes, once per
+        position, from series 0's sizes — so a position that holds fewer of
+        them is asked for a plane it does not have. Z is not one of them:
+        :func:`_extract_plane` collapses the whole stack, so positions with
+        different stack depths (routine with per-position autofocus) project
+        correctly and produce exactly the planes they should. Blocking on Z
+        refused a sound file, and said it did so for a reason that was not
+        true.
         """
         if self.single_image or len(self.sizes_per_series) < 2:
             return None
-        labels = {"T": "timepoints", "C": "channels", "Z": "Z slices"}
+        labels = {"T": "timepoints", "C": "channels"}
         first = self.sizes_per_series[0]
-        for ax in ("T", "C", "Z"):
+        for ax in ("T", "C"):
             want = int(first.get(ax, 1))
             for i, sizes in enumerate(self.sizes_per_series[1:], start=1):
                 got = int(sizes.get(ax, 1))

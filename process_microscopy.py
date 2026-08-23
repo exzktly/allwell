@@ -3116,6 +3116,15 @@ def process_well_zip_task(
             # All user-facing artefacts (CSV + out_zip) are already
             # written at this point, so the well *is* done — the
             # cleanup is internal housekeeping.
+            # This well's output was produced under *this* run's settings,
+            # recorded here rather than in the parent because here is the one
+            # point both artefacts are on disk. The parent could not tell an
+            # empty result apart from a short-circuit: a well that logged "up
+            # to date (no new FOVs)" and one that ran and found no cells both
+            # return no records, and stamping the first turns an honest
+            # "unknown, grandfathered" into a confident claim that the numbers
+            # on disk came from settings that never touched them.
+            record_well_settings(output_dir, well_label, settings_key)
             log.info("Well %s — done.", well_label)
             return records, failed
         except BaseException as exc:
@@ -3319,6 +3328,15 @@ def process_well_folder_task(
             # cleanup in the finally block — same reasoning as the zip
             # task: cleanup can hang on NAS storage and we don't want
             # that to defer the GUI's well_done event.
+            # This well's output was produced under *this* run's settings,
+            # recorded here rather than in the parent because here is the one
+            # point both artefacts are on disk. The parent could not tell an
+            # empty result apart from a short-circuit: a well that logged "up
+            # to date (no new FOVs)" and one that ran and found no cells both
+            # return no records, and stamping the first turns an honest
+            # "unknown, grandfathered" into a confident claim that the numbers
+            # on disk came from settings that never touched them.
+            record_well_settings(output_dir, well_label, settings_key)
             log.info("Well %s — done.", well_label)
             return records, failed
         except BaseException as exc:
@@ -3463,13 +3481,6 @@ def _run_well_worker_pool(
                 total_nuclei += len(records)
                 if failed:
                     partial_wells[well_label] = list(failed)
-                # This well's output was produced under *this* run's settings.
-                # Written from the parent rather than the worker so it lands
-                # once per well however the worker exited, and only for a well
-                # that actually ran: a skipped well keeps whatever marker it
-                # already had, which is what makes the check mean "the settings
-                # that produced what is on disk".
-                record_well_settings(output_dir, well_label, settings_key)
             except Exception as exc:
                 _report_worker_failure(well_label, output_dir, exc)
                 wells_failed_entirely.append(well_label)

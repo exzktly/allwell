@@ -695,7 +695,12 @@ def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
     as a partial CSV beside the plate's real one. New rows are appended and
     duplicates skipped, by :func:`merge_records_into_csv`.
 
-    A failure is per file and never stops the loop, but the two failures are
+    A failure is per file and never stops the loop — and "a failure" means any
+    of the three ways a CSV refuses to be read, not just the one that is an
+    ``OSError``. A file whose bytes are not UTF-8 raises ``UnicodeDecodeError``
+    and a malformed one raises ``csv.Error``; catching only ``OSError`` let
+    either abort the whole loop, so one damaged partial stopped every well
+    after it from merging. The two failures are
     reported differently because they mean different things. An unreadable
     *fetched* partial is a transfer that did not land: nothing local is at risk
     and the next fetch can bring it again. An unreadable *target* is the
@@ -715,7 +720,7 @@ def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
         try:
             with open(partial, newline="") as fh:
                 rows = list(_csv.DictReader(fh))
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError, _csv.Error) as exc:
             if log_fn:
                 log_fn(f"[remote] warn: reading fetched CSV {partial.name} "
                        f"failed: {exc}\n")
@@ -724,7 +729,7 @@ def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
             continue
         try:
             added = merge_records_into_csv(target_dir / partial.name, rows)
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError, _csv.Error) as exc:
             if log_fn:
                 log_fn(f"[remote] warn: merging into {partial.name} failed "
                        f"({exc}); the existing CSV is unchanged and this "

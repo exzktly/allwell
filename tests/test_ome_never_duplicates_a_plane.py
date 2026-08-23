@@ -101,3 +101,40 @@ def test_a_uniform_file_is_still_accepted(tmp_path):
 
     assert layout._ragged_positions() is None, layout.sizes_per_series
     assert "do not agree" not in layout.validation_report("uniform.ome.tif")
+
+
+def test_positions_with_different_stack_depths_are_still_accepted():
+    """Z is collapsed, so a deeper stack cannot duplicate a plane.
+
+    `_extract_plane` reaches `elif ax in ("Z", "Y", "X"): continue` and
+    max-projects the whole stack, and the explode loop indexes only T and C.
+    Per-position autofocus routinely produces different depths; blocking such a
+    file refused a sound plate and named a reason that was not true.
+    """
+    from pipeline.ome_explode import OmeLayout
+
+    layout = OmeLayout(
+        n_positions=2, size_t=2, size_c=1, size_z=5,
+        channel_names=["DAPI"], timepoint_tokens=["t0", "t1"],
+        axes_per_series=["TZYX", "TZYX"],
+        sizes_per_series=[{"T": 2, "C": 1, "Z": 5}, {"T": 2, "C": 1, "Z": 3}],
+    )
+
+    assert layout._ragged_positions() is None, (
+        "positions differing only in stack depth were refused")
+    assert "do not agree" not in layout.validation_report("plate.ome.tif")
+
+
+def test_a_short_channel_count_is_still_refused():
+    """The other half of the same tuple, so narrowing it did not empty it."""
+    from pipeline.ome_explode import OmeLayout
+
+    layout = OmeLayout(
+        n_positions=2, size_t=1, size_c=3, size_z=1,
+        channel_names=["DAPI", "GFP", "RFP"], timepoint_tokens=["t0"],
+        axes_per_series=["CYX", "CYX"],
+        sizes_per_series=[{"T": 1, "C": 3, "Z": 1}, {"T": 1, "C": 2, "Z": 1}],
+    )
+
+    report = layout.validation_report("plate.ome.tif")
+    assert "do not agree" in report and "channels" in report, report

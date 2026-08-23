@@ -117,3 +117,31 @@ def test_a_duplicate_key_is_still_dropped(tmp_path):
     assert merge_records_into_csv(csv_path, _rows("T01", 5)) == 0
     with open(csv_path, newline="") as fh:
         assert len(list(csv.DictReader(fh))) == 5
+
+
+def test_one_undecodable_partial_does_not_stop_the_wells_after_it(tmp_path):
+    """The docstring's "a failure is per file" has to cover every failure.
+
+    A CSV refuses to be read in three ways: an `OSError`, a `UnicodeDecodeError`
+    when its bytes are not UTF-8, and a `csv.Error` when its structure is
+    malformed. Catching only the first let either of the others abort the whole
+    loop, so one damaged partial stopped every well after it from merging —
+    silently, since the exception escaped into the fetch's own handler rather
+    than the per-file warning this function writes.
+    """
+    from pipeline.io import merge_fetched_csvs
+
+    src, target = tmp_path / "transit", tmp_path / "out"
+    src.mkdir()
+    target.mkdir()
+    (src / "measurements_A01.csv").write_bytes(b"well,fov\n\xff\xfe,F1\n")
+    (src / "measurements_B02.csv").write_text("well,fov\nB02,F1\n")
+
+    log: list[str] = []
+    added = merge_fetched_csvs(src, target, log_fn=log.append)
+
+    assert added == 1
+    assert (target / "measurements_B02.csv").is_file(), (
+        "B02 never merged because A01's bytes were not decodable")
+    assert "measurements_A01.csv" in "".join(log), (
+        "the damaged partial was skipped without saying so")

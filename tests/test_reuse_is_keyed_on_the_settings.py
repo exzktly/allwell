@@ -298,3 +298,41 @@ def test_the_incremental_path_consults_the_settings_too():
             f"{fn.__name__}'s incremental branch does not consult the "
             f"settings, so changing the segmenter leaves every covered "
             f"(fov, timepoint) in the done-set and the well logs 'up to date'")
+
+
+def test_a_short_circuited_well_is_not_stamped_with_this_runs_settings():
+    """The marker has to mean "these settings produced what is on disk".
+
+    Two paths return from a worker task without computing anything: the
+    incremental branch that logs "up to date (no new FOVs)", and a well whose
+    input holds no image groups. Written from the parent's `as_completed` loop,
+    the marker landed on both — so a grandfathered well skipped under new
+    settings acquired a record asserting those settings produced its rows. That
+    spends the grandfathering escape hatch on a false claim rather than an
+    honest unknown, and a later run under the *original* settings then
+    recomputes a well that was already correct.
+
+    Read off the source rather than driven, because the write has to sit after
+    both artefacts are published and the pool spawns processes: what matters is
+    which side of the early returns it is on.
+    """
+    import inspect
+
+    import process_microscopy as pm
+
+    for fn in (pm.process_well_zip_task, pm.process_well_folder_task):
+        src = inspect.getsource(fn)
+        assert "record_well_settings(output_dir, well_label, settings_key)" in src, (
+            f"{fn.__name__} does not record the settings its own output was "
+            f"produced under, so nothing on disk says which run wrote it")
+        stamp = src.index("record_well_settings(")
+        for early in ("up to date (no new FOVs)", "no image groups found"):
+            if early in src:
+                assert src.index(early) < stamp, (
+                    f"{fn.__name__} stamps the settings marker before the "
+                    f"{early!r} short circuit, so a well that computed nothing "
+                    f"is recorded as having been produced by this run")
+        assert src.index("Well %s — done.") > stamp, (
+            f"{fn.__name__} records the settings after it declares the well "
+            f"done; the marker must be written while both artefacts are known "
+            f"to be on disk")

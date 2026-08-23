@@ -2221,3 +2221,48 @@ def test_f821_guard_catches(tmp_path, shape):
 def test_f821_guard_clears(tmp_path, shape):
     got = _f821_offenders(tmp_path, F821_CLEAN[shape])
     assert got is None, f"ruff fired F821 on a legitimate {shape}: {got}"
+
+
+# ── file dialogs ────────────────────────────────────────────────────────────
+
+DIALOG_VIOLATIONS = {
+    "literal": ('def go(ctx):\n'
+                '    QFileDialog.getSaveFileName(None, "t", "", "*")\n'),
+    # The spelling the third site used, and the one a literal-only check reads
+    # as compliant: the None is bound to a name on the line above the call.
+    "via_local": ('def go(ctx):\n'
+                  '    parent = None\n'
+                  '    QFileDialog.getSaveFileName(parent, "t", "", "*")\n'),
+    "directory": ('def go(ctx):\n'
+                  '    QFileDialog.getExistingDirectory(None, "t", "")\n'),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(DIALOG_VIOLATIONS))
+def test_dialog_guard_catches_an_unparented_call(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, f"bad_dialog_{shape}.py", DIALOG_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_file_dialogs_are_parented",
+                    "test_no_unparented_file_dialog", [bad])
+    assert exc is not None and f"bad_dialog_{shape}.py" in str(exc)
+
+
+DIALOG_CLEARED = {
+    "window": ('def go(ctx):\n'
+               '    QFileDialog.getSaveFileName(ctx.window, "t", "", "*")\n'),
+    # A parameter defaulting to None still passes: the caller decides, and
+    # `widgets/path_field.py` is built exactly this way on purpose.
+    "forwarded": ('def go(ctx, parent=None):\n'
+                  '    QFileDialog.getSaveFileName(parent, "t", "", "*")\n'),
+    # Reassigned to a real window after a None initialiser — not a violation.
+    "reassigned": ('def go(ctx, stacked):\n'
+                   '    parent = None\n'
+                   '    parent = ctx.window\n'
+                   '    QFileDialog.getSaveFileName(parent, "t", "", "*")\n'),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(DIALOG_CLEARED))
+def test_dialog_guard_clears_a_parented_call(tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, f"good_dialog_{shape}.py", DIALOG_CLEARED[shape])
+    assert _run_scan(monkeypatch, "tests.test_file_dialogs_are_parented",
+                     "test_no_unparented_file_dialog", [good]) is None

@@ -1270,11 +1270,15 @@ wells currently selected on the plate beside the tab.
 #### Ratios
 
 Define a ratio channel (e.g. `GFP/MCHERRY`) computed at read time as
-*numerator / (denominator + ε)*; it appears as a virtual channel in the channel
-selector everywhere. **ε** is added to the denominator before dividing, so a
-cell whose denominator reads 0 yields `NaN` and drops out at ε = 0, or survives
-with the ratio biased toward 0 at a small positive ε. **Apply** commits the
-table and persists it with the dataset.
+*numerator / max(denominator, ε)*; it appears as a virtual channel in the
+channel selector everywhere. **ε** is the floor the denominator is clamped to
+before dividing rather than a constant added to it, which matters on
+background-subtracted channels: those read slightly negative for some cells,
+and adding ε there flips the divisor's sign and produces an arbitrarily large
+ratio, while clamping keeps it positive. A cell whose denominator reads 0
+yields `NaN` and drops out at ε = 0, or survives with the ratio biased toward 0
+at a small positive ε. **Apply** commits the table and persists it with the
+dataset.
 
 #### Pipeline Info
 

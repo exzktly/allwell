@@ -94,7 +94,6 @@ class Colors:
     text_secondary  = "#98A2B3"   # --text-secondary : labels-on-controls, metadata
     text_muted      = "#5F6B7C"   # --text-muted     : hints, inactive labels, ticks
     text_faint      = "#404B5C"   # --text-faint     : decorative separators
-    # --text-disabled : disabled control label text. Derived from ``text_muted``
     #: Ink for a plot element that stands for something **undefined** — today
     #: the dashed edge of the bar plots' "could not be computed" placeholder
     #: and their disabled-well outline. It was called ``text_disabled`` and

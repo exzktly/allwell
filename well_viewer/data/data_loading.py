@@ -467,9 +467,12 @@ def resolve_value_series(
 ) -> pd.Series:
     """Vectorised counterpart of the old per-row ``resolve_value``.
 
-    For ratio keys (``ratio:<name>``) returns ``num / (den + epsilon)`` with
-    NaN where the denominator (after epsilon) is zero or either operand is
-    non-finite. For real columns returns the column coerced via
+    For ratio keys (``ratio:<name>``) returns ``num / max(den, epsilon)`` —
+    epsilon is the floor the denominator is clamped to, not a term added to
+    it, because background-subtracted channels go legitimately negative and
+    ``den + epsilon`` sign-flips near zero. ``RatioMetric`` states the rule in
+    full. The result is NaN where the clamped denominator is zero or either
+    operand is non-finite. For real columns returns the column coerced via
     ``pd.to_numeric``, with non-finite values mapped to NaN.
 
     Returns NaN-filled Series of the right index when columns/ratios are

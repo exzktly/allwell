@@ -265,6 +265,13 @@ class AnalyzeSuspendMixin:
         """
         if current is None:
             current = self._current_output_dir()
+        if current == self.UNRESOLVED:
+            # The form names an input this cannot resolve. That is not "no
+            # folder named": falling through would rank every unfinished run
+            # on record and offer the newest, described as though it were the
+            # plate on screen, and accepting it would start an incremental run
+            # against another dataset's output directory.
+            return None
         # Filtering by folder *before* reading anything is the point: the index
         # holds an entry per plate ever run, and reading every one of their
         # journals to then discard all but one turned a keystroke into a
@@ -287,8 +294,28 @@ class AnalyzeSuspendMixin:
                             key=lambda o: (-o.at, o.from_journal))
         return offers[0] if offers else None
 
+    #: `_current_output_dir`'s answer when the form names an input it cannot
+    #: resolve. Distinct from `""`, which means "the form names nothing at
+    #: all" — see `_current_output_dir` for why conflating them offered the
+    #: user a different plate.
+    UNRESOLVED = "\x00unresolved"
+
     def _current_output_dir(self) -> str:
-        """The output folder the form is pointing at, or ``""``.
+        """The output folder the form is pointing at.
+
+        Three answers, not two. ``""`` means the field is empty and the user
+        has named nothing; :data:`UNRESOLVED` means they named something this
+        cannot turn into an output folder — a path that does not exist, a
+        volume that has gone away, a planner that raised; and anything else is
+        the folder.
+
+        Collapsing the middle case into ``""`` is what made the resume banner
+        dangerous. ``_resumable`` reads ``""`` as "no folder named, so offer
+        the newest unfinished run *anywhere*" — which is right for an empty
+        form and wrong for a typo'd path, where it offered a resume for a
+        completely different plate, described in the banner as though it were
+        the one on screen. Accepting it would have started an incremental run
+        against another dataset's output directory.
 
         Read through the same planner the readout and the run both use, so
         "which folder is on screen" cannot come to mean two things.
@@ -298,12 +325,14 @@ class AnalyzeSuspendMixin:
             raw = self._input_edit.text().strip()
         if not raw:
             return ""
+        resolved = self.UNRESOLVED
         with swallow("resolving the output folder for the resume banner"):
             from services.input_resolution_service import plan_input_layout
 
             plan = plan_input_layout(Path(raw))
-            return str(plan.output_dir) if plan.output_dir is not None else ""
-        return ""
+            if plan.output_dir is not None:
+                resolved = str(plan.output_dir)
+        return resolved
 
     def _suspended_offers(self, *, only_dir: str = "") -> list[_Resumable]:
         """Suspended runs on record, newest first; one folder's when named."""

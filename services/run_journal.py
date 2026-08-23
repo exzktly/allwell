@@ -56,14 +56,13 @@ read it without the GUI.
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from services.remote_config import default_state_dir
-from util.aw_safe import swallow, swallowed
+from util.json_write import try_write_json_atomic
+from util.aw_safe import swallowed
 
 #: Bumped when the on-disk shape changes incompatibly. A record written by any
 #: other version reads as "no journal" rather than raising — see
@@ -258,36 +257,11 @@ def _atomic_write_json(path: Path, payload: dict | list) -> bool:
     """Replace *path* with *payload*, atomically. ``False`` on any failure.
 
     A run that cannot write its own bookkeeping must still produce data, so
-    every caller here treats the return value as advisory and carries on.
+    every caller here treats the return value as advisory and carries on. The
+    implementation is shared with the suspended-run record — the two had a copy
+    each and the copies had diverged; see ``util.atomic_json``.
     """
-    tmp = ""
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp_",
-                                   suffix=".json")
-        with os.fdopen(fd, "w") as fh:
-            json.dump(payload, fh, indent=2)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, path)
-        return True
-    except (OSError, TypeError, ValueError):
-        # ``TypeError`` and ``ValueError`` are not hypothetical here: the
-        # payload carries a ``spec`` handed in by the caller, and one
-        # unserialisable value in it makes ``json.dump`` raise rather than the
-        # filesystem. Catching only ``OSError`` let that escape a function
-        # whose whole contract is that bookkeeping never fails a run, past
-        # callers that guard the same narrow type, and into the worker thread.
-        swallowed(f"could not write the run journal at {path}")
-        return False
-    finally:
-        # ``mkstemp`` created a file; every failure after that point leaves it
-        # behind, and these are per-run and per-well writes, so a plate that
-        # keeps failing would silt the output folder up with ``.tmp_*.json``.
-        # ``os.replace`` consumed it on the success path, hence ``missing_ok``.
-        if tmp:
-            with swallow(f"could not remove the temporary journal file {tmp}"):
-                Path(tmp).unlink(missing_ok=True)
+    return try_write_json_atomic(path, payload, what="run journal")
 
 
 def _read_run_payload(output_dir: Path | str) -> dict | None:

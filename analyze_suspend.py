@@ -108,6 +108,12 @@ class AnalyzeSuspendMixin:
         stopped, which the user can decline; the other order risks a run that
         winds down having left nothing behind to resume it with.
 
+        First does not mean *conditional on*. The record is a pointer to the
+        output folder, and the output folder is the work — so a record that
+        cannot be written costs the resume banner and nothing else, and the
+        run must still wind down. That is why the write has a scope of its own
+        below rather than sharing this method's handler.
+
         Never lets an exception escape — PySide6 ≥ 6.5 aborts the process on an
         unhandled exception out of a Qt slot, and this one is reached from a
         button the user presses precisely when they want the work kept.
@@ -122,7 +128,13 @@ class AnalyzeSuspendMixin:
                     "This run has not resolved its output folder yet — there is "
                     "nothing to resume from. Use Stop to cancel it.")
                 return
-            self._write_suspend_record(out_dir)
+            # The record is best-effort; winding the run down is not. Anything
+            # escaping the record write used to land in this method's own
+            # handler, which returns — so the run carried on, and the button
+            # the user pressed precisely to keep their work did nothing and
+            # said nothing. Its own scope keeps the two independent.
+            with swallow("writing the suspend record"):
+                self._write_suspend_record(out_dir)
             self._runner.suspend()
             self._log_line(
                 "\n[Suspending] Finishing the FOV-group(s) already in flight, "

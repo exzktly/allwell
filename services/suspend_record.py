@@ -27,10 +27,11 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
+
+from util.json_write import try_write_json_atomic
 
 RECORD_VERSION = 1
 
@@ -162,17 +163,15 @@ def same_dir(a: str, b: str) -> bool:
 
 
 def _write_all(runs: list[SuspendedRun]) -> bool:
-    """Replace the file atomically, or return False having changed nothing."""
-    path = record_path()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp_",
-                                   suffix=".json")
-        with os.fdopen(fd, "w") as fh:
-            json.dump([r.to_json() for r in runs], fh, indent=2)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, path)
-        return True
-    except OSError:
-        return False
+    """Replace the file atomically, or return False having changed nothing.
+
+    The writer is shared with the run journal (``util.atomic_json``) rather
+    than restated here. The copy that used to sit in this function caught
+    ``OSError`` alone, and the record carries a ``spec`` the caller handed in —
+    so one unserialisable value in it raised a ``TypeError`` out of a function
+    whose whole contract is a boolean, past ``_suspend``'s outer handler and
+    *before* ``PipelineRunner.suspend()`` was ever reached. The Suspend button
+    then did nothing at all and said nothing about it.
+    """
+    return try_write_json_atomic(record_path(), [r.to_json() for r in runs],
+                                what="suspended-run record")

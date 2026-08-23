@@ -1598,6 +1598,27 @@ class AllWellApp(QMainWindow):
                 self._review._persistence.save("view_state")
             except Exception:
                 swallowed()  # was: pass (silent except)
+            try:
+                # An in-progress notes edit reaches the queue only on
+                # focus-out, and closing a window does not move focus.
+                # ``commit_focused_notes`` folds the text on screen into the
+                # state slice *and* queues it, which is why it runs before the
+                # drain below rather than after: draining first would write
+                # everything except the thing the user was typing.
+                from well_viewer.core.ui_helpers import commit_focused_notes
+                commit_focused_notes(self._review._ctx)
+            except Exception:
+                swallowed()
+            try:
+                # Everything else the user edited is behind a 500 ms debounce
+                # timer that will never fire now. Only ``view_state`` had a
+                # force-save here, so an edit to a ratio, a heat-map layout, a
+                # cell override, a line order, a plot group, a note, a sample
+                # definition, a QC parameter or a crop made just before the
+                # window closed was dropped without a word.
+                self._review._persistence.flush_all()
+            except Exception:
+                swallowed()
         if self._review is not None and hasattr(self._review, "_cleanup_tmp"):
             try:
                 self._review._cleanup_tmp()

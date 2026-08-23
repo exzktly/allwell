@@ -177,6 +177,7 @@ from well_viewer.core.tab_controller import on_central_pane_changed, build_centr
 from well_viewer.core.ui_helpers import apply_theme, mute_color, norm_timepoint, toast, show_progress, step_progress, toggle_log
 from well_viewer.core.centre_view import drain_pending_centre_builders
 from well_viewer.core.plot_toggles import toggle_sem, toggle_fov_replicates, refresh_fov_btn_state
+from well_viewer.core.worker_bridge import stop_runtime_workers
 
 
 def teardown_review_pane(app) -> None:
@@ -206,6 +207,11 @@ def teardown_review_pane(app) -> None:
             loader.cancel()
         except Exception:
             _logger.debug("teardown: cell-browser loader cancel failed", exc_info=True)
+    # Cell Gating owns two QThreads — the inclusion pass and the auto-threshold
+    # scan — and neither was stopped anywhere, so quitting mid-pass left one
+    # running against a pane being destroyed (the inclusion pass writes
+    # ``Included`` flags onto the row cache as it goes).
+    stop_runtime_workers(runtime, "cell_gating", ("worker", "auto_worker"))
     try:
         from well_viewer.core.split_view import _remove_split_focus_filter
         _remove_split_focus_filter(app._ctx)

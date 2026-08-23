@@ -55,8 +55,12 @@ def load_from_data_dir(ctx) -> None:
     if not app._app_state.dataset.data_dir:
         return
     data = _doc.get_section(ctx, "heatmap_layouts")
+    # A plate with no saved arrangements has none — carrying the previous
+    # plate's across the swap left layouts in the sidebar naming wells and
+    # metrics this dataset may not have, and its persisted settings driving
+    # this dataset's heat map. So an absent section clears rather than returns.
     if not isinstance(data, dict):
-        return
+        data = {}
     from well_viewer.features.heatmap.models import layouts_from_dict
     ctx.runtime.heatmap.layouts = layouts_from_dict(data.get("layouts", []) or [])
     settings = data.get("settings", {}) or {}

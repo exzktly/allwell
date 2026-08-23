@@ -58,3 +58,16 @@ class ImageViewState:
             self.tint_by_channel.pop(ch, None)
         else:
             self.tint_by_channel[ch] = tuple(max(0, min(255, int(c))) for c in rgb)
+
+    def reset_for_new_dataset(self) -> None:
+        """Forget the per-channel display windows and tints.
+
+        A LUT is a pair of intensity values, and intensities are a property of
+        the plate that produced them. Carrying a bright plate's window onto a
+        dim one renders the new plate black, and carrying a dim plate's window
+        onto a bright one blows it out — in both cases with the histogram
+        controls showing the numbers, so it reads as the data rather than as a
+        stale setting. Neither dict is persisted, so nothing else clears them.
+        """
+        self.lut_by_channel = {}
+        self.tint_by_channel = {}

@@ -62,7 +62,39 @@ class PersistenceRegistry:
         self._pending.add(name)
         QTimer.singleShot(_DEBOUNCE_MS, lambda: self._flush(name))
 
+    def flush_all(self) -> None:
+        """Write every pending debounced save now.
+
+        ``schedule_save`` coalesces edits behind a 500 ms timer, which is right
+        while the app is running and wrong at the two moments the timer will
+        never fire: quitting, and loading another dataset. On quit the edit was
+        simply lost — everything except ``view_state`` had no force-save at
+        all, so a ratio, a heat-map layout, a curated cell override, a line
+        order, a plot group, a note, a sample definition, a QC parameter or a
+        crop made within half a second of pressing ⌘W went nowhere, silently.
+        On a dataset load it was worse than lost: a timer that survived
+        ``begin_load`` fired *after* the new dataset's directory was in place
+        and wrote the previous dataset's state into it.
+
+        Failures are logged per domain and never propagate — this runs on the
+        way out, and one domain's disk error must not stop the others being
+        written.
+        """
+        for name in sorted(self._pending):
+            self._flush(name)
+
     def _flush(self, name: str) -> None:
+        # The ``QTimer.singleShot`` lambdas ``schedule_save`` arms cannot be
+        # cancelled, so they still fire ~500 ms later after ``flush_all`` has
+        # already written and drained the domain. Discarding-then-saving
+        # unconditionally meant that second firing wrote *again* — and on a
+        # dataset swap it landed after ``begin_load``, putting the previous
+        # plate's ratios, layouts, line order or crop into the new plate's
+        # ``persistence.json``. That is the exact bug ``flush_all`` exists to
+        # prevent, so the pending set is the authority on whether a save is
+        # still owed, not merely a coalescing hint.
+        if name not in self._pending:
+            return
         self._pending.discard(name)
         # A debounced autosave runs from a QTimer with no caller to catch a
         # raise — an exception here (e.g. a disk-full write in

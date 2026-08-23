@@ -31,3 +31,9 @@ def load_from_data_dir(ctx) -> None:
     data = _doc.get_section(ctx, "multivariate")
     if isinstance(data, dict):
         st.apply_config(data)
+    else:
+        # No saved configuration for this plate means the tab starts fresh, not
+        # that it keeps the previous plate's axes and channel picks — those name
+        # columns this dataset need not have.
+        from well_viewer.persistence.reset_scopes import restore_slice_defaults
+        restore_slice_defaults(st, "multivariate")

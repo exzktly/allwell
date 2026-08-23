@@ -75,6 +75,11 @@ from pipeline.cli_args import (  # noqa: F401 — re-exported for callers/tests
     FLATFIELD_MODES,
     build_parser,
 )
+from pipeline.input_layout import (  # noqa: F401 — re-exported for callers/tests
+    find_well_folders,
+    find_well_zips,
+    refuse_images_only_in_ignored_folders,
+)
 from util.image_exts import GROUP_IMAGE_EXTS, is_run_input_member
 from util.timepoint import parse_hours as _tp_parse_hours, sort_key as _tp_sort_key
 from util.well_token import (
@@ -397,61 +402,8 @@ log = logging.getLogger(__name__)
 # processed the same folder. One parser, one answer, one parse per name.
 
 
-def find_well_zips(input_dir: Path) -> list[tuple[str, Path]]:
-    """
-    Scan *input_dir* (non-recursively) for .zip files whose stem matches a
-    96-well plate position.
-
-    Returns a list of (well_label, zip_path) sorted by well_label.
-    Zips with non-plate names are logged as warnings and skipped.
-    """
-    found: list[tuple[str, Path]] = []
-    skipped: list[Path] = []
-
-    for p in sorted(input_dir.glob("*.zip")):
-        if p.name.startswith("."):
-            log.debug("Skipping hidden file: %s", p.name)
-            continue
-        # Canonicalises to upper-case, zero-padded column (a1 → A01) and
-        # returns None for anything that is not a 96-well position.
-        well = _canonical_well_label(p.stem)
-        if well is not None:
-            found.append((well, p))
-        else:
-            skipped.append(p)
-
-    if skipped:
-        log.warning(
-            "%d zip file(s) skipped (name not a valid 96-well position):",
-            len(skipped),
-        )
-        for p in skipped:
-            log.warning("  %s", p.name)
-
-    log.info("Found %d well zip file(s) in %s", len(found), input_dir)
-    return found
 
 
-def find_well_folders(input_dir: Path) -> list[tuple[str, Path]]:
-    """
-    Scan *input_dir* (non-recursively) for subdirectories whose name matches
-    a 96-well plate position (e.g. A01/, B12/).
-
-    Returns a list of (well_label, folder_path) sorted by well_label.
-    """
-    found: list[tuple[str, Path]] = []
-    try:
-        entries = sorted(input_dir.iterdir())
-    except OSError:
-        return found
-    for p in entries:
-        if not p.is_dir() or p.name.startswith(".") or p.name.startswith("_"):
-            continue
-        well = _canonical_well_label(p.name)
-        if well is not None:
-            found.append((well, p))
-    log.info("Found %d well folder(s) in %s", len(found), input_dir)
-    return sorted(found, key=lambda x: x[0])
 
 
 def organize_loose_tifs_into_well_folders(
@@ -1392,7 +1344,6 @@ from pipeline.auto_threshold import (
     sample_cell_and_bg as _sample_cell_and_bg,  # noqa: F401
 )
 from pipeline.threshold_optimize import estimate_thresholds_from_controls
-from util.aw_safe import swallow as aw_swallow
 from util.aw_safe import swallowed
 
 
@@ -3543,60 +3494,6 @@ def _run_well_worker_pool(
     return affected_wells
 
 
-def _refuse_images_only_in_ignored_folders(input_dir: Path, well_zips) -> None:
-    """Stop rather than silently analyse a fraction of the plate.
-
-    `well_folders` is read only when there are no zips at all, so a plate that
-    holds both processes the zips and ignores every folder. That is quiet in
-    the ordinary resumed case — the folder is the redundant twin of a finished
-    archive — and it is data loss in the case just above it:
-    `organize_loose_tifs_into_well_folders` has already *moved* the user's
-    loose images into `in/<WELL>/`, and if any zip exists those images are now
-    somewhere the run will never look. The run then reports success having
-    analysed everything except what the user just added.
-
-    Refused only when a folder holds an input image the sibling archive does
-    not already carry, so a resumed plate whose folders are genuinely redundant
-    still runs. Named by well and by file, because the remedy — fold them in,
-    or move the archives aside — depends on which files they are.
-    """
-    import zipfile
-
-    zip_by_well = {str(w): Path(p) for w, p in dict(well_zips or {}).items()} \
-        if isinstance(well_zips, dict) else {str(w): Path(p) for w, p in well_zips}
-    stranded: dict[str, list[str]] = {}
-    for well, folder in find_well_folders(input_dir):
-        images = sorted(
-            q.name for q in folder.iterdir()
-            if q.is_file() and is_run_input_member(q.name)
-        )
-        if not images:
-            continue
-        archive = zip_by_well.get(str(well))
-        held: set[str] = set()
-        if archive is not None and archive.exists():
-            with aw_swallow(f"reading {archive.name} to compare with {folder.name}"):
-                with zipfile.ZipFile(archive) as zf:
-                    held = {Path(n).name for n in zf.namelist()}
-        missing = [n for n in images if n not in held]
-        if missing:
-            stranded[str(well)] = missing
-
-    if not stranded:
-        return
-    detail = "; ".join(
-        f"{w}: {', '.join(names[:4])}{'…' if len(names) > 4 else ''}"
-        for w, names in sorted(stranded.items())
-    )
-    raise SystemExit(
-        f"Input error: {len(stranded)} well folder(s) under {input_dir} hold "
-        f"image(s) that are not in the matching <WELL>.zip, and folder mode is "
-        f"not used when any zip is present — so these images would be silently "
-        f"left out of the run:\n  {detail}\n\n"
-        f"Fold them into the matching archive, or move the archives aside so "
-        f"the run uses folder mode for the whole plate. Refusing rather than "
-        f"analysing part of the plate and reporting success."
-    )
 
 
 def process_well_zips(
@@ -4269,7 +4166,7 @@ def main() -> None:
     well_zips    = find_well_zips(input_dir)
     well_folders = find_well_folders(input_dir) if not well_zips else []
     if well_zips:
-        _refuse_images_only_in_ignored_folders(input_dir, well_zips)
+        refuse_images_only_in_ignored_folders(input_dir, well_zips)
 
     # ── Scratch preflight ───────────────────────────────────────────────────
     # Checked here, once both the well list and the channel count are known and

@@ -2040,7 +2040,10 @@ def test_required_files_list_is_what_we_promised():
         # Per-FOV resume checkpoints, keyed on the output directory and the
         # settings so one plate cannot resume another's intermediates.
         "pipeline/fov_checkpoint.py",
-        "pipeline/incremental_keys.py",
+        # Which of the three input layouts a plate is in; process_microscopy
+    # imports it at module scope.
+    "pipeline/input_layout.py",
+    "pipeline/incremental_keys.py",
         "pipeline/well_skip.py",
         "pipeline/io.py",
         # Packed OME-TIFF de-interleave; client-side, listed for manifest

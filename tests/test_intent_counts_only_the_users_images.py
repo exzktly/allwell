@@ -342,8 +342,8 @@ def test_images_stranded_in_an_ignored_folder_stop_the_run(tmp_path):
     reports success having analysed everything except what the user just
     added.
     """
-    from process_microscopy import (
-        _refuse_images_only_in_ignored_folders, find_well_zips)
+    from pipeline.input_layout import (
+        find_well_zips, refuse_images_only_in_ignored_folders)
 
     d = tmp_path / "in"
     d.mkdir()
@@ -353,7 +353,7 @@ def test_images_stranded_in_an_ignored_folder_stop_the_run(tmp_path):
     (d / "B02" / "P_DAPI_B02_F1_T1.tif").write_bytes(b"x")
 
     with pytest.raises(SystemExit) as caught:
-        _refuse_images_only_in_ignored_folders(d, find_well_zips(d))
+        refuse_images_only_in_ignored_folders(d, find_well_zips(d))
 
     assert "B02" in str(caught.value) and "P_DAPI_B02_F1_T1.tif" in str(caught.value), (
         "the refusal must name the wells and files, because the remedy "
@@ -366,8 +366,8 @@ def test_a_redundant_folder_beside_its_archive_still_runs(tmp_path):
     Refusing there would break every resume, which is why the check is "holds
     an image the archive does not" rather than "holds an image".
     """
-    from process_microscopy import (
-        _refuse_images_only_in_ignored_folders, find_well_zips)
+    from pipeline.input_layout import (
+        find_well_zips, refuse_images_only_in_ignored_folders)
 
     d = tmp_path / "in"
     d.mkdir()
@@ -376,4 +376,4 @@ def test_a_redundant_folder_beside_its_archive_still_runs(tmp_path):
     (d / "A01").mkdir()
     (d / "A01" / "P_DAPI_A01_F1_T1.tif").write_bytes(b"x")
 
-    _refuse_images_only_in_ignored_folders(d, find_well_zips(d))
+    refuse_images_only_in_ignored_folders(d, find_well_zips(d))

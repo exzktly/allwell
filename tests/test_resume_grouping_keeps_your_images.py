@@ -364,3 +364,36 @@ def test_one_unreadable_archive_does_not_stop_the_wells_after_it(tmp_path):
         assert sorted(zf.namelist()) == [
             "P_DAPI_B02_F1_T1.tif", "P_DAPI_B02_F2_T1.tif"], (
             "B02 was never folded because A01's archive could not be read")
+
+
+def test_the_deletion_reads_the_schema_the_zipper_reads(tmp_path):
+    """A second reading of the schema string decides which files are deleted.
+
+    `_wells_claimed_by` split on ":" and lower-cased. `util.schema.parse_schema`,
+    which the zipper uses, drops empty tokens and does not lower-case. A schema
+    carrying a doubled colon put the well at a different index in the two, so
+    the deletion asked "which well is this?" of a token the zipper never
+    treated as the well — and the answer decides whether a source image is
+    unlinked. Asserted as agreement with `parse_schema` rather than against a
+    hardcoded index, because the invariant is that there is one reading.
+    """
+    from util.schema import parse_schema
+    from util.well_token import canonical_well_label
+
+    from services.input_resolution_service import _wells_claimed_by
+
+    for schema in ("experiment::channel:well:fov:timepoint",
+                   "experiment:channel:Well:fov:timepoint",
+                   "experiment:channel:well:fov:timepoint:"):
+        fields = parse_schema(schema)
+        name = tmp_path / "Plate1_DAPI_A01_F1_T1.tif"
+        name.write_bytes(b"x")
+
+        got = _wells_claimed_by([name], filename_schema=schema,
+                                filename_sep="_")[name]
+        want = (canonical_well_label(name.stem.split("_")[fields.index("well")])
+                if "well" in fields else None)
+        assert got == want, (
+            f"for schema {schema!r} the zipper reads the well from index "
+            f"{fields.index('well') if 'well' in fields else None} "
+            f"({want!r}) but the deletion claimed {got!r}")

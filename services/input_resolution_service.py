@@ -1273,10 +1273,19 @@ def _wells_claimed_by(paths, *, filename_schema: str,
     afterwards. A name that does not decompose under the run's schema maps to
     ``None`` and is therefore never deleted: a schema mismatch has to cost the
     user a failed run, not their images.
+
+    The schema is read through :func:`util.schema.parse_schema`, which is what
+    the zipper itself uses. Splitting on ``":"`` here was a second reading of
+    the same string that disagreed with it in two ways — `parse_schema` drops
+    empty tokens, so a schema with a doubled colon shifted the well index apart
+    between the two, and it does not lower-case, so a capitalised field name
+    was a real field to one and ``ignore`` to the other. Either disagreement
+    decides which of the user's files are deleted.
     """
+    from util.schema import parse_schema
     from util.well_token import canonical_well_label
 
-    fields = [f.strip().lower() for f in str(filename_schema or "").split(":")]
+    fields = parse_schema(str(filename_schema or ""))
     well_idx = fields.index("well") if "well" in fields else -1
     out: dict[Path, str | None] = {}
     for p in paths:

@@ -757,10 +757,32 @@ about the form above it — the same schema, channels, folders and options are
 sent — only where the segmentation runs. Results come back into the same output
 folder, so Review cannot tell the difference afterwards.
 
+**Whatever you pick stays picked.** Adding, editing or deleting a host — or
+running a bootstrap, successful or not — rebuilds the dropdown from the file,
+and the rebuild keeps the target that is on screen. A remote you have selected
+that still exists stays selected; one you have just deleted drops back to
+`Local`. The "first configured remote" default above decides the *opening*
+state only, when the pane is built. It is never re-applied afterwards, so
+opening **Manage…** to set a cluster up for later cannot move today's run onto
+it.
+
 **Manage…** opens the remote-host dialog: add, edit, delete, test, or bootstrap
 a host (bootstrap installs the pipeline and its Python environment on a machine
 that has never run All-Well). A malformed `remotes.toml` never blocks the app —
-the run log carries a warning and the dropdown stays on `Local`.
+the run log carries a warning and the dropdown stays on `Local`. Inside the
+dialog, a file that cannot be read or parsed is reported in a message naming the
+error rather than leaving Edit…, Test and the list silently doing nothing.
+
+**Test** in that dialog, and **Test SSH** in the add/edit form, both run in the
+background: an unreachable host takes up to fifteen seconds to time out and the
+rest of the app — including a running plate's log — keeps working meanwhile.
+The same is true of **Verify** in the SSH-key wizard.
+
+**On a node it schedules** requires a scheduler command. Saving that choice with
+the command box empty would mean *run on the SSH host itself*, which on an HPC
+login node is the one thing the setting exists to avoid, so the form refuses it
+and says so. Switch **Run compute** back to *On the remote machine itself* if
+that is what you meant.
 
 **Remote scratch dir**, under *Advanced (remote paths)* in that dialog, is worth
 setting on a cluster. It is where the pipeline keeps its per-well working files
@@ -809,6 +831,11 @@ because none of it applies:
   file count and total bytes of every remote directory that *would* be removed
   at end of run, and removes nothing — worth one run on a shared host before
   trusting auto-delete on it.
+
+Both toggles keep what you set them to. Switching **Run on:** to `Local` hides
+the group, because none of it applies to a local run, and switching back shows
+it exactly as you left it — a dry-run tick is not dropped, and an auto-delete
+you turned off is not turned back on, by a glance at `Local`.
 
 What a remote run does before it uploads (which archives it rebuilds, which it
 sends untouched) and what it reports on the way back are covered by the run log

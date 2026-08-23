@@ -2887,10 +2887,35 @@ so a run's summary cannot land above the output it summarises. Each of the three
 
 The split follows the pane's three jobs. *Gathering* what a run is launched with
 is `analyze_tab_form.AnalyzeTabFormMixin`: anything that reads the form's
-widgets lives with the widgets, so `_collect_run_options`, the well-field
-validators and the entry-boundary numeric parsers (`_safe_qc_float`,
-`_safe_seg_float`, `_numeric_option_errors`) are all there. *Driving* the run is
-the tab plus `analyze_run_spec` / `analyze_suspend`. *Showing what the run said*
+widgets lives with the widgets, so `_collect_run_options` and the well-field
+validators are there, and the entry-boundary numeric validation is beside them
+in `analyze_tab_fields.py` (`_numeric_option_errors` and the field tables it
+reads). *Driving* the run is the tab plus `analyze_run_spec` / `analyze_suspend`.
+
+**Every numeric field is collected as raw text, and coerced once, downstream.**
+`_collect_run_options` puts the string the user typed into `opts` for every
+number the form asks for — radii, FFT sizes, mesh parameters, worker counts, the
+QC bounds, the minimum nucleus area, the Cellpose parameters and the two StarDist
+detection thresholds — and `services.pipeline_service.build_pipeline_args` turns
+them into argv. That ordering is the whole reason `_numeric_option_errors` can
+see anything: a field coerced on its way *into* `opts` reaches the validator as a
+number, and a validator handed a number cannot tell a typo from a deliberate
+blank. `5oo` and an empty box both became `0.0`, and `0.0` for `qc_min_area`
+means *no lower bound* — so debris removal removed nothing, the CSV carried every
+speck, and `pipeline_info.json` recorded a value the user never chose. The
+StarDist thresholds are the same shape one step along: `pipeline.stardist.parse_threshold`
+answers `None` — "use the pretrained model's own threshold" — for anything it
+cannot read, so `0,2` segmented at ~0.479 and the sidecar recorded the
+model-default sentinel. `_numeric_option_errors` covers all of them, each behind
+the control that reads it: the QC bounds only while *Remove debris* is on, the
+Cellpose parameters only under the general-Cellpose routine, the thresholds only
+under a StarDist one, because a value behind a control that is off cannot change
+a run and refusing to start over it would be a refusal the user cannot see.
+`analyze_tab_fields` restates `parse_threshold`'s rule rather than importing it —
+`pipeline.stardist` pulls numpy, scipy and skimage into whatever imports it, and
+the Analyze form keeps them out of its graph — and
+`tests/test_stardist_threshold_rule_is_one_rule.py` holds the two rules together
+over a corpus of typed values so the restatement cannot drift. *Showing what the run said*
 is `analyze_tab_log.AnalyzeLogPaneMixin`, described below — the log view, the
 raw-log toggle, the run-outcome surfacing and the idle "Last run ·" card. That
 last mixin is inherited by `AnalyzeTab` directly rather than through the form
@@ -3276,10 +3301,37 @@ added to the form with no hydration counterpart. Two of the cases need shapes
 the obvious fixture does not produce: a spec whose method and control wells
 agree round-trips even when the method is never restored, and blank
 thresholds only prove anything when hydrated over a form already holding real
-numbers. Note also that `cleanup_remote`/`dry_run_cleanup` are pinned by
-`_refresh_remote_controls` for a local run and gated on each other for a
-remote one, so not every combination of them is a spec the form can collect;
-hydrating an impossible one normalises it.
+numbers. Note also that `_refresh_remote_controls` *enables* dry-run only while
+auto-delete is checked, so "auto-delete off, dry-run on" is not a state the user
+can click their way to; hydrating one from a hand-edited `job_queue.json` leaves
+the value alone and simply shows the box disabled.
+
+**`_refresh_remote_controls` changes what is reachable, never what is set.** It
+shows the *Remote options* group only while a remote is selected and enables the
+dry-run checkbox only while auto-delete is checked — and it stops there. It used
+to force auto-delete back on whenever "Run on:" was `Local` and clear dry-run
+whenever dry-run was disabled, both to a widget that was hidden at the time and
+neither undone on the way back. A user who ticked *Dry-run cleanup* to see what
+auto-delete would remove, flicked to `Local` and back, and pressed Run had the
+per-run remote output directory and the cached input deleted for real; the
+mirror case re-armed an auto-delete they had deliberately turned off. Nothing is
+lost by leaving them alone, because nothing reads either on a local run —
+`PipelineRunner` passes both only down the remote branch, and
+`RemoteRunner.verify_and_cleanup` returns before touching anything when
+`cleanup_mode` is `"none"`.
+
+**"Run on:" keeps the target on screen.** `_reload_remotes_combo` rebuilds the
+combo from `remotes.toml` after every Manage-Remotes change — including a
+*failed* bootstrap, which emits `remotes_changed` all the same — and re-selects
+whatever was selected before, falling back to `Local` for a remote that has just
+been deleted (which is what its docstring had always promised). It does **not**
+re-apply `services.remote_config.default_remote_index`. That default decides the
+pane's opening state, in `_build_run_controls`, and a rebuild is not an opening
+state: re-applying it read `None` — the `userData` of the `Local` item — as
+"nothing has been chosen yet" rather than as the target on screen, so any change
+in the dialog moved a deliberate local run onto the first configured SSH host.
+The rebuild runs under `blockSignals(True)`, so nothing was emitted and nothing
+was logged; the next Run rsync'd the whole plate to the cluster.
 
 `AnalyzeTab.runFinished(ok: bool, message: str)` is a **positive-latch**
 completion signal: `_poll_log`'s `"done"` branch sets a per-run `_run_ok`
@@ -3313,7 +3365,14 @@ processes **folders**; `plan_input_layout` classifies a raw OME-TIFF as
 `packed_ome` and carries `PACKED_OME_MESSAGE`, so the readout under the input
 field and the run-time refusal (`analyze_input.AnalyzeInputMixin._ome_input_hint`,
 which the pre-run validation reads) redirect the user to the converter in the
-same words instead of trying to run it.
+same words instead of trying to run it. `_ome_input_hint` returns a message for a
+check it could not *make*, too, rather than `None`: `None` is the answer that
+means "this input is fine, start the run", so answering it for a permission error
+part-way through the walk turned the guard off silently and let the run go ahead
+against an input Analyze cannot process. The handler stays deliberately broad —
+it runs inside the Run button's own slot, where an unlisted exception type would
+kill the click instead of reporting anything — and names the exception in the
+message.
 
 The conversion itself is `pipeline.ome_explode.explode_ome_tiff`. It reads the
 OME-XML for dimension order and channel names, **max-projects Z**, maps each

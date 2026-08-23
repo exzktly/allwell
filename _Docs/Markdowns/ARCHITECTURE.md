@@ -2212,6 +2212,29 @@ The relevant modules:
 
 ### 5.7 Persistence
 
+**A debounced save is written at the two moments its timer will never fire.**
+`schedule_save` coalesces a burst of edits behind a 500 ms `QTimer`, which is
+right while the app is running and wrong on quit and on a dataset swap.
+`PersistenceRegistry.flush_all` writes every pending domain now, and
+`AllWellApp.closeEvent` and `load_controller` both call it. Before that, only
+`view_state` had a force-save on close, so an edit to a ratio, a heat-map
+layout, a curated cell override, a line order, a plot group, a note, a sample
+definition, a QC parameter or a crop made within half a second of ⌘W went
+nowhere; and on a dataset swap the surviving timer was worse than lost — it
+fired *after* the new data directory was in place and wrote the previous
+dataset's state into it.
+
+**An unreadable document is not an empty one.** When `persistence.json` exists
+but cannot be parsed — corrupt JSON, an OS error, or a `schema_version` this
+build does not understand — the in-memory doc is empty *by failure*, and
+writing it back would erase every section the file still holds because one byte
+failed. `DatasetState.persistence_doc_degraded` records that, and `_doc.write`
+renames the unreadable file to `persistence.unreadable-N.json` before starting a
+fresh one, so the user's work stays recoverable by hand. The schema-version path
+now does what its log line always claimed: it sets the document aside and
+applies defaults, rather than logging that and then using the document anyway.
+
+
 Every "save state into the dataset folder" path lives under
 `well_viewer/persistence/`. One module per JSON file:
 
@@ -6480,6 +6503,22 @@ succeeds (§6b).
 ## 9. Key data flows
 
 ### 9.1 Opening a dataset
+
+**Per-dataset state is reset by the slice that owns it.** `PlotState`,
+`ExportPrefsState` and `ImageViewState` each expose `reset_for_new_dataset`, and
+`load_controller` calls all three. The rule dividing what is cleared from what
+is kept is *which data* versus *how I like to look at it*: a fold-change
+control names a well, a baseline names a timepoint, a line order names wells, a
+LUT is a pair of intensities, an `axis_prefs` limit is in the units of the plate
+that was open — all of those describe a plate that is no longer open. SEM-vs-SD,
+log axes and the publication style are preferences and follow the user.
+
+`view_state.restore` cannot stand in for this: it early-returns when the new
+plate has no saved block, which is exactly the case where the previous plate's
+settings would otherwise carry over. The loudest instance was silent — plate B
+came up normalised against a group of plate A's wells, which resolves to
+nothing, so every bar was NaN under an axis still labelled as a fold change.
+
 
 ```
 User clicks Open  or  Ctrl+O  or  --data_dir argv

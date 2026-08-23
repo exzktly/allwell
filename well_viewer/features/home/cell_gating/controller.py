@@ -807,6 +807,10 @@ def cell_gating_start_gating_worker(ctx) -> None:
     worker.start()
 
 
+class _AutoThresholdCancelled(Exception):
+    """Internal: unwinds :class:`_AutoThresholdWorker`'s scan on cancel."""
+
+
 class _AutoThresholdWorker(QThread):
     """Run :func:`well_viewer.auto_threshold.compute_auto_thresholds` on a
     background thread so the GUI stays responsive while images load.
@@ -830,6 +834,24 @@ class _AutoThresholdWorker(QThread):
         self._channels = list(channels)
         self._well_labels = list(well_labels) if well_labels else []
         self._in_dir = in_dir
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        """Ask the pass to stop and disown whatever it produces.
+
+        ``compute_auto_thresholds`` is one long call, so this cannot interrupt
+        it mid-well; what it can do is stop the *result* being applied. Without
+        it, restarting the pass only waited 50 ms for the previous worker and
+        then started another, so two live threads could both reach ``done`` and
+        the later-finishing one — not the later-started one — decided the
+        thresholds. At teardown it kept a thread alive writing into a pane that
+        was going away.
+        """
+        self._cancelled = True
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled
 
     def run(self) -> None:  # QThread override
         # Stream traceback into the log drawer too — the previous "fail
@@ -840,13 +862,24 @@ class _AutoThresholdWorker(QThread):
         _log = _logging.getLogger("well_viewer.data.auto_threshold")
         try:
             from well_viewer.data.auto_threshold import compute_auto_thresholds
+            def _progress(msg) -> None:
+                if self._cancelled:
+                    # The only interruption point this pass has: raising out of
+                    # the progress callback unwinds the scan instead of reading
+                    # every remaining well for a result nobody will use.
+                    raise _AutoThresholdCancelled()
+                self.progress.emit(str(msg))
+
             result = compute_auto_thresholds(
                 self._out_dir,
                 fluor_channels=self._channels,
-                progress=lambda msg: self.progress.emit(str(msg)),
+                progress=_progress,
                 well_labels=self._well_labels or None,
                 in_dir=self._in_dir,
             )
+        except _AutoThresholdCancelled:
+            _log.info("Auto-threshold pass cancelled.")
+            return
         except Exception as exc:
             _log.error(
                 "Auto-threshold worker failed: %s\n%s",
@@ -854,6 +887,8 @@ class _AutoThresholdWorker(QThread):
             )
             self.failed.emit(str(exc))
             self.done.emit({})
+            return
+        if self._cancelled:
             return
         self.done.emit(result or {})
 
@@ -898,7 +933,11 @@ def cell_gating_auto_threshold(ctx) -> None:
     prev = ctx.runtime.cell_gating.auto_worker
     if prev is not None and prev.isRunning():
         try:
-            prev.wait(50)
+            # Cancel *then* wait. Waiting 50 ms on an uncancelled pass and
+            # starting another anyway left two live threads racing to decide
+            # the thresholds, with the later-finishing one winning.
+            prev.cancel()
+            prev.wait(2000)
         except Exception:
             swallowed()  # was: pass (silent except)
     btn = ctx.runtime.cell_gating.auto_btn
@@ -1621,3 +1660,27 @@ def _cell_gating_persist_params(ctx) -> None:
         save_to_pipeline_info(ctx)
     except Exception:
         logger.exception("Failed to save gating params to pipeline_info.json")
+
+
+def cell_gating_shutdown(ctx) -> None:
+    """Stop both Cell Gating workers, for app teardown.
+
+    Neither was stopped anywhere: ``teardown_review_pane`` covered smFISH and
+    the Cell Browser loader and not these, so quitting mid-pass left a QThread
+    running against a pane being destroyed — and the gating worker writes
+    ``Included`` flags onto the row cache as it goes.
+    """
+    runtime = getattr(getattr(ctx, "runtime", None), "cell_gating", None)
+    if runtime is None:
+        return
+    for attr in ("worker", "auto_worker"):
+        w = getattr(runtime, attr, None)
+        if w is None:
+            continue
+        try:
+            if hasattr(w, "cancel"):
+                w.cancel()
+            if w.isRunning():
+                w.wait(2000)
+        except Exception:
+            logger.debug("teardown: cell-gating %s stop failed", attr, exc_info=True)

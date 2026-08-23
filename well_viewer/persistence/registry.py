@@ -62,6 +62,27 @@ class PersistenceRegistry:
         self._pending.add(name)
         QTimer.singleShot(_DEBOUNCE_MS, lambda: self._flush(name))
 
+    def flush_all(self) -> None:
+        """Write every pending debounced save now.
+
+        ``schedule_save`` coalesces edits behind a 500 ms timer, which is right
+        while the app is running and wrong at the two moments the timer will
+        never fire: quitting, and loading another dataset. On quit the edit was
+        simply lost — everything except ``view_state`` had no force-save at
+        all, so a ratio, a heat-map layout, a curated cell override, a line
+        order, a plot group, a note, a sample definition, a QC parameter or a
+        crop made within half a second of pressing ⌘W went nowhere, silently.
+        On a dataset load it was worse than lost: a timer that survived
+        ``begin_load`` fired *after* the new dataset's directory was in place
+        and wrote the previous dataset's state into it.
+
+        Failures are logged per domain and never propagate — this runs on the
+        way out, and one domain's disk error must not stop the others being
+        written.
+        """
+        for name in sorted(self._pending):
+            self._flush(name)
+
     def _flush(self, name: str) -> None:
         self._pending.discard(name)
         # A debounced autosave runs from a QTimer with no caller to catch a

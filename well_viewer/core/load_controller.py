@@ -309,13 +309,22 @@ def load_directory(ctx, d: Path, label=None) -> None:
         )
         exit_split(ctx)
         sync_split_toggle_button(ctx, False)
-    # Save the outgoing dataset's view-state before swapping data dirs so
-    # reopening it later restores tab / wells / channel selection.
+    # Save the outgoing dataset's state before swapping data dirs, so reopening
+    # it later restores what the user left — and so that no debounced write is
+    # still queued when the data directory changes underneath it. A pending
+    # ``schedule_save`` timer that survives the swap fires against the *new*
+    # dataset's directory and writes the previous dataset's ratios, layouts or
+    # curation into it.
     if app._app_state.dataset.data_dir is not None:
         try:
             app._persistence.save("view_state")
         except Exception:
             logging.getLogger("well_viewer").exception("view_state save on switch failed")
+        try:
+            app._persistence.flush_all()
+        except Exception:
+            logging.getLogger("well_viewer").exception(
+                "pending autosave flush on dataset switch failed")
     # DatasetState resets the per-dataset caches (data dir, well paths, row
     # cache, persistence doc) for the switch to the new data directory.
     app._app_state.dataset.begin_load(d)
@@ -323,7 +332,14 @@ def load_directory(ctx, d: Path, label=None) -> None:
     app._app_state.selection.last_sel = None
     app._app_state.selection.prev_sel = set()
     app._app_state.selection.plot_groups = []
-    app._app_state.plot.bar_order = None
+    # Per-dataset state that names wells, timepoints or intensities of the
+    # plate being closed. Each slice owns the list of what that means for it;
+    # ``view_state.restore`` puts back whatever the *new* dataset saved, and it
+    # early-returns when the new plate has no saved block — which is why these
+    # have to be cleared here rather than merely overwritten there.
+    app._app_state.plot.reset_for_new_dataset()
+    app._app_state.export_prefs.reset_for_new_dataset()
+    app._app_state.image_view.reset_for_new_dataset()
     # Drop the per-channel threshold (min, max) cache; the new dataset's
     # ranges may be completely different.
     app._app_state.channel.threshold_range_cache.clear()

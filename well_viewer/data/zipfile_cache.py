@@ -68,13 +68,39 @@ class ZipFileCache:
         except OSError:
             return 0
 
-    def _evict_locked(self) -> None:
+    @staticmethod
+    def _close_entry(entry: "_Entry | None") -> None:
+        """Close a handle, waiting for any in-flight read to finish first.
+
+        ``with_handle`` yields the ``ZipFile`` while holding the entry's own
+        lock, because ZipFile is not safe for concurrent reads. Eviction, the
+        stale-mtime replacement and ``invalidate`` all closed the handle
+        without taking that lock — and the readers are off-thread (the Cell
+        Browser loader, the smFISH worker), so a close could land in the middle
+        of one and surface as a "seek of closed file" from a thread that had
+        done nothing wrong.
+
+        **Never call this while holding ``self._mutex``.** A caller inside
+        ``with_handle`` may reach back into the cache for another path and want
+        the mutex, so taking an entry lock under the mutex inverts the order
+        and can deadlock. Every call site here collects victims under the mutex
+        and closes them after releasing it.
+        """
+        if entry is None:
+            return
+        try:
+            with entry.lock:
+                entry.zf.close()
+        except Exception:
+            swallowed()  # was: pass (silent except)
+
+    def _evict_locked(self) -> list["_Entry"]:
+        """Pop entries over the cap and return them for the caller to close."""
+        victims: list[_Entry] = []
         while len(self._entries) > self._max_open:
             _, victim = self._entries.popitem(last=False)
-            try:
-                victim.zf.close()
-            except Exception:
-                swallowed()  # was: pass (silent except)
+            victims.append(victim)
+        return victims
 
     def _open_entry(self, path: Path) -> _Entry | None:
         try:
@@ -100,18 +126,16 @@ class ZipFileCache:
             # Close the stale handle outside the mutex so we don't
             # serialise IO behind it.
             stale = entry
-        if stale is not None:
-            try:
-                stale.zf.close()
-            except Exception:
-                swallowed()  # was: pass (silent except)
+        self._close_entry(stale)
         new_entry = self._open_entry(path)
         if new_entry is None:
             return None
         with self._mutex:
             self._entries[path] = new_entry
             self._entries.move_to_end(path, last=True)
-            self._evict_locked()
+            evicted = self._evict_locked()
+        for victim in evicted:
+            self._close_entry(victim)
         return new_entry
 
     @contextmanager
@@ -143,10 +167,7 @@ class ZipFileCache:
                 victim = self._entries.pop(resolved, None)
                 victims = [victim] if victim is not None else []
         for v in victims:
-            try:
-                v.zf.close()
-            except Exception:
-                swallowed()  # was: pass (silent except)
+            self._close_entry(v)
 
 
 # Module-level singleton. Process-wide; bounded so we never accumulate

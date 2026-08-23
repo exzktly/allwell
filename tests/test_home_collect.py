@@ -300,8 +300,23 @@ def test_work_is_counted_from_state():
     work = {r["key"]: r for r in hc.your_work(ctx)}
     assert work["replicates"]["count"] == 2
     assert work["plot_groups"]["count"] == 1
-    assert work["labels"]["count"] == 1 and work["labels"]["total"] == 2
     assert work["notes"]["count"] == 1
+
+
+def test_wells_labelled_is_counted_against_the_plate():
+    """"1 of 5", not "1 of 2".
+
+    This asserted the denominator was ``len(well_labels)`` — the size of the
+    label *map*, which only gains an entry for a well the user has touched. So
+    the row answered "how many of the labels I have started are non-empty",
+    which is not a question anyone asks, and on the common path (every entry
+    filled) it could only say "N of N". The plate's loaded wells are the
+    denominator that makes the row mean "how much of this plate is labelled".
+    """
+    ctx = _ctx(_block(), well_labels={"A01": "treated", "A02": ""})
+    work = {r["key"]: r for r in hc.your_work(ctx)}
+    assert work["labels"]["count"] == 1
+    assert work["labels"]["total"] == len(ctx.state.dataset.well_paths)
 
 
 # ── next step ───────────────────────────────────────────────────────────────

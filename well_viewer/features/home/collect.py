@@ -573,13 +573,25 @@ def your_work(ctx) -> list:
 
     info = _sidecar(ctx)
     smfish = info.get("smfish_thresholds") or {}
-    ratios = info.get("ratios") or []
+    # Ratios are read from the live channel state, which the loader has already
+    # populated from ``persistence.json`` (``persistence/ratios.py`` writes
+    # them there through ``_doc.set_section``). This row used to read
+    # ``pipeline_info["ratios"]`` — a key nothing has ever written — so it said
+    # "None yet" however many ratios the user had defined. Reading the doc
+    # directly would fix the count and break this page's other promise: Home
+    # reports a record and opens no files.
+    ratios = list(getattr(getattr(ctx.state, "channel", None),
+                          "ratio_metrics", None) or [])
 
     return [
         {"key": "replicates", "label": "Replicate sets", "count": len(sets)},
         {"key": "plot_groups", "label": "Plot groups", "count": len(groups)},
+        # The denominator is the plate's loaded wells, not the size of the
+        # label map: that map holds only wells that *have* a label, so
+        # ``labelled of len(labels)`` could only ever read "N of N" and told
+        # the user nothing about how much of the plate was still unlabelled.
         {"key": "labels", "label": "Wells labelled", "count": labelled,
-         "total": len(labels) or None},
+         "total": len(getattr(dataset, "well_paths", None) or {}) or None},
         {"key": "smfish", "label": "smFISH thresholds", "count": len(smfish)},
         # Read from the sidecar, so the count is right in a build with the
         # Ratios editor profiled out: the ratio model is core, and a dataset's

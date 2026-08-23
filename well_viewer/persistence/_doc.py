@@ -69,15 +69,23 @@ def read(state) -> dict:
         except (OSError, json.JSONDecodeError) as exc:
             _logger.warning("Failed to read %s: %s", p, exc)
             doc = {}
+            state.dataset.persistence_doc_degraded = True
         if not isinstance(doc, dict):
             _logger.warning("%s is not a JSON object; ignoring.", p)
             doc = {}
+            state.dataset.persistence_doc_degraded = True
         sv = doc.get("schema_version")
         if sv is not None and sv != SCHEMA_VERSION:
+            # "Applying defaults" is now what actually happens. It used to be
+            # only what the message said: the doc was then used unchanged, so a
+            # file written by a different schema was read section by section as
+            # if this build understood it.
             _logger.warning(
-                "%s schema_version=%r (expected %d); applying defaults.",
-                p, sv, SCHEMA_VERSION,
+                "%s schema_version=%r (expected %d); it will be set aside and "
+                "a fresh document started.", p, sv, SCHEMA_VERSION,
             )
+            doc = {}
+            state.dataset.persistence_doc_degraded = True
         # Legacy sidecars alongside an existing persistence.json shouldn't
         # happen, but if they do, prefer the consolidated doc.
         _warn_about_orphan_legacy(p.parent)
@@ -88,11 +96,42 @@ def read(state) -> dict:
     return doc
 
 
+def _set_aside_unreadable(p) -> None:
+    """Move an unreadable ``persistence.json`` out of the way, keeping it.
+
+    Overwriting it would destroy the only copy of everything the user saved —
+    their ratios, layouts, curation, notes and sample definitions — because one
+    section failed to parse. Renaming keeps that file recoverable by hand while
+    letting the app start a clean one.
+    """
+    for n in range(1, 100):
+        alt = p.with_name(f"{p.stem}.unreadable-{n}{p.suffix}")
+        if not alt.exists():
+            try:
+                p.replace(alt)
+                _logger.warning(
+                    "Kept the unreadable %s as %s rather than overwriting it.",
+                    p.name, alt.name,
+                )
+            except OSError as exc:
+                _logger.warning("Could not set aside %s: %s", p, exc)
+            return
+    _logger.warning(
+        "Could not set aside %s — 99 copies already exist beside it.", p)
+
+
 def write(state, doc: dict) -> None:
     """Atomically replace the on-disk doc and refresh the cache."""
     p = path_for(state)
     if p is None:
         return
+    if getattr(state.dataset, "persistence_doc_degraded", False):
+        # The doc in memory is empty because the read failed, not because the
+        # dataset has nothing saved. Writing it back would erase every section
+        # the file still holds.
+        if p.exists():
+            _set_aside_unreadable(p)
+        state.dataset.persistence_doc_degraded = False
     doc.setdefault("schema_version", SCHEMA_VERSION)
     try:
         atomic_write_json(p, doc)

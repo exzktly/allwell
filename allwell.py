@@ -1598,6 +1598,16 @@ class AllWellApp(QMainWindow):
                 self._review._persistence.save("view_state")
             except Exception:
                 swallowed()  # was: pass (silent except)
+            try:
+                # Everything else the user edited is behind a 500 ms debounce
+                # timer that will never fire now. Only ``view_state`` had a
+                # force-save here, so an edit to a ratio, a heat-map layout, a
+                # cell override, a line order, a plot group, a note, a sample
+                # definition, a QC parameter or a crop made just before the
+                # window closed was dropped without a word.
+                self._review._persistence.flush_all()
+            except Exception:
+                swallowed()
         if self._review is not None and hasattr(self._review, "_cleanup_tmp"):
             try:
                 self._review._cleanup_tmp()

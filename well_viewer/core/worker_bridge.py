@@ -24,6 +24,7 @@ worker in it, so a handler that writes to a widget needs exactly this route.
 
 from __future__ import annotations
 
+import logging
 import threading
 
 from PySide6.QtCore import QObject, Qt, Signal
@@ -159,3 +160,35 @@ class GuiLogRelay(QObject):
     def post(self, text: str) -> None:
         """Queue *text* for delivery on the thread that built this relay."""
         self._line.emit(text)
+
+
+def stop_runtime_workers(runtime, slice_name: str, attrs, *, wait_ms: int = 2000) -> None:
+    """Cancel and join the QThreads a runtime slice is holding.
+
+    App-close teardown has to stop several features' workers, and every one of
+    them is reached the same way: a runtime slice, an attribute holding a
+    thread, ``cancel()`` if it has one, then a bounded ``wait``. Written once
+    here rather than inline per feature for two reasons — ``runtime_app`` is
+    under a line and defensive-probe ratchet that this pattern would eat
+    (three ``getattr`` probes per feature), and a feature that is profiled out
+    has no slice at all, so the "is it there?" question belongs in one place.
+
+    Never imports a feature: the workers are reached through runtime state, so
+    a build without the feature simply finds nothing to stop.
+    """
+    slice_ = getattr(runtime, slice_name, None)
+    if slice_ is None:
+        return
+    for attr in attrs:
+        worker = getattr(slice_, attr, None)
+        if worker is None:
+            continue
+        try:
+            cancel = getattr(worker, "cancel", None)
+            if callable(cancel):
+                cancel()
+            if worker.isRunning():
+                worker.wait(wait_ms)
+        except Exception:
+            logging.getLogger(__name__).debug(
+                "teardown: stopping %s.%s failed", slice_name, attr, exc_info=True)

@@ -387,6 +387,15 @@ class BarBatchExportPanel(BatchExportPanel):
             except Exception as exc:
                 return f"{grp.name} t={tp_strs} CSV: {exc}"
 
+            if not rows_csv:
+                # Nothing to draw and nothing written. The figure would still
+                # save — axes, title, legend, tick labels, no bars — and the
+                # job would report success, so a group that produced no data
+                # was indistinguishable in the output directory from one that
+                # did, minus a CSV nobody counts.
+                return (f"{grp.name} t={tp_strs}: no data for this group — "
+                        f"nothing exported")
+
             try:
                 with self._app_val_col_scope(_val_col):
                     fig = self._render_bar_group_figure(

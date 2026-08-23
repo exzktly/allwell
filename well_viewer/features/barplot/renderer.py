@@ -291,8 +291,14 @@ def draw_violin(
         f"{ctx.state.channel.active_channel.upper()} {_metric_label} distribution (violin, bw={bw:.2f}){_fc_suffix}  —  {_tp_suffix}",
         color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=6)
     ax_mean.set_ylabel(f"{ctx.state.channel.active_channel.upper()} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
+    # The fraction panel of the per-cell display modes is NOT normalised: its
+    # value is ``n_above / n_total`` off the raw rows, and only the per-cell
+    # *values* on the mean panel are scaled. Giving it the mean panel's
+    # fold-change suffix labelled a raw fraction as a fold change —
+    # ``draw_per_well_n_bars`` already guards against exactly this for the
+    # events panel beside it.
     ax_frac.set_title(
-        f"{fraction_title(ctx.state.channel.active_metric)}{_fc_suffix}  —  {_tp_suffix}",
+        f"{fraction_title(ctx.state.channel.active_metric)}  —  {_tp_suffix}",
         color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6)
 
 
@@ -445,8 +451,14 @@ def draw_beeswarm(
         f"{ctx.state.channel.active_channel.upper()} {_metric_label} per cell{_thr_q}{_fc_suffix}  —  {_tp_suffix}",
         color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=6)
     ax_mean.set_ylabel(f"{ctx.state.channel.active_channel.upper()} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
+    # The fraction panel of the per-cell display modes is NOT normalised: its
+    # value is ``n_above / n_total`` off the raw rows, and only the per-cell
+    # *values* on the mean panel are scaled. Giving it the mean panel's
+    # fold-change suffix labelled a raw fraction as a fold change —
+    # ``draw_per_well_n_bars`` already guards against exactly this for the
+    # events panel beside it.
     ax_frac.set_title(
-        f"{fraction_title(ctx.state.channel.active_metric)}{_fc_suffix}  —  {_tp_suffix}",
+        f"{fraction_title(ctx.state.channel.active_metric)}  —  {_tp_suffix}",
         color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6)
 
 
@@ -524,9 +536,27 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
     xs = list(getattr(ctx.runtime.barplot, "xs", []) or [])
     if not keys or len(keys) != len(xs):
         return
-    x_by_key = {k: xs[i] for i, k in enumerate(keys)}
+
+    # ``keys``/``xs`` are parallel to ``items``. In multi-timepoint mode one key
+    # appears once per timepoint, so a dict built by key alone keeps only the
+    # last position — and the bracket for a test run at t=0 was drawn over the
+    # bars of the last timepoint on the axis. Restrict both the positions and
+    # the bar heights to the timepoint the test was actually run at, when the
+    # record names one.
+    def _same_tp(it) -> bool:
+        if rec_tp is None:
+            return True
+        try:
+            return tp_close(float(getattr(it, "tp", float("nan"))), float(rec_tp))
+        except (TypeError, ValueError):
+            return True
+
+    tested = [(it, x) for it, x in zip(items, xs) if _same_tp(it)]
+    if not tested:
+        tested = list(zip(items, xs))
+    x_by_key = {it.key: x for it, x in tested}
     top_by_key: dict[str, float] = {}
-    for it in items:
+    for it, _x in tested:
         val = getattr(it, val_attr, float("nan"))
         if getattr(it, has_attr, False) and not math.isnan(val):
             sp = getattr(it, spread_attr, 0.0)

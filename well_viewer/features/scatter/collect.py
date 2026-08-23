@@ -200,8 +200,12 @@ def collect_scatter_data(
         # "Apply gates" toggle filters through ``gates`` below instead — against
         # the boxes on screen, not against a column another tab's worker wrote.
         mask = df_included_mask(df, include_gate=False).to_numpy(copy=True)
-        if gates:
-            mask &= compute_gate_inclusion(df, gates, ratios)
+        # Two masks when the tab is filtering by gate geometry: the drawn one,
+        # and the one the gate percentages have to be denominated by. "42% of
+        # well A fell in this gate" is a statement about the cloud the gate was
+        # drawn over — filter first and every gate reads 100.0%, which is what
+        # "Apply gates" used to do to its own labels.
+        gate_mask = compute_gate_inclusion(df, gates, ratios) if gates else None
         tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):
             finite = np.isfinite(tp)
@@ -221,6 +225,9 @@ def collect_scatter_data(
         gate_x_mask = np.ones_like(x, dtype=bool) if is_count_x else (x > fluor_gate_x)
         gate_y_mask = np.ones_like(y, dtype=bool) if is_count_y else (y > fluor_gate_y)
         mask &= np.isfinite(x) & np.isfinite(y) & gate_x_mask & gate_y_mask
+        ungated = mask
+        if gate_mask is not None:
+            mask = mask & gate_mask
         if not mask.any():
             return None
         sel = df.loc[mask]
@@ -236,7 +243,11 @@ def collect_scatter_data(
             _logger.debug("scatter filename=%r nuclear_id=%r", filenames[0], nuclear_ids[0])
         metadata = [(well_label, fn, nid, int(ri))
                     for fn, nid, ri in zip(filenames, nuclear_ids, row_idx)]
-        return x[mask], y[mask], tp[mask], metadata
+        # The fifth element is the pre-gate cloud, and it is ``None`` unless a
+        # gate filter is actually in force — an ungated collection must not pay
+        # for a second copy of every array.
+        pre_gate = None if gate_mask is None else (x[ungated], y[ungated], tp[ungated])
+        return x[mask], y[mask], tp[mask], metadata, pre_gate
 
     # Use active replicate sets if defined, otherwise fall back to selected wells
     active_rsets = active_replicate_sets(
@@ -260,14 +271,20 @@ def collect_scatter_data(
             # whole-group ``x``/``y``/``metadata`` arrays stay too — the
             # CSV exporter and click resolver still consume them.
             wells_breakdown: dict[str, dict] = {}
+            ungated_xs: list[np.ndarray] = []
+            ungated_ys: list[np.ndarray] = []
+            ungated_tps: list[np.ndarray] = []
             for well_label in rset.wells:
                 if well_label not in ctx.state.dataset.well_paths:
                     continue
                 got = _collect_well(well_label)
                 if got is None:
                     continue
-                wx, wy, wtp, wmeta = got
+                wx, wy, wtp, wmeta, pre_gate = got
                 xs.append(wx); ys.append(wy); tps.append(wtp); metadata.extend(wmeta)
+                if pre_gate is not None:
+                    ux, uy, utp = pre_gate
+                    ungated_xs.append(ux); ungated_ys.append(uy); ungated_tps.append(utp)
                 wells_breakdown[well_label] = {
                     'x': wx.tolist(),
                     'y': wy.tolist(),
@@ -287,6 +304,12 @@ def collect_scatter_data(
                     # stays the raw identity used by the click resolver / export.
                     'label': replicate_display_label(ctx, rset),
                 }
+                if ungated_xs:
+                    scatter_data[group_name].update(
+                        x_ungated=np.concatenate(ungated_xs).tolist(),
+                        y_ungated=np.concatenate(ungated_ys).tolist(),
+                        tp_ungated=np.concatenate(ungated_tps).tolist(),
+                    )
     else:
         selected_wells = sorted(
             (lbl for lbl in ctx.state.selection.selected_wells if lbl in ctx.state.dataset.well_paths),
@@ -302,7 +325,7 @@ def collect_scatter_data(
             got = _collect_well(well_label)
             if got is None:
                 continue
-            wx, wy, wtp, wmeta = got
+            wx, wy, wtp, wmeta, pre_gate = got
             wx_list = wx.tolist()
             wy_list = wy.tolist()
             wtp_list = wtp.tolist()
@@ -326,6 +349,12 @@ def collect_scatter_data(
                 # the well token). Key stays the raw token used as identity.
                 'label': well_display_label(ctx, well_label),
             }
+            if pre_gate is not None:
+                ux, uy, utp = pre_gate
+                scatter_data[well_label].update(
+                    x_ungated=ux.tolist(), y_ungated=uy.tolist(),
+                    tp_ungated=utp.tolist(),
+                )
 
     return scatter_data
 

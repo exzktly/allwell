@@ -23,6 +23,8 @@ from well_viewer.core.lazy import lazy as _lazy
 # features deletable. Each proxy resolves its target on first call.
 _scatter_collect_agg_data = _lazy("well_viewer.features.scatter.collect", "collect_scatter_agg_data")
 _scatter_collect_data = _lazy("well_viewer.features.scatter.collect", "collect_scatter_data")
+_scatter_points_gated = _lazy("well_viewer.features.scatter.collect", "scatter_points_gated")
+_scatter_gates_for_axes = _lazy("well_viewer.features.scatter.collect", "gates_for_axes")
 _scatter_axis_metric_key = _lazy("well_viewer.features.scatter.controller", "scatter_axis_metric_key")
 _scatter_col_for_axis = _lazy("well_viewer.features.scatter.controller", "col_for_scatter_axis")
 _scatter_sync_agg_stat_combos = _lazy("well_viewer.features.scatter.controller", "sync_scatter_agg_stat_combos")
@@ -589,6 +591,25 @@ def export_bar_plot_data(ctx) -> None:
         _error(ctx.window, "Export failed", str(exc))
 
 
+def _axis_column_names(name_x: str, name_y: str) -> tuple[str, str]:
+    """Column names for the two scatter axes, disambiguated only if they clash.
+
+    A scatter with the same statistic (or the same column) on both axes is a
+    legitimate plot — mean-vs-mean across two timepoints, a metric against
+    itself under different gating. The row dicts and the ``DictWriter``
+    fieldnames were keyed by the statistic's own name, so in that case the two
+    axes wrote to one key: Y overwrote X, and the CSV carried Y twice under one
+    header while claiming to hold both.
+
+    Names that differ are left exactly as they were, so the ordinary export's
+    headers are unchanged and downstream scripts keep working; only the
+    colliding case gains an ``_x`` / ``_y`` suffix.
+    """
+    if name_x != name_y:
+        return name_x, name_y
+    return f"{name_x}_x", f"{name_y}_y"
+
+
 def export_scatter_data(ctx) -> None:
     """Export scatter plot data to CSV."""
     from well_viewer.core.channel_state_controller import get_fluor_gate
@@ -635,13 +656,22 @@ def export_scatter_data(ctx) -> None:
     fluor_gate_x = get_fluor_gate(ctx, ch_x_base)
     fluor_gate_y = get_fluor_gate(ctx, ch_y_base)
 
+    # This is the *tab's* Export CSV button, so it exports what the tab is
+    # drawing. With "Apply gates" on, the plot shows only the cells inside the
+    # gate boxes and the CSV used to carry the whole cloud — the two disagreed
+    # about which cells the figure is about, which is the one thing an export
+    # beside a plot must not do. (Batch export deliberately does not inherit
+    # this live toggle; see `_scatter_gate_note` and ARCHITECTURE §5.6.)
     scatter_data = _scatter_collect_data(
         ctx, col_x, col_y, timepoints_h,
         well_colors=[],
         fluor_gate_x=fluor_gate_x,
         fluor_gate_y=fluor_gate_y,
+        gates=(_scatter_gates_for_axes(ctx, col_x, col_y)
+               if _scatter_points_gated(ctx) else None),
     )
 
+    name_x, name_y = _axis_column_names(col_x, col_y)
     well_labels = dict(ctx.state.dataset.well_labels or {})
     well_paths = set(ctx.state.dataset.well_paths or {})
     rows_out = []
@@ -655,8 +685,8 @@ def export_scatter_data(ctx) -> None:
             rows_out.append({
                 "group_well": label,
                 "well_name": well_name,
-                f"{col_x}": f"{x:.6f}",
-                f"{col_y}": f"{y:.6f}",
+                name_x: f"{x:.6f}",
+                name_y: f"{y:.6f}",
                 "timepoint_h": f"{tp:.4f}",
             })
 
@@ -675,7 +705,8 @@ def export_scatter_data(ctx) -> None:
 
     try:
         with open(out_path, "w", newline="") as fh:
-            writer = csv.DictWriter(fh, fieldnames=["group_well", "well_name", f"{col_x}", f"{col_y}", "timepoint_h"])
+            writer = csv.DictWriter(
+                fh, fieldnames=["group_well", "well_name", name_x, name_y, "timepoint_h"])
             writer.writeheader()
             writer.writerows(rows_out)
         ctx.notify.set_status(f"Exported {len(rows_out)} datapoint(s) → {Path(out_path).name}")
@@ -720,6 +751,7 @@ def export_scatter_agg_data(ctx) -> None:
         well_colors=[],
     )
 
+    name_x, name_y = _axis_column_names(stat_x, stat_y)
     well_labels = dict(ctx.state.dataset.well_labels or {})
     well_paths = set(ctx.state.dataset.well_paths or {})
     rows_out = []
@@ -736,10 +768,10 @@ def export_scatter_agg_data(ctx) -> None:
             "well_name": well_name_for(rep_well, well_labels,
                                        well_paths=well_paths, strict=True),
             "timepoint_h": f"{tp:.4f}",
-            stat_x: f"{x_val:.6f}",
-            f"{stat_x}_error": f"{x_err:.6f}",
-            stat_y: f"{y_val:.6f}",
-            f"{stat_y}_error": f"{y_err:.6f}",
+            name_x: f"{x_val:.6f}",
+            f"{name_x}_error": f"{x_err:.6f}",
+            name_y: f"{y_val:.6f}",
+            f"{name_y}_error": f"{y_err:.6f}",
         })
 
     if not rows_out:
@@ -759,7 +791,8 @@ def export_scatter_agg_data(ctx) -> None:
 
     try:
         with open(out_path, "w", newline="") as fh:
-            fieldnames = ["replicate_well", "well_name", "timepoint_h", stat_x, f"{stat_x}_error", stat_y, f"{stat_y}_error"]
+            fieldnames = ["replicate_well", "well_name", "timepoint_h",
+                          name_x, f"{name_x}_error", name_y, f"{name_y}_error"]
             writer = csv.DictWriter(fh, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows_out)

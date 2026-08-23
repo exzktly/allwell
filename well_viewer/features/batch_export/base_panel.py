@@ -1849,6 +1849,12 @@ class BatchExportPanel(QWidget):
                 except OSError as exc:
                     return f"{grp.name} CSV: {exc}"
 
+                if not rows_out:
+                    # See the note in ``bar_panel``: a blank figure saved
+                    # beside a missing CSV, reported as success, is the same
+                    # silent shortfall.
+                    return f"{grp.name}: no data for this group — nothing exported"
+
                 try:
                     fig = self._render_group_figure(
                         grp, threshold, use_sem, band_lbl,

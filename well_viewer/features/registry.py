@@ -418,6 +418,15 @@ def _redraw_spatial():
     return render_spatial
 
 
+def _redraw_multivariate():
+    """Multivariate renders from its own cached result, exactly as Spatial
+    does, so it is not reached by ``redraw_app``'s fan-out. Without a hook here
+    the Properties sidebar's Reset-to-defaults had a Spatial branch and no
+    Multivariate one, and repainted the wrong figure."""
+    from well_viewer.features.multivariate.renderer import render_multivariate
+    return render_multivariate
+
+
 def _heatmap_view_state_io():
     """Heat Map's (snapshot, apply) view-state pair (lazy). ``view_state`` fans
     this out via the registry so it never names Heat Map — a profiled-out Heat Map
@@ -723,6 +732,7 @@ def _features() -> list[FeatureDescriptor]:
             on_activate=_activate_multivariate,
             on_selection_changed=_sel_multivariate,
             on_channel_changed=_channel_multivariate,
+            redraw=_redraw_multivariate,
             per_well_selection=True,
         ),
         FeatureDescriptor(

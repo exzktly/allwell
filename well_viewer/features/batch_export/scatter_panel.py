@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import logging
 import re
 from pathlib import Path
 
@@ -42,6 +43,9 @@ _render_scatter_points = _lazy("well_viewer.features.scatter.gating", "render_sc
 _draw_gates = _lazy("well_viewer.features.scatter.gating", "draw_gates")
 _log1p_axis_suffix = _lazy("well_viewer.features.scatter._layout", "log1p_axis_suffix")
 _compose_scatter_agg_stat = _lazy("well_viewer.features.scatter.controller", "compose_scatter_agg_stat")
+
+
+_logger = logging.getLogger(__name__)
 
 
 class ScatterBatchExportPanel(BatchExportPanel):
@@ -362,6 +366,24 @@ class ScatterBatchExportPanel(BatchExportPanel):
             return "fraction_above_threshold"
         return METRIC_LABEL_TO_KEY.get(label, "mean_intensity")
 
+    def _warn_if_live_gates_ignored(self) -> None:
+        """Say so when the Scatter tab is filtering by gate and this batch is not.
+
+        Batch export deliberately does not inherit the tab's live "Apply gates"
+        toggle — a batch job that silently changed its population because of a
+        checkbox left on in another tab would be worse. But the *other* silence
+        is just as bad: with the toggle on, the tab's figure and this batch's
+        figure are drawn from different sets of cells and nothing said so. This
+        is the announcement, not a behaviour change.
+        """
+        from well_viewer.features.scatter.collect import scatter_points_gated
+        if scatter_points_gated(self._ctx):
+            _logger.warning(
+                "Batch export: the Scatter tab is filtering its points by gate "
+                "geometry, but batch figures are exported from the unfiltered "
+                "cloud — they will not match the tab's plot cell for cell.",
+            )
+
     def _scatter_axis_col(self, ch_cb: QComboBox, prop_cb: QComboBox) -> str:
         """Resolve a (channel combo, property combo) pair to a CSV column
         / ratio key, via ``app._col_for_scatter_axis``."""
@@ -473,6 +495,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         self, grp: BarGroup, tp_h: float, csv_path: Path, fig_path: Path, fmt: str,
     ) -> str | None:
         from well_viewer.features.scatter.controller import collect_scatter_data as _collect_scatter_data
+        self._warn_if_live_gates_ignored()
         col_x = self._scatter_axis_col(self._sc_cells_x_cb, self._sc_cells_metric_x_cb)
         col_y = self._scatter_axis_col(self._sc_cells_y_cb, self._sc_cells_metric_y_cb)
         with self._app_group_scope(grp):
@@ -686,6 +709,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         from well_viewer.features.scatter.controller import collect_scatter_data as _collect_scatter_data
         combined_rows: list[dict] = []
         combined_series: list[tuple] = []
+        self._warn_if_live_gates_ignored()
         for tp_h in sorted(timepoints):
             col_x = self._scatter_axis_col(self._sc_cells_x_cb, self._sc_cells_metric_x_cb)
             col_y = self._scatter_axis_col(self._sc_cells_y_cb, self._sc_cells_metric_y_cb)

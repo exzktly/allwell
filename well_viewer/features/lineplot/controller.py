@@ -702,7 +702,18 @@ def redraw_line_plots(
     threshold = on_cutoff_for_column(
         ctx, ctx.state.channel.active_val_col,
         channel=ctx.state.channel.active_channel)
-    selected = sorted(ctx.state.selection.selected_wells, key=parse_rc)
+    # Filtered against the loaded wells, as the three sibling renderers do
+    # (``barplot.controller``, ``heatmap.controller``, ``scatter.collect``).
+    # ``selected_wells`` is app-wide state that outlives a dataset swap, so a
+    # token left over from the previous plate reaches ``get_rows`` and raises
+    # ``KeyError`` — which aborts the whole redraw before it reaches
+    # ``apply_export_style_to_current``, losing the Properties-panel settings
+    # along with the plot.
+    selected = sorted(
+        (lbl for lbl in ctx.state.selection.selected_wells
+         if lbl in ctx.state.dataset.well_paths),
+        key=parse_rc,
+    )
 
     # Fold-change state read once for the axis title suffix. The actual
     # control-series resolution + per-trace normalization happens inside
@@ -751,7 +762,14 @@ def redraw_line_plots(
     for _ax_time in (ax_mean, ax_frac, ax_n):
         _ax_time.set_xlabel(_time_lbl, fontsize=8, labelpad=5)
         apply_time_rescale(_ax_time, _time_scale)
-    ax_frac.set_ylim(-0.05, 1.05)
+    # Same rule as the Bar tab's ``renderer._set_frac_ylim``, and for the same
+    # reason: a raw fraction is bounded, so the clamp is a good default, but
+    # under fold change the field is a ratio (which can exceed 1) or a
+    # difference (which can go negative). Clamping then clips the very effect
+    # the normalisation exists to show, silently — the curve simply leaves the
+    # panel. The two tabs draw the same field and disagreed about this.
+    if not _fc.fold_change_state(ctx).active:
+        ax_frac.set_ylim(-0.05, 1.05)
     ax_cdf.set_xlabel(f"{_ch} {metric_label}", fontsize=8, labelpad=5)
     ax_cdf.set_ylim(-0.02, 1.05)
 

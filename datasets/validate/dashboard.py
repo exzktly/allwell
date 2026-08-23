@@ -86,9 +86,11 @@ class ValidateDashboard(PlateProgress):
         if state == "partial":
             return theme.Colors.warn
         if state == "csv_only":
-            # Warn, not success: the numbers are whole but the archive they
-            # were derived from is gone, so nothing here can be re-reviewed.
-            return theme.Colors.warn
+            # Its own token, shared with Review Home's plate: the numbers are
+            # whole and the archive they came from is gone. Painting it `warn`
+            # made it identical to `partial` on this very plate, which is the
+            # one thing a plate legend cannot survive.
+            return theme.Colors.stale
         if state == "missing":
             return theme.Colors.danger
         if state == "no_output":

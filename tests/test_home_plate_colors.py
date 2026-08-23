@@ -27,12 +27,21 @@ from well_viewer.features.home.tab_view import legend_swatch_style
 #: Concatenate, Merge Plates, Import Loose and the run dashboard between them.
 #: ``accent2`` is excluded on purpose: it means "the other of two normal
 #: groups", which no state on this page is.
+#:
+#: ``stale`` joined this set rather than being a colour this one plate
+#: invented: it means "there is a result and its output archive is gone" on
+#: Review Home *and* on the Validate dashboard, which is what makes it
+#: vocabulary rather than decoration. It could not reuse an existing token —
+#: `warn` is Validate's "partial, work in flight", and painting the two alike
+#: made them indistinguishable on the Validate plate and, as the render guard
+#: proved, on this one.
 SHARED_STATUS_TOKENS = {
     theme.Colors.success,
     theme.Colors.warn,
     theme.Colors.danger,
     theme.Colors.accent,
     theme.Colors.text_muted,
+    theme.Colors.stale,
 }
 
 

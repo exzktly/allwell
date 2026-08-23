@@ -26,6 +26,29 @@ def _focus_cdf_xaxis(ax, vals) -> None:
     ax.set_xlim(lo - pad, hi + pad)
 
 
+def _effective_thresh_frac_on(ctx, channel: str) -> float | None:
+    """The ON cutoff in force for *channel*, or ``None`` when there is none.
+
+    The stored value when the user set one, the channel's default otherwise —
+    the nuclear channel's default is not the readout default, which is why this
+    goes through ``default_thresh_frac_on`` rather than a literal. ``None``
+    only for a cutoff of zero, which is "no cut" and would draw a line on the
+    axis edge claiming to be a threshold.
+    """
+    from well_viewer.domain.gating_state import default_thresh_frac_on
+
+    key = str(channel or "").strip().lower()
+    value = ctx.state.cell_gating.thresh_frac_on.get(key)
+    if value is None:
+        seg = str(getattr(ctx.state.channel, "seg_channel_token", "") or "")
+        value = default_thresh_frac_on(key, seg)
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return value if value else None
+
+
 def _cell_gating_plot_cdf(ctx) -> None:
     ratio_data = ctx.runtime.cell_gating.ratio_data or {}
     if (not ctx.runtime.cell_gating.cell_areas
@@ -126,6 +149,17 @@ def _cell_gating_plot_cdf(ctx) -> None:
         if fluor_gate is not None:
             ax.axvline(x=float(fluor_gate), color=warn,
                        linestyle="--", linewidth=2, alpha=0.7)
+        # The ON cutoff, beside the gate it is constantly confused with. These
+        # CDFs are the surface for choosing it — the whole optimiser above them
+        # searches for it — and it was the one line not on them: only
+        # FluorGating was drawn, so a user setting ThreshFracOn had no way to
+        # see where it fell on the distribution. Drawn as the *effective*
+        # value, defaults included, because that is the number the fraction
+        # panel everywhere else divides by.
+        on_cutoff = _effective_thresh_frac_on(ctx, channel)
+        if on_cutoff is not None:
+            ax.axvline(x=float(on_cutoff), color=theme.Colors.accent,
+                       linestyle=":", linewidth=2, alpha=0.9)
         _focus_cdf_xaxis(ax, vals)
 
     for ratio_label, values in sorted(ratio_data.items()):

@@ -747,6 +747,13 @@ def cell_gating_on_threshold_frac_on_change(ctx) -> None:
         _cell_gating_sync_gate_state(ctx)
         _cell_gating_persist_params(ctx)
         invalidate_stats_cache(ctx)
+        # Redraw this tab's own CDFs too. They carry the ON-cutoff line now,
+        # and ``cell_gating_on_gating_change`` — the FluorGating sibling ten
+        # lines of code away — has always redrawn them for its own line. Without
+        # this the cutoff the user just typed stayed where the old one was, on
+        # the very panel they are looking at to choose it.
+        ctx.runtime.cell_gating.axes_stack = []
+        _cell_gating_plot_cdf(ctx)
         # ``_redraw`` only fans out to the default-scope plots (line /
         # distribution / heat map). Bar and scatter redraw via the fold-change
         # scope registry, so also emit ``plot_options_changed`` — otherwise a

@@ -214,7 +214,12 @@ def _render_splom(fig, res) -> None:
     # too, where no tooltip or status line can explain them.
     n = min(X.shape[1], _SPLOM_MAX_FEATURES)
     dropped = list(labels[n:]) if X.shape[1] > n else []
-    colors, _legend_entries = _point_colors(data, "group")
+    # ``res["color_by"]`` like every other panel, not a hardcoded "group". The
+    # Colour-by control is on screen while the SPLOM is showing and did
+    # nothing: picking "timepoint" or "cluster" left the points coloured by
+    # group, with no sign the setting had been ignored.
+    colors, _legend_entries = _point_colors(
+        data, res.get("color_by", "group"), res.get("clusters"))
     axes = fig.subplots(n, n, sharex="col")
     if n == 1:
         axes = np.array([[axes]])

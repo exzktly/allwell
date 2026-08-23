@@ -44,9 +44,32 @@ _CARDS = (
 PLOT_CARD_ATTRS: tuple[str, ...] = tuple(attr for attr, _ in _CARDS)
 
 
-def _active_card(ctx):
-    """Return ``(card, default_filename)`` for the first visible plot card, or
-    ``(None, None)`` when none is visible. Cards resolve through the registry."""
+def _named_card(ctx, card_attr: str):
+    """Return ``(card, default_filename)`` for the card registered as *card_attr*."""
+    for attr, default in _CARDS:
+        if attr == card_attr:
+            return ctx.widgets.get_or_none(attr), default
+    return ctx.widgets.get_or_none(card_attr), None
+
+
+def _active_card(ctx, card_attr: str | None = None):
+    """Return ``(card, default_filename)`` for the card to act on.
+
+    With *card_attr* the answer is that card, whatever else is on screen. That
+    is what a tab-local Export menu wants and it is the only correct answer for
+    one: in Split View two cards are visible at once, so "first visible" gave
+    Bar Plots' own "Copy SVG" the line figure. ``save_card_to_gallery`` had
+    been fixed to resolve its card by name; its two siblings in the same menu
+    had not, and this file's own docstring described the hazard while fixing
+    one of the three.
+
+    Without *card_attr* it falls back to the first visible card, which is right
+    for a single global toolbar action that belongs to no tab. Returns
+    ``(None, None)`` when nothing resolves.
+    """
+    if card_attr:
+        card, default = _named_card(ctx, card_attr)
+        return (card, default) if card is not None else (None, None)
     for attr, default in _CARDS:
         card = ctx.widgets.get_or_none(attr)
         if card is None or not card.isVisible():
@@ -55,8 +78,11 @@ def _active_card(ctx):
     return None, None
 
 
-def copy_active_card_as_svg(ctx) -> None:
-    """Copy the active card's figure to the clipboard, preferring vector.
+def copy_active_card_as_svg(ctx, card_attr: str | None = None) -> None:
+    """Copy a card's figure to the clipboard, preferring vector.
+
+    *card_attr* names the card; every tab-local Export menu passes its own, so
+    the item copies that tab's figure even when another card is also visible.
 
     On macOS the figure is written natively to ``NSPasteboard`` so Illustrator
     pastes true editable vector; elsewhere a Qt clipboard payload is used (see
@@ -64,7 +90,7 @@ def copy_active_card_as_svg(ctx) -> None:
     """
     from well_viewer.features.export.style import copy_figure_to_clipboard
 
-    card, _ = _active_card(ctx)
+    card, _ = _active_card(ctx, card_attr)
     if card is None:
         return
     fig = getattr(card, "_figure", None) or getattr(card, "figure", None)
@@ -89,14 +115,16 @@ def copy_active_card_as_svg(ctx) -> None:
     ctx.notify.set_status(status)
 
 
-def save_active_card_figure(ctx) -> None:
-    """Open a Save-As dialog for the active visible plot card's figure.
+def save_active_card_figure(ctx, card_attr: str | None = None) -> None:
+    """Open a Save-As dialog for a plot card's figure.
+
+    *card_attr* names the card — see :func:`_active_card`.
 
     Uses the app's ``_save_matplotlib_fig`` helper so every renderer honours the
     same file-type filter and the active dataset directory as the starting
     location.
     """
-    card, default = _active_card(ctx)
+    card, default = _active_card(ctx, card_attr)
     if card is None:
         return
     fig = getattr(card, "_figure", None) or getattr(card, "figure", None)
@@ -112,12 +140,9 @@ def save_active_card_figure(ctx) -> None:
 def save_card_to_gallery(ctx, card_attr: str) -> None:
     """Trigger *card_attr*'s whole-figure Saved-Plots capture directly.
 
-    Unlike :func:`copy_active_card_as_svg`/:func:`save_active_card_figure`,
-    which resolve the "first visible" card via :func:`_active_card` (fine for
-    a single global toolbar action), an Export dropdown's "Save to Saved
-    Plots" item is tab-local — it must always capture *that* tab's own
-    figure, even if another tab's card happens to also be visible (Split
-    View), so it resolves the named card directly instead.
+    The same rule as its two siblings, which now also take a ``card_attr``: an
+    Export dropdown's items are tab-local and must capture *that* tab's figure
+    even when another tab's card is visible too (Split View).
     """
     card = ctx.widgets.get_or_none(card_attr)
     if card is not None and hasattr(card, "saveFigureToGallery"):

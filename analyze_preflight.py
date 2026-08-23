@@ -503,13 +503,41 @@ def _same(a: str, b: str) -> bool:
 
 
 
+def _as_sidecar_polarity(opts: dict) -> dict:
+    """Restate a form ``opts`` dict in the polarity the applier reads.
+
+    Two settings are spelled one way in the form and its journal spec and the
+    other way in the sidecar: the form carries ``auto_threshold`` and
+    ``run_check`` as positives, and the pipeline records the negatives it was
+    given on the command line, ``no_auto_threshold`` and ``no_run_check``.
+    ``_apply_pinfo_settings`` reads the sidecar's spelling.
+
+    So a journal-sourced settings load handed the applier a dict that named
+    neither key it was looking for, and both silently kept whatever the form
+    happened to be showing. "Load these settings" restored eighteen fields and
+    quietly left two alone — the two that decide whether the plate gets a gate
+    and whether the run audits itself.
+
+    Translated here, at the one place the journal shape enters, rather than by
+    teaching the applier a second vocabulary: the applier has one source of
+    truth for what a settings key is called, and adding a synonym to it is how
+    the next pair comes to disagree.
+    """
+    out = dict(opts)
+    for positive, negative in (("auto_threshold", "no_auto_threshold"),
+                               ("run_check", "no_run_check")):
+        if positive in out and negative not in out:
+            out[negative] = not bool(out[positive])
+    return out
+
+
 def _previous_settings(out_dir: Path) -> tuple[dict, str]:
     """The form settings this folder records, and where they came from."""
     journal = run_journal.read_journal(out_dir)
     spec = (journal.spec if journal is not None else None) or {}
     opts = spec.get("opts") if isinstance(spec.get("opts"), dict) else None
     if opts:
-        return dict(opts), "run journal"
+        return _as_sidecar_polarity(opts), "run journal"
     info_path = out_dir / "pipeline_info.json"
     if info_path.is_file():
         import json

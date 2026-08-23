@@ -16,6 +16,7 @@ is reachable via dynamic attributes on `app`.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 import math  # noqa: F401 — keeps parity with the original method bodies
 
 import numpy as np
@@ -33,7 +34,8 @@ from well_viewer.data.data_loading import (
     normalize_channel_tokens,
 )
 from well_viewer.domain.metric_registry import channel_supports_smfish
-from well_viewer.domain.ratio_models import is_ratio_key, ratio_name_from_key
+from well_viewer.domain.ratio_models import (
+    RatioMetric, is_ratio_key, ratio_name_from_key)
 from well_viewer.core.ui_helpers import set_combo_values, set_combo_values_sectioned
 from pipeline.shape_features import is_shape_column, label_for as shape_label_for
 from well_viewer.core.safe import swallowed
@@ -639,7 +641,7 @@ def populate_metric_combo(
     cb,
     *,
     channel_entry: str,
-    smfish_channel: Optional[str] = None,
+    smfish_channel: str | None = None,
     include_fraction: bool = False,
 ) -> None:
     """Repopulate a Property combo to match the channel context.
@@ -915,7 +917,7 @@ def channel_key_for_label(ctx, label: str) -> str:
 
 
 
-def get_all_fluor_gates(ctx) -> Dict[str, float]:
+def get_all_fluor_gates(ctx) -> dict[str, float]:
     """Get FluorGating thresholds for all loaded channels.
 
     Returns a dict mapping channel name -> gate threshold, e.g., {"gfp": 10.0, "mcherry": 20.0}.
@@ -956,7 +958,7 @@ def _gating_row_key(ctx, channel: str) -> str:
     return _cell_gating_resolve_key(ctx, channel)
 
 
-def get_thresh_frac_on(ctx, channel: Optional[str] = None) -> float:
+def get_thresh_frac_on(ctx, channel: str | None = None) -> float:
     """Get ThreshFracOn threshold. Uses active channel if not specified.
 
     This is the ON cutoff for the *fluorescence-intensity* metrics only; the
@@ -979,7 +981,7 @@ def get_thresh_frac_on(ctx, channel: Optional[str] = None) -> float:
     return default_thresh_frac_on(channel, seg_channel_token_of(ctx))
 
 
-def get_thresh_count_on(ctx, channel: Optional[str] = None) -> float:
+def get_thresh_count_on(ctx, channel: str | None = None) -> float:
     """Get ThreshCountOn — the ON cutoff for the integer *count* metrics.
 
     A cell is "on" when its spot tally exceeds this. A channel with no configured
@@ -1000,7 +1002,7 @@ def get_thresh_count_on(ctx, channel: Optional[str] = None) -> float:
     return default_thresh_count_on(channel)
 
 
-def on_cutoff_for_column(ctx, val_col: str, *, channel: Optional[str] = None) -> float:
+def on_cutoff_for_column(ctx, val_col: str, *, channel: str | None = None) -> float:
     """The ON cutoff *val_col* is measured against — the one resolver.
 
     Every aggregate plot path (bar, line, scatter-aggregate, heatmap, stats,
@@ -1071,7 +1073,7 @@ def ensure_cell_gating_tab_built(ctx) -> bool:
     return ctx.runtime.cell_gating.fluor_gate_edits is not None
 
 
-def set_thresh_frac_on(ctx, value, channel: Optional[str] = None) -> None:
+def set_thresh_frac_on(ctx, value, channel: str | None = None) -> None:
     """Set ThreshFracOn for a channel (the active channel by default).
 
     Writes *through* the Cell Gating tab's edit — the single source of truth that
@@ -1097,7 +1099,7 @@ def set_thresh_frac_on(ctx, value, channel: Optional[str] = None) -> None:
     _write_gating_edit(ctx, channel, value, count=False)
 
 
-def set_thresh_count_on(ctx, value, channel: Optional[str] = None) -> None:
+def set_thresh_count_on(ctx, value, channel: str | None = None) -> None:
     """Set ThreshCountOn for a channel (the active channel by default).
 
     The count-metric half of :func:`set_thresh_frac_on`, writing through the same
@@ -1143,7 +1145,7 @@ def _write_gating_edit(ctx, channel: str, value, *, count: bool) -> None:
         cell_gating_on_threshold_frac_on_change(ctx)
 
 
-def set_on_cutoff(ctx, value, channel: Optional[str] = None) -> None:
+def set_on_cutoff(ctx, value, channel: str | None = None) -> None:
     """Set whichever ON cutoff the active metric is measured against.
 
     The write half of the quick-edit Steppers. They show one box whose meaning
@@ -1161,7 +1163,7 @@ def set_on_cutoff(ctx, value, channel: Optional[str] = None) -> None:
         set_thresh_frac_on(ctx, value, channel)
 
 
-def quick_edit_cutoff_is_count(ctx, channel: Optional[str] = None) -> bool:
+def quick_edit_cutoff_is_count(ctx, channel: str | None = None) -> bool:
     """True when a quick-edit Stepper is editing the *count* cutoff.
 
     The Steppers carry no Property picker of their own, so they follow the app's
@@ -1216,7 +1218,7 @@ def refresh_thresh_frac_quick_edit(ctx) -> None:
         "Edits the same value as the Cell Gating tab's ThreshFracOn."
     )
 
-    def _sync(attr: str, *, channel: Optional[str] = None,
+    def _sync(attr: str, *, channel: str | None = None,
               label_attr: str | None = None) -> None:
         stepper = ctx.widgets.get_or_none(attr)
         if stepper is None:

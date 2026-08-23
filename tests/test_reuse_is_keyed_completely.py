@@ -411,3 +411,123 @@ def test_every_keying_call_folds_in_the_host_extras():
         "output is not interchangeable — which is how a run fetches another "
         "configuration's numbers and reports success.\n  "
         + "\n  ".join(offenders))
+
+
+# ── the reuse predicate, driven directly ────────────────────────────────────
+#
+# Four critical slips in this predicate pass the end-to-end remote harness,
+# because that harness exercises `spawn`'s control-file plumbing rather than
+# the decisions behind it. These are pure functions and need no harness at all,
+# which is exactly why there is no excuse for them being untested: they are the
+# highest-stakes decision in the module, and every one of them returns a
+# previous run's numbers and reports success when it goes wrong.
+
+def test_a_forced_run_never_re_attaches():
+    """`--force` means "compute it again", and re-attaching defeats that.
+
+    A forced run that lands in the previous run's directory finds it full of
+    that run's output, the pre-flight check calls the plate complete, the
+    pipeline never launches, and yesterday's numbers come back as a successful
+    forced re-run — the one outcome a user pressing Force is explicitly trying
+    to rule out.
+    """
+    from services.remote_runner import _choose_remote_output_dir
+
+    fresh, stored = "/stg/runs/run-new/out", "/stg/runs/run-old/out"
+    chosen, _reason = _choose_remote_output_dir(
+        fresh, stored, forced=True, remote_has_outputs=True)
+    assert chosen == fresh, (
+        "a forced run re-attached to a populated directory; its outputs would "
+        "be found complete and the pipeline would never run")
+
+
+def test_an_unforced_run_re_attaches_to_the_same_directory():
+    """The other half, so the test above cannot pass by never re-attaching."""
+    from services.remote_runner import _choose_remote_output_dir
+
+    fresh, stored = "/stg/runs/run-new/out", "/stg/runs/run-old/out"
+    chosen, reason = _choose_remote_output_dir(
+        fresh, stored, forced=False, remote_has_outputs=True)
+    assert chosen == stored and reason
+
+
+def test_an_empty_recorded_directory_is_not_re_attached_to():
+    """A recorded address says where work was *sent*, not that it is there."""
+    from services.remote_runner import _choose_remote_output_dir
+
+    fresh, stored = "/stg/runs/run-new/out", "/stg/runs/run-old/out"
+    chosen, _reason = _choose_remote_output_dir(
+        fresh, stored, forced=False, remote_has_outputs=False)
+    assert chosen == fresh
+
+
+#: What this configuration hashes to. Pinned as a literal because re-attach
+#: reads a digest journalled by an **earlier launch**, so the instability that
+#: kills it is *cross-process* — and two calls inside one interpreter cannot
+#: see that. A `hash()` or `id()` of an unordered container anywhere in the
+#: filtered-argv path (what an innocuous "order-insensitive" refactor to
+#: `frozenset` produces) gives a different digest every launch, re-attach dies
+#: silently, and every run re-uploads and recomputes with no error anywhere.
+#:
+#: Changing this literal deliberately is a real decision, not a test fix: it
+#: orphans every address already journalled on a user's machine.
+#:
+#: The literal moved once, when the digest stopped hashing the launcher. It had
+#: been folding in `sys.executable` and the local path to
+#: `process_microscopy.py`, so it was not one value at all — it differed
+#: between machines, between a frozen bundle and a source run, and after any
+#: interpreter change. The pin was therefore *machine-specific*, and passed
+#: here while failing in CI; `test_the_launcher_does_not_reach_the_digest`
+#: below is the guard that can see the defect a pin cannot.
+_PINNED_DIGEST = "ed34655eac9f2335"
+_PINNED_RUN_ID = "kkkkkkkkkkkkkkkk-ed34655eac9f2335"
+
+
+def test_the_keys_are_the_same_on_every_launch():
+    """The keys must be *discriminating*, not merely different every time.
+
+    A digest that changed on every call would satisfy every test above and make
+    re-attach dead — which is how the feature shipped unreachable once already.
+    """
+    from services.remote_runner import _compute_run_id, pipeline_argv_digest
+
+    argv, key = _local_argv(), "k" * 32
+    assert pipeline_argv_digest(argv, extras=["--cpu_only"]) == _PINNED_DIGEST
+    assert _compute_run_id(key, argv, extras=["--cpu_only"]) == _PINNED_RUN_ID
+
+
+def test_the_launcher_does_not_reach_the_digest():
+    """How this machine starts the pipeline is not a property of the run.
+
+    `build_pipeline_args` opens the argv with `sys.executable` and then either
+    the local path to `process_microscopy.py` or, in a frozen bundle, the
+    `--run-pipeline` sentinel. None of it reaches the worker: the remote runs
+    its own interpreter against its own uploaded copy of the script. Hashing it
+    keyed the reuse decision on facts that cannot change a byte of the output,
+    so an identical plate re-attached or did not depending on whether the user
+    launched the .app or ran from source, on where the checkout lived, and on
+    which Python was on PATH — each of them re-uploading the whole plate and
+    recomputing it with nothing logged.
+
+    The pinned literal above cannot see this, because a pin computed from
+    `sys.executable` is itself machine-specific: it passed on the machine that
+    wrote it and failed in CI. This test compares the shapes directly.
+    """
+    from services.remote_runner import pipeline_argv_digest
+
+    flags = ["--input_dir", "/in", "--nuclear_token", "DAPI",
+             "--segmentation_method", "stardist_nuclei"]
+    source = ["/usr/local/bin/python3", "/home/me/allwell/process_microscopy.py",
+              *flags]
+    frozen = ["/Applications/All-Well.app/Contents/MacOS/allwell",
+              "--run-pipeline", *flags]
+    other_machine = ["/opt/hostedtoolcache/Python/3.11.16/x64/bin/python",
+                     "/somewhere/else/process_microscopy.py", *flags]
+
+    digests = {name: pipeline_argv_digest(argv) for name, argv in
+               (("source", source), ("frozen", frozen),
+                ("other machine", other_machine))}
+    assert len(set(digests.values())) == 1, (
+        "the same configuration hashes differently depending on how the "
+        f"pipeline was launched, so re-attach dies on any change to it: "
+        f"{digests}")

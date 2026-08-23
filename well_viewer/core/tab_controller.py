@@ -188,7 +188,7 @@ def on_notebook_current_changed(ctx, _idx) -> None:
 
 def run_tab_switch_smoke_checks(
     ctx,
-    prev_tab: Optional[str],
+    prev_tab: str | None,
     tab: str,
     prev_selected: set,
 ) -> None:

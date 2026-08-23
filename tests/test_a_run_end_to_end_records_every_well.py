@@ -54,11 +54,6 @@ print("Run complete.", flush=True)
 '''
 
 
-@pytest.fixture(autouse=True)
-def _isolated_index(tmp_path, monkeypatch):
-    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "state" / "idx.json")
-
-
 def _drain_like_the_gui(runner, tracker, out_dir, journal_stage, events) -> None:
     """One slice of ``AnalyzeTab._poll_log``, bounded exactly as it is.
 

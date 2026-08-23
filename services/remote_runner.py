@@ -31,7 +31,6 @@ here:
 
 from __future__ import annotations
 
-import hashlib
 import io
 import json
 import os
@@ -43,14 +42,13 @@ import subprocess
 import sys
 import contextlib
 from functools import lru_cache
-import tempfile
 import threading
 import time
 import zipfile
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path, PurePosixPath
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 
 from services.remote_config import (
     DEFAULT_CONDA_ENV,
@@ -59,7 +57,6 @@ from services.remote_config import (
     launcher_time_seconds,
     scale_launcher_time,
     resolve_rsync_binary,
-    resolve_ssh_for_rsync,
     to_rsync_path,
     update_bandwidth,
     REWRITE_MIN_SAVING,
@@ -88,6 +85,8 @@ from pipeline.incremental_keys import (
     read_done_fov_keys_from_zip,
 )
 from services import run_journal
+from util.zip_write import atomic_zip, replace_folder_with_archive
+from util.well_token import is_valid_well_name
 from util.aw_safe import swallow, swallowed
 # The shared "retry an OSError with a backoff, then fail with an actionable
 # message" shield. A remote run does as much I/O on the user's own volumes as a
@@ -137,237 +136,72 @@ _BREADCRUMB_INTERVAL_S = 60.0
 # stuck — and cheap, since the emission is one formatted string that never
 # touches the log.
 _WELL_XFER_INTERVAL_S = 1.0
-from util.zip_write import atomic_zip, replace_folder_with_archive
-from util.well_token import is_valid_well_name
-def _well_zips_in(input_dir: Path):
-    """Every ``<WELL>.zip`` directly under *input_dir*.
-
-    A filesystem glob cannot judge a well. ``[A-H][0-9]*.zip`` — what this
-    replaced — accepted ``A13.zip`` and ``A1_out.zip`` while rejecting a
-    lower-case ``a1.zip``, which is the opposite of what the folder-side scan a
-    few lines away decides with ``is_valid_well_name``. Two rules for "is this a
-    well" inside one function is the §15 defect in miniature: staging would take
-    ``a1/`` but not ``a1.zip``, and ``A13.zip`` but not ``A13/``.
-    """
-    return (p for p in input_dir.glob("*.zip") if is_valid_well_name(p.stem))
 
 
+# The scratch / transit / fingerprint leaves live in their own module now — nine
+# functions whose only tie to this one was ``TRANSIT_SUBDIR``. Re-exported here
+# rather than left for callers to find, so every existing import of them from
+# ``services.remote_runner`` keeps working and the move is a move rather than a
+# rename of the whole call graph.
+# The transport layer — rsync capability probes, remote-path quoting, the retry
+# funnel every transfer passes through, and the progress-line reader — lives in
+# its own module. Re-exported so every existing import keeps working.
+from services.remote_transport import (  # noqa: F401
+    _RSYNC_FILENAME_RE,
+    _RSYNC_RETRY_CODES,
+    _RSYNC_RETRY_DELAYS,
+    _fmt_bytes,
+    _fmt_secs,
+    _iter_rsync_lines,
+    _looks_like_rsync_filename,
+    _remote_join,
+    _remote_quote,
+    _rsync_progress_flags,
+    _rsync_run_cancellable,
+    _rsync_ssh_transport,
+    _rsync_supports_append_verify,
+    _rsync_supports_info_flag,
+    _rsync_version,
+    _rsync_with_retry,
+)
+
+# Where a run lives, and whether an earlier one's output may be reused — the
+# addresses, the keys they are derived from, and the re-attach decision. Its own
+# module because it is pure, which is what lets the reuse predicate be tested
+# directly rather than through a harness. Re-exported so existing imports work.
+from services.remote_run_id import (  # noqa: F401
+    UPLOAD_HEARTBEAT,
+    UPLOAD_SENTINEL,
+    RemoteRunPaths,
+    _choose_remote_output_dir,
+    _compute_run_id,
+    _forced_from_argv,
+    _local_input_dir_from_argv,
+    _parse_argv_flags,
+    pipeline_argv_digest,
+    remote_run_dir,
+    remote_run_paths,
+)
+
+from services.remote_scratch import (  # noqa: F401
+    TRANSIT_SUBDIR,
+    # The same set object, not a copy: it is mutated, never rebound, so a
+    # caller clearing it through either module clears the one the code reads.
+    _transit_refused,
+    _new_scratch_dir,
+    _new_transit_dir,
+    _scratch_dir,
+    _transit_dir,
+    _well_zips_in,
+    _zip_is_complete,
+    fingerprint_archives,
+    source_fingerprint,
+    sweep_stale_scratch,
+)
 
 
-def fingerprint_archives(paths) -> str:
-    """Hash a set of archives by ``(basename, size, whole-second mtime)``.
-
-    One definition, two questions. :meth:`DatasetCache.cache_key` asks it of the
-    archives being *uploaded*, to decide whether the remote already holds them.
-    :func:`source_fingerprint` asks it of the archives the user actually has, to
-    decide whether two runs are looking at the same images at all. Those answers
-    diverge exactly when staging rewrites — which is the whole reason the second
-    one is needed — so they must not be two hashes that could drift apart in
-    any other way.
-    """
-    h = hashlib.blake2b(digest_size=16)
-    for path in paths:
-        stat = path.stat()
-        h.update(path.name.encode("utf-8"))
-        h.update(b"\0")
-        h.update(str(stat.st_size).encode("ascii"))
-        h.update(b"\0")
-        h.update(str(int(stat.st_mtime)).encode("ascii"))
-        h.update(b"\0")
-    return h.hexdigest()
 
 
-def source_fingerprint(input_dir: "Path | None") -> str:
-    """Fingerprint the user's **own** input archives, or ``""`` if unreadable.
-
-    The discriminator the re-attach turns on, and the reason it is not enough to
-    key a recorded remote address on the pipeline arguments alone.
-
-    The upload cache key churns for two completely different reasons: staging
-    rewrote the archives (same images, new files, new mtimes) or the user
-    replaced the images. Only the first is a reason to go looking for a previous
-    run's output — the second means the old outputs describe images that no
-    longer exist. Keyed on the argv alone the two are indistinguishable, and a
-    user who re-exported a plate with corrected images, changed no setting and
-    did not tick Force would have re-attached to the stale directory, been given
-    a full cache hit against it, and had the previous run's numbers fetched back
-    and reported as a successful run of the new data.
-
-    Hashing the input directory tells them apart: it does not move when staging
-    rewrites, and it moves the moment the images do. An input directory that
-    cannot be resolved or read fingerprints as ``""``, which never matches a
-    stored value, so the re-attach declines rather than guesses.
-    """
-    if input_dir is None:
-        return ""
-    try:
-        archives = sorted(_well_zips_in(Path(input_dir)))
-    except OSError:
-        return ""
-    if not archives:
-        return ""
-    try:
-        return fingerprint_archives(archives)
-    except OSError:
-        return ""
-
-
-def _scratch_dir() -> Path:
-    """Base directory for AllWell's local scratch — input staging, transit
-    output zips, and incremental merge temps.
-
-    Resolution order, matching ``pipeline.io.scratch_base_for`` exactly:
-
-    1. ``$ALLWELL_SCRATCH_DIR`` — the redirectable-scratch env the GUI sets from
-       its "Scratch disk" field, so a user whose data lives on a NAS but whose
-       OS temp is a small system drive (Windows ``%TEMP%`` on ``C:``) can put
-       the potentially-GB-sized staging rewrite on a roomy volume.
-    2. ``~/.allwell/scratch`` — the default.
-    3. The OS temp dir — last resort, when the home directory is unwritable.
-
-    The two resolvers agree deliberately. They used to differ: the pipeline
-    defaulted to ``~/.allwell/scratch`` while this one defaulted to the OS temp
-    dir, so a remote run wrote into a path the user had never heard of and could
-    not find — ``/var/folders/jj/…/T`` on macOS, and on Linux frequently a tmpfs,
-    i.e. RAM. One default, stated in one place, is one thing to reason about when
-    a volume fills.
-
-    This module cannot import ``pipeline.io`` to share the constant (that would
-    drag numpy and tifffile into the remote client, which
-    ``test_architecture_contracts`` forbids), so the path is repeated here and
-    ``test_remote_runner`` pins the two to the same value.
-    """
-    override = os.environ.get("ALLWELL_SCRATCH_DIR", "").strip()
-    if override:
-        try:
-            p = Path(override).expanduser()
-            p.mkdir(parents=True, exist_ok=True)
-            return p
-        except OSError as exc:
-            # Don't silently ignore a user-set scratch dir — falling back
-            # elsewhere can later fill a small system drive with GB of staging
-            # (audit E14). Surface it so the misconfiguration is visible.
-            import logging as _logging
-            _logging.getLogger(__name__).warning(
-                "ALLWELL_SCRATCH_DIR=%r is unusable (%s); falling back to "
-                "~/.allwell/scratch", override, exc)
-    try:
-        home = Path.home() / ".allwell" / "scratch"
-        home.mkdir(parents=True, exist_ok=True)
-        return home
-    except OSError:
-        return Path(tempfile.gettempdir())
-
-
-def _new_scratch_dir(prefix: str) -> Path:
-    """``mkdtemp`` rooted at :func:`_scratch_dir` (honours ALLWELL_SCRATCH_DIR)."""
-    return Path(tempfile.mkdtemp(prefix=prefix, dir=str(_scratch_dir())))
-
-
-# Working directory for bytes in transit, created on the volume they are coming
-# from or going to. Dot-prefixed so every dataset scan in the app skips it —
-# `image_discovery`, `auto_threshold` and `zip_members` all drop a name starting
-# with a dot — and removed as soon as the file it held is in place.
-TRANSIT_SUBDIR = ".allwell-transit"
-
-# Volumes that have already refused a transit directory this process. Without
-# it, a fallback on a read-only output folder would repeat its warning once per
-# well for the whole plate.
-_transit_refused: set[str] = set()
-
-
-def _transit_dir(near: Path | str,
-                 *, log_fn: Callable[[str], None] | None = None) -> Path:
-    """A working directory beside *near*, for a file on its way to or from it.
-
-    A remote run's compute happens on the cluster; locally it only sends inputs
-    and receives results. It has no reason to touch the home volume, and it used
-    to touch it for every well: each downloaded ``<well>_out.zip`` was written to
-    ``~/.allwell/scratch`` and then materialised into the output directory, so
-    every byte of a plate's results crossed two volumes, and a full home volume
-    stopped a run whose own input and output volumes had room to spare. That is
-    the ``ENOSPC`` users hit.
-
-    **Why this does not re-create the problem ``pipeline.io.scratch_base_for``
-    warns about.** That docstring is right that putting churn on a
-    network-mounted volume is what caused the macOS SMB "Bad file descriptor"
-    well failures — but it is describing the *pipeline's* working set: roughly
-    six float32 intermediates per FOV-group, each written tmp → fsync → rename,
-    from every worker process at once. This is one file per well, written once
-    and moved once. And the destination volume already receives exactly these
-    bytes today, by copy from the home volume; the number of writes it sees does
-    not change. What changes is that the home volume stops seeing them, and the
-    move into place becomes a same-volume rename instead of a cross-device copy.
-
-    Falls back to :func:`_scratch_dir` when *near* will not take a directory (a
-    read-only or quota'd volume) — and says so, once per volume. A run that
-    silently reverted to the volume the user is trying to get off would be the
-    original failure with the explanation removed.
-    """
-    base = Path(near)
-    path = base / TRANSIT_SUBDIR
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-        return path
-    except OSError as exc:
-        key = str(base)
-        if key not in _transit_refused:
-            _transit_refused.add(key)
-            if log_fn is not None:
-                log_fn(f"[remote] WARN cannot use {path} for files in transit "
-                       f"({exc}); falling back to {_scratch_dir()}. That volume "
-                       f"has to hold a well's output on its way through, so a "
-                       f"large plate can fill it.\n")
-        return _scratch_dir()
-
-
-def _new_transit_dir(near: Path | str, prefix: str,
-                     *, log_fn: Callable[[str], None] | None = None) -> Path:
-    """``mkdtemp`` rooted at :func:`_transit_dir`."""
-    return Path(tempfile.mkdtemp(
-        prefix=prefix, dir=str(_transit_dir(near, log_fn=log_fn))))
-
-
-def sweep_stale_scratch(*, max_age_h: float = 6.0,
-                        also: Iterable[Path | str] = (),
-                        log_fn: Callable[[str], None] | None = None) -> int:
-    """Best-effort removal of leftover ``allwell-*`` scratch from runs killed
-    before their cleanup ran (a hard quit skips the ``finally`` that deletes the
-    staging dir, leaking a full input copy onto the scratch volume). Only
-    removes entries older than *max_age_h* so a concurrent run's live staging is
-    never touched. Returns the number removed.
-
-    *also* names further bases to sweep — the transit directories beside the
-    run's own input and output volumes. Without them the leak does not go away
-    when transit moves off the scratch volume, it just moves with it.
-    """
-    cutoff = time.time() - max_age_h * 3600.0
-    removed = 0
-    seen: set[Path] = set()
-    for base in [_scratch_dir(), *[Path(p) / TRANSIT_SUBDIR for p in also]]:
-        if base in seen:
-            continue
-        seen.add(base)
-        try:
-            entries = list(base.glob("allwell-*"))
-        except OSError:
-            continue
-        here = 0
-        for p in entries:
-            try:
-                if p.stat().st_mtime > cutoff:
-                    continue
-                if p.is_dir():
-                    shutil.rmtree(p, ignore_errors=True)
-                else:
-                    p.unlink()
-                here += 1
-            except OSError:
-                continue
-        if here and log_fn:
-            log_fn(f"[remote] cleaned {here} stale scratch item(s) from {base}\n")
-        removed += here
-    return removed
 
 
 # Tail of the exhausted-budget message for a client-side transfer. The remote
@@ -593,36 +427,9 @@ class RunEstimate:
         return f"transfer {gb:.2f} GB ({_fmt_secs(self.transfer_s)}) to the remote"
 
 
-def _fmt_bytes(n: float) -> str:
-    """Bytes at a unit a human reads without counting zeros.
-
-    A fixed MB format renders every archive under a megabyte as "0 MB", which
-    reads as a broken measurement rather than a small one — and the planner
-    reports sizes for archives that legitimately span kilobytes to gigabytes.
-    """
-    for unit, scale in (("GB", 1024**3), ("MB", 1024**2), ("KB", 1024)):
-        if n >= scale:
-            return f"{n / scale:.1f} {unit}"
-    return f"{int(n)} B"
 
 
-def _fmt_secs(s: float) -> str:
-    if s < 60:
-        return f"{s:.0f}s"
-    return f"{int(s // 60)}m{int(s % 60):02d}s"
 
-
-def _zip_is_complete(path: Path) -> bool:
-    """True iff *path* is a fully-transferred, valid zip.
-
-    ``zipfile.is_zipfile`` looks for the end-of-central-directory record, which
-    only exists once the whole archive has landed — a truncated / partial
-    download fails the check. Lets the Fetcher distinguish "rsync errored but the
-    file is actually here" from "the file is incomplete"."""
-    try:
-        return path.exists() and zipfile.is_zipfile(path)
-    except OSError:
-        return False
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -1090,89 +897,8 @@ def _canonical_well_from_path(stem: str) -> str | None:
     return canonical_well_label(stem)
 
 
-def pipeline_argv_digest(
-    pipeline_argv: list[str], *, extras: Sequence[str] = (),
-) -> str:
-    """Hash the arguments that decide the *bytes* a run produces.
-
-    Split out of :func:`_compute_run_id` so the run journal can record "this
-    plate, configured this way" and a later run can recognise it, without a
-    second definition of which flags count. Two runs whose digests differ are
-    not producing interchangeable output, whatever else they share.
-
-    Skips the input/output paths (already implied by the cache key, which is
-    computed over the input archives) and ``--force`` (a re-processing knob, not
-    a change of configuration — which is what lets a forced re-run land in the
-    same remote directory and overwrite it).
-
-    ``extras`` are the flags a *remote* run adds on top of the local argv —
-    :meth:`RemoteRunner._host_argv_extras`. They are not in ``pipeline_argv``
-    because nothing local produces them, and leaving them out made two runs
-    that compute different numbers hash identically. They are appended rather
-    than merged, so the digest is stable in their order.
-    """
-    skip_with_value = {"--input_dir", "--output_dir"}
-    skip_flags = {"--force"}
-    filtered: list[str] = []
-    i = 0
-    while i < len(pipeline_argv):
-        a = pipeline_argv[i]
-        if a in skip_with_value:
-            i += 2
-            continue
-        if a in skip_flags:
-            i += 1
-            continue
-        filtered.append(a)
-        i += 1
-    filtered.extend(str(e) for e in extras)
-    return hashlib.blake2b("|".join(filtered).encode(), digest_size=8).hexdigest()
 
 
-def _choose_remote_output_dir(
-    fresh: str,
-    stored: str,
-    *,
-    forced: bool,
-    remote_has_outputs: bool,
-) -> tuple[str, str]:
-    """Which remote output directory this run should use, and why.
-
-    A module-level function rather than a branch inside ``spawn`` for two
-    reasons: ``spawn`` is already near the complexity ratchet's ceiling, and a
-    decision that cannot be called directly cannot be run against fixtures —
-    only read, which is how the wrong branch gets described as the app's
-    behaviour.
-
-    ``fresh`` is the address derived the usual way, from the staged archives'
-    ``(name, size, mtime)`` and the pipeline argv. ``stored`` is the one a
-    previous run of this same configuration recorded in the output directory's
-    journal, or ``""``. They differ when the previous run's upload was
-    *rewritten* into scratch — a channel filter that cleared
-    ``REWRITE_MIN_SAVING``, or an incremental split — because a fresh staging
-    copy carries a new mtime every run and so keys differently every run. The
-    work that run computed is then sitting in a directory nothing will look in
-    again.
-
-    Returns ``(chosen, reason)``. The stored address wins only when it exists,
-    differs, is not overridden by a forced run, **and** the caller has confirmed
-    it still holds output: the journal says where work was sent, which is not
-    the same claim as the work still being there. The journal proposes; the
-    remote listing decides.
-    """
-    if not stored or stored == fresh:
-        return fresh, ""
-    if forced:
-        return fresh, (
-            "a recorded prior output dir was ignored: this run was asked to "
-            "reprocess")
-    if not remote_has_outputs:
-        return fresh, (
-            f"a prior run recorded {stored}, but it holds no output now — "
-            f"using {fresh}")
-    return stored, (
-        f"re-attaching to {stored}, recorded by a prior run of this plate "
-        f"(the freshly-derived address would have been {fresh})")
 
 
 #: Which well a ``_verify_local_manifest`` message is about. That method emits
@@ -1266,33 +992,12 @@ def _record_remote_in_journal(
         swallowed(f"could not record the remote address in {local_output_dir}")
 
 
-def _compute_run_id(
-    cache_key: str, pipeline_argv: list[str], *, extras: Sequence[str] = (),
-) -> str:
-    """Deterministic run_id from input cache_key + pipeline-args
-    hash. Same input + same pipeline config → same run_id, so
-    re-running lands in the existing remote output dir and the
-    pipeline's own ``output_exists_for_well`` logic skips wells
-    whose ``{well}_out.zip`` already exists.
 
-    v5.2.25: skips per-run-irrelevant flags so the cache slot stays
-    stable across a forced-reprocess re-run, and so input/output
-    dir paths don't churn the hash. ``--force`` users will hit the
-    same dir and overwrite the cached outputs (which is what
-    ``--force`` is supposed to mean).
 
-    Which flags count is :func:`pipeline_argv_digest`'s answer, not a second
-    one kept here: the run journal records that digest so a later run can
-    recognise the same configuration, and two spellings of "same config"
-    would have the journal offering an address the run id says belongs
-    somewhere else.
 
-    ``extras`` carries the host- and filter-level flags a remote run appends to
-    the local argv, so a plate run against a CPU-only host, or with a host
-    override, or with the Fetch filter changed, addresses its own directory
-    instead of finding the other configuration's outputs already complete
-    there."""
-    return f"{cache_key[:16]}-{pipeline_argv_digest(pipeline_argv, extras=extras)}"
+
+
+
 
 
 def _snapshot_local_artifacts(local_output_dir: Path) -> dict:
@@ -1336,21 +1041,6 @@ def _artifact_changed(run, path: Path) -> bool:
     return (st.st_size, st.st_mtime_ns) != before
 
 
-def _forced_from_argv(pipeline_argv: list[str]) -> tuple[bool, frozenset[str]]:
-    """The run's re-processing intent, read back off the argv it will run.
-
-    The argv is the only place both spawn paths agree on what the user asked
-    for, and the batched runner already reads ``--force`` back out of it the
-    same way. Returns ``(force_all, forced_wells)``.
-    """
-    force_all = "--force" in pipeline_argv
-    wells: list[str] = []
-    if "--force_wells" in pipeline_argv:
-        i = pipeline_argv.index("--force_wells") + 1
-        while i < len(pipeline_argv) and not pipeline_argv[i].startswith("--"):
-            wells.append(pipeline_argv[i])
-            i += 1
-    return force_all, _canonical_force_wells(wells)
 
 
 def _pipeline_launch_is_pointless(
@@ -2240,21 +1930,6 @@ def _tp_sort_key(tok: str):
     return tp_sort_key(tok)
 
 
-def _local_input_dir_from_argv(argv) -> "Path | None":
-    """The ``--input_dir`` the local argv named, before the remote rewrite.
-
-    This is the user's own plate directory. For an incremental run the *staged*
-    upload is a different, partial directory, and a completeness check pointed
-    at that one would call a plate finished on the strength of the slice that
-    happened to be re-uploaded.
-    """
-    argv = list(argv or [])
-    for i, arg in enumerate(argv):
-        if arg == "--input_dir" and i + 1 < len(argv):
-            return Path(argv[i + 1])
-        if arg.startswith("--input_dir="):
-            return Path(arg.split("=", 1)[1])
-    return None
 
 
 def input_well_containers(input_dir: Path | None) -> dict[str, Path]:
@@ -2456,40 +2131,8 @@ def refresh_pipeline_info_available_from_outputs(
 # ────────────────────────────────────────────────────────────────────────────
 
 
-def _remote_quote(s: str) -> str:
-    """Shell-quote ``s`` for embedding in a remote bash command line,
-    preserving leading-``~/`` expansion.
-
-    Stock ``shlex.quote`` wraps everything in single quotes, which the
-    remote bash treats as literal — so ``shlex.quote("~/foo")`` →
-    ``'~/foo'``, and the remote ``mkdir -p '~/foo'`` creates a folder
-    literally named ``~`` containing ``foo``. (This bit a user in
-    v5.2.10 with a `[remote.j]` config whose ``remote_staging_dir`` was
-    the default ``~/.allwell-staging``.)
-
-    Fix: a leading ``~/`` is rewritten to ``"$HOME"`` followed by the
-    single-quoted remainder. The remote bash expands ``$HOME`` inside
-    the double-quoted half and keeps the rest literal:
-
-        _remote_quote("~/foo bar")  →  '"$HOME"'\\''/foo bar'\\'
-                                       ^^^^^^^^   ^^^^^^^^^^^^^
-                                       expanded   literal (quoted)
-
-    A bare ``~`` becomes ``"$HOME"`` directly. Everything else falls
-    through to ``shlex.quote`` so spaces / metacharacters in regular
-    paths stay safe.
-    """
-    if s == "~":
-        return '"$HOME"'
-    if s.startswith("~/"):
-        return '"$HOME"' + shlex.quote(s[1:])
-    return shlex.quote(s)
 
 
-def _remote_join(remote_argv: list[str]) -> str:
-    """Like ``shlex.join`` but tilde-aware. Use everywhere we build a
-    remote command line for execution by the remote bash."""
-    return " ".join(_remote_quote(a) for a in remote_argv)
 
 
 # Characters that would end the assignment and start something else. The value
@@ -2781,7 +2424,6 @@ def _scheduler_handoff_lines(launcher: str, *, batch: int | None = None) -> str:
 # the allocation be requested *while* the upload is still running instead of
 # after it: on a busy cluster the queue wait and the transfer then overlap
 # instead of running end to end.
-UPLOAD_SENTINEL = ".aw_upload_complete"
 
 # How long a granted allocation will wait for that file before giving up. The
 # node is idle and billed for every second of it, so this is a backstop against
@@ -2802,7 +2444,6 @@ _UPLOAD_WAIT_EXIT = 75
 # The file is touched over ssh, so its mtime is the *remote* clock and the job
 # comparing it against its own ``date`` is not measuring clock skew between two
 # machines.
-UPLOAD_HEARTBEAT = ".aw_upload_alive"
 UPLOAD_HEARTBEAT_S = 30
 UPLOAD_HEARTBEAT_STALE_S = 120
 
@@ -3277,43 +2918,8 @@ def _compose_remote_cmd(
 
 
 @lru_cache(maxsize=1)
-def _rsync_version() -> tuple[int, int]:
-    """Parsed ``(major, minor)`` of the local rsync, or ``(0, 0)`` if
-    rsync is missing / unparseable. Cached for the process lifetime.
-    Shared by ``_rsync_supports_info_flag`` (≥ 3.1) and
-    ``_rsync_supports_append_verify`` (≥ 3.0) so we don't fork+exec
-    ``rsync --version`` twice on startup."""
-    try:
-        result = subprocess.run(
-            [resolve_rsync_binary(), "--version"],
-            capture_output=True, text=True, timeout=5,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return (0, 0)
-    if result.returncode != 0:
-        return (0, 0)
-    first_line = (result.stdout or "").splitlines()[0] if result.stdout else ""
-    match = re.search(r"version\s+(\d+)\.(\d+)", first_line)
-    if not match:
-        return (0, 0)
-    return int(match.group(1)), int(match.group(2))
 
 
-def _rsync_supports_info_flag() -> bool:
-    """Whether the local rsync accepts ``--info=...``.
-
-    Added in rsync 3.1.0 (2013). macOS still ships the very old
-    rsync 2.6.9 by default (Apple licensing — they froze before
-    rsync went GPLv3); HPC clusters and minimal containers can
-    have similar vintage. Those rsyncs reject ``--info=...`` with
-    "rsync: --info=stats0: unknown option" → exit 1.
-
-    Detected once at first call via ``rsync --version`` (which both
-    old and new rsyncs support) and cached for the process lifetime.
-    Returns False on any error so the caller defaults to the
-    safer "omit --info" path.
-    """
-    return _rsync_version() >= (3, 1)
 
 
 class _LogToLineStream(__import__("logging").Handler):
@@ -3340,87 +2946,10 @@ class _LogToLineStream(__import__("logging").Handler):
             self.handleError(record)
 
 
-def _rsync_progress_flags() -> list[str]:
-    """Flags that make rsync narrate a transfer, for whatever rsync is here.
-
-    ``--info=name1,stats2,progress2`` needs rsync ≥ 3.1.0. macOS ships 2.6.9 and
-    that is the machine most runs are launched from, so on the common case the
-    gate around ``--info`` fell through to **nothing at all** — rsync ran
-    silently for the entire transfer. Everything downstream is driven off its
-    output: ``_looks_like_rsync_filename`` turns per-file lines into
-    ``[remote] ↑ <well>.zip`` (the Upload rail and the per-well "uploaded"
-    colour), and the progress stream drives the transfer bar and the per-well
-    pie slices. With no flags none of it fires, so a multi-hour upload showed
-    ``Upload 0/N`` and an unchanged plate from the first second to the last,
-    which is indistinguishable from a hang.
-
-    ``-v`` and ``--progress`` both predate 3.0 and are what the old rsync
-    understands: ``-v`` names each file as it goes, ``--progress`` emits the
-    percentage stream. The parsers already accept both shapes.
-    """
-    if _rsync_supports_info_flag():
-        return ["--info=name1,stats2,progress2"]
-    return ["-v", "--progress"]
 
 
-def _rsync_supports_append_verify() -> bool:
-    """Whether the local rsync accepts ``--append-verify``.
-
-    Added in rsync 3.0.0 (2008). macOS's bundled rsync 2.6.9 rejects
-    it with "Unrecognized option --append-verify" → exit 1, which was
-    the failure mode that motivated this probe (v5.2.14 user hit it
-    on macOS). On legacy rsync we drop the flag entirely; ``--partial``
-    alone is still enough to resume an interrupted transfer (just
-    without the tail-checksum verification step)."""
-    return _rsync_version() >= (3, 0)
 
 
-def _rsync_ssh_transport(host: RemoteHost) -> list[str]:
-    """Build the ``-e "ssh …"`` argument every rsync in this module
-    should pass.
-
-    rsync invokes ssh as a separate child process — it does NOT use
-    the runner's ``host.ssh_argv()`` machinery. Without an explicit
-    ``-e`` flag, rsync's ssh would:
-
-    * **Skip the wizard-generated key.** v5.2.2 threaded ``ssh_key_path``
-      through every direct ssh call, but the rsync calls in this module
-      pass bare argv with no ``-i``, so rsync's underlying ssh falls
-      through to ssh's default identity search and never tries
-      ``~/.ssh/allwell_<alias>``. A keys-only remote then rejects the
-      connection with "Permission denied".
-
-    * **Refuse first-contact hosts.** No ``StrictHostKeyChecking=
-      accept-new``, so a host that isn't in ``~/.ssh/known_hosts`` yet
-      kills rsync with exit 255 "Host key verification failed", same
-      class of failure the bootstrap's ``_ssh_run`` had before v5.2.3.
-
-    v5.x.x: the ssh binary is pulled via :func:`resolve_ssh_for_rsync`
-    (not :func:`resolve_ssh_binary`) so that on Windows we pick an
-    ssh.exe from the SAME MSYS / Cygwin runtime as the resolved
-    rsync.exe. Mismatched runtimes (MSYS2 rsync + Git for Windows
-    ssh, the two ship different msys-2.0.dll versions) make
-    Cygwin's fork-emulation fail with ``dup() in/out/err failed``
-    before ssh runs, surfacing as rsync exit 12 / "connection
-    unexpectedly closed".
-
-    This helper centralises the policy so every call site (there are
-    seven as of v5.2.5: cache upload, file sync, per-well fetch, glob
-    pull, optional pull, two end-of-run retries) gets the same options.
-    """
-    ssh_inner = [
-        resolve_ssh_for_rsync(),
-        "-o", "StrictHostKeyChecking=accept-new",
-        "-o", "ConnectTimeout=15",
-        "-o", "BatchMode=yes",
-    ]
-    if host.ssh_key_path:
-        key = str(Path(host.ssh_key_path).expanduser())
-        ssh_inner += ["-i", key]
-    # Join with shlex.quote so a path with spaces (rare on Linux, common
-    # on macOS / Windows user dirs) survives the round-trip through the
-    # shell rsync uses internally.
-    return ["-e", " ".join(shlex.quote(a) for a in ssh_inner)]
 
 
 class DatasetCache:
@@ -3794,74 +3323,10 @@ class DatasetCache:
         )
 
 
-_RSYNC_FILENAME_RE = re.compile(
-    # Positive match: a single token (NO whitespace anywhere) that
-    # either contains a path separator (e.g. ``subdir/foo.tif``) or
-    # ends with a 1–8 character extension (e.g. ``A01.zip``,
-    # ``process_microscopy.py``, ``_Docs/requirements-remote.txt``).
-    r"^\S+(?:[/\\]\S+|\.[A-Za-z0-9]{1,8})$"
-)
 
 
-def _looks_like_rsync_filename(line: str) -> bool:
-    """Return True iff ``line`` looks like an rsync ``--info=name1``
-    filename emission (vs progress, stats, warning, or error noise).
-
-    Uses a POSITIVE match rather than elimination. The original
-    negate-known-prefixes approach was leaky — rsync emits dozens of
-    status lines (``total size is X``, ``Number of files: N``,
-    ``sending incremental file list``, ``created directory /foo``,
-    ``file has vanished: x.tmp``, ``deleting old.zip``, etc.) and
-    every new one would silently get misclassified as a "filename"
-    until the prefix list was extended.
-
-    The positive form keys on two observations: (a) every transferred
-    filename rsync emits with ``--info=name1`` is a single
-    whitespace-free token, and (b) every status/diagnostic line
-    contains whitespace (the prose part). So a no-whitespace line
-    that also looks like a path is the filename; anything else is
-    noise.
-    """
-    if not line:
-        return False
-    return bool(_RSYNC_FILENAME_RE.match(line))
 
 
-def _iter_rsync_lines(stdout) -> Iterable[str]:
-    """Yield rsync stdout 'lines' split on BOTH ``\\n`` and ``\\r``.
-
-    Critical for surfacing ``--info=progress2`` updates in real time:
-    rsync terminates its in-place updating progress bar with ``\\r``,
-    not ``\\n``. The default ``for line in proc.stdout`` only splits
-    on ``\\n``, so during a multi-GB transfer of a single well zip
-    the progress updates accumulate in the pipe buffer for minutes
-    until rsync moves on to the next file (or finishes). On Windows
-    where non-TTY pipes are block-buffered at the OS level, this
-    becomes ten-plus-minute silences in the GUI log — users
-    reasonably assume the pipeline has hung.
-
-    Reads small chunks (raw bytes), splits on ``[\\r\\n]+``, decodes
-    each chunk on its own. Empty splits (consecutive terminators,
-    typical of ``\\r\\n`` from Windows-built tools) are filtered.
-    Returns a generator so the caller can interleave per-line work
-    with reading.
-    """
-    buf = b""
-    line_re = re.compile(rb"[\r\n]+")
-    while True:
-        chunk = stdout.read(64)
-        if not chunk:
-            if buf:
-                yield buf.decode("utf-8", errors="replace")
-            return
-        buf += chunk
-        parts = line_re.split(buf)
-        # Last element may be a partial line (no terminator yet);
-        # keep it for the next iteration.
-        for part in parts[:-1]:
-            if part:
-                yield part.decode("utf-8", errors="replace")
-        buf = parts[-1]
 
 
 def _well_xfer_line(well: str, direction: str, fraction: float) -> str:
@@ -4077,32 +3542,7 @@ def _run_rsync_streaming(
     return sent_bytes, proc.returncode if proc.returncode is not None else -1
 
 
-# Exit codes rsync uses to signal a network-side failure (per rsync(1)
-# manpage, "EXIT VALUES" section). Anything outside this set is treated
-# as a configuration / permission / logic error and surfaces immediately
-# without retry — re-running such an error wouldn't help and would mask
-# the real problem.
-#
-#   10: error in socket I/O
-#   11: error in file I/O
-#   12: error in rsync protocol data stream
-#   30: timeout in data send/receive
-#   35: timeout waiting for daemon connection
-#
-# 11 is here because it is what a fault on the *local* end of a transfer looks
-# like: rsync writing a fetched well onto a network-mounted output dir reports
-# ``write failed on "…": Bad file descriptor (9)`` and exits 11 when the SMB
-# session drops and reconnects mid-file. That is the same transient the
-# pipeline's own writes retry through, and without it a single blip lost the
-# well's CSVs for the rest of the run. Genuine, non-transient file errors
-# (permission denied, no such file) exit 23 or 3 and still surface immediately.
-_RSYNC_RETRY_CODES = {10, 11, 12, 30, 35}
 
-# Backoff schedule for rsync retries — mirrors the git push/pull policy
-# documented at the top of the runner's invocation env. Total wait
-# across the three retries is 14 s, an upper bound the user can sit
-# through without thinking the run is hung.
-_RSYNC_RETRY_DELAYS = (2.0, 4.0, 8.0)
 
 
 def _log_wells_uploaded(well_zips, log_fn: Callable[[str], None]) -> None:
@@ -4177,169 +3617,8 @@ def _stream_rsync_with_retry(
     return sent_bytes, elapsed, rc, attempts_run
 
 
-def _rsync_with_retry(
-    cmd: list[str],
-    *,
-    log_fn: Callable[[str], None] | None = None,
-    timeout: int | None = 300,
-    capture_output: bool = True,
-    cwd: str | None = None,
-    stop_event: threading.Event | None = None,
-) -> subprocess.CompletedProcess:
-    """Run an rsync command, retrying on transient network failures.
-
-    Returns the final ``CompletedProcess``. A success on the first try
-    is the common path; transient failures (rsync exit codes 10/12/30/35
-    or an OSError from the subprocess machinery itself) trigger up to
-    three retries with exponential backoff. Non-transient failures
-    (any other non-zero exit code) return immediately so logic /
-    configuration errors don't get masked behind a retry storm.
-
-    This is the v5.1.1 patch to the v5.0.0 runner — every rsync call
-    site in the framework funnels through here.
-
-    v5.2.12: ``cwd`` is passed through to ``subprocess.run`` so callers
-    can use bare relative source paths (the only portable way to make
-    ``rsync -aR`` recreate the right directory layout on the remote;
-    the absolute-path-with-``/./``-pivot trick is fragile on older
-    rsync versions, which mirror the full local path instead).
-
-    v5.2.28: ``stop_event`` makes the rsync cancellable. When set, the
-    in-flight rsync subprocess is terminated and the retry loop
-    short-circuits with synthetic ``rc=130`` (SIGINT-style). The
-    Fetcher passes its own stop event through here so the Stop
-    button actually interrupts per-well downloads instead of
-    waiting for each rsync to finish on its own.
-    """
-    log = log_fn or (lambda _m: None)
-    delays = (0.0,) + _RSYNC_RETRY_DELAYS  # delay before each attempt
-    last_result: subprocess.CompletedProcess | None = None
-    last_exc: BaseException | None = None
-
-    for attempt, delay in enumerate(delays):
-        if stop_event is not None and stop_event.is_set():
-            log("[remote] rsync cancelled by Stop request.\n")
-            return subprocess.CompletedProcess(
-                cmd, returncode=130, stdout="", stderr="cancelled",
-            )
-        if delay > 0:
-            log(
-                f"[remote] rsync retry {attempt}/{len(_RSYNC_RETRY_DELAYS)} "
-                f"in {delay:.0f}s (last exit code "
-                f"{last_result.returncode if last_result else '?'})\n"
-            )
-            # Cooperatively interruptible sleep — check stop_event
-            # every 0.25s so a long backoff doesn't deafen Stop.
-            slept = 0.0
-            while slept < delay:
-                if stop_event is not None and stop_event.is_set():
-                    log("[remote] rsync cancelled during retry backoff.\n")
-                    return subprocess.CompletedProcess(
-                        cmd, returncode=130, stdout="", stderr="cancelled",
-                    )
-                step = min(0.25, delay - slept)
-                time.sleep(step)
-                slept += step
-        try:
-            result = _rsync_run_cancellable(
-                cmd,
-                timeout=timeout,
-                capture_output=capture_output,
-                cwd=cwd,
-                stop_event=stop_event,
-            )
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            last_exc = exc
-            log(f"[remote] rsync attempt {attempt + 1} raised: {exc}\n")
-            continue
-        last_result = result
-        last_exc = None
-        if result.returncode == 0:
-            return result
-        if result.returncode == 130:
-            # Stop fired mid-rsync — don't retry, return immediately.
-            return result
-        if result.returncode not in _RSYNC_RETRY_CODES:
-            # Non-transient — return immediately so the caller sees the
-            # real error.
-            return result
-
-    if last_result is not None:
-        return last_result
-    # Every attempt raised — synthesise a CompletedProcess so callers
-    # have a uniform return type.
-    return subprocess.CompletedProcess(
-        cmd, returncode=255, stdout="", stderr=str(last_exc),
-    )
 
 
-def _rsync_run_cancellable(
-    cmd: list[str],
-    *,
-    timeout: int | None,
-    capture_output: bool,
-    cwd: str | None,
-    stop_event: threading.Event | None,
-) -> subprocess.CompletedProcess:
-    """``subprocess.run`` work-alike that polls ``stop_event`` while
-    the child runs and terminates it on cancellation. v5.2.28.
-
-    When ``stop_event`` is None this is equivalent to ``subprocess.run``
-    — the only path that runs without cancellation is the bootstrap
-    ``sync_required_files`` call, which is small and short-lived.
-
-    ``timeout=None`` disables the wall-clock deadline entirely: the caller
-    is relying on rsync's own ``--timeout`` (I/O-idle) + ssh ``ConnectTimeout``
-    to bound stalls, so a large but steadily-progressing transfer is never
-    killed mid-flight (the bug that made the final per-well fetch retry-loop
-    and fail on big zips / slow links)."""
-    if stop_event is None:
-        return subprocess.run(
-            cmd, capture_output=capture_output, text=True,
-            timeout=timeout, cwd=cwd,
-        )
-    stdout_pipe = subprocess.PIPE if capture_output else None
-    stderr_pipe = subprocess.PIPE if capture_output else None
-    proc = subprocess.Popen(
-        cmd, stdout=stdout_pipe, stderr=stderr_pipe, text=True, cwd=cwd,
-    )
-    deadline = None if timeout is None else time.monotonic() + timeout
-    rc: int | None = None
-    try:
-        while True:
-            try:
-                rc = proc.wait(timeout=0.25)
-            except subprocess.TimeoutExpired:
-                if stop_event.is_set():
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                    return subprocess.CompletedProcess(
-                        cmd, returncode=130, stdout="", stderr="cancelled",
-                    )
-                if deadline is not None and time.monotonic() > deadline:
-                    proc.kill()
-                    raise subprocess.TimeoutExpired(cmd, timeout)
-                continue
-            break
-    finally:
-        if proc.poll() is None:
-            proc.terminate()
-    out, err = ("", "")
-    if capture_output and proc.stdout is not None:
-        try:
-            out = proc.stdout.read()
-        except Exception:
-            out = ""
-    if capture_output and proc.stderr is not None:
-        try:
-            err = proc.stderr.read()
-        except Exception:
-            err = ""
-    assert rc is not None
-    return subprocess.CompletedProcess(cmd, rc, out, err)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -4537,32 +3816,6 @@ def _empty_well_blanks(argv, well_zips) -> tuple[str, ...]:
     return tuple(z.stem for z in well_zips if _bg_well_key(z.stem) in wanted)
 
 
-def _parse_argv_flags(argv, multi: set[str], single: set[str]) -> dict:
-    """Read *multi*- and *single*-valued flags out of a pipeline argv.
-
-    A multi-valued flag (``--fluor_tokens GFP mCherry DAPI``) consumes entries
-    until the next ``--``. A plain ``next(it)`` picks up only the FIRST, which is
-    how the batched-remote threshold pass came to see one channel of many.
-    """
-    out: dict = {}
-    argv = [str(a) for a in argv]
-    i = 0
-    while i < len(argv):
-        arg = argv[i]
-        if arg in multi:
-            values: list[str] = []
-            i += 1
-            while i < len(argv) and not argv[i].startswith("--"):
-                values.append(argv[i])
-                i += 1
-            out[arg] = values
-            continue
-        if arg in single:
-            out[arg] = argv[i + 1] if i + 1 < len(argv) else ""
-            i += 2
-            continue
-        i += 1
-    return out
 
 
 def _auto_threshold_args_from_argv(argv):
@@ -4712,13 +3965,10 @@ class _BatchedRemoteProcess:
         # them twice, which is what `ProgressTracker.well_repeats` counts. The
         # cache is no warmer for it: the Fetcher deletes each zip as it lands
         # either way.
-        remote_input = f"{runner.host.remote_staging_dir}/runs/{run_id}/in"
-        remote_output = (
-            f"{runner.host.remote_staging_dir}/runs/{run_id}/out"
-        )
-        remote_pidfile = (
-            f"{runner.host.remote_staging_dir}/runs/{run_id}/run.pid"
-        )
+        own = remote_run_paths(runner.host, run_id)
+        remote_input = f"{own.run_dir}/in"
+        remote_output = own.out
+        remote_pidfile = own.pidfile
         runner._cache._ssh_run(
             ["mkdir", "-p", remote_input, remote_output],
             check=True,
@@ -4842,12 +4092,13 @@ class _BatchedRemoteProcess:
 
     def _batch_flag(self, template: str, index: int) -> str:
         """The remote path of one batch's handshake file."""
-        run_dir = f"{self._runner.host.remote_staging_dir}/runs/{self._run_id}"
+        run_dir = remote_run_dir(self._runner.host, self._run_id)
         return f"{run_dir}/{template.format(i=index)}"
 
     def _batch_staging_dir(self, index: int) -> str:
         """Where batch *index* is uploaded, before the driver swaps it in."""
-        return f"{self._runner.host.remote_staging_dir}/runs/{self._run_id}/b{index}"
+        run_dir = remote_run_dir(self._runner.host, self._run_id)
+        return f"{run_dir}/b{index}"
 
     def _start_driver(self, n_batches: int) -> bool:
         """Put one allocation on a node and leave it there for the whole run.
@@ -4863,8 +4114,9 @@ class _BatchedRemoteProcess:
         """
         run = self._runner._run
         host = self._runner.host
-        run_dir = f"{host.remote_staging_dir}/runs/{self._run_id}"
-        heartbeat = f"{run_dir}/{UPLOAD_HEARTBEAT}"
+        paths = remote_run_paths(host, self._run_id)
+        run_dir = paths.run_dir
+        heartbeat = paths.heartbeat
 
         # Ask *before* clearing anything. Everything below assumes this run
         # directory is ours to empty, and `run_id` is deterministic in the
@@ -6825,11 +6077,12 @@ class RemoteRunner:
         host_extras = self._host_argv_extras(output_filter)
         run_id = "run-" + _compute_run_id(key, pipeline_argv, extras=host_extras)
         remote_input = self._cache.remote_dataset_dir(key)
-        own_run_dir = f"{self.host.remote_staging_dir}/runs/{run_id}"
-        remote_output = f"{own_run_dir}/out"
-        remote_pidfile = f"{own_run_dir}/run.pid"
-        remote_sentinel = f"{own_run_dir}/{UPLOAD_SENTINEL}"
-        remote_heartbeat = f"{own_run_dir}/{UPLOAD_HEARTBEAT}"
+        own = remote_run_paths(self.host, run_id)
+        own_run_dir = own.run_dir
+        remote_output = own.out
+        remote_pidfile = own.pidfile
+        remote_sentinel = own.sentinel
+        remote_heartbeat = own.heartbeat
 
         # Only the *output* directory can be re-attached, and only it is. The
         # input dir keys on this run's own staged archives, and the pidfile /
@@ -7281,7 +6534,7 @@ class RemoteRunner:
             # created, and nothing prunes ``runs/`` — ``DatasetCache.gc``
             # covers ``datasets/`` — so leaving it would drop two sidecar files
             # on the host for every re-attaching run, for ever.
-            own_dir = f"{self.host.remote_staging_dir}/runs/{run.run_id}"
+            own_dir = remote_run_dir(self.host, run.run_id)
             # The fate of this run's own directory is said inside the branch
             # that decides it. Stating it afterwards told a dry run that the
             # directory "has been cleaned up" three lines before announcing
@@ -7299,7 +6552,7 @@ class RemoteRunner:
                 f"place; remove it by hand once you are done with it.\n"
             )
         else:
-            run_dir = f"{self.host.remote_staging_dir}/runs/{run.run_id}"
+            run_dir = remote_run_dir(self.host, run.run_id)
             if dry_run:
                 self._log_would_delete(
                     run_dir, label=f"run dir {run.run_id}", log=log)

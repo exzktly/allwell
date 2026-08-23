@@ -907,12 +907,19 @@ class PipelineRunner:
         else:
             os.environ.pop("ALLWELL_SCRATCH_DIR", None)
         try:
-            # Try the new signature first (with proc_hook); fall back for
-            # callers that haven't been updated yet.
-            try:
-                resolved = resolve_dirs(opts, self.log_q, proc_hook=self._track_zipper_proc)
-            except TypeError:
-                resolved = resolve_dirs(opts, self.log_q)
+            # No compatibility fallback. The only production caller,
+            # `analyze_input._resolve_run_dirs_for_runner`, takes `proc_hook`,
+            # and the `except TypeError` that used to sit here could therefore
+            # not be entered by a caller with the wrong signature — only by a
+            # `TypeError` raised from *inside* the resolver, which it then
+            # answered by running the whole resolver a second time. That
+            # resolver groups loose images into archives and deletes their
+            # sources; running it twice on a partially-completed first pass is
+            # not a fallback, it is a second pass over a directory the first
+            # one had already changed. Without `proc_hook` the grouping
+            # subprocess is also untracked, so Stop cannot reach it.
+            resolved = resolve_dirs(
+                opts, self.log_q, proc_hook=self._track_zipper_proc)
             # Stop button may have fired during the (potentially long)
             # grouping / resolution phase. Bail before launching the
             # pipeline in that case.

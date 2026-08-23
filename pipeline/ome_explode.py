@@ -160,6 +160,43 @@ class OmeLayout:
     # where on the *plate*, so they are the one place a starting well can come
     # from rather than be typed.
     position_names: list[str] = field(default_factory=list)
+    # The channel names as the OME-XML spells them, before ``_safe_token``
+    # strips them to filename tokens. Kept only so a token collision can name
+    # the two channels a user has to go and rename; nothing decides anything
+    # from these.
+    raw_channel_names: list[str] = field(default_factory=list)
+
+    def _colliding_tokens(self) -> tuple[str, str, list[str]] | None:
+        """The first token collision the exploded filenames would carry.
+
+        Returns ``(what, token, the names that produced it)``, or ``None``.
+
+        Every image is published as
+        ``<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif``, so two channels
+        whose names reduce to the same token — ``"488 nm"`` and ``"488nm"``,
+        ``"GFP-1"`` and ``"GFP_1"``, or simply two channels both called ``GFP`` —
+        write the *same member name* into one archive. ``zipfile`` accepts that
+        with a ``UserWarning`` and keeps both copies of the bytes; a reader
+        returns only the last, so one channel is unreachable and the run reports
+        two images written for one readable image. ``atomic_zip``'s
+        verification cannot catch it either: the duplicate name is on both sides
+        of the comparison, so ``landed == written``. The same holds for two
+        timepoints whose ``DeltaT`` values render alike at ``%g``'s six
+        significant figures.
+        """
+        for what, tokens, sources in (
+            ("channel", self.channel_names,
+             self.raw_channel_names or self.channel_names),
+            ("timepoint", self.timepoint_tokens, self.timepoint_tokens),
+        ):
+            seen: dict[str, list[str]] = {}
+            for i, tok in enumerate(tokens):
+                src = sources[i] if i < len(sources) else tok
+                seen.setdefault(tok, []).append(str(src))
+            for tok, names in seen.items():
+                if len(names) > 1:
+                    return what, tok, names
+        return None
 
     def _ragged_positions(self) -> tuple[str, int, int, int] | None:
         """The first axis on which the positions disagree, or ``None``.
@@ -236,6 +273,25 @@ class OmeLayout:
                 f"has to carry the same {ax} for the timepoints and channels to "
                 f"line up across the plate. Re-export it from the acquisition "
                 f"software, or export the affected position separately."
+            )
+        # Names, not shape: two channels (or two timepoints) that reduce to one
+        # filename token would publish one member name twice, and the second
+        # copy is unreachable for ever after. Refused here, before an archive is
+        # written, because nothing downstream can see it — see
+        # :meth:`_colliding_tokens`.
+        collision = self._colliding_tokens()
+        if collision:
+            what, tok, names = collision
+            shown = ", ".join(repr(n) for n in names)
+            return (
+                f"{subject} has {len(names)} {what}s whose names all reduce to "
+                f"the filename token {tok!r}: {shown}. Every image is named "
+                f"<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif, so those "
+                f"would be written to the same name inside one archive and only "
+                f"the last would be readable — the rest would be lost without "
+                f"the run reporting a single missing image. Rename the {what}s "
+                f"in the acquisition software so they differ by more than "
+                f"punctuation or spacing, and export again."
             )
         realised = self.n_frames if self.single_image else self.size_t
         declared_t = int(self.declared_sizes.get("T", 0))
@@ -335,6 +391,53 @@ def _safe_token(value: object, fallback: str) -> str:
     return tok or fallback
 
 
+# OME's ``UnitsTime`` enumeration, as hours per unit. Only the units an
+# acquisition realistically writes are listed, plus the spellings this module
+# accepted before (``minute``, and the bare ``m`` that OME itself does not
+# define). ``µ`` is here twice: MICRO SIGN (U+00B5) is what OME's schema uses and
+# GREEK SMALL LETTER MU (U+03BC) is what several writers emit instead, and they
+# are different characters.
+#
+# Anything *not* in this table is unknown, and unknown is not a synonym for
+# seconds. Treating it as seconds is how a file whose DeltaT is in milliseconds
+# produced a "1000h" token for a frame taken one hour in — the token becomes the
+# filename's timepoint field and the app's chronological key, so every hours axis
+# in Review was scaled by 1000. An unreadable unit now leaves the timepoint
+# tokens positional (``t0``, ``t1``, …), which orders correctly and states no
+# number it cannot back up.
+_DELTA_T_HOURS_PER_UNIT = {
+    "ms": 1.0 / 3_600_000.0,
+    "millisecond": 1.0 / 3_600_000.0,
+    "milliseconds": 1.0 / 3_600_000.0,
+    "µs": 1.0 / 3_600_000_000.0,
+    "μs": 1.0 / 3_600_000_000.0,
+    "us": 1.0 / 3_600_000_000.0,
+    "microsecond": 1.0 / 3_600_000_000.0,
+    "microseconds": 1.0 / 3_600_000_000.0,
+    "ns": 1.0 / 3.6e12,
+    "nanosecond": 1.0 / 3.6e12,
+    "nanoseconds": 1.0 / 3.6e12,
+    "s": 1.0 / 3600.0,
+    "sec": 1.0 / 3600.0,
+    "secs": 1.0 / 3600.0,
+    "second": 1.0 / 3600.0,
+    "seconds": 1.0 / 3600.0,
+    "min": 1.0 / 60.0,
+    "mins": 1.0 / 60.0,
+    "minute": 1.0 / 60.0,
+    "minutes": 1.0 / 60.0,
+    "m": 1.0 / 60.0,
+    "h": 1.0,
+    "hr": 1.0,
+    "hrs": 1.0,
+    "hour": 1.0,
+    "hours": 1.0,
+    "d": 24.0,
+    "day": 24.0,
+    "days": 24.0,
+}
+
+
 def _localname(tag: str) -> str:
     """Strip an XML namespace (``{ns}Local`` → ``Local``)."""
     return tag.rsplit("}", 1)[-1] if "}" in tag else tag
@@ -342,8 +445,8 @@ def _localname(tag: str) -> str:
 
 def _parse_ome_labels(
     ome_xml: str | None, size_c: int, size_t: int
-) -> tuple[list[str], list[str]]:
-    """Return ``(channel_names, timepoint_tokens)`` parsed from OME-XML.
+) -> tuple[list[str], list[str], list[str]]:
+    """Return ``(channel_names, timepoint_tokens, raw_channel_names)`` from OME-XML.
 
     Channel names come from the first ``Image``'s ``Channel`` elements (channels
     are the same across positions in a plate scan). Timepoint tokens come from
@@ -354,23 +457,24 @@ def _parse_ome_labels(
     """
     channel_names = [f"c{i}" for i in range(size_c)]
     timepoint_tokens = [f"t{i}" for i in range(size_t)]
+    raw_names: list[str] = []
     if not ome_xml:
-        return channel_names, timepoint_tokens
+        return channel_names, timepoint_tokens, raw_names
 
     try:
         root = ET.fromstring(ome_xml)
     except ET.ParseError:
-        return channel_names, timepoint_tokens
+        return channel_names, timepoint_tokens, raw_names
 
     image = next((el for el in root.iter() if _localname(el.tag) == "Image"), None)
     if image is None:
-        return channel_names, timepoint_tokens
+        return channel_names, timepoint_tokens, raw_names
 
     pixels = next(
         (el for el in image.iter() if _localname(el.tag) == "Pixels"), None
     )
     if pixels is None:
-        return channel_names, timepoint_tokens
+        return channel_names, timepoint_tokens, raw_names
 
     # Channel names, in channel order.
     names: list[str] = []
@@ -378,12 +482,16 @@ def _parse_ome_labels(
         if _localname(el.tag) == "Channel":
             names.append(el.get("Name") or "")
     if names:
+        raw_names = [str(names[i]) if i < len(names) else "" for i in range(size_c)]
         channel_names = [
             _safe_token(names[i] if i < len(names) else "", f"c{i}")
             for i in range(size_c)
         ]
 
-    # Timepoints from DeltaT (seconds by default) on the T-index planes.
+    # Timepoints from DeltaT on the T-index planes, converted to hours through
+    # ``_DELTA_T_HOURS_PER_UNIT``. A plane whose unit is not in that table
+    # contributes nothing, so ``delta_by_t`` comes up short of ``size_t`` and
+    # every token stays positional.
     delta_by_t: dict[int, float] = {}
     for el in pixels:
         if _localname(el.tag) != "Plane":
@@ -394,19 +502,25 @@ def _parse_ome_labels(
             continue
         try:
             ti = int(the_t)
-            secs = float(delta)
+            value = float(delta)
         except ValueError:
             continue
-        unit = (el.get("DeltaTUnit") or "s").lower()
-        hours = secs / 60.0 if unit in ("min", "minute", "m") else secs / 3600.0
-        delta_by_t.setdefault(ti, hours)
+        # OME's default for DeltaT is seconds, so an *absent* unit is seconds.
+        # An unrecognised one is not: it is a unit this module cannot convert,
+        # and the plane is left without a delta, which drops the whole file back
+        # to positional tokens below.
+        unit = (el.get("DeltaTUnit") or "s").strip()
+        per_hour = _DELTA_T_HOURS_PER_UNIT.get(unit.lower())
+        if per_hour is None:
+            continue
+        delta_by_t.setdefault(ti, value * per_hour)
     if delta_by_t and len(delta_by_t) >= size_t:
         timepoint_tokens = [
             f"{delta_by_t[i]:g}h" if i in delta_by_t else f"t{i}"
             for i in range(size_t)
         ]
 
-    return channel_names, timepoint_tokens
+    return channel_names, timepoint_tokens, raw_names
 
 
 # ``tifffile`` sizes a series' page list from the dimensions the *metadata*
@@ -872,7 +986,7 @@ def read_ome_layout(ome_path: Path | str) -> OmeLayout:
     single_image = len(series) == 1
     # For a single-image file the T axis is the frame sequence, not timepoints, so
     # don't manufacture size_t timepoint tokens (there could be thousands).
-    channel_names, timepoint_tokens = _parse_ome_labels(
+    channel_names, timepoint_tokens, raw_channel_names = _parse_ome_labels(
         ome_xml, size_c, 0 if single_image else size_t
     )
     ome_positions, positions_in_um = _stage_positions(ome_xml)
@@ -906,6 +1020,7 @@ def read_ome_layout(ome_path: Path | str) -> OmeLayout:
         position_names=_position_names(ome_xml),
         metadata_blocks=blocks,
         metadata_key_sample=key_sample,
+        raw_channel_names=raw_channel_names,
     )
 
 

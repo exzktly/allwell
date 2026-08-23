@@ -1,9 +1,9 @@
 """Which configuration produced each well's output, recorded beside it.
 
-`pipeline/run_report.py`'s shape and for its reason — one small file per well,
-written atomically and never appended to, so the worker pool records without a
-lock. Unlike that module's directory, this one is **not** cleared at the end of
-a run: it is read by the *next* run, which is the whole point.
+Built on `pipeline/run_report.py`'s shape and for its reason — one small file
+per well, written atomically and never appended to, so the worker pool records
+without a lock. Unlike that module's directory, this one is **not** cleared at
+the end of a run: it is read by the *next* run, which is the whole point.
 
 `util.settings_digest` decides what goes into the string; this decides where it
 lives and answers "may this well be reused". The two are separate because the

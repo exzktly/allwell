@@ -32,6 +32,26 @@ from services.remote_config import RemoteHost
 UPLOAD_SENTINEL = ".aw_upload_complete"
 UPLOAD_HEARTBEAT = ".aw_upload_alive"
 
+#: What a frozen bundle passes instead of a script path — the launcher routes
+#: argv past it into ``process_microscopy.main``. It is launcher plumbing, so
+#: the digest skips it exactly as it skips the script path a source run passes.
+_LAUNCHER_SENTINEL = "--run-pipeline"
+
+
+def _without_launcher(pipeline_argv: Sequence[str]) -> list[str]:
+    """*pipeline_argv* from its first real flag onward.
+
+    The prefix is `sys.executable` followed by either the local path to
+    `process_microscopy.py` or, in a frozen bundle, `--run-pipeline`. Slicing
+    at the first flag that is not the sentinel handles both without this
+    function needing to know which shape it was handed.
+    """
+    for n, arg in enumerate(pipeline_argv):
+        if arg.startswith("--") and arg != _LAUNCHER_SENTINEL:
+            return list(pipeline_argv[n:])
+    return []
+
+
 def pipeline_argv_digest(
     pipeline_argv: list[str], *, extras: Sequence[str] = (),
 ) -> str:
@@ -47,6 +67,18 @@ def pipeline_argv_digest(
     a change of configuration — which is what lets a forced re-run land in the
     same remote directory and overwrite it).
 
+    Skips the **launcher** too, which is everything before the first real flag:
+    ``sys.executable``, and either the local path to ``process_microscopy.py``
+    or the frozen bundle's ``--run-pipeline`` sentinel. None of it reaches the
+    worker — the remote runs its own interpreter against its own uploaded copy
+    of the script — so hashing it keyed the reuse decision on facts about the
+    client that cannot change a single byte of the result. It made the digest
+    differ between the frozen app and a source run on one machine, and between
+    any two machines at all; CI caught the second, which is the only reason the
+    first was found. A key that churns for a reason unrelated to the output is
+    re-attach dying silently and the whole plate re-uploading, with nothing
+    logged anywhere.
+
     ``extras`` are the flags a *remote* run adds on top of the local argv —
     :meth:`RemoteRunner._host_argv_extras`. They are not in ``pipeline_argv``
     because nothing local produces them, and leaving them out made two runs
@@ -56,6 +88,7 @@ def pipeline_argv_digest(
     skip_with_value = {"--input_dir", "--output_dir"}
     skip_flags = {"--force"}
     filtered: list[str] = []
+    pipeline_argv = _without_launcher(pipeline_argv)
     i = 0
     while i < len(pipeline_argv):
         a = pipeline_argv[i]

@@ -4194,6 +4194,19 @@ already filled, be found complete by the pre-flight check, and have that
 configuration's numbers fetched back as its own. One definition feeds both the
 launched command and the digest.
 
+It is computed over the *flags*, never the launcher — `sys.executable` and
+either the local path to `process_microscopy.py` or the frozen bundle's
+`--run-pipeline` sentinel are sliced off first. None of that reaches the
+worker, which runs its own interpreter against its own uploaded copy of the
+script, so folding it in keyed the reuse decision on facts about the client
+that cannot change a byte of the result. The failure was over-keying rather
+than under-keying, and it is quieter: an identical plate re-attached or did not
+depending on whether the user launched the app bundle or ran from source, where
+the checkout lived, and which Python was on PATH — each miss re-uploading the
+plate and recomputing it with nothing logged. `test_the_launcher_does_not_reach_the_digest`
+compares the three shapes directly, which a pinned digest literal cannot do:
+one computed from `sys.executable` is itself machine-specific.
+
 Every call that turns a configuration into an address or a reuse key folds
 those extras in — `spawn`'s two, and `_BatchedRemoteProcess`'s run id *and* its
 journal record. Missing one makes that call's key smaller than its siblings',

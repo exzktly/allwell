@@ -47,6 +47,13 @@ from pipeline.incremental_keys import (
 #: fails on a second literal roster anywhere in the repo.
 HEALTH_STATES = ("complete", "partial", "csv_only", "missing", "no_output")
 
+#: The states that mean "this well is not finished" — everything a reader has
+#: to act on. Derived from the roster rather than restated, so a sixth state
+#: cannot be added to one and forgotten in the other; `no_output` is excluded
+#: because a well outside the plate's scope is not a shortfall to chase.
+NEEDS_ATTENTION = tuple(
+    s for s in HEALTH_STATES if s not in ("complete", "no_output"))
+
 #: The CSV columns a ``(fov, timepoint)`` key is read out of.
 _FOV_COLUMN = "fov"
 _TIMEPOINT_COLUMN = "timepoint"

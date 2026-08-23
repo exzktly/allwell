@@ -2031,6 +2031,9 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/auto_threshold.py",
         "pipeline/background.py",
         "pipeline/capacity.py",
+    # The pipeline's argparse declaration, imported by process_microscopy at
+    # module scope.
+    "pipeline/cli_args.py",
         "pipeline/cellpose.py",
         "pipeline/completeness.py",
         "pipeline/flatfield.py",

@@ -86,6 +86,10 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/auto_threshold.py",
     "pipeline/background.py",
     "pipeline/capacity.py",
+    # The pipeline's argparse declaration. The remote runs process_microscopy,
+    # which imports it at module scope, so a missing file here aborts the run
+    # with ModuleNotFoundError before it reads a single image.
+    "pipeline/cli_args.py",
     "pipeline/cellpose.py",
     # The one definition of "is this well complete", shared by the end-of-run
     # check and the Datasets Validate tool.

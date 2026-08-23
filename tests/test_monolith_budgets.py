@@ -84,7 +84,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # services.remote_runner._REQUIRED_REMOTE_FILES, i.e. a change to what every
 # remote machine is sent, and that was explicitly out of scope for this change.
 # That cluster remains the extraction to take when this budget next binds.
-PROCESS_MICROSCOPY_BUDGET = 4713
+PROCESS_MICROSCOPY_BUDGET = 4382
 
 # `services/remote_runner.py` is the largest module in the repo — nearly twice
 # `process_microscopy.py` — and until now the only large one with nothing

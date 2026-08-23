@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 import theme
 from pipeline.completeness import HEALTH_STATES as _WELL_STATES
+from pipeline.completeness import NEEDS_ATTENTION as _NEEDS_ATTENTION
 from widgets.plate_progress import PlateProgress, canon_well, status_dot
 
 
@@ -71,7 +72,7 @@ class ValidateDashboard(PlateProgress):
         # Terminal states carry a marker too, not just colour (accessibility
         # — colour alone is unreadable to anyone who can't distinguish
         # success-green from danger-red).
-        marker = ("!" if state in ("partial", "missing", "csv_only")
+        marker = ("!" if state in _NEEDS_ATTENTION
                   else "✓" if state == "complete" else None)
         self._plate.setWellMarker(w, marker)
         self.set_overall(sum(1 for s in self._well_state.values() if s == "complete"))

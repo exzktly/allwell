@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Callable
-from util.aw_safe import swallowed
+from util.aw_safe import swallow, swallowed
 from util.retry_io import retry_io
-from util.zip_write import atomic_zip, replace_folder_with_archive
+from util.zip_write import (
+    atomic_zip, replace_folder_with_archive, zip_members)
 
 HERE = Path(__file__).resolve().parent.parent
 ZIPPER_SCRIPT = HERE / "WellPlateZipper.py"
@@ -1049,6 +1051,138 @@ def _consolidate_mixed_to_zips(
     return zipped_any
 
 
+def _fold_well_folders_into_existing_zips(
+    grouped: Path,
+    *,
+    log_fn: Callable[[str], None] | None = None,
+) -> int:
+    """Merge each ``<WELL>/`` folder into the ``<WELL>.zip`` beside it.
+
+    The complement of :func:`_consolidate_mixed_to_zips`, which deliberately
+    leaves such a folder alone because there the zip is the *finished* artefact
+    of a half-killed run and the folder is its redundant twin. On the resume
+    path the folder is the opposite thing: images the zipper has just grouped,
+    which are new to a well that already has an archive. Left as a folder they
+    are invisible, because ``process_microscopy`` reads ``well_folders`` only
+    when there are no zips at all — so the run reports success having analysed
+    nothing new, and the source images have been deleted.
+
+    Members already in the archive win, so re-running is a no-op rather than a
+    duplication. Returns the number of wells folded.
+    """
+    from util.image_exts import is_group_image
+    from util.well_token import canonical_well_label
+
+    folded = 0
+    with swallow(f"folding new well folders into the archives in {grouped.name}"):
+        entries = sorted(grouped.iterdir(), key=lambda q: q.name)
+        zips = {
+            canonical_well_label(q.stem): q
+            for q in entries
+            if q.is_file() and q.suffix.lower() == ".zip"
+            and canonical_well_label(q.stem)
+        }
+        for entry in entries:
+            if not entry.is_dir():
+                continue
+            tok = canonical_well_label(entry.name)
+            target = zips.get(tok) if tok else None
+            if target is None:
+                continue          # no archive to fold into; the consolidator owns it
+            existing = set(zip_members(target))
+            incoming = [
+                q for q in sorted(entry.rglob("*"))
+                if q.is_file() and is_group_image(q.name)
+                and q.name not in existing
+            ]
+            if not incoming:
+                shutil.rmtree(entry, ignore_errors=True)
+                continue
+            with zipfile.ZipFile(target) as src:
+                carried = [(m, src.read(m)) for m in src.namelist()]
+            with atomic_zip(target) as zf:
+                for name, blob in carried:
+                    zf.writestr(name, blob)
+                for q in incoming:
+                    zf.write(q, arcname=q.name)
+            shutil.rmtree(entry, ignore_errors=True)
+            folded += 1
+            if log_fn:
+                log_fn(
+                    f"[zipper] Folded {len(incoming)} new image(s) into "
+                    f"{target.name}.\n"
+                )
+    return folded
+
+
+def _grouped_member_names(grouped: Path) -> set[str]:
+    """Every image basename already inside *grouped*, in either layout.
+
+    A resolved input dir holds `<WELL>/` folders, `<WELL>.zip` archives, or —
+    mid-resume — both. Reading only one of them is what made every loose TIF
+    look unconsumed on a plate that had already been zipped.
+    """
+    from util.image_exts import is_group_image
+
+    names: set[str] = set()
+    with swallow(f"listing already-grouped members under {grouped.name}"):
+        for entry in grouped.iterdir():
+            if entry.is_dir():
+                for child in entry.iterdir():
+                    if child.is_file() and is_group_image(child.name):
+                        names.add(child.name)
+            elif entry.suffix.lower() == ".zip":
+                with swallow(f"reading {entry.name}"), \
+                        zipfile.ZipFile(entry) as zf:
+                    for member in zf.namelist():
+                        base = member.rsplit("/", 1)[-1]
+                        if base and not base.startswith(".") \
+                                and is_group_image(base):
+                            names.add(base)
+    return names
+
+
+def _wells_claimed_by(paths, *, filename_schema: str,
+                      filename_sep: str) -> dict[Path, str | None]:
+    """Map each loose TIF to the canonical well its own filename claims.
+
+    One definition, shared by both zipper call sites that delete their sources
+    afterwards. A name that does not decompose under the run's schema maps to
+    ``None`` and is therefore never deleted: a schema mismatch has to cost the
+    user a failed run, not their images.
+    """
+    from util.well_token import canonical_well_label
+
+    fields = [f.strip().lower() for f in str(filename_schema or "").split(":")]
+    well_idx = fields.index("well") if "well" in fields else -1
+    out: dict[Path, str | None] = {}
+    for p in paths:
+        tok = None
+        if well_idx >= 0:
+            parts = p.stem.split(filename_sep)
+            if well_idx < len(parts):
+                tok = canonical_well_label(parts[well_idx])
+        out[p] = tok
+    return out
+
+
+def _delete_sources_that_landed(source_tifs, grouped_dir: Path, *,
+                                filename_schema: str, filename_sep: str) -> None:
+    """Unlink only the loose TIFs whose well actually got grouped.
+
+    Keyed on the well token rather than on a file appearing inside a well
+    folder, because the pipeline may compress those folders into ``<WELL>.zip``
+    during the run. A file whose well never appeared is kept.
+    """
+    grouped_wells = set(iter_well_tokens(grouped_dir))
+    for tif, tok in _wells_claimed_by(
+            source_tifs, filename_schema=filename_schema,
+            filename_sep=filename_sep).items():
+        if tok and tok in grouped_wells:
+            with swallow(f"removing the consumed source {tif.name}"):
+                tif.unlink()
+
+
 def _group_loose_tifs_in_place(
     folder: Path,
     output_dir: Path,
@@ -1110,27 +1244,9 @@ def _group_loose_tifs_in_place(
         return folder, output_dir, None
 
     def _on_success() -> None:
-        """Delete only the loose TIFs whose well actually got grouped — i.e. the
-        well now exists as a ``folder/<well>/`` directory OR a ``folder/<well>.zip``
-        (the pipeline may compress the input folders into zips during the run).
-        Keying on the well token (not on a file living inside a folder) keeps the
-        cleanup correct across that compression, and a name that doesn't parse to
-        a grouped well is kept — so a schema mismatch never silently deletes data."""
-        from util.well_token import canonical_well_label
-
-        grouped_wells = set(iter_well_tokens(folder))
-        fields = [f.strip().lower() for f in str(filename_schema or "").split(":")]
-        well_idx = fields.index("well") if "well" in fields else -1
-        if well_idx < 0:
-            return
-        for tif in source_tifs:
-            parts = tif.stem.split(filename_sep)
-            tok = canonical_well_label(parts[well_idx]) if well_idx < len(parts) else None
-            if tok and tok in grouped_wells:
-                try:
-                    tif.unlink()
-                except OSError:
-                    pass
+        _delete_sources_that_landed(
+            source_tifs, folder,
+            filename_schema=filename_schema, filename_sep=filename_sep)
 
     return folder, output_dir, _on_success
 
@@ -1318,16 +1434,12 @@ def resolve_input_output(
     # from a prior successful copy).
     loose_at_top = tif_files_in(raw)
     if loose_at_top:
-        existing_basenames: set[str] = set()
-        try:
-            for well_dir in grouped.iterdir():
-                if not well_dir.is_dir():
-                    continue
-                for child in well_dir.iterdir():
-                    if child.is_file() and child.suffix.lower() in (".tif", ".tiff"):
-                        existing_basenames.add(child.name)
-        except OSError:
-            pass
+        # Both already-grouped layouts, not just one. Scanning directories
+        # alone means that in the zip-grouped layout — which is what a plate
+        # looks like after any completed run — this set is always empty, so
+        # every loose TIF reads as unconsumed and the zipper is re-run against
+        # files that are already inside the archives.
+        existing_basenames = _grouped_member_names(grouped)
         leftover_tifs = [
             p for p in loose_at_top if p.name not in existing_basenames
         ]
@@ -1352,18 +1464,45 @@ def resolve_input_output(
             proc_hook=proc_hook,
             move_source_tifs=move_source_tifs,
         )
+        # The two checks the other two zipper call sites make and this one did
+        # not. `has_well_content` cannot serve here — the resume layout already
+        # has well content, so it is True whatever the zipper did — so the
+        # question asked instead is whether any of *these* files' wells landed.
+        # Without it, a wrong separator or schema meant the zipper matched
+        # nothing, nothing refused the run, and `_on_success_resume` then
+        # deleted every source file: the images existed nowhere afterwards.
+        landed = set(iter_well_tokens(grouped))
+        claimed = _wells_claimed_by(
+            source_tifs, filename_schema=filename_schema,
+            filename_sep=filename_sep)
+        if not any(tok in landed for tok in claimed.values() if tok):
+            raise ValueError(
+                "WellPlateZipper ran but none of the loose images at the "
+                "dataset root were grouped into a well.\n\n"
+                "Common causes:\n"
+                "  \u2022 The 'well' position in the Filename Schema does not match "
+                "the actual well token in your filenames.\n"
+                "  \u2022 The separator character does not match your filenames.\n"
+                "  \u2022 The well token is not a valid 96-well plate position "
+                "(A01\u2013H12).\n\n"
+                f"Schema used: {filename_schema}  |  Separator: '{filename_sep}'"
+            )
+
+        # Grouping beside pre-existing zips leaves `<WELL>/` folders next to
+        # `<WELL>.zip`, and the pipeline reads folders only when there are no
+        # zips at all — so without both of these the new images are never
+        # processed. The two are complements: fold merges a folder into the
+        # archive its well already has, consolidate packs one that has none.
+        _fold_well_folders_into_existing_zips(grouped, log_fn=log_fn)
+        _consolidate_mixed_to_zips(grouped, log_fn=log_fn)
+
         if move_source_tifs:
             return grouped, out_dir, None
 
         def _on_success_resume() -> None:
-            """Delete the leftover loose TIFs from raw/ once the
-            pipeline completes cleanly. Mirror the fresh-run
-            callback."""
-            for tif in source_tifs:
-                try:
-                    tif.unlink()
-                except OSError:
-                    pass
+            _delete_sources_that_landed(
+                source_tifs, grouped,
+                filename_schema=filename_schema, filename_sep=filename_sep)
 
         return grouped, out_dir, _on_success_resume
 
@@ -1383,11 +1522,9 @@ def resolve_input_output(
         already_copied = tuple(loose_at_top)
 
         def _on_success_post_copy() -> None:
-            for tif in already_copied:
-                try:
-                    tif.unlink()
-                except OSError:
-                    pass
+            _delete_sources_that_landed(
+                already_copied, grouped,
+                filename_schema=filename_schema, filename_sep=filename_sep)
 
         return grouped, out_dir, _on_success_post_copy
     return grouped, out_dir, None

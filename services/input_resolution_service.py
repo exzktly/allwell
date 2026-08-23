@@ -8,6 +8,7 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Callable
+from services.subprocess_kill import signal_subprocess
 from util.aw_safe import swallow, swallowed
 from util.image_exts import is_run_input_member
 from util.retry_io import retry_io
@@ -947,6 +948,12 @@ def run_zipper(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        # A filename can carry any byte the filesystem allows, and the zipper
+        # echoes every one it groups. Decoding strictly means one such byte
+        # raises out of the reader below — see the `finally` there for why
+        # that was worse than a lost log line.
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
     )
@@ -979,11 +986,19 @@ def run_zipper(
         if proc.returncode != 0:
             raise RuntimeError(f"WellPlateZipper exited with code {proc.returncode}.")
     finally:
+        # Reap it whatever ended the read. The zipper is spawned into its own
+        # process group so Stop can reach it, which also means nothing else
+        # will reap it: an exception escaping the loop above left it running,
+        # rewriting the user's input directory, while the caller reported the
+        # grouping had failed.
+        if proc.poll() is None:
+            with swallow("stopping the zipper after its output stopped"):
+                signal_subprocess(proc)
+        with swallow("waiting for the zipper subprocess"):
+            proc.wait(timeout=30)
         if proc_hook is not None:
-            try:
+            with swallow("clearing the zipper process hook"):
                 proc_hook(None)
-            except Exception:
-                swallowed()  # was: pass (silent except)
 
 
 def _consolidate_mixed_to_zips(

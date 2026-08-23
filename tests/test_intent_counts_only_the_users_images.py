@@ -377,3 +377,49 @@ def test_a_redundant_folder_beside_its_archive_still_runs(tmp_path):
     (d / "A01" / "P_DAPI_A01_F1_T1.tif").write_bytes(b"x")
 
     refuse_images_only_in_ignored_folders(d, find_well_zips(d))
+
+
+# ── the zipper is reaped whatever ends the read of its output ───────────────
+
+def test_the_zipper_stream_replaces_undecodable_bytes():
+    """The zipper echoes every filename it groups, and a filename can carry
+    any byte the filesystem allows."""
+    import inspect
+
+    from services import input_resolution_service
+
+    src = inspect.getsource(input_resolution_service.run_zipper)
+    assert 'errors="replace"' in src and 'encoding="utf-8"' in src, (
+        "the zipper's output is decoded strictly, so one byte from a filename "
+        "raises out of the reader and the process is never reaped")
+
+
+def test_the_zipper_is_reaped_even_when_the_read_stops_early():
+    """It is spawned into its own process group so Stop can reach it, which
+    also means nothing else will reap it. The `finally` cleared the process
+    hook and never waited, so an exception from the loop left the zipper
+    rewriting the user's input directory while the caller reported failure."""
+    import ast
+    import inspect
+    import textwrap
+
+    from services import input_resolution_service
+
+    src = textwrap.dedent(inspect.getsource(input_resolution_service.run_zipper))
+    tree = ast.parse(src)
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Try):
+            continue
+        if not any(isinstance(n, ast.For) and "proc.stdout" in ast.unparse(n.iter)
+                   for n in node.body):
+            continue
+        tail = ast.unparse(ast.Module(body=list(node.finalbody), type_ignores=[]))
+        assert "proc.wait" in tail, (
+            "the finally around the zipper's read loop does not wait for it")
+        assert "signal_subprocess" in tail, (
+            "the finally does not signal the zipper, so wait() would block on "
+            "a process still producing output")
+        break
+    else:
+        raise AssertionError("no try wraps the zipper's read loop")

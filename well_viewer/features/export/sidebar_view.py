@@ -476,6 +476,12 @@ class ExportStyleSidebar(QWidget):
             def _sync_err_from_app(use_sem: bool, _sc=err_sc) -> None:
                 try:
                     target = "sem" if use_sem else "sd"
+                    # "None" is a choice about whether to draw error bars at
+                    # all, not about which one — a SEM/SD flip made from a plot
+                    # card must not turn bars back on that the user switched
+                    # off here.
+                    if _sc.currentData() == "none":
+                        return
                     if _sc.currentData() != target:
                         _sc.blockSignals(True)
                         try:
@@ -491,10 +497,9 @@ class ExportStyleSidebar(QWidget):
                         # same thing or the figure lies about itself.
                         self._app._app_state.plot.bar_err_kind = target
                         _update_stats_preview()
-                        try:
-                            self._redraw_active_plot()
-                        except Exception:
-                            swallowed()
+                        # No redraw here: this observer runs *because* something
+                        # else flipped ``use_sem``, and that caller redraws. A
+                        # second one would double every such toggle.
                 except Exception:
                     swallowed()  # was: pass (silent except)
 

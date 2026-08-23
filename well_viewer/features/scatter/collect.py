@@ -228,11 +228,15 @@ def collect_scatter_data(
         ungated = mask
         if gate_mask is not None:
             mask = mask & gate_mask
-        if not mask.any():
+        # Test the *pre-gate* population for emptiness. Returning early on an
+        # empty gated mask dropped the whole well, and with it the cells that
+        # belong in the gate percentage's denominator — so a set of two wells
+        # where one had 100 of 1000 cells inside the gate and the other had
+        # none read 10.0% instead of 5.0%. That is the exact number this
+        # denominator exists to produce.
+        if not ungated.any():
             return None
         sel = df.loc[mask]
-        if sel.empty:
-            return None
         filenames = (sel["filename"].astype(str).to_numpy()
                      if "filename" in sel.columns else np.array([""] * len(sel)))
         nuclear_ids = (sel["nucleus_id"].astype(str).to_numpy()

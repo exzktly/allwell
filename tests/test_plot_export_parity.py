@@ -162,6 +162,44 @@ def test_an_empty_batch_group_reports_rather_than_saving_a_blank_figure(path, ma
     src = (REPO_ROOT / path).read_text()
     assert f"if not {marker}:" in src, (
         f"{path} no longer refuses to export a group with no rows")
+    assert "SkippedJob(" in src, (
+        f"{path} reports an empty group through the error channel")
+
+
+def test_an_empty_group_does_not_discard_the_whole_batch():
+    """``_run_batch_jobs`` is all-or-nothing on purpose: any job that returns a
+    message discards the entire staging directory, so a failed re-run cannot
+    leave a half-written export beside the previous complete one.
+
+    That makes the return channel load-bearing. Reporting "this group had no
+    rows" down it threw away every *good* group's CSVs and figures in the same
+    run and told the user only "Done with 1 error(s)" — a far worse outcome
+    than the blank figure it was meant to prevent. ``SkippedJob`` is a notice,
+    and the runner has to tell the two apart.
+    """
+    from well_viewer.features.batch_export.base_panel import SkippedJob
+
+    notice = SkippedJob("g2: no data for this group — nothing exported")
+    error = "g3 figure: boom"
+
+    # Truthy and str-like, so it still logs and reads like its neighbours…
+    assert notice and str(notice)
+    # …but distinguishable by type, which is what the runner branches on.
+    assert isinstance(notice, SkippedJob)
+    assert not isinstance(error, SkippedJob)
+
+
+def test_the_runner_branches_a_notice_away_from_the_error_path():
+    src = (REPO_ROOT / "well_viewer" / "features" / "batch_export"
+           / "base_panel.py").read_text()
+    tree = ast.parse(src)
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.FunctionDef) and n.name == "_run_batch_jobs")
+    body = ast.unparse(fn)
+    assert "isinstance(err, SkippedJob)" in body, (
+        "a skipped group still travels down the channel that discards the "
+        "whole staged export")
+    assert "skipped.append" in body
 
 
 # ── 5. a redraw ends with the export-style pass ──────────────────────────────
@@ -222,3 +260,86 @@ def test_the_saved_plots_report_follows_gallery_order():
     src = (REPO_ROOT / "well_viewer" / "features" / "saved_plots" / "controller.py").read_text()
     assert "list(reversed(store.records))" in src, (
         "the report is built in storage order, the reverse of the gallery")
+
+
+# ── 8. the corrections a review of this branch required ──────────────────────
+
+def test_the_bracket_y_limit_still_sees_every_timepoint_s_bars():
+    """Restricting the *positions* to the tested timepoint is the fix;
+    restricting the bar *heights* with them shrank the axis to that timepoint
+    and clipped the other timepoints' bars off the figure."""
+    src = (REPO_ROOT / "well_viewer" / "features" / "barplot" / "renderer.py").read_text()
+    tree = ast.parse(src)
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.FunctionDef)
+              and n.name == "draw_significance_brackets")
+    body = ast.unparse(fn)
+    assert "x_by_key = {it.key: x for it, x in tested}" in body
+    # The height scan runs over every item, not over ``tested``.
+    assert "for it in items:" in body
+
+
+def test_a_well_with_nothing_in_the_gate_still_counts_in_the_denominator():
+    """The early return tested the *gated* mask, so a well with no cells inside
+    the gate was dropped entirely — and with it the cells that belong in the
+    percentage's denominator. Two wells, one with 100 of 1000 inside and one
+    with none, read 10.0% instead of 5.0%: the exact number the denominator
+    exists to produce."""
+    src = (REPO_ROOT / "well_viewer" / "features" / "scatter" / "collect.py").read_text()
+    assert "if not ungated.any():" in src, (
+        "the collector still drops a well that has nothing inside the gate")
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "well_viewer/features/batch_export/bar_panel.py",
+        "well_viewer/features/batch_export/base_panel.py",
+    ],
+)
+def test_the_batch_twins_do_not_clamp_the_fraction_under_fold_change(path):
+    """The batch twin of a fixed on-tab figure is exactly where a half-swept
+    rule hides: the exported PNG kept clipping the fold-change effect after the
+    tab had stopped."""
+    src = (REPO_ROOT / path).read_text()
+    assert "if not fc_active:\n            ax_frac.set_ylim(-0.05, 1.05)" in src, (
+        f"{path} clamps its fraction panel unconditionally")
+
+
+def test_only_the_stale_facet_columns_lose_their_label():
+    """The first version asked one all-or-nothing question about the whole
+    grid, so a single right-click per-cell override — a supported feature —
+    silently removed every column label on an otherwise ordinary grid."""
+    from well_viewer.features.image_browser.image_table import facet_view as fv
+
+    # Cells store the timepoint under "tp" (``facet_view._DIM_CB``).
+    cells = [
+        [{"tp": "T1"}, {"tp": "T2"}, {"tp": "T3"}],
+        [{"tp": "T1"}, {"tp": "T9"}, {"tp": "T3"}],
+    ]
+    col_vals = [("T1",), ("T2",), ("T3",)]
+    assert fv._disagreeing_columns(cells, ["timepoint"], col_vals) == {1}
+
+
+def test_an_ordinary_grid_keeps_every_column_label():
+    from well_viewer.features.image_browser.image_table import facet_view as fv
+
+    cells = [[{"tp": "T1"}, {"tp": "T2"}]] * 3
+    assert fv._disagreeing_columns(cells, ["timepoint"], [("T1",), ("T2",)]) == set()
+
+
+def test_a_sem_flip_does_not_switch_error_bars_back_on():
+    """"None" is a choice about whether to draw error bars at all, not about
+    which one; a SEM/SD flip made from a plot card must not override it."""
+    src = (REPO_ROOT / "well_viewer" / "features" / "export" / "sidebar_view.py").read_text()
+    assert 'if _sc.currentData() == "none":' in src
+
+
+def test_derived_error_columns_cannot_collide():
+    """The aggregate exporter derives an ``_error`` column from each axis name,
+    so two names that differ can still collide once suffixed."""
+    from well_viewer.features.export.service import _axis_column_names
+
+    assert _axis_column_names("mean", "median") == ("mean", "median")
+    assert _axis_column_names("mean", "mean") == ("mean_x", "mean_y")
+    assert _axis_column_names("A", "A_error") == ("A_x", "A_error_y")

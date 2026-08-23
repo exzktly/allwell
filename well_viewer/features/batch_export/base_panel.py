@@ -176,6 +176,22 @@ def _apply_split_sep_orientation(sep: QFrame, *, stacked: bool) -> None:
     sep.style().polish(sep)
 
 
+class SkippedJob(str):
+    """A job that produced nothing — a *notice*, not an error.
+
+    ``_run_batch_jobs`` is all-or-nothing on purpose: any job returning a
+    message discards the whole staging directory, so a failed re-run cannot
+    leave a half-written export beside the previous complete one. That makes
+    the return channel load-bearing, and it is why "this group had no rows at
+    the selected timepoint" must not travel down it — reporting an empty group
+    that way would throw away every *good* group's CSVs and figures in the same
+    run and tell the user only "Done with 1 error(s)".
+
+    Subclasses ``str`` so it is truthy and logs like the messages beside it,
+    while the runner can tell the two apart by type.
+    """
+
+
 class BatchExportPanel(QWidget):
     """Batch export panel — defines export groups and runs the export."""
 
@@ -1616,6 +1632,7 @@ class BatchExportPanel(QWidget):
         self._prog_bar.setValue(0)
         self._run_btn.setEnabled(False)
         errors: list[str] = []
+        skipped: list[str] = []
         staging = new_staging_dir(out_dir)
         try:
             for step, job in enumerate(jobs, 1):
@@ -1623,7 +1640,9 @@ class BatchExportPanel(QWidget):
                 self._prog_bar.setValue(step - 1)
                 QApplication.processEvents()
                 err = run_job_fn(job, staging)
-                if err:
+                if isinstance(err, SkippedJob):
+                    skipped.append(str(err))
+                elif err:
                     errors.append(err)
             self._prog_bar.setValue(len(jobs))
             if not errors:
@@ -1643,6 +1662,20 @@ class BatchExportPanel(QWidget):
             self._prog_lbl.setStyleSheet(f"color: {get_color('CLR_DANGER')};")
             for err in errors:
                 _logger.error("Batch export error: %s", err)
+            return
+        # A skipped group is not a failure, but it is also not a success to be
+        # counted silently: the headline used to report the number of groups
+        # *submitted*, so a run where half of them produced nothing looked
+        # identical to one where they all did.
+        if skipped:
+            done = len(jobs) - len(skipped)
+            self._prog_lbl.setText(
+                f"✓ {done} group(s) → {out_dir.name}/ · {len(skipped)} with no data")
+            self._prog_lbl.setStyleSheet(f"color: {get_color('CLR_SUCCESS_DARK')};")
+            for note in skipped:
+                _logger.info("Batch export: %s", note)
+            self._ctx.notify.set_status(
+                f"{status_text} · {len(skipped)} group(s) had no data")
             return
         self._prog_lbl.setText(success_text)
         self._prog_lbl.setStyleSheet(f"color: {get_color('CLR_SUCCESS_DARK')};")
@@ -1852,8 +1885,12 @@ class BatchExportPanel(QWidget):
                 if not rows_out:
                     # See the note in ``bar_panel``: a blank figure saved
                     # beside a missing CSV, reported as success, is the same
-                    # silent shortfall.
-                    return f"{grp.name}: no data for this group — nothing exported"
+                    # silent shortfall. ``SkippedJob``, not a plain string —
+                    # the runner discards the whole staging directory for any
+                    # error, so reporting this as one would delete every other
+                    # group's output too.
+                    return SkippedJob(
+                        f"{grp.name}: no data for this group — nothing exported")
 
                 try:
                     fig = self._render_group_figure(
@@ -1975,7 +2012,14 @@ class BatchExportPanel(QWidget):
         for _ax_time in (ax_mean, ax_frac, ax_n):
             _ax_time.set_xlabel(_time_lbl, fontsize=8, labelpad=5)
             apply_time_rescale(_ax_time, _time_scale)
-        ax_frac.set_ylim(-0.05, 1.05)
+        # Same rule as the on-tab figures (``barplot.renderer._set_frac_ylim``,
+        # ``lineplot.controller``): a raw fraction is bounded so the clamp is a
+        # good default, but under fold change the field is a ratio or a
+        # difference and the clamp silently clips the effect out of the panel.
+        # The batch twin of a fixed on-tab figure is exactly where a half-swept
+        # rule hides — the exported PNG kept clipping after the tab stopped.
+        if not fc_active:
+            ax_frac.set_ylim(-0.05, 1.05)
         ax_cdf.set_xlabel(f"{_ch} {_metric_label}", fontsize=8, labelpad=5)
         ax_cdf.set_ylim(-0.02, 1.05)
 

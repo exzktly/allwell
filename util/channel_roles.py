@@ -47,11 +47,24 @@ _NUCLEAR_SECONDARY_RE = re.compile(r"nir|rfp", re.IGNORECASE)
 # excluded it from flat-field and background correction. So: no *letter* may
 # precede the hint (which rejects "GFPtrans" and "BFP"), a digit may (which
 # accepts "w1BF"), and nothing alphanumeric may follow it.
+#
+# ``dic`` carries the same bound as ``trans`` and ``bf``, and for the same
+# reason: as a bare substring it is inside "Ca-Indicator", "Indicator" and
+# "Predicted", so a calcium-indicator channel classified as phase and was
+# quantified from raw frames while every other channel was flat-field- and
+# background-corrected — under the usual ``_tophat`` filename, which gives
+# nothing downstream a way to tell. Three letters cannot be left unbounded.
+#
+# ``phase``, ``brightfield`` and ``bright?field`` stay unbounded, deliberately
+# rather than by omission. They are whole words of five letters or more; no
+# realistic channel name carries one as a fragment, and the trailing
+# ``(?![a-z0-9])`` bound that makes "BFP" and "GFPtrans" safe would reject
+# "Brightfield1" and "Phase2", which are ordinary spellings.
 _PHASE_HINT_RE = re.compile(
     r"phase"
     r"|brightfield|bright.?field"
     r"|(?<![a-z])trans(?:mitted|mission)?(?![a-z0-9])"
-    r"|dic"
+    r"|(?<![a-z])dic(?![a-z0-9])"
     r"|(?<![a-z])bf(?![a-z0-9])",
     re.IGNORECASE,
 )

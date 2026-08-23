@@ -21,7 +21,15 @@ import re
 
 
 # A `[A-Ha-h]` row + 1- or 2-digit column with column ∈ [1, 12].
-_WELL_RE = re.compile(r"([A-Ha-h])(\d{1,2})")
+#
+# The digits are spelled `[0-9]` rather than `\d` on purpose. `\d` is Unicode by
+# default, so it matches every decimal digit in Unicode — ARABIC-INDIC ZERO,
+# FULLWIDTH ONE and some six hundred others — and `int()` then converts them
+# happily. `"A١"`, `"A１"` and `"A1"` are three distinct filename tokens naming
+# three distinct files, and all three canonicalised to `"A01"`, silently merging
+# them onto one well. A well label written by an instrument is ASCII; anything
+# else is a token this parser is not entitled to read.
+_WELL_RE = re.compile(r"([A-Ha-h])([0-9]{1,2})")
 
 
 def canonical_well_label(token: str) -> str | None:

@@ -201,9 +201,17 @@ def compute_auto_thresholds(
         cancel signalled that way is swallowed and the scan runs to completion
         anyway — reading every remaining well for a result nobody will use.
         """
+        if should_cancel is None:
+            return False
         try:
-            return bool(should_cancel()) if should_cancel is not None else False
+            return bool(should_cancel())
         except Exception:
+            # Treated as "not cancelled" so a broken predicate cannot abort a
+            # scan that was never asked to stop — but said out loud, because
+            # the other reading is a pass that has become uncancellable, and
+            # this function exists precisely because a swallowed cancel is
+            # indistinguishable from one nobody sent.
+            swallowed("auto-threshold: should_cancel raised; treating as not cancelled")
             return False
 
     channels = [str(ch).strip().lower() for ch in fluor_channels if str(ch).strip()]

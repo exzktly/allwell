@@ -788,7 +788,13 @@ def cell_gating_start_gating_worker(ctx) -> None:
     prev = ctx.runtime.cell_gating.worker
     if prev is not None and prev.isRunning():
         prev.cancel()
-        prev.wait()
+        # Bounded, and on the GUI thread. ``cancel()`` is what makes the restart
+        # safe — a cancelled worker disowns whatever it computed — so the wait is
+        # only a courtesy to let the thread unwind at its next checkpoint. An
+        # unbounded ``wait()`` here froze the window for as long as the previous
+        # pass took to finish reading a well, which on a network mount is not a
+        # bounded amount of time.
+        prev.wait(50)
 
     worker = GatingWorker(ctx)
     worker.progress.connect(lambda cur, tot: _cell_gating_on_progress(ctx, cur, tot))
@@ -876,8 +882,15 @@ class _AutoThresholdWorker(QThread):
                 "Auto-threshold worker failed: %s\n%s",
                 exc, _tb.format_exc(),
             )
-            self.failed.emit(str(exc))
-            self.done.emit({})
+            # A cancelled worker owns none of this. The restart path starts a
+            # second pass immediately, and ``_on_failed`` / ``_on_done`` re-enable
+            # the button, reset its label and post "no thresholds were updated" —
+            # so a cancelled worker that then raises would report the *new* pass
+            # as finished and failed while it is still running. The cancel check
+            # therefore has to cover the failure path, not just the success one.
+            if not self._cancelled:
+                self.failed.emit(str(exc))
+                self.done.emit({})
             return
         if self._cancelled:
             return

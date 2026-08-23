@@ -568,7 +568,14 @@ def your_work(ctx) -> list:
     sets = list(getattr(selection, "selections", None) or [])
     groups = list(getattr(selection, "plot_groups", None) or [])
     labels = dict(getattr(dataset, "well_labels", None) or {})
-    labelled = sum(1 for value in labels.values() if str(value or "").strip())
+    loaded_wells = dict(getattr(dataset, "well_paths", None) or {})
+    # Counted over the *loaded* wells, which is also what the denominator below
+    # measures. The label map is hydrated additively and is never pruned to the
+    # plate, so a dataset re-run over fewer wells still carries labels for the
+    # ones that are gone — counting those would put the numerator above the
+    # denominator and print something like "12 of 6".
+    labelled = sum(1 for well, value in labels.items()
+                   if well in loaded_wells and str(value or "").strip())
     notes = str(getattr(selection, "notes_text", "") or "")
 
     info = _sidecar(ctx)
@@ -591,7 +598,7 @@ def your_work(ctx) -> list:
         # ``labelled of len(labels)`` could only ever read "N of N" and told
         # the user nothing about how much of the plate was still unlabelled.
         {"key": "labels", "label": "Wells labelled", "count": labelled,
-         "total": len(getattr(dataset, "well_paths", None) or {}) or None},
+         "total": len(loaded_wells) or None},
         {"key": "smfish", "label": "smFISH thresholds", "count": len(smfish)},
         # Read from the live channel state, so the count is right in a build
         # with the Ratios editor profiled out: the ratio model is core, and a

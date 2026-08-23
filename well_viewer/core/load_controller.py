@@ -179,8 +179,10 @@ def _reset_sample_definitions_state(ctx) -> None:
     previous dataset's replicate sets / groups / notes into the new one (audit
     X1 pattern, mirroring :func:`_reset_gating_state`). ``well_labels`` is reset
     in ``DatasetState.begin_load``; ``plot_groups`` is reset in the load block;
-    ratio metrics are reset at their hydration point (heavy channel-combo
-    cascade must not run here on the not-yet-loaded dataset).
+    ratio metrics, heat-map layouts and the Multivariate configuration are reset
+    by their own hydrators, which clear when the new dataset has no section
+    rather than returning — the channel-combo cascade a ratio change triggers
+    must not run here, on the not-yet-loaded dataset.
     """
     sel = ctx.state.selection
     sel.selections = []
@@ -233,6 +235,44 @@ def _report_incomplete_wells(ctx) -> None:
     )
     ctx.notify.set_status(msg + " — see the log.")
     ctx.notify.toast(msg, kind="warn", msec=9000)
+
+
+def _report_persistence_doc_state(ctx) -> None:
+    """Say out loud when this dataset's saved state could not be read.
+
+    Two ways ``persistence.json`` fails to come back, and both of them leave
+    Review looking exactly like a plate nobody has ever configured: every
+    ratio, layout, group, note, curation mark and QC parameter simply absent.
+    Silence there is the worst possible answer, because the natural next move
+    is to define all of it again — and the writes that follow either go into a
+    file the app has already decided not to touch, or over the top of the one
+    copy of the work.
+
+    - *degraded*: the file did not parse. ``_doc.write`` sets it aside as
+      ``persistence.unreadable-N.json`` on the next save rather than
+      overwriting it, so the work is recoverable by hand.
+    - *foreign*: the file carries another build's ``schema_version``. It is
+      perfectly legible, just not by this build, so it is left exactly where it
+      is and this session writes nothing to it — an edit made now is lost when
+      the window closes.
+
+    Said once per load, in the status line, a toast and the log, the same way
+    an incomplete run is announced.
+    """
+    ds = ctx.state.dataset
+    if getattr(ds, "persistence_doc_foreign", False):
+        msg = ("This dataset's saved state was written by a different version "
+               "of All-Well — it is being left untouched, so changes made now "
+               "will not be saved")
+    elif getattr(ds, "persistence_doc_degraded", False):
+        msg = ("This dataset's saved state could not be read — Review has "
+               "started from defaults, and the unreadable file will be kept "
+               "beside the new one")
+    else:
+        return
+    logging.getLogger("well_viewer").warning("%s.", msg)
+    ctx.notify.set_status(msg + " — see the log.")
+    ctx.notify.toast(msg, kind="warn", msec=12000)
 
 
 def _report_unusable_fov_labels(ctx) -> None:
@@ -549,6 +589,9 @@ def load_directory(ctx, d: Path, label=None) -> None:
     app._set_status(f"Loaded {n} well(s) — {display}")
     _report_incomplete_wells(ctx)
     _report_unusable_fov_labels(ctx)
+    # After the hydrators, because the flags are set by the first ``_doc.read``
+    # and the loads above are what trigger it.
+    _report_persistence_doc_state(ctx)
     recalculate_threshold(ctx)
     # Apply any non-default gating thresholds that were just hydrated from
     # pipeline_info.json. Running the worker once here (rather than from

@@ -449,9 +449,6 @@ def _sync_widgets_to_state(ctx, *, skip_scope: str = "") -> None:
         refresh_pairing_window(ctx, scope.name)
 
 
-_BAR_LIMIT_KEYS = ("x_lim_min", "x_lim_max", "y_lim_min", "y_lim_max")
-
-
 def _reset_bar_ylim_edits(ctx) -> None:
     """Drop the bar plot's user-entered axis limits so the autofit reclaims the
     panels after a fold-change change.
@@ -460,23 +457,16 @@ def _reset_bar_ylim_edits(ctx) -> None:
     100-1500 vs ratio 0-10 vs subtract -100..300), so previously pinned limits no
     longer make sense. The limits live in the per-figure export-axis store
     (``ctx.state.export_prefs.axis_prefs['bar']``) — both the flat keys and the
-    per-panel ``axis_buckets``; log scale / font sizes / axis target are kept.
-    Idempotent and a no-op when nothing is stored yet."""
+    per-panel ``axis_buckets``, which is what ``plot_style.drop_axis_limits``
+    clears; log scale / font sizes / axis target are kept. Idempotent and a
+    no-op when nothing is stored yet."""
+    from well_viewer.core.plot_style import drop_axis_limits
+
     export_prefs = getattr(getattr(ctx, "state", None), "export_prefs", None)
     axis_prefs = getattr(export_prefs, "axis_prefs", None)
     if not isinstance(axis_prefs, dict):
         return
-    bar = axis_prefs.get("bar")
-    if not isinstance(bar, dict):
-        return
-    for _k in _BAR_LIMIT_KEYS:
-        bar.pop(_k, None)
-    buckets = bar.get("axis_buckets")
-    if isinstance(buckets, dict):
-        for _b in buckets.values():
-            if isinstance(_b, dict):
-                for _k in _BAR_LIMIT_KEYS:
-                    _b.pop(_k, None)
+    drop_axis_limits(axis_prefs.get("bar"))
 
 
 def set_fold_change_state(

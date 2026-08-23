@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -111,21 +113,26 @@ def _set_aside_unreadable(p) -> bool:
     section failed to parse. Renaming keeps that file recoverable by hand while
     letting the app start a clean one.
     """
-    for n in range(1, 100):
-        alt = p.with_name(f"{p.stem}.unreadable-{n}{p.suffix}")
-        if not alt.exists():
-            try:
-                p.replace(alt)
-            except OSError as exc:
-                _logger.warning("Could not set aside %s: %s", p, exc)
-                return False
-            _logger.warning(
-                "Kept the unreadable %s as %s rather than overwriting it.",
-                p.name, alt.name,
-            )
-            return True
-    _logger.warning(
-        "Could not set aside %s — 99 copies already exist beside it.", p)
+    candidates = [p.with_name(f"{p.stem}.unreadable-{n}{p.suffix}")
+                  for n in range(1, 100)]
+    # A name that cannot already be taken, so running out of the tidy numbered
+    # ones never turns into "abandon every save from here on" — the only thing
+    # worse than an ugly filename is a session that silently stops persisting.
+    candidates.append(p.with_name(
+        f"{p.stem}.unreadable-{os.getpid()}-{time.time_ns()}{p.suffix}"))
+    for alt in candidates:
+        if alt.exists():
+            continue
+        try:
+            p.replace(alt)
+        except OSError as exc:
+            _logger.warning("Could not set aside %s: %s", p, exc)
+            return False
+        _logger.warning(
+            "Kept the unreadable %s as %s rather than overwriting it.",
+            p.name, alt.name,
+        )
+        return True
     return False
 
 

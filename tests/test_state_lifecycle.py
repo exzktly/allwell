@@ -14,7 +14,9 @@ from __future__ import annotations
 import ast
 import json
 import pathlib
+import tempfile
 import types
+from unittest import mock
 
 import pytest
 
@@ -258,16 +260,75 @@ def test_both_cell_gating_workers_are_stopped_at_teardown():
 
 
 def test_teardown_survives_a_build_without_the_feature():
-    """A profiled-out Cell Gating has no runtime slice at all; teardown must
-    not care."""
-    from well_viewer import runtime_app
+    """A profiled-out feature has a runtime slice holding no worker.
 
-    runtime = types.SimpleNamespace(
-        smfish=types.SimpleNamespace(cancel_event=None),
-        cell_browser=types.SimpleNamespace(loader=None),
-    )
-    app = types.SimpleNamespace(_ctx=types.SimpleNamespace(runtime=runtime))
-    runtime_app.teardown_review_pane(app)
+    Driven through the real ``AppRuntime`` rather than a hand-built namespace:
+    ``AppRuntime`` constructs the known slices unconditionally and
+    ``_FeatureRuntime`` answers an unknown attribute with ``None``, so the
+    shape a profiled-out build actually produces is "slice present, worker
+    ``None``" — not "no slice". A namespace with the attribute missing tests a
+    state the app cannot reach, and it passed before the helper existed.
+    """
+    from well_viewer.core.app_runtime import AppRuntime
+    from well_viewer.core.worker_bridge import stop_runtime_workers
+
+    runtime = AppRuntime(store={})
+    assert runtime.cell_gating is not None, (
+        "a known feature's runtime slice is always constructed; if this ever "
+        "becomes None the helper's slice_ guard is the load-bearing one")
+    assert runtime.cell_gating.worker is None
+    stop_runtime_workers(runtime, "cell_gating", ("worker", "auto_worker"))
+    # And a slice name this build knows nothing about.
+    stop_runtime_workers(runtime, "not_a_feature_in_this_build", ("worker",))
+
+
+def test_teardown_clears_the_thread_reference_it_stopped():
+    """A stopped QThread left hanging off the runtime slice is a dead C++
+    object for whatever looks at it next."""
+    from well_viewer.core.worker_bridge import stop_runtime_workers
+
+    class _Worker:
+        def __init__(self):
+            self.cancelled = False
+
+        def cancel(self):
+            self.cancelled = True
+
+        def isRunning(self):
+            return False
+
+    slice_ = types.SimpleNamespace(worker=_Worker())
+    runtime = types.SimpleNamespace(cell_gating=slice_)
+    stop_runtime_workers(runtime, "cell_gating", ("worker",))
+    assert slice_.worker is None
+
+
+def test_a_failing_cancel_does_not_skip_the_wait():
+    """``cancel()`` and ``wait()`` answer different questions. Sharing one
+    ``try`` turned "cancel raised" into "the thread was never joined either",
+    which is the case where a live worker emits into a widget tree being
+    deleted."""
+    from well_viewer.core.worker_bridge import stop_runtime_workers
+
+    class _Worker:
+        def __init__(self):
+            self.waited = False
+
+        def cancel(self):
+            raise RuntimeError("cancel is broken")
+
+        def isRunning(self):
+            return True
+
+        def wait(self, _ms):
+            self.waited = True
+            return True
+
+    worker = _Worker()
+    slice_ = types.SimpleNamespace(worker=worker)
+    stop_runtime_workers(types.SimpleNamespace(cell_gating=slice_),
+                         "cell_gating", ("worker",))
+    assert worker.waited, "a raising cancel() swallowed the wait as well"
 
 
 def test_a_cancelled_auto_threshold_scan_actually_stops():
@@ -282,24 +343,106 @@ def test_a_cancelled_auto_threshold_scan_actually_stops():
     """
     from well_viewer.data import auto_threshold as at
 
-    seen: list[str] = []
-    result = at.compute_auto_thresholds(
-        pathlib.Path("/nonexistent-plate"),
-        fluor_channels=["gfp"],
-        progress=seen.append,
-        should_cancel=lambda: True,
-    )
+    # A directory that exists and names wells, so the scan gets past its own
+    # "data directory not found" guard and reaches the per-well loop. Pointed
+    # at a nonexistent path the call returns {} without consulting
+    # ``should_cancel`` even once, which is a pass that proves only that the
+    # parameter is accepted.
+    with tempfile.TemporaryDirectory() as tmp:
+        out_dir = pathlib.Path(tmp)
+        (out_dir / "A01.csv").write_text("well,cell_id\nA01,1\n")
+        (out_dir / "A02.csv").write_text("well,cell_id\nA02,1\n")
+
+        asked: list[int] = []
+
+        def _cancel_now() -> bool:
+            asked.append(1)
+            return True
+
+        seen: list[str] = []
+        result = at.compute_auto_thresholds(
+            out_dir,
+            fluor_channels=["gfp"],
+            progress=seen.append,
+            well_labels=["A01", "A02"],
+            should_cancel=_cancel_now,
+        )
+    assert asked, (
+        "should_cancel was never consulted — the scan returned before reaching "
+        "the well loop, so this asserts nothing about cancelling")
     assert result == {}
+    assert any("cancel" in line.lower() for line in seen), (
+        f"a cancelled pass must say so; got {seen!r}")
 
 
-def test_the_restart_guard_does_not_block_the_gui_for_seconds():
-    """Cancelling is what makes the restart safe — a cancelled pass disowns
+def test_a_scan_nobody_cancelled_runs_to_the_end():
+    """The control for the test above: the same fixture with a predicate that
+    says no must *not* stop early, or the one above would pass against code
+    that simply refuses to run."""
+    from well_viewer.data import auto_threshold as at
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out_dir = pathlib.Path(tmp)
+        (out_dir / "A01.csv").write_text("well,cell_id\nA01,1\n")
+        seen: list[str] = []
+        at.compute_auto_thresholds(
+            out_dir,
+            fluor_channels=["gfp"],
+            progress=seen.append,
+            well_labels=["A01"],
+            should_cancel=lambda: False,
+        )
+    assert not any("cancel" in line.lower() for line in seen), (
+        f"nothing asked this pass to stop; got {seen!r}")
+
+
+def test_every_worker_restart_cancels_first_and_waits_briefly():
+    """Cancelling is what makes a restart safe — a cancelled worker disowns
     whatever it computed — so the wait is a courtesy, not the mechanism.
-    Waiting two seconds on the GUI thread for a well read to finish is what a
-    user experiences as a frozen window."""
+
+    Checked at *every* site that waits on a previous worker, not the first one
+    found. Two versions of this test measured nothing before this one: the
+    original asserted that the string ``prev.wait(2000)`` was absent, and that
+    string has never appeared in this file; the replacement stopped at the
+    first matching function and so never reached
+    ``cell_gating_start_gating_worker``, whose ``prev.wait()`` takes no timeout
+    at all and therefore blocks the GUI thread until the previous pass finishes
+    reading a well.
+    """
     src = (REPO_ROOT / "well_viewer" / "features" / "home" / "cell_gating"
            / "controller.py").read_text()
-    assert "prev.wait(2000)" not in src
+    tree = ast.parse(src)
+    checked = 0
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.FunctionDef):
+            continue
+        waits = [n for n in ast.walk(fn) if isinstance(n, ast.Call)
+                 and ast.unparse(n).startswith("prev.wait(")]
+        if not waits:
+            continue
+        checked += 1
+        assert "prev.cancel()" in ast.unparse(fn), (
+            f"{fn.name} waits on the previous worker without cancelling it "
+            "first; the wait alone does not stop anything")
+        for call in waits:
+            # An argless ``prev.wait()`` is the worst form of this, not an
+            # absent one — Qt's default is to wait forever. Reading
+            # ``call.args[0]`` without checking made an earlier version of this
+            # guard raise IndexError against exactly the code it exists to
+            # catch, which reads as a failure in a terminal and measures nothing.
+            assert call.args, (
+                f"{fn.name}, line {call.lineno}: {ast.unparse(call)} waits "
+                "without a timeout, so the window is frozen for as long as the "
+                "previous pass takes to reach its next checkpoint")
+            ms = call.args[0]
+            assert isinstance(ms, ast.Constant) and ms.value <= 500, (
+                f"{fn.name}, line {call.lineno}: {ast.unparse(call)} blocks "
+                "the GUI thread; the cancel is the mechanism, the wait is a "
+                "courtesy")
+    assert checked >= 2, (
+        f"only {checked} restart site(s) found; both the gating worker and the "
+        "auto-threshold worker restart this way, so a lower count means this "
+        "guard has stopped seeing one of them")
 
 
 def test_zip_handles_are_closed_under_the_reader_lock():
@@ -462,3 +605,199 @@ def test_an_in_progress_note_is_committed_before_the_queue_is_drained():
     body = ast.unparse(fn)
     assert "commit_focused_notes" in body
     assert body.index("commit_focused_notes") < body.index("flush_all")
+
+
+# ── 8. the second review round ───────────────────────────────────────────────
+
+def test_a_committed_note_is_queued_not_merely_folded_in():
+    """Folding the text into the slice is only half the commit.
+
+    Everything else the user edits reaches disk through the persistence queue,
+    and text that never focused out was never queued — so the close path folded
+    the edit in and then drained a queue it was not in. The test above asserts
+    the *order* of two calls in ``closeEvent``, which it does correctly and
+    which passed with the note still being lost; this one drives the commit and
+    looks at the queue.
+    """
+    from well_viewer.core import ui_helpers
+
+    # A stub rather than a real QPlainTextEdit: this asserts what the commit
+    # does with the text, which needs no Qt and no QApplication.
+    edit = types.SimpleNamespace(
+        toPlainText=lambda: "cells looked odd today", hasFocus=lambda: True)
+    pending: set[str] = set()
+    ctx = types.SimpleNamespace(
+        state=types.SimpleNamespace(
+            selection=types.SimpleNamespace(notes_text="")),
+        persistence=types.SimpleNamespace(schedule_save=pending.add),
+        widgets=types.SimpleNamespace(get_or_none=lambda _k: None),
+    )
+    with mock.patch.object(ui_helpers, "notes_widgets",
+                           lambda _ctx: [("home_notes", edit)]):
+        ui_helpers.commit_focused_notes(ctx)
+    assert ctx.state.selection.notes_text == "cells looked odd today"
+    assert "notes" in pending, (
+        "the note was folded into the slice but never queued, so a flush "
+        "writes every domain except this one")
+
+
+def test_committing_an_unchanged_note_queues_nothing():
+    """The control: the save paths commit on every write, and queuing there
+    would schedule a write of what was just written."""
+    from well_viewer.core import ui_helpers
+
+    edit = types.SimpleNamespace(
+        toPlainText=lambda: "same text", hasFocus=lambda: True)
+    pending: set[str] = set()
+    ctx = types.SimpleNamespace(
+        state=types.SimpleNamespace(
+            selection=types.SimpleNamespace(notes_text="same text")),
+        persistence=types.SimpleNamespace(schedule_save=pending.add),
+        widgets=types.SimpleNamespace(get_or_none=lambda _k: None),
+    )
+    with mock.patch.object(ui_helpers, "notes_widgets",
+                           lambda _ctx: [("home_notes", edit)]):
+        ui_helpers.commit_focused_notes(ctx)
+    assert pending == set()
+
+
+def test_a_dataset_switch_drops_the_axis_limits_a_panel_kept_in_its_bucket():
+    """A limit lives in two places at once and the drawn one is the bucket.
+
+    ``apply_export_style_prefs`` reads ``axis_buckets[str(index)]`` first and
+    only falls back to the flat key, and the Properties sidebar writes every
+    limit into both on every edit. Clearing the flat keys alone left the drawn
+    limit exactly where it was — a plate whose values run 0–1000 opening under
+    the previous plate's 0–12.
+    """
+    from well_viewer.core.export_prefs_state import ExportPrefsState
+
+    state = ExportPrefsState()
+    state.axis_prefs = {
+        "bar": {
+            "y_lim_min": 0.0, "y_lim_max": 12.0, "axis_target": "1",
+            "y_log": True, "marker_size": 8,
+            "axis_buckets": {"1": {"y_lim_min": 0.0, "y_lim_max": 12.0,
+                                   "tick_label_size": 10}},
+        }
+    }
+    state.reset_for_new_dataset()
+    bar = state.axis_prefs["bar"]
+    assert "y_lim_max" not in bar
+    assert "y_lim_max" not in bar["axis_buckets"]["1"], (
+        "the per-panel copy of the limit survived the switch, and that is the "
+        "one the renderer reads")
+    # The other half of the rule: how a user likes a figure to read follows them.
+    assert bar["y_log"] is True and bar["marker_size"] == 8
+    assert bar["axis_buckets"]["1"]["tick_label_size"] == 10
+
+
+def test_every_caller_that_forgets_a_limit_goes_through_one_helper():
+    """Two call sites answer "forget the limits the user typed" and one of them
+    carried its own copy of the key list, clearing the flat keys and the bucket
+    by hand. A third will be written.
+
+    The first version of this guard looked only for ``pop("y_lim_max")`` with a
+    literal argument, and the site it exists to catch spelled it
+    ``for _k in _BAR_LIMIT_KEYS: bar.pop(_k, None)`` — so it passed on the
+    unfixed code and measured nothing. It now resolves module-level tuple and
+    list constants, which is how a key list is actually written.
+    """
+    import well_viewer.core.plot_style as ps
+
+    limit_keys = set(ps.AXIS_LIMIT_PREF_KEYS)
+    roots = [REPO_ROOT / "well_viewer", REPO_ROOT / "widgets"]
+    offenders: list[str] = []
+    for root in roots:
+        for path in sorted(root.rglob("*.py")):
+            if path.name == "plot_style.py":
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            # Module-level name -> the literal strings it holds, so a pop whose
+            # argument is a loop variable over such a name is seen too.
+            rosters: dict[str, set[str]] = {}
+            for node in tree.body:
+                if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+                    continue
+                target = node.targets[0]
+                if not isinstance(target, ast.Name):
+                    continue
+                if isinstance(node.value, (ast.Tuple, ast.List, ast.Set)):
+                    values = {e.value for e in node.value.elts
+                              if isinstance(e, ast.Constant)
+                              and isinstance(e.value, str)}
+                    if values:
+                        rosters[target.id] = values
+            # Loop variable -> the roster it iterates.
+            from_roster: dict[str, set[str]] = {}
+            for node in ast.walk(tree):
+                if isinstance(node, ast.For) and isinstance(node.target, ast.Name) \
+                        and isinstance(node.iter, ast.Name) \
+                        and node.iter.id in rosters:
+                    from_roster[node.target.id] = rosters[node.iter.id]
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                if getattr(node.func, "attr", "") != "pop" or not node.args:
+                    continue
+                arg = node.args[0]
+                touched: set[str] = set()
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    touched = {arg.value}
+                elif isinstance(arg, ast.Name):
+                    touched = from_roster.get(arg.id, set())
+                if touched & limit_keys:
+                    offenders.append(
+                        f"{path.relative_to(REPO_ROOT)}:{node.lineno}: "
+                        f"{ast.unparse(node)}")
+    assert not offenders, (
+        f"{len(offenders)} site(s) clear an axis limit by hand instead of "
+        "calling plot_style.drop_axis_limits, which also clears the per-panel "
+        "bucket the renderer actually reads:\n  " + "\n  ".join(offenders))
+
+
+def test_a_plate_with_no_saved_ratios_clears_the_previous_plate_s():
+    """No loader in ``persistence/`` clears on a missing section — every one of
+    them early-returns. So a hydrator that returns instead of clearing leaves
+    the previous plate's work live under the new plate's name: its ratios stay
+    as virtual channels in every plot, and Home's ratio row counts them.
+
+    Driven through the loader, which is the point where "this dataset's block"
+    is decided, rather than through a roster in ``load_directory`` that the
+    next domain will not be added to.
+    """
+    from well_viewer.persistence import _doc, ratios
+
+    applied: list[list] = []
+    app = types.SimpleNamespace(
+        _app_state=types.SimpleNamespace(
+            dataset=types.SimpleNamespace(data_dir=pathlib.Path("/plate-b"))),
+        _set_ratio_metrics=applied.append,
+    )
+    ctx = types.SimpleNamespace(window=app)
+    with mock.patch.object(_doc, "get_section", lambda _c, _k: None):
+        ratios.load_from_data_dir(ctx)
+    assert applied == [[]], (
+        "a plate with no saved ratios left the previous plate's ratios live; "
+        f"the loader applied {applied!r}")
+
+
+def test_a_plate_with_no_saved_heatmap_layouts_clears_the_previous_plate_s():
+    """Same rule, the other domain that was still inheriting: a layout names
+    wells and a metric, and the next plate need have neither."""
+    from well_viewer.persistence import heatmap_layouts as hl
+
+    heatmap_slice = types.SimpleNamespace(persisted_settings={"metric": "gfp"})
+    runtime_heatmap = types.SimpleNamespace(layouts=["a layout from plate A"])
+    app = types.SimpleNamespace(
+        _app_state=types.SimpleNamespace(
+            dataset=types.SimpleNamespace(data_dir=pathlib.Path("/plate-b")),
+            feature_slice=lambda _name: heatmap_slice),
+    )
+    ctx = types.SimpleNamespace(
+        window=app, runtime=types.SimpleNamespace(heatmap=runtime_heatmap))
+    with mock.patch.object(hl._doc, "get_section", lambda _c, _k: None), \
+            mock.patch.object(hl, "apply_persisted_settings", lambda _c: None):
+        hl.load_from_data_dir(ctx)
+    assert runtime_heatmap.layouts == [], (
+        "plate A's heat-map layouts survived the switch to plate B")

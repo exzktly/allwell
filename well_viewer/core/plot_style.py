@@ -384,6 +384,33 @@ AXIS_SCOPED_PREF_KEYS = AXIS_LIMIT_PREF_KEYS | frozenset({
     "x_log", "y_log", "axis_buckets", "axis_target",
 })
 
+
+def drop_axis_limits(fig_prefs) -> None:
+    """Remove every axis limit from one figure's export-axis entry, in place.
+
+    A limit lives in two places at once. The flat keys on the entry hold the
+    value for the axis the Properties sidebar is currently targeting, and
+    ``axis_buckets[str(index)]`` holds one copy per panel so a multi-panel
+    figure keeps a separate limit per subplot. ``apply_export_style_prefs``
+    reads the bucket *first* and only falls back to the flat key, so clearing
+    the flat keys alone leaves the drawn limit exactly where it was.
+
+    Every caller that means "forget the limits the user typed" — a dataset
+    switch, a fold-change change that moves the values onto another scale —
+    has to clear both, which is why they share this one function rather than
+    each carrying its own copy of the key list.
+    """
+    if not isinstance(fig_prefs, dict):
+        return
+    for key in AXIS_LIMIT_PREF_KEYS:
+        fig_prefs.pop(key, None)
+    buckets = fig_prefs.get("axis_buckets")
+    if isinstance(buckets, dict):
+        for bucket in buckets.values():
+            if isinstance(bucket, dict):
+                for key in AXIS_LIMIT_PREF_KEYS:
+                    bucket.pop(key, None)
+
 # Mark styling is per-figure too, for the same reason but a different argument:
 # the right mark size is a property of what the plot *draws*, not of the
 # publication. Five aggregate points want an 8pt marker; a per-cell cloud of

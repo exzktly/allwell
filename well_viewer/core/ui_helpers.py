@@ -1293,7 +1293,7 @@ def notes_widgets(ctx):
 
 
 def commit_focused_notes(ctx) -> None:
-    """Fold an in-progress edit into the state slice before anything reads it.
+    """Fold an in-progress edit into the state slice, and queue it for saving.
 
     The editors commit on focus-out, which is deliberate — a freeform notes box
     should not autosave per keystroke. The cost is that every save path which
@@ -1319,7 +1319,7 @@ def commit_focused_notes(ctx) -> None:
         try:
             text = widget.toPlainText()
             if widget.hasFocus():
-                ctx.state.selection.notes_text = text
+                _commit_notes_text(ctx, text)
                 return
             if text != (ctx.state.selection.notes_text or ""):
                 divergent.append(text)
@@ -1327,7 +1327,31 @@ def commit_focused_notes(ctx) -> None:
             # The C++ side is gone (page torn down mid-save); nothing to commit.
             continue
     if len(divergent) == 1:
-        ctx.state.selection.notes_text = divergent[0]
+        _commit_notes_text(ctx, divergent[0])
+
+
+def _commit_notes_text(ctx, text: str) -> None:
+    """Write *text* into the slice and queue a save if it is new.
+
+    Folding the text in is only half the commit. Everything else the user edits
+    reaches disk by way of the persistence queue, and text that has never
+    focused out has never been queued — so a caller that folds the edit in and
+    then drains the queue drains a queue this edit was never in, and the note
+    typed just before the window closed is lost exactly as if nothing had been
+    folded in at all. Queuing here rather than at each call site is what stops
+    the next caller from having to remember: the commit and the queue entry are
+    one act.
+
+    The save is scheduled only when the text actually changed, so the repeated
+    commits on the save paths do not queue a write of what was just written.
+    """
+    if text == (ctx.state.selection.notes_text or ""):
+        return
+    ctx.state.selection.notes_text = text
+    persistence = getattr(ctx, "persistence", None)
+    schedule = getattr(persistence, "schedule_save", None)
+    if callable(schedule):
+        schedule("notes")
 
 
 def mirror_notes(ctx, *, source_key: str) -> None:

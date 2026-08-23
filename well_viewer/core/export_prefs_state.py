@@ -53,12 +53,10 @@ class ExportPrefsState:
         styling on every dataset switch. ``style_prefs`` — the publication look
         — was never in scope.
         """
-        from well_viewer.core.plot_style import AXIS_LIMIT_PREF_KEYS
+        from well_viewer.core.plot_style import drop_axis_limits
 
         for fig_prefs in self.axis_prefs.values():
-            if isinstance(fig_prefs, dict):
-                for key in AXIS_LIMIT_PREF_KEYS:
-                    fig_prefs.pop(key, None)
+            drop_axis_limits(fig_prefs)
         # Drop any figure whose entry is now empty, so the store does not grow
         # a husk per figure per dataset.
         self.axis_prefs = {k: v for k, v in self.axis_prefs.items() if v}

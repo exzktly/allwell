@@ -470,7 +470,10 @@ def _write_summary_csv(ctx, rows) -> None:
     """Open a Save-As dialog and write ``rows`` (list of dicts) to CSV."""
     import csv
     from PySide6.QtWidgets import QFileDialog
-    dataset_dir = getattr(ctx.state.dataset, "dir", None) or ""
+    # ``data_dir``: there is no ``dir`` attribute on DatasetState, so this
+    # silently resolved to "" and every Save-As opened in the process
+    # working directory instead of beside the dataset.
+    dataset_dir = str(getattr(ctx.state.dataset, "data_dir", None) or "")
     default = "spatial_summary.csv"
     parent = None
     path, _ = QFileDialog.getSaveFileName(

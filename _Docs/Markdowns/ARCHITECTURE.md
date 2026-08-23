@@ -970,6 +970,19 @@ guard's bite cases, since `scripts/prove_guard.sh` cannot reach a guard whose
 maps live in a module the base ref does not have — the run there dies importing
 `help_topics` before it measures anything.
 
+**The manual is also checked as it renders, which is a different question.**
+`tests/test_help_topics.py` reads the markdown *source*; the drawer shows what
+`QTextDocument.setMarkdown` made of it, and Qt's parser treats a bare
+`<word>` as an unclosed HTML tag and discards the rest of the document. So a
+heading can exist in the file, satisfy every topic check, and have no anchor in
+the thing the user sees. `tests/test_manual_render.py` renders the real manual
+and asserts three things about it: every heading survives, every one of the
+forty-one help targets has an anchor to scroll to, and the render retains most
+of its source. It also forbids the shape itself — an unescaped `<word>` outside
+a code span — because the other three can only report that *something*
+truncated the render. Write such a placeholder escaped (`\<date\>`) or in
+backticks; both render as themselves in the drawer and on GitHub.
+
 The action cluster sits on the band
 rather than in the window header a row above because that put a second strip of
 chrome across the top of the window carrying controls for a mode the user might
@@ -1592,13 +1605,15 @@ Three rules the page is built around:
   separates a staged-but-never-processed well from a half-finished one on
   `covered_any == 0`, a number already in the record.
 
-It builds on `WellPlateSelector` + `apply_plate_geometry(role="picker")`
+It builds on `WellPlateSelector` + `apply_plate_geometry(role="editor")`
 directly rather than subclassing `PlateProgress`. That class is a *run
 dashboard* — headline, overall bar, ETA, done/failed/cancelled setters — and it
-makes its plate inert (`WA_TransparentForMouseEvents`, the `status` role, which
-is passive selection). Home's wells are clickable, and undoing inertness on a
-base whose whole point is inertness is fighting it; the four-line read-only
-idiom at `plate_progress.py`'s own construction is what is borrowed.
+gives its plate the `status` role, which is passive selection *and*
+report-only: no corner select-all, no pointing-hand cursor. Home's wells are
+clickable, so it takes `editor` instead and borrows only the two lines of
+`plate_progress.py`'s own construction that it wants — the lit colouring and
+the shared geometry call. Undoing a read-only base's read-only-ness would be
+fighting it.
 
 A click **selects** rather than navigates: a click that teleported the reader
 off the summary page would make multi-select impossible and an exploratory click
@@ -8420,6 +8435,8 @@ The map (each rule links to the test that holds it):
 | A context menu is opened through `widgets/menu_exec.exec_menu`, never `QMenu.exec` directly. `QMenu.exec` blocks in Qt's C++ event loop with nothing offscreen to close it, and unlike a dialog's `exec` it **cannot** be monkeypatched — Shiboken exposes it as a static/instance overload, so an entry in `_MODAL_CALLS` would write a class attribute that instance lookup ignores and measure nothing. The seam is ordinary Python, so the autouse fixture patches that instead; the guard also rejects `from widgets.menu_exec import exec_menu`, which binds the name past the patch's reach | `tests/test_menu_exec_seam.py`, with bite cases in `tests/test_guards_bite.py` |
 | No `logging.Handler.emit` creates or arms a Qt timer — `emit` runs on the thread that logged the record, so a timer built there never fires and its teardown raises `killTimer` from another thread. Handlers marshal through `core.worker_bridge.GuiLogRelay` (§10.1) | `tests/test_log_handler_marshalling.py` (static) + `tests/test_log_handler_thread_safety.py` (behavioural), with bite cases in `tests/test_guards_bite.py` |
 | `pipeline/`, `util/`, `services/` and `domain/` import no Qt and no `widgets` at any nesting; `data/` too, but for one allowlisted module (§5, §13) | `tests/test_qt_free_layers.py` |
+| …and reach none *transitively* either: a Qt-free module may not import, at module scope, a module that imports Qt. Reading each file's own import list misses a one-hop detour through `core/`, which is how `domain/stats_compute` came to raise `ImportError: libQt6Core.so.6` while every docstring cited the direct check as its guarantee. The fix for such a hop is a function-local import, which is why only module-scope edges are followed (§5) | `tests/test_qt_free_layers.py::test_a_qt_free_layer_stays_importable_without_qt` |
+| A `feature_slice("…")` names a slice some feature registers, and `_FEATURE_STATE_OWNERS` covers exactly the registered set. A misspelled name answers `None` in *every* build, so the branch it guards is dead everywhere — silently (§5) | `tests/test_feature_slice_names.py` |
 | No Datasets tool imports another Datasets tool, so each stays independently deletable (§6b) | `tests/test_datasets_tool_isolation.py` |
 | Every Datasets dashboard ends a run through the shared outcome setters rather than its own copies (§6b) | `tests/test_datasets_dashboard_outcomes.py` |
 | Every Datasets tool controller owns its worker through `DatasetToolController`, and the one tool whose worker cannot be interrupted still reaches its own stop method (§6b) | `tests/test_datasets_controller_lifecycle.py` |

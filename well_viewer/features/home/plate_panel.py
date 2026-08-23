@@ -3,11 +3,12 @@
 Built on :class:`~widgets.well_plate_selector.WellPlateSelector` directly rather
 than on :class:`~widgets.plate_progress.PlateProgress`. That base is a *run
 dashboard* — headline, overall progress bar, ETA, done/failed/cancelled outcome
-setters — and it makes its plate inert (``WA_TransparentForMouseEvents``, the
-``status`` geometry role, which is passive selection). Home's plate is neither:
-it has no run to report on, and clicking a well selects it. Undoing inertness on
-a base whose whole point is inertness is fighting it, so this borrows that
-class's four-line read-only idiom and stops there.
+setters — and it gives its plate the ``status`` geometry role, which is passive
+selection *and* report-only (no corner select-all, no pointing-hand cursor).
+Home's plate is neither: it has no run to report on, and clicking a well selects
+it. Undoing a read-only base's read-only-ness would be fighting it, so this
+takes the ``editor`` role and borrows only the two lines it wants — the lit
+colouring and the shared geometry call.
 
 **Every colour here means what it means on the other plate maps in the app**,
 because a reader who has learnt one plate has learnt all of them:

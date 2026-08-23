@@ -335,14 +335,35 @@ def apply_global_threshold_async(
         def _abort_write() -> bool:
             return _cancelled() or expected != out_dir or not out_dir.exists()
 
-        status_cb(f"Writing counts into {len(well_to_zip)} well CSV(s)...")
-        _write_counts_to_csvs(
+        total = len(well_to_zip)
+        status_cb(f"Writing counts into {total} well CSV(s)...")
+        written = _write_counts_to_csvs(
             out_dir, well_to_zip, counts, column, well_to_csv,
             should_abort=_abort_write,
             progress_cb=progress_cb,
         )
+        # Reported on the *count*, not on whether the abort predicate is still
+        # true. ``written`` counts wells actually written, and the loop has two
+        # ways to fall short: it breaks on an abort, and it skips a well whose
+        # CSV could not be resolved or could not be written (Excel holding the
+        # file, a read-only volume). Keying the message on the abort flag left
+        # the second, likelier case reported as "Apply to All complete" — the
+        # partial-run-as-clean-run shape this exists to close. It also
+        # mis-reported a cancel that landed after the last write as wells
+        # skipped, since the flag says nothing about what the loop did.
+        shortfall = total - written
         if after_csv_cb is not None:
-            after_csv_cb()
+            # Called either way: the wells that *were* written are on disk, and
+            # the tab's caches have to catch up with them or the plots keep
+            # showing pre-run numbers for rows that changed.
+            after_csv_cb(shortfall)
+        if shortfall:
+            done_cb(
+                f"Apply to All wrote {written} of {total} well(s). The other "
+                f"{shortfall} still hold their previous counts — see the log "
+                "for which and why; re-run to finish them."
+            )
+            return
         done_cb("Apply to All complete. Line/Bar plots refreshed.")
 
     def _run_guarded() -> None:

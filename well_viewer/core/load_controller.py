@@ -167,7 +167,13 @@ def _reset_gating_state(ctx) -> None:
     cg.thresh_frac_on.clear()
     cg.thresh_count_on.clear()
     ctx.runtime.review.included_overrides = {}
-    app._app_state.heatmap.active_layout_name = None
+    # Through ``feature_slice``, like every other feature slice this function
+    # touches: attribute access raises for a build with Heat Map profiled out,
+    # and this line runs on *every* dataset open, so it would take the whole
+    # app down rather than degrade one tab.
+    _heatmap = app._app_state.feature_slice("heatmap")
+    if _heatmap is not None:
+        _heatmap.active_layout_name = None
 
 
 def _reset_sample_definitions_state(ctx) -> None:

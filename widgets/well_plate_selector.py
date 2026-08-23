@@ -169,6 +169,13 @@ class _PlateGrid(QWidget):
         self._hover_row: int | None = None
         self._hover_col: int | None = None
         self._hover_corner = False
+        #: A plate that only *reports* — a run dashboard's status map. It keeps
+        #: hover tooltips (the per-well counts live nowhere else) and loses the
+        #: corner select-all and the pointing-hand cursor, both of which
+        #: advertise a control that has nothing to do. "passive" selection mode
+        #: is not enough on its own: the corner is deliberately live there, for
+        #: the group plates whose host wires ``cornerToggled`` to show/hide all.
+        self._report_only = False
         self._drag_active = False
         self._drag_adding = True
         self._drag_visited: set[tuple[int, int]] = set()
@@ -224,7 +231,7 @@ class _PlateGrid(QWidget):
         # and neither of the other models has one: "select all" has no meaning
         # for a route (in what order?), and a "paint" plate's membership lives
         # in the host, which this control cannot reach.
-        if self._selection_model != "set":
+        if self._selection_model != "set" or self._report_only:
             return False
         return self._mode in ("select", "passive") and not self._single_select
 
@@ -289,6 +296,7 @@ class _PlateGrid(QWidget):
             return
         self._enabled = new
         sel_before = dict(self._selected)
+        path_before = list(self._path)
         # Drop selection / colours / hover for now-disabled wells.
         if new is not None:
             self._selected = {k: v for k, v in self._selected.items() if k in new}
@@ -306,6 +314,12 @@ class _PlateGrid(QWidget):
         if self._selected != sel_before:
             # Disabling a well dropped it from the selection — tell consumers.
             self.selectionChanged.emit()
+        if self._path != path_before:
+            # And from the acquisition route, which is a second model with its
+            # own signal. Every other place ``_path`` is mutated emits this;
+            # these two setters truncated it silently, so the order editor kept
+            # showing a route through wells the plate no longer has.
+            self.pathChanged.emit(self.path_ids())
 
     def set_well_enabled(self, well_id, enabled: bool) -> None:
         parsed = _parse_well_id(well_id)
@@ -313,6 +327,8 @@ class _PlateGrid(QWidget):
             return
         if self._enabled is None:
             self._enabled = {(r, c) for r in range(_N_ROWS) for c in range(_N_COLS)}
+        sel_before = dict(self._selected)
+        path_before = list(self._path)
         if enabled:
             self._enabled.add(parsed)
         else:
@@ -325,6 +341,15 @@ class _PlateGrid(QWidget):
                 self._path.remove(parsed)
         self._recolor()
         self.update()
+        if self._selected != sel_before:
+            # Same rule as ``set_enabled_wells`` above: disabling a well drops
+            # it from the selection, and a selection that changed without
+            # saying so leaves the plate disagreeing with the app-wide well set
+            # that every plot reads. The two setters answer one question and
+            # only one of them was answering it.
+            self.selectionChanged.emit()
+        if self._path != path_before:
+            self.pathChanged.emit(self.path_ids())
 
     def set_well_colors(self, mapping) -> None:
         for w, col in (mapping or {}).items():
@@ -487,6 +512,18 @@ class _PlateGrid(QWidget):
 
     def drag_mode(self) -> str:
         return self._drag_mode
+
+    def set_report_only(self, on: bool) -> None:
+        """Make this plate a read-out rather than a control.
+
+        Drops the corner select-all and the pointing-hand cursor. Hover
+        tooltips stay: a dashboard's per-well detail (``FOV 7/12``,
+        ``downloading 42%``) is readable nowhere else, which is why the plate
+        cannot simply be made transparent to the mouse.
+        """
+        self._report_only = bool(on)
+        self.setCursor(Qt.ArrowCursor if on else Qt.PointingHandCursor)
+        self.update()
 
     def set_row_column_selectable(self, on: bool) -> None:
         self._rc_selectable = bool(on)
@@ -1598,6 +1635,10 @@ class WellPlateSelector(QWidget):
 
     def dragMode(self) -> str:
         return self._grid.drag_mode()
+
+    def setReportOnly(self, on: bool) -> None:
+        """See ``_PlateGrid.set_report_only``."""
+        self._grid.set_report_only(on)
 
     def setRowColumnSelectable(self, on: bool) -> None:
         self._grid.set_row_column_selectable(on)

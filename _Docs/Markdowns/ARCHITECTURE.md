@@ -4562,6 +4562,34 @@ skips any folder the pass preserved),
 `process_microscopy.compress_folder_images_to_zip_and_remove`. The extension
 filter stays with each caller: `util/image_exts.py` records why the folder
 zipper's set is a different question from what the pipeline will group as input.
+
+**Two questions, two functions, and a guard over the difference.**
+`util.image_exts` answers both. `is_group_image` is a pure suffix test and
+nothing more — `._Plate_A01.tif` is an AppleDouble sidecar, four hundred bytes
+of macOS resource fork, and its suffix is `.tif`, so this returns true for it.
+The **done**-side readers use it, because what a resumed run considers already
+finished is pinned by
+`test_incremental_keys_shared.py::test_zip_reader_keeps_its_own_hidden_file_behaviour`
+and must not move when the input rule does. `is_run_input_member` is the
+**intent**-side rule: it rejects the sidecars, `__MACOSX/` members, dotfiles and
+zip directory entries, and it is what every question about *the user's data*
+asks — how many FOV-groups does this plate hold, how much disk will they need,
+which timepoints exist, which filenames should schema inference learn from.
+Everything on that list has an image suffix and is not an image, and everything
+unclassifiable answers wrongly to a domain test applied outside its domain.
+
+The consequences, each measured: a finished two-image well carrying its two
+macOS twins reported intent 4 with two permanently missing FOV-groups, because
+the twins parse to a *different* `(fov, timepoint)` rather than to nothing; the
+disk pre-flight sized a run at 4 KB for a plate of 112 MB frames, since `._`
+sorts first and the loose branch returned the first match rather than the
+largest its own docstring promised; and schema inference gained a whole extra
+field on a 1:1 corpus, so every filename in the plate parsed to the wrong well.
+`tests/test_one_definition_of_an_image.py` is the rule that keeps the set from
+being spelled a sixth time — it found **twelve** sites against the pre-fix
+tree — and exemption is a per-site marker comment carrying its reason, not a
+file-level entry: the first version of that guard allowlisted whole files and
+reported one offending site out of twelve.
 `tests/test_no_unarchived_delete.py` holds the rule, following archive-writing
 one call deep within a module so a site that zips through a one-line helper is
 still caught.

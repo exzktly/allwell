@@ -29,14 +29,15 @@ rather than a write-up. **Delete it in the PR that closes the last group.**
 | Group | Theme | Branch | Version | PR | State |
 |---|---|---|---|---|---|
 | 1 | Stop the data loss | `…-ugoecl` | 9.0.1 | [#842](https://github.com/exzktly/allwell/pull/842) | **merged** |
-| 2 | One definition of an image, and an honest verdict | `claude/analysis-job-failure-recovery-ugoecl` | 9.0.2 | — | **in progress** |
+| 2 | One definition of an image, and an honest verdict | `claude/analysis-job-failure-recovery-ugoecl` | 9.0.2 | — | **in review** — all findings fixed, lane green, reviewer next |
 | 3 | The record and the resume path | `claude/analyze-audit-group3-record` | 9.0.5 | — | queued — starts when Group 2's PR opens |
 | 4 | The Analyze pane | `claude/analyze-audit-group4-pane` | 9.0.3 | — | **in progress** (parallel worker) |
 | 5 | Numbers and parsing | `claude/analyze-audit-group5-numbers` | 9.0.4 | — | **in progress** (parallel worker) |
 
-Counts: **20 done** (6 Tier-1 findings and 14 review findings on those fixes),
-**2 dropped**, **2 open questions**, **62 outstanding** — Group 2: 14,
-Group 3: 20, Group 4: 16, Group 5: 12.
+Counts: **34 done** (6 Tier-1 findings and 14 review findings on those fixes),
+**2 dropped**, **2 open questions**, **48 outstanding** — Group 2: 0 (all
+14 done, plus 6 extension copies and 3 guard findings the plan had not
+counted), Group 3: 20, Group 4: 16 (in flight), Group 5: 12 (in flight).
 
 The outstanding count exceeds the audit's 69 because it also carries the
 reviewer's findings on Group 1 and the tasks (a guard, a sweep) that no single
@@ -150,7 +151,7 @@ same word — the half-sweep CLAUDE.md §7.5 #5 names as worse than not sweeping
 
 ---
 
-## Group 2 — One definition of an image, and an honest verdict · `next`
+## Group 2 — One definition of an image, and an honest verdict · `in review`
 
 The predicate sweep, plus the places completeness reports something it never
 verified. They belong together: three of the four verdict bugs are *caused* by
@@ -163,20 +164,20 @@ directory entries.
 
 | ID | Finding | State |
 |---|---|---|
-| P6 | AppleDouble twins count toward intent, so a perfect plate reports partial for ever | queued |
-| P7 | A PNG plate writes empty `available_timepoints` and preflights as one FOV-group per well | queued |
-| P8 | The disk preflight sizes a run from a 4 KB sidecar instead of a 112 MB image | queued |
-| C4 | AppleDouble sidecars win schema inference and the result is reported confident | queued |
-| C11 | `auto_threshold` hardcodes tif/tiff while the pipeline can write `.png` | queued |
-| X8 | `tif_files_in` judges files it is not entitled to judge | queued |
-| P4 | Folder mode's `run_check` is structurally incapable of reporting a partial well | queued |
-| P5 | Loose TIFs are moved into folders the run then ignores | queued |
-| P9 | A well with a full CSV and no output archive reads "complete" | queued |
-| P10 | "No image groups found" is recorded as 0/0 and summarised as a whole plate | queued |
-| P11 | `aborted_reason` is computed, serialised, read — and no branch can populate it | queued |
-| P13 | Error accounting names groups that were never attempted, with no traceback behind them | queued |
-| R13 | Delete decision keyed on the well, not the file; `tif_files_in` returns dangling symlinks | queued |
-| — | New AST guard: no second literal spelling of the image-extension set | queued |
+| P6 | AppleDouble twins count toward intent, so a perfect plate reports partial for ever | done |
+| P7 | A PNG plate writes empty `available_timepoints` and preflights as one FOV-group per well | done |
+| P8 | The disk preflight sizes a run from a 4 KB sidecar instead of a 112 MB image | done |
+| C4 | AppleDouble sidecars win schema inference and the result is reported confident | done |
+| C11 | `auto_threshold` hardcodes tif/tiff while the pipeline can write `.png` | done |
+| X8 | `tif_files_in` judges files it is not entitled to judge | done |
+| P4 | Folder mode's `run_check` is structurally incapable of reporting a partial well | done |
+| P5 | Loose TIFs are moved into folders the run then ignores | done |
+| P9 | A well with a full CSV and no output archive reads "complete" | done |
+| P10 | "No image groups found" is recorded as 0/0 and summarised as a whole plate | done |
+| P11 | `aborted_reason` is computed, serialised, read — and no branch can populate it | done |
+| P13 | Error accounting names groups that were never attempted, with no traceback behind them | done |
+| R13 | Delete decision keyed on the well, not the file; `tif_files_in` returns dangling symlinks | done |
+| — | New AST guard: no second literal spelling of the image-extension set | done |
 
 **Leave the done-side default alone.**
 `test_incremental_keys_shared.py::test_zip_reader_keeps_its_own_hidden_file_behaviour`

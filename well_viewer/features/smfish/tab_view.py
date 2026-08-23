@@ -916,7 +916,7 @@ def _smfish_apply_to_all(ctx) -> None:
     thr = _smfish_get_threshold(ctx)
     frame = ctx.runtime.smfish.frame
 
-    def _after_csv() -> None:
+    def _after_csv(shortfall: int = 0) -> None:
         # Runs on the GUI thread via _WorkerBridge.after_csv — see the
         # bridge docstring for why this can't be invoked directly from
         # the worker. Safe to touch widgets and call the refresh chain
@@ -929,6 +929,18 @@ def _smfish_apply_to_all(ctx) -> None:
                 "smFISH threshold persistence failed"
             )
         _smfish_refresh_app_cache(ctx)
+        if shortfall:
+            # The modal is the loudest thing the user sees, so it must not be
+            # the one artifact that still says the run finished cleanly. The
+            # status line carries the counts; this says which kind of outcome
+            # it was and where to look.
+            QMessageBox.warning(
+                frame, "smFISH",
+                f"Apply to All did not finish: {shortfall} well(s) were not "
+                "written and still hold their previous counts. The log names "
+                "which wells and why.",
+            )
+            return
         QMessageBox.information(frame, "smFISH", "Apply to All finished.")
 
     # Cancel event used by load_controller / app shutdown to abort
@@ -973,7 +985,8 @@ def _smfish_apply_to_all(ctx) -> None:
         # the GUI thread, not the worker daemon thread. Calling _after_csv
         # directly here would leave QTimer.singleShot + widget access in
         # the worker thread where they silently no-op.
-        after_csv_cb=lambda: ctx.runtime.smfish.bridge.after_csv.emit(_after_csv),
+        after_csv_cb=lambda shortfall=0: ctx.runtime.smfish.bridge.after_csv.emit(
+            lambda: _after_csv(shortfall)),
         cancel_event=ctx.runtime.smfish.cancel_event,
         expected_data_dir=ctx.runtime.smfish.out_dir,
         well_to_csv=dict(ctx.state.dataset.well_paths),

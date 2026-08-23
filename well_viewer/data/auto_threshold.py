@@ -180,6 +180,7 @@ def compute_auto_thresholds(
     rng_seed: int | None = None,
     well_labels: Iterable[str] | None = None,
     in_dir: Path | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> dict[str, float]:
     """Compute the auto-threshold per channel by Otsu on a per-cell + bg
     distribution sampled from the first / middle / last timepoint of every
@@ -192,6 +193,27 @@ def compute_auto_thresholds(
     caller (the Cell Gating tab) can stream them to the log drawer. The
     module-level logger receives the same strings.
     """
+    def _cancelled() -> bool:
+        """Whether the caller has asked this pass to stop.
+
+        An explicit predicate rather than an exception raised from the progress
+        callback: ``_emit`` wraps that callback in ``except Exception``, so a
+        cancel signalled that way is swallowed and the scan runs to completion
+        anyway — reading every remaining well for a result nobody will use.
+        """
+        if should_cancel is None:
+            return False
+        try:
+            return bool(should_cancel())
+        except Exception:
+            # Treated as "not cancelled" so a broken predicate cannot abort a
+            # scan that was never asked to stop — but said out loud, because
+            # the other reading is a pass that has become uncancellable, and
+            # this function exists precisely because a swallowed cancel is
+            # indistinguishable from one nobody sent.
+            swallowed("auto-threshold: should_cancel raised; treating as not cancelled")
+            return False
+
     channels = [str(ch).strip().lower() for ch in fluor_channels if str(ch).strip()]
     if not channels:
         return {}
@@ -249,6 +271,9 @@ def compute_auto_thresholds(
         label_of = lambda t: Path(t).name
 
     for w_idx, target in enumerate(targets, start=1):
+        if _cancelled():
+            _emit("Auto-threshold: cancelled.")
+            return {}
         try:
             per_channel_refs = _scan_one_well(target, channels, pipeline_info)
         except Exception as exc:

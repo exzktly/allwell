@@ -24,6 +24,10 @@ from PySide6.QtWidgets import QLabel
 from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.features.image_browser.image_table.image_compose import OVERLAY_CHAN
 
+import logging
+
+_logger = logging.getLogger(__name__)
+
 # ``well_row`` / ``well_col`` are the plate (96-well) virtual dims. They carry no
 # render-model cell key of their own — the plate layout composes them into ``well``
 # — so they map here to ``well`` and :func:`_cv` derives their per-cell value back
@@ -172,6 +176,53 @@ def _group_spans(vals, grid_of):
     return spans
 
 
+def _axis_vals(cells, index: int, dims, *, along_rows: bool):
+    """The axis values for one row (or column), read from the first cell that
+    has them rather than from cell 0.
+
+    A deliberately blank cell — plate mode leaves one wherever the plate has no
+    such well — used to delete that whole band's axis label, because the label
+    was read from position 0 and nowhere else.
+    """
+    n = len(cells) if not along_rows else len(cells[0] if cells else [])
+    for k in range(n):
+        cell = cells[index][k] if along_rows else cells[k][index]
+        vals = tuple(_cv(cell, d) for d in dims)
+        if any(v for v in vals):
+            return vals
+    cell = cells[index][0] if along_rows else cells[0][index]
+    return tuple(_cv(cell, d) for d in dims)
+
+
+def _disagreeing_columns(cells, col_dims, col_vals) -> set[int]:
+    """Which columns the single header strip is not true of.
+
+    There is one column-header strip for the whole grid, and in the wrapped
+    ("banded") layout the columns of the second band mean something different
+    from the columns of the first — six timepoints wrapped at three put T4–T6
+    directly beneath a header that reads T1–T3. Labelling those anyway is worse
+    than not labelling them: a reader has no way to tell a stale header from a
+    true one.
+
+    Per column, not per grid. The first version answered one all-or-nothing
+    question about the whole layout, so a single right-click per-cell override
+    — a supported feature — silently removed *every* column label on an
+    otherwise perfectly ordinary grid.
+    """
+    bad: set[int] = set()
+    for r in range(1, len(cells)):
+        row = cells[r]
+        for c in range(len(col_vals)):
+            if c >= len(row) or row[c] is None:
+                continue
+            vals = tuple(_cv(row[c], d) for d in col_dims)
+            if not any(v for v in vals):
+                continue
+            if vals != col_vals[c]:
+                bad.add(c)
+    return bad
+
+
 def plan_facets(ctx, cells) -> FacetPlan | None:
     """Compute the faceted placement, or None when there's nothing to lay out."""
     st = ctx.state.image_table
@@ -183,8 +234,8 @@ def plan_facets(ctx, cells) -> FacetPlan | None:
         return None
 
     tl, rl = len(col_dims), len(row_dims)
-    row_vals = [tuple(_cv(cells[r][0], d) for d in row_dims) for r in range(nrows)]
-    col_vals = [tuple(_cv(cells[0][c], d) for d in col_dims) for c in range(ncols)]
+    row_vals = [_axis_vals(cells, r, row_dims, along_rows=True) for r in range(nrows)]
+    col_vals = [_axis_vals(cells, c, col_dims, along_rows=False) for c in range(ncols)]
 
     grid_row_of, spacer_rows, next_row = _slots(row_vals, rl, tl)
     grid_col_of, spacer_cols, next_col = _slots(col_vals, tl, rl)
@@ -199,13 +250,31 @@ def plan_facets(ctx, cells) -> FacetPlan | None:
     plan.label_pt = max(6, int(getattr(st, "label_font_pt", _LABEL_PT)))
     plan.group_pt = max(6, int(getattr(st, "group_font_pt", _GROUP_PT)))
 
-    # Column axis (top): inner value per column, outer group spanning its columns.
+    # Column axis (top): inner value per column, outer group spanning its
+    # columns — but only when the strip is true of every row. See
+    # ``_disagreeing_columns``.
+    stale_cols = _disagreeing_columns(cells, col_dims, col_vals) if tl >= 1 else set()
+    if stale_cols:
+        _logger.warning(
+            "Image Table: %d column(s) hold different values in different rows "
+            "of this layout, so one header strip cannot describe them — those "
+            "labels are omitted rather than shown stale.", len(stale_cols),
+        )
     if tl >= 1:
         for c in range(ncols):
+            if c in stale_cols:
+                continue
             plan.top.append((_fmt(ctx, col_dims[-1], col_vals[c][-1]),
                              tl - 1, grid_col_of[c], 1, 1, False))
     if tl >= 2:
+        # Per span, not per grid — the same correction the inner labels needed.
+        # Dropping every group prefix because one column disagrees reproduces
+        # the all-or-nothing defect one level up, and a group whose columns all
+        # agree is describable whatever its neighbours do.
         for prefix, gs, ge in _group_spans(col_vals, grid_col_of):
+            span_cols = {c for c in range(ncols) if gs <= grid_col_of[c] <= ge}
+            if span_cols & stale_cols:
+                continue
             plan.top.append((_fmt(ctx, col_dims[0], prefix[0]),
                              0, gs, 1, ge - gs + 1, True))
 

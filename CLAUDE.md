@@ -6,7 +6,7 @@ raw images, and a **Review** pane that explores the CSVs it produced. Both live
 in one window; a dataset folder is the unit of work that flows between them.
 
 **`_Docs/Markdowns/ARCHITECTURE.md` is the canonical map of this codebase**
-(~2600 lines, kept current). Read the section that covers what you're touching
+(~8,700 lines, kept current). Read the section that covers what you're touching
 before you change it — this file is the short operational layer on top, not a
 replacement. `_Docs/Markdowns/README_WellViewer.md` is the user-facing manual.
 

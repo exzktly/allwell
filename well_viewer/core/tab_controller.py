@@ -38,11 +38,22 @@ split_nav_intercept = None      # fn(ctx, key) -> bool (True = consume nav)
 
 
 def on_tab_change(ctx, _e=None) -> None:
-    """Show/hide the sidebar and refresh whichever tab is now active."""
+    """Show/hide the sidebar and refresh whichever tab is now active.
+
+    The early return asks whether the centre notebook exists yet, because a tab
+    change delivered mid-construction has no tab to dispatch on. It used to ask
+    whether ``_line_ax_mean`` was registered — a Line Graphs axis, registered
+    only by ``features/lineplot/tab_view``. Every profile shipped today keeps
+    Line Graphs, so that probe was satisfied in practice; but the feature is
+    one of the removable units ``test_feature_removal`` exists for, and in a
+    build that dropped it the probe would never be satisfied and this function
+    would return for the life of the process — no tab change reaching any tab.
+    Nothing below this line touches the line feature.
+    """
     from well_viewer.core.plot_orchestrator import redraw_app
-    if not ctx.widgets.has("_line_ax_mean"):
-        return
     tab = current_centre_tab(ctx)
+    if not tab:
+        return
     prev_tab = ctx.runtime.tab.last_tab_name
     prev_selected = set(ctx.state.selection.selected_wells)
 

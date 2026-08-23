@@ -311,7 +311,7 @@ def collect_line_series(
                         rset, t, threshold, use_sem,
                     )
                 else:
-                    gm, gerr, gf, _ = compute_rep_stats(ctx,
+                    gm, gerr, gf, gfe = compute_rep_stats(ctx,
                         rset, t, threshold, use_sem,
                     )
                     # Mean of the set's per-well counts — the same statistic
@@ -322,7 +322,14 @@ def collect_line_series(
                     # on a bar against 10 on a curve.
                     _n_above_val, _n_above_spread = compute_rep_n_above_stats(
                         ctx, rset, t, use_sem)
-                    gfe, gnpf_m, gnpf_s = 0.0, 0.0, 0.0
+                    # ``gfe`` is ``compute_rep_stats``'s fourth return value —
+                    # the spread of the set's per-well fractions. It was bound
+                    # to ``_`` and then overwritten with 0.0 here, which is why
+                    # the Fraction panel had no error band in well-replicate
+                    # mode while the Bar tab, reading the same producer, did.
+                    # The per-FOV fields stay 0.0: they are genuinely not
+                    # computed on this branch.
+                    gnpf_m, gnpf_s = 0.0, 0.0
                 if not (isinstance(gm, float) and math.isnan(gm)):
                     # AggPoint idx 6 = frac_spread (per-FOV fraction error), 7/8 =
                     # per-FOV n-above mean/spread. These were previously dropped,
@@ -451,7 +458,13 @@ def _paint_series(axes: LineAxes, series, *, fov_active: bool) -> tuple[bool, bo
             vn = [(p.t, p.n_above_pf_mean, p.n_above_pf_spread)
                   for p in series.points if p.has_mean]
         else:
-            vn = [(p.t, float(p.n_above), 0.0)
+            # ``n_above_spread`` is the cross-well spread of the per-well
+            # counts, computed by ``compute_rep_n_above_stats`` and carried on
+            # the point since it was built (index 9 of the AggPoint tuple).
+            # Passing a literal 0.0 here threw it away at the last step, so the
+            # Line tab's Events panel drew no replicate error band while the
+            # Bar tab, reading the same statistic, drew one.
+            vn = [(p.t, float(p.n_above), float(p.n_above_spread))
                   for p in series.points if p.has_mean]
         if vn:
             vnt, vnv, vne = zip(*vn)
@@ -689,7 +702,18 @@ def redraw_line_plots(
     threshold = on_cutoff_for_column(
         ctx, ctx.state.channel.active_val_col,
         channel=ctx.state.channel.active_channel)
-    selected = sorted(ctx.state.selection.selected_wells, key=parse_rc)
+    # Filtered against the loaded wells, as the three sibling renderers do
+    # (``barplot.controller``, ``heatmap.controller``, ``scatter.collect``).
+    # ``selected_wells`` is app-wide state that outlives a dataset swap, so a
+    # token left over from the previous plate reaches ``get_rows`` and raises
+    # ``KeyError`` — which aborts the whole redraw before it reaches
+    # ``apply_export_style_to_current``, losing the Properties-panel settings
+    # along with the plot.
+    selected = sorted(
+        (lbl for lbl in ctx.state.selection.selected_wells
+         if lbl in ctx.state.dataset.well_paths),
+        key=parse_rc,
+    )
 
     # Fold-change state read once for the axis title suffix. The actual
     # control-series resolution + per-trace normalization happens inside
@@ -738,7 +762,14 @@ def redraw_line_plots(
     for _ax_time in (ax_mean, ax_frac, ax_n):
         _ax_time.set_xlabel(_time_lbl, fontsize=8, labelpad=5)
         apply_time_rescale(_ax_time, _time_scale)
-    ax_frac.set_ylim(-0.05, 1.05)
+    # Same rule as the Bar tab's ``renderer._set_frac_ylim``, and for the same
+    # reason: a raw fraction is bounded, so the clamp is a good default, but
+    # under fold change the field is a ratio (which can exceed 1) or a
+    # difference (which can go negative). Clamping then clips the very effect
+    # the normalisation exists to show, silently — the curve simply leaves the
+    # panel. The two tabs draw the same field and disagreed about this.
+    if not _fc.fold_change_state(ctx).active:
+        ax_frac.set_ylim(-0.05, 1.05)
     ax_cdf.set_xlabel(f"{_ch} {metric_label}", fontsize=8, labelpad=5)
     ax_cdf.set_ylim(-0.02, 1.05)
 

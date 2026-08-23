@@ -14,6 +14,7 @@ import numpy as np
 
 import theme
 from well_viewer.core.plot_style import apply_ax_style, style_legend, tokens_for
+from well_viewer.core.plot_style import apply_export_style_to_current
 
 _logger = logging.getLogger("well_viewer")
 
@@ -50,6 +51,12 @@ def render_multivariate(ctx) -> None:
         _logger.exception("Multivariate render failed")
         _draw_message(fig, f"Render failed: {exc}")
     canvas = ctx.runtime.multivariate.canvas
+    # Every redraw in the app ends here (ARCHITECTURE §5.8). The Properties
+    # sidebar's settings — axis limits, log scales, fonts, mark styling — are
+    # re-applied by this pass and by nothing else, so a renderer that skips it
+    # loses every one of them on its next recompute. This was the only plot
+    # feature that did.
+    apply_export_style_to_current(ctx, fig, canvas)
     if canvas is not None:
         canvas.draw_idle()
 

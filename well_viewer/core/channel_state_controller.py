@@ -36,7 +36,6 @@ from well_viewer.data.data_loading import (
 from well_viewer.domain.metric_registry import channel_supports_smfish
 from well_viewer.domain.ratio_models import (
     RatioMetric, is_ratio_key, ratio_name_from_key)
-from well_viewer.core.ui_helpers import set_combo_values, set_combo_values_sectioned
 from pipeline.shape_features import is_shape_column, label_for as shape_label_for
 from well_viewer.core.safe import swallowed
 import theme
@@ -328,6 +327,18 @@ def update_channel_selector(ctx) -> None:
 
     Replaces ``partial(update_channel_selector, WellViewerApp)``.
     """
+    # Imported here rather than at module scope. ``ui_helpers`` pulls in
+    # PySide6, and this module is imported by ``domain/stats_compute`` — which
+    # is meant to be Qt-free and whose docstring says so. A module-scope import
+    # made ``import well_viewer.domain.fold_change`` fail with
+    # ``ImportError: libQt6Core.so.6`` on a machine with no Qt libraries, one
+    # hop away from anything ``test_qt_free_layers`` could see. These two are
+    # the only Qt-touching names this module needs, and only in this function.
+    from well_viewer.core.ui_helpers import (
+        set_combo_values,
+        set_combo_values_sectioned,
+    )
+
     real_labels = [ch.upper() for ch in ctx.state.channel.fluor_channels]
     ratio_labels = [ratio_label_for(ctx, _r) for _r in ctx.state.channel.ratio_metrics]
     # Shape features are channel-independent virtual channels shown under their
@@ -835,6 +846,14 @@ def set_ratio_metrics(ctx, ratios: Iterable[RatioMetric]) -> None:
     # The typed channel slice sets the catalogue + rebuilds the ratio index in
     # lockstep (the two must never disagree).
     ctx.state.channel.set_ratio_metrics(list(ratios))
+    # Cached replicate-set statistics are keyed on the ratio's *definition*
+    # (``stats_compute._ratio_cache_sig``), but a name reused for an edited
+    # ratio produces the same ``active_val_col``, so drop the cache outright
+    # here as the other twelve state-mutating sites do. Without this, editing a
+    # ratio in place left the grouped bars showing the old numbers while the
+    # per-well bars beside them recomputed.
+    from well_viewer.core.selection_controller import invalidate_stats_cache
+    invalidate_stats_cache(ctx)
     panel = ctx.widgets.get_or_none("_ratio_panel")
     if panel is not None:
         try:

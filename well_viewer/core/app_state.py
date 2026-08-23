@@ -32,15 +32,24 @@ from well_viewer.core.stats_cache_state import StatsCacheState
 
 # Feature-owned slices and the feature that contributes each — used only to
 # produce a helpful error when a disabled feature's slice is accessed.
+# Every name in this map must be a slice some feature registers, and every
+# registered slice must be in it — otherwise a disabled feature's slice raises a
+# bare AttributeError naming a private attribute instead of the message this map
+# exists to produce. ``tests/test_feature_slice_names.py`` holds both directions.
 _FEATURE_STATE_OWNERS = {
     "bar": "Bar Plots",
-    "stats": "Statistics",
-    "multivariate": "Multivariate",
-    "spatial": "Spatial",
-    "review_image": "Image Browser",
-    "preview": "Image Browser",
+    "distribution": "Distribution",
+    "heatmap": "Heat Map",
+    "home": "Home",
     "image_table": "Image Browser",
+    "multivariate": "Multivariate",
     "playground": "Image Browser",
+    "preview": "Image Browser",
+    "review_image": "Image Browser",
+    "scatter": "Scatter",
+    "smfish": "smFISH",
+    "spatial": "Spatial",
+    "stats": "Statistics",
 }
 
 

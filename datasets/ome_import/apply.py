@@ -22,7 +22,9 @@ from pathlib import Path
 from datasets._common.containers import WellFraction
 from datasets.ome_import.ome_import_compute import (
     ConversionParams,
+    OmeImportError,
     clear_run_marker,
+    destination_problem,
     resume_state,
     strip_ome_suffix,
     write_run_marker,
@@ -51,6 +53,21 @@ def convert(
     (already surfaced earlier by ``plan_conversion``, re-checked here defensively).
     """
     src, dest = Path(src), Path(dest)
+
+    # Checked here rather than only in the page, because the page is one of two
+    # ways in: a queued job reaches ``convert`` through ``start_from_queue``
+    # without the field hint ever being consulted. A conversion writes
+    # ``<dest>/in/<WELL>.zip`` and overwrites each archive it produces, so a
+    # destination already holding a plate ends up holding two of them with
+    # nothing in it saying so — and the ``out/`` measurements beside them then
+    # describe inputs that are no longer there. A mismatched resume marker is
+    # the same failure by a subtler route: two mappings write identical
+    # filenames from different images, so finishing one run with another run's
+    # settings stitches one folder from two.
+    problem = destination_problem(dest, src, params)
+    if problem:
+        raise OmeImportError(f"{dest}: {problem}")
+
     experiment = params.experiment or strip_ome_suffix(src.name)
 
     # A conversion that stopped part-way leaves whole wells behind — each

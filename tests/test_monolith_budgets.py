@@ -96,9 +96,16 @@ PROCESS_MICROSCOPY_BUDGET = 4745
 # The complexity ratchet gives no pressure here either. `spawn` is 394 lines
 # and 12 concerns, and its cyclomatic complexity is 22 — comfortably under the
 # threshold of 40 — so length is the dimension that needs a limit and this is
-# it. It only moves down: introduced at 8210, then 7994, 7606 and 7419 as the
-# staging, transport and argv/run-id extractions each took what they moved.
-REMOTE_RUNNER_BUDGET = 7419
+# it. It only moves down: introduced at 8210, then 7994, 7606, 7419 and 7338 as
+# the staging, transport, argv/run-id and upload-manifest extractions each took
+# what they moved.
+#
+# The manifest came out because two guards over it were in direct tension:
+# `test_remote_manifest` requires an entry for every new `pipeline/` or `util/`
+# module, and this budget caps the file it lived in — so a required entry could
+# fail the budget, and the budget could only be met by not adding it. A data
+# declaration with no behaviour was the right thing to move.
+REMOTE_RUNNER_BUDGET = 7338
 # 1494 -> 1333: the smart-layout builder cluster (flat + nested grid assembly,
 # per-channel LUT re-keying, the Build presets, and the row-channel styling
 # helper) moved into ``image_table/build_layout.py``. The nested / compound-axis

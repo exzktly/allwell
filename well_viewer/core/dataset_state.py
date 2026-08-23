@@ -78,6 +78,18 @@ class DatasetState:
     # fields cannot produce per-field statistics, and the fact has to be
     # reported rather than silently absorbed — see ``domain/fov_integrity.py``.
     fov_integrity: dict = field(default_factory=dict)
+    # True when ``persistence.json`` existed but could not be read (corrupt
+    # JSON, an OS error, or a schema version this build does not understand).
+    # The in-memory doc is then empty *by failure*, not because the dataset has
+    # no saved state — and the two must not be confused on the next write, or
+    # one unreadable byte silently erases every section the user ever saved.
+    persistence_doc_degraded: bool = False
+    # True when ``persistence.json`` is legible but carries a schema version
+    # this build does not know — written by a newer build the user also runs.
+    # Distinct from *degraded*: nothing is wrong with the file, so it is not
+    # renamed aside; this build simply refuses to write over state it cannot
+    # read.
+    persistence_doc_foreign: bool = False
 
     # ── status ───────────────────────────────────────────────────────────────
 
@@ -104,6 +116,8 @@ class DatasetState:
         self.well_paths.clear()
         self.cache.clear()
         self.fov_integrity.clear()
+        self.persistence_doc_degraded = False
+        self.persistence_doc_foreign = False
         # Well labels are per-dataset (persisted in the new dataset's
         # pipeline_info sample_definitions block). The loader merges them in
         # additively and early-returns when the new dataset has no block, so

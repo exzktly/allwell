@@ -10,6 +10,7 @@ line / bar / scatter panels.
 
 from __future__ import annotations
 
+from util.json_write import write_json_atomic
 from pathlib import Path
 
 # ``apply_export_style_prefs`` lives in the Qt-free core layer (``export.style``
@@ -84,7 +85,6 @@ def commit_staged_export(staging, out_dir, *, manifest_extra: dict | None = None
     a ``batch_export_manifest.json`` records exactly what this run produced, and
     the (now empty) staging dir is removed. Returns the committed file names.
     """
-    import json
     import os
     import shutil
 
@@ -99,6 +99,8 @@ def commit_staged_export(staging, out_dir, *, manifest_extra: dict | None = None
     manifest = {"files": committed, "count": len(committed)}
     if manifest_extra:
         manifest.update(manifest_extra)
-    (out / MANIFEST_NAME).write_text(json.dumps(manifest, indent=2))
+    # ``durable=False``: an index of files that are themselves already on
+    # disk beside it, written at the end of an export the user is watching.
+    write_json_atomic(out / MANIFEST_NAME, manifest, durable=False)
     shutil.rmtree(staging, ignore_errors=True)
     return committed

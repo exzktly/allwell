@@ -379,7 +379,15 @@ def compute_gate_stats(
     """Label rows ``(text, color_or_None, indent)`` for one gate.
 
     Percentages are denominated by each group's own total (the FACS reading:
-    "what fraction of well A fell in this gate"). Layout:
+    "what fraction of well A fell in this gate") — and *total* means the cloud
+    the gate was drawn over, not what survived it. When the tab's "Apply gates"
+    toggle is on, ``collect_scatter_data`` also stashes the pre-gate arrays
+    under ``x_ungated`` / ``y_ungated`` / ``tp_ungated``, and they are what
+    these percentages count against. Reading the drawn arrays instead made
+    every gate label read ``100.0%`` the moment the toggle was switched on,
+    which is arithmetically true of a filtered cloud and useless as a readout.
+
+    Layout:
 
     * one group & one tp → a single ``"42.3%"`` line;
     * multiple groups → one ``"<group>: %"`` line each, colored by the group's
@@ -391,19 +399,25 @@ def compute_gate_stats(
     multi_tps = len(tps_list) > 1
     rows: list[tuple[str, str | None, int]] = []
 
+    def _population(data: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """The group's ``(x, y, tp)`` before any gate filter."""
+        return (
+            np.asarray(data.get("x_ungated", data["x"]), float),
+            np.asarray(data.get("y_ungated", data["y"]), float),
+            np.asarray(data.get("tp_ungated", data.get("tp", [])), float),
+        )
+
     if not multi_groups and not multi_tps:
         if groups:
             _, data = groups[0]
-            pct, _, _ = _pct(np.asarray(data["x"], float),
-                             np.asarray(data["y"], float), gate)
+            gx, gy, _gtp = _population(data)
+            pct, _, _ = _pct(gx, gy, gate)
             if pct is not None:
                 rows.append((f"{pct:.1f}%", None, 0))
         return rows
 
     for gname, data in groups:
-        xs = np.asarray(data["x"], float)
-        ys = np.asarray(data["y"], float)
-        tps = np.asarray(data.get("tp", []), float)
+        xs, ys, tps = _population(data)
         color = data.get("color")
 
         def _tp_rows(indent: int) -> None:

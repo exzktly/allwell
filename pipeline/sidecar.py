@@ -23,6 +23,7 @@ listed in ``services.remote_runner._REQUIRED_REMOTE_FILES``.
 from __future__ import annotations
 
 import json
+from util.json_write import write_json_atomic
 from pathlib import Path
 
 #: Sidecar keys written by the Review side and owned by the user. Anything that
@@ -84,9 +85,7 @@ def restore_user_blocks(info_path, prior: dict | None) -> list[str]:
     for k in restored:
         info[k] = prior[k]
     try:
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(json.dumps(info, indent=2))
-        tmp.replace(path)
+        write_json_atomic(path, info)
     except OSError:
         return []
     return restored

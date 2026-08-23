@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from util.json_write import write_json_atomic
 from PySide6.QtCore import QObject
 from well_viewer.core.safe import swallowed
 
@@ -787,7 +788,6 @@ def sel_export_one(ctx, sid) -> None:
     if s is None:
         return
     from PySide6.QtWidgets import QFileDialog
-    import json as _json
     default_name = f"{s.get('name') or 'selection'}.json"
     path, _ = QFileDialog.getSaveFileName(
         ctx.window, "Export selection", default_name, "JSON (*.json)"
@@ -797,8 +797,7 @@ def sel_export_one(ctx, sid) -> None:
     try:
         from well_viewer.domain.selections_model import to_block
         block = to_block([s], current_id=s.get("id"))
-        with open(path, "w", encoding="utf-8") as f:
-            _json.dump(block, f, indent=2)
+        write_json_atomic(path, block)
         ctx.notify.toast(f"Exported '{s.get('name')}' to {path}.", kind="success")
     except Exception as exc:
         ctx.notify.toast(f"Export failed: {exc}", kind="danger", msec=6000)

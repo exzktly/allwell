@@ -127,45 +127,150 @@ def _dedup_name(name: str, existing: set[str], suffix: str) -> str:
     return candidate
 
 
-def merge_sample_definitions(info1: dict, info2: dict, *, well_map: dict[str, str], ds2_label: str) -> dict | None:
-    """Merge ``sample_definitions`` blocks, remapping dataset 2's well
-    references through *well_map* and disambiguating dataset-2 rep-set/group
-    names that collide with dataset 1's rather than overwriting them."""
+def _remap_wells(wells, well_map: dict[str, str]) -> list:
+    return [well_map.get(w, w) for w in (wells or [])]
+
+
+def merge_sample_definitions(info1: dict, info2: dict, *, well_map: dict[str, str],
+                             ds2_label: str) -> dict | None:
+    """Merge two ``sample_definitions`` blocks into one, in the current schema.
+
+    Dataset 2's well references are remapped through *well_map* and any of its
+    names that collide with dataset 1's are disambiguated with the dataset-2
+    folder name rather than overwriting the dataset-1 definition.
+
+    Both inputs go through :func:`selections_model.from_block`, which is the
+    only thing in the codebase that knows how to read a saved block: it
+    validates a current (v2) one and migrates a legacy (v1) one on the way in.
+    Reading the raw ``rep_sets`` / ``groups`` keys directly — as this function
+    used to — sees nothing at all in a block written by today's app, and since
+    the result *replaces* dataset 1's whole block, a merge of two normally-saved
+    plates wrote back an empty v1 shape: every selection, replicate set, plot
+    group, well label, current selection and note from both datasets gone, and
+    the merge reported as a clean success.
+
+    The output is built with :func:`selections_model.to_block`, so the merged
+    plate carries the same shape the app writes for any other plate.
+    """
+    from well_viewer.domain.selections_model import from_block, to_block
+
     sd1 = info1.get("sample_definitions") or {}
     sd2 = info2.get("sample_definitions") or {}
     if not sd1 and not sd2:
         return None
 
-    well_labels = dict(sd1.get("well_labels") or {})
-    for well, label in (sd2.get("well_labels") or {}).items():
+    sels1, current_id, labels1, notes1, groups1 = from_block(sd1)
+    sels2, _current2, labels2, notes2, groups2 = from_block(sd2)
+
+    # Well labels: dataset 1 wins a collision, which can only happen where the
+    # remap put a dataset-2 well on top of a dataset-1 one.
+    well_labels = dict(labels1)
+    for well, label in labels2.items():
         well_labels.setdefault(well_map.get(well, well), label)
 
-    existing_rep_names = {r.get("name", "") for r in (sd1.get("rep_sets") or [])}
-    rep_sets = list(sd1.get("rep_sets") or [])
-    rep_name_remap: dict[str, str] = {}
-    for rep in (sd2.get("rep_sets") or []):
-        old_name = rep.get("name", "")
-        new_name = _dedup_name(old_name, existing_rep_names, ds2_label)
-        rep_name_remap[old_name] = new_name
-        existing_rep_names.add(new_name)
-        rep_sets.append({
-            "name": new_name,
-            "wells": [well_map.get(w, w) for w in rep.get("wells", [])],
-        })
+    used_names = {s.get("name", "") for s in sels1}
+    selections = [dict(s) for s in sels1]
+    for sel in sels2:
+        name = _dedup_name(sel.get("name", ""), used_names, ds2_label)
+        used_names.add(name)
+        merged = dict(sel)
+        merged["name"] = name
+        wells = _remap_wells(sel.get("wells"), well_map)
+        if wells != list(sel.get("wells") or []):
+            # The remap moved this condition to a different part of the plate,
+            # and a selection's colour is baked from its lowest well's rank —
+            # so the stored one now describes a position it no longer occupies.
+            # Dropping it lets ``to_block`` re-bake from where the wells landed.
+            # Left in place, dataset 1's "Control" at A01 and dataset 2's,
+            # remapped to B01, both render #6AB2FB: two conditions the user
+            # cannot tell apart in a bar chart.
+            merged.pop("color", None)
+        merged["wells"] = wells
+        # ``replicates`` is deliberately not remapped: the field is reserved and
+        # ``make_selection`` collapses it to ``None`` on every selection it
+        # builds, so ``to_block`` below discards whatever were put here. A
+        # remap would be code that runs and changes nothing.
+        # The id is dropped rather than remapped: an id is only unique within one block,
+        # and ``to_block``'s validation re-mints a duplicate anyway. Letting it
+        # mint them here keeps dataset 1's ids stable, which is what
+        # ``current_id`` below points at.
+        merged.pop("id", None)
+        selections.append(merged)
 
-    existing_group_names = {g.get("name", "") for g in (sd1.get("groups") or [])}
-    groups = list(sd1.get("groups") or [])
-    for group in (sd2.get("groups") or []):
-        new_name = _dedup_name(group.get("name", ""), existing_group_names, ds2_label)
-        existing_group_names.add(new_name)
-        groups.append({
-            "name": new_name,
-            "hidden": group.get("hidden", False),
-            "members": [rep_name_remap.get(m, m) for m in group.get("members", [])],
-            "solo_wells": [well_map.get(w, w) for w in group.get("solo_wells", [])],
-        })
+    # Plot groups are a separate model with its own name uniqueness, so they get
+    # the same treatment rather than riding along inside a selection.
+    used_group_names = {g.get("name", "") for g in groups1}
+    plot_groups = [dict(g) for g in groups1]
+    for group in groups2:
+        name = _dedup_name(group.get("name", ""), used_group_names, ds2_label)
+        used_group_names.add(name)
+        merged = dict(group)
+        merged["name"] = name
+        merged["wells"] = _remap_wells(group.get("wells"), well_map)
+        merged.pop("id", None)
+        plot_groups.append(merged)
 
-    return {"well_labels": well_labels, "rep_sets": rep_sets, "groups": groups}
+    # Both notes are kept, labelled, because a note is the one field here whose
+    # value is prose a person wrote and nothing can reconstruct it.
+    parts = [t for t in (notes1.strip(), notes2.strip()) if t]
+    if len(parts) == 2:
+        notes = f"{parts[0]}\n\n--- from {ds2_label} ---\n{parts[1]}"
+    else:
+        notes = parts[0] if parts else ""
+
+    return to_block(selections, well_labels=well_labels, notes=notes,
+                    current_id=current_id, plot_groups=plot_groups)
+
+
+#: Analysis blocks that cannot be combined by rule — each is a decision made
+#: under one plate's imaging conditions — paired with the words to describe it.
+_UNMERGEABLE_BLOCKS: tuple[tuple[str, str], ...] = (
+    ("cell_gating", "cell gating"),
+    ("ratios", "ratio metrics"),
+    ("qc_options", "QC parameters"),
+    ("smfish_thresholds", "smFISH thresholds"),
+)
+
+
+def _dropped_blocks_warning(info1: dict, info2: dict, *, ds1_label: str,
+                            ds2_label: str) -> str | None:
+    """Name what dataset 2 loses, in the two ways it can lose it.
+
+    A block dataset 1 also has is *replaced*: the merged plate carries dataset
+    1's version, which is a defensible choice the user should know was made. A
+    block only dataset 2 has is *gone*, because the merged sidecar starts as a
+    copy of dataset 1 — and saying "the merged plate keeps dataset 1's" about a
+    block dataset 1 never had would be the degraded-output-reported-as-clean
+    shape this warning exists to prevent, stated in the warning itself.
+
+    Blocks whose two values are equal are not mentioned at all. Nothing was
+    lost, and a note that fires on every merge trains the user to skip it.
+    """
+    replaced: list[str] = []
+    lost: list[str] = []
+    for key, label in _UNMERGEABLE_BLOCKS:
+        theirs = info2.get(key)
+        if not theirs:
+            continue
+        ours = info1.get(key)
+        if not ours:
+            lost.append(label)
+        elif ours != theirs:
+            replaced.append(label)
+    parts: list[str] = []
+    if replaced:
+        parts.append(
+            f"{ds2_label}'s " + ", ".join(replaced)
+            + f" differ from {ds1_label}'s; the merged plate keeps {ds1_label}'s"
+        )
+    if lost:
+        parts.append(
+            f"{ds2_label}'s " + ", ".join(lost)
+            + f" are not carried over ({ds1_label} has none to merge them with)"
+        )
+    if not parts:
+        return None
+    return ". ".join(parts) + ". Sample definitions from both are merged."
 
 
 @dataclass(frozen=True)
@@ -181,6 +286,13 @@ class PlateMergePlan:
     merged_info: dict
     dest_is_restart: bool = False
     timepoint_warning: str | None = None
+    #: Named when dataset 2 carries analysis blocks the merge keeps only
+    #: dataset 1's copy of. Sample definitions are genuinely merged; the rest
+    #: are decisions about the science that cannot be combined by rule, so the
+    #: merge takes dataset 1's — and says which ones it dropped, because a
+    #: merged plate carrying half the user's gating and reporting nothing is
+    #: the shape this codebase refuses to produce.
+    blocks_warning: str | None = None
 
 
 def build_plate_merge_plan(
@@ -300,6 +412,15 @@ def build_plate_merge_plan(
     if sample_defs is not None:
         merged_info["sample_definitions"] = sample_defs
 
+    # ``merged_info`` starts as a copy of dataset 1, so every other analysis
+    # block dataset 2 holds is replaced by dataset 1's. Say which — but only
+    # where the two datasets actually disagree. ``qc_options`` in particular is
+    # written for every run as a full dict of eleven keys, so a note keyed on
+    # the block merely being *present* fires on every merge of two real plates
+    # and is noise rather than a warning.
+    blocks_warning = _dropped_blocks_warning(
+        info1, info2, ds1_label=ds1.root.name, ds2_label=ds2.root.name)
+
     return PlateMergePlan(
         ds1=ds1, ds2=ds2, dest=dest,
         schema=load_schema(info1),
@@ -310,6 +431,7 @@ def build_plate_merge_plan(
         merged_info=merged_info,
         dest_is_restart=dest_is_restart,
         timepoint_warning=timepoint_warning,
+        blocks_warning=blocks_warning,
     )
 
 

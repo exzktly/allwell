@@ -57,6 +57,7 @@ import os
 import shutil
 import time
 import zipfile
+from util.json_write import write_json_atomic
 from collections import defaultdict
 from pathlib import Path
 import multiprocessing as mp
@@ -1420,9 +1421,7 @@ def _apply_thresholds_to_pipeline_info(
     cell_gating["thresh_frac_on"] = tfo
     existing["cell_gating"] = cell_gating
     try:
-        tmp = info_path.with_suffix(info_path.suffix + ".tmp")
-        tmp.write_text(json.dumps(existing, indent=2))
-        tmp.replace(info_path)
+        write_json_atomic(info_path, existing)
     except OSError as exc:
         log.warning("Auto-threshold: cannot write %s: %s", info_path, exc)
         return {}
@@ -3837,16 +3836,7 @@ def write_pipeline_info(
             for preserved_key in USER_SIDE_BLOCKS:
                 if preserved_key in existing and preserved_key not in info:
                     info[preserved_key] = existing[preserved_key]
-    tmp = p.with_suffix(p.suffix + ".tmp")
-    try:
-        tmp.write_text(json.dumps(info, indent=2))
-        os.replace(tmp, p)
-    finally:
-        try:
-            if tmp.exists():
-                tmp.unlink()
-        except OSError:
-            pass
+    write_json_atomic(p, info)
     return p
 
 

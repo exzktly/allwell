@@ -476,6 +476,12 @@ class ExportStyleSidebar(QWidget):
             def _sync_err_from_app(use_sem: bool, _sc=err_sc) -> None:
                 try:
                     target = "sem" if use_sem else "sd"
+                    # "None" is a choice about whether to draw error bars at
+                    # all, not about which one — a SEM/SD flip made from a plot
+                    # card must not turn bars back on that the user switched
+                    # off here.
+                    if _sc.currentData() == "none":
+                        return
                     if _sc.currentData() != target:
                         _sc.blockSignals(True)
                         try:
@@ -483,7 +489,17 @@ class ExportStyleSidebar(QWidget):
                         finally:
                             _sc.blockSignals(False)
                         _stats_state["err"] = target
+                        # The renderer reads ``bar_err_kind``, not the combo.
+                        # Moving the widget and leaving the state behind meant
+                        # a "95% CI" selection survived a SEM→SD flip made from
+                        # a plot card: the bars kept drawing 1.96 × SD under a
+                        # label that read SD. The widget and the state say the
+                        # same thing or the figure lies about itself.
+                        self._app._app_state.plot.bar_err_kind = target
                         _update_stats_preview()
+                        # No redraw here: this observer runs *because* something
+                        # else flipped ``use_sem``, and that caller redraws. A
+                        # second one would double every such toggle.
                 except Exception:
                     swallowed()  # was: pass (silent except)
 
@@ -1074,11 +1090,11 @@ class ExportStyleSidebar(QWidget):
             elif tab == "Scatter Plot":
                 from well_viewer.features.scatter.tab_view import scatter_redraw_active
                 scatter_redraw_active(app._ctx)
-            elif tab == "Spatial" and app._ctx.features.redraw(app._ctx, tab):
-                # Spatial renders from its own cached result and is not part of
-                # ``redraw_app``'s fan-out, so without this a Properties edit
-                # made while looking at it changed nothing until the tab was
-                # left and re-entered. Resolved by name through the registry
+            elif tab in ("Spatial", "Multivariate") and app._ctx.features.redraw(app._ctx, tab):
+                # Spatial and Multivariate both render from their own cached
+                # result and are not part of ``redraw_app``'s fan-out, so
+                # without this a Properties edit made while looking at either
+                # changed nothing until the tab was left and re-entered. Resolved by name through the registry
                 # rather than imported, so this sidebar names no other feature's
                 # module and a profiled-out Spatial just falls through.
                 #

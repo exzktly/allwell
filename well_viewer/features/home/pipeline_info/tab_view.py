@@ -133,9 +133,15 @@ def build_pipeline_info_subtab(ctx, parent: QWidget) -> None:
             ("Background method", qc.get("background", "top_hat")),
             ("Flat-field", qc.get("flatfield", "none")),
             ("Background well", qc.get("background_well")),
-            ("Remove debris", qc.get("qc_remove_debris")),
-            ("Min/Max area (px)", [qc.get("qc_min_area"), qc.get("qc_max_area")]),
-            ("Min solidity", qc.get("qc_min_solidity")),
+            # ``qc_options`` is written by ``process_microscopy`` with
+            # *un-prefixed* names (``remove_debris``, ``min_area``, …); the
+            # ``qc_`` prefix belongs to the CLI flags they come from, not to
+            # the sidecar. Reading the prefixed names meant these three rows of
+            # the run receipt showed "—" and the literal "None, None" for every
+            # run ever made.
+            ("Remove debris", qc.get("remove_debris")),
+            ("Min/Max area (px)", [qc.get("min_area"), qc.get("max_area")]),
+            ("Min solidity", qc.get("min_solidity")),
         ])
         # bold the background-method row so it reads as the headline fact
         bg_row = bg_node.child(0)

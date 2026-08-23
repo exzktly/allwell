@@ -788,7 +788,13 @@ def cell_gating_start_gating_worker(ctx) -> None:
     prev = ctx.runtime.cell_gating.worker
     if prev is not None and prev.isRunning():
         prev.cancel()
-        prev.wait()
+        # Bounded, and on the GUI thread. ``cancel()`` is what makes the restart
+        # safe — a cancelled worker disowns whatever it computed — so the wait is
+        # only a courtesy to let the thread unwind at its next checkpoint. An
+        # unbounded ``wait()`` here froze the window for as long as the previous
+        # pass took to finish reading a well, which on a network mount is not a
+        # bounded amount of time.
+        prev.wait(50)
 
     worker = GatingWorker(ctx)
     worker.progress.connect(lambda cur, tot: _cell_gating_on_progress(ctx, cur, tot))
@@ -830,6 +836,24 @@ class _AutoThresholdWorker(QThread):
         self._channels = list(channels)
         self._well_labels = list(well_labels) if well_labels else []
         self._in_dir = in_dir
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        """Ask the pass to stop and disown whatever it produces.
+
+        ``compute_auto_thresholds`` is one long call, so this cannot interrupt
+        it mid-well; what it can do is stop the *result* being applied. Without
+        it, restarting the pass only waited 50 ms for the previous worker and
+        then started another, so two live threads could both reach ``done`` and
+        the later-finishing one — not the later-started one — decided the
+        thresholds. At teardown it kept a thread alive writing into a pane that
+        was going away.
+        """
+        self._cancelled = True
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled
 
     def run(self) -> None:  # QThread override
         # Stream traceback into the log drawer too — the previous "fail
@@ -846,14 +870,29 @@ class _AutoThresholdWorker(QThread):
                 progress=lambda msg: self.progress.emit(str(msg)),
                 well_labels=self._well_labels or None,
                 in_dir=self._in_dir,
+                # An explicit predicate, not an exception raised from the
+                # progress callback: ``_emit`` wraps that callback in
+                # ``except Exception``, so a cancel signalled that way is
+                # swallowed and the scan runs to completion regardless.
+                should_cancel=lambda: self._cancelled,
             )
+
         except Exception as exc:
             _log.error(
                 "Auto-threshold worker failed: %s\n%s",
                 exc, _tb.format_exc(),
             )
-            self.failed.emit(str(exc))
-            self.done.emit({})
+            # A cancelled worker owns none of this. The restart path starts a
+            # second pass immediately, and ``_on_failed`` / ``_on_done`` re-enable
+            # the button, reset its label and post "no thresholds were updated" —
+            # so a cancelled worker that then raises would report the *new* pass
+            # as finished and failed while it is still running. The cancel check
+            # therefore has to cover the failure path, not just the success one.
+            if not self._cancelled:
+                self.failed.emit(str(exc))
+                self.done.emit({})
+            return
+        if self._cancelled:
             return
         self.done.emit(result or {})
 
@@ -898,6 +937,14 @@ def cell_gating_auto_threshold(ctx) -> None:
     prev = ctx.runtime.cell_gating.auto_worker
     if prev is not None and prev.isRunning():
         try:
+            # Cancel, then wait only briefly. The cancel is what makes the
+            # restart safe: the old pass stops at its next well boundary and,
+            # whatever it computed, ``run`` refuses to emit ``done`` once
+            # cancelled — so the later-*started* pass decides the thresholds
+            # rather than the later-*finishing* one. Blocking the GUI thread
+            # for the full stop instead would freeze the window for as long as
+            # the current well takes to read.
+            prev.cancel()
             prev.wait(50)
         except Exception:
             swallowed()  # was: pass (silent except)

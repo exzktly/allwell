@@ -309,6 +309,15 @@ class QueueBridge(QObject):
         runner = self._runners.get(job.kind)
         if runner is None:
             return  # no adapter registered for this kind — leave it pending
+        if runner.is_busy():
+            # The user started this tool by hand while the queue was running.
+            # Every tool's ``_launch`` opens with "if a worker is already
+            # running, return" and emits no ``jobFinished``, so dispatching now
+            # would mark the job running against a controller that never
+            # reports back — ``_current`` stays set and the whole queue stops
+            # for the session. The job keeps its place instead, and the manual
+            # run's own completion is what starts it (see ``_on_job_finished``).
+            return
         try:
             spec = self._queue.materialise(job.id)
         except ValueError as exc:
@@ -325,7 +334,14 @@ class QueueBridge(QObject):
 
     def _on_job_finished(self, kind: str, ok: bool, message: str, output_path: str) -> None:
         if self._current is None or self._current[1] != kind:
-            return  # not the queue's own in-flight job
+            # Not the queue's own in-flight job — the user ran this tool by
+            # hand. Nothing to record, but that controller has just become free,
+            # and a job ``_advance`` declined to dispatch because the runner was
+            # busy is waiting on exactly this. Without the nudge the queue would
+            # sit still until something else happened to call ``_advance``.
+            if self._current is None:
+                QTimer.singleShot(0, self._advance)
+            return
         job_id, _kind = self._current
         self._current = None
         produced = produced_for(kind, output_path) if ok else {}

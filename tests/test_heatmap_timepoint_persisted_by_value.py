@@ -59,16 +59,17 @@ def _plate(timepoints: list[float], selected: int):
     hm.tp_values = list(timepoints)
     combo = _Combo([f"{v:g} h" for v in timepoints])
     combo.setCurrentIndex(selected)
-    registry = WidgetRegistry(SimpleNamespace())
+    slices = {"heatmap": hm}
+    app = SimpleNamespace(_app_state=SimpleNamespace(feature_slice=slices.get))
+    # Bound to the app, the way ``runtime_app`` builds it: ``register`` also
+    # stamps ``app._heatmap_tp_cb``, which is the handle ``_collect_settings``
+    # reads. Hand-setting that attribute instead would test a wiring the app
+    # does not have.
+    registry = WidgetRegistry(app)
     registry.register("_heatmap_tp_cb", combo)
     # apply_persisted_settings bails unless one of the three "tab is built"
     # widgets exists; the scale combo is the cheapest of them.
     registry.register("_heatmap_scale_cb", _Combo(["Auto"]))
-    slices = {"heatmap": hm}
-    app = SimpleNamespace(
-        _heatmap_tp_cb=combo,
-        _app_state=SimpleNamespace(feature_slice=slices.get),
-    )
     ctx = SimpleNamespace(
         widgets=registry,
         state=SimpleNamespace(feature_slice=slices.get),

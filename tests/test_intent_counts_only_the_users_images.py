@@ -186,3 +186,48 @@ def test_a_well_folder_layout_is_read_too(tmp_path):
     (d / "A01" / "._Plate_DAPI_A01_F1_T1.jpg").write_bytes(b"junk")
 
     assert _collect_image_stems(d) == {"Plate_DAPI_A01_F1_T1"}
+
+
+# ── P9: numbers whole, images gone, reported complete ───────────────────────
+
+def test_a_well_whose_output_archive_is_gone_is_not_complete():
+    """`health` accepted `has_out_zip` and never read it.
+
+    A well whose `_out.zip` had been deleted, or whose remote fetch brought
+    back the CSV and lost the archive, answered `complete` on the strength of
+    the CSV alone — and a plate of them summarised as a finished plate. The
+    archive holds the masks and the corrected frames, so without it the rows
+    cannot be reviewed, re-gated or re-thresholded. The well is not finished;
+    it is half delivered, and CLAUDE.md §7 forbids the two being
+    indistinguishable in the record whose whole job is to tell them apart.
+    """
+    from pipeline.completeness import health
+
+    assert health(missing=(), csv_state="ok", has_in_container=True,
+                  has_out_zip=False, has_out_folder=False) == "csv_only"
+    assert health(missing=(), csv_state="ok", has_in_container=True,
+                  has_out_zip=True, has_out_folder=False) == "complete"
+    assert health(missing=(), csv_state="ok", has_in_container=True,
+                  has_out_zip=False, has_out_folder=True) == "complete"
+
+
+def test_every_consumer_paints_the_new_state_rather_than_falling_through():
+    """A new state that lands in an `else` is the same silent substitution.
+
+    Both consumers have a catch-all — `CELL_UNCHECKED` on the plate and no
+    marker on the Validate dashboard — so an unhandled `csv_only` would render
+    as "not checked", which is a third wrong answer rather than a fix.
+    """
+    import inspect
+
+    from datasets.validate import dashboard
+    from well_viewer.features.home import collect
+    from pipeline.completeness import HEALTH_STATES
+
+    assert "csv_only" in HEALTH_STATES
+    assert "csv_only" in inspect.getsource(collect), (
+        "the plate cell mapper does not name csv_only, so such a well paints "
+        "as unchecked")
+    assert "csv_only" in inspect.getsource(dashboard), (
+        "the Validate dashboard does not name csv_only, so such a well gets "
+        "no marker and no colour")

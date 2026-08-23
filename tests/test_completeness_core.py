@@ -47,8 +47,17 @@ def _image(fov: str, tp: str, *, well: str = "A01", channel: str = "DAPI") -> st
 
 # ── the state roster ────────────────────────────────────────────────────────
 
-def test_health_states_are_the_four_the_plate_paints():
-    assert HEALTH_STATES == ("complete", "partial", "missing", "no_output")
+def test_health_states_are_the_five_the_plate_paints():
+    """`csv_only` is the fifth: numbers whole, images gone.
+
+    It exists because `health` accepted `has_out_zip` and never read it, so a
+    well whose output archive had been deleted answered `complete` on the
+    strength of its CSV alone. Every consumer must paint it distinctly — a new
+    state that falls through to an `else` branch is the same silent
+    substitution wearing a different hat.
+    """
+    assert HEALTH_STATES == (
+        "complete", "partial", "csv_only", "missing", "no_output")
 
 
 # ── csv_keys_from_rows ──────────────────────────────────────────────────────

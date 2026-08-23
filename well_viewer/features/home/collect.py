@@ -32,6 +32,11 @@ CELL_PARTIAL = "partial"
 CELL_FAILED = "failed"
 CELL_INPUT_ONLY = "input_only"
 CELL_NO_MEASUREMENTS = "no_measurements"
+#: Measurements are whole and the output archive they came from is gone, so the
+#: rows cannot be reviewed, re-gated or re-thresholded. Distinct from
+#: ``CELL_COMPLETE`` because it is not finished, and distinct from
+#: ``CELL_NO_MEASUREMENTS`` because that is the mirror case.
+CELL_CSV_ONLY = "csv_only"
 CELL_UNCHECKED = "unchecked"
 #: The record's fourth health state (``pipeline.completeness.HEALTH_STATES``):
 #: the well has no evidence at all — no staged input, no output. Named for the
@@ -201,6 +206,8 @@ def plate_cells(ctx) -> dict:
             cells[well] = CELL_INPUT_ONLY
         elif health == "partial":
             cells[well] = CELL_PARTIAL
+        elif health == "csv_only":
+            cells[well] = CELL_CSV_ONLY
         elif health == "missing":
             cells[well] = CELL_NO_MEASUREMENTS
         elif health == "complete":

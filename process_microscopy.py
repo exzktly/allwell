@@ -464,7 +464,7 @@ def organize_loose_tifs_into_well_folders(
     """
     loose_images = [
         p for p in input_dir.iterdir()
-        if p.is_file() and p.suffix.lower() in {".tif", ".tiff"}
+        if p.is_file() and is_run_input_member(p.name)
     ]
     if not loose_images:
         return
@@ -541,7 +541,7 @@ def extract_zip(
 
     Returns the number of image files extracted.
     """
-    image_exts = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
+    image_exts = set(GROUP_IMAGE_EXTS)
     wanted = set(members_to_extract or [])
     dest_dir.mkdir(parents=True, exist_ok=True)
     skipped: list[str] = []
@@ -598,7 +598,7 @@ def _compress_images_to_zip(image_dir: Path, out_zip: Path) -> list[Path]:
     and deleting the directory takes those with it. The public function keeps
     its count return for the call sites that only report a number.
     """
-    include_exts = {".tif", ".tiff", ".png"}
+    include_exts = {".tif", ".tiff", ".png"}  # aw-image-exts-ok: what we write
     candidate_files = sorted(
         p for p in image_dir.iterdir()
         if p.is_file()
@@ -1014,8 +1014,7 @@ def sample_empty_well_images(
             with zipfile.ZipFile(zpath, "r") as zf:
                 for member in zf.infolist():
                     name = Path(member.filename).name
-                    if not name or name.startswith(".") \
-                            or Path(name).suffix.lower() not in (".tif", ".tiff"):
+                    if not is_run_input_member(member.filename):
                         continue
                     _add(Path(name).stem, (zpath, member.filename))
         except (OSError, zipfile.BadZipFile):

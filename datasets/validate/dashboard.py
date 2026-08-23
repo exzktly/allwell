@@ -71,7 +71,8 @@ class ValidateDashboard(PlateProgress):
         # Terminal states carry a marker too, not just colour (accessibility
         # — colour alone is unreadable to anyone who can't distinguish
         # success-green from danger-red).
-        marker = "!" if state in ("partial", "missing") else "✓" if state == "complete" else None
+        marker = ("!" if state in ("partial", "missing", "csv_only")
+                  else "✓" if state == "complete" else None)
         self._plate.setWellMarker(w, marker)
         self.set_overall(sum(1 for s in self._well_state.values() if s == "complete"))
         self._refresh_rail()
@@ -82,6 +83,10 @@ class ValidateDashboard(PlateProgress):
         if state == "complete":
             return theme.Colors.success
         if state == "partial":
+            return theme.Colors.warn
+        if state == "csv_only":
+            # Warn, not success: the numbers are whole but the archive they
+            # were derived from is gone, so nothing here can be re-reviewed.
             return theme.Colors.warn
         if state == "missing":
             return theme.Colors.danger

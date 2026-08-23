@@ -45,7 +45,7 @@ from pipeline.incremental_keys import (
 #: Every surface that paints or labels well health imports this rather than
 #: writing its own copy — ``tests/test_no_second_completeness_predicate.py``
 #: fails on a second literal roster anywhere in the repo.
-HEALTH_STATES = ("complete", "partial", "missing", "no_output")
+HEALTH_STATES = ("complete", "partial", "csv_only", "missing", "no_output")
 
 #: The CSV columns a ``(fov, timepoint)`` key is read out of.
 _FOV_COLUMN = "fov"
@@ -178,20 +178,35 @@ def health(
     would force the other to build a throwaway.
 
     ``complete``
-        every ``(fov, timepoint)`` pair in the input is accounted for and a
-        readable measurements CSV exists.
+        every ``(fov, timepoint)`` pair in the input is accounted for, a
+        readable measurements CSV exists, **and** the output archive it was
+        derived from is on disk.
     ``partial``
         some of the input's pairs are missing from the output.
+    ``csv_only``
+        the numbers are whole and the images they came from are gone. The
+        archive holds the masks and the corrected frames, so without it the
+        rows cannot be reviewed, re-gated or re-thresholded — the well is not
+        finished, it is half delivered.
     ``missing``
-        nothing is missing from the input diff, but images exist with no usable
-        measurements CSV behind them.
+        the mirror image: images exist with no usable measurements CSV behind
+        them.
     ``no_output``
         the well has no evidence at all.
+
+    ``has_out_zip`` was accepted and never read. A well whose ``_out.zip`` had
+    been deleted, or whose fetch brought back the CSV and lost the archive,
+    answered ``complete`` on the strength of the CSV alone — and a plate of
+    them summarised as a finished plate. That is the shortfall CLAUDE.md §7
+    forbids: degraded output indistinguishable from good output, in the record
+    whose whole job is to tell them apart.
     """
     if missing:
         return "partial"
     if csv_state == "ok":
-        return "complete"
+        if has_out_zip or has_out_folder:
+            return "complete"
+        return "csv_only"
     if has_in_container or has_out_zip or has_out_folder:
         return "missing"
     return "no_output"

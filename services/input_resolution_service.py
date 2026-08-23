@@ -9,13 +9,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Callable
 from util.aw_safe import swallow, swallowed
+from util.image_exts import is_run_input_member
 from util.retry_io import retry_io
 from util.zip_write import (
     atomic_zip, replace_folder_with_archive)
 
 HERE = Path(__file__).resolve().parent.parent
 ZIPPER_SCRIPT = HERE / "WellPlateZipper.py"
-TIF_GLOB = ("*.tif", "*.tiff", "*.TIF", "*.TIFF")
+#: Kept for the WellPlateZipper subprocess, which takes glob patterns on its
+#: command line and answers a different question — packing a well *folder*,
+#: where `.tif`/`.tiff` is the deliberate rule. `tif_files_in` no longer uses
+#: it: deciding which loose files are this run's input is
+#: `util.image_exts.is_run_input_member`'s job.
+TIF_GLOB = ("*.tif", "*.tiff", "*.TIF", "*.TIFF")  # aw-image-exts-ok: zipper argv
 
 # Consolidation reads and writes on whatever volume the user pointed at as the
 # input folder, and it moves the whole plate: every loose TIF into a per-well
@@ -87,10 +93,30 @@ def build_bootstrap_cmd(bootstrap: Path, alias: str) -> list[str]:
 
 
 def tif_files_in(folder: Path) -> list[Path]:
-    files: list[Path] = []
-    for pat in TIF_GLOB:
-        files.extend(folder.glob(pat))
-    return files
+    """The loose input images directly inside *folder*.
+
+    Three things this had to stop doing, all of them the same mistake — judging
+    items it is not entitled to judge.
+
+    It globbed ``*.tif``/``*.tiff`` only, while the pipeline groups ``.png``,
+    ``.jpg`` and ``.jpeg`` too, so a PNG plate looked like a folder with no
+    images in it and the zipper had nothing to consume.
+
+    It matched AppleDouble sidecars: ``._Plate_A01_F1.tif`` is four hundred
+    bytes of macOS resource fork with an image suffix, and every file on a
+    non-HFS volume has one. The callers of this function count these, group
+    these, and **delete** these.
+
+    And it used ``folder.glob`` with no ``is_file()``, so a dangling symlink
+    named ``*.tif`` came back as an input image. ``WellPlateZipper.group_by_well``
+    skips such a link as unreadable, so the two disagreed in the one direction
+    that matters: the zipper never grouped it, and the deletion pass counted
+    its well as landed and unlinked it.
+    """
+    return sorted(
+        p for p in folder.glob("*")
+        if p.is_file() and is_run_input_member(p.name)
+    )
 
 
 def _is_well_named(p: Path) -> bool:
@@ -576,7 +602,11 @@ def plan_loose_append(
     except OSError:
         return empty
     for p in entries:
-        if not p.is_file() or p.suffix.lower() not in (".tif", ".tiff"):
+        # The same rule the zipper and the pre-flight use. This branch decides
+        # what `plan_input_layout` tells the user it is about to do, and taking
+        # `.tif`/`.tiff` alone meant a PNG plate was described as holding no
+        # loose images at all.
+        if not p.is_file() or not is_run_input_member(p.name):
             continue
         parts = p.stem.split(filename_sep)
         token = canonical_well_label(parts[well_idx]) if well_idx < len(parts) else None
@@ -1006,9 +1036,12 @@ def _consolidate_mixed_to_zips(
     zipped_any = False
     for well, well_dir in sorted(leftover.items()):
         target = folder / f"{well}.zip"
+        # Input images, by the one definition — this packs the *user's* well
+        # folder into the archive the pipeline segments from, so a narrower
+        # rule here silently drops a PNG plate's images out of the run.
         tifs = sorted(
             p for p in well_dir.iterdir()
-            if p.is_file() and p.suffix.lower() in (".tif", ".tiff")
+            if p.is_file() and is_run_input_member(p.name)
         )
         if not tifs:
             # Nothing to pack. Writing the archive anyway would publish a

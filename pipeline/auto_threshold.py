@@ -27,6 +27,8 @@ import numpy as np
 from tifffile import imread
 from skimage.filters import threshold_otsu
 
+from pipeline.threshold_optimize import round_stored_threshold
+from util.image_exts import is_group_image
 from util.timepoint import parse_hours as _parse_hours, sort_key as tp_sort_key
 
 
@@ -192,11 +194,18 @@ def _index_members(zf, reader: _SchemaReader, channels: set[str]):
     tophats: dict[tuple[str, str, str], str] = {}
     unplaceable: list[str] = []
     for name in zf.namelist():
+        # Directory entries, macOS sidecars and dotfiles are not this run's
+        # images; everything else is judged by the one extension set. The list
+        # spelled out here was ``tif``/``tiff`` only, while the pipeline also
+        # writes ``.png`` — and because the skip happens *before* the role and
+        # schema checks below, a PNG archive left ``unplaceable`` empty too, so
+        # the "none of its members could be placed" warning could not fire and
+        # the whole plate reported one line per channel: "only 0 sample(s)".
         if "/" in name or name.startswith("."):
             continue
-        base, _, ext = name.rpartition(".")
-        if not base or ext.lower() not in ("tif", "tiff"):
+        if not is_group_image(name):
             continue
+        base, _, _ext = name.rpartition(".")
         suffix = next((s for s in _ROLE_SUFFIXES if base.endswith(s)), None)
         if suffix is None:
             continue
@@ -273,13 +282,20 @@ def _otsu_per_channel(channels, per_channel, attempted, decode_failed, log
                      "(min == max == %.3g)", ch.upper(), float(arr.min()))
             continue
         try:
-            # Round before saving — the gating cut is an intensity value, and a
-            # clean integer default reads better and matches what the user can
-            # type back in.
-            thr = float(round(float(threshold_otsu(arr))))
+            raw = float(threshold_otsu(arr))
         except Exception as exc:
             log.warning("Auto-threshold: Otsu failed for %s: %s", ch.upper(), exc)
             continue
+        if not np.isfinite(raw):
+            log.warning("Auto-threshold: skipping %s — Otsu returned a "
+                        "non-finite threshold (%r).", ch.upper(), raw)
+            continue
+        # Rounded for storage, but never rounded away: a normalised 0-1 channel
+        # whose true cut is 0.4048 used to be stored as 0.0, which is both a gate
+        # that passes every cell and the value this function uses to mean "I
+        # could not measure this channel" (it omits the key). See
+        # ``round_stored_threshold``.
+        thr = round_stored_threshold(raw)
         thresholds[ch] = thr
         log.info("Auto-threshold: %s → %.4g (n=%d)", ch.upper(), thr, int(arr.size))
     return thresholds
@@ -354,6 +370,16 @@ def estimate_thresholds_from_outputs(
                         "Example member stem: %r",
                         zpath.name, len(unplaceable), reader.schema, reader.sep,
                         unplaceable[0],
+                    )
+                else:
+                    # No mask members and nothing the schema rejected either, so
+                    # the archive simply holds no ``_labels`` image. Named here
+                    # rather than left to the per-channel "only 0 sample(s)"
+                    # lines, which describe the channel and not the well.
+                    log.warning(
+                        "Auto-threshold: %s holds %d member(s) but no "
+                        "'_labels' segmentation image, so no cell can be "
+                        "sampled from it.", zpath.name, len(zf.namelist()),
                     )
                 continue
             picked_tps = set(pick_endpoint_timepoints(

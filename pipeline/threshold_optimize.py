@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -39,10 +40,49 @@ SWEEP_HI_PERCENTILE = 99.5
 MIN_SWEEP_STEPS = 2
 MAX_SWEEP_STEPS = 10001
 
+# Significant figures kept when a threshold is stored. See
+# :func:`round_stored_threshold`.
+_STORED_SIG_FIGS = 3
+
+
+def round_stored_threshold(value: float) -> float:
+    """Round an estimated threshold for storage without rounding it away.
+
+    Both estimators used to store ``float(round(x))``, which is right for camera
+    counts — a gating cut of 547.7 reads better as 548, and it is the number the
+    user can type back into the form — and catastrophic below 1. ``_safe_imwrite``
+    writes float32 TIFFs, so a channel normalised to 0–1 is a real input, and its
+    Otsu threshold of 0.4048 was stored as **0.0**: a gate that passes every cell
+    (measured: 29.9 % of cells ON became 99.8 %), written as the one value a
+    reader cannot tell apart from "no threshold was computed", which is exactly
+    what both callers mean when they omit a channel.
+
+    So: keep at least three significant figures, and never fewer digits than the
+    integer rounding used to give. ``|value| >= 100`` — every real camera-intensity
+    threshold — is unchanged, because three significant figures there is already
+    the integer. Below that the value keeps enough resolution to stay non-zero:
+    0.4048 → 0.405, 0.000123 → 0.000123.
+
+    Non-finite input is returned unchanged; a caller storing a threshold checks
+    for that itself rather than letting this function invent a number.
+    """
+    v = float(value)
+    if not math.isfinite(v) or v == 0.0:
+        return v
+    digits = max(0, (_STORED_SIG_FIGS - 1) - int(math.floor(math.log10(abs(v)))))
+    return float(round(v, digits))
+
 
 @dataclass(frozen=True)
 class ThreshFracOptimizationResult:
-    """Best threshold scan result for a two-population fraction-on comparison."""
+    """Best threshold scan result for a two-population fraction-on comparison.
+
+    ``tie_count`` and ``tie_span`` describe the *plateau* the reported threshold
+    was picked from: how many grid points scored the identical best objective,
+    and how wide a range of thresholds those points span. ``argmax`` returns the
+    first of them, so without these two numbers a flat run of 73 grid points is
+    presented as if the optimiser had found one answer.
+    """
 
     threshold: float
     frac_a: float
@@ -50,6 +90,8 @@ class ThreshFracOptimizationResult:
     difference: float
     n_a: int
     n_b: int
+    tie_count: int = 1
+    tie_span: float = 0.0
 
 
 def fraction_on_for_threshold(values: np.ndarray, threshold: float) -> float:
@@ -67,7 +109,8 @@ def frac_curve(values: np.ndarray, thresholds: np.ndarray) -> np.ndarray:
     )
 
 
-def relative_gap(fa: np.ndarray, fb: np.ndarray) -> np.ndarray:
+def relative_gap(fa: np.ndarray, fb: np.ndarray, *,
+                 n_a: int | None = None, n_b: int | None = None) -> np.ndarray:
     """Per-threshold ``|fa-fb| / max(|fa|, |fb|)``, with 0.0 where undefined.
 
     Relative rather than absolute because for skewed distributions the ratio is
@@ -78,7 +121,30 @@ def relative_gap(fa: np.ndarray, fb: np.ndarray) -> np.ndarray:
     subtractive fold-change the fractions can go negative, and a signed
     denominator would zero the gap across that region and spike at the sign
     crossing, inverting the chosen threshold.
+
+    **Statistical support.** Given the population sizes *n_a* and *n_b*, both
+    fractions are Laplace-smoothed — ``(k + 1) / (n + 2)`` — before the ratio is
+    taken. Without that, the ratio is exactly 1.0 at *every* threshold where one
+    arm is empty and the other holds even a single cell, so the objective could
+    not tell "97 % of positives on against 0 % of negatives" from "1 % on
+    against 0 %", and ``argmax``'s first-index tie-break turned the whole
+    objective into an unstated rule: *the lowest grid point above the negative
+    control's maximum*. Moving one negative-control cell then moved the plate's
+    gate by 185 intensity units. Smoothing costs nothing where the counts are
+    real (0.998 rather than 1.000 for a clean separation) and collapses the
+    score where they are not (0.5 for one cell against none, at n=500).
+
+    Counts are optional because the fold-change layer in
+    ``well_viewer.features.home.cell_gating.gating_compute`` scans *adjusted*
+    fractions, which are no longer ``k / n`` — they can exceed 1 and go
+    negative — so there is no ``k`` to add one to. Pass counts only for genuine
+    fraction-on curves.
     """
+    fa = np.asarray(fa, dtype=float)
+    fb = np.asarray(fb, dtype=float)
+    if n_a is not None and n_b is not None and int(n_a) > 0 and int(n_b) > 0:
+        fa = (fa * int(n_a) + 1.0) / (int(n_a) + 2.0)
+        fb = (fb * int(n_b) + 1.0) / (int(n_b) + 2.0)
     abs_gap = np.abs(fa - fb)
     larger = np.maximum(np.abs(fa), np.abs(fb))
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -114,19 +180,29 @@ def best_from_curves(
     n_a: int,
     n_b: int,
 ) -> ThreshFracOptimizationResult:
-    """Package the argmax of *diffs* as a result.
+    """Package the argmax of *diffs* as a result, plateau included.
 
     ``np.argmax`` takes the FIRST index at the maximum, so a run of tied
     thresholds (common — fraction-on is a step function) reports the lowest.
+    That is a defensible choice and an indefensible thing to leave unsaid, so
+    the result also carries how many grid points scored that same maximum and
+    how wide a threshold range they cover. A caller that prints one number can
+    then say whether it was picked from a plateau or from a peak.
     """
+    diffs = np.asarray(diffs, dtype=float)
+    thresholds = np.asarray(thresholds, dtype=float)
     best_idx = int(np.argmax(diffs))
+    best = float(diffs[best_idx])
+    tied = thresholds[diffs == best]
     return ThreshFracOptimizationResult(
         threshold=float(thresholds[best_idx]),
         frac_a=float(fa[best_idx]),
         frac_b=float(fb[best_idx]),
-        difference=float(diffs[best_idx]),
+        difference=best,
         n_a=int(n_a),
         n_b=int(n_b),
+        tie_count=int(tied.size),
+        tie_span=float(tied.max() - tied.min()) if tied.size else 0.0,
     )
 
 
@@ -185,7 +261,7 @@ def optimize_between_populations(
     thresholds = sweep_thresholds(lo, hi, steps)
     fa = frac_curve(values_a, thresholds)
     fb = frac_curve(values_b, thresholds)
-    diffs = relative_gap(fa, fb)
+    diffs = relative_gap(fa, fb, n_a=values_a.size, n_b=values_b.size)
     return best_from_curves(thresholds, fa, fb, diffs,
                             n_a=values_a.size, n_b=values_b.size)
 
@@ -289,7 +365,8 @@ def estimate_thresholds_from_controls(
 
     A channel missing from either well, or with no spread to scan, is skipped
     with a warning rather than falling back to Otsu — a sidecar mixing two
-    estimators is unexplainable. Rounded to integers, matching the Otsu pass.
+    estimators is unexplainable. Stored through
+    :func:`round_stored_threshold`, matching the Otsu pass.
     """
     pos_csv = find_well_csv(output_dir, csv_prefix, pos_well)
     neg_csv = find_well_csv(output_dir, csv_prefix, neg_well)
@@ -321,14 +398,35 @@ def estimate_thresholds_from_controls(
         except ValueError as exc:
             log.warning("Auto-threshold: skipping %s — %s", ch, exc)
             continue
-        out[ch] = float(round(result.threshold))
+        if not np.isfinite(result.threshold):
+            # Not a number the sidecar can carry, and storing it as 0.0 would be
+            # a gate that passes everything, written as the value that also
+            # means "not computed".
+            log.warning(
+                "Auto-threshold: skipping %s — the optimiser returned a "
+                "non-finite threshold (%r).", ch, result.threshold,
+            )
+            continue
+        out[ch] = round_stored_threshold(result.threshold)
         log.info(
-            "Auto-threshold %s: %.0f  (%s %.1f%% on / %s %.1f%% on, "
-            "relative gap %.3f; n=%d/%d)",
+            "Auto-threshold %s: %.4g  (%s %.1f%% on / %s %.1f%% on, "
+            "supported gap %.3f; n=%d/%d)",
             ch, out[ch], pos_well, 100.0 * result.frac_a,
             neg_well, 100.0 * result.frac_b, result.difference,
             result.n_a, result.n_b,
         )
+        # The scan is a step function, so the best score is usually shared by a
+        # run of grid points and the reported threshold is merely the lowest of
+        # them. A plateau spanning a meaningful share of the swept range is a
+        # weak answer, and it used to be reported exactly like a sharp one.
+        if result.tie_count > 1:
+            log.info(
+                "Auto-threshold %s: that score is shared by %d of %d grid "
+                "point(s), spanning %.4g intensity unit(s) (%.4g to %.4g) — the "
+                "lowest of them is reported.",
+                ch, result.tie_count, steps, result.tie_span,
+                result.threshold, result.threshold + result.tie_span,
+            )
         # The objective is symmetric, so it cannot tell the wells apart — this
         # is the only guard against a swap poisoning every downstream default.
         if result.frac_a < result.frac_b:

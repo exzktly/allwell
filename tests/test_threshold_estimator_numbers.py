@@ -1,0 +1,245 @@
+"""What the two auto-threshold estimators are allowed to store, and to claim.
+
+Three defects from the Analyze audit, all in the same family — a number the
+software could not really justify, written down as if it could:
+
+* **C2** — the control-based objective ``|fa-fb| / max(|fa|,|fb|)`` saturates at
+  exactly 1.0 wherever the negative control is empty, however few positive cells
+  are above the cut. ``argmax`` then breaks the resulting tie by first index, so
+  the rule actually implemented was *the lowest grid point above the negative
+  control's maximum* — one outlying control cell moved a plate's gate by two
+  hundred intensity units, and the log called it a relative gap of 1.000.
+* **C3** — both estimators stored ``float(round(x))``, so a channel normalised
+  to 0–1 stored ``0.0``: a gate that passes every cell, written as the one value
+  that also means "this channel was never measured".
+* **C11** — ``_index_members`` judged archive members with its own ``tif``/
+  ``tiff`` list while the pipeline can write ``.png``, and it did so *before* the
+  role and schema checks, so a PNG well left ``unplaceable`` empty and the run
+  said only "skipping GFP — only 0 sample(s)".
+
+The populations here are drawn from a seeded ``numpy`` generator at the audit's
+own parameters, and every one is checked in float32 as well as float64 — a
+shared numeric helper that behaves differently for the two is how a previous
+refactor lost error bars.
+"""
+
+from __future__ import annotations
+
+import logging
+import zipfile
+
+import numpy as np
+import pytest
+
+from pipeline.auto_threshold import _index_members, _SchemaReader, _otsu_per_channel
+from pipeline.threshold_optimize import (
+    best_from_curves,
+    frac_curve,
+    optimize_between_populations,
+    relative_gap,
+    round_stored_threshold,
+    sweep_bounds,
+    sweep_thresholds,
+)
+
+tifffile = pytest.importorskip("tifffile")
+
+
+def _populations(dtype=np.float64, n=500):
+    """The audit's own scenario: pos ~ N(600, 250), neg ~ N(400, 200)."""
+    rng = np.random.default_rng(0)
+    pos = rng.normal(600, 250, n).astype(dtype)
+    neg = rng.normal(400, 200, n).astype(dtype)
+    return pos, neg
+
+
+# ── C2: the objective cannot saturate, and says how flat it was ──────────────
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32])
+def test_a_single_positive_cell_cannot_score_a_perfect_gap(dtype):
+    """One cell above the cut against an empty control is not perfect separation.
+
+    The unsmoothed objective scored exactly 1.0 for both "97 % on against 0 %"
+    and "1 cell on against 0", because the numerator and the denominator are the
+    same number whenever ``fb`` is zero. Laplace support has to separate them.
+    """
+    n = 500
+    thin = np.zeros(2)            # fa, fb curves as bare arrays
+    thin[0] = 1.0 / n             # one positive cell above the cut
+    lots = np.array([0.97, 0.0])
+    one_cell = relative_gap(np.array([thin[0]], dtype=dtype),
+                            np.array([0.0], dtype=dtype), n_a=n, n_b=n)[0]
+    almost_all = relative_gap(np.array([lots[0]], dtype=dtype),
+                              np.array([0.0], dtype=dtype), n_a=n, n_b=n)[0]
+    assert one_cell < 0.9, (
+        f"one positive cell against an empty control still scores {one_cell:.4f}"
+    )
+    assert almost_all > 0.99
+    assert one_cell < almost_all - 0.2
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32])
+def test_one_outlying_control_cell_no_longer_moves_the_plate_gate(dtype):
+    """Moving a single negative-control cell moved the threshold by ~200 units."""
+    pos, neg = _populations(dtype)
+    clean = optimize_between_populations(pos, neg)
+    outlier = np.concatenate([neg[:-1], np.array([1100.0], dtype=dtype)])
+    shifted = optimize_between_populations(pos, outlier)
+    assert abs(shifted.threshold - clean.threshold) < 50.0, (
+        f"one control outlier moved the gate from {clean.threshold:.1f} to "
+        f"{shifted.threshold:.1f}"
+    )
+    # And the gate it keeps is one a meaningful share of the positives clear.
+    assert shifted.frac_a > 0.05
+
+
+def test_the_result_reports_how_many_grid_points_tied():
+    """A plateau has to be visible as a plateau, not presented as an argmax."""
+    pos, neg = _populations()
+    thresholds = sweep_thresholds(*sweep_bounds(pos, neg), 512)
+    fa, fb = frac_curve(pos, thresholds), frac_curve(neg, thresholds)
+    unsupported = best_from_curves(thresholds, fa, fb, relative_gap(fa, fb),
+                                   n_a=pos.size, n_b=neg.size)
+    assert unsupported.tie_count > 1
+    assert unsupported.tie_span > 0.0
+    # The reported threshold is the lowest of the tied run, so the span is the
+    # distance from it to the highest.
+    tied = thresholds[relative_gap(fa, fb) == unsupported.difference]
+    assert unsupported.threshold == pytest.approx(float(tied.min()))
+    assert unsupported.tie_span == pytest.approx(float(tied.max() - tied.min()))
+
+
+def test_the_supported_objective_collapses_the_plateau():
+    pos, neg = _populations()
+    supported = optimize_between_populations(pos, neg)
+    assert supported.difference < 1.0
+    assert supported.tie_count == 1
+
+
+def test_the_fold_change_path_keeps_the_unsmoothed_objective():
+    """Counts are optional, and without them nothing changes.
+
+    The viewer's fold-change scan adjusts each fraction before the gap is taken,
+    so its values are no longer ``k / n`` — they exceed 1 and go negative — and
+    there is no ``k`` to add one to. Passing no counts must leave the old
+    objective exactly as it was, including its sign-safe magnitude denominator.
+    """
+    fa = np.array([0.5, -0.2, 1.4, 0.0])
+    fb = np.array([0.0, 0.4, 0.7, 0.0])
+    got = relative_gap(fa, fb)
+    want = np.array([1.0, 1.5, 0.5, 0.0])
+    assert got == pytest.approx(want)
+
+
+# ── C3: an estimator that succeeded never stores 0.0 ─────────────────────────
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (0.4048, 0.405),          # the audit's normalised-channel Otsu value
+        (0.000123456, 0.000123),
+        (547.7, 548.0),           # unchanged where integers were already right
+        (915.1, 915.0),
+        (1234.5, 1234.0),
+        (-0.4048, -0.405),
+        (0.0, 0.0),               # a real zero stays a real zero
+    ],
+)
+def test_round_stored_threshold_keeps_three_significant_figures(value, expected):
+    assert round_stored_threshold(value) == pytest.approx(expected)
+
+
+def test_a_sub_one_channel_stores_a_usable_gate(caplog):
+    """A 0–1 normalised channel used to store 0.0 — a gate that passes everything.
+
+    Driven through ``_otsu_per_channel``, the function that actually writes the
+    sidecar entry, rather than through the rounding helper alone.
+    """
+    rng = np.random.default_rng(3)
+    values = np.concatenate([rng.normal(0.15, 0.03, 400),
+                             rng.normal(0.70, 0.05, 400)])
+    with caplog.at_level(logging.INFO, logger="test"):
+        log = logging.getLogger("test")
+        out = _otsu_per_channel(["gfp"], {"gfp": list(values)},
+                                {"gfp": 8}, {"gfp": 0}, log)
+    assert "gfp" in out
+    stored = out["gfp"]
+    assert stored != 0.0, "the estimator stored the value that means 'not computed'"
+    frac_on = float(np.count_nonzero(values > stored)) / values.size
+    assert 0.3 < frac_on < 0.7, (
+        f"stored threshold {stored!r} passes {frac_on:.1%} of the cells"
+    )
+
+
+def test_a_non_finite_otsu_result_is_skipped_not_stored(caplog, monkeypatch):
+    """``0.0`` and ``nan`` are both "no gate"; neither may be written as one.
+
+    This one passes on the unfixed code too, and for a reason that no longer
+    holds: ``round(nan)`` raises, so the old ``float(round(...))`` fell into the
+    broad ``except Exception`` beside it and skipped the channel by accident.
+    ``round_stored_threshold`` returns a non-finite value unchanged rather than
+    raising, so the skip is now an explicit branch and this pins it.
+    """
+    import pipeline.auto_threshold as at
+
+    monkeypatch.setattr(at, "threshold_otsu", lambda arr: float("nan"))
+    log = logging.getLogger("test")
+    with caplog.at_level(logging.WARNING, logger="test"):
+        out = _otsu_per_channel(["gfp"], {"gfp": [1.0, 2.0, 3.0]},
+                                {"gfp": 1}, {"gfp": 0}, log)
+    assert out == {}
+    assert "non-finite" in caplog.text
+
+
+# ── C11: one definition of "is this one of the run's images" ─────────────────
+
+def _out_zip(path, names):
+    """An output archive carrying *names* plus the mess a real one carries."""
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("A01/", b"")                       # a directory entry
+        zf.writestr(".DS_Store", b"\x00\x01")
+        zf.writestr("._exp_GFP_A01_1_0_tophat.tif", b"AppleDouble")
+        zf.writestr("__MACOSX/._exp_GFP_A01_1_0_tophat.tif", b"AppleDouble")
+        zf.writestr("notes.txt", b"hello")
+        for name in names:
+            zf.writestr(name, b"not really an image")
+    return path
+
+
+def test_png_output_members_are_indexed(tmp_path):
+    """A PNG well was invisible, and invisible in a way nothing could report."""
+    path = _out_zip(tmp_path / "A01_out.zip", [
+        "exp_GFP_A01_1_0_tophat.png",
+        "exp_DAPI_A01_1_0_labels.png",
+    ])
+    reader = _SchemaReader("experiment:channel:well:fov:timepoint", "_")
+    with zipfile.ZipFile(path) as zf:
+        labels, tophats, unplaceable = _index_members(zf, reader, {"gfp"})
+    assert labels == {("1", "0"): "exp_DAPI_A01_1_0_labels.png"}
+    assert tophats == {("gfp", "1", "0"): "exp_GFP_A01_1_0_tophat.png"}
+    assert unplaceable == []
+
+
+def test_a_schema_mismatch_is_still_reported_for_png(tmp_path):
+    """The evidence behind the "could not be placed" warning must survive too.
+
+    The members were dropped before the role/schema check, so ``unplaceable``
+    stayed empty and the warning naming the schema could not fire at all.
+    """
+    path = _out_zip(tmp_path / "A01_out.zip", ["nonsense_labels.png"])
+    reader = _SchemaReader("experiment:channel:well:fov:timepoint", "_")
+    with zipfile.ZipFile(path) as zf:
+        labels, _tophats, unplaceable = _index_members(zf, reader, {"gfp"})
+    assert labels == {}
+    assert unplaceable == ["nonsense"]
+
+
+def test_the_mess_in_a_real_archive_is_never_indexed(tmp_path):
+    """Sidecars, dotfiles, directory entries and non-images are not members."""
+    path = _out_zip(tmp_path / "A01_out.zip", ["exp_DAPI_A01_1_0_labels.tif"])
+    reader = _SchemaReader("experiment:channel:well:fov:timepoint", "_")
+    with zipfile.ZipFile(path) as zf:
+        labels, tophats, unplaceable = _index_members(zf, reader, {"gfp"})
+    assert labels == {("1", "0"): "exp_DAPI_A01_1_0_labels.tif"}
+    assert tophats == {}
+    assert unplaceable == []

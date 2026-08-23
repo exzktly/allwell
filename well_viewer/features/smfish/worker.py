@@ -134,6 +134,7 @@ def _write_counts_to_csvs(
     well_to_csv: dict[str, Path] | None = None,
     should_abort: Callable[[], bool] | None = None,
     progress_cb: Callable[[int, int], None] | None = None,
+    failed_wells: set[str] | None = None,
 ) -> int:
     """Write the counts column into each well's CSV.
 
@@ -141,6 +142,14 @@ def _write_counts_to_csvs(
     iteration so a dataset swap / cancel that lands *mid-loop* stops further
     writes into the now-wrong dataset (audit E19: the identity check only ran
     once, before the loop). Returns the number of wells actually written.
+
+    ``failed_wells`` names the wells whose spot-counting pass raised. They are
+    skipped rather than written, because ``counts`` holds no entry for any of
+    their cells and the lookup below therefore substitutes ``0`` for every row
+    — a full column of fabricated zeros, indistinguishable in the CSV from a
+    well that genuinely has no spots above threshold. Skipping leaves the
+    well's previous counts in place and drops it out of ``written``, so the
+    caller's shortfall arithmetic reports it like any other unwritten well.
 
     ``progress_cb`` receives ``(wells_visited, total_wells)`` after each
     iteration so the caller can drive a determinate progress bar. It counts
@@ -164,6 +173,14 @@ def _write_counts_to_csvs(
         # `continue`s below — so a run with unresolvable or locked CSVs still
         # finishes with a full bar instead of one stuck short of its maximum.
         try:
+            if failed_wells and well in failed_wells:
+                logger.warning(
+                    "smFISH apply-global: not writing %s — its spot-counting "
+                    "pass raised, so `counts` holds nothing for it and every "
+                    "row would be written as a fabricated 0. The well keeps "
+                    "its previous counts and is reported as unwritten.", well,
+                )
+                continue
             csv_path = _resolve_csv_path(well, well_to_csv, out_dir)
             if csv_path is None:
                 continue
@@ -276,6 +293,7 @@ def apply_global_threshold_async(
             done_cb("Select channel and ensure one well is selected.")
             return
         counts: dict[tuple[str, str, str, str], int] = {}
+        failed_wells: set[str] = set()
         wells = sorted(well_to_zip.items())
         if wells:
             max_workers = min(8, len(wells))
@@ -312,6 +330,11 @@ def apply_global_threshold_async(
                     try:
                         counts.update(future.result())
                     except Exception as exc:
+                        # Record the well, don't just log it. Without this the
+                        # write loop cannot tell a well that produced no spots
+                        # from one that never ran, and writes 0 for every row
+                        # of the latter under a "complete" banner.
+                        failed_wells.add(well)
                         logger.exception("smFISH global threshold failed for %s: %s", well, exc)
                     status_cb(f"Processed {well} ({completed}/{len(wells)})...")
                     if progress_cb is not None:
@@ -351,6 +374,7 @@ def apply_global_threshold_async(
             out_dir, well_to_zip, counts, column, well_to_csv,
             should_abort=_abort_write,
             progress_cb=progress_cb,
+            failed_wells=failed_wells,
         )
         # Reported on the *count*, not on whether the abort predicate is still
         # true. ``written`` counts wells actually written, and the loop has two

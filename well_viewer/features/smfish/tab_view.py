@@ -931,19 +931,37 @@ def _smfish_apply_to_all(ctx) -> None:
     channel = ctx.runtime.smfish.channel_cb.currentText().strip().lower()
     thr = _smfish_get_threshold(ctx)
     frame = ctx.runtime.smfish.frame
+    # The dataset this run belongs to, captured before the worker starts.
+    # ``save_threshold`` resolves ``pipeline_info.json`` from whatever
+    # ``ctx.state.dataset.data_dir`` says at the moment it is called, and
+    # ``_after_csv`` runs after a plate-length pass — long enough for the user
+    # to have opened a different dataset. The worker already refuses to write
+    # CSVs into a swapped dataset, but it calls ``after_csv_cb`` either way (the
+    # wells it did write still have to be picked up), so without this the
+    # threshold from the abandoned run lands in the *new* plate's sidecar.
+    launch_dir = getattr(ctx.state.dataset, "data_dir", None)
 
     def _after_csv(shortfall: int = 0) -> None:
         # Runs on the GUI thread via _WorkerBridge.after_csv — see the
         # bridge docstring for why this can't be invoked directly from
         # the worker. Safe to touch widgets and call the refresh chain
         # synchronously.
-        try:
-            from well_viewer.persistence import smfish as _smfish_persist
-            _smfish_persist.save_threshold(ctx, channel, thr)
-        except Exception:
-            logging.getLogger("well_viewer").exception(
-                "smFISH threshold persistence failed"
+        current_dir = getattr(ctx.state.dataset, "data_dir", None)
+        if current_dir != launch_dir:
+            logging.getLogger("well_viewer").warning(
+                "smFISH threshold not persisted: the run started against %s "
+                "but the loaded dataset is now %s. Writing it would stamp one "
+                "plate's threshold into another plate's pipeline_info.json.",
+                launch_dir, current_dir,
             )
+        else:
+            try:
+                from well_viewer.persistence import smfish as _smfish_persist
+                _smfish_persist.save_threshold(ctx, channel, thr)
+            except Exception:
+                logging.getLogger("well_viewer").exception(
+                    "smFISH threshold persistence failed"
+                )
         _smfish_refresh_app_cache(ctx)
         if shortfall:
             # The modal is the loudest thing the user sees, so it must not be

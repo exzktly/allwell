@@ -3061,9 +3061,10 @@ reason `analyze_suspend` and `analyze_progress` are, since `analyze_tab.py` sits
 against its line budget. `_refresh_output` hands it the `InputPlan`, and it
 reports in two tiers split by what each costs. Tier one is the run journal
 (§6.5) — one small JSON read — plus the scope line's `iterdir` of the input
-directory and, where loose images sit beside the archives, a central-directory
-read of each archive they belong to: bounded by the plate's top level rather
-than a walk of it, which is what lets it run inline once the field settles. It
+directory, and a central-directory read per archive in the narrow case where
+loose images are present *and* a background or flat-field method needs the
+empty-well tokens resolved: bounded by the plate's top level rather than a walk
+of it, which is what lets it run inline once the field settles. It
 says what the last run against this folder did, and whether it *finished* — a
 journal still open is a run the app was killed during, which nothing else on
 disk records. Tier two runs `completeness.scan_run` on a
@@ -4072,7 +4073,7 @@ Small dependency-light service modules used by `analyze_tab.py`:
 | `env.py` | `validate_env` — a pure startup check of the `ALLWELL_*` overrides (`ALLWELL_SCRATCH_DIR` / `ALLWELL_REMOTES` / `ALLWELL_SEG_DEBUG`), returning warnings for any that are set but unusable so a mistyped path is not a silent fallback. |
 | `ssh_key_setup.py` | Ed25519 keypair generation at `~/.ssh/allwell_<alias>` + the `ssh-copy-id` walkthrough behind the remote-host wizard. |
 | `subprocess_kill.py` | Kills a spawned pipeline's whole process group / session (what Stop uses). |
-| `run_journal.py` | The record of what a run intended, where it sent the work, and what became of each well — opened before the first well is processed, amended as the run goes, closed with an outcome, so a record still open at the next start-up is a run the app was killed during (§6.5). Stdlib-only. Writes `<output_dir>/.aw_journal/`: `run.json` for the run and one `wells/<WELL>.json` per well, `pipeline/run_report.py`'s one-atomic-file-per-unit shape so the orchestrator, the worker pool and the Fetcher thread all record without a lock. **Evidence, never authority** — `pipeline.completeness` stays the answer to "is this well complete" and the artefacts stay the done-set, so a journal that goes missing costs answers rather than making a good dataset look empty. It drives exactly one decision, the remote re-attach above. `WELL_STATES` is the single roster of what a run can have done to a well, guarded by `tests/test_no_second_journal_vocabulary.py` — which walks dict keys as well as tuples, lists and sets, because a states-to-words table is presentation only for as long as the module holding it also consults the canonical roster; one that does not is holding its only copy, and anything iterating it drops every state it fails to spell. |
+| `run_journal.py` | The record of what a run intended, where it sent the work, and what became of each well — opened before the first well is processed, amended as the run goes, closed with an outcome, so a record still open at the next start-up is a run the app was killed during (§6.5). Stdlib-only. Writes `<output_dir>/.aw_journal/`: `run.json` for the run and one `wells/<WELL>.json` per well, `pipeline/run_report.py`'s one-atomic-file-per-unit shape so the orchestrator, the worker pool and the Fetcher thread all record without a lock. **Evidence, never authority** — `pipeline.completeness` stays the answer to "is this well complete" and the artefacts stay the done-set, so a journal that goes missing costs answers rather than making a good dataset look empty. It drives exactly one decision, the remote re-attach above. A well record only ever belongs to an *open* run — `record_well` refuses one otherwise, which is what keeps a run whose own `open_run` could not write from filing its progress under the previous, closed run whose record survived. `WELL_STATES` is the single roster of what a run can have done to a well, guarded by `tests/test_no_second_journal_vocabulary.py` — which walks dict keys as well as tuples, lists and sets, because a states-to-words table is presentation only for as long as the module holding it also consults the canonical roster; one that does not is holding its only copy, and anything iterating it drops every state it fails to spell. |
 
 These modules deliberately have no Qt imports beyond what the Analyze tab
 itself uses — keeping them potentially reusable for a CLI driver.
@@ -4159,7 +4160,11 @@ pidfile, sentinel and heartbeat stay under this run's own `run_id`, because
 `_sweep_orphaned_allocation` finds a crashed session's job by recomputing that
 address and must not be pointed at another run's — and both directories are
 created, since a re-attached run's output lives under a *previous* `run_id` and
-nothing else would make its own.
+nothing else would make its own. Cleanup mirrors that split: the borrowed
+directory is left in place and named in the log, while the run's own is removed
+like any other, because nothing prunes `runs/` (`DatasetCache.gc` covers
+`datasets/`) and it holds only the pidfile, sentinel and heartbeat this run
+wrote.
 
 Which flags count as "the same configuration" is `pipeline_argv_digest`,
 extracted from `_compute_run_id` and recorded in the journal, so the address and
@@ -4172,6 +4177,15 @@ threshold overridden per host, address the directory another configuration had
 already filled, be found complete by the pre-flight check, and have that
 configuration's numbers fetched back as its own. One definition feeds both the
 launched command and the digest.
+
+Every call that turns a configuration into an address or a reuse key folds
+those extras in — `spawn`'s two, and `_BatchedRemoteProcess`'s run id *and* its
+journal record. Missing one makes that call's key smaller than its siblings',
+and a smaller key matches configurations whose output is not interchangeable:
+a batched CSV-only run journalled a digest identical to a plain full run's, so
+a later full run re-attached to its directory and fetched back output with no
+tophat images. `test_every_keying_call_folds_in_the_host_extras` is the AST
+sweep that holds it.
 
 `stored_remote_address` compares three keys, and `tests/test_reuse_is_keyed_completely.py`
 carries the written reason for each: the argv digest, `source_fingerprint` (the

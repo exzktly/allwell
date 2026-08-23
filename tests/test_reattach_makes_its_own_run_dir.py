@@ -66,6 +66,18 @@ from services.remote_runner import (
 STORED_OUT = "~/.allwell-staging/runs/run-previous/out"
 
 
+@pytest.fixture(autouse=True)
+def _isolated_index(tmp_path, monkeypatch):
+    """Keep the journal index out of the developer's real state directory.
+
+    ``run_journal.index_path()`` is ``~/.config/allwell/run_index.json``, capped
+    at fifty entries and shared by every test in the lane. A test that opens a
+    journal without redirecting it evicts the user's genuine unfinished-run
+    entries, and their resume banner stops offering their own plates.
+    """
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "state" / "idx.json")
+
+
 @pytest.fixture
 def host() -> RemoteHost:
     return RemoteHost(
@@ -155,7 +167,7 @@ class _FakeRemoteFs:
 
 
 def _spawn_with(host, plate, monkeypatch, *, completed_remote_wells,
-                launcher=""):
+                launcher="", output_filter=OutputFilter.FULL):
     """Drive the real ``spawn``, returning the fake remote filesystem."""
     fs = _FakeRemoteFs()
     runner = RemoteRunner(replace(host, compute_launcher=launcher))
@@ -203,7 +215,7 @@ def _spawn_with(host, plate, monkeypatch, *, completed_remote_wells,
     )
     log: list[str] = []
     runner.spawn(zipped, plate / "out", pipeline_argv=_argv(plate),
-                 output_filter=OutputFilter.FULL, log_fn=log.append)
+                 output_filter=output_filter, log_fn=log.append)
     return fs, "".join(log), runner
 
 
@@ -273,3 +285,81 @@ def test_a_partially_complete_re_attach_can_write_its_heartbeat_and_sentinel(
     own = Path(runner._run.remote_pidfile).parent.as_posix()
     assert f"{own}/{UPLOAD_SENTINEL}" in fs.files
     assert f"{own}/{UPLOAD_HEARTBEAT}" in fs.files
+
+
+# ── the caller, not the helper ──────────────────────────────────────────────
+
+def _address_from_spawn(host, plate, monkeypatch, *, output_filter):
+    """The remote output directory the real ``spawn`` computed."""
+    fs, _blob, runner = _spawn_with(
+        host, plate, monkeypatch, completed_remote_wells=set(),
+        output_filter=output_filter)
+    return runner._run.remote_output_dir, runner._run
+
+
+@pytest.mark.parametrize("label,host_kw,filt", [
+    ("cpu_only", {"cpu_only": True}, OutputFilter.FULL),
+    ("extra_args", {"extra_args": ("--min_nucleus_area_px", "500")},
+     OutputFilter.FULL),
+    ("output_filter", {}, OutputFilter.CSV_ONLY),
+])
+def test_spawn_gives_a_differently_configured_run_its_own_address(
+        host, plate, monkeypatch, label, host_kw, filt):
+    """Not that the helpers can fold the extras in — that ``spawn`` passes them.
+
+    ``test_reuse_is_keyed_completely`` exercises ``_host_argv_extras`` and
+    ``pipeline_argv_digest(extras=…)`` directly, so dropping ``extras=`` from
+    ``spawn``'s two call sites left every one of them green along with the
+    other 699 tests that import this module. That is §7.6 #2: the convenient
+    seam sat underneath the thing that is actually wired up.
+
+    Each host-side addition, alone, must move the address the run lands on —
+    otherwise a run configured this way finds the other configuration's output
+    already complete and fetches it back as its own.
+    """
+    base, _ = _address_from_spawn(host, plate, monkeypatch,
+                                  output_filter=OutputFilter.FULL)
+    other, _ = _address_from_spawn(replace(host, **host_kw), plate, monkeypatch,
+                                   output_filter=filt)
+    assert base != other, (
+        f"{label} left the remote address unchanged at {base}; a run "
+        f"configured this way would re-use the other configuration's output")
+
+
+def test_spawn_records_the_address_under_the_digest_it_used(
+        host, plate, monkeypatch):
+    """And the journal has to agree with it, or the next run cannot match.
+
+    The address and the recorded key are computed from the same extras, so a
+    run of the *same* configuration finds its own record and a differently
+    configured one does not.
+    """
+    from services.remote_runner import pipeline_argv_digest, source_fingerprint
+
+    cpu_host = replace(host, cpu_only=True)
+    # `PipelineRunner` opens the journal before `spawn` runs; `spawn` only
+    # amends it. Without that there is no record for `record_remote` to write
+    # into, and this would measure nothing.
+    J.open_run(plate / "out", spec={}, mode="remote", input_dir=plate / "in",
+               argv=_argv(plate))
+    _address_from_spawn(cpu_host, plate, monkeypatch,
+                        output_filter=OutputFilter.FULL)
+
+    runner = RemoteRunner(cpu_host)
+    extras = runner._host_argv_extras(OutputFilter.FULL)
+    stored = J.stored_remote_address(
+        plate / "out",
+        argv_digest=pipeline_argv_digest(_argv(plate), extras=extras),
+        source_key=source_fingerprint(plate / "in"),
+        host_alias=cpu_host.ssh_alias)
+    assert stored is not None, (
+        "the run recorded an address its own configuration cannot match")
+
+    plain = RemoteRunner(host)
+    assert J.stored_remote_address(
+        plate / "out",
+        argv_digest=pipeline_argv_digest(
+            _argv(plate), extras=plain._host_argv_extras(OutputFilter.FULL)),
+        source_key=source_fingerprint(plate / "in"),
+        host_alias=host.ssh_alias) is None, (
+        "a differently configured run matched the record")

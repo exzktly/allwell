@@ -104,6 +104,27 @@ def test_every_reuse_decision_is_registered():
     assert "run_journal.stored_remote_address" in REUSE_CONTRACTS
 
 
+def test_the_roster_names_every_key_the_decision_actually_takes():
+    """The reverse direction, which the roster alone cannot give you.
+
+    ``test_changing_one_key_alone_declines_the_reuse`` proves each *listed* key
+    is compared. It says nothing about a key added later — one with a default
+    value would be compared by the code, absent from the roster, and carry none
+    of the written justification the roster exists to hold. Read off the
+    signature, so adding a parameter without a reason to keep it fails here.
+    """
+    import inspect
+
+    params = inspect.signature(J.stored_remote_address).parameters
+    keyed = {name for name, p in params.items()
+             if p.kind is inspect.Parameter.KEYWORD_ONLY}
+    listed = set(REUSE_CONTRACTS["run_journal.stored_remote_address"])
+    assert keyed == listed, (
+        f"the decision takes {sorted(keyed)} but the roster names "
+        f"{sorted(listed)}. Every key needs its written reason beside it — "
+        f"that roster is the only record of what makes the old result wrong.")
+
+
 def test_matching_every_key_reuses(out_dir):
     """The baseline. Without it, a lookup that declines unconditionally would
     pass every mutation test below while reusing nothing."""
@@ -156,9 +177,23 @@ def _host(**kw):
     return RemoteHost(**base)
 
 
-_LOCAL_ARGV = ["/usr/bin/python", "/p/process_microscopy.py",
-               "--input_dir", "/in", "--output_dir", "/out",
-               "--nuclear_token", "DAPI"]
+def _local_argv():
+    """The argv ``build_pipeline_args`` really produces, not a sketch of it.
+
+    A hand-written five-flag argv carries none of the flags the form always
+    emits, so a host override that *collides* with one — the shape that broke
+    the pairing — could not arise in it. Fixtures have to carry the mess of the
+    real thing (CLAUDE.md §7.1 #4).
+    """
+    from pathlib import Path
+
+    from services.pipeline_service import build_pipeline_args
+
+    return build_pipeline_args(
+        Path("/p/process_microscopy.py"), Path("/in"), Path("/out"),
+        {"nuclear_token": "DAPI", "fluor_tokens": ["GFP"], "csv_prefix": "m",
+         "filename_schema": "well_fov_channel", "filename_sep": "_",
+         "segmentation_method": "stardist_nuclei"})
 
 
 @pytest.mark.parametrize("covered", sorted(ARGV_DIGEST_MUST_COVER))
@@ -189,11 +224,11 @@ def test_the_digest_covers_what_the_host_adds_to_the_argv(covered):
     assert base != changed, f"{covered} did not reach _host_argv_extras"
 
     why = ARGV_DIGEST_MUST_COVER[covered]
-    assert (pipeline_argv_digest(_LOCAL_ARGV, extras=base)
-            != pipeline_argv_digest(_LOCAL_ARGV, extras=changed)), (
+    assert (pipeline_argv_digest(_local_argv(), extras=base)
+            != pipeline_argv_digest(_local_argv(), extras=changed)), (
         f"{covered} does not move the reuse key, and it must: {why}")
-    assert (_compute_run_id("k" * 32, _LOCAL_ARGV, extras=base)
-            != _compute_run_id("k" * 32, _LOCAL_ARGV, extras=changed)), (
+    assert (_compute_run_id("k" * 32, _local_argv(), extras=base)
+            != _compute_run_id("k" * 32, _local_argv(), extras=changed)), (
         f"{covered} does not move the remote address, and it must: {why}")
 
 
@@ -205,12 +240,109 @@ def test_the_launched_command_and_the_digest_read_the_same_extras():
     """
     from services.remote_runner import LocalInputMode, OutputFilter, RemoteRunner
 
+    # The override deliberately names a flag ``build_pipeline_args`` always
+    # emits, so its value token collides with one already in the argv.
     runner = RemoteRunner(_host(cpu_only=True,
                                 extra_args=("--min_nucleus_area_px", "500")))
     extras = runner._host_argv_extras(OutputFilter.CSV_ONLY)
     launched = runner._build_remote_argv(
-        list(_LOCAL_ARGV), "/r/in", "/r/out", OutputFilter.CSV_ONLY,
+        list(_local_argv()), "/r/in", "/r/out", OutputFilter.CSV_ONLY,
         LocalInputMode.ZIP)
-    missing = [e for e in extras if e not in launched]
-    assert not missing, (
-        f"the digest folds in {missing}, which the launched command does not")
+    # A *subsequence*, not a set of members. A membership test passes on a
+    # command whose flag/value pairs have come apart — every token is present
+    # and `--min_nucleus_area_px 500` has become a bare `500` that argparse
+    # rejects — which is exactly what the first version of this test waved
+    # through.
+    it = iter(launched)
+    matched = [e for e in extras if any(tok == e for tok in it)]
+    assert matched == list(extras), (
+        f"the digest folds in {list(extras)}, which the launched command does "
+        f"not carry in order — it matched only {matched}.\n"
+        f"launched tail: {launched[-10:]}")
+
+
+def test_the_launched_command_still_parses_with_a_host_override():
+    """The end of that: a command the pipeline's own parser accepts.
+
+    The two shapes a host's ``extra_args`` really takes are overriding a flag
+    ``build_pipeline_args`` always emits, and the ``--workers 0`` in
+    ``remote_config``'s own docstring. Both put a token in the extras that
+    already appears in the argv, and a blanket de-duplication dropped it and
+    left the value stranded.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from services.pipeline_service import build_pipeline_args
+    from services.remote_runner import LocalInputMode, OutputFilter, RemoteRunner
+
+    opts = {"nuclear_token": "DAPI", "fluor_tokens": ["GFP"], "csv_prefix": "m",
+            "filename_schema": "well_fov_channel", "filename_sep": "_",
+            "segmentation_method": "stardist_nuclei"}
+    runner = RemoteRunner(_host(cpu_only=True,
+                                extra_args=("--min_nucleus_area_px", "500")))
+    local = build_pipeline_args(Path("/p/pm.py"), Path("/in"), Path("/out"), opts)
+    out = runner._build_remote_argv(list(local), "/r/in", "/r/out",
+                                    OutputFilter.CSV_ONLY, LocalInputMode.ZIP)
+
+    # The override must survive as a pair, and it must be the last word on the
+    # flag — a host override that lands before the form's own value is not an
+    # override.
+    assert out[-3:] == ["--min_nucleus_area_px", "500", "--cpu_only"], out[-6:]
+
+    start = next(i for i, a in enumerate(out) if a == "--input_dir")
+    proc = subprocess.run(
+        [sys.executable, str(Path(__file__).parent.parent /
+                             "process_microscopy.py"), *out[start:], "--help"],
+        capture_output=True, text=True)
+    assert proc.returncode == 0, (
+        f"the launched command does not parse: {proc.stderr.strip()[-200:]}")
+
+
+# ── the half-swept sibling ──────────────────────────────────────────────────
+
+#: The two functions that turn a configuration into an address or a reuse key.
+#: Every call to either in ``services/remote_runner.py`` must fold in the
+#: host-side additions, because a call that does not produces a *smaller* key
+#: than its siblings — and a smaller key matches configurations it should not.
+_KEYING_CALLS = ("_compute_run_id", "pipeline_argv_digest")
+
+
+def test_every_keying_call_folds_in_the_host_extras():
+    """One call site out of four is enough to re-open the whole defect.
+
+    The first fix updated `spawn`'s two calls and `_BatchedRemoteProcess`'s
+    run id, and missed the journal record forty-five lines below it. That made
+    the batched digest the smaller key: it equalled a plain FULL run's exactly,
+    so a later FULL run re-attached to a batched CSV-only run's directory, was
+    found complete, and had output with no tophat images fetched back as its
+    own. In the other direction — a host with overrides — the two never matched
+    and re-attach silently never fired at all.
+
+    CLAUDE.md §7.5 #5: convert every sibling that answers the same question.
+    A grep finds the ones you thought of; this finds the ones you did not.
+    """
+    import ast
+    from pathlib import Path
+
+    source_path = Path(__file__).parent.parent / "services" / "remote_runner.py"
+    tree = ast.parse(source_path.read_text(), filename=str(source_path))
+
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = getattr(node.func, "id", None) or getattr(node.func, "attr", "")
+        if name not in _KEYING_CALLS:
+            continue
+        if "extras" not in {kw.arg for kw in node.keywords}:
+            offenders.append(f"remote_runner.py:{node.lineno} — {name}(…)")
+
+    assert not offenders, (
+        "A call that decides a remote address or a reuse key does not fold in "
+        "`RemoteRunner._host_argv_extras`. It therefore produces a smaller key "
+        "than its siblings, and a smaller key matches configurations whose "
+        "output is not interchangeable — which is how a run fetches another "
+        "configuration's numbers and reports success.\n  "
+        + "\n  ".join(offenders))

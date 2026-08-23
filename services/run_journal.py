@@ -93,8 +93,12 @@ WELL_STATES = (
 )
 
 #: How far through a remote run each state is, for the states that describe one
-#: well's progress along a single path. A later state is never overwritten by an
-#: earlier one — see :func:`record_well`.
+#: well's progress along a single path. An earlier state does not overwrite a
+#: later one — see :func:`record_well`. A *narrowing*, not a guarantee: the
+#: check is a read followed by a write with no lock between them, so an
+#: interleaving inside that window can still land the wrong way round. The
+#: window is one small file read wide against a download, which is why this is
+#: worth doing; it is not why it would be worth claiming.
 #:
 #: Two independent writers record these on a remote run and neither can be
 #: ordered against the other: ``analyze_progress`` writes ``analysed`` from a
@@ -422,7 +426,9 @@ def record_well(
     contend and neither can leave a half-written record. This says where a well
     *got to*, not every step it took.
 
-    **A well never moves backwards along the upload → analysed → fetched path.**
+    **A well is not moved backwards along the upload → analysed → fetched path**
+    — narrowed, not guaranteed: read-then-write with no lock, so an
+    interleaving inside that window can still land the wrong way round.
     Those three are written by two writers that cannot be ordered against each
     other — the GUI thread draining parsed stdout, and the Fetcher thread
     polling the remote sidecar — so a small well that downloads before the GUI
@@ -442,6 +448,17 @@ def record_well(
     label = str(well).strip()
     if not label:
         return False
+    payload = _read_run_payload(output_dir)
+    if payload is None or payload.get("closed_at") is not None:
+        # No open run here, so there is nothing this well record could belong
+        # to. That is not hypothetical: ``open_run``'s write is allowed to
+        # fail, and when it does the *previous* run's closed ``run.json`` and
+        # its wells are what remain. Writing into it would file this run's
+        # progress under a run that finished — and with the no-regress rule
+        # below, a `fetched` left by that run silently refused this one's
+        # `uploaded` and `analysed`, so the journal reported a well as fetched
+        # for a run that had only uploaded it.
+        return False
     rank = _WELL_STAGE_ORDER.get(state)
     if rank is not None:
         existing = _read_well_state(output_dir, label)
@@ -457,11 +474,13 @@ def record_well(
 
 
 def _read_well_state(output_dir: Path | str, well: str) -> str | None:
-    """The state already recorded for *well*, or ``None``.
+    """The state already recorded for *well* in this run, or ``None``.
 
     One file read, on the path that writes one file — the cost is the same
     order as the write it guards, and the alternative is an in-memory map that
-    the two threads would then have to share.
+    the two writing threads would then have to share. Safe to read as "this
+    run's" because :func:`open_run` clears the previous run's wells, and
+    :func:`record_well` refuses to write into a run that has closed.
     """
     try:
         rec = json.loads((_wells_dir(output_dir) / f"{well}.json").read_text())

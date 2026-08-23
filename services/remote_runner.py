@@ -4739,9 +4739,18 @@ class _BatchedRemoteProcess:
         # batches journalled a ``remote-batched`` mode beside an empty remote
         # block — a record that names the mode and not the place, which is the
         # half that a later run actually needs.
+        # The *same* extras the run id forty lines above was built from.
+        # Recording the bare argv digest here made this the smaller key: a
+        # batched CSV-only run journalled a digest identical to a plain FULL
+        # run's, so a later FULL run re-attached to its directory, was found
+        # complete, and had output with no tophat images fetched back as its
+        # own — and in the other direction, after a batched run on a host with
+        # overrides, the two never matched and re-attach silently never fired.
         _record_remote_in_journal(
             local_output_dir, run=runner._run, host_alias=runner.host.ssh_alias,
-            argv_digest=pipeline_argv_digest(pipeline_argv),
+            argv_digest=pipeline_argv_digest(
+                pipeline_argv,
+                extras=runner._host_argv_extras(output_filter)),
             source_key=source_fingerprint(
                 _local_input_dir_from_argv(pipeline_argv)),
         )
@@ -7263,10 +7272,22 @@ class RemoteRunner:
         # would take with it whatever else that other run's directory still
         # holds. Say so and keep both rather than guess which is safe.
         if run.reattached:
+            # The borrowed directory is left alone; this run's own is not. It
+            # holds only the pidfile, the sentinel and the heartbeat this run
+            # created, and nothing prunes ``runs/`` — ``DatasetCache.gc``
+            # covers ``datasets/`` — so leaving it would drop two sidecar files
+            # on the host for every re-attaching run, for ever.
+            own_dir = f"{self.host.remote_staging_dir}/runs/{run.run_id}"
+            if dry_run:
+                self._log_would_delete(
+                    own_dir, label=f"run dir {run.run_id}", log=log)
+            else:
+                self._cache._ssh_run(["rm", "-rf", own_dir], check=False)
             log(
-                f"[remote] skipping run-dir cleanup: this run re-attached to "
-                f"{run.remote_output_dir}, which belongs to an earlier run of "
-                f"this plate. Remove it by hand once you are done with it.\n"
+                f"[remote] re-attached to {run.remote_output_dir}, which "
+                f"belongs to an earlier run of this plate — leaving it in "
+                f"place; remove it by hand once you are done with it. This "
+                f"run's own {own_dir} has been cleaned up.\n"
             )
         else:
             run_dir = f"{self.host.remote_staging_dir}/runs/{run.run_id}"
@@ -8091,9 +8112,25 @@ class RemoteRunner:
         # `--input_dir` and the pipeline's default already finds it.
         if background_dir:
             out.append(f"--background_dir={background_dir}")
-        out.extend(a for a in self._host_argv_extras(output_filter)
-                   if a not in out)
+        for token in self._host_argv_extras(output_filter):
+            # Only the two switches are deduplicated, and only against their
+            # own spelling. A blanket ``token not in out`` filter reads ``out``
+            # as it grows, so any ``extra_args`` token already present anywhere
+            # in the argv was dropped and its flag/value pair came apart:
+            # a host overriding ``--min_nucleus_area_px 500``, a flag
+            # ``build_pipeline_args`` always emits, launched with a bare
+            # ``500`` and died at argparse. ``extra_args`` is appended whole.
+            if token in self._DEDUPED_HOST_FLAGS and token in out:
+                continue
+            out.append(token)
         return out
+
+    #: The host-side additions that are bare switches, and so are worth
+    #: suppressing when the local argv already carries them —
+    #: ``build_pipeline_args`` emits ``--cpu_only`` from the form's own
+    #: checkbox. Everything else in ``extra_args`` is positional with respect
+    #: to its value and must never be filtered.
+    _DEDUPED_HOST_FLAGS = frozenset({"--no_save_tophat", "--cpu_only"})
 
     def _host_argv_extras(self, output_filter: OutputFilter) -> list[str]:
         """The pipeline flags this *host* and *filter* add, over the local argv.

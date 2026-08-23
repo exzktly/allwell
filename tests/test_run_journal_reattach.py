@@ -374,17 +374,26 @@ def _cleanup_deletions(tmp_path, monkeypatch, *, reattached: bool) -> list[str]:
     return removed
 
 
-def test_cleanup_leaves_a_re_attached_run_dir_alone(tmp_path, monkeypatch):
-    """A re-attached run must not delete the directory it borrowed.
+def test_cleanup_leaves_the_borrowed_dir_and_removes_its_own(
+        tmp_path, monkeypatch):
+    """A re-attached run deletes what it made and nothing it borrowed.
 
-    Its output lives under a *previous* run's ``runs/<id>/``, so the path
-    ``verify_and_cleanup`` derives from this run's own ``run_id`` holds nothing
-    it produced. Removing that would report a cleanup, leave the real outputs
-    on the remote for ever, and take whatever else the other run's directory
-    still holds.
+    Its *output* lives under a previous run's ``runs/<id>/``, so removing the
+    directory ``verify_and_cleanup`` derives from this run's own ``run_id``
+    once meant removing the wrong one — reporting a cleanup, leaving the real
+    outputs on the remote for ever, and taking whatever else that other run's
+    directory still held.
+
+    The two directories are different things, though, and blanket-declining
+    leaked the near-empty one this run really did create: it holds the pidfile,
+    the sentinel and the heartbeat, and nothing prunes ``runs/`` —
+    ``DatasetCache.gc`` covers ``datasets/`` only — so every re-attaching run
+    left two sidecar files behind for ever.
     """
     removed = _cleanup_deletions(tmp_path, monkeypatch, reattached=True)
-    assert removed == [], f"a re-attached run deleted {removed}"
+    assert removed == ["~/.allwell-staging/runs/run-new"], removed
+    assert not any(STORED.startswith(r) for r in removed), (
+        f"the borrowed directory was removed: {removed}")
 
 
 def test_an_ordinary_run_still_removes_its_run_dir(tmp_path, monkeypatch):

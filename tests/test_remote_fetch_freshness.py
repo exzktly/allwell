@@ -47,6 +47,21 @@ def _stale_well(out_dir: Path, well: str, *, days_old: int = 1) -> Path:
     return zip_path
 
 
+from services import run_journal as _J
+
+
+@pytest.fixture(autouse=True)
+def _isolated_index(tmp_path, monkeypatch):
+    """Keep the journal index out of the developer's real state directory.
+
+    ``run_journal.index_path()`` is ``~/.config/allwell/run_index.json``, capped
+    at fifty entries and shared by every test in the lane. A test that opens a
+    journal without redirecting it evicts the user's genuine unfinished-run
+    entries, and their resume banner stops offering their own plates.
+    """
+    monkeypatch.setattr(_J, "index_path", lambda: tmp_path / "state" / "idx.json")
+
+
 def _run(out_dir: Path, **kw) -> rr._RemoteRun:
     params = dict(
         run_id="run-x", cache_key="k", remote_input_dir="/r/in",

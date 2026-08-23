@@ -76,7 +76,15 @@ def test_no_module_restates_the_journal_well_states():
         # A module that reaches for the canonical roster may also carry a table
         # of words for the states; one that never does is holding the only copy
         # it has, which is what makes a missing state unrecoverable there.
-        consults_roster = "WELL_STATES" in source
+        #
+        # A *reference*, not the text. A substring test over the whole file let
+        # a comment mentioning WELL_STATES — or a variable called
+        # ``_MY_WELL_STATES`` — exempt every dict in an 8,000-line module,
+        # including the file the defect actually happened in.
+        consults_roster = any(
+            (isinstance(n, ast.Name) and n.id == "WELL_STATES")
+            or (isinstance(n, ast.Attribute) and n.attr == "WELL_STATES")
+            for n in ast.walk(tree))
         for node in ast.walk(tree):
             if not isinstance(node, (ast.Tuple, ast.List, ast.Set, ast.Dict)):
                 continue

@@ -116,11 +116,19 @@ def test_an_unknown_well_state_is_refused(out_dir):
         J.record_well(out_dir, "A01", "downloaded")
 
 
-def test_recording_before_opening_writes_no_run_record(out_dir):
-    """A well can be recorded into a folder with no run — it is one file per
-    well — but the run record is not conjured to hold it."""
-    assert J.record_well(out_dir, "A01", "fetched")
+def test_recording_before_opening_writes_nothing_at_all(out_dir):
+    """A well record belongs to a run, and the run record is never conjured.
+
+    This used to accept the write and leave an orphan ``wells/A01.json`` in a
+    folder with no ``run.json``. Nothing could read it back —
+    :func:`read_journal` returns ``None`` without a run record — so it was a
+    file that existed and could not be seen, and the same acceptance is what
+    let a run write into a *previous*, closed run's wells when its own
+    ``open_run`` failed. Refused outright now.
+    """
+    assert J.record_well(out_dir, "A01", "fetched") is False
     assert J.read_journal(out_dir) is None
+    assert not list((J.journal_dir(out_dir) / "wells").glob("*.json"))
 
 
 # ── degrading, rather than raising ──────────────────────────────────────────
@@ -491,5 +499,56 @@ def test_a_failed_open_does_not_strip_the_record_it_could_not_replace(
     assert _open(out_dir) is False
     journal = J.read_journal(out_dir)
     assert journal is not None and journal.outcome == "ok"
-    assert journal.wells["A01"].state == "fetched", (
+    # Named rather than indexed, so reverting the fix fails with this sentence
+    # instead of a bare ``KeyError`` — the failure *type* is part of the proof
+    # (CLAUDE.md §7.5 #1).
+    assert "A01" in journal.wells, (
         "the wells were dropped for a run.json that was never replaced")
+    assert journal.wells["A01"].state == "fetched"
+
+
+def test_no_well_is_recorded_into_a_run_that_has_closed(out_dir):
+    """A well record has to belong to an open run, or to nothing.
+
+    ``open_run``'s write is allowed to fail, and when it does what remains is
+    the *previous* run's closed ``run.json`` and its wells. Writing into that
+    files this run's progress under a run that finished — and combined with the
+    no-regress rule, a ``fetched`` left by that run silently refused this run's
+    ``uploaded`` and ``analysed``, so the journal reported a well as fetched
+    for a run that had only uploaded it. Refusing outright leaves the previous
+    record whole and truthful, which is the honest outcome when this run has no
+    record of its own.
+    """
+    _open(out_dir)
+    J.record_well(out_dir, "A01", "fetched")
+    J.close_run(out_dir, outcome="ok")
+
+    # Every shape: a stage, an earlier stage, and a verdict.
+    for state in ("uploaded", "fetched", "failed"):
+        assert J.record_well(out_dir, "A01", state) is False, state
+
+    journal = J.read_journal(out_dir)
+    assert journal.outcome == "ok"
+    assert journal.wells["A01"].state == "fetched"
+
+
+def test_a_failed_open_leaves_the_previous_record_whole_and_uncontradicted(
+        out_dir, monkeypatch):
+    """The two halves of the same commit, driven together.
+
+    `test_a_failed_open_does_not_strip_the_record_it_could_not_replace` pins
+    that the wells survive; this pins that the run which could not open one
+    does not then write into them.
+    """
+    _open(out_dir)
+    J.record_well(out_dir, "A01", "fetched")
+    J.close_run(out_dir, outcome="ok")
+    monkeypatch.setattr(J, "_atomic_write_json", lambda *a, **kw: False)
+    assert _open(out_dir) is False
+    monkeypatch.undo()
+
+    assert J.record_well(out_dir, "A01", "uploaded") is False
+
+    journal = J.read_journal(out_dir)
+    assert journal.outcome == "ok" and journal.wells["A01"].state == "fetched", (
+        "the failed run contradicted the record it could not replace")

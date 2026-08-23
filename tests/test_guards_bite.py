@@ -1618,6 +1618,15 @@ JOURNAL_ROSTER_VIOLATIONS = {
     # canonical roster, at which point it *is* the module's only list of the
     # states, and `_reconcile_fetch` proved what that costs by iterating one to
     # build a tally that then silently dropped every state it did not spell.
+    # The evasion the first exemption allowed: the roster is spelled out, and
+    # the only mention of WELL_STATES is prose. A whole-file substring test
+    # read that as "consults the canonical roster" and waved the module
+    # through — including `remote_runner.py`, where the defect happened.
+    "roster-named-only-in-a-comment": (
+        '# Ordered to match WELL_STATES.\n'
+        'PHRASES = {"fetched": "fetched", "skipped": "skipped",\n'
+        '           "failed": "failed", "not-fetched": "not fetched"}\n'
+    ),
     "unanchored-label-dict": (
         'PHRASES = {"fetched": "fetched", "skipped": "skipped",\n'
         '           "failed": "failed", "not-fetched": "not fetched"}\n'

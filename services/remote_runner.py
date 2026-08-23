@@ -31,7 +31,6 @@ here:
 
 from __future__ import annotations
 
-import hashlib
 import io
 import json
 import os
@@ -49,7 +48,7 @@ import zipfile
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path, PurePosixPath
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 
 from services.remote_config import (
     DEFAULT_CONDA_ENV,
@@ -164,6 +163,24 @@ from services.remote_transport import (  # noqa: F401
     _rsync_supports_info_flag,
     _rsync_version,
     _rsync_with_retry,
+)
+
+# Where a run lives, and whether an earlier one's output may be reused — the
+# addresses, the keys they are derived from, and the re-attach decision. Its own
+# module because it is pure, which is what lets the reuse predicate be tested
+# directly rather than through a harness. Re-exported so existing imports work.
+from services.remote_run_id import (  # noqa: F401
+    UPLOAD_HEARTBEAT,
+    UPLOAD_SENTINEL,
+    RemoteRunPaths,
+    _choose_remote_output_dir,
+    _compute_run_id,
+    _forced_from_argv,
+    _local_input_dir_from_argv,
+    _parse_argv_flags,
+    pipeline_argv_digest,
+    remote_run_dir,
+    remote_run_paths,
 )
 
 from services.remote_scratch import (  # noqa: F401
@@ -876,89 +893,8 @@ def _canonical_well_from_path(stem: str) -> str | None:
     return canonical_well_label(stem)
 
 
-def pipeline_argv_digest(
-    pipeline_argv: list[str], *, extras: Sequence[str] = (),
-) -> str:
-    """Hash the arguments that decide the *bytes* a run produces.
-
-    Split out of :func:`_compute_run_id` so the run journal can record "this
-    plate, configured this way" and a later run can recognise it, without a
-    second definition of which flags count. Two runs whose digests differ are
-    not producing interchangeable output, whatever else they share.
-
-    Skips the input/output paths (already implied by the cache key, which is
-    computed over the input archives) and ``--force`` (a re-processing knob, not
-    a change of configuration — which is what lets a forced re-run land in the
-    same remote directory and overwrite it).
-
-    ``extras`` are the flags a *remote* run adds on top of the local argv —
-    :meth:`RemoteRunner._host_argv_extras`. They are not in ``pipeline_argv``
-    because nothing local produces them, and leaving them out made two runs
-    that compute different numbers hash identically. They are appended rather
-    than merged, so the digest is stable in their order.
-    """
-    skip_with_value = {"--input_dir", "--output_dir"}
-    skip_flags = {"--force"}
-    filtered: list[str] = []
-    i = 0
-    while i < len(pipeline_argv):
-        a = pipeline_argv[i]
-        if a in skip_with_value:
-            i += 2
-            continue
-        if a in skip_flags:
-            i += 1
-            continue
-        filtered.append(a)
-        i += 1
-    filtered.extend(str(e) for e in extras)
-    return hashlib.blake2b("|".join(filtered).encode(), digest_size=8).hexdigest()
 
 
-def _choose_remote_output_dir(
-    fresh: str,
-    stored: str,
-    *,
-    forced: bool,
-    remote_has_outputs: bool,
-) -> tuple[str, str]:
-    """Which remote output directory this run should use, and why.
-
-    A module-level function rather than a branch inside ``spawn`` for two
-    reasons: ``spawn`` is already near the complexity ratchet's ceiling, and a
-    decision that cannot be called directly cannot be run against fixtures —
-    only read, which is how the wrong branch gets described as the app's
-    behaviour.
-
-    ``fresh`` is the address derived the usual way, from the staged archives'
-    ``(name, size, mtime)`` and the pipeline argv. ``stored`` is the one a
-    previous run of this same configuration recorded in the output directory's
-    journal, or ``""``. They differ when the previous run's upload was
-    *rewritten* into scratch — a channel filter that cleared
-    ``REWRITE_MIN_SAVING``, or an incremental split — because a fresh staging
-    copy carries a new mtime every run and so keys differently every run. The
-    work that run computed is then sitting in a directory nothing will look in
-    again.
-
-    Returns ``(chosen, reason)``. The stored address wins only when it exists,
-    differs, is not overridden by a forced run, **and** the caller has confirmed
-    it still holds output: the journal says where work was sent, which is not
-    the same claim as the work still being there. The journal proposes; the
-    remote listing decides.
-    """
-    if not stored or stored == fresh:
-        return fresh, ""
-    if forced:
-        return fresh, (
-            "a recorded prior output dir was ignored: this run was asked to "
-            "reprocess")
-    if not remote_has_outputs:
-        return fresh, (
-            f"a prior run recorded {stored}, but it holds no output now — "
-            f"using {fresh}")
-    return stored, (
-        f"re-attaching to {stored}, recorded by a prior run of this plate "
-        f"(the freshly-derived address would have been {fresh})")
 
 
 #: Which well a ``_verify_local_manifest`` message is about. That method emits
@@ -1052,77 +988,12 @@ def _record_remote_in_journal(
         swallowed(f"could not record the remote address in {local_output_dir}")
 
 
-def _compute_run_id(
-    cache_key: str, pipeline_argv: list[str], *, extras: Sequence[str] = (),
-) -> str:
-    """Deterministic run_id from input cache_key + pipeline-args
-    hash. Same input + same pipeline config → same run_id, so
-    re-running lands in the existing remote output dir and the
-    pipeline's own ``output_exists_for_well`` logic skips wells
-    whose ``{well}_out.zip`` already exists.
-
-    v5.2.25: skips per-run-irrelevant flags so the cache slot stays
-    stable across a forced-reprocess re-run, and so input/output
-    dir paths don't churn the hash. ``--force`` users will hit the
-    same dir and overwrite the cached outputs (which is what
-    ``--force`` is supposed to mean).
-
-    Which flags count is :func:`pipeline_argv_digest`'s answer, not a second
-    one kept here: the run journal records that digest so a later run can
-    recognise the same configuration, and two spellings of "same config"
-    would have the journal offering an address the run id says belongs
-    somewhere else.
-
-    ``extras`` carries the host- and filter-level flags a remote run appends to
-    the local argv, so a plate run against a CPU-only host, or with a host
-    override, or with the Fetch filter changed, addresses its own directory
-    instead of finding the other configuration's outputs already complete
-    there."""
-    return f"{cache_key[:16]}-{pipeline_argv_digest(pipeline_argv, extras=extras)}"
 
 
-@dataclass(frozen=True)
-class RemoteRunPaths:
-    """Every remote path one run owns, derived once.
-
-    ``out`` is the only one a re-attaching run ever re-points; the other three
-    stay under this run's own ``run_id``, because
-    :meth:`RemoteRunner._sweep_orphaned_allocation` finds a crashed session's
-    scheduler job by recomputing exactly that address.
-    """
-
-    run_dir: str
-    out: str
-    pidfile: str
-    sentinel: str
-    heartbeat: str
 
 
-def remote_run_dir(host: "RemoteHost", run_id: str) -> str:
-    """``{remote_staging_dir}/runs/{run_id}`` — the one place this is spelled.
-
-    It was spelled nine times, across three classes, while the *dataset* address
-    right beside it had exactly one definition
-    (:meth:`DatasetCache.remote_dataset_dir`). Every change to "where does a run
-    live" was therefore an N-site sweep with no mechanical way to discover N,
-    and the defects that produced were not hypothetical: a re-attaching run's
-    own directory went uncreated because one of the ten was the output path and
-    the ``mkdir`` used it, and the cleanup that followed named a different one
-    again. ``tests/test_one_definition_of_the_run_dir.py`` holds the rule.
-    """
-    return f"{host.remote_staging_dir}/runs/{run_id}"
 
 
-def remote_run_paths(host: "RemoteHost", run_id: str) -> RemoteRunPaths:
-    """The four paths a run owns, so they cannot disagree about their parent."""
-    run_dir = remote_run_dir(host, run_id)
-    return RemoteRunPaths(
-        run_dir=run_dir,
-        out=f"{run_dir}/out",
-        pidfile=f"{run_dir}/run.pid",
-        sentinel=f"{run_dir}/{UPLOAD_SENTINEL}",
-        heartbeat=f"{run_dir}/{UPLOAD_HEARTBEAT}",
-    )
 
 
 def _snapshot_local_artifacts(local_output_dir: Path) -> dict:
@@ -1166,21 +1037,6 @@ def _artifact_changed(run, path: Path) -> bool:
     return (st.st_size, st.st_mtime_ns) != before
 
 
-def _forced_from_argv(pipeline_argv: list[str]) -> tuple[bool, frozenset[str]]:
-    """The run's re-processing intent, read back off the argv it will run.
-
-    The argv is the only place both spawn paths agree on what the user asked
-    for, and the batched runner already reads ``--force`` back out of it the
-    same way. Returns ``(force_all, forced_wells)``.
-    """
-    force_all = "--force" in pipeline_argv
-    wells: list[str] = []
-    if "--force_wells" in pipeline_argv:
-        i = pipeline_argv.index("--force_wells") + 1
-        while i < len(pipeline_argv) and not pipeline_argv[i].startswith("--"):
-            wells.append(pipeline_argv[i])
-            i += 1
-    return force_all, _canonical_force_wells(wells)
 
 
 def _pipeline_launch_is_pointless(
@@ -2070,21 +1926,6 @@ def _tp_sort_key(tok: str):
     return tp_sort_key(tok)
 
 
-def _local_input_dir_from_argv(argv) -> "Path | None":
-    """The ``--input_dir`` the local argv named, before the remote rewrite.
-
-    This is the user's own plate directory. For an incremental run the *staged*
-    upload is a different, partial directory, and a completeness check pointed
-    at that one would call a plate finished on the strength of the slice that
-    happened to be re-uploaded.
-    """
-    argv = list(argv or [])
-    for i, arg in enumerate(argv):
-        if arg == "--input_dir" and i + 1 < len(argv):
-            return Path(argv[i + 1])
-        if arg.startswith("--input_dir="):
-            return Path(arg.split("=", 1)[1])
-    return None
 
 
 def input_well_containers(input_dir: Path | None) -> dict[str, Path]:
@@ -2579,7 +2420,6 @@ def _scheduler_handoff_lines(launcher: str, *, batch: int | None = None) -> str:
 # the allocation be requested *while* the upload is still running instead of
 # after it: on a busy cluster the queue wait and the transfer then overlap
 # instead of running end to end.
-UPLOAD_SENTINEL = ".aw_upload_complete"
 
 # How long a granted allocation will wait for that file before giving up. The
 # node is idle and billed for every second of it, so this is a backstop against
@@ -2600,7 +2440,6 @@ _UPLOAD_WAIT_EXIT = 75
 # The file is touched over ssh, so its mtime is the *remote* clock and the job
 # comparing it against its own ``date`` is not measuring clock skew between two
 # machines.
-UPLOAD_HEARTBEAT = ".aw_upload_alive"
 UPLOAD_HEARTBEAT_S = 30
 UPLOAD_HEARTBEAT_STALE_S = 120
 
@@ -3973,32 +3812,6 @@ def _empty_well_blanks(argv, well_zips) -> tuple[str, ...]:
     return tuple(z.stem for z in well_zips if _bg_well_key(z.stem) in wanted)
 
 
-def _parse_argv_flags(argv, multi: set[str], single: set[str]) -> dict:
-    """Read *multi*- and *single*-valued flags out of a pipeline argv.
-
-    A multi-valued flag (``--fluor_tokens GFP mCherry DAPI``) consumes entries
-    until the next ``--``. A plain ``next(it)`` picks up only the FIRST, which is
-    how the batched-remote threshold pass came to see one channel of many.
-    """
-    out: dict = {}
-    argv = [str(a) for a in argv]
-    i = 0
-    while i < len(argv):
-        arg = argv[i]
-        if arg in multi:
-            values: list[str] = []
-            i += 1
-            while i < len(argv) and not argv[i].startswith("--"):
-                values.append(argv[i])
-                i += 1
-            out[arg] = values
-            continue
-        if arg in single:
-            out[arg] = argv[i + 1] if i + 1 < len(argv) else ""
-            i += 2
-            continue
-        i += 1
-    return out
 
 
 def _auto_threshold_args_from_argv(argv):

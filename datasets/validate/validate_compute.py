@@ -607,9 +607,9 @@ def _row_content_findings(
 def _no_csv_finding(well: str, evidence: WellEvidence) -> Finding:
     """Why this well has images and no measurements CSV, and what fixes it.
 
-    The three answers are genuinely different and used to be one hedged
-    sentence ("it may have segmented zero cells at every timepoint"), which
-    told a user neither what happened nor what to do:
+    The four answers are genuinely different and were once one hedged sentence
+    ("it may have segmented zero cells at every timepoint"), which told a user
+    neither what happened nor what to do:
 
     * the run recorded the well, covered none of its FOV-groups, failed
       nothing and left no traceback — it segmented zero cells, which is a
@@ -617,13 +617,19 @@ def _no_csv_finding(well: str, evidence: WellEvidence) -> Finding:
       ``info`` and the well is left off the force list.
     * the run recorded failures, or left tracebacks under ``out/errors/`` —
       a real gap, with the run's own records naming it. ``error``.
+    * the run journal recorded the output as produced on a remote host and
+      never transferred — the compute is done and the gap is the download, so
+      the remedy is to fetch rather than to re-segment. ``error``.
     * no record at all (the run died before writing one, or predates the
       block) — unknown, so it is reported as a gap rather than assumed
       benign, since assuming benign is how a missing CSV goes unnoticed.
 
-    The last two both need a *forced* reprocess: an incremental run counts this
-    well's own output images as already done and reports it up to date, so it
-    would skip the well forever.
+    **``no_csv_failed`` and ``no_csv`` need a forced reprocess**, because an
+    incremental run counts this well's own output images as already done and
+    reports it up to date, so it would skip the well forever. The other two do
+    not, and both are held off ``wells_needing_force`` for that reason — one
+    would reproduce the same empty result, the other would spend hours
+    recomputing output that already exists on the far side.
     """
     forced_remedy = (
         "An incremental run counts this well's own output images as already "

@@ -3078,11 +3078,17 @@ sidecar otherwise, so it works on datasets that predate the journal. The
 run-scope knobs (`force`, `force_wells`, `incremental`) are never restored: they
 say what the *last* run was told to do, and silently re-forcing a plate because
 the previous run was forced is the most expensive kind of surprise. **And it
-renders; it does not phrase.** Every claim comes back verbatim from whatever
-owns it — `ScopePlan.reason` for what the run will do about images added since
-last time, `completeness`'s own counts for coverage — which is
-`test_layout_readout_single_source.py`'s rule over the layout line beside it,
-for the same reason. A coverage comparison that comes back incoherent (more
+reports; it does not decide.** Every *claim* in the readout comes back verbatim
+from whatever owns it — `ScopePlan.preview` for what the run will do about
+images added since last time, `completeness`'s own counts for coverage, the
+journal's recorded per-well states for what happened last time — and the pane
+supplies only the connective prose between them. That is deliberately weaker
+than `test_layout_readout_single_source.py`'s rule over the layout line beside
+it, which requires the label to *be* a quoted planner value: that suits a
+one-sentence readout, not a paragraph drawn from four sources.
+`test_analyze_preflight.py::test_the_scope_line_is_the_planners_own_sentence`
+guards the piece that could drift, the scope line, by pinning it to the
+planner's own words. A coverage comparison that comes back incoherent (more
 field groups covered than the input was measured to hold, which means the
 filename schema is not parsing both sides the same way) is reported as such
 rather than printed as a ratio over 1.
@@ -4226,8 +4232,14 @@ returns an index entry with no `closed_at` — a run the process did not survive
 which is what `--incremental` reads as its done-set, so what separates them from
 `ok` is only that the plate is not done yet. A failure especially: it is the case
 where a user most wants to carry on. That roster is named once in `run_journal`
-rather than restated by each surface, and it is the same shape as
-`JobState.RESUMABLE`, which the job queue already applies to the same question.
+rather than restated by each surface.
+
+It is **wider** than `JobState.RESUMABLE`, and the difference is deliberate. The
+queue treats a failed or cancelled job as terminal (`JobState.FAILURE_LIKE`),
+because the jobs chained behind it are waiting on output that is never coming and
+have to be released rather than left hanging. Nothing is chained behind a resume
+banner, so the only question it asks is whether *this* plate has work left worth
+picking up — and after a failure it does, in the wells that got through.
 
 **Which one is offered is decided by the folder on the form.** Both records are
 ordered newest-first across every plate, so taking the newest outright can

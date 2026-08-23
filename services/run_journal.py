@@ -115,9 +115,13 @@ RUN_OUTCOMES = ("ok", "error", "stopped", "suspended")
 #: leaves each finished well's CSV and out-zip on disk, which is what an
 #: incremental re-run reads as its done-set — so what separates them from
 #: ``"ok"`` is only that the plate is not done yet. Named once here rather than
-#: restated by each surface that offers a resume; the roster is the same shape
-#: as ``JobState.RESUMABLE``, which the job queue already applies to the same
-#: question.
+#: restated by each surface that offers a resume.
+#:
+#: This roster differs from ``JobState.RESUMABLE``, deliberately. The queue calls a *failed*
+#: job terminal, because its successors are waiting on output that is never
+#: coming and have to be told. Nothing is chained behind a resume banner, so the
+#: only question here is whether the plate has work left worth picking up — and
+#: after a failure it does, in the wells that got through.
 UNFINISHED_OUTCOMES = ("error", "stopped", "suspended")
 
 #: The run modes, matching what ``PipelineRunner`` actually launched.

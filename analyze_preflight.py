@@ -34,13 +34,17 @@ folder. And the run-scope knobs — ``force``, ``force_wells``, ``incremental``
 silently re-forcing a plate because the previous run was forced would be the
 most expensive kind of surprise.
 
-**It renders; it does not phrase.** Every claim comes back verbatim from the
+**It reports; it does not decide.** Every *claim* comes back verbatim from the
 function that owns it — ``ScopePlan.preview`` for what the run will do about new
 images, ``completeness``'s own counts for coverage, the journal's recorded
-states for what happened. This is the rule
-``tests/test_layout_readout_single_source.py`` already holds over the layout
-line beside it, for exactly the same reason: the preview and the run must not
-be able to disagree.
+states for what happened — and this module supplies only the connective prose
+between them, so the preview and the run cannot disagree about a value. That is
+deliberately weaker than ``tests/test_layout_readout_single_source.py``'s rule
+over the layout line beside it, which requires the label to *be* a quoted
+planner value; that shape suits a one-sentence readout, not a paragraph drawn
+from four sources. The piece that could drift is the scope line, and
+``tests/test_analyze_preflight.py::test_the_scope_line_is_the_planners_own_sentence``
+pins it to the planner's own words.
 
 Held as a mixin rather than folded into ``analyze_tab.py`` for the reason
 ``analyze_suspend`` and ``analyze_progress`` were — that file sits against its

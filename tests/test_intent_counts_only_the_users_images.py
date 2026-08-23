@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import zipfile
 
+import pytest
+
 from pipeline.capacity import sample_image_bytes
 from pipeline.completeness import coverage_for_well
 from util.image_exts import GROUP_IMAGE_EXTS, is_group_image, is_run_input_member
@@ -289,3 +291,89 @@ def test_both_kinds_of_shortfall_are_reported_together():
     })
     assert "NO INPUT GROUPS" in line and "INCOMPLETE" in line, line
     assert "A01" in line and "B02" in line
+
+
+# ── P4: folder mode audited a container the run had deleted ─────────────────
+
+def test_folder_mode_reads_the_container_the_run_left_behind(tmp_path):
+    """`record_run_check` was handed the pre-run folder paths.
+
+    Folder mode's worker compresses `<WELL>/` into `<WELL>.zip` and removes the
+    folder, so every path the check was given is gone by the time it runs.
+    `_member_names` answered None for all of them, intent was 0 for all of
+    them, nothing could ever be missing, and a folder run reported 96 of 96
+    whatever it had produced — structurally incapable of reporting a partial
+    well, rather than a threshold set too loose.
+    """
+    import shutil
+
+    from pipeline.completeness import _member_names, resolve_input_container
+
+    folder = tmp_path / "in" / "A01"
+    folder.mkdir(parents=True)
+    (folder / "P_DAPI_A01_F1_T1.tif").write_bytes(b"x")
+    with zipfile.ZipFile(tmp_path / "in" / "A01.zip", "w") as zf:
+        zf.writestr("P_DAPI_A01_F1_T1.tif", b"x")
+    shutil.rmtree(folder)                       # what the worker does
+
+    resolved = resolve_input_container(folder)
+    assert resolved is not None and resolved.name == "A01.zip", (
+        "the check still looks for the folder the run deleted, so it compares "
+        "the output against nothing")
+    assert _member_names(resolved) == {"P_DAPI_A01_F1_T1.tif"}
+
+
+def test_a_container_that_vanished_entirely_is_not_read_as_complete(tmp_path):
+    """The other half: unreadable must not mean "nothing was asked for"."""
+    from pipeline.completeness import resolve_input_container
+
+    gone = tmp_path / "in" / "H12"
+    assert resolve_input_container(gone) is None
+
+
+# ── P5: images moved into folders the run then ignores ──────────────────────
+
+def test_images_stranded_in_an_ignored_folder_stop_the_run(tmp_path):
+    """`well_folders` is read only when there are no zips at all.
+
+    `organize_loose_tifs_into_well_folders` has already *moved* the user's
+    loose images into `in/<WELL>/` by then, so on a plate that also holds a
+    zip those images are somewhere the run will never look — and the run
+    reports success having analysed everything except what the user just
+    added.
+    """
+    from process_microscopy import (
+        _refuse_images_only_in_ignored_folders, find_well_zips)
+
+    d = tmp_path / "in"
+    d.mkdir()
+    with zipfile.ZipFile(d / "A01.zip", "w") as zf:
+        zf.writestr("P_DAPI_A01_F1_T1.tif", b"x")
+    (d / "B02").mkdir()
+    (d / "B02" / "P_DAPI_B02_F1_T1.tif").write_bytes(b"x")
+
+    with pytest.raises(SystemExit) as caught:
+        _refuse_images_only_in_ignored_folders(d, find_well_zips(d))
+
+    assert "B02" in str(caught.value) and "P_DAPI_B02_F1_T1.tif" in str(caught.value), (
+        "the refusal must name the wells and files, because the remedy "
+        "depends on which they are")
+
+
+def test_a_redundant_folder_beside_its_archive_still_runs(tmp_path):
+    """A resumed plate's leftover folder is the archive's twin, not new input.
+
+    Refusing there would break every resume, which is why the check is "holds
+    an image the archive does not" rather than "holds an image".
+    """
+    from process_microscopy import (
+        _refuse_images_only_in_ignored_folders, find_well_zips)
+
+    d = tmp_path / "in"
+    d.mkdir()
+    with zipfile.ZipFile(d / "A01.zip", "w") as zf:
+        zf.writestr("P_DAPI_A01_F1_T1.tif", b"x")
+    (d / "A01").mkdir()
+    (d / "A01" / "P_DAPI_A01_F1_T1.tif").write_bytes(b"x")
+
+    _refuse_images_only_in_ignored_folders(d, find_well_zips(d))

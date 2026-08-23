@@ -322,6 +322,33 @@ def _member_names(container: Path) -> set | None:
     return names or None
 
 
+def resolve_input_container(recorded) -> Path | None:
+    """Where a well's input actually is *now*, not where it was before the run.
+
+    Folder mode hands this check the ``<WELL>/`` folder paths the run resolved
+    at its start, and the per-well worker compresses that folder into
+    ``<WELL>.zip`` and removes it. So by the time completeness runs, every path
+    it was given is gone: `_member_names` answered ``None`` for all of them,
+    intent was 0 for all of them, nothing could ever be missing, and a folder
+    run reported 96 of 96 whatever it had actually produced. Structurally
+    incapable of reporting a partial well — not a threshold that was too loose,
+    a comparison with nothing on one side.
+
+    So the recorded path is a starting point rather than the answer: if it is
+    gone and the archive the run would have written in its place is there, that
+    archive is the input container.
+    """
+    if recorded is None:
+        return None
+    recorded = Path(recorded)
+    if recorded.exists():
+        return recorded
+    if recorded.suffix:
+        return None
+    zipped = recorded.with_suffix(".zip")
+    return zipped if zipped.exists() else None
+
+
 def csv_keys_and_state(path: Path) -> tuple[set[tuple[str, str]], str]:
     """A per-well CSV's ``(fov, timepoint)`` keys and how readable it was.
 
@@ -493,7 +520,11 @@ def scan_run(
 
     for well in wells:
         try:
-            container = in_map.get(well)
+            # Resolved now, not as the run recorded it: folder mode zips the
+            # folder away mid-run, so the recorded path is stale by the time
+            # this reads it.
+            container = resolve_input_container(in_map.get(well))
+            recorded_container = in_map.get(well)
             out_zip = out_zip_path(out_dir, well)
             out_folder = out_folder_path(out_dir, well)
             csv_keys, csv_state = csv_keys_and_state(
@@ -509,6 +540,14 @@ def scan_run(
                 skip_hidden=bool(container is not None and container.is_dir()),
                 failed=failed_map.get(well, ()),
             )
+            if recorded_container is not None and cov.intent == 0:
+                # The run named a container for this well and nothing could be
+                # read from it. That is not "nothing was asked for" — it is a
+                # question this check could not answer, and answering
+                # `complete` on the strength of an empty comparison is the
+                # substitution CLAUDE.md §7 forbids. Recorded as a scan that
+                # gave up, which forces a non-complete state for the plate.
+                partial_scan = True
         except Exception:
             # One unreadable well must not cost the record for the other 95.
             partial_scan = True

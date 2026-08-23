@@ -25,16 +25,17 @@ from matplotlib import patches as mpatches
 from matplotlib import colormaps as mpl_colormaps
 
 
-from well_viewer.data.data_loading import (
-    _all_fluor_values_filtered,
-    get_rows,
-)
 from well_viewer.features.heatmap.models import (
     HeatmapLayout,
     make_plate_layout,
 )
 from well_viewer.domain.ratio_models import is_ratio_key
-from well_viewer.domain.stats_compute import aggregate_group, _gate_cache_sig
+from well_viewer.domain.stats_compute import (
+    _gate_cache_sig,
+    aggregate_group,
+    group_replicate_stats,
+    replicate_mean,
+)
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current
 from well_viewer.core.channel_state_controller import (
@@ -233,39 +234,45 @@ def _repset_name_for_wells(ctx, wells: Iterable[str]) -> str | None:
     return None
 
 
-def _pool_filtered_mean(
+#: Which :class:`ReplicateStat` field each averaging metric reduces. ``METRIC_COUNT``
+#: is absent on purpose — it is a total, not an average (see ``_cell_value``).
+_METRIC_FIELD = {
+    METRIC_MEAN: "mean",
+    METRIC_MEAN_ALL: "mean_all",
+    METRIC_FRACTION: "frac",
+    METRIC_RATIO: "mean_all",
+}
+
+
+def _repset_mean_of_means(
     ctx,
-    wells,
+    wells: list[str],
+    target_t: float,
+    metric: str,
     *,
     val_col: str,
+    threshold: float,
     fluor_gates: dict[str, float],
-    ratios,
-    target_t: float,
 ) -> float:
-    """Return the mean of ``_all_fluor_values_filtered`` across *wells*.
+    """Mean across replicates of *metric*, from the canonical replicate list.
 
-    Filters each well's DataFrame separately and concatenates the
-    resulting 1-D float arrays — much cheaper than ``pd.concat`` on
-    the full per-well DataFrames inside the heatmap's O(T·R·C) inner
-    loop.
+    ``group_replicate_stats`` is the one producer Bar, Line and the Statistics
+    test reduce, and ``replicate_mean`` is the same reducer they use, so this
+    cannot describe a different quantity from the bar drawn beside it. The
+    replicate unit follows the app's per-FOV toggle for the same reason: when
+    the toggle is on the plots average per-FOV means, and a heatmap averaging
+    per-well means would disagree with them again in the other direction.
     """
-    parts: list[np.ndarray] = []
-    for w in wells:
-        df = get_rows(ctx, w)
-        if df is None or df.empty:
-            continue
-        vals = _all_fluor_values_filtered(
-            df, val_col=val_col,
-            fluor_gates=fluor_gates,
-            ratios=ratios,
-            tp_filter=target_t,
-        )
-        if vals.size:
-            parts.append(vals)
-    if not parts:
+    reps = group_replicate_stats(
+        ctx, wells, target_t,
+        use_fov=bool(getattr(ctx.state.plot, "use_fov_replicates", False)),
+        val_col=val_col,
+        threshold=threshold,
+        fluor_gates=fluor_gates,
+    )
+    if not reps:
         return float("nan")
-    pooled = parts[0] if len(parts) == 1 else np.concatenate(parts)
-    return float(pooled.mean())
+    return replicate_mean(reps, _METRIC_FIELD[metric])
 
 
 def _cell_value(
@@ -276,24 +283,25 @@ def _cell_value(
     val_col: str,
     threshold: float,
     fluor_gates: dict[str, float],
-    ratios: dict | None = None,
 ) -> float:
-    """Compute the heatmap cell value by pooling rows across *wells*.
+    """Compute the heatmap cell value for *wells* at *target_t*.
 
-    **This is a different statistic from the one Bar, Line and Stats show for
-    the same replicate set**, and the difference is not cosmetic. Those three
-    take the mean of each well's mean, weighting every well equally. Pooling
-    concatenates the cells first, so a well contributes in proportion to how
-    many cells it has — a replicate that segmented twice as many nuclei pulls
-    the cell twice as hard. On a set whose wells differ in confluence the two
-    numbers diverge, and a user reading a heatmap cell against the bar beside
-    it has no way to see why.
+    **The averaging metrics are the mean of each replicate's mean**, which is
+    what Bar, Line and Stats draw for the same set. They all reduce the one
+    replicate list ``group_replicate_stats`` produces, so a heatmap cell and
+    the bar beside it cannot describe different quantities.
 
-    Which convention is right for a heatmap is a judgement nobody has recorded,
-    so this states what the code does rather than asserting it is correct. If
-    the two are ever unified, they must be unified everywhere at once:
-    ``aggregate_group`` is shared, and changing it silently re-scales every
-    figure in the app.
+    This used to pool the cells of every well and take a single mean over the
+    pool, which weights a well by how many cells it segmented: a replicate that
+    happened to be more confluent pulled the cell harder, and on a set whose
+    wells differ in confluence the heatmap and the bar showed different numbers
+    with nothing saying why. A cell holding one well is unaffected — the mean of
+    one well's mean is that well's mean.
+
+    ``METRIC_COUNT`` is deliberately **not** converted. It reports how many
+    cells the set contains, which is a total rather than an average, and the
+    mean of the per-well counts would be a different quantity rather than a
+    more consistent one. It stays the pooled total and says so on the cell.
     """
     expanded = _expand_repset_wells(ctx, wells)
     valid_wells = [w for w in expanded if w in ctx.state.dataset.well_paths]
@@ -315,55 +323,35 @@ def _cell_value(
         return float(matched[0][5]) if matched else float("nan")
 
     if metric == METRIC_FRACTION:
-        pts = aggregate_group(ctx,
-            valid_wells, threshold=threshold, use_sem=False,
-            val_col=val_col,
-            fluor_gates=fluor_gates,
+        return _repset_mean_of_means(
+            ctx, valid_wells, target_t, metric,
+            val_col=val_col, threshold=threshold, fluor_gates=fluor_gates,
         )
-        matched = [pt for pt in pts if tp_close(pt[0], target_t)]
-        if not matched:
-            return float("nan")
-        return float(matched[0][3])
 
     if metric == METRIC_RATIO:
         if not is_ratio_key(val_col):
             return float("nan")
-        # Run the filter per well and concat the resulting 1-D float
-        # arrays instead of pd.concat'ing the per-well DataFrames.
-        # `_compute_global_range` calls this O(T·R·C) times per
-        # heatmap redraw — full-frame concat in the hot loop was the
-        # bottleneck on slider scrubs.
-        return _pool_filtered_mean(
-            ctx, valid_wells,
-            val_col=val_col,
-            fluor_gates=fluor_gates,
-            ratios=ratios,
-            target_t=target_t,
+        return _repset_mean_of_means(
+            ctx, valid_wells, target_t, metric,
+            val_col=val_col, threshold=threshold, fluor_gates=fluor_gates,
         )
 
     if metric == METRIC_MEAN_ALL:
         # Mean across every included cell at the target timepoint — no
         # per-channel ThreshFracOn filter applied. Useful for non-MFI
         # properties (Total / Max / Min / Std) where the MFI threshold is
-        # semantically irrelevant.
-        return _pool_filtered_mean(
-            ctx, valid_wells,
-            val_col=val_col,
-            fluor_gates=fluor_gates,
-            ratios=ratios,
-            target_t=target_t,
+        # semantically irrelevant. Averaged per replicate, like its siblings.
+        return _repset_mean_of_means(
+            ctx, valid_wells, target_t, metric,
+            val_col=val_col, threshold=threshold, fluor_gates=fluor_gates,
         )
 
     # METRIC_MEAN (and fallback)
-    pts = aggregate_group(ctx,
-        valid_wells, threshold=threshold, use_sem=False,
-        val_col=val_col,
-        fluor_gates=fluor_gates,
+    return _repset_mean_of_means(
+        ctx, valid_wells, target_t,
+        metric if metric in _METRIC_FIELD else METRIC_MEAN,
+        val_col=val_col, threshold=threshold, fluor_gates=fluor_gates,
     )
-    matched = [pt for pt in pts if tp_close(pt[0], target_t)]
-    if not matched:
-        return float("nan")
-    return float(matched[0][1])
 
 
 def _resolve_color_scale(arr: np.ndarray, ctx) -> tuple[float | None, float | None]:
@@ -477,7 +465,7 @@ def _compute_global_range(
             try:
                 v = _cell_value(
                     ctx, wells, tp, metric, val_col,
-                    threshold, fluor_gates, ratios,
+                    threshold, fluor_gates,
                 )
             except Exception:
                 v = float("nan")
@@ -535,7 +523,7 @@ def redraw_heatmap(ctx) -> None:
         try:
             arr[r, c] = _cell_value(
                 ctx, wells, tp, metric, val_col,
-                threshold, fluor_gates, ratios,
+                threshold, fluor_gates,
             )
         except Exception:
             arr[r, c] = float("nan")

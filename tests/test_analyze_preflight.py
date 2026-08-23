@@ -14,6 +14,7 @@ fixture here.
 from __future__ import annotations
 
 import json
+import shutil
 import zipfile
 
 import pytest
@@ -89,6 +90,22 @@ def _point_at(tab, path) -> None:
 
 def _text(tab) -> str:
     return tab._preflight_label.text()
+
+
+class _FakeThread:
+    """A ``threading.Thread`` stand-in that records the start and runs nothing.
+
+    The point of these tests is *how many* walks are started, so the walk
+    itself must not run: a real one would emit the completion signal and clear
+    the in-flight marker before the assertion could see it.
+    """
+
+    def __init__(self, started: list[str], kw: dict) -> None:
+        self._started = started
+        self._name = str(kw.get("name") or "")
+
+    def start(self) -> None:
+        self._started.append(self._name)
 
 
 # ── tier one: what the journal says ─────────────────────────────────────────
@@ -295,6 +312,70 @@ def test_a_scan_for_another_folder_is_discarded(tab, plate):
         "csv_prefix": "measurements"})
     tab._on_coverage_scanned("/somewhere/else/out", block)
     assert _text(tab) == before
+
+
+def test_a_second_settle_does_not_put_a_second_walk_on_the_same_plate(
+        tab, plate, monkeypatch):
+    """The settle timer bounds how often a scan is *asked* for, not how long
+    one takes. A plate on a slow volume outlives several settles, and without a
+    bound each settle would start another thread walking the same directory."""
+    started: list[str] = []
+    monkeypatch.setattr("analyze_preflight.threading.Thread",
+                        lambda **kw: _FakeThread(started, kw))
+    _journal(plate / "out", plate / "in")
+
+    _point_at(tab, plate)
+    assert len(started) == 1, "the first settle did not start a scan"
+    tab._preflight_timer.stop()
+    tab.settle_folder_banners()
+    tab._preflight_timer.stop()
+    tab.settle_folder_banners()
+    assert len(started) == 1, "a settle started a second walk of the same plate"
+
+    # The one in flight lands; the pane is free to scan again.
+    tab._on_coverage_scanned(str(plate / "out"), None)
+    tab._preflight_timer.stop()
+    tab.settle_folder_banners()
+    assert len(started) == 2
+
+
+def test_a_folder_chosen_mid_scan_is_walked_once_the_scan_lands(
+        tab, plate, tmp_path, monkeypatch):
+    """Holding the request is only safe if it is honoured. Dropping it would
+    leave the coverage line describing the folder the user has moved away
+    from, with nothing scheduled to correct it."""
+    started: list[str] = []
+    monkeypatch.setattr("analyze_preflight.threading.Thread",
+                        lambda **kw: _FakeThread(started, kw))
+    _journal(plate / "out", plate / "in")
+    # A real second plate, not an empty pair of folders: the planner declines
+    # to resolve a directory with no archives in it, so the form would never
+    # name a second output folder to hold a request for.
+    other = tmp_path / "other"
+    shutil.copytree(plate, other)
+    _journal(other / "out", other / "in")
+
+    _point_at(tab, plate)
+    assert len(started) == 1
+    _point_at(tab, other)                  # while the first is still walking
+    assert len(started) == 1, "a second walk started before the first landed"
+
+    tab._on_coverage_scanned(str(plate / "out"), None)
+    assert len(started) == 2, "the folder chosen mid-scan was never walked"
+    assert tab._preflight_scanning == str(other / "out")
+
+
+def test_a_scan_that_cannot_be_started_does_not_wedge_every_later_one(
+        tab, plate, monkeypatch):
+    """Nothing emits the signal that clears the in-flight marker when the
+    thread never runs, so it has to come down by hand."""
+    def _refuse(**kw):
+        raise RuntimeError("can't start new thread")
+    monkeypatch.setattr("analyze_preflight.threading.Thread", _refuse)
+    _journal(plate / "out", plate / "in")
+
+    _point_at(tab, plate)
+    assert tab._preflight_scanning == ""
 
 
 def test_typing_a_path_starts_at_most_one_scan(tab, plate, monkeypatch):

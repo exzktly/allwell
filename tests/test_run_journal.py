@@ -56,7 +56,7 @@ def _open(out_dir, **kw):
 # ── the round trip ──────────────────────────────────────────────────────────
 
 def test_a_run_round_trips_through_open_and_close(out_dir):
-    _open(out_dir, argv=["--force"], expected_wells=["A01", "A02"])
+    _open(out_dir, argv=["--force"])
     J.record_well(out_dir, "A01", "fetched")
     J.close_run(out_dir, outcome="ok", message="done")
 
@@ -64,7 +64,6 @@ def test_a_run_round_trips_through_open_and_close(out_dir):
     assert journal is not None
     assert journal.outcome == "ok" and journal.message == "done"
     assert journal.argv == ("--force",)
-    assert journal.expected_wells == ("A01", "A02")
     assert journal.spec == SPEC
     assert journal.wells["A01"].state == "fetched"
 

@@ -148,6 +148,15 @@ class AnalyzePreflightMixin:
         self._preflight_dir: str = ""
         self._preflight_dismissed: str = ""
         self._preflight_coverage: str = ""
+        #: The folder a scan is currently walking, or ``""`` for none. One
+        #: scan at a time: the settle timer bounds how often a scan is *asked*
+        #: for, not how long one takes, and a plate on a slow network volume
+        #: outlives several settles — which would put a thread per settle onto
+        #: the same directory, all but the last of whose answers is discarded
+        #: on arrival anyway. A folder chosen while one is in flight is held
+        #: here and started when it lands.
+        self._preflight_scanning: str = ""
+        self._preflight_scan_queued: bool = False
         return banner
 
     # ── tier one: the journal, immediately ───────────────────────────────
@@ -333,6 +342,12 @@ class AnalyzePreflightMixin:
         target = self._preflight_dir
         if not target:
             return
+        if self._preflight_scanning:
+            # One in flight already. Note that the answer wanted now is not the
+            # one being computed and let its completion start the next, rather
+            # than running two walks of the same plate at once.
+            self._preflight_scan_queued = self._preflight_scanning != target
+            return
         try:
             opts = self._collect_run_options()
         except Exception:
@@ -359,8 +374,18 @@ class AnalyzePreflightMixin:
                 # unhandled traceback with no context.
                 swallowed(f"pre-run scan of {target} outlived its window")
 
-        threading.Thread(target=_work, name="aw-preflight-scan",
-                         daemon=True).start()
+        self._preflight_scanning = target
+        self._preflight_scan_queued = False
+        try:
+            threading.Thread(target=_work, name="aw-preflight-scan",
+                             daemon=True).start()
+        except RuntimeError:
+            # No thread could be started. Take the in-flight marker back down
+            # by hand — nothing is going to emit the signal that normally
+            # clears it, and leaving it set would refuse every later scan for
+            # the life of the pane.
+            self._preflight_scanning = ""
+            swallowed(f"could not start the pre-run scan of {target}")
 
     def _on_coverage_scanned(self, output_dir: str, block: object) -> None:
         """Fold a finished scan into the banner, if it still describes it.
@@ -369,6 +394,13 @@ class AnalyzePreflightMixin:
         shown against the wrong folder — the slowest thing this does is also
         the one whose answer goes stale.
         """
+        # Cleared before anything can return: this is the only place the
+        # in-flight marker comes down, so an early return here would leave the
+        # pane believing a scan was still running and refuse every later one.
+        self._preflight_scanning = ""
+        if self._preflight_scan_queued:
+            self._preflight_scan_queued = False
+            self._start_coverage_scan()
         if output_dir != self._preflight_dir or not isinstance(block, dict):
             return
         totals = block.get("totals") or {}

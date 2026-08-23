@@ -388,9 +388,10 @@ in the same words the run log will use.
 output — from the run's own record where there is one, otherwise from the
 `pipeline_info.json` beside it, so it works on plates you ran long ago. Nothing
 changes until you press it, so anything you have already typed is safe. The
-reprocessing options (**force**, **incremental**) are deliberately *not*
-restored: they describe what the last run was told to do, not what you want this
-one to do. **Dismiss** hides the strip for that folder.
+reprocessing options — **force**, the per-well force list, and **incremental** —
+are deliberately *not* restored: they describe what the last run was told to do,
+not what you want this one to do. A plate that was forced once would otherwise
+be forced again the moment you loaded its settings back. **Dismiss** hides the strip for that folder.
 
 ### 3. Channel tokens
 

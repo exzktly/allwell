@@ -127,6 +127,8 @@ allwell/
 ├── analyze_input.py             ← Analyze input mixin: run-dir resolver, OME-TIFF
 │                                   redirect, channel rows, browse-time folder scan
 ├── analyze_progress.py          ← Analyze run-progress rendering mixin (ETA + progress events → dashboard)
+├── analyze_preflight.py         ← Analyze pre-run mixin: what the output folder already
+│                                   holds, and offering the settings that produced it
 ├── datasets_tab.py              ← Datasets pane (page-rail shell; see §6b)
 ├── datasets/                    ← dataset tools: Qt-free compute/apply + their feature views (§6b)
 │   ├── _common/                ← what more than one tool needs: dataset_paths,
@@ -4268,9 +4270,9 @@ reporting success. The banner's second line is the journal's own per-well tally
 nothing about how complete the *output* is — that is `completeness`'s answer and
 §6.1's pre-run readout carries it.
 
-`PipelineRunner._run_pipeline_thread` is where the journal opens and closes, one
-line after `_last_output_dir` is set and inside the `finally` beside
-`("finished", None)`. That is the only chokepoint every mode passes through:
+`PipelineRunner._run_pipeline_thread` is where the journal opens and closes:
+just below where `_last_output_dir` is set and the pipeline arguments are built,
+and inside the `finally` beside `("finished", None)`. That is the only chokepoint every mode passes through:
 local, remote and batched all fork below it, and the output directory does not
 exist as a known path any earlier, because `resolve_dirs` runs inside that
 thread. The outcome comes from the runner's own flags rather than the queue it

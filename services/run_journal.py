@@ -63,7 +63,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from services.remote_config import default_state_dir
-from util.aw_safe import swallowed
+from util.aw_safe import swallow, swallowed
 
 #: Bumped when the on-disk shape changes incompatibly. A record written by any
 #: other version reads as "no journal" rather than raising — see
@@ -124,7 +124,10 @@ RUN_OUTCOMES = ("ok", "error", "stopped", "suspended")
 #: after a failure it does, in the wells that got through.
 UNFINISHED_OUTCOMES = ("error", "stopped", "suspended")
 
-#: The run modes, matching what ``PipelineRunner`` actually launched.
+#: The run modes, matching what ``PipelineRunner`` actually launched, and the
+#: only place they are spelled. :func:`open_run` refuses anything else, for the
+#: same reason ``record_well`` refuses an unknown state: a mode nobody renders
+#: is a run the readout describes as neither local nor remote.
 RUN_MODES = ("local", "remote", "remote-batched")
 
 INDEX_FILENAME = "run_index.json"
@@ -155,7 +158,6 @@ class RunJournal:
     message: str
     argv: tuple[str, ...]
     spec: dict
-    expected_wells: tuple[str, ...]
     remote: dict
     wells: dict[str, WellRecord] = field(default_factory=dict)
 
@@ -233,6 +235,7 @@ def _atomic_write_json(path: Path, payload: dict | list) -> bool:
     A run that cannot write its own bookkeeping must still produce data, so
     every caller here treats the return value as advisory and carries on.
     """
+    tmp = ""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp_",
@@ -243,9 +246,23 @@ def _atomic_write_json(path: Path, payload: dict | list) -> bool:
             os.fsync(fh.fileno())
         os.replace(tmp, path)
         return True
-    except OSError:
+    except (OSError, TypeError, ValueError):
+        # ``TypeError`` and ``ValueError`` are not hypothetical here: the
+        # payload carries a ``spec`` handed in by the caller, and one
+        # unserialisable value in it makes ``json.dump`` raise rather than the
+        # filesystem. Catching only ``OSError`` let that escape a function
+        # whose whole contract is that bookkeeping never fails a run, past
+        # callers that guard the same narrow type, and into the worker thread.
         swallowed(f"could not write the run journal at {path}")
         return False
+    finally:
+        # ``mkstemp`` created a file; every failure after that point leaves it
+        # behind, and these are per-run and per-well writes, so a plate that
+        # keeps failing would silt the output folder up with ``.tmp_*.json``.
+        # ``os.replace`` consumed it on the success path, hence ``missing_ok``.
+        if tmp:
+            with swallow(f"could not remove the temporary journal file {tmp}"):
+                Path(tmp).unlink(missing_ok=True)
 
 
 def _read_run_payload(output_dir: Path | str) -> dict | None:
@@ -266,7 +283,6 @@ def open_run(
     mode: str,
     input_dir: Path | str,
     argv: list[str] | tuple[str, ...] = (),
-    expected_wells: list[str] | tuple[str, ...] = (),
 ) -> bool:
     """Record that a run has begun, before it does any work.
 
@@ -291,7 +307,15 @@ def open_run(
     run that dies can be offered back to the user with the settings it had; the
     same serialisation ``suspend_record`` and the job queue already use, so
     there is no second form-to-JSON mapping to keep in step.
+
+    An unrecognised *mode* is refused rather than written, like an unrecognised
+    well state: every surface that renders this record words the run by its
+    mode, and one nobody spells is a run described as neither local nor remote.
     """
+    if mode not in RUN_MODES:
+        raise ValueError(
+            f"{mode!r} is not a run-journal run mode; expected one of "
+            f"{', '.join(RUN_MODES)}")
     prior = _read_run_payload(output_dir) or {}
     carried = prior.get("remote")
     _clear_wells(output_dir)
@@ -307,7 +331,6 @@ def open_run(
         "output_dir": str(output_dir),
         "argv": [str(a) for a in argv],
         "spec": spec if isinstance(spec, dict) else {},
-        "expected_wells": [str(w) for w in expected_wells],
         "remote": carried if isinstance(carried, dict) else {},
     }
     ok = _atomic_write_json(_run_path(output_dir), payload)
@@ -448,7 +471,6 @@ def read_journal(output_dir: Path | str) -> RunJournal | None:
         message=str(payload.get("message") or ""),
         argv=tuple(str(a) for a in (payload.get("argv") or [])),
         spec=payload.get("spec") if isinstance(payload.get("spec"), dict) else {},
-        expected_wells=tuple(str(w) for w in (payload.get("expected_wells") or [])),
         remote=payload.get("remote") if isinstance(payload.get("remote"), dict) else {},
         wells=_read_wells(output_dir),
     )

@@ -938,7 +938,11 @@ class PipelineRunner:
                 input_dir=input_dir,
                 argv=argv,
             )
-        except OSError:
+        except (OSError, ValueError):
+            # ``ValueError`` is ``open_run`` refusing a mode it does not know —
+            # a programming error, but one that must not take a run down with
+            # it, because the artefacts and not this record are what the run
+            # produces. It is logged with its reason rather than passed over.
             swallowed(f"could not open the run journal in {output_dir}")
             return
         self._journal_dir = output_dir

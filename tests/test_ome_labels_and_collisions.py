@@ -53,6 +53,11 @@ def _write_ome(path, *, positions=2, size_t=1, size_c=2, channel_names=("DAPI", 
     ("GFP-1", "GFP_1"),
     ("GFP", "GFP"),
     ("DAPI", "d.a.p.i" .upper()),
+    # Case alone is not a distinction downstream: every reader of a channel
+    # token folds case, so `GFP` and `gfp` write two member names that collapse
+    # into one key the moment anything looks the channel up again.
+    ("GFP", "gfp"),
+    ("DAPI", "dapi"),
 ])
 def test_channel_names_that_reduce_to_one_token_are_refused(tmp_path, names):
     path = _write_ome(tmp_path / "dup.ome.tif", channel_names=names)
@@ -152,7 +157,12 @@ def _ome_xml(*, size_c=1, size_t=2, planes):
     ("µs", 3_600_000_000, "1h"),   # MICRO SIGN, U+00B5
     ("μs", 3_600_000_000, "1h"),   # GREEK SMALL LETTER MU, U+03BC
     ("minute", 60, "1h"),
-    ("Ms", 3_600_000, "1h"),       # units are matched case-insensitively
+    # SI prefixes are case-sensitive in OME's UnitsTime enum, so the symbol
+    # table is consulted before the lower-cased word table: ``Ms`` is a
+    # megasecond and ``ms`` a millisecond, twelve orders of magnitude apart.
+    ("Ms", 0.0036, "1h"),
+    ("ks", 3.6, "1h"),
+    ("cs", 360_000, "1h"),
 ])
 def test_every_delta_t_unit_converts_to_hours(unit, delta, want):
     xml = _ome_xml(planes=[(0, 0, unit), (1, delta, unit)])

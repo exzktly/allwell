@@ -192,10 +192,19 @@ class OmeLayout:
              self.raw_channel_names or self.channel_names),
             ("timepoint", self.timepoint_tokens, self.timepoint_tokens),
         ):
+            # Keyed case-**insensitively**, because every consumer of these
+            # tokens folds case: `_SchemaReader.channel`, `auto_threshold`'s
+            # member index and `process_microscopy`'s two grouping sites all
+            # `.lower()` the channel they read out of a filename. So `GFP` and
+            # `gfp` write two distinct member names, pass this check and pass
+            # `atomic_zip` — and then collapse into one key downstream, which
+            # is the same channel-becomes-unreachable outcome by a slower
+            # route. Comparing raw tokens made the refusal blind to exactly
+            # the pair a user is most likely to produce.
             seen: dict[str, list[str]] = {}
             for i, tok in enumerate(tokens):
                 src = sources[i] if i < len(sources) else tok
-                seen.setdefault(tok, []).append(str(src))
+                seen.setdefault(str(tok).lower(), []).append(str(src))
             for tok, names in seen.items():
                 if len(names) > 1:
                     return what, tok, names
@@ -408,6 +417,23 @@ def _safe_token(value: object, fallback: str) -> str:
 # in Review was scaled by 1000. An unreadable unit now leaves the timepoint
 # tokens positional (``t0``, ``t1``, …), which orders correctly and states no
 # number it cannot back up.
+
+#: SI symbols whose meaning depends on their case, and which therefore must be
+#: matched **before** the case-insensitive table below. OME's `UnitsTime`
+#: enumeration contains both `Ms` (megasecond) and `ms` (millisecond);
+#: lower-casing the lookup folded them together and read a megasecond as a
+#: millisecond — off by a factor of 10^9, which is the same class of error, an
+#: order of magnitude worse, that reading every unit as seconds produced.
+_DELTA_T_HOURS_PER_SYMBOL = {
+    "Ms": 1_000_000.0 / 3600.0,     # megasecond
+    "ks": 1_000.0 / 3600.0,         # kilosecond
+    "hs": 100.0 / 3600.0,           # hectosecond
+    "das": 10.0 / 3600.0,           # decasecond
+    "ds": 0.1 / 3600.0,             # decisecond
+    "cs": 0.01 / 3600.0,            # centisecond
+    "ms": 1.0 / 3_600_000.0,        # millisecond
+}
+
 _DELTA_T_HOURS_PER_UNIT = {
     "ms": 1.0 / 3_600_000.0,
     "millisecond": 1.0 / 3_600_000.0,
@@ -513,7 +539,11 @@ def _parse_ome_labels(
         # and the plane is left without a delta, which drops the whole file back
         # to positional tokens below.
         unit = (el.get("DeltaTUnit") or "s").strip()
-        per_hour = _DELTA_T_HOURS_PER_UNIT.get(unit.lower())
+        # Case-sensitive symbols first: `Ms` and `ms` are different units and
+        # only their case tells them apart.
+        per_hour = _DELTA_T_HOURS_PER_SYMBOL.get(unit)
+        if per_hour is None:
+            per_hour = _DELTA_T_HOURS_PER_UNIT.get(unit.lower())
         if per_hour is None:
             continue
         delta_by_t.setdefault(ti, value * per_hour)

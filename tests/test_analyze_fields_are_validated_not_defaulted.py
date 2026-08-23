@@ -120,9 +120,57 @@ def test_cellpose_parameters_are_not_checked_for_another_routine(tab):
 def test_a_bad_minimum_nucleus_area_blocks_the_run(tab, typed):
     """``build_pipeline_args`` floors this at 1 and falls back to 50 on a parse
     failure, so an unreadable value ran a different segmentation than the one on
-    screen."""
+    screen.
+
+    Asserted through ``_segmentation_validation_errors``, which is the one rule
+    for this field and the gated one: the widget lives only on the seeded-
+    watershed page and only that routine reads the number, so a copy of the
+    check in the ungated numeric scan refused a Cellpose run over a control
+    that routine does not show.
+    """
+    tab._seg_method_cb.setCurrentIndex(
+        next(i for i in range(tab._seg_method_cb.count())
+             if tab._seg_method_cb.itemData(i) == "stardist_seeded_watershed_cell"))
     tab._min_nucleus_area_edit.setText(typed)
-    assert any("Minimum nucleus area" in e for e in _errors(tab)), typed
+    assert any("Minimum nucleus area" in e
+               for e in tab._segmentation_validation_errors()), typed
+
+
+@pytest.mark.parametrize("method", ["cellpose", "stardist_nuclei",
+                                    "classical_threshold"])
+def test_a_stale_minimum_nucleus_area_does_not_block_another_routine(tab, method):
+    """A field that is not on screen cannot refuse the run it is not part of."""
+    tab._min_nucleus_area_edit.setText("0")
+    tab._seg_method_cb.setCurrentIndex(
+        next(i for i in range(tab._seg_method_cb.count())
+             if tab._seg_method_cb.itemData(i) == method))
+    assert not any("Minimum nucleus area" in e for e in _errors(tab)), (
+        f"a leftover minimum-nucleus-area refused a {method} run, naming a "
+        "control that routine does not show")
+
+
+# ── the QC bounds are compared the way the pipeline reads them ───────────────
+
+def test_the_shipped_default_max_area_is_not_an_upper_bound(tab):
+    """Both QC boxes ship holding the text ``0``, and ``0`` means no bound.
+
+    ``build_pipeline_args`` emits ``--qc_max_area`` only when the value is above
+    zero, so comparing a typed minimum against an untouched maximum refused the
+    form's own default — with a message whose remedy is to blank a box that
+    already reads ``0``.
+    """
+    tab._qc_remove_debris_cb.setChecked(True)
+    assert tab._qc_max_area_edit.text().strip() == "0", (
+        "the fixture no longer reproduces the shipped default")
+    tab._qc_min_area_edit.setText("50")
+    assert not any("maximum area" in e for e in _errors(tab)), _errors(tab)
+
+
+def test_a_real_inverted_pair_is_still_refused(tab):
+    tab._qc_remove_debris_cb.setChecked(True)
+    tab._qc_min_area_edit.setText("500")
+    tab._qc_max_area_edit.setText("100")
+    assert any("maximum area" in e for e in _errors(tab))
 
 
 # ── StarDist detection thresholds ────────────────────────────────────────────
@@ -143,7 +191,7 @@ def test_an_out_of_range_stardist_threshold_blocks_the_run_before_it_starts(tab)
     assert any("NMS threshold" in e for e in _errors(tab))
 
 
-@pytest.mark.parametrize("typed", ["", "auto", "0.2", "-1"])
+@pytest.mark.parametrize("typed", ["", "auto", "0.2"])
 def test_the_thresholds_that_mean_the_model_default_are_accepted(tab, typed):
     """Blank, ``auto`` and the recorded ``-1`` sentinel all mean "use the
     pretrained model's own threshold" and are not user errors."""
@@ -191,9 +239,12 @@ def test_a_negative_threshold_is_refused_rather_than_read_as_the_default(tab):
         "the model's own default', so the run segments at a sensitivity "
         "nobody chose and the form shows -0.5"
     )
-    # ...but the recorded sentinel a loaded prior run puts back is still fine.
+    # ...and so is -1. Nothing puts the CLI's sentinel in this box:
+    # `_restore_stardist_thresholds` writes "" for any recorded negative, and
+    # its own docstring says why — "writing -1.0 into the box would read as a
+    # real threshold". A negative here was typed.
     tab._stardist_prob_thresh_edit.setText("-1")
-    assert not _errors(tab), "the -1 default sentinel was refused"
+    assert _errors(tab), "a typed -1 was accepted as a threshold"
 
 
 def test_a_stale_tile_size_does_not_block_a_cellpose_run(tab):

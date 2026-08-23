@@ -9,12 +9,22 @@ value outside that range is refused by raising rather than clamped.
 it, because ``pipeline.stardist`` pulls numpy, scipy and skimage into whatever
 imports it and the Analyze form deliberately keeps them out of its graph — the
 pipeline runs as a subprocess. A restated rule is two rules the day one of them
-changes, so this holds them together: for a corpus of typed values, the form
-refuses exactly the inputs the pipeline would not accept.
+changes, so this holds them together.
 
-``parse_threshold`` answers ``None`` for two different reasons — the sentinel,
-and text it could not read — which is the ambiguity the form has to resolve. The
-corpus names which is which.
+**The relation is containment, not equality**, and the direction matters. The
+form must refuse everything the pipeline would refuse — otherwise a run starts
+and dies mid-plate. It must *also* refuse what the pipeline would silently turn
+into the pretrained model's own threshold when the user plainly typed a number:
+``parse_threshold`` answers ``None`` for text it could not read *and* for any
+negative, so ``0,2`` and ``-0.5`` both segment at a sensitivity nobody chose,
+with the number the user typed still on screen. Catching that at the boundary is
+the whole point of validating the raw text, so an input the form refuses and the
+pipeline tolerates is the design rather than a drift.
+
+What would be a drift is the other direction, and that is what
+:func:`test_the_pipeline_refuses_nothing_the_form_lets_through` asserts.
+:data:`FORM_IS_STRICTER` enumerates the deliberate gap, each entry with the
+reason it is there, so an accidental addition to it has to be written down.
 """
 from __future__ import annotations
 
@@ -61,12 +71,51 @@ CORPUS = ["", "  ", "auto", "AUTO", "0", "0.2", "0.479", "1", "1.0",
           "0,2", "O.2", "point three", "abc", ".", "1e-1", "nan"]
 
 
+#: Values the form refuses and the pipeline tolerates, with why. Each is a
+#: number the user typed that ``parse_threshold`` answers for silently, so the
+#: run would segment at a threshold nobody chose and the form would still show
+#: what was typed.
+FORM_IS_STRICTER = {
+    "-1":   "any negative reads as the model's own default; nothing puts the "
+            "CLI's sentinel in this box (_restore_stardist_thresholds writes "
+            "\"\" for a recorded negative, and says why)",
+    "-1.0": "as -1",
+    "-0.5": "as -1, and unmistakably a typo",
+    "nan":  "float('nan') parses and compares false against every bound, so it "
+            "passes a floor, a ceiling and both at once",
+}
+
+
 @pytest.mark.parametrize("typed", CORPUS)
-def test_the_form_and_the_pipeline_refuse_the_same_thresholds(typed):
-    assert _form_refuses(typed) == _pipeline_refuses(typed), (
-        f"the Analyze form and pipeline.stardist.parse_threshold disagree about "
-        f"{typed!r}: form refuses={_form_refuses(typed)}, "
-        f"pipeline refuses={_pipeline_refuses(typed)}")
+def test_the_pipeline_refuses_nothing_the_form_lets_through(typed):
+    """The direction that would start a run and kill it mid-plate."""
+    if _pipeline_refuses(typed):
+        assert _form_refuses(typed), (
+            f"the form accepts {typed!r} and pipeline.stardist.parse_threshold "
+            "does not — the run starts and fails after the first well")
+
+
+@pytest.mark.parametrize("typed", CORPUS)
+def test_where_the_form_is_stricter_it_is_stricter_on_purpose(typed):
+    if _form_refuses(typed) and not _pipeline_refuses(typed):
+        assert typed in FORM_IS_STRICTER, (
+            f"the form refuses {typed!r} and the pipeline accepts it, and "
+            "nothing says that is deliberate. Either the restated rule has "
+            "drifted, or add it to FORM_IS_STRICTER with the reason")
+
+
+@pytest.mark.parametrize("typed", sorted(FORM_IS_STRICTER))
+def test_every_deliberate_gap_is_still_a_gap(typed):
+    """Liveness: an entry that no longer describes a real difference is a lie.
+
+    ``parse_threshold`` may well grow a refusal of its own — the ``nan`` entry
+    in particular is one the pipeline ought to make — and when it does, this
+    fails rather than leaving a roster nobody re-reads.
+    """
+    assert _form_refuses(typed), f"the form no longer refuses {typed!r}"
+    assert not _pipeline_refuses(typed), (
+        f"the pipeline now refuses {typed!r} too, so this entry no longer "
+        f"describes a gap: {FORM_IS_STRICTER[typed]}")
 
 
 def test_the_corpus_covers_both_answers():

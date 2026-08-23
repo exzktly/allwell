@@ -53,13 +53,18 @@ _METHOD_GATED_INT_FIELDS = {
     "stardist_tile_px": "stardist",
 }
 
-#: Whole-number fields that must be strictly positive: key -> label. The
-#: pipeline refuses ``--min_nucleus_area_px 0`` outright, and
-#: ``build_pipeline_args`` floors it at 1, so a typed ``0`` would silently
-#: become a different number from the one on screen.
-_POSITIVE_INT_FIELDS = {
-    "min_nucleus_area_px": "Minimum nucleus area",
-}
+#: Whole-number fields that must be strictly positive: key -> label. Empty
+#: today, and kept because the ``≥ 1`` half of the int scan is the shape a
+#: future field will want.
+#:
+#: ``min_nucleus_area_px`` is *not* here. Its widget lives only on the
+#: ``stardist_seeded_watershed_cell`` page of the segmentation stack, only that
+#: routine reads it, and ``_segmentation_validation_errors`` already refuses a
+#: non-positive value inside ``if method == "stardist_seeded_watershed_cell"``
+#: — earlier in ``_validate_run_request`` than this scan runs. Listing it here
+#: as well gave one field two rules with different wording, and the ungated one
+#: refused a Cellpose run over a control that routine does not show.
+_POSITIVE_INT_FIELDS: dict[str, str] = {}
 
 #: Float fields, with the bound each one carries and the run option that has to
 #: be set for the field to matter: key -> (label, minimum, maximum, gate).
@@ -92,11 +97,6 @@ _THRESHOLD_FIELDS = {
     "stardist_prob_thresh": "StarDist probability threshold",
     "stardist_nms_thresh": "StarDist NMS threshold",
 }
-
-#: The one negative a threshold field may carry: the value the CLI writes to
-#: mean "the model's own default", which a loaded prior run puts back in the
-#: box. Every other negative is a typo the form stops for.
-_DEFAULT_SENTINEL = "-1"
 
 
 def _raw(opts: dict, key: str) -> str:
@@ -211,9 +211,17 @@ def _float_field_errors(opts: dict) -> list[str]:
     if opts.get("qc_remove_debris"):
         mn = _as_float(_raw(opts, "qc_min_area"))
         mx = _as_float(_raw(opts, "qc_max_area"))
+        # ``0`` in the maximum-area box means *no upper bound*, which is how
+        # the pipeline reads it: ``build_pipeline_args`` emits
+        # ``--qc_max_area`` only when the value is above zero. Both boxes are
+        # built holding the text ``"0"``, not a placeholder, so comparing a
+        # typed minimum against an untouched maximum refused the form's own
+        # shipped default — a run that works on main, blocked by a message
+        # whose remedy is to blank a box that already reads 0.
+        #
         # Both unreadable values are already reported above as "must be a
         # number"; comparing them would only restate that in worse words.
-        if mn is not None and mx is not None and mn > mx:
+        if mn is not None and mx is not None and mx > 0 and mn > mx:
             errors.append("QC minimum area must be ≤ maximum area.")
     return errors
 
@@ -249,13 +257,16 @@ def _threshold_errors(opts: dict) -> list[str]:
             errors.append(
                 f"{label} must be in [0, 1] (got {raw!r}). The pipeline rejects "
                 "an out-of-range threshold, and it would do so mid-run.")
-        elif value < 0.0 and raw != _DEFAULT_SENTINEL:
+        elif value < 0.0:
             # ``parse_threshold`` reads *any* negative as "use the model's own
             # default", so a typed -0.5 does not fail — it silently segments
-            # with a threshold the operator did not choose and never sees. The
-            # bare -1 is the value a prior run recorded for exactly that
-            # meaning, so it stays accepted; anything else negative is a typo
-            # worth stopping for.
+            # with a threshold the operator did not choose and never sees.
+            #
+            # No exception for the CLI's ``-1`` sentinel, because nothing puts
+            # one in this box: ``_restore_stardist_thresholds`` writes ``""``
+            # for any recorded negative, and its own docstring says why —
+            # "writing -1.0 into the box would read as a real threshold". A
+            # negative here was typed, and a typed negative is a typo.
             errors.append(
                 f"{label} must be in [0, 1] (got {raw!r}). A negative value is "
                 "read as \"use the model's own default\", which is what blank "

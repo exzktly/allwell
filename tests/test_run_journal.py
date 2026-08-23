@@ -496,7 +496,7 @@ def test_a_failed_open_does_not_strip_the_record_it_could_not_replace(
     J.close_run(out_dir, outcome="ok")
     monkeypatch.setattr(J, "_atomic_write_json", lambda *a, **kw: False)
 
-    assert _open(out_dir) is False
+    assert _open(out_dir) is None
     journal = J.read_journal(out_dir)
     assert journal is not None and journal.outcome == "ok"
     # Named rather than indexed, so reverting the fix fails with this sentence
@@ -507,25 +507,43 @@ def test_a_failed_open_does_not_strip_the_record_it_could_not_replace(
     assert journal.wells["A01"].state == "fetched"
 
 
-def test_no_well_is_recorded_into_a_run_that_has_closed(out_dir):
-    """A well record has to belong to an open run, or to nothing.
+def test_a_run_records_its_own_wells_after_its_record_has_closed(out_dir):
+    """The tail of every plate, and the reason this is a token and not a flag.
 
-    ``open_run``'s write is allowed to fail, and when it does what remains is
-    the *previous* run's closed ``run.json`` and its wells. Writing into that
-    files this run's progress under a run that finished — and combined with the
-    no-regress rule, a ``fetched`` left by that run silently refused this run's
-    ``uploaded`` and ``analysed``, so the journal reported a well as fetched
-    for a run that had only uploaded it. Refusing outright leaves the previous
-    record whole and truthful, which is the honest outcome when this run has no
-    record of its own.
+    ``analyze_progress`` writes ``analysed`` when the ``Well X … done.`` line is
+    *parsed*, on the GUI thread, in bounded slices — while ``_close_journal``
+    runs in the worker thread's ``finally`` the instant the subprocess exits.
+    So a run's own completion lines arrive after its record is closed, and a
+    rule that asked "is a run open here" refused all of them: a 24-well plate
+    recorded four wells and the pre-run readout said so.
     """
-    _open(out_dir)
-    J.record_well(out_dir, "A01", "fetched")
+    token = _open(out_dir)
+    J.record_well(out_dir, "A01", "analysed", run_token=token)
     J.close_run(out_dir, outcome="ok")
 
-    # Every shape: a stage, an earlier stage, and a verdict.
+    assert J.record_well(out_dir, "A02", "analysed", run_token=token) is True
+
+    journal = J.read_journal(out_dir)
+    assert set(journal.wells) == {"A01", "A02"}
+
+
+def test_another_run_may_not_write_into_this_record(out_dir):
+    """What the token is actually for.
+
+    ``open_run``'s write is allowed to fail, and when it does the previous
+    run's record and its wells are what remain. A writer belonging to the run
+    that could not open one must not file its progress there — and with the
+    no-regress rule, a ``fetched`` left by the earlier run would otherwise have
+    silently refused the later one's ``uploaded``, so the journal reported a
+    well as fetched for a run that had only uploaded it.
+    """
+    token = _open(out_dir)
+    J.record_well(out_dir, "A01", "fetched", run_token=token)
+    J.close_run(out_dir, outcome="ok")
+
     for state in ("uploaded", "fetched", "failed"):
-        assert J.record_well(out_dir, "A01", state) is False, state
+        assert J.record_well(
+            out_dir, "A01", state, run_token=token + 1.0) is False, state
 
     journal = J.read_journal(out_dir)
     assert journal.outcome == "ok"
@@ -540,14 +558,17 @@ def test_a_failed_open_leaves_the_previous_record_whole_and_uncontradicted(
     that the wells survive; this pins that the run which could not open one
     does not then write into them.
     """
-    _open(out_dir)
-    J.record_well(out_dir, "A01", "fetched")
+    first = _open(out_dir)
+    J.record_well(out_dir, "A01", "fetched", run_token=first)
     J.close_run(out_dir, outcome="ok")
     monkeypatch.setattr(J, "_atomic_write_json", lambda *a, **kw: False)
-    assert _open(out_dir) is False
+    # ``None``: this run has no record of its own, so its writers have no token
+    # and — per ``analyze_progress`` — do not write at all.
+    assert _open(out_dir) is None
     monkeypatch.undo()
 
-    assert J.record_well(out_dir, "A01", "uploaded") is False
+    assert J.record_well(
+        out_dir, "A01", "uploaded", run_token=first + 1.0) is False
 
     journal = J.read_journal(out_dir)
     assert journal.outcome == "ok" and journal.wells["A01"].state == "fetched", (

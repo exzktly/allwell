@@ -253,10 +253,20 @@ def test_the_launched_command_and_the_digest_read_the_same_extras():
     # and `--min_nucleus_area_px 500` has become a bare `500` that argparse
     # rejects — which is exactly what the first version of this test waved
     # through.
+    # De-duplicated first: `_host_argv_extras` can name a bare switch twice
+    # when a host lists `--cpu_only` in `extra_args` *and* sets `cpu_only`, and
+    # `_build_remote_argv` correctly emits it once. The invariant is about the
+    # flags reaching the command, not about their multiplicity.
+    wanted, seen = [], set()
+    for e in extras:
+        if e in _DEDUPED and e in seen:
+            continue
+        seen.add(e)
+        wanted.append(e)
     it = iter(launched)
-    matched = [e for e in extras if any(tok == e for tok in it)]
-    assert matched == list(extras), (
-        f"the digest folds in {list(extras)}, which the launched command does "
+    matched = [e for e in wanted if any(tok == e for tok in it)]
+    assert matched == wanted, (
+        f"the digest folds in {wanted}, which the launched command does "
         f"not carry in order — it matched only {matched}.\n"
         f"launched tail: {launched[-10:]}")
 
@@ -308,6 +318,12 @@ def test_the_launched_command_still_parses_with_a_host_override():
 #: than its siblings — and a smaller key matches configurations it should not.
 _KEYING_CALLS = ("_compute_run_id", "pipeline_argv_digest")
 
+#: The host additions that are bare switches, mirrored from
+#: ``RemoteRunner._DEDUPED_HOST_FLAGS``. A host may name one in ``extra_args``
+#: *and* set the field that produces it, so the extras list can carry it twice
+#: while the command carries it once.
+_DEDUPED = frozenset({"--no_save_tophat", "--cpu_only"})
+
 
 def test_every_keying_call_folds_in_the_host_extras():
     """One call site out of four is enough to re-open the whole defect.
@@ -322,12 +338,44 @@ def test_every_keying_call_folds_in_the_host_extras():
 
     CLAUDE.md §7.5 #5: convert every sibling that answers the same question.
     A grep finds the ones you thought of; this finds the ones you did not.
+
+    It checks the argument's *value*, not merely that the keyword is present:
+    ``extras=()`` re-introduced the identical defect and walked past the first
+    version of this guard along with 878 other tests.
     """
     import ast
     from pathlib import Path
 
     source_path = Path(__file__).parent.parent / "services" / "remote_runner.py"
     tree = ast.parse(source_path.read_text(), filename=str(source_path))
+
+    def _is_extras_call(node) -> bool:
+        return (isinstance(node, ast.Call)
+                and (getattr(node.func, "attr", "")
+                     or getattr(node.func, "id", "")) == "_host_argv_extras")
+
+    def _names_holding_extras(fn) -> set[str]:
+        """Locals in *fn* bound from ``_host_argv_extras``, plus its own params.
+
+        ``spawn`` binds ``host_extras`` once and passes it twice; and
+        ``_compute_run_id`` forwards its own ``extras`` parameter through to
+        ``pipeline_argv_digest``. Both are correct, and a guard that could not
+        see them would be answered by weakening it rather than by fixing code.
+        """
+        names = {a.arg for a in fn.args.args + fn.args.kwonlyargs}
+        for n in ast.walk(fn):
+            if isinstance(n, ast.Assign) and _is_extras_call(n.value):
+                names.update(t.id for t in n.targets
+                             if isinstance(t, ast.Name))
+        return names
+
+    # Which enclosing function each call sits in, so a name can be resolved.
+    enclosing = {}
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            ok_names = _names_holding_extras(fn)
+            for n in ast.walk(fn):
+                enclosing.setdefault(n, ok_names)
 
     offenders = []
     for node in ast.walk(tree):
@@ -336,8 +384,25 @@ def test_every_keying_call_folds_in_the_host_extras():
         name = getattr(node.func, "id", None) or getattr(node.func, "attr", "")
         if name not in _KEYING_CALLS:
             continue
-        if "extras" not in {kw.arg for kw in node.keywords}:
-            offenders.append(f"remote_runner.py:{node.lineno} — {name}(…)")
+        extras = next((kw.value for kw in node.keywords if kw.arg == "extras"),
+                      None)
+        if extras is None:
+            offenders.append(
+                f"remote_runner.py:{node.lineno} — {name}(…) has no extras=")
+            continue
+        # The *value*, not just the keyword. `extras=()` types the argument and
+        # folds in nothing, so it re-introduces the exact defect this guard was
+        # written for — and it did: with that one token, all 878 tests across
+        # every file touching this module passed. A guard that proves a keyword
+        # was typed proves nothing about the key being complete (§7.5 #5, the
+        # sibling spelled differently).
+        known = enclosing.get(node, set())
+        if not (_is_extras_call(extras)
+                or (isinstance(extras, ast.Name) and extras.id in known)):
+            offenders.append(
+                f"remote_runner.py:{node.lineno} — {name}(…, extras="
+                f"{ast.unparse(extras)}) does not come from "
+                f"_host_argv_extras(...)")
 
     assert not offenders, (
         "A call that decides a remote address or a reuse key does not fold in "

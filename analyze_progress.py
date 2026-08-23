@@ -84,8 +84,15 @@ class AnalyzeProgressMixin:
         out_dir = getattr(self._runner, "last_output_dir", None)
         if out_dir is None:
             return
+        # The token this run was opened with. It is what lets a completion line
+        # still queued when the worker thread closed the record be accepted
+        # anyway — these are parsed here, on the GUI thread, in bounded slices,
+        # so the tail of every plate lands after the run has ended.
+        token = getattr(self._runner, "journal_token", None)
+        if token is None:
+            return
         with swallow(f"journalling {well} as {state}"):
-            run_journal.record_well(out_dir, well, state)
+            run_journal.record_well(out_dir, well, state, run_token=token)
 
     def _on_scheduler(self, state: str, job_id: str, launcher: str) -> None:
         """A scheduler queued this run, or has just granted it a node.

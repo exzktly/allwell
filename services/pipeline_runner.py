@@ -610,6 +610,20 @@ class PipelineRunner:
         return self._last_output_dir
 
     @property
+    def journal_token(self) -> float | None:
+        """This run's journal token, for a writer that is not on this thread.
+
+        ``None`` when the journal could not be opened — a writer that sees that
+        has nothing of its own to write into and must not write at all.
+
+        Deliberately *not* cleared by ``_close_journal``: the GUI thread is
+        still draining this run's completion lines when the worker thread
+        closes the record, and every one of them needs the token to be
+        accepted. It is reset when the next run starts.
+        """
+        return self._journal_token
+
+    @property
     def was_stopped(self) -> bool:
         """Whether the most recent (or in-flight) run was cancelled via
         :meth:`stop`. Cleared only at the *start* of the next run, so it is
@@ -827,6 +841,12 @@ class PipelineRunner:
         # returns before the journal is ever opened, and a stale directory
         # from the previous run would then be closed in this run's name.
         self._journal_dir: Path | None = None
+        #: This run's journal token — ``open_run``'s ``opened_at``. Handed to
+        #: every well write so a record can say *which* run it belongs to.
+        #: ``None`` for a run whose journal could not be opened, which is how a
+        #: writer knows to stop rather than file its progress under the
+        #: previous run's surviving record.
+        self._journal_token: float | None = None
         # The Analyze "Scratch disk" field routes per-well working files via
         # ALLWELL_SCRATCH_DIR. Set it on this process's env so the local
         # pipeline subprocess (inherits os.environ) and the in-process remote
@@ -937,7 +957,7 @@ class PipelineRunner:
                 batched = False
             mode = "remote-batched" if batched else "remote"
         try:
-            run_journal.open_run(
+            self._journal_token = run_journal.open_run(
                 output_dir,
                 spec=self._journal_spec,
                 mode=mode,

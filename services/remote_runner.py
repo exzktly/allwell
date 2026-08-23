@@ -7278,16 +7278,21 @@ class RemoteRunner:
             # covers ``datasets/`` — so leaving it would drop two sidecar files
             # on the host for every re-attaching run, for ever.
             own_dir = f"{self.host.remote_staging_dir}/runs/{run.run_id}"
+            # The fate of this run's own directory is said inside the branch
+            # that decides it. Stating it afterwards told a dry run that the
+            # directory "has been cleaned up" three lines before announcing
+            # that nothing was deleted — in the one mode whose whole purpose is
+            # saying truthfully what *would* happen.
             if dry_run:
                 self._log_would_delete(
                     own_dir, label=f"run dir {run.run_id}", log=log)
             else:
                 self._cache._ssh_run(["rm", "-rf", own_dir], check=False)
+                log(f"[remote] removed this run's own dir {own_dir}.\n")
             log(
                 f"[remote] re-attached to {run.remote_output_dir}, which "
                 f"belongs to an earlier run of this plate — leaving it in "
-                f"place; remove it by hand once you are done with it. This "
-                f"run's own {own_dir} has been cleaned up.\n"
+                f"place; remove it by hand once you are done with it.\n"
             )
         else:
             run_dir = f"{self.host.remote_staging_dir}/runs/{run.run_id}"

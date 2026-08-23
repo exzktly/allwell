@@ -308,7 +308,7 @@ def open_run(
     mode: str,
     input_dir: Path | str,
     argv: list[str] | tuple[str, ...] = (),
-) -> bool:
+) -> float | None:
     """Record that a run has begun, before it does any work.
 
     Replaces any earlier journal in the same directory: the point of the record
@@ -372,7 +372,10 @@ def open_run(
     # missing entry costs the offer entirely.
     _index_upsert(str(output_dir), opened_at=now, closed_at=None,
                   outcome=None, mode=str(mode))
-    return ok
+    # The token, not a bare success flag: every later write says which run it
+    # belongs to by handing this back. ``None`` for a record that was not
+    # written, which is falsy exactly where the old ``bool`` was.
+    return now if ok else None
 
 
 def record_remote(
@@ -419,6 +422,7 @@ def record_well(
     state: str,
     *,
     reason: str = "",
+    run_token: float | None = None,
 ) -> bool:
     """Record what just happened to one well.
 
@@ -438,6 +442,15 @@ def record_well(
     ``not-fetched``) is a verdict rather than a stage, is written once by
     whoever decided it, and always takes effect.
 
+    ``run_token`` is the ``opened_at`` :func:`open_run` returned, and it is how
+    a writer says *which* run this belongs to. A record whose token does not
+    match the one on disk is refused; a caller that does not know its token
+    passes ``None`` and is trusted. It exists because a run whose own
+    ``open_run`` failed would otherwise write into the previous run's
+    surviving record — and because the obvious cheaper test, "is a run still
+    open here", refuses a run's *own* completion lines, which arrive after the
+    worker thread has closed the record.
+
     An unrecognised *state* is refused rather than written — a typo'd state is
     a well that silently disappears from every count that reads this back.
     """
@@ -449,15 +462,26 @@ def record_well(
     if not label:
         return False
     payload = _read_run_payload(output_dir)
-    if payload is None or payload.get("closed_at") is not None:
-        # No open run here, so there is nothing this well record could belong
-        # to. That is not hypothetical: ``open_run``'s write is allowed to
-        # fail, and when it does the *previous* run's closed ``run.json`` and
-        # its wells are what remain. Writing into it would file this run's
-        # progress under a run that finished — and with the no-regress rule
-        # below, a `fetched` left by that run silently refused this one's
-        # `uploaded` and `analysed`, so the journal reported a well as fetched
-        # for a run that had only uploaded it.
+    if payload is None:
+        return False
+    if run_token is not None and float(payload.get("opened_at") or 0.0) != run_token:
+        # The record on disk belongs to a *different* run. That happens for one
+        # reason and it is not hypothetical: ``open_run``'s write is allowed to
+        # fail, and when it does the previous run's ``run.json`` and its wells
+        # are what remain. Writing into it would file this run's progress under
+        # someone else's run — and with the no-regress rule below, a `fetched`
+        # left there silently refused this run's `uploaded` and `analysed`, so
+        # the journal reported a well as fetched for a run that had only
+        # uploaded it.
+        #
+        # **Which run, not whether one is open.** The first version of this
+        # asked ``closed_at is not None``, and those two questions coincide
+        # only in the case above. A run's own completion lines are parsed on
+        # the GUI thread, in bounded slices, while ``_close_journal`` runs in
+        # the worker thread's ``finally`` the instant the subprocess exits — so
+        # the tail of every plate arrives after the record is closed, and
+        # asking "is a run open" refused all of it. A 24-well plate recorded
+        # four wells and the pre-run readout told the user so.
         return False
     rank = _WELL_STAGE_ORDER.get(state)
     if rank is not None:

@@ -13,10 +13,11 @@ This module is the answer to that. It reports in two tiers, split by what each
 costs:
 
 **Tier one is cheap enough to run inline** — the journal is one small JSON
-read, and the scope line adds one ``iterdir`` of the input directory, plus a
-central-directory read per archive in the narrow case where loose images are
-present *and* a background or flat-field method needs the empty-well tokens
-looked up. Not free, and not a directory *walk*: bounded by the plate's own
+read, and the scope line adds one ``iterdir`` of the input directory plus, when
+loose images are sitting in it, a central-directory read of every well archive
+they belong to — that is how the duplicate rule knows what each archive already
+holds. A background or flat-field method set to ``empty_well`` adds a second
+pass over the same archives. Not free, and not a directory *walk*: bounded by the plate's own
 top level, which is why it can hang off the existing ``_refresh_output`` once
 the field has settled. It says what the last run against this folder did, and
 above all whether it *finished*: a journal still open is a run the app was

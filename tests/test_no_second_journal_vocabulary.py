@@ -81,14 +81,34 @@ def test_no_module_restates_the_journal_well_states():
         # a comment mentioning WELL_STATES — or a variable called
         # ``_MY_WELL_STATES`` — exempt every dict in an 8,000-line module,
         # including the file the defect actually happened in.
-        consults_roster = any(
-            (isinstance(n, ast.Name) and n.id == "WELL_STATES")
-            or (isinstance(n, ast.Attribute) and n.attr == "WELL_STATES")
-            for n in ast.walk(tree))
+        # Scoped to the *enclosing function*, not the module. A file-wide
+        # exemption meant one legitimate reference anywhere in an 8,000-line
+        # module exempted every dict in it — including `remote_runner.py`,
+        # the file the defect happened in, where a second roster injected at
+        # module level walked straight past this guard.
+        def _names_roster(node) -> bool:
+            return any(
+                (isinstance(n, ast.Name) and n.id == "WELL_STATES")
+                or (isinstance(n, ast.Attribute) and n.attr == "WELL_STATES")
+                for n in ast.walk(node))
+
+        exempt = set()
+        for fn in ast.walk(tree):
+            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if _names_roster(fn):
+                    exempt.update(id(n) for n in ast.walk(fn))
+        # Module level is its own scope, judged on the module's own statements
+        # rather than on anything a function body happens to say.
+        top = [n for n in tree.body
+               if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                     ast.ClassDef))]
+        if any(_names_roster(n) for n in top):
+            for n in top:
+                exempt.update(id(x) for x in ast.walk(n))
         for node in ast.walk(tree):
             if not isinstance(node, (ast.Tuple, ast.List, ast.Set, ast.Dict)):
                 continue
-            if isinstance(node, ast.Dict) and consults_roster:
+            if isinstance(node, ast.Dict) and id(node) in exempt:
                 continue
             hits = sorted(_string_elements(node) & set(WELL_STATES))
             if len(hits) >= _ROSTER_MIN:

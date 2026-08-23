@@ -358,14 +358,26 @@ class AnalyzeSuspendMixin:
         return journal.tally() if journal is not None else ""
 
     def _forget_resumable(self, offer: _Resumable) -> None:
-        """Stop offering *offer*, whichever record it came from.
+        """Stop offering *offer* — from **both** records, not the one it came from.
 
-        Neither branch deletes anything the run produced: the output folder is
-        the work, and this drops only the pointer that keeps asking about it.
+        Neither call deletes anything the run produced: the output folder is
+        the work, and these drop only the pointers that keep asking about it.
+
+        There are two pointers and a plate can carry both. A run that was
+        suspended writes a suspend record *and* leaves a journal entry, so
+        dropping only the one the offer happened to be built from left the
+        other behind: Discard cleared the banner, the next refresh read the
+        surviving record, and the banner came straight back. The user's answer
+        was recorded against one bookkeeping file and the question was being
+        asked by two.
+
+        `from_journal` still decides which record *sourced* the offer — that is
+        what the banner's wording depends on — but it is not a claim that the
+        other record does not exist.
         """
-        if offer.from_journal:
+        with swallow(f"dropping the journal offer for {offer.output_dir}"):
             run_journal.forget(offer.output_dir)
-        else:
+        with swallow(f"dropping the suspend record for {offer.output_dir}"):
             clear(offer.output_dir)
 
     def _on_run_settled(self) -> None:

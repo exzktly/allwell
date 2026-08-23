@@ -24,6 +24,7 @@ from well_viewer.data.data_loading import (
     get_rows,
     resolve_value_series,
 )
+from well_viewer.domain.batch_models import ReplicateSet
 from well_viewer.domain.text_columns import fov_text
 from well_viewer.domain.tp_match import tp_close, tp_close_mask
 from well_viewer.core.channel_state_controller import (

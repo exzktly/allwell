@@ -1652,6 +1652,31 @@ def test_run_dir_guard_clears(tmp_path, monkeypatch, shape):
     assert _run_scan(monkeypatch, *_RUN_DIR_GUARD, [good]) is None, (
         f"the guard fired on a legitimate {shape}")
 
+def test_run_dir_guard_refuses_without_its_anchor(tmp_path, monkeypatch):
+    """Every case above prepends the funnel, so none of them tests the anchor.
+
+    The guard fails closed: a scan surface with no ``remote_run_dir`` in it
+    means the funnel was renamed or moved out from under the guard, so it has
+    nothing to compare offenders against and cannot know whether it found
+    every spelling or simply read the wrong tree. Reporting *no violations*
+    from that position is the fail-open shape this whole file exists to
+    prevent.
+
+    The surface here is deliberately **clean**. Feeding it a violation makes
+    the guard fire for the ordinary reason, and the test then passes whether
+    the anchor exists or not — which is how the first draft of this test
+    measured nothing.
+    """
+    orphan = _write(tmp_path, "orphan_rundir.py", RUN_DIR_CLEAN["dataset-dir"])
+    exc = _run_scan(monkeypatch, *_RUN_DIR_GUARD, [orphan])
+    assert exc is not None, (
+        "the guard passed on a scan surface with no funnel in it at all — it "
+        "failed open, which is the one outcome it must not have")
+    assert "remote_run_dir" in str(exc), (
+        "the guard fired, but not about its missing anchor. Its message must "
+        f"name the funnel it could not find; it said: {exc}")
+
+
 
 # ── the run journal's well-state vocabulary ─────────────────────────────────
 
@@ -1729,3 +1754,80 @@ def test_journal_vocabulary_guard_clears(tmp_path, monkeypatch, shape):
                   JOURNAL_ROSTER_CLEAN[shape])
     assert _run_scan(monkeypatch, *_JOURNAL_GUARD, [good]) is None, (
         f"the guard fired on a legitimate {shape}")
+
+
+# ── names that appear only in an annotation ─────────────────────────────────
+#
+# `from __future__ import annotations` is on every module here, so an
+# annotation is stored as a string and never compiled as a load. The compiler
+# never sees the name, which means `symtable` above cannot either, and ruff
+# cannot because F821 is in this repo's ignore list. Extracting a module
+# dropped a `Callable, Iterable` import down to `Callable` that way: the
+# annotation still read `Iterable[Path | str]`, nothing raised at import or at
+# call, and the whole fast lane stayed green.
+
+ANNOTATION_VIOLATIONS = {
+    # The shape that shipped: the annotation survives the import that fed it.
+    "dropped-import": (
+        "from collections.abc import Callable\n"
+        "def f(also: Iterable[str] = ()) -> None: ...\n"
+    ),
+    # A return annotation, which is a separate node from the arguments.
+    "return": "def f() -> Mapping[str, int]: ...\n",
+    # A module-level annotated assignment.
+    "annassign": "rows: Sequence[int] = []\n",
+    # Nested inside a subscript, where a name is easiest to overlook.
+    "nested": "def f(x: dict[str, Nowhere]) -> None: ...\n",
+    # Keyword-only and *args/**kwargs carry annotations of their own.
+    "kwonly": "def f(*rest: Nowhere, flag: bool = False) -> None: ...\n",
+}
+
+ANNOTATION_CLEAN = {
+    # The same annotation, with the import it needs.
+    "imported": (
+        "from collections.abc import Callable, Iterable\n"
+        "def f(also: Iterable[str] = ()) -> None: ...\n"
+    ),
+    # A TYPE_CHECKING import is the idiomatic way to annotate without paying
+    # the runtime cost, and it binds the name as far as this guard is
+    # concerned — flagging it would make the guard unusable.
+    "type-checking": (
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    from pathlib import Path\n"
+        "def f(p: Path) -> None: ...\n"
+    ),
+    # A string forward reference resolves against a namespace this file cannot
+    # see, so it is not this guard's to judge.
+    "forward-ref": 'def f(x: "SomethingLater") -> None: ...\n',
+    # Builtins and PEP 604 unions need no import at all.
+    "builtin-union": "def f(x: str | None) -> list[int]: ...\n",
+    # A class defined in the same module is bound by its own definition.
+    "own-class": (
+        "class Row: ...\n"
+        "def f(r: Row) -> Row: return r\n"
+    ),
+    # An attribute path only loads its root, which is imported.
+    "attribute": (
+        "import collections.abc as abc\n"
+        "def f(x: abc.Iterable) -> None: ...\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(ANNOTATION_VIOLATIONS))
+def test_annotation_name_guard_catches(shape):
+    from tests.test_no_unbound_names import annotation_offenders_in
+    found = annotation_offenders_in(ANNOTATION_VIOLATIONS[shape], "probe.py")
+    assert found, f"the {shape} spelling walked past the guard"
+
+
+@pytest.mark.parametrize("shape", sorted(ANNOTATION_CLEAN))
+def test_annotation_name_guard_clears(shape):
+    """The first cut of this guard allowlisted every name in `dir(typing)`,
+    which swallows `Iterable`, `Callable`, `Mapping` and `Sequence` — exactly
+    the names a dropped import loses. It passed on the real defect it was
+    written for. A clean case that is too generous is how that happens."""
+    from tests.test_no_unbound_names import annotation_offenders_in
+    found = annotation_offenders_in(ANNOTATION_CLEAN[shape], "probe.py")
+    assert not found, f"the guard fired on a legitimate {shape}: {found}"

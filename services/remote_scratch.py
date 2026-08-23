@@ -22,7 +22,7 @@ import shutil
 import tempfile
 import time
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from util.well_token import is_valid_well_name

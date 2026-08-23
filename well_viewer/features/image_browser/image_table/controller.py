@@ -1000,7 +1000,7 @@ def image_table_generate(ctx) -> None:
     # When Overlay is on, the channel axis has collapsed to the OVERLAY_CHAN
     # sentinel and each cell blends the whole selected-channel set (resolved once,
     # off the collapse). Empty until a channel-overlay cell is actually hit.
-    overlay_chans: List[str] = []
+    overlay_chans: list[str] = []
 
     for r, row in enumerate(cells):
         for c, cell in enumerate(row):

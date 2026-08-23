@@ -36,6 +36,7 @@ from __future__ import annotations
 # keep exported names stable for package imports and entrypoints.
 
 import argparse
+from collections.abc import Iterable
 import logging
 import shutil
 import sys

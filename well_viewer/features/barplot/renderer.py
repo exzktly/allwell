@@ -571,8 +571,13 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
     # only the tested timepoint shrank the axis to that timepoint's bars and
     # clipped every other timepoint's bars off the figure — measured, a panel
     # holding bars of 10, 12, 100 and 110 came back with a limit of 30.5.
+    # Heights are scanned over every item so the y-limit still covers the
+    # tallest bar on the axis — but only the keys that have a *position* at the
+    # tested timepoint can carry a bracket, and reading a missing one raises.
     top_by_key: dict[str, float] = {}
     for it in items:
+        if it.key not in x_by_key:
+            continue
         val = getattr(it, val_attr, float("nan"))
         if getattr(it, has_attr, False) and not math.isnan(val):
             sp = getattr(it, spread_attr, 0.0)

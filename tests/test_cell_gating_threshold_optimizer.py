@@ -24,6 +24,29 @@ def _df(values, *, included=None, den=None, qc=None, crop=None):
     return pd.DataFrame(data)
 
 
+
+def _smoothed_gap(result) -> float:
+    """The score a perfect separation earns *at these sample sizes*.
+
+    The objective is Laplace-smoothed — ``(k + 1) / (n + 2)`` on both arms
+    before the ratio — so a perfect split scores below 1.0, and how far below is
+    a statement about how many cells said so. Without it, a well with two cells
+    on against another with none scored exactly 1.0, the same as 485 against 0,
+    and the optimiser could not tell the two apart: ``argmax``'s first-index
+    tie-break then reduced the whole objective to "the lowest grid point above
+    the negative well's maximum". These fixtures are deliberately tiny, so the
+    shortfall is large here — that is the rule working, not a tolerance.
+
+    Derived from the result's own counts rather than written out, so a fixture
+    that changes size does not silently start asserting a different rule.
+    """
+    k_a = round(result.frac_a * result.n_a)
+    k_b = round(result.frac_b * result.n_b)
+    fa = (k_a + 1) / (result.n_a + 2)
+    fb = (k_b + 1) / (result.n_b + 2)
+    return abs(fa - fb) / max(abs(fa), abs(fb))
+
+
 def test_optimizer_maximizes_relative_fraction_gap():
     # Optimizer maximises ``|fa - fb| / max(fa, fb)`` (relative gap), so
     # B is fully off and A is partially on ⇒ the gap is 100% of the larger
@@ -45,7 +68,7 @@ def test_optimizer_maximizes_relative_fraction_gap():
     assert result.threshold == pytest.approx(0.0)
     assert result.frac_a == pytest.approx(0.75)
     assert result.frac_b == pytest.approx(0.0)
-    assert result.difference == pytest.approx(1.0)
+    assert result.difference == pytest.approx(_smoothed_gap(result))
     assert result.n_a == 4
     assert result.n_b == 4
 
@@ -75,7 +98,7 @@ def test_optimizer_normalisation_prefers_relative_over_absolute():
     assert result.threshold >= 50.0
     assert result.frac_a == pytest.approx(0.05)
     assert result.frac_b == pytest.approx(0.0)
-    assert result.difference == pytest.approx(1.0)
+    assert result.difference == pytest.approx(_smoothed_gap(result))
 
 
 def test_optimizer_ignores_included_gate():
@@ -183,7 +206,7 @@ def test_optimizer_supports_ratio_channels():
     assert result.threshold == pytest.approx(2.0)
     assert result.frac_a == pytest.approx(0.0)
     assert result.frac_b == pytest.approx(1.0)
-    assert result.difference == pytest.approx(1.0)
+    assert result.difference == pytest.approx(_smoothed_gap(result))
 
 
 def test_optimizer_returns_first_threshold_at_max_difference():
@@ -199,7 +222,7 @@ def test_optimizer_returns_first_threshold_at_max_difference():
         min_threshold=0, max_threshold=1100, steps=1101,
     )
 
-    assert result.difference == pytest.approx(1.0)
+    assert result.difference == pytest.approx(_smoothed_gap(result))
     assert result.threshold == pytest.approx(100.0)
 
 
@@ -225,7 +248,7 @@ def test_optimizer_filters_by_timepoint():
     )
     assert at_24.frac_a == pytest.approx(1.0)
     assert at_24.frac_b == pytest.approx(0.0)
-    assert at_24.difference == pytest.approx(1.0)
+    assert at_24.difference == pytest.approx(_smoothed_gap(at_24))
     assert at_24.n_a == 2 and at_24.n_b == 2
 
     # At 0 h both wells are off ⇒ no difference, and only the 2 tp=0 rows count.

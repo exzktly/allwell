@@ -588,7 +588,13 @@ def _parse_ome_labels(
         # Case-sensitive symbols first: `Ms` and `ms` are different units and
         # only their case tells them apart.
         per_hour = _DELTA_T_HOURS_PER_SYMBOL.get(unit)
-        if per_hour is None:
+        if per_hour is None and unit.lower() not in _DELTA_T_HOURS_PER_SYMBOL:
+            # Only fall through to the case-insensitive table when the unit is
+            # not a *case-significant* symbol in some other spelling. ``"MS"``
+            # is neither of OME's two: lower-cased it becomes the millisecond,
+            # which is the exact 10^9 fold this table exists to prevent, and
+            # silently picking the smaller of two units a spelling could mean
+            # is worse than declining to read it.
             per_hour = _DELTA_T_HOURS_PER_UNIT.get(unit.lower())
         if per_hour is None:
             unreadable_units.add(unit)
@@ -708,7 +714,13 @@ def _parse_ome_labels(
         # Case-sensitive symbols first: `Ms` and `ms` are different units and
         # only their case tells them apart.
         per_hour = _DELTA_T_HOURS_PER_SYMBOL.get(unit)
-        if per_hour is None:
+        if per_hour is None and unit.lower() not in _DELTA_T_HOURS_PER_SYMBOL:
+            # Only fall through to the case-insensitive table when the unit is
+            # not a *case-significant* symbol in some other spelling. ``"MS"``
+            # is neither of OME's two: lower-cased it becomes the millisecond,
+            # which is the exact 10^9 fold this table exists to prevent, and
+            # silently picking the smaller of two units a spelling could mean
+            # is worse than declining to read it.
             per_hour = _DELTA_T_HOURS_PER_UNIT.get(unit.lower())
         if per_hour is None:
             unreadable_units.add(unit)

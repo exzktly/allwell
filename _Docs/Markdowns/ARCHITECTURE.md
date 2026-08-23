@@ -1482,7 +1482,7 @@ silent substitution §7 of `CLAUDE.md` is about, and the reason `severity` is
 honoured on a receipt row at all.
 
 **`subtract_background` says when it corrected nothing, for the same reason.**
-Three of its paths are the identity transform wearing a correction's name, each
+Four of its paths are the identity transform wearing a correction's name, each
 a legitimate response to an input it cannot work with and each previously
 indistinguishable — in the output *and* in the log — from a correction that ran.
 `fft_bandpass` with a radius of 1 px or less builds an all-ones transfer function
@@ -1490,9 +1490,20 @@ and the round trip returns the frame (a cliff between radius 1 and radius 2);
 `robust_mesh` zeroes the whole mesh when not one tile yields a finite level, and
 subtracting zero changes nothing; `fov_median` substituted a level of `0.0` for a
 frame with no finite pixel, which is a measured zero and an unmeasurable one
-written identically. There is nothing else for any of them to do, so each warns
-under the pipeline's own logger naming what did not happen. A frame whose median
-really is zero is not one of these and says nothing.
+written identically; and `empty_well` returns the frame when the channel has no
+background field, or when the field it has is a different shape from the frame —
+a blank acquired at a different binning or crop from the plate.
+`_require_empty_well_models` catches only the case where *no* model was built at
+all, so a per-channel gap passed through it. There is nothing else for any of
+the four to do, so each warns under the pipeline's own logger naming what did
+not happen. A frame whose median really is zero is not one of these and says
+nothing.
+
+`fft_bandpass`'s line says the frame is returned "UNCHANGED", which is true of
+that function and not quite of the pipeline: `subtract_background` hands the
+result to `_floor_after_subtract`, which zeroes non-finite pixels and clips
+negatives. The distinction only matters for a frame that already carries
+negatives or NaNs.
 
 **Before a dataset is open, the page is not shown at all.** Home's body is
 wrapped in the shared `wrap_with_empty_state` stack like every other Review
@@ -3346,18 +3357,45 @@ cost is visible; the parallelism grain is per-well, so a degenerate single-well
 grid stays serial.
 
 **Timepoint tokens come from `DeltaT`, in whatever unit the file states.**
-`_parse_ome_labels` converts each plane's `DeltaT` to hours through
-`_DELTA_T_HOURS_PER_UNIT`, which spells out OME's `UnitsTime` values an
-acquisition realistically writes (`ms`, `µs` in both its Unicode spellings, `s`,
-`min`, `h`, `d`, plus the long forms), and renders the result as `<hours>h`. A
-unit **not** in that table is unknown rather than assumed: the plane contributes
-no delta, `delta_by_t` comes up short of `size_t`, and every token for that file
-falls back to positional `t0`, `t1`, …. Those tokens become the filename's
-timepoint field and the app's chronological key, so a wrong conversion scales
-every hours axis in Review by the ratio of the two units while leaving the
-ordering intact — the failure mode where nothing looks broken. An *absent*
-`DeltaTUnit` is seconds, which is the schema's own default; an empty one is
-read the same way.
+`_parse_ome_labels` converts each plane's `DeltaT` to hours through two tables,
+consulted in order, and renders the result as `<hours>h`. Those tokens become
+the filename's timepoint field and the app's chronological key, so a wrong
+conversion scales every hours axis in Review by the ratio of the two units while
+leaving the ordering intact — the failure mode where nothing looks broken.
+
+`_DELTA_T_HOURS_PER_SYMBOL` comes first and is matched **case-sensitively**,
+because OME's `UnitsTime` enumeration contains both `Ms` (megasecond) and `ms`
+(millisecond) and only their case tells them apart: a case-insensitive lookup
+read a megasecond as a millisecond, off by a factor of 10⁹. It holds the SI
+prefixes that carry that hazard — `Ms`, `ks`, `hs`, `das`, `ds`, `cs`, `ms`.
+`_DELTA_T_HOURS_PER_UNIT` follows, matched on the lower-cased unit, and spells
+out the values an acquisition realistically writes whose meaning does not depend
+on case (`s`, `min`, `h`, `d`, `µs` in both its Unicode spellings, `ns`, plus the
+long forms). An *absent* `DeltaTUnit` is seconds, which is the schema's own
+default; an empty one is read the same way.
+
+**Every route back to a positional token is announced.** A `t0`/`t1` plate whose
+writer recorded no `DeltaT` and one whose elapsed times were dropped produce
+byte-identical archives, so the run log is the only thing that separates a file
+stating no time from one whose time was lost. `_parse_ome_labels` collects every
+reason and warns once, naming it — a unit neither table can read; a `TheT`
+outside `0..SizeT-1`, which is a writer using one-based indexing and would
+otherwise attach each elapsed time to the wrong array slot while still passing
+the completeness count; two elapsed times rendering to the same label, where the
+second timepoint's images would be written over the first's; and a time the
+app's own parser could not read back. The warning fires only when the fallback
+actually happens: one channel's planes carrying a bad unit while another's carry
+seconds leaves every timepoint resolved, and a log line asserting data loss that
+did not occur sends a user to re-export a plate for nothing.
+
+`_hours_token` does the rendering, in **fixed** notation at six significant
+figures. `f"{v:g}"` switches to exponent form below 1e-4, which was rare while
+every `DeltaT` was read as seconds and became routine once the sub-second units
+were added: a six-frame time-lapse 100 ms apart rendered `2.77778e-05h`, and
+`util/timepoint`'s `_UNIT_RE` matches no exponent — so `parse_hours` answered
+`None`, `sort_key` sorted those tokens as text, and frames 5 and 6 landed ahead
+of frames 2 to 4. A number the app cannot read back is worse than a wrong one,
+which at least orders correctly.
 
 **The file already knows most of the layout.** An OME-TIFF's `<Plane>`
 elements carry `PositionX`/`PositionY` — where on the stage each image was taken
@@ -4016,10 +4054,14 @@ noted:
 
   **A FOV that yields no cells says which reason it was.** Three outcomes were
   silent, in the same function whose nuclear half refuses a near-constant input
-  with an explicit warning. A constant cytoplasm channel makes `threshold_otsu`
-  raise, and the fallback — the frame's own mean — admits no pixel, so the mask
-  is empty (`cytoplasm_mask` warns, twice over: once for the constant input and
-  once for an empty mask however it arose). Every nucleus below
+  with an explicit warning. A constant cytoplasm channel cannot be
+  strictly exceeded by any of its own pixels, so the mask is empty
+  (`cytoplasm_mask` warns twice over: once for the constant input and once for
+  an empty mask however it arose). That case is **tested for** rather than
+  caught: `threshold_otsu` was assumed to raise on a constant image and with the
+  pinned skimage it returns the constant value instead, so the handler never
+  fired while four places described it as the behaviour. An *empty* frame does
+  raise, as `IndexError` rather than `ValueError`, and is its own branch. Every nucleus below
   `min_nucleus_area_px` leaves no seed at all. And a seed outside the mask is
   dropped by `watershed(mask=…)` without a word, which is what happens when a
   cytoplasm stain does not cover its nuclei — those are counted and named. Each
@@ -8623,12 +8665,17 @@ control row, so only a per-mode pass exercises the one that makes the row wrap.
   six hundred decimal digits, and `int()` / `float()` convert all of them, so
   `"A1"`, `"A１"` and `"A١"` — three distinct filename tokens naming three
   distinct files — all canonicalised to `"A01"` and merged onto one well.
-  `util/well_token` and `util/timepoint` therefore spell their digit classes
-  `[0-9]`, and `parse_hours` gates its bare-`float()` fallback on `str.isascii`
+  `util/well_token` and `util/timepoint` — the two modules whose parse decides
+  *identity*, and where a merge is therefore unrecoverable — spell their digit
+  classes `[0-9]`, and `parse_hours` gates its bare-`float()` fallback on `str.isascii`
   because the regex is not the only way a number gets out of that function. A
   token whose digits come from another alphabet is opaque, and an opaque token is
   kept as-is rather than guessed at — which is what both modules already promise
-  everywhere else.
+  everywhere else. `util/fov` and `util/schema_infer` still spell theirs `\d`,
+  deliberately: nothing there decides identity. `parse_fov`'s own docstring
+  records the reason — only *sorting* depends on it, equality still compares the
+  raw token strings, and `sort_key`'s last tuple element is that raw token — so
+  a non-ASCII digit costs an ordering, never a merge.
   `tests/test_well_token_single_parser.py` fails on any *whole-token* well
   pattern outside `util/well_token.py`. Two neighbouring shapes are deliberately
   not caught by it, because they are different operations: a **trailing**-token

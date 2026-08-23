@@ -395,6 +395,25 @@ def subtract_background(image, radius: int, method: str = "sliding_disk",
                 # field's shape (e.g. bright corners).
                 bg = _match_background_scale(img, bg)
                 return _floor_after_subtract(img - bg)
+            log.warning(
+                "Background: the empty-well field is %s and this frame is %s, "
+                "so it cannot be subtracted — the frame is returned UNCHANGED "
+                "and is NOT background-subtracted. A blank acquired at a "
+                "different binning or crop from the plate is the usual cause.",
+                bg.shape, img.shape,
+            )
+        else:
+            log.warning(
+                "Background: empty_well was requested but no background field "
+                "was built for this channel — the frame is returned UNCHANGED "
+                "and is NOT background-subtracted.",
+            )
+        # The fourth identity return in this function, and the one that used to
+        # be silent. ``_require_empty_well_models`` covers only the case where
+        # *no* model was built at all, so a per-channel gap — and a shape
+        # mismatch in particular — passed straight through, written under the
+        # usual ``_tophat`` filename with nothing downstream able to tell it
+        # from a corrected frame.
         return img
     return apply_tophat(img, int(radius))  # top_hat (default / back-compat)
 

@@ -49,15 +49,23 @@ _NUCLEAR_SECONDARY_RE = re.compile(r"nir|rfp", re.IGNORECASE)
 # (rejecting "GFPtrans" and "BFP") and none may follow, while a digit is
 # allowed on either side.
 #
-# The digit is allowed rather than merely tolerated. A trailing ``[0-9]`` in
-# the bound rejected "BF1", "BF2", "DIC1", "DIC2", "Trans1" and "NIR_BF2" —
-# every one of them a phase channel written the way a scope with two
-# transmitted-light paths names them — and it bought nothing, because no
-# fluorescent channel is spelled as one of these three tokens followed by a
-# digit. A rejected phase channel is not a cosmetic misclassification: it is
-# quantified from raw frames while every other channel is flat-field- and
-# background-corrected, under the usual ``_tophat`` filename, which gives
-# nothing downstream a way to tell.
+# A trailing digit is allowed after ``bf`` and ``dic`` and not after ``trans``,
+# and the asymmetry is the point. ``BF1``, ``BF2``, ``DIC1``, ``DIC2`` and
+# ``NIR_BF2`` are how a scope with two transmitted-light paths names them, and
+# no fluorescent channel is spelled as those two tokens plus a digit — rejecting
+# them bought nothing and cost a real phase channel, which is not a cosmetic
+# misclassification: it is quantified from raw frames while every other channel
+# is flat-field- and background-corrected, under the usual ``_tophat`` filename,
+# which gives nothing downstream a way to tell.
+#
+# ``trans`` keeps the digit in its bound because it is the hint with the large
+# fluorescent overlap — transferrin, transfection, transduction — and
+# ``Trans647`` on a transferrin conjugate is a name someone writes. The audit's
+# own example of this misclassification was ``Transferrin647``. A numbered
+# transmitted-light channel is rarer than an abbreviated transferrin one, and
+# the two errors are not symmetric: missing a phase channel leaves it corrected
+# like every other, while claiming a fluorescence channel is phase silently
+# skips both corrections.
 #
 # ``dic`` carries the same bound as ``trans`` and ``bf``, and for the same
 # reason: as a bare substring it is inside "Ca-Indicator", "Indicator" and
@@ -72,7 +80,7 @@ _NUCLEAR_SECONDARY_RE = re.compile(r"nir|rfp", re.IGNORECASE)
 _PHASE_HINT_RE = re.compile(
     r"phase"
     r"|brightfield|bright.?field"
-    r"|(?<![a-z])trans(?:mitted|mission)?(?![a-z])"
+    r"|(?<![a-z])trans(?:mitted|mission)?(?![a-z0-9])"
     r"|(?<![a-z])dic(?![a-z])"
     r"|(?<![a-z])bf(?![a-z])",
     re.IGNORECASE,

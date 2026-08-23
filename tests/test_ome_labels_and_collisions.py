@@ -172,7 +172,12 @@ def test_every_delta_t_unit_converts_to_hours(unit, delta, want):
     assert tokens == ["0h", want]
 
 
-@pytest.mark.parametrize("unit", ["furlong", "ticks", "Zs", "1/s"])
+@pytest.mark.parametrize("unit", ["furlong", "ticks", "Zs", "1/s",
+                                 # A case-significant symbol in a spelling
+                                 # OME does not use: silently picking the
+                                 # smaller of the two units it could mean
+                                 # is the 10^9 fold this table prevents.
+                                 "MS", "mS", "KS", "DAS"])
 def test_an_unreadable_unit_falls_back_to_positional_tokens(unit):
     """Unknown is not a synonym for seconds; a positional token states nothing."""
     xml = _ome_xml(planes=[(0, 0, unit), (1, 3600, unit)])

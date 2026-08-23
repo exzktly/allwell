@@ -459,24 +459,44 @@ def nucleus_seed_markers(
 def cytoplasm_mask(cytoplasm_tophat: np.ndarray, fov: str) -> np.ndarray:
     """Otsu mask of the corrected cytoplasm frame, saying so when it is empty.
 
-    ``threshold_otsu`` raises on a constant image, and the fallback — the frame's
-    own mean — then admits nothing at all, because no pixel of a constant frame
-    is strictly above its mean. That is a legitimate outcome (an empty or
-    saturated cytoplasm channel has no cytoplasm to find) but it produces zero
-    cells for the whole FOV, and it used to produce them in silence, forty lines
-    below the near-constant *nuclear* input that this module refuses with an
-    explicit warning. Both halves of one function now say when they could not
-    measure something.
+    A constant cytoplasm frame yields no pixels at all, because a threshold on
+    a constant image cannot be strictly exceeded by any of its pixels. That is a
+    legitimate outcome — an empty or saturated cytoplasm channel has no
+    cytoplasm to find — but it produces zero cells for the whole FOV, and it
+    used to produce them in silence, forty lines below the near-constant
+    *nuclear* input that this module refuses with an explicit warning. Both
+    halves of one function now say when they could not measure something.
+
+    The constant case is **tested for**, not caught. ``threshold_otsu`` was
+    assumed to raise on one, and with the pinned skimage (0.24.0) it does not:
+    it returns the constant value, so the ``except`` never fired and the
+    constant warning was unreachable while four artefacts described it as the
+    behaviour. An empty frame is the case that does raise, and it raises
+    ``IndexError`` rather than ``ValueError``, so the handler could not see that
+    one either.
     """
-    try:
-        thresh = float(threshold_otsu(cytoplasm_tophat))
-    except ValueError:
-        thresh = float(np.mean(cytoplasm_tophat)) if cytoplasm_tophat.size else 0.0
+    if cytoplasm_tophat.size == 0:
+        thresh = 0.0
+        log.warning(
+            "  seg %s: the corrected cytoplasm frame is empty, so there is "
+            "nothing to threshold. This FOV will yield 0 cells.", fov,
+        )
+    elif float(cytoplasm_tophat.min()) == float(cytoplasm_tophat.max()):
+        thresh = float(cytoplasm_tophat.reshape(-1)[0])
         log.warning(
             "  seg %s: the cytoplasm channel is constant (every pixel %.4g), so "
-            "Otsu could not split it — falling back to its mean, which admits no "
-            "pixels. This FOV will yield 0 cells.", fov, thresh,
+            "there is no split to find — no pixel is strictly above the "
+            "threshold. This FOV will yield 0 cells.", fov, thresh,
         )
+    else:
+        try:
+            thresh = float(threshold_otsu(cytoplasm_tophat))
+        except (ValueError, IndexError):
+            thresh = float(np.mean(cytoplasm_tophat))
+            log.warning(
+                "  seg %s: Otsu could not split the cytoplasm channel — falling "
+                "back to its mean (%.4g).", fov, thresh,
+            )
     mask = cytoplasm_tophat > thresh
     if not mask.any():
         log.warning(

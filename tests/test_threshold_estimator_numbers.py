@@ -80,8 +80,21 @@ def test_a_single_positive_cell_cannot_score_a_perfect_gap(dtype):
 
 
 @pytest.mark.parametrize("dtype", [np.float64, np.float32])
-def test_one_outlying_control_cell_no_longer_moves_the_plate_gate(dtype):
-    """Moving a single negative-control cell moved the threshold by ~200 units."""
+def test_smoothing_holds_the_gate_when_the_two_populations_overlap(dtype):
+    """On *these* populations, one control outlier no longer moves the gate.
+
+    Measured on this fixture — overlapping N(600,250) against N(400,200), with
+    the outlier at 1100 — the shift is 200.2 units unsmoothed and 0.0 smoothed,
+    so the rule genuinely bites here.
+
+    Deliberately not named for the general claim. ``relative_gap``'s docstring
+    records the case where it does *not* hold: on two well-separated 400-cell
+    populations the reported threshold is the plateau's lower edge, which is set
+    by where the negative control's fraction-on reaches zero, and smoothing does
+    not touch that edge — the same one-cell move shifts the gate by 1252 units
+    either way. What ships against that is the reported plateau, not the
+    smoothing, and a test named for the general claim would have said otherwise.
+    """
     pos, neg = _populations(dtype)
     clean = optimize_between_populations(pos, neg)
     outlier = np.concatenate([neg[:-1], np.array([1100.0], dtype=dtype)])
@@ -448,3 +461,68 @@ def test_the_viewers_estimator_keeps_a_sub_one_gate(monkeypatch):
         "is the value that also means 'this channel was never measured'"
     )
     assert out["gfp"] == pytest.approx(round_stored_threshold(0.24962132375636537))
+
+
+# ── the two estimators the module promises cannot disagree ──────────────────
+
+@pytest.mark.parametrize("seed_a, seed_b, kind", [
+    (1, 2, "normal"),
+    (4, 5, "lognormal"),
+    (11, 12, "separated"),
+])
+def test_the_viewer_and_the_pipeline_choose_the_same_threshold(seed_a, seed_b, kind):
+    """`threshold_optimize`'s own docstring says they cannot differ.
+
+    They did. The pipeline passes population sizes to `relative_gap` and the
+    Cell Gating tab's scan did not, unconditionally — including on the raw
+    fraction-on branch, where the fractions *are* `k / n` and both `n`s are two
+    lines away, and which is the default (the controller leaves every
+    fold-change array `None` until a user picks one). Measured before the fix:
+    grid points 1104 vs 1209 on overlapping populations, 1231 vs 2366 on a
+    skewed pair.
+    """
+    from well_viewer.features.home.cell_gating.gating_compute import (
+        scan_fc_fractions,
+    )
+
+    ra, rb = np.random.default_rng(seed_a), np.random.default_rng(seed_b)
+    if kind == "normal":
+        a, b = ra.normal(600, 250, 300), rb.normal(400, 200, 300)
+    elif kind == "lognormal":
+        a, b = ra.lognormal(6, 0.8, 400), rb.lognormal(5.6, 0.8, 400)
+    else:
+        a, b = ra.normal(2000, 100, 400), rb.normal(200, 20, 400)
+
+    thresholds = sweep_thresholds(*sweep_bounds(a, b), 512)
+    fa, fb, diffs = scan_fc_fractions(thresholds, a, b)
+    viewer = best_from_curves(thresholds, fa, fb, diffs,
+                              n_a=a.size, n_b=b.size).threshold
+    pipeline = optimize_between_populations(a, b, steps=512).threshold
+    assert viewer == pytest.approx(pipeline), (
+        f"the Cell Gating tab would report {viewer!r} and the pipeline "
+        f"{pipeline!r} for the same two populations"
+    )
+
+
+def test_the_fold_changed_branch_stays_unsmoothed():
+    """Not an oversight: those fractions are not `k / n` any more.
+
+    `scale_bar_value` adjusts each fraction against a control or a baseline, so
+    the result exceeds 1 and goes negative — there is no `k` to add one to, and
+    smoothing it would be arithmetic on a quantity that is no longer a count.
+    """
+    from well_viewer.features.home.cell_gating.gating_compute import (
+        scan_fc_fractions,
+    )
+
+    rng = np.random.default_rng(7)
+    a, b = rng.normal(600, 250, 300), rng.normal(400, 200, 300)
+    ctrl = rng.normal(300, 150, 300)
+    thresholds = sweep_thresholds(*sweep_bounds(a, b), 256)
+    _fa, _fb, fc_diffs = scan_fc_fractions(thresholds, a, b, ctrl_values=ctrl)
+    raw_fa, raw_fb, _ = scan_fc_fractions(thresholds, a, b)
+    assert not np.allclose(fc_diffs, relative_gap(raw_fa, raw_fb,
+                                                 n_a=a.size, n_b=b.size)), (
+        "the fixture no longer distinguishes the two branches")
+    assert np.allclose(fc_diffs, relative_gap(_fa, _fb)), (
+        "the fold-changed branch was smoothed; its fractions are not counts")

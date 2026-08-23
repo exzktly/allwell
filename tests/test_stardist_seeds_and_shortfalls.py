@@ -14,8 +14,8 @@ Three audit findings in ``pipeline.stardist``:
   centroids in both parities, four integer dtypes and an empty frame.
 * **C10** — three ways this function returned zero cells without a word, in a
   module that refuses a near-constant *nuclear* input forty lines above with an
-  explicit warning: a constant cytoplasm channel (``threshold_otsu`` raises, the
-  fallback mean admits no pixel), every nucleus below ``min_nucleus_area_px``,
+  explicit warning: a constant cytoplasm channel (no pixel is strictly above a
+  constant frame's threshold), every nucleus below ``min_nucleus_area_px``,
   and markers that fall outside the cytoplasm mask and are dropped by
   ``watershed(mask=…)``.
 * **C14** — ``parse_threshold`` let ``float("nan")`` through both bounds, since
@@ -223,6 +223,12 @@ def test_a_constant_cytoplasm_channel_says_it_produced_no_cells(monkeypatch, cap
     assert points.max() > 0, "the nuclei were seeded; it is the mask that is empty"
     assert "A01_f1_t0" in caplog.text
     assert "0 cells" in caplog.text
+    # Both halves, and the constant one by name: it was described in four
+    # places as the ``except ValueError`` branch, and with the pinned skimage
+    # ``threshold_otsu`` returns the constant value instead of raising, so that
+    # branch could not fire and only the empty-mask line ever appeared.
+    assert "is constant" in caplog.text, caplog.text
+    assert "mask is empty" in caplog.text, caplog.text
 
 
 def test_every_nucleus_below_the_area_floor_says_so(monkeypatch, caplog):

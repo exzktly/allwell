@@ -1,6 +1,6 @@
 """Background corrections that return the frame they were given.
 
-Three returns in ``pipeline.background`` are the identity transform wearing a
+Four returns in ``pipeline.background`` are the identity transform wearing a
 correction's name (audit C13). Each is a legitimate outcome of an input the
 function cannot work with, and each used to be indistinguishable, in the output
 and in the log, from a correction that worked:
@@ -12,6 +12,12 @@ and in the log, from a correction that worked:
 * ``fov_median`` substitutes a level of ``0.0`` for a frame with no finite pixel,
   which is CLAUDE.md §7's cardinal conflation — "computed as zero" written the
   same way as "never computed".
+* ``empty_well`` returns the frame when the channel has no background field at
+  all, or when the field it has is a different shape from the frame — a blank
+  acquired at a different binning or crop from the plate.
+  ``_require_empty_well_models`` refuses a run where *no* model was built, so it
+  cannot see either of these; this was the fourth, and it was the one the first
+  round of the sweep left behind.
 
 The fix is not to make them do something else; there is nothing else to do. It
 is to make the shortfall reach the run log, so a plate quantified from

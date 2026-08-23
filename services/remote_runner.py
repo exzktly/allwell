@@ -289,6 +289,7 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # Filename-schema inference for the Analyze input scan; client-side only.
     "util/schema_infer.py",
     "util/timepoint.py",
+    "util/settings_digest.py",
     "util/well_token.py",
     # Free-space primitives + the single wording for a volume that filled. The
     # retry shield below rewrites an ENOSPC through it, so a remote run that
@@ -315,6 +316,7 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # check and the Datasets Validate tool.
     "pipeline/completeness.py",
     "pipeline/flatfield.py",
+    "pipeline/fov_checkpoint.py",
     "pipeline/incremental_keys.py",
     "pipeline/well_skip.py",
     "pipeline/io.py",
@@ -325,6 +327,7 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/run_report.py",
     # The sidecar blocks the user owns (cell_gating / sample_definitions /
     # ratios / notes), shared by write_pipeline_info and the end-of-run fetch.
+    "pipeline/settings_record.py",
     "pipeline/sidecar.py",
     "pipeline/shape_features.py",
     "pipeline/stardist.py",
@@ -5497,41 +5500,16 @@ class Fetcher:
     def _merge_fetched_csvs(self, tmp_csv_dir: Path) -> None:
         """Merge each partial per-well CSV pulled into *tmp_csv_dir* into the
         matching full CSV under ``local_output_dir`` (incremental remote runs).
-        New rows are appended, duplicates skipped — see
-        ``pipeline.io.merge_records_into_csv``."""
-        import csv as _csv
 
-        from pipeline.io import merge_records_into_csv
+        The loop itself lives beside `merge_records_into_csv` in `pipeline.io`,
+        because deciding what to do when one of these merges fails is a
+        property of the merge, not of the remote runner.
+        """
+        from pipeline.io import merge_fetched_csvs
 
-        for partial in sorted(tmp_csv_dir.glob("*.csv")):
-            try:
-                with open(partial, newline="") as fh:
-                    rows = list(_csv.DictReader(fh))
-            except OSError as exc:
-                self._log(f"[remote] warn: reading fetched CSV {partial.name} failed: {exc}\n")
-                continue
-            if not rows:
-                continue
-            try:
-                added = merge_records_into_csv(
-                    self.run.local_output_dir / partial.name, rows)
-            except OSError as exc:
-                # The *local* target could not be read. `merge_records_into_csv`
-                # used to treat that as "there is no target" and rewrite the
-                # file with the fetched rows alone, losing every row the plate
-                # already had. Refusing this one file keeps the rest of the
-                # fetch going and leaves the existing CSV untouched, which is
-                # the recoverable state: the well's rows are still on the
-                # remote and still in its `_out.zip`.
-                self._log(
-                    f"[remote] warn: merging into {partial.name} failed "
-                    f"({exc}); the existing CSV is unchanged and this well's "
-                    f"new rows were not added\n")
-                continue
-            self._log(
-                f"[remote] merge: {partial.name} → +{added} new row(s) "
-                f"into {self.run.local_output_dir.name}/\n"
-            )
+        merge_fetched_csvs(tmp_csv_dir, self.run.local_output_dir,
+                           log_fn=self._log)
+
 
     def _materialize(self, well: str, well_zip: Path) -> bool:
         """Place the well's outputs in ``local_output_dir`` so the result

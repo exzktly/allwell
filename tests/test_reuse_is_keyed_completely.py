@@ -38,6 +38,7 @@ from __future__ import annotations
 import pytest
 
 from services import run_journal as J
+from util.settings_digest import KEYED_ON
 
 #: Every "reuse earlier work" decision in the app, the keys it compares, and why
 #: each key is required. One entry per decision; the reason is not a comment, it
@@ -60,6 +61,13 @@ REUSE_CONTRACTS = {
             "A 'gpu'/'cpu' pair of entries for the same cluster, differing "
             "only in compute_launcher or extra_args, is the live case"),
     },
+    # The pipeline's own two "we already did this" predicates —
+    # `well_skip.output_exists_for_well` and the incremental done-set — both
+    # consult one digest, so they are one decision here. Its keys are
+    # `util.settings_digest.KEYED_ON` *by reference* rather than restated:
+    # a second copy would be a second definition of what makes two runs
+    # interchangeable, and the reason each key is in it is written there.
+    "settings_record.well_settings_allow_reuse": dict(KEYED_ON),
 }
 
 #: What ``argv_digest`` has to cover, and why each item is not optional.

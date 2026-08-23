@@ -84,7 +84,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # services.remote_runner._REQUIRED_REMOTE_FILES, i.e. a change to what every
 # remote machine is sent, and that was explicitly out of scope for this change.
 # That cluster remains the extraction to take when this budget next binds.
-PROCESS_MICROSCOPY_BUDGET = 4745
+PROCESS_MICROSCOPY_BUDGET = 4720
 
 # `services/remote_runner.py` is the largest module in the repo — nearly twice
 # `process_microscopy.py` — and until now the only large one with nothing
@@ -98,7 +98,7 @@ PROCESS_MICROSCOPY_BUDGET = 4745
 # threshold of 40 — so length is the dimension that needs a limit and this is
 # it. It only moves down: introduced at 8210, then 7994, 7606 and 7419 as the
 # staging, transport and argv/run-id extractions each took what they moved.
-REMOTE_RUNNER_BUDGET = 7419
+REMOTE_RUNNER_BUDGET = 7412
 # 1494 -> 1333: the smart-layout builder cluster (flat + nested grid assembly,
 # per-channel LUT re-keying, the Build presets, and the row-channel styling
 # helper) moved into ``image_table/build_layout.py``. The nested / compound-axis

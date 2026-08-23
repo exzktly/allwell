@@ -411,6 +411,15 @@ be forced again the moment you loaded its settings back. **Dismiss** hides the s
   It is still quantified like any other channel. At most one channel can be
   Phase, and it cannot also be smFISH.
 
+  **All-Well pre-ticks it when a channel's name reads as brightfield** — `DIC`,
+  `BF`, `Phase`, `Brightfield`, `Trans` and the usual spellings around them,
+  including prefixed forms like `w1BF`. It reads them as whole words, so a
+  fluorescence channel that merely contains those letters — `Ca-Indicator`,
+  `Transferrin647`, `BFP` — is left as an ordinary channel. The guess is only a
+  starting point: check the tick before you run, because a fluorescence channel
+  marked Phase is quantified from uncorrected images and nothing downstream says
+  so.
+
   **The Phase channel cannot also be the segmentation channel**, except under the
   `cellpose_labelfree` method, which exists to segment it. Because Phase skips
   correction, segmenting it with a fluorescence routine means running that
@@ -586,6 +595,17 @@ symmetrically, so entering them the wrong way round still produces a threshold.
 The run log warns when the positive control ends up with the *lower* fraction of
 on cells, which is the tell.
 
+**Read the control method's log line as two numbers, not one.** It reports the
+threshold it chose, the fraction of cells on either side of it, and a *supported
+gap* — how well the cut separates the two wells, weighted by how many cells are
+actually behind the claim, so a cut that only one or two positive cells clear
+scores low rather than perfect. A second line follows whenever several candidate
+thresholds scored identically: it says how many, and across how wide a range of
+intensities. Fraction-on changes in steps, so that is common and not a fault —
+but it means the reported number is the lowest of a range rather than a single
+best answer, and a range spanning a large part of the channel's intensities is
+worth a look before you trust the default.
+
 **If the Cell Gating tab opens with no thresholds, read the end of the run log.**
 The Otsu pass takes its samples from the per-well output archives, pairing each
 channel's corrected image with the segmentation mask of the same field and
@@ -601,6 +621,7 @@ look for, in order of what they mean:
 | `Auto-threshold defaults written for N channel(s): …` | worked; those values are now the Cell Gating defaults |
 | `no threshold could be estimated for any of …` | nothing was computed — the lines above it say why |
 | `none of its N image member(s) could be placed by the run's filename schema …` | the schema does not match the filenames |
+| `… holds N member(s) but no '_labels' segmentation image` | that well's archive carries no segmentation mask, so no cell could be sampled from it |
 | `produced no new defaults (every channel already has a stored value)` | nothing to do; the dataset already had thresholds |
 | *(no `Auto-threshold` line at all)* | the run ended before the pass — check for an earlier failure |
 
@@ -2916,6 +2937,21 @@ What it catches, and what each one means:
   holds), or a **broken index map**, where the message says "No image data is
   missing" — every image is in the file and only the metadata is wrong, so
   re-export or repair the metadata rather than re-running the plate.
+- **"has 2 channels whose names all reduce to the filename token …"** — two
+  channels (or two timepoints) whose names differ only by spacing or punctuation,
+  such as `488 nm` and `488nm`, or `GFP-1` and `GFP_1`. Converted images are
+  named from those labels with everything but letters and digits stripped, so
+  both channels would be written to the same filename inside a well's archive and
+  only one of them would be readable afterwards — while the conversion reported
+  writing both. Rename the channels in the acquisition software so they differ by
+  more than punctuation, and export again.
+
+**Timepoints are named from the times the file records.** Where an OME-TIFF
+carries a `DeltaT` for each frame, the converted filenames use it — `0h`, `1h`,
+`24h` — whatever unit the file states them in (milliseconds, seconds, minutes,
+hours or days). If the file states a unit All-Well does not recognise, the
+timepoints are named by position instead (`t0`, `t1`, …): the order is still
+right and nothing claims an elapsed time the converter could not work out.
 
 All-Well looks for those coordinates in **both** places a file keeps metadata:
 the OME block, and the original metadata the microscope wrote, which conversion

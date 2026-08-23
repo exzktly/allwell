@@ -42,6 +42,69 @@ The four groups are partitioned by file, not by theme, so that they can run at
 the same time without touching the same lines. Where a theme's items live in
 another group's files, the item moves to the group that owns the file.
 
+## Resuming this work in a new session
+
+Everything needed to pick this up is in this file and in git. Nothing
+load-bearing lives in a scratch directory, because those do not survive a
+session.
+
+**Where the work is.** Branch `claude/codebase-review-report-5oiiam` (checked
+out locally as `claude/fix-7-remainder`), stacked on top of the commits that
+pull request #843 already carries. That pull request is open, green and
+mergeable; the remediation commits on top of it are **not pushed**, deliberately,
+because each push costs a CI run. Push once the parallel groups have landed, and
+update the #843 description in the same breath — it currently describes only the
+work up to `598ebb01` and says nothing about the 42-item remediation. The
+version is already bumped for this pull request; do not bump it again.
+
+**How to read the state.** The group tables below are the source of truth. A row
+is finished only when its state column says `done` and its right-hand column
+names the test that pins it. The counts line above is derived from the rows —
+recompute it rather than editing it by hand:
+
+```
+python3 - <<'EOF'
+import re
+p = "_Docs/Markdowns/REVIEW_REMEDIATION.md"
+s = open(p).read()
+rows = re.findall(r"^\| \d+ \| [^|]* \| ([a-z ]+) \|", s, re.M)
+n = {k: sum(1 for r in rows if r.strip() == k) for k in ("done", "declined", "deferred")}
+line = (f"Counts: **{n['done']} done · {n['declined']} declined · "
+        f"{n['deferred']} deferred · {len(rows) - sum(n.values())} outstanding** "
+        f"of {len(rows)}.")
+open(p, "w").write(re.sub(r"^Counts: .*$", line, s, count=1, flags=re.M))
+print(line)
+EOF
+```
+
+**The rule that produced this document.** CLAUDE.md section 6.1. Move the row in
+the same commit as the fix; never in a batch afterwards. `done` requires a test
+watched failing without the fix — `scripts/prove_guard.sh <test_file>` does that
+against the base branch, and for a behaviour that does not exist on the base at
+all, neutralise the fix at HEAD instead and watch the test go red. Read the
+failure: an `ImportError` or a `TypeError` on a symbol the fix introduces
+measured nothing, and a test that imports such a symbol has to be rewritten not
+to.
+
+**Who owns which files.** The four groups are partitioned by file so they can
+run at once. Anything editing outside its own list collides:
+
+| Group | Files |
+|---|---|
+| W1 | `well_viewer/persistence/**`, `well_viewer/core/channel_state_controller.py`, `well_viewer/domain/gating_state.py`, `well_viewer/features/home/groups/panel_view.py`, `well_viewer/features/saved_plots/tab_view.py` |
+| W2 | `datasets/**`, `util/zip_write.py`, `WellPlateZipper.py` |
+| W3 | `well_viewer/features/image_browser/**`, `well_viewer/features/batch_export/**`, `well_viewer/data/{image_discovery,zip_members,cache_projectors}.py` |
+| lead | `well_viewer/features/smfish/**`, the fold-change modules, `well_viewer/features/heatmap/`, `well_viewer/features/barplot/**`, `widgets/**`, `theme.py`, the guards, the docs |
+
+**Commits that are not evidence.** Several commits are titled `Checkpoint:` and
+hold work the groups had not finished. They exist so an interrupted session
+loses nothing; they prove nothing, and no row was moved for them. Judge each
+item by the commit that names it and moves its row.
+
+**Still to verify.** Every row a parallel group reports as fixed needs its claim
+read against the code before its row moves. A group's report is a hypothesis
+until the diff has been read.
+
 ## Two cross-cutting fixes, sequenced last
 
 Two of these rows are not local edits and must land after the groups they touch,
@@ -124,8 +187,18 @@ or they will go red on files another group is still holding:
 
 ## Not carried here
 
-The 128 findings already closed and the 7 declined deliberately are not
-listed here. They are recorded in the pull requests that closed them, and the
-reconciliation that established the split is reproducible: it read every
-finding against the tree, not against the report line numbers, which had all
-moved.
+The 128 findings already closed and the 7 declined deliberately are not listed
+here. They are recorded in the pull requests that closed them — #834 through
+#841 and #843 — and each carries its evidence in the commit that closed it.
+
+The reconciliation that established the split checked all 177 against the tree
+rather than against the report, whose line numbers had all moved. Its full
+per-finding ledger (verdict, evidence at the tree, and the guard test where one
+exists) was delivered to the user as a file rather than committed, to keep this
+directory to the three permanent documents plus this tracker. It is
+reproducible: read each finding of the original review against the current code,
+classify it fixed / partial / declined / open with the file and line that
+settles it, and do not trust the report's line numbers.
+
+The split it found was 128 fixed, 5 partial, 7 declined, 37 open. The 5 partial
+and 37 open are the 42 rows above.

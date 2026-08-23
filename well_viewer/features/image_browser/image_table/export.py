@@ -462,7 +462,10 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None):
                     rgb = draw_cell_chrome(rgb, **ck)
                 # A figure that dropped the uncorrected mark would leave the app
                 # carrying exactly the ambiguity the live grid no longer has.
-                rgb = mark_uncorrected(ctx, cell, rgb)
+                # ``overlay_chans`` because an overlay cell's own token names no
+                # channel the loader ever recorded — without it the figure would
+                # silently drop the mark on exactly the cells the screen shows it on.
+                rgb = mark_uncorrected(ctx, cell, rgb, overlay_chans)
 
             if rgb is not None:
                 if cell_max_px:

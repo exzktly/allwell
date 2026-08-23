@@ -30,6 +30,8 @@ from datasets._common.containers import (
     WellFraction,
     clear_destination,
     copy_container_members,
+    restamp_overrides,
+    unstamped_note,
 )
 from datasets.subset.subset_compute import (
     IN_PROGRESS_MARKER,
@@ -115,15 +117,11 @@ def _copy_filtered_overrides(plan: SubsetPlan, kept_keys: dict[str, set[tuple[st
     if not kept_entries:
         return 0
 
-    for entry in kept_entries:
-        well = str(entry.get("well", "")).strip()
-        zip_path = plan.dest.out_dir / f"{well}_out.zip"
-        with swallow(f"stat {zip_path}"):
-            entry["seg_fp"] = f"{zip_path.stat().st_mtime_ns}"
+    unstamped = restamp_overrides(kept_entries, plan.dest.out_dir)
 
     payload = {"version": OVERRIDES_SCHEMA_VERSION, "overrides": kept_entries}
     write_json_atomic(plan.dest.out_dir / OVERRIDES_FILENAME, payload, indent=None)
-    emit(f"Carried over {len(kept_entries)} cell override(s).")
+    emit(f"Carried over {len(kept_entries)} cell override(s).{unstamped_note(unstamped)}")
     return len(kept_entries)
 
 

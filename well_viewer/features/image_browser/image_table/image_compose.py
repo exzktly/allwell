@@ -392,10 +392,11 @@ def _parse_lut(ctx, row_idx: int, chan=None) -> tuple[float | None, float | None
     With a builder channel spec (``chan`` given) the range comes from the
     channel's own ``lut_min``/``lut_max`` (None ⇒ inherit the shared per-channel
     default, then the pooled Auto window, then per-cell auto-fit). Without a spec
-    (``chan`` omitted / no channel_opts entry) the range inherits the shared
-    per-channel default (a brightness tuned in Review Image), then the pooled Auto
-    window, else auto-fits. The pooled window is what makes Auto comparable
-    cell-to-cell (see ``controller._compute_auto_luts``)."""
+    the range inherits the shared per-channel default (a brightness tuned in Review
+    Image) for *chan* — or, only when the caller named no channel at all, for the
+    row's representative channel — then the pooled Auto window, else auto-fits. The
+    pooled window is what makes Auto comparable cell-to-cell (see
+    ``controller._compute_auto_luts``)."""
     spec = _channel_opts_for(ctx, chan)
     if spec is not None:
         lo = spec.get("lut_min")
@@ -408,9 +409,14 @@ def _parse_lut(ctx, row_idx: int, chan=None) -> tuple[float | None, float | None
             if pooled is not None:
                 return pooled
         return lo, hi
-    # No channel spec → inherit the shared per-channel default. ``_shared_channel_lut``
-    # reads the grid cell's own channel (raw row index), correct per band.
-    shared = _shared_channel_lut(ctx, row_idx)
+    # No channel spec → inherit the shared per-channel default for the channel the
+    # CALLER named. ``_shared_channel_lut`` answers for the row's representative
+    # channel — ``cells[row_idx][0]['chan']``, i.e. column 0's — which is only the
+    # right question when no channel was named at all. Asking it for a named
+    # channel handed every cell in the row column 0's brightness window, so a row
+    # of mixed channels was drawn with one channel's LUT.
+    shared = (_shared_channel_lut_for(ctx, chan) if chan
+              else _shared_channel_lut(ctx, row_idx))
     if shared is not None:
         return shared
     pooled = _auto_lut_for(ctx, chan or _row_channel(ctx, row_idx))
@@ -706,7 +712,12 @@ def composite_column_rgb(ctx, cache, cells, crop_tool, c: int, rendered):
             tp = cell["tp"]
             fov = cell["fov"]
             if well and chan and tp:
-                use_tophat = _row_display_opts(ctx, r)[0]
+                # raw vs corrected travels with the CHANNEL, not the row: a grid
+                # whose rows are wells holds a different channel in every column,
+                # and omitting ``chan`` here resolved no spec at all, so every
+                # lazy-loaded cell fetched the raw frame even where the channel
+                # is set to corrected.
+                use_tophat = _row_display_opts(ctx, r, chan)[0]
                 arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
         rgb = cell_display_rgb(ctx, cache, cell, r, crop_tool, arr)
         if rgb is not None:
@@ -717,8 +728,15 @@ def composite_column_rgb(ctx, cache, cells, crop_tool, c: int, rendered):
 def _ratio_for_overlay(ctx, chan) -> RatioMetric | None:
     """The RatioMetric whose display label matches *chan* (case-insensitive), else
     None. Inlined so this render layer stays free of a ``grid_layout`` import
-    (which would cycle: grid_layout imports this module)."""
-    for r in (ctx.state.channel.ratio_metrics or []):
+    (which would cycle: grid_layout imports this module).
+
+    Resolved defensively because this module's render helpers are also driven by
+    callers that carry no channel state at all (the render-resilience tests pass
+    a bare stub, and some pass no ctx); a context without ratio metrics simply
+    has no ratio to find, which is not a failure worth an exception."""
+    metrics = getattr(getattr(getattr(ctx, "state", None), "channel", None),
+                      "ratio_metrics", None)
+    for r in (metrics or []):
         if r.display_label().upper() == str(chan or "").strip().upper():
             return r
     return None
@@ -1018,7 +1036,36 @@ UNCORRECTED_MARK = "raw"
 UNCORRECTED_TOOLTIP = "shown uncorrected — no corrected image for this field"
 
 
-def is_raw_fallback(ctx, cell) -> bool:
+def cell_source_channels(ctx, cell, overlay_chans=None) -> list[str]:
+    """Every REAL channel whose frame *cell* draws from.
+
+    A cell's ``chan`` is what the axis calls it, and for two kinds of cell that
+    is not a channel the loader ever reads:
+
+    * an :data:`OVERLAY_CHAN` cell blends the whole selected channel set
+      (``overlay_cell_rgb``), which the caller supplies as *overlay_chans*
+      because only the layout knows it;
+    * a ratio cell's token is a :class:`RatioMetric` display label, and the
+      loader reads the metric's numerator and denominator
+      (:func:`_load_ratio_array`).
+
+    Everything else draws from its own channel. Returns ``[]`` for an unset cell.
+    Used wherever a per-cell answer has to be looked up in a record the loader
+    keyed by the channel it actually opened — see :func:`is_raw_fallback`.
+    """
+    chan = (cell.get("chan") or "") if hasattr(cell, "get") else ""
+    if not chan:
+        return []
+    if chan == OVERLAY_CHAN:
+        return [str(c) for c in (overlay_chans or []) if c and c != OVERLAY_CHAN]
+    ratio = _ratio_for_overlay(ctx, chan)
+    if ratio is not None:
+        return [c for c in ((ratio.numerator_channel or "").strip(),
+                            (ratio.denominator_channel or "").strip()) if c]
+    return [chan]
+
+
+def is_raw_fallback(ctx, cell, overlay_chans=None) -> bool:
     """Whether *cell* was served the raw frame after asking for the corrected one.
 
     Reads the current render pass's :func:`_raw_fallbacks` set, whose keys
@@ -1026,14 +1073,23 @@ def is_raw_fallback(ctx, cell) -> bool:
     The set is populated by whichever pass loaded the cell first — the pooled
     Auto-LUT pass runs before the render loop — so this answers correctly for
     both.
+
+    The lookup is per SOURCE channel (:func:`cell_source_channels`), not per axis
+    token. An overlay cell and a ratio cell are both drawn from channels whose
+    names appear nowhere on the grid, so keying on the cell's own token asked the
+    record for a channel the loader never wrote and answered "corrected" for a
+    cell that is not: the fallback was counted under a channel the user cannot
+    see and badged on nothing. True when ANY source channel fell back, because a
+    blend or a ratio carrying one uncorrected input is an uncorrected image.
     """
     well = (cell.get("well") or "") if hasattr(cell, "get") else ""
-    chan = (cell.get("chan") or "") if hasattr(cell, "get") else ""
-    if not well or not chan:
+    if not well:
         return False
-    key = (well, _binary_base(chan).strip().lower(),
-           str(cell.get("tp") or ""), str(cell.get("fov") or ""))
-    return key in _raw_fallbacks(ctx)
+    tp = str(cell.get("tp") or "")
+    fov = str(cell.get("fov") or "")
+    rec = _raw_fallbacks(ctx)
+    return any((well, _binary_base(ch).strip().lower(), tp, fov) in rec
+               for ch in cell_source_channels(ctx, cell, overlay_chans))
 
 
 def _mark_corner(st) -> str:
@@ -1046,7 +1102,7 @@ def _mark_corner(st) -> str:
     return "tr"
 
 
-def mark_uncorrected(ctx, cell, rgb):
+def mark_uncorrected(ctx, cell, rgb, overlay_chans=None):
     """Burn :data:`UNCORRECTED_MARK` into *rgb* when *cell* fell back to raw.
 
     A cell whose corrected (top-hat) image is missing still draws — it draws the
@@ -1063,7 +1119,7 @@ def mark_uncorrected(ctx, cell, rgb):
     identity label use, so the live thumbnail and the exported figure carry it
     identically. Returns *rgb* untouched for a cell that got what it asked for.
     """
-    if rgb is None or not is_raw_fallback(ctx, cell):
+    if rgb is None or not is_raw_fallback(ctx, cell, overlay_chans):
         return rgb
     st = ctx.state.image_table
     return draw_cell_chrome(

@@ -502,12 +502,21 @@ def _hover_array(ctx, well: str, chan: str, tp: str, fov: str, r: int) -> np.nda
 
 def _install_cell_events(
     ctx, label, crop_tool, well: str, chan: str, tp: str, fov: str, r: int = 0,
+    readout_chan: str | None = None,
 ) -> None:
     """Wire press/move/release on a cell's image label.
 
     Replaces ``CropTool.install_events`` so the same label can both serve
     as the crop-tool's drag target and report the intensity of the pixel
     under the cursor on every move.
+
+    *chan* is what the cell is CALLED — for an overlay cell that is the
+    :data:`OVERLAY_CHAN` sentinel, which names no image on disk. *readout_chan*
+    is the channel whose pixels the readout actually reads (the representative
+    member the caller also handed ``_render_cell``); it defaults to *chan* for
+    every ordinary cell. Passing the sentinel to the loader resolved nothing, so
+    the readout was empty over the entire overlay grid — a control that silently
+    does nothing rather than one that says which channel it is quoting.
 
     The pixel readout re-fetches the cell's array on demand rather than the
     label holding one: a grid pinning every cell's full-resolution frame is
@@ -520,6 +529,7 @@ def _install_cell_events(
     from PySide6.QtCore import Qt as _Qt
     from PySide6.QtWidgets import QToolTip
 
+    readout = readout_chan or chan
     label.setMouseTracking(True)
     if crop_tool is not None:
         label.setCursor(_Qt.CrossCursor)
@@ -531,7 +541,7 @@ def _install_cell_events(
         own = getattr(_lbl, "_raw_arr", None)
         if own is not None:
             return own
-        return _hover_array(ctx, well, chan, tp, fov, r)
+        return _hover_array(ctx, well, readout, tp, fov, r)
 
     def _show_tip(_lbl, global_pt, text: str) -> None:
         if not text or global_pt is None:
@@ -591,10 +601,16 @@ def _install_cell_events(
         if not intensity:
             return ""
         from well_viewer.domain.selections_model import well_display_label
-        prefix = f"{well_display_label(ctx, well)} {chan.upper()} T:{tp}"
+        # An overlay cell shows a blend but can only quote ONE channel's pixel, so
+        # the readout names the channel the number came from beside the cell's own
+        # label — a value with no channel on it is not a measurement.
+        chan_lbl = chan.upper()
+        if readout != chan:
+            chan_lbl = f"{chan_lbl} ({readout.upper()})"
+        prefix = f"{well_display_label(ctx, well)} {chan_lbl} T:{tp}"
         if fov:
             prefix += f" FOV:{fov}"
-        mfi = _cell_mfi(ctx, _lbl, chan, well, tp, fov, x, y)
+        mfi = _cell_mfi(ctx, _lbl, readout, well, tp, fov, x, y)
         suffix = f"  MFI:{mfi:.1f}" if mfi is not None else ""
         return f"{prefix}  ({x}, {y}) = {intensity}{suffix}"
 
@@ -757,7 +773,7 @@ def _cell_title(ctx, cell, overlay_chans) -> str:
     A cell served the raw frame in place of the corrected one says so in full
     words here; the burned-in mark has to stay short enough to sit in a corner."""
     title = cell_identity_label(ctx, cell, overlay_chans) or "(unset)"
-    if is_raw_fallback(ctx, cell):
+    if is_raw_fallback(ctx, cell, overlay_chans):
         return f"{title}\n{UNCORRECTED_TOOLTIP}"
     return title
 
@@ -794,6 +810,12 @@ def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay
         rgb = overlay_cell_rgb(ctx, cache, cell, r, crop_tool, overlay_chans)
         if rgb is not None and chrome_kwargs:
             rgb = draw_cell_chrome(rgb, **chrome_kwargs)
+        # A blend built from an uncorrected member IS an uncorrected image, and it
+        # is the one kind of cell whose channel is not on the grid to be read off
+        # the axis. Without the member list the mark could never resolve, so the
+        # overlay branch drew a cell the status line was counting as uncorrected
+        # while nothing on the grid said which cell that was.
+        rgb = mark_uncorrected(ctx, cell, rgb, overlay_chans)
         pix = make_overlay_thumb(rgb, sz, sz, 0.0, 255.0) if rgb is not None else None
         return pix, arr, rgb is not None, "(no image)"
 
@@ -1056,9 +1078,16 @@ def image_table_generate(ctx) -> None:
                 img_label._raw_shape = (  # type: ignore[attr-defined]
                     (int(shape[0]), int(shape[1])) if shape and len(shape) >= 2 else None)
                 img_label._crop = crop_tool.crop if crop_tool else None  # type: ignore[attr-defined]
+                # The readout quotes pixels, and an overlay cell's own token names
+                # no image — it reads the same representative member ``_render_cell``
+                # already used for the crop-drag source, so the two agree on which
+                # frame the cell's coordinates belong to.
                 _install_cell_events(ctx, img_label, crop_tool,
                                      cell["well"], cell["chan"], cell["tp"],
-                                     cell["fov"], r)
+                                     cell["fov"], r,
+                                     readout_chan=(overlay_chans[0]
+                                                   if cell["chan"] == OVERLAY_CHAN
+                                                   and overlay_chans else None))
                 # Right-click a rendered cell → one-off per-cell override popover
                 # (writes the cell combos the renderer reads, then re-renders).
                 img_label.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -1105,7 +1134,14 @@ def image_table_generate(ctx) -> None:
     # cover them. They DO draw, so the count above says nothing about them — and
     # a grid silently mixing corrected and raw frames is exactly the kind of
     # degraded output that reads as a finished one.
-    n_raw = len(getattr(ctx.state.image_table, "raw_fallbacks", None) or ())
+    #
+    # Counted over the CELLS, not over the loader's record. The record is keyed by
+    # the channel actually opened, so an overlay cell blending three fallen-back
+    # channels put three entries in it and a ratio cell two — a number larger than
+    # the grid, describing loads the user cannot point at, next to a badge drawn
+    # once per cell. This counts exactly the cells that carry the mark.
+    n_raw = sum(1 for row in cells for cell in row
+                if is_raw_fallback(ctx, cell, overlay_chans))
     if n_raw:
         msg += f" {n_raw} shown uncorrected (no corrected image)."
     ctx.notify.set_status(msg)

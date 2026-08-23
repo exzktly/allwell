@@ -282,6 +282,17 @@ def reset_view(ctx) -> None:
     from well_viewer.persistence import view_state
     view_state.reset(ctx)
 
+    # ``view_state.reset`` clears the live draw order (it is two ``PlotState``
+    # fields, so ``restore_defaults`` empties them), but the order has a second
+    # home: its own ``line_order`` section of persistence.json. Leaving that
+    # section behind made the reset look complete and then undo itself — the
+    # next load re-read it and ``line_order._reorder_selections_by_line_order``
+    # re-applied the order to ``selections``, permanently reordering them. This
+    # module's promise is that what resets live is what is dropped from disk, so
+    # the emptied order is written in the same pass, after ``reset`` has cleared
+    # it rather than before.
+    _save(ctx, "line_order")
+
     ctx.runtime.heatmap.layouts = []
     hm = ctx.state.feature_slice("heatmap")
     if hm is not None:

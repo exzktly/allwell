@@ -845,6 +845,15 @@ class ScatterBatchExportPanel(BatchExportPanel):
                         data["x"], data["y"],
                         xerr=data["x_err"], yerr=data["y_err"],
                         label=data.get("label", ""),
+                        # ``color`` is the whole point of the multi-timepoint
+                        # figure: ``collect_scatter_agg_data`` paints each point
+                        # with its timepoint's position on the viridis gradient,
+                        # which is what makes a time course readable. Omitting it
+                        # let matplotlib assign its own cycle per series, so the
+                        # colours in the exported figure said nothing \u2014 and said
+                        # something different from the same plot on the tab and
+                        # from the single-timepoint export beside it.
+                        color=data["color"],
                         marker=data.get("marker", "o"),
                         linestyle="none", capsize=5, alpha=0.75,
                     )

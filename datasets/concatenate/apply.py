@@ -41,6 +41,8 @@ from datasets._common.containers import (
     WellFraction,
     clear_destination,
     copy_container_members,
+    restamp_overrides,
+    unstamped_note,
 )
 from datasets._common.member_names import is_os_junk_member
 from datasets.concatenate.concatenate_compute import (
@@ -432,15 +434,14 @@ def _merge_cell_overrides(plan: MergePlan, emit: Callable[[str], None]) -> None:
     if not entries:
         return
 
-    for entry in entries:
-        well = str(entry.get("well", "")).strip()
-        zip_path = plan.dest.out_dir / f"{well}_out.zip"
-        with swallow(f"stat {zip_path}"):
-            entry["seg_fp"] = f"{zip_path.stat().st_mtime_ns}"
+    unstamped = restamp_overrides(entries, plan.dest.out_dir)
 
     payload = {"version": _OVERRIDES_SCHEMA_VERSION, "overrides": entries}
     write_json_atomic(plan.dest.out_dir / _OVERRIDES_FILENAME, payload, indent=None)
-    emit(f"Carried over {len(entries)} cell override(s) from the source dataset(s).")
+    emit(
+        f"Carried over {len(entries)} cell override(s) from the source "
+        f"dataset(s).{unstamped_note(unstamped)}"
+    )
 
 
 # ── verification (runs before the sidecar is written) ────────────────────────

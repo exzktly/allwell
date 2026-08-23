@@ -31,6 +31,8 @@ from datasets._common.containers import (
     WellFraction,
     clear_destination,
     copy_container_members,
+    restamp_overrides,
+    unstamped_note,
 )
 from datasets._common.member_names import rewrite_member_field
 from datasets.merge_plates.merge_plates_compute import (
@@ -266,13 +268,13 @@ def _merge_cell_overrides(plan: PlateMergePlan, emit: Callable[[str], None]) -> 
 
     if not entries:
         return
-    for entry in entries:
-        zip_path = plan.dest.out_dir / f"{entry.get('well', '')}_out.zip"
-        with swallow(f"stat {zip_path}"):
-            entry["seg_fp"] = f"{zip_path.stat().st_mtime_ns}"
+    unstamped = restamp_overrides(entries, plan.dest.out_dir)
     payload = {"version": OVERRIDES_SCHEMA_VERSION, "overrides": entries}
     write_json_atomic(plan.dest.out_dir / OVERRIDES_FILENAME, payload, indent=None)
-    emit(f"Carried over {len(entries)} cell override(s) from the source dataset(s).")
+    emit(
+        f"Carried over {len(entries)} cell override(s) from the source "
+        f"dataset(s).{unstamped_note(unstamped)}"
+    )
 
 
 def _verify(plan: PlateMergePlan, row_counts: dict[str, int], mismatches: dict[str, list[str]]) -> None:

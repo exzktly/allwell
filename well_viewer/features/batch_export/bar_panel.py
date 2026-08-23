@@ -583,6 +583,7 @@ class BarBatchExportPanel(BatchExportPanel):
             placeholder_color=_CLR_PLACEHOLDER,
             disabled_well_color=_CLR_DISABLED_WELL,
             err_bar_color=_CLR_ERR_BAR,
+            n_axis_integer=not bool(self._ctx.state.plot.use_fov_replicates),
         )
         # This figure is built here rather than by the on-tab renderer, so the
         # marker that renderer adds has to be added here too: the tick labels and

@@ -152,11 +152,17 @@ class PlateProgress(QWidget):
         self._outcome = ""
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(12, 8, 12, 8)
+        root.setContentsMargins(theme.Spacing.md, theme.Spacing.sm,
+                                theme.Spacing.md, theme.Spacing.sm)
+        # 6 px sits between ``Spacing.xs`` and ``Spacing.sm`` and matches no
+        # token. Left as a literal rather than rounded: this rail packs a
+        # header, a plate and a group list into a fixed-width column, so either
+        # scale step changes how much of the list fits, and that is a design
+        # decision rather than a lint fix.
         root.setSpacing(6)
 
         # header: title + status + collapse toggle
-        hdr = QHBoxLayout(); hdr.setSpacing(8)
+        hdr = QHBoxLayout(); hdr.setSpacing(theme.Spacing.sm)
         self._title_label = QLabel(title, self)
         hdr.addWidget(self._title_label)
         self._status = QLabel("", self); self._status.setObjectName("Muted")

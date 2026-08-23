@@ -94,7 +94,13 @@ class Colors:
     text_secondary  = "#98A2B3"   # --text-secondary : labels-on-controls, metadata
     text_muted      = "#5F6B7C"   # --text-muted     : hints, inactive labels, ticks
     text_faint      = "#404B5C"   # --text-faint     : decorative separators
-    text_disabled   = "#A0AEC0"   # --text-disabled  : disabled control label text
+    # --text-disabled : disabled control label text. Derived from ``text_muted``
+    # by ``apply_theme`` rather than carried as its own literal — see
+    # ``_derive_tokens``. As a literal it was #A0AEC0, *brighter* than
+    # ``text_secondary`` (#98A2B3), so the one role that must read as receded
+    # read as emphasised; and being absent from every theme's override table it
+    # stayed at the blue value under ``grey``, the same drift ``accent2`` had.
+    text_disabled   = "#5F6B7C"
     placeholder     = "#64748B"   # --placeholder    : empty-field placeholder text
 
     # ── Accent (interactive / brand) ─────────────────────────────────────
@@ -1287,6 +1293,15 @@ _GREY = {
         "text_muted": "#878D95", "text_faint": "#5E646C",
         "accent": "#2D8CEB", "accent_hover": "#43A0FF", "accent_pressed": "#1668B8",
         "accent_dim": "#22415E", "accent_fg": "#FFFFFF",
+        # ``accent2`` has to move with ``accent``. It is the *neighbouring*
+        # hue — the second series colour, the dial's other half — and the
+        # relationship, not the absolute value, is what makes the pair read as
+        # one family. Left at the default while the five tokens above were
+        # overridden, the gap went from 38° to 55° and the saturations diverged
+        # (206 against 110), so on every remote-run plate the two stopped
+        # looking related. Derived by carrying the default theme's own hue
+        # offset (+38°) and saturation/value ratios onto this accent.
+        "accent2": "#6D5BE5",
         # The brand tokens (version-pill fill + text) are not overridden here:
         # the pill stays the default transparent-with-white-text in every theme.
         "success": "#3FB950", "warn": "#FFB300", "danger": "#F04747",
@@ -1353,12 +1368,33 @@ def apply_theme(name: str) -> str:
         _cls = _THEMEABLE_CLASSES[_cname]
         for _attr, _val in _attrs.items():
             setattr(_cls, _attr, _val)
+    _derive_tokens()
     for _hook in list(_THEME_HOOKS):
         try:
             _hook(name)
         except Exception:  # a broken hook must not break theming
             _LOG.exception("theme hook %r failed", _hook)
     return name
+
+
+def _derive_tokens() -> None:
+    """Recompute the tokens that are defined *in terms of* other tokens.
+
+    Run after a theme's overrides land, so a derived token follows the theme
+    that moved what it derives from. A token carried as its own literal has to
+    be remembered in every override table, and the ones nobody remembered are
+    exactly where this codebase's colour drift came from: ``accent2`` kept the
+    blue value under ``grey`` while its five siblings moved, and
+    ``text_disabled`` sat brighter than ``text_secondary`` in both.
+
+    ``text_disabled`` is the same colour the stylesheet's own ``:disabled``
+    rules use, which is ``text_muted``. One answer to "what does disabled look
+    like", rather than a QSS answer and a painter answer that disagree.
+    """
+    Colors.text_disabled = Colors.text_muted
+
+
+_derive_tokens()
 
 
 def select_theme_from_env(default: str = DEFAULT_THEME,

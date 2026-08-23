@@ -285,7 +285,15 @@ def apply_global_threshold_async(
             completed = 0
             if progress_cb is not None:
                 progress_cb(0, len(wells))
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Not a ``with`` block: ``ThreadPoolExecutor.__exit__`` calls
+            # ``shutdown(wait=True)`` with no ``cancel_futures``, so every well
+            # already submitted — the whole plate, since they are all submitted
+            # up front — was decoded to completion before a cancelled run could
+            # return. "Cancel" then took as long as letting it finish. The
+            # explicit shutdown below drops what has not started and leaves the
+            # handful of in-flight decodes to end on their own.
+            executor = ThreadPoolExecutor(max_workers=max_workers)
+            try:
                 future_to_well = {
                     executor.submit(
                         _process_well,
@@ -312,6 +320,8 @@ def apply_global_threshold_async(
                         status_cb("Apply to All cancelled.")
                         done_cb("Apply to All cancelled before CSV write.")
                         return
+            finally:
+                executor.shutdown(wait=False, cancel_futures=True)
 
         if _cancelled():
             status_cb("Apply to All cancelled.")

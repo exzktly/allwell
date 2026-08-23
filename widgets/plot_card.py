@@ -534,15 +534,18 @@ if _HAVE_MPL:
 
         def setThemeToggleVisible(self, visible: bool) -> None:
             """Hide the in-header ``Publication ↔ Screen`` toggle (and the
-            'preview only' chip). ``setPlotTheme`` still works programmatically."""
+            'preview only' chip). ``setPlotTheme`` still works programmatically.
+
+            The choice is remembered rather than applied once, because
+            :meth:`_sync_theme_ui` runs again on every ``setPlotTheme`` call and
+            would otherwise put the 'preview only' chip back the first time the
+            card switched to the screen theme — leaving a card that was asked
+            to hide its theme UI showing half of it.
+            """
+            self._theme_toggle_visible = bool(visible)
             if self._header is None:
                 return
-            if getattr(self, "_theme_sc", None) is not None:
-                self._theme_sc.setVisible(bool(visible))
-            if not visible:
-                self._preview_chip.setVisible(False)
-            else:
-                self._sync_theme_ui()
+            self._sync_theme_ui()
 
         def headerWidget(self) -> QWidget | None:
             return self._header
@@ -648,8 +651,10 @@ if _HAVE_MPL:
         def _sync_theme_ui(self) -> None:
             if self._header is None:
                 return
-            self._preview_chip.setVisible(self._plot_theme == "screen")
+            show_toggle = getattr(self, "_theme_toggle_visible", True)
+            self._preview_chip.setVisible(show_toggle and self._plot_theme == "screen")
             if getattr(self, "_theme_sc", None) is not None:
+                self._theme_sc.setVisible(show_toggle)
                 try:
                     self._theme_sc.blockSignals(True)
                     self._theme_sc.setCurrentByData(self._plot_theme)
@@ -679,6 +684,15 @@ if _HAVE_MPL:
                 err_sc.currentChanged.connect(lambda *_a: self._set_error(err_sc.currentData()))
                 v.addWidget(err_sc)
             pop.setContentWidget(content)
+            # Each click built a fresh Popover and dropped the reference to the
+            # previous one onto this attribute. The old popover is a child of
+            # this card, so Qt keeps it alive for the card's whole life: a
+            # session of poking the chip accumulated one hidden window per
+            # click, each holding its own segmented controls.
+            prev = getattr(self, "_stats_pop", None)
+            if prev is not None:
+                prev.close()
+                prev.deleteLater()
             self._stats_pop = pop
             pop.popup(self._stats_chip, side="bottom", align="end")
 

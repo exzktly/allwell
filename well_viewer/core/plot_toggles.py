@@ -35,6 +35,43 @@ _refresh_bar_layout_btn_state = _lazy(
 )
 
 
+def _live_buttons(bank) -> list:
+    """The still-alive buttons in *bank*, with the dead ones dropped from it.
+
+    The SEM and FOV banks are append-only: ``ui_helpers`` and the batch-export
+    ``base_panel`` append to them and nothing ever removes an entry. A
+    batch-export panel that has since been closed leaves its buttons behind as
+    Python wrappers around deleted C++ objects, and the first call on one raises
+    ``RuntimeError: Internal C++ object already deleted``. Because the button
+    loops were unguarded, that aborted the toggle part-way: the buttons after
+    the dead one kept the previous label and variant while the state had already
+    flipped, and in ``toggle_sem`` the ``redraw_app`` below never ran, so the
+    plots kept the old error band too. The observer loops immediately beneath
+    each button loop already guarded the identical case.
+
+    Pruning rather than skipping keeps the bank from growing without bound
+    across a session of opening and closing export panels.
+    """
+    live = []
+    for btn in list(bank or []):
+        try:
+            btn.objectName()
+        except RuntimeError:
+            continue
+        live.append(btn)
+    if bank is not None and len(live) != len(bank):
+        bank[:] = live
+    return live
+
+
+def _style_button(btn, fn) -> None:
+    """Apply *fn* to *btn*, letting one dead widget not abort the whole bank."""
+    try:
+        fn(btn)
+    except RuntimeError:
+        swallowed()
+
+
 def refresh_fov_btn_state(ctx) -> None:
     """Sync every per-FOV toggle button's text/variant state."""
     is_on = bool(ctx.state.plot.use_fov_replicates)
@@ -46,7 +83,8 @@ def refresh_fov_btn_state(ctx) -> None:
         "otherwise FOVs are pooled within each well. Pairs with the SEM/SD toggle."
     )
     from PySide6.QtGui import QFontMetrics
-    for btn in list(ctx.runtime.fov.btns or []):
+
+    def _apply_fov(btn) -> None:
         btn.setEnabled(True)
         btn.setText(text)
         btn.setToolTip(tooltip)
@@ -59,6 +97,9 @@ def refresh_fov_btn_state(ctx) -> None:
         btn.setMinimumWidth(fm.horizontalAdvance("FOV ✓") + 26)
         btn.style().unpolish(btn)
         btn.style().polish(btn)
+
+    for btn in _live_buttons(ctx.runtime.fov.btns):
+        _style_button(btn, _apply_fov)
     for obs in list(ctx.runtime.fov.observers or []):
         try:
             obs(is_on)
@@ -71,11 +112,15 @@ def toggle_sem(ctx) -> None:
     is_sem = ctx.state.plot.toggle_sem()
     text = "SEM" if is_sem else "SD"
     variant = "sem" if is_sem else "sem_warn"
-    for btn in list(ctx.runtime.sem.btns or []):
+
+    def _apply_sem(btn) -> None:
         btn.setText(text)
         btn.setProperty("variant", variant)
         btn.style().unpolish(btn)
         btn.style().polish(btn)
+
+    for btn in _live_buttons(ctx.runtime.sem.btns):
+        _style_button(btn, _apply_sem)
     for obs in list(ctx.runtime.sem.observers or []):
         try:
             obs(is_sem)

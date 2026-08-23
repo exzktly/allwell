@@ -20,6 +20,8 @@ from well_viewer.core.channel_state_controller import recalculate_threshold, set
 from well_viewer.core.ui_helpers import (
     clear_notes_editors as _clear_notes_editors,
     refresh_plot_empty_states,
+    show_progress as _show_progress,
+    step_progress as _step_progress,
 )
 from well_viewer.core.safe import swallowed
 
@@ -445,7 +447,12 @@ def load_directory(ctx, d: Path, label=None) -> None:
         except Exception:
             swallowed()  # was: pass (silent except)
     n = len(csvs)
-    app._show_progress(n, f"Loading {n} CSV file(s)…")
+    # ``allow_user_input=False`` on both pumps below: this loop empties the
+    # caches first and refills them one CSV at a time, so a click dispatched
+    # between two files reaches the sidebar, commit and tab handlers while the
+    # dataset is half-built. The repaint is still wanted — a plate of CSVs on a
+    # network share takes long enough that a frozen window reads as a hang.
+    _show_progress(ctx, n, f"Loading {n} CSV file(s)…", allow_user_input=False)
     _opening_set_phase(ctx, f"Loading {n} well CSV(s)…", value=0, maximum=n)
     for i, p in enumerate(csvs, 1):
         tok = app._extract_well_token(p.stem)
@@ -459,7 +466,8 @@ def load_directory(ctx, d: Path, label=None) -> None:
         # ``_report_unusable_fov_labels`` below has nothing to report.
         from well_viewer.data.data_loading import record_fov_verdict
         record_fov_verdict(ctx, key, frame)
-        app._step_progress(i, f"Loading {i}/{n}: {p.name}")
+        _step_progress(ctx, i, f"Loading {i}/{n}: {p.name}",
+                       allow_user_input=False)
         _opening_set_phase(ctx, f"Loading {i}/{n}: {p.name}", value=i)
     app._hide_progress()
     app._rebuild_all_timepoints_cache()

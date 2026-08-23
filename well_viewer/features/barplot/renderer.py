@@ -214,7 +214,11 @@ def draw_violin(
             spec = cell_scale(lbl, col_tp)
             if spec.missing:
                 # Baseline unresolved — render a blank slot instead of
-                # misleading raw values.
+                # misleading raw values. The fraction panel below is
+                # deliberately unaffected: it is the raw ``n_above / n_total``
+                # off the rows whatever the fold-change state says (see the
+                # note beside ``_set_frac_ylim``), so it stays a real
+                # measurement even when this column has no baseline.
                 continue
             vals = _fc.apply_cell_scale(vals, spec)
             vals = vals[np.isfinite(vals)]

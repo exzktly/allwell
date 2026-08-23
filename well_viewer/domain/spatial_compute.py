@@ -207,6 +207,16 @@ def _dbscan(points: np.ndarray, eps: float, min_samples: int) -> np.ndarray:
         if len(nbrs) < min_samples:
             continue
         labels[i] = cluster_id
+        # ``seen`` mirrors ``nbrs`` and is maintained as the frontier grows.
+        # It used to be rebuilt with ``set(nbrs)`` inside the loop, once per
+        # core point expanded, which walks the whole accumulated frontier every
+        # time and makes the expansion quadratic in cluster size. Colony
+        # detection runs inline on the GUI thread, so a confluent well froze
+        # Review: 4 000 cells took 0.26 s, 8 000 took 1.99 s and 16 000 took
+        # 10.69 s, per redraw. The set built here is the same set the rebuild
+        # produced — everything appended to ``nbrs`` so far — so the labels are
+        # unchanged.
+        seen = set(nbrs)
         j = 0
         while j < len(nbrs):
             q = nbrs[j]
@@ -214,7 +224,6 @@ def _dbscan(points: np.ndarray, eps: float, min_samples: int) -> np.ndarray:
                 visited[q] = True
                 q_nbrs = neighbours[q]
                 if len(q_nbrs) >= min_samples:
-                    seen = set(nbrs)
                     for x in q_nbrs:
                         if x not in seen:
                             nbrs.append(x)

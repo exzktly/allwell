@@ -46,6 +46,31 @@ _logger = logging.getLogger("well_viewer")
 # ── Threshold / channel-list recompute ──────────────────────────────────────
 
 
+# Re-entrancy guard for :func:`recalculate_threshold`.
+#
+# ``set_active_channel`` calls ``recalculate_threshold``, which calls
+# ``update_channel_selector``, which calls ``set_active_channel`` again whenever
+# the active channel is no longer one of the valid plot channels — a dataset
+# swap, a pipeline run that changed the channel set. The cycle terminates
+# (the second ``set_active_channel`` installs a valid channel, so the third
+# ``update_channel_selector`` does not recurse), but the nested pass redid the
+# whole recompute: the per-well concat for the intensity range, the cell-gating
+# hydration from ``pipeline_info.json`` — which runs ``load_from_pipeline_info``
+# twice on its own — and the seven ``on_channel_changed`` feature hooks, all
+# against a channel the outer pass is about to correct anyway.
+#
+# Skipping the nested pass is safe because everything in
+# ``recalculate_threshold`` that depends on the active channel happens *after*
+# ``update_channel_selector`` returns: ``normalize_metric``, ``sync_val_col``,
+# the range cache and the gating hydration all run in the outer frame, with the
+# channel the nested call installed.
+#
+# A module-level set of context ids rather than runtime state: this is
+# GUI-thread-only control flow, and ``AppRuntime`` fixes its namespaces in
+# ``__slots__``.
+_RECALC_IN_PROGRESS: set[int] = set()
+
+
 def recalculate_threshold(ctx) -> None:
     """Re-detect channels from the loaded CSVs, sync combos, and rebuild
     the (lo, hi) intensity range used by the threshold sliders.
@@ -60,6 +85,17 @@ def recalculate_threshold(ctx) -> None:
     ``_features`` ``on_channel_changed`` hook fan-out now dispatches ``ctx`` (all
     seven hooks — bar / stats / distribution / heatmap / multivariate / spatial /
     scatter — take ctx, guarding widget existence via ``ctx.widgets.has``)."""
+    if id(ctx) in _RECALC_IN_PROGRESS:
+        return
+    _RECALC_IN_PROGRESS.add(id(ctx))
+    try:
+        _recalculate_threshold(ctx)
+    finally:
+        _RECALC_IN_PROGRESS.discard(id(ctx))
+
+
+def _recalculate_threshold(ctx) -> None:
+    """The body of :func:`recalculate_threshold`, one re-entrancy check in."""
     from well_viewer.data.data_loading import get_rows
     sample_df = next(
         (get_rows(ctx, lbl) for lbl in ctx.state.dataset.well_paths),

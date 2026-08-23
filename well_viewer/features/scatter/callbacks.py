@@ -115,12 +115,21 @@ def on_scatter_motion(ctx, event) -> None:
                 min_dist = dist
                 nearest_info = meta
 
+        # The status line is one shared slot, and everything else that writes
+        # to it — the fold-change warnings, the load summary, a failed export —
+        # is meant to stay readable. Blanking it on every hover miss wiped
+        # those the instant the cursor crossed a scatter axis without landing
+        # on a point, which is most of the axis. Clear it only when the thing
+        # standing there is a tooltip this handler put there.
+        rt = ctx.runtime.scatter
         if min_dist < threshold and nearest_info:
             well_label, filename, nuclear_id, row_idx = nearest_info
             tooltip_text = f"File: {filename} | Nuclear ID: {nuclear_id}"
             ctx.notify.set_status(tooltip_text)
-        else:
+            rt.hover_status = tooltip_text
+        elif getattr(rt, "hover_status", None):
             ctx.notify.set_status("")
+            rt.hover_status = ""
 
     except Exception:
         swallowed()  # was: pass (silent except)

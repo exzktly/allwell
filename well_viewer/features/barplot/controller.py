@@ -149,6 +149,7 @@ def render_bar_items(
     err_bar_color: str,
     ax_n=None,
     fc_active: bool = False,
+    n_axis_integer: bool | None = None,
     ctx=None,
 ) -> None:
     """Draw mean / fraction / events-above-threshold bar panels.
@@ -321,12 +322,20 @@ def render_bar_items(
         _autofit(ax_n, *_tops_lows(
             lambda it: float(it.n_above) if it.has_mean else float("nan"),
             lambda it: it.n_above_spread), floor_hi=1.0)
-        # Default to integer ticks because N is a count of events; in
-        # Aggregate-FOVs mode the bar shows a per-FOV mean which can be
-        # fractional, so let matplotlib pick auto ticks then.
+        # Integer ticks because N is a count of events; in Aggregate-FOVs mode
+        # the bar shows a per-FOV mean, which can be fractional, so float ticks
+        # are right there. ``draw_per_well_n_bars`` in the renderer decides the
+        # same way for the panel it owns; the two must not disagree, or the same
+        # value reads as 3 on one bar chart and 3.0 on the other.
+        _integer = n_axis_integer
+        if _integer is None:
+            _integer = not bool(
+                getattr(getattr(ctx, "state", None), "plot", None)
+                and ctx.state.plot.use_fov_replicates
+            )
         try:
             from matplotlib.ticker import MaxNLocator
-            ax_n.yaxis.set_major_locator(MaxNLocator(integer=False))
+            ax_n.yaxis.set_major_locator(MaxNLocator(integer=_integer))
         except ImportError:
             pass
 

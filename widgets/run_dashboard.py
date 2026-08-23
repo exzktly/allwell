@@ -397,7 +397,7 @@ class RunDashboard(PlateProgress):
         rows = _RAIL_REMOTE if self._remote else _RAIL_LOCAL
         for key, label in rows:
             row_w = QWidget(self._rail_host)
-            row = QHBoxLayout(row_w); row.setContentsMargins(0, 0, 0, 0); row.setSpacing(7)
+            row = QHBoxLayout(row_w); row.setContentsMargins(0, 0, 0, 0); row.setSpacing(theme.Spacing.sm)
             dot = status_dot(theme.Colors.text_muted)
             row.addWidget(dot)
             nm = QLabel(label, row_w); nm.setFixedWidth(_NM_W)

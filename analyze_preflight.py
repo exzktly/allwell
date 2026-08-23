@@ -12,10 +12,14 @@ running it.
 This module is the answer to that. It reports in two tiers, split by what each
 costs:
 
-**Tier one is free** — one small JSON read of the journal — so it hangs
-directly off the existing ``_refresh_output``. It says what the last run
-against this folder did, and above all whether it *finished*: a journal still
-open is a run the app was killed during, which nothing else on disk records.
+**Tier one is cheap enough to run inline** — the journal is one small JSON
+read, and the scope line adds one ``iterdir`` of the input directory plus, when
+loose images are sitting in it, a central-directory read of each archive they
+belong to. Not free, and not a directory *walk*: bounded by the plate's own
+top level, which is why it can hang off the existing ``_refresh_output`` once
+the field has settled. It says what the last run against this folder did, and
+above all whether it *finished*: a journal still open is a run the app was
+killed during, which nothing else on disk records.
 
 **Tier two costs a directory walk**, so it runs on a worker and arrives when it
 arrives. ``pipeline.completeness.scan_run`` is the same predicate the
@@ -460,8 +464,12 @@ class AnalyzePreflightMixin:
             # them ``filename_schema`` and ``filename_sep``, so the form kept
             # its default schema, the pre-run scan then parsed the plate's
             # names by the wrong field order, and the coverage line reported a
-            # dataset it had mis-read. The journal's ``opts`` *are* a
-            # ``vars(args)`` snapshot, which is exactly what that block holds.
+            # dataset it had mis-read. The journal's ``opts`` are the Analyze
+            # form's own dict (``RunSpec.to_json`` → ``_collect_run_options``),
+            # not argparse's namespace — but its keys are the argparse dests,
+            # which is what makes ``execution_options`` the right block for it.
+            # The few form-only keys (``raw``, ``scratch_dir``,
+            # ``remote_batch_size``) pass through it untouched.
             self._apply_pipeline_info({"execution_options": applied},
                                       set_input_path=False)
         except Exception:

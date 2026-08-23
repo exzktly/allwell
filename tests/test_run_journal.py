@@ -429,3 +429,67 @@ def test_every_well_state_is_written_by_some_caller(state):
     assert state in written, (
         f"no caller anywhere writes the {state!r} state; it is a roster entry "
         f"nothing can produce")
+
+
+# ── a well never moves backwards ────────────────────────────────────────────
+
+def test_a_fetched_well_is_not_downgraded_by_a_late_analysed(out_dir):
+    """Two writers, no ordering between them, one well file.
+
+    On a remote run ``analysed`` comes from a parsed stdout line drained by the
+    GUI's poll timer, and ``fetched`` from the Fetcher thread polling the
+    remote sidecar. A small well can download before the GUI queue drains, and
+    the late ``analysed`` then overwrote a well that was already on disk — so
+    the fetch report printed "analysed but not transferred" for a well the user
+    could open.
+    """
+    _open(out_dir)
+    J.record_well(out_dir, "A01", "analysed")
+    J.record_well(out_dir, "A01", "fetched")
+    J.record_well(out_dir, "A01", "analysed")          # the late one
+
+    assert J.read_journal(out_dir).wells["A01"].state == "fetched"
+
+
+def test_a_well_still_moves_forwards(out_dir):
+    """The bound is one-directional, or the record never advances at all."""
+    _open(out_dir)
+    for state in ("uploaded", "analysed", "fetched"):
+        J.record_well(out_dir, "A01", state)
+        assert J.read_journal(out_dir).wells["A01"].state == state
+
+
+@pytest.mark.parametrize("verdict", ["skipped", "failed", "not-fetched"])
+def test_a_verdict_always_takes_effect(out_dir, verdict):
+    """Only the upload→analysed→fetched path is ordered.
+
+    The rest are verdicts rather than stages — written once, by whoever made
+    the decision — and a rule that refused them would leave a well that failed
+    to materialise on disk still recorded as fetched.
+    """
+    _open(out_dir)
+    J.record_well(out_dir, "A01", "fetched")
+    J.record_well(out_dir, "A01", verdict, reason="because")
+
+    rec = J.read_journal(out_dir).wells["A01"]
+    assert rec.state == verdict and rec.reason == "because"
+
+
+def test_a_failed_open_does_not_strip_the_record_it_could_not_replace(
+        out_dir, monkeypatch):
+    """Clearing the wells before writing lost the detail of a record that stayed.
+
+    ``open_run``'s write is explicitly allowed to fail. Clearing first left the
+    *previous* run's ``run.json`` beside an empty wells directory — a record
+    still presenting as complete with its per-well detail silently gone.
+    """
+    _open(out_dir)
+    J.record_well(out_dir, "A01", "fetched")
+    J.close_run(out_dir, outcome="ok")
+    monkeypatch.setattr(J, "_atomic_write_json", lambda *a, **kw: False)
+
+    assert _open(out_dir) is False
+    journal = J.read_journal(out_dir)
+    assert journal is not None and journal.outcome == "ok"
+    assert journal.wells["A01"].state == "fetched", (
+        "the wells were dropped for a run.json that was never replaced")

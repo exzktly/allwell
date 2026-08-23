@@ -92,6 +92,27 @@ WELL_STATES = (
     "not-fetched",   # output exists on the remote but never arrived here
 )
 
+#: How far through a remote run each state is, for the states that describe one
+#: well's progress along a single path. A later state is never overwritten by an
+#: earlier one — see :func:`record_well`.
+#:
+#: Two independent writers record these on a remote run and neither can be
+#: ordered against the other: ``analyze_progress`` writes ``analysed`` from a
+#: parsed stdout line, drained by the GUI's poll timer, while the Fetcher
+#: thread writes ``fetched`` after polling the remote sidecar. A small well can
+#: download before the GUI queue drains, and the late ``analysed`` then
+#: permanently downgraded a well already on disk — so the fetch report printed
+#: "analysed but not transferred" for a well that had transferred.
+#:
+#: States absent from this map are terminal verdicts rather than stages
+#: (``skipped``, ``failed``, ``not-fetched``) and always take effect: they are
+#: written once, by whichever party made the decision.
+_WELL_STAGE_ORDER = {
+    "uploaded": 1,
+    "analysed": 2,
+    "fetched": 3,
+}
+
 #: How the well states are grouped when a run is described to a user, and the
 #: words used for each group. Every member of ``WELL_STATES`` appears exactly
 #: once — ``tests/test_run_journal.py`` holds that, because a state missing here
@@ -318,7 +339,6 @@ def open_run(
             f"{', '.join(RUN_MODES)}")
     prior = _read_run_payload(output_dir) or {}
     carried = prior.get("remote")
-    _clear_wells(output_dir)
     now = time.time()
     payload = {
         "version": JOURNAL_VERSION,
@@ -334,6 +354,18 @@ def open_run(
         "remote": carried if isinstance(carried, dict) else {},
     }
     ok = _atomic_write_json(_run_path(output_dir), payload)
+    # Only once the new record is on disk. Clearing first meant a write that
+    # failed — a full disk, a volume gone read-only between the read and the
+    # write — left the *previous* run's ``run.json`` beside an empty wells
+    # directory: a record that still presents as complete while its per-well
+    # detail has silently gone. The wells belong to whichever ``run.json`` is
+    # there, so they are dropped only when this one replaced it.
+    if ok:
+        _clear_wells(output_dir)
+    # The index entry is what makes a run findable at the next start-up, so it
+    # is written whether or not the record itself landed: an entry naming a
+    # directory whose journal cannot be read costs one wasted read, while a
+    # missing entry costs the offer entirely.
     _index_upsert(str(output_dir), opened_at=now, closed_at=None,
                   outcome=None, mode=str(mode))
     return ok
@@ -387,8 +419,18 @@ def record_well(
     """Record what just happened to one well.
 
     One file per well, replaced whole, so two threads recording two wells never
-    contend and neither can leave a half-written record. Later states overwrite
-    earlier ones: this says where a well *got to*, not every step it took.
+    contend and neither can leave a half-written record. This says where a well
+    *got to*, not every step it took.
+
+    **A well never moves backwards along the upload → analysed → fetched path.**
+    Those three are written by two writers that cannot be ordered against each
+    other — the GUI thread draining parsed stdout, and the Fetcher thread
+    polling the remote sidecar — so a small well that downloads before the GUI
+    queue drains would otherwise have its ``fetched`` overwritten by a late
+    ``analysed`` and be reported as "analysed but not transferred" while
+    sitting on disk. Any state outside that path (``skipped``, ``failed``,
+    ``not-fetched``) is a verdict rather than a stage, is written once by
+    whoever decided it, and always takes effect.
 
     An unrecognised *state* is refused rather than written — a typo'd state is
     a well that silently disappears from every count that reads this back.
@@ -400,6 +442,11 @@ def record_well(
     label = str(well).strip()
     if not label:
         return False
+    rank = _WELL_STAGE_ORDER.get(state)
+    if rank is not None:
+        existing = _read_well_state(output_dir, label)
+        if _WELL_STAGE_ORDER.get(existing or "", 0) > rank:
+            return False
     payload = {
         "well": label,
         "state": state,
@@ -407,6 +454,23 @@ def record_well(
         "at": time.time(),
     }
     return _atomic_write_json(_wells_dir(output_dir) / f"{label}.json", payload)
+
+
+def _read_well_state(output_dir: Path | str, well: str) -> str | None:
+    """The state already recorded for *well*, or ``None``.
+
+    One file read, on the path that writes one file — the cost is the same
+    order as the write it guards, and the alternative is an in-memory map that
+    the two threads would then have to share.
+    """
+    try:
+        rec = json.loads((_wells_dir(output_dir) / f"{well}.json").read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(rec, dict):
+        return None
+    state = str(rec.get("state") or "")
+    return state or None
 
 
 def close_run(

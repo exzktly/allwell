@@ -62,6 +62,11 @@ class _Resumable:
     output_dir: str
     headline: str
     from_journal: bool
+    #: When the run stopped, as a unix timestamp. Only used to rank offers
+    #: across the two records when no folder is on the form — each record is
+    #: already newest-first within itself, but "the newest of both" cannot be
+    #: had by concatenating them.
+    at: float = 0.0
 
 
 #: How each unfinished outcome is said, in the user's terms rather than the
@@ -249,8 +254,14 @@ class AnalyzeSuspendMixin:
         folder in it yet, which is the state the app opens in and the one this
         banner was built for.
 
-        Between the two records for the same folder the suspend record wins: it
-        is the more specific statement, since the user asked for it.
+        Between the two records for the *same* folder the suspend record wins:
+        it is the more specific statement, since the user asked for it. Across
+        *different* folders it does not, and that is the distinction the first
+        version of this missed — it concatenated the two lists and took the
+        head, so every suspended record preceded every journal one however old.
+        A plate suspended in February beat one the app was killed on this
+        morning, in exactly the empty-form case both this docstring and the
+        manual describe as "the most recent unfinished run on any plate".
         """
         if current is None:
             current = self._current_output_dir()
@@ -259,13 +270,21 @@ class AnalyzeSuspendMixin:
         # journals to then discard all but one turned a keystroke into a
         # hundred-odd file opens. With a folder on the form there is exactly one
         # candidate, so read exactly one.
-        offers = [*self._suspended_offers(only_dir=current),
-                  *self._journal_offers(only_dir=current)]
+        suspended = self._suspended_offers(only_dir=current)
+        from_journal = self._journal_offers(only_dir=current)
         if current:
-            # A folder is on the form and neither record describes it. Offering
-            # some other plate here would be answering a question the user did
-            # not ask; the pre-run report is what speaks for this folder.
-            return offers[0] if offers else None
+            # One folder, so this is the specificity rule and nothing else: the
+            # suspend record first, the journal behind it, and an empty list
+            # when neither describes the folder — offering some other plate
+            # here would answer a question the user did not ask, and the
+            # pre-run report is what speaks for this folder.
+            offers = [*suspended, *from_journal]
+        else:
+            # No folder named, so the question really is "what is the newest
+            # unfinished run anywhere". Ranked by when each stopped, with the
+            # suspend record breaking a tie for the reason above.
+            offers = sorted([*suspended, *from_journal],
+                            key=lambda o: (-o.at, o.from_journal))
         return offers[0] if offers else None
 
     def _current_output_dir(self) -> str:
@@ -297,6 +316,7 @@ class AnalyzeSuspendMixin:
                     f"continues it — only the field/timepoint groups still "
                     f"missing are computed."),
                 from_journal=False,
+                at=float(getattr(run, "suspended_at", 0.0) or 0.0),
             )
             for run in load_all()
             if not only_dir or same_dir(run.output_dir, only_dir)
@@ -324,6 +344,11 @@ class AnalyzeSuspendMixin:
                 output_dir=out_dir,
                 headline=_unfinished_headline(out_dir, journal),
                 from_journal=True,
+                # When it stopped, not when it began: a run opened yesterday
+                # and killed this morning is newer than one that began and
+                # ended in between. An open record has no closing time, so it
+                # falls back to when it was opened.
+                at=float(journal.closed_at or journal.opened_at or 0.0),
             ))
         return offers
 

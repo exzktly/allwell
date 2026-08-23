@@ -3059,10 +3059,14 @@ everything an earlier run left there can be reported before this one starts.**
 `analyze_preflight.AnalyzePreflightMixin` is that report — a mixin for the same
 reason `analyze_suspend` and `analyze_progress` are, since `analyze_tab.py` sits
 against its line budget. `_refresh_output` hands it the `InputPlan`, and it
-reports in two tiers split by what each costs. Tier one is one small JSON read
-of the run journal (§6.5): what the last run against this folder did, and
-whether it *finished* — a journal still open is a run the app was killed during,
-which nothing else on disk records. Tier two runs `completeness.scan_run` on a
+reports in two tiers split by what each costs. Tier one is the run journal
+(§6.5) — one small JSON read — plus the scope line's `iterdir` of the input
+directory and, where loose images sit beside the archives, a central-directory
+read of each archive they belong to: bounded by the plate's top level rather
+than a walk of it, which is what lets it run inline once the field settles. It
+says what the last run against this folder did, and whether it *finished* — a
+journal still open is a run the app was killed during, which nothing else on
+disk records. Tier two runs `completeness.scan_run` on a
 worker thread and states real coverage, the same predicate the end-of-run check
 and Validate use, because a preview computing its own idea of coverage is a
 preview that can contradict the run it describes. The input field's
@@ -5368,10 +5372,13 @@ The Fetcher records each well into the run journal (§6.5) at the moment it
 decides it — `skipped` with the reason from `_already_local`, `not-fetched` when
 the zip cannot be pulled, `failed` when it arrives and cannot be materialised,
 `fetched` once it is in place, and `fetched` again if the end-of-run retry
-rescues it. `RemoteRunner._reconcile_fetch` then runs before verify and renders
+rescues it. `RemoteRunner._reconcile_fetch` runs at the *end* of `verify_and_cleanup` —
+after the manifest check, the retry pass that re-pulls what is missing, and the
+second manifest check that records what the retry rescued — and renders
 `<output_dir>/remote_fetch_report.txt` from that record: the run id, the force
-intent, and one line per well the remote holds output for. Two things follow
-from the order. A run that never reaches the reconciliation — killed, or the app
+intent, and one line per well the remote holds output for. Running it last is the point: written before the retry, the
+report named as never fetched exactly the wells the retry then recovered. Two
+things follow from the order. A run that never reaches the reconciliation — killed, or the app
 closed — has still recorded everything it got to, because each well was written
 down as it was decided rather than gathered at the end. And the report is a
 *rendering* of that record rather than a second classification derived from

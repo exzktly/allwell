@@ -40,6 +40,16 @@ from services.remote_runner import (
     stage_local_zips,
 )
 
+def _make_host():
+    from services.remote_runner import RemoteHost
+    return RemoteHost(
+        name="test", ssh_alias="test-host", remote_project_dir="~/allwell",
+        remote_staging_dir="~/.allwell-staging", remote_python="/opt/python",
+        cpu_only=False, extra_args=(), cache_budget_gb=10,
+        measured_bandwidth_mbps=100.0,
+    )
+
+
 SCHEMA = "experiment:well:fov:timepoint:channel"
 SEP = "_"
 FRESH = "/staging/runs/run-fresh/out"
@@ -318,7 +328,53 @@ def test_the_fetch_report_falls_back_to_the_in_memory_state(tmp_path):
     assert any("already complete locally" in ln for ln in lines)
 
 
-def test_cleanup_leaves_a_re_attached_run_dir_alone(tmp_path):
+def _cleanup_deletions(tmp_path, monkeypatch, *, reattached: bool) -> list[str]:
+    """Run ``verify_and_cleanup`` for real and return what it removed.
+
+    Asserted at the boundary — the ``rm -rf`` that reaches the remote — rather
+    than on the flag that decides it. The previous version of this test built
+    two dataclasses and asserted ``run.reattached`` was the value it had just
+    passed in; it would have passed unchanged with the cleanup branch deleted.
+    """
+    from services import remote_runner as rr
+
+    run = rr._RemoteRun(
+        run_id="run-new", cache_key="k" * 32, remote_input_dir="/r/in",
+        remote_output_dir=(STORED if reattached
+                           else "~/.allwell-staging/runs/run-new/out"),
+        remote_pidfile="~/.allwell-staging/runs/run-new/run.pid",
+        local_output_dir=tmp_path, local_input_mode=rr.LocalInputMode.ZIP,
+        output_filter=rr.OutputFilter.FULL, reattached=reattached,
+    )
+
+    removed: list[str] = []
+
+    def _ssh_run(self, argv, *, check=False, **kw):
+        if list(argv[:2]) == ["rm", "-rf"]:
+            removed.extend(argv[2:])
+        return None
+
+    monkeypatch.setattr(rr.DatasetCache, "_ssh_run", _ssh_run)
+
+    runner = rr.RemoteRunner.__new__(rr.RemoteRunner)
+    runner._run = run
+    runner._cache = rr.DatasetCache.__new__(rr.DatasetCache)
+    runner.host = _make_host()
+    # Nothing is missing, so verify passes and cleanup is reached.
+    monkeypatch.setattr(rr.RemoteRunner, "_verify_local_manifest",
+                        lambda self, *, log: [])
+    monkeypatch.setattr(rr.RemoteRunner, "_reconcile_fetch",
+                        lambda self, *, log: "")
+    # Real rsync attempts, with the retry ladder behind them — a minute of
+    # timeouts for artefacts this test does not look at.
+    monkeypatch.setattr(rr.RemoteRunner, "_rsync_optional",
+                        lambda self, *a, **kw: None)
+    rr.RemoteRunner.verify_and_cleanup(
+        runner, True, cleanup_mode="run", log_fn=lambda _m: None)
+    return removed
+
+
+def test_cleanup_leaves_a_re_attached_run_dir_alone(tmp_path, monkeypatch):
     """A re-attached run must not delete the directory it borrowed.
 
     Its output lives under a *previous* run's ``runs/<id>/``, so the path
@@ -327,25 +383,18 @@ def test_cleanup_leaves_a_re_attached_run_dir_alone(tmp_path):
     on the remote for ever, and take whatever else the other run's directory
     still holds.
     """
-    from services.remote_runner import _RemoteRun, OutputFilter, LocalInputMode
+    removed = _cleanup_deletions(tmp_path, monkeypatch, reattached=True)
+    assert removed == [], f"a re-attached run deleted {removed}"
 
-    run = _RemoteRun(
-        run_id="run-new", cache_key="k", remote_input_dir="/r/in",
-        remote_output_dir=STORED, remote_pidfile="/r/runs/run-new/run.pid",
-        local_output_dir=tmp_path, local_input_mode=LocalInputMode.ZIP,
-        output_filter=OutputFilter.FULL, reattached=True,
-    )
-    assert run.reattached
-    assert run.remote_output_dir != f"/staging/runs/{run.run_id}/out", (
-        "the fixture must actually differ, or it proves nothing")
 
-    plain = _RemoteRun(
-        run_id="run-new", cache_key="k", remote_input_dir="/r/in",
-        remote_output_dir="/staging/runs/run-new/out",
-        remote_pidfile="/r/runs/run-new/run.pid", local_output_dir=tmp_path,
-        local_input_mode=LocalInputMode.ZIP, output_filter=OutputFilter.FULL,
-    )
-    assert not plain.reattached, "an ordinary run cleans up as it always did"
+def test_an_ordinary_run_still_removes_its_run_dir(tmp_path, monkeypatch):
+    """The other half: declining for a re-attach must not decline for everyone.
+
+    Without this the test above passes just as well against a cleanup that
+    never deletes anything at all.
+    """
+    removed = _cleanup_deletions(tmp_path, monkeypatch, reattached=False)
+    assert removed == ["~/.allwell-staging/runs/run-new"], removed
 
 
 # ── the discrimination the whole re-attach rests on ─────────────────────────

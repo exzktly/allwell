@@ -23,6 +23,7 @@ control is offered is not asserting it works.
 from __future__ import annotations
 
 import json
+import time
 import zipfile
 
 import pytest
@@ -240,3 +241,66 @@ def test_resuming_stops_the_offer_repeating(tab, tmp_path, qtbot, monkeypatch):
     # The journal itself stays: it is the dataset's provenance, and only the
     # "look at this" pointer is dropped.
     assert J.read_journal(plate / "out") is not None
+
+
+# ── ranking the two records against each other ──────────────────────────────
+
+def _suspend(plate, *, at: float, done: int = 1, total: int = 10) -> None:
+    """Record *plate* as deliberately suspended, stopped at *at*."""
+    suspend_record.save(suspend_record.SuspendedRun(
+        spec={"opts": {"raw": str(plate), "filename_schema": SCHEMA,
+                       "filename_sep": SEP, "nuclear_token": "DAPI"}},
+        input_dir=str(plate / "in"), output_dir=str(plate / "out"),
+        suspended_at=at, wells_done=done, wells_total=total,
+    ))
+
+
+def test_with_no_folder_on_the_form_the_newest_of_either_record_is_offered(
+        tab, tmp_path):
+    """Reported by the manual and by ARCHITECTURE, and not what it did.
+
+    The two records were read into separate lists and concatenated, so every
+    suspended run preceded every journal one however old. A plate suspended
+    months ago beat one the app was killed on minutes ago — in exactly the
+    empty-form case both documents describe as "the most recent unfinished run
+    on any plate", and the state the app opens in.
+    """
+    old = _plate(tmp_path, "PLATE-OLD")
+    new = _plate(tmp_path, "PLATE-NEW")
+    _suspend(old, at=1_000.0)
+    _journal(new)                                   # still open: it was killed
+
+    offer = tab._resumable("")
+    assert offer is not None
+    assert offer.output_dir == str(new / "out"), (
+        f"offered {offer.output_dir}, which is not the newest record")
+    assert offer.from_journal is True
+
+
+def test_the_older_record_wins_when_it_is_the_newer_one(tab, tmp_path):
+    """The mirror, so the fix is a *ranking* and not a reversed preference."""
+    old = _plate(tmp_path, "PLATE-OLD")
+    new = _plate(tmp_path, "PLATE-NEW")
+    _journal(old, outcome="error")
+    _suspend(new, at=time.time() + 60.0)            # unambiguously the newest
+
+    offer = tab._resumable("")
+    assert offer is not None
+    assert offer.output_dir == str(new / "out")
+    assert offer.from_journal is False
+
+
+def test_for_one_folder_the_suspend_record_still_wins(tab, tmp_path):
+    """Ranking across plates must not disturb the specificity rule.
+
+    Both records describing the *same* folder is not a question of recency: the
+    user asked for the suspend, so it is the more specific statement about that
+    plate, whichever was written last.
+    """
+    plate = _plate(tmp_path, "PLATE")
+    _journal(plate)                                 # written now
+    _suspend(plate, at=1_000.0)                     # written long ago
+
+    offer = tab._resumable(str(plate / "out"))
+    assert offer is not None
+    assert offer.from_journal is False

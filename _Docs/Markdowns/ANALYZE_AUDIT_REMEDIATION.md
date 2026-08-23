@@ -28,7 +28,7 @@ rather than a write-up. **Delete it in the PR that closes the last group.**
 
 | Group | Theme | Branch | Version | PR | State |
 |---|---|---|---|---|---|
-| 1 | Stop the data loss | [#842](https://github.com/exzktly/allwell/pull/842) | **done** — CI green, awaiting merge |
+| 1 | Stop the data loss | `…-ugoecl` | 9.0.1 | [#842](https://github.com/exzktly/allwell/pull/842) | **merged** |
 | 2 | One definition of an image, and an honest verdict | `claude/analysis-job-failure-recovery-ugoecl` | 9.0.2 | — | **in progress** |
 | 3 | The record and the resume path | `claude/analyze-audit-group3-record` | 9.0.5 | — | queued — starts when Group 2's PR opens |
 | 4 | The Analyze pane | `claude/analyze-audit-group4-pane` | 9.0.3 | — | **in progress** (parallel worker) |
@@ -108,10 +108,10 @@ These are carried from the approved plan and are not optional.
 
 ---
 
-## Group 1 — Stop the data loss · `done`
+## Group 1 — Stop the data loss · `merged`
 
-PR [#842](https://github.com/exzktly/allwell/pull/842). Six Tier-1 findings,
-plus twelve defects a sixth reviewer found in those fixes.
+PR [#842](https://github.com/exzktly/allwell/pull/842), merged. Six Tier-1
+findings, plus fourteen defects a sixth reviewer found in those fixes.
 
 | ID | Finding | State |
 |---|---|---|

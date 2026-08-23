@@ -36,7 +36,7 @@ last row.**
 | W3 | Image identity and batch export (themes 4, 7) | worker | 14 | **in progress** |
 | ME | smFISH, fold change, stats, guards, docs | lead | 11 | **in progress** |
 
-Counts: **7 done · 0 declined · 1 deferred · 34 outstanding** of 42.
+Counts: **8 done · 0 declined · 1 deferred · 33 outstanding** of 42.
 
 The four groups are partitioned by file, not by theme, so that they can run at
 the same time without touching the same lines. Where a theme's items live in
@@ -120,7 +120,9 @@ or they will go red on files another group is still holding:
 | 87 | High | done | An aborted run's `_after_csv` stamps the old threshold into the **new** dataset's `pipeline_info.json`. | Fixed: tab_view.py captures the dataset at launch and _after_csv refuses to persist (with a WARNING) when the loaded dataset changed. tests/test_smfish_threshold_stays_with_its_dataset.py — proved by neutralising the guard at HEAD (real AssertionError). |
 | 110 | Medium | done | The Included/funnel readout is never refreshed on a dataset load, so it keeps describing the previous dataset. | Fixed: _kick_off_gating_after_load now calls cell_gating_refresh_included_count on the no-worker path (the commonest one). tests/test_gating_counts_follow_the_dataset.py, proved on origin/main with 'assert [] == [refresh]'. |
 | 116 | Low | done | Modal dialogs opened with `parent=None`, against the repo's documented macOS rule. | Fixed: all three sites now pass ctx.window. tests/test_file_dialogs_are_parented.py is a new AST guard proved on origin/main (AssertionError naming all 3), with catch/clear cases in tests/test_guards_bite.py including the parent = None spelling a literal-only check would miss. |
-| 155 | Low | queued | `font-size: 10px` in QSS and bare margin/spacing literals in the two modules whose header comments cite §8 for their *named* width constants. Invisible to `test_hardcoded | The QSS literal is fixed — widgets/selection_chip.py:129 now reads `font-size: {t.caption_size}px`. The spacing half is only partly swept: widgets/run_dashboard.py:43 names `_STAGE_ROW_SPACING_PX = 7` |## Not carried here
+| 155 | Low | done | `font-size: 10px` in QSS and bare margin/spacing literals in the two modules whose header comments cite §8 for their *named* width constants. Invisible to `test_hardcoded | Fixed the named sites: run_dashboard:458 now uses _STAGE_ROW_SPACING_PX (it sat beside a constant of the same value), and plate_progress's four bare spacings are either theme.Spacing.sm or a named off-scale constant carrying its justification. The guard's blind spots — setSpacing/setContentsMargins (147 sites) and QSS font-size — are recorded in test_hardcoded_tokens.py as a known gap with the reason, rather than left to be rediscovered. |
+
+## Not carried here
 
 The 128 findings already closed and the 7 declined deliberately are not
 listed here. They are recorded in the pull requests that closed them, and the

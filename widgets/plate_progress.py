@@ -27,6 +27,17 @@ from widgets.well_plate_selector import WellPlateSelector
 from util.well_token import canonical_well_label
 import theme
 
+#: Gap between the plate column and the stage rail beside it. Off the 4-px
+#: scale on purpose, like the 6-px root spacing below: this row has to hold a
+#: fixed-aspect plate next to a rail whose width is set by its longest stage
+#: label, and the nearest scale steps (12 and 16) either crowd the plate or
+#: push the rail's text to wrap. Named so the number is stated once.
+_BODY_COLUMN_GAP_PX = 14
+
+#: Gap between the plate and the caption stacked under it. Same reasoning: the
+#: caption reads as part of the plate at 6 px and as a separate block at 8.
+_PLATE_STACK_GAP_PX = 6
+
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
 # (ARCHITECTURE §8: never hardcode a pixel size at a call site).
@@ -195,11 +206,13 @@ class PlateProgress(QWidget):
         # body: rail | plate | legend
         self._body = QWidget(self)
         body = QHBoxLayout(self._body)
-        body.setContentsMargins(0, 4, 0, 0); body.setSpacing(14)
+        body.setContentsMargins(0, theme.Spacing.xs, 0, 0)
+        body.setSpacing(_BODY_COLUMN_GAP_PX)
 
         self._rail_host = QWidget(self._body)
         self._rail_lay = QVBoxLayout(self._rail_host)
-        self._rail_lay.setContentsMargins(0, 0, 0, 0); self._rail_lay.setSpacing(8)
+        self._rail_lay.setContentsMargins(0, 0, 0, 0)
+        self._rail_lay.setSpacing(theme.Spacing.sm)
         self._rail_host.setFixedWidth(_RAIL_HOST_W)
         body.addWidget(self._rail_host)
 
@@ -218,7 +231,8 @@ class PlateProgress(QWidget):
         if show_plate:
             self._center_host = QWidget(self._body)
             center = QVBoxLayout(self._center_host)
-            center.setContentsMargins(0, 0, 0, 0); center.setSpacing(6)
+            center.setContentsMargins(0, 0, 0, 0)
+            center.setSpacing(_PLATE_STACK_GAP_PX)
 
             self._plate = WellPlateSelector(self._center_host)
             self._plate.setDragSelectEnabled(False)
@@ -255,7 +269,8 @@ class PlateProgress(QWidget):
         if show_legend:
             self._legend_host = QWidget(self._body)
             self._legend_lay = QVBoxLayout(self._legend_host)
-            self._legend_lay.setContentsMargins(0, 0, 0, 0); self._legend_lay.setSpacing(8)
+            self._legend_lay.setContentsMargins(0, 0, 0, 0)
+            self._legend_lay.setSpacing(theme.Spacing.sm)
             # Wide enough for the longest legend string in current use
             # ("merged — no CSV on one side") without wrapping; subclasses'
             # legend labels also carry setWordWrap(True) as a second line of

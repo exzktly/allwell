@@ -455,7 +455,8 @@ class RunDashboard(PlateProgress):
         items.append((theme.Colors.danger, "failed"))
         for color, txt in items:
             row_w = QWidget(self._legend_host)
-            r = QHBoxLayout(row_w); r.setContentsMargins(0, 0, 0, 0); r.setSpacing(7)
+            r = QHBoxLayout(row_w); r.setContentsMargins(0, 0, 0, 0)
+            r.setSpacing(_STAGE_ROW_SPACING_PX)
             r.addWidget(status_dot(color))
             t = QLabel(txt, row_w); t.setStyleSheet(f"color:{theme.Colors.text_primary};")
             r.addWidget(t); r.addStretch(1)

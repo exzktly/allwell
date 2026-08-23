@@ -554,6 +554,14 @@ class PipelineRunner:
         # into the journal so a run that dies can be offered back with the
         # settings it had. ``None`` for a caller that supplies none.
         self._journal_spec: dict | None = None
+        #: Where this run's journal lives, and its token — `open_run`'s
+        #: `opened_at`, handed to every write so a record can say *which* run
+        #: it belongs to. Declared here rather than only in `start()`, because
+        #: a runner that is asked about them before its first run should get
+        #: `None` rather than an `AttributeError`: `stop()` and the queue's
+        #: gate can both be reached on a freshly built runner.
+        self._journal_dir: Path | None = None
+        self._journal_token: float | None = None
         # Remote-execution state. Set in start() when the user chose a
         # remote host; the runner threads it through _run_pipeline_thread
         # to swap spawn_pipeline for the SSH-staged remote run.
@@ -714,6 +722,24 @@ class PipelineRunner:
         self._dry_run_cleanup = dry_run_cleanup
         self._selective_channels = selective_channels
         self._journal_spec = journal_spec
+        # Every per-run flag is cleared **here**, on the caller's thread,
+        # before the worker is started — not at the top of the worker itself.
+        # `start()` returns as soon as the thread is created, and the thread
+        # may not be scheduled for some time after that. A Stop pressed in
+        # that gap sets `_stop_requested`, and the worker's first act used to
+        # be clearing it: the run carried on with the user's cancellation
+        # discarded, and the button had already gone back to its idle state.
+        # Clearing before the thread exists closes the window entirely.
+        self._stop_requested.clear()
+        self._suspend_requested.clear()
+        self._error_was_stopped = False
+        self._error_was_suspended = False
+        self._had_error = False
+        # Cleared per run rather than at ``close_run``: a setup-phase failure
+        # returns before the journal is ever opened, and a stale directory
+        # from the previous run would then be closed in this run's name.
+        self._journal_dir = None
+        self._journal_token = None
         self._thread = threading.Thread(
             target=self._run_pipeline_thread,
             args=(pipeline, opts, resolve_dirs),
@@ -870,22 +896,6 @@ class PipelineRunner:
         opts: dict,
         resolve_dirs: Callable[..., tuple[Path, Path] | None],
     ) -> None:
-        # Each run starts with a fresh "not cancelled" state.
-        self._stop_requested.clear()
-        self._suspend_requested.clear()
-        self._error_was_stopped = False
-        self._error_was_suspended = False
-        self._had_error = False
-        # Cleared here rather than at ``close_run``: a setup-phase failure
-        # returns before the journal is ever opened, and a stale directory
-        # from the previous run would then be closed in this run's name.
-        self._journal_dir: Path | None = None
-        #: This run's journal token — ``open_run``'s ``opened_at``. Handed to
-        #: every well write so a record can say *which* run it belongs to.
-        #: ``None`` for a run whose journal could not be opened, which is how a
-        #: writer knows to stop rather than file its progress under the
-        #: previous run's surviving record.
-        self._journal_token: float | None = None
         # The Analyze "Scratch disk" field routes per-well working files via
         # ALLWELL_SCRATCH_DIR. Set it on this process's env so the local
         # pipeline subprocess (inherits os.environ) and the in-process remote

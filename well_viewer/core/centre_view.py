@@ -640,7 +640,7 @@ def build_centre(win, parent: QWidget) -> None:
     def _top_level_builder(title: str) -> Callable[[], None]:
         return _bespoke_builders.get(title) or _registry_builder(title)
 
-    groups: List[Tuple[str, List[Tuple[str, Callable[[], None]]]]] = [
+    groups: list[tuple[str, list[tuple[str, Callable[[], None]]]]] = [
         (group, [(d.name, _top_level_builder(d.name))
                  for d in win._features.in_group(group)])
         for group in ("Home", "Analysis", "Images", "Data")

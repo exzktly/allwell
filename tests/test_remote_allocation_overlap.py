@@ -128,7 +128,8 @@ def _host(launcher: str) -> RemoteHost:
     )
 
 
-def _spawn_recording_order(monkeypatch, tmp_path, launcher, *, upload_raises=None):
+def _spawn_recording_order(monkeypatch, tmp_path, stop_fetchers, launcher, *,
+                           upload_raises=None):
     """Run ``spawn`` against fakes, returning the order of the outbound calls."""
     order: list[str] = []
     key = "cachekey" + "0" * 24
@@ -182,17 +183,18 @@ def _spawn_recording_order(monkeypatch, tmp_path, launcher, *, upload_raises=Non
     zipped = ZippedInput(zip_dir=tmp_path, mode=LocalInputMode.ZIP,
                          well_zips=(zip_path,))
     runner = RemoteRunner(_host(launcher))
+    stop_fetchers(runner)
     runner.spawn(zipped, tmp_path / "out",
                  ["python", "process_microscopy.py"],
                  output_filter=None, log_fn=lambda _m: None)
     return order, cancelled
 
 
-def test_the_allocation_is_requested_before_the_upload_starts(monkeypatch, tmp_path):
+def test_the_allocation_is_requested_before_the_upload_starts(monkeypatch, tmp_path, stop_fetchers):
     """The whole point: the queue wait and the transfer overlap. Asserted on
     the order of the outbound calls, because no value inside the runner records
     which of the two waits came first."""
-    order, _ = _spawn_recording_order(monkeypatch, tmp_path, "srun -N1")
+    order, _ = _spawn_recording_order(monkeypatch, tmp_path, stop_fetchers, "srun -N1")
     assert "allocate" in order and "upload" in order
     assert order.index("allocate") < order.index("upload")
     # And the sentinel is written after the bytes, not before them — the job
@@ -212,20 +214,21 @@ def test_the_allocation_is_requested_before_the_upload_starts(monkeypatch, tmp_p
     assert order.index("sweep") < order.index("allocate")
 
 
-def test_a_host_with_no_scheduler_still_uploads_first(monkeypatch, tmp_path):
+def test_a_host_with_no_scheduler_still_uploads_first(monkeypatch, tmp_path, stop_fetchers):
     """There is nothing to queue for, and the pipeline starts the moment ssh
     connects — so starting it early would run it against an input directory
     that is still filling."""
-    order, _ = _spawn_recording_order(monkeypatch, tmp_path, "")
+    order, _ = _spawn_recording_order(monkeypatch, tmp_path, stop_fetchers, "")
     assert order.index("upload") < order.index("allocate")
 
 
-def test_a_failed_upload_hands_the_allocation_back(monkeypatch, tmp_path):
+def test_a_failed_upload_hands_the_allocation_back(monkeypatch, tmp_path,
+                                                  stop_fetchers):
     """Otherwise the node sits on the sentinel that will now never be written,
     until the timeout hours later."""
     boom = RuntimeError("rsync exited 23")
     with pytest.raises(RuntimeError):
-        _spawn_recording_order(monkeypatch, tmp_path, "srun -N1",
+        _spawn_recording_order(monkeypatch, tmp_path, stop_fetchers, "srun -N1",
                                upload_raises=boom)
 
 

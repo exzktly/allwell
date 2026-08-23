@@ -671,7 +671,7 @@ def refresh_sidebar_map_now(ctx) -> None:
     # repaint passive and wipe the per-well selection the handler just committed.
     rep_mode = _plate_passive_in_group_mode(ctx)
 
-    colors: Dict[str, object] = {}
+    colors: dict[str, object] = {}
     if rep_mode:
         for s in app._app_state.selection.selections:
             full_c = app._sel_color(s)

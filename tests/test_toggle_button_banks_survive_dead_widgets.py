@@ -63,7 +63,15 @@ class _LiveButton:
         return types.SimpleNamespace(unpolish=lambda _w: None, polish=lambda _w: None)
 
 
-def _ctx(sem_bank, fov_bank, *, use_fov=False, use_sem=True):
+class _DeadObserver:
+    """An observer closing over a deleted widget."""
+
+    def __call__(self, _value):
+        raise RuntimeError("Internal C++ object (QToolButton) already deleted.")
+
+
+def _ctx(sem_bank, fov_bank, *, use_fov=False, use_sem=True,
+         sem_observers=None, fov_observers=None):
     calls: list[str] = []
 
     class _Plot:
@@ -76,8 +84,10 @@ def _ctx(sem_bank, fov_bank, *, use_fov=False, use_sem=True):
     return types.SimpleNamespace(
         state=types.SimpleNamespace(plot=_Plot()),
         runtime=types.SimpleNamespace(
-            sem=types.SimpleNamespace(btns=sem_bank, observers=[]),
-            fov=types.SimpleNamespace(btns=fov_bank, observers=[]),
+            sem=types.SimpleNamespace(btns=sem_bank,
+                                      observers=sem_observers if sem_observers is not None else []),
+            fov=types.SimpleNamespace(btns=fov_bank,
+                                      observers=fov_observers if fov_observers is not None else []),
         ),
         _calls=calls,
     )
@@ -133,3 +143,51 @@ def test_the_fov_bank_is_guarded_the_same_way(no_side_effects, qapp):
 def qapp():
     from PySide6.QtWidgets import QApplication
     return QApplication.instance() or QApplication([])
+
+
+# ── the observer banks grow the same way ────────────────────────────────────
+
+def test_a_dead_observer_is_dropped_and_the_live_ones_still_fire(no_side_effects):
+    """The button banks were pruned and these were not — the same unbounded
+    growth in the list immediately below the one that was fixed. A guarded but
+    unpruned observer raises on every toggle for the rest of the session."""
+    seen: list[bool] = []
+    observers = [seen.append, _DeadObserver(), seen.append]
+    ctx = _ctx([], [], sem_observers=observers)
+
+    plot_toggles.toggle_sem(ctx)
+
+    assert seen == [True, True], "the observer behind the dead one never fired"
+    assert observers == [seen.append, seen.append] or len(observers) == 2, (
+        f"the dead observer is still in the bank: {observers}"
+    )
+
+
+def test_an_observer_that_raises_for_its_own_reasons_is_kept(no_side_effects):
+    """Only a RuntimeError means a dead widget. Dropping anything else would
+    silently unsubscribe a live listener over its own bug."""
+    calls: list[int] = []
+
+    def _buggy(_value):
+        calls.append(1)
+        raise ValueError("my own bug")
+
+    observers = [_buggy]
+    ctx = _ctx([], [], sem_observers=observers)
+
+    plot_toggles.toggle_sem(ctx)
+    plot_toggles.toggle_sem(ctx)
+
+    assert len(calls) == 2, "a buggy observer was unsubscribed"
+    assert observers == [_buggy]
+
+
+def test_the_fov_observers_are_pruned_the_same_way(no_side_effects, qapp):
+    seen: list[bool] = []
+    observers = [_DeadObserver(), seen.append]
+    ctx = _ctx([], [], use_fov=True, fov_observers=observers)
+
+    plot_toggles.refresh_fov_btn_state(ctx)
+
+    assert seen == [True]
+    assert len(observers) == 1

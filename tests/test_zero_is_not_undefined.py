@@ -146,3 +146,73 @@ def test_a_well_with_events_draws_a_real_bar(monkeypatch):
 def test_a_nan_count_is_undefined_not_zero(monkeypatch):
     bars = _n_panel_bars(monkeypatch, {"A01": [_agg_point(6.0, float("nan"))]})
     assert bars == ["placeholder"]
+
+
+# ── the collector's own zero-versus-undefined split ─────────────────────────
+
+def _bar_items_src():
+    import inspect
+
+    from well_viewer.features.barplot import collect
+
+    return inspect.getsource(collect)
+
+
+def test_has_frac_is_never_coupled_to_has_mean():
+    """A fraction of zero is a measurement even when the mean is undefined.
+
+    ``_aggregate_arrays`` sets ``mean = nan`` exactly when nothing passed the
+    threshold, so ``has_mean and not isnan(frac)`` throws the "could not be
+    computed" placeholder over the commonest measured zero there is. Two of the
+    collector's three branches were spelled that way and one was not, so the
+    same set read differently depending on a layout toggle.
+
+    Reverting the three sites left the whole fast lane green, which is why this
+    is here: the behaviour is reachable only through a collector that needs a
+    full app, so the guard is on the spelling.
+    """
+    import ast
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(_bar_items_src()))
+    offenders = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1):
+            continue
+        target = node.targets[0]
+        if not (isinstance(target, ast.Name) and target.id == "has_frac"):
+            continue
+        names = {n.id for n in ast.walk(node.value) if isinstance(n, ast.Name)}
+        if "has_mean" in names:
+            offenders.append(node.lineno)
+    assert not offenders, (
+        f"has_frac is derived from has_mean at line(s) {offenders} of "
+        "barplot/collect.py — a set where nothing passed the cut has a "
+        "fraction of exactly 0, which is a measurement and usually the point "
+        "of the experiment"
+    )
+
+
+def test_the_events_bar_is_never_gated_on_has_mean_either():
+    """The same coupling one step removed, in the renderer's draw gate."""
+    import ast
+    import inspect
+    import textwrap
+
+    from well_viewer.features.barplot import controller
+
+    src = textwrap.dedent(inspect.getsource(controller.render_bar_items))
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1):
+            continue
+        target = node.targets[0]
+        if not (isinstance(target, ast.Name) and target.id == "_n_above_known"):
+            continue
+        names = {n.id for n in ast.walk(node.value) if isinstance(n, ast.Name)} | {
+            a.attr for a in ast.walk(node.value) if isinstance(a, ast.Attribute)}
+        assert "has_mean" not in names, (
+            "the events bar is gated on has_mean again — the mean is NaN "
+            "exactly when the count is a measured zero"
+        )
+        return
+    raise AssertionError("_n_above_known is gone; the gate moved without this guard")

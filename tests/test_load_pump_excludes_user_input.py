@@ -76,3 +76,29 @@ def test_the_load_loop_opts_out_on_every_progress_call():
             f"{call.func.id} at line {call.lineno} of load_directory pumps the "
             "event loop with user input enabled, mid-load"
         )
+
+
+def test_no_bare_processevents_anywhere_in_the_load_controller():
+    """The scan surface is half the rule (CLAUDE.md 7.5 #3).
+
+    The first version of this guard read only calls named ``_show_progress`` /
+    ``_step_progress`` inside ``load_directory``. ``_opening_set_phase`` — a
+    sibling pump called from the *same loop iteration*, one line later — was
+    invisible to it, so on the main open path (the only one that builds the
+    opening dialog) user input was dispatched once per CSV anyway and the
+    opt-out held only on the dialog-less reload route.
+    """
+    import pathlib
+
+    path = pathlib.Path(load_controller.__file__)
+    tree = ast.parse(path.read_text(), filename=str(path))
+    bare = []
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "processEvents" and not node.args):
+            bare.append(node.lineno)
+    assert not bare, (
+        f"bare processEvents() at line(s) {bare} of {path.name}: every pump on "
+        "the load path has to pass ExcludeUserInputEvents, or a click landing "
+        "between two CSVs runs against a half-built dataset"
+    )

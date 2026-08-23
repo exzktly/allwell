@@ -29,21 +29,27 @@ def _focus_cdf_xaxis(ax, vals) -> None:
 def _effective_thresh_frac_on(ctx, channel: str) -> float | None:
     """The ON cutoff in force for *channel*, or ``None`` when there is none.
 
-    The stored value when the user set one, the channel's default otherwise —
-    the nuclear channel's default is not the readout default, which is why this
-    goes through ``default_thresh_frac_on`` rather than a literal. ``None``
-    only for a cutoff of zero, which is "no cut" and would draw a line on the
-    axis edge claiming to be a threshold.
-    """
-    from well_viewer.domain.gating_state import default_thresh_frac_on
+    Goes through ``on_cutoff_for_column``, the **one resolver**, and hands it
+    the column this panel actually draws — the channel's mean-intensity column.
+    Two earlier attempts reached past it: first by reading
+    ``thresh_frac_on.get(channel.lower())`` here, then by delegating to the raw
+    ``get_thresh_frac_on`` accessor. ``tests/test_on_cutoff_sweep.py`` refuses
+    both, and it is right to: there are three ON cutoffs because there are
+    three scales, and a path that picks for itself is how a spot tally came to
+    be measured against a fluorescence threshold that sits above its entire
+    range. The panel drawing intensities does want ThreshFracOn — but that is
+    the resolver's answer to give, not this function's to assume.
 
-    key = str(channel or "").strip().lower()
-    value = ctx.state.cell_gating.thresh_frac_on.get(key)
-    if value is None:
-        seg = str(getattr(ctx.state.channel, "seg_channel_token", "") or "")
-        value = default_thresh_frac_on(key, seg)
+    ``None`` only for a cutoff of zero, which is "no cut" — the nuclear
+    channel's default, among others — and a line on the axis edge claiming to
+    be a threshold is worse than no line.
+    """
+    from well_viewer.core.channel_state_controller import on_cutoff_for_column
+
+    token = str(channel or "").strip().lower()
     try:
-        value = float(value)
+        value = float(on_cutoff_for_column(
+            ctx, f"{token}_mean_intensity", channel=token))
     except (TypeError, ValueError):
         return None
     return value if value else None

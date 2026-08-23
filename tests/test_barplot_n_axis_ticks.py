@@ -1,4 +1,4 @@
-"""The events-above-threshold panel picks integer ticks unless the bar is a mean.
+"""The events-above-threshold panel picks integer ticks only for a plain count.
 
 ``render_bar_items`` carried a comment saying it defaults to integer ticks
 because N is a count of events, and then passed ``MaxNLocator(integer=False)``
@@ -8,8 +8,12 @@ the other path that draws the same panel — already decided this correctly with
 ``integer=not per_fov_spread``. The two disagreeing meant the same value read
 differently depending on which path drew it.
 
-Aggregate-FOVs mode is the one case where the bar is a per-FOV *mean* rather
-than a count, and fractional ticks are right there.
+Two things make the bar something other than a count, and both have to be
+asked: Aggregate-FOVs mode, where it is a per-FOV *mean* of counts, and fold
+change, where it is a ratio or a difference of them. The first version of this
+fix copied ``draw_per_well_n_bars``' rule wholesale — which asks only about
+per-FOV mode, correctly, because nothing it draws is fold-changed — and so
+rounded a fold change of 1.35 to ticks of 0, 1, 2.
 """
 
 from __future__ import annotations
@@ -72,14 +76,33 @@ def test_the_default_with_no_context_is_a_count():
     assert loc._integer is True
 
 
-def test_the_two_paths_that_draw_this_panel_agree():
-    """``draw_per_well_n_bars`` keys the same decision off the same fact."""
+def test_a_fold_changed_count_gets_fractional_ticks():
+    """The second fact. A fold change is a ratio or a difference of counts, so
+    integer ticks round it away: 1.35 came back as ticks of 0, 1, 2."""
+    loc = _render(fc_active=True)
+    assert loc._integer is False
+
+
+def test_fold_change_overrides_an_explicit_integer_request():
+    """The batch panel passes ``n_axis_integer`` from the FOV toggle alone, so
+    the fold-change half has to be applied after the caller's choice."""
+    loc = _render(n_axis_integer=True, fc_active=True)
+    assert loc._integer is False
+
+
+def test_the_other_path_asks_only_about_per_fov_mode():
+    """``draw_per_well_n_bars`` is right to ask one question where this one asks
+    two: its own docstring records that nothing it draws is fold-changed, and
+    it is never handed an ``fc_active``. An earlier version of this file
+    asserted the two rules were identical, which is false — the panels draw
+    different quantities."""
     import inspect
 
     from well_viewer.features.barplot import renderer
 
     src = inspect.getsource(renderer.draw_per_well_n_bars)
-    assert "MaxNLocator(integer=not per_fov_spread)" in src, (
-        "the renderer's own N panel stopped keying integer ticks off "
-        "per-FOV mode; render_bar_items still does, so the two now disagree"
+    assert "MaxNLocator(integer=not per_fov_spread)" in src
+    assert "fc_active" not in src, (
+        "draw_per_well_n_bars now sees fold-change state, so its tick rule has "
+        "to grow the second question too"
     )

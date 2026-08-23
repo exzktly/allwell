@@ -712,7 +712,7 @@ def draw_grouped_bar_mode(
         warn_color=theme.Colors.warn,
         border_color=theme.Colors.border,
         placeholder_color=theme.Colors.placeholder,
-        disabled_well_color=theme.Colors.text_disabled,
+        disabled_well_color=theme.Colors.plot_undefined_ink,
         err_bar_color=theme.Colors.err_bar,
         fc_active=bool(ctx.state.plot.fold_change_active),
         ctx=ctx,
@@ -1294,7 +1294,7 @@ def draw_per_well_n_bars(
             if err_val > 0:
                 ax_n.errorbar(xi, bar_val, yerr=err_val, fmt="none", ecolor=theme.Colors.err_bar, elinewidth=1.4, capsize=4, zorder=4)
         else:
-            ax_n.bar(xi, 0, width=bar_w, color=theme.Colors.placeholder, linewidth=1, edgecolor=theme.Colors.text_disabled, linestyle="--", zorder=3)
+            ax_n.bar(xi, 0, width=bar_w, color=theme.Colors.placeholder, linewidth=1, edgecolor=theme.Colors.plot_undefined_ink, linestyle="--", zorder=3)
     ax_n.set_xticks(xs)
     ax_n.set_xticklabels(xlabels, rotation=45 if n > 8 else 0, ha="right" if n > 8 else "center", fontsize=7)
     xlim_lo = (min(xs) - 0.6) if xs else -0.6

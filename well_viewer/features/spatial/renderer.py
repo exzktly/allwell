@@ -322,7 +322,14 @@ def _render_nnd_histogram(ax, payload) -> None:
 
 def _render_ripley(ax, payload) -> None:
     ripley = payload.get("ripley")
-    if ripley is None:
+    # ``None`` is the controller declining to compute (it guards on a minimum
+    # cell count); an all-NaN curve is ``ripley_l`` itself declining, which it
+    # does below two points rather than returning the all-zero curve inside a
+    # zero-width envelope that used to read as *perfect* randomness. Both mean
+    # the same thing to a reader, so both get the same words — otherwise the
+    # NaN case drew an empty axes carrying a legend and a zero line, which
+    # looks like a measurement that came out flat.
+    if ripley is None or not np.isfinite(ripley.L_minus_r).any():
         _msg_ax(ax, "Not enough cells for Ripley's L.")
         return
     _style_axes(ax,

@@ -36,6 +36,11 @@ _BAR_W = 86
 _BAR_H = 6
 _CNT_W = 40
 _NM_W = 74
+#: Gap between a stage row's dot, name and bar. Off the 4-px scale on purpose,
+#: like the 6 px in ``plate_progress``: these rows are a fixed-width rail whose
+#: density decides how many fit, so rounding to a scale step is a design
+#: decision rather than a lint fix. Named so the number is stated once.
+_STAGE_ROW_SPACING_PX = 7
 
 # Per-well transfer directions, as they arrive on a ``well_xfer`` event.
 _XFER_UP = "up"
@@ -397,7 +402,8 @@ class RunDashboard(PlateProgress):
         rows = _RAIL_REMOTE if self._remote else _RAIL_LOCAL
         for key, label in rows:
             row_w = QWidget(self._rail_host)
-            row = QHBoxLayout(row_w); row.setContentsMargins(0, 0, 0, 0); row.setSpacing(theme.Spacing.sm)
+            row = QHBoxLayout(row_w); row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(_STAGE_ROW_SPACING_PX)
             dot = status_dot(theme.Colors.text_muted)
             row.addWidget(dot)
             nm = QLabel(label, row_w); nm.setFixedWidth(_NM_W)

@@ -723,10 +723,19 @@ if _HAVE_MPL:
                     self.setPlotTheme("publication")
                 yield
             finally:
-                if self._plot_theme != prev:
-                    self.setPlotTheme(prev)
-                self._theme_signal_suppressed = False
-                self.canvas.draw_idle()
+                # Nested, so the clear cannot be skipped. The restoring flip has
+                # to happen with the flag still set — suppressing one half of a
+                # round trip emits the very recompute the bracket exists to
+                # avoid — but a plain sequence of "flip, then clear" loses the
+                # clear if the flip raises, and the flag would then stay True
+                # for the card's whole life: one failed capture would silently
+                # unsubscribe every tab recompute from the theme, for ever.
+                try:
+                    if self._plot_theme != prev:
+                        self.setPlotTheme(prev)
+                finally:
+                    self._theme_signal_suppressed = False
+                    self.canvas.draw_idle()
 
         def setPlotTheme(self, mode: str) -> None:
             mode = "publication" if str(mode).lower().startswith("pub") else "screen"

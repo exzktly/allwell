@@ -92,10 +92,12 @@ class CropTool:
         self._idle_status = idle_status
 
         self._crop: CropRect | None = None
-        #: Set by :meth:`apply` when the rectangle clamped to nothing against
-        #: the image it was handed — that image is shown uncropped, and
+        #: Set by :meth:`apply_to_array` when the rectangle clamped to nothing
+        #: against an image it was handed — that image is shown uncropped, and
         #: :meth:`status_text` says so rather than naming a region that was
-        #: never applied.
+        #: never applied. Sticky until the crop itself changes, because this
+        #: runs once per grid cell and a per-cell flag would describe only the
+        #: last one drawn.
         self._crop_missed: bool = False
         self._mode: bool = False
         self._drag: dict[str, Any] | None = None
@@ -165,10 +167,11 @@ class CropTool:
     def status_text(self) -> str:
         """The crop state as one short phrase — ``(full FOV)`` or the region.
 
-        This is the region the user drew. When :meth:`apply` last met an image
-        the rectangle does not overlap, the phrase says so: that image is shown
-        uncropped, and a readout naming a region over an uncropped picture is
-        the silent substitution this codebase refuses to make.
+        This is the region the user drew. Once :meth:`apply_to_array` has met
+        an image the rectangle does not overlap, the phrase says so until the
+        crop changes: those images are shown uncropped, and a readout naming a
+        region over an uncropped picture is the silent substitution this
+        codebase refuses to make.
         """
         if self._crop is None:
             return self._idle_status
@@ -207,19 +210,28 @@ class CropTool:
             # array is the right call (an empty array renders as a blank cell
             # and loses the image entirely), but doing it silently left the
             # readout saying ``Crop: 300×300 px`` over an uncropped picture.
+            #
+            # The flag is **sticky for as long as this crop lasts**, and is
+            # cleared only by ``set_crop`` / ``clear``. It was cleared by the
+            # next image that *did* crop, which made it useless: this runs once
+            # per grid cell, so the readout described only whichever cell was
+            # rendered last, and a grid with one uncroppable image among fifty
+            # said nothing at all.
             if not self._crop_missed:
+                # Region first, flag second: ``status_text`` appends the
+                # warning once the flag is set, so reading it after produced
+                # "Crop region 300×300 px — outside some images does not
+                # overlap a 200×200 image".
+                region = self.status_text()
                 self._crop_missed = True
                 _logger.warning(
                     "Crop region %s does not overlap a %d×%d image — that "
                     "image is shown uncropped. The readout describes the "
                     "region you drew, not what was applied.",
-                    self.status_text(), iw, ih,
+                    region, iw, ih,
                 )
                 self._refresh_indicator()
             return a
-        if self._crop_missed:
-            self._crop_missed = False
-            self._refresh_indicator()
         return a[y0:y1, x0:x1]
 
     # ── label coordinate conversion ─────────────────────────────────────────

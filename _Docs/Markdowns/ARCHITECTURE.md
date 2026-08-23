@@ -2058,13 +2058,19 @@ separated from the frame — the label says so rather than implying a split the
 data does not support.
 
 The **CDFs** follow immediately, so a threshold edit and the distribution it is
-placed against are on one screen. Each carries **two** vertical lines, because
-this panel is where both cutoffs are chosen and they are constantly mistaken
-for each other: the FluorGating floor (dashed, `warn`) and the **ON cutoff**
-(dotted, `accent`) drawn at its *effective* value — the stored one, or the
+placed against are on one screen. Each **fluorescence-channel** panel carries two
+vertical lines, because that panel is where both cutoffs are chosen and they
+are constantly mistaken for each other: the FluorGating floor (dashed, `warn`)
+and the **ON cutoff** (dotted, `accent`) drawn at its *effective* value — the stored one, or the
 channel's default, which is not the readout default for the nuclear channel.
 A cutoff of zero draws no line, because zero is "no cut" and a line on the axis
-edge claiming to be a threshold is worse than none. Editing either cutoff
+edge claiming to be a threshold is worse than none — which is also why the
+nuclear channel, whose ON default *is* zero, shows only its gate line. The
+cell-area panel carries the `min_area` line alone and the ratio panels carry
+none: neither has an ON cutoff of its own. The effective value comes from
+`channel_state_controller.get_thresh_frac_on`, the canonical accessor, so the
+line and every statistic that divides by that cutoff read the same number
+through the same key resolution. Editing either cutoff
 replots the CDFs; a ThreshFracOn edit used to leave its own line where the old
 value was, on the panel the user was looking at to choose it. The optimizer — twelve controls answering an
 occasional question — is not on the tab at all: `optimizer_view` builds it into
@@ -2219,7 +2225,7 @@ Shared domain helpers (under `well_viewer/domain/`):
 | Module | Role |
 |--------|------|
 | `domain/fold_change.py` | Fold-change normalization helpers (vs control well/rep-set, vs each member's first timepoint). Consumed by line / bar plot, batch export, and `features/export/service.py`. |
-| `domain/numeric.py` | `is_number` / `is_numeric` — the one answer to "is this a usable measurement?" and "is this a number at all?". Every numeric guard on the plotting and export paths used to be spelled `isinstance(value, (int, float)) and math.isfinite(value)`, which is False for **every** numpy scalar, and the values reaching those guards come out of numpy reductions several call levels away — so the test asked which class had produced a number rather than whether it was one. The failure is silent and always in the same direction: a real spread becomes "no error bar", a real mean becomes a placeholder. Measured: `fold_change._finite_spread(numpy.float32(0.25))` returned `0.0`. The two predicates are separate because the distinction is load-bearing — a NaN spread means *undefined*, and folding it to `0.0` says the replicates agreed exactly, so a site that lets NaN through on purpose uses `is_numeric` while a site deciding whether a value can be drawn uses `is_number`. Both reject anything sized, because `float(numpy.array([1.0]))` succeeds and an array in a scalar slot is a bug that must not be converted quietly. `tests/test_numeric_guard.py` holds the five modules that judge measured values to using them. |
+| `domain/numeric.py` | `is_number` / `is_numeric` — the one answer to "is this a usable measurement?" and "is this a number at all?". Every numeric guard on the plotting and export paths used to be spelled `isinstance(value, (int, float)) and math.isfinite(value)`, which is False for **every** numpy scalar, and the values reaching those guards come out of numpy reductions several call levels away — so the test asked which class had produced a number rather than whether it was one. When such a value does reach one, the failure is silent and always in the same direction: a real spread becomes "no error bar", a real mean becomes a placeholder — `fold_change._finite_spread(numpy.float32(0.25))` returned `0.0`, measured on the helper directly. No live producer was found: every `AggPoint` field is `float()`/`int()`-coerced in `data_loading`, and `_reduce_reps` coerces too, so this is **hardening against a reachable shape rather than a defect anyone has hit** — which is the honest way to hold a rule whose violations are silent. The two predicates are separate because the distinction is load-bearing — a NaN spread means *undefined*, and folding it to `0.0` says the replicates agreed exactly, so a site that lets NaN through on purpose uses `is_numeric` while a site deciding whether a value can be drawn uses `is_number`. Both reject anything sized, because `float(numpy.array([1.0]))` succeeds and an array in a scalar slot is a bug that must not be converted quietly. `tests/test_numeric_guard.py` holds the five modules that judge measured values to using them. |
 | `domain/control_ref.py` | `ControlRef` — the frozen `(kind, name)` a fold-change control is addressed by, plus its storage form. The kind travels beside the name because replicate-set names are unrestricted free text, so no single string can distinguish a well from a set that shares its token (§9.5). |
 | `domain/fold_change_state.py` | `FoldChangeState` — the request object every collection path is handed. It is read **by name only**: a request read by unpacking silently drops any field added after the unpack was written, and for this object a dropped field means raw values drawn under a fold-change axis. Emulating a tuple would also break the `__eq__`/`__hash__` contract the denominator cache keys on. `coerce_fc_state` accepts a tuple as input, since many tests spell a request inline; nothing hands one back. |
 | `domain/fold_change_series_cache.py` | `ControlSeriesCache` — a per-redraw memo of control denominator series, keyed on the reference. The cross-axis stacking blocks resolve a control inside the member loop and each call rebuilds the whole series, so a 24-member plate over 6 timepoints issued 882 builds on the vs-control + vs-t0 path against 75 with the memo. It captures the threshold, value column, spread mode and gates it was built with and has no invalidation, so it is a collector local and must not outlive one redraw. |
@@ -2545,9 +2551,14 @@ catalogue of exactly four cross-cutting signals — `channel_changed`,
 `selection_changed`, `dataset_loaded` and `plot_options_changed`. Signal
 payloads are the relevant *state object*, never `app`. The catalogue and its
 contract are documented in the module docstring. The bus is **load-bearing**:
-every signal has a real emitter and a real subscriber, and
-`test_architecture_contracts.py` asserts both — the roster it may hold, and
-that nothing on the roster is dead. Subscribers are
+every signal has a real emitter and a real subscriber.
+`test_architecture_contracts.py` asserts the roster it may hold, and — the
+other direction, which a frozen roster cannot give — that every name on it is
+*mentioned* somewhere outside `event_bus.py` and outside the tests. That is a
+substring scan, so it catches a signal nobody references at all (which is what
+`redraw_requested` was) and cannot tell an emitter from a subscriber; the
+emitter/subscriber pairing is held by the wiring documented below, not by the
+scan. Subscribers are
 constructed and connected by `bus_wiring.py`'s `wire_event_bus`, called once
 from `WellViewerApp.__init__`:
 

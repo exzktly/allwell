@@ -99,6 +99,32 @@ def test_a_capture_that_raises_still_puts_the_theme_back(card):
     assert card._theme_signal_suppressed is False
 
 
+def test_a_failing_restore_does_not_wedge_the_signal_off_for_ever(card, monkeypatch):
+    """The suppression flag has to be cleared even when the restoring flip
+    raises. Otherwise one failed capture silently unsubscribes every tab
+    recompute from the theme for the card's whole life."""
+    card.setPlotTheme("screen")
+
+    real = card.setPlotTheme
+
+    def _boom(mode):
+        if mode == "screen":
+            raise RuntimeError("restore blew up")
+        return real(mode)
+
+    monkeypatch.setattr(card, "setPlotTheme", _boom)
+    with pytest.raises(RuntimeError):
+        with card._publication_capture():
+            pass
+    assert card._theme_signal_suppressed is False
+
+    monkeypatch.undo()
+    seen: list[str] = []
+    card.plotThemeChanged.connect(seen.append)
+    card.setPlotTheme("screen")
+    assert seen == ["screen"], "plotThemeChanged never fired again"
+
+
 def test_reopening_the_stats_popover_does_not_stack_popovers(card):
     from widgets.popover import Popover
 

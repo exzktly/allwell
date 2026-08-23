@@ -95,12 +95,16 @@ class Colors:
     text_muted      = "#5F6B7C"   # --text-muted     : hints, inactive labels, ticks
     text_faint      = "#404B5C"   # --text-faint     : decorative separators
     # --text-disabled : disabled control label text. Derived from ``text_muted``
-    # by ``apply_theme`` rather than carried as its own literal — see
-    # ``_derive_tokens``. As a literal it was #A0AEC0, *brighter* than
-    # ``text_secondary`` (#98A2B3), so the one role that must read as receded
-    # read as emphasised; and being absent from every theme's override table it
-    # stayed at the blue value under ``grey``, the same drift ``accent2`` had.
-    text_disabled   = "#5F6B7C"
+    #: Ink for a plot element that stands for something **undefined** — today
+    #: the dashed edge of the bar plots' "could not be computed" placeholder
+    #: and their disabled-well outline. It was called ``text_disabled`` and
+    #: documented as "disabled control label text", which it has never been:
+    #: no ``:disabled`` rule in ``qss()`` reads it, both consumers are
+    #: matplotlib painters, and the name invited exactly the wrong fix —
+    #: re-pointing it at the muted grey the stylesheet's ``:disabled`` rules
+    #: use took the placeholder's contrast against ``plot_bg`` from 7.75:1 to
+    #: 3.23:1, on the one marker whose whole job is to be noticed.
+    plot_undefined_ink = "#A0AEC0"
     placeholder     = "#64748B"   # --placeholder    : empty-field placeholder text
 
     # ── Accent (interactive / brand) ─────────────────────────────────────
@@ -1368,33 +1372,12 @@ def apply_theme(name: str) -> str:
         _cls = _THEMEABLE_CLASSES[_cname]
         for _attr, _val in _attrs.items():
             setattr(_cls, _attr, _val)
-    _derive_tokens()
     for _hook in list(_THEME_HOOKS):
         try:
             _hook(name)
         except Exception:  # a broken hook must not break theming
             _LOG.exception("theme hook %r failed", _hook)
     return name
-
-
-def _derive_tokens() -> None:
-    """Recompute the tokens that are defined *in terms of* other tokens.
-
-    Run after a theme's overrides land, so a derived token follows the theme
-    that moved what it derives from. A token carried as its own literal has to
-    be remembered in every override table, and the ones nobody remembered are
-    exactly where this codebase's colour drift came from: ``accent2`` kept the
-    blue value under ``grey`` while its five siblings moved, and
-    ``text_disabled`` sat brighter than ``text_secondary`` in both.
-
-    ``text_disabled`` is the same colour the stylesheet's own ``:disabled``
-    rules use, which is ``text_muted``. One answer to "what does disabled look
-    like", rather than a QSS answer and a painter answer that disagree.
-    """
-    Colors.text_disabled = Colors.text_muted
-
-
-_derive_tokens()
 
 
 def select_theme_from_env(default: str = DEFAULT_THEME,

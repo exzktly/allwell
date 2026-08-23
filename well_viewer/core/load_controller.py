@@ -50,7 +50,11 @@ def _make_opening_dialog(ctx, text: str) -> QProgressDialog | None:
         dlg.setAutoReset(False)
         dlg.setValue(0)
         dlg.show()
-        QApplication.processEvents()
+        # Same opt-out as every other pump in this module: nothing the user
+        # clicks during a dataset open should be dispatched, and this one runs
+        # after ``begin_load`` has already emptied the caches.
+        from PySide6.QtCore import QEventLoop
+        QApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
         app._opening_dialog = dlg
         return dlg
     except Exception:
@@ -61,18 +65,29 @@ def _make_opening_dialog(ctx, text: str) -> QProgressDialog | None:
 def _opening_set_phase(ctx, text: str, *, value=None, maximum=None) -> None:
     app = ctx.window  # transitional bridge (A3)
     """Update the opening dialog's label / progress and pump the event loop so
-    the window repaints (and Windows doesn't mark it 'Not Responding')."""
+    the window repaints (and Windows doesn't mark it 'Not Responding').
+
+    ``ExcludeUserInputEvents``, for the reason ``ui_helpers._pump`` gives: this
+    is called once per CSV from ``load_directory``'s loop, immediately after the
+    progress helpers that already opt out, and a bare ``processEvents()`` here
+    dispatched the clicks they had just refused — so the opt-out only ever held
+    on the one route that has no opening dialog. Repainting is the whole point
+    of the call and is unaffected; only input dispatch is withheld, and the
+    dialog carries no Cancel button (``setCancelButton(None)``) for it to make
+    unreachable.
+    """
     dlg = getattr(app, "_opening_dialog", None)
     if dlg is None:
         return
     try:
+        from PySide6.QtCore import QEventLoop
         from PySide6.QtWidgets import QApplication
         if maximum is not None:
             dlg.setMaximum(int(maximum))
         dlg.setLabelText(text)
         if value is not None:
             dlg.setValue(int(value))
-        QApplication.processEvents()
+        QApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
     except Exception:
         swallowed()
 
@@ -376,6 +391,13 @@ def load_directory(ctx, d: Path, label=None) -> None:
     # DatasetState resets the per-dataset caches (data dir, well paths, row
     # cache, persistence doc) for the switch to the new data directory.
     app._app_state.dataset.begin_load(d)
+    # Let this dataset speak for itself about a missing ``area_px``. The
+    # warning is deduplicated per entry point so it is one line rather than one
+    # per redraw, and a set never cleared makes the *second* dataset a session
+    # opens the silent one — which is the one whose empty plots are harder to
+    # explain, because the first dataset's warning has scrolled away.
+    from well_viewer.data.data_loading import reset_missing_area_warnings
+    reset_missing_area_warnings()
     app._app_state.selection.selected_wells.clear()
     app._app_state.selection.last_sel = None
     app._app_state.selection.prev_sel = set()

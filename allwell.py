@@ -1717,7 +1717,14 @@ def main() -> None:
     # no effect for six of them and two of those shipped ON.
     # ``tests/test_debug_flags_default_off.py`` holds both halves.
     for _flag in _debug_flags.FLAG_NAMES:
-        setattr(_debug_flags, _flag, globals()[_flag])
+        # ``.get`` with the module's own value as the fallback, not
+        # ``globals()[...]``: a roster that drifts ahead of this file's
+        # constants would otherwise be a KeyError during ``main()``, i.e. the
+        # app failing to start over a debug toggle.
+        # ``tests/test_debug_flags_default_off.py`` keeps the two in step; this
+        # is what happens on the day it does not.
+        setattr(_debug_flags, _flag,
+                globals().get(_flag, getattr(_debug_flags, _flag)))
 
     ap = argparse.ArgumentParser(
         description="All-Well: pipeline runner + well viewer",

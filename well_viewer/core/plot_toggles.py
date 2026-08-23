@@ -79,6 +79,36 @@ def _style_button(btn, fn) -> None:
         swallowed()
 
 
+def _notify_observers(bank, value) -> None:
+    """Call each observer in *bank*, dropping the ones whose widget has died.
+
+    The observer banks grow the same way the button banks do — every
+    batch-export panel appends and nothing removes — and an observer closing
+    over a deleted widget raises ``RuntimeError`` on every toggle for the rest
+    of the session. Guarding without pruning meant the failure was survivable
+    but permanent: a log line per stale observer per click, for ever. The
+    button banks were pruned here and these were not, which is the half-sweep
+    CLAUDE.md §7.5 #5 is about — the same unbounded growth, in the list
+    immediately below the one that was fixed.
+
+    Only a ``RuntimeError`` prunes. Any other exception is the observer's own
+    bug, not a dead widget, and dropping it would silently unsubscribe a live
+    listener; those are logged and the observer is kept.
+    """
+    live = []
+    for obs in list(bank or []):
+        try:
+            obs(value)
+        except RuntimeError:
+            swallowed()
+            continue
+        except Exception:
+            swallowed()  # was: pass (silent except)
+        live.append(obs)
+    if bank is not None and len(live) != len(bank):
+        bank[:] = live
+
+
 def refresh_fov_btn_state(ctx) -> None:
     """Sync every per-FOV toggle button's text/variant state."""
     is_on = bool(ctx.state.plot.use_fov_replicates)
@@ -107,11 +137,7 @@ def refresh_fov_btn_state(ctx) -> None:
 
     for btn in _live_buttons(ctx.runtime.fov.btns):
         _style_button(btn, _apply_fov)
-    for obs in list(ctx.runtime.fov.observers or []):
-        try:
-            obs(is_on)
-        except Exception:
-            swallowed()  # was: pass (silent except)
+    _notify_observers(ctx.runtime.fov.observers, is_on)
 
 
 def toggle_sem(ctx) -> None:
@@ -128,11 +154,7 @@ def toggle_sem(ctx) -> None:
 
     for btn in _live_buttons(ctx.runtime.sem.btns):
         _style_button(btn, _apply_sem)
-    for obs in list(ctx.runtime.sem.observers or []):
-        try:
-            obs(is_sem)
-        except Exception:
-            swallowed()  # was: pass (silent except)
+    _notify_observers(ctx.runtime.sem.observers, is_sem)
     redraw_app(ctx)
     # Redraw the bar pane too whenever it is on screen — in Split View it can be
     # visible alongside another pane without being the focused tab.

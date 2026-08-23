@@ -214,12 +214,14 @@ def _render_splom(fig, res) -> None:
     # too, where no tooltip or status line can explain them.
     n = min(X.shape[1], _SPLOM_MAX_FEATURES)
     dropped = list(labels[n:]) if X.shape[1] > n else []
-    # ``res["color_by"]`` like every other panel, not a hardcoded "group". The
-    # Colour-by control is on screen while the SPLOM is showing and did
-    # nothing: picking "timepoint" or "cluster" left the points coloured by
-    # group, with no sign the setting had been ignored.
-    colors, _legend_entries = _point_colors(
-        data, res.get("color_by", "group"), res.get("clusters"))
+    # "group", deliberately, not ``res["color_by"]``. The Colour-by combo lives
+    # in the dim-reduction scope (``tab_view`` line 334:
+    # ``dr_frame.setVisible(mode == MODE_DIMRED)``) and is **hidden** whenever
+    # the SPLOM is on screen, because the SPLOM is reached only from
+    # ``MODE_CORRELATION`` — whose payload carries no ``color_by`` key at all.
+    # Reading one here looks like honouring a control and honours nothing: the
+    # ``.get`` would return this same default on every call.
+    colors, _legend_entries = _point_colors(data, "group")
     axes = fig.subplots(n, n, sharex="col")
     if n == 1:
         axes = np.array([[axes]])

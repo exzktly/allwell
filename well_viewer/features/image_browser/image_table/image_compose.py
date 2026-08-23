@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from typing import Any
     from pathlib import Path
-    from PySide6.QtGui import QPixmap
     from well_viewer.domain.ratio_models import RatioMetric
     import numpy as np
 
@@ -206,8 +205,12 @@ def _row_cmap_name(ctx, r: int, chan=None) -> str | None:
 def _export_binary_mask(ctx, cache, well, chan, tp, fov, binary_mode, crop_tool) -> np.ndarray | None:
     """Compute the shown-cells array for a binary-mode cell (cropped).
 
-    Mirrors the live ``_render_mask_binary`` / ``_render_threshold_binary``
-    selection so the export matches the on-screen thumbnails.
+    This **is** the live selection: the grid, the export figure and the
+    clipboard copies all reach binary mode through here. Two sibling renderers
+    (``_render_mask_binary`` / ``_render_threshold_binary``) used to do the same
+    job for the live thumbnails and were left behind, imported and never called,
+    while docstrings on both sides went on calling them "the live path" — so a
+    fix applied to one of them could not affect anything. They are gone.
 
     The **label ids survive**: shown cells keep their own id and everything else
     is 0, rather than the array being flattened to a 0/1 membership mask. ``> 0``
@@ -227,7 +230,7 @@ def _export_binary_mask(ctx, cache, well, chan, tp, fov, binary_mode, crop_tool)
             from well_viewer.features.image_browser.review_image.controller import (
                 review_build_threshold_map, review_norm_fov,
             )
-            # Mirror the live _render_threshold_binary path: the CSV row keys are
+            # The CSV row keys are
             # normalised (timepoint "0h" -> "0", fov tokens), and gating is per
             # the cell's OWN channel. Passing the raw tp/fov + no channel (as
             # this path used to) matches no rows → every cell reads as
@@ -573,78 +576,6 @@ def _format_pixel_intensity(arr, y: int, x: int) -> str:
     if a.ndim == 2:
         return _fmt(px)
     return ",".join(_fmt(v) for v in np.atleast_1d(px).tolist())
-
-def _render_mask_binary(ctx, cache, well, tp, fov, crop_tool, sz) -> QPixmap | None:
-    """White-on-black image of every segmented cell (full mask)."""
-    from well_viewer.core.ui_helpers import make_overlay_thumb
-    import numpy as _np
-
-    mask_arr = _load_mask_array(ctx, cache, well, tp, fov)
-    if mask_arr is None:
-        return None
-    cm = crop_tool.apply_to_array(mask_arr) if crop_tool else mask_arr
-    binary = (_np.asarray(cm) > 0).astype(_np.uint8) * 255
-    rgb = _np.stack([binary, binary, binary], axis=-1)
-    return make_overlay_thumb(rgb, sz, sz, None, None)
-
-def _render_threshold_binary(ctx, cache, well, chan, tp, fov, crop_tool, sz) -> QPixmap | None:
-    """White-on-black image of only the cells above the active ON threshold.
-
-    Reuses the Review Image gating logic (``review_build_threshold_map``) so
-    the "above threshold" definition matches the bar plot / review tab exactly
-    (cell-area gating + every fluor gate + value-column > ON threshold). That
-    helper also emits the ``[binary-mask]`` diagnostic line.
-    """
-    from well_viewer.core.ui_helpers import make_overlay_thumb
-    import numpy as _np
-
-    mask_arr = _load_mask_array(ctx, cache, well, tp, fov)
-    if mask_arr is None:
-        return None
-    above_by_nid: dict[int, bool] = {}
-    try:
-        from well_viewer.features.image_browser.review_image.controller import (
-            review_build_threshold_map, review_norm_fov,
-        )
-        # The CSV row keys are normalised (e.g. timepoint "0h" -> "0"); the
-        # Image Table cell carries the raw image-filename token, so normalise
-        # tp/fov the same way the Review Image tab does before the lookup —
-        # otherwise no rows match and every cell reads as below-threshold
-        # (an all-black mask) for any non-integer timepoint token.
-        norm_tp = norm_timepoint(ctx, tp)
-        norm_fov = review_norm_fov(fov)
-        # Gate each cell by ITS OWN channel's ThreshFracOn (set per-channel in
-        # Home → Cell Gating), not whatever channel the Segmentation tab last
-        # showed. Only override for real fluor channels — nuc+seg / ratio cells
-        # fall back to the displayed-channel default.
-        chan_l = str(chan or "").strip().lower()
-        fluor = {str(c).strip().lower() for c in (ctx.state.channel.fluor_channels or [])}
-        gate_channel = chan_l if chan_l in fluor else None
-        above_by_nid = review_build_threshold_map(
-            ctx, mask_arr, well, norm_fov, norm_tp, channel=gate_channel
-        ) or {}
-    except Exception:
-        # As in ``_export_binary_mask``: an all-off mask is what a cell with no
-        # nuclei above threshold genuinely looks like, so returning one on a
-        # failure makes the two indistinguishable. ``None`` is this function's
-        # own "nothing to show" value and the caller already handles it.
-        logger.exception(
-            "image_table: could not build the threshold map for well=%r "
-            "channel=%r tp=%r fov=%r — showing nothing for this cell rather "
-            "than an empty mask", well, chan, tp, fov,
-        )
-        return None
-    m = _np.asarray(mask_arr)
-    passing = [nid for nid, ok in above_by_nid.items() if ok]
-    binary = _np.isin(m, passing) if passing else _np.zeros(m.shape, dtype=bool)
-    b = binary.astype(_np.uint8) * 255
-    cm = crop_tool.apply_to_array(b) if crop_tool else b
-    rgb = _np.stack([cm, cm, cm], axis=-1)
-    return make_overlay_thumb(rgb, sz, sz, None, None)
-
-
-# ── Composite row: additive merge of the LUT-colored rows above ─────────────
-
 
 def cell_display_rgb(ctx, cache, cell, r: int, crop_tool, arr) -> np.ndarray | None:
     """Return the uint8 (H, W, 3) RGB shown for grid cell ``cell`` in row *r*.

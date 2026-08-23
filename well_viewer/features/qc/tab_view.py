@@ -32,24 +32,6 @@ _GRID_INDENT = 18
 _QUANTITY_LBL_W = 92
 
 
-def _bound(text: str) -> float | None:
-    """A QC bound typed into a box: the number, or ``None`` for an empty box.
-
-    ``float(text or "0") or None`` was the spelling, and it throws away a typed
-    zero along with an empty box because ``0.0`` is falsy — so "minimum
-    solidity 0" silently became "no minimum solidity", with nothing on screen
-    saying the value had been discarded. Only an unparseable or blank box means
-    "no bound"; every number the user typed, zero included, is one.
-    """
-    raw = (text or "").strip()
-    if not raw:
-        return None
-    try:
-        return float(raw)
-    except ValueError:
-        return None
-
-
 def _fmt(v: float | None) -> str:
     return "" if v is None else f"{v:g}"
 
@@ -177,20 +159,28 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     })
 
     def _fields_params() -> QCParams:
-        return QCParams(
-            enabled=enable_cb.isChecked(),
-            # ``_bound(...)`` rather than ``float(...) or None``: the falsy-zero
-            # bug ``util.timepoint`` carries a paragraph about. A deliberately
-            # typed ``0`` is a real bound — "solidity at least 0", "area at
-            # least 0" — and reads as an empty box, so a user who typed it got
-            # no bound at all and no sign that the value had been discarded.
-            min_area=_bound(min_area_edit.text()),
-            max_area=_bound(max_area_edit.text()),
-            min_solidity=_bound(min_sol_edit.text()),
-            max_region_area=_bound(max_region_edit.text()),
-            min_circularity=_bound(min_circ_edit.text()),
-            max_circularity=_bound(max_circ_edit.text()),
-        ).with_updates()
+        """The six boxes as a normalised :class:`QCParams`.
+
+        The bounds go through ``with_updates`` **as keyword arguments**, which
+        is the only way its ``_pos`` normalisation runs — it filters on
+        ``k in changes``, so a bare ``.with_updates()`` after the constructor
+        normalises nothing. ``_pos`` is where the rule lives: a blank,
+        unparseable, zero or negative box means *no bound*, which for a
+        **maximum** is the whole point (``qc_params._pos``'s own docstring calls
+        ``max_area == 0`` a foot-gun — it would exclude every cell), and for a
+        minimum is the same population a bound of zero would keep anyway. This
+        function briefly coerced the text itself and passed the result to the
+        constructor, which left a typed ``0`` in ``max_area`` intact and blanked
+        every plot.
+        """
+        return QCParams(enabled=enable_cb.isChecked()).with_updates(
+            min_area=min_area_edit.text(),
+            max_area=max_area_edit.text(),
+            min_solidity=min_sol_edit.text(),
+            max_region_area=max_region_edit.text(),
+            min_circularity=min_circ_edit.text(),
+            max_circularity=max_circ_edit.text(),
+        )
 
     def _sync_enabled() -> None:
         on = enable_cb.isChecked()

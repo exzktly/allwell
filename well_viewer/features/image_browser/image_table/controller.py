@@ -68,8 +68,6 @@ from well_viewer.features.image_browser.image_table.image_compose import (  # no
     _parse_lut,
     _row_channel,
     _row_display_opts,
-    _render_mask_binary,
-    _render_threshold_binary,
     _render_with_boundary_overlay,
     _row_cmap_name,
     _row_log_scale,

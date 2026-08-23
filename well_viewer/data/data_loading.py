@@ -311,9 +311,17 @@ def detect_review_image_channels(df: pd.DataFrame, fluor_channels: list[str], se
 
 # ── DataFrame helpers ────────────────────────────────────────────────────────
 
-#: Columns whose absence has already been announced, so the warning below is a
-#: line per missing column per session rather than one per redraw.
+#: Entry points that have already announced a missing ``area_px``, so the
+#: warning below is one line per load rather than one per redraw. Cleared by
+#: ``reset_missing_area_warnings`` when a dataset is opened: a process-global
+#: that is never reset says nothing at all about the *second* dataset a session
+#: opens, which is the one the user is more likely to be puzzled by.
 _missing_area_warned: set[str] = set()
+
+
+def reset_missing_area_warnings() -> None:
+    """Let the next dataset announce its own missing ``area_px`` column."""
+    _missing_area_warned.clear()
 
 
 def _warn_no_area_column(where: str) -> None:

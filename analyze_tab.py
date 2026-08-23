@@ -36,7 +36,6 @@ from services.pipeline_runner import (
     is_transient_progress,
 )
 from services.pipeline_service import find_pipeline_script
-from services.remote_config import default_remote_index
 import theme
 from well_viewer.core.app_shell_view import RAIL_W
 from well_viewer.core.safe import swallowed
@@ -219,30 +218,33 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
 
 
     def _refresh_remote_controls(self) -> None:
-        """Show the remote-only parameter group only when a remote is selected,
-        and within it gate the dry-run-cleanup checkbox on auto-delete being
-        checked. Switching back to Local restores the toggles to their defaults
-        so a stale value can't be submitted for the next remote run."""
+        """Show the remote-only parameter group only while a remote is selected,
+        and enable the dry-run-cleanup checkbox only while auto-delete is on.
+
+        It changes what is *reachable* and never what is *set*. Forcing
+        auto-delete back on for Local, and clearing dry-run whenever it was
+        disabled, meant a glance at Local silently dropped both: a user who
+        ticked "Dry-run cleanup" to see what auto-delete would remove, flicked
+        to Local and back, and pressed Run had the per-run remote output
+        directory and the cached input deleted for real. The mirror case
+        re-armed an auto-delete they had deliberately turned off. The group is
+        hidden for a local run anyway, and neither value is read on one —
+        ``PipelineRunner`` passes both only down the remote branch, where
+        ``verify_and_cleanup`` returns before touching anything for
+        ``cleanup_mode="none"`` — so resetting them bought nothing.
+        """
         is_remote = self._remote_cb.currentData() is not None
         self._remote_params_widget.setVisible(is_remote)
-        if not is_remote:
-            # Back to its default rather than to off: auto-delete is on by
-            # default, so resetting to off here would quietly hand the next
-            # remote run the opposite setting from a fresh one.
-            self._cleanup_remote_cb.setChecked(True)
-        dry_run_enabled = is_remote and self._cleanup_remote_cb.isChecked()
-        self._dry_run_cleanup_cb.setEnabled(dry_run_enabled)
-        if not dry_run_enabled:
-            self._dry_run_cleanup_cb.setChecked(False)
+        self._dry_run_cleanup_cb.setEnabled(
+            is_remote and self._cleanup_remote_cb.isChecked())
+
 
     def _open_manage_remotes(self) -> None:
-        """Open the v5.1.0 Manage Remotes dialog.
+        """Open the Manage Remotes dialog and rebuild "Run on:" from disk after.
 
-        After the dialog closes (or any time remotes_changed fires), the
-        "Run on:" combobox is rebuilt from disk. The previous selection
-        is preserved if it still exists; otherwise we fall back to
-        "Local" so a user who just deleted their currently-selected
-        remote can't end up with a stale selection.
+        The dialog is deleted once it closes. Left alive it stayed a child of
+        this tab, holding its ``remotes_changed`` connection and every child
+        dialog opened inside it — five opens measured five live dialogs.
         """
         # Lazy import to avoid pulling the dialog module into the
         # AnalyzeTab import graph on startup — the dialog imports
@@ -250,13 +252,32 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
         from analyze_remote_dialog import ManageRemotesDialog
         dlg = ManageRemotesDialog(self)
         dlg.remotes_changed.connect(self._reload_remotes_combo)
-        dlg.exec()
+        try:
+            dlg.exec()
+        finally:
+            dlg.deleteLater()
 
     def _reload_remotes_combo(self) -> None:
-        """Refresh the 'Run on:' combobox from remotes.toml.
+        """Refresh the "Run on:" combobox from remotes.toml.
 
-        Called after every add / edit / delete in the Manage Remotes
-        dialog. Preserves the user's current selection when possible.
+        Called after every add / edit / delete in the Manage Remotes dialog —
+        and after a *failed* bootstrap, which emits ``remotes_changed`` too.
+
+        The target on screen is what is kept. A named remote that still exists
+        is re-selected; "Local", and a remote that has just been deleted, both
+        land on Local — which is what this method's own docstring has always
+        promised and did not do.
+
+        **The default is a build-time decision and is not re-applied here.**
+        ``default_remote_index`` picks the first configured remote when the form
+        is built, which is a sensible opening state; a rebuild is not an opening
+        state. Re-applying it meant ``None`` — the userData of the ``Local``
+        item — was read as "nothing chosen yet" rather than as the target on
+        screen, so *any* Manage-Remotes change moved a local run onto an SSH
+        host: adding a remote, deleting a different one, or a bootstrap that
+        failed, all of which emit ``remotes_changed``. It happened under
+        ``blockSignals(True)``, so nothing was emitted and nothing was logged,
+        and the next Run rsync'd the whole plate to the cluster.
         """
         prev = self._remote_cb.currentData()
         self._remote_cb.blockSignals(True)
@@ -272,15 +293,12 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
                     "line",
                     f"[warn] could not reload remotes.toml: {exc}\n",
                 ))
-            # Re-select an explicit prior remote when it still exists; else use
-            # the default (first configured remote if any, else Local).
-            _default = default_remote_index(self._remote_cb.count())
-            for i in range(self._remote_cb.count()):
-                if prev is not None and self._remote_cb.itemData(i) == prev:
-                    self._remote_cb.setCurrentIndex(i)
+            index = 0           # Local, and the fallback for a deleted remote
+            for i in range(1, self._remote_cb.count()):
+                if self._remote_cb.itemData(i) == prev:
+                    index = i
                     break
-            else:
-                self._remote_cb.setCurrentIndex(_default)
+            self._remote_cb.setCurrentIndex(index)
         finally:
             self._remote_cb.blockSignals(False)
         # Manually re-fire the dependent-control refresh since we
@@ -298,7 +316,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
 
         edit = QLineEdit(default_token, row)
         edit.setFixedWidth(theme.Metrics.num_field_w_lg)
-        edit.textChanged.connect(lambda _: self._refresh_schema_preview())
+        edit.textChanged.connect(lambda _: self._refresh_channel_dependents())
         rl.addWidget(edit)
 
         remove_btn = QPushButton("✕", row)
@@ -359,7 +377,20 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
         self._fluor_rows = [(e, s, p, b) for e, s, p, b in self._fluor_rows if b is not remove_btn]
         row.deleteLater()
         self._fluor_refresh_remove_buttons()
+        self._refresh_channel_dependents()
+
+    def _refresh_channel_dependents(self) -> None:
+        """Everything downstream of the fluorescent-channel rows.
+
+        Both readouts are derived from those rows and both have to move with
+        them. Removing the row marked "Phase", or clearing its token, leaves the
+        Label-free routine with no channel to segment — and the hint went on
+        reading "Use when there's no stain at all…" because only the schema
+        preview was refreshed. The run was correctly refused at Run; the live
+        feedback said it would succeed.
+        """
         self._refresh_schema_preview()
+        self._refresh_segmentation_hints()
 
     def _fluor_refresh_remove_buttons(self) -> None:
         only_one = len(self._fluor_rows) == 1

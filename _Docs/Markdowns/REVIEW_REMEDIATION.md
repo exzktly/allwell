@@ -103,7 +103,11 @@ item by the commit that names it and moves its row.
 
 **Still to verify.** Every row a parallel group reports as fixed needs its claim
 read against the code before its row moves. A group's report is a hypothesis
-until the diff has been read.
+until the diff has been read. Each group's own working state — what it has
+closed, what is half-done and what remains of it — is in
+`_Docs/Markdowns/_remediation/W1.md`, `W2.md` and `W3.md`, written there
+rather than reported in conversation so that it survives a session ending.
+Those files are the groups' claims; this file is the record.
 
 ## Two cross-cutting fixes, sequenced last
 

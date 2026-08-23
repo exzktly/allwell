@@ -19,7 +19,13 @@ import json
 import os
 from pathlib import Path
 
-from pipeline.io import scratch_base_for
+import logging
+
+from pipeline.io import (
+    _sweep_stale_scratch_dirs_all, remove_directory, scratch_base_for)
+from util.aw_safe import swallow
+
+log = logging.getLogger(__name__)
 
 #: Bumped when the checkpoint payload's shape changes, so a run never reads a
 #: record it would misinterpret.
@@ -64,12 +70,61 @@ def _staging_dir_for(output_dir: Path, well_label: str,
     not run and a stopped plate leaves the mine armed.
 
     The output directory and the settings both go into the name, because either
-    changing means the intermediates are not this run's to reuse.
+    changing means the intermediates are not this run's to reuse — as two
+    *separate* components rather than one combined hash, so that
+    :func:`prune_superseded_staging` can recognise this plate's own
+    superseded directories without having to guess at another plate's.
     """
-    stamp = hashlib.blake2b(
-        f"{Path(output_dir).resolve()}|{settings_key}".encode(),
-        digest_size=6).hexdigest()
-    return scratch_base_for(output_dir) / f"_tmp_images_{stamp}_{well_label}"
+    return (scratch_base_for(output_dir)
+            / f"_tmp_images_{_output_stamp(output_dir)}"
+              f"_{_settings_stamp(settings_key)}_{well_label}")
+
+
+def _output_stamp(output_dir: Path) -> str:
+    return hashlib.blake2b(
+        str(Path(output_dir).resolve()).encode(), digest_size=6).hexdigest()
+
+
+def _settings_stamp(settings_key: str) -> str:
+    return hashlib.blake2b(
+        str(settings_key or "").encode(), digest_size=4).hexdigest()
+
+
+def prune_superseded_staging(output_dir: Path, settings_key: str) -> int:
+    """Remove this plate's staging dirs left behind by *other* settings.
+
+    Keying the staging directory on the run closed a collision and opened a
+    leak. The name used to be ``_tmp_images_<WELL>``, so the next run of that
+    well reused and eventually consumed it; now a run under different settings
+    gets a different directory and the old one is orphaned. Stop is SIGKILL, so
+    the ``finally`` that would have removed it never runs, and
+    ``_sweep_stale_scratch_dirs`` deliberately *keeps* any directory holding
+    ``.fov_*.done`` markers — which is exactly what a killed run leaves. A
+    96-well plate stopped mid-run therefore stranded a plate's worth of
+    intermediates in the shared scratch base per settings variation, for ever.
+
+    Scoped to directories carrying *this output directory's* stamp, so it can
+    never touch another plate's resumable work, and skipped entirely when the
+    settings are unknown — an empty key names no run, and deleting on the
+    strength of it would be guessing.
+
+    Returns how many directories were removed.
+    """
+    if not settings_key:
+        return 0
+    keep = _settings_stamp(settings_key)
+    prefix = f"_tmp_images_{_output_stamp(output_dir)}_"
+    removed = 0
+    base = scratch_base_for(output_dir)
+    with swallow(f"pruning superseded staging under {base}"):
+        for stale in sorted(base.glob(f"{prefix}*")):
+            if not stale.is_dir() or stale.name.startswith(f"{prefix}{keep}_"):
+                continue
+            log.info("Removing staging left by a previous settings "
+                     "combination: %s", stale.name)
+            remove_directory(stale)
+            removed += 1
+    return removed
 
 def _checkpoint_paths(tmp_images: Path, fov_id: str) -> tuple[Path, Path]:
     """Return ``(records_json, done_marker)`` for a given FOV id."""
@@ -146,3 +201,18 @@ def _save_fov_checkpoint(
     # The marker is the atomicity boundary — present iff records_file
     # is on disk and complete.
     marker.touch()
+
+
+def sweep_run_scratch(output_dir: Path, settings_key: str, *,
+                      extra_extract: bool) -> None:
+    """The pre-run scratch sweep, plus this plate's superseded staging.
+
+    :func:`pipeline.io._sweep_stale_scratch_dirs_all` deliberately keeps any
+    staging directory holding ``.fov_*.done`` markers, so that a killed run
+    resumes from them. Once the directory name carries the run's settings, a
+    run under different settings never reaches the old one again — so what
+    protected a resume became a leak. This removes the ones this plate can no
+    longer use, and leaves every other plate's alone.
+    """
+    _sweep_stale_scratch_dirs_all(output_dir, extra_extract=extra_extract)
+    prune_superseded_staging(output_dir, settings_key)

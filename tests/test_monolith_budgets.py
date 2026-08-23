@@ -84,7 +84,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # services.remote_runner._REQUIRED_REMOTE_FILES, i.e. a change to what every
 # remote machine is sent, and that was explicitly out of scope for this change.
 # That cluster remains the extraction to take when this budget next binds.
-PROCESS_MICROSCOPY_BUDGET = 4720
+PROCESS_MICROSCOPY_BUDGET = 4713
 
 # `services/remote_runner.py` is the largest module in the repo — nearly twice
 # `process_microscopy.py` — and until now the only large one with nothing
@@ -98,14 +98,15 @@ PROCESS_MICROSCOPY_BUDGET = 4720
 # threshold of 40 — so length is the dimension that needs a limit and this is
 # it. It only moves down: introduced at 8210, then 7994, 7606, 7419 and 7338 as
 # the staging, transport, argv/run-id and upload-manifest extractions each took
-# what they moved.
+# what they moved, then 7326 when the provisional-sidecar stamp went to
+# `pipeline/sidecar.py`, which is where the rest of that file's blocks live.
 #
 # The manifest came out because two guards over it were in direct tension:
 # `test_remote_manifest` requires an entry for every new `pipeline/` or `util/`
 # module, and this budget caps the file it lived in — so a required entry could
 # fail the budget, and the budget could only be met by not adding it. A data
 # declaration with no behaviour was the right thing to move.
-REMOTE_RUNNER_BUDGET = 7338
+REMOTE_RUNNER_BUDGET = 7326
 # 1494 -> 1333: the smart-layout builder cluster (flat + nested grid assembly,
 # per-channel LUT re-keying, the Build presets, and the row-channel styling
 # helper) moved into ``image_table/build_layout.py``. The nested / compound-axis

@@ -33,6 +33,19 @@ def record_well_settings(output_dir: Path | str, well_label: str,
                          digest: str) -> Path | None:
     """Record that *well_label*'s current output was produced under *digest*.
 
+    **Call this past every short circuit, and after both artefacts are on
+    disk.** The marker's whole meaning is "these settings produced what is
+    beside it", so a well that computed nothing must not get one. Two paths
+    return from a worker task without doing any work — the incremental branch
+    that logs "up to date (no new FOVs)", and a well whose input holds no image
+    groups — and neither is distinguishable from a well that ran and found no
+    cells by looking at what it returned. Stamped from the parent's result
+    loop, both were credited: a grandfathered well, skipped under new settings
+    precisely because nothing recorded what produced it, then carried a record
+    asserting those settings did. That spends the grandfathering escape hatch
+    on a false claim rather than an honest unknown, and a later run under the
+    original settings recomputes a well that was already correct.
+
     Best-effort: a well whose marker cannot be written is still a well whose
     output is on disk, and the next run simply treats it as unknown — which
     grandfathers it, exactly as a well written before this existed.

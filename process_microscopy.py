@@ -168,7 +168,6 @@ from pipeline.io import (  # noqa: F401
     _safe_imwrite,
     _safe_well,
     _sweep_stale_scratch_dirs,
-    _sweep_stale_scratch_dirs_all,
     _verify_files_complete,
     _write_single_csv,
     incremental_done_fov_keys,
@@ -187,6 +186,7 @@ from pipeline.fov_checkpoint import (
     _load_fov_checkpoint,
     _save_fov_checkpoint,
     _staging_dir_for,
+    sweep_run_scratch,
 )
 from pipeline.settings_record import (
     record_well_settings,
@@ -3116,14 +3116,9 @@ def process_well_zip_task(
             # All user-facing artefacts (CSV + out_zip) are already
             # written at this point, so the well *is* done — the
             # cleanup is internal housekeeping.
-            # This well's output was produced under *this* run's settings,
-            # recorded here rather than in the parent because here is the one
-            # point both artefacts are on disk. The parent could not tell an
-            # empty result apart from a short-circuit: a well that logged "up
-            # to date (no new FOVs)" and one that ran and found no cells both
-            # return no records, and stamping the first turns an honest
-            # "unknown, grandfathered" into a confident claim that the numbers
-            # on disk came from settings that never touched them.
+            # Here, and not in the parent's result loop: see
+            # `record_well_settings` on why the caller has to be past every
+            # short circuit and after both artefacts are written.
             record_well_settings(output_dir, well_label, settings_key)
             log.info("Well %s — done.", well_label)
             return records, failed
@@ -3328,14 +3323,9 @@ def process_well_folder_task(
             # cleanup in the finally block — same reasoning as the zip
             # task: cleanup can hang on NAS storage and we don't want
             # that to defer the GUI's well_done event.
-            # This well's output was produced under *this* run's settings,
-            # recorded here rather than in the parent because here is the one
-            # point both artefacts are on disk. The parent could not tell an
-            # empty result apart from a short-circuit: a well that logged "up
-            # to date (no new FOVs)" and one that ran and found no cells both
-            # return no records, and stamping the first turns an honest
-            # "unknown, grandfathered" into a confident claim that the numbers
-            # on disk came from settings that never touched them.
+            # Here, and not in the parent's result loop: see
+            # `record_well_settings` on why the caller has to be past every
+            # short circuit and after both artefacts are written.
             record_well_settings(output_dir, well_label, settings_key)
             log.info("Well %s — done.", well_label)
             return records, failed
@@ -3581,7 +3571,8 @@ def process_well_zips(
         threads_per_worker=threads_per_worker,
         shared_kwargs_template=shared_kwargs_template, mode_label="Zip",
         # Zip staging (extract + images) lives under the scratch base.
-        stale_sweep=lambda out: _sweep_stale_scratch_dirs_all(out, extra_extract=True),
+        stale_sweep=lambda out: sweep_run_scratch(out, settings_key,
+                                                   extra_extract=True),
         # File existence alone answered "already done" whatever the run was
         # configured to compute, so changing the segmenter or a threshold
         # skipped every well and kept the old numbers — while the sidecar was
@@ -3648,7 +3639,8 @@ def process_well_folders(
         # Folder-mode staging (_tmp_images_*) lives under the scratch base, same
         # as zip mode; there is no zip-extract scratch to sweep. Legacy runs left
         # their staging under output_dir, so sweep both when they differ.
-        stale_sweep=lambda out: _sweep_stale_scratch_dirs_all(out, extra_extract=False),
+        stale_sweep=lambda out: sweep_run_scratch(out, settings_key,
+                                                   extra_extract=False),
         output_exists=lambda well: well_settings_allow_reuse(
             output_dir, well, settings_key) and output_exists_for_well_folder(
             output_dir, well, csv_prefix, compressed_output=True),

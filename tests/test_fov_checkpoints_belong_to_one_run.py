@@ -125,3 +125,108 @@ def test_the_staging_name_still_carries_the_well(tmp_path, monkeypatch):
     assert name.startswith("_tmp_images_"), name
     assert name.endswith("_B07"), (
         f"the sweep and every debugging recipe look for the well here: {name}")
+
+
+# ── the leak the keying opened ──────────────────────────────────────────────
+
+def test_a_settings_change_does_not_strand_the_previous_runs_staging(tmp_path, monkeypatch):
+    """Keying the directory on the run closed a collision and opened a leak.
+
+    The name used to be `_tmp_images_<WELL>`, so the next run of that well
+    reused and eventually consumed it. Now a run under different settings gets
+    a different directory. Stop is SIGKILL, so the `finally` that removes it
+    never runs, and `_sweep_stale_scratch_dirs` deliberately *keeps* any
+    directory holding `.fov_*.done` — which is precisely what a killed run
+    leaves behind. A 96-well plate stopped mid-run therefore stranded a plate's
+    worth of intermediates per settings variation, in a scratch base shared by
+    the whole machine, for ever.
+    """
+    from pipeline.fov_checkpoint import prune_superseded_staging
+
+    monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(tmp_path / "scratch"))
+    out = tmp_path / "plate" / "out"
+    out.mkdir(parents=True)
+
+    old = _staging_dir_for(out, "A01", RUN_A)
+    old.mkdir(parents=True, exist_ok=True)
+    _save_fov_checkpoint(old, FOV, RECORDS, RUN_A)
+    assert list(old.glob(".fov_*.done")), "the fixture must look resumable"
+
+    removed = prune_superseded_staging(out, RUN_B)
+
+    assert removed == 1 and not old.exists(), (
+        "the previous settings' staging survived a run under new settings, "
+        "and nothing will ever reach it again")
+
+
+def test_the_prune_leaves_this_runs_own_staging_alone(tmp_path, monkeypatch):
+    """Or a resume would delete the work it is about to resume from."""
+    from pipeline.fov_checkpoint import prune_superseded_staging
+
+    monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(tmp_path / "scratch"))
+    out = tmp_path / "plate" / "out"
+    out.mkdir(parents=True)
+
+    mine = _staging_dir_for(out, "A01", RUN_A)
+    mine.mkdir(parents=True, exist_ok=True)
+    _save_fov_checkpoint(mine, FOV, RECORDS, RUN_A)
+
+    assert prune_superseded_staging(out, RUN_A) == 0
+    assert _load_fov_checkpoint(mine, FOV, RUN_A) == RECORDS
+
+
+def test_the_prune_never_touches_another_plate(tmp_path, monkeypatch):
+    """The scratch base is shared by the whole machine.
+
+    Two plates run concurrently from one scratch dir; a prune that matched on
+    the settings alone would delete the other plate's live intermediates.
+    """
+    from pipeline.fov_checkpoint import prune_superseded_staging
+
+    monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(tmp_path / "scratch"))
+    mine = tmp_path / "plateA" / "out"
+    theirs = tmp_path / "plateB" / "out"
+    mine.mkdir(parents=True)
+    theirs.mkdir(parents=True)
+
+    other = _staging_dir_for(theirs, "A01", RUN_A)
+    other.mkdir(parents=True, exist_ok=True)
+    _save_fov_checkpoint(other, FOV, RECORDS, RUN_A)
+
+    assert prune_superseded_staging(mine, RUN_B) == 0
+    assert _load_fov_checkpoint(other, FOV, RUN_A) == RECORDS, (
+        "another plate's resumable staging was deleted")
+
+
+def test_an_unknown_settings_key_prunes_nothing(tmp_path, monkeypatch):
+    """An empty key names no run; deleting on the strength of it is guessing."""
+    from pipeline.fov_checkpoint import prune_superseded_staging
+
+    monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(tmp_path / "scratch"))
+    out = tmp_path / "plate" / "out"
+    out.mkdir(parents=True)
+    d = _staging_dir_for(out, "A01", RUN_A)
+    d.mkdir(parents=True, exist_ok=True)
+
+    assert prune_superseded_staging(out, "") == 0
+    assert d.exists()
+
+
+def test_the_run_sweep_prunes_as_well_as_sweeps():
+    """§7.7 #1: the helper is worth nothing behind an unreachable call.
+
+    Both worker pools install their stale sweep as a lambda; this reads the one
+    they actually install.
+    """
+    import inspect
+
+    import process_microscopy as pm
+    from pipeline.fov_checkpoint import sweep_run_scratch
+
+    for fn in (pm.process_well_zips, pm.process_well_folders):
+        src = inspect.getsource(fn)
+        assert "sweep_run_scratch" in src, (
+            f"{fn.__name__} installs a sweep that does not prune superseded "
+            f"staging, so a settings change strands the previous run's "
+            f"intermediates for ever")
+    assert "prune_superseded_staging" in inspect.getsource(sweep_run_scratch)

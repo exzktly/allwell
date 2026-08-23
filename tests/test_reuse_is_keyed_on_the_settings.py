@@ -336,3 +336,33 @@ def test_a_short_circuited_well_is_not_stamped_with_this_runs_settings():
             f"{fn.__name__} records the settings after it declares the well "
             f"done; the marker must be written while both artefacts are known "
             f"to be on disk")
+
+
+def test_a_remote_run_brings_the_settings_marker_back_with_the_well():
+    """Otherwise the record is inert for every remote user.
+
+    The pipeline writes `.aw_settings/<WELL>.json` in *its* output directory,
+    which for a remote run is on the worker host. The fetch pulls
+    `<well>_out.zip` and the per-well CSV and nothing else, so a remotely
+    computed plate landed with no marker at all — permanently grandfathered,
+    and every future settings change on it silently answered "already done".
+
+    Asserted on the outbound pull rather than on a local write (§7.4 #1): the
+    marker has to come from the worker, because the worker is what computed the
+    digest, and a client that recomputed it would be a second definition that
+    can drift.
+    """
+    import inspect
+
+    from services.remote_runner import Fetcher
+
+    src = inspect.getsource(Fetcher._fetch_one)
+    assert "_pull_settings_marker" in src, (
+        "a fetched well is never asked for the record of which configuration "
+        "produced it, so the settings check cannot fire on a remote plate")
+    assert src.index("materialized") < src.index("_pull_settings_marker"), (
+        "the marker is pulled before the well is known to have materialised, "
+        "so a failed fetch would credit local output that is not there")
+
+    pull = inspect.getsource(Fetcher._pull_settings_marker)
+    assert SETTINGS_DIRNAME in pull and "pull_small_file" in pull, pull

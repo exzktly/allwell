@@ -372,20 +372,34 @@ def get_rows(ctx, label: str) -> pd.DataFrame:
         # registered projectors — no features/ import in the data layer.
         for _project in iter_cache_projectors():
             _project(ctx, label)
-        # Check the FOV labels once, while the frame is being built. Every
-        # per-field number in the app groups on this column, and a well whose
-        # filenames didn't match the schema arrives with every row labelled
-        # field "1" — which is indistinguishable, after loading, from a well
-        # that genuinely has one field.
-        verdict = check_fov_labels(cache[label])
-        ctx.state.dataset.fov_integrity[label] = verdict
-        if not verdict.trusted:
-            _logger.warning(
-                "Well %s: %s. Per-field statistics (error bars, events per "
-                "field, the Statistics tab's n) are undefined for this well "
-                "until the CSV carries usable FOV labels.", label, verdict.reason,
-            )
+        record_fov_verdict(ctx, label, cache[label])
     return cache[label]
+
+
+def record_fov_verdict(ctx, label: str, df) -> None:
+    """Judge one well's ``fov`` column and store the verdict.
+
+    Every per-field number in the app groups on that column, and a well whose
+    filenames did not match the schema arrives with every row labelled field
+    "1" — indistinguishable, after loading, from a well that genuinely has one
+    field. So the check runs once, as the frame is built.
+
+    A function rather than four lines inside :func:`get_rows`, because
+    ``get_rows`` is not the only way a frame is built. ``load_controller.
+    load_directory`` fills ``dataset.cache`` itself, well by well, and so never
+    reached this — which left ``dataset.fov_integrity`` empty for the whole
+    session and ``_report_unusable_fov_labels`` with nothing to report. The
+    warning existed, was tested, and could not fire. Any future path that
+    builds a frame calls this too, or it inherits the same silence.
+    """
+    verdict = check_fov_labels(df)
+    ctx.state.dataset.fov_integrity[label] = verdict
+    if not verdict.trusted:
+        _logger.warning(
+            "Well %s: %s. Per-field statistics (error bars, events per "
+            "field, the Statistics tab's n) are undefined for this well "
+            "until the CSV carries usable FOV labels.", label, verdict.reason,
+        )
 
 
 def get_all_timepoints(ctx) -> list[float]:

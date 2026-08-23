@@ -451,7 +451,14 @@ def load_directory(ctx, d: Path, label=None) -> None:
         tok = app._extract_well_token(p.stem)
         key = tok if tok else p.stem
         app._app_state.dataset.well_paths[key] = p
-        app._app_state.dataset.cache[key] = app._load_well_csv(p)
+        frame = app._load_well_csv(p)
+        app._app_state.dataset.cache[key] = frame
+        # This path builds the frame itself rather than going through
+        # ``get_rows``, so it has to record the FOV verdict itself too —
+        # otherwise ``dataset.fov_integrity`` stays empty for the session and
+        # ``_report_unusable_fov_labels`` below has nothing to report.
+        from well_viewer.data.data_loading import record_fov_verdict
+        record_fov_verdict(ctx, key, frame)
         app._step_progress(i, f"Loading {i}/{n}: {p.name}")
         _opening_set_phase(ctx, f"Loading {i}/{n}: {p.name}", value=i)
     app._hide_progress()

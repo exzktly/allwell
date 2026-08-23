@@ -17,7 +17,7 @@ import math
 import numpy as np
 import pandas as pd
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from well_viewer.data.data_loading import (
     aggregate_with_threshold_df,
@@ -27,7 +27,9 @@ from well_viewer.data.data_loading import (
 )
 from well_viewer.domain.text_columns import fov_text
 from well_viewer.domain.fov_integrity import check_fov_labels
+from well_viewer.domain.ratio_models import RATIO_PREFIX
 from well_viewer.domain.tp_match import tp_close, tp_close_mask
+from well_viewer.domain.gating_state import active_fluor_gates
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates,
     on_cutoff_for_column,
@@ -65,7 +67,11 @@ class ReplicateStat:
     median: float        # median of above-threshold values
     mean_all: float      # mean of all included cells (no threshold filter)
     frac: float          # fraction above threshold (or gate-on when on_col set)
-    n_above: int
+    # Typed float, not int: a well whose FOV labels are provably wrong has a
+    # pooled mean and fraction that are still correct, and a per-field count
+    # that is undefined. NaN is how "undefined" is spelled everywhere else in
+    # this module, and an int cannot hold it.
+    n_above: float
     n_total: int
 
     def summary(self, statistic: str) -> float:
@@ -117,7 +123,10 @@ def _raw_extra(df, target_t, threshold, val_col, fluor_gates, ratios, on_col):
     area = pd.to_numeric(df["area_px"], errors="coerce").to_numpy()
     with np.errstate(invalid="ignore"):
         mask &= np.isfinite(area)
-    for channel, gate in (fluor_gates or {}).items():
+    # Same "a 0.0 gate is off" rule the aggregation applies, so the median
+    # and mean-of-all a ReplicateStat carries describe the same population
+    # as the mean, fraction and count beside them.
+    for channel, gate in active_fluor_gates(fluor_gates).items():
         col = f"{channel}_mean_intensity"
         if col not in df.columns:
             return float("nan"), float("nan")
@@ -140,6 +149,23 @@ def _raw_extra(df, target_t, threshold, val_col, fluor_gates, ratios, on_col):
 
 
 _logger = logging.getLogger(__name__)
+
+
+def _fov_verdict(ctx, label: str, df):
+    """The FOV-label verdict for *label*, from the per-dataset cache when it is
+    there.
+
+    ``data_loading.get_rows`` runs ``check_fov_labels`` once as each well's
+    frame is built and records it on ``ctx.state.dataset.fov_integrity``.
+    Recomputing it here is two ``groupby.nunique`` passes and a full
+    ``duplicated`` over the whole well — 14 ms on a 21k-row well — and this
+    runs per well, per timepoint, per group, per channel, so a batch export
+    would pay it about fifteen hundred times.
+    """
+    cached = (getattr(ctx.state.dataset, "fov_integrity", None) or {}).get(label)
+    if cached is not None:
+        return cached
+    return check_fov_labels(df)
 
 
 def _rep_from(df, pts, target_t, threshold, val_col, fluor_gates, ratios,
@@ -198,22 +224,33 @@ def group_replicate_stats(ctx, wells, target_t, *, use_fov, val_col, threshold,
                 if rs is not None:
                     reps.append(rs)
                 continue
-            verdict = check_fov_labels(df)
+            verdict = _fov_verdict(ctx, lbl, df)
             if not verdict.trusted:
                 # Every row of this well carries the same field label because
-                # the filenames did not match the schema — so splitting on it
-                # yields ONE replicate holding the pooled total, which is the
+                # the filenames did not match the schema, so splitting on that
+                # column yields one "replicate" holding the pooled total — the
                 # per-field mean multiplied by however many fields were pooled.
-                # ``aggregate_with_threshold_df`` refuses that (it returns NaN
-                # for every per-field field); this producer split the column
-                # itself and so never asked. The well contributes no per-FOV
-                # replicate rather than one six-times-too-large one.
+                # ``aggregate_with_threshold_df`` is the model to copy here: it
+                # keeps the well's mean and fraction, which are correct pooled
+                # statistics whatever the field labels say, and NaNs only the
+                # quantities that are genuinely per-field. Dropping the well
+                # outright instead would remove real cells from the Mean and
+                # Fraction panels, and would make a *solo* untrusted well's bar
+                # vanish entirely — indistinguishable from having no data.
                 _logger.warning(
-                    "FOV labels are unusable for %s (%s) — it contributes no "
-                    "per-field replicate to this set rather than a pooled "
-                    "total wearing a per-field label.",
+                    "FOV labels are unusable for %s (%s) — it contributes one "
+                    "pooled replicate with an undefined per-field count, "
+                    "rather than a pooled total wearing a per-field label.",
                     lbl, verdict.reason,
                 )
+                rs = _rep_from(df,
+                               aggregate_well(ctx, lbl, threshold=threshold,
+                                              use_sem=False, val_col=val_col,
+                                              fluor_gates=fluor_gates),
+                               target_t, threshold, val_col, fluor_gates, ratios,
+                               on_col)
+                if rs is not None:
+                    reps.append(replace(rs, n_above=float("nan")))
                 continue
             fov = _norm_fov(df)
             for fov_id in pd.unique(fov):
@@ -286,28 +323,39 @@ def _thresh_on_col(ctx) -> str | None:
 
 
 def _ratio_cache_sig(ctx) -> tuple | None:
-    """Signature of the ratio definitions, for the stats cache keys.
+    """Signature of the active ratio's *definition*, for the stats cache keys.
 
     Every key folds in ``active_val_col``, which for a ratio metric is the bare
-    string ``"ratio:<name>"``. The numerator, denominator, aggregation and
-    epsilon live in ``ctx.state.channel.ratio_index`` and appear in no key at
-    all, so editing a ratio *in place* — keeping its name — left every cached
+    string ``"ratio:<name>"``. The numerator, denominator, per-channel metrics
+    and epsilon live in ``ctx.state.channel.ratio_index`` and appear in no key
+    at all, so editing a ratio *in place* — keeping its name — left every cached
     replicate-set statistic valid by key and wrong by value, while the per-well
-    bars beside them recomputed. Returns ``None`` when the active column is not
-    a ratio, leaving a plain-channel session's keys byte-identical.
+    bars beside them recomputed.
+
+    Two details this has to get right, and got wrong first time round.
+    ``ratio_index`` is keyed by ``RatioMetric.key()`` — the full ``"ratio:R"``
+    string, not the bare name — so looking up the split-off name resolves
+    nothing; and the fields are ``numerator_channel`` / ``numerator_metric`` /
+    ``denominator_channel`` / ``denominator_metric``, not ``numerator`` /
+    ``denominator`` / ``aggregation``. Either mistake alone makes this a
+    constant, i.e. a signature that signs nothing.
+
+    Returns ``None`` when the active column is not a ratio, leaving a
+    plain-channel session's keys byte-identical.
     """
     col = str(ctx.state.channel.active_val_col or "")
-    if not col.startswith("ratio:"):
+    if not col.startswith(RATIO_PREFIX):
         return None
-    ratio = (ctx.state.channel.ratio_index or {}).get(col.split(":", 1)[1])
+    ratio = (ctx.state.channel.ratio_index or {}).get(col)
     if ratio is None:
         return (col,)
     return (
         col,
-        str(getattr(ratio, "numerator", "")),
-        str(getattr(ratio, "denominator", "")),
-        str(getattr(ratio, "aggregation", "")),
-        repr(getattr(ratio, "epsilon", None)),
+        ratio.numerator_channel,
+        ratio.numerator_metric,
+        ratio.denominator_channel,
+        ratio.denominator_metric,
+        repr(ratio.epsilon),
     )
 
 

@@ -43,6 +43,7 @@ from well_viewer.domain.stats_compute import (
 )
 from well_viewer.core import debug_flags as debug_flags
 from well_viewer.domain.tp_match import tp_close
+from well_viewer.domain.gating_state import active_fluor_gates
 
 _logger = logging.getLogger(__name__)
 
@@ -184,12 +185,18 @@ def _scale_group_bar(mean_pair, frac_pair, n_pair, *, pts, ctrl, outcome,
     if fc_vs_t0:
         _stack_kw = dict(fc_order=fc_order, fc_op_ctrl=fc_op_ctrl,
                          fc_op_t0=fc_op_t0)
+        # The operation decides what a usable baseline is: subtracting zero is
+        # well defined, dividing by it is not. Passing it means the three
+        # panels resolve the *same* baseline timepoint in subtract mode instead
+        # of the mean panel using t0 and the fraction and events panels
+        # silently falling through to a later one.
         rtp_m, t0_mean, t0_spread = _fc.baseline_from_points_resolved(
-            pts, baseline_tp=baseline_tp)
+            pts, baseline_tp=baseline_tp, op=fc_op_t0)
         rtp_f, t0_frac, t0_frac_spread = _fc.baseline_frac_from_points_resolved(
-            pts, baseline_tp=baseline_tp)
+            pts, baseline_tp=baseline_tp, op=fc_op_t0)
         rtp_n, t0_n, t0_n_spread = _fc.baseline_n_from_points_resolved(
-            pts, per_fov_spread=per_fov_spread, baseline_tp=baseline_tp)
+            pts, per_fov_spread=per_fov_spread, baseline_tp=baseline_tp,
+            op=fc_op_t0)
         # Cross-axis stacking, one lookup of the control per resolved baseline
         # timepoint. Each panel resolves its own baseline tp, exactly as the
         # tab's three ``_member_baseline`` calls do.
@@ -637,13 +644,14 @@ def collect_bar_items(
                     eff_ctrl_n_spread = eff_ctrl_n_spread_t
                     if fc_vs_t0:
                         resolved_tp, t0_mean, t0_spread = _fc.baseline_from_points_resolved(
-                            pts, baseline_tp=fc_baseline_tp,
+                            pts, baseline_tp=fc_baseline_tp, op=fc_op_t0,
                         )
                         resolved_tp_f, t0_frac, t0_frac_spread = _fc.baseline_frac_from_points_resolved(
-                            pts, baseline_tp=fc_baseline_tp,
+                            pts, baseline_tp=fc_baseline_tp, op=fc_op_t0,
                         )
                         resolved_tp_n, t0_n, t0_n_spread = _fc.baseline_n_from_points_resolved(
                             pts, per_fov_spread=per_fov_spread, baseline_tp=fc_baseline_tp,
+                            op=fc_op_t0,
                         )
                         # Cross-axis stacking: ctrl_first → adjust t0 denom; t0_first → adjust control denom.
                         if fc_vs_ctrl and fc_ctrl_ref is not None and resolved_tp is not None and t0_mean is not None:
@@ -1067,7 +1075,7 @@ def collect_bar_items_fov_pooled(
             area = _pd.to_numeric(df["area_px"], errors="coerce").to_numpy()
             with _np.errstate(invalid="ignore"):
                 mask &= _np.isfinite(area)
-        for channel, gate in fluor_gates.items():
+        for channel, gate in active_fluor_gates(fluor_gates).items():
             col = f"{channel}_mean_intensity"
             if col not in df.columns:
                 continue

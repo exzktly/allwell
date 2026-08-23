@@ -191,3 +191,171 @@ def test_a_real_gate_still_filters():
         fluor_gates={"gfp": 15.0, "mcherry": 0.0},
     )
     assert int(pts[0][5]) == 1
+
+# ── 6. the ratio cache signature actually signs the definition ───────────────
+
+def _ratio_ctx(metric):
+    import types
+
+    from well_viewer.domain.ratio_models import build_ratio_index
+    channel = types.SimpleNamespace(
+        active_val_col=metric.key(), ratio_index=build_ratio_index([metric]),
+    )
+    return types.SimpleNamespace(state=types.SimpleNamespace(channel=channel))
+
+
+def test_two_ratios_with_one_name_have_different_cache_signatures():
+    """The stats cache keys fold in ``active_val_col``, which for a ratio is the
+    bare string ``ratio:<name>`` — so editing a ratio in place left every cached
+    replicate-set statistic valid by key and wrong by value.
+
+    The first attempt at this signature looked the metric up by its bare name
+    (the index is keyed by the full ``ratio:<name>``) and read three attributes
+    that do not exist on ``RatioMetric``, so it returned a constant. A
+    signature that signs nothing is worse than none: it reads as covered.
+    """
+    from well_viewer.domain.ratio_models import RatioMetric
+    from well_viewer.domain.stats_compute import _ratio_cache_sig
+
+    a = RatioMetric("R", "gfp", "mean_intensity", "mch", "mean_intensity", 0.0)
+    b = RatioMetric("R", "rfp", "total_intensity", "dapi", "mean_intensity", 1e-6)
+    sig_a = _ratio_cache_sig(_ratio_ctx(a))
+    sig_b = _ratio_cache_sig(_ratio_ctx(b))
+    assert sig_a != sig_b
+    # And it names the parts, rather than repeating what the key already has.
+    assert "gfp" in sig_a and "mch" in sig_a
+
+
+def test_a_plain_channel_has_no_ratio_signature():
+    """A non-ratio session's keys must stay byte-identical."""
+    import types
+
+    from well_viewer.domain.stats_compute import _ratio_cache_sig
+    channel = types.SimpleNamespace(active_val_col="gfp_mean_intensity",
+                                    ratio_index={})
+    ctx = types.SimpleNamespace(state=types.SimpleNamespace(channel=channel))
+    assert _ratio_cache_sig(ctx) is None
+
+
+# ── 7. normalization rescales fields; it does not invent them ────────────────
+
+_WELL_PT_9 = [
+    (0.0, 100.0, 5.0, 0.5, 10, 20, 0.0, 0.0, 0.0),
+    (24.0, 200.0, 6.0, 0.6, 12, 20, 0.0, 0.0, 0.0),
+]
+
+
+def test_a_single_well_point_gains_no_events_spread():
+    """Index 9 is the *cross-well* events spread, and a plain per-well point is
+    a 9-tuple that has no such field because one well has no replicates.
+
+    Naming index 9 unconditionally made the padding helper invent the slot and
+    fill it with a propagated error, so a single well normalised against a
+    control came back carrying an events error band — and the Line tab, which
+    now draws that field, painted a ribbon around it.
+    """
+    out = normalize_pts(
+        _WELL_PT_9,
+        control_stats={0.0: (50.0, 5.0), 24.0: (50.0, 5.0)},
+        control_n_stats={0.0: (5.0, 1.0), 24.0: (5.0, 1.0)},
+        normalize_frac_n=True,
+    )
+    assert all(len(pt) == 9 for pt in out)
+
+
+def test_a_replicate_point_keeps_its_events_spread_normalized():
+    """The 11-tuple a replicate set builds does carry index 9, and it must be
+    rescaled with its value rather than left in raw units."""
+    pts = [(0.0, 100.0, 5.0, 0.5, 10.0, 20, 0.0, 0.0, 0.0, 2.0, 20)]
+    out = normalize_pts(
+        pts,
+        control_n_stats={0.0: (5.0, 0.0)},
+        normalize_frac_n=True,
+    )
+    assert out[0][4] == pytest.approx(2.0)      # 10 / 5
+    assert out[0][9] == pytest.approx(0.4)      # 2 / 5, not left at 2.0
+
+
+def test_an_undefined_spread_survives_on_every_field():
+    """The fraction and events fields go through ``_scale_field``, which folded
+    NaN to 0.0 while the mean field's ``_scale_pt`` preserved it — two
+    conventions for "we could not compute this", in panels of one figure."""
+    nan = float("nan")
+    pts = [(0.0, 100.0, nan, 0.5, 10.0, 20, nan, 0.0, 0.0, nan, 20)]
+    out = normalize_pts(
+        pts,
+        control_stats={0.0: (50.0, 0.0)},
+        control_frac_stats={0.0: (0.25, 0.0)},
+        control_n_stats={0.0: (5.0, 0.0)},
+        normalize_frac_n=True,
+    )
+    assert math.isnan(out[0][2]) and math.isnan(out[0][6]) and math.isnan(out[0][9])
+
+
+# ── 8. the bar path resolves the same baseline as the line path ──────────────
+
+_BASE_PTS = [
+    (0.0, 100.0, 5.0, 0.0, 0.0, 200, 0.0, 0.0, 0.0, 0.0, 0),
+    (24.0, 300.0, 9.0, 0.40, 80.0, 200, 0.0, 0.0, 0.0, 0.0, 0),
+]
+
+
+def test_bar_baselines_agree_across_panels_in_subtract_mode():
+    """The line path's ``_field_baseline`` was taught the operation; the bar
+    path's five ``baseline_*_from_points*`` finders were not, so the reported
+    symptom — the mean panel normalised against t=0 and the fraction and events
+    panels against t=24, under one axis label — survived untouched there."""
+    from well_viewer.domain import fold_change as fc
+
+    mean_tp = fc.baseline_from_points_resolved(
+        _BASE_PTS, baseline_tp=0.0, op="subtract")[0]
+    frac_tp = fc.baseline_frac_from_points_resolved(
+        _BASE_PTS, baseline_tp=0.0, op="subtract")[0]
+    n_tp = fc.baseline_n_from_points_resolved(
+        _BASE_PTS, baseline_tp=0.0, op="subtract")[0]
+    assert mean_tp == frac_tp == n_tp == 0.0
+
+
+def test_bar_baselines_still_refuse_a_zero_divisor():
+    from well_viewer.domain import fold_change as fc
+
+    assert fc.baseline_from_points_resolved(
+        _BASE_PTS, baseline_tp=0.0, op="ratio")[0] == 0.0
+    assert fc.baseline_frac_from_points_resolved(
+        _BASE_PTS, baseline_tp=0.0, op="ratio")[0] == 24.0
+
+
+# ── 9. every gate filter answers the "is this gate on?" question the same way ─
+
+def test_no_filter_applies_a_gate_without_asking_whether_it_is_on():
+    """Five sites iterate ``fluor_gates`` and cut on it. Converting two of them
+    left the other three describing a different population from the ones beside
+    them — a half-swept predicate is worse than an unswept one, because one
+    function then holds two definitions of the same word and neither looks
+    wrong."""
+    import ast
+    import pathlib as _pathlib
+
+    repo = _pathlib.Path(__file__).resolve().parent.parent
+    offenders = []
+    for path in sorted((repo / "well_viewer").rglob("*.py")):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.For):
+                continue
+            src = ast.unparse(node.iter)
+            if "fluor_gates" not in src:
+                continue
+            body = ast.unparse(node)
+            # A loop that only reads the mapping (building a key, formatting a
+            # row) is not a filter; a loop that compares a value against the
+            # gate is.
+            if "> gate" not in body and "> gate_threshold" not in body:
+                continue
+            if "active_fluor_gates" not in src:
+                offenders.append(f"{path.relative_to(repo)}:{node.lineno}")
+    assert not offenders, (
+        "these filter on a raw gate value, so a gate of 0.0 (which means off) "
+        "still excludes cells:\n" + "\n".join(offenders)
+    )
+

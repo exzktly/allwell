@@ -31,6 +31,7 @@ from util.well_token import split_background_wells as _split_background_wells
 # an always-present support library whose ``region`` module is pure pandas and
 # imports nothing back, so this is a plain module-scope dependency, not a cycle.
 from well_viewer.features.crop.region import centroids_inside, has_centroid_columns
+from well_viewer.domain.gating_state import active_fluor_gates
 
 _logger = logging.getLogger(__name__)
 
@@ -376,7 +377,7 @@ def review_build_threshold_map(
             mask &= np.isfinite(area)
     n_after_area = int(mask.sum())
     missing_fluor_col = None
-    for chan, gate in fluor_gates.items():
+    for chan, gate in active_fluor_gates(fluor_gates).items():
         col = f"{chan}_mean_intensity"
         if col not in sub.columns:
             missing_fluor_col = col

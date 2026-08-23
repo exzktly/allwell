@@ -211,6 +211,23 @@ def _grow(new: list, idx_a: int, idx_b: int | None) -> None:
         new.append(0.0)
 
 
+def _spread_slot(pt: tuple, spread_idx: int | None) -> int | None:
+    """*spread_idx* if *pt* actually carries that field, else ``None``.
+
+    An AggPoint is a tuple of varying length: a replicate-set point is an
+    11-tuple carrying the cross-well events spread at index 9, and a plain
+    per-well point from ``aggregate_well`` is a 9-tuple that has no such field
+    because a single well has no replicates to vary across. Naming index 9
+    unconditionally makes ``_grow`` *invent* the slot and then fill it with a
+    propagated error — so a single well, normalised against a control, came
+    back with an events error band it has no replicates to have measured, and
+    the panel drew a filled ribbon around it. The rule is that normalization
+    may rescale a field that exists; it may not create one."""
+    if spread_idx is None or spread_idx < len(pt):
+        return spread_idx
+    return None
+
+
 def _scale_field(
     pt: tuple, val_idx: int, spread_idx: int | None, factor: float, *,
     factor_rel_err_sq: float = 0.0,
@@ -222,6 +239,7 @@ def _scale_field(
     ([1]/[2]) is scaled. ``spread_idx=None`` marks a count-like field with no
     spread — the value is scaled and no spread is written.
     """
+    spread_idx = _spread_slot(pt, spread_idx)
     new = list(pt)
     _grow(new, val_idx, spread_idx)
     if factor == 0 or not math.isfinite(factor):
@@ -229,15 +247,19 @@ def _scale_field(
         if spread_idx is not None:
             new[spread_idx] = 0.0
         return tuple(new)
-    v = pt[val_idx] if val_idx < len(pt) else None
-    scaled_val = v / factor if isinstance(v, (int, float)) and math.isfinite(v) else float("nan")
+    v = _as_finite(pt[val_idx] if val_idx < len(pt) else None)
+    scaled_val = v / factor if v is not None else float("nan")
     new[val_idx] = scaled_val
     if spread_idx is not None:
-        s = pt[spread_idx] if spread_idx < len(pt) else None
-        s_val = s if isinstance(s, (int, float)) and math.isfinite(s) else 0.0
+        # An undefined spread stays undefined, exactly as ``_scale_pt`` does
+        # for the mean field. Folding it to 0.0 here put two conventions for
+        # "we could not compute this" in panels of the same figure.
+        s_raw = _as_finite(pt[spread_idx] if spread_idx < len(pt) else None)
         new[spread_idx] = _propagate_spread(
-            scaled_val, v if isinstance(v, (int, float)) else float("nan"),
-            s_val, factor_rel_err_sq,
+            scaled_val,
+            v if v is not None else float("nan"),
+            s_raw if s_raw is not None else float("nan"),
+            factor_rel_err_sq,
         )
     return tuple(new)
 
@@ -247,20 +269,24 @@ def _subtract_field(
     shift_spread: float = 0.0,
 ) -> tuple:
     """Generic ``_subtract_pt`` over an arbitrary ``(val_idx, spread_idx)`` field."""
+    spread_idx = _spread_slot(pt, spread_idx)
     new = list(pt)
     _grow(new, val_idx, spread_idx)
-    v = pt[val_idx] if val_idx < len(pt) else None
-    if not (isinstance(v, (int, float)) and math.isfinite(v)) or not math.isfinite(shift):
+    v = _as_finite(pt[val_idx] if val_idx < len(pt) else None)
+    if v is None or not math.isfinite(shift):
         new[val_idx] = float("nan")
         if spread_idx is not None:
             new[spread_idx] = 0.0
         return tuple(new)
     new[val_idx] = float(v) - float(shift)
     if spread_idx is not None:
-        s = pt[spread_idx] if spread_idx < len(pt) else None
-        s_val = s if isinstance(s, (int, float)) and math.isfinite(s) else 0.0
-        shift_var = float(shift_spread) ** 2 if math.isfinite(shift_spread) else 0.0
-        new[spread_idx] = math.sqrt(s_val * s_val + shift_var)
+        s_raw = _as_finite(pt[spread_idx] if spread_idx < len(pt) else None)
+        if s_raw is None:
+            # Undefined in, undefined out — the rule ``_scale_pt`` follows.
+            new[spread_idx] = float("nan")
+        else:
+            shift_var = float(shift_spread) ** 2 if math.isfinite(shift_spread) else 0.0
+            new[spread_idx] = math.sqrt(s_raw * s_raw + shift_var)
     return tuple(new)
 
 
@@ -338,9 +364,10 @@ def _baseline_usable(value, *, op: str) -> bool:
     non-zero for both meant the requested baseline was skipped and a **later
     timepoint** silently substituted, under an axis still labelled "vs t0".
     """
-    if not (isinstance(value, (int, float)) and math.isfinite(value)):
+    v = _as_finite(value)
+    if v is None:
         return False
-    return True if op == "subtract" else float(value) != 0.0
+    return True if op == "subtract" else v != 0.0
 
 
 def _field_baseline(
@@ -700,7 +727,7 @@ def _pt_frac(pt) -> tuple[float | None, float]:
 
 
 def baseline_from_points(
-    pts, baseline_tp: float | None = None,
+    pts, baseline_tp: float | None = None, *, op: str = "ratio",
 ) -> tuple[float | None, float]:
     """Pull the ``(mean, spread)`` baseline out of an AggPoint sequence.
 
@@ -718,7 +745,7 @@ def baseline_from_points(
             t = float(pt[0])
             if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
                 m = pt[1]
-                if isinstance(m, (int, float)) and math.isfinite(m) and m != 0:
+                if _baseline_usable(m, op=op):
                     s = pt[2] if len(pt) > 2 else 0.0
                     return (
                         float(m),
@@ -733,7 +760,7 @@ def baseline_from_points(
         # the per-well series doesn't sample.
     for pt in sorted(pts, key=lambda p: p[0]):
         m = pt[1]
-        if isinstance(m, (int, float)) and math.isfinite(m) and m != 0:
+        if _baseline_usable(m, op=op):
             s = pt[2] if len(pt) > 2 else 0.0
             return (
                 float(m),
@@ -743,7 +770,7 @@ def baseline_from_points(
 
 
 def baseline_from_points_resolved(
-    pts, baseline_tp: float | None = None,
+    pts, baseline_tp: float | None = None, *, op: str = "ratio",
 ) -> tuple[float | None, float | None, float]:
     """Like :func:`baseline_from_points` but also returns the resolved tp.
 
@@ -758,7 +785,7 @@ def baseline_from_points_resolved(
             t = float(pt[0])
             if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
                 m = pt[1]
-                if isinstance(m, (int, float)) and math.isfinite(m) and m != 0:
+                if _baseline_usable(m, op=op):
                     s = pt[2] if len(pt) > 2 else 0.0
                     return (
                         t,
@@ -768,7 +795,7 @@ def baseline_from_points_resolved(
                 break
     for pt in sorted(pts, key=lambda p: p[0]):
         m = pt[1]
-        if isinstance(m, (int, float)) and math.isfinite(m) and m != 0:
+        if _baseline_usable(m, op=op):
             s = pt[2] if len(pt) > 2 else 0.0
             return (
                 float(pt[0]),
@@ -779,7 +806,7 @@ def baseline_from_points_resolved(
 
 
 def baseline_frac_from_points_resolved(
-    pts, baseline_tp: float | None = None,
+    pts, baseline_tp: float | None = None, *, op: str = "ratio",
 ) -> tuple[float | None, float | None, float]:
     """Frac counterpart of :func:`baseline_from_points_resolved` —
     returns ``(tp, frac, frac_spread)`` with ``tp=None`` for the no-match case."""
@@ -791,18 +818,18 @@ def baseline_frac_from_points_resolved(
             t = float(pt[0])
             if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
                 f, fs = _pt_frac(pt)
-                if f is not None and f != 0:
+                if _baseline_usable(f, op=op):
                     return t, f, fs
                 break
     for pt in sorted(pts, key=lambda p: p[0]):
         f, fs = _pt_frac(pt)
-        if f is not None and f != 0:
+        if _baseline_usable(f, op=op):
             return float(pt[0]), f, fs
     return None, None, 0.0
 
 
 def baseline_frac_from_points(
-    pts, baseline_tp: float | None = None,
+    pts, baseline_tp: float | None = None, *, op: str = "ratio",
 ) -> tuple[float | None, float]:
     """Pull the ``(frac, frac_spread)`` baseline out of an AggPoint sequence.
 
@@ -820,12 +847,12 @@ def baseline_frac_from_points(
             t = float(pt[0])
             if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
                 f, fs = _pt_frac(pt)
-                if f is not None and f != 0:
+                if _baseline_usable(f, op=op):
                     return f, fs
                 break
     for pt in sorted(pts, key=lambda p: p[0]):
         f, fs = _pt_frac(pt)
-        if f is not None and f != 0:
+        if _baseline_usable(f, op=op):
             return f, fs
     return None, 0.0
 
@@ -852,6 +879,7 @@ def _pt_n_above(pt, per_fov_spread: bool = False) -> tuple[float, float]:
 
 def baseline_n_from_points_resolved(
     pts, *, per_fov_spread: bool = False, baseline_tp: float | None = None,
+    op: str = "ratio",
 ) -> tuple[float | None, float | None, float]:
     """``(tp, n_above, n_above_spread)`` for the member's baseline tp.
 
@@ -865,12 +893,12 @@ def baseline_n_from_points_resolved(
             t = float(pt[0])
             if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
                 n, ns = _pt_n_above(pt, per_fov_spread)
-                if n != 0:
+                if _baseline_usable(n, op=op):
                     return t, n, ns
                 break
     for pt in sorted(pts, key=lambda p: p[0]):
         n, ns = _pt_n_above(pt, per_fov_spread)
-        if n != 0:
+        if _baseline_usable(n, op=op):
             return float(pt[0]), n, ns
     return None, None, 0.0
 

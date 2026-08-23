@@ -784,7 +784,7 @@ def _all_fluor_values_filtered(
     else:
         return np.empty(0, dtype=float)
 
-    for channel, gate in fluor_gates.items():
+    for channel, gate in active_fluor_gates(fluor_gates).items():
         col = f"{channel}_mean_intensity"
         if col not in df.columns:
             return np.empty(0, dtype=float)

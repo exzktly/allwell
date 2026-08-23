@@ -28,6 +28,7 @@ from pipeline.shape_features import is_shape_column
 from well_viewer.data.data_loading import df_included_mask, resolve_value_series
 from well_viewer.domain import spatial_compute as spc
 from well_viewer.domain.metric_registry import METRICS
+from well_viewer.domain.tp_match import tp_close_mask
 
 _logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ def collect_spatial_frame(
         target = float(np.min(tp[finite_tp]))
     else:
         target = float(timepoint)
-    tp_match = np.abs(tp - target) <= 1e-6
+    tp_match = tp_close_mask(tp, target)
 
     mask = df_included_mask(df, include_gate=include_gate).to_numpy(copy=True)
     mask &= finite_tp & tp_match
@@ -266,7 +267,7 @@ def collect_summary_matrix(
                 metric_vals = None
 
         for j, target in enumerate(tps):
-            frame_mask = base_mask & (np.abs(tp_col - target) <= 1e-6)
+            frame_mask = base_mask & tp_close_mask(tp_col, target)
             idx = np.flatnonzero(frame_mask)
             if idx.size == 0:
                 continue

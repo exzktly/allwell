@@ -23,6 +23,7 @@ from well_viewer.data.data_loading import df_included_mask, resolve_value_series
 from well_viewer.domain.metric_registry import METRIC_BY_KEY
 from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.domain.selections_model import color_for_replicate_set, color_for_well, active_replicate_sets
+from well_viewer.domain.tp_match import tp_close_mask
 
 _logger = logging.getLogger(__name__)
 
@@ -65,7 +66,8 @@ def collect_feature_matrix(
         feature_cols: CSV columns forming the matrix, in display order.
         timepoints: optional iterable of target timepoints (hours); ``None`` /
             empty means every timepoint. A cell is kept if its
-            ``timepoint_hours`` matches any target within ``1e-6``.
+            ``timepoint_hours`` matches any target within the shared relative
+            tolerance (``domain.tp_match``).
         include_gate: honour the scatter-gate (``Gate_Pass``) layer too — the
             multivariate matrix analyses the fully-included population by default.
 
@@ -108,7 +110,7 @@ def collect_feature_matrix(
                 return
             tp_match = np.zeros_like(tp, dtype=bool)
             for t in target_arr:
-                tp_match |= np.abs(tp - t) <= 1e-6
+                tp_match |= tp_close_mask(tp, t)
             mask &= finite_tp & tp_match
         else:
             mask &= finite_tp

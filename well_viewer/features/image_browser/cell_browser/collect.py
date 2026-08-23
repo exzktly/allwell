@@ -30,6 +30,7 @@ from well_viewer.data.data_loading import (
 from well_viewer.data.metric_labels import split_metric_col
 from well_viewer.domain.metric_registry import intensity_keys
 from well_viewer.core.lazy import lazy as _lazy
+from well_viewer.domain.tp_match import tp_close_mask
 
 # Scatter is a removable feature, so reach its gate-inclusion helper through the
 # lazy proxy (a call, not a module-scope import) — keeps cell_browser importable
@@ -398,7 +399,7 @@ def collect_cells(
                 tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
                 tp_match = np.zeros(len(df), dtype=bool)
                 for t in target:
-                    tp_match |= np.abs(tp - t) <= 1e-6
+                    tp_match |= tp_close_mask(tp, t)
                 mask &= tp_match
         if fov_set is not None and "fov" in df.columns:
             if not fov_set:

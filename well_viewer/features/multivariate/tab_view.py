@@ -26,6 +26,7 @@ from well_viewer.features.multivariate.collect import (
     available_feature_columns, column_display_label,
 )
 from well_viewer.features.multivariate.feature_picker_view import build_feature_picker
+from well_viewer.domain.tp_match import tp_close
 
 _FIG_W, _FIG_H, _DPI = 7.6, 6.6, 100
 
@@ -368,7 +369,7 @@ def _select_combo_by_data(combo, value) -> None:
     for i in range(combo.count()):
         d = combo.itemData(i)
         if d == value or (isinstance(d, float) and isinstance(value, (int, float))
-                          and abs(d - value) <= 1e-6):
+                          and tp_close(d, value)):
             combo.setCurrentIndex(i)
             return
 

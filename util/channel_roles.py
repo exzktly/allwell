@@ -37,16 +37,22 @@ LABELFREE_METHODS = ("cellpose_labelfree",)
 _NUCLEAR_STRONG_RE = re.compile(r"dapi|hoechst|nuclear|nucleus|nuc|dna|h33342|405",
                                 re.IGNORECASE)
 _NUCLEAR_SECONDARY_RE = re.compile(r"nir|rfp", re.IGNORECASE)
-# ``trans`` is spelled out rather than left bare: an unanchored substring
-# matched ``GFP_transfected``, classifying a fluorescent readout as phase and so
-# skipping its flat-field and background correction — for that channel alone.
+# Boundaries on both sides, and neither of them ``\b``. Channel names are
+# written as separate tokens ("NIR_BF", "Cy5_BF"), as prefixed run-ons
+# ("w1BF", the ImageXpress spelling this repo's own defaults use), and as
+# ordinary words that merely start the same way ("GFP_transfected",
+# "GFPtrans"). ``\b`` finds no boundary at an underscore, so ``\bbf\b`` never
+# matched the commonest spelling of a brightfield channel; a bare ``trans``
+# substring, on the other hand, matched a transfection marker and quietly
+# excluded it from flat-field and background correction. So: no *letter* may
+# precede the hint (which rejects "GFPtrans" and "BFP"), a digit may (which
+# accepts "w1BF"), and nothing alphanumeric may follow it.
 _PHASE_HINT_RE = re.compile(
-    r"phase|brightfield|bright.?field|trans(?:mitted|mission)?(?![a-z])|dic"
-    # Not ``\bbf\b``: ``_`` is a word character, so ``\b`` finds no boundary in
-    # ``NIR_BF`` and the commonest spelling of a brightfield channel went
-    # unrecognised — which is precisely the name that also reads as a far-red
-    # nuclear stain, so it took the segmentation role.
-    r"|(?<![a-z0-9])bf(?![a-z0-9])",
+    r"phase"
+    r"|brightfield|bright.?field"
+    r"|(?<![a-z])trans(?:mitted|mission)?(?![a-z0-9])"
+    r"|dic"
+    r"|(?<![a-z])bf(?![a-z0-9])",
     re.IGNORECASE,
 )
 

@@ -16,8 +16,10 @@ way:
   (:func:`util.well_token.canonical_well_label`).
 * **timepoint** — a ``t<n>`` / ``<n>h`` style slot (:func:`util.timepoint.parse_hours`
   with an explicit prefix or unit, so a bare integer is not mistaken for one).
-* **fov** — an explicit ``f<n>`` slot, or, once every named role has had its
-  pick, a leftover slot of bare integers.
+* **fov** — an explicit ``f<n>`` slot. A slot of bare integers is deliberately
+  *not* claimed: the same evidence would equally support a timepoint index or a
+  site number, and this module leaves what it cannot identify as ``ignore``
+  rather than pre-filling the Analyze form with a confident wrong guess.
 * **experiment** — a slot constant across every sampled name.
 * **channel** — the remaining small, mostly-alphabetic categorical slot; its
   distinct values are the channel tokens, seeded into roles by
@@ -51,7 +53,6 @@ _SAMPLE_LIMIT = 400           # names sampled — "briefly scanning", not a full
 _TP_RE = re.compile(r"(?i)^t\d+$")
 _FOV_RE = re.compile(r"(?i)^f\d+$")
 _HAS_ALPHA_RE = re.compile(r"[A-Za-z]")
-_BARE_INT_RE = re.compile(r"^\d+$")
 
 
 @dataclass
@@ -247,17 +248,6 @@ def _pick_channel_slot(cols, used: set[int]) -> int | None:
     return best_i
 
 
-def _bare_number_slot(cols, used: set[int]) -> int | None:
-    """The leftmost unused slot whose tokens are all bare integers, with at
-    least two distinct values (a constant slot is an experiment tag)."""
-    for i, col in enumerate(cols):
-        if i in used or not col:
-            continue
-        if all(_BARE_INT_RE.match(t or "") for t in col) and len(set(col)) >= 2:
-            return i
-    return None
-
-
 def _classify_slots(rows: list[list[str]], k: int) -> tuple[list[str], int | None, int | None]:
     cols = [[r[i] for r in rows] for i in range(k)]
     fields = ["ignore"] * k
@@ -284,14 +274,6 @@ def _classify_slots(rows: list[list[str]], k: int) -> tuple[list[str], int | Non
     chan_i = _pick_channel_slot(cols, used)
     if chan_i is not None:
         fields[chan_i] = "channel"; used.add(chan_i)
-    if fov_i is None:
-        # A bare-number FOV slot ("A01_2_w1" for field 2). Only after every
-        # named role has had its pick, so it can never outbid a timepoint,
-        # a well or the channel set — it is the last thing a leftover numeric
-        # slot can be, not the first.
-        fov_i = _bare_number_slot(cols, used)
-        if fov_i is not None:
-            fields[fov_i] = "fov"; used.add(fov_i)
     return fields, well_i, chan_i
 
 

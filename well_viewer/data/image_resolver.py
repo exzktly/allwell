@@ -28,12 +28,19 @@ def _suffixes_for_role(role: Role) -> tuple[str, ...]:
     """The suffix+extension forms a role's files can carry, as templates.
 
     Channel-scoped roles yield the bare form first and then the
-    ``{channel}``-templated one, which is the order the legacy hand-written
-    table used and which ``classify_filename_kind`` still relies on."""
+    ``{channel}``-templated one, reproducing the order of the hand-written
+    table this replaced. The order still matters to the consumers that build a
+    regex alternation from it (``features/smfish/controller``,
+    ``image_discovery._suffix_matcher``); ``classify_filename_kind`` no longer
+    reads it at all, since it delegates to ``classify_filename_role``.
+
+    A role whose bare suffix is ambiguous with a channel name
+    (``match_bare_suffix=False``) contributes only its channel-scoped form."""
     spec = ROLE_CATALOG[role]
     if not spec.suffix:
         return ()
-    bare = tuple(f"{spec.suffix}{ext}" for ext in spec.all_exts)
+    bare = tuple(f"{spec.suffix}{ext}" for ext in spec.all_exts
+                 if spec.match_bare_suffix)
     if not spec.is_channel_scoped:
         return bare
     scoped = tuple(f"{spec.suffix}_{{channel}}{ext}" for ext in spec.all_exts)
@@ -55,18 +62,6 @@ OUTPUT_SUFFIXES: dict[str, tuple[str, ...]] = {
     "smfish": _suffixes_for_role(Role.SMFISH),
     "phase": _suffixes_for_role(Role.PHASE),
 }
-
-
-# Kept for callers that iterate kinds in resolution order. The ordering is
-# ``ROLE_CATALOG``'s ``precedence`` field, not a second opinion about it.
-OUTPUT_KIND_PRECEDENCE: tuple[str, ...] = (
-    "mask",
-    "overlay",
-    "smfish",
-    "phase",
-    "tophat",
-    "fluor_processed",
-)
 
 
 CANONICAL_SUFFIX_FAMILIES: tuple[str, ...] = (
@@ -161,9 +156,10 @@ def normalize_numeric_token(value: object) -> str:
 
     Goes through :func:`image_identity.raw_token` rather than
     ``str(value or "")``: FOV and timepoint tokens are legitimately ``0``
-    (``position_to_well_fov`` hands out 0-based FOV indices), and ``0`` is
-    falsy, so the obvious spelling reported a real token as absent — which in
-    :func:`find_ref_for_key` turns an exact key into "match anything"."""
+    (``util.plate_grid.position_to_well_fov`` hands out 0-based FOV indices),
+    and ``0`` is falsy, so the obvious spelling reported a real token as absent
+    — which in :func:`well_viewer.data.frame_load.match_image_ref` turns an
+    exact key into "match anything"."""
     raw = raw_token(value).strip()
     if not raw:
         return ""

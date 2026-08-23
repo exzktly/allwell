@@ -26,6 +26,7 @@ from well_viewer.core.safe import swallowed
 from well_viewer.features.spatial import state as sp_state
 from well_viewer.features.spatial import controller as sp_ctrl
 from well_viewer.features.spatial.collect import available_metric_columns
+from well_viewer.domain.tp_match import tp_close
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -497,7 +498,7 @@ def _select_combo_by_data(combo, value) -> None:
     for i in range(combo.count()):
         d = combo.itemData(i)
         if d == value or (isinstance(d, float) and isinstance(value, (int, float))
-                          and abs(d - value) <= 1e-6):
+                          and tp_close(d, value)):
             combo.setCurrentIndex(i)
             return
 

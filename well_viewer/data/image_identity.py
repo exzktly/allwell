@@ -70,6 +70,13 @@ class RoleSpec:
     accept_exts: tuple[str, ...]          # additional read-side exts
     is_channel_scoped: bool               # accepts "_tophat_<channel>" form
     precedence: int                       # lower wins in resolve_channel_frame_refs
+    # Whether the suffix may be recognised on its own, without a channel token
+    # after it. False for a suffix that is also a plausible *channel name*: a
+    # dataset whose last schema slot is a channel called "phase" produces
+    # "A01_1_phase.tif", which is indistinguishable from a bare phase-role
+    # output of well A01 field 1. Only the channel-scoped spelling
+    # ("_phase_<channel>") is unambiguous, so only that one is matched.
+    match_bare_suffix: bool = True
 
     @property
     def all_exts(self) -> tuple[str, ...]:
@@ -115,6 +122,7 @@ ROLE_CATALOG: Mapping[Role, RoleSpec] = {
         output_exts=(".tif", ".tiff"),
         accept_exts=(),
         is_channel_scoped=True, precedence=35,
+        match_bare_suffix=False,
     ),
 }
 
@@ -205,6 +213,8 @@ def classify_filename_role(
                 channel_suffix = f"{spec.suffix}_{fluor_norm}{ext}".lower()
                 if lower.endswith(channel_suffix):
                     return spec.role, p.name[: -len(channel_suffix)]
+            if not spec.match_bare_suffix:
+                continue
             bare = f"{spec.suffix}{ext}".lower()
             if lower.endswith(bare):
                 return spec.role, p.name[: -len(bare)]

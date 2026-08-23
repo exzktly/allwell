@@ -369,6 +369,18 @@ def load_frame_array(ctx, cache: dict, well: str, chan_upper: str, tp: str,
                     well, chan_lower, tp, fov,
                 )
     if ref is None:
+        if kind.startswith("ambiguous"):
+            # A refusal is a decision, and the cell it produces looks exactly
+            # like a frame that was never captured. Say which axis was left
+            # open and how many values it spanned, at a level the log drawer
+            # shows, so "(no image)" is diagnosable rather than mysterious.
+            logger.warning(
+                "frame_load: well=%r channel=%r has several frames matching "
+                "tp=%r fov=%r — refusing to pick one arbitrarily (%s). Choose "
+                "a %s to see it.",
+                well, chan_lower, tp, fov, kind,
+                "field" if kind.endswith("fov") else "timepoint",
+            )
         return None
     if kind != "exact":
         # Annotate any non-exact resolution so a surfaced neighbouring

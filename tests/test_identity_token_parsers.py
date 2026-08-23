@@ -116,10 +116,21 @@ def test_the_two_classifier_spellings_agree(name):
     assert kind_stem == role_stem
 
 
-def test_a_phase_output_is_not_a_raw_fluor_frame():
+def test_a_channel_scoped_phase_output_is_not_a_raw_fluor_frame():
     assert classify_filename_kind(
-        "A01_f1_T01_w2_phase.tif", fluor_token="w2",
+        "A01_f1_T01_phase_w2.tif", fluor_token="w2",
     )[0] == "phase"
+
+
+def test_a_channel_named_phase_is_not_a_phase_role_suffix():
+    """``_phase`` is the one role suffix that is also a plausible *channel
+    name*. A dataset whose last schema slot is a channel called ``phase``
+    writes ``A01_1_phase.tif``, which is indistinguishable from a bare
+    phase-role output — so only the channel-scoped spelling is matched, and
+    this file stays an ordinary raw frame."""
+    assert classify_filename_kind("A01_1_phase.tif", fluor_token="phase") == (
+        "fluor_raw", "A01_1_phase",
+    )
 
 
 # ── 3. zero is a token ───────────────────────────────────────────────────────
@@ -182,18 +193,15 @@ def test_channel_slot_is_not_stolen_from_a_narrow_well_slot():
     assert inferred.channels == ["w1", "w2", "w3"]
 
 
-def test_a_bare_number_slot_can_be_the_fov():
-    stems = [
-        f"EXP_{c}_{w}_{n}_t1"
-        for w in ("A01", "B02")
-        for c in ("w1", "w2")
-        for n in ("2", "3")
-    ]
+def test_a_bare_number_slot_is_left_unclaimed():
+    """A slot of bare integers is equally good evidence for a field number, a
+    timepoint index and a site number, and this module's contract is to leave
+    what it cannot identify as ``ignore`` rather than pre-fill the Analyze form
+    with a confident wrong guess."""
+    stems = [f"A01_w1DAPI_{h}" for h in ("0", "24", "48")]
     inferred = infer_schema(stems)
     assert inferred is not None
-    assert inferred.fields == [
-        "experiment", "channel", "well", "fov", "timepoint",
-    ]
+    assert "fov" not in inferred.fields
 
 
 # ── 5. channel roles ─────────────────────────────────────────────────────────
@@ -212,6 +220,13 @@ def test_a_bare_number_slot_can_be_the_fov():
         (["GFP_transfected", "DAPI"], "DAPI", ""),
         (["DAPI", "GFP", "DIC"], "DAPI", "DIC"),
         (["BFP", "DAPI"], "DAPI", ""),
+        # The ImageXpress prefix spelling, which this repo's own default
+        # tokens use. ``\bbf\b`` matched neither this nor "NIR_BF".
+        (["w1BF", "w2GFP"], "w2GFP", "w1BF"),
+        # A run-on that merely starts like the hint must not be phase: a
+        # transfection marker excluded from background correction is a
+        # measurement made on the wrong pixels.
+        (["GFPtrans", "DAPI"], "DAPI", ""),
     ],
 )
 def test_phase_and_nuclear_roles(names, expect_nuclear, expect_phase):
@@ -237,21 +252,25 @@ def test_a_single_timepoint_dataset_still_resolves():
 
 # ── 7. the timepoint tolerance is the shared one ─────────────────────────────
 
-_ABS_TP_TOL_RE = re.compile(
-    r"(?:target_t|col_tp|rec_tp|pt_t)[^\n]{0,80}?1e-6|1e-6[^\n]{0,80}?"
-    r"(?:target_t|col_tp|rec_tp|pt_t)"
-)
+_TP_NAME_RE = re.compile(r"\b(?:tp|tps|tp_col|timepoint|target_t|col_tp|rec_tp|pt_t|t)\b")
 
 
 def test_no_absolute_timepoint_tolerance_in_features():
     """A combo formats timepoints with ``:.4g``, so 2/3 h round-trips ~3e-5 off
     its original float — outside an absolute ``1e-6`` and inside the shared
     relative one. With both spellings live, one tab drew grouped bars for a
-    fractional timepoint and blanked the per-well ones beside them."""
+    fractional timepoint and blanked the per-well ones beside them.
+
+    The scan is deliberately wider than the sites that were fixed: a guard
+    written around the four variable names the first sweep happened to touch
+    reports "clean" for the six it missed, which is how a half-swept predicate
+    survives its own regression test. Any ``1e-6`` on a line that also names a
+    timepoint-ish variable counts.
+    """
     offenders = []
     for path in sorted((REPO_ROOT / "well_viewer" / "features").rglob("*.py")):
         for lineno, line in enumerate(path.read_text().splitlines(), 1):
-            if _ABS_TP_TOL_RE.search(line):
+            if "1e-6" in line and _TP_NAME_RE.search(line):
                 rel = path.relative_to(REPO_ROOT)
                 offenders.append(f"{rel}:{lineno}: {line.strip()}")
     assert not offenders, (

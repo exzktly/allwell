@@ -694,16 +694,21 @@ def find_well_images_and_masks(
 ):
     """Find fluor / overlay / mask / tophat images for a well across all layouts."""
     well_token = _extract_well_token(well_label)
-    # A label the token parser cannot read is *unknown*, not *unrestricted*.
-    # Section 3's filter is skipped when the token is falsy, so a label like
-    # "plate2-siteA" used to let every well's images through into this one
-    # well's accumulators. Fall back to filtering on the label text itself,
-    # which is what such a dataset names its files with anyway.
-    well_filter_token = well_token or str(well_label or "").strip()
-    if well_token is None and well_filter_token:
+    # A label the token parser cannot read is *unknown*, not *unrestricted*:
+    # Section 3's per-file well filter is skipped when the token is falsy, so
+    # every well's images are admitted into this one well's accumulators. That
+    # is said out loud rather than left silent. It is not *fixed* here, because
+    # the filter's predicate (``well_token_matches_text``) is written against a
+    # canonical token and answers "no" — or raises — for anything else, so
+    # feeding it the raw label swaps an over-permissive scan for one that
+    # matches nothing at all. Narrowing it properly needs a predicate that can
+    # judge a non-canonical label, which is a change to the well vocabulary
+    # itself.
+    if not well_token and str(well_label or "").strip():
         _logger.warning(
-            "Image discovery: %r does not parse as a well label; filtering "
-            "images on the label text instead of a canonical well token.",
+            "Image discovery: %r does not parse as a well label, so the "
+            "loose-file scan cannot filter by well — images belonging to other "
+            "wells may be included for this one.",
             well_label,
         )
     fluor_lower = fluor_token.lower()
@@ -743,7 +748,7 @@ def find_well_images_and_masks(
     )
     if not fluor and search_dirs:
         _scan_raw_disk_files(
-            search_dirs, well_filter_token, fluor_lower,
+            search_dirs, well_token, fluor_lower,
             _fov_tp_extractor, _pipeline_info, image_load_debug, targets,
         )
 

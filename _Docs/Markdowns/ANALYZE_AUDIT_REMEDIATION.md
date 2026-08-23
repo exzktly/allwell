@@ -29,10 +29,10 @@ rather than a write-up. **Delete it in the PR that closes the last group.**
 | Group | Theme | Branch | Version | PR | State |
 |---|---|---|---|---|---|
 | 1 | Stop the data loss | `…-ugoecl` | 9.0.1 | [#842](https://github.com/exzktly/allwell/pull/842) | **merged** |
-| 2 | One definition of an image, and an honest verdict | `claude/analysis-job-failure-recovery-ugoecl` | 9.0.2 | — | **in review** — all findings fixed, lane green, reviewer next |
-| 3 | The record and the resume path | `claude/analyze-audit-group3-record` | 9.0.5 | — | queued — starts when Group 2's PR opens |
-| 4 | The Analyze pane | `claude/analyze-audit-group4-pane` | 9.0.3 | — | **in progress** (parallel worker) |
-| 5 | Numbers and parsing | `claude/analyze-audit-group5-numbers` | 9.0.4 | — | **in progress** (parallel worker) |
+| 2 | One definition of an image, and an honest verdict | `claude/analysis-job-failure-recovery-ugoecl` | 9.0.2 | [#846](https://github.com/exzktly/allwell/pull/846) | **open** — lane green, adversarial review running |
+| 3 | The record and the resume path | `claude/analyze-audit-group3-record` | 9.0.5 | — | **in progress** — L1, L3, X2, X4, X5, X6 done |
+| 4 | The Analyze pane | `claude/analyze-audit-group4-pane` | 9.0.3 | [#844](https://github.com/exzktly/allwell/pull/844) | **open** — lane never completed, review still owed |
+| 5 | Numbers and parsing | `claude/analyze-audit-group5-numbers` | 9.0.4 | [#845](https://github.com/exzktly/allwell/pull/845) | **open** — lane never completed, adversarial review running |
 
 Counts: **34 done** (6 Tier-1 findings and 14 review findings on those fixes),
 **2 dropped**, **2 open questions**, **48 outstanding** — Group 2: 0 (all
@@ -43,6 +43,20 @@ The outstanding count exceeds the audit's 69 because it also carries the
 reviewer's findings on Group 1 and the tasks (a guard, a sweep) that no single
 finding owns. It is the count of *rows below*, which is the number that can be
 checked.
+
+
+> **Session-limit interruption, 23 August.** Both parallel workers and the
+> Group 2 reviewer were killed mid-task by an API session limit. No work was
+> lost — every branch's commits were pushed and every worktree was clean — but
+> two things these ground rules require did **not** happen for Groups 4 and 5:
+> neither ran `scripts/test.sh` to completion, and neither had its adversarial
+> review. Both PR bodies say so. CI on those PRs is the first full check either
+> has had, and the reviews are running now. Do not read either group as
+> verified until this note is removed.
+>
+> **This file is edited on Group 2's branch only.** It was briefly updated on
+> two branches at once, which is the same two-definitions failure the audit is
+> about, in the document tracking it.
 
 ---
 

@@ -637,14 +637,22 @@ def merge_records_into_csv(
     existing_rows: list[dict] = []
     fieldnames: list[str] = []
     if path.exists():
-        try:
-            with open(path, newline="") as fh:
-                reader = csv.DictReader(fh)
-                fieldnames = list(reader.fieldnames or [])
-                existing_rows = list(reader)
-        except OSError:
-            existing_rows = []
-            fieldnames = []
+        # A target that exists and cannot be read is **not** the same as no
+        # target. Treating the two alike meant one transient OSError — an EIO
+        # on an SMB or NFS output volume — silently rewrote the file with the
+        # new rows alone. Atomically, so there was no partial file to notice;
+        # the caller logged "+N row(s), merged" with N being the whole of what
+        # survived; and because `done_keys` unions the CSV with the well's
+        # `_out.zip`, which still held every image, the well went on reporting
+        # complete. The lost timepoints were unrecoverable short of --force.
+        #
+        # Note that a *corrupt* CSV already failed the well loudly here —
+        # UnicodeDecodeError and csv.Error were never caught — so an unreadable
+        # one truncating silently was also the two failures disagreeing.
+        with open(path, newline="") as fh:
+            reader = csv.DictReader(fh)
+            fieldnames = list(reader.fieldnames or [])
+            existing_rows = list(reader)
 
     seen = {_key(r) for r in existing_rows}
     to_add: list[dict] = []

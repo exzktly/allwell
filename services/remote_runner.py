@@ -5512,7 +5512,22 @@ class Fetcher:
                 continue
             if not rows:
                 continue
-            added = merge_records_into_csv(self.run.local_output_dir / partial.name, rows)
+            try:
+                added = merge_records_into_csv(
+                    self.run.local_output_dir / partial.name, rows)
+            except OSError as exc:
+                # The *local* target could not be read. `merge_records_into_csv`
+                # used to treat that as "there is no target" and rewrite the
+                # file with the fetched rows alone, losing every row the plate
+                # already had. Refusing this one file keeps the rest of the
+                # fetch going and leaves the existing CSV untouched, which is
+                # the recoverable state: the well's rows are still on the
+                # remote and still in its `_out.zip`.
+                self._log(
+                    f"[remote] warn: merging into {partial.name} failed "
+                    f"({exc}); the existing CSV is unchanged and this well's "
+                    f"new rows were not added\n")
+                continue
             self._log(
                 f"[remote] merge: {partial.name} → +{added} new row(s) "
                 f"into {self.run.local_output_dir.name}/\n"

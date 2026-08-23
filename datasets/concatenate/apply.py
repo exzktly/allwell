@@ -22,6 +22,7 @@ import json
 import math
 import shutil
 import threading
+from util.json_write import write_json_atomic
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -437,7 +438,7 @@ def _merge_cell_overrides(plan: MergePlan, emit: Callable[[str], None]) -> None:
             entry["seg_fp"] = f"{zip_path.stat().st_mtime_ns}"
 
     payload = {"version": _OVERRIDES_SCHEMA_VERSION, "overrides": entries}
-    (plan.dest.out_dir / _OVERRIDES_FILENAME).write_text(json.dumps(payload))
+    write_json_atomic(plan.dest.out_dir / _OVERRIDES_FILENAME, payload, indent=None)
     emit(f"Carried over {len(entries)} cell override(s) from the source dataset(s).")
 
 
@@ -698,7 +699,7 @@ def execute_plan(
 
     _merge_cell_overrides(plan, emit)
 
-    (plan.dest.out_dir / "pipeline_info.json").write_text(json.dumps(plan.merged_info, indent=2))
+    write_json_atomic(plan.dest.out_dir / "pipeline_info.json", plan.merged_info)
     marker_path.unlink(missing_ok=True)
     emit("Wrote merged pipeline_info.json.")
 

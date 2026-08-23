@@ -22,7 +22,7 @@ the queue page calls :meth:`JobQueue.start` explicitly.
 from __future__ import annotations
 
 import json
-import os
+from util.json_write import write_json_atomic
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -630,8 +630,4 @@ def load_queue(state_dir: Path | None = None) -> JobQueue:
 def save_queue(queue: JobQueue, state_dir: Path | None = None) -> None:
     """Write the queue via a tmp file + ``os.replace`` so a crash mid-write
     can't leave a truncated ``job_queue.json`` behind."""
-    path = queue_path(state_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(f"{path.suffix}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(queue.to_json(), indent=2))
-    os.replace(str(tmp), str(path))
+    write_json_atomic(queue_path(state_dir), queue.to_json())

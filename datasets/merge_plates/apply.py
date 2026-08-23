@@ -15,6 +15,7 @@ import csv
 import json
 import shutil
 import threading
+from util.json_write import write_json_atomic
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -243,7 +244,7 @@ def _merge_cell_overrides(plan: PlateMergePlan, emit: Callable[[str], None]) -> 
         with swallow(f"stat {zip_path}"):
             entry["seg_fp"] = f"{zip_path.stat().st_mtime_ns}"
     payload = {"version": OVERRIDES_SCHEMA_VERSION, "overrides": entries}
-    (plan.dest.out_dir / OVERRIDES_FILENAME).write_text(json.dumps(payload))
+    write_json_atomic(plan.dest.out_dir / OVERRIDES_FILENAME, payload, indent=None)
     emit(f"Carried over {len(entries)} cell override(s) from the source dataset(s).")
 
 
@@ -303,6 +304,8 @@ def execute_plan(
 
     if plan.timepoint_warning:
         emit(f"Note: {plan.timepoint_warning}")
+    if plan.blocks_warning:
+        emit(f"Note: {plan.blocks_warning}")
     emit(
         f"Wells: {len(plan.wells_ds1)} from dataset 1, {len(plan.wells_ds2)} from "
         "dataset 2 (after remap)."
@@ -375,7 +378,7 @@ def execute_plan(
 
     _merge_cell_overrides(plan, emit)
 
-    (plan.dest.out_dir / "pipeline_info.json").write_text(json.dumps(plan.merged_info, indent=2))
+    write_json_atomic(plan.dest.out_dir / "pipeline_info.json", plan.merged_info)
     marker_path.unlink(missing_ok=True)
     emit("Wrote merged pipeline_info.json.")
 

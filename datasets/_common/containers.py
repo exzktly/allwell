@@ -41,12 +41,13 @@ bytes in hand.
 from __future__ import annotations
 
 import contextlib
+import os
 import shutil
 import zipfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from util.zip_write import atomic_zip
+from util.zip_write import atomic_zip, staging_path
 from datasets._common.dataset_paths import DatasetPaths
 from datasets._common.zip_passthrough import copy_member_raw, member_is_raw_copyable
 
@@ -324,7 +325,19 @@ def copy_container_members(
             and all(dest_name == entry.filename for _archive, entry, dest_name in planned)
         ):
             dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(sources[0], dest)
+            # Staged and renamed, exactly like the tier-2/3 path below. Copying
+            # straight onto *dest* would leave a truncated ``<WELL>.zip`` if the
+            # copy is interrupted — a well whose images read as partly vanished,
+            # from the one tier that was supposed to be the safest because it
+            # moves the file whole. The comment below says nothing here is
+            # written straight to the destination; this is what makes that true.
+            staging = staging_path(dest)
+            try:
+                shutil.copy2(sources[0], staging)
+                os.replace(str(staging), str(dest))
+            except BaseException:
+                staging.unlink(missing_ok=True)
+                raise
             _close_progress(progress)
             return frozenset(written), frozenset()
 

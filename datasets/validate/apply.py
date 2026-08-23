@@ -31,6 +31,7 @@ from datasets._common.dataset_paths import (
     resolve_dataset,
 )
 from datasets.validate.validate_compute import DatasetReport, _OVERRIDES_FILENAME
+from util.json_write import write_json_atomic
 
 
 @dataclass(frozen=True)
@@ -93,7 +94,7 @@ def _prune_stale_overrides(paths) -> int:
         kept.append(entry)
     if dropped:
         payload = {"version": data.get("version", 2), "overrides": kept}
-        overrides_path.write_text(json.dumps(payload))
+        write_json_atomic(overrides_path, payload, indent=None)
     return dropped
 
 
@@ -133,7 +134,7 @@ def apply_repairs(root: Path | str, report: DatasetReport) -> RepairResult:
         )
         rebuilt = True
     if rebuilt:
-        info_path.write_text(json.dumps(info, indent=2))
+        write_json_atomic(info_path, info)
 
     pruned = _prune_stale_overrides(paths)
     swept = _sweep_staging_files(paths)

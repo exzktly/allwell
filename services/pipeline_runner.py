@@ -868,13 +868,19 @@ class PipelineRunner:
                     "line",
                     "[warn] Zip mode detected; folder-mode compression options do not apply.\n",
                 ))
+            # Built before the directory is created, and deliberately so.
+            # ``build_pipeline_args`` is pure string assembly, but it reads
+            # required keys off ``opts`` and raises on a missing one — and
+            # creating the output directory first meant a form the pipeline
+            # could not be launched from still left an empty ``out/`` behind,
+            # for a run that never started and left nothing to explain it.
+            args = build_pipeline_args(pipeline, input_dir, output_dir, opts)
             try:
                 output_dir.mkdir(parents=True, exist_ok=True)
             except OSError as exc:
                 self._enqueue_error(f"Cannot create output dir: {exc}\n")
                 return
             self._last_output_dir = output_dir
-            args = build_pipeline_args(pipeline, input_dir, output_dir, opts)
             # The run begins on disk here, and not one line earlier: the output
             # directory is resolved inside this thread, so this is the first
             # moment the journal has a home. Opening it before the fork below

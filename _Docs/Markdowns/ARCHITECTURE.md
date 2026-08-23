@@ -4271,11 +4271,19 @@ nothing about how complete the *output* is — that is `completeness`'s answer a
 §6.1's pre-run readout carries it.
 
 `PipelineRunner._run_pipeline_thread` is where the journal opens and closes:
-just below where `_last_output_dir` is set and the pipeline arguments are built,
-and inside the `finally` beside `("finished", None)`. That is the only chokepoint every mode passes through:
-local, remote and batched all fork below it, and the output directory does not
-exist as a known path any earlier, because `resolve_dirs` runs inside that
-thread. The outcome comes from the runner's own flags rather than the queue it
+just below where the output directory is created and `_last_output_dir` is set,
+and inside the `finally` beside `("finished", None)`. That is the only
+chokepoint every mode passes through: local, remote and batched all fork below
+it, and the output directory does not exist as a known path any earlier,
+because `resolve_dirs` runs inside that thread.
+
+The pipeline's argument list is built one step earlier still, *before* the
+directory is created. `build_pipeline_args` is pure string assembly but reads
+required keys off `opts` and raises on a missing one, so creating the directory
+first left an empty `out/` behind whenever the form could not produce a
+launchable command — an output folder, and nothing beside it to say what it
+was, for a run that never started. `tests/test_run_leaves_no_empty_output_dir.py`
+holds the order. The outcome comes from the runner's own flags rather than the queue it
 just wrote to — suspend is asked about before stop, since a suspend sets both and
 asking the other way round would record every suspend as a cancel.
 

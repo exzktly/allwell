@@ -130,12 +130,6 @@ def load_all() -> list[SuspendedRun]:
     return runs
 
 
-def latest() -> SuspendedRun | None:
-    """The most recently suspended run, or ``None``."""
-    runs = load_all()
-    return runs[0] if runs else None
-
-
 def save(run: SuspendedRun) -> bool:
     """Record *run*, replacing any earlier entry for the same output dir.
 

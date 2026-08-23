@@ -55,6 +55,7 @@ def timepoint_color_map(timepoints) -> dict[float, Any]:
 # distribution / heat map, so it lives in the data layer now; re-exported here
 # for the existing ``scatter.collect`` / ``scatter.controller`` import paths.
 from well_viewer.data.data_loading import get_all_timepoints  # noqa: F401
+from well_viewer.domain.tp_match import tp_close_mask
 
 # Lazy: ``gating`` imports ``timepoint_color_map`` from this module, so a
 # module-scope import back would cycle. Same binding style the Cell Gating
@@ -136,7 +137,7 @@ def collect_scatter_data(
 
     ``timepoints_h`` accepts a single ``float`` (legacy) or a list of floats.
     Cells whose ``timepoint_hours`` matches any of the supplied values
-    (within 1e-6) are included.
+    (within the shared relative tolerance, ``domain.tp_match``) are included.
 
     Groups data by well group (if defined) or by individual well. Each group/well
     gets a distinct color and contains x/y values plus metadata for click tracking.
@@ -210,7 +211,7 @@ def collect_scatter_data(
                 # tp ≈ any selected target within tolerance.
                 tp_match = np.zeros_like(tp, dtype=bool)
                 for t in target_arr:
-                    tp_match |= np.abs(tp - t) <= 1e-6
+                    tp_match |= tp_close_mask(tp, t)
                 mask &= finite & tp_match
         area = pd.to_numeric(df["area_px"], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):

@@ -16,41 +16,52 @@ from pathlib import Path
 from dataclasses import dataclass
 from collections.abc import Callable, Mapping
 from util.well_token import canonical_well_label
-
-
-OUTPUT_SUFFIXES: dict[str, tuple[str, ...]] = {
-    "mask": ("_labels.tif", "_labels.tiff", "_labels.png"),
-    "overlay": ("_overlay.png", "_overlay.jpg", "_overlay.jpeg", "_overlay.tif", "_overlay.tiff"),
-    "tophat": (
-        "_tophat.tif",
-        "_tophat.tiff",
-        "_tophat_{channel}.tif",
-        "_tophat_{channel}.tiff",
-    ),
-    # Backwards-compatible alias for old callers.
-    "fluor_processed": (
-        "_tophat.tif",
-        "_tophat.tiff",
-        "_tophat_{channel}.tif",
-        "_tophat_{channel}.tiff",
-    ),
-    "fluor_raw": (),
-    "smfish": (
-        "_smfish.tif",
-        "_smfish.tiff",
-        "_smfish_{channel}.tif",
-        "_smfish_{channel}.tiff",
-    ),
-}
-
-
-OUTPUT_KIND_PRECEDENCE: tuple[str, ...] = (
-    "mask",
-    "overlay",
-    "smfish",
-    "tophat",
-    "fluor_processed",
+from well_viewer.data.image_identity import (
+    ROLE_CATALOG,
+    Role,
+    classify_filename_role,
+    raw_token,
 )
+
+
+def _suffixes_for_role(role: Role) -> tuple[str, ...]:
+    """The suffix+extension forms a role's files can carry, as templates.
+
+    Channel-scoped roles yield the bare form first and then the
+    ``{channel}``-templated one, reproducing the order of the hand-written
+    table this replaced. The order still matters to the consumers that build a
+    regex alternation from it (``features/smfish/controller``,
+    ``image_discovery._suffix_matcher``); ``classify_filename_kind`` no longer
+    reads it at all, since it delegates to ``classify_filename_role``.
+
+    A role whose bare suffix is ambiguous with a channel name
+    (``match_bare_suffix=False``) contributes only its channel-scoped form."""
+    spec = ROLE_CATALOG[role]
+    if not spec.suffix:
+        return ()
+    bare = tuple(f"{spec.suffix}{ext}" for ext in spec.all_exts
+                 if spec.match_bare_suffix)
+    if not spec.is_channel_scoped:
+        return bare
+    scoped = tuple(f"{spec.suffix}_{{channel}}{ext}" for ext in spec.all_exts)
+    return bare + scoped
+
+
+# Derived from ``image_identity.ROLE_CATALOG`` rather than written out again:
+# the catalog is the single source of truth for which suffix and extensions
+# belong to a role, and a second hand-maintained copy is how the two sides
+# drift (the copy here had no ``phase`` entry at all, so a processed phase
+# image classified as a raw fluor frame).
+OUTPUT_SUFFIXES: dict[str, tuple[str, ...]] = {
+    "mask": _suffixes_for_role(Role.MASK),
+    "overlay": _suffixes_for_role(Role.OVERLAY),
+    "tophat": _suffixes_for_role(Role.FLUOR_TOPHAT),
+    # Backwards-compatible alias for old callers.
+    "fluor_processed": _suffixes_for_role(Role.FLUOR_TOPHAT),
+    "fluor_raw": _suffixes_for_role(Role.FLUOR_RAW),
+    "smfish": _suffixes_for_role(Role.SMFISH),
+    "phase": _suffixes_for_role(Role.PHASE),
+}
 
 
 CANONICAL_SUFFIX_FAMILIES: tuple[str, ...] = (
@@ -106,22 +117,29 @@ def output_suffixes_for_kind(output_kind: str, *, target_channel: str = "") -> t
     return tuple(out)
 
 
+_ROLE_TO_KIND: dict[Role, str] = {
+    Role.MASK: "mask",
+    Role.OVERLAY: "overlay",
+    Role.SMFISH: "smfish",
+    Role.PHASE: "phase",
+    Role.FLUOR_TOPHAT: "tophat",
+    Role.FLUOR_RAW: "fluor_raw",
+}
+
+
 def classify_filename_kind(name: str, *, fluor_token: str = "") -> tuple[str, str]:
-    """Classify filename into canonical kind and return (kind, stem_without_kind_suffix)."""
-    p = Path(str(name or "").strip())
-    if not p.name:
-        return "", ""
-    lower_name = p.name.lower()
+    """Classify filename into canonical kind and return (kind, stem_without_kind_suffix).
 
-    for kind in OUTPUT_KIND_PRECEDENCE:
-        suffixes = output_suffixes_for_kind(kind, target_channel=fluor_token)
-        for suffix in suffixes:
-            lowered = suffix.lower()
-            if lower_name.endswith(lowered):
-                stripped = p.name[: -len(suffix)] if len(suffix) else p.name
-                return kind, Path(stripped).stem
-
-    return "fluor_raw", p.stem
+    A thin legacy-vocabulary wrapper over
+    :func:`image_identity.classify_filename_role`, which is the one
+    implementation. It used to be a second, independently written classifier
+    over a second copy of the suffix table; the two then disagreed about
+    ``phase`` and shared a stem-truncation bug, and only one of them was ever
+    described as the single source of truth."""
+    role, stem = classify_filename_role(name, fluor_token=fluor_token)
+    if role is None:
+        return ("", "") if not stem and not str(name or "").strip() else ("fluor_raw", stem)
+    return _ROLE_TO_KIND[role], stem
 
 
 def normalize_row_filename(filename: str) -> str:
@@ -133,7 +151,16 @@ def normalize_row_filename(filename: str) -> str:
 
 
 def normalize_numeric_token(value: object) -> str:
-    raw = str(value or "").strip()
+    """Normalize a numeric identity token (FOV, timepoint index) to a stable
+    string, so ``"1"``, ``"01"`` and ``1.0`` all compare equal.
+
+    Goes through :func:`image_identity.raw_token` rather than
+    ``str(value or "")``: FOV and timepoint tokens are legitimately ``0``
+    (``util.plate_grid.position_to_well_fov`` hands out 0-based FOV indices),
+    and ``0`` is falsy, so the obvious spelling reported a real token as absent
+    — which in :func:`well_viewer.data.frame_load.match_image_ref` turns an
+    exact key into "match anything"."""
+    raw = raw_token(value).strip()
     if not raw:
         return ""
     try:
@@ -144,7 +171,7 @@ def normalize_numeric_token(value: object) -> str:
 
 def normalize_well_token(value: object) -> str:
     """Normalize well tokens so `A1` and `A01` are treated as identical."""
-    raw = str(value or "").strip()
+    raw = raw_token(value).strip()
     if not raw:
         return ""
     return canonical_well_label(raw) or raw.upper()

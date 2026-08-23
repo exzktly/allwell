@@ -43,6 +43,7 @@ from well_viewer.core.channel_state_controller import (
     on_cutoff_for_column,
 )
 from well_viewer.core.timepoint_sync import current_focus_tp, nearest_index
+from well_viewer.domain.tp_match import tp_close
 
 
 METRIC_MEAN = "Mean above threshold"
@@ -290,7 +291,7 @@ def _cell_value(
             val_col=val_col,
             fluor_gates=fluor_gates,
         )
-        matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
+        matched = [pt for pt in pts if tp_close(pt[0], target_t)]
         return float(matched[0][5]) if matched else 0.0
 
     if metric == METRIC_FRACTION:
@@ -299,7 +300,7 @@ def _cell_value(
             val_col=val_col,
             fluor_gates=fluor_gates,
         )
-        matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
+        matched = [pt for pt in pts if tp_close(pt[0], target_t)]
         if not matched:
             return float("nan")
         return float(matched[0][3])
@@ -339,7 +340,7 @@ def _cell_value(
         val_col=val_col,
         fluor_gates=fluor_gates,
     )
-    matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
+    matched = [pt for pt in pts if tp_close(pt[0], target_t)]
     if not matched:
         return float("nan")
     return float(matched[0][1])

@@ -593,8 +593,19 @@ def _scan_raw_disk_files(
                 tophat_fluor.setdefault((fov, tp), ref)
             elif kind == "overlay":
                 overlay.setdefault((fov, tp), ref)
-            else:
+            elif kind == "mask":
                 mask.setdefault((fov, tp), ref)
+            else:
+                # Anything else classified — smFISH today, phase tomorrow —
+                # belongs to none of these four accumulators. This used to be a
+                # bare ``else`` that filed every remaining kind as a *mask*, so a
+                # smFISH image was handed to ``load_mask_array``, which rounds it
+                # to an int32 label image: spot intensities read as nucleus ids.
+                if image_load_debug:
+                    _logger.info(
+                        "[image-load-debug] skip %s kind=%s has no accumulator here",
+                        p.name, kind,
+                    )
 
 
 def _discover_from_layouts(
@@ -683,6 +694,23 @@ def find_well_images_and_masks(
 ):
     """Find fluor / overlay / mask / tophat images for a well across all layouts."""
     well_token = _extract_well_token(well_label)
+    # A label the token parser cannot read is *unknown*, not *unrestricted*:
+    # Section 3's per-file well filter is skipped when the token is falsy, so
+    # every well's images are admitted into this one well's accumulators. That
+    # is said out loud rather than left silent. It is not *fixed* here, because
+    # the filter's predicate (``well_token_matches_text``) is written against a
+    # canonical token and answers "no" — or raises — for anything else, so
+    # feeding it the raw label swaps an over-permissive scan for one that
+    # matches nothing at all. Narrowing it properly needs a predicate that can
+    # judge a non-canonical label, which is a change to the well vocabulary
+    # itself.
+    if not well_token and str(well_label or "").strip():
+        _logger.warning(
+            "Image discovery: %r does not parse as a well label, so the "
+            "loose-file scan cannot filter by well — images belonging to other "
+            "wells may be included for this one.",
+            well_label,
+        )
     fluor_lower = fluor_token.lower()
     fluor: dict[tuple[str, str], ImgRef] = {}
     overlay: dict[tuple[str, str], ImgRef] = {}

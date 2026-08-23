@@ -254,34 +254,42 @@ def match_image_ref(images: dict, fov: str, tp: str):
 
     Tiers, in order: exact tuple key → normalized-token (``"1.0"`` ↔ ``"1"``)
     → numeric-close (``"T01"`` ↔ ``"1"``, timepoints matched with the S2
-    relative tolerance). When ``fov`` is empty (empty dropdown) and MORE THAN
-    ONE distinct FOV would satisfy the timepoint, prefer "no image" —
-    ``(None, "ambiguous_fov")`` — rather than silently surfacing an arbitrary
-    first FOV; a genuinely single-FOV dataset still resolves unambiguously.
+    relative tolerance).
+
+    An empty axis matches everything, so when one is empty (an empty dropdown)
+    and MORE THAN ONE distinct value on that axis would satisfy the request,
+    this prefers "no image" — ``(None, "ambiguous_fov")`` /
+    ``(None, "ambiguous_tp")`` — over silently surfacing whichever entry the
+    dict happened to yield first. The rule applies to both axes: it was written
+    for FOV, and an empty *timepoint* had the same free-for-all match with no
+    refusal behind it, so an arbitrary timepoint's frame came back reported as a
+    successful ``"normalized"`` resolution. A genuinely single-FOV or
+    single-timepoint dataset still resolves unambiguously.
     """
     exact = images.get((str(fov), str(tp)))
     if exact is not None:
         return exact, "exact"
 
     def _pick(pred):
-        # Returns (val, "ok") for a unique resolution, (None, "ambiguous_fov")
-        # when an empty fov spans multiple FOVs, or (None, "") for no match.
-        hits = [(cf, val) for (cf, ct), val in images.items() if pred(cf, ct)]
+        # Returns (val, "ok") for a unique resolution, (None, "ambiguous_fov") /
+        # (None, "ambiguous_tp") when an unspecified axis spans more than one
+        # value, or (None, "") for no match.
+        hits = [(cf, ct, val) for (cf, ct), val in images.items() if pred(cf, ct)]
         if not hits:
             return None, ""
-        if not str(fov or "").strip():
-            distinct = {cf for cf, _ in hits}
-            if len(distinct) > 1:
-                return None, "ambiguous_fov"
-        return hits[0][1], "ok"
+        if not str(fov or "").strip() and len({cf for cf, _, _ in hits}) > 1:
+            return None, "ambiguous_fov"
+        if not str(tp or "").strip() and len({ct for _, ct, _ in hits}) > 1:
+            return None, "ambiguous_tp"
+        return hits[0][2], "ok"
 
     target_fov = norm_token(fov)
     target_tp = norm_token(tp)
     val, status = _pick(lambda cf, ct:
         ((not target_tp) or norm_token(ct) == target_tp)
         and ((not target_fov) or norm_token(cf) == target_fov))
-    if status == "ambiguous_fov":
-        return None, "ambiguous_fov"
+    if status.startswith("ambiguous"):
+        return None, status
     if val is not None:
         return val, "normalized"
 
@@ -299,8 +307,8 @@ def match_image_ref(images: dict, fov: str, tp: str):
     val, status = _pick(lambda cf, ct:
         (target_tp_n is None or _close(numeric_token(ct), target_tp_n))
         and (target_fov_n is None or _close(numeric_token(cf), target_fov_n)))
-    if status == "ambiguous_fov":
-        return None, "ambiguous_fov"
+    if status.startswith("ambiguous"):
+        return None, status
     if val is not None:
         return val, "numeric"
     return None, ""
@@ -347,7 +355,7 @@ def load_frame_array(ctx, cache: dict, well: str, chan_upper: str, tp: str,
     # "(no image)". ``kind == "ambiguous_fov"`` is a deliberate refusal (an empty
     # FOV spanning several fields), not a gap in the corrected set, so it is left
     # to stand instead of being retried against a dict with the same ambiguity.
-    if ref is None and kind != "ambiguous_fov" and use_tophat and not is_overlay:
+    if ref is None and not kind.startswith("ambiguous") and use_tophat and not is_overlay:
         raw = load_well_channel(ctx, cache, well, chan_lower,
                                 use_tophat=False, scan_misses=scan_misses)
         if raw:
@@ -361,6 +369,18 @@ def load_frame_array(ctx, cache: dict, well: str, chan_upper: str, tp: str,
                     well, chan_lower, tp, fov,
                 )
     if ref is None:
+        if kind.startswith("ambiguous"):
+            # A refusal is a decision, and the cell it produces looks exactly
+            # like a frame that was never captured. Say which axis was left
+            # open and how many values it spanned, at a level the log drawer
+            # shows, so "(no image)" is diagnosable rather than mysterious.
+            logger.warning(
+                "frame_load: well=%r channel=%r has several frames matching "
+                "tp=%r fov=%r — refusing to pick one arbitrarily (%s). Choose "
+                "a %s to see it.",
+                well, chan_lower, tp, fov, kind,
+                "field" if kind.endswith("fov") else "timepoint",
+            )
         return None
     if kind != "exact":
         # Annotate any non-exact resolution so a surfaced neighbouring

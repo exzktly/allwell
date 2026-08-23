@@ -16,7 +16,10 @@ way:
   (:func:`util.well_token.canonical_well_label`).
 * **timepoint** — a ``t<n>`` / ``<n>h`` style slot (:func:`util.timepoint.parse_hours`
   with an explicit prefix or unit, so a bare integer is not mistaken for one).
-* **fov** — an explicit ``f<n>`` slot.
+* **fov** — an explicit ``f<n>`` slot. A slot of bare integers is deliberately
+  *not* claimed: the same evidence would equally support a timepoint index or a
+  site number, and this module leaves what it cannot identify as ``ignore``
+  rather than pre-filling the Analyze form with a confident wrong guess.
 * **experiment** — a slot constant across every sampled name.
 * **channel** — the remaining small, mostly-alphabetic categorical slot; its
   distinct values are the channel tokens, seeded into roles by
@@ -199,19 +202,38 @@ def _fraction(col: list[str], pred) -> float:
 
 
 def _best_slot(cols, pred, used: set[int]) -> int | None:
-    """The unused column index best matching *pred* above the min fraction."""
-    best_i, best_f = None, _MIN_SLOT_FRACTION
+    """The unused column index best matching *pred* above the min fraction.
+
+    Ties go to the **leftmost** column. The comparison used to be ``>=``
+    against a running best, which handed a tie to the *rightmost* one — and ties
+    are the normal case, not an edge case: two slots that both parse perfectly
+    both score 1.0. On the default ``experiment:channel:well:fov:timepoint``
+    layout that gave the ``well`` role to the FOV slot, because ``f01``–``f12``
+    are also valid 96-well labels (row F), so the real well column was left
+    unclassified and every image was attributed to well ``F01``.
+    """
+    best_i, best_f = None, None
     for i, col in enumerate(cols):
         if i in used:
             continue
         f = _fraction(col, pred)
-        if f >= best_f:
+        if f < _MIN_SLOT_FRACTION:
+            continue
+        if best_f is None or f > best_f:
             best_i, best_f = i, f
     return best_i
 
 
 def _pick_channel_slot(cols, used: set[int]) -> int | None:
-    """The leftmost unused slot that reads as a small alphabetic categorical set."""
+    """The unused slot with the fewest distinct values that reads as a small
+    alphabetic categorical set; leftmost on a tie.
+
+    Fewest-distinct rather than leftmost outright: a plate has more wells than
+    channels, so on any layout where both slots survive the earlier passes the
+    channel slot is the narrower one. The earlier passes are what make that safe
+    — the well slot is claimed by :func:`_classify_slots` before this runs, and
+    when it is not (a folder with fewer wells than channels), the narrower slot
+    genuinely is the better guess."""
     best_i, best_distinct = None, None
     for i, col in enumerate(cols):
         if i in used:
@@ -231,15 +253,20 @@ def _classify_slots(rows: list[list[str]], k: int) -> tuple[list[str], int | Non
     fields = ["ignore"] * k
     used: set[int] = set()
 
-    well_i = _best_slot(cols, _is_well, used)
-    if well_i is not None:
-        fields[well_i] = "well"; used.add(well_i)
+    # Order matters, and it runs strictest-predicate-first. ``t<n>`` and
+    # ``f<n>`` can only be what they look like; a well label cannot. The reverse
+    # is not true — ``f01``..``f12`` *are* valid well labels — so classifying
+    # well first let the FOV slot answer a question it is not entitled to
+    # answer, and the real well column was then left over as ``ignore``.
     tp_i = _best_slot(cols, _is_timepoint, used)
     if tp_i is not None:
         fields[tp_i] = "timepoint"; used.add(tp_i)
     fov_i = _best_slot(cols, _is_fov, used)
     if fov_i is not None:
         fields[fov_i] = "fov"; used.add(fov_i)
+    well_i = _best_slot(cols, _is_well, used)
+    if well_i is not None:
+        fields[well_i] = "well"; used.add(well_i)
     for i in range(k):
         if i not in used and len(set(cols[i])) == 1:
             fields[i] = "experiment"; used.add(i)

@@ -34,6 +34,19 @@ from typing import Any
 _TRAILING_NUM_RE = re.compile(r"(\d+(?:\.\d+)?)$")
 
 
+def _token(value: Any) -> str:
+    """Stringify *value* for parsing, treating only ``None`` as absent.
+
+    The same rule, and the same reason, as :func:`util.timepoint._token`:
+    ``str(value or "")`` reports a numeric ``0`` as no token at all, and FOV
+    ``0`` is real — ``util.plate_grid.position_to_well_fov`` hands out 0-based
+    FOV indices. With the falsy spelling, FOV 0 was indistinguishable from a
+    missing FOV and sorted into the opaque block at the end
+    (``sorted([1, 2, 10, 0], key=sort_key)`` gave ``[1, 2, 10, 0]``).
+    """
+    return "" if value is None else str(value)
+
+
 def parse_fov(value: Any) -> float | None:
     """Parse an FOV token into a number, or ``None`` for an opaque label.
 
@@ -41,7 +54,7 @@ def parse_fov(value: Any) -> float | None:
     prefixed token (``"f10"`` → 10.0). ``None`` means "not a number I can read";
     callers keep such tokens as-is and sort them last.
     """
-    s = str(value or "").strip()
+    s = _token(value).strip()
     if not s:
         return None
     try:
@@ -62,6 +75,6 @@ def sort_key(value: Any) -> tuple[bool, float, str]:
     tokens is stable and puts the real FOVs first, in numeric order regardless of
     an ``f`` prefix.
     """
-    token = str(value or "").strip()
+    token = _token(value).strip()
     n = parse_fov(token)
     return (n is None, n if n is not None else 0.0, token)

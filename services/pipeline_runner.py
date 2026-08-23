@@ -666,6 +666,22 @@ class PipelineRunner:
         corresponding flags on :func:`scripts.allwell_remote.main` —
         they're ignored in local mode.
         """
+        # The GUI is not the only thing that can ask twice, and it is not the
+        # right place to enforce this: overwriting `self._thread` and `_proc`
+        # leaves the first run unreachable — `stop()` can only signal whichever
+        # process was assigned last — while both write the same output
+        # directory and both fire `finished`, so a queue bridge starts the next
+        # job twice.
+        # Asked of the worker thread, not of `is_running`: that property reads
+        # the pipeline *subprocess*, which does not exist yet while the run is
+        # resolving directories and grouping — a window of seconds to minutes
+        # on a large plate, and exactly when the GUI's Run button was being
+        # re-armed. A finished run has joined, so the queue starting the next
+        # job on the same runner is unaffected.
+        if self._thread is not None and self._thread.is_alive():
+            raise RuntimeError(
+                "a pipeline is already running in this runner; stop it before "
+                "starting another")
         self._remote = remote
         self._remote_runner: RemoteRunner | None = (
             RemoteRunner(remote) if remote is not None else None

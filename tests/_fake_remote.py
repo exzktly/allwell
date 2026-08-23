@@ -111,6 +111,7 @@ class FakeRemote:
         calls with the test's mock.
         """
         import services.remote_runner as rr
+        from services import remote_transport
 
         ssh_prefix = host.ssh_argv(allocate_tty=False)
         ssh_prefix_tty = host.ssh_argv(allocate_tty=True)
@@ -188,7 +189,12 @@ class FakeRemote:
         monkeypatch.setattr(rr.subprocess, "run", _run)
         monkeypatch.setattr(rr.subprocess, "Popen", _popen)
         monkeypatch.setattr(rr, "_rsync_with_retry", _rsync)
-        monkeypatch.setattr(rr, "_rsync_run_cancellable",
+        # ``_rsync_run_cancellable`` is called from inside
+        # ``remote_transport._rsync_with_retry``, so it has to be patched on
+        # the module that holds that caller.  ``remote_runner`` only re-exports
+        # the name, and patching a re-exported binding never reaches a caller
+        # living in the module the name came from.
+        monkeypatch.setattr(remote_transport, "_rsync_run_cancellable",
                             lambda cmd, **kw: _rsync(cmd, **kw))
 
     def _finish(self, argv, out, kw):

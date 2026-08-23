@@ -139,6 +139,43 @@ a tracker is read every time someone picks the work up.
    have collided, and the version-literal guard makes such a conflict expensive
    to resolve.
 
+5. **`ScanResult.partial` reaches no user-facing surface.** Item 12 makes a
+   truncated scan say so in its own return value; nothing yet reads it —
+   `data/frame_load.py` and `features/image_browser/review_image/renderer.py`
+   are the two surfaces that should. Until they do, the honest verdict exists
+   and the user still cannot see it.
+6. **`project_verdict_column`'s failure list has no reader** (item 23). The QC
+   and Crop controllers should surface which wells' verdicts could not be
+   re-projected.
+7. **`review_image/renderer.py` still coerces a `None` threshold map to `{}`** —
+   the same "unmeasured looks like empty" conflation as item 2, one surface
+   over. No regression; it was simply outside the item's scope.
+8. **`scatter_panel`'s four `_run_scatter_*_job` methods read every axis combo
+   and `self._scatter_mode` live, per job** (the neighbourhood of item 100). A
+   mode change mid-run splits one manifest across two export kinds. Fixing it
+   needs a snapshot threaded through four signatures, so it is recorded rather
+   than half-swept.
+9. **`composite_column_rgb` has no ratio or overlay handling at all** (found
+   around item 60). A real gap, though the function is presently dead in the app
+   — a re-export kept only for its import.
+10. **`_WELL_TOKEN_IN_TEXT_RE` reads a FOV token `f1` as the well `F01`**
+    (`data/image_resolver.py`). Pre-existing and unrelated to any item here.
+
+## A lesson this work paid for
+
+Checkpointing a group's in-flight tree into `HEAD` silently invalidated the
+other groups' guard proofs. `scripts/prove_guard.sh` compares against a base
+ref, and once a checkpoint carried the fixes into the history, the base
+contained them too — so proofs came back "passed on the base", which reads as
+*the rule already held* rather than as *this measured nothing*. Both W2 and W3
+hit it; W2 re-based its proofs on the last commit before its package began, and
+W3 switched to mutating the fix at `HEAD` instead.
+
+If groups are again run in parallel with checkpoint commits between them, either
+prove against a ref taken before any of the work started, or mutate the fix in
+place. This is CLAUDE.md §7.3 #1 — a harness that fails open will happily
+confirm anything — arriving through a route nobody had written down.
+
 ## A note on the commit history
 
 Several commits here were staged with `git add -A` while more than one group was

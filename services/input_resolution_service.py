@@ -519,6 +519,12 @@ class LooseAppendPlan:
 
     #: canonical well → the loose files that are not already in its archive.
     by_well: dict[str, list[Path]] = field(default_factory=dict)
+    #: Wells whose archive already held at least one member. Carried because
+    #: the append logs "created" or "updated" from it, and an archive that
+    #: exists but is empty is "created" — the planner has the member list in
+    #: hand, so deriving this from ``target.exists()`` at the write instead
+    #: silently changed that word for exactly that case.
+    nonempty: frozenset[str] = frozenset()
 
     @property
     def total(self) -> int:
@@ -583,6 +589,7 @@ def plan_loose_append(
         return empty
 
     planned: dict[str, list[Path]] = {}
+    had_members: set[str] = set()
     for well, files in sorted(by_well.items()):
         target = grouped_dir / f"{well}.zip"
         existing: set[str] = set()
@@ -601,7 +608,9 @@ def plan_loose_append(
             )
         if new_files:
             planned[well] = new_files
-    return LooseAppendPlan(by_well=planned)
+            if existing:
+                had_members.add(well)
+    return LooseAppendPlan(by_well=planned, nonempty=frozenset(had_members))
 
 
 def append_loose_images_to_zips(
@@ -648,9 +657,9 @@ def append_loose_images_to_zips(
     )
     for well, new_files in sorted(plan.by_well.items()):
         target = grouped_dir / f"{well}.zip"
-        existing = target.exists()
+        existing = well in plan.nonempty
 
-        def _append(target=target, new_files=new_files, existing=existing) -> None:
+        def _append(target=target, new_files=new_files) -> None:
             with atomic_zip(target) as zf:
                 if target.exists():
                     with zipfile.ZipFile(target, "r") as src:
@@ -696,7 +705,14 @@ class ScopePlan:
     """
 
     mode: str
+    #: What the run log says once the fold has happened — past tense, because
+    #: by the time it is printed it has.
     reason: str
+    #: What the pre-run readout says *before* it happens. The same verdict and
+    #: the same justification, in the tense that is true at the time: a preview
+    #: printing "Appended 3 loose image(s)" has appended nothing, and a readout
+    #: that claims work it has not done is worse than one that says nothing.
+    preview: str = ""
 
 
 def _scope_verdict(
@@ -719,17 +735,21 @@ def _scope_verdict(
     empty_well_in_use = flatfield == "empty_well" or background == "empty_well"
     bg_touched = bool(bg_tokens & wells_touched)
     stale_existing_tp = bool(new_bg_tps & existing_bg_tps)
+    images = f"{appended} loose image(s) into {len(wells_touched)} well(s)"
     if basic_model or (empty_well_in_use and bg_touched and stale_existing_tp):
-        reason = ("basic flat-field/background is sampled across all wells"
-                  if basic_model
-                  else "the empty-well background well gained blanks at an "
-                       "already-processed timepoint")
-        return ScopePlan("force", (
-            f"Appended {appended} loose image(s) into {len(wells_touched)} "
-            f"well(s); forcing a full reprocess ({reason})."))
-    return ScopePlan("incremental", (
-        f"Appended {appended} loose image(s) into {len(wells_touched)} "
-        f"well(s); processing only new FOVs (incremental)."))
+        why = ("basic flat-field/background is sampled across all wells"
+               if basic_model
+               else "the empty-well background well gained blanks at an "
+                    "already-processed timepoint")
+        return ScopePlan(
+            "force",
+            f"Appended {images}; forcing a full reprocess ({why}).",
+            f"Will fold in {images} and reprocess the plate in full ({why}).")
+    return ScopePlan(
+        "incremental",
+        f"Appended {images}; processing only new FOVs (incremental).",
+        f"Will fold in {images} and compute only the new fields "
+        f"(incremental).")
 
 
 def plan_incremental_scope(
@@ -757,9 +777,9 @@ def plan_incremental_scope(
         plan = plan_loose_append(
             input_dir, filename_schema=schema, filename_sep=sep)
     except OSError:
-        return ScopePlan("unchanged", "")
+        return ScopePlan("unchanged", "", "")
     if not plan.total:
-        return ScopePlan("unchanged", "")
+        return ScopePlan("unchanged", "", "")
 
     bg_tokens = {
         canonical_well_label(w)

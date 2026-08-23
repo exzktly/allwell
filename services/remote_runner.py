@@ -87,6 +87,7 @@ from pipeline.incremental_keys import (
     read_done_fov_keys,
     read_done_fov_keys_from_zip,
 )
+from services import run_journal
 from util.aw_safe import swallow, swallowed
 # The shared "retry an OSError with a backoff, then fail with an actionable
 # message" shield. A remote run does as much I/O on the user's own volumes as a
@@ -1161,6 +1162,16 @@ def _choose_remote_output_dir(
         f"(the freshly-derived address would have been {fresh})")
 
 
+#: Which well a ``_verify_local_manifest`` message is about. That method emits
+#: several forms — "missing CSV for A01", "empty CSV for A01",
+#: "missing A01_out.zip locally", "missing A01/ output folder locally" — and a
+#: trailing ``\b`` fails on the zip form, since ``_`` is a word character and
+#: there is no boundary after ``A01``. Anchor on a leading boundary and forbid
+#: only a trailing digit, so all four parse without over-matching ``A012``.
+#: Named once because two readers now ask the same question of the same list.
+_WELL_IN_MESSAGE = re.compile(r"\b([A-H]\d{2})(?![0-9])")
+
+
 def _classify_fetched_wells(
     remote_wells: list[str],
     local_output_dir: Path,
@@ -2225,6 +2236,37 @@ def _local_input_dir_from_argv(argv) -> "Path | None":
     return None
 
 
+def input_well_containers(input_dir: Path | None) -> dict[str, Path]:
+    """``{well: path}`` for the well archives and folders in an input directory.
+
+    "Which entries in this folder are wells?" is a question three callers ask —
+    the client-side completeness check, the pre-run coverage scan, and anything
+    that follows them — and it was being answered by a copied loop each time.
+    A copy that drifts here does not raise: it changes the *denominator* the
+    caller measures against, which surfaces as a coverage fraction nobody can
+    reproduce.
+
+    Dot- and underscore-prefixed entries are skipped, which is what keeps
+    ``.aw_journal/`` and the transit directories out of a plate's well count.
+    Unreadable directory: ``{}``, so a caller measures nothing rather than
+    measuring wrong.
+    """
+    if input_dir is None:
+        return {}
+    out: dict[str, Path] = {}
+    try:
+        for path in sorted(Path(input_dir).iterdir()):
+            if path.name.startswith(".") or path.name.startswith("_"):
+                continue
+            stem = path.stem if path.suffix == ".zip" else path.name
+            label = _canonical_well_label(stem)
+            if label and (path.is_dir() or path.suffix == ".zip"):
+                out[label] = path
+    except OSError:
+        return {}
+    return out
+
+
 def run_client_side_completeness_check(
     local_input_dir: Path | None, local_output_dir: Path, *,
     log_fn: Callable[[str], None] | None = None,
@@ -2277,21 +2319,7 @@ def run_client_side_completeness_check(
         csv_prefix = str(
             (info.get("execution_options") or {}).get("csv_prefix") or "measurements")
 
-        containers = {}
-        if local_input_dir is not None:
-            from util.well_token import canonical_well_label
-
-            in_dir = Path(local_input_dir)
-            try:
-                for path in sorted(in_dir.iterdir()):
-                    if path.name.startswith(".") or path.name.startswith("_"):
-                        continue
-                    stem = path.stem if path.suffix == ".zip" else path.name
-                    label = canonical_well_label(stem)
-                    if label and (path.is_dir() or path.suffix == ".zip"):
-                        containers[label] = path
-            except OSError:
-                containers = {}
+        containers = input_well_containers(local_input_dir)
 
         return record_run_check(
             info_path=info_path,
@@ -4689,6 +4717,16 @@ class _BatchedRemoteProcess:
             force=_force, force_wells=_forced_wells,
             pre_run_artifacts=_snapshot_local_artifacts(local_output_dir),
         )
+        # Batched runs record their address too. Without this a plate run in
+        # batches journalled a ``remote-batched`` mode beside an empty remote
+        # block — a record that names the mode and not the place, which is the
+        # half that a later run actually needs.
+        _record_remote_in_journal(
+            local_output_dir, run=runner._run, host_alias=runner.host.ssh_alias,
+            argv_digest=pipeline_argv_digest(pipeline_argv),
+            source_key=source_fingerprint(
+                _local_input_dir_from_argv(pipeline_argv)),
+        )
 
         # One Fetcher persisting across batches. Pre-set the total well
         # count: each batch's pipeline banner reports just THAT
@@ -6977,6 +7015,17 @@ class RemoteRunner:
                     f"was prepared for {key[:8]}")
             log(f"[remote] uploaded {sent / (1024**2):.1f} MB in "
                 f"{_fmt_secs(elapsed)}\n")
+            # Their input is on the remote now. Recorded because it is the one
+            # thing that distinguishes "this run never got to that well" from
+            # "its images were sent and the run died before computing them" —
+            # and on a run that dies mid-plate, that is the difference between
+            # re-uploading a plate and not.
+            for wz in zipped.well_zips:
+                label = _canonical_well_from_path(Path(wz).stem)
+                if label:
+                    with swallow(f"journalling {label} as uploaded"):
+                        run_journal.record_well(
+                            local_output_dir, label, "uploaded")
             return sent, elapsed
 
         heartbeat: _UploadHeartbeat | None = None
@@ -7131,8 +7180,11 @@ class RemoteRunner:
         # missing files using the same retry-aware helpers.
         missing = self._verify_local_manifest(log=log)
         if missing:
-            self._retry_missing_wells(missing, log=log)
+            attempted = self._retry_missing_wells(missing, log=log)
             missing = self._verify_local_manifest(log=log)
+            # Journalled from verify's own verdict, so "did this well arrive"
+            # has one answer rather than two that can disagree.
+            self._journal_retry_outcomes(attempted, missing)
 
         # Written *after* the retry, because the retry is what turns a failed
         # pull into a fetched well and the report has to describe the outcome
@@ -7264,7 +7316,7 @@ class RemoteRunner:
 
     def _retry_missing_wells(
         self, missing_messages: list[str], *, log: Callable[[str], None],
-    ) -> None:
+    ) -> set[str]:
         """Re-pull the per-well outputs for wells whose CSV is missing.
 
         Closes the "transient drop ate one well's output" hole that
@@ -7274,7 +7326,7 @@ class RemoteRunner:
         """
         run = self._run
         if run is None:
-            return
+            return set()
         # Extract well IDs from the manifest messages. _verify_local_manifest
         # emits several forms: "missing CSV for A01", "empty CSV for A01",
         # "missing A01_out.zip locally", "missing A01/ output folder locally".
@@ -7282,14 +7334,13 @@ class RemoteRunner:
         # so no boundary after A01), which silently dropped zip/folder-only
         # misses from the retry. Anchor on a leading boundary and forbid only a
         # trailing digit, so all four forms parse without over-matching A012…
-        well_re = re.compile(r"\b([A-H]\d{2})(?![0-9])")
         wells: set[str] = set()
         for m in missing_messages:
-            match = well_re.search(m)
+            match = _WELL_IN_MESSAGE.search(m)
             if match:
                 wells.add(match.group(1))
         if not wells:
-            return
+            return set()
 
         log(f"[remote] end-of-run retry: re-pulling {len(wells)} well(s)…\n")
         host = self.host
@@ -7358,7 +7409,7 @@ class RemoteRunner:
             well_t0 = time.monotonic()
             if self._cancelled.is_set():
                 log("[remote] end-of-run retry cancelled by Stop.\n")
-                return
+                return wells
             # Re-pull the per-well CSV(s) only if they're actually missing or
             # empty locally — a present CSV needs no refetch.
             local_csvs = list(run.local_output_dir.glob(f"*_{well}.csv"))
@@ -7405,37 +7456,41 @@ class RemoteRunner:
                 if not out_zip.exists() or out_zip.stat().st_size == 0 or stale:
                     _pull(f"{run.remote_output_dir}/{well}_out.zip")
                 _report_zip(well, time.monotonic() - zip_t0)
-            # A well this pass rescued is fetched, and the journal has to say
-            # so: the in-stream fetcher recorded it as ``not-fetched`` on its
-            # way out, and leaving that standing would have the record report a
-            # loss this backstop had already repaired.
-            self._journal_retry_result(well)
+        # Whether any of this actually recovered a well is not decided here —
+        # see ``_journal_retry_outcomes``, which reads verify's answer.
+        return wells
 
-    def _journal_retry_result(self, well: str) -> None:
-        """Record whether the end-of-run retry actually recovered *well*.
+    def _journal_retry_outcomes(
+        self, attempted: set[str], still_missing: list[str],
+    ) -> None:
+        """Record what the end-of-run retry recovered, using verify's answer.
 
-        Read off the artefacts rather than off whether ``_pull`` was called:
-        a pull that returned is not a file that landed, and the question the
-        record has to answer is whether the user has the data.
+        "Did this well arrive?" has exactly one answer in this class, and it is
+        ``_verify_local_manifest``'s: for a FULL run that means the CSV **and**
+        the ``{well}_out.zip``, not the CSV alone. Deciding it here from the
+        CSV would have the journal call a well fetched while verify was still
+        holding the run open for the missing archive — two answers to one
+        question, disagreeing in the direction that reports a loss as a
+        recovery.
+
+        So this is handed the list verify produced and reads the wells out of
+        it, rather than going back to the files itself.
         """
         from services import run_journal
 
         run = self._run
-        if run is None:
+        if run is None or not attempted:
             return
-        csvs = list(run.local_output_dir.glob(f"*_{well}.csv"))
-        recovered = bool(csvs) and all(p.stat().st_size > 0 for p in csvs)
-        try:
-            if recovered:
+        unresolved = {m.group(1) for m in
+                      (_WELL_IN_MESSAGE.search(t) for t in still_missing) if m}
+        for well in sorted(attempted):
+            recovered = well not in unresolved
+            with swallow(f"journalling the retry result for {well}"):
                 run_journal.record_well(
-                    run.local_output_dir, well, "fetched",
-                    reason="recovered by the end-of-run retry")
-            else:
-                run_journal.record_well(
-                    run.local_output_dir, well, "not-fetched",
-                    reason="the end-of-run retry could not recover it")
-        except OSError:
-            swallowed(f"could not journal the retry result for {well}")
+                    run.local_output_dir, well,
+                    "fetched" if recovered else "not-fetched",
+                    reason=("recovered by the end-of-run retry" if recovered
+                            else "the end-of-run retry could not recover it"))
 
     def _reconcile_fetch(self, *, log: Callable[[str], None]) -> str:
         """Classify every well the remote holds output for, and record it.

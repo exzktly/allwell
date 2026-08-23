@@ -338,3 +338,94 @@ def test_re_running_the_same_folder_replaces_its_index_entry(out_dir):
     for _ in range(3):
         _open(out_dir)
     assert len(J.unfinished_runs()) == 1
+
+
+# ── the rosters stay live ───────────────────────────────────────────────────
+
+def test_every_well_state_is_reported_somewhere(out_dir):
+    """A state missing from ``TALLY_GROUPS`` is a well nobody is ever told about.
+
+    §7.5 #10: pair every roster with a liveness test. Without one, adding a
+    state to ``WELL_STATES`` and forgetting to group it produces no error and no
+    output — the well is recorded, counted by nothing, and reported by nobody,
+    which is exactly the silent omission the roster guard exists to prevent.
+    """
+    grouped = {state for _label, states in J.TALLY_GROUPS for state in states}
+    assert grouped == set(J.WELL_STATES), (
+        f"ungrouped: {sorted(set(J.WELL_STATES) - grouped)}; "
+        f"unknown: {sorted(grouped - set(J.WELL_STATES))}")
+
+
+@pytest.mark.parametrize("state", J.WELL_STATES)
+def test_a_well_in_any_state_reaches_the_tally(out_dir, state):
+    _open(out_dir)
+    J.record_well(out_dir, "A01", state)
+    assert J.read_journal(out_dir).tally(), f"{state} is recorded and never said"
+
+
+def test_the_tally_is_empty_when_nothing_was_recorded(out_dir):
+    _open(out_dir)
+    assert J.read_journal(out_dir).tally() == ""
+
+
+def test_the_tally_groups_analysed_and_fetched_together(out_dir):
+    """One well that finished locally and one fetched from a remote are both
+    just "finished" to a user; the distinction is the journal's, not theirs."""
+    _open(out_dir)
+    J.record_well(out_dir, "A01", "analysed")
+    J.record_well(out_dir, "A02", "fetched")
+    assert "2 finished" in J.read_journal(out_dir).tally()
+
+
+#: The calls that put a state into the record: the journal's own writer, and
+#: the ``Fetcher`` wrapper that forwards to it with the best-effort guard
+#: around it. Naming both is what keeps this test narrow — a scan wide enough
+#: to catch every indirection is a scan wide enough to pass on prose.
+_RECORDING_SEAMS = ("record_well", "_journal_well")
+
+
+@pytest.mark.parametrize("state", J.WELL_STATES)
+def test_every_well_state_is_written_by_some_caller(state):
+    """A state nothing can produce is a stale roster entry.
+
+    ``"uploaded"`` was exactly that: declared, documented, grouped for the
+    tally, and written by no code path in the app — so a reader had a bucket
+    that could never fill and a reviewer had a claim that read as covered.
+
+    The scan is deliberately narrow. An earlier version of this test swept every
+    string constant in any module that mentions ``record_well``, and passed for
+    ``"uploaded"`` on the strength of a *phrase table* that happened to contain
+    the word — a liveness test that could not fail, which is worse than none.
+    Only two shapes count now: a literal handed to ``record_well`` or to the
+    one-line wrapper that forwards to it, and the values of a dict literal (the
+    ``well_stage -> state`` mapping ``analyze_progress`` looks the state up in).
+    """
+    import ast
+
+    from tests._repo_scan import python_sources
+
+    written: set[str] = set()
+    for path in python_sources():
+        if path.parts[-2:] == ("services", "run_journal.py"):
+            continue
+        text = path.read_text()
+        if not any(seam in text for seam in _RECORDING_SEAMS):
+            continue
+        tree = ast.parse(text, filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                name = (getattr(node.func, "attr", None)
+                        or getattr(node.func, "id", ""))
+                if name in _RECORDING_SEAMS:
+                    written.update(
+                        a.value for a in node.args
+                        if isinstance(a, ast.Constant)
+                        and isinstance(a.value, str))
+            elif isinstance(node, ast.Dict):
+                written.update(
+                    v.value for v in node.values
+                    if isinstance(v, ast.Constant) and isinstance(v.value, str))
+
+    assert state in written, (
+        f"no caller anywhere writes the {state!r} state; it is a roster entry "
+        f"nothing can produce")

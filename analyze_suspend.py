@@ -328,27 +328,9 @@ class AnalyzeSuspendMixin:
         return offers
 
     def _journal_detail(self, offer: _Resumable) -> str:
-        """The per-well line under the headline, or ``""`` when there is none.
-
-        Reported rather than derived: these are the states the run itself
-        recorded as it went. The counts deliberately do not claim anything
-        about how complete the *output* is — that is
-        ``pipeline.completeness``'s answer and the pane has no business
-        offering a second one.
-        """
+        """The per-well line under the headline, or ``""`` when there is none."""
         journal = run_journal.read_journal(offer.output_dir)
-        if journal is None or not journal.wells:
-            return ""
-        parts = []
-        for label, states in (
-            ("finished", ("analysed", "fetched")),
-            ("failed", ("failed",)),
-            ("never fetched", ("not-fetched",)),
-        ):
-            n = len(journal.wells_in(*states))
-            if n:
-                parts.append(f"{n} {label}")
-        return f" It recorded {', '.join(parts)}." if parts else ""
+        return journal.tally() if journal is not None else ""
 
     def _forget_resumable(self, offer: _Resumable) -> None:
         """Stop offering *offer*, whichever record it came from.

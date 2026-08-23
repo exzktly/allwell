@@ -364,8 +364,13 @@ def test_the_scope_line_is_the_planners_own_sentence(tab, plate):
     tab._apply_pipeline_info({"execution_options": {
         "filename_schema": SCHEMA, "filename_sep": SEP}})
     expected = plan_incremental_scope(tab._collect_run_options(), plate / "in")
-    assert expected.reason, "the fixture should have loose images to fold in"
-    assert tab._scope_line() == expected.reason
+    assert expected.preview, "the fixture should have loose images to fold in"
+    assert tab._scope_line() == expected.preview
+    assert "Appended" not in tab._scope_line(), (
+        "the readout prints the log's past-tense sentence, claiming work it "
+        "has not done")
+    assert expected.reason.startswith("Appended"), (
+        "the run log keeps its past tense — it prints after the fold")
 
 
 # ── after a run ends ────────────────────────────────────────────────────────

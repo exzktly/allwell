@@ -92,6 +92,21 @@ WELL_STATES = (
     "not-fetched",   # output exists on the remote but never arrived here
 )
 
+#: How the well states are grouped when a run is described to a user, and the
+#: words used for each group. Every member of ``WELL_STATES`` appears exactly
+#: once — ``tests/test_run_journal.py`` holds that, because a state missing here
+#: is a well the user is never told about, which is the same silent omission the
+#: roster guard exists to prevent. Two surfaces render this (the resume banner
+#: and the pre-run readout) and both had their own copy, which between them
+#: dropped ``uploaded`` and ``skipped``.
+TALLY_GROUPS = (
+    ("finished", ("analysed", "fetched")),
+    ("failed", ("failed",)),
+    ("never fetched", ("not-fetched",)),
+    ("skipped", ("skipped",)),
+    ("uploaded only", ("uploaded",)),
+)
+
 #: The outcomes a run can be closed with. ``None`` while it is still open, which
 #: after a restart means the run died without closing its own record.
 RUN_OUTCOMES = ("ok", "error", "stopped", "suspended")
@@ -166,6 +181,20 @@ class RunJournal:
         """The wells currently recorded in any of *states*, sorted."""
         wanted = set(states)
         return tuple(sorted(w for w, r in self.wells.items() if r.state in wanted))
+
+    def tally(self) -> str:
+        """What this run recorded, as one sentence, or ``""`` for nothing.
+
+        Reported, never derived: these are states the run wrote down as it went,
+        and they say nothing about whether the *output* is complete — that is
+        ``pipeline.completeness``'s answer. Lives here rather than at each
+        surface because the grouping is a statement about ``WELL_STATES``, and
+        the two surfaces that render it had drifted into dropping two states
+        between them.
+        """
+        parts = [f"{n} {label}" for label, states in TALLY_GROUPS
+                 if (n := len(self.wells_in(*states)))]
+        return f" It recorded {', '.join(parts)}." if parts else ""
 
 
 # ── paths ───────────────────────────────────────────────────────────────────

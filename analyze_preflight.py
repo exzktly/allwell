@@ -35,7 +35,7 @@ silently re-forcing a plate because the previous run was forced would be the
 most expensive kind of surprise.
 
 **It renders; it does not phrase.** Every claim comes back verbatim from the
-function that owns it — ``ScopePlan.reason`` for what the run will do about new
+function that owns it — ``ScopePlan.preview`` for what the run will do about new
 images, ``completeness``'s own counts for coverage, the journal's recorded
 states for what happened. This is the rule
 ``tests/test_layout_readout_single_source.py`` already holds over the layout
@@ -276,7 +276,7 @@ class AnalyzePreflightMixin:
                 "suspended": "was suspended",
             }.get(journal.outcome or "", "ended")
             head = f"The last run here started {when} and {ended}."
-        return head + _well_tally(journal)
+        return head + journal.tally()
 
     def _render_preflight(self, headline: str) -> None:
         """Paint the banner, coverage line included when one has arrived."""
@@ -292,9 +292,12 @@ class AnalyzePreflightMixin:
     def _scope_line(self) -> str:
         """What this run will do about images added since the last one.
 
-        The sentence is ``ScopePlan.reason`` verbatim — the same string the run
-        log prints when it actually folds those images in — so the preview
-        cannot describe a decision the run then does not make.
+        The sentence is ``ScopePlan.preview`` verbatim: the same verdict and
+        the same justification the run log prints, in the tense that is true
+        before the fold happens. Rendering the log's own past-tense ``reason``
+        here had the readout announce "Appended 3 loose image(s)" while nothing
+        had been written — a claim about work not yet done, which is the one
+        thing a preview must never make.
         """
         # The planner's *resolved* input directory, never the raw text the user
         # typed. Loose images sit beside the well archives inside ``in/``, so a
@@ -312,7 +315,7 @@ class AnalyzePreflightMixin:
             return ""
         with swallow("planning the run scope for the pre-run readout"):
             plan = plan_incremental_scope(opts, Path(in_dir))
-            return plan.reason
+            return plan.preview
         return ""
 
     # ── tier two: real coverage, off the GUI thread ──────────────────────
@@ -452,25 +455,6 @@ def _same(a: str, b: str) -> bool:
     return same_dir(a, b)
 
 
-def _well_tally(journal: run_journal.RunJournal) -> str:
-    """The per-well counts the run recorded, or ``""``.
-
-    Reported, never derived: these are states the run wrote down as it went.
-    They say nothing about whether the *output* is complete — that is
-    ``pipeline.completeness``'s answer, and the coverage line carries it.
-    """
-    if not journal.wells:
-        return ""
-    parts = []
-    for label, states in (
-        ("finished", ("analysed", "fetched")),
-        ("failed", ("failed",)),
-        ("never fetched", ("not-fetched",)),
-    ):
-        n = len(journal.wells_in(*states))
-        if n:
-            parts.append(f"{n} {label}")
-    return f" It recorded {', '.join(parts)}." if parts else ""
 
 
 def _previous_settings(out_dir: Path) -> tuple[dict, str]:
@@ -505,23 +489,17 @@ def _scan_coverage(input_dir: Path, output_dir: Path, opts: dict) -> dict | None
     without a widget and without a thread.
     """
     from pipeline.completeness import scan_run
-    from util.well_token import canonical_well_label
+    from services.remote_runner import input_well_containers
 
     schema = [f.strip() for f in str(opts.get("filename_schema") or "").split(":")
               if f.strip()]
     if not schema or not output_dir.is_dir():
         return None
-    containers: dict[str, Path] = {}
-    try:
-        for path in sorted(input_dir.iterdir()):
-            if path.name.startswith(".") or path.name.startswith("_"):
-                continue
-            stem = path.stem if path.suffix == ".zip" else path.name
-            label = canonical_well_label(stem)
-            if label and (path.is_dir() or path.suffix == ".zip"):
-                containers[label] = path
-    except OSError:
-        containers = {}
+    # The same walk the end-of-run completeness check uses. This is the
+    # *denominator* the coverage line is measured against, so a second copy of
+    # "which entries are wells" would not raise — it would quietly produce a
+    # fraction nobody could reproduce.
+    containers = input_well_containers(input_dir)
     return scan_run(
         in_containers=containers,
         output_dir=output_dir,

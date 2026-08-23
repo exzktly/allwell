@@ -679,10 +679,15 @@ Three of these are commands now. Run them instead of recalling them.
     liveness test that fails when an entry stops describing a real violation. A
     colour allowlist justified by one file's icon-painter palette exempted every
     literal in that whole file.
-11. **Ruff here does not flag unbound names.** Stripping an `app = ctx.window`
-    bridge left `app` undefined in three functions and lint passed. After
-    deleting a binding, AST-scan the touched files for names loaded but never
-    bound in scope.
+11. **Ruff's F821 is enforced, but it does not see everything.** Stripping an
+    `app = ctx.window` bridge left `app` undefined in three functions and lint
+    passed, because F821 was in the ignore list; it no longer is, and
+    `tests/test_guards_bite.py` keeps it that way. Annotations still slip past
+    it — every module carries `from __future__ import annotations`, so an
+    annotation is a string that is never compiled — and so does anything only
+    `symtable` can see. `tests/test_no_unbound_names.py` covers those. After
+    deleting a binding, still AST-scan the touched files for names loaded but
+    never bound in scope.
 
 ## 7.6 A control that exists is not a control that works
 

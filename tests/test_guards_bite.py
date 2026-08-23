@@ -27,6 +27,8 @@ from pathlib import Path
 
 import pytest
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 def _write(tmp_path: Path, name: str, body: str) -> Path:
     path = tmp_path / name
@@ -2103,3 +2105,79 @@ def test_feature_slice_guard_catches(tmp_path, monkeypatch, shape):
 def test_feature_slice_guard_clears(tmp_path, monkeypatch, shape):
     got = _slice_offenders(tmp_path, monkeypatch, FEATURE_SLICE_CLEAN[shape])
     assert got is None, f"the guard fired on a legitimate {shape}: {got}"
+
+
+# ── ruff's F821 (undefined-name) ────────────────────────────────────────────
+#
+# F821 was in ``pyproject.toml``'s ignore list, justified by false positives on
+# quoted forward-reference annotations whose names are imported lazily in
+# workers. Ruff resolves those correctly now and the tree has zero hits, so the
+# rule is enforced — closing the blind spot CLAUDE.md §7.5 #11 records, where
+# deleting an ``app = ctx.window`` bridge left ``app`` unbound in three
+# functions and lint stayed green.
+#
+# Re-adding "F821" to the ignore list is a one-line edit that nothing else would
+# notice, so these run ruff against the repo's real config on a planted file.
+
+F821_VIOLATIONS = {
+    "plain unbound name": "def f():\n    return app\n",
+    "unbound after a deleted binding": (
+        "def f(ctx):\n"
+        "    return ctx.window\n"
+        "\n"
+        "def g():\n"
+        "    return app.state\n"
+    ),
+    "unbound in a comprehension": "def f(rows):\n    return [r for r in rows if r in missing]\n",
+}
+
+F821_CLEAN = {
+    # The pattern the ignore entry was justified by, spelled the way this
+    # codebase actually spells it: a ``TYPE_CHECKING`` import, which costs
+    # nothing at runtime and gives ruff the name. A *bare* quoted reference to
+    # a name imported only inside a worker function does trip F821 — that is
+    # the one thing enforcement changes, and the fix at such a site is this
+    # import, or a targeted per-line suppression, not turning the rule back off.
+    "lazy worker annotation via TYPE_CHECKING": (
+        "from __future__ import annotations\n"
+        "\n"
+        "from typing import TYPE_CHECKING\n"
+        "\n"
+        "if TYPE_CHECKING:\n"
+        "    from stardist.models import StarDist2D\n"
+        "\n"
+        "def f(model: 'StarDist2D | None' = None):\n"
+        "    return model\n"
+    ),
+    "ordinary bound name": "def f(ctx):\n    app = ctx.window\n    return app\n",
+    "module import": "import os\n\ndef f():\n    return os.getcwd()\n",
+}
+
+
+def _f821_offenders(tmp_path, body):
+    """Run the repo's own ruff config over *body*; return its F821 output."""
+    import subprocess
+
+    path = tmp_path / "probe.py"
+    path.write_text(body)
+    proc = subprocess.run(
+        ["ruff", "check", "--no-cache", "--select", "F821",
+         "--config", str(_REPO_ROOT / "pyproject.toml"), str(path)],
+        capture_output=True, text=True, cwd=str(_REPO_ROOT),
+    )
+    return proc.stdout if "F821" in proc.stdout else None
+
+
+@pytest.mark.parametrize("shape", sorted(F821_VIOLATIONS))
+def test_f821_guard_catches(tmp_path, shape):
+    got = _f821_offenders(tmp_path, F821_VIOLATIONS[shape])
+    assert got is not None, (
+        f"the {shape} spelling walked past ruff — F821 is back in the ignore "
+        "list, and an unbound name will not fail lint again"
+    )
+
+
+@pytest.mark.parametrize("shape", sorted(F821_CLEAN))
+def test_f821_guard_clears(tmp_path, shape):
+    got = _f821_offenders(tmp_path, F821_CLEAN[shape])
+    assert got is None, f"ruff fired F821 on a legitimate {shape}: {got}"

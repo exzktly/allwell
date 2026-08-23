@@ -1177,8 +1177,16 @@ because asking someone to pick wells on a plate that is not there is a worse
 message than the one it would replace.
 
 `selection_controller.has_plottable_selection` is the single predicate behind the
-shared `no_selection_reason` — wells picked, or a visible replicate set. Four
-renderers each spelled that condition out for themselves before it existed.
+shared `no_selection_reason` — wells picked, or a visible replicate set — and it
+is also what the four interactive renderers ask before drawing their own empty
+figure: `barplot/renderer`, `lineplot/controller` and `scatter/controller`
+twice. They call it rather than spelling `not selected and not active_rsets` out
+again, so the placeholder and the figure behind it cannot reach different
+verdicts; `tests/test_one_plottable_selection_predicate.py` holds both halves —
+that no renderer re-implements the condition, and that each one asks. The
+predicate filters selected wells by `well_paths`, because a stale label pushed
+through `set_selected_wells` by a saved heat-map layout plots nothing, and
+counting it as "plottable" hides the placeholder over an empty figure.
 Messages about *other* empty causes — no timepoints, no channel data, no feature
 columns, no smFISH/mask pair — stay on the axes, because the placeholder cannot
 know about them. `tests/test_no_axes_selection_message.py` enforces the split: no
@@ -2500,12 +2508,13 @@ feature's local state lives next to its controller / renderer in the same
 feature package.
 
 **`EventBus` (`core/event_bus.py`).** A `QObject` carrying a small, capped
-catalogue of exactly five cross-cutting signals — `channel_changed`,
-`selection_changed`, `dataset_loaded`, `plot_options_changed`, and
-`redraw_requested`. Signal payloads are the relevant *state object*, never
-`app` (`redraw_requested` carries a scope name). The catalogue and its contract
-are documented in the module docstring. The bus is **load-bearing**:
-every signal has a real subscriber. Subscribers are
+catalogue of exactly four cross-cutting signals — `channel_changed`,
+`selection_changed`, `dataset_loaded` and `plot_options_changed`. Signal
+payloads are the relevant *state object*, never `app`. The catalogue and its
+contract are documented in the module docstring. The bus is **load-bearing**:
+every signal has a real emitter and a real subscriber, and
+`test_architecture_contracts.py` asserts both — the roster it may hold, and
+that nothing on the roster is dead. Subscribers are
 constructed and connected by `bus_wiring.py`'s `wire_event_bus`, called once
 from `WellViewerApp.__init__`:
 
@@ -7799,12 +7808,17 @@ remote UTF-8 stream is decoded on a cp1252 Windows client).
 
 ### 10.2 Debug flags
 
-`well_viewer/core/debug_flags.py` exposes module-level booleans
-(`REVIEW_TAB_DEBUG`, `REVIEW_BAR_DEBUG`, `REVIEW_SCATTER_DEBUG`,
-`ANALYZE_TAB_DEBUG`, `REVIEW_IMAGE_CHSW_DEBUG`).
-`allwell.main()` wires the top-of-file constants in `allwell.py` into
-these flags so toggling them is a one-line edit. Each flag gates `logger.debug`
-calls inside its domain; off by default.
+`well_viewer/core/debug_flags.py` exposes module-level booleans, all of them
+listed in that module's `FLAG_NAMES`: two master switches (`REVIEW_TAB_DEBUG`,
+`ANALYZE_TAB_DEBUG`) and eight per-domain ones (`REVIEW_BAR_DEBUG`,
+`REVIEW_SCATTER_DEBUG`, `REVIEW_IMAGE_DEBUG`, `REVIEW_IMAGE_LOAD_DEBUG`,
+`REVIEW_IMAGE_CHANNEL_SWITCH_DEBUG`, `MOVIE_MONTAGE_DEBUG`,
+`MOVIE_MONTAGE_LOAD_DEBUG`, `CELL_GATING_DEBUG`). `allwell.main()` copies the
+top-of-file constants in `allwell.py` onto every name in `FLAG_NAMES`, so
+toggling any of them is a one-line edit in one place. Each flag gates
+`logger.debug` calls inside its domain, and all of them are off by default —
+`tests/test_debug_flags_default_off.py` asserts that, and that the roster and
+the wiring cover the same set.
 
 ### 10.3 Build / packaging
 
@@ -8249,8 +8263,10 @@ head -1 <data>/<one>_measurements.csv
 
 ### 12.4 "Auto-threshold reports 'timepoint unknown'"
 
-`well_viewer/features/preview/controller.classify_member` parses `(fov, tp)` from
-each image filename. It prefers the schema-derived fields from
+`well_viewer/data/zip_members.classify_member` parses `(fov, tp)` from each
+image filename. (`features/preview/controller` re-exports the name for
+backward compatibility, and that shim is where this section used to point —
+reading it will not show you the parsing.) It prefers the schema-derived fields from
 `pipeline_info.json` (`pipeline_fields_extractor`) and only falls back to
 the legacy 5-field regex when those are absent. If you see "unknown", the
 pipeline_info schema is either missing or doesn't include `fov` / `tp`
@@ -8507,8 +8523,8 @@ The map (each rule links to the test that holds it):
 | Nothing deletes a directory it only partly archived. Every path that turns a `<well>/` into `<well>.zip` packs an extension-filtered subset, so removing the folder destroyed the companion XML, acquisition logs and mask subdirectories the filter skipped. Archive-writing is followed one call deep within a module, because the two worst sites zipped through a one-line helper and a guard matching only a literal `atomic_zip` found two of the four (§6.5) | `tests/test_no_unarchived_delete.py`, with its bite cases in `tests/test_guards_bite.py` |
 | Every figure registered as `_*_fig` has a `_FIG_PREF_KEY_MAP` entry, so its axis and mark prefs key on a stable name rather than on `id(fig)` and survive a reload (§5.8) | `tests/test_figure_pref_keys.py`, with bite cases in `tests/test_guards_bite.py` |
 | A function that returns a value on one path and an explicit `None` on another declares it. Without the annotation a caller cannot tell "no value" from "computed zero" by signature, which is the conflation behind this codebase's silently-wrong numbers | `tests/test_optional_returns_declared.py`, with bite cases in `tests/test_guards_bite.py` |
-| No annotation reads a name nothing binds. Every module carries `from __future__ import annotations`, so an annotation is stored as a string and never compiled — invisible to `symtable` below and to ruff alike, since F821 is in this repo's ignore list. An extraction dropped `Iterable` from a `collections.abc` import while the annotation needing it moved intact: nothing raised at import or at call, and `typing.get_type_hints` on that function raised `NameError`. A `TYPE_CHECKING` import counts as bound; a string forward reference is not this guard's to judge | `tests/test_no_unbound_names.py::test_no_annotation_reads_a_name_nothing_binds`, with bite cases in `tests/test_guards_bite.py`. The first cut allowlisted `dir(typing)`, which contains `Iterable`, `Callable`, `Mapping` and `Sequence` — the names a dropped import loses — so it passed on the defect it was written for |
-| No function reads a name nothing binds. Ruff does not flag it, and the shape it misses is what a rename leaves behind — replace `a, b, c = thing()` with `obj = thing()` and every downstream `a` becomes a `NameError` no linter mentions, often on a path only the slow lane reaches | `tests/test_no_unbound_names.py` (`symtable`, so closures and comprehensions are not false positives), with bite cases in `tests/test_guards_bite.py` |
+| No annotation reads a name nothing binds. Every module carries `from __future__ import annotations`, so an annotation is stored as a string and never compiled — invisible to `symtable` below (ruff's F821 is enforced, but an annotation string is not compiled, so it does not reach that rule either). An extraction dropped `Iterable` from a `collections.abc` import while the annotation needing it moved intact: nothing raised at import or at call, and `typing.get_type_hints` on that function raised `NameError`. A `TYPE_CHECKING` import counts as bound; a string forward reference is not this guard's to judge | `tests/test_no_unbound_names.py::test_no_annotation_reads_a_name_nothing_binds`, with bite cases in `tests/test_guards_bite.py`. The first cut allowlisted `dir(typing)`, which contains `Iterable`, `Callable`, `Mapping` and `Sequence` — the names a dropped import loses — so it passed on the defect it was written for |
+| No function reads a name nothing binds. Ruff's F821 is enforced now and catches the plain cases, but the shape that gets past it is what a rename leaves behind — replace `a, b, c = thing()` with `obj = thing()` and every downstream `a` becomes a `NameError` no linter mentions, often on a path only the slow lane reaches | `tests/test_no_unbound_names.py` (`symtable`, so closures and comprehensions are not false positives), with bite cases in `tests/test_guards_bite.py` |
 | The fold-change request is read by name, never unpacked | `tests/test_fc_state_is_not_unpacked.py`, with bite cases in `tests/test_guards_bite.py` |
 | Every `ControlOutcome` is produced by a real collection and consumed by the editor, the status line and the CSV | `tests/test_control_outcome_roster.py` |
 | `runtime_app` line/attr ratchets + state-package import boundary | `tests/test_guardrails.py` |

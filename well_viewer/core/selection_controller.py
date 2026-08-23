@@ -920,11 +920,15 @@ def has_plottable_selection(ctx) -> bool:
     visible replicate set — a group is a selection expressed a different way, and
     a tab plotting groups is not empty just because no individual well is lit.
 
-    This is the condition four renderers each spell out for themselves
-    (``barplot/renderer``, ``lineplot/controller``, ``scatter/controller`` twice)
-    as ``if not selected and not active_rsets``. One copy, next to the state it
-    reads, so the placeholder and the plot cannot come to different conclusions
-    about whether the page has anything on it.
+    The four renderers that decide whether to draw a placeholder —
+    ``barplot/renderer``, ``lineplot/controller`` and ``scatter/controller``
+    twice — call this rather than each spelling out ``if not selected and not
+    active_rsets``, so the placeholder and the plot cannot come to different
+    conclusions about whether the page has anything on it. The docstring used
+    to describe that consolidation as done while all four copies were still
+    there and this function had no renderer among its callers;
+    ``tests/test_one_plottable_selection_predicate.py`` is what makes the claim
+    true rather than aspirational.
 
     Deliberately *not* routed through ``data_loading.iter_plot_groups``: that one
     also yields solo wells and defaults to falling back to every loaded well, so
@@ -934,8 +938,7 @@ def has_plottable_selection(ctx) -> bool:
 
     sel = ctx.state.selection
     well_paths = ctx.state.dataset.well_paths or {}
-    # Filtered by ``well_paths``, exactly as three of the four renderers this
-    # replaced were. A label the dataset does not have plots nothing, so counting
+    # Filtered by ``well_paths``, as all four call sites are. A label the dataset does not have plots nothing, so counting
     # it as "plottable" hides the placeholder over a figure with no data in it.
     # That state is reachable and outlives a frame: a saved heat-map layout can
     # push a stale label through ``on_heatmap_click`` -> ``set_selected_wells``,

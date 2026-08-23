@@ -54,6 +54,12 @@ REVIEW_TAB_DEBUG = False
 ANALYZE_TAB_DEBUG = False
 REVIEW_BAR_DEBUG = False
 REVIEW_SCATTER_DEBUG = False
+REVIEW_IMAGE_DEBUG = False
+REVIEW_IMAGE_LOAD_DEBUG = False
+REVIEW_IMAGE_CHANNEL_SWITCH_DEBUG = False
+MOVIE_MONTAGE_DEBUG = False
+MOVIE_MONTAGE_LOAD_DEBUG = False
+CELL_GATING_DEBUG = False
 
 
 def _stop_analyze_runner(analyze) -> None:
@@ -1706,10 +1712,12 @@ def main() -> None:
 
     from well_viewer.core import debug_flags as _debug_flags
 
-    _debug_flags.REVIEW_TAB_DEBUG = REVIEW_TAB_DEBUG
-    _debug_flags.ANALYZE_TAB_DEBUG = ANALYZE_TAB_DEBUG
-    _debug_flags.REVIEW_BAR_DEBUG = REVIEW_BAR_DEBUG
-    _debug_flags.REVIEW_SCATTER_DEBUG = REVIEW_SCATTER_DEBUG
+    # All ten, not the four that happened to be wired: a flag this file does not
+    # set keeps whatever ``debug_flags`` ships, so editing the constant above had
+    # no effect for six of them and two of those shipped ON.
+    # ``tests/test_debug_flags_default_off.py`` holds both halves.
+    for _flag in _debug_flags.FLAG_NAMES:
+        setattr(_debug_flags, _flag, globals()[_flag])
 
     ap = argparse.ArgumentParser(
         description="All-Well: pipeline runner + well viewer",

@@ -35,6 +35,13 @@ _refresh_bar_layout_btn_state = _lazy(
 )
 
 
+#: Room the FOV toggle reserves beyond its widest label, in pixels: the QSS
+#: padding on both sides plus the border. Written at the call site until the
+#: pixel-literal ratchet reached this module; named here so the number has a
+#: reason attached rather than an allowlist entry.
+_FOV_BTN_SLACK_PX = 26
+
+
 def _live_buttons(bank) -> list:
     """The still-alive buttons in *bank*, with the dead ones dropped from it.
 
@@ -94,7 +101,7 @@ def refresh_fov_btn_state(ctx) -> None:
         # popover whose size is fixed at first show and won't re-expand when the
         # text grows. Size for the widest label + QSS padding/border slack.
         fm = QFontMetrics(btn.font())
-        btn.setMinimumWidth(fm.horizontalAdvance("FOV ✓") + 26)
+        btn.setMinimumWidth(fm.horizontalAdvance("FOV ✓") + _FOV_BTN_SLACK_PX)
         btn.style().unpolish(btn)
         btn.style().polish(btn)
 

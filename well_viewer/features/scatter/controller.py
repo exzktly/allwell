@@ -14,8 +14,8 @@ _logger = logging.getLogger(__name__)
 
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 from well_viewer.core.ui_helpers import multiselect_button_text
+from well_viewer.core.selection_controller import has_plottable_selection
 from well_viewer.core.channel_state_controller import populate_metric_combo, get_fluor_gate, ratio_label_for
-from well_viewer.domain.selections_model import active_replicate_sets
 from well_viewer.domain.ratio_models import is_ratio_key
 from pipeline.shape_features import is_shape_column
 from well_viewer.core.safe import swallowed
@@ -85,9 +85,6 @@ def redraw_scatter(
         _setup_scatter_axes(ctx, 1)
         ax_scatter = ctx.widgets.get_or_none("_ax_scatter")
 
-    active_rsets = active_replicate_sets(
-        ctx.state.selection.selections, ctx.state.dataset.well_paths)
-    selected_wells = [lbl for lbl in ctx.state.selection.selected_wells if lbl in ctx.state.dataset.well_paths]
 
     # Clear existing plot
     ax_scatter.clear()
@@ -96,7 +93,7 @@ def redraw_scatter(
     # white block. Shared with the faceted + aggregate paths (audit A16).
     _bg, _title_fg, _muted_fg, _grid, _spine = _style_scatter_ax(ctx, ax_scatter)
 
-    if not selected_wells and not active_rsets:
+    if not has_plottable_selection(ctx):
         # The words are the tab's shared placeholder; the axes are cleared above,
         # so the figure behind it holds nothing an export could misrepresent.
         ctx.runtime.scatter.interaction_cache = {"points": []}
@@ -315,9 +312,6 @@ def redraw_scatter_agg(
     if ax_agg is None or agg_fig is None or agg_canvas is None:
         return
 
-    active_rsets = active_replicate_sets(
-        ctx.state.selection.selections, ctx.state.dataset.well_paths)
-    selected_wells = [lbl for lbl in ctx.state.selection.selected_wells if lbl in ctx.state.dataset.well_paths]
 
     # Clear existing plot
     ax_agg.clear()
@@ -325,7 +319,7 @@ def redraw_scatter_agg(
     _bg, _title_fg, _muted_fg, _grid, _spine = _style_scatter_ax(
         ctx, ax_agg, fig=agg_fig)
 
-    if not selected_wells and not active_rsets:
+    if not has_plottable_selection(ctx):
         # Words on the shared placeholder; axes cleared above (see the per-cell
         # branch) so nothing stale can be exported from behind it.
         ax_agg.set_axis_off()

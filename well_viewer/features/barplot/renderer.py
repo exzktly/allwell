@@ -14,7 +14,6 @@ from well_viewer.domain.selections_model import (color_for_replicate_set, color_
 from well_viewer.core.channel_state_controller import get_all_fluor_gates, on_cutoff_for_column
 from well_viewer.core.empty_state_copy import NO_DATASET_MESSAGE
 from well_viewer.data.data_loading import get_rows
-from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.domain.text_columns import timepoint_text
 from well_viewer.domain.time_rescale import format_scaled as _rescale_tp
 from well_viewer.domain import fold_change_pairing as _pairing_mod
@@ -813,7 +812,6 @@ def redraw_bars(ctx) -> None:
     # user just created a replicate set, which otherwise never refreshed the
     # button's visibility.
     refresh_bar_layout_btn_state(ctx)
-    bar_selected = selected_bar_wells(ctx, active_rsets)
 
     _ch = ctx.state.channel.active_channel.upper()
     from well_viewer.data.metric_labels import (
@@ -849,7 +847,11 @@ def redraw_bars(ctx) -> None:
     if not ctx.state.dataset.well_paths:
         draw_bar_empty_state(ctx, ax_mean, ax_frac, NO_DATASET_MESSAGE, ax_n=ax_n)
         return
-    if not bar_selected and not active_rsets:
+    from well_viewer.core.selection_controller import has_plottable_selection
+    # One answer to "is there anything to draw?", in core, next to the state
+    # it reads: the four renderers each spelled the condition out and could
+    # therefore disagree with the placeholder drawn over them.
+    if not has_plottable_selection(ctx):
         # One line, where this used to paint the same sentence onto all three
         # panels. On screen it is invisible — the tab's shared placeholder covers
         # this canvas and says it properly — but the figure is what Export,
@@ -964,16 +966,6 @@ def resolve_bar_timepoints(ctx) -> list[tuple]:
         return [(float(tp_str), tp_str)]
     except ValueError:
         return []
-
-
-def selected_bar_wells(ctx, active_rsets) -> list[str]:
-    if active_rsets:
-        return []
-    return sorted(
-        (lbl for lbl in ctx.state.selection.selected_wells
-         if lbl in ctx.state.dataset.well_paths),
-        key=lambda lbl: parse_rc(lbl),
-    )
 
 
 def _drop_hidden_columns(ctx, wells, colors, short, full, pool_groups):

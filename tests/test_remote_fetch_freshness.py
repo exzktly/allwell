@@ -23,6 +23,7 @@ and the behaviours that had to survive the fix.
 from __future__ import annotations
 
 import os
+import re
 import zipfile
 from pathlib import Path
 
@@ -287,6 +288,50 @@ def test_every_well_is_classified_in_a_file_beside_the_outputs(tmp_path):
     assert "A02  skipped" in report
     assert "A03  never-announced" in report
     assert "force: True" in report
+
+
+def test_the_summary_accounts_for_every_well_the_report_lists(
+        tmp_path, monkeypatch):
+    """The parts have to sum to the whole, on the day a state is added.
+
+    The summary sits directly under "wells with output on the remote: N", so a
+    bucket it drops is a well the per-well lines name and the tally does not.
+    That happened once with a fixed four-outcome list, which lost ``failed``;
+    it was then re-created by driving the tally off the phrase table, which
+    loses anything that table does not spell. The order comes from
+    ``WELL_STATES`` now and an unrecognised state prints under its own name, so
+    neither omission can silently shrink the count.
+
+    Driven by adding a state to ``WELL_STATES`` — which is what a future
+    contributor does, and the moment the phrase table falls behind. Both the
+    reader and the classifier take the roster from there, so a monkeypatched
+    roster is the whole scenario.
+    """
+    import services.run_journal as J
+
+    extended = (*J.WELL_STATES, "quarantined")
+    monkeypatch.setattr(J, "WELL_STATES", extended)
+
+    run = _run(tmp_path)
+    J.open_run(tmp_path, spec={}, mode="remote", input_dir=tmp_path / "in")
+    J.record_well(tmp_path, "A01", "fetched")
+    J.record_well(tmp_path, "A02", "quarantined", reason="held back")
+    J.record_well(tmp_path, "A03", "quarantined", reason="held back")
+
+    summary = rr.RemoteRunner._reconcile_fetch(
+        _Reconciler(run, {"A01", "A02", "A03"}), log=lambda _m: None)
+
+    report = (tmp_path / "remote_fetch_report.txt").read_text()
+    listed = [ln for ln in report.splitlines()
+              if ln.startswith(("A01", "A02", "A03"))]
+    assert len(listed) == 3, listed
+    # Only the tally, not the "(of N with output…)" that follows it.
+    tally = summary.split(" (of ")[0]
+    counted = sum(int(n) for n in re.findall(r"(\d+) ", tally))
+    assert counted == 3, (
+        f"the summary accounts for {counted} of the 3 wells it lists: {tally}")
+    assert "quarantined" in tally, (
+        f"a state with no phrase was dropped rather than named: {tally}")
 
 
 def test_the_report_survives_an_unwritable_output_dir(tmp_path):

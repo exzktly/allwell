@@ -1613,6 +1613,16 @@ JOURNAL_ROSTER_VIOLATIONS = {
     "stale-list": 'for s in ["fetched", "skipped", "failed"]:\n    pass\n',
     # A set comprehension's source, which is still a literal collection.
     "set": 'TERMINAL = {"fetched", "failed", "not-fetched"}\n',
+    # The shape that got past the first version of this guard. A dict of words
+    # is presentation — until the module holding it never consults the
+    # canonical roster, at which point it *is* the module's only list of the
+    # states, and `_reconcile_fetch` proved what that costs by iterating one to
+    # build a tally that then silently dropped every state it did not spell.
+    "unanchored-label-dict": (
+        'PHRASES = {"fetched": "fetched", "skipped": "skipped",\n'
+        '           "failed": "failed", "not-fetched": "not fetched"}\n'
+        'parts = [PHRASES[k] for k in PHRASES]\n'
+    ),
 }
 
 JOURNAL_ROSTER_CLEAN = {
@@ -1626,6 +1636,15 @@ JOURNAL_ROSTER_CLEAN = {
     "label-pairs": (
         'ROWS = (("fetched", "Fetched"), ("skipped", "Skipped"),\n'
         '        ("failed", "Failed"), ("not-fetched", "Never fetched"))\n'
+    ),
+    # The same dict, in a module that does reach for the canonical roster. The
+    # words are still presentation, and the order and completeness now come
+    # from the one place that can supply them — which is the whole distinction.
+    "anchored-label-dict": (
+        'from services.run_journal import WELL_STATES\n'
+        'PHRASES = {"fetched": "fetched", "skipped": "skipped",\n'
+        '           "failed": "failed", "not-fetched": "not fetched"}\n'
+        'parts = [PHRASES.get(k, k) for k in WELL_STATES]\n'
     ),
 }
 

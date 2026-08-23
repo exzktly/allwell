@@ -7573,11 +7573,11 @@ class RemoteRunner:
             remote_wells, run.local_output_dir,
             announced=run.expected_wells, skipped=run.skipped_wells)
         lines.extend(well_lines)
-        # Every non-zero bucket, so the parts sum to the whole. Naming a fixed
-        # four dropped `failed` — which this run's own Fetcher records when a
+        # Words for the states, and *only* the words. Naming a fixed four here
+        # once dropped `failed` — which this run's own Fetcher records when a
         # well arrives and cannot be materialised — so a materialise failure
         # vanished from a tally printed directly under "wells with output on
-        # the remote: N", and the numbers no longer added up to N.
+        # the remote: N" and the numbers stopped adding up to N.
         _PHRASES = {
             "fetched": "fetched",
             "skipped": "skipped (already complete locally)",
@@ -7587,8 +7587,16 @@ class RemoteRunner:
             "uploaded": "uploaded only",
             "never-announced": "never announced completion",
         }
+        # The order comes from ``WELL_STATES``, not from ``_PHRASES``, and
+        # anything ``counts`` holds beyond it is appended under its own name.
+        # Iterating the phrase table was the same bug in a second shape: a
+        # state recorded by a writer but never spelled here appeared in the
+        # per-well lines above and in nothing below them, so the parts silently
+        # stopped summing to the whole again.
+        ordered = [*run_journal.WELL_STATES, "never-announced"]
+        ordered += [k for k in counts if k not in ordered]
         parts = [f"{counts[k]} {_PHRASES.get(k, k)}"
-                 for k in _PHRASES if counts.get(k)]
+                 for k in ordered if counts.get(k)]
         summary = (
             f"[remote] fetch reconciliation: "
             f"{', '.join(parts) if parts else 'no wells'}"

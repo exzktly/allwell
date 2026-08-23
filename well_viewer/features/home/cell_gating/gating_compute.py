@@ -35,6 +35,7 @@ from pipeline.threshold_optimize import (  # noqa: F401 (re-export)
 from well_viewer.data.data_loading import resolve_value_series
 from well_viewer.domain.text_columns import fov_text, timepoint_text
 from well_viewer.core.lazy import lazy as _lazy
+from well_viewer.domain.gating_state import active_fluor_gates
 
 # Lazy so this pure-compute module imports without eagerly pulling the scatter
 # feature (keeps both deletable and avoids a features import cycle); resolves on
@@ -218,7 +219,7 @@ def apply_fluor_gating(
         well_included = int(gate_mask.sum())
     else:
         mask = pd.Series(True, index=df.index)
-        for channel, gate_threshold in fluor_gates.items():
+        for channel, gate_threshold in active_fluor_gates(fluor_gates).items():
             col = f"{channel}_mean_intensity"
             if col not in df.columns:
                 mask = pd.Series(False, index=df.index)

@@ -63,6 +63,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from well_viewer.domain.batch_models import ReplicateSet
 
+import logging
 import math
 from typing import NamedTuple
 from collections.abc import Callable
@@ -89,14 +90,32 @@ CONTROL_NONE = ""
 _TP_REL_TOL = 1e-3
 
 
+def _as_finite(value) -> float | None:
+    """*value* as a Python float when it is a finite real number, else ``None``.
+
+    Written as a duck-typed conversion rather than ``isinstance(value, (int,
+    float))`` on purpose. ``numpy.float32`` is not an instance of ``float``, so
+    the isinstance spelling silently answered "not a number" for it — and this
+    is the most numerically sensitive module in the app, where that produced a
+    NaN mean and a vanished error bar rather than an exception. ``bool`` is
+    excluded because ``True`` is not a measurement.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if math.isfinite(out) else None
+
+
 def _rel_err_sq(value: float, spread: float) -> float:
     """``(spread / value)²``, falling back to 0 for non-finite or zero values."""
-    if (not isinstance(value, (int, float)) or value == 0
-            or not math.isfinite(value)
-            or not isinstance(spread, (int, float))
-            or not math.isfinite(spread)):
+    v = _as_finite(value)
+    sp = _as_finite(spread)
+    if v is None or v == 0 or sp is None:
         return 0.0
-    return (spread / value) ** 2
+    return (sp / v) ** 2
 
 
 def _propagate_spread(
@@ -107,11 +126,15 @@ def _propagate_spread(
 
     ``denom_rel_err_sq`` is the sum of ``(σ_Di / Di)²`` over every
     denominator. When it's 0 the formula collapses to ``spread / factor``
-    (the "treat denominator as exact" behaviour). Always returns a
-    non-negative value.
+    (the "treat denominator as exact" behaviour). Returns a non-negative
+    value, or NaN when the input spread was itself undefined — the same
+    convention ``scale_bar_value`` documents on the bar path. An undefined
+    spread scaled to 0.0 draws an error bar that looks measured.
     """
     if not math.isfinite(new_mean):
         return 0.0
+    if _as_finite(spread) is None:
+        return float("nan")
     rel_sq = _rel_err_sq(mean, spread) + denom_rel_err_sq
     if rel_sq <= 0:
         return 0.0
@@ -159,15 +182,20 @@ def _scale_pt(
         scaled_mean = float("nan")
         scaled_spread = 0.0
     else:
-        m = pt[1]
-        s = pt[2]
-        if isinstance(m, (int, float)) and math.isfinite(m):
-            scaled_mean = m / factor
+        m_val = _as_finite(pt[1])
+        if m_val is not None:
+            scaled_mean = m_val / factor
         else:
             scaled_mean = float("nan")
-        s_val = s if isinstance(s, (int, float)) and math.isfinite(s) else 0.0
+        # An undefined spread stays undefined. Folding it to 0.0 here made a
+        # normalised point claim a measured zero spread, while the bar path's
+        # ``scale_bar_value`` — whose docstring states the rule — preserved the
+        # NaN. One figure, two conventions for "we could not compute this".
+        s_raw = _as_finite(pt[2])
+        s_val = s_raw if s_raw is not None else float("nan")
         scaled_spread = _propagate_spread(
-            scaled_mean, m if isinstance(m, (int, float)) else float("nan"),
+            scaled_mean,
+            m_val if m_val is not None else float("nan"),
             s_val, factor_rel_err_sq,
         )
     new = list(pt)
@@ -293,8 +321,30 @@ def _series_baseline(
     return (float(earliest), vs[0], vs[1])
 
 
+_logger = logging.getLogger(__name__)
+
+
+def _baseline_usable(value, *, op: str) -> bool:
+    """Whether *value* can serve as a vs-t0 baseline under operation *op*.
+
+    The two operations do not have the same requirement, and treating them as
+    if they did is what made a fold-change figure normalise its three panels
+    against two different timepoints.
+
+    Dividing by zero is undefined, so a ratio baseline must be non-zero. But
+    *subtracting* zero is perfectly well defined, and zero at t0 is the
+    expected reading for the fields this matters to — a fraction-on or an event
+    count at the start of an induction experiment is normally 0. Requiring
+    non-zero for both meant the requested baseline was skipped and a **later
+    timepoint** silently substituted, under an axis still labelled "vs t0".
+    """
+    if not (isinstance(value, (int, float)) and math.isfinite(value)):
+        return False
+    return True if op == "subtract" else float(value) != 0.0
+
+
 def _field_baseline(
-    pts, val_idx: int, baseline_tp: float | None,
+    pts, val_idx: int, baseline_tp: float | None, *, op: str = "ratio",
 ) -> tuple[float | None, float]:
     """``(baseline_val, baseline_spread_unused)`` for a field's vs-t0 step.
 
@@ -312,12 +362,19 @@ def _field_baseline(
         for pt in pts:
             if abs(float(pt[0]) - tgt) <= _TP_REL_TOL * max(1.0, abs(float(pt[0])), abs(tgt)):
                 v = pt[val_idx] if len(pt) > val_idx else None
-                if isinstance(v, (int, float)) and math.isfinite(v) and v != 0:
+                if _baseline_usable(v, op=op):
                     return float(v), 0.0
+                _logger.warning(
+                    "Fold change: the requested baseline timepoint %g has no "
+                    "usable value for field %d (%r) — falling back to the "
+                    "earliest timepoint that does, so this field is normalised "
+                    "against a different timepoint than the label says.",
+                    tgt, val_idx, v,
+                )
                 break
     for pt in sorted(candidates, key=lambda p: p[0]):
         v = pt[val_idx] if len(pt) > val_idx else None
-        if isinstance(v, (int, float)) and math.isfinite(v) and v != 0:
+        if _baseline_usable(v, op=op):
             return float(v), 0.0
     return None, 0.0
 
@@ -362,7 +419,7 @@ def _normalize_field(
 
     # Step B: vs-t0 baseline (uses each member's own post-control values).
     if use_t0:
-        base, base_spread = _field_baseline(pts, val_idx, baseline_tp)
+        base, base_spread = _field_baseline(pts, val_idx, baseline_tp, op=op_t0)
         if base is not None:
             if op_t0 == "subtract":
                 pts = [_subtract_field(pt, val_idx, spread_idx, base,
@@ -534,12 +591,18 @@ def normalize_pts(
                 t = float(pt[0])
                 if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
                     m = pt[1]
-                    if isinstance(m, (int, float)) and math.isfinite(m) and m != 0:
+                    if _baseline_usable(m, op=effective_op_t0):
                         baseline = float(m)
                         s = pt[2] if len(pt) > 2 else 0.0
                         baseline_spread = (
                             float(s) if isinstance(s, (int, float)) and math.isfinite(s)
                             else 0.0
+                        )
+                    else:
+                        _logger.warning(
+                            "Fold change: the requested baseline timepoint %g "
+                            "has no usable mean (%r) — falling back to the "
+                            "earliest timepoint that does.", tgt, m,
                         )
                     break
         if baseline is None:
@@ -549,7 +612,7 @@ def normalize_pts(
             # normalisation rather than a silent no-op.
             for pt in sorted(stage1, key=lambda p: p[0]):
                 m = pt[1]
-                if isinstance(m, (int, float)) and math.isfinite(m) and m != 0:
+                if _baseline_usable(m, op=effective_op_t0):
                     baseline = float(m)
                     s = pt[2] if len(pt) > 2 else 0.0
                     baseline_spread = (
@@ -582,11 +645,16 @@ def normalize_pts(
             op_ctrl=effective_op_ctrl, op_t0=effective_op_t0,
         )
         # Steps 5+6: N-events field — [7]/[8] per-FOV-mean (the panel's
-        # FOV-spread series) or [4] total count (no spread) otherwise.
+        # FOV-spread series) or [4]/[9] the per-well count and its cross-well
+        # replicate spread otherwise. Index 9 used to be left unnormalised
+        # while the value at index 4 was scaled, so a normalised Events panel
+        # carried a raw-units error band around a scaled point. It was
+        # invisible only because the Line tab was passing a literal 0.0 for
+        # that spread at the draw site.
         if n_per_fov:
             n_val_idx, n_spread_idx = 7, 8
         else:
-            n_val_idx, n_spread_idx = 4, None
+            n_val_idx, n_spread_idx = 4, 9
         stage2 = _normalize_field(
             stage2, val_idx=n_val_idx, spread_idx=n_spread_idx,
             control_stats=control_n_stats, use_t0=use_t0,

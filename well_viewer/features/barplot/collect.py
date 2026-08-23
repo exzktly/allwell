@@ -839,10 +839,15 @@ def collect_bar_items_for_group(
                         ctx, rset, t, threshold, use_sem)
                     nval, nspread = 0, 0.0
                 else:
-                    gm, gerr, gf, _ = compute_rep_stats(ctx, rset, t, threshold, use_sem)
+                    gm, gerr, gf, gfe = compute_rep_stats(ctx, rset, t, threshold, use_sem)
                     # Per-well mean, matching the Bar tab's own numerator.
                     nval, nspread = compute_rep_n_above_stats(ctx, rset, t, use_sem)
-                    gfe, gnpf_m, gnpf_s = 0.0, 0.0, 0.0
+                    # ``gfe`` is the fraction spread the producer returned; it
+                    # was discarded and replaced with 0.0, so a batch export
+                    # reported ``err_frac`` as zero where the tab drew a real
+                    # whisker. The per-FOV fields are genuinely not computed
+                    # here and stay 0.0.
+                    gnpf_m, gnpf_s = 0.0, 0.0
                 out_pts.append(
                     (t, gm, gerr, gf, nval, 0, gfe, gnpf_m, gnpf_s, nspread, ntotal))
             return out_pts

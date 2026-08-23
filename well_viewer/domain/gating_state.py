@@ -256,3 +256,29 @@ def read_gating_params(out_dir: Path) -> dict[str, Any] | None:
     if not isinstance(block, dict):
         return None
     return block
+
+#: The value a FluorGating floor takes when it is **off**. ``get_fluor_gate``
+#: defaults an unset channel to it, and the Cell Gating tab's own docstring
+#: calls it "gate off".
+FLUOR_GATE_OFF = 0.0
+
+
+def active_fluor_gates(fluor_gates) -> dict[str, float]:
+    """The subset of *fluor_gates* that is actually gating anything.
+
+    A gate of ``0.0`` means "off", but both filter sites applied it anyway as
+    ``isfinite(v) & (v > gate)`` — so a plate at its default gates still lost
+    every cell whose background-subtracted mean intensity was zero or negative,
+    and every cell carrying a NaN in any *unrelated* gated channel. Those cells
+    are not excluded by any choice the user made, and nothing reported their
+    removal; the population simply differed from the one on the CSV.
+
+    A negative floor is left active: background-subtracted channels legitimately
+    run below zero, so a user who types one means it. Only the default-off value
+    is skipped.
+    """
+    return {
+        str(channel): float(gate)
+        for channel, gate in (fluor_gates or {}).items()
+        if float(gate) != FLUOR_GATE_OFF
+    }

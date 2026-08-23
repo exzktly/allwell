@@ -64,6 +64,12 @@ def classify_member(
     is_mask = kind == "mask" or bool(mask_re.search(name))
     is_overlay = kind == "overlay" or bool(overlay_re.search(name))
     is_smfish = kind == "smfish"
+    # A processed phase output is not this channel's raw frame. Before
+    # ``classify_filename_kind`` knew the role existed it answered "fluor_raw"
+    # for a "_phase" file, which then passed the channel test below (the phase
+    # channel's token is in the stem) and was served as a raw fluorescence
+    # image.
+    is_phase = kind == "phase"
     # ``classify_filename_kind`` returns ``"tophat"`` for the canonical
     # name; the legacy ``"fluor_processed"`` alias is kept for the suffix
     # lookup but is never produced as an output. The regex is the legacy
@@ -85,6 +91,8 @@ def classify_member(
     tp = schema_tp or default_tp
     channel_field = str(parsed_fields.get("channel", "")).strip().lower()
 
+    if is_phase:
+        return "", fov, tp
     if is_mask:
         return "mask", fov, tp
     if is_overlay:

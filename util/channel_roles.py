@@ -37,13 +37,43 @@ LABELFREE_METHODS = ("cellpose_labelfree",)
 _NUCLEAR_STRONG_RE = re.compile(r"dapi|hoechst|nuclear|nucleus|nuc|dna|h33342|405",
                                 re.IGNORECASE)
 _NUCLEAR_SECONDARY_RE = re.compile(r"nir|rfp", re.IGNORECASE)
-_PHASE_HINT_RE = re.compile(r"phase|brightfield|bright.?field|trans|dic|\bbf\b",
-                            re.IGNORECASE)
+# ``trans`` is spelled out rather than left bare: an unanchored substring
+# matched ``GFP_transfected``, classifying a fluorescent readout as phase and so
+# skipping its flat-field and background correction — for that channel alone.
+_PHASE_HINT_RE = re.compile(
+    r"phase|brightfield|bright.?field|trans(?:mitted|mission)?(?![a-z])|dic"
+    # Not ``\bbf\b``: ``_`` is a word character, so ``\b`` finds no boundary in
+    # ``NIR_BF`` and the commonest spelling of a brightfield channel went
+    # unrecognised — which is precisely the name that also reads as a far-red
+    # nuclear stain, so it took the segmentation role.
+    r"|(?<![a-z0-9])bf(?![a-z0-9])",
+    re.IGNORECASE,
+)
+
+
+def _is_phase_name(name: str) -> bool:
+    return bool(_PHASE_HINT_RE.search(name or ""))
+
+
+def _is_secondary_nuclear_name(name: str) -> bool:
+    """True for a NIR/RFP-style name that is *not* also a phase name.
+
+    The two vocabularies overlap: ``NIR_BF`` reads as both a far-red stain and a
+    brightfield frame. The phase reading has to win, because the cost of the two
+    mistakes is not symmetric — a phase frame handed the segmentation role runs a
+    fluorescence routine over an uncorrected brightfield image, and, worse, the
+    guard that refuses exactly that (:func:`phase_role_conflicts`) compares
+    against ``phase_token``, which stays empty when the name is claimed as
+    nuclear instead. So the guard had nothing to compare and returned no
+    conflicts. A *strong* stain (DAPI/Hoechst) still wins outright; only this
+    weaker tier defers."""
+    name = name or ""
+    return bool(_NUCLEAR_SECONDARY_RE.search(name)) and not _is_phase_name(name)
 
 
 def _is_nuclear_name(name: str) -> bool:
     name = name or ""
-    return bool(_NUCLEAR_STRONG_RE.search(name) or _NUCLEAR_SECONDARY_RE.search(name))
+    return bool(_NUCLEAR_STRONG_RE.search(name) or _is_secondary_nuclear_name(name))
 
 
 @dataclass
@@ -80,7 +110,8 @@ def _pick_nuclear(names: list[str]) -> str | None:
     order; with neither, the first channel is used so segmentation always has one.
 
     A phase/brightfield-looking name (``DIC``, ``BF``, ``Phase``…) is never taken
-    by that positional fallback while any other channel exists. Segmenting a
+    by the secondary tier or by that positional fallback while any other channel
+    exists. Segmenting a
     brightfield frame with a fluorescence routine measures nothing, and the
     channel order this runs on comes from a sorted filename listing, so ``DIC``
     lands first often enough that the fallback would keep choosing it. Only when
@@ -90,7 +121,7 @@ def _pick_nuclear(names: list[str]) -> str | None:
     strong = [n for n in names if _NUCLEAR_STRONG_RE.search(n or "")]
     if strong:
         return strong[0]
-    secondary = [n for n in names if _NUCLEAR_SECONDARY_RE.search(n or "")]
+    secondary = [n for n in names if _is_secondary_nuclear_name(n)]
     if secondary:
         return secondary[0]
     non_phase = [n for n in names if not _PHASE_HINT_RE.search(n or "")]

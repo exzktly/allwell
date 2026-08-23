@@ -119,6 +119,15 @@ ROLE_CATALOG: Mapping[Role, RoleSpec] = {
 }
 
 
+# Every extension any role accepts, longest first so ".tiff" is tried before
+# ".tif". Used to strip a trailing extension without ``Path(...).stem``, which
+# would also eat a dot that belongs to a field token.
+_ALL_KNOWN_EXTS: tuple[str, ...] = tuple(sorted(
+    {e.lower() for spec in ROLE_CATALOG.values() for e in spec.all_exts},
+    key=len, reverse=True,
+))
+
+
 def role_for_kind(kind: str) -> Role | None:
     """Map legacy ``kind`` strings (``"fluor_raw"``, ``"fluor_processed"``,
     ``"tophat"``, …) to ``Role``. Returns ``None`` if not recognised."""
@@ -168,7 +177,16 @@ def classify_filename_role(
     Returns ``(None, stem)`` for files whose name carries no recognised
     role suffix — those are raw fluor images (``Role.FLUOR_RAW``) by
     convention, but callers may want to validate against a channel
-    token before classifying that way."""
+    token before classifying that way.
+
+    The returned stem is the name with the role suffix *and* its extension
+    removed, and nothing else. It is deliberately not passed through
+    ``Path(...).stem`` a second time: the suffix match already consumed the
+    extension, so a further ``.stem`` would truncate at the last dot left in
+    the *field* text — and schema tokens legitimately contain dots
+    (``1.5h``). That truncation turned ``A1_f1_1.5h_w2_labels.tif`` into the
+    stem ``A1_f1_1``, which both lost the frame its own mask belonged to and
+    collided with the genuine ``1h``/``T01`` key on a first-hit-wins lookup."""
     p = Path(str(name or "").strip())
     if not p.name:
         return None, ""
@@ -186,13 +204,35 @@ def classify_filename_role(
             if spec.is_channel_scoped and fluor_norm:
                 channel_suffix = f"{spec.suffix}_{fluor_norm}{ext}".lower()
                 if lower.endswith(channel_suffix):
-                    stem = p.name[: -len(channel_suffix)]
-                    return spec.role, Path(stem).stem
+                    return spec.role, p.name[: -len(channel_suffix)]
             bare = f"{spec.suffix}{ext}".lower()
             if lower.endswith(bare):
-                stem = p.name[: -len(bare)]
-                return spec.role, Path(stem).stem
-    return None, p.stem
+                return spec.role, p.name[: -len(bare)]
+    return None, _strip_known_ext(p.name)
+
+
+def _known_ext(name: str) -> str:
+    """The trailing image extension of *name*, or ``""`` if it has none."""
+    lower = name.lower()
+    for ext in _ALL_KNOWN_EXTS:
+        if lower.endswith(ext):
+            return name[-len(ext):]
+    return ""
+
+
+def _strip_known_ext(name: str) -> str:
+    """Drop a trailing image extension from *name*, leaving dots inside the
+    field text alone.
+
+    ``Path(name).stem`` cannot be used for this: it splits at the last dot
+    whether or not what follows is an extension, so an unsuffixed
+    ``A1_f1_1.5h_w2.tif`` would come back as ``A1_f1_1.5h_w2`` (correct) but
+    an extensionless ``A1_f1_1.5h_w2`` would come back as ``A1_f1_1``."""
+    lower = name.lower()
+    for ext in _ALL_KNOWN_EXTS:
+        if lower.endswith(ext):
+            return name[: -len(ext)]
+    return name
 
 
 # ── Pipeline schema ──────────────────────────────────────────────────────
@@ -289,7 +329,7 @@ DEFAULT_SCHEMA = PipelineSchema()
 _NUMERIC_RE = re.compile(r"^-?\d+(?:\.\d+)?$")
 
 
-def _raw_token(value: Any) -> str:
+def raw_token(value: Any) -> str:
     """Stringify *value* for normalisation, treating only ``None`` as absent.
 
     The obvious ``str(value or "")`` is wrong here and was wrong for a long
@@ -301,6 +341,12 @@ def _raw_token(value: Any) -> str:
     else. ``None`` is the only value that genuinely means "no token".
     """
     return "" if value is None else str(value)
+
+
+# Private spelling kept for the call sites inside this module; the public name
+# is what other modules import, so there is one implementation of "stringify a
+# token without treating 0 as absent".
+_raw_token = raw_token
 
 
 def normalize_well(value: Any) -> str:
@@ -445,7 +491,10 @@ def parse_image_filename(
     ``(role=SMFISH, channel="w2turq", fields={"well":"A02","timepoint":"T01"})``
     on a single-FOV schema."""
     p = Path(str(name or "").strip())
-    ext = p.suffix
+    # Not ``p.suffix``: that splits at the last dot whatever follows it, so a
+    # member with no extension whose fields carry a dot ("A1_f1_1.5h_w2")
+    # would report an "extension" of ".5h_w2".
+    ext = _known_ext(p.name)
     role, stripped_stem = classify_filename_role(p.name, fluor_token=fluor_token)
     parts = stripped_stem.split(schema.sep)
     fields = {

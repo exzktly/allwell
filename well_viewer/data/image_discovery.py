@@ -593,8 +593,19 @@ def _scan_raw_disk_files(
                 tophat_fluor.setdefault((fov, tp), ref)
             elif kind == "overlay":
                 overlay.setdefault((fov, tp), ref)
-            else:
+            elif kind == "mask":
                 mask.setdefault((fov, tp), ref)
+            else:
+                # Anything else classified — smFISH today, phase tomorrow —
+                # belongs to none of these four accumulators. This used to be a
+                # bare ``else`` that filed every remaining kind as a *mask*, so a
+                # smFISH image was handed to ``load_mask_array``, which rounds it
+                # to an int32 label image: spot intensities read as nucleus ids.
+                if image_load_debug:
+                    _logger.info(
+                        "[image-load-debug] skip %s kind=%s has no accumulator here",
+                        p.name, kind,
+                    )
 
 
 def _discover_from_layouts(
@@ -683,6 +694,18 @@ def find_well_images_and_masks(
 ):
     """Find fluor / overlay / mask / tophat images for a well across all layouts."""
     well_token = _extract_well_token(well_label)
+    # A label the token parser cannot read is *unknown*, not *unrestricted*.
+    # Section 3's filter is skipped when the token is falsy, so a label like
+    # "plate2-siteA" used to let every well's images through into this one
+    # well's accumulators. Fall back to filtering on the label text itself,
+    # which is what such a dataset names its files with anyway.
+    well_filter_token = well_token or str(well_label or "").strip()
+    if well_token is None and well_filter_token:
+        _logger.warning(
+            "Image discovery: %r does not parse as a well label; filtering "
+            "images on the label text instead of a canonical well token.",
+            well_label,
+        )
     fluor_lower = fluor_token.lower()
     fluor: dict[tuple[str, str], ImgRef] = {}
     overlay: dict[tuple[str, str], ImgRef] = {}
@@ -720,7 +743,7 @@ def find_well_images_and_masks(
     )
     if not fluor and search_dirs:
         _scan_raw_disk_files(
-            search_dirs, well_token, fluor_lower,
+            search_dirs, well_filter_token, fluor_lower,
             _fov_tp_extractor, _pipeline_info, image_load_debug, targets,
         )
 

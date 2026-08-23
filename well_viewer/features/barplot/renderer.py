@@ -44,6 +44,7 @@ _logger = logging.getLogger(__name__)
 
 import theme
 
+from well_viewer.domain.tp_match import tp_close, tp_close_mask
 from well_viewer.features.barplot.controller import (
     cluster_centers as _cluster_centers,
     cluster_x_for_group_keys,
@@ -186,7 +187,7 @@ def draw_violin(
             mask = df_included_mask(df).to_numpy(copy=True)
             tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
             with np.errstate(invalid="ignore"):
-                mask &= np.isfinite(tp) & (np.abs(tp - col_tp) <= 1e-6)
+                mask &= np.isfinite(tp) & tp_close_mask(tp, col_tp)
             v = resolve_value_series(df, ctx.state.channel.active_val_col, ratios).to_numpy()
             mask &= np.isfinite(v)
             v_sel = v[mask]
@@ -347,7 +348,7 @@ def draw_beeswarm(
                 fallback = timepoint_text(df.loc[need]).map(parse_timepoint_hours)
                 tp[need] = fallback.fillna(np.nan).to_numpy(dtype=float)
             with np.errstate(invalid="ignore"):
-                mask &= np.isfinite(tp) & (np.abs(tp - col_tp) <= 1e-6)
+                mask &= np.isfinite(tp) & tp_close_mask(tp, col_tp)
             val = resolve_value_series(df, ctx.state.channel.active_val_col, ratios).to_numpy()
             mask &= np.isfinite(val)
             v_sel = val[mask]
@@ -506,7 +507,7 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
     rec_tp = rec0.get("target_t")
     if rec_tp is not None and target_ts:
         try:
-            if not any(abs(float(t) - float(rec_tp)) <= 1e-6 for t in target_ts):
+            if not any(tp_close(float(t), float(rec_tp)) for t in target_ts):
                 return
         except (TypeError, ValueError):
             pass
@@ -1205,7 +1206,7 @@ def draw_per_well_n_bars(
                 fluor_gates=fluor_gates,
                 per_fov_spread=per_fov_spread,
             )
-        matched = [pt for pt in pts if abs(pt[0] - col_tp) < 1e-6]
+        matched = [pt for pt in pts if tp_close(pt[0], col_tp)]
         color = colors[i % len(colors)] if colors else color_for_well(lbl)
         if matched:
             pt = matched[0]

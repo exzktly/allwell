@@ -42,6 +42,7 @@ from well_viewer.domain.stats_compute import (
     replicate_unit,
 )
 from well_viewer.core import debug_flags as debug_flags
+from well_viewer.domain.tp_match import tp_close
 
 _logger = logging.getLogger(__name__)
 
@@ -590,7 +591,7 @@ def collect_bar_items(
                 fluor_gates=fluor_gates,
                 per_fov_spread=per_fov_spread,
             )
-            matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
+            matched = [pt for pt in pts if tp_close(pt[0], target_t)]
             if matched:
                 pt = matched[0]
                 m, s, f = pt[1], pt[2], pt[3]
@@ -892,7 +893,7 @@ def collect_bar_items_for_group(
             fc_control_mean_at_t, fc_control_spread_at_t = ctrl_stats_t or (None, None)
             fc_control_frac_at_t, fc_control_frac_spread_at_t = ctrl_frac_t or (None, None)
             pts = member_pts_by_key[key]
-            matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
+            matched = [pt for pt in pts if tp_close(pt[0], target_t)]
             if matched:
                 pt = matched[0]
                 m, s, f = pt[1], pt[2], pt[3]
@@ -1110,17 +1111,17 @@ def collect_bar_items_fov_pooled(
     target_set = set()
     for t in target_ts:
         target_set.add(float(t))
-    # _aggregate_arrays groups by exact tp values present in the stream;
-    # round to the same tolerance we already use elsewhere (1e-6).
+    # _aggregate_arrays groups by exact tp values present in the stream; match
+    # against the shared relative tolerance (``tp_match.tp_close``) rather than
+    # an absolute one, which a 4-significant-figure combo round-trip defeats.
     pts = _agg_arrays(tp_all, val_all, fov_all, threshold, use_sem, True)
     pts_by_t = {float(p[0]): p for p in pts}
 
     for i, t in enumerate(target_ts):
-        # Match within 1e-6 tolerance to handle float rounding from
-        # earlier numeric parsing — same tolerance as the per-well branch.
+        # Same relative tolerance as the per-well branch, for the same reason.
         matched = None
         for pt_t, pt in pts_by_t.items():
-            if abs(pt_t - float(t)) < 1e-6:
+            if tp_close(pt_t, float(t)):
                 matched = pt
                 break
         color = _WELL_COLORS[i % len(_WELL_COLORS)]

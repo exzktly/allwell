@@ -500,6 +500,12 @@ class ImportLoosePage(LogPanelMixin, QWidget):
             self._dest_field.show_note("")
         else:
             self._dest_field.revalidate()
+        # The readout says different things in the two modes — only the in-place
+        # conversion touches the well folders already in the source, so only it
+        # states that it will. Toggling the box changed nothing about the
+        # readout, so that sentence existed and was unreachable through the
+        # control that decides whether it applies.
+        self.refresh_readout()
         self._refresh_run_enabled()
 
     def _can_run(self) -> bool:

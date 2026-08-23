@@ -22,10 +22,18 @@ from __future__ import annotations
 
 import zipfile
 
+import pytest
+from PySide6.QtWidgets import QApplication
+
 from datasets.import_loose.apply import _zip_well_folders
 from datasets.import_loose.import_loose_compute import scan_folder
 
 _SCHEMA = "experiment:channel:well:fov:timepoint"
+
+
+@pytest.fixture(scope="module")
+def qapp():
+    return QApplication.instance() or QApplication([])
 
 
 def _folder_with_loose_tifs_and_pre_existing_wells(root):
@@ -119,3 +127,44 @@ def test_the_run_summary_names_the_extra_scope(tmp_path, monkeypatch):
 
     assert "C03" in summary and "D04" in summary
     assert "already in the source" in summary
+
+
+def _page(qapp):
+    from datasets.import_loose.view import ImportLoosePage
+
+    page = ImportLoosePage()
+    page.show()
+    for _ in range(4):
+        qapp.processEvents()
+    return page
+
+
+def test_the_page_states_the_extra_scope_once_the_destructive_mode_is_armed(
+    qapp, tmp_path,
+):
+    """Driven through the checkbox a user actually ticks, not by calling the
+    readout builder directly: the note is meant to appear when the destructive
+    mode is selected and to stay out of the way when it is not, and only
+    toggling the real control exercises that.
+
+    The confirmation dialog itself is modal and cannot be opened from a test
+    (``tests/conftest.py::_no_modal_dialogs``); this checks the accessor the
+    controller composes it from, the way the existing page tests do for the
+    counts and the left-alone note.
+    """
+    src = _folder_with_loose_tifs_and_pre_existing_wells(tmp_path / "plate")
+    page = _page(qapp)
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+
+    # New-destination mode acts on none of those folders, so it must not
+    # describe deleting inside them.
+    assert page.in_place() is False
+    assert "C03" not in page._readout.text()
+
+    page._in_place_cb.setChecked(True)
+    qapp.processEvents()
+
+    note = page.existing_folder_note()
+    assert "C03" in note and "D04" in note
+    assert "C03" in page._readout.text()

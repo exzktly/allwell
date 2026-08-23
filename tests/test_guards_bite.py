@@ -1625,6 +1625,21 @@ RUN_DIR_VIOLATIONS = {
     "split-literal": 'def d(host, run_id):\n'
                      '    return (f"{host.remote_staging_dir}/ru"\n'
                      '            f"ns/{run_id}/out")\n',
+    # The four spellings that are not f-strings at all. Reading only
+    # `ast.JoinedStr` made each of these a way around the rule, and
+    # `PurePosixPath` is already imported in the module the guard holds.
+    "percent-format": 'def d(staging, run_id):\n'
+                      '    return "%s/runs/%s" % (staging, run_id)\n',
+    "str-format": 'def d(staging, run_id):\n'
+                  '    return "{}/runs/{}".format(staging, run_id)\n',
+    "concatenation": 'def d(staging, run_id):\n'
+                     '    return staging + "/runs/" + run_id\n',
+    "posixpath-join": 'import posixpath\n'
+                      'def d(staging, run_id):\n'
+                      '    return posixpath.join(staging, "runs", run_id)\n',
+    "purepath-div": 'from pathlib import PurePosixPath\n'
+                    'def d(staging, run_id):\n'
+                    '    return str(PurePosixPath(staging) / "runs" / run_id)\n',
 }
 
 RUN_DIR_CLEAN = {
@@ -1633,6 +1648,16 @@ RUN_DIR_CLEAN = {
                    '    return f"{host.remote_staging_dir}/datasets/{key}"\n',
     # A path that merely mentions runs in prose.
     "prose": 'MSG = "look under runs/ on the host"\n',
+    # A bare "runs" outside a path-building position is a word. The rule is
+    # keyed on where the segment sits, not on the word itself, or every
+    # sentence in the codebase that uses it would be a violation.
+    "runs-as-a-word": 'HEADING = "runs"\nLABEL = ("runs", "wells")\n',
+    # A join that is not building a run directory.
+    "unrelated-join": 'def f(parts):\n    return "/".join(parts)\n',
+    # The dataset address again, in the slash-free spelling.
+    "dataset-join": 'import posixpath\n'
+                    'def d(staging, key):\n'
+                    '    return posixpath.join(staging, "datasets", key)\n',
 }
 
 

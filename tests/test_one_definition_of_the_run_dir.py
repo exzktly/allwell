@@ -31,23 +31,82 @@ _FUNNEL = ("remote_run_dir", "remote_run_paths")
 
 
 def _run_dir_literals(tree: ast.AST) -> list[tuple[int, str]]:
-    """Every f-string that builds a ``runs/<something>`` path.
+    """Every literal that builds a ``runs/<something>`` path.
 
-    Matched on the joined static parts rather than on the interpolations, so
-    the spelling of the run-id expression cannot dodge it — ``{run_id}``,
-    ``{self._run_id}`` and ``{run.run_id}`` were the three used, and a fourth
-    would have been just as invisible.
+    Matched on the **static text**, not on the interpolations, so the spelling
+    of the run-id expression cannot dodge it — ``{run_id}``, ``{self._run_id}``
+    and ``{run.run_id}`` were the three in use, and a fourth would have been
+    just as invisible.
+
+    Both literal kinds are read, because reading only f-strings is a rule with
+    an obvious way around it. An f-string's static parts are joined first, so
+    an implicit concatenation split mid-word still matches; a plain string
+    constant is read whole, which covers ``"%s/runs/%s" % …``,
+    ``"{}/runs/{}".format(…)``, ``staging + "/runs/" + run_id`` and
+    alike — the first three contain the segment somewhere, and none of them is
+    an f-string. Docstrings are exempt: describing the layout is what the
+    funnel's own docstring and this file do.
+
+    Two path builders never spell the separator at all, and so are matched by
+    shape instead: ``posixpath.join(staging, "runs", run_id)`` and
+    ``PurePosixPath(staging) / "runs" / run_id`` both carry a bare ``"runs"``,
+    the first as an argument to a ``join`` call and the second as an operand
+    of ``/``. Outside those two positions a bare ``"runs"`` is ordinary prose,
+    which is why the rule is keyed on the position and not on the word.
     """
-    found = []
+    docstrings = {id(d) for d in _docstring_nodes(tree)}
+    found = [(node.lineno, ast.unparse(node))
+             for node in ast.walk(tree) if _joins_a_runs_segment(node)]
     for node in ast.walk(tree):
-        if not isinstance(node, ast.JoinedStr):
+        if isinstance(node, ast.JoinedStr):
+            static = "".join(v.value for v in node.values
+                             if isinstance(v, ast.Constant)
+                             and isinstance(v.value, str))
+        elif (isinstance(node, ast.Constant) and isinstance(node.value, str)
+              and id(node) not in docstrings):
+            static = node.value
+        else:
             continue
-        static = "".join(v.value for v in node.values
-                         if isinstance(v, ast.Constant)
-                         and isinstance(v.value, str))
         if "/runs/" in static or static.endswith("/runs"):
             found.append((node.lineno, ast.unparse(node)))
     return found
+
+
+def _is_runs(node: ast.AST) -> bool:
+    return isinstance(node, ast.Constant) and node.value == "runs"
+
+
+def _joins_a_runs_segment(node: ast.AST) -> bool:
+    """A ``runs`` segment joined into a path without ever spelling a slash.
+
+    ``posixpath.join(staging, "runs", run_id)`` and ``PurePosixPath(staging) /
+    "runs" / run_id`` build the same address as the literals above and share
+    none of their text, so a rule that only reads string content walks past
+    both. Keyed on the position the segment sits in — an argument to a ``join``
+    call, or an operand of ``/`` — because a bare ``"runs"`` anywhere else is
+    a word, not a path.
+    """
+    if isinstance(node, ast.Call):
+        func = node.func
+        name = getattr(func, "attr", None) or getattr(func, "id", None)
+        return name == "join" and any(_is_runs(a) for a in node.args)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return _is_runs(node.left) or _is_runs(node.right)
+    return False
+
+
+def _docstring_nodes(tree: ast.AST) -> list[ast.Constant]:
+    """The string constants that are docstrings, which describe rather than build."""
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.ClassDef,
+                                 ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        first = node.body[0] if node.body else None
+        if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)):
+            out.append(first.value)
+    return out
 
 
 def test_only_the_funnel_spells_the_run_directory():

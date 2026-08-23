@@ -9,7 +9,6 @@ matplotlib rendering, click handling, and combo wiring.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 _logger = logging.getLogger(__name__)
 
@@ -253,7 +252,7 @@ def _draw_scatter_agg_legends(ax_agg, scatter_data, marker_fg) -> None:
     from matplotlib.legend import Legend
 
     wells: dict[str, str] = {}      # group_label -> marker
-    tps: dict[float, Any] = {}      # timepoint  -> colour
+    tps: dict[float, object] = {}   # timepoint  -> colour
     for data in scatter_data.values():
         glabel = data.get('group_label') or data.get('label', '')
         if glabel not in wells:

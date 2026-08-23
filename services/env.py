@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 def _check_scratch_dir(value: str) -> str | None:
     """Return a warning if ``ALLWELL_SCRATCH_DIR`` is set but unusable.
 
-    Mirrors :func:`services.remote_runner._scratch_dir`: the override must be a
+    Mirrors :func:`services.remote_scratch._scratch_dir`: the override must be a
     directory we can create. We only *probe* here (create-if-missing, same as
     the real path) — we never delete, and we never fall back.
     """

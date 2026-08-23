@@ -93,12 +93,11 @@ PROCESS_MICROSCOPY_BUDGET = 4745
 # derived in N places and N was not knowable, and a module keeps acquiring
 # those for exactly as long as adding one more costs nothing.
 #
-# The complexity ratchet gives no pressure here either. `spawn` is 393 lines
+# The complexity ratchet gives no pressure here either. `spawn` is 394 lines
 # and 12 concerns, and its cyclomatic complexity is 22 — comfortably under the
 # threshold of 40 — so length is the dimension that needs a limit and this is
-# it. Set at the count on the day it was introduced; it only moves down, and
-# the planned extractions (staging, transport, argv/run-id) each drop it by
-# what they move.
+# it. It only moves down: introduced at 8210, then 7994, 7606 and 7419 as the
+# staging, transport and argv/run-id extractions each took what they moved.
 REMOTE_RUNNER_BUDGET = 7419
 # 1494 -> 1333: the smart-layout builder cluster (flat + nested grid assembly,
 # per-channel LUT re-keying, the Build presets, and the row-channel styling

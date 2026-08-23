@@ -453,7 +453,7 @@ def test_stage_local_zips_with_fluor_filter_preserves_user_input(tmp_path):
 def test_client_scratch_default_matches_the_pipelines(monkeypatch, tmp_path):
     """One scratch default across the app, not two.
 
-    ``pipeline.io.scratch_base_for`` and ``remote_runner._scratch_dir`` cannot
+    ``pipeline.io.scratch_base_for`` and ``remote_scratch._scratch_dir`` cannot
     share a constant (the client must not import the imaging stack), so they are
     pinned here instead. They used to disagree — the client fell back to the OS
     temp dir, which on macOS is an opaque ``/var/folders/…/T`` path and on Linux

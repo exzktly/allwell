@@ -99,7 +99,7 @@ PROCESS_MICROSCOPY_BUDGET = 4745
 # it. Set at the count on the day it was introduced; it only moves down, and
 # the planned extractions (staging, transport, argv/run-id) each drop it by
 # what they move.
-REMOTE_RUNNER_BUDGET = 8210
+REMOTE_RUNNER_BUDGET = 7994
 # 1494 -> 1333: the smart-layout builder cluster (flat + nested grid assembly,
 # per-channel LUT re-keying, the Build presets, and the row-channel styling
 # helper) moved into ``image_table/build_layout.py``. The nested / compound-axis

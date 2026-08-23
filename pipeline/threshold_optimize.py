@@ -420,12 +420,14 @@ def estimate_thresholds_from_controls(
         # them. A plateau spanning a meaningful share of the swept range is a
         # weak answer, and it used to be reported exactly like a sharp one.
         if result.tie_count > 1:
+            # Rounded the same way the stored value is, so the two lines cannot
+            # disagree about the number they both name.
             log.info(
                 "Auto-threshold %s: that score is shared by %d of %d grid "
                 "point(s), spanning %.4g intensity unit(s) (%.4g to %.4g) — the "
                 "lowest of them is reported.",
-                ch, result.tie_count, steps, result.tie_span,
-                result.threshold, result.threshold + result.tie_span,
+                ch, result.tie_count, steps, result.tie_span, out[ch],
+                round_stored_threshold(result.threshold + result.tie_span),
             )
         # The objective is symmetric, so it cannot tell the wells apart — this
         # is the only guard against a swap poisoning every downstream default.

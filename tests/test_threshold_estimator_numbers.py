@@ -34,6 +34,7 @@ import pytest
 from pipeline.auto_threshold import _index_members, _SchemaReader, _otsu_per_channel
 from pipeline.threshold_optimize import (
     best_from_curves,
+    estimate_thresholds_from_controls,
     frac_curve,
     optimize_between_populations,
     relative_gap,
@@ -189,6 +190,64 @@ def test_a_non_finite_otsu_result_is_skipped_not_stored(caplog, monkeypatch):
                                 {"gfp": 1}, {"gfp": 0}, log)
     assert out == {}
     assert "non-finite" in caplog.text
+
+
+def _write_well_csv(path, values, channel="gfp"):
+    import csv as _csv
+
+    with open(path, "w", newline="") as fh:
+        w = _csv.writer(fh)
+        w.writerow(["cell_id", f"{channel}_mean_intensity"])
+        for i, v in enumerate(values):
+            w.writerow([i, f"{float(v):.6f}"])
+
+
+def test_the_plateau_reaches_the_run_log(tmp_path, caplog):
+    """The tie is only useful if it is printed, so assert the line, not the field.
+
+    A bimodal positive population against a tight negative one leaves the two
+    fractions constant across the whole gap between the modes, so hundreds of
+    grid points score identically and the reported threshold is the lowest of
+    them. That is exactly the case the reader has to be told about.
+    """
+    rng = np.random.default_rng(11)
+    pos = np.concatenate([rng.normal(200, 20, 200), rng.normal(2000, 100, 200)])
+    neg = rng.normal(200, 20, 400)
+    _write_well_csv(tmp_path / "plate_A01.csv", pos)
+    _write_well_csv(tmp_path / "plate_H12.csv", neg)
+    log = logging.getLogger("test_plateau")
+    with caplog.at_level(logging.INFO, logger="test_plateau"):
+        out = estimate_thresholds_from_controls(
+            tmp_path, fluor_channels=["GFP"], csv_prefix="plate",
+            pos_well="A01", neg_well="H12", log=log)
+    assert "gfp" in out
+    assert "is shared by" in caplog.text
+    assert "grid point" in caplog.text
+    # The range it names really is the range of the tied thresholds, and the
+    # value it reports really is the lowest of them.
+    thresholds = sweep_thresholds(*sweep_bounds(pos, neg), 512)
+    fa, fb = frac_curve(pos, thresholds), frac_curve(neg, thresholds)
+    diffs = relative_gap(fa, fb, n_a=pos.size, n_b=neg.size)
+    tied = thresholds[diffs == diffs.max()]
+    assert f"{len(tied)} of 512" in caplog.text
+    # The bounds are printed through the same rounding as the stored value, so
+    # the headline and the plateau line cannot name the same threshold twice
+    # with two different numbers.
+    assert f"{round_stored_threshold(float(tied.min())):.4g}" in caplog.text
+    assert f"{round_stored_threshold(float(tied.max())):.4g}" in caplog.text
+    assert out["gfp"] == pytest.approx(round_stored_threshold(float(tied.min())))
+
+
+def test_a_single_best_threshold_says_nothing_about_a_plateau(tmp_path, caplog):
+    rng = np.random.default_rng(0)
+    _write_well_csv(tmp_path / "plate_A01.csv", rng.normal(600, 250, 500))
+    _write_well_csv(tmp_path / "plate_H12.csv", rng.normal(400, 200, 500))
+    log = logging.getLogger("test_no_plateau")
+    with caplog.at_level(logging.INFO, logger="test_no_plateau"):
+        estimate_thresholds_from_controls(
+            tmp_path, fluor_channels=["GFP"], csv_prefix="plate",
+            pos_well="A01", neg_well="H12", log=log)
+    assert "is shared by" not in caplog.text
 
 
 # ── C11: one definition of "is this one of the run's images" ─────────────────

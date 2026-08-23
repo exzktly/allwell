@@ -196,7 +196,7 @@ def test_an_unreadable_unit_says_so_in_the_run_log(caplog):
     assert tokens == ["t0", "t1"]
     assert "cannot read" in caplog.text
     assert "furlong" in caplog.text
-    assert "named by position" in caplog.text
+    assert "naming by position" in caplog.text
 
 
 def test_labels_that_collide_say_which_label_repeated(caplog):
@@ -206,7 +206,7 @@ def test_labels_that_collide_say_which_label_repeated(caplog):
         _channels, tokens, _raw = _parse_ome_labels(xml, 1, 2)
     assert tokens == ["t0", "t1"]
     assert "1h" in caplog.text, caplog.text
-    assert "named by position" in caplog.text
+    assert "naming by position" in caplog.text
 
 
 def test_a_file_with_readable_units_logs_no_warning(caplog):
@@ -240,3 +240,74 @@ def test_the_raw_channel_names_survive_tokenisation():
     xml = _ome_xml(planes=[(0, 0, "s"), (1, 3600, "s")])
     _channels, _tokens, raw = _parse_ome_labels(xml, 1, 2)
     assert raw == ["GFP"]
+
+
+# ── the label has to be one the app can read back ───────────────────────────
+
+@pytest.mark.parametrize("unit,step,frames", [
+    ("ms", 100, 6),        # 100 ms apart: 2.78e-05 h
+    ("s", 1, 6),           # one second apart
+    ("ms", 1, 4),          # one millisecond apart
+    ("s", 3600, 4),        # an hour apart, the ordinary case
+    ("min", 30, 5),
+])
+def test_every_rendered_timepoint_parses_and_sorts(unit, step, frames):
+    """``%g`` goes exponential below 1e-4, and the parser matches no exponent.
+
+    Adding the sub-second units made that routine rather than rare: a six-frame
+    time-lapse 100 ms apart rendered ``2.77778e-05h``, ``parse_hours`` answered
+    ``None`` for three of the six, and ``sort_key`` fell back to sorting those
+    tokens as text — putting frames 5 and 6 ahead of frames 2 to 4. A number the
+    app cannot read is worse than the wrong number it replaced, which at least
+    ordered correctly.
+    """
+    from util.timepoint import parse_hours, sort_key
+
+    xml = _ome_xml(planes=[(i, i * step, unit) for i in range(frames)])
+    _channels, tokens, _raw = _parse_ome_labels(xml, 1, frames)
+    assert all(not t.startswith("t") for t in tokens), (
+        f"{unit} at {step} fell back to positional tokens: {tokens}")
+    unread = [t for t in tokens if parse_hours(t) is None]
+    assert not unread, f"the app's own parser cannot read {unread} out of {tokens}"
+    assert sorted(tokens, key=sort_key) == tokens, (
+        f"Review would order these {sorted(tokens, key=sort_key)}, not {tokens}")
+
+
+def test_a_one_based_thet_does_not_mix_the_two_vocabularies():
+    """An out-of-range TheT must not satisfy the completeness test.
+
+    ``TheT`` is a zero-based index. A writer stamping it one-based left keys
+    ``{1,2,3}`` for ``SizeT=3``, which is three keys and passed the count check
+    while attaching every elapsed time to the wrong index: the tokens came out
+    ``['t0', '0h', '1h']`` — mixed vocabularies, and ``t0`` and ``0h`` both read
+    as 0 h, so two distinct timepoints shared one reading.
+    """
+    xml = _ome_xml(planes=[(1, 0, "s"), (2, 3600, "s"), (3, 7200, "s")])
+    _channels, tokens, _raw = _parse_ome_labels(xml, 1, 3)
+    assert tokens == ["t0", "t1", "t2"], tokens
+
+
+def test_an_out_of_range_thet_says_which_way_it_was_out(caplog):
+    xml = _ome_xml(planes=[(1, 0, "s"), (2, 3600, "s")])
+    with caplog.at_level(logging.WARNING, logger="pipeline.ome_explode"):
+        _parse_ome_labels(xml, 1, 2)
+    assert "TheT outside" in caplog.text, caplog.text
+
+
+def test_an_unreadable_unit_on_a_file_that_resolved_says_nothing(caplog):
+    """A warning must describe what happened, not what could have.
+
+    The unreadable-unit line fired wherever a bad unit was seen, which is not
+    the same as the file falling back — one channel's planes carrying a bad
+    unit while another's carry seconds leaves every timepoint resolved. Saying
+    "naming by position" about a file whose timepoints are named by elapsed
+    time sends a user to re-export a plate for nothing.
+    """
+    planes = [(0, 0, "s"), (1, 3600, "s"),         # channel 0: readable
+              (0, 0, "furlong"), (1, 3600, "furlong")]   # channel 1: not
+    xml = _ome_xml(planes=planes)
+    with caplog.at_level(logging.WARNING, logger="pipeline.ome_explode"):
+        _channels, tokens, _raw = _parse_ome_labels(xml, 1, 2)
+    assert tokens == ["0h", "1h"], tokens
+    assert caplog.text.strip() == "", (
+        f"warned about a fallback that did not happen: {caplog.text!r}")

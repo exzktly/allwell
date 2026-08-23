@@ -195,16 +195,19 @@ def _index_members(zf, reader: _SchemaReader, channels: set[str]):
     unplaceable: list[str] = []
     for name in zf.namelist():
         # This archive is the pipeline's own ``<WELL>_out.zip`` output, not the
-        # user's input, so the predicate is deliberately the plain suffix test
-        # ``is_group_image`` and not ``is_run_input_member``: the members here
-        # were written by ``_safe_imwrite`` at the top level of a flat archive,
-        # and a nested member is not one of them. ``is_run_input_member`` judges
-        # a member by its *basename*, which is the right question for an input
-        # archive a user assembled and the wrong one here.
+        # user's input, and the two questions are not the same one. Every
+        # member here was written by ``_safe_imwrite`` at the top level of a
+        # flat archive, so a nested member is by definition not one of them —
+        # which is why the path test below is a flat refusal rather than a
+        # basename test. An *input* archive is assembled by the user and may
+        # legitimately carry its images in subdirectories.
         #
-        # The two skips ahead of it are for what a user's file manager adds
-        # after the fact — opening the archive in Finder leaves a ``.DS_Store``
-        # and an ``__MACOSX/`` tree inside it.
+        # The two skips ahead of the extension test are for what a user's file
+        # manager adds after the fact: opening the archive in Finder leaves a
+        # ``.DS_Store`` and an ``__MACOSX/`` tree inside it. The repo's shared
+        # OS-junk predicate (``datasets._common.member_names.is_os_junk_member``)
+        # cannot be used here — it imports ``well_viewer``, which the pipeline
+        # may not — so this is the local spelling of the same two rules.
         #
         # The extension test was spelled out here as ``tif``/``tiff`` only,
         # while the pipeline also writes ``.png`` — and because the skip happens

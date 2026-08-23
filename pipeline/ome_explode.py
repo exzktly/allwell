@@ -33,6 +33,7 @@ inside the pipeline self-sufficiency contract (ARCHITECTURE §6.2).
 
 from __future__ import annotations
 
+import math
 import io
 import logging
 import os
@@ -476,6 +477,37 @@ def _localname(tag: str) -> str:
     return tag.rsplit("}", 1)[-1] if "}" in tag else tag
 
 
+def _hours_token(hours: float) -> str:
+    """``"<hours>h"`` in a spelling ``util.timepoint`` can read, or ``""``.
+
+    Six significant figures in **fixed** notation. ``f"{v:g}"`` switches to
+    exponent form below 1e-4, which was rare while every DeltaT was read as
+    seconds and became routine once milliseconds, microseconds and nanoseconds
+    were added: a six-frame time-lapse 100 ms apart rendered
+    ``2.77778e-05h``, and ``util.timepoint._UNIT_RE`` matches no exponent, so
+    ``parse_hours`` answered ``None`` and ``sort_key`` fell back to sorting
+    those tokens as text — putting frames 5 and 6 before frames 2 to 4. A
+    number the parser cannot read is worse than the wrong number it replaced,
+    because the wrong one at least ordered correctly.
+
+    Answers ``""`` for a value the parser cannot represent at all: not finite,
+    or negative (``_UNIT_RE`` accepts no sign, and a writer stamping a
+    pre-treatment frame at a negative elapsed time is the case that produces
+    one). The caller reads that as a reason to name every timepoint by
+    position, and says so.
+    """
+    if not math.isfinite(hours) or hours < 0.0:
+        return ""
+    if hours == 0.0:
+        return "0h"
+    # Decimal places chosen so six significant figures survive, capped: below
+    # a microsecond in hours the label is more zeros than number, and two such
+    # timepoints colliding is caught by the duplicate check either way.
+    places = min(12, max(0, 5 - int(math.floor(math.log10(hours)))))
+    text = f"{hours:.{places}f}".rstrip("0").rstrip(".")
+    return f"{text}h" if text and text != "0" else "0h"
+
+
 def _parse_ome_labels(
     ome_xml: str | None, size_c: int, size_t: int
 ) -> tuple[list[str], list[str], list[str]]:
@@ -493,6 +525,134 @@ def _parse_ome_labels(
     raw_names: list[str] = []
     if not ome_xml:
         return channel_names, timepoint_tokens, raw_names
+
+    try:
+        root = ET.fromstring(ome_xml)
+    except ET.ParseError:
+        return channel_names, timepoint_tokens, raw_names
+
+    image = next((el for el in root.iter() if _localname(el.tag) == "Image"), None)
+    if image is None:
+        return channel_names, timepoint_tokens, raw_names
+
+    pixels = next(
+        (el for el in image.iter() if _localname(el.tag) == "Pixels"), None
+    )
+    if pixels is None:
+        return channel_names, timepoint_tokens, raw_names
+
+    # Channel names, in channel order.
+    names: list[str] = []
+    for el in pixels:
+        if _localname(el.tag) == "Channel":
+            names.append(el.get("Name") or "")
+    if names:
+        raw_names = [str(names[i]) if i < len(names) else "" for i in range(size_c)]
+        channel_names = [
+            _safe_token(names[i] if i < len(names) else "", f"c{i}")
+            for i in range(size_c)
+        ]
+
+    # Timepoints from DeltaT on the T-index planes, converted to hours. A plane
+    # whose unit cannot be converted contributes nothing, so ``delta_by_t``
+    # comes up short of ``size_t`` and every token stays positional.
+    delta_by_t: dict[int, float] = {}
+    unreadable_units: set[str] = set()
+    unreadable_planes = 0
+    out_of_range = 0
+    for el in pixels:
+        if _localname(el.tag) != "Plane":
+            continue
+        the_t = el.get("TheT")
+        delta = el.get("DeltaT")
+        if the_t is None or delta is None:
+            continue
+        try:
+            ti = int(the_t)
+            value = float(delta)
+        except ValueError:
+            continue
+        # ``TheT`` is a zero-based index into the T axis, and a writer that
+        # stamps it one-based is the common deviation. Unchecked, those keys
+        # still satisfy the ``len(delta_by_t) >= size_t`` test below while
+        # attaching every elapsed time to the wrong array index — a file with
+        # TheT 1,2,3 and SizeT 3 rendered ``['t0', '0h', '1h']``, mixing the two
+        # vocabularies and giving two timepoints the same 0 h reading, with
+        # nothing saying so.
+        if not (0 <= ti < size_t):
+            out_of_range += 1
+            continue
+        # OME's default for DeltaT is seconds, so an *absent* unit is seconds.
+        # An unrecognised one is not: it is a unit this module cannot convert.
+        unit = (el.get("DeltaTUnit") or "s").strip()
+        # Case-sensitive symbols first: `Ms` and `ms` are different units and
+        # only their case tells them apart.
+        per_hour = _DELTA_T_HOURS_PER_SYMBOL.get(unit)
+        if per_hour is None:
+            per_hour = _DELTA_T_HOURS_PER_UNIT.get(unit.lower())
+        if per_hour is None:
+            unreadable_units.add(unit)
+            unreadable_planes += 1
+            continue
+        delta_by_t.setdefault(ti, value * per_hour)
+
+    # Every route to a positional token is a *degradation*: the file stated a
+    # time and the archive will not carry it, so Review orders the timepoints by
+    # index and can put no number on an axis. Each one says so, because a
+    # ``t0``/``t1`` plate is otherwise indistinguishable from one whose writer
+    # recorded no DeltaT at all.
+    #
+    # The warnings live *inside* the branch that actually falls back. Reporting
+    # an unreadable unit wherever one was seen said "the timepoints are named by
+    # position" about a file whose timepoints had resolved perfectly — one
+    # channel's planes carrying a bad unit while another's carried seconds is
+    # enough — and a log line asserting data loss that did not happen sends a
+    # user to re-export a plate for nothing.
+    complete = bool(size_t) and len(delta_by_t) >= size_t
+    from_delta = (
+        [_hours_token(delta_by_t[i]) for i in range(size_t)] if complete else []
+    )
+    # ``%g`` renders six significant figures, so two deltas that differ by less
+    # than that — or a writer that stamps the same placeholder on every plane —
+    # produce one token for two timepoints, and every image of the second would
+    # be written over the first's member name. Positional tokens name them all
+    # distinctly and lose only a number the file did not really state.
+    collided = sorted({t for t in from_delta if from_delta.count(t) > 1})
+    unrenderable = [i for i, t in enumerate(from_delta) if not t]
+
+    if complete and not collided and not unrenderable:
+        timepoint_tokens = from_delta
+    elif size_t:
+        why: list[str] = []
+        if unreadable_units:
+            why.append(
+                f"{unreadable_planes} plane(s) carry a DeltaTUnit this "
+                f"converter cannot read ({', '.join(sorted(unreadable_units))})")
+        if out_of_range:
+            why.append(
+                f"{out_of_range} plane(s) carry a TheT outside "
+                f"0..{size_t - 1}, so the file's T indexing is not this "
+                f"converter's")
+        if complete and collided:
+            why.append(
+                f"the elapsed times render to {len(set(from_delta))} distinct "
+                f"label(s) for {len(from_delta)} timepoint(s) — "
+                f"{', '.join(collided)} repeat(s), and two timepoints sharing "
+                f"a label would write every image of the second over the first")
+        if complete and unrenderable:
+            why.append(
+                f"{len(unrenderable)} elapsed time(s) are not finite or not "
+                f"positive, and the app's timepoint parser reads neither")
+        if not complete and not why:
+            why.append(
+                f"only {len(delta_by_t)} of {size_t} timepoint(s) carry a "
+                f"readable DeltaT")
+        _log.warning(
+            "OME timepoints: naming by position (t0, t1, …) rather than by "
+            "elapsed time — %s.", "; ".join(why),
+        )
+
+    return channel_names, timepoint_tokens, raw_names
 
     try:
         root = ET.fromstring(ome_xml)

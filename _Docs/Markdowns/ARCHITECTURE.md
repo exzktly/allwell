@@ -3839,17 +3839,26 @@ maxima had scored the best. Which point of a genuine plateau *ought* to be
 reported is a question about the assay, and is deliberately left open rather than
 answered with a silently different default.
 
-**A stored threshold is rounded, never rounded away.** Both estimators wrote
-`float(round(x))`, which is right for camera counts — a cut of 547.7 reads better
-as 548 and is what the user can type back into the form — and catastrophic below
-1: `_safe_imwrite` writes float32 TIFFs, so a channel normalised to 0–1 is a real
-input, and its Otsu threshold of 0.4048 stored as `0.0`, a gate that passes every
-cell written as the one value that also means "this channel was never measured"
-(both estimators omit a channel they could not measure). `round_stored_threshold`
-keeps three significant figures and never fewer digits than integer rounding gave,
-so anything at or above 100 — every real camera-intensity threshold — is
-unchanged, and a sub-1 value keeps enough resolution to stay non-zero. A
-non-finite estimate is skipped with a warning rather than stored.
+**A stored threshold is rounded, never rounded away.** All three estimators
+wrote `float(round(x))`, which is right for camera counts — a cut of 547.7 reads
+better as 548 and is what the user can type back into the form — and
+catastrophic below 1: `_safe_imwrite` writes float32 TIFFs, so a channel
+normalised to 0–1 is a real input, and its Otsu threshold of 0.4048 stored as
+`0.0`, a gate that passes every cell written as the one value that also means
+"this channel was never measured" (every estimator omits a channel it could not
+measure). `round_stored_threshold` keeps three significant figures and never
+fewer digits than integer rounding gave, so anything at or above 100 — every
+real camera-intensity threshold — is unchanged, and a sub-1 value keeps enough
+resolution to stay non-zero. A non-finite estimate is skipped with a warning
+rather than stored.
+
+Three, not two: the pipeline's control-well and Otsu passes
+(`pipeline/threshold_optimize.py`, `pipeline/auto_threshold.py`) and the Cell
+Gating tab's own Auto-threshold button, whose sampler is the near-twin
+`well_viewer/data/auto_threshold.py`. The viewer's copy imports
+`round_stored_threshold` rather than restating the rule, because a rounding rule
+that holds on the batch path and not on the button is the one a user meets
+first.
 
 **The Otsu mode reads its samples out of the output archives, and pairs them by
 name.** `estimate_thresholds_from_outputs` walks `<output_dir>/*_out.zip` and

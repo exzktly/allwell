@@ -395,3 +395,56 @@ def test_the_mess_in_a_real_archive_is_never_indexed(tmp_path):
     assert labels == {("1", "0"): "exp_DAPI_A01_1_0_labels.tif"}
     assert tophats == {}
     assert unplaceable == []
+
+
+# ── the rule holds on every estimator, including the interactive one ─────────
+
+def test_every_otsu_estimator_uses_the_one_rounding_rule():
+    """Three estimators answer "what threshold?", not two.
+
+    The pipeline's control-well and Otsu passes were fixed and the Cell Gating
+    tab's own Auto-threshold button was not, so the defect stayed live on the
+    path a user reaches by pressing a button: a 0-1 normalised channel's Otsu
+    threshold of 0.2496 was stored as 0.0, which gates 100% of cells and is
+    also the value meaning "never measured".
+    """
+    import ast
+    import inspect
+
+    import well_viewer.data.auto_threshold as viewer_at
+
+    src = inspect.getsource(viewer_at)
+    assert "_threshold_otsu" in src and len(src) > 5_000, len(src)
+
+    tree = ast.parse(src)
+    bare = [
+        n.lineno for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Name) and n.func.id == "round"
+    ]
+    assert not bare, (
+        f"lines {bare} round a threshold with the builtin instead of "
+        "pipeline.threshold_optimize.round_stored_threshold, so a sub-1 "
+        "channel's gate is stored as 0.0"
+    )
+    assert "round_stored_threshold" in src
+
+
+def test_the_viewers_estimator_keeps_a_sub_one_gate(monkeypatch):
+    """Driven through the real function, not asserted from its source."""
+    import numpy as np
+
+    import well_viewer.data.auto_threshold as viewer_at
+
+    rng = np.random.default_rng(3)
+    values = np.concatenate([rng.normal(0.15, 0.03, 300),
+                             rng.normal(0.70, 0.05, 300)])
+    monkeypatch.setattr(viewer_at, "_threshold_otsu",
+                        lambda arr: float(np.float64(0.24962132375636537)))
+    out = viewer_at.thresholds_from_samples(
+        ["gfp"], {"gfp": list(values)}, {}, {}, lambda _m: None)
+    assert out["gfp"] > 0.0, (
+        "a 0-1 channel's gate was stored as 0.0, which passes every cell and "
+        "is the value that also means 'this channel was never measured'"
+    )
+    assert out["gfp"] == pytest.approx(round_stored_threshold(0.24962132375636537))

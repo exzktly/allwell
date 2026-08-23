@@ -25,6 +25,8 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 
+import shutil
+
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -2111,13 +2113,25 @@ def test_feature_slice_guard_clears(tmp_path, monkeypatch, shape):
 #
 # F821 was in ``pyproject.toml``'s ignore list, justified by false positives on
 # quoted forward-reference annotations whose names are imported lazily in
-# workers. Ruff resolves those correctly now and the tree has zero hits, so the
-# rule is enforced — closing the blind spot CLAUDE.md §7.5 #11 records, where
-# deleting an ``app = ctx.window`` bridge left ``app`` unbound in three
+# workers. Ruff resolves those correctly now (every such site in this tree
+# declares the name under ``if TYPE_CHECKING:``) and the tree has zero hits, so
+# the rule is enforced — closing the blind spot CLAUDE.md §7.5 #11 records,
+# where deleting an ``app = ctx.window`` bridge left ``app`` unbound in three
 # functions and lint stayed green.
 #
 # Re-adding "F821" to the ignore list is a one-line edit that nothing else would
-# notice, so these run ruff against the repo's real config on a planted file.
+# notice. ``test_f821_is_enforced_by_the_lint_config`` is what notices, and it
+# reads the config rather than running anything, so it holds in **every**
+# environment — including CI's pytest job, which installs
+# ``tests/requirements-dev.txt`` and has no ``ruff`` binary at all (ruff runs
+# there as its own job, with its own pin). The subprocess cases below add the
+# behavioural half — that ruff really does flag these shapes and really does
+# clear the TYPE_CHECKING spelling — and skip where the binary is absent. The
+# first draft had only those, so the whole block failed in CI on a missing
+# executable; the rule they guard is decidable from the config, and that is
+# where the durable assertion belongs.
+
+_RUFF = shutil.which("ruff")
 
 F821_VIOLATIONS = {
     "plain unbound name": "def f():\n    return app\n",
@@ -2154,6 +2168,31 @@ F821_CLEAN = {
 }
 
 
+def _lint_config() -> dict:
+    import tomllib
+
+    data = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text())
+    return data.get("tool", {}).get("ruff", {}).get("lint", {})
+
+
+def test_f821_is_enforced_by_the_lint_config():
+    """The durable half: no binary, so it holds wherever the suite runs."""
+    lint = _lint_config()
+    ignored = set(lint.get("ignore", []))
+    assert "F821" not in ignored, (
+        "F821 (undefined-name) is back in pyproject.toml's ignore list. That is "
+        "the blind spot CLAUDE.md 7.5 #11 records: an unbound name left behind "
+        "by a rename passes lint. A site that genuinely needs a quoted "
+        "forward reference declares the name under `if TYPE_CHECKING:`, or "
+        "takes a per-line suppression."
+    )
+    selected = set(lint.get("select", []))
+    assert selected & {"F", "F8", "F82", "F821", "ALL"}, (
+        f"nothing in select={sorted(selected)} reaches F821, so ignoring it "
+        "would be beside the point — the rule is not switched on"
+    )
+
+
 def _f821_offenders(tmp_path, body):
     """Run the repo's own ruff config over *body*; return its F821 output."""
     import subprocess
@@ -2161,22 +2200,23 @@ def _f821_offenders(tmp_path, body):
     path = tmp_path / "probe.py"
     path.write_text(body)
     proc = subprocess.run(
-        ["ruff", "check", "--no-cache", "--select", "F821",
+        [_RUFF, "check", "--no-cache", "--select", "F821",
          "--config", str(_REPO_ROOT / "pyproject.toml"), str(path)],
         capture_output=True, text=True, cwd=str(_REPO_ROOT),
     )
     return proc.stdout if "F821" in proc.stdout else None
 
 
+@pytest.mark.skipif(_RUFF is None, reason="no ruff binary (CI runs it as its own job)")
 @pytest.mark.parametrize("shape", sorted(F821_VIOLATIONS))
 def test_f821_guard_catches(tmp_path, shape):
     got = _f821_offenders(tmp_path, F821_VIOLATIONS[shape])
     assert got is not None, (
-        f"the {shape} spelling walked past ruff — F821 is back in the ignore "
-        "list, and an unbound name will not fail lint again"
+        f"ruff did not flag the {shape} spelling under this repo's own config"
     )
 
 
+@pytest.mark.skipif(_RUFF is None, reason="no ruff binary (CI runs it as its own job)")
 @pytest.mark.parametrize("shape", sorted(F821_CLEAN))
 def test_f821_guard_clears(tmp_path, shape):
     got = _f821_offenders(tmp_path, F821_CLEAN[shape])

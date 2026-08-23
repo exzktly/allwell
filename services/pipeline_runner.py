@@ -1240,11 +1240,15 @@ class PipelineRunner:
             elif rc != 0:
                 self._enqueue_error(exit_message(rc, tail, where="Remote pipeline"))
             else:
-                self._enqueue((
-                    "error",
+                # Through `_enqueue_error`, not by hand. Building the tuple
+                # here skipped `_had_error` and the cancel-state latch, so a
+                # remote run that finished and then failed local verification
+                # was journalled `ok`: the index held it as a completed run,
+                # the resume banner never offered it, and the remote files it
+                # had deliberately preserved for retry were never fetched.
+                self._enqueue_error(
                     "Remote pipeline finished but local verification failed; "
-                    "remote files preserved for retry.\n",
-                ))
+                    "remote files preserved for retry.\n")
         except Exception as exc:  # surface any failure to the GUI
             self._enqueue_error(f"Failed to run pipeline remotely: {exc}\n")
         finally:

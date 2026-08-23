@@ -30,6 +30,7 @@ from well_viewer.features.image_browser.image_table.image_compose import (
     OVERLAY_CHAN,
     _load_array,
     _load_mask_array,
+    _load_ratio_array,
     _row_display_opts,
     cell_chrome_kwargs,
     cell_display_rgb,
@@ -39,7 +40,10 @@ from well_viewer.features.image_browser.image_table.image_compose import (
     reset_scan_misses,
     resolve_chrome_plan,
 )
-from well_viewer.features.image_browser.image_table.grid_layout import _axis_dim_values
+from well_viewer.features.image_browser.image_table.grid_layout import (
+    _axis_dim_values,
+    _find_ratio_for_channel,
+)
 
 
 # Save to Saved Plots quality presets: (cell_max_px, gallery_max_px).
@@ -61,6 +65,22 @@ GALLERY_QUALITY_LABELS: dict[str, str] = {
     "high": "High (slower)",
 }
 DEFAULT_GALLERY_QUALITY = "standard"
+
+
+def _load_cell_array(ctx, cache, well, chan, tp, fov, *, use_tophat):
+    """The cell's pixels, ratio channels included.
+
+    The live grid resolves a ratio channel through ``_find_ratio_for_channel``
+    / ``_load_ratio_array`` before falling back to a plain frame load
+    (``controller._cell_array``); the export builder had only the plain load,
+    so every ratio cell exported as ``(no image)`` — in Export to File, Copy
+    PNG, Copy SVG and Save to Saved Plots alike — while the screen showed it.
+    """
+    ratio = _find_ratio_for_channel(ctx, chan)
+    if ratio is not None:
+        return _load_ratio_array(ctx, cache, well, ratio, tp, fov,
+                                 use_tophat=use_tophat)
+    return _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
 
 
 def _export_opts(ctx) -> dict[str, Any]:
@@ -368,7 +388,8 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None):
                 # raw vs corrected is a per-channel render option (channel_opts).
                 use_tophat = _row_display_opts(ctx, r, chan)[0]
                 if well and chan and tp:
-                    arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
+                    arr = _load_cell_array(ctx, cache, well, chan, tp, fov,
+                                           use_tophat=use_tophat)
             if arr is not None and crop_tool is not None:
                 arr = crop_tool.apply_to_array(arr)
             if arr is not None:
@@ -419,7 +440,8 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None):
                 arr = rendered.get((r, c))
                 if arr is None and well and chan and tp:
                     use_tophat, _b, binary_mode = _row_display_opts(ctx, r, chan)
-                    arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
+                    arr = _load_cell_array(ctx, cache, well, chan, tp, fov,
+                                           use_tophat=use_tophat)
                     if arr is None and binary_mode:
                         # A binary cell draws its segmentation, not the
                         # fluorescence — same fallback the live grid takes, so the

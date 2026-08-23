@@ -34,7 +34,7 @@ from well_viewer.features.heatmap.models import (
     make_plate_layout,
 )
 from well_viewer.domain.ratio_models import is_ratio_key
-from well_viewer.domain.stats_compute import aggregate_group
+from well_viewer.domain.stats_compute import aggregate_group, _gate_cache_sig
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current
 from well_viewer.core.channel_state_controller import (
@@ -292,7 +292,11 @@ def _cell_value(
             fluor_gates=fluor_gates,
         )
         matched = [pt for pt in pts if tp_close(pt[0], target_t)]
-        return float(matched[0][5]) if matched else 0.0
+        # NaN, not 0.0. A well with no point at this timepoint has an *unknown*
+        # cell count, and returning zero coloured it as a real, empty well —
+        # indistinguishable from one the pipeline genuinely measured as having
+        # no cells. The two sibling metrics below already return NaN here.
+        return float(matched[0][5]) if matched else float("nan")
 
     if metric == METRIC_FRACTION:
         pts = aggregate_group(ctx,
@@ -412,7 +416,21 @@ def _compute_global_range(
             )
         ),
     )
-    ratios_fingerprint = tuple(sorted((ratios or {}).keys()))
+    # The ratio *definitions*, not just their names: two ratios can share a name
+    # and divide different channels, and the colour scale computed from one is
+    # wrong for the other. (`stats_compute._ratio_cache_sig` is the same rule for
+    # the statistics cache.)
+    ratios_fingerprint = tuple(
+        (
+            name,
+            getattr(r, "numerator_channel", ""),
+            getattr(r, "numerator_metric", ""),
+            getattr(r, "denominator_channel", ""),
+            getattr(r, "denominator_metric", ""),
+            repr(getattr(r, "epsilon", None)),
+        )
+        for name, r in sorted((ratios or {}).items())
+    )
     cache_key = (
         layout_fingerprint,
         metric,
@@ -423,6 +441,12 @@ def _compute_global_range(
         tuple(tps),
         bool(ctx.state.heatmap.repset_avg),
         bool(ctx.state.heatmap.log_scale),
+        # The scatter-gate signature. The colour range is computed from gated
+        # cell values, so editing or resizing a gate changes every cell in the
+        # map without moving any of the fields above it — and the cache is
+        # otherwise cleared only when the tab is rebuilt, so an Auto scale went
+        # on describing the population from before the edit.
+        _gate_cache_sig(ctx),
     )
     cached = ctx.runtime.heatmap.global_range_cache
     if cached is not None and cached.get("key") == cache_key:

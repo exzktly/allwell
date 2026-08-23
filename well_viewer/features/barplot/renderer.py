@@ -79,8 +79,8 @@ def _annotate_cluster_footers(items, axes, fontsize=8) -> None:
                         color=_muted_fg, annotation_clip=False)
 
 
-def _set_frac_ylim(ctx, ax_frac) -> None:
-    """Clamp the OnFraction panel to [0, 1] unless fold-change is on.
+def _set_frac_ylim(ctx, ax_frac, *, normalised: bool = True) -> None:
+    """Clamp the OnFraction panel to [0, 1] unless it holds a fold change.
 
     Raw fractions are bounded so the clamp is a sensible default — without
     it matplotlib's autoscaler wastes the panel on a tiny range. Under
@@ -91,7 +91,12 @@ def _set_frac_ylim(ctx, ax_frac) -> None:
     (``apply_export_style_to_current`` at the end of ``redraw_bars``).
     """
     from well_viewer.domain import fold_change as _fc
-    if _fc.fold_change_state(ctx).active:
+    # *normalised* is what makes this the same question the panel's title
+    # answers. The per-cell display modes plot a raw ``n_above / n_total``
+    # whatever the fold-change state says — that is why their title carries no
+    # fold-change suffix — so for them the clamp stays correct and skipping it
+    # would waste the panel on a tiny range for no reason.
+    if normalised and _fc.fold_change_state(ctx).active:
         return
     ax_frac.set_ylim(-0.05, 1.05)
 
@@ -279,7 +284,10 @@ def draw_violin(
             cx = sum(positions) / len(positions)
             ax_mean.text(cx, 1.02, gk, transform=ax_mean.get_xaxis_transform(),
                          ha="center", va="bottom", fontsize=8, fontweight="bold")
-    _set_frac_ylim(ctx, ax_frac)
+    # The per-cell fraction is raw whatever the fold-change state
+    # says — it is ``n_above / n_total`` off the rows — which is why
+    # its title carries no fold-change suffix either.
+    _set_frac_ylim(ctx, ax_frac, normalised=False)
     mark_time_rescale(ax_mean, ax_frac, factor=ctx.state.plot.time_scale)
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB, fraction_title
@@ -291,8 +299,14 @@ def draw_violin(
         f"{ctx.state.channel.active_channel.upper()} {_metric_label} distribution (violin, bw={bw:.2f}){_fc_suffix}  —  {_tp_suffix}",
         color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=6)
     ax_mean.set_ylabel(f"{ctx.state.channel.active_channel.upper()} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
+    # The fraction panel of the per-cell display modes is NOT normalised: its
+    # value is ``n_above / n_total`` off the raw rows, and only the per-cell
+    # *values* on the mean panel are scaled. Giving it the mean panel's
+    # fold-change suffix labelled a raw fraction as a fold change —
+    # ``draw_per_well_n_bars`` already guards against exactly this for the
+    # events panel beside it.
     ax_frac.set_title(
-        f"{fraction_title(ctx.state.channel.active_metric)}{_fc_suffix}  —  {_tp_suffix}",
+        f"{fraction_title(ctx.state.channel.active_metric)}  —  {_tp_suffix}",
         color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6)
 
 
@@ -429,7 +443,10 @@ def draw_beeswarm(
             cx = sum(positions) / len(positions)
             ax_mean.text(cx, 1.02, gk, transform=ax_mean.get_xaxis_transform(),
                          ha="center", va="bottom", fontsize=8, fontweight="bold")
-    _set_frac_ylim(ctx, ax_frac)
+    # The per-cell fraction is raw whatever the fold-change state
+    # says — it is ``n_above / n_total`` off the rows — which is why
+    # its title carries no fold-change suffix either.
+    _set_frac_ylim(ctx, ax_frac, normalised=False)
     mark_time_rescale(ax_mean, ax_frac, factor=ctx.state.plot.time_scale)
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     from well_viewer.data.metric_labels import (
@@ -445,8 +462,14 @@ def draw_beeswarm(
         f"{ctx.state.channel.active_channel.upper()} {_metric_label} per cell{_thr_q}{_fc_suffix}  —  {_tp_suffix}",
         color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=6)
     ax_mean.set_ylabel(f"{ctx.state.channel.active_channel.upper()} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
+    # The fraction panel of the per-cell display modes is NOT normalised: its
+    # value is ``n_above / n_total`` off the raw rows, and only the per-cell
+    # *values* on the mean panel are scaled. Giving it the mean panel's
+    # fold-change suffix labelled a raw fraction as a fold change —
+    # ``draw_per_well_n_bars`` already guards against exactly this for the
+    # events panel beside it.
     ax_frac.set_title(
-        f"{fraction_title(ctx.state.channel.active_metric)}{_fc_suffix}  —  {_tp_suffix}",
+        f"{fraction_title(ctx.state.channel.active_metric)}  —  {_tp_suffix}",
         color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6)
 
 
@@ -524,9 +547,37 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
     xs = list(getattr(ctx.runtime.barplot, "xs", []) or [])
     if not keys or len(keys) != len(xs):
         return
-    x_by_key = {k: xs[i] for i, k in enumerate(keys)}
+
+    # ``keys``/``xs`` are parallel to ``items``. In multi-timepoint mode one key
+    # appears once per timepoint, so a dict built by key alone keeps only the
+    # last position — and the bracket for a test run at t=0 was drawn over the
+    # bars of the last timepoint on the axis. Restrict both the positions and
+    # the bar heights to the timepoint the test was actually run at, when the
+    # record names one.
+    def _same_tp(it) -> bool:
+        if rec_tp is None:
+            return True
+        try:
+            return tp_close(float(getattr(it, "tp", float("nan"))), float(rec_tp))
+        except (TypeError, ValueError):
+            return True
+
+    tested = [(it, x) for it, x in zip(items, xs) if _same_tp(it)]
+    if not tested:
+        tested = list(zip(items, xs))
+    x_by_key = {it.key: x for it, x in tested}
+    # Positions are restricted to the tested timepoint; **bar heights are
+    # not**. The y-limit below is computed from ``top_by_key``, so scanning
+    # only the tested timepoint shrank the axis to that timepoint's bars and
+    # clipped every other timepoint's bars off the figure — measured, a panel
+    # holding bars of 10, 12, 100 and 110 came back with a limit of 30.5.
+    # Heights are scanned over every item so the y-limit still covers the
+    # tallest bar on the axis — but only the keys that have a *position* at the
+    # tested timepoint can carry a bracket, and reading a missing one raises.
     top_by_key: dict[str, float] = {}
     for it in items:
+        if it.key not in x_by_key:
+            continue
         val = getattr(it, val_attr, float("nan"))
         if getattr(it, has_attr, False) and not math.isnan(val):
             sp = getattr(it, spread_attr, 0.0)

@@ -278,8 +278,13 @@ def export_report_pdf(ctx) -> None:
             None, "Export Saved Plots report", suggested, "PDF document (*.pdf)")
         if not dest:
             return
+        # Gallery order, not storage order. The gallery shows newest first and
+        # the ▲/▼ buttons curate that sequence; the report walked the records
+        # as stored, so it came out in exactly the reverse of the order the
+        # user had arranged — silently, since both are plausible orderings of
+        # the same plots.
         n = build_saved_plots_report(
-            store.records,
+            list(reversed(store.records)),
             lambda r: store.image_path(ctx, r),
             dest,
             dataset_name=(Path(data_dir).name if data_dir else ""),

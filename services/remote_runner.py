@@ -6793,12 +6793,11 @@ class RemoteRunner:
         # on the remote.
         run_id = "run-" + _compute_run_id(key, pipeline_argv)
         remote_input = self._cache.remote_dataset_dir(key)
-        remote_output = f"{self.host.remote_staging_dir}/runs/{run_id}/out"
-        remote_pidfile = f"{self.host.remote_staging_dir}/runs/{run_id}/run.pid"
-        remote_sentinel = (
-            f"{self.host.remote_staging_dir}/runs/{run_id}/{UPLOAD_SENTINEL}")
-        remote_heartbeat = (
-            f"{self.host.remote_staging_dir}/runs/{run_id}/{UPLOAD_HEARTBEAT}")
+        own_run_dir = f"{self.host.remote_staging_dir}/runs/{run_id}"
+        remote_output = f"{own_run_dir}/out"
+        remote_pidfile = f"{own_run_dir}/run.pid"
+        remote_sentinel = f"{own_run_dir}/{UPLOAD_SENTINEL}"
+        remote_heartbeat = f"{own_run_dir}/{UPLOAD_HEARTBEAT}"
 
         # Only the *output* directory can be re-attached, and only it is. The
         # input dir keys on this run's own staged archives, and the pidfile /
@@ -6818,12 +6817,24 @@ class RemoteRunner:
         )
         reattached = remote_output != own_output
 
-        # The sentinel is cleared with the same call that makes the directory:
-        # ``run_id`` is deterministic in (input, arguments), so a re-run lands
-        # in the directory the last one used and would otherwise find that
-        # run's "upload finished" flag already waiting for it.
+        # **Both** directories, and the second one is not optional. A
+        # re-attached run writes its outputs under a *previous* run's id, but
+        # its pidfile, upload sentinel and heartbeat stay under its own — and
+        # nothing else on this path creates that. Making only the output
+        # directory left ``runs/<own_run_id>/`` absent for exactly the runs
+        # that re-attach (re-attach fires only when the cache key churned,
+        # which is what makes the id new), so ``echo $$ > run.pid`` failed and
+        # Stop could no longer reach the remote pipeline; on a scheduler host
+        # the heartbeat failed silently, the allocation was released after
+        # ``UPLOAD_HEARTBEAT_STALE_S``, and the sentinel ``touch`` then raised
+        # after the whole plate had uploaded.
+        #
+        # The sentinel is cleared with the same call: ``run_id`` is
+        # deterministic in (input, arguments), so a re-run lands in the
+        # directory the last one used and would otherwise find that run's
+        # "upload finished" flag already waiting for it.
         self._cache._ssh_run(  # short-circuit reuse of ssh helper
-            ["mkdir", "-p", remote_output],
+            ["mkdir", "-p", remote_output, own_run_dir],
             check=True,
         )
         # Two calls rather than one shell line: ``_remote_join`` quotes every
@@ -7053,8 +7064,23 @@ class RemoteRunner:
                 except Exception:
                     swallowed("releasing the allocation after a failed upload")
                 raise
-            # The job is watching for exactly this file.
-            self._cache._ssh_run(["touch", remote_sentinel], check=True)
+            # Inside the guard, not after it: this is a ``check=True`` call, so
+            # a failure here raises with an allocation already granted, a
+            # heartbeat thread still beating and the whole plate uploaded. It
+            # is the last step of the upload, so it fails for the same reasons
+            # the upload does and wants the same cleanup.
+            try:
+                # The job is watching for exactly this file.
+                self._cache._ssh_run(["touch", remote_sentinel], check=True)
+            except BaseException:
+                heartbeat.stop()
+                log("[remote] could not signal upload completion — "
+                    "releasing the allocation\n")
+                try:
+                    self.cancel(popen)
+                except Exception:
+                    swallowed("releasing the allocation after a failed sentinel")
+                raise
         else:
             _upload()
             popen = _start_ssh()

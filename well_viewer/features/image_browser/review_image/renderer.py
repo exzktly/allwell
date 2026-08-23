@@ -740,7 +740,7 @@ def refresh_review_image_zoom_label(ctx) -> None:
     lbl.setText(f"{float(ctx.state.review_image.zoom) * 100:.0f}%")
 
 
-def review_image_resolve_lut(ctx, arr) -> Tuple[float, float]:
+def review_image_resolve_lut(ctx, arr) -> tuple[float, float]:
     # A8 D4: ctx-native — active channel + the per-channel LUT cache read off
     # typed ``ctx.state``; the LUT min/max boxes are the (unregistered) Qt
     # widgets reached through ``ctx.window``.
@@ -787,7 +787,7 @@ _REVIEW_IMAGE_COLOR_DEFAULTS = {
 }
 
 
-def review_image_get_color(ctx, which: str) -> Tuple[int, int, int]:
+def review_image_get_color(ctx, which: str) -> tuple[int, int, int]:
     """The current RGB for a Review Image overlay slot (boundary/selected/tint).
 
     Stored as ``ctx.runtime.review_image.<which>_color`` scratch; falls back to
@@ -1016,7 +1016,7 @@ def toggle_review_image_outline(ctx) -> None:
 
 
 
-def review_image_set_color(ctx, which: str, rgb: Tuple[int, int, int]) -> None:
+def review_image_set_color(ctx, which: str, rgb: tuple[int, int, int]) -> None:
     rgb_clamped = tuple(max(0, min(255, int(c))) for c in rgb)
     setattr(ctx.runtime.review_image, f"{which}_color", rgb_clamped)
     review_image_refresh_color_swatch(ctx, which)

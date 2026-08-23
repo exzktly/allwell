@@ -453,7 +453,7 @@ def test_stage_local_zips_with_fluor_filter_preserves_user_input(tmp_path):
 def test_client_scratch_default_matches_the_pipelines(monkeypatch, tmp_path):
     """One scratch default across the app, not two.
 
-    ``pipeline.io.scratch_base_for`` and ``remote_runner._scratch_dir`` cannot
+    ``pipeline.io.scratch_base_for`` and ``remote_scratch._scratch_dir`` cannot
     share a constant (the client must not import the imaging stack), so they are
     pinned here instead. They used to disagree — the client fell back to the OS
     temp dir, which on macOS is an opaque ``/var/folders/…/T`` path and on Linux
@@ -795,7 +795,8 @@ def test_rsync_with_retry_no_stop_event_behaves_normally():
 # ── v5.2.27: pre-flight cache-hit skips pipeline launch entirely ──────────
 
 
-def _make_spawn_test_runner(host, tmp_path, monkeypatch, *, completed_remote_wells):
+def _make_spawn_test_runner(
+        host, tmp_path, monkeypatch, stop_fetchers, *, completed_remote_wells):
     """Plumb a RemoteRunner whose spawn() can run end-to-end without
     real ssh/rsync: mock _ssh_run/_ssh_script, ensure_uploaded, popen,
     and _list_remote_completed_wells return value."""
@@ -843,10 +844,11 @@ def _make_spawn_test_runner(host, tmp_path, monkeypatch, *, completed_remote_wel
         return m
 
     monkeypatch.setattr("services.remote_runner.subprocess.Popen", fake_popen)
+    stop_fetchers(runner)
     return runner, captured
 
 
-def test_spawn_skips_pipeline_when_remote_has_all_wells(host, tmp_path, monkeypatch):
+def test_spawn_skips_pipeline_when_remote_has_all_wells(host, tmp_path, monkeypatch, stop_fetchers):
     """v5.2.27: previous run completed every well on the remote, then
     the local fetch was interrupted. Re-run must NOT re-launch the
     pipeline — pre-flight detects the cache hit and replaces the
@@ -858,7 +860,7 @@ def test_spawn_skips_pipeline_when_remote_has_all_wells(host, tmp_path, monkeypa
         zip_dir=tmp_path, mode=LocalInputMode.ZIP, well_zips=(z1, z2),
     )
     runner, captured = _make_spawn_test_runner(
-        host, tmp_path, monkeypatch,
+        host, tmp_path, monkeypatch, stop_fetchers,
         completed_remote_wells={"A01", "B02"},
     )
 
@@ -883,7 +885,7 @@ def test_spawn_skips_pipeline_when_remote_has_all_wells(host, tmp_path, monkeypa
     assert "process_microscopy" not in remote_cmd
 
 
-def test_spawn_runs_pipeline_when_remote_is_partial(host, tmp_path, monkeypatch):
+def test_spawn_runs_pipeline_when_remote_is_partial(host, tmp_path, monkeypatch, stop_fetchers):
     """If only some wells are complete on the remote, the pipeline
     runs normally — its own per-well skip logic handles the rest."""
     z1 = _make_well_zip(tmp_path, "A01.zip", ["x.tif"])
@@ -893,7 +895,7 @@ def test_spawn_runs_pipeline_when_remote_is_partial(host, tmp_path, monkeypatch)
         zip_dir=tmp_path, mode=LocalInputMode.ZIP, well_zips=(z1, z2, z3),
     )
     runner, captured = _make_spawn_test_runner(
-        host, tmp_path, monkeypatch,
+        host, tmp_path, monkeypatch, stop_fetchers,
         completed_remote_wells={"A01"},  # only 1 of 3 done
     )
     log_lines: list[str] = []
@@ -915,7 +917,7 @@ def test_spawn_runs_pipeline_when_remote_is_partial(host, tmp_path, monkeypatch)
     assert "process_microscopy" in remote_cmd
 
 
-def test_spawn_runs_pipeline_when_remote_is_empty(host, tmp_path, monkeypatch):
+def test_spawn_runs_pipeline_when_remote_is_empty(host, tmp_path, monkeypatch, stop_fetchers):
     """First-ever run on a fresh remote: pre-flight finds nothing,
     pipeline launches normally."""
     z1 = _make_well_zip(tmp_path, "A01.zip", ["x.tif"])
@@ -923,7 +925,7 @@ def test_spawn_runs_pipeline_when_remote_is_empty(host, tmp_path, monkeypatch):
         zip_dir=tmp_path, mode=LocalInputMode.ZIP, well_zips=(z1,),
     )
     runner, captured = _make_spawn_test_runner(
-        host, tmp_path, monkeypatch,
+        host, tmp_path, monkeypatch, stop_fetchers,
         completed_remote_wells=set(),
     )
     log_lines: list[str] = []
@@ -3443,16 +3445,20 @@ def test_old_rsync_still_gets_progress_flags():
     parsers already accept."""
     from unittest import mock
 
-    from services import remote_runner as rr
+    # Patched on `remote_transport`, which is where both functions live now.
+    # `remote_runner` re-exports them, but a re-export is a *binding*: rebinding
+    # the name there leaves `_rsync_progress_flags` still reading the original
+    # out of its own module globals, so the patch would silently not apply.
+    from services import remote_transport as rt
 
-    with mock.patch.object(rr, "_rsync_supports_info_flag", lambda: True):
-        assert rr._rsync_progress_flags() == ["--info=name1,stats2,progress2"]
-    with mock.patch.object(rr, "_rsync_supports_info_flag", lambda: False):
-        assert rr._rsync_progress_flags() == ["-v", "--progress"]
+    with mock.patch.object(rt, "_rsync_supports_info_flag", lambda: True):
+        assert rt._rsync_progress_flags() == ["--info=name1,stats2,progress2"]
+    with mock.patch.object(rt, "_rsync_supports_info_flag", lambda: False):
+        assert rt._rsync_progress_flags() == ["-v", "--progress"]
     # Never empty: an rsync that narrates nothing is the bug.
     for supported in (True, False):
-        with mock.patch.object(rr, "_rsync_supports_info_flag", lambda: supported):
-            assert rr._rsync_progress_flags()
+        with mock.patch.object(rt, "_rsync_supports_info_flag", lambda: supported):
+            assert rt._rsync_progress_flags()
 
 
 def test_legacy_rsync_output_shapes_still_parse():

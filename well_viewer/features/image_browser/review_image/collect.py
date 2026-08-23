@@ -204,14 +204,14 @@ def flatfield_field_for(ctx, channel: str, fluor_arr, tp=None) -> np.ndarray | N
 
 def review_build_include_map(
     ctx, mask_arr, well: str, fov: str, tp: str,
-) -> Dict[int, bool]:
+) -> dict[int, bool]:
     """Build {nid: is_included} for all labels in ``mask_arr``.
 
     A8 D4: ctx-native — rows come from the ctx ``get_rows`` service and the
     manual overrides from the live ``ctx.runtime.review.included_overrides``.
     """
     center = _np.asarray(mask_arr)
-    include_by_nid: Dict[int, bool] = {
+    include_by_nid: dict[int, bool] = {
         int(nid): True for nid in _np.unique(center) if int(nid) > 0
     }
     df = get_rows(ctx, well)
@@ -266,7 +266,7 @@ def review_build_include_map(
 
 def review_build_mfi_map(
     ctx, mask_arr, well: str, fov: str, tp: str, channel=None,
-) -> Dict[int, float]:
+) -> dict[int, float]:
     """Build ``{nid: mean fluorescence intensity}`` for cells in the displayed
     FOV/timepoint.
 
@@ -297,7 +297,7 @@ def review_build_mfi_map(
     sub_keys = keys.loc[sub.index]
     nids = sub_keys.map(lambda k: k[2]).map(_safe_int_or_none)
     vals = pd.to_numeric(sub[col], errors="coerce").to_numpy()
-    out: Dict[int, float] = {}
+    out: dict[int, float] = {}
     for nid, v in zip(nids, vals):
         if nid is None or (present and nid not in present):
             continue
@@ -336,7 +336,7 @@ def _binary_gate_columns(ctx, channel=None):
 
 def review_build_threshold_map(
     ctx, mask_arr, well: str, fov: str, tp: str, channel=None,
-) -> Dict[int, bool]:
+) -> dict[int, bool]:
     """Build {nid: above_threshold} for cells in the displayed FOV/timepoint.
 
     Mirrors the bar plot's gating logic: a cell is "above threshold" only when it
@@ -354,7 +354,7 @@ def review_build_threshold_map(
     # global plotting channel — see _binary_gate_columns.
     val_col, threshold = _binary_gate_columns(ctx, channel)
     ratios = ctx.state.channel.ratio_index
-    above_by_nid: Dict[int, bool] = {
+    above_by_nid: dict[int, bool] = {
         int(nid): False for nid in _np.unique(center) if int(nid) > 0
     }
     df = get_rows(ctx, well)
@@ -433,7 +433,7 @@ def apply_review_overrides_to_cache(ctx, label: str | None = None) -> None:
     overrides = ctx.runtime.review.included_overrides
     if not overrides:
         return
-    by_label: Dict[str, Dict[Tuple[str, str, str], str]] = {}
+    by_label: dict[str, dict[tuple[str, str, str], str]] = {}
     for (lbl, fov, tp, nid), val in overrides.items():
         if label is not None and lbl != label:
             continue
@@ -464,7 +464,7 @@ def apply_review_overrides_to_cache(ctx, label: str | None = None) -> None:
         df.loc[mask, "Included"] = override_for_row[mask].map(_coerce).astype(int)
 
 
-def review_row_keys(ctx, row: dict) -> Tuple[str, str, str]:
+def review_row_keys(ctx, row: dict) -> tuple[str, str, str]:
     def _pick(*names: str) -> object:
         for name in names:
             if name in row:
@@ -741,7 +741,7 @@ def collect_region_delete_targets(
     """
     from well_viewer.data.image_identity import cell_keys_for_dataframe
 
-    targets: list[Tuple[str, str, str, str]] = []
+    targets: list[tuple[str, str, str, str]] = []
     stats = {
         "frames": 0,
         "wells": 0,
@@ -758,7 +758,7 @@ def collect_region_delete_targets(
     if not want_fovs or not want_tps:
         return targets, stats
 
-    frames: set[Tuple[str, str, str]] = set()
+    frames: set[tuple[str, str, str]] = set()
     hit_wells: set[str] = set()
     for well in wells:
         if well not in ctx.state.dataset.well_paths:

@@ -17,6 +17,7 @@ Depends only on numpy + tifffile/imageio/scikit-image + stdlib — no
 from __future__ import annotations
 
 import errno
+import io
 import logging
 import os
 import shutil

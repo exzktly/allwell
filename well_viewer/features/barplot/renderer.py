@@ -8,7 +8,7 @@ the matplotlib axes to draw into.
 from __future__ import annotations
 
 from well_viewer.features.barplot.controller import refresh_bar_layout_btn_state
-from well_viewer.features.barplot.collect import collect_bar_items_for_app
+from well_viewer.features.barplot.collect import bar_err_settings, collect_bar_items_for_app
 
 from well_viewer.domain.selections_model import (color_for_replicate_set, color_for_well, well_display_label, active_replicate_sets)
 from well_viewer.core.channel_state_controller import get_all_fluor_gates, on_cutoff_for_column
@@ -1242,6 +1242,13 @@ def draw_per_well_n_bars(
     fluor_gates = get_all_fluor_gates(ctx)
     per_fov_spread = ctx.state.plot.use_fov_replicates
     use_sem = bool(ctx.state.plot.use_sem)
+    # The Properties → Statistics controls govern this panel too. ``use_sem``
+    # above only chooses SD versus SEM upstream; the Show mode ("Mean", bars
+    # only) and the error-bar type ("None", "95 % CI") are decided here, and
+    # were not consulted at all — so turning error bars off left them on in
+    # per-cell view, and 95 % CI drew a bare SEM. ``bar_err_settings`` is the
+    # same accessor the aggregate path uses, so the two panels cannot drift.
+    _err_kind, _ci_scale, _draw_err = bar_err_settings(ctx)
     n = len(wells)
     if xs is None:
         xs = list(range(n))
@@ -1291,8 +1298,8 @@ def draw_per_well_n_bars(
             known = math.isfinite(bar_val)
         if known:
             ax_n.bar(xi, bar_val, width=bar_w, color=color, alpha=0.85, zorder=3, linewidth=0)
-            if err_val > 0:
-                ax_n.errorbar(xi, bar_val, yerr=err_val, fmt="none", ecolor=theme.Colors.err_bar, elinewidth=1.4, capsize=4, zorder=4)
+            if _draw_err and err_val > 0:
+                ax_n.errorbar(xi, bar_val, yerr=err_val * _ci_scale, fmt="none", ecolor=theme.Colors.err_bar, elinewidth=1.4, capsize=4, zorder=4)
         else:
             ax_n.bar(xi, 0, width=bar_w, color=theme.Colors.placeholder, linewidth=1, edgecolor=theme.Colors.plot_undefined_ink, linestyle="--", zorder=3)
     ax_n.set_xticks(xs)

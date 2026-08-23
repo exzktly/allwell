@@ -637,14 +637,22 @@ def merge_records_into_csv(
     existing_rows: list[dict] = []
     fieldnames: list[str] = []
     if path.exists():
-        try:
-            with open(path, newline="") as fh:
-                reader = csv.DictReader(fh)
-                fieldnames = list(reader.fieldnames or [])
-                existing_rows = list(reader)
-        except OSError:
-            existing_rows = []
-            fieldnames = []
+        # A target that exists and cannot be read is **not** the same as no
+        # target. Treating the two alike meant one transient OSError — an EIO
+        # on an SMB or NFS output volume — silently rewrote the file with the
+        # new rows alone. Atomically, so there was no partial file to notice;
+        # the caller logged "+N row(s), merged" with N being the whole of what
+        # survived; and because `done_keys` unions the CSV with the well's
+        # `_out.zip`, which still held every image, the well went on reporting
+        # complete. The lost timepoints were unrecoverable short of --force.
+        #
+        # Note that a *corrupt* CSV already failed the well loudly here —
+        # UnicodeDecodeError and csv.Error were never caught — so an unreadable
+        # one truncating silently was also the two failures disagreeing.
+        with open(path, newline="") as fh:
+            reader = csv.DictReader(fh)
+            fieldnames = list(reader.fieldnames or [])
+            existing_rows = list(reader)
 
     seen = {_key(r) for r in existing_rows}
     to_add: list[dict] = []
@@ -677,6 +685,61 @@ def merge_records_into_csv(
     retry_write(_write, what=path.name, path=path)
     return len(to_add)
 
+
+
+def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
+                       log_fn=None) -> int:
+    """Merge every partial per-well CSV in *tmp_csv_dir* into *target_dir*.
+
+    Used by an incremental remote run, whose fetch brings back each well's rows
+    as a partial CSV beside the plate's real one. New rows are appended and
+    duplicates skipped, by :func:`merge_records_into_csv`.
+
+    A failure is per file and never stops the loop — and "a failure" means any
+    of the three ways a CSV refuses to be read, not just the one that is an
+    ``OSError``. A file whose bytes are not UTF-8 raises ``UnicodeDecodeError``
+    and a malformed one raises ``csv.Error``; catching only ``OSError`` let
+    either abort the whole loop, so one damaged partial stopped every well
+    after it from merging. The two failures are
+    reported differently because they mean different things. An unreadable
+    *fetched* partial is a transfer that did not land: nothing local is at risk
+    and the next fetch can bring it again. An unreadable *target* is the
+    dangerous one — `merge_records_into_csv` used to treat it as "there is no
+    target" and rewrite the file with the fetched rows alone, discarding every
+    row the plate already had. It now raises, and this leaves the existing CSV
+    untouched, which is the recoverable state: the well's rows are still on the
+    remote and still inside its ``_out.zip``.
+
+    Returns how many rows were added across every file.
+    """
+    import csv as _csv
+
+    tmp_csv_dir, target_dir = Path(tmp_csv_dir), Path(target_dir)
+    total = 0
+    for partial in sorted(tmp_csv_dir.glob("*.csv")):
+        try:
+            with open(partial, newline="") as fh:
+                rows = list(_csv.DictReader(fh))
+        except (OSError, UnicodeDecodeError, _csv.Error) as exc:
+            if log_fn:
+                log_fn(f"[remote] warn: reading fetched CSV {partial.name} "
+                       f"failed: {exc}\n")
+            continue
+        if not rows:
+            continue
+        try:
+            added = merge_records_into_csv(target_dir / partial.name, rows)
+        except (OSError, UnicodeDecodeError, _csv.Error) as exc:
+            if log_fn:
+                log_fn(f"[remote] warn: merging into {partial.name} failed "
+                       f"({exc}); the existing CSV is unchanged and this "
+                       f"well's new rows were not added\n")
+            continue
+        total += added
+        if log_fn:
+            log_fn(f"[remote] merge: {partial.name} \u2192 +{added} new row(s) "
+                   f"into {target_dir.name}/\n")
+    return total
 
 def merge_images_into_zip(out_zip: Path | str, image_dir: Path | str) -> int:
     """Add the new images in *image_dir* to *out_zip*, keeping existing members.

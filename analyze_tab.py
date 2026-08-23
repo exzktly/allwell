@@ -427,7 +427,14 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
 
         self._schema_err_lbl.setText("")
         if hasattr(self, "_run_btn"):
-            self._run_btn.setEnabled(True)
+            # A valid schema is necessary, not sufficient. This runs from four
+            # controls that stay live during a run — the segmentation-channel
+            # edit, every fluorescent row's edit, add/remove row, and the
+            # schema picker — so enabling unconditionally re-armed Run while a
+            # plate was still going, and pressing it started a second pipeline
+            # into the same output directory. `_set_running_ui_state` owns the
+            # other half of this flag; both must agree.
+            self._run_btn.setEnabled(not self._running)
 
         nuclear_tok = (self._nuclear_token_edit.text().strip() if hasattr(self, "_nuclear_token_edit") else "NIR") or "NIR"
         fluor_toks  = self._fluor_tokens_list() if self._fluor_rows else ["GFP"]

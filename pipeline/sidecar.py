@@ -23,6 +23,7 @@ listed in ``services.remote_runner._REQUIRED_REMOTE_FILES``.
 from __future__ import annotations
 
 import json
+from util.aw_safe import swallow
 from util.json_write import write_json_atomic
 from pathlib import Path
 
@@ -89,3 +90,43 @@ def restore_user_blocks(info_path, prior: dict | None) -> list[str]:
     except OSError:
         return []
     return restored
+
+
+def install_provisional_sidecar(tmp: Path, dest: Path, *, run_id: str) -> None:
+    """Stamp *tmp* as mid-run and put it at *dest*, unless *dest* appeared.
+
+    A remote run pulls ``pipeline_info.json`` as soon as the worker has written
+    one, so the plate can be opened in Review while the wells are still
+    arriving. What arrives describes only the input *that* run was handed — for
+    a batched run, one batch's split — so its ``available_timepoints`` and
+    ``available_fovs`` can be short of the plate and there is no run report at
+    all. ``verify_and_cleanup`` replaces the file wholesale at the end.
+
+    The stamp is in the artifact rather than only in the run log because the
+    artifact is what outlives the session: a run that is stopped, or whose app
+    is closed, leaves this file behind as the dataset's only description of
+    itself, and it describes less than a finished one does. A run that never
+    reached the end therefore keeps the mark, which is the honest outcome.
+    """
+    info = json.loads(tmp.read_text())
+    if not isinstance(info, dict):
+        raise ValueError("pipeline_info.json is not a JSON object")
+    info["provisional"] = {
+        "source": "mid_run_fetch",
+        "run_id": run_id,
+        "note": (
+            "Fetched while the run was still going, so it describes only "
+            "the input this run was handed — for a batched run, one "
+            "batch's split. available_timepoints / available_fovs may be "
+            "short of the plate and there is no run_report. The finished "
+            "sidecar replaces this file at the end of the run."
+        ),
+    }
+    from pipeline.io import _safe_atomic_text_write
+
+    if dest.exists():              # a re-run's own sidecar, or Review's saves
+        return
+    with _safe_atomic_text_write(dest) as fh:
+        json.dump(info, fh, indent=2)
+    with swallow("mid-run sidecar temp cleanup"):
+        tmp.unlink()

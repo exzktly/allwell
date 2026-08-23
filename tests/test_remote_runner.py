@@ -2008,6 +2008,12 @@ def test_required_files_list_is_what_we_promised():
         # Filename-schema inference for the Analyze input scan.
         "util/schema_infer.py",
         "util/timepoint.py",
+        # The one string naming the configuration a well's output was
+        # produced under, so a re-run with a different segmenter is not
+        # answered "already done" (util.settings_digest). Read on both
+        # sides, so the digest has to be computed identically on the worker
+        # host and locally.
+        "util/settings_digest.py",
         "util/well_token.py",
         # Free-space primitives + the ENOSPC wording the retry shield rewrites
         # through (util.disk_space).
@@ -2028,6 +2034,9 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/cellpose.py",
         "pipeline/completeness.py",
         "pipeline/flatfield.py",
+        # Per-FOV resume checkpoints, keyed on the output directory and the
+        # settings so one plate cannot resume another's intermediates.
+        "pipeline/fov_checkpoint.py",
         "pipeline/incremental_keys.py",
         "pipeline/well_skip.py",
         "pipeline/io.py",
@@ -2035,6 +2044,9 @@ def test_required_files_list_is_what_we_promised():
         # completeness (mirrors every ``pipeline/`` file).
         "pipeline/ome_explode.py",
         "pipeline/run_report.py",
+        # Where the settings digest is recorded beside each well's output,
+        # and the reuse decision that reads it back.
+        "pipeline/settings_record.py",
         "pipeline/sidecar.py",
         "pipeline/shape_features.py",
         "pipeline/stardist.py",

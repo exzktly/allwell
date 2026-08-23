@@ -60,6 +60,11 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # Filename-schema inference for the Analyze input scan; client-side only.
     "util/schema_infer.py",
     "util/timepoint.py",
+    # The one string naming the configuration a well's output was produced
+    # under, so a re-run with different settings is not answered "already
+    # done". Both the worker host and the client compute it, and they have to
+    # agree, so the module has to be the same one on both sides.
+    "util/settings_digest.py",
     "util/well_token.py",
     # Free-space primitives + the single wording for a volume that filled. The
     # retry shield below rewrites an ENOSPC through it, so a remote run that
@@ -86,6 +91,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # check and the Datasets Validate tool.
     "pipeline/completeness.py",
     "pipeline/flatfield.py",
+    # Per-FOV resume checkpoints, keyed on the output directory and the run's
+    # settings so one plate cannot resume another's intermediates.
+    "pipeline/fov_checkpoint.py",
     "pipeline/incremental_keys.py",
     "pipeline/well_skip.py",
     "pipeline/io.py",
@@ -94,6 +102,10 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # complete mirror of ``pipeline/`` per test_remote_manifest.
     "pipeline/ome_explode.py",
     "pipeline/run_report.py",
+    # Where the settings digest is recorded beside each well's output, and
+    # the reuse decision that reads it back — consulted by both skip
+    # predicates, so a remote run needs it as much as a local one.
+    "pipeline/settings_record.py",
     # The sidecar blocks the user owns (cell_gating / sample_definitions /
     # ratios / notes), shared by write_pipeline_info and the end-of-run fetch.
     "pipeline/sidecar.py",

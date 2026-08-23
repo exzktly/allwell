@@ -603,7 +603,30 @@ class PipelineRunner:
 
     @property
     def is_running(self) -> bool:
+        """Whether the pipeline *subprocess* is alive.
+
+        Not the same question as :attr:`is_busy`, and the difference is the
+        window in which the run is resolving directories and grouping input —
+        seconds to minutes on a large plate — where the subprocess does not
+        exist yet. Callers asking "may I start another run?" want
+        :attr:`is_busy`; callers asking about the pipeline process itself (a
+        stop, a progress read) want this.
+        """
         return self._proc is not None and self._proc.poll() is None
+
+    @property
+    def is_busy(self) -> bool:
+        """Whether this runner would refuse a new :meth:`start`.
+
+        Keyed on the worker thread, so it is true from the moment ``start``
+        returns until the run has finished — including the grouping window that
+        :attr:`is_running` cannot see. The job queue's dispatch gate reads this:
+        with the subprocess-only answer it dispatched into that window, reset a
+        live run's progress UI, and then took the ``RuntimeError`` from
+        ``start`` with ``_current`` already set and no ``jobFinished`` to come,
+        which stops the queue for the session.
+        """
+        return self._thread is not None and self._thread.is_alive()
 
     @property
     def last_output_dir(self) -> Path | None:
@@ -666,6 +689,22 @@ class PipelineRunner:
         corresponding flags on :func:`scripts.allwell_remote.main` —
         they're ignored in local mode.
         """
+        # The GUI is not the only thing that can ask twice, and it is not the
+        # right place to enforce this: overwriting `self._thread` and `_proc`
+        # leaves the first run unreachable — `stop()` can only signal whichever
+        # process was assigned last — while both write the same output
+        # directory and both fire `finished`, so a queue bridge starts the next
+        # job twice.
+        # Asked of the worker thread, not of `is_running`: that property reads
+        # the pipeline *subprocess*, which does not exist yet while the run is
+        # resolving directories and grouping — a window of seconds to minutes
+        # on a large plate, and exactly when the GUI's Run button was being
+        # re-armed. A finished run has joined, so the queue starting the next
+        # job on the same runner is unaffected.
+        if self.is_busy:
+            raise RuntimeError(
+                "a pipeline is already running in this runner; stop it before "
+                "starting another")
         self._remote = remote
         self._remote_runner: RemoteRunner | None = (
             RemoteRunner(remote) if remote is not None else None

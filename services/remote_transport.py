@@ -18,6 +18,7 @@ them from where they always did.
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import subprocess
@@ -31,7 +32,9 @@ from services.remote_config import (
     RemoteHost,
     resolve_rsync_binary,
     resolve_ssh_for_rsync,
+    to_rsync_path,
 )
+from util.aw_safe import swallow
 
 def _fmt_bytes(n: float) -> str:
     """Bytes at a unit a human reads without counting zeros.
@@ -458,3 +461,35 @@ def _rsync_run_cancellable(
             err = ""
     assert rc is not None
     return subprocess.CompletedProcess(cmd, rc, out, err)
+
+
+def pull_small_file(host: "RemoteHost", remote_path: str, dest: Path, *,
+                    stop_event=None, timeout: float = 60,
+                    what: str = "a file") -> bool:
+    """Pull one small file to *dest*, atomically, or leave *dest* as it was.
+
+    For the bookkeeping files a run brings back beside its real output: they
+    are a few hundred bytes, they are read by a *later* run rather than by this
+    one, and a missing one has to be indistinguishable from one that was never
+    written — so every failure here is quiet and answers ``False``.
+
+    Staged under a dot-prefixed sibling and renamed, so a transfer cut halfway
+    cannot leave a truncated file that parses as an empty record.
+    """
+    ok = False
+    with swallow(f"preparing the destination for {what}"):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(f".{dest.name}.tmp")
+    result = _rsync_with_retry(
+        [resolve_rsync_binary(), *_rsync_ssh_transport(host),
+         "-a", f"{host.ssh_alias}:{remote_path}", to_rsync_path(tmp)],
+        log_fn=None, timeout=timeout, stop_event=stop_event,
+    )
+    if result.returncode == 0 and tmp.exists():
+        with swallow(f"installing {what}"):
+            os.replace(tmp, dest)
+            ok = True
+    if not ok:
+        with swallow(f"cleaning up the staged copy of {what}"):
+            tmp.unlink()
+    return ok

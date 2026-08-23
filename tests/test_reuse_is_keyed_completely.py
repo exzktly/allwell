@@ -38,6 +38,7 @@ from __future__ import annotations
 import pytest
 
 from services import run_journal as J
+from util.settings_digest import KEYED_ON
 
 #: Every "reuse earlier work" decision in the app, the keys it compares, and why
 #: each key is required. One entry per decision; the reason is not a comment, it
@@ -60,6 +61,13 @@ REUSE_CONTRACTS = {
             "A 'gpu'/'cpu' pair of entries for the same cluster, differing "
             "only in compute_launcher or extra_args, is the live case"),
     },
+    # The pipeline's own two "we already did this" predicates —
+    # `well_skip.output_exists_for_well` and the incremental done-set — both
+    # consult one digest, so they are one decision here. Its keys are
+    # `util.settings_digest.KEYED_ON` *by reference* rather than restated:
+    # a second copy would be a second definition of what makes two runs
+    # interchangeable, and the reason each key is in it is written there.
+    "settings_record.well_settings_allow_reuse": dict(KEYED_ON),
 }
 
 #: What ``argv_digest`` has to cover, and why each item is not optional.
@@ -102,6 +110,7 @@ def out_dir(tmp_path, monkeypatch):
 def test_every_reuse_decision_is_registered():
     """A decision missing from the roster is one nobody checked the keys of."""
     assert "run_journal.stored_remote_address" in REUSE_CONTRACTS
+    assert "settings_record.well_settings_allow_reuse" in REUSE_CONTRACTS
 
 
 def test_the_roster_names_every_key_the_decision_actually_takes():
@@ -161,6 +170,84 @@ def test_an_unknown_key_on_either_side_declines(out_dir, key):
     keys = _record(out_dir, **{key: ""})
     assert J.stored_remote_address(out_dir, **dict(keys, **{key: ""})) is None
     assert J.stored_remote_address(out_dir, **dict(keys, **{key: "x"})) is None
+
+
+# ── the pipeline's own reuse decision ───────────────────────────────────────
+#
+# Registering a decision in ``REUSE_CONTRACTS`` above is not, by itself, a
+# test: every parametrize in this file names ``stored_remote_address``
+# explicitly, so an entry added beside it generates nothing and reads in review
+# as protection that is not there — the failure mode CLAUDE.md §7.3 opens with.
+# These drive the second decision through the same two questions.
+
+_SETTINGS_KEY = "settings_record.well_settings_allow_reuse"
+
+
+def _settings_out(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    return out
+
+
+def test_matching_settings_reuse_the_well(tmp_path):
+    """The baseline, for the same reason the remote one has one."""
+    from pipeline.settings_record import (
+        record_well_settings, well_settings_allow_reuse)
+    from util.settings_digest import settings_digest
+
+    out = _settings_out(tmp_path)
+    key = settings_digest({"segmentation_method": "stardist_nuclei"})
+    record_well_settings(out, "A01", key)
+    assert well_settings_allow_reuse(out, "A01", key)
+
+
+@pytest.mark.parametrize("key", sorted(REUSE_CONTRACTS[_SETTINGS_KEY]))
+def test_changing_one_setting_alone_declines_the_reuse(tmp_path, key):
+    """Every declared key, mutated by itself, driven through the real decision.
+
+    ``tests/test_reuse_is_keyed_on_the_settings.py`` proves each key moves the
+    digest. This proves the decision that reads the digest back off disk then
+    declines — the two are separate functions in separate modules, and the
+    digest moving is worth nothing if the comparison does not happen.
+    """
+    from pipeline.settings_record import (
+        record_well_settings, well_settings_allow_reuse)
+    from util.settings_digest import settings_digest
+
+    base = {"segmentation_method": "stardist_nuclei", "nuclear_token": "NIR",
+            "fluor_tokens": ["GFP"], "filename_sep": "_"}
+    # A value that differs from the baseline's for this key, whatever its type.
+    was = base.get(key)
+    other = "___changed___" if was is None or isinstance(was, str) else None
+    if isinstance(was, list):
+        other = [*was, "___changed___"]
+    changed = dict(base, **{key: other})
+
+    out = _settings_out(tmp_path)
+    record_well_settings(out, "A01", settings_digest(base))
+
+    assert not well_settings_allow_reuse(out, "A01", settings_digest(changed)), (
+        f"{key} is in KEYED_ON but the well was reused across a change to it, "
+        f"so the old numbers stand under a sidecar advertising the new value. "
+        f"It is keyed because: {REUSE_CONTRACTS[_SETTINGS_KEY][key]}.")
+
+
+def test_an_unrecorded_well_is_grandfathered_deliberately(tmp_path):
+    """The one place this decision differs from the remote one, on purpose.
+
+    ``stored_remote_address`` treats an unknown key as a refusal. This treats an
+    unrecorded well as acceptable, because refusing would force every user to
+    reprocess every plate they have. The cost — a plate written before this
+    record existed keeps the old behaviour until its next forced run — is
+    stated in the manual, and pinned here so it cannot be changed silently in
+    either direction.
+    """
+    from pipeline.settings_record import well_settings_allow_reuse
+    from util.settings_digest import settings_digest
+
+    out = _settings_out(tmp_path)
+    assert well_settings_allow_reuse(
+        out, "A01", settings_digest({"segmentation_method": "cellpose"}))
 
 
 # ── the completeness of one key, rather than the roster of keys ─────────────

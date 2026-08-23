@@ -1,0 +1,212 @@
+[
+ {
+  "id": 105,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "widgets/plate_progress.py:229-245 now carries an explicit 'Deliberately NOT WA_TransparentForMouseEvents' comment, read-only-ness comes from apply_plate_geometry(role=\"status\"), and setWellTooltipProvider(self._well_tooltip) is wired. Probe on a real RunDashboard: plate and _PlateGrid both report WA_TransparentForMouseEvents False, d.childAt(centre of grid) returns _PlateGrid, and _PlateGrid._hit(centre) returns ('well', 3, 5), so the event(ToolTip) handler at widgets/well_plate_selector.py:941 is reachable.",
+  "test": "tests/test_run_dashboard.py::test_the_counts_behind_a_dial_are_in_its_tooltip"
+ },
+ {
+  "id": 106,
+  "verdict": "DECLINED",
+  "confidence": "high",
+  "evidence": "A fix (an eventFilter mapping cell-widget focus to setCurrentCell) landed in 938b98c5 and was deliberately reverted in d9e08c31, whose message states setCellWidget goes through setIndexWidget, which installs the view's own event filter and maps FocusIn to setCurrentIndex, so currentRow() is never -1. I reproduced that: driving the real RatioMetricsPanel offscreen, currentRow()==0 with one selectedIndex before any click, QTest.mouseClick on the row-1 QLineEdit moves currentRow to 1, and _remove_selected() (tab_view.py:204) then removes exactly that row. No explanatory comment survives at the site — only the commit message.",
+  "test": "tests/test_ratios_panel.py::test_remove_takes_the_current_row_when_nothing_is_selected"
+ },
+ {
+  "id": 107,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "well_viewer/features/home/collect.py:601-603 reads ratios from ctx.state.channel.ratio_metrics (hydrated from persistence.json) instead of pipeline_info[\"ratios\"], with a comment naming the old key as one nothing ever wrote; the row at :620 uses len(ratios).",
+  "test": null
+ },
+ {
+  "id": 108,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "well_viewer/features/home/pipeline_info/tab_view.py:136-144 now reads the un-prefixed sidecar names qc.get(\"remove_debris\"), qc.get(\"min_area\")/qc.get(\"max_area\"), qc.get(\"min_solidity\"), with a comment explaining the qc_ prefix belongs to the CLI flags. process_microscopy.py:4326-4329 confirms the sidecar writes the un-prefixed keys.",
+  "test": null
+ },
+ {
+  "id": 109,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "well_viewer/features/home/collect.py:583-586 counts only labels whose well is in loaded_wells, and the row at :608-609 uses total=len(loaded_wells) as the denominator rather than len(well_labels).",
+  "test": "tests/test_home_collect.py::test_wells_labelled_is_counted_against_the_plate"
+ },
+ {
+  "id": 110,
+  "verdict": "OPEN",
+  "confidence": "medium",
+  "evidence": "cell_gating_refresh_included_count (well_viewer/features/home/cell_gating/controller.py:608) has only five callers: tab build (tab_view.py:174), the QC changed_cb (tab_view.py:163), worker start/finish/fail (controller.py:819,1650,1664). load_controller's post-load sequence (core/load_controller.py:630-682) never calls it, and _kick_off_gating_after_load only starts the worker when a non-default gate or a scatter-gate mode is set, so a dataset opened with default gates leaves the Included/funnel labels showing the previous dataset. Home's on_dataset_loaded hook (features/home/controller.py:300-323 → refresh_home) repaints only Home's own blocks, and the Cell Gating sub-tab entry path (on_home_subtab_changed → cell_gating_sync_scatter_gates) does not refresh the count either.",
+  "test": null
+ },
+ {
+  "id": 111,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "well_viewer/features/spatial/controller.py:473-482 now reads getattr(ctx.state.dataset, \"data_dir\", None) with a comment recording that DatasetState has no `dir` attribute, and seeds the Save-As dialog with f\"{dataset_dir}/{default}\".",
+  "test": null
+ },
+ {
+  "id": 112,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "well_viewer/core/tab_controller.py:40-56: on_tab_change's early return is now `tab = current_centre_tab(ctx); if not tab: return`, and the docstring records that the old probe was the Line Graphs axis _line_ax_mean. No reference to _line_ax_mean remains outside features/lineplot and one registry test.",
+  "test": null
+ },
+ {
+  "id": 113,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "well_viewer/core/load_controller.py:191-193 in _reset_gating_state uses app._app_state.feature_slice(\"heatmap\") with an `is not None` guard and a comment; grep finds no remaining `state.heatmap`/`_app_state.heatmap` attribute access anywhere in well_viewer/core.",
+  "test": "tests/test_disabled_feature_slices.py::test_no_code_outside_a_feature_reaches_its_slice_by_attribute"
+ },
+ {
+  "id": 114,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "well_viewer/core/plot_toggles.py:169-177: toggle_fov_replicates now gates _refresh_bar_layout_btn_state on `ctx.state.feature_slice(\"bar\") is not None` (the registered slice name per app_state._FEATURE_STATE_OWNERS), with a comment describing the ModuleNotFoundError-after-flip failure.",
+  "test": "tests/test_feature_slice_names.py::test_every_feature_slice_lookup_names_a_registered_slice"
+ },
+ {
+  "id": 115,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "well_viewer/features/home/cell_gating/renderer.py:158-168 draws the ON cutoff via _effective_thresh_frac_on() as an accent axvline beside the FluorGating line, and controller.py:750-757 clears axes_stack and re-runs _cell_gating_plot_cdf on a ThreshFracOn edit.",
+  "test": "tests/test_cell_gating_on_cutoff_is_visible.py::test_the_renderer_draws_the_cutoff_line and ::test_editing_the_cutoff_redraws_the_cdfs"
+ },
+ {
+  "id": 116,
+  "verdict": "OPEN",
+  "confidence": "high",
+  "evidence": "All three named sites still pass no parent: well_viewer/features/saved_plots/controller.py:254 and :277 call QFileDialog.getSaveFileName(None, …), and well_viewer/features/spatial/controller.py:477-479 sets `parent = None` and passes it. Every sibling dialog in the app passes the window (multivariate/controller.py:419 ctx.window, export/service.py:90, selection_controller.py:501,792, persistence/bar_groups.py:35, plot_orchestrator.py:96 app), and ARCHITECTURE (widgets/path_field row) states the parent is explicit because an unparented QFileDialog opens detached on macOS. No comment at any of the three sites declines the rule.",
+  "test": null
+ },
+ {
+  "id": 127,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "util/schema_infer.py:_classify_slots now runs strictest-first (timepoint, then fov, then well) and _best_slot breaks ties leftmost with `f > best_f`, both with comments naming the F01 misattribution. Probe: infer_schema on exp_<chan>_<well>_f01..f04_t1 stems returns ['experiment','channel','well','fov','timepoint'] with the well slot correct.",
+  "test": "tests/test_schema_and_gating_domains.py::test_an_explicit_fov_slot_still_wins"
+ },
+ {
+  "id": 128,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "util/schema_infer.py:_pick_channel_slot's docstring now states fewest-distinct (leftmost on a tie) and justifies it — the well slot is claimed by _classify_slots before this runs. Probe with 3 channels and only 2 wells ('gfp/dapi/rfp' x 'A01/A02' x f1/f2) yields fields ['channel','well','fov'] and channels ['gfp','dapi','rfp'], i.e. the well column is no longer labelled channel.",
+  "test": "tests/test_schema_infer.py::test_infer_default_schema_and_channels"
+ },
+ {
+  "id": 129,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "util/channel_roles.py:_is_secondary_nuclear_name requires `not _is_phase_name(name)` and _pick_nuclear tries strong stain, then non-phase secondary, then non-phase fallback. Probe: ['NIR_BF','GFP'] -> nuclear_token='GFP', phase_token='NIR_BF' (was NIR_BF nuclear with phase_token empty), so phase_role_conflicts now has something to compare.",
+  "test": "tests/test_identity_token_parsers.py::test_phase_and_nuclear_roles"
+ },
+ {
+  "id": 130,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "util/channel_roles.py:_PHASE_HINT_RE now anchors the trans alternative as `(?<![a-z])trans(?:mitted|mission)?(?![a-z0-9])` (and bf likewise). Probe: 'GFP_transfected' -> fluor, 'GFPtrans' -> fluor, while 'w1BF' and 'DIC' still classify as phase.",
+  "test": "tests/test_identity_token_parsers.py::test_phase_and_nuclear_roles"
+ },
+ {
+  "id": 131,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "well_viewer/domain/gating_state.py:289-307 adds active_fluor_gates(), which drops any gate equal to FLUOR_GATE_OFF (0.0) while keeping negative floors. All six filter sites iterate through it: gating_compute.py:222, data_loading.py:616 and :839, stats_compute.py:130, barplot/collect.py:1090, review_image/collect.py:380. A default-gated plate therefore applies no per-channel cut, so zero/negative MFI and unrelated-channel NaNs no longer exclude cells.",
+  "test": "tests/test_statistics_contract.py::test_no_filter_applies_a_gate_without_asking_whether_it_is_on (plus ::test_the_gate_guard_bites)"
+ },
+ {
+  "id": 132,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "Every named site now calls the relative matcher: barplot/collect.py:611 and :919 (tp_close), heatmap/controller.py:294,307,347 (tp_close), barplot/renderer.py:550 and :578 (tp_close), plus tp_close_mask at renderer.py:215,382. No raw 1e-6 timepoint comparison remains in well_viewer (the only 1e-6 left is a ratio epsilon default in image_compose.py:513).",
+  "test": "tests/test_tp_match.py::test_fractional_4g_roundtrip_matches_where_abs_1e6_failed"
+ },
+ {
+  "id": 133,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "util/fov.py:_token returns '' only for None ('\"\" if value is None else str(value)') with a docstring naming the 0-based position_to_well_fov case; sort_key/parse_fov go through it. Probe: sorted([1,2,10,0], key=sort_key) == [0,1,2,10] and parse_fov(0) == 0.0.",
+  "test": "tests/test_identity_token_parsers.py::test_fov_zero_sorts_first_not_last"
+ },
+ {
+  "id": 134,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "Both copy-as-is branches now name the destination for the well through the shared datasets/_common/containers.py:223 container_dest(): concatenate/apply.py:158-163 (_copy_container_as_is) called from merge_input at :194, and merge_plates/apply.py:92-98 called from _merge_input at :149; the QC branches already used f\"{well}_out.zip\" (concatenate:224, merge_plates:178). The CSV keeps its own prefix+dest_well rule (merge_plates/apply.py:237), which is naming the CSV, not the archive.",
+  "test": "tests/test_container_named_for_the_well.py::test_concatenate_copies_an_unpadded_well_under_its_canonical_name and ::test_neither_copy_path_builds_its_destination_from_the_source_name"
+ },
+ {
+  "id": 135,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "well_viewer/features/lineplot/controller.py:743-747 filters selected on `lbl in ctx.state.dataset.well_paths` before it is used, with a comment naming the get_rows KeyError aborting the redraw before apply_export_style_to_current; the per-well collector does the same at :394-396.",
+  "test": null
+ },
+ {
+  "id": 136,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "well_viewer/features/lineplot/controller.py:363-371: with ctx.state.selection.selections non-empty and every group hidden, collect_line_series returns early instead of falling through to the per-well branch, matching ordered_bar_keys.",
+  "test": "tests/test_line_and_bar_agree_on_hidden_groups.py::test_the_line_collector_refuses_it_too"
+ },
+ {
+  "id": 137,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "well_viewer/features/barplot/renderer.py:128-145 adds _timepoint_hours(), which falls back to the text timepoint column via parse_timepoint_hours, and both renderers call it — violin at :213 and beeswarm at :380.",
+  "test": "tests/test_percell_timepoint_fallback.py::test_a_text_only_timepoint_still_draws and ::test_the_two_renderers_share_one_timepoint_reader"
+ },
+ {
+  "id": 138,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "well_viewer/features/scatter/collect.py:44-47 widens GROUP_MARKERS to 20 shapes, and collect.py:496-506 logs a named warning listing which groups share a shape when the roster wraps.",
+  "test": "tests/test_line_and_bar_agree_on_hidden_groups.py::test_the_group_marker_roster_is_wider_than_a_plate_of_groups and ::test_a_wrapped_marker_roster_is_announced"
+ },
+ {
+  "id": 139,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "well_viewer/features/scatter/callbacks.py:48-85 _nearest_point transforms candidate points through ax.transData and measures in screen pixels; the hover cut-off is the named _HOVER_RADIUS_PX = 12.0 (callbacks.py:44) applied at :154, and the click path deliberately applies no radius (:101-105).",
+  "test": "tests/test_scatter_hover_status.py::test_nearest_is_decided_in_screen_space_not_data_space and ::test_a_log_axis_does_not_change_which_point_is_nearest"
+ },
+ {
+  "id": 140,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "well_viewer/data/auto_threshold.py:422-437 now passes seg_channel_token=read_nuclear_token(out_dir) to build_gating_block, with a comment citing ARCHITECTURE 5.7.",
+  "test": "tests/test_schema_and_gating_domains.py::test_the_auto_threshold_rebuild_passes_the_token and ::test_rebuilding_the_gating_block_keeps_a_nuclear_cutoff_at_the_readout_default"
+ },
+ {
+  "id": 141,
+  "verdict": "FIXED",
+  "confidence": "medium",
+  "evidence": "util/schema_infer.py:_classify_slots ends with a last pass that claims a leftover all-bare-number column with >1 distinct value as fov (guarded on the timepoint slot already being taken), documented in place. Probe: 'exp_gfp_A01_3_t2'-style stems now infer experiment:channel:well:fov:timepoint. The residual case — no timepoint slot found — deliberately stays 'ignore' because the number is then genuinely ambiguous, and that decision is stated in the code and pinned by a test.",
+  "test": "tests/test_schema_and_gating_domains.py::test_a_bare_number_slot_is_claimed_as_fov_when_the_timepoint_is_known and ::test_a_lone_numeric_slot_stays_ignore_when_it_could_be_the_timepoint"
+ },
+ {
+  "id": 142,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "WellPlateZipper.py:11 imports PLATE_MAX_COL/PLATE_ROWS from util.plate_grid and generate_wells (WellPlateZipper.py:54-66) builds the labels from them; no 'ABCDEFGH'/range(1,13) literal remains outside util/plate_grid.py:30.",
+  "test": "tests/test_schema_and_gating_domains.py::test_the_zipper_and_plate_grid_agree_on_the_plate"
+ },
+ {
+  "id": 143,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "WellPlateZipper.py:225 calls validate_schema(schema, required=(\"well\",)), and util/schema.py's validate_schema takes a required parameter defaulting to PIPELINE_REQUIRED_FIELDS = (\"channel\",\"well\"), so a well:fov schema is accepted by the zipper and still refused for the pipeline.",
+  "test": "tests/test_schema_and_gating_domains.py::test_the_zipper_validates_against_well_alone and ::test_a_caller_that_reads_only_the_well_can_say_so"
+ },
+ {
+  "id": 144,
+  "verdict": "FIXED",
+  "confidence": "high",
+  "evidence": "util/image_exts.py:45-55 is_group_image's docstring now states that '._x.tif' has an image suffix and is accepted, that the caller must reject AppleDouble sidecars by name first, and that the previous claim was the more dangerous way round to be wrong.",
+  "test": "tests/test_schema_and_gating_domains.py::test_is_group_image_answers_only_about_the_suffix"
+ }
+]

@@ -1,0 +1,1418 @@
+[
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`well_viewer/features/smfish/worker.py:179,305,346`",
+  "problem": "A well whose spot-counting pass raises is logged and then dropped from `counts`; `counts.get(k, 0)` writes a full column of `0` into that well's CSV and `done_cb` still reports \"Apply to All complete\". A per-file \"0 matched rows\" warning exists in the log, but the artifact itself is a plausible column of zeros.",
+  "sev": "High",
+  "id": 1
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`well_viewer/features/image_browser/image_table/image_compose.py:244`",
+  "problem": "`_export_binary_mask` catches every exception into `above_by_nid = {}` and renders an all-black silhouette \u2014 identical to \"no cells above threshold\". Same all-black result when the well's CSV rows do not cover the displayed `(fov, tp)`. The assignment body evades `test_no_silent_except.py`.",
+  "sev": "Medium",
+  "id": 2
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`well_viewer/features/heatmap/controller.py:294`",
+  "problem": "`METRIC_COUNT` returns `0.0` (not NaN) when nothing matches, so a well that failed to compute colours as a genuine zero-count well.",
+  "sev": "Medium",
+  "id": 3
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`well_viewer/features/barplot/controller.py:233`, `renderer.py:1223`",
+  "problem": "The Events bar is gated on `n_above > 0`, so a measured zero renders as \"never computed\" \u2014 the same conflation in the other direction.",
+  "sev": "Medium",
+  "id": 4
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`well_viewer/domain/stats_compute.py:210`",
+  "problem": "`_reduce_reps` returns spread `0.0` for n=1 where `_aggregate_arrays` returns NaN and its own docstring promises \"never 0.0\". A one-well replicate set exports `err_SD = 0.000000`.",
+  "sev": "Medium",
+  "id": 5
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`well_viewer/domain/stats_compute.py:372,449`",
+  "problem": "A NaN events-mean is coerced to `0.0` while the mean and fraction in the same tuple stay NaN \u2014 one tuple, two conventions, so Mean and Fraction draw nothing and Events draws a bar at exactly 0.",
+  "sev": "Medium",
+  "id": 6
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`well_viewer/domain/spatial_compute.py:585`",
+  "problem": "`radial_profile` gives a one-cell bin `sem = 0.0` while empty bins correctly get NaN. The misleading case is the one drawn as data.",
+  "sev": "Medium",
+  "id": 7
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`well_viewer/domain/spatial_compute.py:136`",
+  "problem": "`ripley_l` with n<2 returns an all-zero curve **and** a zero-width CSR envelope: a one-cell frame renders as perfect CSR with zero uncertainty.",
+  "sev": "Low\u2013Medium",
+  "id": 8
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`well_viewer/features/spatial/renderer.py:464`",
+  "problem": "An empty partition is substituted with `np.array([0.0])` and drawn as a violin.",
+  "sev": "Medium",
+  "id": 9
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`well_viewer/features/multivariate/renderer.py:199`",
+  "problem": "SPLOM silently truncates to 6 features with no footnote on the figure.",
+  "sev": "Medium",
+  "id": 10
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`well_viewer/data/data_loading.py:561,782`",
+  "problem": "A CSV without `area_px` returns empty from both aggregation entry points **with no log line**; every plot draws nothing and nothing says why.",
+  "sev": "Medium",
+  "id": 11
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`well_viewer/data/zip_members.py:215`",
+  "problem": "A mid-scan exception returns partially filled dicts indistinguishable from a complete scan, under a \"Result: N fluor\u2026\" line that reads as an inventory.",
+  "sev": "Medium",
+  "id": 12
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`well_viewer/data/crop_tool.py:186`",
+  "problem": "A crop clamping to an empty rectangle returns the full array while the status still reads `Crop: 300\u00d7300 px`.",
+  "sev": "Low",
+  "id": 13
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`well_viewer/features/batch_export/bar_panel.py:552`",
+  "problem": "An empty item set writes a fully labelled blank figure, no CSV, and returns success.",
+  "sev": "High",
+  "id": 14
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`well_viewer/features/batch_export/base_panel.py:1831`",
+  "problem": "The line batch skips the CSV when there are no rows but still saves the figure and reports success.",
+  "sev": "High",
+  "id": 15
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`well_viewer/features/batch_export/scatter_panel.py:489,717,754`",
+  "problem": "One empty `(group, tp)` returns an error string that discards the entire batch's staging.",
+  "sev": "Medium",
+  "id": 16
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`datasets/job_queue/controller.py:303`",
+  "problem": "A queued job that never ran is marked **succeeded**, carrying the message and `dataset_root` of an unrelated manual run.",
+  "sev": "High",
+  "id": 17
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`datasets/subset/apply.py:242`",
+  "problem": "The \"did anything land?\" check is skipped exactly when the filtered archive came out empty \u2014 \"nothing to compare against\" conflated with \"nothing landed\".",
+  "sev": "Medium",
+  "id": 18
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`datasets/merge_plates/apply.py:133,154`",
+  "problem": "`copy_container_members`' `dropped` set (real data loss) is bound to `_dropped` and thrown away; Concatenate makes the same event a hard failure.",
+  "sev": "Medium",
+  "id": 19
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`datasets/concatenate/concatenate_compute.py:267`",
+  "problem": "Dataset 2's `sample_definitions` / `notes` / `ratios` are dropped with no log line, even though `wells_ds2_only` is normally non-empty.",
+  "sev": "Low\u2013Medium",
+  "id": 20
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`util/disk_space.py:57`",
+  "problem": "`os.walk` never raises, so the outer handler is dead code and an unreadable subtree silently counts 0 bytes.",
+  "sev": "Low",
+  "id": 21
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`util/zip_write.py:185`",
+  "problem": "`folder_removed=True` is returned even when the removal actually failed.",
+  "sev": "Low",
+  "id": 22
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`well_viewer/data/cache_projectors.py:79`",
+  "problem": "A verdict that raises during re-projection leaves the previous `QC_Pass`/`Crop_Pass` values attached: plots filter by the old parameters while the UI shows the new ones.",
+  "sev": "Low",
+  "id": 23
+ },
+ {
+  "theme": 1,
+  "theme_name": "Silent degradation: \"computed as zero\" vs. \"never computed\"",
+  "loc": "`well_viewer/features/smfish/tab_view.py:759`",
+  "problem": "An unparseable threshold silently becomes `0.0` and is applied plate-wide.",
+  "sev": "Medium",
+  "id": 24
+ },
+ {
+  "theme": 2,
+  "theme_name": "Statistics and error bars",
+  "loc": "`well_viewer/features/lineplot/controller.py:325`, `well_viewer/features/barplot/collect.py:841`, `well_viewer/features/batch_export/_line_series_runner.py:180`",
+  "problem": "`compute_rep_stats` returns a 4-tuple whose fourth element is the fraction spread. `barplot/collect.py:429` binds it as `g_err_f`; these three siblings discard it (`, _ =`) and then hard-set `gfe = 0.0`. The Line tab's Fraction panel and the batch bar path lose their error band entirely while the Bar tab keeps it.",
+  "sev": "High",
+  "id": 25
+ },
+ {
+  "theme": 2,
+  "theme_name": "Statistics and error bars",
+  "loc": "`well_viewer/features/lineplot/controller.py:454`",
+  "problem": "`LinePoint.n_above_spread` is populated at `:335` and then ignored at the draw site, which passes a literal `0.0`. The Line tab's Events panel never shows a replicate error bar the Bar tab does show.",
+  "sev": "High",
+  "id": 26
+ },
+ {
+  "theme": 2,
+  "theme_name": "Statistics and error bars",
+  "loc": "`well_viewer/domain/stats_compute.py:181`",
+  "problem": "The FOV branch of `group_replicate_stats` never consults `fov_integrity.check_fov_labels`, the verdict that exists because \"six fields pooled under one label turn the mean events per field into the total \u2014 six times too large\". An untrustworthy well reads \"undefined\" as a solo bar and 6\u00d7 as a set member, in one figure.",
+  "sev": "High",
+  "id": 27
+ },
+ {
+  "theme": 2,
+  "theme_name": "Statistics and error bars",
+  "loc": "`well_viewer/features/scatter/controller.py:128` + `gating.py:505`",
+  "problem": "The gate percentage is denominated by the already gate-filtered cloud, so \"Apply gates\" makes every label read `100.0%`.",
+  "sev": "High",
+  "id": 28
+ },
+ {
+  "theme": 2,
+  "theme_name": "Statistics and error bars",
+  "loc": "`well_viewer/features/export/sidebar_view.py:476`",
+  "problem": "`_sync_err_from_app` never writes `bar_err_kind`, so `ci95` survives a SEM/SD flip: bars draw 1.96 \u00d7 SD under a label reading \"SD\".",
+  "sev": "High",
+  "id": 29
+ },
+ {
+  "theme": 2,
+  "theme_name": "Statistics and error bars",
+  "loc": "`well_viewer/domain/stats_compute.py:319,353,398,437`",
+  "problem": "The stats-cache keys fold in `active_val_col` \u2014 a bare `ratio:<name>` string \u2014 but never `ratio_index`, and `channel_state_controller.set_ratio_metrics:831` never calls `invalidate_stats_cache` (twelve other mutation sites do). Editing a ratio in place leaves every rep-set entry valid by key and wrong by value.",
+  "sev": "Medium\u2013High",
+  "id": 30
+ },
+ {
+  "theme": 2,
+  "theme_name": "Statistics and error bars",
+  "loc": "`well_viewer/features/heatmap/controller.py:270`",
+  "problem": "The replicate-set average is a pool-of-cells mean, not the mean-of-per-well-means Bar, Line and Stats use. Possibly deliberate; undocumented either way.",
+  "sev": "Medium",
+  "id": 31
+ },
+ {
+  "theme": 2,
+  "theme_name": "Statistics and error bars",
+  "loc": "`well_viewer/features/home/cell_gating/gating_compute.py:426`",
+  "problem": "The optimizer's fraction-on population (QC + Crop only) is not the plots' denominator, so its reported fractions and its argmax do not match the bar plot.",
+  "sev": "Medium",
+  "id": 32
+ },
+ {
+  "theme": 2,
+  "theme_name": "Statistics and error bars",
+  "loc": "`well_viewer/features/barplot/collect.py:519` vs `:679`",
+  "problem": "`has_frac` couples to `has_mean` only in the grouped branch: a set with zero above-threshold cells shows a placeholder pooled and an honest 0 unpooled.",
+  "sev": "Medium",
+  "id": 33
+ },
+ {
+  "theme": 2,
+  "theme_name": "Statistics and error bars",
+  "loc": "`well_viewer/features/barplot/renderer.py:1223`",
+  "problem": "The per-cell Events panel ignores `bar_err_settings`, so \"None\" and \"95 % CI\" apply to grouped mode only.",
+  "sev": "Medium",
+  "id": 34
+ },
+ {
+  "theme": 2,
+  "theme_name": "Statistics and error bars",
+  "loc": "`well_viewer/features/barplot/renderer.py:526`",
+  "problem": "`x_by_key` collapses duplicate keys in multi-timepoint mode, so significance brackets are drawn over the last timepoint's bars rather than the tested one.",
+  "sev": "Medium",
+  "id": 35
+ },
+ {
+  "theme": 2,
+  "theme_name": "Statistics and error bars",
+  "loc": "`well_viewer/features/qc/tab_view.py:171`",
+  "problem": "`_num(...) or None` drops a deliberately typed `0` bound.",
+  "sev": "Low",
+  "id": 36
+ },
+ {
+  "theme": 2,
+  "theme_name": "Statistics and error bars",
+  "loc": "`well_viewer/domain/fold_change.py:92,148`",
+  "problem": "`isinstance(x, (int, float))` rejects `numpy.float32`, giving a NaN mean and a lost error bar. Latent (no live float32 producer found) but the exact class CLAUDE.md \u00a77.5 #8 records in this module.",
+  "sev": "Low",
+  "id": 37
+ },
+ {
+  "theme": 2,
+  "theme_name": "Statistics and error bars",
+  "loc": "`well_viewer/features/export/service.py:148`",
+  "problem": "The line CSV writes a literal `nan` spread where the bar CSV writes `\"\"`.",
+  "sev": "Low",
+  "id": 38
+ },
+ {
+  "theme": 2,
+  "theme_name": "Statistics and error bars",
+  "loc": "`well_viewer/domain/ratio_models.py:24`",
+  "problem": "Docstring says epsilon is *added*; the resolver *clamps* (`np.maximum(den, epsilon)`) \u2014 different numbers near and below zero on background-subtracted channels.",
+  "sev": "Low",
+  "id": 39
+ },
+ {
+  "theme": 3,
+  "theme_name": "Fold change and normalization",
+  "loc": "`well_viewer/domain/fold_change.py:296,713,785`",
+  "problem": "Every baseline search requires `v != 0`, so a fraction-on or event count of exactly 0 at t0 \u2014 the expected value of an induction experiment \u2014 is skipped and a **later timepoint** is silently substituted. Measured: the mean panel normalizes to t=0 while the fraction and events panels normalize to t=24, in one figure under one axis label. For *ratio* mode skipping a zero divisor is defensible; for *subtract* mode subtracting 0 is well-defined and the skip is simply wrong.",
+  "sev": "High",
+  "id": 40
+ },
+ {
+  "theme": 3,
+  "theme_name": "Fold change and normalization",
+  "loc": "`well_viewer/features/lineplot/controller.py:741`",
+  "problem": "`ax_frac.set_ylim(-0.05, 1.05)` unconditionally, so under fold change the fraction panel clips every ratio above 1.05 out of view. Bar's `_set_frac_ylim` skips the clamp for exactly this reason.",
+  "sev": "High",
+  "id": 41
+ },
+ {
+  "theme": 3,
+  "theme_name": "Fold change and normalization",
+  "loc": "`well_viewer/features/barplot/renderer.py:197,394`",
+  "problem": "The violin/beeswarm Fraction panel plots raw fractions but is given the fold-change title suffix. `draw_per_well_n_bars` guards against this; the fraction panel does not.",
+  "sev": "High",
+  "id": 42
+ },
+ {
+  "theme": 3,
+  "theme_name": "Fold change and normalization",
+  "loc": "`well_viewer/core/load_controller.py:326`",
+  "problem": "`PlotState`'s fold-change block (`fc_vs_control_on`, `fc_control`, `fc_control_map`, `focus_timepoint`, `line_order_*`, `bar_group_mode`) is never reset on a dataset swap, and `view_state.load_from_data_dir` early-returns when the new plate has no saved block. Plate B comes up normalized against plate A's group \u2014 every bar NaN under a fold-change axis label.",
+  "sev": "High",
+  "id": 43
+ },
+ {
+  "theme": 3,
+  "theme_name": "Fold change and normalization",
+  "loc": "`well_viewer/domain/fold_change.py:148` vs `:1882`",
+  "problem": "The line path folds an undefined (NaN) spread to `0.0`; the bar path preserves NaN. `scale_bar_value`'s own docstring states the rule `_scale_pt` breaks four hundred lines above it.",
+  "sev": "Medium",
+  "id": 44
+ },
+ {
+  "theme": 3,
+  "theme_name": "Fold change and normalization",
+  "loc": "`well_viewer/features/batch_export/base_panel.py:224`",
+  "problem": "An inherited per-member control mode shows `\u2014` in the Control combo while the export normalizes anyway.",
+  "sev": "Medium",
+  "id": 45
+ },
+ {
+  "theme": 3,
+  "theme_name": "Fold change and normalization",
+  "loc": "`well_viewer/domain/fold_change.py:589`",
+  "problem": "The events replicate spread (index 9) is not normalized while its value (index 4) is. Invisible only because the Line draw site passes `0.0` for that panel.",
+  "sev": "Low",
+  "id": 46
+ },
+ {
+  "theme": 3,
+  "theme_name": "Fold change and normalization",
+  "loc": "`well_viewer/domain/fold_change_pairing.py:516`",
+  "problem": "`tick_labels` de-duplicates by reference and `distinct_controls` by resolved wells, so a one-well control set plus that well's own token gives an axis title naming one control above tick rows naming two.",
+  "sev": "Low",
+  "id": 47
+ },
+ {
+  "theme": 3,
+  "theme_name": "Fold change and normalization",
+  "loc": "`well_viewer/core/fold_change_pairing_view.py:226,356`",
+  "problem": "One row edit rebuilds the table twice, and `setCellWidget` destroys the combo whose slot is still on the stack \u2014 roughly 192 combos per edit on a 96-member plate.",
+  "sev": "Medium",
+  "id": 48
+ },
+ {
+  "theme": 3,
+  "theme_name": "Fold change and normalization",
+  "loc": "`well_viewer/domain/fold_change_scopes.py:88`",
+  "problem": "A bare `except \u2192 frozenset()` with no log makes `redraw_scopes_or_defer` defer every scope: the fold-change controls silently stop working.",
+  "sev": "Low",
+  "id": 49
+ },
+ {
+  "theme": 4,
+  "theme_name": "Image and frame identity",
+  "loc": "`well_viewer/data/image_identity.py:190,194` and `well_viewer/data/image_resolver.py:122`",
+  "problem": "Both classifiers call `Path(stripped).stem` on an **already-stripped field stem**, truncating any schema token that contains a dot. Reproduced: `classify_filename_role(\"A1_f1_1.5h_w2_labels.tif\")` \u2192 `(MASK, 'A1_f1_1')`. A `1.5h` mask or tophat is keyed `tp=\"1\"`, so it loses its own mask *and* collides with the genuine `1h`/`T01` key on a first-hit-wins lookup.",
+  "sev": "Critical",
+  "id": 50
+ },
+ {
+  "theme": 4,
+  "theme_name": "Image and frame identity",
+  "loc": "`well_viewer/data/image_discovery.py:596`",
+  "problem": "The loose-file fallback's `else:` files `smfish` images into the **mask** dict; `load_mask_array` then `rint`s spot intensities into an int32 label image.",
+  "sev": "High",
+  "id": 51
+ },
+ {
+  "theme": 4,
+  "theme_name": "Image and frame identity",
+  "loc": "`well_viewer/data/frame_load.py:266`",
+  "problem": "The ambiguity refusal covers an empty FOV but not an empty timepoint, which matches every key and returns `hits[0]` as a successful `\"normalized\"` resolution.",
+  "sev": "High",
+  "id": 52
+ },
+ {
+  "theme": 4,
+  "theme_name": "Image and frame identity",
+  "loc": "`well_viewer/features/image_browser/image_table/facet_view.py:187`",
+  "problem": "The wrap-cols banded layout derives its single column-header strip from row 0 only, so every band below the first is labelled with the *first* band's values (2 ch \u00d7 6 tp, wrap 3 \u2192 rows 2\u20133 show T4\u2013T6 under a header reading T1\u2013T3). Export replays the same plan. Documented as a known limitation at ARCHITECTURE line 2141; nothing in the UI says so.",
+  "sev": "High",
+  "id": 53
+ },
+ {
+  "theme": 4,
+  "theme_name": "Image and frame identity",
+  "loc": "`well_viewer/features/image_browser/image_table/facet_view.py:186`",
+  "problem": "Row labels read only column 0 and column labels only row 0, so a deliberately blank cell there deletes that band's axis label instead of falling back to a populated cell.",
+  "sev": "Medium",
+  "id": 54
+ },
+ {
+  "theme": 4,
+  "theme_name": "Image and frame identity",
+  "loc": "`well_viewer/data/image_resolver.py:135`",
+  "problem": "`normalize_numeric_token` uses `str(value or \"\")`, so numeric zero becomes `\"\"` \u2014 dropping a `0` entry from `timepoint_options`/`fov_options` and turning an empty target into \"match anything\". `image_identity._raw_token` documents this exact defect as fixed, in the other copy.",
+  "sev": "Medium",
+  "id": 55
+ },
+ {
+  "theme": 4,
+  "theme_name": "Image and frame identity",
+  "loc": "`well_viewer/data/data_loading.py:911` + `image_discovery.py:559`",
+  "problem": "An unparseable well label yields `well_token=None`, which **disables** the per-well filter in the loose-file fallback, so every well's images are accepted into that one well.",
+  "sev": "Medium",
+  "id": 56
+ },
+ {
+  "theme": 4,
+  "theme_name": "Image and frame identity",
+  "loc": "`well_viewer/features/image_browser/image_table/controller.py:789` + `image_compose.py:1070`",
+  "problem": "An Overlay cell can never carry the `raw` uncorrected badge, so the status line counts uncorrected cells no badge ever identifies.",
+  "sev": "Medium",
+  "id": 57
+ },
+ {
+  "theme": 4,
+  "theme_name": "Image and frame identity",
+  "loc": "`well_viewer/core/image_view_state.py:31`",
+  "problem": "`lut_by_channel` / `tint_by_channel` are neither persisted nor cleared on swap: a bright plate's LUT renders the next plate black.",
+  "sev": "Medium",
+  "id": 58
+ },
+ {
+  "theme": 4,
+  "theme_name": "Image and frame identity",
+  "loc": "`well_viewer/features/image_browser/image_table/image_compose.py:1070`",
+  "problem": "A ratio cell's raw-fallback is recorded under the numerator/denominator channel, so it is never badged and is counted under a channel absent from the grid.",
+  "sev": "Low",
+  "id": 59
+ },
+ {
+  "theme": 4,
+  "theme_name": "Image and frame identity",
+  "loc": "`well_viewer/features/image_browser/image_table/image_compose.py:758`",
+  "problem": "`composite_column_rgb` calls `_row_display_opts(ctx, r)` with no channel, so it always loads the **raw** frame for a corrected channel. Dead today (re-export only).",
+  "sev": "Low",
+  "id": 60
+ },
+ {
+  "theme": 4,
+  "theme_name": "Image and frame identity",
+  "loc": "`well_viewer/features/image_browser/image_table/image_compose.py:374`",
+  "problem": "`_parse_lut`'s no-spec fallback applies column 0's channel LUT to the whole row. Reachable only with an empty `channel_opts`.",
+  "sev": "Low",
+  "id": 61
+ },
+ {
+  "theme": 4,
+  "theme_name": "Image and frame identity",
+  "loc": "`well_viewer/features/image_browser/image_table/controller.py:795`",
+  "problem": "Overlay cells install a hover readout keyed on the sentinel channel, so their pixel readout can never resolve and is always empty.",
+  "sev": "Low",
+  "id": 62
+ },
+ {
+  "theme": 4,
+  "theme_name": "Image and frame identity",
+  "loc": "`well_viewer/data/image_resolver.py:109` vs `image_identity.py:159`",
+  "problem": "Two filename classifiers; the one the scan path uses has no `_phase` entry, so a `Role.PHASE` output would be served as a raw fluor frame. Docs name `image_identity` the single source of truth.",
+  "sev": "Low",
+  "id": 63
+ },
+ {
+  "theme": 5,
+  "theme_name": "Destructive dataset operations",
+  "loc": "`datasets/merge_plates/merge_plates_compute.py:130,292`",
+  "problem": "`merge_sample_definitions` reads only the **legacy v1** `rep_sets`/`groups`; today's on-disk shape is v2 `selections`. Its result *replaces* dataset 1's whole block. Reproduced: merging two plates with current-app Sample Definitions yields `{\"well_labels\": {...}, \"rep_sets\": [], \"groups\": []}` \u2014 every selection, replicate set, group, plot group, `current_id` and `notes` from **both** datasets gone, reported as a clean success. Concatenate preserves what Merge Plates deletes.",
+  "sev": "Critical",
+  "id": 64
+ },
+ {
+  "theme": 5,
+  "theme_name": "Destructive dataset operations",
+  "loc": "`datasets/ome_import/apply.py:53`, `worker.py:48`",
+  "problem": "No run-time destination check: `destination_problem` / `resume_state(...).mismatched` are consulted only by `view.py`. A queued OME job overwrites each `in/<WELL>.zip` while `out/` survives \u2014 measurements that no longer match their inputs, reported as success; and a `mismatched` marker is ignored, stitching one folder from two mappings.",
+  "sev": "High",
+  "id": 65
+ },
+ {
+  "theme": 5,
+  "theme_name": "Destructive dataset operations",
+  "loc": "`datasets/validate/apply.py:136`",
+  "problem": "`apply_repairs` rewrites the live `out/pipeline_info.json` with a truncating `write_text`, while its sibling `validate/record.py:152` writes the same file tmp + `Path.replace`. A crash mid-apply destroys `cell_gating`, `sample_definitions`, `ratios` and `notes` \u2014 the four blocks this module's docstring is a paragraph about preserving \u2014 with no backup.",
+  "sev": "High",
+  "id": 66
+ },
+ {
+  "theme": 5,
+  "theme_name": "Destructive dataset operations",
+  "loc": "`datasets/merge_plates/apply.py:83`",
+  "problem": "`_remap._rename` discards `rewrite_member_field`'s `was_rewritten` flag, so a member failing the structural gate keeps dataset 2's original well token inside the destination well's archive, silently. The CSV row is equally unrewritten, so the `dest_in_names` check still passes.",
+  "sev": "High",
+  "id": 67
+ },
+ {
+  "theme": 5,
+  "theme_name": "Destructive dataset operations",
+  "loc": "`datasets/import_loose/apply.py:179`",
+  "problem": "In-place mode zips and unlinks the TIFs of **every** well-named subfolder under the source, including pre-existing ones; the preview is non-recursive and loose-TIF-only. Bytes survive in the archives, so this is unannounced scope rather than loss \u2014 but preview \u2260 apply on the pane's one destructive path.",
+  "sev": "Medium",
+  "id": 68
+ },
+ {
+  "theme": 5,
+  "theme_name": "Destructive dataset operations",
+  "loc": "`datasets/subset/subset_compute.py:215` vs `:182`",
+  "problem": "`row_matches` reads the `timepoint_hours` **column** and `member_matches` reads the **filename** token. A legacy CSV with a blank `timepoint_hours` loses every row while all images copy, and `_verify` names the wrong cause.",
+  "sev": "Medium",
+  "id": 69
+ },
+ {
+  "theme": 5,
+  "theme_name": "Destructive dataset operations",
+  "loc": "`datasets/_common/dataset_paths.py:187`",
+  "problem": "Two containers canonicalising to the same well (`A1.zip` + `A01.zip`) collapse by plain dict overwrite in glob order. The `out_csvs` sibling documents its identical overwrite and names the caller that must not trust it; the input side has no warning and every copy tool trusts it.",
+  "sev": "Medium",
+  "id": 70
+ },
+ {
+  "theme": 5,
+  "theme_name": "Destructive dataset operations",
+  "loc": "`datasets/_common/containers.py:318`",
+  "problem": "The tier-1 whole-file path writes with `shutil.copy2` straight onto `dest`, outside the `atomic_zip` guarantee the module docstring states without exception. An interrupted wells-only Subset leaves a truncated `in/<WELL>.zip`.",
+  "sev": "Low",
+  "id": 71
+ },
+ {
+  "theme": 5,
+  "theme_name": "Destructive dataset operations",
+  "loc": "`util/zip_write.py:250`",
+  "problem": "`atomic_zip`'s verification is name-only. With 200 bytes flipped in the deflate stream the archive still publishes; `testzip()` reports `Bad CRC-32`. The invariant verified is \"the index is complete\", not the docstring's \"readable\".",
+  "sev": "Medium",
+  "id": 72
+ },
+ {
+  "theme": 5,
+  "theme_name": "Destructive dataset operations",
+  "loc": "`util/zip_write.py:154`",
+  "problem": "`replace_folder_with_archive`'s `resolve()` identity conflates symlink and hardlink aliases in both directions: an archived symlink is reported as `kept`, and a second name for an archived file is destroyed by the folder removal though the archive holds no member under that name.",
+  "sev": "Low",
+  "id": 73
+ },
+ {
+  "theme": 5,
+  "theme_name": "Destructive dataset operations",
+  "loc": "`WellPlateZipper.py:180`",
+  "problem": "`copy2`/`move` silently overwrite same-basename files under `--recursive`; the progress line counts sources, not survivors.",
+  "sev": "Medium",
+  "id": 74
+ },
+ {
+  "theme": 5,
+  "theme_name": "Destructive dataset operations",
+  "loc": "`datasets/ome_import/controller.py:55`",
+  "problem": "`_launch` returns silently on an empty source or destination with no `jobFinished`, so a queued job is marked `running` and the queue bridge stalls forever.",
+  "sev": "Medium",
+  "id": 75
+ },
+ {
+  "theme": 5,
+  "theme_name": "Destructive dataset operations",
+  "loc": "`datasets/subset/apply.py:120`, `concatenate/apply.py:436`, `merge_plates/apply.py:243`",
+  "problem": "The `seg_fp` restamp is set only inside `with swallow(...)`; on a failed stat the entry silently keeps the **source** dataset's fingerprint and the carried-over override is later discarded as stale.",
+  "sev": "Low",
+  "id": 76
+ },
+ {
+  "theme": 6,
+  "theme_name": "Persistence and cross-dataset state leakage",
+  "loc": "`well_viewer/persistence/registry.py:53` + `allwell.py:1594`",
+  "problem": "The 500 ms debounce has no flush-all; `closeEvent` force-saves only `view_state`. An edit to ratios, heatmap layouts, cell overrides, line order, plot groups, notes, sample definitions, QC params or crop region made within 500 ms of \u2318W is lost, and a pending timer surviving `begin_load` writes into the **next** dataset's files.",
+  "sev": "High",
+  "id": 77
+ },
+ {
+  "theme": 6,
+  "theme_name": "Persistence and cross-dataset state leakage",
+  "loc": "`well_viewer/persistence/view_state.py:595` + `load_controller.py:321`",
+  "problem": "`ExportPrefsState.axis_prefs` (per-figure x/y limits, log flags, mark styling) survives a dataset swap; `apply_export_style_prefs` re-applies plate A's `y_lim_max` to plate B on every redraw.",
+  "sev": "High",
+  "id": 78
+ },
+ {
+  "theme": 6,
+  "theme_name": "Persistence and cross-dataset state leakage",
+  "loc": "`well_viewer/persistence/_doc.py:204`",
+  "problem": "An unreadable `persistence.json` degrades to `{}` and the next `set_section` writes that back, erasing every other section.",
+  "sev": "Medium",
+  "id": 79
+ },
+ {
+  "theme": 6,
+  "theme_name": "Persistence and cross-dataset state leakage",
+  "loc": "`well_viewer/persistence/cell_overrides.py:62,108,186`",
+  "problem": "`except OSError: pass` plus an absent `<well>_out.zip` makes the v2 staleness fingerprint fail open, and the compensating warning is gated on `file_version < 2`, so a v2 file warns about nothing.",
+  "sev": "Medium",
+  "id": 80
+ },
+ {
+  "theme": 6,
+  "theme_name": "Persistence and cross-dataset state leakage",
+  "loc": "`well_viewer/persistence/reset_scopes.py:270`",
+  "problem": "`VIEW_DOMAINS` claims `line_order` but `reset_view` never saves it, so the stale order returns on the next load and permanently reorders `selections`. The module's own promise is \"what resets live must equal what is dropped from disk\".",
+  "sev": "Medium",
+  "id": 81
+ },
+ {
+  "theme": 6,
+  "theme_name": "Persistence and cross-dataset state leakage",
+  "loc": "`well_viewer/persistence/view_state.py:105,462`",
+  "problem": "`absent_wells` / `absent_solo` survive a dataset swap and are reassigned only inside `restore()`, which is skipped when the new dataset has no `view_state` section: dataset A's wells get unioned into B's saved selection.",
+  "sev": "Medium",
+  "id": 82
+ },
+ {
+  "theme": 6,
+  "theme_name": "Persistence and cross-dataset state leakage",
+  "loc": "`well_viewer/persistence/heatmap_layouts.py:130,264`",
+  "problem": "The heatmap timepoint is persisted as a combo **index**, which \u00a79.7's add-timepoints workflow invalidates.",
+  "sev": "Medium",
+  "id": 83
+ },
+ {
+  "theme": 6,
+  "theme_name": "Persistence and cross-dataset state leakage",
+  "loc": "`well_viewer/persistence/sample_definitions.py:216`",
+  "problem": "`well_labels` are hydrated pruned to loaded wells and then autosaved back, erasing labels for wells absent from a subset load. `view_state` solved this with `absent_wells`; this path did not.",
+  "sev": "Medium",
+  "id": 84
+ },
+ {
+  "theme": 6,
+  "theme_name": "Persistence and cross-dataset state leakage",
+  "loc": "`well_viewer/persistence/smfish.py:123`, `well_viewer/domain/gating_state.py:200`",
+  "problem": "Unlocked read-modify-write of `pipeline_info.json` from a viewer sharing a window with a running Analyze pass; a lost update reverts `available_timepoints` / `fluor_tokens` \u2014 the \u00a712.3 symptom.",
+  "sev": "Medium",
+  "id": 85
+ },
+ {
+  "theme": 6,
+  "theme_name": "Persistence and cross-dataset state leakage",
+  "loc": "`well_viewer/core/channel_state_controller.py:150`",
+  "problem": "A bare mid-function `return` skips `apply_range` and the whole gating-hydration tail, so `threshold_min/max` keep the previous dataset's range (`begin_load` clears only the cache).",
+  "sev": "Medium",
+  "id": 86
+ },
+ {
+  "theme": 6,
+  "theme_name": "Persistence and cross-dataset state leakage",
+  "loc": "`well_viewer/features/smfish/tab_view.py:919` \u2192 `persistence/smfish.py:111`",
+  "problem": "An aborted run's `_after_csv` stamps the old threshold into the **new** dataset's `pipeline_info.json`.",
+  "sev": "High",
+  "id": 87
+ },
+ {
+  "theme": 6,
+  "theme_name": "Persistence and cross-dataset state leakage",
+  "loc": "`well_viewer/features/home/groups/panel_view.py:78`",
+  "problem": "A plate edit rewrites a group's membership from the plate alone, permanently dropping wells the current dataset does not hold \u2014 and autosaves that.",
+  "sev": "Low",
+  "id": 88
+ },
+ {
+  "theme": 6,
+  "theme_name": "Persistence and cross-dataset state leakage",
+  "loc": "`well_viewer/persistence/_doc.py:214`",
+  "problem": "A `schema_version` mismatch logs \"applying defaults\" and then uses the doc unchanged: no migration, no discard (contrast `view_state._migrate`).",
+  "sev": "Low",
+  "id": 89
+ },
+ {
+  "theme": 6,
+  "theme_name": "Persistence and cross-dataset state leakage",
+  "loc": "`well_viewer/features/saved_plots/tab_view.py:124`",
+  "problem": "`_confirm_clear` falls through to clearing when the confirmation dialog raises \u2014 an unconfirmed destructive wipe of the gallery and its PNGs.",
+  "sev": "Medium",
+  "id": 90
+ },
+ {
+  "theme": 7,
+  "theme_name": "Export does not match the screen",
+  "loc": "`well_viewer/features/batch_export/scatter_panel.py:481,695,735`",
+  "problem": "Batch scatter-cells collects with `gates=None`, so the export never applies the Apply-gates point filter the tab applies at `scatter/controller.py:128`. The exported figure contains points the on-screen plot excludes.",
+  "sev": "Critical",
+  "id": 91
+ },
+ {
+  "theme": 7,
+  "theme_name": "Export does not match the screen",
+  "loc": "`well_viewer/features/export/service.py:638`",
+  "problem": "The on-tab Scatter \"Export CSV\" has the same omission: the CSV holds cells the plot excluded.",
+  "sev": "Critical",
+  "id": 92
+ },
+ {
+  "theme": 7,
+  "theme_name": "Export does not match the screen",
+  "loc": "`well_viewer/features/image_browser/image_table/export.py:371,422`",
+  "problem": "The export figure builder has no ratio-channel branch (the live grid has one), so every ratio cell exports as `(no image)` in Export to File, Copy PNG, Copy SVG and Save to Saved Plots.",
+  "sev": "High",
+  "id": 93
+ },
+ {
+  "theme": 7,
+  "theme_name": "Export does not match the screen",
+  "loc": "`well_viewer/features/export/service.py:735,762`",
+  "problem": "`export_scatter_agg_data` keys rows and fieldnames by the statistic string, so `stat_x == stat_y` silently replaces the X column with Y (reproduced).",
+  "sev": "High",
+  "id": 94
+ },
+ {
+  "theme": 7,
+  "theme_name": "Export does not match the screen",
+  "loc": "`well_viewer/features/export/service.py:655,678`",
+  "problem": "The same defect in `export_scatter_data`, keyed by `col_x`/`col_y`.",
+  "sev": "Medium",
+  "id": 95
+ },
+ {
+  "theme": 7,
+  "theme_name": "Export does not match the screen",
+  "loc": "`well_viewer/features/multivariate/renderer.py:52`",
+  "problem": "`render_multivariate` never calls `apply_export_style_to_current`, so Properties-sidebar edits die on the next recompute \u2014 a direct \u00a75.8 violation.",
+  "sev": "High",
+  "id": 96
+ },
+ {
+  "theme": 7,
+  "theme_name": "Export does not match the screen",
+  "loc": "`well_viewer/features/export/sidebar_view.py:1063`",
+  "problem": "`_redraw_active_plot` has a Spatial branch but no Multivariate one, so Reset-defaults never repaints `_mv_fig`.",
+  "sev": "Medium",
+  "id": 97
+ },
+ {
+  "theme": 7,
+  "theme_name": "Export does not match the screen",
+  "loc": "`well_viewer/core/plot_card_actions.py:189`",
+  "problem": "`_active_card` takes the roster-first visible card while `copy_active_card_as_svg` / `save_active_card_figure` are wired to 16 per-tab Export menus. In Split View, Bar Plots' own \"Copy SVG\" copies the line figure. The file's own docstring describes this hazard and fixes only one of the three actions.",
+  "sev": "Medium",
+  "id": 98
+ },
+ {
+  "theme": 7,
+  "theme_name": "Export does not match the screen",
+  "loc": "`well_viewer/features/batch_export/scatter_panel.py:793`",
+  "problem": "The multi-timepoint aggregate `_draw` omits `color=data[\"color\"]` that the single-tp sibling and the tab both pass.",
+  "sev": "Medium",
+  "id": 99
+ },
+ {
+  "theme": 7,
+  "theme_name": "Export does not match the screen",
+  "loc": "`well_viewer/features/batch_export/base_panel.py:1747`, `bar_panel.py:274`",
+  "problem": "val_col and metric are re-read per job while the channel token is snapshotted, across a `processEvents()` pump.",
+  "sev": "Medium",
+  "id": 100
+ },
+ {
+  "theme": 7,
+  "theme_name": "Export does not match the screen",
+  "loc": "`well_viewer/features/saved_plots/controller.py:282` vs `tab_view.py:149`",
+  "problem": "The PDF report writes pages in storage order \u2014 the reverse of the gallery order the \u25b2/\u25bc buttons curate.",
+  "sev": "Medium",
+  "id": 101
+ },
+ {
+  "theme": 7,
+  "theme_name": "Export does not match the screen",
+  "loc": "`well_viewer/features/image_browser/image_table/controller.py:835`",
+  "problem": "The pre-rendered-RGB branch skips chrome and the raw badge and uses a different contrast than the export path for the same cell.",
+  "sev": "Low",
+  "id": 102
+ },
+ {
+  "theme": 7,
+  "theme_name": "Export does not match the screen",
+  "loc": "`well_viewer/features/multivariate/renderer.py:196`",
+  "problem": "SPLOM hardcodes `color_by=\"group\"`, ignoring the control.",
+  "sev": "Low",
+  "id": 103
+ },
+ {
+  "theme": 7,
+  "theme_name": "Export does not match the screen",
+  "loc": "`well_viewer/features/batch_export/base_panel.py:664`",
+  "problem": "Conditional scope restore leaves the app in the batch's scope on one branch.",
+  "sev": "Low",
+  "id": 104
+ },
+ {
+  "theme": 8,
+  "theme_name": "Controls that cannot work",
+  "loc": "`widgets/plate_progress.py:224`",
+  "problem": "`setAttribute(WA_TransparentForMouseEvents, True)` on the status plate makes its whole subtree invisible to hit-testing, so the `event(ToolTip)` handler wired eight lines later can never run. Verified on a real `RunDashboard`: `root.childAt(<centre of A01>)` returns the plain centre-column widget. The per-well counts ARCHITECTURE \u00a77 says \"live in the well's hover tooltip\" (`FOV 7/12`, `downloading 42%`) exist nowhere else, on any dashboard.",
+  "sev": "High",
+  "id": 105
+ },
+ {
+  "theme": 8,
+  "theme_name": "Controls that cannot work",
+  "loc": "`well_viewer/features/home/ratios/tab_view.py:204`",
+  "problem": "\"\u2212 Remove selected\" can never remove a ratio: every cell is a cell widget and the vertical header is hidden, so `currentRow()` is always `-1` and `selectedIndexes()` is always empty. Verified by running the real panel.",
+  "sev": "High",
+  "id": 106
+ },
+ {
+  "theme": 8,
+  "theme_name": "Controls that cannot work",
+  "loc": "`well_viewer/features/home/collect.py:576,589`",
+  "problem": "Home's \"Ratios\" count reads `pipeline_info.json[\"ratios\"]`, a key nothing writes (ratios live in `persistence.json`), so the row always reads \"None yet\".",
+  "sev": "Medium\u2013High",
+  "id": 107
+ },
+ {
+  "theme": 8,
+  "theme_name": "Controls that cannot work",
+  "loc": "`well_viewer/features/home/pipeline_info/tab_view.py:136`",
+  "problem": "The QC rows read `qc_remove_debris` / `qc_min_area` / `qc_max_area` / `qc_min_solidity`; the sidecar writes the un-prefixed names, so the run receipt shows \"\u2014\" and the literal \"None, None\".",
+  "sev": "Medium",
+  "id": 108
+ },
+ {
+  "theme": 8,
+  "theme_name": "Controls that cannot work",
+  "loc": "`well_viewer/features/home/collect.py:571,581`",
+  "problem": "\"Wells labelled\" uses `len(well_labels)` as the denominator, and that map holds only non-empty labels, so the row can only ever say \"N of N\".",
+  "sev": "Medium",
+  "id": 109
+ },
+ {
+  "theme": 8,
+  "theme_name": "Controls that cannot work",
+  "loc": "`well_viewer/features/home/cell_gating/controller.py:608`",
+  "problem": "The Included/funnel readout is never refreshed on a dataset load, so it keeps describing the previous dataset.",
+  "sev": "Medium",
+  "id": 110
+ },
+ {
+  "theme": 8,
+  "theme_name": "Controls that cannot work",
+  "loc": "`well_viewer/features/spatial/controller.py:473`",
+  "problem": "`ctx.state.dataset.dir` does not exist, so Save-As always opens in the process CWD.",
+  "sev": "Low",
+  "id": 111
+ },
+ {
+  "theme": 8,
+  "theme_name": "Controls that cannot work",
+  "loc": "`well_viewer/core/tab_controller.py:43`",
+  "problem": "The core tab dispatcher's readiness probe is `_line_ax_mean`, registered only by `features/lineplot/tab_view.py`. Drop Line Graphs \u2014 a supported build profile \u2014 and `on_tab_change` returns forever.",
+  "sev": "Medium",
+  "id": 112
+ },
+ {
+  "theme": 8,
+  "theme_name": "Controls that cannot work",
+  "loc": "`well_viewer/core/load_controller.py:170`",
+  "problem": "Core reads the feature-owned `state.heatmap` slice unconditionally, two lines from the same function's correct `feature_slice()` guards. Removing Heat Map breaks **every** dataset open, and this case is not in `test_feature_removal.py`'s matrix.",
+  "sev": "Medium",
+  "id": 113
+ },
+ {
+  "theme": 8,
+  "theme_name": "Controls that cannot work",
+  "loc": "`well_viewer/core/plot_toggles.py:520`",
+  "problem": "`toggle_fov_replicates` calls the lazy bar-feature proxy unconditionally while the sibling `_redraw_bars` two lines below is visibility-gated: with `features/barplot` deleted the app-global FOV button raises `ModuleNotFoundError` **after** already flipping the state.",
+  "sev": "Medium",
+  "id": 114
+ },
+ {
+  "theme": 8,
+  "theme_name": "Controls that cannot work",
+  "loc": "`well_viewer/features/home/cell_gating/renderer.py:122`",
+  "problem": "The ON cutoff (ThreshFracOn) is never drawn on the CDFs, and changing it does not redraw them \u2014 unlike its FluorGating sibling.",
+  "sev": "Low",
+  "id": 115
+ },
+ {
+  "theme": 8,
+  "theme_name": "Controls that cannot work",
+  "loc": "`well_viewer/features/saved_plots/controller.py:254,277`, `well_viewer/features/spatial/controller.py:475`",
+  "problem": "Modal dialogs opened with `parent=None`, against the repo's documented macOS rule.",
+  "sev": "Low",
+  "id": 116
+ },
+ {
+  "theme": 9,
+  "theme_name": "Threading and lifecycle",
+  "loc": "`well_viewer/features/smfish/worker.py:337`",
+  "problem": "The write loop can `break` on abort, but `after_csv_cb()` and `done_cb(\"Apply to All complete\u2026\")` fire regardless and `written` is discarded.",
+  "sev": "High",
+  "id": 117
+ },
+ {
+  "theme": 9,
+  "theme_name": "Threading and lifecycle",
+  "loc": "`well_viewer/features/home/cell_gating/controller.py:93,810`",
+  "problem": "Neither `GatingWorker` nor `_AutoThresholdWorker` is cancelled or waited at shutdown (`teardown_review_pane` covers only smFISH and cell browser); the auto-threshold worker has no cancel flag at all and a restart can leave two live.",
+  "sev": "High",
+  "id": 118
+ },
+ {
+  "theme": 9,
+  "theme_name": "Threading and lifecycle",
+  "loc": "`well_viewer/features/smfish/worker.py:288`",
+  "problem": "All wells are submitted up front with `shutdown(wait=True)` and no `cancel_futures`, and the thread is never joined: cancel decodes everything anyway and can hang shutdown.",
+  "sev": "Medium",
+  "id": 119
+ },
+ {
+  "theme": 9,
+  "theme_name": "Threading and lifecycle",
+  "loc": "`well_viewer/domain/spatial_compute.py:188`",
+  "problem": "`_dbscan` rebuilds `seen` per core point \u2014 quadratic, on the UI thread (`features/spatial/controller.py:361` calls it inline, there is no worker). Timed: 4 000 cells 0.26 s, 8 000 cells 1.99 s, 16 000 cells 10.69 s. A confluent well freezes Review for tens of seconds per redraw.",
+  "sev": "Medium",
+  "id": 120
+ },
+ {
+  "theme": 9,
+  "theme_name": "Threading and lifecycle",
+  "loc": "`well_viewer/core/load_controller.py:262`, `ui_helpers.py:1249`",
+  "problem": "`processEvents()` is pumped per-CSV inside `load_directory`, after `begin_load` has emptied the caches, so queued sidebar/commit/log callbacks run against a half-loaded dataset.",
+  "sev": "Medium",
+  "id": 121
+ },
+ {
+  "theme": 9,
+  "theme_name": "Threading and lifecycle",
+  "loc": "`well_viewer/core/channel_state_controller.py:189 \u2194 324`",
+  "problem": "`set_active_channel \u2194 recalculate_threshold` mutual recursion; bounded at depth 2, but it duplicates the gating hydration and emits `channel_changed` (a direct connection) mid-recompute.",
+  "sev": "Medium",
+  "id": 122
+ },
+ {
+  "theme": 9,
+  "theme_name": "Threading and lifecycle",
+  "loc": "`well_viewer/core/plot_toggles.py:49,74`",
+  "problem": "Append-only SEM/FOV button banks are iterated with no `RuntimeError` guard, while the observer loops directly beneath them guard the identical case.",
+  "sev": "Medium",
+  "id": 123
+ },
+ {
+  "theme": 9,
+  "theme_name": "Threading and lifecycle",
+  "loc": "`widgets/plot_card.py:343,393,437`",
+  "problem": "Each capture path flips `setPlotTheme` twice, and `plotThemeChanged` is directly connected to full tab recomputes: one hover copy/save click runs two complete recomputes, the first *between* the theme flip and the savefig it wraps.",
+  "sev": "Medium\u2013Low",
+  "id": 124
+ },
+ {
+  "theme": 9,
+  "theme_name": "Threading and lifecycle",
+  "loc": "`widgets/plot_card.py:682`",
+  "problem": "`_open_stats_popover` builds a fresh `Popover(self)` per click; the overwritten one keeps the card as QObject parent \u2014 one leaked hidden top-level popover plus two `SegmentedControl`s per click.",
+  "sev": "Low",
+  "id": 125
+ },
+ {
+  "theme": 9,
+  "theme_name": "Threading and lifecycle",
+  "loc": "`well_viewer/data/zipfile_cache.py:71,103,145`",
+  "problem": "Eviction, stale-mtime close and `invalidate()` all close a `ZipFile` without taking the per-handle lock that `with_handle` holds.",
+  "sev": "Medium",
+  "id": 126
+ },
+ {
+  "theme": 10,
+  "theme_name": "Half-swept predicates and duplicated logic",
+  "loc": "`util/schema_infer.py:208` + `:75`",
+  "problem": "FOV tokens `f1`\u2013`f12` are valid well labels (`canonical_well_label(\"f01\") == \"F01\"`), so `_is_well` says yes for every FOV token; both columns score 1.0 and `if f >= best_f` keeps the **last** tie \u2014 the FOV slot. Executed against three built folders: `zips \u2192 ['experiment','channel','ignore','well','timepoint'] confident=True`. Every image is attributed to well `F01`\u2013`F0n`. Only bites when FOVs number \u2264 12, so it fails on small plates and works on big ones.",
+  "sev": "Critical",
+  "id": 127
+ },
+ {
+  "theme": 10,
+  "theme_name": "Half-swept predicates and duplicated logic",
+  "loc": "`util/schema_infer.py:213`",
+  "problem": "`_pick_channel_slot` picks the **fewest-distinct** slot while its docstring says \"leftmost\", so with fewer wells than channels the *well* column is labelled `channel`. Executed: `loose \u2192 channels=['A01','A02']`, and `A01` then takes the segmentation role.",
+  "sev": "Critical",
+  "id": 128
+ },
+ {
+  "theme": 10,
+  "theme_name": "Half-swept predicates and duplicated logic",
+  "loc": "`util/channel_roles.py:44,67`",
+  "problem": "Nuclear is tested before phase and `_pick_nuclear` consults `nir",
+  "sev": "rfp` before the phase filter, so a name matching both takes the segmentation role and `phase_token` stays empty \u2014 which leaves `phase_role_conflicts`, the guard that exists to refuse a run \"measured on the wrong image\", with nothing to compare. Measured: `['NIR_BF','GFP']` \u2192 `NIR_BF: nuclear`, `phase_token=''`.",
+  "id": 129
+ },
+ {
+  "theme": 10,
+  "theme_name": "Half-swept predicates and duplicated logic",
+  "loc": "`util/channel_roles.py:40`",
+  "problem": "`_PHASE_HINT_RE` alternates on the bare substring `trans`, so `GFP_transfected` classifies as phase and skips flat-field and background correction for that channel alone.",
+  "sev": "Medium",
+  "id": 130
+ },
+ {
+  "theme": 10,
+  "theme_name": "Half-swept predicates and duplicated logic",
+  "loc": "`well_viewer/features/home/cell_gating/gating_compute.py:221`, `well_viewer/data/data_loading.py:564`",
+  "problem": "A FluorGating of `0.0`, documented as \"off\", is still applied as `isfinite(v) & (v > 0)` across every gated channel, so cells with a zero or negative background-subtracted MFI, or a NaN in any unrelated channel, are silently excluded. Measured: 1 of 4 cells survives with all gates at default.",
+  "sev": "High",
+  "id": 131
+ },
+ {
+  "theme": 10,
+  "theme_name": "Half-swept predicates and duplicated logic",
+  "loc": "`well_viewer/domain/tp_match.py:1` vs six live sites",
+  "problem": "The absolute `1e-6` timepoint match is still live in `barplot/collect.py:593,895`, `heatmap/controller.py:293,302,342`, `barplot/renderer.py:509`. `abs(2/3 - 0.6667) = 3.33e-5`: `tp_close` True, `< 1e-6` False. On a fractional-timepoint plate the same tab draws grouped bars and blanks per-well ones.",
+  "sev": "Medium",
+  "id": 132
+ },
+ {
+  "theme": 10,
+  "theme_name": "Half-swept predicates and duplicated logic",
+  "loc": "`util/fov.py:44,65`",
+  "problem": "`str(value or \"\")` \u2014 the falsy-zero bug `util/timepoint.py:53` exists to prevent. FOV 0 is indistinguishable from a missing FOV and sorts last: `sorted([1,2,10,0], key=fov_sort_key) \u2192 [1,2,10,0]`. `position_to_well_fov` returns 0-based FOV indices, so FOV 0 is not hypothetical.",
+  "sev": "Medium",
+  "id": 133
+ },
+ {
+  "theme": 10,
+  "theme_name": "Half-swept predicates and duplicated logic",
+  "loc": "`datasets/concatenate/apply.py:192` vs `:222`; `merge_plates/apply.py:123` vs `:151`",
+  "problem": "The copy-as-is branch writes under the **source** filename; every other branch writes canonical `f\"{well}.zip\"`; the CSV uses a third rule. An unpadded dataset yields `in/A1.zip` beside `out/A01_out.zip`.",
+  "sev": "Medium",
+  "id": 134
+ },
+ {
+  "theme": 10,
+  "theme_name": "Half-swept predicates and duplicated logic",
+  "loc": "`well_viewer/features/lineplot/controller.py:692`",
+  "problem": "`selected` is not filtered by `well_paths` (the three sibling renderers do), so a stale token reaches `get_rows` \u2192 `KeyError`, aborting the redraw before `apply_export_style_to_current`.",
+  "sev": "High",
+  "id": 135
+ },
+ {
+  "theme": 10,
+  "theme_name": "Half-swept predicates and duplicated logic",
+  "loc": "`well_viewer/features/lineplot/controller.py:355` vs `barplot/controller.py:63`",
+  "problem": "Line falls back to stale `selected_wells` when all groups are hidden; Bar deliberately does not.",
+  "sev": "Medium",
+  "id": 136
+ },
+ {
+  "theme": 10,
+  "theme_name": "Half-swept predicates and duplicated logic",
+  "loc": "`well_viewer/features/barplot/renderer.py:184` vs `:341`",
+  "problem": "Violin requires `timepoint_hours`; beeswarm falls back to the text column, so one mode is empty where the other is not.",
+  "sev": "Medium",
+  "id": 137
+ },
+ {
+  "theme": 10,
+  "theme_name": "Half-swept predicates and duplicated logic",
+  "loc": "`well_viewer/features/scatter/collect.py:448`",
+  "problem": "Ten marker shapes cycled while colour encodes timepoint: more than ten groups merge visually and the legend shows two identical swatches.",
+  "sev": "Medium",
+  "id": 138
+ },
+ {
+  "theme": 10,
+  "theme_name": "Half-swept predicates and duplicated logic",
+  "loc": "`well_viewer/features/scatter/callbacks.py:60,100`",
+  "problem": "Nearest-point search runs in raw data space on a `log10(v+1)`-displayed axis with incommensurate units, and the hover threshold is a hardcoded `0.5` data units.",
+  "sev": "Medium",
+  "id": 139
+ },
+ {
+  "theme": 10,
+  "theme_name": "Half-swept predicates and duplicated logic",
+  "loc": "`well_viewer/data/auto_threshold.py:396`",
+  "problem": "`build_gating_block` is called without `seg_channel_token`, so a nuclear ThreshFracOn of exactly 50.0 diffs as default and is dropped. ARCHITECTURE \u00a75.7 names this as one of three sites that must know. No live caller today.",
+  "sev": "Medium",
+  "id": 140
+ },
+ {
+  "theme": 10,
+  "theme_name": "Half-swept predicates and duplicated logic",
+  "loc": "`util/schema_infer.py:88`",
+  "problem": "`_is_fov` accepts only `f\\d+`, so a bare-number FOV slot stays `ignore` and FOVs merge.",
+  "sev": "Low",
+  "id": 141
+ },
+ {
+  "theme": 10,
+  "theme_name": "Half-swept predicates and duplicated logic",
+  "loc": "`WellPlateZipper.py:53` vs `util/plate_grid.py:30`",
+  "problem": "A third spelling of the 96-well vocabulary.",
+  "sev": "Low",
+  "id": 142
+ },
+ {
+  "theme": 10,
+  "theme_name": "Half-swept predicates and duplicated logic",
+  "loc": "`WellPlateZipper.py:208` + `util/schema.py:54`",
+  "problem": "The shared `validate_schema` demands `channel`; the zipper reads only `well` and its own `--filename_schema` help says so, so `well:fov` is rejected with an error about a field the tool never uses.",
+  "sev": "Medium",
+  "id": 143
+ },
+ {
+  "theme": 10,
+  "theme_name": "Half-swept predicates and duplicated logic",
+  "loc": "`util/image_exts.py:44`",
+  "problem": "Docstring says `._x.tif` has no image suffix; `is_group_image` returns `True`.",
+  "sev": "Low",
+  "id": 144
+ },
+ {
+  "theme": 11,
+  "theme_name": "Rendering, theming and widget state",
+  "loc": "`widgets/rail_nav.py:303`",
+  "problem": "The comma group `#RailNavRow:hover QLabel, #RailNavRow[active=\"true\"] QLabel {color: text_primary}` bakes `text_primary` into **every** row label's palette, killing the base `text_secondary` rule. Isolated repro: the `[active]` rule alone gives `[(False,'#98a2b3'),(True,'#e6e9ef')]`; adding the `:hover` sibling to the same group gives `[(True\u2026),(True\u2026)]`. Review's left rail draws every section at full strength and the selected one is not distinguished.",
+  "sev": "Medium",
+  "id": 145
+ },
+ {
+  "theme": 11,
+  "theme_name": "Rendering, theming and widget state",
+  "loc": "`widgets/segmented_control.py:105`",
+  "problem": "`_Segment.paintEvent` blanks `opt.text` and draws from the palette; `QStyleSheetStyle` fills only the enabled/disabled colour *groups*, never `:checked`/`:hover`, so those QSS rules are dead. Measured: brightest checked pixel `#969ca9` vs unchecked `#98a2b3`, where `text_primary` is `#E6E9EF`. Only the fill differs.",
+  "sev": "Medium",
+  "id": 146
+ },
+ {
+  "theme": 11,
+  "theme_name": "Rendering, theming and widget state",
+  "loc": "`widgets/search_input.py:68,77`",
+  "problem": "`_reposition_hint` gates on `isVisible()`, which is False while any ancestor is hidden \u2014 exactly during build and while a popover is closed. Measured on the real `LutSelector`: the \"32 / 32\" chip opens at `QRect(0,0,56,15)` with right margin 0, corrects to `QRect(202,7,49,15)` only after typing, and regresses on every re-open. `isVisibleTo(self)` is the predicate needed.",
+  "sev": "Medium",
+  "id": 147
+ },
+ {
+  "theme": 11,
+  "theme_name": "Rendering, theming and widget state",
+  "loc": "`widgets/rail_nav.py:157`",
+  "problem": "The glyph is rendered at a hardcoded `15` logical px inside a font-derived box (`max(12, fontMetrics().height())`). It is 15\u00d715 in a 14\u00d714 box today, and at 150 % font the box grows and the ink does not \u2014 the sweep converted the reservation, not the ink.",
+  "sev": "Medium",
+  "id": 148
+ },
+ {
+  "theme": 11,
+  "theme_name": "Rendering, theming and widget state",
+  "loc": "`widgets/well_plate_selector.py:310`",
+  "problem": "`set_well_enabled(w, False)` drops the well from `_selected` but emits no `selectionChanged`, while its sibling `set_enabled_wells` explicitly does. The plate silently desynchronises from the app-wide `_selected_wells`.",
+  "sev": "Medium",
+  "id": 149
+ },
+ {
+  "theme": 11,
+  "theme_name": "Rendering, theming and widget state",
+  "loc": "`theme.py:1275`",
+  "problem": "The `_GREY` theme overrides `accent`, `accent_hover`, `accent_pressed`, `accent_dim` and `accent_fg` but **not** `accent2`. ARCHITECTURE \u00a77/\u00a78 require `accent2` to read as a neighbour of `accent`; under `grey` the hue gap goes 38\u00b0 \u2192 55\u00b0 with diverging saturation, so the pair stops reading as one family on every remote-run plate.",
+  "sev": "Medium",
+  "id": 150
+ },
+ {
+  "theme": 11,
+  "theme_name": "Rendering, theming and widget state",
+  "loc": "`theme.py:97`",
+  "problem": "`text_disabled = \"#A0AEC0\"` is *brighter* than `text_secondary` `#98A2B3` while claiming the disabled-label role; all seven `:disabled` rules in `qss()` use `text_faint` instead.",
+  "sev": "Low",
+  "id": 151
+ },
+ {
+  "theme": 11,
+  "theme_name": "Rendering, theming and widget state",
+  "loc": "`widgets/stepper.py:333`",
+  "problem": "`#Stepper QLineEdit#StepperEdit {color: text_primary}` has no `:disabled` variant and its two-ID specificity beats the app sheet's `QLineEdit:disabled`. Latent \u2014 none of the 14 construction sites disables one.",
+  "sev": "Low",
+  "id": 152
+ },
+ {
+  "theme": 11,
+  "theme_name": "Rendering, theming and widget state",
+  "loc": "`widgets/plot_card.py:543` vs `:651`",
+  "problem": "`setThemeToggleVisible(False)` hides `_preview_chip`, but `_sync_theme_ui` re-shows it on the next `setPlotTheme`. Latent \u2014 no caller uses the API.",
+  "sev": "Low",
+  "id": 153
+ },
+ {
+  "theme": 11,
+  "theme_name": "Rendering, theming and widget state",
+  "loc": "`widgets/toast.py:70`, `widgets/color_swatch_row.py:254`",
+  "problem": "Raw `QColor(0,0,0,\u03b1)` where `drawer.py:58` uses `with_alpha(theme.Colors.ink_dark, 0.35)` and `popover.py:79` uses the token \u2014 four spellings of one shadow across four sibling overlays, two of which cannot follow a theme.",
+  "sev": "Low",
+  "id": 154
+ },
+ {
+  "theme": 11,
+  "theme_name": "Rendering, theming and widget state",
+  "loc": "`widgets/selection_chip.py:129`, `widgets/plate_progress.py:156`, `widgets/run_dashboard.py:400`",
+  "problem": "`font-size: 10px` in QSS and bare margin/spacing literals in the two modules whose header comments cite \u00a78 for their *named* width constants. Invisible to `test_hardcoded_tokens.py`, which scans only `setFixed*`/`setMinimum*`/`setMaximum*` arguments.",
+  "sev": "Low",
+  "id": 155
+ },
+ {
+  "theme": 11,
+  "theme_name": "Rendering, theming and widget state",
+  "loc": "`well_viewer/features/barplot/renderer.py:225`",
+  "problem": "Violin's `spec.missing` skips the violin but the raw fraction dot was already appended and still draws.",
+  "sev": "Low",
+  "id": 156
+ },
+ {
+  "theme": 11,
+  "theme_name": "Rendering, theming and widget state",
+  "loc": "`well_viewer/features/barplot/controller.py:319`",
+  "problem": "`MaxNLocator(integer=False)` contradicts the comment directly above it.",
+  "sev": "Low",
+  "id": 157
+ },
+ {
+  "theme": 11,
+  "theme_name": "Rendering, theming and widget state",
+  "loc": "`well_viewer/features/scatter/gating.py:242`",
+  "problem": "Colour-by-time hardcodes `markersize=6`, ignoring the `marker_size` preference.",
+  "sev": "Low",
+  "id": 158
+ },
+ {
+  "theme": 11,
+  "theme_name": "Rendering, theming and widget state",
+  "loc": "`well_viewer/features/scatter/callbacks.py:118`",
+  "problem": "A hover miss clears the status line on every mouse move, erasing fold-change shortfall warnings.",
+  "sev": "Low",
+  "id": 159
+ },
+ {
+  "theme": 12,
+  "theme_name": "Docs, contracts and guard gaps",
+  "loc": "`allwell.py:101,792` \u2190 `_Docs/Markdowns/README_WellViewer.md:987`",
+  "problem": "A bare `<date>` in the manual is parsed by `QTextDocument.setMarkdown` as an unclosed HTML tag, and everything after it is dropped from the render. Repro: `'Para one.\\n\\nreads *checked <date>* \u2026\\n\\nAfter paragraph two.\\n'` \u2192 `'Para one.\\nreads checked \\n'`. On the real manual every block after line 991 renders empty, so `_render_manual_html` injects 27 anchors for 85 headings and **29 of the 41 `help_topics` targets have none** \u2014 help opened from Bar Plots, Cell Gating, Job Queue, Merge Plates and 25 other pages leaves the drawer at the top of a manual that also stops at \"Home\". `tests/test_help_topics.py` matches topics against markdown headings, never against the render, so it cannot see this. A second bare `<date>` sits at line 3097.",
+  "sev": "High",
+  "id": 160
+ },
+ {
+  "theme": 12,
+  "theme_name": "Docs, contracts and guard gaps",
+  "loc": "`well_viewer/domain/stats_compute.py:29`",
+  "problem": "`domain/` transitively imports PySide6 via `core.channel_state_controller \u2192 core.ui_helpers \u2192 PySide6.QtCore`. `tests/test_qt_free_layers.py` walks direct imports inside the listed roots only, so a one-hop detour through `core/` is invisible to it while docstrings cite that test as the guarantee. Observed as `ImportError: libQt6Core.so.6` on a bare `import well_viewer.domain.fold_change`.",
+  "sev": "Medium",
+  "id": 161
+ },
+ {
+  "theme": 12,
+  "theme_name": "Docs, contracts and guard gaps",
+  "loc": "`pyproject.toml:72` + 45 sites",
+  "problem": "`F821` is disabled globally, which is the blind spot CLAUDE.md \u00a77.5 #11 records. All 45 current hits are annotation-only under `from __future__ import annotations` (harmless at runtime, fatal to `typing.get_type_hints`), including `pipeline/io.py:454` where `io` is never imported.",
+  "sev": "Low",
+  "id": 162
+ },
+ {
+  "theme": 12,
+  "theme_name": "Docs, contracts and guard gaps",
+  "loc": "`boot_diag.py:171,178,195,214,240,245`, `mpl_bootstrap.py:98`",
+  "problem": "Seven broad `except Exception: pass` handlers. Both files sit outside `test_no_silent_except.py`'s roots, so the rule CLAUDE.md states as \"no silent `except Exception: pass` anywhere\" is unenforced there. Defensible in pre-logging startup code; the coverage gap is the finding.",
+  "sev": "Low",
+  "id": 163
+ },
+ {
+  "theme": 12,
+  "theme_name": "Docs, contracts and guard gaps",
+  "loc": "`well_viewer/core/event_bus.py:44`",
+  "problem": "`redraw_requested` has no emitter and no subscriber, while ARCHITECTURE \u00a75.9 claims every bus signal is load-bearing and `test_architecture_contracts.py:449` freezes the dead signal in place.",
+  "sev": "Low",
+  "id": 164
+ },
+ {
+  "theme": 12,
+  "theme_name": "Docs, contracts and guard gaps",
+  "loc": "`well_viewer/core/app_state.py:33`",
+  "problem": "`_FEATURE_STATE_OWNERS` omits `heatmap`, `scatter`, `distribution`, `smfish` and `home`, so those five give a bare `AttributeError` instead of the documented \"feature disabled\" message.",
+  "sev": "Low",
+  "id": 165
+ },
+ {
+  "theme": 12,
+  "theme_name": "Docs, contracts and guard gaps",
+  "loc": "`well_viewer/core/debug_flags.py:21,28`",
+  "problem": "Two flags ship `True`; ARCHITECTURE \u00a710.2 says \"off by default\", names a flag (`REVIEW_IMAGE_CHSW_DEBUG`) that does not exist, and `allwell.py:1686` wires only 4 of 9.",
+  "sev": "Low",
+  "id": 166
+ },
+ {
+  "theme": 12,
+  "theme_name": "Docs, contracts and guard gaps",
+  "loc": "`well_viewer/core/plot_style.py:415`",
+  "problem": "`figure_pref_key(ctx, None)` matches the first *unregistered* slot (`None is None`), returns a wrong key and skips its own anti-silence warning; `redraw_app:177` can pass `None`.",
+  "sev": "Low",
+  "id": 167
+ },
+ {
+  "theme": 12,
+  "theme_name": "Docs, contracts and guard gaps",
+  "loc": "`well_viewer/core/selection_controller.py:917`",
+  "problem": "`has_plottable_selection`'s docstring claims four callers it does not have; the divergence it papers over is the lineplot `well_paths` filter above.",
+  "sev": "Medium",
+  "id": 168
+ },
+ {
+  "theme": 12,
+  "theme_name": "Docs, contracts and guard gaps",
+  "loc": "`_Docs/Markdowns/ARCHITECTURE.md:7642`",
+  "problem": "\u00a712.4 points at `preview/controller.classify_member`; the implementation is in `well_viewer/data/zip_members.py`, and that module is a re-export shim.",
+  "sev": "Low",
+  "id": 169
+ },
+ {
+  "theme": 12,
+  "theme_name": "Docs, contracts and guard gaps",
+  "loc": "`_Docs/Markdowns/ARCHITECTURE.md:1592` vs `:1535`",
+  "problem": "The Home section states both `role=\"editor\"` and `role=\"picker\"` for the same plate; the code uses `\"editor\"`.",
+  "sev": "Low",
+  "id": 170
+ },
+ {
+  "theme": 12,
+  "theme_name": "Docs, contracts and guard gaps",
+  "loc": "`well_viewer/domain/selections_model.py:244`",
+  "problem": "Docstring says a 48-colour palette; `len(theme.WELL_COLORS_TUPLE) == 96`.",
+  "sev": "Low",
+  "id": 171
+ },
+ {
+  "theme": 12,
+  "theme_name": "Docs, contracts and guard gaps",
+  "loc": "`well_viewer/domain/selections_model.py:610`",
+  "problem": "`from_block`'s docstring says it returns 4 values; it returns 5, so a caller unpacking the documented shape raises `ValueError`.",
+  "sev": "Low",
+  "id": 172
+ },
+ {
+  "theme": 12,
+  "theme_name": "Docs, contracts and guard gaps",
+  "loc": "`CLAUDE.md`",
+  "problem": "States ARCHITECTURE.md is \"~2600 lines\"; it is 8,171.",
+  "sev": "Low",
+  "id": 173
+ },
+ {
+  "theme": 12,
+  "theme_name": "Docs, contracts and guard gaps",
+  "loc": "`util/retry_io.py:181,167`",
+  "problem": "The exhausted-budget `OSError(str)` carries `errno=None` and says \"write\" for read call sites; `cleanup` is skipped for non-`OSError` failures, contradicting \"after every failed attempt\".",
+  "sev": "Low",
+  "id": 174
+ },
+ {
+  "theme": 12,
+  "theme_name": "Docs, contracts and guard gaps",
+  "loc": "`util/zip_write.py`, `datasets/_common/containers.py:340`",
+  "problem": "Two docstrings state atomicity/readability guarantees the code does not provide (see Theme 5).",
+  "sev": "Low",
+  "id": 175
+ },
+ {
+  "theme": 12,
+  "theme_name": "Docs, contracts and guard gaps",
+  "loc": "`mpl_bootstrap.py:38`",
+  "problem": "`.mplcache` lands inside `sys._MEIPASS` in a frozen build, not the \"stable\" directory promised.",
+  "sev": "Low",
+  "id": 176
+ },
+ {
+  "theme": 12,
+  "theme_name": "Docs, contracts and guard gaps",
+  "loc": "`well_viewer/features/home/collect.py:180` + `controller.py:430`",
+  "problem": "Wells loaded but absent from the completeness record are disabled and unpainted on Home's plate with no legend row, so they cannot be selected there.",
+  "sev": "Low",
+  "id": 177
+ }
+]

@@ -139,6 +139,13 @@ def apply_plate_geometry(plate, *, role: str = "rail") -> None:
 
     plate.setActionsVisible(role == "picker")
     plate.setSelectionMode("passive" if role == "status" else "select")
+    # A status plate reports and accepts nothing: no corner select-all, no
+    # pointing-hand cursor. "passive" alone does not say that — the corner is
+    # deliberately live in passive mode for the group plates whose host wires
+    # ``cornerToggled``. Kept separate from mouse *transparency*, which would
+    # also take the hover tooltip, and a dashboard's per-well counts are
+    # readable nowhere else.
+    plate.setReportOnly(role == "status")
 
     # Preferred (not Expanding) with heightForWidth: the plate scales down to a
     # container narrower than the caps and keeps its aspect ratio, instead of

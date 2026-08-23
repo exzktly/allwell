@@ -51,15 +51,41 @@ def test_every_feature_slice_lookup_names_a_registered_slice():
         if path == REGISTRY:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
+        # Module-level names bound to a string literal, so a call whose argument
+        # is ``_NAME`` rather than ``"bar"`` is still resolved. A first draft
+        # read only ``ast.Constant`` arguments and was evaded by one
+        # assignment.
+        consts: dict[str, str] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                    and isinstance(node.targets[0], ast.Name) \
+                    and isinstance(node.value, ast.Constant) \
+                    and isinstance(node.value.value, str):
+                consts[node.targets[0].id] = node.value.value
+        # ``fn = ctx.state.feature_slice`` then ``fn("barplot")`` — the bound
+        # method reaches the same code with no ``feature_slice`` attribute on
+        # the call, so the alias is followed too.
+        aliases: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                    and isinstance(node.targets[0], ast.Name) \
+                    and getattr(node.value, "attr", "") == "feature_slice":
+                aliases.add(node.targets[0].id)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
-            if getattr(node.func, "attr", "") != "feature_slice":
+            is_direct = getattr(node.func, "attr", "") == "feature_slice"
+            is_alias = isinstance(node.func, ast.Name) and node.func.id in aliases
+            if not (is_direct or is_alias) or not node.args:
                 continue
-            if not node.args or not isinstance(node.args[0], ast.Constant):
+            arg = node.args[0]
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                name = arg.value
+            elif isinstance(arg, ast.Name) and arg.id in consts:
+                name = consts[arg.id]
+            else:
                 continue
-            name = node.args[0].value
-            if isinstance(name, str) and name not in known:
+            if name not in known:
                 offenders.append(
                     f"{rel(path)}:{node.lineno}: feature_slice({name!r}) — "
                     "no feature registers that slice, so this is always None")

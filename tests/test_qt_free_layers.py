@@ -116,9 +116,22 @@ def test_the_allowlist_is_live():
 #: is exactly how a layer stays importable while still reaching Qt on demand —
 #: it is the fix for this class of defect, not an instance of it — so following
 #: one here would report every correct solution as a violation.
+#:
+#: "Module scope" is not "``tree.body``": an import inside a module-level ``if``
+#: or ``try`` still runs at import time, and a first draft of this that walked
+#: only the top-level statement list was evaded by
+#: ``if os.environ.get(...) != "1": from well_viewer.core.ui_helpers import …``.
+#: So the whole tree is walked and only imports *inside a function or class
+#: body* are skipped.
 def _module_scope_imports(tree: ast.Module) -> set[str]:
+    deferred: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            deferred.update(id(inner) for inner in ast.walk(node) if inner is not node)
     out: set[str] = set()
-    for node in tree.body:
+    for node in ast.walk(tree):
+        if id(node) in deferred:
+            continue
         if isinstance(node, ast.Import):
             out.update(a.name for a in node.names)
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
@@ -151,7 +164,12 @@ def _qt_path_from(start: str) -> list[str] | None:
             continue
         for imported in sorted(_module_scope_imports(tree)):
             top = imported.split(".")[0]
-            if top in QT_ROOTS:
+            # ``FORBIDDEN``, not ``QT_ROOTS``: importing a widget pulls Qt in
+            # transitively, which is why the direct check forbids ``widgets``
+            # too. Terminating only on Qt itself let a hop whose endpoint was
+            # ``widgets`` walk straight through — the shape of the bug this
+            # test was written for, one module further out.
+            if top in FORBIDDEN:
                 return path + [imported]
             if top == "well_viewer" and imported not in seen:
                 seen.add(imported)

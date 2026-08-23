@@ -613,7 +613,12 @@ def from_block(block: Any, *, tok_to_label: Any = None,
     Honours a saved line-graph order (§3.5) when one is supplied.
     """
     if not isinstance(block, dict):
-        return [], None, {}, ""
+        # Five values, like the return at the end of this function. It returned
+        # four here, and every one of the four callers unpacks five — so a
+        # ``sample_definitions`` key holding anything but a dict (a list from a
+        # hand-edited sidecar, a null) raised ValueError instead of the empty
+        # state this branch exists to supply.
+        return [], None, {}, "", []
 
     if block_is_v2(block):
         selections = validate_repair(block.get("selections"), palette=palette, id_factory=id_factory)

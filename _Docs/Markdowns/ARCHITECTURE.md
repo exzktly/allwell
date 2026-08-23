@@ -1606,13 +1606,14 @@ Three rules the page is built around:
   `covered_any == 0`, a number already in the record.
 
 It builds on `WellPlateSelector` + `apply_plate_geometry(role="editor")`
-directly rather than subclassing `PlateProgress` — the same role the sentence
-below states, and the one `plate_panel.py` passes. That class is a *run
+directly rather than subclassing `PlateProgress`. That class is a *run
 dashboard* — headline, overall bar, ETA, done/failed/cancelled setters — and it
-makes its plate read-only (the `status` role, which
-is passive selection). Home's wells are clickable, and undoing inertness on a
-base whose whole point is inertness is fighting it; the four-line read-only
-idiom at `plate_progress.py`'s own construction is what is borrowed.
+gives its plate the `status` role, which is passive selection *and*
+report-only: no corner select-all, no pointing-hand cursor. Home's wells are
+clickable, so it takes `editor` instead and borrows only the two lines of
+`plate_progress.py`'s own construction that it wants — the lit colouring and
+the shared geometry call. Undoing a read-only base's read-only-ness would be
+fighting it.
 
 A click **selects** rather than navigates: a click that teleported the reader
 off the summary page would make multi-select impossible and an exploratory click

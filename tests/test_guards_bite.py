@@ -1784,3 +1784,141 @@ def test_atomic_json_guard_clears(tmp_path, monkeypatch, shape):
     good = _write(tmp_path, f"good_json_{shape}.py", ATOMIC_JSON_CLEAN[shape])
     assert _run_scan(monkeypatch, *_ATOMIC_JSON_GUARD, [good]) is None, (
         f"the guard fired on a legitimate {shape}")
+
+
+# ── the Qt-free layers, reached one hop away ────────────────────────────────
+
+#: Every way a "Qt-free" module has reached Qt without importing it itself.
+#: These are shapes that were *measured* walking past an earlier draft of
+#: ``test_a_qt_free_layer_stays_importable_without_qt``, not invented ones.
+TRANSITIVE_QT_VIOLATIONS = {
+    # The shape that shipped: a pure module importing a core module that
+    # imports PySide6.
+    "plain-hop": (
+        "well_viewer/core/_bite_hop.py",
+        "from PySide6.QtCore import QTimer\n",
+        "from well_viewer.core._bite_hop import QTimer\n",
+    ),
+    # An import inside a module-level ``if`` still runs at import time. A draft
+    # that walked only ``tree.body`` never saw it.
+    "guarded-by-if": (
+        "well_viewer/core/_bite_hop.py",
+        "from PySide6.QtCore import QTimer\n",
+        'import os\nif os.environ.get("NEVER") != "1":\n'
+        "    from well_viewer.core._bite_hop import QTimer\n",
+    ),
+    # ``try/except ImportError`` around it, likewise.
+    "guarded-by-try": (
+        "well_viewer/core/_bite_hop.py",
+        "from PySide6.QtCore import QTimer\n",
+        "try:\n    from well_viewer.core._bite_hop import QTimer\n"
+        "except ImportError:\n    QTimer = None\n",
+    ),
+    # The endpoint is ``widgets``, not Qt itself — importing a widget pulls Qt
+    # transitively, which is why the direct check forbids it too. A draft that
+    # terminated only on QT_ROOTS walked straight through this.
+    "endpoint-is-widgets": (
+        "well_viewer/core/_bite_hop.py",
+        "from widgets.rail_nav import RailNav\n",
+        "from well_viewer.core._bite_hop import RailNav\n",
+    ),
+}
+
+#: And the shapes it must NOT fire on — a function-local import of a
+#: Qt-touching module is the *fix* for this class of defect.
+TRANSITIVE_QT_CLEAN = {
+    "function-local-hop": (
+        "well_viewer/core/_bite_hop.py",
+        "from PySide6.QtCore import QTimer\n",
+        "def f():\n    from well_viewer.core._bite_hop import QTimer\n"
+        "    return QTimer\n",
+    ),
+    "hop-to-a-pure-module": (
+        "well_viewer/core/_bite_hop.py",
+        "VALUE = 1\n",
+        "from well_viewer.core._bite_hop import VALUE\n",
+    ),
+}
+
+
+def _qt_chain(tmp_path, monkeypatch, hop_rel, hop_src, pure_src):
+    """Point the transitive guard's module resolver at a temp tree."""
+    import tests.test_qt_free_layers as guard
+
+    (tmp_path / "well_viewer" / "core").mkdir(parents=True)
+    (tmp_path / "well_viewer" / "domain").mkdir(parents=True)
+    (tmp_path / hop_rel).write_text(hop_src)
+    (tmp_path / "well_viewer" / "domain" / "_bite_pure.py").write_text(pure_src)
+    monkeypatch.setattr(guard, "REPO_ROOT", tmp_path)
+    return guard._qt_path_from("well_viewer.domain._bite_pure")
+
+
+@pytest.mark.parametrize("shape", sorted(TRANSITIVE_QT_VIOLATIONS))
+def test_transitive_qt_guard_catches(tmp_path, monkeypatch, shape):
+    chain = _qt_chain(tmp_path, monkeypatch, *TRANSITIVE_QT_VIOLATIONS[shape])
+    assert chain is not None and len(chain) > 1, (
+        f"the {shape} spelling reaches Qt but the guard found no chain")
+
+
+@pytest.mark.parametrize("shape", sorted(TRANSITIVE_QT_CLEAN))
+def test_transitive_qt_guard_clears(tmp_path, monkeypatch, shape):
+    chain = _qt_chain(tmp_path, monkeypatch, *TRANSITIVE_QT_CLEAN[shape])
+    assert chain is None, (
+        f"the guard fired on a legitimate {shape}: {chain}")
+
+
+# ── feature_slice names ─────────────────────────────────────────────────────
+
+FEATURE_SLICE_VIOLATIONS = {
+    "literal": 'def f(ctx):\n    return ctx.state.feature_slice("barplot")\n',
+    # A module constant, one assignment away from the literal form.
+    "module-constant": (
+        '_NAME = "barplot"\n'
+        "def f(ctx):\n    return ctx.state.feature_slice(_NAME)\n"
+    ),
+    # The bound method — the call has no ``feature_slice`` attribute on it.
+    "bound-method": (
+        "def f(ctx):\n    fn = ctx.state.feature_slice\n"
+        '    return fn("barplot")\n'
+    ),
+}
+
+FEATURE_SLICE_CLEAN = {
+    "registered-name": 'def f(ctx):\n    return ctx.state.feature_slice("bar")\n',
+    "registered-via-constant": (
+        '_NAME = "heatmap"\n'
+        "def f(ctx):\n    return ctx.state.feature_slice(_NAME)\n"
+    ),
+    # A genuinely dynamic name cannot be judged, and guessing would produce
+    # false failures on the one call site that legitimately varies.
+    "dynamic-name": (
+        "def f(ctx, name):\n    return ctx.state.feature_slice(name)\n"
+    ),
+}
+
+
+def _slice_offenders(tmp_path, monkeypatch, body):
+    import tests.test_feature_slice_names as guard
+
+    path = tmp_path / "probe.py"
+    path.write_text(body)
+    monkeypatch.setattr(guard, "python_sources", lambda **kw: [path])
+    monkeypatch.setattr(guard, "rel", lambda p: p.name)
+    try:
+        guard.test_every_feature_slice_lookup_names_a_registered_slice()
+    except AssertionError as exc:
+        return str(exc)
+    return None
+
+
+@pytest.mark.parametrize("shape", sorted(FEATURE_SLICE_VIOLATIONS))
+def test_feature_slice_guard_catches(tmp_path, monkeypatch, shape):
+    got = _slice_offenders(tmp_path, monkeypatch, FEATURE_SLICE_VIOLATIONS[shape])
+    assert got is not None and "barplot" in got, (
+        f"the {shape} spelling walked past the guard")
+
+
+@pytest.mark.parametrize("shape", sorted(FEATURE_SLICE_CLEAN))
+def test_feature_slice_guard_clears(tmp_path, monkeypatch, shape):
+    got = _slice_offenders(tmp_path, monkeypatch, FEATURE_SLICE_CLEAN[shape])
+    assert got is None, f"the guard fired on a legitimate {shape}: {got}"

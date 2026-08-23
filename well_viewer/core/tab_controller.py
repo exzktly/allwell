@@ -43,10 +43,12 @@ def on_tab_change(ctx, _e=None) -> None:
     The early return asks whether the centre notebook exists yet, because a tab
     change delivered mid-construction has no tab to dispatch on. It used to ask
     whether ``_line_ax_mean`` was registered — a Line Graphs axis, registered
-    only by ``features/lineplot/tab_view``. Line Graphs is a droppable feature
-    and a supported build profile drops it; in such a build the probe is never
-    satisfied and this function returns for the life of the process, so no tab
-    change reaches any tab. Nothing below this line touches the line feature.
+    only by ``features/lineplot/tab_view``. Every profile shipped today keeps
+    Line Graphs, so that probe was satisfied in practice; but the feature is
+    one of the removable units ``test_feature_removal`` exists for, and in a
+    build that dropped it the probe would never be satisfied and this function
+    would return for the life of the process — no tab change reaching any tab.
+    Nothing below this line touches the line feature.
     """
     from well_viewer.core.plot_orchestrator import redraw_app
     tab = current_centre_tab(ctx)

@@ -89,6 +89,14 @@ def test_every_help_target_has_an_anchor_to_scroll_to(rendered):
         table = getattr(help_topics, name)
         if isinstance(table, dict):
             targets.update(str(v) for v in table.values())
+    # The anchor. Without it, emptying the four tables — or renaming them to
+    # something ``getattr`` still finds — would make this test pass on zero
+    # targets, which is how a scan-based guard stops measuring anything without
+    # ever going red. (A *rename* is already loud: ``getattr`` has no default.)
+    assert len(targets) >= 30, (
+        f"only {len(targets)} help targets found across the four topic tables "
+        "— this test is checking almost nothing")
+    assert anchors, "the rendered manual carries no anchors at all"
     missing = sorted(t for t in targets if allwell._gh_slug(t) not in anchors)
     assert not missing, (
         f"{len(missing)} of {len(targets)} help topics point at a heading with "

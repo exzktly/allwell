@@ -342,22 +342,26 @@ def apply_global_threshold_async(
             should_abort=_abort_write,
             progress_cb=progress_cb,
         )
-        aborted = _abort_write()
+        # Reported on the *count*, not on whether the abort predicate is still
+        # true. ``written`` counts wells actually written, and the loop has two
+        # ways to fall short: it breaks on an abort, and it skips a well whose
+        # CSV could not be resolved or could not be written (Excel holding the
+        # file, a read-only volume). Keying the message on the abort flag left
+        # the second, likelier case reported as "Apply to All complete" — the
+        # partial-run-as-clean-run shape this exists to close. It also
+        # mis-reported a cancel that landed after the last write as wells
+        # skipped, since the flag says nothing about what the loop did.
+        shortfall = total - written
         if after_csv_cb is not None:
-            # Still called on an abort: the wells that *were* written are on
-            # disk, and the tab's caches have to catch up with them or the
-            # plots keep showing the pre-run numbers for rows that changed.
-            after_csv_cb()
-        if aborted:
-            # The count is the point. This used to report "Apply to All
-            # complete" whatever the loop did, so a run stopped part-way
-            # through left a plate where some wells carry the new counts and
-            # some carry the old ones, with nothing on screen saying which —
-            # two populations in one figure, reported as one finished run.
+            # Called either way: the wells that *were* written are on disk, and
+            # the tab's caches have to catch up with them or the plots keep
+            # showing pre-run numbers for rows that changed.
+            after_csv_cb(shortfall)
+        if shortfall:
             done_cb(
-                f"Apply to All stopped after {written} of {total} well(s). "
-                "The wells not written still hold their previous counts; "
-                "re-run to finish them."
+                f"Apply to All wrote {written} of {total} well(s). The other "
+                f"{shortfall} still hold their previous counts — see the log "
+                "for which and why; re-run to finish them."
             )
             return
         done_cb("Apply to All complete. Line/Bar plots refreshed.")

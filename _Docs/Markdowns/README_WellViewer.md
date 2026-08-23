@@ -2949,9 +2949,10 @@ What it catches, and what each one means:
 **Timepoints are named from the times the file records.** Where an OME-TIFF
 carries a `DeltaT` for each frame, the converted filenames use it — `0h`, `1h`,
 `24h` — whatever unit the file states them in (milliseconds, seconds, minutes,
-hours or days). If the file states a unit All-Well does not recognise, the
-timepoints are named by position instead (`t0`, `t1`, …): the order is still
-right and nothing claims an elapsed time the converter could not work out.
+hours or days). If the file states a unit All-Well does not recognise — or
+records times that would give two timepoints the same name — the timepoints are
+named by position instead (`t0`, `t1`, …): the order is still right and nothing
+claims an elapsed time the converter could not work out.
 
 All-Well looks for those coordinates in **both** places a file keeps metadata:
 the OME block, and the original metadata the microscope wrote, which conversion

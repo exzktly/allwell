@@ -182,7 +182,10 @@ class OmeLayout:
         verification cannot catch it either: the duplicate name is on both sides
         of the comparison, so ``landed == written``. The same holds for two
         timepoints whose ``DeltaT`` values render alike at ``%g``'s six
-        significant figures.
+        significant figures — though :func:`_parse_ome_labels` heads that half
+        off by falling back to positional tokens, so in practice this fires on
+        channel names. The timepoint arm stays because the invariant belongs to
+        the member name rather than to one producer of it.
         """
         for what, tokens, sources in (
             ("channel", self.channel_names,
@@ -515,10 +518,19 @@ def _parse_ome_labels(
             continue
         delta_by_t.setdefault(ti, value * per_hour)
     if delta_by_t and len(delta_by_t) >= size_t:
-        timepoint_tokens = [
+        from_delta = [
             f"{delta_by_t[i]:g}h" if i in delta_by_t else f"t{i}"
             for i in range(size_t)
         ]
+        # ``%g`` renders six significant figures, so two deltas that differ by
+        # less than that — or a writer that stamps the same placeholder on every
+        # plane — produce one token for two timepoints, and every image of the
+        # second would be written over the first's member name. Positional
+        # tokens name them all distinctly and lose only a number the file did
+        # not really state, which is the same trade the unreadable-unit branch
+        # above already takes.
+        if len(set(from_delta)) == len(from_delta):
+            timepoint_tokens = from_delta
 
     return channel_names, timepoint_tokens, raw_names
 

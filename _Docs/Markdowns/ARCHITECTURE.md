@@ -3675,7 +3675,10 @@ because the duplicate name appears on both sides of `sorted(namelist())`. Two
 same way. `OmeLayout._colliding_tokens` finds the first such clash across the
 channel tokens and the timepoint tokens, and `validation_report` refuses the file
 by naming the colliding labels in the spelling the acquisition software shows
-them — which is why `OmeLayout` also carries `raw_channel_names`, the names
+them. The timepoint half is a backstop: `_parse_ome_labels` drops a whole file
+back to positional tokens when its `DeltaT`-derived ones are not unique, which
+names every timepoint distinctly and loses only a number the file did not really
+state — there is no such fallback for a channel, whose identity *is* its name — which is why `OmeLayout` also carries `raw_channel_names`, the names
 before tokenisation, used for nothing else.
 `OmeLayout.warnings` keeps what `tifffile` logged while reading — it diagnoses
 every one of these in its own words and writes them to a logger nothing was

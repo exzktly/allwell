@@ -91,16 +91,32 @@ def test_unnamed_channels_fall_back_to_distinct_tokens(tmp_path):
     assert layout.validation_report("blank.ome.tif") == ""
 
 
-def test_timepoint_tokens_that_collide_are_refused():
-    """Two ``DeltaT`` values that render alike at ``%g`` name one member twice."""
+@pytest.mark.parametrize("deltas", [
+    ("3600.0000001", "3600.0000002"),   # differ below %g's six significant figures
+    ("0", "0"),                         # a writer that stamps one placeholder
+])
+def test_timepoints_that_would_render_alike_fall_back_to_positional(deltas):
+    """One token for two timepoints would write every image of the second over
+    the first. Positional tokens name them all and lose only a number the file
+    did not really state."""
     xml = _ome_xml(size_c=1, size_t=2,
-                   planes=[(0, "3600.0000001", "s"), (1, "3600.0000002", "s")])
-    channels, tokens, _raw = _parse_ome_labels(xml, 1, 2)
-    assert tokens == ["1h", "1h"], f"expected a collision to reproduce, got {tokens!r}"
+                   planes=[(0, deltas[0], "s"), (1, deltas[1], "s")])
+    _channels, tokens, _raw = _parse_ome_labels(xml, 1, 2)
+    assert tokens == ["t0", "t1"]
+
+
+def test_colliding_timepoint_tokens_are_refused_as_a_backstop():
+    """The invariant belongs to the member name, not to one producer of it.
+
+    ``_parse_ome_labels`` heads this off (above), so this drives
+    ``validation_report`` from a hand-built layout — the check is here for a
+    layout assembled any other way, and it is the same three lines that catch
+    the channel collision that does happen in the wild.
+    """
     from pipeline.ome_explode import OmeLayout
 
     layout = OmeLayout(n_positions=2, size_t=2, size_c=1, size_z=1,
-                       channel_names=channels, timepoint_tokens=tokens,
+                       channel_names=["GFP"], timepoint_tokens=["1h", "1h"],
                        axes_per_series=["TCYX", "TCYX"])
     report = layout.validation_report("t.ome.tif")
     assert "filename token" in report

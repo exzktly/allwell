@@ -33,7 +33,6 @@ from __future__ import annotations
 import json
 import socket
 import time
-from pathlib import Path
 
 from pipeline.completeness import (
     WellCoverage,
@@ -45,6 +44,7 @@ from pipeline.completeness import (
 )
 from datasets._common.dataset_paths import resolve_dataset
 from datasets.validate.validate_compute import DatasetReport, WellReport
+from util.json_write import write_json_atomic
 
 _INFO_FILENAME = "pipeline_info.json"
 
@@ -149,7 +149,5 @@ def write_record(report: DatasetReport, *, checked_at: str = "", host: str = "")
         raise ValueError(f"{info_path} is not a JSON object.")
     block = block_from_report(report, checked_at=checked_at, host=host)
     info["run_check"] = block
-    tmp = info_path.with_name(info_path.name + ".__aw_tmp")
-    tmp.write_text(json.dumps(info, indent=2))
-    Path(tmp).replace(info_path)
+    write_json_atomic(info_path, info)
     return block

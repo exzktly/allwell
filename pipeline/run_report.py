@@ -23,6 +23,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from util.json_write import write_json_atomic
 
 # Hidden so it never looks like dataset output; removed once collected.
 RUN_REPORT_DIRNAME = ".aw_run_report"
@@ -269,7 +270,7 @@ def merge_fetched_run_report(info_path, prior_block: dict | None) -> bool:
         "groups_covered": sum(int((r or {}).get("groups_covered", 0)) for r in merged.values()),
     }
     try:
-        path.write_text(json.dumps(info, indent=2))
+        write_json_atomic(path, info)
     except OSError:
         return False
     return True

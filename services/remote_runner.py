@@ -440,6 +440,10 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # every ``util/`` file so the completeness guard (test_remote_manifest) passes.
     "util/frozen_io.py",
     "util/retry_io.py",
+    # The one atomic JSON write. ``pipeline/run_report`` and
+    # ``process_microscopy`` both replace ``pipeline_info.json`` through it on
+    # the remote, so the remote genuinely needs this one.
+    "util/json_write.py",
     # Serpentine plate-position labelling for packed OME-TIFF input. The
     # de-interleave runs client-side (before any remote sync), so a remote run
     # never imports this — but the manifest must list every ``util/`` file so

@@ -196,6 +196,8 @@ allwell/
 │   │                              volume that filled (shared by the retry shield
 │   │                              and pipeline.capacity)
 │   ├── frozen_io.py            ← reading bundled data from a PyInstaller bundle
+│   ├── json_write.py           ← write_json_atomic(): the one way to replace a
+│   │                              JSON file the app or pipeline will read again
 │   └── zip_write.py            ← atomic_zip(): the one verified writer for the
 │                                  per-well archives (pipeline, services, remote),
 │                                  and replace_folder_with_archive(): the one way
@@ -3678,6 +3680,21 @@ Datasets tools use (`_common.dataset_paths.make_dataset_api`), for the same
 reason: a folder holding *this* tool's interrupted attempt is a resume, while the
 same folder holding another tool's leftovers is not.
 
+**`convert` asks that question itself**, rather than trusting the page to have
+asked it. There are two ways in and only one of them goes through a field hint:
+a queued job reaches `convert` through `start_from_queue`, which populates the
+page and launches without ever consulting the destination's inline validation.
+A conversion overwrites each `in/<WELL>.zip` it produces and leaves everything
+else in the folder alone, so an unchecked run against a folder that already
+holds a plate produces one folder holding two of them, with `out/` measurements
+beside inputs that are no longer the ones they were computed from. The marker
+is checked at the same point and for the same reason: two mappings write
+identical filenames from different images, so finishing one run with another
+run's settings stitches a single plate out of two acquisitions. The marker is
+written through `util.json_write.write_json_atomic`, because a half-written
+marker is a *different* mapping to `resume_state` and the wells already on disk
+came from this one.
+
 `explode_ome_tiff` also takes a `progress_fn`/`should_abort` pair (raising
 `OmeExplodeCancelled`) so the converter's worker can drive a progress bar and
 Cancel. Channel roles are *not* set in the converter — it writes the OME channel
@@ -4573,10 +4590,12 @@ through `util.zip_write.atomic_zip`, the single writer shared by
 `input_resolution_service` (the mixed-input consolidation and the loose-image
 append) and `remote_runner` (upload staging and the two upload-filter rewrites).
 It stages at `__aw_tmp_<name>.pid<N>`, fsyncs, re-reads the staged file's central
-directory to confirm it holds exactly the members that were written, and only
-then `os.replace`s it into position and fsyncs the parent directory. Two
-invariants come out of that, and both matter because users open these archives
-by hand as often as All-Well opens them:
+directory to confirm it holds exactly the members that were written, and —
+when `verify` is on, which it is whenever `durable` is — decompresses every
+member to check its stored CRC, before `os.replace`ing it into position and
+fsyncing the parent directory. Three invariants come out of that, the first two
+unconditional and the third following `verify`; all of them matter because users
+open these archives by hand as often as All-Well opens them:
 
 - *A published archive is readable.* A run killed mid-write — or a share that
   drops — leaves the staging file, never a truncated `<WELL>.zip`.
@@ -4587,6 +4606,34 @@ by hand as often as All-Well opens them:
   rather than publish one, so callers with nothing to pack must not create the
   file: a well folder with no TIFs is left alone by the consolidation step, and
   a well that produced no output images gets no `<well>_out.zip`.
+- *A published archive's members decompress.* The member-list check answers "is
+  the index complete?", which is a different question: a truncated tail loses
+  entries from the central directory, but bytes corrupted inside a deflate
+  stream leave the index untouched, so the archive opens, lists everything, and
+  raises `Bad CRC-32` only when something reads a member. The `verify` pass
+  closes that gap, and defaults to `durable` for the same reason: an archive
+  holding the only copy of data a pipeline just computed is worth the read-back,
+  while a Datasets container copy whose source is still on disk beside it is not.
+  Measured at 0.55s for a 56 MB, 40-member archive of dense 16-bit image data.
+
+**A JSON file the app will read again is replaced, not overwritten.**
+`util.json_write.write_json_atomic` is that rule: a staging file in the
+destination's own directory, then `os.replace`. `path.write_text(json.dumps(…))`
+truncates the destination the instant it opens, so anything that interrupts the
+write leaves a file that is neither the old content nor the new one — and for
+`pipeline_info.json` that is the user's gating, sample definitions, ratios and
+notes gone at once, which is precisely what the tools rewriting it exist to
+preserve. Two specialised versions stay: `well_viewer.persistence._io.atomic_write_json`
+wraps both the open and the replace in a retry for Windows `PermissionError`,
+and `services.run_journal._atomic_write_json` returns `False` instead of raising,
+because a run that cannot write its own bookkeeping must still produce data.
+`tests/test_dataset_tool_integrity.py` scans every application source file
+(`tests/_repo_scan.python_sources`) for the shapes that truncate a destination:
+`write_text` / `write_bytes` of a serialised payload, including one bound to a
+name first or encoded on the way, and `json.dump` into a handle from a plain
+`open`. A scope that renames what it wrote is doing by hand what
+`write_json_atomic` does, and clears the rule on that basis rather than by
+being named in an allowlist.
 
 The reading side stays tolerant — a `<WELL>.zip` that won't open is skipped by
 the samplers and surfaces as a failed well from the worker pool — but nothing
@@ -4682,7 +4729,7 @@ deletable:
 | Module | What it holds |
 |---|---|
 | `datasets/_common/dataset_paths.py` | `DatasetPaths`, `resolve_dataset`, `read_info`, well enumeration (`in_containers`, `out_csvs`, `out_zips`, `out_folders`, `dataset_wells`), the destination-state predicates (each taking the caller's own in-progress marker filename as a parameter), and the input-side availability scan (`collect_available_schema_values`) that mirrors `process_microscopy._collect_available_timepoints`/`_fovs` without importing the pipeline. That scan is two halves: `collect_input_image_stems(in_dir, known_zip_members=…)` walks the input folder (loose TIFs, one level of well subfolders, well zips' TIF members), taking already-listed member names for any zip the caller has read itself rather than opening it again; `schema_values_from_stems` extracts one field's distinct values out of stems already in hand. `collect_available_schema_values` is the two composed, and remains the entry point for a caller asking about a single field from a cold start (Apply repairs). A caller asking about two fields, or one that has just read every archive for its own reasons (Validate does both), goes through the halves and walks once. `out_folders` is `out_zips`'s folder-mode twin (`out/<WELL>/`, written when `compressed_output=False`) — a dataset is written either zipped or folder-mode, never both, but a caller checking for "done" image evidence regardless of which mode produced it (Validate) should check both maps rather than assuming one. `dataset_wells` unions all four well-enumeration maps, including `out_folders`, matching its own docstring ("every 96-well position present in a dataset's `in` or `out`") — every current caller (Concatenate, Merge Plates, Subset) already refuses folder-mode input before calling it, so this only matters for a future caller that doesn't. `preview_wells(root)` is a best-effort, exception-safe `dataset_wells` a page calls on every keystroke while the user is still typing a path — it returns `[]` for anything that isn't (yet) a real dataset folder instead of raising `DatasetPathsError` the way `resolve_dataset` would, since "not a valid path yet" is the normal, expected state through most of a field edit, not an error to report. `shorten_headline(text, *full_paths)` replaces every occurrence of each of *full_paths* inside *text* with its own basename — a run's success summary is built by formatting a full destination (or source) path into a sentence, right for the log line but unreadable as a dashboard headline; the caller keeps the original *text* for the log and passes it again as the headline's own tooltip, so the full path is never actually lost, only the on-screen headline is shortened. It skips any path that is empty (Import Loose's in-place mode, whose `dest_root` is `""`) — `"".replace` would otherwise insert the basename between every character of *text*. |
-| `datasets/_common/containers.py` | `copy_container_members` — the one path every Datasets tool moves image bytes through — plus `read_members` / `write_zip` (collision-safe, first-write-wins), `clear_destination`, and the `timepoint`/`timepoint_hours`/`filename` column-name and cell-overrides constants. **It moves bytes rather than reconstructing them.** No Datasets tool alters image data: Subset filters, Concatenate offsets a name's timepoint field, Merge plates rewrites a name's well token, and in every case the member's compressed payload is identical on both sides — a name lives in a member's headers, not in its data. So the helper publishes one destination archive from one or more source containers, taking a `rename(container, member_name)` callback that returns the destination name or `None` to leave the member out, in three tiers. **Whole-file copy:** a single zip source with every member kept under its own name is `shutil.copy2`'d and never opened for reading. That is a wells-only Subset, and it is the case a user would otherwise do by hand in Finder, so it has to cost what Finder costs. **Raw member passthrough:** otherwise each kept member's already-compressed bytes are streamed across by `datasets/_common/zip_passthrough.py` — no inflate, no deflate, no CRC recomputation — and a dropped member is never read at all, so a filter that keeps a quarter of an archive costs about a quarter of it. **Fallback:** a folder source, or a member the passthrough declines (a directory entry, an encrypted member), goes through `read_members`/`write_zip`'s ordinary decompress-and-recompress, one member at a time. The tier is chosen from member *lists* only — for a zip that is the central directory, a footer, so planning costs a couple of seeks however large the archive is and however slow the volume holding it — and peak memory is one chunk or one member rather than a whole uncompressed archive per thread. **Tiers 2 and 3 publish through `util/zip_write.atomic_zip`**, the same staged-then-verified-then-renamed writer the pipeline's own archives use: a plain `with ZipFile(dest, "w")` writes a central directory for whatever landed before an exception, so a member failing part-way through a well left a structurally valid archive holding fewer images than it was asked for with nothing on it saying so. The tools do write an in-progress marker and clear the destination on the next attempt, but nothing stops a user opening that half-written folder in Review first. **Two consequences of moving bytes rather than rebuilding them are worth knowing.** A whole-file copy reproduces the source exactly, so it keeps directory entries that a re-pack drops — inert either way, since `find_image_groups_in_zip`, `data/zip_members.py`, Validate and `incremental_keys` all filter by basename/extension or on a trailing slash. And a copied member keeps its source's compression method, so a subset or merge of a dataset whose `in/` archives were written `ZIP_STORED` (what `pipeline/ome_explode.py` writes) stays stored rather than being deflated on the way out; the destination can be larger on disk than the old re-packing path produced, which is the cost of not spending CPU to reproduce bytes that already exist. Returns `(written, dropped)`: *written* is what actually landed, so a caller can verify a CSV row's `filename` is really there; *dropped* is only the names lost to a **collision**, which is real data loss, never a member the `rename` callback declined. Nothing is created when nothing is kept — a zero-member zip is structurally valid but macOS Archive Utility refuses to expand it and All-Well reads it as a well whose images have vanished, the same rule `util/zip_write.atomic_zip` enforces for the pipeline's own archives. `read_members` / `write_zip` remain the tier-3 primitives and the shape a caller reaches for when it genuinely needs a member's decoded bytes in hand; both take an optional `progress(done, total)` keyword, called once per member against a total they know up front. `WellFraction` fuses per-pass counts into one dial: copying a well is several passes (the source container, then the QC `<WELL>_out.zip`), so the passes are declared up front as equal-weight *slices*, each pass reports into the slice `slice_progress()` hands it, and a pass with no work closes its slice with `skip()`. `copy_container_members` consumes exactly one slice whichever tier serves it, reporting a whole-file copy or an empty filter as a single closing step. Feeding each pass's own `(done, total)` straight to a dashboard instead would fill the same well's dial from empty once per pass, which reads as the well restarting; leaving a no-work slice unclaimed would strand a finished well short of full. `finish()` closes out whatever remains once the well's non-container work (its CSV) is done. The scale is a fixed 100 steps, deduplicated to whole steps, so a well holding thousands of files emits a bounded number of updates rather than one queued signal and one plate repaint per file. |
+| `datasets/_common/containers.py` | `copy_container_members` — the one path every Datasets tool moves image bytes through — plus `read_members` / `write_zip` (collision-safe, first-write-wins), `clear_destination`, and the `timepoint`/`timepoint_hours`/`filename` column-name and cell-overrides constants. **It moves bytes rather than reconstructing them.** No Datasets tool alters image data: Subset filters, Concatenate offsets a name's timepoint field, Merge plates rewrites a name's well token, and in every case the member's compressed payload is identical on both sides — a name lives in a member's headers, not in its data. So the helper publishes one destination archive from one or more source containers, taking a `rename(container, member_name)` callback that returns the destination name or `None` to leave the member out, in three tiers. **Whole-file copy:** a single zip source with every member kept under its own name is copied byte-for-byte and never opened for reading — staged beside the destination and renamed into place, like the other two tiers, so an interrupted copy leaves no partial `<WELL>.zip` behind. That is a wells-only Subset, and it is the case a user would otherwise do by hand in Finder, so it has to cost what Finder costs. **Raw member passthrough:** otherwise each kept member's already-compressed bytes are streamed across by `datasets/_common/zip_passthrough.py` — no inflate, no deflate, no CRC recomputation — and a dropped member is never read at all, so a filter that keeps a quarter of an archive costs about a quarter of it. **Fallback:** a folder source, or a member the passthrough declines (a directory entry, an encrypted member), goes through `read_members`/`write_zip`'s ordinary decompress-and-recompress, one member at a time. The tier is chosen from member *lists* only — for a zip that is the central directory, a footer, so planning costs a couple of seeks however large the archive is and however slow the volume holding it — and peak memory is one chunk or one member rather than a whole uncompressed archive per thread. **Tiers 2 and 3 publish through `util/zip_write.atomic_zip`**, the same staged-then-verified-then-renamed writer the pipeline's own archives use (with `durable=False`, and therefore without the CRC read-back, because the source dataset is still on disk beside the destination): a plain `with ZipFile(dest, "w")` writes a central directory for whatever landed before an exception, so a member failing part-way through a well left a structurally valid archive holding fewer images than it was asked for with nothing on it saying so. The tools do write an in-progress marker and clear the destination on the next attempt, but nothing stops a user opening that half-written folder in Review first. **Two consequences of moving bytes rather than rebuilding them are worth knowing.** A whole-file copy reproduces the source exactly, so it keeps directory entries that a re-pack drops — inert either way, since `find_image_groups_in_zip`, `data/zip_members.py`, Validate and `incremental_keys` all filter by basename/extension or on a trailing slash. And a copied member keeps its source's compression method, so a subset or merge of a dataset whose `in/` archives were written `ZIP_STORED` (what `pipeline/ome_explode.py` writes) stays stored rather than being deflated on the way out; the destination can be larger on disk than the old re-packing path produced, which is the cost of not spending CPU to reproduce bytes that already exist. Returns `(written, dropped)`: *written* is what actually landed, so a caller can verify a CSV row's `filename` is really there; *dropped* is only the names lost to a **collision**, which is real data loss, never a member the `rename` callback declined. Nothing is created when nothing is kept — a zero-member zip is structurally valid but macOS Archive Utility refuses to expand it and All-Well reads it as a well whose images have vanished, the same rule `util/zip_write.atomic_zip` enforces for the pipeline's own archives. `read_members` / `write_zip` remain the tier-3 primitives and the shape a caller reaches for when it genuinely needs a member's decoded bytes in hand; both take an optional `progress(done, total)` keyword, called once per member against a total they know up front. `WellFraction` fuses per-pass counts into one dial: copying a well is several passes (the source container, then the QC `<WELL>_out.zip`), so the passes are declared up front as equal-weight *slices*, each pass reports into the slice `slice_progress()` hands it, and a pass with no work closes its slice with `skip()`. `copy_container_members` consumes exactly one slice whichever tier serves it, reporting a whole-file copy or an empty filter as a single closing step. Feeding each pass's own `(done, total)` straight to a dashboard instead would fill the same well's dial from empty once per pass, which reads as the well restarting; leaving a no-work slice unclaimed would strand a finished well short of full. `finish()` closes out whatever remains once the well's non-container work (its CSV) is done. The scale is a fixed 100 steps, deduplicated to whole steps, so a well holding thousands of files emits a bounded number of updates rather than one queued signal and one plate repaint per file. |
 | `datasets/_common/zip_passthrough.py` | `copy_member_raw` / `member_is_raw_copyable` / `RawCopyUnsupported` — copying one member's already-compressed bytes from one archive into another. The destination member keeps the source's compression method, CRC and both sizes, so it decompresses to exactly the same data; only its name and its position in the file change. **This depends on four `zipfile` implementation details** — `ZipFile.fp`, `.filelist`, `.NameToInfo`, `.start_dir` (plus the `_didModify` flag) — because the standard library exposes no public API for adding a member whose bytes are already compressed. Two things keep that contained: `member_is_raw_copyable` gates every member first, so a directory entry or an encrypted member is routed to the ordinary path as an expected case rather than an error; and `RawCopyUnsupported` is raised, with the destination truncated back to its exact pre-member state, when an archive's local headers disagree with its central directory. That last case is raised on rather than worked around — the ordinary path would fail on the same member for the same reason, and an archive that quietly holds fewer images than it was asked for is the one outcome this code must never produce. Any ZIP64 record in the source's extra field is stripped before the header is rebuilt (`ZipInfo.FileHeader` appends a freshly-computed one, and the source's describes the member at its old offsets); the data-descriptor flag comes off for the same class of reason, since the copied header carries the CRC and sizes inline where the source kept them in a trailer. **A member that is being renamed also loses Info-ZIP's Unicode Path and Unicode Comment records** (`0x7075` / `0x6375`). Each embeds its own copy of the member's name alongside a CRC of the name it was derived from, so across a rename it is a second, stale name for the same member: a reader that honours it and skips the name-CRC restores the file under its *pre-rename* name, silently undoing the well remap or timepoint offset the copy existed to perform. A member keeping its own name keeps those records, which still describe it correctly. |
 | `datasets/_common/member_names.py` | `rewrite_member_field` — the schema-safe, field-agnostic zip-member filename rewriter (extension check, field-count check, channel-scoped role suffix preserved) that Concatenate's timepoint shift and Merge plates' well remap both wrap with their own validity predicate — plus `is_os_junk_member`, the shared answer to "is this member operating-system debris rather than data?" (`.DS_Store`, `Thumbs.db`, `desktop.ini`, `__MACOSX/`, AppleDouble `._` sidecars, the Spotlight and Trash directories). It is deliberately a *named set*, not "anything that isn't an image": a `notes.txt` a user put in an archive on purpose is real content, and a caller that refuses to reconcile two conflicting copies of a real file should keep refusing. Concatenate is its only caller — see §6b's Verification note for what carrying that debris through a merge used to do. |
 | `datasets/_common/tool_controller.py` | `DatasetToolController` — the worker lifecycle every tool controller shares (`jobFinished`, `stop`, `is_busy`, `shutdown`), with the two things that differ between tools as knobs: `_shutdown_label`, and a `_request_worker_stop` hook. The hook exists for one tool. Import Loose's worker spends the run blocked inside the zipper subprocess's stdout read loop and never polls `isInterruptionRequested()`, so Qt's cooperative flag is a no-op there and `request_stop` — which also signals the tracked child — is what actually stops it; a base that hard-coded `requestInterruption()` would have left an orphan process on app close, and `shutdown` swallows the failure it would then hit. `DestinationToolController` adds the run-and-confirm-restart cluster the three copy-into-a-destination tools share (Subset, Merge Plates, Concatenate), with `_destination_has_marker` supplied per tool because a folder holding *this* tool's interrupted attempt is a resume and another tool's leftovers are not. Deliberately **not** on either base: `_on_queue_requested`, `_on_finished` and `_on_succeeded`, which measured six, five and two distinct shapes across the six controllers — pulling them up would trade plain methods for a base full of flags. |
@@ -6041,16 +6088,40 @@ concurrently in the same pool. Sized by `pick_workers`, same
 lock-only-around-the-pre-work-callback shape Concatenate and Subset use.
 
 Curation is where this is genuinely harder than Concatenate, which simply
-carries dataset 1's forward unchanged: `merge_sample_definitions` remaps
-dataset 2's `well_labels`/`rep_sets`/`groups` well references through the
-well map and disambiguates dataset-2 rep-set/group names that collide with
-dataset 1's by suffixing with dataset 2's folder name, rather than silently
-overwriting a same-named definition. `cell_gating` still simply carries
-dataset 1's forward, with the same "set under dataset 1's imaging
-conditions, worth reviewing" note Concatenate gives. Cell overrides remap
-their `well` key through the well map before the `seg_fp` restamp (from the
-destination `<well>_out.zip`, as the last write to that archive) —
-Concatenate's own precedent, not reinvented.
+carries dataset 1's forward unchanged. `merge_sample_definitions` reads both
+blocks through `domain.selections_model.from_block` and writes the result with
+`to_block` — the same pair the app itself saves and loads with, so a legacy (v1)
+block is migrated on the way in and the merged plate always carries the current
+schema. Going through that pair rather than the raw keys is the whole point:
+`rep_sets`/`groups` are absent from a block written by today's app, and the
+result *replaces* dataset 1's block — so a reader that finds nothing produces an
+empty block, and a merge of two normally-saved plates has discarded every
+selection, plot group, well label, note and current selection from both
+datasets while reporting a clean success.
+
+Dataset 2's well references — a selection's `wells` and each plot group's
+`wells` — are remapped through the well map. A selection's `replicates` is not,
+because the field is reserved: `make_selection` collapses it to `None` on every
+selection the model builds, so nothing downstream would ever read a remapped
+one. Dataset 2's selection and
+plot-group names that collide with dataset 1's are suffixed with dataset 2's
+folder name rather than silently overwriting a same-named definition. Its
+selection ids are dropped and re-minted, because an id is unique only within
+the block it came from and dataset 1's must stay stable for `current_id` to
+keep pointing at the same selection. Both plates' notes are kept, dataset 2's
+under a labelled separator: a note is the one field here whose value is prose a
+person wrote, and nothing can reconstruct it.
+
+Every *other* analysis block comes from dataset 1, because none of them can be
+combined by rule — `cell_gating`, `ratios`, `qc_options` and
+`smfish_thresholds` are decisions made under one plate's imaging conditions.
+The plan says which of them dataset 2 also had (`PlateMergePlan.blocks_warning`,
+emitted into the run log beside the ragged-timepoint note), since a merged plate
+silently carrying half the user's gating is the degraded-output-that-looks-clean
+shape this codebase refuses to produce. Cell overrides remap their `well` key
+through the well map before the `seg_fp` restamp (from the destination
+`<well>_out.zip`, as the last write to that archive) — Concatenate's own
+precedent, not reinvented.
 
 **Job Queue** (`datasets/job_queue/`) lines up Analyze and Datasets-tool runs
 to work through unattended, built on a Qt-free scheduler
@@ -6190,9 +6261,27 @@ Qt event loop. Four layers:
   soundness depends on every `start_from_queue` path eventually emitting
   `jobFinished` exactly once: a launch that silently no-ops on invalid input
   would leave `_current` stuck forever, which is why
-  `MergePlatesController._launch`'s remap-failure branch and
-  `ValidateController._run`'s "no dataset path" branch emit `jobFinished`
-  directly rather than returning silently. On completion the bridge looks up
+  `MergePlatesController._launch`'s remap-failure branch,
+  `ValidateController._run`'s "no dataset path" branch and
+  `OmeImportController._launch`'s "no source or destination" branch all emit
+  `jobFinished` directly rather than returning silently.
+  `tests/test_dataset_tool_integrity.py` checks each of the six launchers
+  return by return, against the statement block it sits in rather than the
+  function as a whole — one emit elsewhere in the function does not excuse a
+  silent return beside it.
+
+  There is one such return the bridge does **not** need an emit for, and it is
+  the bridge's own job to make sure of it. Every tool's launcher opens with "if
+  a worker is already running, return", which is reachable when the user starts
+  that tool by hand while the queue is going — so `_advance` refuses to
+  dispatch to a runner whose `is_busy()` is true, and leaves the job pending
+  instead. That leaves the queue waiting on something it is not watching, so
+  `_on_job_finished` re-enters `_advance` when a completion arrives for a job
+  that was *not* the queue's own: the manual run finishing is exactly the event
+  the held-back job is waiting for. Without both halves a single by-hand run
+  during a queue stopped the queue for the rest of the session.
+
+  On completion the bridge looks up
   `was_cancelled()` on the finishing controller (falling back to the Datasets
   convention that a cancelled worker's failure message starts with
   `"Cancelled"`) to tell a user-requested Stop apart from a genuine failure,

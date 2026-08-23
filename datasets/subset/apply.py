@@ -15,6 +15,7 @@ from __future__ import annotations
 import csv
 import json
 import threading
+from util.json_write import write_json_atomic
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -121,7 +122,7 @@ def _copy_filtered_overrides(plan: SubsetPlan, kept_keys: dict[str, set[tuple[st
             entry["seg_fp"] = f"{zip_path.stat().st_mtime_ns}"
 
     payload = {"version": OVERRIDES_SCHEMA_VERSION, "overrides": kept_entries}
-    (plan.dest.out_dir / OVERRIDES_FILENAME).write_text(json.dumps(payload))
+    write_json_atomic(plan.dest.out_dir / OVERRIDES_FILENAME, payload, indent=None)
     emit(f"Carried over {len(kept_entries)} cell override(s).")
     return len(kept_entries)
 
@@ -267,7 +268,7 @@ def execute_plan(
     _verify(plan, well_row_counts)
     _copy_filtered_overrides(plan, kept_keys_by_well, emit)
 
-    (plan.dest.out_dir / "pipeline_info.json").write_text(json.dumps(plan.merged_info, indent=2))
+    write_json_atomic(plan.dest.out_dir / "pipeline_info.json", plan.merged_info)
     marker_path.unlink(missing_ok=True)
     emit("Wrote subset pipeline_info.json.")
 

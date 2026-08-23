@@ -20,8 +20,9 @@ from __future__ import annotations
 import csv
 import json
 import math
-import shutil
 import threading
+from datasets._common.containers import publish_container
+from util.json_write import write_json_atomic
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -155,10 +156,10 @@ class _MemberRename:
 
 
 def _copy_container_as_is(src: Path, dest_in_dir: Path) -> None:
-    if src.is_dir():
-        shutil.copytree(src, dest_in_dir / src.name, dirs_exist_ok=True)
-    else:
-        shutil.copy2(src, dest_in_dir / src.name)
+    """Taken for a well only one of the two datasets holds — the common case
+    for two plates that were imaged separately. Staged and renamed by
+    ``publish_container``, like the member-by-member path beside it."""
+    publish_container(src, dest_in_dir / src.name)
 
 
 def merge_input(
@@ -221,7 +222,7 @@ def merge_qc_zip(
     frac = fraction if fraction is not None else _detached_fraction(well)
     dest_zip = plan.dest.out_dir / f"{well}_out.zip"
     if z1 and not z2:
-        shutil.copy2(z1, dest_zip)
+        publish_container(z1, dest_zip)
         frac.skip(_QC_SLICES)
         return 0, frozenset(), 0
     if z2 and not z1:
@@ -437,7 +438,7 @@ def _merge_cell_overrides(plan: MergePlan, emit: Callable[[str], None]) -> None:
             entry["seg_fp"] = f"{zip_path.stat().st_mtime_ns}"
 
     payload = {"version": _OVERRIDES_SCHEMA_VERSION, "overrides": entries}
-    (plan.dest.out_dir / _OVERRIDES_FILENAME).write_text(json.dumps(payload))
+    write_json_atomic(plan.dest.out_dir / _OVERRIDES_FILENAME, payload, indent=None)
     emit(f"Carried over {len(entries)} cell override(s) from the source dataset(s).")
 
 
@@ -698,7 +699,7 @@ def execute_plan(
 
     _merge_cell_overrides(plan, emit)
 
-    (plan.dest.out_dir / "pipeline_info.json").write_text(json.dumps(plan.merged_info, indent=2))
+    write_json_atomic(plan.dest.out_dir / "pipeline_info.json", plan.merged_info)
     marker_path.unlink(missing_ok=True)
     emit("Wrote merged pipeline_info.json.")
 

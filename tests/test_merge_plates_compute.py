@@ -149,11 +149,86 @@ def test_sample_definitions_names_disambiguated(tmp_path):
     )
     plan = mpc.build_plate_merge_plan(ds1, ds2, dest)
     sd = plan.merged_info["sample_definitions"]
-    rep_names = {r["name"] for r in sd["rep_sets"]}
-    group_names = {g["name"] for g in sd["groups"]}
-    assert len(rep_names) == 2  # "Rep 1" from ds1 + a disambiguated ds2 one
-    assert len(group_names) == 2
-    assert "Rep 1" in rep_names
+    # The merge writes the schema the app writes, whatever the inputs were: two
+    # legacy (v1) blocks in, one current (v2) block out. This test previously
+    # asserted the v1 keys back out again, which is why it stayed green while a
+    # merge of two normally-saved plates was discarding both plates' work.
+    assert sd["schema_version"] == 2
+    names = [s["name"] for s in sd["selections"]]
+    assert len(names) == 2, names
+    assert "Control" in names
+    assert any(n.startswith("Control (") for n in names), (
+        f"the dataset-2 name was not disambiguated: {names}")
+    assert sd["well_labels"] == {"A01": "Control", "B02": "Treated"}
+
+
+def test_sample_definitions_survive_a_merge_of_two_current_plates(tmp_path):
+    """A merge of two plates saved by today's app keeps both plates' work.
+
+    The block on disk has been ``{schema_version: 2, selections, current_id,
+    well_labels, notes, plot_groups}`` for some time; the merge read only the
+    legacy ``rep_sets`` / ``groups`` keys, found nothing, and *replaced*
+    dataset 1's block with an empty legacy shape — every selection, plot group,
+    note and current selection from both plates gone, reported as success.
+    """
+    from well_viewer.domain.selections_model import make_selection, to_block
+
+    def v2_block(pairs, notes, groups):
+        used_names, used_ids, used_colors = set(), set(), set()
+        sels = [
+            make_selection(name=n, wells=w, replicates=None, hidden=False,
+                           color=None, source="user", used_names=used_names,
+                           used_ids=used_ids, used_colors=used_colors,
+                           fallback_color_idx=i)
+            for i, (n, w) in enumerate(pairs)
+        ]
+        return to_block(sels, well_labels={w: n for n, ws in pairs for w in ws},
+                        notes=notes, current_id=sels[0]["id"],
+                        plot_groups=groups)
+
+    ds1, ds2, dest = tmp_path / "ds1", tmp_path / "ds2", tmp_path / "dest"
+    build_dataset(ds1, wells=["A01"], timepoints=["0h"],
+                  info_extra={"sample_definitions": v2_block(
+                      [("Control", ["A01"])], "plate one notes",
+                      [{"name": "QC set", "wells": ["A01"]}])})
+    build_dataset(ds2, wells=["B02"], timepoints=["0h"],
+                  info_extra={"sample_definitions": v2_block(
+                      [("Treated", ["B02"])], "plate two notes",
+                      [{"name": "Row B", "wells": ["B02"]}])})
+
+    sd = mpc.build_plate_merge_plan(ds1, ds2, dest).merged_info["sample_definitions"]
+    assert [s["name"] for s in sd["selections"]] == ["Control", "Treated"]
+    assert {g["name"] for g in sd["plot_groups"]} == {"QC set", "Row B"}
+    assert "plate one notes" in sd["notes"] and "plate two notes" in sd["notes"]
+    assert sd["current_id"] in {s["id"] for s in sd["selections"]}
+    assert sd["well_labels"] == {"A01": "Control", "B02": "Treated"}
+
+
+def test_a_merge_says_which_of_dataset_two_s_analysis_blocks_it_dropped(tmp_path):
+    """Only sample definitions can be combined by rule; gating, ratios, QC and
+    smFISH thresholds are taken from dataset 1 wholesale. A merged plate
+    carrying half the user's decisions and saying nothing is the shape this
+    codebase refuses to produce."""
+    ds1, ds2, dest = tmp_path / "ds1", tmp_path / "ds2", tmp_path / "dest"
+    build_dataset(ds1, wells=["A01"], timepoints=["0h"],
+                  info_extra={"cell_gating": {"fluor_gates": {"gfp": 10.0}}})
+    build_dataset(ds2, wells=["B02"], timepoints=["0h"],
+                  info_extra={"cell_gating": {"fluor_gates": {"gfp": 99.0}},
+                              "ratios": [{"name": "r"}]})
+    plan = mpc.build_plate_merge_plan(ds1, ds2, dest)
+    assert plan.blocks_warning, "dataset 2's gating and ratios vanished silently"
+    assert "cell gating" in plan.blocks_warning
+    assert "ratio metrics" in plan.blocks_warning
+    # And the merge really did keep dataset 1's.
+    assert plan.merged_info["cell_gating"]["fluor_gates"]["gfp"] == 10.0
+
+
+def test_a_merge_with_nothing_to_drop_says_nothing(tmp_path):
+    """The control: a note that fires for every merge is noise, not a warning."""
+    ds1, ds2, dest = tmp_path / "ds1", tmp_path / "ds2", tmp_path / "dest"
+    build_dataset(ds1, wells=["A01"], timepoints=["0h"])
+    build_dataset(ds2, wells=["B02"], timepoints=["0h"])
+    assert mpc.build_plate_merge_plan(ds1, ds2, dest).blocks_warning is None
 
 
 def test_verify_fails_on_zero_rows(tmp_path):

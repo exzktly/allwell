@@ -54,6 +54,20 @@ class OmeImportController(DatasetToolController):
             return
         src, dest = self.page.source_path(), self.page.destination_path()
         if not src or not dest:
+            missing = "source file" if not src else "destination folder"
+            message = f"No {missing} selected."
+            self.page.append_log(f"✗ {message}")
+            self.page.set_outcome("failed", message)
+            self._last_result = (False, message, "")
+            # No worker gets started on this path, so ``_on_finished`` never
+            # fires — emit directly, or a queued run would sit marked "running"
+            # waiting for a ``jobFinished`` that was never coming, and the whole
+            # queue would stop behind it. Validate and Merge Plates already
+            # answer this the same way on their own no-worker paths.
+            try:
+                self.jobFinished.emit(False, message, "")
+            except Exception:
+                swallowed()
             return
         self.page.clear_log()
         self.page.clear_outcome()

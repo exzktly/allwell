@@ -66,18 +66,6 @@ from services.remote_runner import (
 STORED_OUT = "~/.allwell-staging/runs/run-previous/out"
 
 
-@pytest.fixture(autouse=True)
-def _isolated_index(tmp_path, monkeypatch):
-    """Keep the journal index out of the developer's real state directory.
-
-    ``run_journal.index_path()`` is ``~/.config/allwell/run_index.json``, capped
-    at fifty entries and shared by every test in the lane. A test that opens a
-    journal without redirecting it evicts the user's genuine unfinished-run
-    entries, and their resume banner stops offering their own plates.
-    """
-    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "state" / "idx.json")
-
-
 @pytest.fixture
 def host() -> RemoteHost:
     return RemoteHost(

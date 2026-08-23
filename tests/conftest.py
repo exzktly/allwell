@@ -508,3 +508,27 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "viewer_app" in getattr(item, "fixturenames", ()):
             item.add_marker(slow)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_run_journal_index(tmp_path, monkeypatch):
+    """No test writes to the developer's real journal index. Ever.
+
+    ``run_journal.index_path()`` is ``~/.config/allwell/run_index.json``, capped
+    at fifty entries and shared by every test in the lane. A test that opens a
+    journal without redirecting it evicts the user's own unfinished-run entries,
+    and their resume banner stops offering their own plates. That has now
+    happened twice.
+
+    Autouse *here* rather than per-module because the second occurrence came
+    from a module-local fixture: a new test file that imported the helpers from
+    an existing one re-ran its tests without inheriting its underscore-named
+    fixture, and wrote four entries into the real file. The helpers this covers
+    are exactly the ones new remote tests will import, so the isolation has to
+    live where importing cannot lose it.
+    """
+    from services import run_journal
+
+    monkeypatch.setattr(
+        run_journal, "index_path",
+        lambda: tmp_path / "_aw_state" / "run_index.json")

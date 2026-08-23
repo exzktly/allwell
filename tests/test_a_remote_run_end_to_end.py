@@ -26,11 +26,6 @@ from services import run_journal as J
 from tests._fake_remote import FakeRemote
 
 
-@pytest.fixture(autouse=True)
-def _isolated_index(tmp_path, monkeypatch):
-    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "state" / "idx.json")
-
-
 @pytest.fixture
 def host():
     from services.remote_runner import RemoteHost
@@ -56,6 +51,16 @@ def plate(tmp_path):
 @pytest.fixture
 def remote(tmp_path):
     return FakeRemote(tmp_path / "remote-host")
+
+
+def _shell_home(text: str) -> str:
+    """``~/x`` and ``"$HOME"/x`` name one path; compare them as one.
+
+    ``_remote_quote`` renders a leading ``~/`` as ``"$HOME"/`` so the remote
+    shell expands it, so an assertion written in the form the *runner* holds
+    would never match the form the *command* carries.
+    """
+    return text.replace('"$HOME"/', "~/").replace("$HOME/", "~/")
 
 
 def _argv(plate):
@@ -266,3 +271,117 @@ def test_a_re_attached_run_leaves_the_borrowed_directory_alone(
     assert remote.exists(STORED_OUT), (
         "cleanup removed the directory this run borrowed from an earlier one")
     assert not remote.exists(own), "the run's own dir survived cleanup"
+
+
+def test_a_failing_remote_command_aborts_the_run(host, plate, remote, monkeypatch):
+    """``check=True`` has to behave like ``check=True``.
+
+    The real ``_ssh_run`` hands ``check`` to ``subprocess.run``, so a failing
+    ``mkdir`` aborts. A harness that swallowed it was more forgiving than
+    production on the one call this file exists to guard: flipping that call to
+    ``check=False`` — a silent continue with no directories, in production —
+    passed every other test here.
+    """
+    from services.remote_runner import DatasetCache
+
+    # A staging dir that cannot be created: a file sits where the directory
+    # would go, which is what a stale artefact on a worker host looks like.
+    (remote.root / "blocked").parent.mkdir(parents=True, exist_ok=True)
+    (remote.root / "blocked").write_text("not a directory")
+    blocked = host.__class__(**{**host.__dict__,
+                               "remote_staging_dir": "~/blocked/staging"})
+
+    remote.install(monkeypatch, blocked)
+    cache = DatasetCache.__new__(DatasetCache)
+    cache.host = blocked
+    with pytest.raises(Exception):
+        cache._ssh_run(["mkdir", "-p", "~/blocked/staging/x"], check=True)
+
+
+def test_a_re_attaching_run_with_work_left_launches_against_the_borrowed_dir(
+        host, plate, remote, monkeypatch):
+    """The address the run journals and the address it launches against.
+
+    Both re-attach tests above hand the host *every* well, which trips the
+    full-cache-hit branch: the launched command becomes ``exec true`` and no
+    pipeline argv is ever built, so neither can see what the pipeline was
+    pointed at. One well short is what exercises it.
+
+    Two critical slips pass every other test in this file and fail here: the
+    pipeline being launched against the run's *own* output directory while the
+    journal and cleanup name the borrowed one — so the run computes into a
+    directory nothing fetches and cleanup then deletes it — and ``--input_dir``
+    being handed the output directory.
+    """
+    _record_a_previous_run(plate, remote)
+    runner, log = _spawn(host, plate, remote, monkeypatch, completed=("A01",))
+
+    assert "re-attaching" in log, "the run under test did not re-attach"
+    assert "FULL CACHE HIT" not in log, (
+        "this test needs the partial path, where a pipeline argv is built")
+    assert remote.launched, "no pipeline was launched"
+
+    joined = _shell_home(" ".join(remote.launched[-1]))
+    borrowed = runner._run.remote_output_dir
+    assert borrowed.endswith("run-previous/out"), borrowed
+    assert f"--output_dir {_shell_home(borrowed)}" in joined, (
+        f"the pipeline was not pointed at the directory the run re-attached "
+        f"to.\n  journalled: {borrowed}\n  launched:   {joined[:400]}")
+    assert f"--input_dir {_shell_home(runner._run.remote_input_dir)}" in joined, (
+        f"the pipeline reads its input from somewhere other than the uploaded "
+        f"dataset.\n  launched: {joined[:400]}")
+
+
+# ── the one modelled piece, exercised ───────────────────────────────────────
+
+def test_the_transfer_model_honours_the_argv_shapes_the_runner_builds(
+        tmp_path, remote, monkeypatch):
+    """rsync is not installed here, so this piece is modelled — and untested
+    modelling is how a harness reports correct code as broken.
+
+    Each rule below is one the runner actually depends on, and each was wrong
+    in the first version of this file.
+    """
+    import services.remote_runner as rr
+
+    from services.remote_runner import RemoteHost
+    host = RemoteHost(
+        name="t", ssh_alias="test-host", remote_project_dir="~/allwell",
+        remote_staging_dir="~/.allwell-staging", remote_python="/opt/python",
+        cpu_only=False, extra_args=(), cache_budget_gb=10,
+        measured_bandwidth_mbps=100.0)
+    # The real ``monkeypatch``, never a hand-rolled stand-in: ``install``
+    # patches the *shared* ``subprocess`` module, so a shim without an undo
+    # leaves ``Popen`` replaced for every later test in the session — which is
+    # what it did, breaking the local-run harness three files away.
+    remote.install(monkeypatch, host)
+    rsync = rr._rsync_with_retry
+
+    # 1. `-aR`, as `sync_required_files` uses: the source path is
+    #    reproduced under the destination.
+    (tmp_path / "_Docs").mkdir()
+    (tmp_path / "_Docs" / "requirements-remote.txt").write_text("numpy\n")
+    rsync(["rsync", "-aR", "_Docs/requirements-remote.txt",
+           "test-host:~/allwell/"], cwd=str(tmp_path))
+    assert remote.exists("~/allwell/_Docs/requirements-remote.txt"), (
+        f"-R did not reproduce the source path; host holds {remote.tree()}")
+
+    # 2. A *file* destination, as `_rsync_optional` and the sidecar pull
+    #    use: it stays a file.
+    remote.path("~/out").mkdir(parents=True, exist_ok=True)
+    (remote.path("~/out") / "pipeline_info.json").write_text("{}")
+    local = tmp_path / "local"
+    local.mkdir()
+    rsync(["rsync", "-az", "test-host:~/out/pipeline_info.json",
+           str(local / "pipeline_info.json")])
+    assert (local / "pipeline_info.json").is_file(), (
+        "a file destination became a directory")
+
+    # 3. A glob source, as `_retry_missing_wells` passes: it expands.
+    for well in ("A01", "B02"):
+        (remote.path("~/out") / f"{well}_out.zip").write_bytes(b"x")
+    pulled = tmp_path / "pulled"
+    pulled.mkdir()
+    rsync(["rsync", "-az", "test-host:~/out/*_out.zip", str(pulled) + "/"])
+    assert sorted(q.name for q in pulled.glob("*.zip")) == [
+        "A01_out.zip", "B02_out.zip"], sorted(pulled.iterdir())

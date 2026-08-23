@@ -4153,9 +4153,28 @@ run's output is exactly how a forced re-run gets skipped. Only the *output*
 directory moves: the input keys on this run's own staged archives, and the
 pidfile, sentinel and heartbeat stay under this run's own `run_id`, because
 `_sweep_orphaned_allocation` finds a crashed session's job by recomputing that
-address and must not be pointed at another run's. Which flags count as "the same
-configuration" is `pipeline_argv_digest`, extracted from `_compute_run_id` and
-recorded in the journal, so the two cannot come to disagree.
+address and must not be pointed at another run's — and both directories are
+created, since a re-attached run's output lives under a *previous* `run_id` and
+nothing else would make its own.
+
+Which flags count as "the same configuration" is `pipeline_argv_digest`,
+extracted from `_compute_run_id` and recorded in the journal, so the address and
+the reuse key cannot come to disagree. It is computed over the local argv **plus
+`RemoteRunner._host_argv_extras`** — the flags a remote run appends that nothing
+local produces: `--no_save_tophat` for a CSV-only fetch, the host's `extra_args`,
+and `--cpu_only`. Each of those changes what the remote computes or writes, so
+leaving them out let a plate run against a CPU-only host, or with a segmentation
+threshold overridden per host, address the directory another configuration had
+already filled, be found complete by the pre-flight check, and have that
+configuration's numbers fetched back as its own. One definition feeds both the
+launched command and the digest.
+
+`stored_remote_address` compares three keys, and `tests/test_reuse_is_keyed_completely.py`
+carries the written reason for each: the argv digest, `source_fingerprint` (the
+user's own input archives, which separates "staging rewrote" from "the images
+changed" — the two reasons the upload key churns), and the host alias, because
+the recorded address is a path on one machine and two hosts that share a
+filesystem will happily resolve each other's.
 
 `cache_key` hashes `int(st_mtime)`, so two staged copies written inside one
 wall-clock second key identically. That is why this drift is invisible in a

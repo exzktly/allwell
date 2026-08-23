@@ -150,7 +150,7 @@ def test_a_recorded_address_survives_to_the_next_run(out_dir):
     # then does spawn ask what the last run's address was.
     J.open_run(out_dir, spec={}, mode="remote", input_dir="/data/in", argv=[])
     stored = J.stored_remote_address(
-        out_dir, argv_digest=digest, source_key="src1")
+        out_dir, argv_digest=digest, source_key="src1", host_alias="hpc")
     assert stored is not None, (
         "opening the next run's journal wiped the address it exists to carry")
     assert stored["remote_output_dir"] == STORED
@@ -192,7 +192,7 @@ def test_a_reconfigured_run_gets_no_address(out_dir):
     assert J.stored_remote_address(
         out_dir,
         argv_digest=pipeline_argv_digest(["--nuclear_token", "NIR"]),
-        source_key="src1") is None
+        source_key="src1", host_alias="hpc") is None
 
 
 # ── the churn this exists for, measured rather than asserted ────────────────
@@ -364,7 +364,8 @@ def _run_two_chooses(out_dir, in_dir):
     from services.remote_runner import source_fingerprint
     J.open_run(out_dir, spec={}, mode="remote", input_dir=in_dir, argv=[])
     stored = J.stored_remote_address(
-        out_dir, argv_digest="d1", source_key=source_fingerprint(in_dir))
+        out_dir, argv_digest="d1", source_key=source_fingerprint(in_dir),
+        host_alias="hpc")
     chosen, _ = _choose_remote_output_dir(
         FRESH, (stored or {}).get("remote_output_dir", ""),
         forced=False, remote_has_outputs=True)
@@ -444,7 +445,8 @@ def test_the_stored_address_survives_the_app_s_real_call_order(tmp_path, monkeyp
     # production, and only then does spawn ask what the last run recorded.
     runner._open_journal(in_dir, out, ["--x"], {})
     stored = J.stored_remote_address(
-        out, argv_digest="d1", source_key=source_fingerprint(in_dir))
+        out, argv_digest="d1", source_key=source_fingerprint(in_dir),
+        host_alias="hpc")
 
     assert stored is not None, (
         "opening this run's journal destroyed the address the next read needs; "

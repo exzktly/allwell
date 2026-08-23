@@ -231,7 +231,8 @@ def _record_remote(out_dir, digest="d1", remote_out="/staging/runs/run-1/out",
 def test_a_recorded_address_comes_back_for_the_same_configuration(out_dir):
     _open(out_dir)
     _record_remote(out_dir)
-    stored = J.stored_remote_address(out_dir, argv_digest="d1", source_key="src1")
+    stored = J.stored_remote_address(
+        out_dir, argv_digest="d1", source_key="src1", host_alias="hpc")
     assert stored["remote_output_dir"] == "/staging/runs/run-1/out"
     assert stored["host_alias"] == "hpc"
 
@@ -242,7 +243,7 @@ def test_a_different_configuration_gets_no_address(out_dir):
     _open(out_dir)
     _record_remote(out_dir, digest="d1")
     assert J.stored_remote_address(
-        out_dir, argv_digest="d2", source_key="src1") is None
+        out_dir, argv_digest="d2", source_key="src1", host_alias="hpc") is None
 
 
 def test_replaced_images_get_no_address(out_dir):
@@ -259,9 +260,9 @@ def test_replaced_images_get_no_address(out_dir):
     _open(out_dir)
     _record_remote(out_dir, source="images-v1")
     assert J.stored_remote_address(
-        out_dir, argv_digest="d1", source_key="images-v2") is None
+        out_dir, argv_digest="d1", source_key="images-v2", host_alias="hpc") is None
     assert J.stored_remote_address(
-        out_dir, argv_digest="d1", source_key="images-v1") is not None
+        out_dir, argv_digest="d1", source_key="images-v1", host_alias="hpc") is not None
 
 
 def test_an_unreadable_input_dir_gets_no_address(out_dir):
@@ -270,13 +271,13 @@ def test_an_unreadable_input_dir_gets_no_address(out_dir):
     _open(out_dir)
     _record_remote(out_dir, source="")
     assert J.stored_remote_address(
-        out_dir, argv_digest="d1", source_key="") is None
+        out_dir, argv_digest="d1", source_key="", host_alias="hpc") is None
 
 
 def test_no_remote_block_gets_no_address(out_dir):
     _open(out_dir)
     assert J.stored_remote_address(
-        out_dir, argv_digest="d1", source_key="src1") is None
+        out_dir, argv_digest="d1", source_key="src1", host_alias="hpc") is None
 
 
 def test_recording_an_address_without_a_run_does_nothing(out_dir):

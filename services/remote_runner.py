@@ -50,7 +50,7 @@ import zipfile
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path, PurePosixPath
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 
 from services.remote_config import (
     DEFAULT_CONDA_ENV,
@@ -1086,7 +1086,9 @@ def _canonical_well_from_path(stem: str) -> str | None:
     return canonical_well_label(stem)
 
 
-def pipeline_argv_digest(pipeline_argv: list[str]) -> str:
+def pipeline_argv_digest(
+    pipeline_argv: list[str], *, extras: Sequence[str] = (),
+) -> str:
     """Hash the arguments that decide the *bytes* a run produces.
 
     Split out of :func:`_compute_run_id` so the run journal can record "this
@@ -1098,6 +1100,12 @@ def pipeline_argv_digest(pipeline_argv: list[str]) -> str:
     computed over the input archives) and ``--force`` (a re-processing knob, not
     a change of configuration — which is what lets a forced re-run land in the
     same remote directory and overwrite it).
+
+    ``extras`` are the flags a *remote* run adds on top of the local argv —
+    :meth:`RemoteRunner._host_argv_extras`. They are not in ``pipeline_argv``
+    because nothing local produces them, and leaving them out made two runs
+    that compute different numbers hash identically. They are appended rather
+    than merged, so the digest is stable in their order.
     """
     skip_with_value = {"--input_dir", "--output_dir"}
     skip_flags = {"--force"}
@@ -1113,6 +1121,7 @@ def pipeline_argv_digest(pipeline_argv: list[str]) -> str:
             continue
         filtered.append(a)
         i += 1
+    filtered.extend(str(e) for e in extras)
     return hashlib.blake2b("|".join(filtered).encode(), digest_size=8).hexdigest()
 
 
@@ -1253,7 +1262,9 @@ def _record_remote_in_journal(
         swallowed(f"could not record the remote address in {local_output_dir}")
 
 
-def _compute_run_id(cache_key: str, pipeline_argv: list[str]) -> str:
+def _compute_run_id(
+    cache_key: str, pipeline_argv: list[str], *, extras: Sequence[str] = (),
+) -> str:
     """Deterministic run_id from input cache_key + pipeline-args
     hash. Same input + same pipeline config → same run_id, so
     re-running lands in the existing remote output dir and the
@@ -1270,8 +1281,14 @@ def _compute_run_id(cache_key: str, pipeline_argv: list[str]) -> str:
     one kept here: the run journal records that digest so a later run can
     recognise the same configuration, and two spellings of "same config"
     would have the journal offering an address the run id says belongs
-    somewhere else."""
-    return f"{cache_key[:16]}-{pipeline_argv_digest(pipeline_argv)}"
+    somewhere else.
+
+    ``extras`` carries the host- and filter-level flags a remote run appends to
+    the local argv, so a plate run against a CPU-only host, or with a host
+    override, or with the Fetch filter changed, addresses its own directory
+    instead of finding the other configuration's outputs already complete
+    there."""
+    return f"{cache_key[:16]}-{pipeline_argv_digest(pipeline_argv, extras=extras)}"
 
 
 def _snapshot_local_artifacts(local_output_dir: Path) -> dict:
@@ -4679,7 +4696,8 @@ class _BatchedRemoteProcess:
         # out to be cache-dir pollution we can switch later, with
         # evidence.
         key = runner._cache.cache_key(zipped)
-        run_id = "run-" + _compute_run_id(key, pipeline_argv)
+        run_id = "run-" + _compute_run_id(
+            key, pipeline_argv, extras=runner._host_argv_extras(output_filter))
         self._run_id = run_id
         # Batched input lives in the *run* directory, not the shared dataset
         # cache. Each batch is staged beside it as ``b<i>`` and moved into
@@ -6791,7 +6809,8 @@ class RemoteRunner:
         # re-runs cheap. The ``[run-]`` prefix marks them visually
         # different from the timestamp-style dirs older builds left
         # on the remote.
-        run_id = "run-" + _compute_run_id(key, pipeline_argv)
+        host_extras = self._host_argv_extras(output_filter)
+        run_id = "run-" + _compute_run_id(key, pipeline_argv, extras=host_extras)
         remote_input = self._cache.remote_dataset_dir(key)
         own_run_dir = f"{self.host.remote_staging_dir}/runs/{run_id}"
         remote_output = f"{own_run_dir}/out"
@@ -6805,7 +6824,7 @@ class RemoteRunner:
         # ``_sweep_orphaned_allocation`` finds a crashed session's SLURM job by
         # recomputing exactly that address — pointing them at a previous run's
         # directory would make this run adopt an allocation it does not own.
-        argv_digest = pipeline_argv_digest(pipeline_argv)
+        argv_digest = pipeline_argv_digest(pipeline_argv, extras=host_extras)
         # Fingerprint what the *user* has, not what staging produced. See
         # ``source_fingerprint``: the upload key churns for two different
         # reasons and only one of them is a reason to re-attach.
@@ -6813,7 +6832,8 @@ class RemoteRunner:
         own_output = remote_output
         remote_output = self._reattach_output_dir(
             remote_output, local_output_dir, pipeline_argv,
-            argv_digest=argv_digest, source_key=source_key, log=log,
+            argv_digest=argv_digest, source_key=source_key,
+            host_alias=self.host.ssh_alias, log=log,
         )
         reattached = remote_output != own_output
 
@@ -7700,6 +7720,7 @@ class RemoteRunner:
         *,
         argv_digest: str,
         source_key: str,
+        host_alias: str,
         log: Callable[[str], None],
     ) -> str:
         """The remote output dir to use, preferring a recorded one that still
@@ -7716,7 +7737,8 @@ class RemoteRunner:
 
         try:
             stored = run_journal.stored_remote_address(
-                local_output_dir, argv_digest=argv_digest, source_key=source_key)
+                local_output_dir, argv_digest=argv_digest,
+                source_key=source_key, host_alias=host_alias)
         except OSError:
             swallowed(f"could not read the run journal in {local_output_dir}")
             return fresh
@@ -8061,11 +8083,34 @@ class RemoteRunner:
         # `--input_dir` and the pipeline's default already finds it.
         if background_dir:
             out.append(f"--background_dir={background_dir}")
-        # Apply the output filter.
-        if output_filter is OutputFilter.CSV_ONLY and "--no_save_tophat" not in out:
-            out.append("--no_save_tophat")
-        # Host-level override args.
-        out.extend(self.host.extra_args)
-        if self.host.cpu_only and "--cpu_only" not in out:
-            out.append("--cpu_only")
+        out.extend(a for a in self._host_argv_extras(output_filter)
+                   if a not in out)
         return out
+
+    def _host_argv_extras(self, output_filter: OutputFilter) -> list[str]:
+        """The pipeline flags this *host* and *filter* add, over the local argv.
+
+        Split out because two questions need the same answer and had different
+        ones. :meth:`_build_remote_argv` appends these to the command it
+        launches; the run id and the journal's ``argv_digest`` are computed
+        from the local argv, which does not contain them — so switching the
+        Fetch filter, adding a host override, or ticking CPU-only changed the
+        bytes the remote produced while leaving both the address and the reuse
+        key identical. A run configured that differently then found the
+        previous run's outputs complete, skipped the pipeline, and fetched the
+        old numbers back as its own.
+
+        Every one of these changes what the pipeline computes or writes:
+        ``--no_save_tophat`` drops the tophat QC images from the output zip,
+        ``extra_args`` are arbitrary pipeline flags (segmentation thresholds
+        among them), and ``--cpu_only`` changes the execution path. None of
+        them is a re-processing knob like ``--force``, which is exactly why
+        ``pipeline_argv_digest`` skips that and folds these in.
+        """
+        extras: list[str] = []
+        if output_filter is OutputFilter.CSV_ONLY:
+            extras.append("--no_save_tophat")
+        extras.extend(self.host.extra_args)
+        if self.host.cpu_only:
+            extras.append("--cpu_only")
+        return extras

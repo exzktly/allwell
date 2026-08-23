@@ -52,15 +52,39 @@ REUSE_CONTRACTS = {
             "churns both when staging rewrites and when the images change; "
             "only this separates them, and without it a re-exported plate "
             "reuses the results of the images it replaced"),
+        "host_alias": (
+            "the address is a path on one machine. Two hosts can share a "
+            "filesystem, so a path recorded against one resolves against the "
+            "other and its listing succeeds — which is why the machine has to "
+            "be compared rather than inferred from the directory being there. "
+            "A 'gpu'/'cpu' pair of entries for the same cluster, differing "
+            "only in compute_launcher or extra_args, is the live case"),
     },
+}
+
+#: What ``argv_digest`` has to cover, and why each item is not optional.
+#: Not a second roster of keys — a note on the completeness of one of them,
+#: because the digest is computed from the *local* argv and three of the flags
+#: that decide the output bytes are appended after that, by the host.
+ARGV_DIGEST_MUST_COVER = {
+    "--no_save_tophat": (
+        "added when the Fetch filter is CSV_ONLY. It drops the tophat QC "
+        "images from the output zip, so a FULL run and a CSV_ONLY run do not "
+        "produce interchangeable output"),
+    "host.extra_args": (
+        "arbitrary per-host pipeline flags — segmentation thresholds among "
+        "them — so two hosts can compute different numbers from one form"),
+    "--cpu_only": (
+        "added for a CPU-only host, which changes the execution path"),
 }
 
 
 def _record(out_dir, **overrides):
-    keys = {"argv_digest": "argv-1", "source_key": "src-1"}
+    keys = {"argv_digest": "argv-1", "source_key": "src-1",
+            "host_alias": "hpc"}
     keys.update(overrides)
     J.record_remote(
-        out_dir, run_id="run-1", cache_key="k1", host_alias="hpc",
+        out_dir, run_id="run-1", cache_key="k1",
         remote_input_dir="/staging/datasets/k1",
         remote_output_dir="/staging/runs/run-1/out", **keys)
     return keys
@@ -116,3 +140,77 @@ def test_an_unknown_key_on_either_side_declines(out_dir, key):
     keys = _record(out_dir, **{key: ""})
     assert J.stored_remote_address(out_dir, **dict(keys, **{key: ""})) is None
     assert J.stored_remote_address(out_dir, **dict(keys, **{key: "x"})) is None
+
+
+# ── the completeness of one key, rather than the roster of keys ─────────────
+
+def _host(**kw):
+    from services.remote_runner import RemoteHost
+    base = dict(
+        name="test", ssh_alias="test-host", remote_project_dir="~/allwell",
+        remote_staging_dir="~/.allwell-staging", remote_python="/opt/python",
+        cpu_only=False, extra_args=(), cache_budget_gb=10,
+        measured_bandwidth_mbps=100.0,
+    )
+    base.update(kw)
+    return RemoteHost(**base)
+
+
+_LOCAL_ARGV = ["/usr/bin/python", "/p/process_microscopy.py",
+               "--input_dir", "/in", "--output_dir", "/out",
+               "--nuclear_token", "DAPI"]
+
+
+@pytest.mark.parametrize("covered", sorted(ARGV_DIGEST_MUST_COVER))
+def test_the_digest_covers_what_the_host_adds_to_the_argv(covered):
+    """Each host-side addition, alone, must move the digest and the run id.
+
+    ``argv_digest`` is computed from the local argv, and ``_build_remote_argv``
+    appends these afterwards — so before this they were invisible to both the
+    reuse key and the remote address. A run with a different segmentation
+    threshold found the previous run's outputs complete and fetched them back.
+    """
+    from services.remote_runner import (
+        OutputFilter, RemoteRunner, _compute_run_id, pipeline_argv_digest,
+    )
+
+    plain = RemoteRunner(_host())
+    variants = {
+        "--no_save_tophat": (RemoteRunner(_host()), OutputFilter.CSV_ONLY),
+        "host.extra_args": (
+            RemoteRunner(_host(extra_args=("--min_nucleus_area_px", "500"))),
+            OutputFilter.FULL),
+        "--cpu_only": (RemoteRunner(_host(cpu_only=True)), OutputFilter.FULL),
+    }
+    other, other_filter = variants[covered]
+
+    base = plain._host_argv_extras(OutputFilter.FULL)
+    changed = other._host_argv_extras(other_filter)
+    assert base != changed, f"{covered} did not reach _host_argv_extras"
+
+    why = ARGV_DIGEST_MUST_COVER[covered]
+    assert (pipeline_argv_digest(_LOCAL_ARGV, extras=base)
+            != pipeline_argv_digest(_LOCAL_ARGV, extras=changed)), (
+        f"{covered} does not move the reuse key, and it must: {why}")
+    assert (_compute_run_id("k" * 32, _LOCAL_ARGV, extras=base)
+            != _compute_run_id("k" * 32, _LOCAL_ARGV, extras=changed)), (
+        f"{covered} does not move the remote address, and it must: {why}")
+
+
+def test_the_launched_command_and_the_digest_read_the_same_extras():
+    """One definition, two callers — the shape §7.5 #5 exists for.
+
+    If ``_build_remote_argv`` grew a flag the digest did not, the two would
+    disagree again in exactly the direction that reuses stale output.
+    """
+    from services.remote_runner import LocalInputMode, OutputFilter, RemoteRunner
+
+    runner = RemoteRunner(_host(cpu_only=True,
+                                extra_args=("--min_nucleus_area_px", "500")))
+    extras = runner._host_argv_extras(OutputFilter.CSV_ONLY)
+    launched = runner._build_remote_argv(
+        list(_LOCAL_ARGV), "/r/in", "/r/out", OutputFilter.CSV_ONLY,
+        LocalInputMode.ZIP)
+    missing = [e for e in extras if e not in launched]
+    assert not missing, (
+        f"the digest folds in {missing}, which the launched command does not")

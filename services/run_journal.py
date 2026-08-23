@@ -505,21 +505,29 @@ def _read_wells(output_dir: Path | str) -> dict[str, WellRecord]:
 
 def stored_remote_address(
     output_dir: Path | str, *, argv_digest: str, source_key: str,
+    host_alias: str,
 ) -> dict | None:
     """The remote address a prior run of the same images and settings recorded.
 
     ``None`` unless a journal exists, carries a remote block with an output
-    directory, and **both** keys match.
+    directory, and **all three** keys match.
 
     A differing ``argv_digest`` means a differently-configured run, whose
-    outputs are not interchangeable with this one's. A differing ``source_key``
-    means the images themselves changed, and that is the dangerous one: the
-    recorded directory holds results computed from pictures the user has since
-    replaced, and handing it back would let the pre-flight check find it
-    complete, skip the pipeline entirely, and fetch the old numbers as though
-    they were this run's. Both keys are required, and an empty ``source_key``
-    on either side matches nothing — a record written before the key existed,
-    or an input directory that cannot be read, declines rather than guesses.
+    outputs are not interchangeable with this one's — and it covers the flags
+    the *host* adds as well as the ones the form produces, because a CPU-only
+    host, a host override and a changed Fetch filter all change what the remote
+    writes. A differing ``source_key`` means the images themselves changed, and
+    that is the dangerous one: the recorded directory holds results computed
+    from pictures the user has since replaced, and handing it back would let
+    the pre-flight check find it complete, skip the pipeline entirely, and
+    fetch the old numbers as though they were this run's. A differing
+    ``host_alias`` means the address names a path on a machine this run is not
+    talking to; two hosts can share a filesystem, so the path may well resolve
+    and the listing succeed, which is precisely why it has to be asked rather
+    than inferred from the directory being there. All three are required, and
+    an empty key on either side matches nothing — a record written before the
+    key existed, or an input directory that cannot be read, declines rather
+    than guesses.
 
     The caller must still verify the address against the remote before using
     it. This says where a previous run *sent* work, which is not the same claim
@@ -531,7 +539,8 @@ def stored_remote_address(
     remote = journal.remote or {}
     if not remote.get("remote_output_dir"):
         return None
-    for name, given in (("argv_digest", argv_digest), ("source_key", source_key)):
+    for name, given in (("argv_digest", argv_digest), ("source_key", source_key),
+                        ("host_alias", host_alias)):
         stored = str(remote.get(name) or "")
         # An empty key on either side is "I could not determine this", never
         # "it matched". A record written before a key existed, and an input

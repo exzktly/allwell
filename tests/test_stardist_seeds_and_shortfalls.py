@@ -122,13 +122,9 @@ def _cases():
         _blobs((64, 64), np.random.default_rng(6), range(1, 11)), 10 ** 6)
     cases["min area of zero"] = (
         _blobs((64, 64), np.random.default_rng(6), range(1, 11)), 0)
-    # Shapes the fast path must decline rather than mis-answer. A float label
-    # image would have to be truncated towards zero to index a `bincount`, which
-    # merges 2.0 and 2.5 into one object; a negative id would raise. The
-    # segmenter's own labels are int32, so these are guards, not live paths.
-    cases["float labels, one a half-integer"] = (
-        np.array([[0, 1.0, 1.0], [2.5, 2.5, 0], [0, 0, 2.0]], dtype=np.float32), 1)
-    cases["float64 labels"] = (
+    # Shapes the fast path must decline rather than mis-answer: `bincount`
+    # indexes with integers, and a negative id would raise outright.
+    cases["float64 labels, all integral"] = (
         np.array([[0, 1.0, 1.0], [2.0, 2.0, 0]], dtype=np.float64), 1)
     cases["a negative id"] = (np.array([[0, -1], [2, 2]], dtype=np.int32), 1)
     cases["a boolean mask"] = (np.array([[0, 1], [1, 0]], dtype=bool), 1)
@@ -163,6 +159,26 @@ def test_exact_half_pixel_centroids_round_the_same_way(offset):
     want, _ = _markers_the_old_way(labels, 1)
     got, _n, _s = nucleus_seed_markers(labels, 1)
     assert np.array_equal(got, want)
+
+
+def test_a_float_label_image_is_not_truncated_into_one_object():
+    """`2.0` and `2.5` are two objects, and `bincount` cannot be asked either.
+
+    Indexing a `bincount` with a float label image means truncating towards
+    zero, which merges them. `_label_areas` declines the fast path for any
+    non-integer dtype instead.
+
+    The loop this function replaces did not get this right either — it built its
+    id list as `int(nid)`, which merges the same two — so this is deliberately
+    *not* checked against that oracle. The segmenter's own labels are `int32`,
+    so neither behaviour is reachable today; what matters is that the fast path
+    cannot silently merge two objects if it ever becomes reachable.
+    """
+    labels = np.array([[0, 1.0, 1.0], [2.5, 2.5, 0], [0, 0, 2.0]], dtype=np.float32)
+    markers, n_markers, n_small = nucleus_seed_markers(labels, 1)
+    assert n_markers == 3
+    assert int(np.count_nonzero(markers)) == 3
+    assert n_small == 0
 
 
 def test_a_label_image_with_an_absurd_id_does_not_allocate_by_id():

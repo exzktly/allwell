@@ -345,6 +345,28 @@ def test_a_key_replace_that_cannot_unlink_says_so(qtbot, boxes, monkeypatch):
         "Step 2/3 were unlocked for a key the wizard could not replace")
 
 
+def test_a_replace_that_generated_nothing_is_not_called_a_reuse(qtbot, boxes, monkeypatch, tmp_path):
+    """``generate_keypair`` answering "no work done" straight after both halves
+    were deleted cannot mean what the word "reusing" means. Whatever it does
+    mean, the user does not have the fresh key they asked for."""
+    import analyze_remote_dialog as ard
+    from services import ssh_key_setup
+
+    key = tmp_path / "allwell_hpc"
+    key.write_text("old private key")
+    monkeypatch.setattr(ssh_key_setup, "default_key_path", lambda _a: key)
+    monkeypatch.setattr(ssh_key_setup, "key_has_passphrase", lambda _p: True)
+    monkeypatch.setattr(ssh_key_setup, "generate_keypair", lambda p, **kw: (False, ""))
+
+    dlg = ard.SSHKeyWizardDialog(None, ssh_alias="hpc")
+    qtbot.addWidget(dlg)
+    dlg._generate_btn.click()
+
+    status = dlg._generate_status_lbl.text()
+    assert "reusing" not in status.lower(), status
+    assert not dlg._verify_btn.isEnabled()
+
+
 def test_a_key_replace_that_unlinks_cleanly_generates(qtbot, boxes, monkeypatch, tmp_path):
     """The other half: with the old key gone, the wizard proceeds."""
     import analyze_remote_dialog as ard

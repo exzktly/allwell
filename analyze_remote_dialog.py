@@ -979,6 +979,7 @@ class SSHKeyWizardDialog(QDialog):
     # ── steps ────────────────────────────────────────────────────────────
 
     def _on_generate(self) -> None:
+        replacing = False
         self._generate_btn.setEnabled(False)
         self._generate_status_lbl.setText("Checking key…")
         QApplication.processEvents()
@@ -1030,6 +1031,8 @@ class SSHKeyWizardDialog(QDialog):
                 )
                 return
 
+            replacing = True
+
         self._generate_status_lbl.setText("Generating…")
         QApplication.processEvents()
         created, err = ssh_key_setup.generate_keypair(self._key_path)
@@ -1039,6 +1042,16 @@ class SSHKeyWizardDialog(QDialog):
             QMessageBox.critical(
                 self, "Key generation failed",
                 f"Could not generate {self._key_path}:\n{err}",
+            )
+            return
+        if replacing and not created:
+            # Both halves were deleted a moment ago, so "no work done" cannot
+            # be true here. Whatever happened, this is not the fresh key the
+            # user asked for, and "reusing" would be the wrong word for it.
+            self._generate_status_lbl.setText(
+                f"✗ {self._key_path} was replaced, but no new key was "
+                "generated in its place. Check the path by hand before "
+                "trying again."
             )
             return
         msg = f"✓ Key generated at {self._key_path}" if created else \

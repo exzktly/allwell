@@ -382,12 +382,18 @@ def _label_areas(labels: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     a segmentation numbers its objects ``1..N`` with ``N`` at most the pixel
     count. A label image that breaks either assumption (a negative value, or an
     id larger than the array) falls back to ``np.unique``, which costs a sort
-    but cannot be made to allocate a gigabyte by one stray id.
+    but cannot be made to allocate a gigabyte by one stray id. A **non-integer**
+    label image takes that fallback too: ``bincount`` would have to truncate
+    towards zero to index with it, which silently merges ``2.0`` and ``2.5``
+    into one object. The segmenter's own labels are ``int32``, so this is a
+    guard rather than a live path — but the merge would be invisible if it ever
+    became one.
     """
     flat = labels.ravel()
-    lmax = int(flat.max()) if flat.size else 0
-    lmin = int(flat.min()) if flat.size else 0
-    if lmin >= 0 and lmax <= flat.size:
+    integral = flat.dtype.kind in "iub"
+    lmax = int(flat.max()) if (flat.size and integral) else 0
+    lmin = int(flat.min()) if (flat.size and integral) else 0
+    if integral and lmin >= 0 and lmax <= flat.size:
         counts = np.bincount(flat.astype(np.intp, copy=False), minlength=1)
         ids = np.flatnonzero(counts)
         ids = ids[ids != 0]

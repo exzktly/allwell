@@ -122,6 +122,22 @@ def _cases():
         _blobs((64, 64), np.random.default_rng(6), range(1, 11)), 10 ** 6)
     cases["min area of zero"] = (
         _blobs((64, 64), np.random.default_rng(6), range(1, 11)), 0)
+    # Shapes the fast path must decline rather than mis-answer. A float label
+    # image would have to be truncated towards zero to index a `bincount`, which
+    # merges 2.0 and 2.5 into one object; a negative id would raise. The
+    # segmenter's own labels are int32, so these are guards, not live paths.
+    cases["float labels, one a half-integer"] = (
+        np.array([[0, 1.0, 1.0], [2.5, 2.5, 0], [0, 0, 2.0]], dtype=np.float32), 1)
+    cases["float64 labels"] = (
+        np.array([[0, 1.0, 1.0], [2.0, 2.0, 0]], dtype=np.float64), 1)
+    cases["a negative id"] = (np.array([[0, -1], [2, 2]], dtype=np.int32), 1)
+    cases["a boolean mask"] = (np.array([[0, 1], [1, 0]], dtype=bool), 1)
+    cases["a single row"] = (np.arange(6, dtype=np.int32).reshape(1, 6), 1)
+    cases["a single column"] = (np.arange(6, dtype=np.int32).reshape(6, 1), 1)
+    cases["ids in descending spatial order"] = (
+        np.array([[9, 9, 0], [0, 4, 4], [1, 0, 0]], dtype=np.int32), 1)
+    cases["min area equal to an area exactly"] = (
+        np.array([[1, 1, 0], [0, 2, 0], [3, 3, 3]], dtype=np.int32), 2)
     return cases
 
 

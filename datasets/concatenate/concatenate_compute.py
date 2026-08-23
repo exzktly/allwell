@@ -43,11 +43,13 @@ from datasets._common.dataset_paths import (
     make_dataset_api,
     DatasetPaths,
     dataset_wells,
+    describe_well_collisions,
     destination_is_complete_dataset,
     has_folder_mode_output,
     in_containers,  # noqa: F401 — re-exported for datasets.concatenate.apply
     out_csvs,
     out_zips,  # noqa: F401 — re-exported for datasets.concatenate.apply
+    well_spelling_collisions,
     check_compatible as _check_compatible,
     known_channel_tokens as _known_channel_tokens,
 )
@@ -239,6 +241,22 @@ def _interval_hours(sorted_hours: list[float]) -> float:
         )
     diffs = [later - earlier for earlier, later in zip(uniq, uniq[1:])]
     return statistics.median(diffs)
+
+
+def _refuse_well_collisions(paths: DatasetPaths, label: str) -> None:
+    """Refuse *paths* when two files claim one well under different
+    spellings.
+
+    Every well this tool copies is found through ``in_containers`` /
+    ``out_zips`` / ``out_csvs``, each of which maps a canonical well to one
+    path — so an ``A1.zip`` sitting beside an ``A01.zip`` is simply not in
+    the map the copy walks, and a whole well's images leave no trace in the
+    destination or in the summary. The map cannot say that happened, so the
+    folder is asked directly, once, before anything is written.
+    """
+    message = describe_well_collisions(well_spelling_collisions(paths))
+    if message:
+        raise ConcatError(f"{label} can't be concatenated. {message}")
 
 
 def compute_offset(info1: dict, info2: dict) -> tuple[float, float, float]:
@@ -445,6 +463,9 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
             "pipeline_info.json has no valid tp_index, so the timepoint field in "
             "filenames can't be located — concatenation can't relabel dataset 2."
         )
+
+    _refuse_well_collisions(ds1, "Dataset 1")
+    _refuse_well_collisions(ds2, "Dataset 2")
 
     if has_folder_mode_output(ds1) or has_folder_mode_output(ds2):
         which = "dataset 1" if has_folder_mode_output(ds1) else "dataset 2"

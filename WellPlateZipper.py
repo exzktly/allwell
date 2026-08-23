@@ -168,6 +168,20 @@ def group_by_well(
     return out
 
 
+def _same_file(a: str, b: str) -> bool:
+    """Whether *a* and *b* are the same file on disk.
+
+    Only ever asked about a path that exists, but a race or a dangling link can
+    still make the check itself fail; a file that cannot be compared is treated
+    as a different one, so the caller warns and leaves both alone rather than
+    overwriting on a guess.
+    """
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
 def folder_well(
     well: str, files: list[str], output_dir: str,
     *, move: bool = False,
@@ -190,9 +204,41 @@ def folder_well(
     well_dir = os.path.join(output_dir, well)
     os.makedirs(well_dir, exist_ok=True)
     place = shutil.move if move else shutil.copy2
+    placed = 0
+    collisions: list[tuple[str, str]] = []
     for f in files:
-        place(f, os.path.join(well_dir, os.path.basename(f)))
-    print(f"{well}: {len(files)} files")
+        target = os.path.join(well_dir, os.path.basename(f))
+        if os.path.exists(target):
+            if _same_file(f, target):
+                # Already exactly where it belongs — a re-run over a folder a
+                # previous pass has partly converted, or an --output-dir equal
+                # to --search-dir walked recursively. Nothing to do, and it is
+                # not a loss, so it counts as placed.
+                placed += 1
+                continue
+            collisions.append((f, target))
+            continue
+        place(f, target)
+        placed += 1
+    for source, target in collisions:
+        # Two files from different subfolders share a basename, which only
+        # ``--recursive`` can produce. ``copy2``/``move`` onto an existing name
+        # simply overwrite it: the first file's bytes were replaced by the
+        # second's, and with ``--move-source-tifs`` the loser's original was
+        # gone from disk as well — one image destroyed with no copy anywhere,
+        # while this function printed the *source* count and the pipeline read
+        # one image fewer than the log claimed. First-write-wins instead (the
+        # rule the zip writers already use for a duplicate member name), the
+        # loser is left untouched where it is, and the count below is what
+        # actually landed.
+        print(
+            f"warning: {well}: {source} was not grouped — {target} already "
+            f"exists with different contents. Both files are called "
+            f"{os.path.basename(source)}; only one can live in {well}/, so the "
+            f"first one found was kept and this one was left where it is.",
+            file=sys.stderr, flush=True,
+        )
+    print(f"{well}: {placed} files")
 
 
 def main():

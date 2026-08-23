@@ -369,6 +369,15 @@ class ImportLoosePage(LogPanelMixin, QWidget):
                 f"{len(preview.unparsed_files)} of {preview.examined} file(s) didn't match the "
                 f"schema and would be left alone (e.g. {examples}{more})."
             )
+        if self.in_place():
+            # Only in the mode that acts on them. The extra scope belongs to the
+            # in-place conversion — a new-destination run reads the loose files
+            # and never touches a well folder — so saying it while the
+            # destination mode is selected would describe something this run
+            # will not do.
+            note = preview.existing_folder_note()
+            if note:
+                lines.append(note)
         # Each clause is its own sentence; without the stop they run together
         # ("… channels: GFP 1 of 3 file(s) didn't match …").
         self._readout.setText(" ".join(
@@ -440,6 +449,18 @@ class ImportLoosePage(LogPanelMixin, QWidget):
             return "This will group the loose TIFs "
         return (f"This will zip {preview.matched} file(s) into "
                 f"{len(preview.wells)} well archive(s) ")
+
+    def existing_folder_note(self) -> str:
+        """A sentence naming the well folders an in-place run will convert on
+        top of the loose TIFs, or ``""``.
+
+        Read by the confirmation dialog for the same reason
+        :meth:`unmatched_note` is: the scope the user is consenting to delete
+        within has to be stated where the consent is taken, not only in a
+        readout further up the page.
+        """
+        preview = self._preview
+        return "" if preview is None else preview.existing_folder_note()
 
     def unmatched_note(self) -> str:
         """A sentence naming what the run will *not* touch, or "".

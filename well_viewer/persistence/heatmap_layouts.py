@@ -1,8 +1,14 @@
 """Heatmap layout persistence — ``heatmap_layouts`` section of ``persistence.json``.
 
 The section wraps the layouts in an object so visual settings (cmap, scale
-mode, vmin/vmax, rep-set average toggle) persist alongside. Legacy
-``heatmap_layouts.json`` sidecars are migrated on first load by ``_doc``.
+mode, vmin/vmax, rep-set average toggle, selected timepoint) persist alongside.
+Legacy ``heatmap_layouts.json`` sidecars are migrated on first load by ``_doc``.
+
+The timepoint is stored as a value, not as a position in the combo: adding
+timepoints to a plate and reloading it (the add-timepoints workflow) rebuilds
+that combo, so a saved index comes back naming a different hour. A saved value
+this plate does not have restores nothing and says so rather than picking a
+neighbour that would be indistinguishable from the real one.
 """
 
 from __future__ import annotations
@@ -23,6 +29,16 @@ def _collect_settings(app) -> dict:
         return None
     tp_cb = getattr(app, "_heatmap_tp_cb", None)
     hm = app._app_state.feature_slice("heatmap")
+    tp_index = int(tp_cb.currentIndex()) if tp_cb is not None else 0
+    # The timepoint the index is *pointing at*. The combo is rebuilt from
+    # ``tp_values`` every time the plate's timepoints change, so an index alone
+    # names a different hour after the add-timepoints workflow extends a run —
+    # the value is what the user chose and the index is only where it happened
+    # to sit. ``None`` when the tab has never been built (no combo, no values).
+    tp_values = list(hm.tp_values or []) if hm is not None else []
+    tp_value = (
+        float(tp_values[tp_index]) if 0 <= tp_index < len(tp_values) else None
+    )
     return {
         # cmap / vmin / vmax are the typed HeatmapState display stamps (D-persist;
         # they moved off the loose ``app._heatmap_*`` runtime attrs).
@@ -32,9 +48,12 @@ def _collect_settings(app) -> dict:
         "vmax": _f(hm.vmax) if hm is not None else None,
         "repset_avg": bool(hm.repset_avg if hm is not None else False),
         "log_scale": bool(hm.log_scale if hm is not None else False),
-        # Selected timepoint's combo index, so it restores between sessions
-        # (clamped to the live item count on restore).
-        "tp_index": int(tp_cb.currentIndex()) if tp_cb is not None else 0,
+        # Selected timepoint, by value. ``tp_index`` is still written for
+        # older builds reading this file, and is what a file written before
+        # ``tp_value`` existed restores from; the value wins whenever it is
+        # present.
+        "tp_index": tp_index,
+        "tp_value": tp_value,
     }
 
 
@@ -167,22 +186,74 @@ def apply_persisted_settings(ctx) -> None:
             log_cb.blockSignals(blocked)
 
     # Selected timepoint. The combo's items are populated by
-    # ``refresh_heatmap_timepoints`` (called just before this on tab build), so
-    # clamp to the live item count; the caller's ``_redraw`` then renders the
-    # restored timepoint. Signals are blocked so we don't re-enter the redraw
-    # path here — ``setCurrentIndex`` alone repaints the combo's own
-    # "Timepoint: …" text, it isn't a separate label to update in step.
-    tp_idx = settings.get("tp_index")
-    if isinstance(tp_idx, int):
-        tp_cb = ctx.widgets.get_or_none("_heatmap_tp_cb")
-        if tp_cb is not None and tp_cb.count():
-            clamped = max(0, min(tp_idx, tp_cb.count() - 1))
-            blocked = tp_cb.blockSignals(True)
-            try:
-                tp_cb.setCurrentIndex(clamped)
-            finally:
-                tp_cb.blockSignals(blocked)
+    # ``refresh_heatmap_timepoints`` (called just before this on tab build);
+    # the caller's ``_redraw`` then renders the restored timepoint.
+    tp_cb = ctx.widgets.get_or_none("_heatmap_tp_cb")
+    if tp_cb is not None and tp_cb.count():
+        _restore_timepoint(hm, tp_cb, settings)
 
     # Successfully applied — keep the dict around in case the tab rebuilds.
     # (No need to clear it; a subsequent save_to_data_dir overwrites the file
     # with current widget state anyway.)
+
+
+def _timepoint_index(tp_values: list, target: float) -> int | None:
+    """Index of *target* in *tp_values*, or ``None`` when it is not there.
+
+    Compared with a tolerance rather than ``==``: the values make a round trip
+    through JSON and through ``f"{v:g} h"`` item text, and a timepoint read
+    back from a CSV as ``23.999999999999996`` is the same hour the user chose.
+    """
+    for i, value in enumerate(tp_values):
+        try:
+            if math.isclose(float(value), target, rel_tol=1e-9, abs_tol=1e-9):
+                return i
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _restore_timepoint(hm, tp_cb, settings: dict) -> None:
+    """Put the timepoint combo back on the saved timepoint.
+
+    By **value** whenever the saved settings carry one. The index this used to
+    restore from is a position in a list the dataset owns, and the documented
+    add-timepoints workflow (§9.7) re-runs a plate with extra timepoints and
+    reloads it — which leaves every saved index pointing at a different hour,
+    silently, on a tab whose whole output is one timepoint.
+
+    A saved value that this plate no longer has is *not* fallen back to the
+    index: the combo is left where ``refresh_heatmap_timepoints`` put it (the
+    shared focus timepoint, else the first), and the mismatch is logged. Falling
+    back would restore an arbitrary timepoint that looks exactly like a restored
+    one. Only a file written before ``tp_value`` existed uses the index.
+    """
+    tp_value = settings.get("tp_value")
+    if isinstance(tp_value, (int, float)) and not isinstance(tp_value, bool):
+        target = float(tp_value)
+        if not math.isfinite(target):
+            return
+        tp_values = list(hm.tp_values or []) if hm is not None else []
+        index = _timepoint_index(tp_values, target)
+        if index is None:
+            _logger.info(
+                "heatmap: the saved timepoint (%g) is not among this plate's "
+                "timepoints (%s); showing the default one instead.",
+                target, ", ".join(f"{float(v):g}" for v in tp_values) or "none",
+            )
+            return
+    else:
+        tp_idx = settings.get("tp_index")
+        if not isinstance(tp_idx, int) or isinstance(tp_idx, bool):
+            return
+        index = max(0, min(tp_idx, tp_cb.count() - 1))
+    if index >= tp_cb.count():
+        return
+    # Signals are blocked so we don't re-enter the redraw path here —
+    # ``setCurrentIndex`` alone repaints the combo's own "Timepoint: …" text,
+    # it isn't a separate label to update in step.
+    blocked = tp_cb.blockSignals(True)
+    try:
+        tp_cb.setCurrentIndex(index)
+    finally:
+        tp_cb.blockSignals(blocked)

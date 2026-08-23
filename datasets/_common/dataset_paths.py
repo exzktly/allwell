@@ -190,19 +190,127 @@ def in_containers(paths: DatasetPaths) -> dict[str, Path]:
     Keys are canonical wells (``A01``); a zip wins over a same-well folder. This
     is what lets a caller find a container from a canonical well even when the
     file on disk is unpadded (``A1.zip``).
+
+    One well, one container: a dataset holding **both** ``in/A1.zip`` and
+    ``in/A01.zip`` canonicalises them to the same key and one of them is simply
+    not in the result, so a copy tool trusting this map writes a destination
+    that is quietly missing a whole well's images. The map cannot represent that
+    state, so it does not try to; what it does instead is pick the survivor
+    deterministically — sorted order, and the spelling that already *is* the
+    canonical label wins — so the outcome no longer depends on the order the
+    filesystem returned. Naming the state is :func:`well_spelling_collisions`,
+    and every tool that copies a dataset asks it before starting.
+
+    A zip beside a same-well *folder* is not that state and is not reported:
+    the pipeline ignores well folders whenever any zip is present, so the two
+    layouts have a settled precedence and this map follows it.
     """
     containers: dict[str, Path] = {}
-    for zip_path in paths.in_dir.glob("*.zip"):
+    for zip_path in sorted(paths.in_dir.glob("*.zip")):
         well = canonical_well_label(zip_path.stem)
-        if well:
+        if well and (well not in containers or zip_path.stem == well):
             containers[well] = zip_path
     with swallow("enumerate in/ well folders"):
-        for entry in paths.in_dir.iterdir():
+        for entry in sorted(paths.in_dir.iterdir()):
             if entry.is_dir():
                 well = canonical_well_label(entry.name)
                 if well:
                     containers.setdefault(well, entry)
     return containers
+
+
+def _by_well(pairs) -> dict[str, list[Path]]:
+    """Group ``(well, path)`` pairs into ``well -> [paths]``, sorted."""
+    grouped: dict[str, list[Path]] = {}
+    for well, path in pairs:
+        grouped.setdefault(well, []).append(path)
+    return {well: sorted(paths) for well, paths in grouped.items()}
+
+
+def well_spelling_collisions(paths: DatasetPaths) -> dict[str, list[Path]]:
+    """Every well that more than one file (or folder) in this dataset claims.
+
+    ``in_containers`` / ``out_zips`` / ``out_csvs`` / ``out_folders`` each map a
+    canonical well to exactly one path, so two spellings of the same position —
+    ``A1.zip`` beside ``A01.zip``, the state a plate exported by a scope that
+    does not zero-pad and later topped up by a run that does is left in — silently
+    collapse to one. Nothing about the surviving map says a well's other archive
+    exists, and every Datasets copy tool reads the map rather than the folder, so
+    the images in the loser vanish from the copy and the run reports success with
+    a well count that never mentions them.
+
+    Returns ``{well: [every path claiming it]}`` for the wells where that is
+    true, and ``{}`` for a healthy dataset. Only genuine same-role duplicates
+    count:
+
+    * two raw-input zips, or two raw-input folders, for one well;
+    * two ``<WELL>_out.zip`` QC archives, or two ``out/<WELL>/`` folders;
+    * two measurements CSVs for one well **under the same ``--csv_prefix``**.
+      Two CSVs with *different* prefixes is the mixed-prefix state Validate
+      already reports and names a cause for; it is a different question from
+      one plate position being spelled two ways, and answering both here would
+      make every copy tool refuse a dataset Validate merely comments on.
+    """
+    collisions: dict[str, list[Path]] = {}
+
+    def _collect(pairs) -> None:
+        for well, group in _by_well(pairs).items():
+            if len(group) > 1:
+                collisions.setdefault(well, [])
+                collisions[well] = sorted(set(collisions[well]) | set(group))
+
+    _collect(
+        (canonical_well_label(z.stem), z)
+        for z in paths.in_dir.glob("*.zip") if canonical_well_label(z.stem)
+    )
+    _collect(
+        (canonical_well_label(z.stem[:-4]), z)
+        for z in paths.out_dir.glob("*_out.zip")
+        if z.stem.endswith("_out") and canonical_well_label(z.stem[:-4])
+    )
+    with swallow("scan in/ and out/ for duplicate well folders"):
+        for folder in (paths.in_dir, paths.out_dir):
+            _collect(
+                (canonical_well_label(e.name), e)
+                for e in folder.iterdir()
+                if e.is_dir() and canonical_well_label(e.name)
+            )
+    # Keyed on (prefix, well) so only the same-prefix duplicate counts.
+    prefixed: dict[tuple[str, str], list[Path]] = {}
+    for csv_path in paths.out_dir.glob("*.csv"):
+        split = split_stem_well(csv_path.stem)
+        if split is not None:
+            prefixed.setdefault(split, []).append(csv_path)
+    _collect(
+        (well, path)
+        for (_prefix, well), group in prefixed.items() if len(group) > 1
+        for path in group
+    )
+    return collisions
+
+
+def describe_well_collisions(collisions: dict[str, list[Path]]) -> str:
+    """The user-facing sentence a copy tool refuses with. ``""`` for none.
+
+    One line per well, naming every file that claims it, so the user can see
+    which two spellings to reconcile without going to look.
+    """
+    if not collisions:
+        return ""
+    lines = [
+        f"  \u2022 {well}: " + ", ".join(path.name for path in paths)
+        for well, paths in sorted(collisions.items())
+    ]
+    listing = "\n".join(lines)
+    return (
+        f"{len(collisions)} well(s) in this dataset are claimed by more than "
+        "one file, under different spellings of the same plate position:\n"
+        f"{listing}\n\n"
+        "Only one of each pair would be copied and the rest would be lost "
+        "without a word, so this is refused. Rename or merge them so each "
+        "well has exactly one raw-input archive, one QC archive and one "
+        "measurements CSV, then try again."
+    )
 
 
 def out_csvs(paths: DatasetPaths) -> dict[str, Path]:

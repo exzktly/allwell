@@ -677,8 +677,14 @@ class BatchExportPanel(QWidget):
             chan.active_val_col = val_col
             yield
         finally:
-            if saved is not None:
-                chan.active_val_col = saved
+            # Restored unconditionally. Guarding on ``saved is not None`` treated
+            # "the app had no column selected" as "there is nothing to put back",
+            # which is the opposite: it is precisely then that the batch's own
+            # column stays behind on shared app state after the export, so the
+            # next tab plot silently draws whatever the last exported group
+            # happened to pick. ``None`` is the value that was there, so ``None``
+            # is what goes back — the sibling ``_app_group_scope`` already does.
+            chan.active_val_col = saved
 
     @contextmanager
     def _app_group_scope(self, grp: BarGroup):
@@ -1030,6 +1036,19 @@ class BatchExportPanel(QWidget):
     _FC_NONE_LABEL = "—"
     _FC_T0_LABEL = "t0 (first timepoint)"
 
+    #: Shown in the Control combo when the panel inherited a PER-SAMPLE mapping
+    #: from the plot tab. That mapping names a different control per member, so no
+    #: single entry in this list describes it — and the panel deliberately does not
+    #: let it be edited here (see ``__init__``). Before this entry existed the
+    #: combo fell through to ``—``, i.e. it said "no control" on a run that was
+    #: about to normalise every member against one.
+    _FC_PER_SAMPLE_LABEL = "Per-sample (from the plot tab)"
+
+    #: The item data that entry carries. A plain sentinel, not a ``ControlRef``:
+    #: the handler must be able to tell "the user re-picked the inherited mode"
+    #: from "the user named one control", and ``None`` already means ``—``.
+    _FC_PER_SAMPLE = object()
+
     def _build_fold_change_widgets(self, row: QHBoxLayout) -> None:
         """Append the Control + Baseline dropdowns to *row*.
 
@@ -1047,7 +1066,10 @@ class BatchExportPanel(QWidget):
         self._fc_ctrl_combo.setMinimumWidth(_FC_CTRL_COMBO_MIN_W)
         self._fc_ctrl_combo.setToolTip(
             "Divide each bar / curve by the picked well or replicate "
-            "set's mean at the same timepoint. — disables this axis."
+            "set's mean at the same timepoint. — disables this axis. "
+            "\"Per-sample\" means the panel inherited a different control per "
+            "member from the plot tab; picking any single entry here replaces "
+            "that mapping for this export."
         )
         self._repopulate_fc_control_combo()
         row.addWidget(self._fc_ctrl_combo)
@@ -1067,11 +1089,22 @@ class BatchExportPanel(QWidget):
         def _on_ctrl_change(_i: int) -> None:
             # Read the reference the item carries, not its text.
             ref = self._fc_ctrl_combo.currentData()
+            if ref is self._FC_PER_SAMPLE:
+                # Re-selecting the inherited mapping is not a control pick — it
+                # leaves the panel exactly as it was seeded.
+                return
             self._fc_vs_control_on = ref is not None
             self._fc_control = ref
             # Naming one control here is a request for one control. Leaving the
             # inherited per-sample mapping on would ignore the pick silently.
             self._fc_control_mode = "single"
+            self._fc_control_map = {}
+            # The inherited mapping is gone, so the entry that named it must go
+            # too — leaving it listed would let the user re-select a mode the
+            # panel is no longer in. Removed in place rather than by a full
+            # repopulate: this runs inside the combo's own currentIndexChanged,
+            # and clearing a combo from its own signal handler is re-entrant.
+            self._drop_per_sample_entry()
 
         def _on_baseline_change(_i: int) -> None:
             self._fc_vs_t0_on = (
@@ -1080,6 +1113,23 @@ class BatchExportPanel(QWidget):
 
         self._fc_ctrl_combo.currentIndexChanged.connect(_on_ctrl_change)
         self._fc_baseline_combo.currentIndexChanged.connect(_on_baseline_change)
+
+    def _drop_per_sample_entry(self) -> None:
+        """Remove the inherited per-sample entry from the Control combo, if listed.
+
+        Signals stay blocked: the caller is the combo's own change handler, and
+        the removal must not look like a second pick."""
+        combo = getattr(self, "_fc_ctrl_combo", None)
+        if combo is None:
+            return
+        for i in range(combo.count()):
+            if combo.itemData(i) is self._FC_PER_SAMPLE:
+                blocked = combo.blockSignals(True)
+                try:
+                    combo.removeItem(i)
+                finally:
+                    combo.blockSignals(blocked)
+                return
 
     def _repopulate_fc_control_combo(self) -> None:
         combo = getattr(self, "_fc_ctrl_combo", None)
@@ -1111,13 +1161,24 @@ class BatchExportPanel(QWidget):
             for w in sorted((self._ctx.state.dataset.well_paths or {})):
                 entries.append((w, ControlRef.for_well(w)))
         saved = self._fc_control
+        # A per-sample mapping inherited from the plot tab is a real control
+        # setting that no concrete entry in this list can stand for, so it gets
+        # its own entry and the combo selects it. Offered ONLY while that mode is
+        # actually in force: it is a statement about the panel's inherited state,
+        # not a mode the user can switch into from here.
+        per_sample = (str(self._fc_control_mode or "single") == "per_sample"
+                      and bool(self._fc_control_map))
         blocked = combo.blockSignals(True)
         try:
             combo.clear()
             combo.addItem(self._FC_NONE_LABEL, None)
+            if per_sample:
+                combo.addItem(self._FC_PER_SAMPLE_LABEL, self._FC_PER_SAMPLE)
             for text, ref in entries:
                 combo.addItem(text, ref)
-            if saved is not None:
+            if per_sample:
+                combo.setCurrentIndex(1)
+            elif saved is not None:
                 for i in range(combo.count()):
                     if combo.itemData(i) == saved:
                         combo.setCurrentIndex(i)
@@ -1751,7 +1812,19 @@ class BatchExportPanel(QWidget):
         if out_dir is None:
             return
 
+        # The (Channel, Property) selection is read ONCE, here, and every job in
+        # the run uses this one answer. The runner pumps ``processEvents()``
+        # between jobs (``_run_batch_jobs``), so a combo the user touches while
+        # the export is running changes under it — and re-reading only *part* of
+        # the pair per job produced the worst possible version of that: the
+        # channel stayed on its snapshot while the column and the metric moved,
+        # so a group was exported as "gfp" from ``mcherry_total_intensity``, in a
+        # file named and titled for the wrong one of the two. A run now exports
+        # one configuration or, if the user changes the controls, still one — the
+        # one that was on screen when they pressed the button.
         _ch_selected = self._selected_export_channel() or self._ctx.state.channel.active_channel
+        _val_col_selected = self._export_val_col_for("_line_channel_cb")
+        _metric_selected = self._selected_export_metric_key("_line_channel_cb")
         # The cutoff lookup keys by the canonical key (bare channel token or
         # ``ratio:<name>``), not by the dropdown's display label -- translate
         # ratio labels first so the user's configured cutoff is honoured
@@ -1759,7 +1832,7 @@ class BatchExportPanel(QWidget):
         # (intensity or spot count) follows the selected column.
         threshold = _on_cutoff_for_column(
             self._ctx,
-            self._export_val_col_for("_line_channel_cb"),
+            _val_col_selected,
             channel=self._resolved_channel_key(_ch_selected),
         )
         use_sem = self._ctx.state.plot.use_sem
@@ -1788,9 +1861,9 @@ class BatchExportPanel(QWidget):
             # Resolve the panel's (Channel, Property) selection into a
             # column / ratio key — independent of whatever the plot-tab
             # Plotting's band has picked.
-            _val_col = self._export_val_col_for("_line_channel_cb")
+            _val_col = _val_col_selected
             _ch = _ch_selected
-            _metric = self._selected_export_metric_key("_line_channel_cb")
+            _metric = _metric_selected
             _fluor_gates = _get_all_fluor_gates(self._ctx)
             # The panel's own request object, passed through rather than
             # rebuilt as a tuple — rebuilding it drops any field the

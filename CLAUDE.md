@@ -222,12 +222,15 @@ function, remove its stale allowlist entry (the test fails until you do).
   tab-local handler that clobbers `_selected_wells` leaks across tabs.
 - **End a redraw with** `core.plot_style.apply_export_style_to_current(ctx, fig, canvas)`
   or the Properties sidebar's toggles get lost.
-- **`_Docs/Markdowns/` is small on purpose** — three live documents and no more:
+- **`_Docs/Markdowns/` is small on purpose** — three permanent documents:
   `ARCHITECTURE.md` (the structural map), `README_WellViewer.md` (the user manual),
   and `GOD_OBJECT_REPOSITORY_ROADMAP.md` (the teardown plan, which is a live
   tracking document because its ratchet numbers are asserted by
-  `tests/test_guardrails.py`). One-off plans and status write-ups belong in git
-  history / PRs, not new markdown files.
+  `tests/test_guardrails.py`). One-off plans, status write-ups and post-hoc
+  summaries belong in git history / PRs, not new markdown files. The one
+  sanctioned exception is a **remediation tracker** for a body of work too large
+  to hold in one session's head — see §6.1. A tracker is live state, not a
+  write-up, and it is deleted by the PR that closes its last row.
 
 ## 6. Session defaults — docs and PRs
 
@@ -336,6 +339,57 @@ identically to a plain well. Before adjusting a tolerance or an expected value,
 read what the test was *for*: if it encodes the reported symptom, rewrite it
 around the report and say so in the commit. Loosening it would have left the
 next regression unguarded.
+
+## 6.1 A plan is a document on disk, or it does not exist
+
+This one has cost more than any bug in this file. A 177-finding review was
+worked across eight pull requests, and at the end I reported the tail complete.
+A reconciliation pass against the tree found 42 items still owed — a quarter of
+the review — including three rated High. Nothing had gone wrong in the code.
+What went wrong is that the state of the work lived in conversation, and
+conversation is compacted, summarised and eventually lost, while my confidence
+that the work was finished survived all three.
+
+The failure mode is specific and it recurs: **progress reported from memory is
+progress reported from the parts of the work that were memorable.** The items
+that get fixed are vivid; the items skipped because a file looked untouched, or
+because a theme was reached at the end of a long session, leave no trace at all.
+There is nothing to notice their absence with, so the summary reads complete and
+is believed.
+
+So, for any body of work with more than a handful of items — an audit, a review,
+a migration, a sweep:
+
+1. **Write the tracker before writing any code.** One row per item, with a state
+   and a place. It goes in `_Docs/Markdowns/` (§5's sanctioned exception) so it
+   survives a compaction, a new session and a different assistant. A plan that
+   exists only in a reply is not a plan.
+2. **Update the row in the same commit as the fix.** Not at the end of the
+   session, not in a batch, not "once CI is green". A tracker updated in
+   arrears is a summary, and summaries are what failed here.
+3. **The tracker's counts are derived from its own rows, never typed.** If the
+   header says 12 done, twelve rows say `done`. A hand-maintained total drifts
+   from the rows within a day and is then the most confidently wrong line in the
+   file.
+4. **A row goes to `done` only with evidence** — the test that pins it, watched
+   failing without the fix (§7.7 #2). "Implemented" is not `done`; `done` means
+   the defect can no longer recur.
+5. **Report completion from the tracker, not from recollection.** When asked
+   whether the work is finished, read the file and answer from it. If the answer
+   is "I believe so", the honest answer is "I have not checked" — say that
+   instead, then go and check.
+6. **Reconcile before claiming the whole body is closed.** Re-read every original
+   item against the tree, not against the tracker and not against the report's
+   line numbers, which will all have moved. The reconciliation is cheap and it
+   is the only thing that catches an item that was never started.
+7. **Delete the tracker in the PR that closes its last row**, and say in the body
+   that it is gone. A tracker left behind at zero outstanding becomes a stale
+   document claiming work is owed.
+
+An item that turns out not to be a defect is `declined` with the reason written
+at the site *and* in the row — never silently dropped, because a dropped row is
+indistinguishable from a forgotten one, which is exactly the confusion this
+section exists to prevent.
 
 ## 7. Diagnosing a wrong number
 

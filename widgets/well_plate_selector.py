@@ -313,6 +313,7 @@ class _PlateGrid(QWidget):
             return
         if self._enabled is None:
             self._enabled = {(r, c) for r in range(_N_ROWS) for c in range(_N_COLS)}
+        sel_before = dict(self._selected)
         if enabled:
             self._enabled.add(parsed)
         else:
@@ -325,6 +326,13 @@ class _PlateGrid(QWidget):
                 self._path.remove(parsed)
         self._recolor()
         self.update()
+        if self._selected != sel_before:
+            # Same rule as ``set_enabled_wells`` above: disabling a well drops
+            # it from the selection, and a selection that changed without
+            # saying so leaves the plate disagreeing with the app-wide well set
+            # that every plot reads. The two setters answer one question and
+            # only one of them was answering it.
+            self.selectionChanged.emit()
 
     def set_well_colors(self, mapping) -> None:
         for w, col in (mapping or {}).items():

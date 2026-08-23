@@ -108,3 +108,88 @@ def test_the_allowlist_is_live():
         if not (tops & FORBIDDEN):
             stale.append(f"{rel} (imports no Qt any more — drop it from ALLOWLIST)")
     assert not stale, "stale Qt-free allowlist entries:\n  " + "\n  ".join(stale)
+
+
+# ── the transitive half ──────────────────────────────────────────────────────
+
+#: Module-scope imports only. A *function-local* import of a Qt-touching module
+#: is exactly how a layer stays importable while still reaching Qt on demand —
+#: it is the fix for this class of defect, not an instance of it — so following
+#: one here would report every correct solution as a violation.
+def _module_scope_imports(tree: ast.Module) -> set[str]:
+    out: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            out.update(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            out.add(node.module)
+    return out
+
+
+def _module_file(dotted: str) -> Path | None:
+    base = REPO_ROOT / dotted.replace(".", "/")
+    for candidate in (base.with_suffix(".py"), base / "__init__.py"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _qt_path_from(start: str) -> list[str] | None:
+    """The shortest module-scope import chain from *start* to Qt, or None."""
+    from collections import deque
+
+    queue = deque([(start, [start])])
+    seen = {start}
+    while queue:
+        dotted, path = queue.popleft()
+        f = _module_file(dotted)
+        if f is None:
+            continue
+        try:
+            tree = ast.parse(f.read_text(), filename=str(f))
+        except SyntaxError:
+            continue
+        for imported in sorted(_module_scope_imports(tree)):
+            top = imported.split(".")[0]
+            if top in QT_ROOTS:
+                return path + [imported]
+            if top == "well_viewer" and imported not in seen:
+                seen.add(imported)
+                queue.append((imported, path + [imported]))
+    return None
+
+
+def test_a_qt_free_layer_stays_importable_without_qt():
+    """Reaching Qt one hop away is the same failure as importing it directly.
+
+    ``test_qt_free_layers_import_no_qt`` reads each file's own import list, so a
+    detour through ``core/`` is invisible to it — and every docstring in these
+    packages cites that test as the guarantee. ``domain/stats_compute`` imported
+    two pure ``ctx`` readers from ``core.channel_state_controller``, which
+    imported ``core.ui_helpers``, which imports ``PySide6.QtCore``: ``import
+    well_viewer.domain.fold_change`` failed with ``ImportError:
+    libQt6Core.so.6`` on a machine with no Qt libraries.
+
+    The chain is reported in full, because the fix is almost never in the file
+    that fails — it is at the hop where a pure module reached for a Qt-touching
+    one at module scope.
+    """
+    offenders: list[str] = []
+    for root, why in sorted(QT_FREE_ROOTS.items()):
+        if not root.startswith("well_viewer"):
+            continue    # the direct check already covers packages outside it
+        for path in sorted((REPO_ROOT / root).rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            rel = path.relative_to(REPO_ROOT).as_posix()
+            if rel in ALLOWLIST or path.name == "__init__.py":
+                continue
+            dotted = rel[:-3].replace("/", ".")
+            chain = _qt_path_from(dotted)
+            if chain is not None and len(chain) > 1:
+                offenders.append(f"{why}\n      " + "\n      → ".join(chain))
+    assert not offenders, (
+        "these modules reach Qt through another module's import, so importing "
+        "them on a machine without Qt raises. Make the offending hop a "
+        "function-local import, or move the pure names the caller needs into "
+        "the pure layer:\n  " + "\n  ".join(offenders))

@@ -300,7 +300,17 @@ class RailNav(QFrame):
             font-weight: 500;
             background: transparent;
         }}
-        QFrame#RailNavRow:hover QLabel#RailNavRowLabel,
+        /* Two rules, not one comma-separated group. QSS resolves a group by
+           baking its colour into the widget's *palette*, and a palette has no
+           notion of ":hover" — so the hover half applied unconditionally and
+           took the base `text_secondary` rule with it. Every row then drew at
+           full strength and the selected one was not distinguished from the
+           rest, which is the whole job of this rail. Measured: the [active]
+           rule alone gives (inactive #98a2b3, active #e6e9ef); adding the
+           :hover sibling to the same group gives (#e6e9ef, #e6e9ef). */
+        QFrame#RailNavRow:hover QLabel#RailNavRowLabel {{
+            color: {c.text_primary};
+        }}
         QFrame#RailNavRow[active="true"] QLabel#RailNavRowLabel {{
             color: {c.text_primary};
         }}

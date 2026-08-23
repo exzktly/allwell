@@ -13,7 +13,7 @@ a redraw of all plots.
 from __future__ import annotations
 
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
@@ -183,6 +183,18 @@ class RatioMetricsPanel(QWidget):
         )
         table.setCellWidget(row, 5, eps_spin)
 
+        # Every cell in this table is a *cell widget*, so the table itself
+        # holds no items: ``selectedIndexes()`` is always empty and
+        # ``currentRow()`` is always -1, because a click lands on the widget
+        # and never reaches the view. Without this, "− Remove selected" could
+        # not remove anything — the control was offered on every row and did
+        # nothing on all of them.
+        for col, widget in enumerate(
+                (name_edit, num_chan_cb, num_metric_cb,
+                 den_chan_cb, den_metric_cb, eps_spin)):
+            widget.installEventFilter(self)
+            widget.setProperty("_aw_ratio_col", col)
+
     def _channel_combo(self, current: str) -> QComboBox:
         cb = QComboBox()
         for ch in self._channel_choices():
@@ -200,6 +212,33 @@ class RatioMetricsPanel(QWidget):
         if idx >= 0:
             cb.setCurrentIndex(idx)
         return cb
+
+    def eventFilter(self, obj, event):
+        """Make the row a click landed in the table's current row.
+
+        A cell widget swallows the press, so the view's own selection never
+        moves. Mapping focus back onto the table is what lets the table answer
+        "which row is the user in", which is the question every row-scoped
+        control here asks.
+        """
+        if event.type() in (QEvent.FocusIn, QEvent.MouseButtonPress):
+            row = self._row_of_widget(obj)
+            if row >= 0:
+                col = obj.property("_aw_ratio_col")
+                self._table.setCurrentCell(row, int(col) if col is not None else 0)
+        return super().eventFilter(obj, event)
+
+    def _row_of_widget(self, widget) -> int:
+        """The row *widget* sits in, or -1. Found by asking the table rather
+        than by storing an index on the widget: ``removeRow`` renumbers every
+        row below the one it drops, and a stored index would then name the
+        wrong row — or a row that no longer exists."""
+        table = self._table
+        for row in range(table.rowCount()):
+            for col in range(table.columnCount()):
+                if table.cellWidget(row, col) is widget:
+                    return row
+        return -1
 
     def _remove_selected(self) -> None:
         rows = sorted({idx.row() for idx in self._table.selectedIndexes()}, reverse=True)

@@ -241,9 +241,9 @@ def rank_color(wells: Sequence[str], fallback_idx: int = 0,
     Falls back to the positional palette entry when ``wells`` has no parseable
     token (e.g. an empty, not-yet-populated selection).
 
-    The plate has 96 wells but the palette has 48 colours, so two selections
-    whose lowest-rank wells differ by exactly 48 (e.g. A01 / E01) would map
-    to the same palette index. When ``used_colors`` is supplied, the index is
+    The plate has 96 wells and the palette has ``len(theme.WELL_COLORS_TUPLE)``
+    entries, so two selections whose lowest-rank wells differ by exactly that
+    many map to the same palette index. When ``used_colors`` is supplied, the index is
     incremented (mod len(palette)) until a free slot is found — preserving
     the "same lowest-rank well → same colour" intent in the common case
     while keeping distinct selections distinguishable.
@@ -607,7 +607,8 @@ def from_block(block: Any, *, tok_to_label: Any = None,
                id_factory: Callable[[], str] = _default_id_factory):
     """Parse a ``sample_definitions`` / ``bar_groups.json`` block → unified state.
 
-    Returns ``(selections, current_id, well_labels, notes)``. v1 blocks are
+    Returns ``(selections, current_id, well_labels, notes, plot_groups)`` —
+    five values, so a caller unpacking four raises ``ValueError``. v1 blocks are
     migrated; v2 blocks are validated/repaired; non-dict / empty → empty state.
     Honours a saved line-graph order (§3.5) when one is supplied.
     """

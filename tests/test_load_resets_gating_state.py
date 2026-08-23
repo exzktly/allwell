@@ -29,13 +29,16 @@ def test_reset_clears_all_leaky_gating_attrs():
     )
     rt = AppRuntime()
     rt.review.included_overrides = {"A01/0/1/5": False}
-    app = types.SimpleNamespace(
-        runtime=rt,
-        _app_state=types.SimpleNamespace(
-            cell_gating=cg,
-            heatmap=types.SimpleNamespace(active_layout_name="old-layout"),
-        ),
+    # ``feature_slice`` is how core reaches a feature-owned slice — the real
+    # ``AppState`` answers ``None`` for a feature this build does not have, and
+    # a stub without it makes the reset look like it works while the real one
+    # would raise. Modelled on the real method: read the attribute, or None.
+    _state = types.SimpleNamespace(
+        cell_gating=cg,
+        heatmap=types.SimpleNamespace(active_layout_name="old-layout"),
     )
+    _state.feature_slice = lambda name: getattr(_state, name, None)
+    app = types.SimpleNamespace(runtime=rt, _app_state=_state)
     app.window = app  # the mock doubles as its own ctx (ctx.window -> app)
 
     _reset_gating_state(app)

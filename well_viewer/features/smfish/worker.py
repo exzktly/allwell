@@ -335,14 +335,31 @@ def apply_global_threshold_async(
         def _abort_write() -> bool:
             return _cancelled() or expected != out_dir or not out_dir.exists()
 
-        status_cb(f"Writing counts into {len(well_to_zip)} well CSV(s)...")
-        _write_counts_to_csvs(
+        total = len(well_to_zip)
+        status_cb(f"Writing counts into {total} well CSV(s)...")
+        written = _write_counts_to_csvs(
             out_dir, well_to_zip, counts, column, well_to_csv,
             should_abort=_abort_write,
             progress_cb=progress_cb,
         )
+        aborted = _abort_write()
         if after_csv_cb is not None:
+            # Still called on an abort: the wells that *were* written are on
+            # disk, and the tab's caches have to catch up with them or the
+            # plots keep showing the pre-run numbers for rows that changed.
             after_csv_cb()
+        if aborted:
+            # The count is the point. This used to report "Apply to All
+            # complete" whatever the loop did, so a run stopped part-way
+            # through left a plate where some wells carry the new counts and
+            # some carry the old ones, with nothing on screen saying which —
+            # two populations in one figure, reported as one finished run.
+            done_cb(
+                f"Apply to All stopped after {written} of {total} well(s). "
+                "The wells not written still hold their previous counts; "
+                "re-run to finish them."
+            )
+            return
         done_cb("Apply to All complete. Line/Bar plots refreshed.")
 
     def _run_guarded() -> None:

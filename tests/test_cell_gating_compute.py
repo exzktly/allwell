@@ -9,6 +9,7 @@ smoke-checked below.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import pandas as pd
 
 from well_viewer.features.home.cell_gating.gating_compute import (
@@ -71,7 +72,12 @@ def test_fraction_on_and_scan():
     assert list(fb) == [1.0, 0.25, 0.0, 0.0, 0.0, 0.0]
     # relative gap is |fa-fb|/max(|fa|,|fb|); at th=0 both 1.0 → 0.0
     assert diffs[0] == 0.0
-    assert diffs[2] == 1.0
+    # ...and at th=4, two of four on against none of four. The raw branch is
+    # Laplace-smoothed, as the pipeline's objective is, so a perfect split at
+    # n=4 scores (3/6 - 1/6) / (3/6) rather than a saturated 1.0 — which is the
+    # whole point: without it, two cells on against none is indistinguishable
+    # from 485 against none.
+    assert diffs[2] == pytest.approx((3 / 6 - 1 / 6) / (3 / 6))
 
 
 def test_result_dataclass_shape():

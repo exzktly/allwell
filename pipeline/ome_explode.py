@@ -508,17 +508,168 @@ def _hours_token(hours: float) -> str:
     return f"{text}h" if text and text != "0" else "0h"
 
 
+@dataclass(frozen=True)
+class _DeltaTScan:
+    """What one file's ``<Plane>`` elements yielded, and what they could not.
+
+    Kept as a value rather than four return values because every field is
+    evidence for the same decision — whether the timepoints can be named by
+    elapsed time — and three of them exist only to be reported when they cannot.
+    """
+
+    hours_by_index: dict[int, float]
+    unreadable_units: frozenset[str]
+    unreadable_planes: int
+    out_of_range: int
+
+
+def _scan_delta_t(pixels, size_t: int) -> _DeltaTScan:
+    """Read every ``<Plane>``'s ``DeltaT`` into hours, keyed by ``TheT``."""
+    hours: dict[int, float] = {}
+    unreadable: set[str] = set()
+    unreadable_planes = 0
+    out_of_range = 0
+    for el in pixels:
+        if _localname(el.tag) != "Plane":
+            continue
+        the_t = el.get("TheT")
+        delta = el.get("DeltaT")
+        if the_t is None or delta is None:
+            continue
+        try:
+            ti = int(the_t)
+            value = float(delta)
+        except ValueError:
+            continue
+        # ``TheT`` is a zero-based index into the T axis, and a writer that
+        # stamps it one-based is the common deviation. Unchecked, those keys
+        # still satisfy the completeness test below while attaching every
+        # elapsed time to the wrong array index — a file with TheT 1,2,3 and
+        # SizeT 3 rendered ``['t0', '0h', '1h']``, mixing the two vocabularies
+        # and giving two timepoints the same 0 h reading, with nothing saying so.
+        if not (0 <= ti < size_t):
+            out_of_range += 1
+            continue
+        # OME's default for DeltaT is seconds, so an *absent* unit is seconds.
+        # An unrecognised one is not: it is a unit this module cannot convert.
+        unit = (el.get("DeltaTUnit") or "s").strip()
+        per_hour = _hours_per_unit(unit)
+        if per_hour is None:
+            unreadable.add(unit)
+            unreadable_planes += 1
+            continue
+        hours.setdefault(ti, value * per_hour)
+    return _DeltaTScan(hours, frozenset(unreadable), unreadable_planes,
+                       out_of_range)
+
+
+def _hours_per_unit(unit: str) -> float | None:
+    """Hours per one *unit*, or ``None`` when this module cannot convert it."""
+    # Case-sensitive symbols first: ``Ms`` and ``ms`` are different units and
+    # only their case tells them apart.
+    per_hour = _DELTA_T_HOURS_PER_SYMBOL.get(unit)
+    if per_hour is not None:
+        return per_hour
+    if unit.lower() in _DELTA_T_HOURS_PER_SYMBOL:
+        # A case-significant symbol in a spelling OME does not use. ``"MS"`` is
+        # neither of its two, and lower-casing it would make it the millisecond
+        # — the exact 10^9 fold that table exists to prevent. Silently picking
+        # the smaller of two units a spelling could mean is worse than
+        # declining to read it.
+        return None
+    return _DELTA_T_HOURS_PER_UNIT.get(unit.lower())
+
+
+def _fallback_reasons(scan: _DeltaTScan, size_t: int, tokens: list[str],
+                      collided: list[str], unrenderable: list[int]) -> list[str]:
+    """Why the timepoints cannot be named by elapsed time, in the log's words."""
+    why: list[str] = []
+    if scan.unreadable_units:
+        why.append(
+            f"{scan.unreadable_planes} plane(s) carry a DeltaTUnit this "
+            f"converter cannot read ({', '.join(sorted(scan.unreadable_units))})")
+    if scan.out_of_range:
+        why.append(
+            f"{scan.out_of_range} plane(s) carry a TheT outside "
+            f"0..{size_t - 1}, so the file's T indexing is not this "
+            f"converter's")
+    if collided:
+        why.append(
+            f"the elapsed times render to {len(set(tokens))} distinct label(s) "
+            f"for {len(tokens)} timepoint(s) — {', '.join(collided)} repeat(s), "
+            f"and two timepoints sharing a label would write every image of the "
+            f"second over the first")
+    if unrenderable:
+        why.append(
+            f"{len(unrenderable)} elapsed time(s) are not finite or not "
+            f"positive, and the app's timepoint parser reads neither")
+    if not why:
+        why.append(
+            f"only {len(scan.hours_by_index)} of {size_t} timepoint(s) carry a "
+            f"readable DeltaT")
+    return why
+
+
+def _timepoint_tokens(pixels, size_t: int) -> list[str] | None:
+    """``["0h", "1h", …]`` from the planes' ``DeltaT``, or ``None``.
+
+    ``None`` means the caller keeps its positional tokens, and this function has
+    already said in the run log why. Every route here is a *degradation*: the
+    file stated a time and the archive will not carry it, so Review orders the
+    timepoints by index and can put no number on an axis. Each one says so,
+    because a ``t0``/``t1`` plate is otherwise indistinguishable from one whose
+    writer recorded no ``DeltaT`` at all.
+
+    The warning is emitted only when the fallback actually happens. Reporting an
+    unreadable unit wherever one was seen said "the timepoints are named by
+    position" about a file whose timepoints had resolved perfectly — one
+    channel's planes carrying a bad unit while another's carried seconds is
+    enough — and a log line asserting data loss that did not occur sends a user
+    to re-export a plate for nothing.
+    """
+    scan = _scan_delta_t(pixels, size_t)
+    if not size_t:
+        return None
+
+    complete = len(scan.hours_by_index) >= size_t
+    tokens = ([_hours_token(scan.hours_by_index[i]) for i in range(size_t)]
+              if complete else [])
+    # ``%g`` renders six significant figures, so two deltas that differ by less
+    # than that — or a writer that stamps the same placeholder on every plane —
+    # produce one token for two timepoints, and every image of the second would
+    # be written over the first's member name. Positional tokens name them all
+    # distinctly and lose only a number the file did not really state.
+    collided = sorted({t for t in tokens if tokens.count(t) > 1})
+    unrenderable = [i for i, t in enumerate(tokens) if not t]
+
+    if complete and not collided and not unrenderable:
+        return tokens
+    _log.warning(
+        "OME timepoints: naming by position (t0, t1, …) rather than by "
+        "elapsed time — %s.",
+        "; ".join(_fallback_reasons(scan, size_t, tokens, collided,
+                                    unrenderable)),
+    )
+    return None
+
+
 def _parse_ome_labels(
     ome_xml: str | None, size_c: int, size_t: int
 ) -> tuple[list[str], list[str], list[str]]:
     """Return ``(channel_names, timepoint_tokens, raw_channel_names)`` from OME-XML.
 
     Channel names come from the first ``Image``'s ``Channel`` elements (channels
-    are the same across positions in a plate scan). Timepoint tokens come from
-    the per-plane ``DeltaT`` when present — rendered as ``"<hours>h"`` so the
-    app's timepoint parser reads them chronologically — otherwise positional
-    ``t0``, ``t1``, …. Any parse failure falls back cleanly to positional tokens
-    for both, so a malformed or absent metadata block never aborts the explode.
+    are the same across positions in a plate scan). ``raw_channel_names`` are
+    those names before ``_safe_token`` normalises them, which is what a refusal
+    message has to quote: the user renames a channel in their acquisition
+    software, not in the filename token it reduces to.
+
+    Timepoint tokens come from the per-plane ``DeltaT`` when present — rendered
+    as ``"<hours>h"`` so the app's timepoint parser reads them chronologically —
+    otherwise positional ``t0``, ``t1``, …. :func:`_timepoint_tokens` owns that
+    decision and says in the run log whenever it falls back. Any parse failure
+    here falls back cleanly to positional tokens for both, so a malformed or
+    absent metadata block never aborts the explode.
     """
     channel_names = [f"c{i}" for i in range(size_c)]
     timepoint_tokens = [f"t{i}" for i in range(size_t)]
@@ -553,224 +704,7 @@ def _parse_ome_labels(
             for i in range(size_c)
         ]
 
-    # Timepoints from DeltaT on the T-index planes, converted to hours. A plane
-    # whose unit cannot be converted contributes nothing, so ``delta_by_t``
-    # comes up short of ``size_t`` and every token stays positional.
-    delta_by_t: dict[int, float] = {}
-    unreadable_units: set[str] = set()
-    unreadable_planes = 0
-    out_of_range = 0
-    for el in pixels:
-        if _localname(el.tag) != "Plane":
-            continue
-        the_t = el.get("TheT")
-        delta = el.get("DeltaT")
-        if the_t is None or delta is None:
-            continue
-        try:
-            ti = int(the_t)
-            value = float(delta)
-        except ValueError:
-            continue
-        # ``TheT`` is a zero-based index into the T axis, and a writer that
-        # stamps it one-based is the common deviation. Unchecked, those keys
-        # still satisfy the ``len(delta_by_t) >= size_t`` test below while
-        # attaching every elapsed time to the wrong array index — a file with
-        # TheT 1,2,3 and SizeT 3 rendered ``['t0', '0h', '1h']``, mixing the two
-        # vocabularies and giving two timepoints the same 0 h reading, with
-        # nothing saying so.
-        if not (0 <= ti < size_t):
-            out_of_range += 1
-            continue
-        # OME's default for DeltaT is seconds, so an *absent* unit is seconds.
-        # An unrecognised one is not: it is a unit this module cannot convert.
-        unit = (el.get("DeltaTUnit") or "s").strip()
-        # Case-sensitive symbols first: `Ms` and `ms` are different units and
-        # only their case tells them apart.
-        per_hour = _DELTA_T_HOURS_PER_SYMBOL.get(unit)
-        if per_hour is None and unit.lower() not in _DELTA_T_HOURS_PER_SYMBOL:
-            # Only fall through to the case-insensitive table when the unit is
-            # not a *case-significant* symbol in some other spelling. ``"MS"``
-            # is neither of OME's two: lower-cased it becomes the millisecond,
-            # which is the exact 10^9 fold this table exists to prevent, and
-            # silently picking the smaller of two units a spelling could mean
-            # is worse than declining to read it.
-            per_hour = _DELTA_T_HOURS_PER_UNIT.get(unit.lower())
-        if per_hour is None:
-            unreadable_units.add(unit)
-            unreadable_planes += 1
-            continue
-        delta_by_t.setdefault(ti, value * per_hour)
-
-    # Every route to a positional token is a *degradation*: the file stated a
-    # time and the archive will not carry it, so Review orders the timepoints by
-    # index and can put no number on an axis. Each one says so, because a
-    # ``t0``/``t1`` plate is otherwise indistinguishable from one whose writer
-    # recorded no DeltaT at all.
-    #
-    # The warnings live *inside* the branch that actually falls back. Reporting
-    # an unreadable unit wherever one was seen said "the timepoints are named by
-    # position" about a file whose timepoints had resolved perfectly — one
-    # channel's planes carrying a bad unit while another's carried seconds is
-    # enough — and a log line asserting data loss that did not happen sends a
-    # user to re-export a plate for nothing.
-    complete = bool(size_t) and len(delta_by_t) >= size_t
-    from_delta = (
-        [_hours_token(delta_by_t[i]) for i in range(size_t)] if complete else []
-    )
-    # ``%g`` renders six significant figures, so two deltas that differ by less
-    # than that — or a writer that stamps the same placeholder on every plane —
-    # produce one token for two timepoints, and every image of the second would
-    # be written over the first's member name. Positional tokens name them all
-    # distinctly and lose only a number the file did not really state.
-    collided = sorted({t for t in from_delta if from_delta.count(t) > 1})
-    unrenderable = [i for i, t in enumerate(from_delta) if not t]
-
-    if complete and not collided and not unrenderable:
-        timepoint_tokens = from_delta
-    elif size_t:
-        why: list[str] = []
-        if unreadable_units:
-            why.append(
-                f"{unreadable_planes} plane(s) carry a DeltaTUnit this "
-                f"converter cannot read ({', '.join(sorted(unreadable_units))})")
-        if out_of_range:
-            why.append(
-                f"{out_of_range} plane(s) carry a TheT outside "
-                f"0..{size_t - 1}, so the file's T indexing is not this "
-                f"converter's")
-        if complete and collided:
-            why.append(
-                f"the elapsed times render to {len(set(from_delta))} distinct "
-                f"label(s) for {len(from_delta)} timepoint(s) — "
-                f"{', '.join(collided)} repeat(s), and two timepoints sharing "
-                f"a label would write every image of the second over the first")
-        if complete and unrenderable:
-            why.append(
-                f"{len(unrenderable)} elapsed time(s) are not finite or not "
-                f"positive, and the app's timepoint parser reads neither")
-        if not complete and not why:
-            why.append(
-                f"only {len(delta_by_t)} of {size_t} timepoint(s) carry a "
-                f"readable DeltaT")
-        _log.warning(
-            "OME timepoints: naming by position (t0, t1, …) rather than by "
-            "elapsed time — %s.", "; ".join(why),
-        )
-
-    return channel_names, timepoint_tokens, raw_names
-
-    try:
-        root = ET.fromstring(ome_xml)
-    except ET.ParseError:
-        return channel_names, timepoint_tokens, raw_names
-
-    image = next((el for el in root.iter() if _localname(el.tag) == "Image"), None)
-    if image is None:
-        return channel_names, timepoint_tokens, raw_names
-
-    pixels = next(
-        (el for el in image.iter() if _localname(el.tag) == "Pixels"), None
-    )
-    if pixels is None:
-        return channel_names, timepoint_tokens, raw_names
-
-    # Channel names, in channel order.
-    names: list[str] = []
-    for el in pixels:
-        if _localname(el.tag) == "Channel":
-            names.append(el.get("Name") or "")
-    if names:
-        raw_names = [str(names[i]) if i < len(names) else "" for i in range(size_c)]
-        channel_names = [
-            _safe_token(names[i] if i < len(names) else "", f"c{i}")
-            for i in range(size_c)
-        ]
-
-    # Timepoints from DeltaT on the T-index planes, converted to hours through
-    # ``_DELTA_T_HOURS_PER_UNIT``. A plane whose unit is not in that table
-    # contributes nothing, so ``delta_by_t`` comes up short of ``size_t`` and
-    # every token stays positional.
-    delta_by_t: dict[int, float] = {}
-    unreadable_units: set[str] = set()
-    unreadable_planes = 0
-    for el in pixels:
-        if _localname(el.tag) != "Plane":
-            continue
-        the_t = el.get("TheT")
-        delta = el.get("DeltaT")
-        if the_t is None or delta is None:
-            continue
-        try:
-            ti = int(the_t)
-            value = float(delta)
-        except ValueError:
-            continue
-        # OME's default for DeltaT is seconds, so an *absent* unit is seconds.
-        # An unrecognised one is not: it is a unit this module cannot convert,
-        # and the plane is left without a delta, which drops the whole file back
-        # to positional tokens below.
-        unit = (el.get("DeltaTUnit") or "s").strip()
-        # Case-sensitive symbols first: `Ms` and `ms` are different units and
-        # only their case tells them apart.
-        per_hour = _DELTA_T_HOURS_PER_SYMBOL.get(unit)
-        if per_hour is None and unit.lower() not in _DELTA_T_HOURS_PER_SYMBOL:
-            # Only fall through to the case-insensitive table when the unit is
-            # not a *case-significant* symbol in some other spelling. ``"MS"``
-            # is neither of OME's two: lower-cased it becomes the millisecond,
-            # which is the exact 10^9 fold this table exists to prevent, and
-            # silently picking the smaller of two units a spelling could mean
-            # is worse than declining to read it.
-            per_hour = _DELTA_T_HOURS_PER_UNIT.get(unit.lower())
-        if per_hour is None:
-            unreadable_units.add(unit)
-            unreadable_planes += 1
-            continue
-        delta_by_t.setdefault(ti, value * per_hour)
-
-    # Every route to a positional token is a *degradation*: the file stated a
-    # time and the archive will not carry it, so Review orders the timepoints by
-    # index and can put no number on an axis. Each one says so, because a
-    # ``t0``/``t1`` plate is otherwise indistinguishable from one whose writer
-    # recorded no DeltaT at all.
-    if unreadable_units:
-        _log.warning(
-            "OME timepoints: %d plane(s) carry a DeltaTUnit this converter "
-            "cannot read (%s), so the timepoints are named by position (t0, "
-            "t1, …) rather than by elapsed time.",
-            unreadable_planes, ", ".join(sorted(unreadable_units)),
-        )
-    if size_t and delta_by_t and len(delta_by_t) < size_t:
-        _log.warning(
-            "OME timepoints: only %d of %d timepoint(s) carry a readable "
-            "DeltaT, so all of them are named by position (t0, t1, …).",
-            len(delta_by_t), size_t,
-        )
-
-    if delta_by_t and len(delta_by_t) >= size_t:
-        from_delta = [
-            f"{delta_by_t[i]:g}h" if i in delta_by_t else f"t{i}"
-            for i in range(size_t)
-        ]
-        # ``%g`` renders six significant figures, so two deltas that differ by
-        # less than that — or a writer that stamps the same placeholder on every
-        # plane — produce one token for two timepoints, and every image of the
-        # second would be written over the first's member name. Positional
-        # tokens name them all distinctly and lose only a number the file did
-        # not really state, which is the same trade the unreadable-unit branch
-        # above already takes.
-        if len(set(from_delta)) == len(from_delta):
-            timepoint_tokens = from_delta
-        else:
-            collided = sorted({t for t in from_delta if from_delta.count(t) > 1})
-            _log.warning(
-                "OME timepoints: the elapsed times render to %d distinct "
-                "label(s) for %d timepoint(s) — %s repeat(s) — so the "
-                "timepoints are named by position (t0, t1, …) rather than by "
-                "elapsed time. Two timepoints sharing a label would write "
-                "every image of the second over the first.",
-                len(set(from_delta)), len(from_delta), ", ".join(collided),
-            )
+    timepoint_tokens = _timepoint_tokens(pixels, size_t) or timepoint_tokens
 
     return channel_names, timepoint_tokens, raw_names
 

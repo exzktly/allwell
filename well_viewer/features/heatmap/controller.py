@@ -278,7 +278,23 @@ def _cell_value(
     fluor_gates: dict[str, float],
     ratios: dict | None = None,
 ) -> float:
-    """Compute the heatmap cell value by pooling rows across *wells*."""
+    """Compute the heatmap cell value by pooling rows across *wells*.
+
+    **This is a different statistic from the one Bar, Line and Stats show for
+    the same replicate set**, and the difference is not cosmetic. Those three
+    take the mean of each well's mean, weighting every well equally. Pooling
+    concatenates the cells first, so a well contributes in proportion to how
+    many cells it has — a replicate that segmented twice as many nuclei pulls
+    the cell twice as hard. On a set whose wells differ in confluence the two
+    numbers diverge, and a user reading a heatmap cell against the bar beside
+    it has no way to see why.
+
+    Which convention is right for a heatmap is a judgement nobody has recorded,
+    so this states what the code does rather than asserting it is correct. If
+    the two are ever unified, they must be unified everywhere at once:
+    ``aggregate_group`` is shared, and changing it silently re-scales every
+    figure in the app.
+    """
     expanded = _expand_repset_wells(ctx, wells)
     valid_wells = [w for w in expanded if w in ctx.state.dataset.well_paths]
     if not valid_wells:

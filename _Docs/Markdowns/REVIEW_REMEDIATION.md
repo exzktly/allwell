@@ -36,7 +36,7 @@ last row.**
 | W3 | Image identity and batch export (themes 4, 7) | worker | 14 | **in progress** |
 | ME | smFISH, fold change, stats, guards, docs | lead | 11 | **in progress** |
 
-Counts: **7 done · 0 declined · 0 deferred · 35 outstanding** of 42.
+Counts: **7 done · 0 declined · 1 deferred · 34 outstanding** of 42.
 
 The four groups are partitioned by file, not by theme, so that they can run at
 the same time without touching the same lines. Where a theme's items live in
@@ -111,7 +111,7 @@ or they will go red on files another group is still holding:
 | # | Sev | State | Item | Where it stands |
 |---|---|---|---|---|
 | 1 | High | done | A well whose spot-counting pass raises is logged and then dropped from `counts`; `counts.get(k, 0)` writes a full column of `0` into that well's CSV and `done_cb` still r | Fixed: worker.py records failed wells and _write_counts_to_csvs skips them, so they keep their previous counts and land in the run's shortfall instead of a fabricated zero column. tests/test_smfish_failed_well_is_not_zero_filled.py — proved by neutralising the skip at HEAD (real AssertionError). |
-| 31 | Medium | queued | The replicate-set average is a pool-of-cells mean, not the mean-of-per-well-means Bar, Line and Stats use. Possibly deliberate; undocumented either way. | well_viewer/features/heatmap/controller.py:272 `_cell_value` still pools rows across the expanded rep-set: METRIC_MEAN/COUNT/FRACTION go through `aggregate_group(ctx, valid_wells, ...)` (pooled cells) |
+| 31 | Medium | deferred | The replicate-set average is a pool-of-cells mean, not the mean-of-per-well-means Bar, Line and Stats use. Possibly deliberate; undocumented either way. | Half-closed: the divergence is now documented at _cell_value and in ARCHITECTURE (pool-of-cells vs mean-of-per-well-means, and when they diverge). Unifying them changes every heatmap number a user has seen and aggregate_group is shared, so which convention is right is the user's call, not mine. Revisit when that decision is made. |
 | 34 | Medium | done | The per-cell Events panel ignores `bar_err_settings`, so "None" and "95 % CI" apply to grouped mode only. | Fixed: draw_per_well_n_bars now reads bar_err_settings(ctx) — the same accessor the aggregate path uses — so the Show mode and error-bar type govern the per-cell Events panel, and 95 % CI scales by 1.96. tests/test_per_cell_events_honours_stats_controls.py, proved on origin/main. |
 | 39 | Low | done | Docstring says epsilon is *added*; the resolver *clamps* (`np.maximum(den, epsilon)`) — different numbers near and below zero on background-subtracted channels. | Swept: the clamp-not-add rule is now stated consistently in domain/ratio_models.py, data/data_loading.py, the Ratios tab intro text, and README_WellViewer.md. The manual was a fourth site the finding did not name. |
 | 47 | Low | queued | `tick_labels` de-duplicates by reference and `distinct_controls` by resolved wells, so a one-well control set plus that well's own token gives an axis title naming one co | The two de-duplications still key on different things and both are pinned as such: fold_change_pairing.py:137-146 (`distinct_controls`) skips on `rec.wells in seen`, while :535-543 (`tick_labels`) bui |

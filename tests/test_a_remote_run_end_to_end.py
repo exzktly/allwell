@@ -16,6 +16,7 @@ behaviour.
 
 from __future__ import annotations
 
+import subprocess
 import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -385,3 +386,78 @@ def test_the_transfer_model_honours_the_argv_shapes_the_runner_builds(
     rsync(["rsync", "-az", "test-host:~/out/*_out.zip", str(pulled) + "/"])
     assert sorted(q.name for q in pulled.glob("*.zip")) == [
         "A01_out.zip", "B02_out.zip"], sorted(pulled.iterdir())
+
+    # 4. A source that resolves to nothing exits 23, as real rsync does.
+    #    Returning 0 here made every failure branch downstream unreachable —
+    #    `Fetcher`'s per-well "could not pull", `_rsync_optional`'s
+    #    "note: X not pulled", and the whole of `_retry_missing_wells` — so a
+    #    regression that moved no bytes at all read as a clean run, which is
+    #    the shape this harness exists to catch.
+    missing = tmp_path / "missing"
+    missing.mkdir()
+    result = rsync(["rsync", "-az", "test-host:~/nowhere/A01_out.zip",
+                    str(missing) + "/"])
+    assert result.returncode == 23, (
+        "a pull of a file the host does not have reported success; real rsync "
+        f"exits 23. Got {result.returncode} and {sorted(missing.iterdir())}")
+    assert not list(missing.iterdir()), "it also invented a file"
+
+    # A glob matching nothing is the same failure, and is the shape
+    # `_retry_missing_wells` actually builds.
+    result = rsync(["rsync", "-az", "test-host:~/nowhere/*_out.zip",
+                    str(missing) + "/"])
+    assert result.returncode == 23, (
+        f"a glob matching nothing reported success: {result.returncode}")
+
+
+def test_the_fake_refuses_a_host_it_cannot_contain(tmp_path, remote):
+    """Containment here is one mechanism, and it does not cover every path.
+
+    `_bash` runs the script with `HOME` pointed at the fake root, so `~/x` and
+    `$HOME/x` land inside it. An absolute path is covered by nothing: `path()`
+    re-roots it for the assertion helpers, but the shell gets the script
+    verbatim. A host with `/scratch/$USER` staging — the normal configuration
+    on a cluster whose home is a small-quota NFS mount — would therefore run
+    its `mkdir -p` and its `rm -rf` against the machine running this suite
+    while `tree()` read the empty fake root and every assertion passed.
+
+    Refusing is the honest answer while nothing rewrites paths inside `_bash`.
+    """
+    from services.remote_runner import RemoteHost
+    host = RemoteHost(
+        name="t", ssh_alias="test-host", remote_project_dir="~/allwell",
+        remote_staging_dir="/scratch/someone/staging",
+        remote_python="/opt/python", cpu_only=False, extra_args=(),
+        cache_budget_gb=10, measured_bandwidth_mbps=100.0)
+    with pytest.raises(AssertionError) as caught:
+        remote.install(None, host)
+    assert "remote_staging_dir" in str(caught.value), (
+        f"it refused, but did not say which field: {caught.value}")
+
+
+def test_an_unrelated_subprocess_is_not_mistaken_for_a_pipeline_launch(
+        tmp_path, remote, monkeypatch):
+    """`install` patches the *shared* `subprocess` module, so its `Popen` seam
+    sees every process the test session starts, not only the runner's launches.
+
+    Without a prefix match, an `rsync --version` capability probe or any other
+    helper binary either aborted the test with a message about a pipeline
+    launch it never made, or appended its argv to `launched` — which the
+    end-to-end tests above assert on. Nothing in the suite reaches it today
+    only because those call sites happen to be stubbed.
+    """
+    from services.remote_runner import RemoteHost
+    host = RemoteHost(
+        name="t", ssh_alias="test-host", remote_project_dir="~/allwell",
+        remote_staging_dir="~/.allwell-staging", remote_python="/opt/python",
+        cpu_only=False, extra_args=(), cache_budget_gb=10,
+        measured_bandwidth_mbps=100.0)
+    remote.install(monkeypatch, host)  # no on_launch: a launch would raise
+
+    out = subprocess.run(["/bin/echo", "hello"], capture_output=True, text=True)
+
+    assert out.returncode == 0 and out.stdout.strip() == "hello", (
+        "an unrelated binary did not run: the Popen seam swallowed it")
+    assert remote.launched == [], (
+        f"an unrelated binary was recorded as a pipeline launch: "
+        f"{remote.launched}")

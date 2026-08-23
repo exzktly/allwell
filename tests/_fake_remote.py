@@ -54,13 +54,20 @@ class FakeRemote:
     def path(self, remote_path: str) -> Path:
         """The local path a remote path names. Always inside :attr:`root`.
 
-        An absolute ``remote_staging_dir`` — ``/scratch/$USER`` and friends, the
-        normal configuration on a cluster whose home directory is a small-quota
-        NFS mount — is re-rooted rather than passed through. Passing it through
-        meant a host fixture with a realistic staging dir ran ``mkdir -p`` and
-        ``rm -rf`` against the *test machine*, while :meth:`tree` looked inside
-        the fake root and reported nothing: a real deletion and a silently
-        passing assertion, from one plausible fixture.
+        ``~/`` and ``$HOME/`` are re-rooted, because :meth:`_bash` runs with
+        ``HOME`` pointing at :attr:`root` and the shell expands them there. An
+        absolute path is re-rooted too, but **only for this method and the
+        assertion helpers over it** — :meth:`_bash` hands the script to a real
+        shell verbatim, and nothing rewrites a path inside it.
+
+        That gap is why :meth:`install` refuses a host whose directories are
+        absolute. Accepting one meant a fixture with a realistic staging dir
+        (``/scratch/$USER`` and friends, the normal configuration on a cluster
+        whose home is a small-quota NFS mount) ran ``mkdir -p`` and ``rm -rf``
+        against the *test machine*, while :meth:`tree` looked inside the fake
+        root and reported nothing: a real deletion and a silently passing
+        assertion, from one plausible fixture. Re-rooting here without the
+        refusal is the shape that reads as safe and is not.
         """
         p = str(remote_path)
         for prefix in ("~/", "$HOME/"):
@@ -101,6 +108,33 @@ class FakeRemote:
         out, err = proc.communicate(stdin)
         return subprocess.CompletedProcess(argv, proc.returncode, out, err)
 
+    #: The host directories that end up inside a remote shell command, and so
+    #: must be ones ``HOME`` containment actually covers.
+    _HOST_DIR_FIELDS = ("remote_project_dir", "remote_staging_dir",
+                        "remote_scratch_dir")
+
+    def _refuse_absolute_host_dirs(self, host) -> None:
+        """Refuse a host this fake cannot contain, rather than escaping.
+
+        Containment here is one mechanism: the shell runs with ``HOME`` set to
+        :attr:`root`, so ``~/x`` and ``$HOME/x`` land inside it. An absolute
+        path is not covered by that and is not rewritten anywhere, so a test
+        using one would run its ``mkdir -p`` and its ``rm -rf`` against the
+        machine running the suite while every assertion read the empty fake
+        root and passed.
+        """
+        loose = [f"{f}={getattr(host, f)!r}" for f in self._HOST_DIR_FIELDS
+                 if str(getattr(host, f, "") or "").startswith("/")]
+        if loose:
+            raise AssertionError(
+                "FakeRemote contains a host by pointing HOME at a temporary "
+                "directory, which only covers paths written relative to it. "
+                "These are absolute, so the commands built from them would "
+                "run against the machine running this suite: "
+                + ", ".join(loose)
+                + ". Write them as '~/…' in the fixture, or teach _bash to "
+                "rewrite absolute paths before removing this check.")
+
     def install(self, monkeypatch, host, *, on_launch=None) -> None:
         """Point ``services.remote_runner`` at this host instead of a real one.
 
@@ -113,6 +147,7 @@ class FakeRemote:
         import services.remote_runner as rr
         from services import remote_transport
 
+        self._refuse_absolute_host_dirs(host)
         ssh_prefix = host.ssh_argv(allocate_tty=False)
         ssh_prefix_tty = host.ssh_argv(allocate_tty=True)
         real_run = subprocess.run
@@ -149,7 +184,13 @@ class FakeRemote:
               ``requirements-remote.txt`` and a correct sync reads as broken;
             * a **glob** source expands, because ``_retry_missing_wells``
               passes one and a literal ``*`` matches nothing and transfers
-              silently.
+              silently;
+            * a source that resolves to **nothing** exits **23**, as real rsync
+              does. Returning 0 there made every failure branch downstream
+              unreachable — ``Fetcher``'s per-well "could not pull", the
+              "note: X not pulled" of ``_rsync_optional``, and the whole of
+              ``_retry_missing_wells`` — so a regression that transferred no
+              bytes at all read as a clean run.
             """
             flags = [a for a in cmd[1:] if a.startswith("-")]
             relative = any("R" in f for f in flags if not f.startswith("--"))
@@ -163,7 +204,15 @@ class FakeRemote:
             dest_p = self._translate(dest, kw.get("cwd"))
             dest_is_dir = dest.endswith("/") or dest_p.is_dir()
             for src in sources:
-                for src_p in self._expand(src, kw.get("cwd")):
+                expanded = self._expand(src, kw.get("cwd"))
+                if not expanded:
+                    return subprocess.CompletedProcess(
+                        cmd, 23, "",
+                        f'rsync: [sender] link_stat "{src}" failed: '
+                        "No such file or directory (2)\n"
+                        "rsync error: some files/attrs were not transferred "
+                        "(see previous errors) (code 23)\n")
+                for src_p in expanded:
                     if relative:
                         rel = Path(src).as_posix().lstrip("/")
                         target = dest_p / rel
@@ -179,9 +228,24 @@ class FakeRemote:
             return subprocess.CompletedProcess(cmd, 0, "", "")
 
         def _popen(argv, *a, **kw):
-            self.launched.append(list(argv))
+            """Answer the runner's ssh launches; leave every other Popen alone.
+
+            ``subprocess.run`` looks ``Popen`` up in its own module globals,
+            which this patch replaces, so an unrelated helper — an ``rsync
+            --version`` capability probe, any binary a future code path
+            shells out to — used to land here: either aborting the test with
+            a message about a pipeline launch it never made, or appending its
+            argv to :attr:`launched`, which two end-to-end tests assert on.
+            Matching either ssh prefix — with and without a TTY — is the same
+            rule :func:`_run` uses.
+            """
+            argv = list(argv)
+            if not any(argv[:len(pre)] == list(pre)
+                       for pre in (ssh_prefix, ssh_prefix_tty)):
+                return self._REAL_POPEN(argv, *a, **kw)
+            self.launched.append(argv)
             if on_launch is not None:
-                return on_launch(list(argv))
+                return on_launch(argv)
             raise AssertionError(
                 "the run launched a pipeline and the test supplied no "
                 "on_launch to answer it")

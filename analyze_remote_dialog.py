@@ -1462,8 +1462,14 @@ class ManageRemotesDialog(QDialog):
 
     # ── list management ─────────────────────────────────────────────────
 
-    def _load_remotes_or_report(self) -> dict:
-        """``load_remotes()``, or ``{}`` after telling the user why not.
+    def _load_remotes_or_report(self) -> dict | None:
+        """``load_remotes()``, or ``None`` after telling the user why not.
+
+        ``None`` rather than ``{}`` so a caller can tell "the file says there
+        are no remotes" from "the file could not be read". ``_on_edit`` reading
+        an empty dict would go on to report the selected host as *deleted from
+        the file*, which is a different and untrue thing to say about a file
+        nothing could parse.
 
         Every entry point into this dialog reads that file, and each read is
         reached from a ``clicked`` slot. ``_reload`` caught ``ValueError`` and
@@ -1484,12 +1490,12 @@ class ManageRemotesDialog(QDialog):
                 "Fix the file (or move it aside) and reopen this dialog. "
                 "Until then AllWell has no configured remotes to offer.",
             )
-            return {}
+            return None
 
     def _reload(self) -> None:
         prev = self._selected_name()
         self._list.clear()
-        remotes = self._load_remotes_or_report()
+        remotes = self._load_remotes_or_report() or {}
         for name, host in remotes.items():
             item = QListWidgetItem(f"{name}    (ssh:{host.ssh_alias})", self._list)
             item.setData(Qt.UserRole, name)
@@ -1546,7 +1552,10 @@ class ManageRemotesDialog(QDialog):
         name = self._selected_name()
         if name is None:
             return
-        host = self._load_remotes_or_report().get(name)
+        remotes = self._load_remotes_or_report()
+        if remotes is None:
+            return                      # already reported; the file is unreadable
+        host = remotes.get(name)
         if host is None:
             QMessageBox.warning(self, "Gone",
                 f"Remote '{name}' has been deleted from the file.")
@@ -1596,8 +1605,14 @@ class ManageRemotesDialog(QDialog):
         name = self._selected_name()
         if name is None:
             return
-        host = self._load_remotes_or_report().get(name)
+        remotes = self._load_remotes_or_report()
+        if remotes is None:
+            return                      # already reported; the file is unreadable
+        host = remotes.get(name)
         if host is None:
+            QMessageBox.warning(self, "Gone",
+                f"Remote '{name}' has been deleted from the file.")
+            self._reload()
             return
         self._test_btn.setEnabled(False)
         self._test_btn.setText("Testing…")

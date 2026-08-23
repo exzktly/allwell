@@ -131,6 +131,10 @@ def test_edit_and_test_report_a_broken_remotes_toml(qtbot, boxes, monkeypatch, a
         f"{action} raised {escaped[0]!r}, so the button did nothing at all")
     assert any(kind == "critical" for kind, _t, _x in boxes), (
         f"{action} failed silently — no message named the unreadable file")
+    assert not any(kind == "warning" for kind, _t, _x in boxes), (
+        f"{action} also reported the host as deleted from the file, which is a "
+        f"different and untrue thing to say about a file nothing could parse: "
+        f"{boxes}")
 
 
 # ── U4: the Test button does not hold the GUI thread ────────────────────────

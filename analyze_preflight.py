@@ -297,8 +297,39 @@ class AnalyzePreflightMixin:
             head = f"The last run here started {when} and {ended}."
         return head + journal.tally()
 
+    def _preflight_is_wanted(self) -> bool:
+        """Whether the report may be on screen at all, right now.
+
+        Two states forbid it, and both are answers the user has already given:
+        a run is going, so the report describes a folder this run is in the
+        middle of making untrue (:meth:`suspend_preflight`); or they closed the
+        strip for this folder, and it must stay closed until they point
+        somewhere else.
+        """
+        if getattr(self, "_running", False):
+            return False
+        target = self._preflight_dir
+        dismissed = getattr(self, "_preflight_dismissed", "")
+        return not (target and dismissed and _same(dismissed, target))
+
     def _render_preflight(self, headline: str) -> None:
-        """Paint the banner, coverage line included when one has arrived."""
+        """Paint the banner, coverage line included when one has arrived.
+
+        The visibility gates are asked here rather than by each caller because
+        this is the only place the strip is shown, and the callers are not all
+        immediate: a coverage scan walks the output volume on a worker thread
+        and lands whenever it lands. ``settle_folder_banners`` checked both
+        gates and this did not, so a scan of a slow volume that started before
+        Run was pressed came back five seconds into the run and put the strip
+        up describing the folder the running job was overwriting — the exact
+        thing ``suspend_preflight``'s docstring says must not happen — and a
+        strip the user had dismissed came back the same way, with no second
+        dismissal available because the banner had never been re-offered.
+
+        The text is still updated when the strip is not wanted: it is what the
+        next legitimate paint will show, and computing it twice is the only
+        alternative.
+        """
         banner = getattr(self, "_preflight_banner", None)
         if banner is None:
             return
@@ -306,7 +337,7 @@ class AnalyzePreflightMixin:
         self._preflight_label.setText(
             " ".join(p for p in (headline, self._preflight_coverage,
                                  self._scope_line()) if p))
-        banner.setVisible(True)
+        banner.setVisible(self._preflight_is_wanted())
 
     def _scope_line(self) -> str:
         """What this run will do about images added since the last one.

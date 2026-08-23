@@ -521,3 +521,72 @@ def test_the_stale_coverage_line_is_dropped_after_a_run(tab, plate):
 
     _finish(tab, "error", plate / "out", plate / "in")
     assert "field group(s) already covered" not in _text(tab)
+
+
+# ── a late scan must not undo an answer the user already gave ───────────────
+#
+# The coverage scan walks the output volume on a daemon thread and lands
+# whenever it lands. ``settle_folder_banners`` checked both visibility gates
+# and ``_render_preflight`` -- the seam every scan completion paints through --
+# checked neither, so a scan started before Run was pressed put the strip back
+# up mid-run, describing the folder the running job was overwriting.
+
+def _deliver_scan(tab, plate, *, partial=False):
+    """Land a *real* finished coverage scan through the app's own handler."""
+    from analyze_preflight import _scan_coverage
+
+    tab._apply_pipeline_info({"execution_options": {
+        "filename_schema": SCHEMA, "filename_sep": SEP}})
+    block = _scan_coverage(plate / "in", plate / "out",
+                           tab._collect_run_options())
+    if partial:
+        block = {**block, "partial_scan": True}
+    tab._on_coverage_scanned(str(plate / "out"), block)
+
+
+def test_a_scan_landing_mid_run_does_not_put_the_report_back(tab, plate):
+    _journal(plate / "out", plate / "in")
+    _point_at(tab, plate)
+    assert not tab._preflight_banner.isHidden(), "fixture did not show the strip"
+
+    tab._running = True          # the user presses Run
+    tab.suspend_preflight()
+    assert tab._preflight_banner.isHidden()
+
+    _deliver_scan(tab, plate)   # ...and the slow scan finally answers
+    assert tab._preflight_banner.isHidden(), (
+        "the pre-run report came back during the run, describing the folder "
+        "the running job is overwriting"
+    )
+
+
+def test_a_scan_landing_after_a_dismissal_does_not_put_the_report_back(tab, plate):
+    _journal(plate / "out", plate / "in")
+    _point_at(tab, plate)
+    tab._dismiss_preflight()
+    assert tab._preflight_banner.isHidden()
+
+    _deliver_scan(tab, plate)
+    assert tab._preflight_banner.isHidden(), (
+        "a dismissed report came back on its own, and the user has no second "
+        "dismissal to give because they were never re-offered it"
+    )
+
+
+def test_a_partial_scan_landing_mid_run_is_equally_silent(tab, plate):
+    """The partial branch is a second, earlier return through the same seam."""
+    _journal(plate / "out", plate / "in")
+    _point_at(tab, plate)
+    tab._running = True
+    tab.suspend_preflight()
+    _deliver_scan(tab, plate, partial=True)
+    assert tab._preflight_banner.isHidden()
+
+
+def test_a_scan_landing_with_neither_gate_set_still_shows_the_report(tab, plate):
+    """The gates must not have turned the feature off."""
+    _journal(plate / "out", plate / "in")
+    _point_at(tab, plate)
+    _deliver_scan(tab, plate)
+    assert not tab._preflight_banner.isHidden()
+    assert "field group(s) already covered" in _text(tab), _text(tab)

@@ -593,11 +593,12 @@ def your_work(ctx) -> list:
         {"key": "labels", "label": "Wells labelled", "count": labelled,
          "total": len(getattr(dataset, "well_paths", None) or {}) or None},
         {"key": "smfish", "label": "smFISH thresholds", "count": len(smfish)},
-        # Read from the sidecar, so the count is right in a build with the
-        # Ratios editor profiled out: the ratio model is core, and a dataset's
-        # persisted ratios stay live as virtual channels in every plot whether
-        # or not the tab that defines them shipped. These rows report, they do
-        # not navigate, so nothing here offers a route to a tab that is gone.
+        # Read from the live channel state, so the count is right in a build
+        # with the Ratios editor profiled out: the ratio model is core, and a
+        # dataset's persisted ratios stay live as virtual channels in every
+        # plot whether or not the tab that defines them shipped. These rows
+        # report, they do not navigate, so nothing here offers a route to a tab
+        # that is gone.
         {"key": "ratios", "label": "Ratios", "count": len(ratios)},
         {"key": "notes", "label": "Notes", "count": 1 if notes.strip() else 0},
     ]

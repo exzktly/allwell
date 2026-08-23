@@ -88,11 +88,27 @@ class ZipFileCache:
         """
         if entry is None:
             return
+        # Bounded, not indefinite. Waiting for the reader is what makes the
+        # close safe, but ``invalidate()`` runs on the GUI thread from
+        # ``load_directory`` and a reader can be part-way through a member
+        # decode — so a hard ``with entry.lock`` would stall opening a dataset
+        # behind up to 32 of them. On timeout the handle is left to the garbage
+        # collector, which closes it once the reader is finished with it: a
+        # leaked descriptor for a moment is a smaller harm than a frozen
+        # window, and the entry is already out of the cache either way.
+        got = entry.lock.acquire(timeout=2.0)
         try:
-            with entry.lock:
-                entry.zf.close()
+            if not got:
+                _logger.debug(
+                    "zip cache: handle still in use at close; leaving it to be "
+                    "collected once the reader finishes")
+                return
+            entry.zf.close()
         except Exception:
             swallowed()  # was: pass (silent except)
+        finally:
+            if got:
+                entry.lock.release()
 
     def _evict_locked(self) -> list["_Entry"]:
         """Pop entries over the cap and return them for the caller to close."""

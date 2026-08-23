@@ -270,16 +270,36 @@ def test_teardown_survives_a_build_without_the_feature():
     runtime_app.teardown_review_pane(app)
 
 
-def test_the_auto_threshold_worker_can_be_cancelled():
-    """Restarting the pass waited 50 ms for the previous worker and then
-    started another regardless, so two live threads could both reach ``done``
-    and the later-*finishing* one decided the thresholds."""
-    from well_viewer.features.home.cell_gating import controller as cg
+def test_a_cancelled_auto_threshold_scan_actually_stops():
+    """The cancel has to be something the compute cannot swallow.
 
-    assert hasattr(cg._AutoThresholdWorker, "cancel")
+    The first version raised an exception from inside the progress callback —
+    and ``compute_auto_thresholds._emit`` wraps that callback in ``except
+    Exception``, so the raise was caught, the scan ran to completion, and every
+    later progress line logged a suppressed traceback. The guard for it
+    asserted only that a ``cancel`` method existed and that the restart site
+    contained the string ``prev.cancel()``, which is why it shipped.
+    """
+    from well_viewer.data import auto_threshold as at
+
+    seen: list[str] = []
+    result = at.compute_auto_thresholds(
+        pathlib.Path("/nonexistent-plate"),
+        fluor_channels=["gfp"],
+        progress=seen.append,
+        should_cancel=lambda: True,
+    )
+    assert result == {}
+
+
+def test_the_restart_guard_does_not_block_the_gui_for_seconds():
+    """Cancelling is what makes the restart safe — a cancelled pass disowns
+    whatever it computed — so the wait is a courtesy, not the mechanism.
+    Waiting two seconds on the GUI thread for a well read to finish is what a
+    user experiences as a frozen window."""
     src = (REPO_ROOT / "well_viewer" / "features" / "home" / "cell_gating"
            / "controller.py").read_text()
-    assert "prev.cancel()" in src, "the restart guard does not cancel the old pass"
+    assert "prev.wait(2000)" not in src
 
 
 def test_zip_handles_are_closed_under_the_reader_lock():
@@ -329,3 +349,116 @@ def test_the_ratio_count_reads_live_state_not_a_sidecar_key():
     src = (REPO_ROOT / "well_viewer" / "features" / "home" / "collect.py").read_text()
     assert 'info.get("ratios")' not in src
     assert "ratio_metrics" in src
+
+
+# ── 6. the corrections a review of this branch required ──────────────────────
+
+def test_a_drained_save_does_not_fire_again_when_its_timer_lands():
+    """``schedule_save`` arms a ``QTimer.singleShot`` lambda that cannot be
+    cancelled, so it still fires ~500 ms after ``flush_all`` has written and
+    drained the domain. ``_flush`` discarded-then-saved unconditionally, so
+    that second firing wrote again — and on a dataset swap it landed after
+    ``begin_load``, putting the previous plate's ratios, layouts, line order or
+    crop into the new plate's document. That is the exact bug ``flush_all``
+    exists to prevent, so the pending set has to be the authority on whether a
+    save is still owed."""
+    from well_viewer.persistence.registry import PersistenceRegistry
+
+    writes: list[str] = []
+    reg = PersistenceRegistry(types.SimpleNamespace())
+    reg.register("ratios", save=lambda _c: writes.append("ratios"))
+    reg._pending.add("ratios")
+
+    reg.flush_all()
+    assert writes == ["ratios"]
+
+    # The stray timer landing afterwards.
+    reg._flush("ratios")
+    assert writes == ["ratios"], "a drained domain was written a second time"
+
+
+def test_a_log_scale_and_mark_styling_survive_a_dataset_swap():
+    """Only the *limits* carry the old plate's units. Clearing the whole of
+    ``axis_prefs`` also reset the user's log axes and mark styling on every
+    dataset switch — the "how I like to look at it" half of the rule the reset
+    is built on, and the half ARCHITECTURE says follows the user."""
+    from well_viewer.core.export_prefs_state import ExportPrefsState
+
+    st = ExportPrefsState()
+    st.axis_prefs = {
+        "bar": {"y_lim_max": 12.0, "y_log": True, "marker_size": 8.0},
+        "line": {"y_lim_min": 1.0},
+    }
+    st.reset_for_new_dataset()
+    assert st.axis_prefs == {"bar": {"y_log": True, "marker_size": 8.0}}
+
+
+def test_the_time_scale_multiplier_does_not_follow_the_user_to_the_next_plate():
+    """"Interval per timepoint" is a statement about the plate whose filename
+    cadence does not match the hours it was imaged at, and the factor is
+    printed in the axis label — so carrying it over relabels every time axis on
+    the next plate in a way that reads as the data."""
+    from well_viewer.core.plot_state import PlotState
+
+    st = PlotState()
+    st.time_scale = 4.0
+    st.reset_for_new_dataset()
+    assert st.time_scale == 1.0
+
+
+def test_a_document_from_a_newer_build_is_left_alone(tmp_path):
+    """A legible file written by a schema this build does not know is not
+    corrupt. Renaming it aside would make a user who alternates builds lose the
+    other one's state on every launch, under a filename claiming it was
+    unreadable; refusing to write is enough to keep both safe."""
+    from well_viewer.persistence import _doc
+
+    out = tmp_path / "out"
+    out.mkdir()
+    state = _doc_state(out)
+    state.dataset.persistence_doc_foreign = False
+    p = _doc.path_for(state)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"schema_version": 9999, "ratios": ["theirs"]}))
+
+    _doc.read(state)
+    assert state.dataset.persistence_doc_foreign is True
+    assert state.dataset.persistence_doc_degraded is False
+
+    _doc.write(state, {"ratios": []})
+
+    assert json.loads(p.read_text())["ratios"] == ["theirs"]
+    assert not list(p.parent.glob(f"{p.stem}.unreadable-*{p.suffix}"))
+
+
+def test_an_unpreservable_corrupt_file_is_not_overwritten(tmp_path, monkeypatch):
+    """If the copy cannot be made — a read-only directory, a permission problem
+    — writing anyway destroys the very file the rename exists to preserve."""
+    from well_viewer.persistence import _doc
+
+    out = tmp_path / "out"
+    out.mkdir()
+    state = _doc_state(out)
+    p = _doc.path_for(state)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("{ not json")
+    _doc.read(state)
+    assert state.dataset.persistence_doc_degraded is True
+
+    monkeypatch.setattr(_doc, "_set_aside_unreadable", lambda _p: False)
+    _doc.write(state, {"ratios": []})
+    assert p.read_text() == "{ not json"
+
+
+def test_an_in_progress_note_is_committed_before_the_queue_is_drained():
+    """The notes editors commit on focus-out, and closing a window does not
+    move focus — so the edit is not in the queue at all. Draining a queue the
+    edit never entered writes everything except the thing the user was
+    typing."""
+    src = (REPO_ROOT / "allwell.py").read_text()
+    tree = ast.parse(src)
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.FunctionDef) and n.name == "closeEvent")
+    body = ast.unparse(fn)
+    assert "commit_focused_notes" in body
+    assert body.index("commit_focused_notes") < body.index("flush_all")

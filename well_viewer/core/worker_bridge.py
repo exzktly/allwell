@@ -162,7 +162,7 @@ class GuiLogRelay(QObject):
         self._line.emit(text)
 
 
-def stop_runtime_workers(runtime, slice_name: str, attrs, *, wait_ms: int = 2000) -> None:
+def stop_runtime_workers(runtime, slice_name: str, attrs, *, wait_ms: int = 250) -> None:
     """Cancel and join the QThreads a runtime slice is holding.
 
     App-close teardown has to stop several features' workers, and every one of
@@ -175,6 +175,13 @@ def stop_runtime_workers(runtime, slice_name: str, attrs, *, wait_ms: int = 2000
 
     Never imports a feature: the workers are reached through runtime state, so
     a build without the feature simply finds nothing to stop.
+
+    The wait is short on purpose. ``cancel()`` is what makes the stop safe —
+    a cancelled worker disowns whatever it produces — so waiting is only a
+    courtesy to let a thread unwind at its next checkpoint. Blocking the window
+    close for seconds while a worker finishes reading a well is a worse
+    outcome than letting a daemon thread exit on its own after the pane is
+    gone, and the wait is what a user experiences as "the app won't quit".
     """
     slice_ = getattr(runtime, slice_name, None)
     if slice_ is None:

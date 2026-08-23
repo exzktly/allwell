@@ -84,6 +84,17 @@ class PersistenceRegistry:
             self._flush(name)
 
     def _flush(self, name: str) -> None:
+        # The ``QTimer.singleShot`` lambdas ``schedule_save`` arms cannot be
+        # cancelled, so they still fire ~500 ms later after ``flush_all`` has
+        # already written and drained the domain. Discarding-then-saving
+        # unconditionally meant that second firing wrote *again* — and on a
+        # dataset swap it landed after ``begin_load``, putting the previous
+        # plate's ratios, layouts, line order or crop into the new plate's
+        # ``persistence.json``. That is the exact bug ``flush_all`` exists to
+        # prevent, so the pending set is the authority on whether a save is
+        # still owed, not merely a coalescing hint.
+        if name not in self._pending:
+            return
         self._pending.discard(name)
         # A debounced autosave runs from a QTimer with no caller to catch a
         # raise — an exception here (e.g. a disk-full write in

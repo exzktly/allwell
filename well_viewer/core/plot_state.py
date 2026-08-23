@@ -329,3 +329,10 @@ class PlotState:
         self.line_order_wells = []
         self.bar_group_mode = "well"
         self.bar_order = None
+        # The "Interval per timepoint" multiplier: a statement about the plate
+        # whose filename cadence does not match the hours it was imaged at.
+        # ``view_state`` restores it only when the new plate saved one, which
+        # is precisely the early-return case this reset exists for — so plate
+        # A's factor relabelled every time axis on plate B, with the factor
+        # printed in the label so it read as the data.
+        self.time_scale = 1.0

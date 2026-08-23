@@ -6758,9 +6758,11 @@ succeeds (§6b).
 `load_controller` calls all three. The rule dividing what is cleared from what
 is kept is *which data* versus *how I like to look at it*: a fold-change
 control names a well, a baseline names a timepoint, a line order names wells, a
-LUT is a pair of intensities, an `axis_prefs` limit is in the units of the plate
-that was open — all of those describe a plate that is no longer open. SEM-vs-SD,
-log axes and the publication style are preferences and follow the user.
+LUT is a pair of intensities, an `axis_prefs` *limit* is in the units of the
+plate that was open — all of those describe a plate that is no longer open.
+SEM-vs-SD, log axes, mark styling and the publication style are preferences and
+follow the user, which is why the reset drops only `AXIS_LIMIT_PREF_KEYS` from
+each figure's entry rather than clearing `axis_prefs` wholesale.
 
 `view_state.restore` cannot stand in for this: it early-returns when the new
 plate has no saved block, which is exactly the case where the previous plate's

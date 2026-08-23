@@ -1599,6 +1599,18 @@ class AllWellApp(QMainWindow):
             except Exception:
                 swallowed()  # was: pass (silent except)
             try:
+                # An in-progress notes edit is not in the queue at all: the
+                # editors commit on focus-out, and closing a window does not
+                # move focus. ``commit_focused_notes`` exists for exactly this
+                # — its docstring names "window close" — so the text on screen
+                # is folded into the state slice *before* the queue is drained.
+                # Draining a queue the edit never entered would have written
+                # everything except the thing the user was typing.
+                from well_viewer.core.ui_helpers import commit_focused_notes
+                commit_focused_notes(self._review._ctx)
+            except Exception:
+                swallowed()
+            try:
                 # Everything else the user edited is behind a 500 ms debounce
                 # timer that will never fire now. Only ``view_state`` had a
                 # force-save here, so an edit to a ratio, a heat-map layout, a

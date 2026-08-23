@@ -36,14 +36,29 @@ class ExportPrefsState:
     axis_prefs: dict = field(default_factory=dict)
 
     def reset_for_new_dataset(self) -> None:
-        """Drop the per-figure axis views, keep the publication style.
+        """Drop the per-figure axis *limits*, keep everything else.
 
-        ``style_prefs`` is a look the user chose — fonts, line weights,
-        publication palette — and it should follow them between plates.
-        ``axis_prefs`` is the opposite: explicit x/y limits, log flags and mark
-        styling recorded per figure, in the *units of the plate that was open*.
-        Re-applying plate A's ``y_lim_max`` to plate B happens on every redraw,
-        through ``apply_export_style_prefs``, and looks exactly like a plot
-        that has decided to clip itself.
+        The dividing rule is the same one the load path applies everywhere:
+        *which data* versus *how I like to look at it*. An explicit
+        ``y_lim_max`` is in the units of the plate that was open, and
+        ``apply_export_style_prefs`` re-applies it on every redraw — so it
+        follows the next plate around looking exactly like a plot that has
+        decided to clip itself.
+
+        A log scale and the mark styling (line width, marker size and their
+        kin) are the other half: they are how the user likes a figure to read,
+        they carry no plate-specific units, and `plot_style`'s own comment
+        calls mark size a property of what the plot *draws*. Clearing the whole
+        of ``axis_prefs`` took those with it and silently reset a user's mark
+        styling on every dataset switch. ``style_prefs`` — the publication look
+        — was never in scope.
         """
-        self.axis_prefs = {}
+        from well_viewer.core.plot_style import AXIS_LIMIT_PREF_KEYS
+
+        for fig_prefs in self.axis_prefs.values():
+            if isinstance(fig_prefs, dict):
+                for key in AXIS_LIMIT_PREF_KEYS:
+                    fig_prefs.pop(key, None)
+        # Drop any figure whose entry is now empty, so the store does not grow
+        # a husk per figure per dataset.
+        self.axis_prefs = {k: v for k, v in self.axis_prefs.items() if v}

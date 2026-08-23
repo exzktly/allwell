@@ -807,10 +807,6 @@ def cell_gating_start_gating_worker(ctx) -> None:
     worker.start()
 
 
-class _AutoThresholdCancelled(Exception):
-    """Internal: unwinds :class:`_AutoThresholdWorker`'s scan on cancel."""
-
-
 class _AutoThresholdWorker(QThread):
     """Run :func:`well_viewer.auto_threshold.compute_auto_thresholds` on a
     background thread so the GUI stays responsive while images load.
@@ -862,24 +858,19 @@ class _AutoThresholdWorker(QThread):
         _log = _logging.getLogger("well_viewer.data.auto_threshold")
         try:
             from well_viewer.data.auto_threshold import compute_auto_thresholds
-            def _progress(msg) -> None:
-                if self._cancelled:
-                    # The only interruption point this pass has: raising out of
-                    # the progress callback unwinds the scan instead of reading
-                    # every remaining well for a result nobody will use.
-                    raise _AutoThresholdCancelled()
-                self.progress.emit(str(msg))
-
             result = compute_auto_thresholds(
                 self._out_dir,
                 fluor_channels=self._channels,
-                progress=_progress,
+                progress=lambda msg: self.progress.emit(str(msg)),
                 well_labels=self._well_labels or None,
                 in_dir=self._in_dir,
+                # An explicit predicate, not an exception raised from the
+                # progress callback: ``_emit`` wraps that callback in
+                # ``except Exception``, so a cancel signalled that way is
+                # swallowed and the scan runs to completion regardless.
+                should_cancel=lambda: self._cancelled,
             )
-        except _AutoThresholdCancelled:
-            _log.info("Auto-threshold pass cancelled.")
-            return
+
         except Exception as exc:
             _log.error(
                 "Auto-threshold worker failed: %s\n%s",
@@ -933,11 +924,15 @@ def cell_gating_auto_threshold(ctx) -> None:
     prev = ctx.runtime.cell_gating.auto_worker
     if prev is not None and prev.isRunning():
         try:
-            # Cancel *then* wait. Waiting 50 ms on an uncancelled pass and
-            # starting another anyway left two live threads racing to decide
-            # the thresholds, with the later-finishing one winning.
+            # Cancel, then wait only briefly. The cancel is what makes the
+            # restart safe: the old pass stops at its next well boundary and,
+            # whatever it computed, ``run`` refuses to emit ``done`` once
+            # cancelled — so the later-*started* pass decides the thresholds
+            # rather than the later-*finishing* one. Blocking the GUI thread
+            # for the full stop instead would freeze the window for as long as
+            # the current well takes to read.
             prev.cancel()
-            prev.wait(2000)
+            prev.wait(50)
         except Exception:
             swallowed()  # was: pass (silent except)
     btn = ctx.runtime.cell_gating.auto_btn
@@ -1660,27 +1655,3 @@ def _cell_gating_persist_params(ctx) -> None:
         save_to_pipeline_info(ctx)
     except Exception:
         logger.exception("Failed to save gating params to pipeline_info.json")
-
-
-def cell_gating_shutdown(ctx) -> None:
-    """Stop both Cell Gating workers, for app teardown.
-
-    Neither was stopped anywhere: ``teardown_review_pane`` covered smFISH and
-    the Cell Browser loader and not these, so quitting mid-pass left a QThread
-    running against a pane being destroyed — and the gating worker writes
-    ``Included`` flags onto the row cache as it goes.
-    """
-    runtime = getattr(getattr(ctx, "runtime", None), "cell_gating", None)
-    if runtime is None:
-        return
-    for attr in ("worker", "auto_worker"):
-        w = getattr(runtime, attr, None)
-        if w is None:
-            continue
-        try:
-            if hasattr(w, "cancel"):
-                w.cancel()
-            if w.isRunning():
-                w.wait(2000)
-        except Exception:
-            logger.debug("teardown: cell-gating %s stop failed", attr, exc_info=True)

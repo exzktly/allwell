@@ -370,8 +370,17 @@ def _ensure_export_style_prefs(ctx) -> dict:
 # so editing them on one tab leaked onto every other tab. They now live in a
 # per-figure store (``app._export_axis_prefs[fig_key]``) overlaid on the global
 # style via :class:`_FigurePrefs`.
-AXIS_SCOPED_PREF_KEYS = frozenset({
+# The subset of the axis keys that carry a *value in the plate's own units*.
+# These are the ones a dataset switch has to drop (``ExportPrefsState.
+# reset_for_new_dataset``): a limit typed for one plate re-applies itself on
+# every redraw of the next one. A log scale and the bucket/target settings
+# beside them are preferences about how to read a figure, not measurements
+# from it, so they follow the user across plates.
+AXIS_LIMIT_PREF_KEYS = frozenset({
     "x_lim_min", "x_lim_max", "y_lim_min", "y_lim_max",
+})
+
+AXIS_SCOPED_PREF_KEYS = AXIS_LIMIT_PREF_KEYS | frozenset({
     "x_log", "y_log", "axis_buckets", "axis_target",
 })
 

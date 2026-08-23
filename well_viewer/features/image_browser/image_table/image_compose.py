@@ -242,7 +242,18 @@ def _export_binary_mask(ctx, cache, well, chan, tp, fov, binary_mode, crop_tool)
                 ctx, mask_arr, well, norm_fov, norm_tp, channel=gate_channel
             ) or {}
         except Exception:
-            above_by_nid = {}
+            # ``{}`` here rendered an all-black silhouette — the *same* picture
+            # a cell with genuinely no nuclei above threshold produces, which
+            # is a real and common result. The failure was therefore
+            # indistinguishable from the measurement. ``None`` is the value
+            # this function already uses for "cannot render this cell", and the
+            # caller labels it; the log line names the cell.
+            logger.exception(
+                "image_table: could not build the threshold map for well=%r "
+                "channel=%r tp=%r fov=%r — the cell is reported unrenderable "
+                "rather than drawn as an empty mask", well, chan, tp, fov,
+            )
+            return None
         m = _np.asarray(mask_arr)
         passing = [nid for nid, ok in above_by_nid.items() if ok]
         bm = _np.isin(m, passing) if passing else _np.zeros(m.shape, dtype=bool)
@@ -612,8 +623,17 @@ def _render_threshold_binary(ctx, cache, well, chan, tp, fov, crop_tool, sz) -> 
         above_by_nid = review_build_threshold_map(
             ctx, mask_arr, well, norm_fov, norm_tp, channel=gate_channel
         ) or {}
-    except Exception:  # fall back to an all-off mask on any error
-        above_by_nid = {}
+    except Exception:
+        # As in ``_export_binary_mask``: an all-off mask is what a cell with no
+        # nuclei above threshold genuinely looks like, so returning one on a
+        # failure makes the two indistinguishable. ``None`` is this function's
+        # own "nothing to show" value and the caller already handles it.
+        logger.exception(
+            "image_table: could not build the threshold map for well=%r "
+            "channel=%r tp=%r fov=%r — showing nothing for this cell rather "
+            "than an empty mask", well, chan, tp, fov,
+        )
+        return None
     m = _np.asarray(mask_arr)
     passing = [nid for nid, ok in above_by_nid.items() if ok]
     binary = _np.isin(m, passing) if passing else _np.zeros(m.shape, dtype=bool)

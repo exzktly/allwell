@@ -102,6 +102,29 @@ def _needs_rewrite(src_well: str, dest_well: str) -> bool:
     return src_well != dest_well
 
 
+def _refuse_dropped(src_well: str, dest_well: str, dropped, where: str) -> None:
+    """Fail the merge when members collided by name and were skipped.
+
+    ``copy_container_members`` is first-write-wins: a member whose name is
+    already in the destination is silently not written, and the set of those
+    names is its second return value. This tool bound that set to ``_dropped``
+    and threw it away, so a remapping that landed two source members on one
+    destination name produced an archive holding fewer images than the source,
+    and reported success. Concatenate treats the identical event as a
+    verification failure, in the same words; a well token rewrite is not a
+    reason for the two tools to disagree about whether losing data is an error.
+    """
+    if not dropped:
+        return
+    names = sorted(dropped)
+    raise MergePlatesError(
+        f"Verification failed: {len(names)} file(s) from well {src_well} "
+        f"collided by name while being written to {where} and were dropped "
+        f"(e.g. {names[0]!r}) — that data did not survive the merge into "
+        f"{dest_well}."
+    )
+
+
 def _merge_input(
     plan: PlateMergePlan, dest_well: str, src_well: str, container: Path | None,
     *, fraction: WellFraction,
@@ -133,11 +156,12 @@ def _merge_input(
             "rewrite well tokens inside zip archives. Re-run the pipeline with "
             "compressed input, or don't remap this well."
         )
-    written, _dropped = copy_container_members(
+    written, dropped = copy_container_members(
         plan.dest.in_dir / f"{dest_well}.zip", [container],
         _remap(plan, src_well, dest_well),
         progress=fraction.slice_progress(),
     )
+    _refuse_dropped(src_well, dest_well, dropped, f"in/{dest_well}.zip")
     return written
 
 
@@ -154,11 +178,12 @@ def _merge_qc_zip(
         publish_container(container, plan.dest.out_dir / f"{dest_well}_out.zip")
         fraction.skip()
         return
-    copy_container_members(
+    _written, dropped = copy_container_members(
         plan.dest.out_dir / f"{dest_well}_out.zip", [container],
         _remap(plan, src_well, dest_well),
         progress=fraction.slice_progress(),
     )
+    _refuse_dropped(src_well, dest_well, dropped, f"out/{dest_well}_out.zip")
 
 
 def _read_csv(path: Path) -> tuple[list[dict], list[str]]:

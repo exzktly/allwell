@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from well_viewer.domain.numeric import is_number
 from well_viewer.domain.selections_model import well_display_label, active_replicate_sets
 from well_viewer.domain.viewer_state import parse_rc
 from widgets import menu_exec
@@ -238,8 +239,7 @@ def render_bar_items(
             # placeholder is kept for the undefined case.
             _n_above_known = (
                 item.has_mean
-                and isinstance(item.n_above, (int, float))
-                and math.isfinite(float(item.n_above))
+                and is_number(item.n_above)
             )
             if _n_above_known:
                 ax_n.bar(x, item.n_above, width=bar_w, color=color,

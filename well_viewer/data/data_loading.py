@@ -311,6 +311,34 @@ def detect_review_image_channels(df: pd.DataFrame, fluor_channels: list[str], se
 
 # ── DataFrame helpers ────────────────────────────────────────────────────────
 
+#: Columns whose absence has already been announced, so the warning below is a
+#: line per missing column per session rather than one per redraw.
+_missing_area_warned: set[str] = set()
+
+
+def _warn_no_area_column(where: str) -> None:
+    """Say out loud that a frame has no ``area_px``, once.
+
+    Both aggregation entry points return an empty result when the column is
+    absent, which is correct — cell area is the gate every downstream statistic
+    is defined against — but they returned it silently. Every plot in the app
+    then drew nothing at all, with no status line, no log line and no empty
+    state naming a cause, on a dataset that had loaded without complaint. A
+    CSV written by an older pipeline, or one hand-edited down to a few columns,
+    lands exactly here.
+    """
+    if where in _missing_area_warned:
+        return
+    _missing_area_warned.add(where)
+    _logger.warning(
+        "%s: the loaded CSVs have no 'area_px' column, so no cells can be "
+        "gated by area and every aggregation returns empty — the plots will "
+        "draw nothing. This column is written by the segmentation step; a CSV "
+        "from an older pipeline run, or one that has been edited down, will "
+        "not have it.", where,
+    )
+
+
 def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True) -> pd.Series:
     """Rows that count toward analysis: ``Included == 1`` composed with the QC,
     crop, and scatter-gate layers.
@@ -574,6 +602,7 @@ def aggregate_with_threshold_df(
             # them — same dataset, different counts.
             mask &= np.isfinite(area)
     else:
+        _warn_no_area_column("aggregate_with_threshold_df")
         return []
 
     for channel, gate in active_fluor_gates(fluor_gates).items():
@@ -796,6 +825,7 @@ def _all_fluor_values_filtered(
         with np.errstate(invalid="ignore"):
             mask &= np.isfinite(area)
     else:
+        _warn_no_area_column("all_fluor_values_filtered")
         return np.empty(0, dtype=float)
 
     for channel, gate in active_fluor_gates(fluor_gates).items():

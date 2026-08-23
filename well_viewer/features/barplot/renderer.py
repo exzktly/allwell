@@ -1269,20 +1269,27 @@ def draw_per_well_n_bars(
             )
         matched = [pt for pt in pts if tp_close(pt[0], col_tp)]
         color = colors[i % len(colors)] if colors else color_for_well(lbl)
+        # ``bar_val > 0`` conflated two different facts, in the direction that
+        # hides real data: a well the pipeline measured as having no events
+        # above threshold drew the dashed "could not be computed" placeholder,
+        # identical to a well with no point at this timepoint at all. Zero is a
+        # measurement — it gets a real, zero-height bar. ``render_bar_items``
+        # beside this one already decides it this way; the two draw the same
+        # panel and must not disagree.
+        known = False
+        bar_val = err_val = 0.0
         if matched:
             pt = matched[0]
             if per_fov_spread:
                 # AggPoint index 7 = mean per-FOV n_above; index 8 = SD/SEM.
-                bar_val = float(pt[7]) if len(pt) >= 8 else 0.0
+                bar_val = float(pt[7]) if len(pt) >= 8 else float("nan")
                 err_val = float(pt[8]) if len(pt) >= 9 else 0.0
             else:
                 # AggPoint index 4 = total n_above for the well.
                 bar_val = float(pt[4])
                 err_val = 0.0
-        else:
-            bar_val = 0.0
-            err_val = 0.0
-        if bar_val > 0:
+            known = math.isfinite(bar_val)
+        if known:
             ax_n.bar(xi, bar_val, width=bar_w, color=color, alpha=0.85, zorder=3, linewidth=0)
             if err_val > 0:
                 ax_n.errorbar(xi, bar_val, yerr=err_val, fmt="none", ecolor=theme.Colors.err_bar, elinewidth=1.4, capsize=4, zorder=4)

@@ -135,10 +135,15 @@ def ripley_l(
     pts = _as_points(points)
     n = pts.shape[0]
     if n < 2:
+        # Not zeros. A zero L(r) - r curve inside a zero-width CSR envelope
+        # reads as a frame measured to be *perfectly* random with no
+        # uncertainty at all — the strongest claim this function can make,
+        # produced from one cell or none. NaN draws nothing, which is what
+        # "there was not enough here to say" should look like.
         r = np.linspace(0.0, 1.0 if r_max is None else float(r_max), max(2, n_r))
-        zeros = np.zeros_like(r)
-        return RipleyResult(r=r, L_minus_r=zeros, csr_lo=zeros, csr_hi=zeros,
-                            n_points=n)
+        undefined = np.full_like(r, np.nan)
+        return RipleyResult(r=r, L_minus_r=undefined,
+                            csr_lo=undefined, csr_hi=undefined, n_points=n)
 
     xmin, ymin = pts.min(axis=0)
     xmax, ymax = pts.max(axis=0)
@@ -598,8 +603,11 @@ def radial_profile(
             means[b] = float(np.mean(block))
             if block.size > 1:
                 sems[b] = float(np.std(block, ddof=1) / np.sqrt(block.size))
-            else:
-                sems[b] = 0.0
+            # A single-cell bin is left at NaN, like an empty one. One value has
+            # no spread; that is not the same fact as several values agreeing
+            # exactly, and 0.0 is how the two became indistinguishable — the
+            # misleading case being the one drawn as data, with a mean and no
+            # error band, beside bins whose bands were measured.
     return RadialProfile(bin_centres=centres, mean=means, sem=sems,
                           n_per_bin=counts)
 

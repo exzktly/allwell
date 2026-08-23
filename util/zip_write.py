@@ -186,7 +186,13 @@ def replace_folder_with_archive(
         remove_dir(folder)
     else:
         shutil.rmtree(folder, ignore_errors=True)
-    return FolderReplacement(kept=(), folder_removed=True)
+    # ``ignore_errors=True`` returns quietly on a locked file or a permission
+    # error, and this used to report ``folder_removed=True`` regardless — a
+    # caller that logs "replaced the folder with the archive", or that counts
+    # reclaimed space, was told a removal had happened that had not. The
+    # question the flag is meant to answer is whether the folder is gone, so
+    # ask the filesystem.
+    return FolderReplacement(kept=(), folder_removed=not folder.exists())
 
 
 @contextmanager

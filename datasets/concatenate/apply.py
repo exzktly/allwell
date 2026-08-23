@@ -601,6 +601,18 @@ def execute_plan(
             "dataset 1 and apply to dataset 2's rows too — review them after "
             "opening the merged dataset."
         )
+    # Dataset 2's own user blocks are not merged; dataset 1's replace them
+    # wholesale. That is the documented rule, but it was applied silently, and
+    # ``wells_ds2_only`` is normally non-empty — so a plate's replicate sets,
+    # groups, notes and ratios simply were not in the merged dataset and
+    # nothing said they had been left behind.
+    if plan.ds2_blocks_dropped:
+        emit(
+            "Note: dataset 2's " + ", ".join(plan.ds2_blocks_dropped)
+            + " were not carried over — dataset 1's are used for the whole "
+            "merged plate. Re-enter anything dataset 2 had that dataset 1 "
+            "did not."
+        )
 
     if plan.dest_is_restart:
         emit(

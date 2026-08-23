@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import math
 import re
 
 import theme
@@ -78,6 +77,7 @@ _PROG_BAR_W = 180
 _TP_LB_MIN_H = 120
 # Sibling-feature ctx forms reached through core.lazy proxies — a call, not an
 # import statement, so no module-load cycle and no deferred-import-budget hit.
+from well_viewer.domain.numeric import is_number
 from well_viewer.domain.selections_model import replicate_sets_loaded
 
 
@@ -139,8 +139,8 @@ def _attach_fc_row(row: dict, npt: tuple, band_lbl: str,
     """
     fmean = npt[1] if len(npt) > 1 else float("nan")
     fspread = npt[2] if len(npt) > 2 else 0.0
-    has_mean = isinstance(fmean, (int, float)) and not (isinstance(fmean, float) and math.isnan(fmean))
-    has_spread = isinstance(fspread, (int, float)) and not (isinstance(fspread, float) and math.isnan(fspread))
+    has_mean = is_number(fmean)
+    has_spread = is_number(fspread)
     row["fold_change_mean"] = f"{fmean:.6f}" if has_mean else ""
     row[f"fold_change_{band_lbl.lower()}"] = f"{fspread:.6f}" if has_spread else ""
     parts: list = []

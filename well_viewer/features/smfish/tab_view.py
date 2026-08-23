@@ -757,10 +757,26 @@ def _smfish_load_selected_images(ctx) -> None:
 
 
 def _smfish_get_threshold(ctx) -> float:
+    """The threshold in the box, or the last one that parsed.
+
+    An unparseable box used to read as ``0.0``, which is not a neutral value
+    here: it is the *lowest possible* threshold, so a stray keystroke silently
+    counted every spot in every well, and "Apply Global Threshold" would then
+    write those counts across the plate. Falling back to the last value that
+    parsed keeps the preview honest while the user is mid-edit, and the status
+    line says the box is not a number.
+    """
+    raw = ctx.runtime.smfish.threshold_edit.text().strip()
     try:
-        return float(ctx.runtime.smfish.threshold_edit.text().strip())
+        value = float(raw)
     except ValueError:
-        return 0.0
+        last = ctx.runtime.smfish.last_valid_threshold
+        _smfish_set_status(
+            ctx, f"Threshold {raw!r} is not a number — still using "
+                 f"{0.0 if last is None else last:g}.")
+        return 0.0 if last is None else float(last)
+    ctx.runtime.smfish.last_valid_threshold = value
+    return value
 
 
 def _smfish_redraw(ctx) -> None:

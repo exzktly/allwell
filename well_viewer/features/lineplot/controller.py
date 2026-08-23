@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from well_viewer.domain import fold_change as _fc
+from well_viewer.domain.numeric import is_number, is_numeric
 from well_viewer.domain.stats_compute import compute_rep_stats
 from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
 from well_viewer.domain.stats_compute import aggregate_well
@@ -92,7 +93,7 @@ class LinePoint:
         as 7; the CSV's integer count now comes from index 10 instead.
         """
         n_above = (float(self.n_above)
-                   if isinstance(self.n_above, (int, float)) and math.isfinite(self.n_above)
+                   if is_number(self.n_above)
                    else float("nan"))
         return (
             self.t, self.mean, self.spread, self.frac,
@@ -163,16 +164,16 @@ class LineAxes:
 def _aggpoint_to_linepoint(pt) -> LinePoint:
     """Lift a raw AggPoint tuple into a :class:`LinePoint`."""
     t = float(pt[0])
-    mean = float(pt[1]) if isinstance(pt[1], (int, float)) else float("nan")
-    spread = float(pt[2]) if isinstance(pt[2], (int, float)) else 0.0
-    frac = float(pt[3]) if (len(pt) > 3 and isinstance(pt[3], (int, float))) else float("nan")
+    mean = float(pt[1]) if is_numeric(pt[1]) else float("nan")
+    spread = float(pt[2]) if is_numeric(pt[2]) else 0.0
+    frac = float(pt[3]) if (len(pt) > 3 and is_numeric(pt[3])) else float("nan")
     # n_above may be a fold-change ratio (float, or NaN at a missing-control
     # timepoint) once FC normalizes the N panel, so keep it float / NaN-safe
     # rather than int(): the renderer reads ``float(p.n_above)`` and skips
     # points without a mean anyway.
     _n_raw = pt[4] if len(pt) > 4 else 0
     n_above = (float(_n_raw)
-               if isinstance(_n_raw, (int, float)) and math.isfinite(_n_raw)
+               if is_number(_n_raw)
                else float("nan"))
     n_total = int(pt[5]) if len(pt) > 5 else 0
     frac_spread = float(pt[6]) if len(pt) > 6 else 0.0

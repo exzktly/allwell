@@ -391,6 +391,12 @@ class MergePlan:
     dest_is_restart: bool = False       # dest has leftovers from an earlier, unfinished attempt
     format_warning: str | None = None
     column_warnings: tuple[str, ...] = ()
+    #: User-side blocks dataset 2 carried that the merged sidecar does not.
+    #: ``merge_info`` takes these from dataset 1 wholesale — the documented
+    #: rule — but it was applied silently, and ``wells_ds2_only`` is normally
+    #: non-empty, so a plate's replicate sets, groups, notes and ratios simply
+    #: were not in the merged dataset with nothing saying they had been left.
+    ds2_blocks_dropped: tuple[str, ...] = ()
 
 
 def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path | str) -> MergePlan:
@@ -454,6 +460,10 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
         [str(t) for t in info1.get("available_timepoints", []) or []]
     )
     merged_info = merge_info(info1, info2, offset_hours=offset, tp_format=tp_format)
+    ds2_blocks_dropped = tuple(
+        name for name in ("sample_definitions", "notes", "ratios", "cell_gating")
+        if (info2 or {}).get(name)
+    )
 
     wells1 = dataset_wells(ds1)
     wells2 = dataset_wells(ds2)
@@ -473,6 +483,7 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
         ds1_interval_hours=interval,
         wells_ds1_only=tuple(sorted(wells1 - wells2)),
         wells_ds2_only=tuple(sorted(wells2 - wells1)),
+        ds2_blocks_dropped=ds2_blocks_dropped,
         wells_both=wells_both,
         merged_info=merged_info,
         dest_is_restart=dest_is_restart,

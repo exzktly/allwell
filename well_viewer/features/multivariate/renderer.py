@@ -199,11 +199,21 @@ def _render_correlation(fig, res) -> None:
     fig.subplots_adjust(left=0.28, bottom=0.30, right=0.98, top=0.94)
 
 
+#: Most features a scatter-plot matrix will draw. Above this the panels are too
+#: small to read and the pairwise count grows as the square.
+_SPLOM_MAX_FEATURES = 6
+
+
 def _render_splom(fig, res) -> None:
     data = res["data"]
     X = data["X"]
     labels = data["feature_labels"]
-    n = min(X.shape[1], 6)  # cap grid size for legibility / performance
+    # Cap the grid for legibility / performance — but say so on the figure.
+    # A 6x6 SPLOM of the first six of nine features looks exactly like a
+    # complete one, and the three that are missing are missing from the export
+    # too, where no tooltip or status line can explain them.
+    n = min(X.shape[1], _SPLOM_MAX_FEATURES)
+    dropped = list(labels[n:]) if X.shape[1] > n else []
     colors, _legend_entries = _point_colors(data, "group")
     axes = fig.subplots(n, n, sharex="col")
     if n == 1:
@@ -224,9 +234,18 @@ def _render_splom(fig, res) -> None:
                 ax.set_xlabel(labels[j], fontsize=6, color=muted_fg)
             if j == 0:
                 ax.set_ylabel(labels[i], fontsize=6, color=muted_fg)
-    fig.suptitle("Feature pair matrix (SPLOM)", fontsize=9, color=_t,
-                 fontweight="bold")
-    fig.subplots_adjust(left=0.10, bottom=0.10, right=0.98, top=0.94,
+    title = "Feature pair matrix (SPLOM)"
+    if dropped:
+        title = f"{title} — first {n} of {X.shape[1]} features"
+    fig.suptitle(title, fontsize=9, color=_t, fontweight="bold")
+    if dropped:
+        # On the figure, not in a tooltip: this is the only place an exported
+        # copy can carry the shortfall.
+        fig.text(0.5, 0.005,
+                 "not shown: " + ", ".join(str(lbl) for lbl in dropped),
+                 ha="center", va="bottom", fontsize=6, color=muted_fg)
+    fig.subplots_adjust(left=0.10, bottom=0.10 if not dropped else 0.13,
+                        right=0.98, top=0.94,
                         hspace=0.15, wspace=0.15)
 
 

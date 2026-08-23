@@ -221,7 +221,20 @@ def scan_zip_members(
                     logger.info("  + SMFISH    fov=%s tp=%s  %s", fov, tp, full)
         logger.info("Result: %d fluor, %d tophat, %d smfish, %d overlay(s), %d mask(s) from %s", len(fluor), len(tophat), len(smfish), len(overlay), len(mask), zip_path.name)
     except Exception as exc:
-        logger.warning("Failed scanning %s: %s", zip_path, exc)
+        # The dicts built so far are still returned — dropping them would lose
+        # every image in the archive over one unreadable member — but they are
+        # a *partial* inventory, and the caller cannot tell that from a
+        # complete one. The "Result:" line above never printed for this
+        # archive, so say the counts here, with the reason, rather than leaving
+        # the log looking as though the scan simply had not run.
+        logger.warning(
+            "Failed scanning %s: %s. Partial inventory returned: "
+            "%d fluor, %d tophat, %d smfish, %d overlay(s), %d mask(s) — "
+            "images after the failure point are missing from it, so this "
+            "well may show fewer frames than the archive holds.",
+            zip_path, exc,
+            len(fluor), len(tophat), len(smfish), len(overlay), len(mask),
+        )
     return fluor, overlay, mask, tophat, smfish
 
 

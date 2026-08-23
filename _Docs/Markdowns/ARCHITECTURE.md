@@ -4174,7 +4174,7 @@ to enumerate its own sites — which is how the `mkdir` came to use the output
 path and leave the pidfile's parent uncreated, and how the cleanup after it
 derived a third spelling again. `remote_run_paths` returns the four paths
 together so they cannot disagree about their parent, and
-`tests/test_one_definition_of_the_run_dir.py` fails on an eleventh literal,
+`tests/test_one_definition_of_the_run_dir.py` fails on a tenth literal,
 matched on the static text so the spelling of the run-id expression cannot
 dodge it. Cleanup mirrors that split: the borrowed
 directory is left in place and named in the log, while the run's own is removed
@@ -7750,6 +7750,54 @@ installs that stack by hand.
 
 ---
 
+### 10.7 The fake worker host (`tests/_fake_remote.py`)
+
+A remote run is a long sequence of ssh commands whose whole purpose is to
+change a filesystem the test cannot see, so a mock that records argv proves
+only that a string was built. `FakeRemote` answers instead: it points a real
+`bash` at a temporary directory as `HOME` and runs the script the runner
+composed, so `mkdir -p`, `test -d`, `touch`, `rm -rf` and the rest have effects
+the test asserts against with `exists()` and `tree()`.
+`tests/test_a_remote_run_end_to_end.py` drives a real `spawn` and
+`verify_and_cleanup` through it.
+
+Three rules keep it from being kinder than production, each of them a bug the
+harness reported as a clean run before it was fixed.
+
+**`check=True` raises.** `_ssh_run` passes `check` straight to
+`subprocess.run`, so a failing remote command aborts the run; a fake that
+swallowed it turned a silent-continue-with-no-directories-created into a
+passing test.
+
+**A transfer that moves nothing exits 23**, as real rsync does. Returning 0
+made every failure branch downstream unreachable — `Fetcher`'s per-well "could
+not pull", `_rsync_optional`'s "note: X not pulled", and all of
+`_retry_missing_wells` — so a regression that transferred no bytes read as
+success. rsync itself is *modelled* here rather than run, since it is not
+installed; the four modelling rules that the runner depends on (a file
+destination stays a file, `-R` reproduces the source path, a glob expands, a
+missing source fails) are pinned by a test of their own, because untested
+modelling is how a harness reports correct code as broken.
+
+**A host it cannot contain is refused.** Containment is one mechanism —
+`HOME` points at the fake root, so `~/x` and `$HOME/x` land inside it — and
+`_bash` hands the script to the shell verbatim, rewriting nothing. An absolute
+`remote_staging_dir` such as `/scratch/$USER`, the normal configuration on a
+cluster whose home is a small-quota NFS mount, would therefore run its
+`mkdir -p` and its `rm -rf` against the machine running the suite while every
+assertion read the empty fake root and passed. `install` refuses such a host
+and names the field.
+
+The `Popen` seam matches the same ssh prefixes `_run` does and delegates
+everything else to the real `Popen`, captured at import. Both patches land on
+the *shared* `subprocess` module — `subprocess.run` looks `Popen` up in its own
+globals — so an unmatched patch would answer the fake's own shell calls with
+the test's mock, and a seam that matched nothing would record an unrelated
+binary as a pipeline launch.
+
+---
+
+
 ## 11. Recipes
 
 ### 11.1 Add a new plotting tab
@@ -8155,12 +8203,13 @@ The map (each rule links to the test that holds it):
 | Feature-module naming scheme (§3) | `test_architecture_contracts.py::test_feature_module_naming` |
 | One definition of "is this well complete" — no module outside `pipeline/completeness.py` spells out the dataset-health states as its own roster, so the states a plate legend paints cannot diverge from the states the classifier returns (§6.2, §6b) | `tests/test_no_second_completeness_predicate.py`, with its bite cases in `tests/test_guards_bite.py` |
 | One definition of what a run did to a well — no module outside `services/run_journal.py` spells out the run-journal well states as its own roster, so a state the runner records cannot be one a reader has never heard of and silently reports as something else (§6.5) | `tests/test_no_second_journal_vocabulary.py`, with its bite cases in `tests/test_guards_bite.py` |
-| One definition of where a remote run lives — no module builds `{remote_staging_dir}/runs/{run_id}` from a literal outside `remote_run_dir` / `remote_run_paths`. It was spelled nine times across three classes while the dataset address beside it had one definition, and the half-sweeps that produced left a re-attaching run's own directory uncreated. | `tests/test_one_definition_of_the_run_dir.py`, with its bite cases in `tests/test_guards_bite.py`. Matched on the f-string's static text, so the spelling of the run-id expression cannot dodge it, and scanned through `tests/_repo_scan.py` — the first version read one hardcoded file and went vacuous the moment an extraction moved code out of it. It now fails when it cannot find the funnel at all, rather than passing with nothing to compare against. |
+| One definition of where a remote run lives — no module builds `{remote_staging_dir}/runs/{run_id}` from a literal outside `remote_run_dir` / `remote_run_paths`. It was spelled nine times across three classes while the dataset address beside it had one definition, and the half-sweeps that produced left a re-attaching run's own directory uncreated. | `tests/test_one_definition_of_the_run_dir.py`, with its bite cases in `tests/test_guards_bite.py`. Matched on the literal's static text, so the spelling of the run-id expression cannot dodge it, and on the *position* of a bare `"runs"` segment for the two builders that never write a separator — `posixpath.join(staging, "runs", run_id)` and `PurePosixPath(staging) / "runs" / run_id`. Reading only f-strings left `%`, `.format` and `+` concatenation as ways around the rule. Scanned through `tests/_repo_scan.py` — the first version read one hardcoded file and went vacuous the moment an extraction moved code out of it — and it fails when it cannot find the funnel at all, rather than passing with nothing to compare against. |
 | `domain/` & `data/` never import `features/` (the layering) | `tests/test_layering.py` |
 | No silent broad-except anywhere (§15) — the four area tests, plus one over the whole `_repo_scan` surface (root modules and `scripts/` included) with a per-site, file-and-function allowlist and a liveness test | `tests/test_no_silent_except.py` |
 | Nothing deletes a directory it only partly archived. Every path that turns a `<well>/` into `<well>.zip` packs an extension-filtered subset, so removing the folder destroyed the companion XML, acquisition logs and mask subdirectories the filter skipped. Archive-writing is followed one call deep within a module, because the two worst sites zipped through a one-line helper and a guard matching only a literal `atomic_zip` found two of the four (§6.5) | `tests/test_no_unarchived_delete.py`, with its bite cases in `tests/test_guards_bite.py` |
 | Every figure registered as `_*_fig` has a `_FIG_PREF_KEY_MAP` entry, so its axis and mark prefs key on a stable name rather than on `id(fig)` and survive a reload (§5.8) | `tests/test_figure_pref_keys.py`, with bite cases in `tests/test_guards_bite.py` |
 | A function that returns a value on one path and an explicit `None` on another declares it. Without the annotation a caller cannot tell "no value" from "computed zero" by signature, which is the conflation behind this codebase's silently-wrong numbers | `tests/test_optional_returns_declared.py`, with bite cases in `tests/test_guards_bite.py` |
+| No annotation reads a name nothing binds. Every module carries `from __future__ import annotations`, so an annotation is stored as a string and never compiled — invisible to `symtable` below and to ruff alike, since F821 is in this repo's ignore list. An extraction dropped `Iterable` from a `collections.abc` import while the annotation needing it moved intact: nothing raised at import or at call, and `typing.get_type_hints` on that function raised `NameError`. A `TYPE_CHECKING` import counts as bound; a string forward reference is not this guard's to judge | `tests/test_no_unbound_names.py::test_no_annotation_reads_a_name_nothing_binds`, with bite cases in `tests/test_guards_bite.py`. The first cut allowlisted `dir(typing)`, which contains `Iterable`, `Callable`, `Mapping` and `Sequence` — the names a dropped import loses — so it passed on the defect it was written for |
 | No function reads a name nothing binds. Ruff does not flag it, and the shape it misses is what a rename leaves behind — replace `a, b, c = thing()` with `obj = thing()` and every downstream `a` becomes a `NameError` no linter mentions, often on a path only the slow lane reaches | `tests/test_no_unbound_names.py` (`symtable`, so closures and comprehensions are not false positives), with bite cases in `tests/test_guards_bite.py` |
 | The fold-change request is read by name, never unpacked | `tests/test_fc_state_is_not_unpacked.py`, with bite cases in `tests/test_guards_bite.py` |
 | Every `ControlOutcome` is produced by a real collection and consumed by the editor, the status line and the CSV | `tests/test_control_outcome_roster.py` |

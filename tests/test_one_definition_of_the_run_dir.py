@@ -8,14 +8,14 @@ no mechanical way to discover N, so the sweeps were half-done and the halves
 disagreed.
 
 That is not a hypothetical failure mode here. A re-attaching run's own
-directory went uncreated because one of the ten sites was the *output* path and
+directory went uncreated because one of the nine sites was the *output* path and
 the ``mkdir`` used that one — leaving the pidfile with nowhere to land, so Stop
 could no longer kill the remote pipeline, and on a scheduler host the heartbeat
 failed silently and the sentinel raised after the whole plate had uploaded. The
 cleanup that followed derived the directory a third way again.
 
 ``remote_run_dir`` and ``remote_run_paths`` are that one place now, and this is
-what keeps the eleventh site from appearing. It is a syntactic rule because the
+what keeps the tenth site from appearing. It is a syntactic rule because the
 alternative — noticing in review that a new f-string duplicates an old one — is
 what already failed.
 """

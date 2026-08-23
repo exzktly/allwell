@@ -1614,7 +1614,7 @@ _FUNNEL_STUB = (
 )
 
 RUN_DIR_VIOLATIONS = {
-    # The plain eleventh site, in whatever module an extraction put it.
+    # The plain tenth site, in whatever module an extraction put it.
     "f-string": 'def d(host, run_id):\n'
                 '    return f"{host.remote_staging_dir}/runs/{run_id}/out"\n',
     # A different spelling of the run id — three were in use, and a fourth

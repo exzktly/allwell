@@ -4161,7 +4161,19 @@ pidfile, sentinel and heartbeat stay under this run's own `run_id`, because
 `_sweep_orphaned_allocation` finds a crashed session's job by recomputing that
 address and must not be pointed at another run's — and both directories are
 created, since a re-attached run's output lives under a *previous* `run_id` and
-nothing else would make its own. Cleanup mirrors that split: the borrowed
+nothing else would make its own.
+
+`remote_run_dir(host, run_id)` and `remote_run_paths(host, run_id)` are where
+that address is spelled, and the only place. It was a format-string literal in
+ten places across three classes while the dataset address beside it had one
+definition, so every change to "where does a run live" was a sweep with no way
+to enumerate its own sites — which is how the `mkdir` came to use the output
+path and leave the pidfile's parent uncreated, and how the cleanup after it
+derived a third spelling again. `remote_run_paths` returns the four paths
+together so they cannot disagree about their parent, and
+`tests/test_one_definition_of_the_run_dir.py` fails on an eleventh literal,
+matched on the static text so the spelling of the run-id expression cannot
+dodge it. Cleanup mirrors that split: the borrowed
 directory is left in place and named in the log, while the run's own is removed
 like any other, because nothing prunes `runs/` (`DatasetCache.gc` covers
 `datasets/`) and it holds only the pidfile, sentinel and heartbeat this run

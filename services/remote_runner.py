@@ -1291,6 +1291,50 @@ def _compute_run_id(
     return f"{cache_key[:16]}-{pipeline_argv_digest(pipeline_argv, extras=extras)}"
 
 
+@dataclass(frozen=True)
+class RemoteRunPaths:
+    """Every remote path one run owns, derived once.
+
+    ``out`` is the only one a re-attaching run ever re-points; the other three
+    stay under this run's own ``run_id``, because
+    :meth:`RemoteRunner._sweep_orphaned_allocation` finds a crashed session's
+    scheduler job by recomputing exactly that address.
+    """
+
+    run_dir: str
+    out: str
+    pidfile: str
+    sentinel: str
+    heartbeat: str
+
+
+def remote_run_dir(host: "RemoteHost", run_id: str) -> str:
+    """``{remote_staging_dir}/runs/{run_id}`` — the one place this is spelled.
+
+    It was spelled ten times, across three classes, while the *dataset* address
+    right beside it had exactly one definition
+    (:meth:`DatasetCache.remote_dataset_dir`). Every change to "where does a run
+    live" was therefore an N-site sweep with no mechanical way to discover N,
+    and the defects that produced were not hypothetical: a re-attaching run's
+    own directory went uncreated because one of the ten was the output path and
+    the ``mkdir`` used it, and the cleanup that followed named a different one
+    again. ``tests/test_one_definition_of_the_run_dir.py`` holds the rule.
+    """
+    return f"{host.remote_staging_dir}/runs/{run_id}"
+
+
+def remote_run_paths(host: "RemoteHost", run_id: str) -> RemoteRunPaths:
+    """The four paths a run owns, so they cannot disagree about their parent."""
+    run_dir = remote_run_dir(host, run_id)
+    return RemoteRunPaths(
+        run_dir=run_dir,
+        out=f"{run_dir}/out",
+        pidfile=f"{run_dir}/run.pid",
+        sentinel=f"{run_dir}/{UPLOAD_SENTINEL}",
+        heartbeat=f"{run_dir}/{UPLOAD_HEARTBEAT}",
+    )
+
+
 def _snapshot_local_artifacts(local_output_dir: Path) -> dict:
     """Fingerprint the output artefacts already on disk, before the run.
 
@@ -4708,13 +4752,10 @@ class _BatchedRemoteProcess:
         # them twice, which is what `ProgressTracker.well_repeats` counts. The
         # cache is no warmer for it: the Fetcher deletes each zip as it lands
         # either way.
-        remote_input = f"{runner.host.remote_staging_dir}/runs/{run_id}/in"
-        remote_output = (
-            f"{runner.host.remote_staging_dir}/runs/{run_id}/out"
-        )
-        remote_pidfile = (
-            f"{runner.host.remote_staging_dir}/runs/{run_id}/run.pid"
-        )
+        own = remote_run_paths(runner.host, run_id)
+        remote_input = f"{own.run_dir}/in"
+        remote_output = own.out
+        remote_pidfile = own.pidfile
         runner._cache._ssh_run(
             ["mkdir", "-p", remote_input, remote_output],
             check=True,
@@ -4838,12 +4879,13 @@ class _BatchedRemoteProcess:
 
     def _batch_flag(self, template: str, index: int) -> str:
         """The remote path of one batch's handshake file."""
-        run_dir = f"{self._runner.host.remote_staging_dir}/runs/{self._run_id}"
+        run_dir = remote_run_dir(self._runner.host, self._run_id)
         return f"{run_dir}/{template.format(i=index)}"
 
     def _batch_staging_dir(self, index: int) -> str:
         """Where batch *index* is uploaded, before the driver swaps it in."""
-        return f"{self._runner.host.remote_staging_dir}/runs/{self._run_id}/b{index}"
+        run_dir = remote_run_dir(self._runner.host, self._run_id)
+        return f"{run_dir}/b{index}"
 
     def _start_driver(self, n_batches: int) -> bool:
         """Put one allocation on a node and leave it there for the whole run.
@@ -4859,8 +4901,9 @@ class _BatchedRemoteProcess:
         """
         run = self._runner._run
         host = self._runner.host
-        run_dir = f"{host.remote_staging_dir}/runs/{self._run_id}"
-        heartbeat = f"{run_dir}/{UPLOAD_HEARTBEAT}"
+        paths = remote_run_paths(host, self._run_id)
+        run_dir = paths.run_dir
+        heartbeat = paths.heartbeat
 
         # Ask *before* clearing anything. Everything below assumes this run
         # directory is ours to empty, and `run_id` is deterministic in the
@@ -6821,11 +6864,12 @@ class RemoteRunner:
         host_extras = self._host_argv_extras(output_filter)
         run_id = "run-" + _compute_run_id(key, pipeline_argv, extras=host_extras)
         remote_input = self._cache.remote_dataset_dir(key)
-        own_run_dir = f"{self.host.remote_staging_dir}/runs/{run_id}"
-        remote_output = f"{own_run_dir}/out"
-        remote_pidfile = f"{own_run_dir}/run.pid"
-        remote_sentinel = f"{own_run_dir}/{UPLOAD_SENTINEL}"
-        remote_heartbeat = f"{own_run_dir}/{UPLOAD_HEARTBEAT}"
+        own = remote_run_paths(self.host, run_id)
+        own_run_dir = own.run_dir
+        remote_output = own.out
+        remote_pidfile = own.pidfile
+        remote_sentinel = own.sentinel
+        remote_heartbeat = own.heartbeat
 
         # Only the *output* directory can be re-attached, and only it is. The
         # input dir keys on this run's own staged archives, and the pidfile /
@@ -7277,7 +7321,7 @@ class RemoteRunner:
             # created, and nothing prunes ``runs/`` — ``DatasetCache.gc``
             # covers ``datasets/`` — so leaving it would drop two sidecar files
             # on the host for every re-attaching run, for ever.
-            own_dir = f"{self.host.remote_staging_dir}/runs/{run.run_id}"
+            own_dir = remote_run_dir(self.host, run.run_id)
             # The fate of this run's own directory is said inside the branch
             # that decides it. Stating it afterwards told a dry run that the
             # directory "has been cleaned up" three lines before announcing
@@ -7295,7 +7339,7 @@ class RemoteRunner:
                 f"place; remove it by hand once you are done with it.\n"
             )
         else:
-            run_dir = f"{self.host.remote_staging_dir}/runs/{run.run_id}"
+            run_dir = remote_run_dir(self.host, run.run_id)
             if dry_run:
                 self._log_would_delete(
                     run_dir, label=f"run dir {run.run_id}", log=log)

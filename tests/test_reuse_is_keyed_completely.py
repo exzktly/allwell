@@ -411,3 +411,92 @@ def test_every_keying_call_folds_in_the_host_extras():
         "output is not interchangeable — which is how a run fetches another "
         "configuration's numbers and reports success.\n  "
         + "\n  ".join(offenders))
+
+
+# ── the reuse predicate, driven directly ────────────────────────────────────
+#
+# Four critical slips in this predicate pass the end-to-end remote harness,
+# because that harness exercises `spawn`'s control-file plumbing rather than
+# the decisions behind it. These are pure functions and need no harness at all,
+# which is exactly why there is no excuse for them being untested: they are the
+# highest-stakes decision in the module, and every one of them returns a
+# previous run's numbers and reports success when it goes wrong.
+
+def test_a_forced_run_never_re_attaches():
+    """`--force` means "compute it again", and re-attaching defeats that.
+
+    A forced run that lands in the previous run's directory finds it full of
+    that run's output, the pre-flight check calls the plate complete, the
+    pipeline never launches, and yesterday's numbers come back as a successful
+    forced re-run — the one outcome a user pressing Force is explicitly trying
+    to rule out.
+    """
+    from services.remote_runner import _choose_remote_output_dir
+
+    fresh, stored = "/stg/runs/run-new/out", "/stg/runs/run-old/out"
+    chosen, _reason = _choose_remote_output_dir(
+        fresh, stored, forced=True, remote_has_outputs=True)
+    assert chosen == fresh, (
+        "a forced run re-attached to a populated directory; its outputs would "
+        "be found complete and the pipeline would never run")
+
+
+def test_an_unforced_run_re_attaches_to_the_same_directory():
+    """The other half, so the test above cannot pass by never re-attaching."""
+    from services.remote_runner import _choose_remote_output_dir
+
+    fresh, stored = "/stg/runs/run-new/out", "/stg/runs/run-old/out"
+    chosen, reason = _choose_remote_output_dir(
+        fresh, stored, forced=False, remote_has_outputs=True)
+    assert chosen == stored and reason
+
+
+def test_an_empty_recorded_directory_is_not_re_attached_to():
+    """A recorded address says where work was *sent*, not that it is there."""
+    from services.remote_runner import _choose_remote_output_dir
+
+    fresh, stored = "/stg/runs/run-new/out", "/stg/runs/run-old/out"
+    chosen, _reason = _choose_remote_output_dir(
+        fresh, stored, forced=False, remote_has_outputs=False)
+    assert chosen == fresh
+
+
+@pytest.mark.parametrize("extras,label", [
+    (["--cpu_only"], "cpu_only"),
+    (["--no_save_tophat"], "a CSV-only fetch"),
+    (["--min_nucleus_area_px", "500"], "a host override"),
+])
+def test_the_run_id_and_the_digest_both_move_with_the_host_extras(extras, label):
+    """Both keys, not just the one that happens to be tested elsewhere.
+
+    `_compute_run_id` decides *where* the run lands and `pipeline_argv_digest`
+    decides whether a recorded address is *reusable*. They are computed from
+    the same inputs and either one dropping the extras is enough: the first
+    collides two configurations in one directory, the second hands back an
+    address that belongs to a different one. Both return another
+    configuration's numbers reported as this run's.
+    """
+    from services.remote_runner import _compute_run_id, pipeline_argv_digest
+
+    argv, key = _local_argv(), "k" * 32
+    assert (pipeline_argv_digest(argv, extras=[])
+            != pipeline_argv_digest(argv, extras=extras)), (
+        f"the reuse key does not move for {label}")
+    assert (_compute_run_id(key, argv, extras=[])
+            != _compute_run_id(key, argv, extras=extras)), (
+        f"the remote address does not move for {label}")
+
+
+def test_the_run_id_is_stable_for_the_same_configuration():
+    """The keys must be *discriminating*, not merely different every time.
+
+    A digest that changed on every call would pass every test above and make
+    re-attach dead — which is how the feature shipped unreachable once already.
+    """
+    from services.remote_runner import _compute_run_id, pipeline_argv_digest
+
+    argv, key = _local_argv(), "k" * 32
+    assert (pipeline_argv_digest(argv, extras=["--cpu_only"])
+            == pipeline_argv_digest(list(argv), extras=["--cpu_only"]))
+    assert (_compute_run_id(key, argv, extras=["--cpu_only"])
+            == _compute_run_id(key, list(argv), extras=["--cpu_only"]))

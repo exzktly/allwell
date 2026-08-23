@@ -21,10 +21,11 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from analyze_preflight import _as_sidecar_polarity  # noqa: E402
 
 
 def test_the_forms_positives_become_the_sidecars_negatives():
+    from analyze_preflight import _as_sidecar_polarity
+
     got = _as_sidecar_polarity(
         {"auto_threshold": False, "run_check": True, "nuclear_token": "DAPI"})
 
@@ -35,6 +36,8 @@ def test_the_forms_positives_become_the_sidecars_negatives():
 
 
 def test_both_polarities_round_trip():
+    from analyze_preflight import _as_sidecar_polarity
+
     for value in (True, False):
         got = _as_sidecar_polarity({"auto_threshold": value})
         assert got["no_auto_threshold"] is (not value)
@@ -43,6 +46,8 @@ def test_both_polarities_round_trip():
 def test_a_sidecar_shaped_dict_is_left_alone():
     """The other source. Translating a dict that already speaks the applier's
     language would invert it."""
+    from analyze_preflight import _as_sidecar_polarity
+
     already = {"no_auto_threshold": True, "no_run_check": True}
     assert _as_sidecar_polarity(already) == already
 
@@ -51,6 +56,8 @@ def test_an_explicit_negative_wins_over_the_positive():
     """If both are present the applier's own key is authoritative — inventing
     a second answer for a question already answered is how the two spellings
     came to disagree in the first place."""
+    from analyze_preflight import _as_sidecar_polarity
+
     got = _as_sidecar_polarity(
         {"auto_threshold": True, "no_auto_threshold": True})
     assert got["no_auto_threshold"] is True
@@ -73,3 +80,37 @@ def test_the_journal_branch_translates_and_the_sidecar_branch_does_not():
     assert any("_pinfo_flat" in c for c in calls), (
         "the sidecar branch is gone; this test names a shape that no longer "
         "exists")
+
+
+# ── L2: a scan that gave up, reported as a complete one ─────────────────────
+
+def test_the_coverage_line_says_when_the_scan_did_not_finish():
+    """`scan_run` sets `partial_scan` when it could not read a well.
+
+    One unreadable well must not cost the record for the other 95, so the scan
+    keeps going and flags itself. Two surfaces already read that flag — the
+    Home plate and the run log — and the pre-run coverage line did not. So
+    "94 of 96 well(s) are complete" meant either two wells short or two wells
+    unreadable, with nothing to tell them apart, and it is the line the user
+    reads while deciding whether to re-run.
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    import analyze_preflight
+
+    fn = analyze_preflight.AnalyzePreflightMixin._on_coverage_ready \
+        if hasattr(analyze_preflight, "AnalyzePreflightMixin") \
+        and hasattr(analyze_preflight.AnalyzePreflightMixin, "_on_coverage_ready") \
+        else None
+    src = (textwrap.dedent(inspect.getsource(fn)) if fn is not None
+           else inspect.getsource(analyze_preflight))
+    assert "partial_scan" in src, (
+        "the pre-run coverage line never reads partial_scan, so a scan that "
+        "gave up part-way is reported as the plate's true state")
+
+    tree = ast.parse(src)
+    reads = [n for n in ast.walk(tree)
+             if isinstance(n, ast.Call) and "partial_scan" in ast.unparse(n)]
+    assert reads, "partial_scan is mentioned but never read"

@@ -417,6 +417,21 @@ class AnalyzePreflightMixin:
         if not wells:
             return
         head = f"{complete} of {wells} well(s) are complete."
+        # A scan that gave up part-way reported its partial totals as though
+        # they were the plate's. `scan_run` sets `partial_scan` for exactly
+        # this — one unreadable well must not cost the record for the other
+        # 95, so it keeps going and says so — and two other surfaces already
+        # read the flag (the Home plate and the run log). This line did not,
+        # so "94 of 96 well(s) are complete" could mean two wells short or two
+        # wells unreadable, and the user is about to decide whether to re-run
+        # on the strength of it.
+        if block.get("partial_scan"):
+            self._preflight_coverage = (
+                f"{head} Some wells could not be read, so this count is a "
+                f"floor rather than the plate's — check the log for what the "
+                f"scan skipped before deciding whether to re-run.")
+            self._render_preflight(getattr(self, "_preflight_headline_text", ""))
+            return
         # The fraction is only printed when it is one. ``covered_any`` counts
         # the output's field groups and ``intent`` the input's, so more covered
         # than intended is not a plate that is more than finished — it is the

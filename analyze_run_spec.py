@@ -60,6 +60,11 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
             pipeline = find_pipeline_script()
         if pipeline is None:
             return "process_microscopy.py not found next to allwell.py."
+        # Every entry point answers the same way. This was wired into
+        # `start_from_queue` alone, so the Run button — the way almost everyone
+        # restarts a plate — never asked, and a well that was mid-flight when
+        # the previous run was killed stayed skipped as complete for ever.
+        spec = self.resume_aware_spec(spec)
         if self._runner.is_busy:
             return ("A pipeline is already running on the Analyze pane. Wait "
                     "for it to finish, or stop it, before starting another.")
@@ -168,8 +173,8 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
         start_run() would from the live form. A remote that no longer
         resolves, or a missing pipeline script, reports failure through
         jobFinished rather than raising — there is no dialog to show it to."""
-        run_spec = self.resume_aware_spec(RunSpec.from_json(spec))
-        error = self.start_run(run_spec)
+        # `start_run` applies `resume_aware_spec` itself now, for every caller.
+        error = self.start_run(RunSpec.from_json(spec))
         if error is not None:
             self.jobFinished.emit(False, error, "")
 

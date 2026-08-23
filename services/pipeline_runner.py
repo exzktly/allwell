@@ -1024,7 +1024,12 @@ class PipelineRunner:
         if output_dir is None:
             return
         try:
-            run_journal.close_run(output_dir, outcome=self._journal_outcome())
+            # Keyed on this run's own token, so a run whose `open_run` write
+            # failed cannot close the record still standing from the run
+            # before it — which the index is holding open precisely so that
+            # run can be offered for resume.
+            run_journal.close_run(output_dir, outcome=self._journal_outcome(),
+                                  run_token=self._journal_token)
         except OSError:
             swallowed(f"could not close the run journal in {output_dir}")
 

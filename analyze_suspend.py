@@ -392,6 +392,30 @@ class AnalyzeSuspendMixin:
         except Exception:
             swallowed()
 
+    def _input_has_unfinished_work(self, raw_input: str) -> bool:
+        """Whether *raw_input* has a suspended **or** interrupted run behind it.
+
+        The journal's index is keyed on the *output* directory, so the input it
+        was run against is read from the journal in that directory rather than
+        inferred: an output directory can be re-pointed between runs, and
+        guessing one from the other is how a resume gets offered for a
+        different plate.
+        """
+        from services import run_journal as _journal
+
+        if any(same_dir(r.input_dir, raw_input) for r in load_all()):
+            return True
+        for entry in _journal.unfinished_runs():
+            out = str(entry.get("output_dir") or "")
+            if not out:
+                continue
+            with swallow(f"reading the run journal in {out}"):
+                rec = _journal.read_journal(out)
+                if rec is not None and rec.input_dir and same_dir(
+                        rec.input_dir, raw_input):
+                    return True
+        return False
+
     def resume_aware_spec(self, spec: RunSpec) -> RunSpec:
         """Force incremental when this spec's input has a suspended run behind it.
 
@@ -409,12 +433,22 @@ class AnalyzeSuspendMixin:
         Matching is on the input directory, which is what the record stores and
         what ``opts["raw"]`` carries, and is exactly the identity the queue
         preserves when it re-runs a job.
+
+        **Two records, not one.** ``suspend_record`` holds the runs the user
+        wound down deliberately; the run journal holds every run that did not
+        finish, including the ones nobody was there to record — an app that was
+        killed, a machine that lost power, a crash. Asking only the suspend
+        record meant the killed case, the one no artefact can report because a
+        killed run and a run that simply processed fewer wells leave identical
+        output, never got ``incremental`` and so left every half-finished well
+        skipped as complete for ever. That is the defect this is for; the
+        suspend case was only the half that already had a record.
         """
         try:
             raw = str((spec.opts or {}).get("raw") or "").strip()
             if not raw or spec.opts.get("incremental"):
                 return spec
-            if not any(same_dir(r.input_dir, raw) for r in load_all()):
+            if not self._input_has_unfinished_work(raw):
                 return spec
             opts = dict(spec.opts)
             opts["incremental"] = True

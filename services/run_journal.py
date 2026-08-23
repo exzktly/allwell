@@ -521,15 +521,28 @@ def close_run(
     *,
     outcome: str,
     message: str = "",
+    run_token: float | None = None,
 ) -> bool:
     """Close the record with how the run ended.
 
     Until this lands the record reads as open, which after a restart is how the
     app knows a run died rather than finished. So it must run on **every** exit
     the app survives — success, failure, Stop and Suspend alike.
+
+    *run_token* mirrors :func:`record_well`'s refusal and exists for the same
+    reason. ``open_run``'s write is allowed to fail, and when it does the
+    previous run's ``run.json`` is what remains on disk. Without the check this
+    run's ending is written over *that* run's record: a run the app was killed
+    during, which the index is holding open precisely so it can be offered for
+    resume, is closed as `ok` by the next run's exit — and the offer disappears
+    for a plate that never finished. Passing ``None`` keeps the old behaviour
+    for a caller that has no token, which is the honest reading of "I cannot
+    tell which run this is".
     """
     payload = _read_run_payload(output_dir)
     if payload is None:
+        return False
+    if run_token is not None and float(payload.get("opened_at") or 0.0) != run_token:
         return False
     closed_at = time.time()
     payload["closed_at"] = closed_at

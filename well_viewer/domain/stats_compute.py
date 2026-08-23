@@ -152,20 +152,32 @@ _logger = logging.getLogger(__name__)
 
 
 def _fov_verdict(ctx, label: str, df):
-    """The FOV-label verdict for *label*, from the per-dataset cache when it is
-    there.
+    """The FOV-label verdict for *label*, computed at most once per well.
 
-    ``data_loading.get_rows`` runs ``check_fov_labels`` once as each well's
-    frame is built and records it on ``ctx.state.dataset.fov_integrity``.
-    Recomputing it here is two ``groupby.nunique`` passes and a full
+    ``data_loading.get_rows`` records the verdict on
+    ``ctx.state.dataset.fov_integrity`` as it builds a well's frame — but the
+    eager load path (``load_controller.load_directory``) fills
+    ``dataset.cache`` itself and never calls ``get_rows``, so in a real session
+    that dict is empty and a reader that only *consults* it recomputes every
+    time. Checking the labels is two ``groupby.nunique`` passes and a full
     ``duplicated`` over the whole well — 14 ms on a 21k-row well — and this
-    runs per well, per timepoint, per group, per channel, so a batch export
-    would pay it about fifteen hundred times.
+    runs per well, per timepoint, per group, per channel, which is roughly
+    fifteen hundred calls in a batch export. So a miss is written back rather
+    than merely tolerated.
+
+    (The same empty dict is why ``load_controller._report_unusable_fov_labels``
+    has nothing to name at load time. Fixing that belongs with the load path,
+    not here.)
     """
-    cached = (getattr(ctx.state.dataset, "fov_integrity", None) or {}).get(label)
+    store = getattr(ctx.state.dataset, "fov_integrity", None)
+    if store is None:
+        return check_fov_labels(df)
+    cached = store.get(label)
     if cached is not None:
         return cached
-    return check_fov_labels(df)
+    verdict = check_fov_labels(df)
+    store[label] = verdict
+    return verdict
 
 
 def _rep_from(df, pts, target_t, threshold, val_col, fluor_gates, ratios,

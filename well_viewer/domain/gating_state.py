@@ -266,7 +266,7 @@ FLUOR_GATE_OFF = 0.0
 def active_fluor_gates(fluor_gates) -> dict[str, float]:
     """The subset of *fluor_gates* that is actually gating anything.
 
-    A gate of ``0.0`` means "off", but both filter sites applied it anyway as
+    A gate of ``0.0`` means "off", but all six filter sites applied it anyway as
     ``isfinite(v) & (v > gate)`` — so a plate at its default gates still lost
     every cell whose background-subtracted mean intensity was zero or negative,
     and every cell carrying a NaN in any *unrelated* gated channel. Those cells

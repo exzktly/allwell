@@ -6667,11 +6667,18 @@ induction experiment is normally 0. Requiring a non-zero baseline for both
 operations meant the requested timepoint was skipped and a later one silently
 substituted, so one figure normalised its mean panel against t=0 and its
 fraction and events panels against t=24, under a single axis label.
-`_baseline_usable(value, op=…)` is the shared predicate, and *shared* is the load-bearing
-word: the line path's `_field_baseline` and all five of the bar path's
-`baseline_*_from_points*` finders go through it, with the operation threaded from
-the collector. Converting only the line path would have left the reported symptom
-alive on the other tab. The ratio-mode fall-through remains (it is arithmetic, not
+`_baseline_usable(value, op=…)` is the shared predicate, and *shared* is the
+load-bearing word. There are six baseline finders in `fold_change.py` — the line
+path's `_field_baseline`, the bar path's four `baseline_*_from_points*` variants,
+and `member_baseline_value`, which the per-cell overlay uses and whose docstring
+promises it agrees with the bar's. All six go through the predicate, and the
+operation is threaded in from the collector at every live call site. Converting a
+subset is worse than converting none: the first pass took the line path only, so
+the symptom survived intact on the bar tab, and the pass after it left
+`member_baseline_value` resolving a different timepoint from the bar it is drawn
+over — in exactly the case its own docstring says the two agree. (Two of the four
+`baseline_*_from_points*` variants have no production caller today; they take the
+parameter so a future one cannot reintroduce the split.) The ratio-mode fall-through remains (it is arithmetic, not
 a choice) but now says so in the log.
 
 **Two conventions for "undefined" were live at once.** `scale_bar_value`'s

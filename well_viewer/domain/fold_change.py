@@ -428,11 +428,16 @@ def _normalize_field(
             t = float(pt[0])
             cm = _match_control_mean(t, means_only)
             if cm is None:
+                # Same two rules as the scaling siblings below: address the
+                # spread field only if the point carries it (normalization
+                # rescales fields, it does not create them), and write NaN
+                # rather than 0.0 for a value nobody could compute.
+                slot = _spread_slot(pt, spread_idx)
                 new = list(pt)
-                _grow(new, val_idx, spread_idx)
+                _grow(new, val_idx, slot)
                 new[val_idx] = float("nan")
-                if spread_idx is not None:
-                    new[spread_idx] = 0.0
+                if slot is not None:
+                    new[slot] = float("nan")
                 stage.append(tuple(new))
                 continue
             cval, cspread = _resolve_stat(t, control_stats, (cm, 0.0))
@@ -1603,6 +1608,7 @@ def build_cell_scaling(
                 ctx, w, baseline_tp=baseline_tp,
                 threshold=threshold, val_col=val_col, use_sem=use_sem,
                 per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
+                op=op_t0,
             )
 
     control_cache: dict = {}
@@ -1662,6 +1668,7 @@ def member_baseline_value(
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
+    op: str = "ratio",
 ) -> float | None:
     """Member baseline honouring *baseline_tp* (audit S1).
 
@@ -1669,6 +1676,12 @@ def member_baseline_value(
     otherwise falls back to the earliest finite mean — matching
     :func:`baseline_from_points` / :func:`member_first_tp_value` so the
     per-cell overlay baseline agrees with the bar's.
+
+    That agreement is why *op* is a parameter. This is the sixth baseline
+    finder in the file, and it was the one left behind when the other five were
+    taught that a zero baseline is usable under subtraction — which made the
+    per-cell overlay resolve a different timepoint from the bar it is drawn
+    over, in exactly the case the docstring above promises they agree.
     """
     series = member_mean_series(
         ctx, label,
@@ -1682,7 +1695,7 @@ def member_baseline_value(
         tgt = float(baseline_tp)
         for t, m in series.items():
             if (abs(float(t) - tgt) <= _TP_REL_TOL * max(1.0, abs(float(t)), abs(tgt))
-                    and isinstance(m, (int, float)) and math.isfinite(m) and m != 0):
+                    and _baseline_usable(m, op=op)):
                 return float(m)
         # Requested tp not sampled — fall through to earliest (mirrors the bar).
     earliest = min(series)

@@ -15,7 +15,9 @@ are grouped by the question they answer:
 
 from __future__ import annotations
 
+import ast
 import math
+import pathlib
 
 import numpy as np
 import pandas as pd
@@ -327,35 +329,117 @@ def test_bar_baselines_still_refuse_a_zero_divisor():
 
 # ── 9. every gate filter answers the "is this gate on?" question the same way ─
 
-def test_no_filter_applies_a_gate_without_asking_whether_it_is_on():
-    """Five sites iterate ``fluor_gates`` and cut on it. Converting two of them
-    left the other three describing a different population from the ones beside
-    them — a half-swept predicate is worse than an unswept one, because one
-    function then holds two definitions of the same word and neither looks
-    wrong."""
-    import ast
-    import pathlib as _pathlib
+def _gate_filter_offenders(root: pathlib.Path) -> list[str]:
+    """Loops over ``fluor_gates`` that *compare against* the gate value without
+    first asking whether the gate is on.
 
-    repo = _pathlib.Path(__file__).resolve().parent.parent
-    offenders = []
-    for path in sorted((repo / "well_viewer").rglob("*.py")):
+    Written against the loop's shape rather than one spelling of it. The
+    previous version matched the literal ``"> gate"``, which the repo's own
+    sites already defeat — two of them bind the value as ``gate_threshold`` —
+    and which any of ``>=``, a reversed comparison, or a differently-named
+    binding would slip past. Here the loop's own target names are read out of
+    the AST and any comparison against either of them counts.
+    """
+    offenders: list[str] = []
+    for path in sorted(root.rglob("*.py")):
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
             if not isinstance(node, ast.For):
                 continue
-            src = ast.unparse(node.iter)
-            if "fluor_gates" not in src:
+            iter_src = ast.unparse(node.iter)
+            if "fluor_gates" not in iter_src:
                 continue
-            body = ast.unparse(node)
-            # A loop that only reads the mapping (building a key, formatting a
-            # row) is not a filter; a loop that compares a value against the
-            # gate is.
-            if "> gate" not in body and "> gate_threshold" not in body:
-                continue
-            if "active_fluor_gates" not in src:
-                offenders.append(f"{path.relative_to(repo)}:{node.lineno}")
+            bound = {n.id for n in ast.walk(node.target)
+                     if isinstance(n, ast.Name)}
+            compares_gate = any(
+                isinstance(cmp, ast.Compare)
+                and any(isinstance(side, ast.Name) and side.id in bound
+                        for side in [cmp.left, *cmp.comparators])
+                for cmp in ast.walk(node)
+            )
+            if compares_gate and "active_fluor_gates" not in iter_src:
+                offenders.append(f"{path}:{node.lineno}")
+    return offenders
+
+
+def test_no_filter_applies_a_gate_without_asking_whether_it_is_on():
+    """Six sites iterate ``fluor_gates`` and cut on it. Converting some of them
+    left the rest describing a different population from the ones beside them —
+    a half-swept predicate is worse than an unswept one, because one function
+    then holds two definitions of the same word and neither looks wrong."""
+    repo = pathlib.Path(__file__).resolve().parent.parent
+    offenders = _gate_filter_offenders(repo / "well_viewer")
     assert not offenders, (
         "these filter on a raw gate value, so a gate of 0.0 (which means off) "
         "still excludes cells:\n" + "\n".join(offenders)
     )
 
+
+def test_the_gate_guard_bites(tmp_path):
+    """The guard is only worth its runtime if it fires on the shapes a future
+    author would actually write — not just on the one that was there when it
+    was written."""
+    violations = {
+        "plain.py": "for channel, gate in fluor_gates.items():\n"
+                    "    mask &= v > gate\n",
+        "renamed.py": "for channel, floor in fluor_gates.items():\n"
+                      "    mask &= v > floor\n",
+        "gte.py": "for channel, gate in fluor_gates.items():\n"
+                  "    mask &= v >= gate\n",
+        "reversed.py": "for channel, gate in fluor_gates.items():\n"
+                       "    mask &= gate < v\n",
+        "other_name.py": "for ch, gate_threshold in fluor_gates.items():\n"
+                         "    mask &= v > gate_threshold\n",
+    }
+    for name, src in violations.items():
+        d = tmp_path / name.removesuffix(".py")
+        d.mkdir()
+        (d / name).write_text(src)
+        assert _gate_filter_offenders(d), f"guard missed {name}"
+
+    clean = tmp_path / "clean"
+    clean.mkdir()
+    (clean / "ok.py").write_text(
+        "for channel, gate in active_fluor_gates(fluor_gates).items():\n"
+        "    mask &= v > gate\n"
+    )
+    # A loop that only *reads* the mapping is not a filter and must not fire.
+    (clean / "reader.py").write_text(
+        "for channel, gate in fluor_gates.items():\n"
+        "    rows.append((channel, gate))\n"
+    )
+    assert not _gate_filter_offenders(clean)
+
+
+# ── 10. the collector passes the operation, not just the finder accepting it ──
+
+def test_the_bar_collector_passes_the_t0_operation():
+    """Teaching the five finders an ``op`` parameter does nothing if the caller
+    never passes it — and nothing in the suite noticed when all six arguments
+    were stripped. This asserts the outbound call, per CLAUDE.md §7.4 #1."""
+    src = (pathlib.Path(__file__).resolve().parent.parent
+           / "well_viewer" / "features" / "barplot" / "collect.py").read_text()
+    tree = ast.parse(src)
+    finders = {
+        "baseline_from_points_resolved",
+        "baseline_frac_from_points_resolved",
+        "baseline_n_from_points_resolved",
+    }
+    seen: set[str] = set()
+    missing: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
+        if name not in finders:
+            continue
+        seen.add(name)
+        if not any(kw.arg == "op" for kw in node.keywords):
+            missing.append(f"{name} at line {node.lineno}")
+    assert seen == finders, f"expected all three finders to be called: {seen}"
+    assert not missing, (
+        "the bar collector resolves a baseline without saying which operation "
+        "will use it, so a zero baseline is skipped even under subtraction:\n"
+        + "\n".join(missing)
+    )

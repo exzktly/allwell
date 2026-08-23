@@ -12,12 +12,40 @@ Pins the load-bearing invariants:
    as if the feature didn't exist (no toggle button, one visible tab).
 
 Qt is required, so the module skips when PySide6 isn't importable. ``offscreen``
-keeps it headless. ``on_tab_change`` (called by enter/exit) early-returns unless
-the app exposes ``_line_ax_mean``, so a bare stub app exercises the reparenting
-without dragging in the whole runtime.
+keeps it headless. These tests are about *reparenting* — which widget ends up in which pane, and
+what the notebook looks like afterwards. ``enter_split`` / ``exit_split`` /
+``focus_split`` each call ``on_tab_change`` on the way out, and that function
+redraws the active tab and rebuilds the sidebar, which needs the whole runtime.
+The ``_no_tab_dispatch`` fixture below neutralises it for the duration, so the
+stub app stays a stub.
+
+That used to happen by accident: ``on_tab_change`` early-returned unless a Line
+Graphs axis was registered, and an empty widget registry satisfied that. Line
+Graphs is a droppable feature, so a build profile without it left that probe
+false for the life of the process and no tab change reached any tab — the probe
+became a readiness check on the centre notebook instead, and these tests had to
+say out loud what they had been relying on.
 """
 
 from __future__ import annotations
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_tab_dispatch(monkeypatch):
+    """Neutralise ``on_tab_change`` for this module.
+
+    Split View's enter/exit/focus each end by dispatching a tab change, which
+    redraws the active tab and rebuilds the sidebar against the full runtime.
+    Nothing in this file is testing that; patching the name in
+    ``split_view``'s own namespace (it imports the function directly, so the
+    module attribute is the binding the calls resolve) keeps these tests on
+    the reparenting they exist to check.
+    """
+    from well_viewer.core import split_view as _sv
+    monkeypatch.setattr(_sv, "on_tab_change", lambda *a, **k: None)
+
 
 import os
 
@@ -114,9 +142,6 @@ def _split_app(*, install=True):
     from types import SimpleNamespace
     from well_viewer.core.app_runtime import AppRuntime
     from well_viewer.core.widget_registry import WidgetRegistry
-    # ``on_tab_change`` (called by enter/exit) early-returns unless
-    # ``ctx.widgets.has("_line_ax_mean")`` — an empty registry keeps the stub
-    # headless while satisfying the ctx-native probe.
     app._ctx = SimpleNamespace(app=app, window=app, runtime=AppRuntime(app),
                                widgets=WidgetRegistry(app))
     if install:

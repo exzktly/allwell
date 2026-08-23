@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import shutil
+from util.json_write import write_json_atomic
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -148,9 +149,12 @@ def save_to_pipeline_info(
             ) from exc
 
     existing[SAMPLE_DEFINITIONS_KEY] = sample_definitions
-    tmp = info_path.with_suffix(info_path.suffix + ".tmp")
-    tmp.write_text(json.dumps(existing, indent=2))
-    tmp.replace(info_path)
+    # ``durable=False``: this is the debounced sample-definitions autosave,
+    # called on the GUI thread every time the user stops typing. An fsync on a
+    # network share is a visible pause there, and the value is rewritten within
+    # seconds anyway — what matters is that a reader never sees a half-written
+    # file, which the rename gives regardless.
+    write_json_atomic(info_path, existing, durable=False)
     return info_path
 
 

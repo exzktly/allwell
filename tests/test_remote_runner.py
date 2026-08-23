@@ -1992,6 +1992,9 @@ def test_required_files_list_is_what_we_promised():
         # The retry-with-backoff shield every pipeline write on the output
         # volume goes through (util.retry_io), imported by pipeline.io.
         "util/retry_io.py",
+        # The one atomic JSON write; pipeline.run_report and
+        # process_microscopy both replace pipeline_info.json through it.
+        "util/json_write.py",
         # Serpentine plate-position labelling for packed OME-TIFF input. The
         # de-interleave runs client-side (before remote sync), so a remote run
         # never imports this — but the manifest mirrors every ``util/`` file.

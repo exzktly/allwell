@@ -300,7 +300,22 @@ class RailNav(QFrame):
             font-weight: 500;
             background: transparent;
         }}
-        QFrame#RailNavRow:hover QLabel#RailNavRowLabel,
+        /* No `:hover` rule for the label, deliberately. Qt resolves a
+           *descendant* rule by baking its colour into the label's stylesheet
+           palette, and a palette has no notion of ":hover" — so
+           `QFrame#RailNavRow:hover QLabel#RailNavRowLabel` applies always,
+           whatever else is written beside it, and overrides the
+           `text_secondary` base above. Every row then drew at full strength
+           and the active one was not distinguished from the rest, which is the
+           whole job of this rail. Measured (Qt 6.7.3, inactive/active): the
+           [active] rule alone gives #98a2b3 / #e6e9ef; adding the :hover rule
+           gives #e6e9ef / #e6e9ef whether the two are one comma group or two
+           separate rules — splitting the group changes nothing, which is why
+           the rule is gone rather than rewritten.
+
+           Hover is still signalled, by `QFrame#RailNavRowBody:hover` above:
+           that one styles the widget it names rather than a descendant of it,
+           so the pseudo-state resolves normally. */
         QFrame#RailNavRow[active="true"] QLabel#RailNavRowLabel {{
             color: {c.text_primary};
         }}

@@ -18,6 +18,7 @@ import pandas as pd
 
 from well_viewer.data.cache_projectors import iter_cache_projectors
 from well_viewer.domain.fov_integrity import check_fov_labels
+from well_viewer.domain.gating_state import active_fluor_gates
 from well_viewer.domain.ratio_models import RatioMetric, is_ratio_key
 from well_viewer.domain.text_columns import (
     TEXT_COLUMNS,
@@ -561,7 +562,7 @@ def aggregate_with_threshold_df(
     else:
         return []
 
-    for channel, gate in fluor_gates.items():
+    for channel, gate in active_fluor_gates(fluor_gates).items():
         col = f"{channel}_mean_intensity"
         if col not in df.columns:
             if col not in _missing_col_warned:
@@ -783,7 +784,7 @@ def _all_fluor_values_filtered(
     else:
         return np.empty(0, dtype=float)
 
-    for channel, gate in fluor_gates.items():
+    for channel, gate in active_fluor_gates(fluor_gates).items():
         col = f"{channel}_mean_intensity"
         if col not in df.columns:
             return np.empty(0, dtype=float)

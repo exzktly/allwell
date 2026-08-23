@@ -21,9 +21,16 @@ RATIO_PREFIX = "ratio:"
 class RatioMetric:
     """User-defined ratio of two channel/metric pairs.
 
-    ``epsilon`` is added to the denominator before division to avoid /0.
+    ``epsilon`` is the **floor the denominator is clamped to** before
+    division, not a term added to it (``np.maximum(den, epsilon)`` in
+    ``data_loading.resolve_value_series``). The distinction is not
+    cosmetic: background-subtracted channels legitimately go slightly
+    negative, and ``den + epsilon`` sign-flips near zero, producing
+    arbitrarily large ratios for individual cells. Clamping keeps the
+    divisor strictly positive whenever ``epsilon > 0``.
+
     When ``epsilon`` is 0 (the default) and the denominator is 0, the
-    resolver returns NaN so the cell is silently dropped from plots.
+    resolver returns NaN so the cell is dropped from plots.
     """
 
     name: str

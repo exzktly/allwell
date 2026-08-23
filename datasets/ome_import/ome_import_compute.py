@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+from util.json_write import write_json_atomic
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -567,8 +568,14 @@ def write_run_marker(dest: Path | str, src: Path | str,
     """Record that a conversion is under way in *dest*, and with what settings."""
     root = Path(dest)
     root.mkdir(parents=True, exist_ok=True)
-    (root / IN_PROGRESS_MARKER).write_text(
-        json.dumps(_mapping_signature(src, params), indent=2), encoding="utf-8")
+    # Atomically, because this marker is what decides whether a later run may
+    # finish this one's work. A half-written marker reads as a *different*
+    # mapping, and the wells already on disk were written by this one — so an
+    # interrupted write turns a resumable folder into one the tool refuses,
+    # or, if it happened to truncate to something parseable, into one it
+    # resumes with the wrong settings.
+    write_json_atomic(root / IN_PROGRESS_MARKER,
+                      _mapping_signature(src, params))
 
 
 def clear_run_marker(dest: Path | str) -> None:

@@ -17,6 +17,8 @@ DataFrame app stand-in so it exercises ``aggregate_with_threshold_df`` for real.
 from __future__ import annotations
 
 import pandas as pd
+import math
+
 import pytest
 
 from well_viewer.domain.batch_models import ReplicateSet
@@ -151,12 +153,19 @@ def test_fov_mode_spread_on_all_three_panels():
     assert n_pf_mean > 0
 
 
-def test_fov_mode_single_fov_zero_spread():
-    """One pooled FOV ⇒ no per-FOV spread anywhere (nothing to vary across)."""
+def test_fov_mode_single_fov_spread_is_undefined():
+    """One pooled FOV ⇒ no per-FOV spread anywhere (nothing to vary across).
+
+    That absence is reported as NaN, not 0.0. This asserted 0.0, which is the
+    conflation being fixed: a spread nobody could compute drew a bar with no
+    whisker beside bars whose whiskers were measured, and exported as an
+    explicit zero.
+    """
     well1 = _fov_df([("f1", 1.0, 60.0), ("f1", 1.0, 70.0)])
     app = _FovApp({"W1": well1})
     rset = ReplicateSet("R", ["W1"])
     _m, mean_err, _f, frac_err, _nm, n_pf_spread = compute_rep_per_fov_stats(
         app._ctx, rset, 1.0, threshold=50.0, use_sem=False
     )
-    assert mean_err == 0.0 and frac_err == 0.0 and n_pf_spread == 0.0
+    assert math.isnan(mean_err) and math.isnan(frac_err)
+    assert math.isnan(n_pf_spread)

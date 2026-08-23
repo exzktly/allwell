@@ -230,7 +230,17 @@ def render_bar_items(
                         linestyle="--", zorder=3)
         # Events-above-threshold panel (optional).
         if ax_n is not None:
-            if item.has_mean and item.n_above > 0:
+            # ``n_above > 0`` conflated two different facts: a set that
+            # genuinely counted zero events above threshold, and one whose
+            # count could not be computed. Both drew the dashed placeholder.
+            # Zero is a measurement — it gets a real (zero-height) bar, and the
+            # placeholder is kept for the undefined case.
+            _n_above_known = (
+                item.has_mean
+                and isinstance(item.n_above, (int, float))
+                and math.isfinite(float(item.n_above))
+            )
+            if _n_above_known:
                 ax_n.bar(x, item.n_above, width=bar_w, color=color,
                          alpha=0.85, zorder=3, linewidth=0)
                 if draw_err and item.n_above_spread > 0:

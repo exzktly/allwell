@@ -18,7 +18,6 @@ populate" order :class:`RunDashboard` used before this extraction.
 from __future__ import annotations
 
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QProgressBar, QToolButton, QVBoxLayout, QWidget,
 )
@@ -221,7 +220,15 @@ class PlateProgress(QWidget):
             # Paint coloured wells in the raised/lit style (not the dim recessed
             # tint) so run states read clearly on the status map.
             self._plate.setColoredWellsLit(True)
-            self._plate.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            # Deliberately NOT WA_TransparentForMouseEvents. That attribute
+            # makes the whole subtree invisible to hit-testing, which takes the
+            # hover tooltip with it — and the per-well detail a dashboard
+            # reports (``FOV 7/12``, ``downloading 42%``) exists nowhere else in
+            # the app, so setting it removed the only place those numbers are
+            # readable. Read-only-ness comes from ``role="status"`` below, which
+            # puts the plate in "passive" selection mode: a click emits
+            # ``wellActivated`` and changes nothing, and no dashboard connects
+            # that signal.
             # The app-wide plate geometry (widgets/plate_geometry.py): the
             # "status" role hides the built-in action row and makes the plate
             # read-only, and the caps give it the same cell scale as every other

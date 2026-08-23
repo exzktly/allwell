@@ -133,7 +133,9 @@ def test_apply_global_threshold_after_csv_dispatches_on_gui_thread(qtbot, tmp_pa
         fov_tp_extractor=None,
         status_cb=lambda _s: None,
         done_cb=lambda _s: done_evt.set(),
-        after_csv_cb=lambda: bridge.after_csv.emit(_refresh_proxy),
+        # Takes the shortfall the worker now reports (how many wells were
+        # not written), mirroring the real callback in tab_view.
+        after_csv_cb=lambda shortfall=0: bridge.after_csv.emit(_refresh_proxy),
         expected_data_dir=tmp_path,
         well_to_csv={},
     )

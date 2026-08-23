@@ -92,7 +92,15 @@ def toggle_fov_replicates(ctx) -> None:
     ctx.state.plot.toggle_fov_replicates()
     invalidate_stats_cache(ctx)
     refresh_fov_btn_state(ctx)
-    _refresh_bar_layout_btn_state(ctx)
+    # Gated on the bar feature being *present*. (``_redraw_bars`` below is
+    # gated too, but on the tab being *visible* — a different question that
+    # happens to imply this one.) This is an app-global button and
+    # ``_refresh_bar_layout_btn_state`` is a lazy proxy into
+    # ``features/barplot``: with that feature profiled out the call raised
+    # ModuleNotFoundError *after* the state had already been flipped, so the
+    # toggle both failed and took effect.
+    if ctx.state.feature_slice("bar") is not None:
+        _refresh_bar_layout_btn_state(ctx)
     redraw_app(ctx)
     # Split View: redraw the bar pane whenever it is on screen, even if unfocused.
     if is_tab_visible(ctx, "Bar Plots"):

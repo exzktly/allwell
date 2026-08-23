@@ -41,6 +41,7 @@ bytes in hand.
 from __future__ import annotations
 
 import contextlib
+import os
 import shutil
 import zipfile
 from collections.abc import Callable, Sequence
@@ -219,6 +220,50 @@ def write_zip(
     return frozenset(written), frozenset(dropped)
 
 
+def publish_container(src: Path, dest: Path) -> None:
+    """Copy *src* to *dest* whole, through a staging name and a rename.
+
+    The one way a Datasets tool puts a container at its destination without
+    opening it — a zip copied byte-for-byte, or a folder-mode well copied as a
+    tree. Copying straight onto *dest* leaves a truncated ``<WELL>.zip``, or a
+    half-populated ``<WELL>/``, if the run is killed or the volume fills: a well
+    whose images read as partly vanished, produced by the one path that was
+    supposed to be safest because it moves the file whole.
+
+    Every caller goes through here rather than each staging for itself, because
+    the last time this rule was applied it was applied to one of five sites —
+    and the one that got the fix was the *rare* one. ``_copy_container_as_is``
+    in Merge Plates and Concatenate runs for every well the tool does not remap,
+    which is all of dataset 1's, always.
+
+    The staging name carries the repo-wide ``__aw_tmp_`` prefix so an
+    interrupted run's leftovers are visible to the sweeps that clean them up.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    staging = dest.with_name(f"__aw_tmp_{dest.name}.pid{os.getpid()}")
+    try:
+        if staging.is_dir():
+            shutil.rmtree(staging, ignore_errors=True)
+        elif staging.exists():
+            staging.unlink()
+        if src.is_dir():
+            shutil.copytree(src, staging)
+            # ``os.replace`` onto a non-empty directory fails, and a retried run
+            # may find one there from the attempt before it.
+            if dest.is_dir():
+                shutil.rmtree(dest, ignore_errors=True)
+        else:
+            shutil.copy2(src, staging)
+        os.replace(str(staging), str(dest))
+    except BaseException:
+        if staging.is_dir():
+            shutil.rmtree(staging, ignore_errors=True)
+        else:
+            with contextlib.suppress(OSError):
+                staging.unlink(missing_ok=True)
+        raise
+
+
 def _close_progress(progress: MemberProgress | None) -> None:
     """Report a pass with no member-level steps as finished.
 
@@ -324,7 +369,13 @@ def copy_container_members(
             and all(dest_name == entry.filename for _archive, entry, dest_name in planned)
         ):
             dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(sources[0], dest)
+            # Staged and renamed, exactly like the tier-2/3 path below. Copying
+            # straight onto *dest* would leave a truncated ``<WELL>.zip`` if the
+            # copy is interrupted — a well whose images read as partly vanished,
+            # from the one tier that was supposed to be the safest because it
+            # moves the file whole. The comment below says nothing here is
+            # written straight to the destination; this is what makes that true.
+            publish_container(sources[0], dest)
             _close_progress(progress)
             return frozenset(written), frozenset()
 

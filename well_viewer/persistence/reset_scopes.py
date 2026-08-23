@@ -285,23 +285,28 @@ def reset_view(ctx) -> None:
     ctx.runtime.heatmap.layouts = []
     hm = ctx.state.feature_slice("heatmap")
     if hm is not None:
-        _restore_slice_defaults(hm, "heatmap")
+        restore_slice_defaults(hm, "heatmap")
     _save(ctx, "heatmap_layouts")
 
     mv = ctx.state.feature_slice("multivariate")
     if mv is not None:
-        _restore_slice_defaults(mv, "multivariate")
+        restore_slice_defaults(mv, "multivariate")
         _save(ctx, "multivariate")
 
     _notify(ctx.runtime.image_table.reset_cb, "the Image Table grid")
 
 
-def _restore_slice_defaults(slice_obj, name: str) -> None:
+def restore_slice_defaults(slice_obj, name: str) -> None:
     """Best-effort ``restore_defaults`` for a feature slice.
 
     A slice that cannot be default-constructed is logged and left alone rather
     than half-reset — a partially-reset slice is the silent-degradation failure
     this whole module exists to remove.
+
+    Public because the same question — "put this slice back the way a fresh
+    dataset finds it" — is asked by the hydrators as well as by a reset: a
+    plate with no saved section for a feature must land on that feature's
+    defaults, not on the previous plate's configuration.
     """
     from well_viewer.domain.state_defaults import restore_defaults
     try:

@@ -300,3 +300,39 @@ class PlotState:
         """Flip whether replicate-set wells pool to a single column."""
         self.bar_pool_replicates = not self.bar_pool_replicates
         return self.bar_pool_replicates
+
+    def reset_for_new_dataset(self) -> None:
+        """Drop the settings that name *this* dataset's wells and timepoints.
+
+        Everything here refers to something only the previous plate had. A
+        fold-change control names a well or a replicate set; a baseline names a
+        timepoint; a line order names wells by token; a bar-group mode is about
+        a layout of those wells. Carrying them into the next plate is not a
+        preference the user set — it is a description of a plate that is no
+        longer open, and the loudest case is fold change: plate B came up
+        normalised against a group of plate A's wells, which resolves to
+        nothing, so every bar was NaN under an axis still labelled as a fold
+        change.
+
+        Presentation-level preferences (SEM vs SD, log axes, show-threshold)
+        are deliberately *not* reset — those are about how the user likes to
+        look at data, not about which data it was.
+        """
+        self.fc_vs_control_on = False
+        self.fc_control = None
+        self.fc_control_mode = "single"
+        self.fc_control_map = {}
+        self.fc_vs_t0_on = False
+        self.fc_baseline_tp = ""
+        self.focus_timepoint = None
+        self.line_order_rsets = []
+        self.line_order_wells = []
+        self.bar_group_mode = "well"
+        self.bar_order = None
+        # The "Interval per timepoint" multiplier: a statement about the plate
+        # whose filename cadence does not match the hours it was imaged at.
+        # ``view_state`` restores it only when the new plate saved one, which
+        # is precisely the early-return case this reset exists for — so plate
+        # A's factor relabelled every time axis on plate B, with the factor
+        # printed in the label so it read as the data.
+        self.time_scale = 1.0

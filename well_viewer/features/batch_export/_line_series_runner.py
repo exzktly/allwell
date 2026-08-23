@@ -177,11 +177,15 @@ def collect_line_series_for_group(
                     ctx, rset, t, threshold, use_sem)
                 n_above_val = 0
             else:
-                gm, gerr, gf, _ = compute_rep_stats(ctx, rset, t, threshold, use_sem)
+                gm, gerr, gf, gfe = compute_rep_stats(ctx, rset, t, threshold, use_sem)
                 # Per-well mean, matching the Line tab's own numerator.
                 n_above_val, n_above_spread = compute_rep_n_above_stats(
                     ctx, rset, t, use_sem)
-                gfe, gnpf_m, gnpf_s = 0.0, 0.0, 0.0
+                # ``gfe`` is the producer's fraction spread — discarded and
+                # zeroed here, so the batch figure and CSV disagreed with the
+                # tab they were exported from. Only the per-FOV fields are
+                # genuinely uncomputed on this branch.
+                gnpf_m, gnpf_s = 0.0, 0.0
             if not (isinstance(gm, float) and math.isnan(gm)):
                 raw_pts.append((
                     t, gm, gerr, gf, n_above_val, 0, gfe, gnpf_m, gnpf_s,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import logging
 import re
 from pathlib import Path
 
@@ -25,7 +26,7 @@ from well_viewer.features.batch_export._common import (
     _groups_with_loaded_wells,
     unique_export_stem,
 )
-from well_viewer.features.batch_export.base_panel import BatchExportPanel
+from well_viewer.features.batch_export.base_panel import BatchExportPanel, SkippedJob
 from well_viewer.core.safe import swallowed
 # ── ctx-native god-method forms (A8 / Epic-A14 panel conversion) ─────────────
 from well_viewer.core.lazy import lazy as _lazy
@@ -42,6 +43,9 @@ _render_scatter_points = _lazy("well_viewer.features.scatter.gating", "render_sc
 _draw_gates = _lazy("well_viewer.features.scatter.gating", "draw_gates")
 _log1p_axis_suffix = _lazy("well_viewer.features.scatter._layout", "log1p_axis_suffix")
 _compose_scatter_agg_stat = _lazy("well_viewer.features.scatter.controller", "compose_scatter_agg_stat")
+
+
+_logger = logging.getLogger(__name__)
 
 
 class ScatterBatchExportPanel(BatchExportPanel):
@@ -362,6 +366,24 @@ class ScatterBatchExportPanel(BatchExportPanel):
             return "fraction_above_threshold"
         return METRIC_LABEL_TO_KEY.get(label, "mean_intensity")
 
+    def _warn_if_live_gates_ignored(self) -> None:
+        """Say so when the Scatter tab is filtering by gate and this batch is not.
+
+        Batch export deliberately does not inherit the tab's live "Apply gates"
+        toggle — a batch job that silently changed its population because of a
+        checkbox left on in another tab would be worse. But the *other* silence
+        is just as bad: with the toggle on, the tab's figure and this batch's
+        figure are drawn from different sets of cells and nothing said so. This
+        is the announcement, not a behaviour change.
+        """
+        from well_viewer.features.scatter.collect import scatter_points_gated
+        if scatter_points_gated(self._ctx):
+            _logger.warning(
+                "Batch export: the Scatter tab is filtering its points by gate "
+                "geometry, but batch figures are exported from the unfiltered "
+                "cloud — they will not match the tab's plot cell for cell.",
+            )
+
     def _scatter_axis_col(self, ch_cb: QComboBox, prop_cb: QComboBox) -> str:
         """Resolve a (channel combo, property combo) pair to a CSV column
         / ratio key, via ``app._col_for_scatter_axis``."""
@@ -473,6 +495,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         self, grp: BarGroup, tp_h: float, csv_path: Path, fig_path: Path, fmt: str,
     ) -> str | None:
         from well_viewer.features.scatter.controller import collect_scatter_data as _collect_scatter_data
+        self._warn_if_live_gates_ignored()
         col_x = self._scatter_axis_col(self._sc_cells_x_cb, self._sc_cells_metric_x_cb)
         col_y = self._scatter_axis_col(self._sc_cells_y_cb, self._sc_cells_metric_y_cb)
         with self._app_group_scope(grp):
@@ -485,7 +508,13 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 fluor_gate_y=_get_fluor_gate(self._ctx, ch_y_base),
             )
         if not scatter_data:
-            return f"{grp.name}: no scatter-cells data at t={tp_h:.1f}h"
+            # ``SkippedJob``, not a plain string: the runner discards the
+            # entire staged export for any error, so reporting "this group
+            # produced nothing" down that channel deletes every *other*
+            # group's files too. Bar and line were converted and these four
+            # were not, which is the worse half — one function now held two
+            # meanings for the same return and neither looked wrong.
+            return SkippedJob(f"{grp.name}: no scatter-cells data at t={tp_h:.1f}h")
         try:
             from well_viewer.features.export.service import _well_labels_map, well_name_for
             _well_labels = _well_labels_map(self._ctx)
@@ -626,7 +655,13 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 well_colors=WELL_COLORS,
             )
         if not scatter_data:
-            return f"{grp.name}: no scatter-aggregate data at t={tp_h:.1f}h"
+            # ``SkippedJob``, not a plain string: the runner discards the
+            # entire staged export for any error, so reporting "this group
+            # produced nothing" down that channel deletes every *other*
+            # group's files too. Bar and line were converted and these four
+            # were not, which is the worse half — one function now held two
+            # meanings for the same return and neither looked wrong.
+            return SkippedJob(f"{grp.name}: no scatter-aggregate data at t={tp_h:.1f}h")
         try:
             from well_viewer.features.export.service import (
                 _well_labels_map, _well_paths_keys, well_name_for,
@@ -686,6 +721,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         from well_viewer.features.scatter.controller import collect_scatter_data as _collect_scatter_data
         combined_rows: list[dict] = []
         combined_series: list[tuple] = []
+        self._warn_if_live_gates_ignored()
         for tp_h in sorted(timepoints):
             col_x = self._scatter_axis_col(self._sc_cells_x_cb, self._sc_cells_metric_x_cb)
             col_y = self._scatter_axis_col(self._sc_cells_y_cb, self._sc_cells_metric_y_cb)
@@ -714,7 +750,13 @@ class ScatterBatchExportPanel(BatchExportPanel):
                         "filename": filename, "nucleus_id": nuclear_id,
                     })
         if not combined_rows:
-            return f"{grp.name}: no scatter-cells data for selected timepoints"
+            # ``SkippedJob``, not a plain string: the runner discards the
+            # entire staged export for any error, so reporting "this group
+            # produced nothing" down that channel deletes every *other*
+            # group's files too. Bar and line were converted and these four
+            # were not, which is the worse half — one function now held two
+            # meanings for the same return and neither looked wrong.
+            return SkippedJob(f"{grp.name}: no scatter-cells data for selected timepoints")
         try:
             with open(csv_path, "w", newline="") as fh:
                 fieldnames = ["group", "timepoint_h", "member", "well", "well_name", "x", "y", "filename", "nucleus_id"]
@@ -760,7 +802,13 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 well_colors=WELL_COLORS,
             )
         if not scatter_data:
-            return f"{grp.name}: no scatter-aggregate data for selected timepoints"
+            # ``SkippedJob``, not a plain string: the runner discards the
+            # entire staged export for any error, so reporting "this group
+            # produced nothing" down that channel deletes every *other*
+            # group's files too. Bar and line were converted and these four
+            # were not, which is the worse half — one function now held two
+            # meanings for the same return and neither looked wrong.
+            return SkippedJob(f"{grp.name}: no scatter-aggregate data for selected timepoints")
         try:
             from well_viewer.features.export.service import (
                 _well_labels_map, _well_paths_keys, well_name_for,

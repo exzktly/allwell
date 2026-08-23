@@ -1025,7 +1025,7 @@ taken is on the masthead. *Check this dataset now* hands off to
 [Validate & Repair](#validate--repair-dataset), which re-reads it as it stands
 and records what it finds — so a dataset that has never been checked fills this
 page in once you have run that tool on it, and the masthead then reads *checked
-<date>* rather than *run finished <date>*, because the two describe different
+\<date\>* rather than *run finished \<date\>*, because the two describe different
 moments.
 
 What is on it:
@@ -3135,7 +3135,7 @@ what it found into `pipeline_info.json`, in the same block a run writes at its
 end — so a dataset produced before that check existed, or by a run with the
 check turned off, gets a completeness record from here and Review's **Home**
 page fills in. The record says which of the two produced it, and Home words
-itself accordingly: *checked <date>* for this tool, *run finished <date>* for a
+itself accordingly: *checked \<date\>* for this tool, *run finished \<date\>* for a
 run. That matters because they describe different moments — a run's record is
 about the run, this one is about the folder as it stood when you scanned it.
 If the dataset is already open in Review, going back to Home shows the new

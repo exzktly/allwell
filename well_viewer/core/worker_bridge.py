@@ -24,6 +24,7 @@ worker in it, so a handler that writes to a widget needs exactly this route.
 
 from __future__ import annotations
 
+import logging
 import threading
 
 from PySide6.QtCore import QObject, Qt, Signal
@@ -159,3 +160,65 @@ class GuiLogRelay(QObject):
     def post(self, text: str) -> None:
         """Queue *text* for delivery on the thread that built this relay."""
         self._line.emit(text)
+
+
+def stop_runtime_workers(runtime, slice_name: str, attrs, *, wait_ms: int = 250) -> None:
+    """Cancel and join the QThreads a runtime slice is holding.
+
+    App-close teardown has to stop several features' workers, and every one of
+    them is reached the same way: a runtime slice, an attribute holding a
+    thread, ``cancel()`` if it has one, then a bounded ``wait``. Written once
+    here rather than inline per feature for one reason: ``runtime_app`` is under
+    a line and defensive-probe ratchet that this pattern would eat (three
+    ``getattr`` probes per feature).
+
+    Never imports a feature: the workers are reached through runtime state, so
+    a build without the feature simply finds nothing to stop. That is what the
+    ``worker is None`` check does the work of — a profiled-out feature still
+    has a slice (``AppRuntime`` constructs the known ones unconditionally, and
+    ``_FeatureRuntime`` answers an unknown attribute with ``None``), it just
+    never assigns a thread to it. The ``slice_ is None`` guard covers a
+    *slice name* this build does not know at all.
+
+    The wait is short on purpose. ``cancel()`` is what makes the stop safe —
+    a cancelled worker disowns whatever it produces — so waiting is only a
+    courtesy to let a thread unwind at its next checkpoint. Blocking the window
+    close for seconds while a worker finishes reading a well is a worse
+    outcome than letting a daemon thread exit on its own after the pane is
+    gone, and the wait is what a user experiences as "the app won't quit".
+    """
+    slice_ = getattr(runtime, slice_name, None)
+    if slice_ is None:
+        return
+    for attr in attrs:
+        worker = getattr(slice_, attr, None)
+        if worker is None:
+            continue
+        # Separate handlers, because a shared one turns "cancel() raised" into
+        # "the thread was never waited on either" — the two steps have nothing
+        # to do with each other and the second is what stops a live thread from
+        # emitting into a widget tree that is being deleted. Logged at WARNING,
+        # not DEBUG: a teardown that fails here is the shape that ends in a
+        # native crash on exit, and at the app's default level a DEBUG line
+        # leaves nothing behind for the bug report to carry.
+        log = logging.getLogger(__name__)
+        try:
+            cancel = getattr(worker, "cancel", None)
+            if callable(cancel):
+                cancel()
+        except Exception:
+            log.warning("teardown: cancelling %s.%s failed",
+                        slice_name, attr, exc_info=True)
+        try:
+            if worker.isRunning():
+                worker.wait(wait_ms)
+        except Exception:
+            log.warning("teardown: waiting on %s.%s failed",
+                        slice_name, attr, exc_info=True)
+        # Drop the reference so a dead QThread is not left hanging off the
+        # runtime slice for whatever looks at it next.
+        try:
+            setattr(slice_, attr, None)
+        except Exception:
+            log.debug("teardown: could not clear %s.%s",
+                      slice_name, attr, exc_info=True)

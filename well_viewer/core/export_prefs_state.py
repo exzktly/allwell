@@ -34,3 +34,29 @@ class ExportPrefsState:
 
     style_prefs: dict | None = None
     axis_prefs: dict = field(default_factory=dict)
+
+    def reset_for_new_dataset(self) -> None:
+        """Drop the per-figure axis *limits*, keep everything else.
+
+        The dividing rule is the same one the load path applies everywhere:
+        *which data* versus *how I like to look at it*. An explicit
+        ``y_lim_max`` is in the units of the plate that was open, and
+        ``apply_export_style_prefs`` re-applies it on every redraw — so it
+        follows the next plate around looking exactly like a plot that has
+        decided to clip itself.
+
+        A log scale and the mark styling (line width, marker size and their
+        kin) are the other half: they are how the user likes a figure to read,
+        they carry no plate-specific units, and `plot_style`'s own comment
+        calls mark size a property of what the plot *draws*. Clearing the whole
+        of ``axis_prefs`` took those with it and silently reset a user's mark
+        styling on every dataset switch. ``style_prefs`` — the publication look
+        — was never in scope.
+        """
+        from well_viewer.core.plot_style import drop_axis_limits
+
+        for fig_prefs in self.axis_prefs.values():
+            drop_axis_limits(fig_prefs)
+        # Drop any figure whose entry is now empty, so the store does not grow
+        # a husk per figure per dataset.
+        self.axis_prefs = {k: v for k, v in self.axis_prefs.items() if v}

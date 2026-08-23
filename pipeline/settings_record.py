@@ -13,11 +13,10 @@ the second.
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from pathlib import Path
 
 from util.aw_safe import swallow
+from util.json_write import write_json_atomic
 from util.settings_digest import settings_match
 
 #: Beside `.aw_run_report/` and `.aw_journal/`, dot-prefixed for the same
@@ -45,15 +44,8 @@ def record_well_settings(output_dir: Path | str, well_label: str,
         d = _dir(output_dir)
         d.mkdir(parents=True, exist_ok=True)
         path = d / f"{well_label}.json"
-        fd, tmp = tempfile.mkstemp(dir=str(d), prefix=".tmp_", suffix=".json")
-        try:
-            with os.fdopen(fd, "w") as fh:
-                json.dump({"well": str(well_label), "digest": str(digest)},
-                          fh, indent=2)
-            os.replace(tmp, path)
-        finally:
-            if os.path.exists(tmp):
-                os.unlink(tmp)
+        write_json_atomic(
+            path, {"well": str(well_label), "digest": str(digest)})
     return path
 
 

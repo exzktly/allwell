@@ -264,7 +264,13 @@ def _set_groups_hidden(ctx, sels, *, target=None) -> None:
             s["hidden"] = target
             changed = True
     if changed:
-        app._invalidate_stats_cache()
+        # Visibility, not definition: the statistics on this plate are still
+        # correct, so they are kept. See ``note_group_visibility_changed``.
+        # Reached through the window seam rather than called directly, the way
+        # the old ``_invalidate_stats_cache`` call was — that seam is what the
+        # pure-logic tests stub, and bypassing it made them reach a Qt button
+        # walk with a context that has no widgets.
+        app._note_group_visibility_changed()
         app._rebuild_all()
 
 
@@ -1085,17 +1091,52 @@ def sel_set_composition(ctx, sid, wells=None, replicates=None) -> None:
 
 
 
-def invalidate_stats_cache(ctx) -> None:
-    """Discard cached group statistics. Call whenever group definitions change."""
-    ctx.state.stats_cache.invalidate()
-    # Replicate-set visibility may have shifted, so re-check whether the
-    # per-FOV toggle is still applicable. Cheap; only walks the FOV btn bank.
+def note_group_visibility_changed(ctx) -> None:
+    """A group was shown or hidden. Nothing computed has changed.
+
+    Showing and hiding groups used to go through :func:`invalidate_stats_cache`,
+    which throws away every cached statistic on the plate. It never needed to.
+    Hiding a group changes which of the already-computed results are *drawn*,
+    not what any of them is: ``active_replicate_sets`` filters hidden sets out
+    before anything is computed, and no cache key carries ``hidden`` — the keys
+    are the set's name, its wells, the timepoint, the threshold and the gate and
+    ratio signatures. So a plate of twelve groups paid for twelve groups'
+    statistics every time one of them was toggled off.
+
+    Measured rather than reasoned: a full collect over twelve groups of eight
+    wells fills 312 entries; toggling ``hidden`` on one group and recomputing
+    every one of them from scratch gives 312 comparable keys and zero value
+    differences.
+
+    What a toggle does still need is the per-FOV button refresh, which syncs the
+    button bank's label and variant from ``plot.use_fov_replicates`` and calls
+    its observers. It is kept here and nothing else is: the other two things
+    ``invalidate_stats_cache`` does — bumping the Review Image override version
+    and cueing the Image Table as stale — both describe a change in *inclusion*,
+    and a visibility toggle does not change which cells are included.
+    """
     from well_viewer.core.plot_toggles import refresh_fov_btn_state
     refresh_fov_btn_state(ctx)
-    # Cell gating writes new ``Included`` flags onto cached rows, which
-    # the Review Image include map mirrors. Bumping the version key
-    # forces the next refresh to recompute the include map (cheap)
-    # while reusing the cached image arrays + boundary mask (expensive).
+
+
+def invalidate_stats_cache(ctx) -> None:
+    """Discard cached group statistics. Call whenever group definitions change.
+
+    For a change in group *visibility* rather than definition, call
+    :func:`note_group_visibility_changed` — it costs nothing and keeps the
+    plate's statistics.
+    """
+    ctx.state.stats_cache.invalidate()
+    # The per-FOV toggle's label and variant are synced from plot state here so
+    # every path that disturbs the groups leaves the button bank consistent.
+    note_group_visibility_changed(ctx)
+    # Cell gating writes new ``Included`` flags onto cached rows, which the
+    # Review Image include map mirrors. This is a CACHE KEY, not a repaint cue:
+    # ``data/inclusion.py`` memoises the per-well excluded-nucleus map on this
+    # version, and names this function as its bump site. Bumping forces the next
+    # refresh to recompute the include map (cheap) while reusing the cached
+    # image arrays and boundary mask (expensive). Anything that moves or drops
+    # this bump makes that map outlive the edit it describes.
     # No-op when Image Browser is disabled (no review_image slice).
     _review_image = ctx.state.feature_slice("review_image")
     if _review_image is not None:

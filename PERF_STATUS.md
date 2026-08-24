@@ -1,6 +1,6 @@
 # STATUS — well-selection / plotting performance
 
-**Updated:** 2026-08-24 04:05 UTC
+**Updated:** 2026-08-24 04:30 UTC
 **Branch:** `claude/well-selection-performance-7phaix`
 **Base:** `44c0d38` (main, includes PR #847)
 **Version:** main is at 9.0.5 → this PR bumps to **9.0.6** (not yet applied)
@@ -27,7 +27,7 @@ last, after local fast lane + slow lane + adversarial review all pass.
 | 0b | Equivalence corpus | ✅ done | 14 cases green on unchanged HEAD; `tests/test_aggregate_equivalence.py` |
 | 1 | String timepoint short-circuit | ✅ done | **6.1x**: `aggregate_well` x96 1,091 → 180 ms, measured back-to-back |
 | 2 | Per-well memo | ✅ done | 1,248 calls → **96 distinct keys**; one-click cost 1,150 → **3.4 ms** |
-| 5 | Group-visibility cache clear | ⬜ not started | split cache-clear from UI cues |
+| 5 | Group-visibility cache clear | ✅ done | 312 entries kept instead of discarded per toggle |
 | 6 | Visible-only redraw | ⬜ not started | extend `fc_dirty_scopes`, no parallel flag |
 | 8 | CDF decimation | ⬜ not started | at `ax_cdf.plot` only, `n` from full array |
 | 9 | CDF collection residual | ⬜ not started | `_all_fluor_values_filtered` |
@@ -206,6 +206,42 @@ pre-existing correctness bug affecting exported numbers, out of scope for a perf
 and Step 3 must not paper over it by picking one threshold. **Flagged for a follow-up PR.**
 
 The bench now passes the app's own cutoff so it measures what the app does.
+
+## Step 5 — group visibility no longer discards the plate's statistics (landed)
+
+`note_group_visibility_changed(ctx)` does the one thing a toggle needs (sync the per-FOV
+button bank) and nothing else. `_set_groups_hidden` calls it instead of
+`invalidate_stats_cache`.
+
+**Proved by recomputation before changing anything**, not by reading the keys: a full
+collect over 12 groups x 8 wells fills **312 entries**; toggling `hidden` on one group and
+recomputing all of them gives 312 comparable keys and **0 value differences**.
+
+**Proved to bite** by mutating HEAD to restore the old behaviour — real `AssertionError`:
+*"toggling a group's visibility discarded cached statistics that a visibility change
+cannot have invalidated"*.
+
+Two things corrected along the way:
+
+- **`review_image.override_version` is a cache key, not a repaint cue.** `data/inclusion.py`
+  memoises the per-well excluded-nucleus map on it and names `invalidate_stats_cache` as its
+  bump site. The comment there now says so, so the next person does not move or drop it on
+  the strength of "it's a UI cue".
+- **The seam matters.** Calling the module function directly bypassed
+  `app._invalidate_stats_cache`, which the pure-logic tests stub — so a mock context reached
+  a Qt button walk. Routed through a matching window seam,
+  `app._note_group_visibility_changed`.
+
+### The projector bump: added, then removed
+
+`project_verdict_column` briefly bumped `rows_version`. It broke `test_crop_scope_view` and
+would have required teaching **81 test files** about a field none of them is about — the
+"widen the contract, then fix the tests" move the review warned against.
+
+It was redundant anyway. The walk has exactly two callers, the QC and crop controllers, and
+both call `invalidate_stats_cache` immediately afterwards, which empties the dict the memo
+lives in. The other route in is `get_rows`, projecting onto a frame it has just built, which
+cannot have a memoized aggregate. Removed, with the reasoning recorded in the roster.
 
 ## Decisions log (for user confirmation at the end)
 

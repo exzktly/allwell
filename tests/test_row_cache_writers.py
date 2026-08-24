@@ -63,9 +63,11 @@ _KNOWN_WRITERS: dict[str, str] = {
     ),
     "well_viewer/data/cache_projectors.py::__dynamic__": (
         "project_verdict_column writes whichever column its caller names "
-        "(QC_Pass, Crop_Pass) onto cached frames. It is the single walk every "
-        "inclusion-verdict projector goes through, so bumping rows_version here "
-        "covers the QC and crop layers together."
+        "(QC_Pass, Crop_Pass) onto cached frames. It does NOT bump, and does "
+        "not need to: its only two callers, the QC and crop controllers, call "
+        "invalidate_stats_cache immediately afterwards, which empties the dict "
+        "the memo lives in; and the other route in is get_rows, projecting onto "
+        "a frame it has just built, which cannot have a memoized aggregate yet."
     ),
     "well_viewer/features/home/cell_gating/gating_compute.py::Included": (
         "apply_fluor_gating rewrites the inclusion columns for a well from the "

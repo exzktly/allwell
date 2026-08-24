@@ -76,12 +76,27 @@ def test_remote_params_grouped_and_gated_on_selection(qapp):
     tab._cleanup_remote_cb.setChecked(False)
     assert not tab._dry_run_cleanup_cb.isEnabled()
 
-    # Back to Local: hidden again, and the toggles return to their DEFAULTS so
-    # the next remote run starts from the same state a fresh tab would.
+    # Back to Local: hidden again, and the toggles keep exactly what the user
+    # set them to.
+    #
+    # This used to assert the opposite — that both returned to their defaults —
+    # and that reset was the defect (audit U3), not the contract. It ran against
+    # a widget hidden at the time and was not undone on the way back, so a user
+    # who ticked "Dry-run cleanup" to see what auto-delete would remove, glanced
+    # at Local and came back had the tick silently dropped and the next run
+    # deleted the remote's per-run output and cached input for real. The mirror
+    # case, the one below, re-armed an auto-delete they had turned off. Nothing
+    # reads either value on a local run — PipelineRunner passes both only down
+    # the remote branch — so there was never anything to protect the next remote
+    # run from. tests/test_analyze_cleanup_toggles_are_not_rewritten.py drives
+    # the whole round trip.
     tab._remote_cb.setCurrentText("Local")
     assert grp.isHidden()
-    assert tab._cleanup_remote_cb.isChecked()
-    assert not tab._dry_run_cleanup_cb.isChecked()
+    assert not tab._cleanup_remote_cb.isChecked(), (
+        "an auto-delete the user turned off was re-armed by a look at Local")
+    tab._remote_cb.setCurrentText("fakehost")
+    assert not tab._cleanup_remote_cb.isChecked()
+    assert not tab._dry_run_cleanup_cb.isEnabled()
 
 
 def test_fluor_radius_info_icon_precedes_disable_checkbox(qapp):

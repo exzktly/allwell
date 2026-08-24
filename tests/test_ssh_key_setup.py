@@ -27,7 +27,6 @@ from services.ssh_key_setup import (
     generate_keypair,
     key_has_passphrase,
     probe_ssh_connection,
-    verify_key_works,
 )
 
 
@@ -193,79 +192,6 @@ def test_build_copy_command_quotes_pathological_alias(tmp_path, monkeypatch):
     assert "'weird user@host with spaces'" in cmd
 
 
-# ── verify_key_works ────────────────────────────────────────────────────────
-
-
-def test_verify_key_works_returns_true_on_ok(tmp_path, monkeypatch):
-    key = tmp_path / "key"
-    monkeypatch.setattr(
-        "services.ssh_key_setup.subprocess.run",
-        MagicMock(return_value=subprocess.CompletedProcess(
-            [], 0, stdout="ok\n", stderr="",
-        )),
-    )
-    ok, detail = verify_key_works("bigbox", key)
-    assert ok is True
-    assert detail == ""
-
-
-def test_verify_key_works_uses_batchmode(tmp_path, monkeypatch):
-    """BatchMode=yes is essential — without it a missing key would
-    fall through to a password prompt and the call would hang in CI."""
-    key = tmp_path / "key"
-    captured = {}
-
-    def fake_run(cmd, **kwargs):
-        captured["cmd"] = list(cmd)
-        return subprocess.CompletedProcess(cmd, 0, stdout="ok\n", stderr="")
-
-    monkeypatch.setattr("services.ssh_key_setup.subprocess.run", fake_run)
-    verify_key_works("bigbox", key)
-    # BatchMode must be present.
-    assert any("BatchMode=yes" in arg for arg in captured["cmd"])
-    # Identity file must be passed.
-    assert "-i" in captured["cmd"]
-
-
-def test_verify_key_works_returns_detail_on_failure(tmp_path, monkeypatch):
-    key = tmp_path / "key"
-    monkeypatch.setattr(
-        "services.ssh_key_setup.subprocess.run",
-        MagicMock(return_value=subprocess.CompletedProcess(
-            [], 255, stdout="",
-            stderr="Permission denied (publickey,password).",
-        )),
-    )
-    ok, detail = verify_key_works("bigbox", key)
-    assert ok is False
-    assert "Permission denied" in detail
-
-
-def test_verify_key_works_truncates_long_stderr(tmp_path, monkeypatch):
-    """A flood of warnings shouldn't blow up the message-box width."""
-    key = tmp_path / "key"
-    monkeypatch.setattr(
-        "services.ssh_key_setup.subprocess.run",
-        MagicMock(return_value=subprocess.CompletedProcess(
-            [], 1, stdout="", stderr="x" * 1000,
-        )),
-    )
-    ok, detail = verify_key_works("bigbox", key)
-    assert ok is False
-    assert len(detail) <= 240
-
-
-def test_verify_key_works_handles_timeout(tmp_path, monkeypatch):
-    key = tmp_path / "key"
-    monkeypatch.setattr(
-        "services.ssh_key_setup.subprocess.run",
-        MagicMock(side_effect=subprocess.TimeoutExpired(cmd="ssh", timeout=10)),
-    )
-    ok, detail = verify_key_works("bigbox", key, timeout=10)
-    assert ok is False
-    assert detail
-
-
 # ── probe_ssh_connection (v5.2.2) ────────────────────────────────────────────
 
 
@@ -349,22 +275,6 @@ def test_probe_ssh_connection_fail_returns_stderr_detail(monkeypatch):
     assert ok is False
     assert "Permission denied" in detail
 
-
-def test_verify_key_works_still_delegates_through_new_helper(tmp_path, monkeypatch):
-    """v5.2.2 backwards-compat: the original verify_key_works API used
-    by the SSH Key wizard's Verify step keeps working."""
-    key = tmp_path / "key"
-    monkeypatch.setattr(
-        "services.ssh_key_setup.subprocess.run",
-        MagicMock(return_value=subprocess.CompletedProcess(
-            [], 0, stdout="ok\n", stderr="",
-        )),
-    )
-    ok, detail = verify_key_works("bigbox", key)
-    assert ok is True
-    assert detail == ""
-
-
 # ── key_has_passphrase (v5.2.6) ─────────────────────────────────────────────
 
 
@@ -446,3 +356,26 @@ def test_key_has_passphrase_invokes_correct_command(tmp_path, monkeypatch):
     assert captured["cmd"][p_idx + 1] == ""  # empty passphrase argument
     f_idx = captured["cmd"].index("-f")
     assert captured["cmd"][f_idx + 1] == str(key)
+
+
+def test_probe_ssh_connection_truncates_long_stderr(monkeypatch):
+    """A flood of warnings shouldn't blow up the message-box width."""
+    monkeypatch.setattr(
+        "services.ssh_key_setup.subprocess.run",
+        MagicMock(return_value=subprocess.CompletedProcess(
+            [], 1, stdout="", stderr="x" * 1000,
+        )),
+    )
+    ok, detail = probe_ssh_connection("bigbox", "~/key")
+    assert ok is False
+    assert len(detail) <= 240
+
+
+def test_probe_ssh_connection_handles_timeout(monkeypatch):
+    monkeypatch.setattr(
+        "services.ssh_key_setup.subprocess.run",
+        MagicMock(side_effect=subprocess.TimeoutExpired(cmd="ssh", timeout=10)),
+    )
+    ok, detail = probe_ssh_connection("bigbox", "~/key", timeout=10)
+    assert ok is False
+    assert detail

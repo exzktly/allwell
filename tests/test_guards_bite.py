@@ -122,6 +122,67 @@ def test_colour_guard_clears_a_token_read(tmp_path, monkeypatch):
                      "test_no_inline_hex_colours", [good]) is None
 
 
+EMBEDDED_HEX_VIOLATIONS = {
+    # The two that shipped in analyze_remote_dialog.py: a hex inside a longer
+    # f-string, which the whole-literal `^…$` match walked straight past.
+    "fstring": ('def paint(lbl, alias):\n'
+                '    lbl.setText(f"<span style=\'color: #4caf50;\'>ok {alias}</span>")\n'),
+    "plain": 'STYLE = "QLabel { color: #e57373; }"\n',
+    "qss_block": ('def qss():\n'
+                  '    return """\n    QFrame { background: #1A2230; }\n    """\n'),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(EMBEDDED_HEX_VIOLATIONS))
+def test_colour_guard_catches_a_hex_embedded_in_a_longer_string(
+        tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_embedded.py", EMBEDDED_HEX_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_hardcoded_tokens",
+                    "test_no_inline_hex_colours", [bad])
+    assert exc is not None, f"the {shape} embedded hex went uncaught"
+    assert "bad_embedded.py" in str(exc)
+
+
+def test_a_file_level_colour_exemption_does_not_cover_an_embedded_hex(
+        tmp_path, monkeypatch):
+    """The two allowlists have different granularities, on purpose.
+
+    ``COLOUR_ALLOWLIST`` is per *file* and was written for an icon painter,
+    where every whole literal in the file is a colour by design.
+    ``EMBEDDED_HEX_ALLOWLIST`` is per *site*. Letting the file-level exemption
+    also cover the embedded scan is CLAUDE.md §7.5 #10 — allowlist the site, not
+    the file — broken inside the file that documents the rule, and it made the
+    one place a buried hex is hardest to see the one place the scan could not
+    look.
+    """
+    import tests.test_hardcoded_tokens as guard
+
+    bad = _write(tmp_path, "exempt_file.py",
+                 'PALETTE = ["#FF6B35", "#1A2230"]\n'
+                 'STYLE = "QLabel { color: #e57373; }"\n')
+    monkeypatch.setattr(guard, "COLOUR_ALLOWLIST", {str(bad)})
+    exc = _run_scan(monkeypatch, "tests.test_hardcoded_tokens",
+                    "test_no_inline_hex_colours", [bad])
+    assert exc is not None, (
+        "a hex embedded in a string went uncaught because the file carried a "
+        "whole-literal exemption")
+    assert "#e57373" in str(exc)
+    # ...and the exemption still does what it is for.
+    assert "#FF6B35" not in str(exc) and "#1A2230" not in str(exc), (
+        f"the file-level exemption stopped covering whole literals: {exc}")
+
+
+def test_colour_guard_clears_a_hex_named_in_a_docstring(tmp_path, monkeypatch):
+    """Prose that names a colour is documentation, not paint — this repository's
+    own guard file names four in its comments. Flagging those would push the
+    guard's own authors toward writing vaguer notes."""
+    good = _write(tmp_path, "good_docstring.py",
+                  '"""The [active] rule alone gives #98a2b3, which is wrong."""\n'
+                  "COLOUR = theme.Colors.accent\n")
+    assert _run_scan(monkeypatch, "tests.test_hardcoded_tokens",
+                     "test_no_inline_hex_colours", [good]) is None
+
+
 PIXEL_VIOLATIONS = {
     "bare": "def build(w):\n    w.setFixedWidth(137)\n",
     # The evasion an earlier version walked past ten times: the literal is a

@@ -251,13 +251,38 @@ def _layout_cell_values_nested(row_dims, col_dims, row_tuple, col_tuple,
     """Per-cell dim values for a NESTED layout: off-axis dims held at *fixed*, the
     row dims set from *row_tuple* (aligned to *row_dims*) and col dims from
     *col_tuple*. The caller supplies the already-decoded product tuples
-    ``row_prod[r]`` / ``col_prod[c]``."""
+    ``row_prod[r]`` / ``col_prod[c]``.
+
+    A ``None`` tuple blanks that axis's dims — the ragged tail of a wrapped
+    (banded) layout, where the grid holds more cells than the axis has values.
+    Blanking rather than leaving the dim unset is what keeps such a cell empty
+    instead of falling back to the held off-axis value and drawing an image the
+    user never asked for."""
     vals = dict(fixed)
-    for d, v in zip(row_dims, row_tuple):
-        vals[d] = v
-    for d, v in zip(col_dims, col_tuple):
-        vals[d] = v
+    for dims, tup in ((row_dims, row_tuple), (col_dims, col_tuple)):
+        if tup is None:
+            for d in dims:
+                vals[d] = ""
+            continue
+        for d, v in zip(dims, tup):
+            vals[d] = v
     return vals
+
+
+def banded_indices(r: int, c: int, n_row_vals: int, group_size: int) -> tuple[int, int]:
+    """Map a grid cell ``(r, c)`` onto indices into the *un-banded* row/column
+    value lists, for the wrapped ("Wrap cols") layout.
+
+    The columns axis folds into vertically-stacked bands of ``group_size``
+    columns and the rows axis repeats once per band, so::
+
+        band = r // n_row_vals ;  row_idx = r % n_row_vals ;  col_idx = band*G + c
+
+    Shared by the flat single-dim path and the nested (product) path so both
+    band identically; the caller decides what a ``col_idx`` past the last value
+    means (a ragged final band leaves the cell blank)."""
+    band = r // max(1, n_row_vals)
+    return r % max(1, n_row_vals), band * group_size + c
 
 
 def _layout_cell_values(row_axis, col_axis, row_vals, col_vals, fixed, r, c,
@@ -274,9 +299,7 @@ def _layout_cell_values(row_axis, col_axis, row_vals, col_vals, fixed, r, c,
     """
     vals = dict(fixed)
     if group_size and n_row_vals:
-        band = r // n_row_vals
-        row_idx = r % n_row_vals
-        col_idx = band * group_size + c
+        row_idx, col_idx = banded_indices(r, c, n_row_vals, group_size)
         vals[row_axis] = row_vals[row_idx] if 0 <= row_idx < len(row_vals) else ""
         vals[col_axis] = col_vals[col_idx] if 0 <= col_idx < len(col_vals) else ""
     else:

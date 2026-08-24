@@ -27,6 +27,7 @@ from well_viewer.features.image_browser.image_table.grid_layout import (
     _fixed_off_axis,
     _layout_cell_values,
     _layout_cell_values_nested,
+    banded_indices,
     _product_values,
     _timepoint_options,
     compose_plate_well,
@@ -66,11 +67,18 @@ def _ctrl():
     return C
 
 
-def _build_nested_layout(ctx, row_dims: list[str], col_dims: list[str]) -> None:
+def _build_nested_layout(ctx, row_dims: list[str], col_dims: list[str],
+                         wrap: int = 0) -> None:
     """Build a grid whose rows and/or columns are the mixed-radix Cartesian
     product of an ordered dim list, so >2 dimensions vary at once (e.g.
     rows=[well, channel] × cols=[timepoint]). The flat single-axis path
-    (``image_table_build_layout``) handles the len==1 case on both axes."""
+    (``image_table_build_layout``) handles the len==1 case on both axes.
+
+    *wrap* folds the columns into vertically-stacked bands of that many columns,
+    repeating the whole row product per band — the same banding the flat path
+    does, applied to the column *product* rather than a single dim's values, so
+    a table with channels nested under an axis wraps like any other. 0 / a value
+    at or past the column count = off."""
     overlap = set(row_dims) & set(col_dims)
     if overlap:
         ctx.notify.set_status("Image Table: a dimension can't be on both the rows and "
@@ -88,14 +96,31 @@ def _build_nested_layout(ctx, row_dims: list[str], col_dims: list[str]) -> None:
         return
 
     n_rows_wanted, n_cols_wanted = len(row_prod), len(col_prod)
-    rows = min(n_rows_wanted, _ROW_MAX)
-    cols = min(n_cols_wanted, _AXIS_MAX)
-    row_prod = row_prod[:rows]
-    col_prod = col_prod[:cols]
-
+    group = int(wrap or 0)
+    grouped = 0 < group < n_cols_wanted
     st = ctx.state.image_table
-    st.group_size = 0
-    st.group_row_span = 0
+    clamped_bands = 0
+    if grouped:
+        # Cap band width at the column max and total rows at the row max; drop
+        # whole overflow bands (reported below) rather than silently.
+        cols = min(group, _AXIS_MAX)
+        n_row_prod = min(n_rows_wanted, _ROW_MAX)
+        row_prod = row_prod[:n_row_prod]
+        n_bands_wanted = (n_cols_wanted + cols - 1) // cols
+        max_bands = max(1, _ROW_MAX // max(1, n_row_prod))
+        n_bands = min(n_bands_wanted, max_bands)
+        clamped_bands = n_bands_wanted - n_bands
+        rows = n_row_prod * n_bands
+        st.group_size = cols
+        st.group_row_span = n_row_prod
+    else:
+        rows = min(n_rows_wanted, _ROW_MAX)
+        cols = min(n_cols_wanted, _AXIS_MAX)
+        row_prod = row_prod[:rows]
+        col_prod = col_prod[:cols]
+        n_row_prod = rows
+        st.group_size = 0
+        st.group_row_span = 0
     st.rows = rows
     st.cols = cols
     _ctrl().image_table_rebuild_grid(ctx)
@@ -106,17 +131,33 @@ def _build_nested_layout(ctx, row_dims: list[str], col_dims: list[str]) -> None:
     cells = getattr(ctx.runtime.image_table, "cells", None) or []
     for r, row in enumerate(cells):
         for c, cell in enumerate(row):
-            vals = _layout_cell_values_nested(
-                row_dims, col_dims, row_prod[r], col_prod[c], fixed)
+            if grouped:
+                ri, ci = banded_indices(r, c, n_row_prod, cols)
+            else:
+                ri, ci = r, c
+            # A ragged final band runs past the last column value: blank the cell
+            # (None) instead of indexing, so it stays empty rather than repeating.
+            rt = row_prod[ri] if 0 <= ri < len(row_prod) else None
+            ct = col_prod[ci] if 0 <= ci < len(col_prod) else None
+            vals = _layout_cell_values_nested(row_dims, col_dims, rt, ct, fixed)
             if plate:
                 compose_plate_well(vals, rc_index)
             _fill_cell(cell, vals)
 
-    clamped = (n_rows_wanted - rows) + (n_cols_wanted - cols)
+    if grouped:
+        clamped = max(0, n_rows_wanted - n_row_prod)
+    else:
+        clamped = (n_rows_wanted - rows) + (n_cols_wanted - cols)
     rlabel = " › ".join(_AXIS_LABEL[d] for d in row_dims)
     clabel = " › ".join(_AXIS_LABEL[d] for d in col_dims)
     status = (f"Image Table: built {rows}×{cols} selector grid — rows = {rlabel}, "
-              f"cols = {clabel}. Press Generate to render.")
+              f"cols = {clabel}")
+    if grouped:
+        status += f", grouped {cols}/band"
+    status += ". Press Generate to render."
+    if clamped_bands:
+        status += (f" (Clamped {clamped_bands} band(s) that exceed the "
+                   f"{_ROW_MAX}-row grid limit.)")
     if clamped:
         status += (f" (Clamped to the {_ROW_MAX}-row / {_AXIS_MAX}-col limit — "
                    "filter the selection to see the rest.)")
@@ -130,7 +171,10 @@ def image_table_build_layout(ctx) -> None:
     _row_dims = _current_dims(ctx, "row")
     _col_dims = _current_dims(ctx, "col")
     if len(_row_dims) > 1 or len(_col_dims) > 1:
-        _build_nested_layout(ctx, _row_dims, _col_dims)
+        # Carry the wrap through: banding is the columns axis folding into bands,
+        # which is as meaningful for a column product as for a single dim.
+        _build_nested_layout(ctx, _row_dims, _col_dims,
+                             int(getattr(ctx.state.image_table, "group_size", 0) or 0))
         return
 
     row_axis = _current_axis(ctx, "row")
@@ -315,9 +359,9 @@ def image_table_apply_spec(ctx, spec, *, render: bool = True) -> None:
         st.col_axis = rt.col_axis
         image_table_build_layout(ctx)
     else:
-        st.group_size = 0
-        st.group_row_span = 0
-        _build_nested_layout(ctx, row_dims, col_dims)
+        # Nested axes band too — the column *product* folds into bands — so a
+        # layout with channels nested under a root still honours Wrap cols.
+        _build_nested_layout(ctx, row_dims, col_dims, wrap)
 
     if render:
         _ctrl().image_table_generate(ctx)

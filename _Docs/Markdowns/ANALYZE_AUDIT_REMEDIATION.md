@@ -29,13 +29,16 @@ rather than a write-up. **Delete it in the PR that closes the last group.**
 | Group | Theme | Branch | Version | PR | State |
 |---|---|---|---|---|---|
 | 1 | Stop the data loss | `…-ugoecl` | 9.0.1 | [#842](https://github.com/exzktly/allwell/pull/842) | **merged** |
-| 2 | One definition of an image, and an honest verdict | `claude/analysis-job-failure-recovery-ugoecl` | 9.0.3 | [#846](https://github.com/exzktly/allwell/pull/846) | **open, complete** — lane green, CI green, reviewed |
-| 3 | The record and the resume path | `claude/analyze-audit-group3-record` | 9.0.3 | [#847](https://github.com/exzktly/allwell/pull/847) | **open, complete** — lane 5,665 passed, three review passes, all 29 review findings fixed or stated |
+| 2 | One definition of an image, and an honest verdict | `claude/analysis-job-failure-recovery-ugoecl` | 9.0.4 | [#846](https://github.com/exzktly/allwell/pull/846) | **open, complete** — lane green, CI green, reviewed |
+| 3 | The record and the resume path | `claude/analyze-audit-group3-record` | 9.0.4 | [#847](https://github.com/exzktly/allwell/pull/847) | **open, complete** — lane 5,665 passed, three review passes, all 29 review findings fixed or stated |
 | 4 | The Analyze pane | `claude/analyze-audit-group4-pane` | 9.0.2 | [#844](https://github.com/exzktly/allwell/pull/844) | **merged** |
-| 5 | Numbers and parsing | `claude/analyze-audit-group5-numbers` | 9.0.3 | [#845](https://github.com/exzktly/allwell/pull/845) | **open, complete** — CI green, two reviews, all 19 review findings fixed |
+| 5 | Numbers and parsing | `claude/analyze-audit-group5-numbers` | 9.0.3 | [#845](https://github.com/exzktly/allwell/pull/845) | **merged** |
 
-**Group 4 has merged**, so `main` carries 9.0.2 and the three branches still
-open carry 9.0.3. That they share a number is deliberate rather than a mistake
+**Groups 1, 4 and 5 have merged**, so `main` carries 9.0.3 and the two
+branches still open carry 9.0.4. Group 4's `FORM_IS_STRICTER` roster survived
+Group 5 landing: the anticipated collision did not materialise, because Group
+5's NaN refusal is in the pipeline's own argument handling and `parse_threshold`
+still returns `nan`, so the entry still describes a real gap. That they share a number is deliberate rather than a mistake
 to correct. `scripts/preflight.sh` requires the net delta from
 `origin/main` to be exactly *one* increment, so the pre-assigned 9.0.3 / 9.0.4 /
 9.0.5 scheme in an earlier revision of this file was wrong on three branches:

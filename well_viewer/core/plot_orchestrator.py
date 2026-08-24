@@ -68,21 +68,51 @@ def redraw(
         metric_label=metric_label,
     )
 
-    # 2. Distribution — lazy-built, so guard on the registered canvas handle
-    # (``register`` stamps ``app._distribution_canvas`` too, so this is the
-    # exact ctx-native equivalent of the old ``hasattr(app, …)`` guard).
-    if ctx.widgets.has("_distribution_canvas"):
-        try:
-            ctx.features.redraw(ctx, "Distribution")
-        except Exception:
-            _logger.exception("Distribution redraw failed")
+    # 2 and 3. Distribution and Heat Map — lazy-built, so guard on the
+    # registered canvas handle (``register`` stamps ``app._distribution_canvas``
+    # too, so this is the exact ctx-native equivalent of the old ``hasattr``
+    # guard) AND on the tab being on screen.
+    #
+    # The canvas guard alone asks whether the tab was ever *built*, not whether
+    # anyone is looking at it. Once built it stays built, so a user who had
+    # visited both tabs paid for all three figures on every selection change for
+    # the rest of the session — and a 96-series figure is over a second of
+    # matplotlib each.
+    #
+    # A figure skipped here is marked dirty rather than forgotten. Both tabs are
+    # registered redraw scopes, and ``flush_dirty_scopes`` — already wired into
+    # the tab-change handler — redraws a dirty scope the moment its tab is
+    # shown; each also carries an ``on_activate`` hook that runs this same
+    # fan-out on show, by which time it *is* visible and does draw. Two routes
+    # to the same repaint, and no third flag: reusing the existing dirty set is
+    # what keeps a figure from being clean by one mechanism's reckoning and
+    # dirty by another's.
+    from well_viewer.domain.fold_change_scopes import visible_scope_names
+    try:
+        _visible = visible_scope_names(ctx.window)
+        _dirty = ctx.state.plot.fc_dirty_scopes
+    except Exception:
+        # A context too thin to report visibility (pure-logic callers) keeps the
+        # old behaviour: draw everything that is built. Failing *open* is right
+        # here — the cost of a redundant redraw is time, the cost of a skipped
+        # one is a figure that disagrees with the plate.
+        _visible, _dirty = None, None
 
-    # 3. Heat Map — lazy-built; same guard.
-    if ctx.widgets.has("_heatmap_canvas"):
+    for _scope, _tab, _canvas in (
+        ("distribution", "Distribution", "_distribution_canvas"),
+        ("heatmap", "Heat Map", "_heatmap_canvas"),
+    ):
+        if not ctx.widgets.has(_canvas):
+            continue
+        if _visible is not None and _scope not in _visible:
+            _dirty.add(_scope)
+            continue
         try:
-            ctx.features.redraw(ctx, "Heat Map")
+            ctx.features.redraw(ctx, _tab)
+            if _dirty is not None:
+                _dirty.discard(_scope)
         except Exception:
-            _logger.exception("Heat map redraw failed")
+            _logger.exception("%s redraw failed", _tab)
 
 
 def save_matplotlib_fig(ctx, fig, default_name: str, *, plot_bg: str) -> None:

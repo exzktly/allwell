@@ -1,6 +1,6 @@
 # STATUS — well-selection / plotting performance
 
-**Updated:** 2026-08-24 05:20 UTC
+**Updated:** 2026-08-24 05:40 UTC
 **Branch:** `claude/well-selection-performance-7phaix`
 **Base:** `44c0d38` (main, includes PR #847)
 **Version:** main is at 9.0.5 → this PR bumps to **9.0.6** (not yet applied)
@@ -28,7 +28,7 @@ last, after local fast lane + slow lane + adversarial review all pass.
 | 1 | String timepoint short-circuit | ✅ done | **6.1x**: `aggregate_well` x96 1,091 → 180 ms, measured back-to-back |
 | 2 | Per-well memo | ✅ done | 1,248 calls → **96 distinct keys**; one-click cost 1,150 → **3.4 ms** |
 | 5 | Group-visibility cache clear | ✅ done | 312 entries kept instead of discarded per toggle |
-| 6 | Visible-only redraw | ⬜ not started | extend `fc_dirty_scopes`, no parallel flag |
+| 6 | Visible-only redraw | ✅ done | up to 3 figures per click → 1 |
 | 8 | CDF decimation | ✅ done | draw 5,219 → 2,413 ms on its own |
 | 9 | CDF collection residual | ✅ done | warm collect 98.6 → **4.8 ms** |
 | 11 | **Legend cap (NEW)** | ✅ done | draw 5,219 → 3,290 ms on its own; with Step 8, **1,498 ms** |
@@ -300,6 +300,30 @@ identity is part of the key, so a caller supplying a different filter cannot be 
 another's answer.
 
 Warm collect, 96 wells: **98.6 ms → 4.8 ms**.
+
+## Step 6 — hidden plot tabs defer their redraw (landed)
+
+`plot_orchestrator.redraw` guarded Distribution and Heat Map on whether the tab had ever
+been **built**, not whether anyone was looking at it. Once built it stays built, so a user
+who had opened both paid for all three figures on every selection change for the rest of
+the session — and each 96-series figure is over a second of matplotlib.
+
+Now also guarded on `visible_scope_names(ctx.window)` (Split-View-aware), with a skipped
+figure added to **the existing `fc_dirty_scopes` set** rather than a new flag. Both tabs are
+already registered redraw scopes, `flush_dirty_scopes` is already wired into the tab-change
+handler, and both carry `on_activate` hooks that re-run this fan-out on show. Two routes to
+the same repaint and no third flag — a parallel set is how a figure ends up clean by one
+mechanism's reckoning and dirty by another's.
+
+**Fails open**, deliberately: a context too thin to report visibility draws everything that
+is built. A redundant redraw costs time; a skipped one costs a figure that disagrees with
+the plate.
+
+Tested through the real control (§7.6 #1) — `_show_leaf()` switches to "Plotting" and then
+the nested notebook page, the way the sub-tab strip does. A test calling
+`ctx.features.redraw` directly would prove the figure *can* be refreshed while the app
+never does. Proved to bite: reverting the skip gives *"a Distribution tab nobody is looking
+at was repainted anyway"*.
 
 ## Decisions log (for user confirmation at the end)
 

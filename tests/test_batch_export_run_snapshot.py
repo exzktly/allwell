@@ -15,7 +15,9 @@ then misreports.
 * the multi-timepoint scatter aggregate drew without ``color``, discarding the
   per-timepoint gradient that is the reason that figure exists;
 * a per-sample control mapping inherited from the plot tab left the Control combo
-  reading ``—`` — "no control" — while the export normalised against it.
+  reading ``—`` — "no control" — while the export normalised against it;
+* the four scatter job methods each re-read the X and Y axis combos, so one run
+  could plot two different columns into one output directory under one manifest.
 
 These drive the real methods with stubs rather than building a panel, because
 the defects are in the *sequence* of reads, not in any widget.
@@ -153,6 +155,7 @@ def test_no_per_job_closure_reads_a_live_combo():
 
 def test_the_multi_tp_scatter_aggregate_draws_each_point_in_its_timepoint_colour(monkeypatch):
     from well_viewer.features.batch_export.scatter_panel import (
+        ScatterAxes,
         ScatterBatchExportPanel,
     )
     import well_viewer.features.scatter.controller as SC
@@ -185,9 +188,6 @@ def test_the_multi_tp_scatter_aggregate_draws_each_point_in_its_timepoint_colour
         _sc_agg_x_cb = _sc_agg_metric_x_cb = None
         _sc_agg_y_cb = _sc_agg_metric_y_cb = None
 
-        def _scatter_axis_stat(self, _a, _b):
-            return "Mean Fluorescence GFP"
-
         def _agg_axis_labels(self, _x, _y):
             return ("x", "y")
 
@@ -202,9 +202,13 @@ def test_the_multi_tp_scatter_aggregate_draws_each_point_in_its_timepoint_colour
             draw(_Ax())
 
     tmp = Path(tempfile.mkdtemp())
+    # The axis definitions arrive as a snapshot taken once per run, not read
+    # off the combos per job — see ``ScatterAxes``.
     err = ScatterBatchExportPanel._run_scatter_agg_multi_tp_job(
         _Stub(), SimpleNamespace(name="G1", wells=[]), [0.0, 6.0],
-        tmp / "a.csv", tmp / "a.png", "png")
+        tmp / "a.csv", tmp / "a.png", "png",
+        ScatterAxes(mode="aggregate", stat_x="Mean Fluorescence GFP",
+                    stat_y="Mean Fluorescence GFP"))
     assert err is None
     assert len(calls) == 2
     # ``color`` here is the timepoint's position on the viridis gradient. Without
@@ -275,3 +279,85 @@ def test_picking_one_control_replaces_the_inherited_mapping(qapp):
     texts = [s._fc_ctrl_combo.itemText(i) for i in range(s._fc_ctrl_combo.count())]
     assert BatchExportPanel._FC_PER_SAMPLE_LABEL not in texts
     assert s._fc_ctrl_combo.currentText() == "B01"
+
+
+
+# ── item 8: the scatter axes are read once per run, not once per job ────────
+
+_SCATTER_JOB_METHODS = (
+    "_run_scatter_cells_job",
+    "_run_scatter_agg_job",
+    "_run_scatter_cells_multi_tp_job",
+    "_run_scatter_agg_multi_tp_job",
+)
+
+#: Every attribute on the panel that names a live axis control, and the two
+#: helpers that read a pair of them. A job that touches any of these is reading
+#: the panel as the user has left it, which for the second and later jobs of a
+#: run is not the configuration the run was started with.
+_LIVE_AXIS_READS = frozenset({
+    "_sc_cells_x_cb", "_sc_cells_y_cb",
+    "_sc_cells_metric_x_cb", "_sc_cells_metric_y_cb",
+    "_sc_agg_x_cb", "_sc_agg_y_cb",
+    "_sc_agg_metric_x_cb", "_sc_agg_metric_y_cb",
+    "_scatter_axis_col", "_scatter_axis_stat",
+    "_scatter_mode",
+})
+
+
+def _scatter_panel_fn(name: str):
+    import ast
+
+    src = (Path(__file__).resolve().parents[1]
+           / "well_viewer" / "features" / "batch_export"
+           / "scatter_panel.py").read_text()
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return node
+    raise AssertionError(f"scatter_panel.py has no {name}")
+
+
+@pytest.mark.parametrize("name", _SCATTER_JOB_METHODS)
+def test_a_scatter_job_reads_no_live_axis_control(name):
+    """Each job plots what the RUN was configured with, not what the panel says now.
+
+    An AST check rather than a behavioural one because the four methods differ
+    only in which pair of controls they used to read, and the multi-timepoint
+    cells job read them twice — once for the CSV and once again for the figure,
+    which put a figure and its own CSV on different columns inside a single job.
+    A guard that names the controls catches the next one added.
+    """
+    import ast
+
+    fn = _scatter_panel_fn(name)
+    offenders = sorted({
+        node.attr for node in ast.walk(fn)
+        if isinstance(node, ast.Attribute) and node.attr in _LIVE_AXIS_READS
+    })
+    assert not offenders, (
+        f"{name} reads {offenders} off the live panel; the axes are fixed for "
+        "the whole run by _snapshot_scatter_axes and arrive as the `axes` "
+        "argument"
+    )
+
+
+def test_the_snapshot_is_taken_before_the_job_loop():
+    """...and the one place that IS allowed to read them runs once, up front."""
+    import ast
+
+    run_batch = _scatter_panel_fn("_run_batch")
+    calls = [n for n in ast.walk(run_batch)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+             and n.func.attr == "_snapshot_scatter_axes"]
+    assert len(calls) == 1, "the run must resolve its axes exactly once"
+    # Inside neither of the two `_run_job` closures — those are what the runner
+    # calls per job.
+    closures = [n for n in ast.walk(run_batch)
+                if isinstance(n, ast.FunctionDef) and n.name == "_run_job"]
+    assert closures, "_run_batch no longer defines _run_job"
+    for closure in closures:
+        assert not [n for n in ast.walk(closure)
+                    if isinstance(n, ast.Call)
+                    and isinstance(n.func, ast.Attribute)
+                    and n.func.attr == "_snapshot_scatter_axes"]

@@ -86,8 +86,27 @@ KIND_ALIASES: dict[str, str] = {
     "fluor_processed": "tophat",
 }
 
+# A well token embedded in free text: a row letter A–H and a column 1–12, with
+# no adjacent letter or digit on either side.
+#
+# **The row letter is case-insensitive except for F.** A lowercase ``f`` followed
+# by one or two digits is how this codebase spells a FIELD, not a well:
+# ``pipeline/ome_explode`` writes ``{experiment}_{channel}_{well}_f{fov}_{tp}``,
+# and the well in that same template comes from ``canonical_well_label``, which
+# upper-cases. Matching ``f1`` as the well ``F01`` therefore made every plate
+# using the standard convention answer "yes, this is well F01" for *every* well's
+# first field — so selecting F01 in Review drew A01's image, F02 drew B02's, and
+# a file naming no well at all (``sample_f3_t0.tif``) was claimed by F03. That is
+# the same defect item 56 fixed, arriving through a different vocabulary.
+#
+# The cost is narrow and deliberate: a plate whose filenames spell a row-F well
+# in lower case (``f01_GFP_…``) is no longer found by this free-text scan. Those
+# names are genuinely ambiguous — ``f01`` is a valid spelling of both fields —
+# and the two parsers above this one (the pipeline schema and the legacy 5-field
+# regex) still read such a well by POSITION, which is not ambiguous at all.
+# Legacy three-digit fields (``F001``) never matched and still do not.
 _WELL_TOKEN_IN_TEXT_RE = re.compile(
-    r"(?<![A-Za-z0-9])([A-Ha-h](?:0?[1-9]|1[0-2]))(?![A-Za-z0-9])"
+    r"(?<![A-Za-z0-9])((?:[A-EGHa-egh]|F)(?:0?[1-9]|1[0-2]))(?![A-Za-z0-9])"
 )
 
 
@@ -213,8 +232,18 @@ def well_token_matches_text(text: object, well_token: object) -> bool:
     if matched_tokens:
         return any(normalize_well_token(tok) == normalized_target for tok in matched_tokens)
 
+    # No delimited token anywhere in the text — fall back to a substring scan,
+    # which is what rescues a name that glues the well to its neighbours
+    # (``plateA01run.tif``).
     row = normalized_target[0]
     col = str(int(normalized_target[1:]))
+    if row == "F":
+        # Case-sensitive for row F, for exactly the reason the regex above is:
+        # a lower-case ``f1`` / ``f01`` is this codebase's FIELD spelling, and a
+        # case-insensitive substring scan claimed ``sample_f1_t0.tif`` for well
+        # F01. Applying the rule in one branch and not the other would leave one
+        # function holding two definitions of the same word.
+        return any(v in raw_text for v in (normalized_target, f"{row}{col}"))
     variants = {normalized_target.lower(), f"{row}{col}".lower()}
     lowered = raw_text.lower()
     return any(v in lowered for v in variants)

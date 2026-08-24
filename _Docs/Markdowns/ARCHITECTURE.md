@@ -8708,14 +8708,22 @@ fixture (it doesn't help).
    how this shows up: the cost lands in `setup`, not in the test body, and the
    same file run on its own is fast because almost nothing is alive yet.
 
-**The slow lane runs nightly, not on PRs** — `.github/workflows/slow-lane.yml`,
-six sharded runners, plus `workflow_dispatch` for on demand. It is not a PR gate
-because it takes minutes rather than seconds and its per-test memory profile is
-fragile under parallel load. It exists because the ~270 tests it covers
-previously had *no* automated coverage anywhere, so a test could sit red
+**The slow lane runs on demand, not on PRs and not on a schedule** —
+`.github/workflows/slow-lane.yml`, six sharded runners, dispatched by hand from
+the Actions tab; `scripts/test_slow.sh` runs the same lane locally. It is not a
+PR gate because it takes minutes rather than seconds and its per-test memory
+profile is fragile under parallel load. It exists because the ~270 tests it
+covers previously had *no* automated coverage anywhere, so a test could sit red
 indefinitely with nothing to report it — several did, each one a `ctx`-taking
-function called with the raw app from the day that function migrated. Run it by
-hand before merging anything that reshapes a feature package.
+function called with the raw app from the day that function migrated.
+
+It used to also fire on a 04:00 UTC cron, which is where "run it by hand" came
+from being advice rather than the only route. Six shards of up to 75 minutes ran
+every day whether anything had changed or not, so the schedule was dropped. That
+trade buys back the daily cost and gives up the daily signal: nothing now
+notices a full-app test going red except a person choosing to look. Run it
+deliberately — before merging anything that reshapes a feature package, and after
+any change to the app's construction or teardown.
 
 That particular defect also has a *static* counterpart in the fast lane
 (`tests/test_frozen_ctx_guardrail.py`), which scans the test suite's own call
@@ -8723,7 +8731,7 @@ sites: on a real `WellViewerApp`, `ctx.window` resolves to Qt's `QWidget.window`
 **method** instead of raising, so the failure surfaces frames later — or not at
 all, when the callee wraps its body in a `try`, leaving a green test that
 asserted nothing. Catching it statically means it no longer depends on the
-nightly lane.
+slow lane being run at all.
 
 **What the environment gives you that CI does not (and vice versa).** The two
 lanes are not the same machine, and the differences decide which failures you

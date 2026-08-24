@@ -10,13 +10,21 @@ name: Slow lane
 #
 # It is not part of the PR gate because it takes minutes rather than seconds and
 # its per-test memory profile (see scripts/test_slow.sh) makes it fragile under
-# parallel load. It runs nightly, and on demand via workflow_dispatch, so a
-# breakage surfaces within a day instead of never. Run it manually before
-# merging anything that reshapes a feature package.
+# parallel load.
+#
+# **On demand only.** It used to also run nightly, on a 04:00 UTC cron. That was
+# six shards of up to 75 minutes every day whether or not anything had changed,
+# which is real money for a signal nobody was reading on most mornings — the
+# repository had gone quiet for days at a time while the matrix kept billing. It
+# is dispatched by hand instead, from the Actions tab, and `scripts/test_slow.sh`
+# runs the same lane locally.
+#
+# The cost of that trade is the thing the lane was added to prevent: a
+# permanently-failing full-app test can now sit unnoticed again, as
+# `tests/test_qc_reopen_apply.py` once did. So run it deliberately — before
+# merging anything that reshapes a feature package, and after any change to the
+# app's construction or teardown.
 on:
-  schedule:
-    # 04:00 UTC daily — after the working day in both hemispheres.
-    - cron: "0 4 * * *"
   workflow_dispatch:
     inputs:
       batch:
@@ -39,7 +47,7 @@ jobs:
     timeout-minutes: 75
     strategy:
       # One shard's failure should not cancel the others — we want the full
-      # picture from a nightly run, not the first casualty.
+      # picture from a dispatched run, not the first casualty.
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
@@ -73,7 +81,7 @@ jobs:
           # The report directory is dot-prefixed, so every path under it counts
           # as hidden and upload-artifact@v4 skips it by default — the run then
           # logs "No files were found" and uploads nothing, which is exactly the
-          # diagnostic material you need when the nightly comes back red.
+          # diagnostic material you need when the run comes back red.
           include-hidden-files: true
           # A shard that produced no report at all is a real signal (the batch
           # crashed before writing one), so warn rather than fail the step —

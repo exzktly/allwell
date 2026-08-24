@@ -112,7 +112,13 @@ def test_separated_populations_split_between_them():
     assert 100.0 <= result.threshold < 400.0
     assert result.frac_a == pytest.approx(1.0)
     assert result.frac_b == pytest.approx(0.0)
-    assert result.difference == pytest.approx(1.0)
+    # Just under 1.0, not exactly 1.0: the objective is Laplace-smoothed by the
+    # population sizes, so a clean separation of 200 against 200 scores
+    # ((201/202) - (1/202)) / (201/202) = 200/201 = 0.995. It used to score
+    # exactly 1.0 — and so did one positive cell against no negative ones, which
+    # is what the smoothing exists to tell apart.
+    assert result.difference == pytest.approx(200.0 / 201.0)
+    assert result.difference < 1.0
     assert (result.n_a, result.n_b) == (200, 200)
 
 

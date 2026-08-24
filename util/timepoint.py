@@ -27,6 +27,14 @@ and disagreed with this one about ``"a1b2"`` (1 versus 2) and ``"12.5.3"``
 (12 versus 5.3). It only ever fed a sort, so nothing broke, but two answers to
 "what hour is this token" is one too many.
 
+A digit here means an **ASCII** digit. The ``\\d`` class is Unicode by default
+and matches some six hundred decimal digits, and ``int()`` / ``float()`` convert
+all of them, so ``"1h"``, ``"１h"`` and ``"١h"`` — three distinct filename tokens
+naming three distinct files — all read as one hour and collapsed onto one
+timepoint key. The patterns spell ``[0-9]`` and the bare-number branch is gated
+on ``str.isascii``; a token whose digits come from anywhere else is opaque, and
+an opaque label is kept as-is rather than guessed at.
+
 Stdlib-only, so ``process_microscopy`` and ``services/`` can both import it
 without breaching the no-``well_viewer`` contract (ARCHITECTURE §6.2) — the same
 reason ``util.well_token`` and ``util.schema`` live here. Listed in
@@ -40,14 +48,15 @@ from typing import Any
 
 # All components optional, but ``parse_hours`` requires at least one to match —
 # an empty match would otherwise accept every string.
-_FULL_RE = re.compile(r"(?:(\d{1,4})d)?(?:(\d{1,2})h)?(?:(\d{1,2})m)?", re.IGNORECASE)
+_FULL_RE = re.compile(r"(?:([0-9]{1,4})d)?(?:([0-9]{1,2})h)?(?:([0-9]{1,2})m)?",
+                      re.IGNORECASE)
 # Spelled-out units are enumerated rather than matched with ``\w*``: a trailing
 # wildcard made ``"2hpCh"`` parse as two hours.
 _UNIT_RE = re.compile(
-    r"(\d+(?:\.\d+)?)\s*(h(?:ours?)?|d(?:ays?)?|m(?:in(?:utes?)?)?)",
+    r"([0-9]+(?:\.[0-9]+)?)\s*(h(?:ours?)?|d(?:ays?)?|m(?:in(?:utes?)?)?)",
     re.IGNORECASE,
 )
-_TRAILING_NUM_RE = re.compile(r"(\d+(?:\.\d+)?)$")
+_TRAILING_NUM_RE = re.compile(r"([0-9]+(?:\.[0-9]+)?)$")
 
 
 def _token(value: Any) -> str:
@@ -102,10 +111,17 @@ def parse_hours(value: Any) -> float | None:
         if unit == "m":
             return val / 60.0
 
-    try:
-        return float(s)
-    except ValueError:
-        pass
+    # ``float`` reads Unicode decimal digits — ``float("１")`` is 1.0 — so the
+    # ASCII digit classes above are not enough on their own: a bare
+    # non-ASCII-digit token would still get a number out of this branch. Two
+    # filename tokens that differ by which alphabet wrote their digits are two
+    # different tokens naming two different files, and giving them one hours
+    # value merges them.
+    if s.isascii():
+        try:
+            return float(s)
+        except ValueError:
+            pass
 
     m = _TRAILING_NUM_RE.search(s)
     if m:

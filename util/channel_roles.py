@@ -44,15 +44,45 @@ _NUCLEAR_SECONDARY_RE = re.compile(r"nir|rfp", re.IGNORECASE)
 # "GFPtrans"). ``\b`` finds no boundary at an underscore, so ``\bbf\b`` never
 # matched the commonest spelling of a brightfield channel; a bare ``trans``
 # substring, on the other hand, matched a transfection marker and quietly
-# excluded it from flat-field and background correction. So: no *letter* may
-# precede the hint (which rejects "GFPtrans" and "BFP"), a digit may (which
-# accepts "w1BF"), and nothing alphanumeric may follow it.
+# excluded it from flat-field and background correction. So the bound on the
+# short hints is *letters only*, on both sides: no letter may precede one
+# (rejecting "GFPtrans" and "BFP") and none may follow, while a digit is
+# allowed on either side.
+#
+# A trailing digit is allowed after ``bf`` and ``dic`` and not after ``trans``,
+# and the asymmetry is the point. ``BF1``, ``BF2``, ``DIC1``, ``DIC2`` and
+# ``NIR_BF2`` are how a scope with two transmitted-light paths names them, and
+# no fluorescent channel is spelled as those two tokens plus a digit — rejecting
+# them bought nothing and cost a real phase channel, which is not a cosmetic
+# misclassification: it is quantified from raw frames while every other channel
+# is flat-field- and background-corrected, under the usual ``_tophat`` filename,
+# which gives nothing downstream a way to tell.
+#
+# ``trans`` keeps the digit in its bound because it is the hint with the large
+# fluorescent overlap — transferrin, transfection, transduction — and
+# ``Trans647`` on a transferrin conjugate is a name someone writes. The audit's
+# own example of this misclassification was ``Transferrin647``. A numbered
+# transmitted-light channel is rarer than an abbreviated transferrin one, and
+# the two errors are not symmetric: missing a phase channel leaves it corrected
+# like every other, while claiming a fluorescence channel is phase silently
+# skips both corrections.
+#
+# ``dic`` carries the same bound as ``trans`` and ``bf``, and for the same
+# reason: as a bare substring it is inside "Ca-Indicator", "Indicator" and
+# "Predicted". Three letters cannot be left unbounded.
+#
+# ``phase``, ``brightfield`` and ``bright?field`` stay unbounded, deliberately
+# rather than by omission: they are the hints that really do appear as the head
+# of a longer word. A trailing ``(?![a-z])`` would reject "PhaseContrast",
+# "phasecontrast" and "BrightfieldLED", which are ordinary spellings, and at
+# five letters and more there is no realistic channel name that carries one of
+# them as an incidental fragment the way "Predicted" carries "dic".
 _PHASE_HINT_RE = re.compile(
     r"phase"
     r"|brightfield|bright.?field"
     r"|(?<![a-z])trans(?:mitted|mission)?(?![a-z0-9])"
-    r"|dic"
-    r"|(?<![a-z])bf(?![a-z0-9])",
+    r"|(?<![a-z])dic(?![a-z])"
+    r"|(?<![a-z])bf(?![a-z])",
     re.IGNORECASE,
 )
 

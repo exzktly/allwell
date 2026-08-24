@@ -13,16 +13,23 @@ functions that need them, exactly as in the original code.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 from scipy.ndimage import grey_opening
 
 from pipeline.flatfield import _FLATFIELD_SIGMA, apply_flatfield
 
+# The pipeline's logger, as in ``pipeline.stardist`` — a correction that could
+# not be computed has to reach the run log, because the array it returns is
+# indistinguishable from a corrected one.
+log = logging.getLogger("process_microscopy")
+
 
 def apply_tophat(image: np.ndarray, radius: int) -> np.ndarray:
     """Return white top-hat corrected image (background subtraction).
 
-    Uses scipy.ndimage.grey_closing with a square (2*radius+1) structuring
+    Uses ``scipy.ndimage.grey_opening`` with a square (2*radius+1) structuring
     element.  A square footprint enables separable 1D decomposition inside
     scipy, giving O(radius) complexity per pixel instead of the O(radius²)
     of skimage's disk-based morphology.  For radius=50 on a 900×900 image
@@ -223,6 +230,18 @@ def _fft_butterworth_bandpass(img: np.ndarray, large_px: float,
         f_hi = 1.0 / float(small_px)        # low-pass cutoff (remove > f_hi)
         lp = 1.0 / (1.0 + (D / f_hi) ** n2)
         transfer = transfer * lp
+    if not (large_px and large_px > 1) and not (small_px and small_px > 1):
+        # Neither cutoff is usable, so ``transfer`` is still all ones and the
+        # round trip returns the input: a background subtraction that subtracts
+        # nothing, and whose output no reader can tell from a corrected frame.
+        # A cutoff of 1 px or less asks to remove structures larger than one
+        # pixel, i.e. everything, which is why the guards reject it — the
+        # measured behaviour is a cliff between radius 1 (no-op) and radius 2.
+        log.warning(
+            "Background: fft_bandpass has no usable cutoff (radius=%r, "
+            "fft_small=%r; both must exceed 1 px) — the frame is returned "
+            "UNCHANGED and is NOT background-subtracted.", large_px, small_px,
+        )
     out = np.fft.ifft2(np.fft.fft2(padded) * transfer).real
     return out[ph:ph + h, pw:pw + w].astype(np.float32)
 
@@ -272,6 +291,14 @@ def _robust_grid_background(img: np.ndarray, box: int,
     if np.any(np.isfinite(mesh)):
         mesh[~np.isfinite(mesh)] = float(np.nanmedian(mesh[np.isfinite(mesh)]))
     else:
+        # Not one tile yielded a finite level — a frame that is entirely NaN or
+        # Inf. Zero is the only mesh left to return, and subtracting it is the
+        # identity: the caller gets back a frame that looks corrected. Say so.
+        log.warning(
+            "Background: robust_mesh could not estimate a single one of the "
+            "%d×%d tiles (no finite pixels) — the mesh is zero and the frame is "
+            "NOT background-subtracted.", ny, nx,
+        )
         mesh[:] = 0.0
     if ny >= 3 and nx >= 3:
         mesh = median_filter(mesh, size=3, mode="nearest")
@@ -347,6 +374,16 @@ def subtract_background(image, radius: int, method: str = "sliding_disk",
             _fft_butterworth_bandpass(img, large_px=int(radius), small_px=float(fft_small)))
     if method == "fov_median":
         finite = img[np.isfinite(img)]
+        if not finite.size:
+            # Every pixel is NaN or Inf, so there is no median to subtract. The
+            # old code substituted 0.0 — a measured level of zero and "I could
+            # not measure a level" written the same way, and the second one is
+            # not a measurement at all.
+            log.warning(
+                "Background: fov_median found no finite pixel in this frame, so "
+                "no background level could be measured — the frame is NOT "
+                "background-subtracted (only its non-finite pixels are zeroed).",
+            )
         level = float(np.median(finite)) if finite.size else 0.0
         return _floor_after_subtract(img - level)
     if method == "empty_well":
@@ -358,6 +395,25 @@ def subtract_background(image, radius: int, method: str = "sliding_disk",
                 # field's shape (e.g. bright corners).
                 bg = _match_background_scale(img, bg)
                 return _floor_after_subtract(img - bg)
+            log.warning(
+                "Background: the empty-well field is %s and this frame is %s, "
+                "so it cannot be subtracted — the frame is returned UNCHANGED "
+                "and is NOT background-subtracted. A blank acquired at a "
+                "different binning or crop from the plate is the usual cause.",
+                bg.shape, img.shape,
+            )
+        else:
+            log.warning(
+                "Background: empty_well was requested but no background field "
+                "was built for this channel — the frame is returned UNCHANGED "
+                "and is NOT background-subtracted.",
+            )
+        # The fourth identity return in this function, and the one that used to
+        # be silent. ``_require_empty_well_models`` covers only the case where
+        # *no* model was built at all, so a per-channel gap — and a shape
+        # mismatch in particular — passed straight through, written under the
+        # usual ``_tophat`` filename with nothing downstream able to tell it
+        # from a corrected frame.
         return img
     return apply_tophat(img, int(radius))  # top_hat (default / back-compat)
 

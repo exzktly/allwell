@@ -147,7 +147,6 @@ ALLOWLIST = {
     # bias WARN (mandatory correctness surfacing, mirroring the pipeline-side
     # estimator) nudged it to 42. The Review-side twin of the decompose noted
     # above is still owed.
-    "well_viewer/data/auto_threshold.py::compute_auto_thresholds",
 }
 
 

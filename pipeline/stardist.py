@@ -26,6 +26,7 @@ the segmentation dispatch is unchanged.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import time
 from dataclasses import dataclass, replace
@@ -158,6 +159,13 @@ def parse_threshold(value) -> float | None:
     try:
         num = float(value)
     except (TypeError, ValueError):
+        return None
+    if math.isnan(num):
+        # ``float("nan")`` parses, and then fails *every* comparison — it is
+        # neither ``< 0`` nor ``> 1.0`` — so without this line it passed both
+        # bounds and reached ``predict_instances(prob_thresh=nan)``, where every
+        # candidate nucleus compares false against it. A value that cannot be
+        # ordered is not a probability; it means the same as blank.
         return None
     if num < 0:
         return None                     # the "-1 = model default" sentinel
@@ -366,43 +374,177 @@ def _segment_stardist_nuclei(nir_corr: np.ndarray) -> np.ndarray:
     return segment_nuclei(nir_corr, model=_STARDIST_MODEL, params=_STARDIST_PARAMS)
 
 
+def _label_areas(labels: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """``(ids, areas)`` for every non-zero label in *labels*, ids ascending.
+
+    ``bincount`` is the fast path and allocates one slot per integer up to the
+    largest id, so it is used only where that is bounded by the image itself —
+    a segmentation numbers its objects ``1..N`` with ``N`` at most the pixel
+    count. A label image that breaks either assumption (a negative value, or an
+    id larger than the array) falls back to ``np.unique``, which costs a sort
+    but cannot be made to allocate a gigabyte by one stray id. A **non-integer**
+    label image takes that fallback too: ``bincount`` would have to truncate
+    towards zero to index with it, which silently merges ``2.0`` and ``2.5``
+    into one object. The segmenter's own labels are ``int32``, so this is a
+    guard rather than a live path — but the merge would be invisible if it ever
+    became one.
+    """
+    flat = labels.ravel()
+    integral = flat.dtype.kind in "iub"
+    lmax = int(flat.max()) if (flat.size and integral) else 0
+    lmin = int(flat.min()) if (flat.size and integral) else 0
+    if integral and lmin >= 0 and lmax <= flat.size:
+        counts = np.bincount(flat.astype(np.intp, copy=False), minlength=1)
+        ids = np.flatnonzero(counts)
+        ids = ids[ids != 0]
+        return ids, counts[ids]
+    ids, counts = np.unique(flat, return_counts=True)
+    keep = ids != 0
+    return ids[keep], counts[keep]
+
+
+def nucleus_seed_markers(
+    nucleus_labels: np.ndarray, min_nucleus_area_px: int
+) -> tuple[np.ndarray, int, int]:
+    """One single-pixel watershed seed per nucleus large enough to keep.
+
+    Returns ``(markers, n_markers, n_below_min_area)``: a label image carrying
+    marker ids ``1..n_markers`` at the rounded centroid of each surviving
+    nucleus, how many seeds were planted, and how many nuclei were rejected for
+    being smaller than *min_nucleus_area_px*.
+
+    Whole-array work, not a per-nucleus loop. The loop this replaces asked
+    ``np.count_nonzero(labels == nid)`` for the area and
+    ``ndi.center_of_mass(labels == nid)`` for the centroid, which is one and two
+    full passes over the label image *per nucleus*: on 1500 nuclei in a 2048²
+    frame that measured 1.43 s for the areas and 23.67 s for the centroids,
+    against 0.076 s and 0.280 s for the two calls here — roughly 25 s of every
+    FOV, invisible in the per-FOV ``seg`` timing line, which times only
+    ``predict_instances``.
+
+    The arithmetic is the same arithmetic. ``bincount`` counts each label's
+    pixels in one pass, and ``center_of_mass`` over a constant input restricted
+    to *index* is the mean coordinate of each label's pixels — which is what the
+    boolean-mask call computed one nucleus at a time. Two nuclei whose rounded
+    centroids land on the same pixel still leave one marker there and one id
+    unused, exactly as the loop's overwrite did: NumPy's indexed assignment
+    keeps the last write.
+    """
+    labels = np.asarray(nucleus_labels)
+    if labels.size == 0:
+        return np.zeros_like(labels, dtype=np.int32), 0, 0
+    ids, areas = _label_areas(labels)
+    n_total = int(ids.size)
+    keep = ids[areas >= int(min_nucleus_area_px)]
+    markers = np.zeros(labels.shape, dtype=np.int32)
+    if keep.size == 0:
+        return markers, 0, n_total
+
+    centres = np.asarray(
+        ndi.center_of_mass(np.ones(labels.shape, dtype=np.uint8), labels, keep),
+        dtype=float,
+    ).reshape(-1, 2)
+    finite = np.isfinite(centres).all(axis=1)
+    centres = centres[finite]
+    if centres.size == 0:
+        return markers, 0, n_total - int(keep.size)
+
+    ys = np.clip(np.rint(centres[:, 0]).astype(np.int64), 0, labels.shape[0] - 1)
+    xs = np.clip(np.rint(centres[:, 1]).astype(np.int64), 0, labels.shape[1] - 1)
+    n_markers = int(ys.size)
+    markers[ys, xs] = np.arange(1, n_markers + 1, dtype=np.int32)
+    return markers, n_markers, n_total - int(keep.size)
+
+
+def cytoplasm_mask(cytoplasm_tophat: np.ndarray, fov: str) -> np.ndarray:
+    """Otsu mask of the corrected cytoplasm frame, saying so when it is empty.
+
+    A constant cytoplasm frame yields no pixels at all, because a threshold on
+    a constant image cannot be strictly exceeded by any of its pixels. That is a
+    legitimate outcome — an empty or saturated cytoplasm channel has no
+    cytoplasm to find — but it produces zero cells for the whole FOV, and it
+    used to produce them in silence, forty lines below the near-constant
+    *nuclear* input that this module refuses with an explicit warning. Both
+    halves of one function now say when they could not measure something.
+
+    The constant case is **tested for**, not caught. ``threshold_otsu`` was
+    assumed to raise on one, and with the pinned skimage (0.24.0) it does not:
+    it returns the constant value, so the ``except`` never fired and the
+    constant warning was unreachable while four artefacts described it as the
+    behaviour. An empty frame is the case that does raise, and it raises
+    ``IndexError`` rather than ``ValueError``, so the handler could not see that
+    one either.
+    """
+    if cytoplasm_tophat.size == 0:
+        thresh = 0.0
+        log.warning(
+            "  seg %s: the corrected cytoplasm frame is empty, so there is "
+            "nothing to threshold. This FOV will yield 0 cells.", fov,
+        )
+    elif float(cytoplasm_tophat.min()) == float(cytoplasm_tophat.max()):
+        thresh = float(cytoplasm_tophat.reshape(-1)[0])
+        log.warning(
+            "  seg %s: the cytoplasm channel is constant (every pixel %.4g), so "
+            "there is no split to find — no pixel is strictly above the "
+            "threshold. This FOV will yield 0 cells.", fov, thresh,
+        )
+    else:
+        try:
+            thresh = float(threshold_otsu(cytoplasm_tophat))
+        except (ValueError, IndexError):
+            thresh = float(np.mean(cytoplasm_tophat))
+            log.warning(
+                "  seg %s: Otsu could not split the cytoplasm channel — falling "
+                "back to its mean (%.4g).", fov, thresh,
+            )
+    mask = cytoplasm_tophat > thresh
+    if not mask.any():
+        log.warning(
+            "  seg %s: the cytoplasm mask is empty at threshold %.4g — no pixel "
+            "of the corrected cytoplasm frame is above it, so the watershed has "
+            "nothing to fill and this FOV will yield 0 cells.", fov, thresh,
+        )
+    return mask
+
+
 def _segment_stardist_seeded_watershed_cell(
     nir_corr: np.ndarray,
     cytoplasm_raw: np.ndarray,
     tophat_radius_fluor: int,
     min_nucleus_area_px: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    fov = _SEG_FOV_LABEL or "?"
     stardist_labels = _segment_stardist_nuclei(nir_corr)
-    nucleus_ids = np.unique(stardist_labels)
-    nucleus_ids = nucleus_ids[nucleus_ids != 0]
-    filtered_ids: list[int] = []
-    for nid in nucleus_ids:
-        area = int(np.count_nonzero(stardist_labels == nid))
-        if area >= min_nucleus_area_px:
-            filtered_ids.append(int(nid))
-
-    nuclear_points = np.zeros_like(stardist_labels, dtype=np.int32)
-    marker_id = 1
-    for nid in filtered_ids:
-        cy, cx = ndi.center_of_mass(stardist_labels == nid)
-        if np.isnan(cy) or np.isnan(cx):
-            continue
-        y = int(np.clip(round(float(cy)), 0, stardist_labels.shape[0] - 1))
-        x = int(np.clip(round(float(cx)), 0, stardist_labels.shape[1] - 1))
-        nuclear_points[y, x] = marker_id
-        marker_id += 1
+    nuclear_points, n_markers, n_small = nucleus_seed_markers(
+        stardist_labels, min_nucleus_area_px)
+    if n_markers == 0:
+        log.warning(
+            "  seg %s: no watershed seeds — %d nucleus/nuclei were detected and "
+            "all of them are smaller than min_nucleus_area_px=%d, so this FOV "
+            "will yield 0 cells.", fov, n_small, int(min_nucleus_area_px),
+        )
+    elif n_small:
+        log.info("  seg %s: %d nucleus/nuclei below min_nucleus_area_px=%d "
+                 "were not seeded (%d seed(s) planted).",
+                 fov, n_small, int(min_nucleus_area_px), n_markers)
 
     # Isotropic disk top-hat (not the square apply_tophat): a square footprint
     # here stamps square bias onto the cytoplasm mask → square-edged watershed
     # cells, regardless of the chosen --background method.
     cytoplasm_tophat = _isotropic_disk_tophat(cytoplasm_raw, tophat_radius_fluor)
-    try:
-        thresh = threshold_otsu(cytoplasm_tophat)
-    except ValueError:
-        thresh = float(np.mean(cytoplasm_tophat))
-    cytoplasm_binary_mask = cytoplasm_tophat > thresh
+    cytoplasm_binary_mask = cytoplasm_mask(cytoplasm_tophat, fov)
+    # A seed outside the mask is dropped by ``watershed(mask=…)`` without a word,
+    # so a frame whose cytoplasm stain does not cover its nuclei loses cells one
+    # at a time and reports the shortfall nowhere. Count them here.
+    outside = int(np.count_nonzero((nuclear_points > 0) & ~cytoplasm_binary_mask))
+    if outside:
+        log.warning(
+            "  seg %s: %d of %d watershed seed(s) fall outside the cytoplasm "
+            "mask and are dropped — those nuclei produce no cell.",
+            fov, outside, n_markers,
+        )
     distance = ndi.distance_transform_edt(cytoplasm_binary_mask)
-    if marker_id <= 1:
+    if n_markers == 0:
         labels = np.zeros_like(stardist_labels, dtype=np.int32)
     else:
         labels = watershed(

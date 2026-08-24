@@ -36,6 +36,7 @@ import threading
 from pathlib import Path
 from collections.abc import Callable
 
+from services.input_resolution_service import has_well_zip
 from services.pipeline_service import build_pipeline_args, spawn_pipeline
 from services.remote_config import RemoteHost
 from services.remote_runner import (
@@ -679,7 +680,14 @@ class PipelineRunner:
                         "still captured in the help-drawer log tab.\n",
                     ))
                 except queue.Full:
-                    pass
+                    # The overflow warning itself could not be queued, which
+                    # means the reader has not drained a single slot since the
+                    # queue filled. Nothing to do and nothing to say — the one
+                    # channel for saying it is the thing that is full — and the
+                    # flag above already ensures this is attempted once per run
+                    # rather than per dropped line.
+                    swallowed("the log-overflow warning could not be queued "
+                              "either; the reader has drained nothing")
 
     @property
     def is_running(self) -> bool:
@@ -1023,7 +1031,16 @@ class PipelineRunner:
                 input_dir, output_dir, on_success = resolved  # type: ignore[misc]
             else:
                 input_dir, output_dir = resolved  # type: ignore[misc]
-            if any(input_dir.glob("*.zip")):
+            # A *well* archive, not any archive. ``has_well_zip`` asks the
+            # well-token canonicaliser, which is the same question the pipeline
+            # asks when it decides to segment from ``in/<WELL>.zip`` — so a
+            # stray ``archive.zip`` or ``backup.zip`` a user left in a
+            # folder-mode ``in/`` no longer tells them their compression
+            # settings were ignored when they were not.
+            # ``has_well_content``'s own docstring records this exact defect
+            # being fixed for the layout planner; this was the surviving
+            # sibling.
+            if has_well_zip(input_dir):
                 self._enqueue((
                     "line",
                     "[warn] Zip mode detected; folder-mode compression options do not apply.\n",

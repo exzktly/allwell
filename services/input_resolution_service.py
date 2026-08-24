@@ -87,9 +87,29 @@ def build_bootstrap_cmd(bootstrap: Path, alias: str) -> list[str]:
 
 
 def tif_files_in(folder: Path) -> list[Path]:
+    """The loose TIFs at *folder*'s top level, sidecars excluded.
+
+    ``TIF_GLOB`` is a suffix match and a suffix is not a decision about whether
+    a file is one of the run's images. It matches ``._Plate1_A01_….tif`` — the
+    AppleDouble resource fork macOS writes beside every file copied to a
+    non-HFS volume, and the commonest way a real plate arrives with exactly
+    twice as many "TIFs" as it has images.
+
+    That count is not cosmetic. It is the ``loose_count`` the readout under the
+    input field prints, the ``tifs > 3`` threshold that decides whether the
+    whole folder is treated as a zipper input, ``count_expected_wells``'
+    fallback, and — most consequentially — the ``source_tifs`` tuples the
+    post-run deletion closures are built from. A predicate applied to files it
+    is not entitled to judge, in the place that decides what gets deleted.
+
+    A leading dot is the whole rule, and it is the right one: it excludes the
+    AppleDouble twins, ``.DS_Store`` if it ever carried a TIF suffix, and
+    anything else a file manager hides, while excluding nothing a microscope
+    writes — no acquisition names an image with a leading dot.
+    """
     files: list[Path] = []
     for pat in TIF_GLOB:
-        files.extend(folder.glob(pat))
+        files.extend(p for p in folder.glob(pat) if not p.name.startswith("."))
     return files
 
 
@@ -258,14 +278,36 @@ class InputPlan:
         return self.action in RUNNABLE_ACTIONS
 
 
-def _plan_grouped_root(root: Path, output_dir: Path, *, named_in: bool) -> InputPlan:
+def _plan_grouped_root(root: Path, output_dir: Path, *, named_in: bool,
+                       schema: tuple[str, str] = ("", "_")) -> InputPlan:
     """Classify a folder that is being used as the pipeline's input directly."""
     loose = len(tif_files_in(root))
     if loose > 0:
         if has_well_zip(root):
+            # The number the *run* will fold, not the number of files with a
+            # TIF suffix, when the caller supplied the schema that decides it.
+            # ``plan_loose_append`` is the function ``append_loose_images_to_zips``
+            # acts on, so this readout and that run cannot disagree.
+            fold_schema, fold_sep = schema
+            folded = loose
+            if fold_schema:
+                folded = plan_loose_append(
+                    root, filename_schema=fold_schema,
+                    filename_sep=fold_sep).total
+            if folded == 0:
+                # Files are lying there and none of them is new. Saying "will
+                # fold 0" invites the user to wonder what went wrong; saying
+                # nothing at all hides that the folder is not as tidy as it
+                # looks. Neither: this is a grouped root with nothing to add.
+                return InputPlan(
+                    GROUPED, root, output_dir, 0,
+                    f"✓ Using {root.name}/ as input — the {loose} loose "
+                    f"TIF(s) beside it are already in the well zips, or are "
+                    f"not named as this schema's images",
+                )
             return InputPlan(
-                FOLD_LOOSE, root, output_dir, loose,
-                f"✓ Will fold {loose} loose TIF(s) into the existing well "
+                FOLD_LOOSE, root, output_dir, folded,
+                f"✓ Will fold {folded} loose TIF(s) into the existing well "
                 f"zips in {root.name}/",
             )
         return InputPlan(
@@ -293,12 +335,23 @@ def _plan_grouped_root(root: Path, output_dir: Path, *, named_in: bool) -> Input
     )
 
 
-def plan_input_layout(raw: Path) -> InputPlan:
+def plan_input_layout(raw: Path, *, filename_schema: str = "",
+                     filename_sep: str = "_") -> InputPlan:
     """Decide how *raw* — the folder the user selected — becomes pipeline input.
 
     Pure: reads the filesystem, changes nothing. :func:`resolve_input_output`
     executes the plan and ``AnalyzeTab._refresh_output`` displays it, so the
     readout under the input field cannot disagree with what Run then does.
+
+    *filename_schema* / *filename_sep* are what make that last sentence true
+    for the fold-loose case, and they are optional only because two internal
+    callers want the layout and not the count. Given them, the count comes from
+    :func:`plan_loose_append` — the function the *run* uses — instead of from a
+    glob. The two disagree by construction: the glob counts every file with a
+    TIF suffix, while the append rejects a name whose well token will not parse
+    and a file already present in its target archive. Measured on a folder with
+    one new image, one duplicate and one calibration frame, the readout said
+    "Will fold 3 loose TIF(s)" and the run folded one.
 
     A folder *named* ``in`` is the input; a folder that *contains* ``in/`` feeds
     the pipeline from that subfolder. The two are classified by the same
@@ -316,13 +369,16 @@ def plan_input_layout(raw: Path) -> InputPlan:
     if not raw.is_dir():
         return InputPlan(NOT_A_DIR, None, None, 0, "Not a directory.")
 
+    schema = (filename_schema, filename_sep)
     if raw.name.lower() == "in":
-        return _plan_grouped_root(raw, raw.parent / "out", named_in=True)
+        return _plan_grouped_root(raw, raw.parent / "out", named_in=True,
+                                  schema=schema)
 
     in_sub = raw / "in"
     out_dir = raw / "out"
     if in_sub.is_dir():
-        nested = _plan_grouped_root(in_sub, out_dir, named_in=False)
+        nested = _plan_grouped_root(in_sub, out_dir, named_in=False,
+                                    schema=schema)
         if nested.action not in (UNRECOGNISED, EMPTY_IN):
             return nested
     else:
@@ -675,12 +731,16 @@ def append_loose_images_to_zips(
         )
 
         created = "created" if not existing else "updated"
-        # Durable in the zip now — remove the loose sources.
+        # Durable in the zip now — remove the loose sources. A file that will
+        # not unlink is a disk-space problem rather than a data one: the
+        # archive beside it already holds the bytes, and the next run finds the
+        # leftover and re-packs an identical member. It still gets a log line,
+        # because a folder quietly accumulating loose copies of everything
+        # already archived is exactly the kind of thing nobody notices until a
+        # volume fills.
         for f in new_files:
-            try:
+            with swallow(f"removing {f.name}, already archived into {target.name}"):
                 f.unlink()
-            except OSError:
-                pass
         appended += len(new_files)
         wells_touched.add(well)
         if log_fn:
@@ -1538,10 +1598,8 @@ def resolve_input_output(
             cleanly. raw/in/{well}.zip already has the data; the
             loose copies in raw/ are now redundant."""
             for tif in source_tifs:
-                try:
+                with swallow(f"removing {tif.name}, already archived into in/"):
                     tif.unlink()
-                except OSError:
-                    pass
 
         return grouped, out_dir, _on_success
 

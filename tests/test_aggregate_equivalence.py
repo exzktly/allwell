@@ -266,3 +266,88 @@ def test_ordinal_timepoints_disagree_between_wells_of_one_plate():
     late_in_a = pts_a[1][0]
     late_in_b = pts_b[0][0]
     assert late_in_a != late_in_b
+
+
+# ── The fast path is entered, and only when it is safe to ───────────────────
+
+class _Counter:
+    """Count calls to a module attribute, delegating to the original."""
+
+    def __init__(self, module, name):
+        self.module, self.name, self.n = module, name, 0
+        self._orig = getattr(module, name)
+
+    def __enter__(self):
+        def counted(*a, **kw):
+            self.n += 1
+            return self._orig(*a, **kw)
+        setattr(self.module, self.name, counted)
+        return self
+
+    def __exit__(self, *exc):
+        setattr(self.module, self.name, self._orig)
+        return False
+
+
+def test_a_complete_numeric_column_never_touches_the_string_columns():
+    """The saving, asserted as a call count rather than as a stopwatch.
+
+    A benchmark is a script a human reads; it cannot fail a build. This asserts
+    the thing the benchmark measures: with every included row carrying a finite
+    numeric timepoint, neither full-column string pass runs at all.
+    """
+    from well_viewer.data import data_loading as dl
+
+    df = _frame([
+        {"timepoint_hours": 0.0, "timepoint": "0h", VAL_COL: 10.0},
+        {"timepoint_hours": 24.0, "timepoint": "24h", VAL_COL: 30.0},
+    ])
+    with _Counter(dl, "_ordinal_timepoints_df") as ordinal, \
+            _Counter(dl, "timepoint_text") as text:
+        pts = _agg(df)
+    assert _timepoints(pts) == [0.0, 24.0], "the fast path must still be correct"
+    assert ordinal.n == 0, "_ordinal_timepoints_df ran despite a complete numeric column"
+    assert text.n == 0, "timepoint_text ran despite a complete numeric column"
+
+
+def test_an_excluded_unresolvable_row_does_not_force_the_slow_path():
+    """The whole point of testing the included rows rather than every row.
+
+    One excluded row with an unparseable timepoint token must not drag the well
+    back onto the two full-column passes, because that row cannot reach the
+    output either way.
+    """
+    from well_viewer.data import data_loading as dl
+
+    df = _frame([
+        {"timepoint_hours": 0.0, "timepoint": "0h", VAL_COL: 10.0, "Included": 1},
+        {"timepoint_hours": np.nan, "timepoint": "junk", VAL_COL: 99.0, "Included": 0},
+    ])
+    with _Counter(dl, "_ordinal_timepoints_df") as ordinal, \
+            _Counter(dl, "timepoint_text") as text:
+        pts = _agg(df)
+    assert _means(pts) == [10.0]
+    assert ordinal.n == 0 and text.n == 0, (
+        "an excluded row's unresolvable timepoint forced the slow path"
+    )
+
+
+def test_an_included_unresolvable_row_does_take_the_slow_path():
+    """The fast path must not be entered when the fallback is genuinely needed."""
+    from well_viewer.data import data_loading as dl
+
+    df = _frame([
+        {"timepoint_hours": 0.0, "timepoint": "0h", VAL_COL: 10.0, "Included": 1},
+        {"timepoint_hours": np.nan, "timepoint": "48h", VAL_COL: 30.0, "Included": 1},
+    ])
+    with _Counter(dl, "_ordinal_timepoints_df") as ordinal, \
+            _Counter(dl, "timepoint_text") as text:
+        pts = _agg(df)
+    assert _timepoints(pts) == [0.0, 48.0], "the missing row must still resolve"
+    assert ordinal.n == 1, "the string fallback was skipped for a row that needed it"
+    # Twice, not once: ``_ordinal_timepoints_df`` builds its own copy of the
+    # text column and the caller then builds another. That redundancy is left
+    # alone deliberately — it is now confined to the branch that runs only when
+    # a well genuinely carries an unresolvable numeric timepoint, so removing it
+    # would trade a real correctness risk for a saving on the rare path.
+    assert text.n == 2, "the slow path's two text passes changed shape"

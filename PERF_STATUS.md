@@ -1,6 +1,6 @@
 # STATUS — well-selection / plotting performance
 
-**Updated:** 2026-08-24 03:20 UTC
+**Updated:** 2026-08-24 03:35 UTC
 **Branch:** `claude/well-selection-performance-7phaix`
 **Base:** `44c0d38` (main, includes PR #847)
 **Version:** main is at 9.0.5 → this PR bumps to **9.0.6** (not yet applied)
@@ -25,7 +25,7 @@ last, after local fast lane + slow lane + adversarial review all pass.
 |---|---|---|---|
 | 0a | Perf bench | ✅ done | runs on fresh main; has both collect and draw phases; baseline captured below |
 | 0b | Equivalence corpus | ✅ done | 14 cases green on unchanged HEAD; `tests/test_aggregate_equivalence.py` |
-| 1 | String timepoint short-circuit | ⬜ not started | gate on `isfinite(tp_num[mask]).all()` |
+| 1 | String timepoint short-circuit | ✅ done | **6.1x**: `aggregate_well` x96 1,091 → 180 ms, measured back-to-back |
 | 2 | Per-well memo | ⬜ not started | AST writer guard FIRST; memo in a wrapper, never inside `aggregate_well` |
 | 5 | Group-visibility cache clear | ⬜ not started | split cache-clear from UI cues |
 | 6 | Visible-only redraw | ⬜ not started | extend `fc_dirty_scopes`, no parallel flag |
@@ -100,6 +100,32 @@ counts reproduce exactly (1,824 = 12 x 6 x 3 x 8 + 96), so the shape is sound; t
 ratios as the signal and re-measure everything in one sitting before/after.
 
 ---
+
+## Step 1 result
+
+`aggregate_with_threshold_df` now computes `tp_num` first and runs the two full-column
+string passes only when an **included** row needs them (`need[mask].any()`), not when any
+row does. An excluded row with an unparseable timepoint token — which real plates carry,
+since the pipeline writes `nan` for any filename whose token it cannot parse — no longer
+drags the whole well onto the slow path.
+
+Measured back-to-back on one container: **1,091 ms → 180 ms for 96 wells, 6.1x.**
+
+Proved by mutation against HEAD in a worktree, all three real `AssertionError`s:
+
+| Mutation | Result |
+|---|---|
+| gate on every row (`need.any()`) | fails exactly `test_an_excluded_unresolvable_row_does_not_force_the_slow_path` |
+| always fast (`if False`) | 9 failures, every fallback case |
+| always slow (`if True`) | 2 failures, both fast-path entry counters |
+
+620 surrounding tests pass (`-k "aggregate or timepoint or data_loading or stats or fov or
+text_column or lineplot or barplot"`).
+
+Noted, not fixed: on the slow path `timepoint_text` runs twice — once inside
+`_ordinal_timepoints_df`, once in the caller. Pinned by a test. Left alone because that
+branch now runs only for wells that genuinely carry an unresolvable timepoint, so
+de-duplicating it would trade a correctness risk for a saving on the rare path.
 
 ## Decisions log (for user confirmation at the end)
 

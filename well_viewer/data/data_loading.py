@@ -636,17 +636,30 @@ def aggregate_with_threshold_df(
     if not mask.any():
         return []
 
-    ord_map = _ordinal_timepoints_df(df, tp_col)
-
     if tp_col in df.columns:
         tp_num = pd.to_numeric(df[tp_col], errors="coerce").to_numpy().astype(float)
     else:
         tp_num = np.full(n, np.nan)
 
-    tp_str = timepoint_text(df).to_numpy()
-
+    # The string fallback below exists for rows whose numeric timepoint is
+    # missing. Deciding whether any row needs it is worth doing first, because
+    # the fallback is two full-column passes — ``_ordinal_timepoints_df`` and
+    # ``timepoint_text``, each widening a categorical to object and stripping
+    # every row — and on a plate whose ``timepoint_hours`` is complete, which is
+    # the ordinary case, neither result is ever read. Those two passes were
+    # around nine tenths of this function's cost.
+    #
+    # The test is on the INCLUDED rows, not on every row. A row the inclusion
+    # mask has already dropped cannot reach the output whatever its timepoint
+    # resolves to (``final`` masks it out below), so its missing numeric value
+    # is dead work rather than a difference. Testing every row instead would
+    # hand the whole well back to the slow path for one excluded row carrying an
+    # unparseable timepoint token — and the pipeline writes ``nan`` for exactly
+    # that, so real plates do carry them.
     need = ~np.isfinite(tp_num)
-    if need.any():
+    if need[mask].any():
+        ord_map = _ordinal_timepoints_df(df, tp_col)
+        tp_str = timepoint_text(df).to_numpy()
         cache: dict[str, float] = {}
         for s in np.unique(tp_str[need]):
             s_str = str(s)

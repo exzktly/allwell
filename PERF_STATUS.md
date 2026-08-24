@@ -1,6 +1,6 @@
 # STATUS — well-selection / plotting performance
 
-**Updated:** 2026-08-24 06:20 UTC
+**Updated:** 2026-08-24 06:45 UTC
 **Branch:** `claude/well-selection-performance-7phaix`
 **Base:** `44c0d38` (main, includes PR #847)
 **Version:** 9.0.5 on main → **9.0.6** applied
@@ -192,7 +192,7 @@ group statistics computed from pre-gating rows. Half-applied gating is still app
 The click is now **83% draw, 17% collect**. Everything remaining is on the draw side —
 Steps 8 and 11.
 
-### Found, not fixed: two thresholds in one collect
+### FIXED: two thresholds in one collect
 
 The key probe surfaced the reviewer's finding #2 as a live divergence. `compute_rep_stats`
 takes the caller's `threshold`; `compute_rep_n_above_stats` and `compute_rep_n_above_total`
@@ -201,11 +201,27 @@ ignore it and recompute their own from `active_channel`. With the bench passing 
 
 In the Line tab they agree by coincidence — `redraw_line_plots` resolves the cutoff with the
 identical expression. They do **not** agree in batch export of a non-active channel, because
-`_app_val_col_scope` swaps `active_val_col` but not `active_channel`. That is a
-pre-existing correctness bug affecting exported numbers, out of scope for a perf branch,
-and Step 3 must not paper over it by picking one threshold. **Flagged for a follow-up PR.**
+`_app_val_col_scope` swaps `active_val_col` but not `active_channel`. **Reproduced, then fixed in this branch on request.**
 
-The bench now passes the app's own cutoff so it measures what the app does.
+Reproduced first: exporting `mcherry` (ON cutoff 5.0) while the tab showed `gfp` (cutoff
+50.0) put **both numbers into one collect**. Nothing raised; the figure drew; the Events
+panel simply counted a different population from the Mean and Fraction panels beside it in
+the same exported figure and the same CSV row.
+
+Fix: both producers now take `threshold` as an argument, defaulting to the old
+`active_channel` derivation so no existing caller changes behaviour, and all **nine** call
+sites pass the cutoff they already had in scope for `compute_rep_stats`. The three
+producers agree by construction rather than by coincidence.
+
+Proved with `scripts/prove_guard.sh` against `origin/main` — a real `AssertionError`
+naming both numbers: *"cut against different ON cutoffs: [5.0, 50.0]"*.
+
+The first version of that test was **refused by the script** as a `TypeError`, not an
+assertion: it called the producers directly with the new argument, which the base branch
+cannot accept, so it measured nothing. Rewritten to drive `collect_line_series` — the
+collector the export actually calls — since the fix is that *callers* pass the cutoff down.
+
+The bench also now passes the app's own cutoff so it measures what the app does.
 
 ## Step 5 — group visibility no longer discards the plate's statistics (landed)
 
@@ -343,10 +359,9 @@ seam you changed does not describe the calls that never reach that seam.
 
 - **Step 3 (merge the three `compute_rep_*` producers): NOT DONE, deliberately.** After the
   memo their per-well work is already deduplicated (672 → 96 calls), so the remaining win is
-  a constant factor. And it cannot be done safely as specified: the two `n_above` producers
-  ignore the caller's threshold and recompute their own from `active_channel`, so a shared
-  producer must pick one — which changes exported numbers on the batch path. Flagged as a
-  follow-up bug rather than papered over here.
+  a constant factor. The blocker that made it unsafe — the two `n_above` producers ignoring
+  the caller's threshold — is now fixed, so a future merge is possible; it is still not
+  worth the churn for a constant factor on a path the memo already collapsed.
 - **Step 7 (cache the pooled group frames): NOT DONE.** `iter_plot_groups` is down to 452 ms
   from 946 ms as a side effect of the other work, its only consumers are Distribution and
   the exporter, and after Step 6 that cost is paid only while Distribution is visible.

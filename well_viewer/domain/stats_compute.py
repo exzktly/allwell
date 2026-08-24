@@ -691,7 +691,35 @@ def compute_rep_per_fov_stats(
     return result
 
 
-def compute_rep_n_above_total(ctx, rset: ReplicateSet, target_t: float) -> int:
+def _on_cutoff(ctx, threshold: float | None) -> float:
+    """The caller's cutoff, or the active channel's when it did not name one.
+
+    The two events producers used to ignore what they were passed and always
+    re-derive from ``active_channel``, while ``compute_rep_stats`` beside them
+    took the caller's number. On the Line tab those agree by coincidence — the
+    tab resolves its threshold with the identical expression — but a batch
+    export of a channel other than the one the tab is showing does not:
+    ``base_panel._app_val_col_scope`` swaps ``active_val_col`` and leaves
+    ``active_channel`` alone, so the panel's own cutoff reached
+    ``compute_rep_stats`` while the events producers went on reading the tab's.
+
+    Reproduced before it was fixed: exporting ``mcherry`` (cutoff 5.0) while the
+    tab showed ``gfp`` (cutoff 50.0) put both numbers into one collect, so the
+    Mean and Fraction panels of a single exported figure described one
+    population and the Events panel beside them described another.
+
+    The default is kept so every existing caller keeps its behaviour verbatim;
+    a caller that knows its cutoff now passes it and is believed.
+    """
+    if threshold is not None:
+        return threshold
+    return on_cutoff_for_column(
+        ctx, ctx.state.channel.active_val_col,
+        channel=ctx.state.channel.active_channel)
+
+
+def compute_rep_n_above_total(ctx, rset: ReplicateSet, target_t: float,
+                              threshold: float | None = None) -> int:
     """Cross-well **total** events-above-threshold for *rset* at *target_t*.
 
     A reporting figure, not a plotted one. The CSV's ``n_above_threshold``
@@ -708,9 +736,7 @@ def compute_rep_n_above_total(ctx, rset: ReplicateSet, target_t: float) -> int:
     guard in ``tests/test_events_total_isolation.py`` fails if a renderer or a
     collector of plotted values imports this.
     """
-    threshold = on_cutoff_for_column(
-        ctx, ctx.state.channel.active_val_col,
-        channel=ctx.state.channel.active_channel)
+    threshold = _on_cutoff(ctx, threshold)
     fluor_gates = get_all_fluor_gates(ctx)
     cache_key = ("rep_n_above_total", rset.name, tuple(rset.wells), target_t,
                  threshold, ctx.state.channel.active_val_col,
@@ -742,7 +768,8 @@ def compute_rep_n_above_total(ctx, rset: ReplicateSet, target_t: float) -> int:
 
 
 def compute_rep_n_above_stats(ctx, rset: ReplicateSet, target_t: float,
-                              use_sem: bool) -> tuple:
+                              use_sem: bool,
+                              threshold: float | None = None) -> tuple:
     """Mean and SD/SEM of events-above-threshold *across the set's wells*.
 
     Each loaded well contributes one ``n_above`` value (AggPoint index 4); the
@@ -752,9 +779,7 @@ def compute_rep_n_above_stats(ctx, rset: ReplicateSet, target_t: float,
     and Fraction panels (a per-well mean with a cross-well spread), so the
     Events panel gets replicate error bars instead of a spread-less total.
     """
-    threshold = on_cutoff_for_column(
-        ctx, ctx.state.channel.active_val_col,
-        channel=ctx.state.channel.active_channel)
+    threshold = _on_cutoff(ctx, threshold)
     fluor_gates = get_all_fluor_gates(ctx)
     cache_key = ("rep_n_above_stats", rset.name, tuple(rset.wells), target_t,
                  threshold, use_sem, ctx.state.channel.active_val_col,

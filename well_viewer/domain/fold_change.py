@@ -1025,7 +1025,7 @@ def member_n_series(
         # This used to be ``compute_rep_n_above``, a *total* across the set's
         # wells, so a set normalised against itself came out at 1/n rather than
         # 1.0: a per-well mean of 5 over a total of 10 reads 0.5.
-        n_mean, n_spread = compute_rep_n_above_stats(ctx, rset, t, use_sem)
+        n_mean, n_spread = compute_rep_n_above_stats(ctx, rset, t, use_sem, threshold)
         return (float(n_mean),
                 float(n_spread) if math.isfinite(n_spread) else 0.0)
 

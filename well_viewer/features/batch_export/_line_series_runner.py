@@ -170,7 +170,7 @@ def collect_line_series_for_group(
             # Index 10 carries the cross-well total for the CSV's integer
             # column; index 4 stays the drawn per-well mean and index 9 its
             # spread, which used to be discarded here.
-            n_above_total = compute_rep_n_above_total(ctx, rset, t)
+            n_above_total = compute_rep_n_above_total(ctx, rset, t, threshold)
             n_above_spread = 0.0
             if rset_per_fov:
                 gm, gerr, gf, gfe, gnpf_m, gnpf_s = compute_rep_per_fov_stats(
@@ -180,7 +180,7 @@ def collect_line_series_for_group(
                 gm, gerr, gf, gfe = compute_rep_stats(ctx, rset, t, threshold, use_sem)
                 # Per-well mean, matching the Line tab's own numerator.
                 n_above_val, n_above_spread = compute_rep_n_above_stats(
-                    ctx, rset, t, use_sem)
+                    ctx, rset, t, use_sem, threshold)
                 # ``gfe`` is the producer's fraction spread — discarded and
                 # zeroed here, so the batch figure and CSV disagreed with the
                 # tab they were exported from. Only the per-FOV fields are

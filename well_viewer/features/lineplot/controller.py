@@ -303,7 +303,7 @@ def collect_line_series(
             for t in sorted(all_tps):
                 # Index 10 is the cross-well total the CSV's integer column
                 # keeps; index 4 stays the drawn value.
-                _n_above_total = compute_rep_n_above_total(ctx, rset, t)
+                _n_above_total = compute_rep_n_above_total(ctx, rset, t, threshold)
                 _n_above_spread = 0.0
                 if rset_per_fov:
                     gm, gerr, gf, gfe, gnpf_m, gnpf_s = compute_rep_per_fov_stats(ctx,
@@ -320,7 +320,7 @@ def collect_line_series(
                     # different numbers for the same replicate set: 5 per well
                     # on a bar against 10 on a curve.
                     _n_above_val, _n_above_spread = compute_rep_n_above_stats(
-                        ctx, rset, t, use_sem)
+                        ctx, rset, t, use_sem, threshold)
                     # ``gfe`` is ``compute_rep_stats``'s fourth return value —
                     # the spread of the set's per-well fractions. It was bound
                     # to ``_`` and then overwritten with 0.0 here, which is why

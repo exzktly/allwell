@@ -439,10 +439,10 @@ def collect_bar_items(
                     # error bars), consistent with the Mean/Fraction panels —
                     # rather than a spread-less total.
                     n_above_val, n_above_err = compute_rep_n_above_stats(
-                        ctx, rset, target_t, use_sem)
+                        ctx, rset, target_t, use_sem, threshold)
                 # The CSV's integer column keeps meaning the cross-well total,
                 # which is a different number from the mean drawn above.
-                n_above_total = compute_rep_n_above_total(ctx, rset, target_t)
+                n_above_total = compute_rep_n_above_total(ctx, rset, target_t, threshold)
                 t0_mean = None
                 t0_spread = None
                 t0_frac = None
@@ -851,7 +851,7 @@ def collect_bar_items_for_group(
                 # integer column keeps. The spread used to be dropped on the
                 # floor here and the total conflated with index 4, so the batch
                 # bar truncated a 7.5 mean to 7 and drew no error bar.
-                ntotal = compute_rep_n_above_total(ctx, rset, t)
+                ntotal = compute_rep_n_above_total(ctx, rset, t, threshold)
                 if rset_per_fov:
                     gm, gerr, gf, gfe, gnpf_m, gnpf_s = compute_rep_per_fov_stats(
                         ctx, rset, t, threshold, use_sem)
@@ -859,7 +859,7 @@ def collect_bar_items_for_group(
                 else:
                     gm, gerr, gf, gfe = compute_rep_stats(ctx, rset, t, threshold, use_sem)
                     # Per-well mean, matching the Bar tab's own numerator.
-                    nval, nspread = compute_rep_n_above_stats(ctx, rset, t, use_sem)
+                    nval, nspread = compute_rep_n_above_stats(ctx, rset, t, use_sem, threshold)
                     # ``gfe`` is the fraction spread the producer returned; it
                     # was discarded and replaced with 0.0, so a batch export
                     # reported ``err_frac`` as zero where the tab drew a real

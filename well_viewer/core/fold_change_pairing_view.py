@@ -26,7 +26,7 @@ Cancel that cannot un-draw the plot behind it is a lie.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -224,21 +224,40 @@ def build_pairing_window(ctx, scope: str) -> QDialog | None:
     close_btn.clicked.connect(win.hide)
 
     def _write(mapping: dict) -> None:
+        # No ``_populate()`` after this. ``set_fold_change_state`` syncs every
+        # scope whose name is not the ``initiating_scope``, and this passes the
+        # empty string, so no scope is skipped — the sync therefore reaches
+        # ``refresh_pairing_window``, which calls this window's own
+        # ``_aw_populate``. The explicit call here rebuilt the whole table a
+        # second time on every single-combo edit.
         from well_viewer.core.fold_change_controls_view import set_fold_change_state
         set_fold_change_state(ctx, control_map=mapping, initiating_scope="")
-        _populate()
 
     def _current_map() -> dict:
         return dict(getattr(ctx.state.plot, "fc_control_map", {}) or {})
 
     def _on_row_control_changed(member: str, combo: QComboBox) -> None:
-        mapping = _current_map()
+        # Deferred by one event-loop turn, deliberately. This runs inside the
+        # combo's own ``currentIndexChanged`` emission, and the write ends in a
+        # repopulate whose ``_fill_row`` calls ``setCellWidget`` for this row —
+        # which destroys *this* combo while its signal is still on the stack.
+        # Qt deletes the C++ object underneath the Python wrapper, so the
+        # remainder of the emission touches freed memory. Letting the signal
+        # return first costs nothing the user can perceive.
+        #
+        # ``singleShot`` is safe here and only here because this is the GUI
+        # thread; from a worker it would silently drop (CLAUDE.md §5).
         ref = combo.currentData()
-        if ref is None:
-            mapping.pop(member, None)
-        else:
-            mapping[member] = ref
-        _write(mapping)
+
+        def _apply() -> None:
+            mapping = _current_map()
+            if ref is None:
+                mapping.pop(member, None)
+            else:
+                mapping[member] = ref
+            _write(mapping)
+
+        QTimer.singleShot(0, _apply)
 
     def _populate() -> None:
         rows = pairing_rows(ctx, scope)

@@ -178,6 +178,32 @@ that is unknown. Scrub the timepoint slider on a large plate with replicate
 averaging on, and if it drags, the fix is to memoise per well and timepoint
 rather than to go back to pooling — pooling is the wrong number.
 
+## Coverage gaps inside rows that are `done`
+
+Verification promoted 29 rows by reading each diff, running the named test, and
+mutating the fix in place to watch the test go red. Six of those rows are
+genuinely closed in code while their guard is narrower than the rule it stands
+for. None is a live defect; each is a place a future regression would pass
+unnoticed.
+
+1. **67** — the archive-side and CSV-side refusals are mutually redundant for
+   the fixture, so killing either alone stays green. A zip member with no CSV row
+   is covered by code and by no test.
+2. **12** — the `derive`-at-the-sort half of `find_well_images_and_masks` is
+   unpinned; reverting it leaves thirteen tests green, because the test drives
+   `_merge_scan` directly.
+3. **73** — reverting `p.is_dir() and not p.is_symlink()` to `p.is_dir()` stays
+   green: no fixture holds a symlink to a directory.
+4. **2** — the `image_compose` consumer branch (`None` meaning unrenderable) was
+   confirmed by reading only.
+5. **100** — the AST guard scans `base_panel.py` and `bar_panel.py` and cannot
+   see `scatter_panel.py`, where the recorded sibling still lives (owed-work 8).
+   The guard file does not state that exclusion, which is the half that makes a
+   scan surface a rule rather than an accident.
+6. **68** — `existing_well_folders` omits `_zip_well_folders`' "well already has
+   a matching zip, skip it" rule, so it can announce a folder the run will not
+   touch.
+
 ## A lesson this work paid for
 
 Checkpointing a group's in-flight tree into `HEAD` silently invalidated the
@@ -203,6 +229,11 @@ the tree at that moment. The history was already pushed when this was noticed an
 is not being rewritten. Read the group status files in `_remediation/` for what
 each group actually did; the commit messages are reliable about intent and not
 about extent.
+
+It recurred after being written down. The commit titled *Defer only the pairing
+table's rebuild* also carries the verification of all 31 reported rows — a
+separate body of work, by a different agent, swept in by the same `git add -A`.
+Knowing the failure mode did not prevent it; staging by path would have.
 
 ## Two cross-cutting fixes, sequenced last
 

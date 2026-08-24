@@ -1272,9 +1272,9 @@ a group read as one condition and match the group's row swatch.
 
 **Editing a group on a partly-loaded plate keeps the wells you cannot see.** If
 you opened a folder that holds only some of the plate's wells, the picker can
-only paint those — but the group's other members are still part of it, and
-adding or removing a well now leaves them where they are instead of quietly
-dropping them from the saved group.
+only paint those — but the group's other members are still part of it. Adding
+or removing a well changes only what you clicked; the members the plate cannot
+show stay in the group.
 
 #### Well Labels
 
@@ -1999,10 +1999,11 @@ place cells in a grid that mirrors your plate or your experimental design.
   the **Timepoint** dropdown to watch the metric evolve.
 - **A session that never opens this tab leaves its saved settings alone.** The
   colour map, the scale mode and its vmin/vmax, the log-scale and rep-set-average
-  toggles and the timepoint are all stored with the dataset. Opening a plate,
-  working entirely on other tabs and closing it no longer overwrites them with
-  defaults — the settings are only rewritten from the controls once the controls
-  exist. Resetting the view still clears them, as it always did.
+  toggles and the timepoint are all stored with the dataset, and they are
+  rewritten from the controls only once the controls exist. So opening a plate,
+  working entirely on other tabs and closing it leaves them exactly as you left
+  them last time. Resetting the view clears them, as it does the rest of the
+  view.
 
 ### Statistics
 
@@ -2281,7 +2282,7 @@ reviewing and curating individual cells.
   read its pixel value, cell id, and **mean fluorescence (MFI)** for the current
   channel (the same per-cell readout the Image Table shows).
 - **The status line says when it is showing you less than it was asked for.**
-  Two cases, both of which used to look like an ordinary picture. If reading the
+  Two cases, each of which would otherwise look like an ordinary picture. If reading the
   well's archive stopped part way, the line ends with **INCOMPLETE** and the
   reason — the FOV and timepoint menus above it are then shorter than the dataset
   actually is, which is otherwise indistinguishable from a well that holds that
@@ -3150,6 +3151,16 @@ What it does to the data:
   thresholds and sample definitions carry over from dataset 1 and apply to
   dataset 2's rows too — worth reviewing after the merge, since they were set
   from dataset 1's imaging conditions.
+- **Carried-over cell-inclusion overrides are re-stamped against the copy.**
+  Each override records a fingerprint of the segmentation it was made on, so a
+  later re-run of the pipeline drops overrides that would otherwise re-attach to
+  different cells. Copying a dataset re-stamps that fingerprint from the new
+  folder's own QC archive. If a well has no QC archive in the destination — a
+  run made without QC images, say — the override is carried **without** a
+  fingerprint rather than with the source's, which would have looked stale to
+  the next check and been thrown away; the log line says how many, and what it
+  costs: those overrides will no longer be dropped if that well really is
+  re-segmented. Subset and Merge Plates do exactly the same.
 - **Before finishing, the merge verifies itself** — that it actually wrote
   measurement data at all (rather than only copying images), that every row's
   timepoint label and its numeric hours agree, that dataset 2's timepoints
@@ -3563,6 +3574,20 @@ recognised field names and worked examples.
 
 `pipeline_info.json` records the schema you ran the pipeline with, so the
 viewer doesn't need you to re-enter it.
+
+**A lower-case `f` followed by digits is read as a field, never as row F.** When
+Review has to find a well's images in a folder whose filenames it cannot parse
+positionally, it falls back to looking for a well token anywhere in the name —
+and `A01_GFP_f1_t0.tif` contains `f1`. Reading that as well `F01` meant every
+plate written in the standard `…_{well}_f{fov}_{tp}` layout answered "yes, this
+is F01" for every well's first field, so selecting F01 in Review drew A01's
+image, F02 drew B02's, and each well showed another well's picture with nothing
+on screen to say so. Row letters are matched case-insensitively for every row
+except **F**, where only the upper-case spelling counts. The cost is narrow and
+deliberate: a plate whose filenames spell a row-F well in lower case (`f01_GFP_…`)
+is no longer found by that free-text fallback — such names are genuinely
+ambiguous — while a plate whose filenames match the schema you gave the run is
+read by position, which is not ambiguous at all, and is unaffected.
 
 ---
 

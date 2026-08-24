@@ -144,3 +144,52 @@ def test_a_suspend_reads_as_cancelled_so_the_queue_pauses():
     runner.suspend()
     assert runner.was_stopped is True     # what AnalyzeRunMixin.was_cancelled reads
     assert runner.was_suspended is True
+
+
+# ── one owner per suspended run ─────────────────────────────────────────────
+
+def test_the_banner_does_not_offer_a_run_the_queue_owns(tmp_path, monkeypatch):
+    """Two surfaces offer an unfinished run; only one may offer any given one.
+
+    Suspending a queue-driven job closes its journal ``suspended``, which is
+    precisely what ``is_unfinished`` is for — so the Analyze banner offered the
+    plate the moment ``_running`` cleared, while the queue still held the job.
+    Resuming from the banner and then letting the queue start ran the same plate
+    twice, concurrently, into one output directory.
+    """
+    import analyze_suspend
+    from services import run_journal as J
+
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    out = tmp_path / "out"
+    out.mkdir()
+
+    class _Pane(analyze_suspend.AnalyzeSuspendMixin):
+        pass
+
+    def _offers(queued: bool) -> list:
+        J.open_run(out, input_dir="/in", mode="local",
+                   spec={"opts": {"raw": "/in"}}, queued=queued)
+        J.close_run(out, outcome="suspended")
+        return _Pane()._journal_offers(only_dir=str(out))
+
+    assert _offers(queued=False), (
+        "the fixture no longer produces an offer at all, so the assertion "
+        "below would pass for the wrong reason")
+    assert _offers(queued=True) == [], (
+        "the banner offered a run the job queue is already holding; resuming "
+        "here runs the plate a second time into the same output folder")
+
+
+def test_a_queue_started_run_is_marked_as_the_queue_s(tmp_path, monkeypatch):
+    """The flag is written by the run, not inferred by the reader."""
+    from services import run_journal as J
+
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    out = tmp_path / "out"
+    out.mkdir()
+    J.open_run(out, input_dir="/in", mode="local", spec={}, queued=True)
+    assert J.read_journal(out).queued is True
+    J.open_run(out, input_dir="/in", mode="local", spec={})
+    assert J.read_journal(out).queued is False, (
+        "the flag survived into a run the queue did not start")

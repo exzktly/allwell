@@ -92,6 +92,12 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
             # already persist, so there is no second serialisation to keep in
             # step with the form.
             journal_spec=spec.to_json(),
+            # Who owns offering this run back if it does not finish. A run the
+            # queue started is already on the queue's own list, and the Analyze
+            # banner offering it too let a user resume from the banner while
+            # the queue still held the job — the same plate running twice,
+            # concurrently, into one output directory.
+            queued=bool(getattr(self, "_starting_from_queue", False)),
         )
         return None
 
@@ -168,13 +174,24 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
         if raw and hasattr(self, "_input_edit"):
             self._input_edit.setText(str(raw))
 
+    #: Set for the duration of :meth:`start_from_queue`, and read by
+    #: :meth:`start_run` when it opens the journal. An attribute rather than a
+    #: parameter because ``start_run`` is the seam every entry point shares and
+    #: threading a flag through it would put the queue's vocabulary into the
+    #: live form's call.
+    _starting_from_queue = False
+
     def start_from_queue(self, spec: dict) -> None:
         """Build a RunSpec from the persisted JSON and launch it exactly as
         start_run() would from the live form. A remote that no longer
         resolves, or a missing pipeline script, reports failure through
         jobFinished rather than raising — there is no dialog to show it to."""
         # `start_run` applies `resume_aware_spec` itself now, for every caller.
-        error = self.start_run(RunSpec.from_json(spec))
+        self._starting_from_queue = True
+        try:
+            error = self.start_run(RunSpec.from_json(spec))
+        finally:
+            self._starting_from_queue = False
         if error is not None:
             self.jobFinished.emit(False, error, "")
 

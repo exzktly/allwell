@@ -380,6 +380,15 @@ class AnalyzeSuspendMixin:
             # output directory must not produce a banner offering to resume it.
             if journal is None or not journal.spec or not journal.is_unfinished:
                 continue
+            if journal.queued:
+                # The job queue started this run, so the queue's own entry is
+                # already offering it. Offering it here too let a user resume
+                # from the banner while the queue still held the job, and the
+                # same plate then ran twice, concurrently, into one output
+                # directory. Suspending from the queue is the case that reaches
+                # this: the journal is closed ``suspended``, which is exactly
+                # what ``is_unfinished`` is for.
+                continue
             offers.append(_Resumable(
                 spec=journal.spec,
                 output_dir=out_dir,

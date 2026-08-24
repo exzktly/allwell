@@ -623,6 +623,9 @@ class PipelineRunner:
         # into the journal so a run that dies can be offered back with the
         # settings it had. ``None`` for a caller that supplies none.
         self._journal_spec: dict | None = None
+        # Whether the job queue started this run and therefore owns resuming
+        # it; see ``RunJournal.queued``.
+        self._journal_queued: bool = False
         #: Where this run's journal lives, and its token — `open_run`'s
         #: `opened_at`, handed to every write so a record can say *which* run
         #: it belongs to. Declared here rather than only in `start()`, because
@@ -744,6 +747,7 @@ class PipelineRunner:
         dry_run_cleanup: bool = False,
         selective_channels: bool = True,
         journal_spec: dict | None = None,
+        queued: bool = False,
     ) -> None:
         """Spawn the worker thread that runs the pipeline subprocess.
 
@@ -791,6 +795,7 @@ class PipelineRunner:
         self._dry_run_cleanup = dry_run_cleanup
         self._selective_channels = selective_channels
         self._journal_spec = journal_spec
+        self._journal_queued = bool(queued)
         # Every per-run flag is cleared **here**, on the caller's thread,
         # before the worker is started — not at the top of the worker itself.
         # `start()` returns as soon as the thread is created, and the thread
@@ -1098,6 +1103,7 @@ class PipelineRunner:
                 mode=mode,
                 input_dir=input_dir,
                 argv=argv,
+                queued=self._journal_queued,
             )
         except (OSError, ValueError):
             # ``ValueError`` is ``open_run`` refusing a mode it does not know —

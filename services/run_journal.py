@@ -208,6 +208,13 @@ class RunJournal:
     argv: tuple[str, ...]
     spec: dict
     remote: dict
+    #: Whether the job queue started this run and therefore owns resuming it.
+    #: Two surfaces offer an unfinished run — the Analyze pane's banner and the
+    #: queue's own entry — and a run started from the queue is on both lists
+    #: unless one of them is told. Resuming from the banner while the queue
+    #: still holds the job runs the same plate twice, concurrently, into one
+    #: output directory.
+    queued: bool = False
     wells: dict[str, WellRecord] = field(default_factory=dict)
 
     @property
@@ -315,6 +322,7 @@ def open_run(
     mode: str,
     input_dir: Path | str,
     argv: list[str] | tuple[str, ...] = (),
+    queued: bool = False,
 ) -> float | None:
     """Record that a run has begun, before it does any work.
 
@@ -343,6 +351,9 @@ def open_run(
     An unrecognised *mode* is refused rather than written, like an unrecognised
     well state: every surface that renders this record words the run by its
     mode, and one nobody spells is a run described as neither local nor remote.
+
+    ``queued`` records that the job queue started this run, which decides who
+    may offer to resume it — see :attr:`RunJournal.queued`.
     """
     if mode not in RUN_MODES:
         raise ValueError(
@@ -363,6 +374,7 @@ def open_run(
         "argv": [str(a) for a in argv],
         "spec": spec if isinstance(spec, dict) else {},
         "remote": carried if isinstance(carried, dict) else {},
+        "queued": bool(queued),
     }
     ok = _atomic_write_json(_run_path(output_dir), payload)
     # Only once the new record is on disk. Clearing first meant a write that
@@ -599,6 +611,7 @@ def read_journal(output_dir: Path | str) -> RunJournal | None:
         argv=tuple(str(a) for a in (payload.get("argv") or [])),
         spec=payload.get("spec") if isinstance(payload.get("spec"), dict) else {},
         remote=payload.get("remote") if isinstance(payload.get("remote"), dict) else {},
+        queued=bool(payload.get("queued")),
         wells=_read_wells(output_dir),
     )
 

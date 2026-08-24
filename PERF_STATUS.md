@@ -1,6 +1,6 @@
 # STATUS — well-selection / plotting performance
 
-**Updated:** 2026-08-24 03:35 UTC
+**Updated:** 2026-08-24 03:45 UTC
 **Branch:** `claude/well-selection-performance-7phaix`
 **Base:** `44c0d38` (main, includes PR #847)
 **Version:** main is at 9.0.5 → this PR bumps to **9.0.6** (not yet applied)
@@ -26,7 +26,7 @@ last, after local fast lane + slow lane + adversarial review all pass.
 | 0a | Perf bench | ✅ done | runs on fresh main; has both collect and draw phases; baseline captured below |
 | 0b | Equivalence corpus | ✅ done | 14 cases green on unchanged HEAD; `tests/test_aggregate_equivalence.py` |
 | 1 | String timepoint short-circuit | ✅ done | **6.1x**: `aggregate_well` x96 1,091 → 180 ms, measured back-to-back |
-| 2 | Per-well memo | ⬜ not started | AST writer guard FIRST; memo in a wrapper, never inside `aggregate_well` |
+| 2 | Per-well memo | 🔵 in progress | AST writer guard ✅ landed (7 sites); memo next |
 | 5 | Group-visibility cache clear | ⬜ not started | split cache-clear from UI cues |
 | 6 | Visible-only redraw | ⬜ not started | extend `fc_dirty_scopes`, no parallel flag |
 | 8 | CDF decimation | ⬜ not started | at `ax_cdf.plot` only, `n` from full array |
@@ -126,6 +126,34 @@ Noted, not fixed: on the slow path `timepoint_text` runs twice — once inside
 `_ordinal_timepoints_df`, once in the caller. Pinned by a test. Left alone because that
 branch now runs only for wells that genuinely carry an unresolvable timepoint, so
 de-duplicating it would trade a correctness risk for a saving on the rare path.
+
+## Step 2a — the writer guard (landed)
+
+`tests/test_row_cache_writers.py` enumerates every site that changes what a cached
+measurement frame contains, from the syntax tree rather than from a grep. **7 sites found:**
+
+| Site | Shape |
+|---|---|
+| `data_loading.py` | `Included` seeded at load |
+| `cache_projectors.py` | dynamic column (QC / Crop) |
+| `home/cell_gating/gating_compute.py` | `Included`, `Gate_Pass`, `Gate_On` |
+| `image_browser/review_image/collect.py` | `Included` via **`df.loc`** |
+| `core/load_controller.py` | whole-frame replacement |
+| `features/smfish/tab_view.py` | whole-frame replacement |
+| `scripts/make_static_fonts.py` | `inplace=True` (unrelated, not a frame) |
+
+Two things the guard caught that a grep did not:
+
+- **`review_image/collect.py`'s `df.loc[mask, "Included"] = ...`** — invisible to a search
+  for `df["Included"]`. Reached from four call sites, one of which (`load_controller`) does
+  not invalidate afterwards, so the bump must live in the function, not its callers.
+- **Whole-frame replacement** (`dataset.cache[label] = ...`) — a different syntactic shape
+  entirely, and as invalidating as any column write.
+
+And one false positive it produced, then fixed: the first version matched any attribute
+spelled `.cache` and reported `stats_compute.py`, which writes `stats_cache.cache[key]` —
+a different cache with a different lifetime. A domain predicate applied outside its domain
+(§7.1). The owner must be `dataset`; a bite test now pins both directions.
 
 ## Decisions log (for user confirmation at the end)
 

@@ -350,18 +350,70 @@ def test_re_running_the_same_folder_replaces_its_index_entry(out_dir):
 
 # ── the rosters stay live ───────────────────────────────────────────────────
 
-def test_every_well_state_is_reported_somewhere(out_dir):
-    """A state missing from ``TALLY_GROUPS`` is a well nobody is ever told about.
+@pytest.mark.parametrize("roster", ["TALLY_GROUPS_LOCAL", "TALLY_GROUPS_REMOTE"])
+def test_every_well_state_is_reported_somewhere(roster):
+    """A state missing from a grouping is a well nobody is ever told about.
 
     §7.5 #10: pair every roster with a liveness test. Without one, adding a
     state to ``WELL_STATES`` and forgetting to group it produces no error and no
     output — the well is recorded, counted by nothing, and reported by nobody,
     which is exactly the silent omission the roster guard exists to prevent.
+
+    There are two groupings and both are checked, because adding a state to one
+    and not the other is the same omission with a mode attached.
     """
-    grouped = {state for _label, states in J.TALLY_GROUPS for state in states}
+    # Resolved inside the test, not in the decorator: a name that does not exist
+    # yet must fail this one test, not stop the module importing and take every
+    # other guard in the file down with it.
+    grouped = {state for _label, states in getattr(J, roster) for state in states}
     assert grouped == set(J.WELL_STATES), (
         f"ungrouped: {sorted(set(J.WELL_STATES) - grouped)}; "
         f"unknown: {sorted(grouped - set(J.WELL_STATES))}")
+
+
+def test_the_two_groupings_differ_only_in_where_analysed_is_filed():
+    """The one difference is the finding; anything else is drift.
+
+    ``analysed`` means "the pipeline announced this well finished" in both
+    modes. Locally that puts the CSV and out-zip on disk; remotely it puts them
+    on the host, and only ``fetched`` says they arrived here.
+    """
+    def _by_state(groups):
+        return {state: label for label, states in groups for state in states}
+
+    local, remote = _by_state(J.TALLY_GROUPS_LOCAL), _by_state(J.TALLY_GROUPS_REMOTE)
+    differing = {s for s in local if local[s] != remote.get(s)}
+    assert differing == {"analysed"}, (
+        f"the two groupings differ on {sorted(differing)}, not just 'analysed'")
+    assert local["analysed"] == "finished"
+    assert remote["analysed"] != "finished"
+    assert remote["fetched"] == "finished"
+
+
+def test_a_remote_run_does_not_call_an_undownloaded_well_finished(out_dir):
+    """The reported defect, at the sentence a user actually reads.
+
+    A remote run that died before reconciliation has wells the host computed
+    and this machine never received. Filing those under "finished" erases the
+    distinction the journal exists to draw — and it is the sentence the resume
+    banner and the pre-run readout both print.
+    """
+    J.open_run(out_dir, input_dir="/in", mode="remote", spec={})
+    J.record_well(out_dir, "A01", "fetched")
+    J.record_well(out_dir, "A02", "analysed")
+    tally = J.read_journal(out_dir).tally()
+    assert "1 finished" in tally, tally
+    assert "2 finished" not in tally, (
+        f"a well the host computed and never sent was called finished: {tally}")
+    assert "not downloaded" in tally, tally
+
+
+def test_a_local_run_still_calls_an_analysed_well_finished(out_dir):
+    """...and the local reading is unchanged, because locally it *is* finished."""
+    J.open_run(out_dir, input_dir="/in", mode="local", spec={})
+    J.record_well(out_dir, "A01", "analysed")
+    J.record_well(out_dir, "A02", "analysed")
+    assert "2 finished" in J.read_journal(out_dir).tally()
 
 
 @pytest.mark.parametrize("state", J.WELL_STATES)

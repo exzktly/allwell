@@ -81,6 +81,10 @@ class AnalyzeProgressMixin:
         state = self._JOURNAL_STAGES.get(stage)
         if state is None:
             return
+        self._journal_well(well, state)
+
+    def _journal_well(self, well: str, state: str, *, reason: str = "") -> None:
+        """Write one well's state into this run's journal, best-effort."""
         out_dir = getattr(self._runner, "last_output_dir", None)
         if out_dir is None:
             return
@@ -92,7 +96,8 @@ class AnalyzeProgressMixin:
         if token is None:
             return
         with swallow(f"journalling {well} as {state}"):
-            run_journal.record_well(out_dir, well, state, run_token=token)
+            run_journal.record_well(out_dir, well, state, run_token=token,
+                                    reason=reason)
 
     def _on_scheduler(self, state: str, job_id: str, launcher: str) -> None:
         """A scheduler queued this run, or has just granted it a node.
@@ -347,6 +352,18 @@ class AnalyzeProgressMixin:
             well, stage = payload  # type: ignore[misc]
             self._dashboard.set_well_stage(str(well), str(stage))
             self._journal_well_stage(str(well), str(stage))
+        elif kind == "well_uncomputed":
+            # This run did not compute the well: the pipeline printed "up to
+            # date" (an incremental well with no new FOVs) or "SKIP … output
+            # already exists" (a re-run without --force). It is complete, and
+            # the plate has already been told so by the ``well_stage`` event
+            # beside this one — but recording it as ``analysed`` claims work
+            # that did not happen, and an incremental run that touched 6 of 96
+            # wells then read "It recorded 96 finished". The journal has had a
+            # ``skipped`` state for exactly this since it was written; the
+            # local path never wrote it.
+            self._journal_well(str(payload), "skipped",
+                               reason="already up to date")
         elif kind == "well_fov":
             well, done, total = payload  # type: ignore[misc]
             self._dashboard.set_well_fov(str(well), int(done), int(total))

@@ -123,13 +123,38 @@ _WELL_STAGE_ORDER = {
 #: roster guard exists to prevent. Two surfaces render this (the resume banner
 #: and the pre-run readout) and both had their own copy, which between them
 #: dropped ``uploaded`` and ``skipped``.
-TALLY_GROUPS = (
+#: ...and what "finished" means depends on where the run happened, which is why
+#: there are two of these rather than one. ``analysed`` is written from the
+#: pipeline's own stdout by ``analyze_progress``, on a local and a remote run
+#: alike, and it means the same thing in both: *the pipeline announced this well
+#: finished*. Where it ran is what differs. Locally the CSV and the out-zip are
+#: on disk the moment that line is printed, so the well is done. Remotely they
+#: are on the host, and only ``fetched`` says they arrived — so filing
+#: ``analysed`` under "finished" told a user whose remote run died before
+#: reconciliation that a well was finished when nothing of it had reached their
+#: machine. That is the one distinction the journal exists to draw, erased in
+#: the sentence that reports it.
+TALLY_GROUPS_LOCAL = (
     ("finished", ("analysed", "fetched")),
     ("failed", ("failed",)),
     ("never fetched", ("not-fetched",)),
     ("skipped", ("skipped",)),
     ("uploaded only", ("uploaded",)),
 )
+
+TALLY_GROUPS_REMOTE = (
+    ("finished", ("fetched",)),
+    ("computed remotely but not downloaded", ("analysed",)),
+    ("failed", ("failed",)),
+    ("never fetched", ("not-fetched",)),
+    ("skipped", ("skipped",)),
+    ("uploaded only", ("uploaded",)),
+)
+
+#: The local grouping, kept under the original name because every reader that
+#: does not know a run's mode wants the reading that treats ``analysed`` as
+#: done — which is what a local run's ``analysed`` is.
+TALLY_GROUPS = TALLY_GROUPS_LOCAL
 
 #: The outcomes a run can be closed with. ``None`` while it is still open, which
 #: after a restart means the run died without closing its own record.
@@ -221,8 +246,16 @@ class RunJournal:
         surface because the grouping is a statement about ``WELL_STATES``, and
         the two surfaces that render it had drifted into dropping two states
         between them.
+
+        The grouping is chosen by this run's ``mode``: see
+        :data:`TALLY_GROUPS_REMOTE`. A remote run that died before it
+        reconciled has wells the host finished and this machine never received,
+        and calling those "finished" is the distinction the journal exists for,
+        deleted in the one sentence that reports it.
         """
-        parts = [f"{n} {label}" for label, states in TALLY_GROUPS
+        groups = (TALLY_GROUPS_REMOTE if str(self.mode).startswith("remote")
+                  else TALLY_GROUPS_LOCAL)
+        parts = [f"{n} {label}" for label, states in groups
                  if (n := len(self.wells_in(*states)))]
         return f" It recorded {', '.join(parts)}." if parts else ""
 

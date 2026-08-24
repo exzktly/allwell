@@ -317,8 +317,18 @@ class ProgressTracker:
         seen.add(part)
         return not was_complete and {"zip", "csv"} <= seen
 
-    def _count_well_done(self, well: str) -> list[tuple[str, object]]:
+    def _count_well_done(self, well: str,
+                         stage: str = "process") -> list[tuple[str, object]]:
         """Record that *well* reached a terminal state, counting it once.
+
+        *stage* is what the marker said happened, and it is not always
+        "processed". Three lines reach here — "— done.", "up to date" and
+        "SKIP … output already exists" — and all three mean the well is
+        complete *for progress purposes*, which is why they share a counter.
+        Only the first means the pipeline computed anything. Collapsing them
+        into one stage made an incremental run that touched 6 of 96 wells
+        journal 96 as ``analysed`` and the readout say "It recorded 96
+        finished", which is a claim about work that did not happen.
 
         Progress is the number of DISTINCT wells that finished, not the number
         of completion markers seen. The two diverge in batched remote mode: the
@@ -348,7 +358,16 @@ class ProgressTracker:
             self.well_total = self.well_done
             events.append(("well_total", self.well_total))
         events.append(("well_done", (self.well_done, self.well_total)))
+        # The plate is told "process" whatever the marker was: all three mean
+        # this well is finished, and the plate paints finished wells alike.
         events.append(("well_stage", (well, "process")))
+        if stage != "process":
+            # The journal is told the truth. A separate event rather than a
+            # different ``well_stage`` value, because the dashboard ignores any
+            # stage outside ``_STAGE_KEYS`` — sending it one would have stopped
+            # those wells being marked done on the plate, trading a wrong record
+            # for a wrong picture.
+            events.append(("well_uncomputed", well))
         return events
 
     def parse(self, line: str) -> list[tuple[str, object]]:
@@ -487,13 +506,19 @@ class ProgressTracker:
             # progress count, and all name their well, so they share one
             # identity-aware counter. An up-to-date well never emits "— done.";
             # a skipped one never runs at all; both are complete.
-            md = (
-                _RE_WELL_DONE_ID.search(line)
-                or _RE_WELL_UPTODATE.search(line)
-                or _RE_WELL_SKIP.search(line)
-            )
-            if md:
-                events.extend(self._count_well_done(md.group(1)))
+            # Matched separately rather than as one `or` chain, because which
+            # of the three fired is the thing the journal needs: they agree
+            # that the well is complete and disagree about whether this run
+            # computed it.
+            for pattern, stage in (
+                (_RE_WELL_DONE_ID, "process"),
+                (_RE_WELL_UPTODATE, "uptodate"),
+                (_RE_WELL_SKIP, "uptodate"),
+            ):
+                md = pattern.search(line)
+                if md:
+                    events.extend(self._count_well_done(md.group(1), stage))
+                    break
         return events
 
 

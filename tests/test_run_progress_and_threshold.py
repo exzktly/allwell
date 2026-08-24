@@ -352,3 +352,69 @@ def test_the_status_line_is_only_retracted_when_it_is_ours(qapp):
     host._dashboard.set_status("Finalizing…")
     host._apply_progress_event("well_done", (2, 2))
     assert host._dashboard._status.text() == "Finalizing…"
+
+
+# ── a well this run did not compute is recorded as one it did not compute ────
+
+def test_an_uncomputed_well_is_reported_as_such_without_changing_the_plate():
+    """Three markers mean "complete"; only one means "this run computed it".
+
+    ``— done.``, ``up to date`` and ``SKIP … output already exists`` all reach
+    ``_count_well_done`` and all three must advance the plate, which is why they
+    share a counter. Collapsing them for the *journal* too made an incremental
+    run that touched 6 of 96 wells record 96 ``analysed``, and the readout then
+    said "It recorded 96 finished" — a claim about work that did not happen.
+
+    The plate still hears ``process`` for all three: it paints finished wells
+    alike, and ``RunDashboard.set_well_stage`` ignores any stage outside its own
+    roster, so a new value there would have stopped those wells being marked
+    done — trading a wrong record for a wrong picture.
+    """
+    from services.pipeline_runner import ProgressTracker
+
+    pt = ProgressTracker()
+    pt.parse("Zip mode: 3 well(s) to process, 2 worker(s).")
+
+    computed = pt.parse("Well A01 — done.")
+    assert ("well_stage", ("A01", "process")) in computed
+    assert not [e for e in computed if e[0] == "well_uncomputed"], (
+        "a well the pipeline actually processed was reported as uncomputed")
+
+    for line, well in (("Well B02 — up to date (no new FOVs).", "B02"),
+                       ("SKIP well C03 — output already exists", "C03")):
+        ev = pt.parse(line)
+        assert ("well_stage", (well, "process")) in ev, (
+            f"{well} stopped advancing the plate: {ev}")
+        assert ("well_uncomputed", well) in ev, (
+            f"{well} was recorded as analysed though this run did not compute "
+            f"it: {ev}")
+
+
+def test_the_journal_records_an_uncomputed_well_as_skipped(tmp_path, monkeypatch):
+    """At the boundary: what reaches ``record_well``, not what the tracker returns."""
+    import analyze_progress
+    from services import run_journal as J
+
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    out = tmp_path / "out"
+    out.mkdir()
+    token = J.open_run(out, input_dir="/in", mode="local", spec={})
+
+    class _Runner:
+        last_output_dir = out
+        journal_token = token
+
+    class _Mixin(analyze_progress.AnalyzeProgressMixin):
+        def __init__(self):
+            self._runner = _Runner()
+
+    m = _Mixin()
+    m._journal_well_stage("A01", "process")
+    m._journal_well("B02", "skipped", reason="already up to date")
+
+    rec = J.read_journal(out)
+    assert rec.wells["A01"].state == "analysed"
+    assert rec.wells["B02"].state == "skipped"
+    assert "up to date" in rec.wells["B02"].reason
+    tally = rec.tally()
+    assert "1 finished" in tally and "1 skipped" in tally, tally

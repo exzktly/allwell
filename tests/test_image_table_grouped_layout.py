@@ -11,7 +11,10 @@ import math
 
 import pytest
 
-from well_viewer.features.image_browser.image_table.grid_layout import _layout_cell_values
+from well_viewer.features.image_browser.image_table.grid_layout import (
+    _layout_cell_values,
+    banded_indices,
+)
 
 
 _FIXED = {"well": "", "channel": "", "timepoint": "0h", "fov": "1"}
@@ -55,6 +58,116 @@ def test_ragged_final_band_blanks_missing_cells():
     # Col 2 in that band → well index 14 → out of range → blank.
     assert _layout_cell_values("channel", "well", rv, cv, _FIXED, 4, 2,
                                n_row_vals=n, group_size=G)["well"] == ""
+
+
+def test_banded_indices_is_the_shared_band_math():
+    # Both layout paths (flat and nested) resolve a cell through this one helper,
+    # so they band identically: 2 rows per band, 6 columns per band.
+    assert banded_indices(0, 0, 2, 6) == (0, 0)
+    assert banded_indices(1, 5, 2, 6) == (1, 5)
+    assert banded_indices(2, 0, 2, 6) == (0, 6)     # band 1 starts at column 6
+    assert banded_indices(3, 5, 2, 6) == (1, 11)
+    assert banded_indices(4, 2, 2, 6) == (0, 14)    # band 2, past a 14-value axis
+
+
+# ── Nested (compound) axes band too ──────────────────────────────────────────
+#
+# The reported defect: with FOV on the rows (channels nested under it) and Wells
+# across the columns, Wrap cols was disabled and — had it been reachable — the
+# nested layout dropped the wrap on the floor. The column *product* bands exactly
+# like a single dim's values, so these drive the real builder path.
+
+
+def _nested_ctx(*, wells, channels, timepoints=None, fovs=None):
+    """A lightweight ctx for the layout builders: dataset dims + an empty grid.
+
+    No dataset and no tab build — the Qt grid rebuild is stubbed with plain dict
+    cells, which is all ``_build_nested_layout`` writes into."""
+    from types import SimpleNamespace
+    from well_viewer.core.app_runtime import AppRuntime
+    from well_viewer.features.image_browser.image_table.state import ImageTableState
+
+    info = {"available_timepoints": timepoints or [], "available_fovs": fovs or [],
+            "nuclear_token": ""}
+    app = SimpleNamespace()
+    app._app_state = SimpleNamespace(
+        dataset=SimpleNamespace(well_paths={w: w for w in wells}, pipeline_info=info,
+                                cache={}),
+        channel=SimpleNamespace(fluor_channels=list(channels), smfish_channels=set(),
+                                ratio_metrics=[], seg_channel_token=""),
+        image_table=ImageTableState(active_wells=set(wells)),
+        image_view=None,
+    )
+    app._parse_rc = lambda w: (w[0], int(w[1:]))
+    ctx = SimpleNamespace(app=app, state=app._app_state, runtime=AppRuntime(app),
+                          notify=SimpleNamespace(set_status=lambda _s: None))
+    app._ctx = ctx
+    return ctx
+
+
+class _GridStub:
+    """Stands in for the controller's Qt grid rebuild + render."""
+
+    @staticmethod
+    def image_table_rebuild_grid(ctx):
+        st = ctx.state.image_table
+        ctx.runtime.image_table.cells = [[{} for _ in range(st.cols)]
+                                         for _ in range(st.rows)]
+
+    @staticmethod
+    def image_table_generate(ctx):
+        pass
+
+
+@pytest.fixture
+def _stub_grid(monkeypatch):
+    from well_viewer.features.image_browser.image_table import build_layout as BL
+    monkeypatch.setattr(BL, "_ctrl", lambda: _GridStub)
+    return BL
+
+
+def _reported_spec(wrap):
+    """The layout from the report: rows = FOV › Channel, cols = Well."""
+    from well_viewer.features.image_browser.image_table.state import (
+        Axis, ChannelSpec, TableSpec,
+    )
+    return TableSpec(
+        rows=Axis(root="fov", channels=[ChannelSpec("GFP"), ChannelSpec("RFP")]),
+        cols=Axis(root="well"),
+        wrap=wrap,
+    )
+
+
+def test_wrap_bands_a_nested_axis_layout(_stub_grid):
+    # 8 wells across the columns, 2 FOVs × 2 channels down the rows, wrap 3.
+    wells = [f"A{i:02d}" for i in range(1, 9)]
+    ctx = _nested_ctx(wells=wells, channels=["gfp", "rfp"], timepoints=["T01"],
+                      fovs=["1", "2"])
+    _stub_grid.image_table_apply_spec(ctx, _reported_spec(3), render=False)
+
+    st = ctx.state.image_table
+    cells = ctx.runtime.image_table.cells
+    # 3 bands of 3 columns; the 4-row FOV×channel product repeats per band.
+    assert (st.rows, st.cols) == (12, 3)
+    assert st.group_size == 3 and st.group_row_span == 4
+    assert (cells[0][0]["fov"], cells[0][0]["chan"], cells[0][0]["well"]) == ("1", "GFP", "A01")
+    assert cells[3][2]["well"] == "A03"      # end of band 0
+    assert cells[4][0]["well"] == "A04"      # band 1 resumes the well axis
+    assert cells[4][0]["chan"] == "GFP" and cells[4][0]["fov"] == "1"
+    assert cells[8][1]["well"] == "A08"      # band 2 holds the last two wells
+    # The ragged tail is blank, not a repeat and not the held off-axis well.
+    assert cells[8][2].get("well", "") == ""
+
+
+def test_nested_wrap_zero_stays_flat(_stub_grid):
+    wells = [f"A{i:02d}" for i in range(1, 9)]
+    ctx = _nested_ctx(wells=wells, channels=["gfp", "rfp"], timepoints=["T01"],
+                      fovs=["1", "2"])
+    _stub_grid.image_table_apply_spec(ctx, _reported_spec(0), render=False)
+
+    st = ctx.state.image_table
+    assert (st.rows, st.cols) == (4, 8)
+    assert st.group_size == 0 and st.group_row_span == 0
 
 
 # ── Qt integration ───────────────────────────────────────────────────────────

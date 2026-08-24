@@ -151,9 +151,16 @@ def test_wrap_applicable_and_set(qtbot):
     spec.rows = B.Axis(root=None, channels=[ChannelSpec("GFP")])
     spec.cols = B.Axis(root="timepoint")
     assert B._wrap_applicable(spec)
-    # an axis nesting a root AND channels is 2-D → wrap doesn't apply
-    spec.rows = B.Axis(root="well", channels=[ChannelSpec("GFP")])
+    # An axis nesting a root AND channels bands on the column product, so wrap
+    # still applies — this is the reported case (FOV › Channel down the rows,
+    # Wells across the columns) where the control used to sit disabled.
+    spec.rows = B.Axis(root="fov", channels=[ChannelSpec("GFP")])
+    spec.cols = B.Axis(root="well")
+    assert B._wrap_applicable(spec)
+    # Plate mode pins both axes to the plate's own row/col dims — nothing to band.
+    spec.plate = True
     assert not B._wrap_applicable(spec)
+    spec.plate = False
     # _set_wrap writes the spec's wrap (→ group_size banding)
     spec.rows = B.Axis(root=None, channels=[ChannelSpec("GFP")])
     B._set_wrap(ctx, 3)

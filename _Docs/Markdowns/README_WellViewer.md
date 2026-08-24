@@ -2532,16 +2532,27 @@ channel for every well).
   one cell per channel; **Overlay** additively blends that root's channels into one
   composite cell (LUT-coloured, clipped to white).
 - **Wrap cols** folds the columns into vertically-stacked bands of *N* (handy for a
-  long single-dimension column axis). **Clear builder** empties the shelf and starts
-  fresh (it leaves the rendered images — use **Clear images** for those).
+  long column axis), repeating the whole rows axis under each band. It works with
+  any axis pairing, including one whose channels are nested under a root — with,
+  say, **FOV › Channel** down the rows and **Wells** across the columns, wrapping
+  at 3 gives three wells per band and repeats every FOV/channel row beneath it. The
+  one place it is unavailable is **Plate A–H × 1–12** below, which pins both axes to
+  the plate's own rows and columns and so has nothing left to band; the box is
+  greyed out while Plate mode is on. One thing a wrapped table gives up: the column
+  headers along the top disappear. There is a single header strip for the whole
+  grid, and a column that holds A01 in the first band and A04 in the second cannot
+  be described by one label — so those labels are dropped rather than shown stale.
+  The row labels are unaffected and repeat under every band. **Clear builder**
+  empties the shelf and starts fresh (it leaves the rendered images — use
+  **Clear images** for those).
 - **Plate A–H × 1–12** lays each selected well's image out in its true 96-well-plate
   position — rows labelled **A–H**, columns **1–12** — using the first channel in the
   builder as the image. Toggle it on in the shelf header; wells come from the plate
   selection (a partial selection renders a correctly-labelled partial plate), and it's
   mutually exclusive with **Wrap cols** — dragging any root or channel onto Rows /
   Columns switches Plate mode back off. Prefer this over well-on-columns + Wrap when
-  you want a plate view: Wrap only labels the first band, whereas Plate labels every
-  row and column correctly. Because both axes are the plate, Plate mode shows **one
+  you want a plate view: a wrapped grid loses its column headers entirely (see
+  above), whereas Plate labels every row and column correctly. Because both axes are the plate, Plate mode shows **one
   channel** — the first in the builder. The LUT panel offers a row for that channel
   only and names the others as not shown, so you are never editing a brightness
   nothing on screen reads.

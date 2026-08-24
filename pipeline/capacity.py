@@ -40,6 +40,7 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
+from util.image_exts import is_run_input_member
 from util.disk_space import (
     directory_bytes,
     free_bytes,
@@ -88,19 +89,37 @@ def sample_image_bytes(input_dir: Path, image_exts) -> int:
     """
     input_dir = Path(input_dir)
     exts = {e.lower() for e in image_exts}
+    # The largest, as the paragraph above says — the loose branch used to
+    # return the *first* in sorted order, which is not the same thing and on a
+    # macOS-copied plate is not even close. `._Plate_A01_F1.tif` is an
+    # AppleDouble sidecar of a few kilobytes and its name sorts before every
+    # real image, so a plate whose frames are 112 MB was sized from 4 KB: a
+    # 27,000-fold under-estimate, in the one check that exists to stop a run
+    # filling the volume. `is_run_input_member` is what excludes it; the max is
+    # what makes the sentence true for a thumbnail that is not a sidecar.
+    loose = 0
     for f in sorted(input_dir.rglob("*")):
-        if f.is_file() and f.suffix.lower() in exts:
-            try:
-                return f.stat().st_size
-            except OSError:
-                return 0
+        if not f.is_file() or f.suffix.lower() not in exts:
+            continue
+        if not is_run_input_member(f.name):
+            continue
+        try:
+            loose = max(loose, f.stat().st_size)
+        except OSError:
+            continue
+    if loose:
+        return loose
     for zip_path in sorted(input_dir.glob("*.zip")):
         try:
             with zipfile.ZipFile(zip_path) as zf:
+                # The same filter as the loose branch. A zip written on a Mac
+                # carries `__MACOSX/._<name>` beside every member, and those
+                # have an image suffix and a tiny `file_size`.
                 sizes = [
                     info.file_size for info in zf.infolist()
                     if not info.is_dir()
                     and Path(info.filename).suffix.lower() in exts
+                    and is_run_input_member(info.filename)
                 ]
         except (OSError, zipfile.BadZipFile):
             continue

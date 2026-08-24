@@ -2170,6 +2170,102 @@ def test_feature_slice_guard_clears(tmp_path, monkeypatch, shape):
     assert got is None, f"the guard fired on a legitimate {shape}: {got}"
 
 
+# ── one definition of an image ──────────────────────────────────────────────
+
+_IMAGE_EXT_VIOLATIONS = {
+    "bare_tuple": 'SUFFIXES = (".tif", ".tiff")\n',
+    "set_literal": 'EXTS = {".tif", ".tiff", ".png"}\n',
+    "glob_patterns": 'PATS = ("*.tif", "*.tiff", "*.TIF", "*.TIFF")\n',
+    "no_leading_dot": 'OK = ["tif", "tiff"]\n',
+    "mixed_case": 'E = (".TIF", ".Tiff")\n',
+    # Found by a reviewer driving synthetic sources at the guard, not by
+    # anything that had gone wrong. None of them was in this roster.
+    "dict_keys": 'X = {".tif": 1, ".tiff": 2}\n',
+    "dict_values": 'X = {"a": ".tif", "b": ".tiff"}\n',
+    "tuple_concat": 'X = (".tif",) + (".tiff",)\n',
+    "set_union": 'X = frozenset({".tif"}) | frozenset({".tiff"})\n',
+    "frozenset_call": 'X = frozenset({".tif", ".tiff"})\n',
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_IMAGE_EXT_VIOLATIONS))
+def test_image_ext_guard_catches_a_second_spelling(tmp_path, monkeypatch, shape):
+    """Every spelling that has actually appeared in this repo.
+
+    `glob_patterns` is `services/input_resolution_service.TIF_GLOB`,
+    `no_leading_dot` is `pipeline/auto_threshold`'s, and `mixed_case` is the
+    one nobody wrote yet — included because a guard that reads the suffix
+    without lowering it is a guard one `.TIF` away from blind.
+    """
+    import tests.test_one_definition_of_an_image as guard
+
+    monkeypatch.setattr(guard, "_GOVERNED", ("",), raising=False)
+    bad = _write(tmp_path, f"bad_{shape}.py", _IMAGE_EXT_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_one_definition_of_an_image",
+                    "test_no_second_spelling_of_the_image_extension_set", [bad])
+
+    assert exc is not None, f"{shape} slipped past the guard"
+    assert "util.image_exts" in str(exc)
+
+
+def test_image_ext_guard_clears_a_caller_that_uses_the_funnel(tmp_path, monkeypatch):
+    import tests.test_one_definition_of_an_image as guard
+
+    monkeypatch.setattr(guard, "_GOVERNED", ("",), raising=False)
+    good = _write(tmp_path, "good_exts.py",
+                  "from util.image_exts import is_run_input_member\n"
+                  "def f(n):\n    return is_run_input_member(n)\n")
+    assert _run_scan(monkeypatch, "tests.test_one_definition_of_an_image",
+                     "test_no_second_spelling_of_the_image_extension_set",
+                     [good]) is None
+
+
+def test_image_ext_guard_clears_a_marked_site(tmp_path, monkeypatch):
+    """The marker is the exemption, and it must actually exempt."""
+    import tests.test_one_definition_of_an_image as guard
+
+    monkeypatch.setattr(guard, "_GOVERNED", ("",), raising=False)
+    ok = _write(tmp_path, "marked.py",
+                'W = (".tif", ".png")  # aw-image-exts-ok: what we write\n')
+    assert _run_scan(monkeypatch, "tests.test_one_definition_of_an_image",
+                     "test_no_second_spelling_of_the_image_extension_set",
+                     [ok]) is None
+
+
+def test_image_ext_guard_does_not_fire_on_a_single_mention(tmp_path, monkeypatch):
+    """One suffix is a mention; two is a set. Without this the guard reddens
+    every `endswith(".tif")` and gets switched off."""
+    import tests.test_one_definition_of_an_image as guard
+
+    monkeypatch.setattr(guard, "_GOVERNED", ("",), raising=False)
+    fine = _write(tmp_path, "single.py",
+                  'def f(n):\n    return n.endswith(".tif")\n')
+    assert _run_scan(monkeypatch, "tests.test_one_definition_of_an_image",
+                     "test_no_second_spelling_of_the_image_extension_set",
+                     [fine]) is None
+
+
+def test_image_ext_guard_still_misses_a_split_string(tmp_path, monkeypatch):
+    """A known hole, recorded rather than left to be rediscovered.
+
+    `".tif .tiff".split()` builds the same set out of one string constant, and
+    the guard reads collection *literals*. Closing it would mean matching on
+    the contents of arbitrary strings, which reddens docstrings and log lines —
+    a guard that cries wolf is a guard somebody switches off (this file's
+    `test_image_ext_guard_does_not_fire_on_a_single_mention` is the same
+    judgement in the other direction).
+
+    This test asserts the hole so the trade-off is visible. If a future change
+    closes it, this fails and should simply be deleted.
+    """
+    import tests.test_one_definition_of_an_image as guard
+
+    monkeypatch.setattr(guard, "_GOVERNED", ("",), raising=False)
+    evasion = _write(tmp_path, "split_evasion.py", 'X = ".tif .tiff".split()\n')
+    assert _run_scan(monkeypatch, "tests.test_one_definition_of_an_image",
+                     "test_no_second_spelling_of_the_image_extension_set",
+                     [evasion]) is None, (
+        "the guard now catches a split string — good; delete this test")
 # ── ruff's F821 (undefined-name) ────────────────────────────────────────────
 #
 # F821 was in ``pyproject.toml``'s ignore list, justified by false positives on

@@ -57,6 +57,7 @@ from .collect import (
     CELL_INPUT_ONLY,
     CELL_NO_MEASUREMENTS,
     CELL_NO_OUTPUT,
+    CELL_CSV_ONLY,
     CELL_PARTIAL,
     CELL_UNCHECKED,
 )
@@ -70,6 +71,15 @@ STATE_COLORS = {
     CELL_PARTIAL: theme.Colors.warn,
     CELL_FAILED: theme.Colors.danger,
     CELL_NO_MEASUREMENTS: theme.Colors.accent,
+    # Numbers whole, output archive gone. Its own colour, because painting it
+    # like `partial` would say the run has work left to do and painting it
+    # neutral would say nothing was checked — and the first version of this
+    # change did the second, so such a well was indistinguishable from one
+    # nobody had looked at. Not `accent2`, whose own comment reserves it for
+    # "the other of two normal groups" and forbids anomaly use, and not
+    # `threshold`, which the plate's render guard proved indistinguishable
+    # from `warn` once painted.
+    CELL_CSV_ONLY: theme.Colors.stale,
     CELL_INPUT_ONLY: theme.Colors.text_muted,
 }
 
@@ -85,6 +95,7 @@ STATE_LABELS = {
     CELL_FAILED: "Failures recorded",
     CELL_INPUT_ONLY: "Staged, never processed",
     CELL_NO_MEASUREMENTS: "Images, no measurements",
+    CELL_CSV_ONLY: "Measurements, no output archive",
     CELL_UNCHECKED: "Not checked",
     CELL_NO_OUTPUT: "No output yet",
 }

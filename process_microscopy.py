@@ -48,7 +48,6 @@ Filename convention (underscore-separated):
 
 from __future__ import annotations
 
-import argparse
 import importlib.util
 import contextlib
 import json
@@ -71,7 +70,17 @@ from skimage.filters import threshold_otsu
 from skimage.segmentation import watershed
 from util.channel_roles import phase_role_conflicts, quantified_channel_tokens
 from util.fov import sort_key as _fov_sort_key
-from util.image_exts import GROUP_IMAGE_EXTS
+from pipeline.cli_args import (  # noqa: F401 — re-exported for callers/tests
+    DEFAULT_SEGMENTATION_METHOD,
+    FLATFIELD_MODES,
+    build_parser,
+)
+from pipeline.input_layout import (  # noqa: F401 — re-exported for callers/tests
+    find_well_folders,
+    find_well_zips,
+    refuse_images_only_in_ignored_folders,
+)
+from util.image_exts import GROUP_IMAGE_EXTS, is_run_input_member
 from util.timepoint import parse_hours as _tp_parse_hours, sort_key as _tp_sort_key
 from util.well_token import (
     split_background_wells as _split_background_wells,
@@ -160,7 +169,6 @@ _LABELFREE_METHODS = ("cellpose_labelfree",)
 # ``pipeline.io`` module. Re-exported so the many call sites here (and the
 # remote worker) are unchanged. See that module for the implementations + the
 # tmp -> fsync -> rename rationale.
-from pipeline.capacity import ALLOW_LOW_DISK_HELP
 from pipeline.io import (  # noqa: F401
     _AtomicTextHandle, _fsync_path,
     _commit_staging_dir,
@@ -394,61 +402,8 @@ log = logging.getLogger(__name__)
 # processed the same folder. One parser, one answer, one parse per name.
 
 
-def find_well_zips(input_dir: Path) -> list[tuple[str, Path]]:
-    """
-    Scan *input_dir* (non-recursively) for .zip files whose stem matches a
-    96-well plate position.
-
-    Returns a list of (well_label, zip_path) sorted by well_label.
-    Zips with non-plate names are logged as warnings and skipped.
-    """
-    found: list[tuple[str, Path]] = []
-    skipped: list[Path] = []
-
-    for p in sorted(input_dir.glob("*.zip")):
-        if p.name.startswith("."):
-            log.debug("Skipping hidden file: %s", p.name)
-            continue
-        # Canonicalises to upper-case, zero-padded column (a1 → A01) and
-        # returns None for anything that is not a 96-well position.
-        well = _canonical_well_label(p.stem)
-        if well is not None:
-            found.append((well, p))
-        else:
-            skipped.append(p)
-
-    if skipped:
-        log.warning(
-            "%d zip file(s) skipped (name not a valid 96-well position):",
-            len(skipped),
-        )
-        for p in skipped:
-            log.warning("  %s", p.name)
-
-    log.info("Found %d well zip file(s) in %s", len(found), input_dir)
-    return found
 
 
-def find_well_folders(input_dir: Path) -> list[tuple[str, Path]]:
-    """
-    Scan *input_dir* (non-recursively) for subdirectories whose name matches
-    a 96-well plate position (e.g. A01/, B12/).
-
-    Returns a list of (well_label, folder_path) sorted by well_label.
-    """
-    found: list[tuple[str, Path]] = []
-    try:
-        entries = sorted(input_dir.iterdir())
-    except OSError:
-        return found
-    for p in entries:
-        if not p.is_dir() or p.name.startswith(".") or p.name.startswith("_"):
-            continue
-        well = _canonical_well_label(p.name)
-        if well is not None:
-            found.append((well, p))
-    log.info("Found %d well folder(s) in %s", len(found), input_dir)
-    return sorted(found, key=lambda x: x[0])
 
 
 def organize_loose_tifs_into_well_folders(
@@ -464,7 +419,7 @@ def organize_loose_tifs_into_well_folders(
     """
     loose_images = [
         p for p in input_dir.iterdir()
-        if p.is_file() and p.suffix.lower() in {".tif", ".tiff"}
+        if p.is_file() and is_run_input_member(p.name)
     ]
     if not loose_images:
         return
@@ -541,7 +496,7 @@ def extract_zip(
 
     Returns the number of image files extracted.
     """
-    image_exts = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
+    image_exts = set(GROUP_IMAGE_EXTS)
     wanted = set(members_to_extract or [])
     dest_dir.mkdir(parents=True, exist_ok=True)
     skipped: list[str] = []
@@ -598,7 +553,7 @@ def _compress_images_to_zip(image_dir: Path, out_zip: Path) -> list[Path]:
     and deleting the directory takes those with it. The public function keeps
     its count return for the call sites that only report a number.
     """
-    include_exts = {".tif", ".tiff", ".png"}
+    include_exts = {".tif", ".tiff", ".png"}  # aw-image-exts-ok: what we write
     candidate_files = sorted(
         p for p in image_dir.iterdir()
         if p.is_file()
@@ -688,7 +643,6 @@ def compress_folder_images_to_zip_and_remove(folder: Path, out_zip: Path) -> int
 # source of truth shared with WellPlateZipper, which reads the same filenames in
 # its grouping pre-pass. Re-exported here because the pipeline's own call sites
 # and the tests import them from this module.
-DEFAULT_SEGMENTATION_METHOD = "stardist_nuclei"
 
 
 # ---------------------------------------------------------------------------
@@ -1014,8 +968,7 @@ def sample_empty_well_images(
             with zipfile.ZipFile(zpath, "r") as zf:
                 for member in zf.infolist():
                     name = Path(member.filename).name
-                    if not name or name.startswith(".") \
-                            or Path(name).suffix.lower() not in (".tif", ".tiff"):
+                    if not is_run_input_member(member.filename):
                         continue
                     _add(Path(name).stem, (zpath, member.filename))
         except (OSError, zipfile.BadZipFile):
@@ -1182,7 +1135,6 @@ def compute_shape_features(
 
 # ── Quality control: flat-field correction + debris removal ──────────────────
 
-FLATFIELD_MODES = ("none", "empty_well", "gaussian", "basic")
 # Flat-field (illumination) estimators live in the Qt-free repo-root
 # ``pipeline.flatfield`` module so the pipeline and the GUI share one implementation
 # (the GUI recomputes them for the Segmentation tab's flat-field validation
@@ -2844,6 +2796,12 @@ def _process_groups_in_worker(
     # producing complete-looking output for wells it has already gutted.
     _consecutive_io_failures = 0
     aborted_reason = ""
+    #: Groups the abort skipped. Kept apart from `failed` because they are not
+    #: the same thing and the difference is what a user acts on: a failed group
+    #: has a traceback in `errors/` and a cause; a skipped one was never
+    #: attempted and has neither. Appending them to `failed` made the PARTIAL
+    #: warning name twenty casualties and point at three tracebacks.
+    not_attempted: list[str] = []
 
     def _note_failure(exc: BaseException) -> bool:
         """Count a failure; True when the well should stop attempting groups."""
@@ -2862,7 +2820,7 @@ def _process_groups_in_worker(
             if _suspend.is_suspended():
                 break            # not attempted is not the same as failed
             if aborted_reason:
-                failed.append(nuclear_path.name)
+                not_attempted.append(nuclear_path.name)
                 continue
             try:
                 all_records.extend(_process_or_resume(nuclear_path, fluor_paths))
@@ -2919,10 +2877,21 @@ def _process_groups_in_worker(
             "CSV / out.zip cover only the %d successful FOV-group(s). Re-run with "
             "--incremental to recover the missing ones.%s",
             well_label, len(failed), _fov_total, ", ".join(failed),
-            _fov_total - len(failed), _err_hint,
+            _fov_total - len(failed) - len(not_attempted), _err_hint,
         )
 
-    return all_records, failed
+    if not_attempted:
+        # Said separately, because "failed" and "never tried" send a reader to
+        # different places. These have no traceback in errors/ and never will.
+        log.warning(
+            "Well %s — NOT ATTEMPTED: %d FOV-group(s) were skipped after the "
+            "well aborted (%s): %s. There is no per-FOV traceback for these — "
+            "the reason is the abort itself.",
+            well_label, len(not_attempted), aborted_reason,
+            ", ".join(not_attempted),
+        )
+
+    return all_records, failed, aborted_reason, tuple(not_attempted)
 
 
 def process_well_zip_task(
@@ -3072,7 +3041,7 @@ def process_well_zip_task(
             )
 
             kwargs = {**shared_kwargs_template, "output_dir": tmp_images}
-            records, failed = _process_groups_in_worker(
+            records, failed, aborted_reason, not_attempted = _process_groups_in_worker(
                 groups, kwargs, well_label, errors_dir=output_dir,
                 settings_key=settings_key)
 
@@ -3092,7 +3061,9 @@ def process_well_zip_task(
                 else:
                     log.warning("Well %s: no records produced; CSV not updated.", well_label)
                 record_well_completeness(
-                    output_dir, well_label, groups_in_input, csv_path, failed)
+                    output_dir, well_label, groups_in_input, csv_path, failed,
+                    aborted_reason=aborted_reason,
+                    not_attempted=not_attempted)
                 n_compressed = merge_images_into_zip(out_zip, tmp_images)
                 log.info("Well %s: merged %d new image(s) -> %s",
                          well_label, n_compressed, out_zip.name)
@@ -3103,7 +3074,9 @@ def process_well_zip_task(
                 else:
                     log.warning("Well %s: no records produced; CSV not written.", well_label)
                 record_well_completeness(
-                    output_dir, well_label, groups_in_input, csv_path, failed)
+                    output_dir, well_label, groups_in_input, csv_path, failed,
+                    aborted_reason=aborted_reason,
+                    not_attempted=not_attempted)
 
                 n_compressed = compress_images_to_zip(tmp_images, out_zip)
                 log.info("Well %s: %d image(s) -> %s", well_label, n_compressed, out_zip.name)
@@ -3264,7 +3237,7 @@ def process_well_folder_task(
                 # else: no prior CSV or outputs → new well → process all (full).
 
             kwargs = {**shared_kwargs_template, "output_dir": tmp_images}
-            records, failed = _process_groups_in_worker(
+            records, failed, aborted_reason, not_attempted = _process_groups_in_worker(
                 groups, kwargs, well_label, errors_dir=output_dir,
                 settings_key=settings_key)
 
@@ -3277,7 +3250,9 @@ def process_well_folder_task(
                 else:
                     log.warning("Well %s: no records produced; CSV not updated.", well_label)
                 record_well_completeness(
-                    output_dir, well_label, groups_in_input, csv_path, failed)
+                    output_dir, well_label, groups_in_input, csv_path, failed,
+                    aborted_reason=aborted_reason,
+                    not_attempted=not_attempted)
                 n_out = merge_images_into_zip(out_zip, tmp_images)
                 log.info("Well %s: merged %d new image(s) -> %s",
                          well_label, n_out, out_zip.name)
@@ -3291,7 +3266,9 @@ def process_well_folder_task(
                 else:
                     log.warning("Well %s: no records produced; CSV not written.", well_label)
                 record_well_completeness(
-                    output_dir, well_label, groups_in_input, csv_path, failed)
+                    output_dir, well_label, groups_in_input, csv_path, failed,
+                    aborted_reason=aborted_reason,
+                    not_attempted=not_attempted)
 
                 # Atomically rename staging dir to final output folder.
                 if final_out.exists():
@@ -3517,6 +3494,8 @@ def _run_well_worker_pool(
     return affected_wells
 
 
+
+
 def process_well_zips(
     input_dir: Path,
     output_dir: Path,
@@ -3676,27 +3655,44 @@ def _pipeline_info_jsonable(value):
 
 
 def _collect_image_stems(input_dir: Path) -> set[str]:
+    """Every input image's stem, for the sidecar's timepoint and FOV lists.
+
+    Reads `util.image_exts` rather than a fourth spelling of the extension set.
+    The three loops here took `.tif`/`.tiff` only, while the pipeline groups
+    `.png`, `.jpg` and `.jpeg` too — so a PNG plate published an empty
+    `available_timepoints` and an empty `available_fovs`, which Review then
+    reads as a plate with no timepoints at all.
+
+    `is_run_input_member` rather than a bare suffix test, for the same reason
+    the disk pre-flight needs it: an AppleDouble twin has an image suffix, and
+    its stem (`._Plate_A01_F1_T1`) parses to a different well and fov than the
+    file it shadows.
+    """
     stems: set[str] = set()
-    for pat in ("*.tif", "*.tiff", "*.TIF", "*.TIFF"):
-        for p in input_dir.glob(pat):
-            stems.add(p.stem)
+
+    def _add_from(folder: Path) -> None:
+        try:
+            entries = list(folder.iterdir())
+        except OSError:
+            return
+        for q in entries:
+            if q.is_file() and is_run_input_member(q.name):
+                stems.add(q.stem)
+
+    _add_from(input_dir)
     try:
         well_dirs = [p for p in input_dir.iterdir() if p.is_dir()]
     except OSError:
         well_dirs = []
     for well_dir in well_dirs:
-        for pat in ("*.tif", "*.tiff", "*.TIF", "*.TIFF"):
-            for p in well_dir.glob(pat):
-                stems.add(p.stem)
+        _add_from(well_dir)
     for z in input_dir.glob("*.zip"):
         try:
             with zipfile.ZipFile(z, "r") as zf:
                 for member in zf.namelist():
-                    name = Path(member).name
-                    lower = name.lower()
-                    if not lower.endswith((".tif", ".tiff")):
+                    if not is_run_input_member(member):
                         continue
-                    stems.add(Path(name).stem)
+                    stems.add(Path(member).stem)
         except Exception:
             swallowed()  # silent except
             continue
@@ -3844,381 +3840,6 @@ def write_pipeline_info(
 # CLI
 # ---------------------------------------------------------------------------
 
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        description=(
-            "Parallel StarDist nuclei segmentation + GFP quantification. "
-            "Accepts a flat directory of images, a directory of per-well "
-            "zip files (A01.zip … H12.zip), or a directory of per-well "
-            "subfolders (A01/ … H12/)."
-        ),
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-
-    p.add_argument("--input_dir",  type=Path, required=True,
-                   help="Directory of images, per-well zip files, or per-well subfolders")
-    p.add_argument("--output_dir", type=Path, default=Path("results"),
-                   help="Destination for CSVs, masks, overlays, and output folders/zips")
-    p.add_argument("--scratch_dir", type=Path, default=None,
-                   help="Directory for per-well working files (zip extraction, "
-                        "intermediate images, FOV checkpoints). Overrides "
-                        "$ALLWELL_SCRATCH_DIR; both default to ~/.allwell/scratch. "
-                        "Keep this on fast LOCAL storage — pointing it at a "
-                        "network mount puts the run's bulk I/O on a volume whose "
-                        "dropped sessions surface as 'Bad file descriptor'.")
-
-    p.add_argument("--nuclear_token", default="NIR",
-                   help="Channel token identifying nuclear-channel files "
-                        "(used for segmentation and quantified like other channels)")
-    p.add_argument("--fluor_tokens", nargs="+", default=["GFP"],
-                   metavar="TOKEN",
-                   help="One or more channel tokens identifying fluorescent "
-                        "channels to quantify (e.g. GFP mCherry DAPI). "
-                        "Each token produces its own intensity columns in the CSV.")
-    p.add_argument(
-        "--segmentation_method",
-        default=DEFAULT_SEGMENTATION_METHOD,
-        choices=("stardist_nuclei", "stardist_seeded_watershed_cell",
-                 "cellpose", "cellpose_labelfree", "classical_threshold"),
-        help=(
-            "Segmentation routine, run on the --nuclear_token channel (any "
-            "fluorescent or brightfield channel) unless noted. 'stardist_nuclei' "
-            "(default) and 'stardist_seeded_watershed_cell' (StarDist seeds + "
-            "cytoplasm watershed) need a fluorescent stain. 'cellpose' is general "
-            "Cellpose (tune --cellpose_model/diameter/flow/cellprob, optional "
-            "--cellpose_nuclei_channel). 'classical_threshold' is Otsu + "
-            "watershed. 'cellpose_labelfree' is a Cellpose cyto3 preset that "
-            "segments the --phase_token (brightfield) channel."
-        ),
-    )
-    p.add_argument(
-        "--phase_token",
-        default="",
-        help=(
-            "Channel token of the phase / brightfield image. Under every method "
-            "this channel skips flat-field and background correction and is "
-            "resaved from the original; the 'cellpose_labelfree' preset also "
-            "segments it. It may not equal --nuclear_token (or --cytoplasm_token) "
-            "under any other method."
-        ),
-    )
-    p.add_argument(
-        "--cellpose_model",
-        default="cyto3",
-        choices=("cyto3", "cyto2", "cyto", "nuclei"),
-        help="Cellpose model for --segmentation_method=cellpose.",
-    )
-    p.add_argument(
-        "--cellpose_diameter",
-        type=float,
-        default=0.0,
-        help="Cellpose cell diameter in px (0 = auto-estimate).",
-    )
-    p.add_argument(
-        "--cellpose_flow_threshold",
-        type=float,
-        default=0.4,
-        help="Cellpose flow_threshold (mask recovery tolerance).",
-    )
-    p.add_argument(
-        "--cellpose_cellprob_threshold",
-        type=float,
-        default=0.0,
-        help="Cellpose cellprob_threshold (cell probability cut).",
-    )
-    p.add_argument(
-        "--cellpose_nuclei_channel",
-        default="",
-        help="Optional fluor token used as Cellpose's nucleus channel "
-             "(channels=[seg, nucleus]) for cyto models; empty = grayscale.",
-    )
-    p.add_argument(
-        "--cytoplasm_token",
-        default="",
-        help=(
-            "Channel token used as cytoplasm image for watershed mode. "
-            "Required when --segmentation_method=stardist_seeded_watershed_cell. "
-            "In watershed mode this channel is also quantified."
-        ),
-    )
-    p.add_argument(
-        "--min_nucleus_area_px",
-        type=int,
-        default=50,
-        help="Minimum StarDist nucleus area (pixels) kept as watershed seeds.",
-    )
-
-    p.add_argument("--filename_schema", default=DEFAULT_SCHEMA,
-                   help=(
-                       "Colon-separated ordered field names describing the "
-                       "filename structure.  Each token must be one of: "
-                       + ", ".join(SCHEMA_FIELDS) + ".  "
-                       "'channel' and 'well' must each appear exactly once.  "
-                       "Slots whose content is not needed should be labelled "
-                       "'ignore'.  "
-                       f"Default: '{DEFAULT_SCHEMA}' matches the convention "
-                       "Exp01_NIR_B03_F001_02d04h30m.tif"
-                   ))
-    p.add_argument("--filename_sep", default=DEFAULT_SEP,
-                   help=(
-                       "Single character that separates fields in image "
-                       f"filenames.  Default: '{DEFAULT_SEP}'"
-                   ))
-
-    p.add_argument("--tophat_radius_nir", type=int, default=100,
-                   help="Top-hat structuring element radius for the nuclear "
-                        "channel (pixels)")
-    p.add_argument("--tophat_radius_fluor", type=int, default=100,
-                   help="Top-hat structuring element radius applied to every "
-                        "fluorescent channel (pixels)")
-    p.add_argument("--fft_small_nir", type=int, default=0,
-                   help="For --background=fft_bandpass: small-structure (high-"
-                        "frequency) cutoff for the nuclear channel (pixels). 0 "
-                        "= high-pass only (no denoise); >1 attenuates features "
-                        "smaller than this for a true band-pass.")
-    p.add_argument("--fft_small_fluor", type=int, default=0,
-                   help="For --background=fft_bandpass: small-structure (high-"
-                        "frequency) cutoff applied to every fluorescent channel "
-                        "(pixels). 0 = high-pass only.")
-    p.add_argument("--mesh_ratio", type=float, default=3.0,
-                   help="For --background=robust_mesh: tile size as a fraction of "
-                        "the radius (tile = radius / mesh_ratio). Larger → "
-                        "coarser, smoother background. Default 3.0.")
-    p.add_argument("--mesh_sigma", type=float, default=3.0,
-                   help="For --background=robust_mesh: per-tile sigma-clip "
-                        "threshold. Smaller rejects bright object pixels more "
-                        "aggressively (crowded fields). Default 3.0.")
-    p.add_argument("--no_tophat_nir", action="store_true",
-                   help="Disable white top-hat on the nuclear channel")
-    p.add_argument("--no_tophat_fluor", action="store_true",
-                   help="Disable white top-hat on all fluorescent channels")
-    p.add_argument("--smfish_tokens", nargs="*", default=[],
-                   help="Fluorescent channel tokens containing smFISH data. "
-                        "A LoG spot-enhancement kernel is applied after tophat.")
-    p.add_argument("--shape_features", nargs="*", default=[],
-                   help="Per-cell shape features to emit as shape_<feature> columns "
-                        "(e.g. eccentricity solidity perimeter major_axis_length). "
-                        "Cell centroids (shape_centroid_row/col) are always emitted.")
-
-    # ── Quality control ──────────────────────────────────────────────────────
-    p.add_argument("--flatfield", choices=FLATFIELD_MODES, default="none",
-                   help="Flat-field illumination correction applied before top-hat. "
-                        "'gaussian' self-estimates a field per image; 'basic' estimates "
-                        "one field per channel from a sample of the dataset (pure-numpy "
-                        "BaSiC); 'empty_well' uses --background_well as the reference.")
-    p.add_argument("--background_dir", default="",
-                   help="Directory to read the --background_well blank(s) from, "
-                        "when they do not live in --input_dir. A batched remote "
-                        "run stages one batch at a time, so the blank is not in "
-                        "most batches' input; it is uploaded once to its own "
-                        "directory and named here, which is what lets every "
-                        "batch build the same correction from it. Defaults to "
-                        "--input_dir.")
-    p.add_argument("--background_well", default="",
-                   help="Empty/background well(s) used as the reference for "
-                        "--flatfield=empty_well and/or --background=empty_well. One "
-                        "well (e.g. H12) or several comma-separated (e.g. 'H12,G12') "
-                        "to pool for a cleaner estimate. The field is built per "
-                        "timepoint (background drifts over time), with a pooled "
-                        "all-timepoints fallback for timepoints the blank lacks.")
-    p.add_argument("--background", choices=BACKGROUND_METHODS, default="sliding_disk",
-                   help="Background-subtraction method (applied per channel where "
-                        "top-hat is enabled). 'top_hat' = fast square morphological "
-                        "(leaves square halos on uneven background); "
-                        "'sliding_disk' = smooth isotropic disk baseline (default; recommended "
-                        "for structured/uneven background, no square halos); "
-                        "'fov_median' = subtract a single scalar, the median "
-                        "intensity of the whole field of view (uniform offset, "
-                        "no spatial flattening; no radius/reference needed); "
-                        "'empty_well' = subtract a "
-                        "measured per-channel background from --background_well; "
-                        "'robust_mesh' = sigma-clipped local background on a "
-                        "coarse grid (SExtractor/Background2D style), robust to "
-                        "bright/confluent objects on uneven background (uses the "
-                        "radius as the background scale); 'fft_bandpass' = 2-D FFT "
-                        "Butterworth high-pass (removes low-frequency background "
-                        "regardless of object size; radius = large-structure "
-                        "cutoff, --fft_small_* = optional high-frequency denoise).")
-    p.add_argument("--qc_remove_debris", action="store_true",
-                   help="Remove segmented regions whose size/solidity fall outside the "
-                        "QC bounds below (debris, fragments, merged blobs).")
-    p.add_argument("--qc_min_area", type=float, default=0.0,
-                   help="Debris removal: minimum region area in px (0 = no lower bound).")
-    p.add_argument("--qc_max_area", type=float, default=0.0,
-                   help="Debris removal: maximum region area in px (0 = no upper bound).")
-    p.add_argument("--qc_min_solidity", type=float, default=0.0,
-                   help="Debris removal: minimum region solidity 0-1 (0 = no bound).")
-
-    p.add_argument("--no_save_tophat",   action="store_true",
-                   help="Do not save top-hat/smFISH intermediate TIFFs")
-    # Input/output well compression is mandatory: folder-mode runs always
-    # compress <input_dir>/<well>/ → <input_dir>/<well>.zip and each output well
-    # folder → <output_dir>/<well>_out.zip. The pipeline only ever emits per-well
-    # .zip files, so there is no flag to disable this.
-
-    p.add_argument("--tf_threads", type=int, default=0,
-                   help=(
-                       "CPU threads per worker for TensorFlow/BLAS inference. "
-                       "0 (default) = 4 (non-Mac) or 2 (macOS/Metal); smaller yields "
-                       "more workers (cpu_count // tf_threads). Common values: "
-                       "4  = default, suits most x86 CPUs (≤32 cores); "
-                       "8  = for CPUs with large L3 caches (e.g. EPYC, Xeon Scalable) "
-                       "     where inference scales beyond 4 threads; "
-                       "16 = for very wide-cache server CPUs where per-image "
-                       "     throughput still improves at 16 threads "
-                       "(workers = cpu_count // tf_threads in all cases). "
-                       "Ignored when running on GPU (--cpu_only not set)."
-                   ))
-    p.add_argument(
-        "--workers",
-        type=int,
-        default=0,
-        help=(
-            "Number of parallel worker processes. "
-            "0 (default) = auto-select from CPU availability and tf_threads."
-        ),
-    )
-
-    p.add_argument(
-        "--stardist_tile_px",
-        type=int,
-        default=0,
-        help=(
-            "Max pixels per tile SIDE for StarDist prediction (NOT the number of "
-            "tiles): the frame is split into as many tiles as needed so no block "
-            "exceeds this size, capping per-worker peak memory on large frames. "
-            "0 (default) = OFF (predict the whole frame at once). On ~4K frames "
-            "an untiled predict can use several GB per worker, so a few parallel "
-            "workers exhaust RAM; e.g. 2048 splits a 4096-px frame into a 2x2 "
-            "grid, 1024 into 4x4 (less RAM, a bit slower). Results are stitched."
-        ),
-    )
-
-    p.add_argument(
-        "--stardist_prob_thresh",
-        type=float,
-        default=-1.0,
-        help=(
-            "StarDist object-probability threshold (0-1). Candidate nuclei whose "
-            "predicted objectness falls below it are dropped before polygon NMS. "
-            "LOWER detects more nuclei, including dim / marginal ones; HIGHER "
-            "keeps only confident detections. Negative (the default) = use the "
-            "threshold the pretrained model ships with (~0.479 for "
-            "2D_versatile_fluo)."
-        ),
-    )
-    p.add_argument(
-        "--stardist_nms_thresh",
-        type=float,
-        default=-1.0,
-        help=(
-            "StarDist polygon non-maximum-suppression overlap threshold (0-1). "
-            "HIGHER lets more overlapping nuclei survive, which recovers touching "
-            "nuclei in a confluent field but can double-count one; LOWER merges "
-            "more aggressively, removing duplicates at the risk of fusing "
-            "neighbours. Negative (the default) = the pretrained model's own "
-            "value (0.3 for 2D_versatile_fluo)."
-        ),
-    )
-
-    p.add_argument("--csv_prefix", default="measurements",
-                   help="Filename prefix for per-well CSVs (<prefix>_<well>.csv)")
-
-    p.add_argument("--force", action="store_true",
-                   help=(
-                       "Reprocess all wells even if output already exists. "
-                       "By default, any well whose <well>_out.zip and "
-                       "<csv_prefix>_<well>.csv are both present is skipped."
-                   ))
-
-    p.add_argument("--incremental", action="store_true",
-                   help=(
-                       "FOV-level incremental update. Instead of skipping a "
-                       "well that already has output, process only the "
-                       "FOV-groups not already present in its CSV and merge the "
-                       "new rows / images into the existing <csv>_<well>.csv and "
-                       "<well>_out.zip. New wells process fully; unchanged wells "
-                       "are left as-is. Ignored when --force is given."
-                   ))
-
-    p.add_argument("--force_wells", nargs="*", default=None, metavar="WELL",
-                   help=(
-                       "Reprocess these wells in full, whatever else the run "
-                       "decides — the per-well counterpart to --force. Given "
-                       "with --incremental, the named wells ignore the "
-                       "already-done set and re-segment from scratch, which is "
-                       "the only way to regenerate a well whose measurements "
-                       "CSV is missing while its <well>_out.zip survives: the "
-                       "archive's own members make that well look complete to "
-                       "an incremental run, so it would otherwise be skipped "
-                       "forever. Well labels are matched canonically, so C8 "
-                       "and C08 name the same well."
-                   ))
-
-    p.add_argument("--incremental_prior_dir", default=None,
-                   help=(
-                       "Directory holding the prior per-well CSVs used to build "
-                       "the already-done (fov, timepoint) set for --incremental. "
-                       "Defaults to the output directory (local runs). Remote "
-                       "runs point this at the uploaded prior-CSV sidecar, since "
-                       "the remote output dir starts empty."
-                   ))
-
-    p.add_argument("--cpu_only", action="store_true",
-                   help=(
-                       "Force StarDist to run on CPU even if a GPU is available. "
-                       "Sets CUDA_VISIBLE_DEVICES='' in every worker process "
-                       "before TensorFlow is initialised, preventing GPU use. "
-                       "Useful for debugging, reproducibility, or when sharing "
-                       "a GPU with other jobs."
-                   ))
-
-    p.add_argument("--allow_low_disk", action="store_true",
-                   help=ALLOW_LOW_DISK_HELP.replace("\n\n", " "))
-
-    p.add_argument("--no_auto_threshold", action="store_true",
-                   help=(
-                       "Skip the post-pipeline auto-threshold estimation. "
-                       "Used by AllWell's batched remote-execution mode (v5.4.7+) "
-                       "to suppress the per-batch threshold pass, which would "
-                       "otherwise overwrite the previous batch's defaults using "
-                       "incomplete data. The runner re-runs the estimation once "
-                       "locally after all batches finish, against the full "
-                       "downloaded output dir."
-                   ))
-
-    p.add_argument("--no_run_check", action="store_true",
-                   help=(
-                       "Skip the end-of-run completeness check. The check reads "
-                       "back what the run wrote — how many (fov, timepoint) "
-                       "groups each well's input held against how many its CSV "
-                       "and output archive cover — and records the answer as the "
-                       "'run_check' block in pipeline_info.json, which is what "
-                       "the Review Home page reports. Skipping it costs seconds "
-                       "and leaves the dataset with no record of whether it is "
-                       "complete; a run skipped this way says so in the sidecar "
-                       "rather than looking like a dataset that predates the "
-                       "check. Remote runs suppress it internally and run it "
-                       "client-side after the fetch instead, since the remote "
-                       "output dir holds only the slice that was uploaded."
-                   ))
-
-    p.add_argument("--pos_control_well", default="",
-                   help=(
-                       "Well label of the positive control (e.g. B02). With "
-                       "--neg_control_well, the end-of-run threshold pass picks "
-                       "each non-segmentation channel's default by sweeping for "
-                       "the cut that maximises the relative fraction-on gap "
-                       "between these two wells, instead of Otsu-splitting cell "
-                       "signal from background. Both or neither."
-                   ))
-    p.add_argument("--neg_control_well", default="",
-                   help=(
-                       "Well label of the negative control (e.g. B11). See "
-                       "--pos_control_well."
-                   ))
-
-    return p
 
 # ---------------------------------------------------------------------------
 # Main
@@ -4544,6 +4165,8 @@ def main() -> None:
     # ── Decide mode: zip, folder, or flat ───────────────────────────────────
     well_zips    = find_well_zips(input_dir)
     well_folders = find_well_folders(input_dir) if not well_zips else []
+    if well_zips:
+        refuse_images_only_in_ignored_folders(input_dir, well_zips)
 
     # ── Scratch preflight ───────────────────────────────────────────────────
     # Checked here, once both the well list and the channel count are known and

@@ -40,12 +40,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from util.channel_roles import ChannelTokens, channel_tokens_from_roles, default_channel_roles
+from util.image_exts import is_run_input_member
 from util.fov import parse_fov
 from util.schema import DEFAULT_SEP
 from util.timepoint import parse_hours
 from util.well_token import canonical_well_label, is_valid_well_name
 
-_TIF_SUFFIXES = (".tif", ".tiff")
 _SEP_CANDIDATES = ("_", "-", ".")
 _MIN_SLOT_FRACTION = 0.7      # a slot must parse this uniformly to earn a role
 _SAMPLE_LIMIT = 400           # names sampled — "briefly scanning", not a full walk
@@ -117,7 +117,7 @@ def _tif_stems_in(root: Path, limit: int) -> list[str]:
     if not root.is_dir():
         return []
     stems = [f.stem for f in sorted(root.iterdir())
-             if f.is_file() and f.suffix.lower() in _TIF_SUFFIXES]
+             if f.is_file() and is_run_input_member(f.name)]
     return _spread(stems, limit)
 
 
@@ -132,7 +132,7 @@ def _zip_stems_in(root: Path, limit: int) -> list[str]:
         try:
             with zipfile.ZipFile(z) as zf:
                 members = [Path(m).stem for m in zf.namelist()
-                           if m.lower().endswith(_TIF_SUFFIXES)]
+                           if is_run_input_member(m)]
         except (zipfile.BadZipFile, OSError):
             continue
         stems.extend(_spread(members, min(per_zip, limit - len(stems))))
@@ -169,7 +169,7 @@ def _well_folder_stems_in(root: Path, limit: int) -> list[str]:
     for well in wells:
         try:
             names = [f.stem for f in sorted(well.iterdir())
-                     if f.is_file() and f.suffix.lower() in _TIF_SUFFIXES]
+                     if f.is_file() and is_run_input_member(f.name)]
         except OSError:
             continue
         stems.extend(_spread(names, min(per_well, limit - len(stems))))

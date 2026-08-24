@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 import theme
 from pipeline.completeness import HEALTH_STATES as _WELL_STATES
+from pipeline.completeness import NEEDS_ATTENTION as _NEEDS_ATTENTION
 from widgets.plate_progress import PlateProgress, canon_well, status_dot
 
 
@@ -71,7 +72,8 @@ class ValidateDashboard(PlateProgress):
         # Terminal states carry a marker too, not just colour (accessibility
         # — colour alone is unreadable to anyone who can't distinguish
         # success-green from danger-red).
-        marker = "!" if state in ("partial", "missing") else "✓" if state == "complete" else None
+        marker = ("!" if state in _NEEDS_ATTENTION
+                  else "✓" if state == "complete" else None)
         self._plate.setWellMarker(w, marker)
         self.set_overall(sum(1 for s in self._well_state.values() if s == "complete"))
         self._refresh_rail()
@@ -83,6 +85,12 @@ class ValidateDashboard(PlateProgress):
             return theme.Colors.success
         if state == "partial":
             return theme.Colors.warn
+        if state == "csv_only":
+            # Its own token, shared with Review Home's plate: the numbers are
+            # whole and the archive they came from is gone. Painting it `warn`
+            # made it identical to `partial` on this very plate, which is the
+            # one thing a plate legend cannot survive.
+            return theme.Colors.stale
         if state == "missing":
             return theme.Colors.danger
         if state == "no_output":
@@ -97,11 +105,16 @@ class ValidateDashboard(PlateProgress):
         if state == "partial":
             n = self._well_missing_count.get(w, 0)
             return f"{w}: {n} (fov, timepoint) pair(s) missing"
+        # `.get`, not `[]`: this is keyed on whatever
+        # `pipeline.completeness.HEALTH_STATES` holds, and a state added there
+        # and forgotten here raised `KeyError` out of a tooltip — a crash in a
+        # Qt slot, which PySide6 turns into process death.
         label = {
             "complete": "complete",
+            "csv_only": "measurements recorded, but the output archive is gone",
             "missing": "no measurements recorded",
             "no_output": "no output yet",
-        }[state]
+        }.get(state, state)
         return f"{w}: {label}"
 
     def _build_rail(self) -> None:

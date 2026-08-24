@@ -593,7 +593,7 @@ def write_csvs_per_well(
 # Image extensions packed into an output well-zip (mirrors compress_images_to_zip
 # in process_microscopy). Kept here so merge_images_into_zip is self-contained
 # and pipeline.io carries no process_microscopy import (no cycle).
-_OUTPUT_IMAGE_EXTS = {".tif", ".tiff", ".png"}
+_OUTPUT_IMAGE_EXTS = {".tif", ".tiff", ".png"}  # aw-image-exts-ok: output side, not input
 
 
 # The stdlib-only ``(fov, timepoint)`` done-key readers were extracted to

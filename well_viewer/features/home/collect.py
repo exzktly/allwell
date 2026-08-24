@@ -34,8 +34,13 @@ CELL_PARTIAL = "partial"
 CELL_FAILED = "failed"
 CELL_INPUT_ONLY = "input_only"
 CELL_NO_MEASUREMENTS = "no_measurements"
+#: Measurements are whole and the output archive they came from is gone, so the
+#: rows cannot be reviewed, re-gated or re-thresholded. Distinct from
+#: ``CELL_COMPLETE`` because it is not finished, and distinct from
+#: ``CELL_NO_MEASUREMENTS`` because that is the mirror case.
+CELL_CSV_ONLY = "csv_only"
 CELL_UNCHECKED = "unchecked"
-#: The record's fourth health state (``pipeline.completeness.HEALTH_STATES``):
+#: The record's fifth health state (``pipeline.completeness.HEALTH_STATES``):
 #: the well has no evidence at all — no staged input, no output. Named for the
 #: health value it renders so the two cannot drift apart.
 CELL_NO_OUTPUT = "no_output"
@@ -179,7 +184,7 @@ def plate_cells(ctx) -> dict:
     ``unchecked``: a neutral state that is not "fine" and not "broken", because
     neither is known.
 
-    Each of the record's four health states maps to a painted state by name,
+    Each of the record's five health states maps to a painted state by name,
     ``no_output`` included: a well with no evidence at all is in the record and
     produced nothing, which is a narrower claim than being absent from the
     dataset, and the legend has a row for it. A health value this build does not
@@ -203,6 +208,8 @@ def plate_cells(ctx) -> dict:
             cells[well] = CELL_INPUT_ONLY
         elif health == "partial":
             cells[well] = CELL_PARTIAL
+        elif health == "csv_only":
+            cells[well] = CELL_CSV_ONLY
         elif health == "missing":
             cells[well] = CELL_NO_MEASUREMENTS
         elif health == "complete":
@@ -262,6 +269,7 @@ def plate_legend(ctx) -> list:
         (CELL_FAILED, "failed"),
         (CELL_INPUT_ONLY, "input only"),
         (CELL_NO_MEASUREMENTS, "no measurements"),
+        (CELL_CSV_ONLY, "measurements, no output archive"),
         (CELL_NO_OUTPUT, "no output yet"),
         (CELL_UNCHECKED, "not checked"),
     )

@@ -166,15 +166,30 @@ def test_a_well_stops_attempting_groups_after_repeated_io_failures(monkeypatch):
 
     monkeypatch.setattr(pm, "process_image_group", _boom)
     groups = [(Path(f"exp_RFP_C02_f{i}_t0.tif"), []) for i in range(20)]
-    records, failed = pm._process_groups_in_worker(
+    records, failed, reason, skipped = pm._process_groups_in_worker(
         groups, {"output_dir": Path("/nonexistent")}, "C02", errors_dir=None,
     )
     assert records == []
-    assert len(failed) == 20, "every group is reported missing, attempted or not"
     assert len(attempted) == pm._MAX_CONSECUTIVE_IO_FAILURES, (
         f"stopped after {len(attempted)} attempts; expected to give up at "
         f"{pm._MAX_CONSECUTIVE_IO_FAILURES}"
     )
+
+    # This assertion used to read `len(failed) == 20` — "every group is
+    # reported missing, attempted or not" — which was the defect rather than
+    # the contract. Only the attempted groups have a traceback in `errors/`;
+    # the rest were never tried, and naming them as failures sent a user
+    # following the §7 diagnosis flow looking for twenty tracebacks when three
+    # had been written.
+    assert len(failed) == pm._MAX_CONSECUTIVE_IO_FAILURES, (
+        f"{len(failed)} group(s) reported as failed but only "
+        f"{len(attempted)} were attempted, so the rest have no traceback")
+    assert len(skipped) == 20 - pm._MAX_CONSECUTIVE_IO_FAILURES
+    assert set(failed).isdisjoint(skipped), "a group is both failed and skipped"
+    assert len(failed) + len(skipped) == 20, (
+        "the two buckets must still account for every group — splitting them "
+        "must not make one disappear")
+    assert "consecutive I/O failures" in reason, reason
 
 
 def test_a_lone_failure_does_not_stop_the_well(monkeypatch):
@@ -191,7 +206,7 @@ def test_a_lone_failure_does_not_stop_the_well(monkeypatch):
 
     monkeypatch.setattr(pm, "process_image_group", _one_bad)
     groups = [(Path(f"exp_RFP_C02_f{i}_t0.tif"), []) for i in range(8)]
-    records, failed = pm._process_groups_in_worker(
+    records, failed, _reason, _skipped = pm._process_groups_in_worker(
         groups, {"output_dir": Path("/nonexistent")}, "C02", errors_dir=None,
     )
     assert len(seen) == 8, "every group is still attempted"
@@ -211,7 +226,7 @@ def test_non_io_failures_do_not_trip_the_storage_abort(monkeypatch):
 
     monkeypatch.setattr(pm, "process_image_group", _value_error)
     groups = [(Path(f"exp_RFP_C02_f{i}_t0.tif"), []) for i in range(6)]
-    _records, failed = pm._process_groups_in_worker(
+    _records, failed, _reason, _skipped = pm._process_groups_in_worker(
         groups, {"output_dir": Path("/nonexistent")}, "C02", errors_dir=None,
     )
     assert len(attempted) == 6 and len(failed) == 6

@@ -8,14 +8,21 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Callable
+from services.subprocess_kill import signal_subprocess
 from util.aw_safe import swallow, swallowed
+from util.image_exts import is_run_input_member
 from util.retry_io import retry_io
 from util.zip_write import (
     atomic_zip, replace_folder_with_archive)
 
 HERE = Path(__file__).resolve().parent.parent
 ZIPPER_SCRIPT = HERE / "WellPlateZipper.py"
-TIF_GLOB = ("*.tif", "*.tiff", "*.TIF", "*.TIFF")
+#: Kept for the WellPlateZipper subprocess, which takes glob patterns on its
+#: command line and answers a different question — packing a well *folder*,
+#: where `.tif`/`.tiff` is the deliberate rule. `tif_files_in` no longer uses
+#: it: deciding which loose files are this run's input is
+#: `util.image_exts.is_run_input_member`'s job.
+TIF_GLOB = ("*.tif", "*.tiff", "*.TIF", "*.TIFF")  # aw-image-exts-ok: zipper argv
 
 # Consolidation reads and writes on whatever volume the user pointed at as the
 # input folder, and it moves the whole plate: every loose TIF into a per-well
@@ -87,30 +94,42 @@ def build_bootstrap_cmd(bootstrap: Path, alias: str) -> list[str]:
 
 
 def tif_files_in(folder: Path) -> list[Path]:
-    """The loose TIFs at *folder*'s top level, sidecars excluded.
+    """The loose input images directly inside *folder*.
 
-    ``TIF_GLOB`` is a suffix match and a suffix is not a decision about whether
-    a file is one of the run's images. It matches ``._Plate1_A01_….tif`` — the
-    AppleDouble resource fork macOS writes beside every file copied to a
-    non-HFS volume, and the commonest way a real plate arrives with exactly
-    twice as many "TIFs" as it has images.
+    Four things this had to stop doing, all of them the same mistake — judging
+    items it is not entitled to judge. Two branches of the audit remediation
+    found it independently and fixed different halves; this is both.
 
-    That count is not cosmetic. It is the ``loose_count`` the readout under the
-    input field prints, the ``tifs > 3`` threshold that decides whether the
-    whole folder is treated as a zipper input, ``count_expected_wells``'
-    fallback, and — most consequentially — the ``source_tifs`` tuples the
-    post-run deletion closures are built from. A predicate applied to files it
-    is not entitled to judge, in the place that decides what gets deleted.
+    It globbed ``*.tif``/``*.tiff`` only, while the pipeline groups ``.png``,
+    ``.jpg`` and ``.jpeg`` too, so a PNG plate looked like a folder with no
+    images in it and the zipper had nothing to consume.
 
-    A leading dot is the whole rule, and it is the right one: it excludes the
-    AppleDouble twins, ``.DS_Store`` if it ever carried a TIF suffix, and
-    anything else a file manager hides, while excluding nothing a microscope
-    writes — no acquisition names an image with a leading dot.
+    It matched AppleDouble sidecars: ``._Plate_A01_F1.tif`` is four hundred
+    bytes of macOS resource fork with an image suffix, and every file copied to
+    a non-HFS volume has one — the commonest way a real plate arrives with
+    exactly twice as many "images" as it has images.
+
+    It used ``folder.glob`` with no ``is_file()``, so a dangling symlink named
+    ``*.tif`` came back as an input image. ``WellPlateZipper.group_by_well``
+    skips such a link as unreadable, so the two disagreed in the one direction
+    that matters: the zipper never grouped it, and the deletion pass counted
+    its well as landed and unlinked it.
+
+    And none of that is cosmetic, because of what the count feeds. It is the
+    ``loose_count`` the readout under the input field prints, the ``tifs > 3``
+    threshold that decides whether the whole folder is treated as a zipper
+    input, ``count_expected_wells``' fallback, and — most consequentially — the
+    ``source_tifs`` tuples the post-run deletion closures are built from. A
+    predicate applied to files it is not entitled to judge, in the place that
+    decides what gets deleted.
+
+    ``is_run_input_member`` is that entitlement question, asked once for the
+    whole repo, and it is what makes the four fixes one rule rather than four.
     """
-    files: list[Path] = []
-    for pat in TIF_GLOB:
-        files.extend(p for p in folder.glob(pat) if not p.name.startswith("."))
-    return files
+    return sorted(
+        p for p in folder.glob("*")
+        if p.is_file() and is_run_input_member(p.name)
+    )
 
 
 def _is_well_named(p: Path) -> bool:
@@ -632,7 +651,11 @@ def plan_loose_append(
     except OSError:
         return empty
     for p in entries:
-        if not p.is_file() or p.suffix.lower() not in (".tif", ".tiff"):
+        # The same rule the zipper and the pre-flight use. This branch decides
+        # what `plan_input_layout` tells the user it is about to do, and taking
+        # `.tif`/`.tiff` alone meant a PNG plate was described as holding no
+        # loose images at all.
+        if not p.is_file() or not is_run_input_member(p.name):
             continue
         parts = p.stem.split(filename_sep)
         token = canonical_well_label(parts[well_idx]) if well_idx < len(parts) else None
@@ -977,6 +1000,12 @@ def run_zipper(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        # A filename can carry any byte the filesystem allows, and the zipper
+        # echoes every one it groups. Decoding strictly means one such byte
+        # raises out of the reader below — see the `finally` there for why
+        # that was worse than a lost log line.
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
     )
@@ -1009,11 +1038,19 @@ def run_zipper(
         if proc.returncode != 0:
             raise RuntimeError(f"WellPlateZipper exited with code {proc.returncode}.")
     finally:
+        # Reap it whatever ended the read. The zipper is spawned into its own
+        # process group so Stop can reach it, which also means nothing else
+        # will reap it: an exception escaping the loop above left it running,
+        # rewriting the user's input directory, while the caller reported the
+        # grouping had failed.
+        if proc.poll() is None:
+            with swallow("stopping the zipper after its output stopped"):
+                signal_subprocess(proc)
+        with swallow("waiting for the zipper subprocess"):
+            proc.wait(timeout=30)
         if proc_hook is not None:
-            try:
+            with swallow("clearing the zipper process hook"):
                 proc_hook(None)
-            except Exception:
-                swallowed()  # was: pass (silent except)
 
 
 def _consolidate_mixed_to_zips(
@@ -1066,9 +1103,12 @@ def _consolidate_mixed_to_zips(
     zipped_any = False
     for well, well_dir in sorted(leftover.items()):
         target = folder / f"{well}.zip"
+        # Input images, by the one definition — this packs the *user's* well
+        # folder into the archive the pipeline segments from, so a narrower
+        # rule here silently drops a PNG plate's images out of the run.
         tifs = sorted(
             p for p in well_dir.iterdir()
-            if p.is_file() and p.suffix.lower() in (".tif", ".tiff")
+            if p.is_file() and is_run_input_member(p.name)
         )
         if not tifs:
             # Nothing to pack. Writing the archive anyway would publish a

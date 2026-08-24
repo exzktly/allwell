@@ -45,7 +45,14 @@ from pipeline.incremental_keys import (
 #: Every surface that paints or labels well health imports this rather than
 #: writing its own copy — ``tests/test_no_second_completeness_predicate.py``
 #: fails on a second literal roster anywhere in the repo.
-HEALTH_STATES = ("complete", "partial", "missing", "no_output")
+HEALTH_STATES = ("complete", "partial", "csv_only", "missing", "no_output")
+
+#: The states that mean "this well is not finished" — everything a reader has
+#: to act on. Derived from the roster rather than restated, so a sixth state
+#: cannot be added to one and forgotten in the other; `no_output` is excluded
+#: because a well outside the plate's scope is not a shortfall to chase.
+NEEDS_ATTENTION = tuple(
+    s for s in HEALTH_STATES if s not in ("complete", "no_output"))
 
 #: The CSV columns a ``(fov, timepoint)`` key is read out of.
 _FOV_COLUMN = "fov"
@@ -178,20 +185,35 @@ def health(
     would force the other to build a throwaway.
 
     ``complete``
-        every ``(fov, timepoint)`` pair in the input is accounted for and a
-        readable measurements CSV exists.
+        every ``(fov, timepoint)`` pair in the input is accounted for, a
+        readable measurements CSV exists, **and** the output archive it was
+        derived from is on disk.
     ``partial``
         some of the input's pairs are missing from the output.
+    ``csv_only``
+        the numbers are whole and the images they came from are gone. The
+        archive holds the masks and the corrected frames, so without it the
+        rows cannot be reviewed, re-gated or re-thresholded — the well is not
+        finished, it is half delivered.
     ``missing``
-        nothing is missing from the input diff, but images exist with no usable
-        measurements CSV behind them.
+        the mirror image: images exist with no usable measurements CSV behind
+        them.
     ``no_output``
         the well has no evidence at all.
+
+    ``has_out_zip`` was accepted and never read. A well whose ``_out.zip`` had
+    been deleted, or whose fetch brought back the CSV and lost the archive,
+    answered ``complete`` on the strength of the CSV alone — and a plate of
+    them summarised as a finished plate. That is the shortfall CLAUDE.md §7
+    forbids: degraded output indistinguishable from good output, in the record
+    whose whole job is to tell them apart.
     """
     if missing:
         return "partial"
     if csv_state == "ok":
-        return "complete"
+        if has_out_zip or has_out_folder:
+            return "complete"
+        return "csv_only"
     if has_in_container or has_out_zip or has_out_folder:
         return "missing"
     return "no_output"
@@ -224,8 +246,15 @@ def coverage_for_well(
     if in_members is None:
         intent: set[tuple[str, str]] = set()
     else:
+        # `images_only` is the intent-side rule and is not the same question as
+        # `skip_hidden`: an AppleDouble twin parses to a *different* key rather
+        # than to nothing, so it survives the set and is never matched by
+        # anything in `done`. Measured on a finished two-image well carrying its
+        # two macOS twins: intent 4, two keys permanently missing, state
+        # `partial` for ever.
         intent = fov_keys_from_member_names(
-            in_members, schema=schema, sep=sep, skip_hidden=skip_hidden)
+            in_members, schema=schema, sep=sep, skip_hidden=skip_hidden,
+            images_only=True)
     done = done_keys(
         csv_keys=csv_keys, out_zip=out_zip, out_folder=out_folder,
         schema=schema, sep=sep)
@@ -291,6 +320,47 @@ def _member_names(container: Path) -> set | None:
     except (OSError, zipfile.BadZipFile):
         return None
     return names or None
+
+
+def resolve_input_container(recorded) -> Path | None:
+    """Where a well's input actually is *now*, not where it was before the run.
+
+    Folder mode hands this check the ``<WELL>/`` folder paths the run resolved
+    at its start, and the per-well worker compresses that folder into
+    ``<WELL>.zip`` and removes it. So by the time completeness runs, every path
+    it was given is gone: `_member_names` answered ``None`` for all of them,
+    intent was 0 for all of them, nothing could ever be missing, and a folder
+    run reported 96 of 96 whatever it had actually produced. Structurally
+    incapable of reporting a partial well — not a threshold that was too loose,
+    a comparison with nothing on one side.
+
+    So the recorded path is a starting point rather than the answer: if it is
+    gone and the archive the run would have written in its place is there, that
+    archive is the input container.
+    """
+    if recorded is None:
+        return None
+    recorded = Path(recorded)
+    if recorded.exists():
+        return recorded
+    if recorded.suffix:
+        return None
+    # The worker names the archive from the **canonical** well label, not from
+    # the folder's own spelling — `find_well_folders` accepts `a01`, `A1` and
+    # `a1` for well A01 and hands back `(canonical, actual_path)`. Guessing
+    # `<folder>.zip` therefore found nothing for three of the four spellings,
+    # which left P4 unfixed for them *and* tripped the new empty-comparison
+    # flag, marking a perfectly finished plate's record `partial_scan`.
+    from util.well_token import canonical_well_label
+
+    candidates = [recorded.with_suffix(".zip")]
+    canon = canonical_well_label(recorded.name)
+    if canon:
+        candidates.append(recorded.with_name(f"{canon}.zip"))
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def csv_keys_and_state(path: Path) -> tuple[set[tuple[str, str]], str]:
@@ -470,7 +540,11 @@ def scan_run(
 
     for well in wells:
         try:
-            container = in_map.get(well)
+            # Resolved now, not as the run recorded it: folder mode zips the
+            # folder away mid-run, so the recorded path is stale by the time
+            # this reads it.
+            container = resolve_input_container(in_map.get(well))
+            recorded_container = in_map.get(well)
             out_zip = out_zip_path(out_dir, well)
             out_folder = out_folder_path(out_dir, well)
             csv_keys, csv_state = csv_keys_and_state(
@@ -486,6 +560,14 @@ def scan_run(
                 skip_hidden=bool(container is not None and container.is_dir()),
                 failed=failed_map.get(well, ()),
             )
+            if recorded_container is not None and cov.intent == 0:
+                # The run named a container for this well and nothing could be
+                # read from it. That is not "nothing was asked for" — it is a
+                # question this check could not answer, and answering
+                # `complete` on the strength of an empty comparison is the
+                # substitution CLAUDE.md §7 forbids. Recorded as a scan that
+                # gave up, which forces a non-complete state for the plate.
+                partial_scan = True
         except Exception:
             # One unreadable well must not cost the record for the other 95.
             partial_scan = True

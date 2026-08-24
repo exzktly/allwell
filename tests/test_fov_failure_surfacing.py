@@ -55,7 +55,7 @@ def test_process_groups_persists_trace_and_reports_partial(tmp_path, monkeypatch
     monkeypatch.setattr(pm, "process_image_group", _boom)
 
     groups = [(Path("exp_nuc_B3_f01_T05.tif"), [])]
-    records, failed = pm._process_groups_in_worker(
+    records, failed, _reason, _skipped = pm._process_groups_in_worker(
         groups, {"output_dir": tmp_images}, "B3", errors_dir=output_dir,
     )
 
@@ -77,7 +77,7 @@ def test_process_groups_without_errors_dir_still_reports(tmp_path, monkeypatch):
         pm, "process_image_group",
         lambda n, f, **k: (_ for _ in ()).throw(ValueError("x")),
     )
-    records, failed = pm._process_groups_in_worker(
+    records, failed, _reason, _skipped = pm._process_groups_in_worker(
         [(Path("exp_nuc_B3_f01_T05.tif"), [])], {"output_dir": tmp_images}, "B3",
     )
     assert failed == ["exp_nuc_B3_f01_T05.tif"]

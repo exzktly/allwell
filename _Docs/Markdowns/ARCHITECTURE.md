@@ -3302,19 +3302,26 @@ original defect on the log line instead of the readout. A folder whose loose fil
 *all* duplicates is reported as `grouped` with the reason, rather than as a fold
 of nothing.
 
-`tif_files_in` is the other half of that: `TIF_GLOB` is a suffix match, and a
-suffix is not a decision about whether a file is one of the run's images. It
-matched `._<name>.tif`, the AppleDouble fork macOS writes beside every file
-copied to a non-HFS volume — so a real plate arrived with exactly twice as many
-"TIFs" as images, in a count that feeds the readout, the `tifs > 3` threshold
-selecting `zip_root`, `count_expected_wells`' fallback, and the `source_tifs`
-tuples the post-run deletion closures are built from. A leading dot is excluded,
-which costs nothing an acquisition writes: no microscope names an image with
-one. It does narrow the `tifs > 3` threshold — a folder of three real images
-beside their three sidecars used to count six and clear it, and now counts three
-and does not — so a very small plate copied to a non-HFS volume reports "No TIF
-files or in/ folder found" where it previously ran. The `> 3` cliff itself
-predates this.
+`tif_files_in` is the other half of that, and it asks `is_run_input_member`
+rather than matching a suffix, because a suffix is not a decision about whether
+a file is one of the run's images. Its glob matched `._<name>.tif`, the
+AppleDouble fork macOS writes beside every file copied to a non-HFS volume — so
+a real plate arrived with exactly twice as many "TIFs" as images — and it read
+`.tif`/`.tiff` only, so a PNG plate looked like a folder holding nothing, and it
+did not ask `is_file()`, so a dangling symlink counted as an image the zipper
+would then skip as unreadable while the deletion pass unlinked it. That count
+feeds the readout, the `tifs > 3` threshold selecting `zip_root`,
+`count_expected_wells`' fallback, and the `source_tifs` tuples the post-run
+deletion closures are built from: a predicate applied to files it is not
+entitled to judge, in the place that decides what gets deleted.
+
+The `tifs > 3` threshold moves in both directions as a result, and neither is
+hypothetical. A folder of three real images beside their three sidecars used to
+count six and clear it and now counts three and does not, so a very small plate
+copied to a non-HFS volume reports "No TIF files or in/ folder found" where it
+previously ran; a folder of PNGs used to count zero and now counts them all, so
+a plate that could not be grouped at all now can. The `> 3` cliff itself
+predates both.
 
 The actions are the layouts. A folder **named** `in` is the input directly
 (output `../out`); a folder that **contains** `in/` feeds the pipeline from that
@@ -5048,6 +5055,34 @@ skips any folder the pass preserved),
 `process_microscopy.compress_folder_images_to_zip_and_remove`. The extension
 filter stays with each caller: `util/image_exts.py` records why the folder
 zipper's set is a different question from what the pipeline will group as input.
+
+**Two questions, two functions, and a guard over the difference.**
+`util.image_exts` answers both. `is_group_image` is a pure suffix test and
+nothing more — `._Plate_A01.tif` is an AppleDouble sidecar, four hundred bytes
+of macOS resource fork, and its suffix is `.tif`, so this returns true for it.
+The **done**-side readers use it, because what a resumed run considers already
+finished is pinned by
+`test_incremental_keys_shared.py::test_zip_reader_keeps_its_own_hidden_file_behaviour`
+and must not move when the input rule does. `is_run_input_member` is the
+**intent**-side rule: it rejects the sidecars, `__MACOSX/` members, dotfiles and
+zip directory entries, and it is what every question about *the user's data*
+asks — how many FOV-groups does this plate hold, how much disk will they need,
+which timepoints exist, which filenames should schema inference learn from.
+Everything on that list has an image suffix and is not an image, and everything
+unclassifiable answers wrongly to a domain test applied outside its domain.
+
+The consequences, each measured: a finished two-image well carrying its two
+macOS twins reported intent 4 with two permanently missing FOV-groups, because
+the twins parse to a *different* `(fov, timepoint)` rather than to nothing; the
+disk pre-flight sized a run at 4 KB for a plate of 112 MB frames, since `._`
+sorts first and the loose branch returned the first match rather than the
+largest its own docstring promised; and schema inference gained a whole extra
+field on a 1:1 corpus, so every filename in the plate parsed to the wrong well.
+`tests/test_one_definition_of_an_image.py` is the rule that keeps the set from
+being spelled a sixth time — it found **twelve** sites against the pre-fix
+tree — and exemption is a per-site marker comment carrying its reason, not a
+file-level entry: the first version of that guard allowlisted whole files and
+reported one offending site out of twelve.
 `tests/test_no_unarchived_delete.py` holds the rule, following archive-writing
 one call deep within a module so a site that zips through a one-line helper is
 still caught.
@@ -5682,7 +5717,7 @@ much of the input they cover), so the FOV-level gap is otherwise invisible.
 
 **The rule it applies is not its own.** `pipeline/completeness.py` holds the
 single definition of a complete well — the CSV ∪ archive union, the
-`intent - done` diff with its single-FOV fallback, and the four health states —
+`intent - done` diff with its single-FOV fallback, and the five health states —
 and both this tool and the pipeline's own end-of-run check (§6.2) go through it,
 so the two cannot disagree about a well. Validate keeps everything built *on
 top* of that answer: run-record evidence, the finding codes, the
@@ -8368,14 +8403,14 @@ Process exits. Analyze tab offers the dataset to Review.
 **The end-of-run completeness check.** `pipeline/completeness.py` holds one
 definition of "is this well complete", shared by this check and the Datasets
 **Validate & Repair** tool (§6b) — `datasets/validate/validate_compute.py`
-delegates its union, its `intent - done` diff and its four health states here,
+delegates its union, its `intent - done` diff and its five health states here,
 so a well cannot read complete on one surface and partial on another. What is
 *not* shared is the scan: Validate parallelises across wells and layers
 findings, evidence and repair on top, while `scan_run` walks a directory the run
 has just written. The shared predicate takes data the caller already holds and
 opens exactly one thing between its functions — the well's output container —
 which is what lets Validate delegate without changing its per-well read count,
-a number `tests/test_validate_compute.py` pins exactly.
+a number `tests/test_validate_compute.py` pins exactly. The fifth state is `csv_only` — measurements whole, output archive gone — added because `health` accepted `has_out_zip` and never read it, so a well whose archive had been deleted answered `complete` on the strength of its CSV alone. `pipeline/input_layout.py` holds the three questions about which layout a plate's input is in, including the refusal that stops a run whose loose images were moved into a folder no zip-mode run will read; `pipeline/cli_args.py` holds `build_parser`. Both left `process_microscopy` under its line budget and are in the remote manifest.
 
 The check runs after the auto-threshold pass and before the exit-code decision,
 and records a `run_check` block per well: how many `(fov, timepoint)` groups the

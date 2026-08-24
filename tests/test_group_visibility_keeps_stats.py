@@ -18,6 +18,7 @@ gives 312 comparable keys with zero value differences.
 from __future__ import annotations
 
 from well_viewer.core.selection_controller import (
+    _set_groups_hidden,
     invalidate_stats_cache,
     note_group_visibility_changed,
 )
@@ -92,3 +93,84 @@ def test_the_visibility_path_still_syncs_the_fov_button(monkeypatch):
     ctx = _Ctx()
     note_group_visibility_changed(ctx)
     assert calls == [ctx], "the per-FOV button bank was left unsynced"
+
+
+# ── Driven through the real toggle, not the helper ───────────────────────────
+#
+# The first version of this file asserted only that ``note_group_visibility_
+# changed`` preserves the cache, and that was true while the app threw it away
+# anyway: ``_set_groups_hidden`` called the notifier and then ``_rebuild_all()``
+# beside it, whose first act is ``_invalidate_stats_cache()``. The step bought
+# nothing and the suite was green. Asserting that a function *can* keep the
+# cache is not asserting that toggling a group keeps it.
+
+
+class _Window:
+    """The seams ``_set_groups_hidden`` -> ``rebuild_all`` actually touches."""
+
+    def __init__(self, ctx):
+        self._ctx = ctx
+        self.invalidated = 0
+
+    def _invalidate_stats_cache(self):
+        self.invalidated += 1
+        self._ctx.state.stats_cache.invalidate()
+
+    def _rebuild_all(self, *, invalidate=True):
+        from well_viewer.core.selection_controller import rebuild_all
+        rebuild_all(self._ctx, invalidate=invalidate)
+
+    # Everything rebuild_all fans out to, stubbed to no-ops.
+    def _groups_centre_refresh(self): pass
+    def _refresh_sidebar_map(self): pass
+    def _is_tab_visible(self, name): return False
+    def _redraw(self): pass
+
+
+class _CtxWithWindow(_Ctx):
+    def __init__(self):
+        super().__init__()
+        self._window = _Window(self)
+        self.features = None
+        # rebuild_all schedules a debounced sample-definitions autosave; the
+        # registry no-ops without a data dir, but the attribute has to exist.
+        self.persistence = None
+
+    @property
+    def window(self):
+        return self._window
+
+
+def test_toggling_a_group_through_the_real_path_keeps_the_statistics(monkeypatch):
+    """The assertion the earlier version of this file was missing.
+
+    Reverting ``invalidate=False`` fails here with the cache emptied, which is
+    what the branch did before this was noticed.
+    """
+    monkeypatch.setattr(
+        "well_viewer.core.plot_toggles.refresh_fov_btn_state", lambda ctx: None)
+    ctx = _CtxWithWindow()
+    before = _fill(ctx)
+    sels = [{"name": "G1", "wells": ["A01"], "hidden": False}]
+    _set_groups_hidden(ctx, sels, target=True)
+
+    assert sels[0]["hidden"] is True, "precondition: the toggle actually flipped"
+    assert ctx.state.stats_cache.cache == before, (
+        "toggling a group's visibility discarded the plate's statistics — the "
+        "refresh invalidated them a line after they were deliberately kept"
+    )
+    assert ctx.window.invalidated == 0, (
+        "the visibility path reached _invalidate_stats_cache"
+    )
+
+
+def test_a_toggle_that_changes_nothing_does_not_refresh_at_all(monkeypatch):
+    """``target`` already satisfied: no flip, so no work of any kind."""
+    monkeypatch.setattr(
+        "well_viewer.core.plot_toggles.refresh_fov_btn_state", lambda ctx: None)
+    ctx = _CtxWithWindow()
+    before = _fill(ctx)
+    sels = [{"name": "G1", "wells": ["A01"], "hidden": True}]
+    _set_groups_hidden(ctx, sels, target=True)
+    assert ctx.state.stats_cache.cache == before
+    assert ctx.window.invalidated == 0

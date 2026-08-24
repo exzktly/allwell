@@ -237,7 +237,7 @@ def group_replicate_stats(ctx, wells, target_t, *, use_fov, val_col, threshold,
                 # Pre-aggregated backends (MockApp) have no raw rows to split —
                 # the well contributes a single replicate.
                 rs = _rep_from(None,
-                               aggregate_well(ctx, lbl, threshold=threshold,
+                               aggregate_well_cached(ctx, lbl, threshold=threshold,
                                               use_sem=False, val_col=val_col,
                                               fluor_gates=fluor_gates),
                                target_t, threshold, val_col, fluor_gates, ratios,
@@ -265,7 +265,7 @@ def group_replicate_stats(ctx, wells, target_t, *, use_fov, val_col, threshold,
                     lbl, verdict.reason,
                 )
                 rs = _rep_from(df,
-                               aggregate_well(ctx, lbl, threshold=threshold,
+                               aggregate_well_cached(ctx, lbl, threshold=threshold,
                                               use_sem=False, val_col=val_col,
                                               fluor_gates=fluor_gates),
                                target_t, threshold, val_col, fluor_gates, ratios,
@@ -542,6 +542,16 @@ def cdf_values_cached(ctx, label: str, *, val_col: str,
     filtered population rather than a statistic of it. ``rows_version`` carries
     everything about the frame, so a gating pass or a dataset swap declines
     here exactly as it does there.
+
+    **This hands every caller the same array**, where the aggregate memo goes to
+    the trouble of returning a tuple. The asymmetry is deliberate but it is a
+    hazard worth naming: an ndarray has no immutable counterpart to convert to
+    without copying the very thing the memo exists to avoid copying, and a
+    plate-wide selection is tens of megabytes of them. No consumer mutates it
+    today — the painter sorts out of place, the collector concatenates, the
+    x-range reads — and one that did would corrupt every other caller's curve.
+    If a mutating consumer ever appears, give it ``.copy()`` at that call site
+    rather than making this one copy for everybody.
     """
     store = getattr(ctx.state, "stats_cache", None)
     rows = get_rows(ctx, label)
@@ -553,7 +563,14 @@ def cdf_values_cached(ctx, label: str, *, val_col: str,
         tuple(sorted((fluor_gates or {}).items())),
         _ratio_sig_for(ctx, val_col),
         ctx.state.dataset.rows_version,
-        id(compute),
+        # The callable itself, not ``id(compute)``. An id is unique only among
+        # *live* objects, and a key tuple holding the bare integer keeps no
+        # reference to the function — so a caller passing a partial, a bound
+        # method or a closure could see that id reused after collection and be
+        # served another filter's answer. Functions, bound methods and partials
+        # are all hashable, and holding the reference is what makes the identity
+        # mean anything.
+        compute,
     )
     hit = store.cache.get(key)
     if hit is not None:

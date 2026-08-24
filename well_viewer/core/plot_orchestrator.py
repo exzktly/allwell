@@ -89,14 +89,24 @@ def redraw(
     # dirty by another's.
     from well_viewer.domain.fold_change_scopes import visible_scope_names
     try:
-        _visible = visible_scope_names(ctx.window)
+        _visible = visible_scope_names(ctx.window) or None
         _dirty = ctx.state.plot.fc_dirty_scopes
     except Exception:
-        # A context too thin to report visibility (pure-logic callers) keeps the
-        # old behaviour: draw everything that is built. Failing *open* is right
-        # here — the cost of a redundant redraw is time, the cost of a skipped
-        # one is a figure that disagrees with the plate.
         _visible, _dirty = None, None
+    # ``or None`` is doing real work. ``visible_scope_names`` swallows its own
+    # lookup failures and answers with an empty set, so "no tab is visible" and
+    # "I cannot tell which tab is visible" arrive identically — and treating the
+    # empty set as an answer deferred BOTH figures indefinitely for a window
+    # whose tab lookup throws, or in a build where the scope registry was never
+    # populated. That is failing closed while a comment claimed it failed open.
+    #
+    # Unknown now means draw everything that is built, which is the old
+    # behaviour: a redundant redraw costs time, a skipped one costs a figure
+    # that disagrees with the plate, and those are not the same mistake. The
+    # cost of the conflation is small and named — when genuinely no scope is
+    # visible (a non-plot tab in front), both figures are redrawn rather than
+    # deferred. Their own ``on_activate`` hooks would have redrawn them on the
+    # way back anyway.
 
     for _scope, _tab, _canvas in (
         ("distribution", "Distribution", "_distribution_canvas"),

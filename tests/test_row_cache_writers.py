@@ -14,7 +14,12 @@ It is derived here instead, from the syntax tree, over the scan surface in
 * ``df.loc[...] = ...`` / ``df.iloc[...] = ...`` — the indexer forms, which a
   search for ``df[`` misses entirely;
 * ``...(inplace=True)`` — the keyword form, which mutates without an assignment
-  statement at all.
+  statement at all. **Detected but not attributed**: the keyword says nothing
+  about *which* object is being mutated, so a hit cannot be pinned to a cached
+  frame and is reported here rather than failed on. The app's one in-place frame
+  mutation is ``cache_projectors``' ``df.drop(columns=[column], inplace=True)``,
+  which removes a verdict column on a projection failure and is covered by that
+  file's roster entry. Do not read this shape as guarded.
 
 A grep for the first shape alone is what produced the original writer list, and
 it missed ``apply_review_overrides_to_cache``'s ``df.loc[mask, "Included"] = ...``
@@ -63,11 +68,18 @@ _KNOWN_WRITERS: dict[str, str] = {
     ),
     "well_viewer/data/cache_projectors.py::__dynamic__": (
         "project_verdict_column writes whichever column its caller names "
-        "(QC_Pass, Crop_Pass) onto cached frames. It does NOT bump, and does "
-        "not need to: its only two callers, the QC and crop controllers, call "
-        "invalidate_stats_cache immediately afterwards, which empties the dict "
-        "the memo lives in; and the other route in is get_rows, projecting onto "
-        "a frame it has just built, which cannot have a memoized aggregate yet."
+        "(QC_Pass, Crop_Pass) onto cached frames. It does NOT bump. Three "
+        "routes reach it. The QC and crop controllers' recompute entry points "
+        "call invalidate_stats_cache immediately afterwards, which empties the "
+        "dict the memo lives in. get_rows projects onto a frame it has just "
+        "built, which cannot have a memoized aggregate yet. And "
+        "load_controller calls apply_crop_to_cache directly, without "
+        "invalidating — safe only because it runs during dataset load, after "
+        "begin_load has already ticked rows_version and cleared the cache, so "
+        "there is nothing memoized for it to stale. That third caller is the "
+        "one an earlier version of this note missed while asserting there were "
+        "only two; if the load sequence ever grows an aggregation before this "
+        "point, the bump has to move into project_verdict_column."
     ),
     "well_viewer/features/home/cell_gating/gating_compute.py::Included": (
         "apply_fluor_gating rewrites the inclusion columns for a well from the "
@@ -209,7 +221,10 @@ def test_every_cached_frame_writer_is_a_known_one():
     for path, columns in sorted(discovered.items()):
         for col in sorted(columns):
             if col == "__inplace__":
-                continue  # too coarse to attribute; see the module docstring
+                # Deliberately not failed on — see the module docstring. The
+                # keyword names no object, so this cannot say whether a cached
+                # frame was the target.
+                continue
             key = f"{path}::{col}"
             dynamic = f"{path}::__dynamic__"
             if key not in _KNOWN_WRITERS and dynamic not in _KNOWN_WRITERS:

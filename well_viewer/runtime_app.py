@@ -171,7 +171,7 @@ review_row_keys, review_norm_fov, review_collect_timepoints, refresh_review_csv,
 set_review_image_source, refresh_review_image_source_btn, review_image_set_color, review_image_refresh_color_swatch, reset_review_image_colors, toggle_review_image_binary_mask, refresh_review_image_binary_btn, toggle_review_image_outline, refresh_review_image_outline_btn, draw_review_image, render_review_image_display, review_image_resolve_lut, review_image_auto_lut, review_image_commit_lut, review_image_zoom_step, apply_review_image_cursor, set_review_image_include_mode, invalidate_review_image_frame_cache, review_image_get_color = _lazy_names("well_viewer.features.image_browser.review_image.renderer", "set_review_image_source", "refresh_review_image_source_btn", "review_image_set_color", "review_image_refresh_color_swatch", "reset_review_image_colors", "toggle_review_image_binary_mask", "refresh_review_image_binary_btn", "toggle_review_image_outline", "refresh_review_image_outline_btn", "draw_review_image", "render_review_image_display", "review_image_resolve_lut", "review_image_auto_lut", "review_image_commit_lut", "review_image_zoom_step", "apply_review_image_cursor", "set_review_image_include_mode", "invalidate_review_image_frame_cache", "review_image_get_color")
 open_scatter_cell_viewer = _lazy("well_viewer.features.scatter.cell_viewer_view", "open_scatter_cell_viewer")
 col_for_scatter_axis, col_for_scatter_entry, scatter_axis_metric_key, refresh_scatter_metric_for_axis, refresh_scatter_agg_metric_for_axis, sync_scatter_agg_stat_combos, compose_scatter_agg_stat, update_tp_selection_display, update_scatter_tp_selection_display, on_scatter_axis_change, on_scatter_agg_axis_change = _lazy_names("well_viewer.features.scatter.controller", "col_for_scatter_axis", "col_for_scatter_entry", "scatter_axis_metric_key", "refresh_scatter_metric_for_axis", "refresh_scatter_agg_metric_for_axis", "sync_scatter_agg_stat_combos", "compose_scatter_agg_stat", "update_tp_selection_display", "update_scatter_tp_selection_display", "on_scatter_axis_change", "on_scatter_agg_axis_change")
-from well_viewer.core.selection_controller import sel_by_id, sel_add, sel_set_hidden, sel_set_composition, sel_select, groups_centre_refresh, rebuild_all, sel_color, refresh_sidebar_map_now, plate_commit_deferred, set_selected_wells, invalidate_stats_cache, note_group_visibility_changed
+from well_viewer.core.selection_controller import sel_by_id, sel_add, sel_set_hidden, sel_set_composition, sel_select, groups_centre_refresh, rebuild_all, sel_color, refresh_sidebar_map_now, plate_commit_deferred, set_selected_wells, invalidate_stats_cache
 stats_active_group, stats_collect_group_values_shim, stats_active_channel_entry, stats_active_val_col, stats_active_threshold, stats_active_statistic, stats_run_shim, stats_draw_ks_cdf_shim, on_stats_property_change = _lazy_names("well_viewer.features.stats.controller", "stats_active_group", "stats_collect_group_values_shim", "stats_active_channel_entry", "stats_active_val_col", "stats_active_threshold", "stats_active_statistic", "stats_run_shim", "stats_draw_ks_cdf_shim", "on_stats_property_change")
 from well_viewer.core import tab_controller as _tabctl
 from well_viewer.core.tab_controller import on_central_pane_changed, build_centre_shim, sync_section_nav_from_notebook, tab_history_back, tab_history_forward, current_centre_tab, sync_heatmap_well_drag_mode, toggle_sidebar, visible_centre_tabs, is_tab_visible, pane_mode
@@ -525,7 +525,8 @@ class WellViewerApp(QWidget):
 
     def _groups_centre_refresh(self) -> None: return groups_centre_refresh(self._ctx)
 
-    def _rebuild_all(self) -> None: return rebuild_all(self._ctx)
+    def _rebuild_all(self, *, invalidate: bool = True) -> None:
+        return rebuild_all(self._ctx, invalidate=invalidate)
 
     # ── Bar group persistence (delegates to well_viewer.persistence.bar_groups)
 
@@ -754,9 +755,6 @@ class WellViewerApp(QWidget):
     def _rep_sets_active(self) -> list[ReplicateSet]: return rep_sets_active(self._ctx)
 
     def _invalidate_stats_cache(self) -> None: return invalidate_stats_cache(self._ctx)
-
-    def _note_group_visibility_changed(self) -> None:
-        return note_group_visibility_changed(self._ctx)
 
     def _invalidate_review_image_frame_cache(self) -> None: return invalidate_review_image_frame_cache(self._ctx)
 

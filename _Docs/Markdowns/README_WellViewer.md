@@ -1332,11 +1332,17 @@ instead of the raw well token. On screen the Line Graphs legend names the first
 twelve traces and ends with a row saying how many it did not list — a legend
 with one entry per well of a full plate overruns the panel it is meant to
 annotate, and drawing it was slower than drawing all of the data. Every trace is
-still plotted, and a **saved or batch-exported figure names them all**: the cap
-is a screen setting, not a change to what the figure contains. The same applies
-to the cumulative-distribution panel, which is drawn from a sample of each
-well's cells on screen and from every cell in an export; the cell count printed
-beside each curve is always the well's real one. **Add Prefix** and **Add Suffix** apply to the
+still plotted. The same applies to the cumulative-distribution panel, which is
+drawn from a sample of each well's cells on screen; the cell count printed beside
+each curve is always the well's real one.
+
+**Exporting repaints the figure at full detail first**, so a saved image, a
+copied vector, a plot filed in Saved Plots and a batch export all name every
+trace and draw every cell — from Line Graphs' own Export menu as well as from the
+Batch Export tab. The two screen shortcuts are for the panel on your monitor, not
+for the file. You may notice the plot flicker as it redraws during an export;
+that is the full-detail repaint and it goes back to the screen version
+afterwards. **Add Prefix** and **Add Suffix** apply to the
 wells currently selected on the plate beside the tab.
 
 Labels are stored with the dataset, and editing one on a load that holds only

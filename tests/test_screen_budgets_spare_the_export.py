@@ -163,3 +163,92 @@ def test_the_capped_legend_keeps_the_first_traces_in_order(axes):
     assert labels[:SCREEN_LEGEND_ENTRIES] == [
         f"W{i:03d}" for i in range(SCREEN_LEGEND_ENTRIES)
     ]
+
+
+# ── The tab's own Export menu saves the figure on screen ─────────────────────
+#
+# The batch exporter renders onto its own axes and never passes the budgets, so
+# it was never at risk. The tab's Export menu is the opposite: ``_line_fig`` IS
+# ``card.figure``, and Save Figure… / Copy SVG / Save to Saved Plots call
+# ``savefig`` on that same object at 300 dpi. Without an explicit repaint, a
+# figure headed for a paper carried the screen's sampled CDF and its
+# twelve-of-ninety-six legend — degraded output indistinguishable from good
+# output, which is the one failure this whole path exists to avoid.
+
+def test_the_capture_context_lifts_the_budgets_and_puts_them_back():
+    """The flag is raised for the capture and restored afterwards."""
+    from types import SimpleNamespace
+
+    from well_viewer.core import plot_card_actions as pca
+
+    seen: list[bool] = []
+    plot = SimpleNamespace(export_full_fidelity=False)
+    ctx = SimpleNamespace(state=SimpleNamespace(plot=plot))
+
+    import well_viewer.core.plot_orchestrator as orch
+    original = orch.redraw_app
+    orch.redraw_app = lambda c: seen.append(c.state.plot.export_full_fidelity)
+    try:
+        with pca._captured_at_full_fidelity(ctx, "_line_card"):
+            assert plot.export_full_fidelity is True, (
+                "the figure was captured while still carrying screen budgets"
+            )
+    finally:
+        orch.redraw_app = original
+
+    assert plot.export_full_fidelity is False, "the flag outlived the capture"
+    assert seen == [True, False], (
+        "expected a repaint at full fidelity before the capture and a repaint "
+        f"back to screen budgets after it, got {seen!r}"
+    )
+
+
+def test_the_flag_is_restored_even_when_the_export_raises():
+    """A failed save must not leave the tab painting the slow figure forever."""
+    from types import SimpleNamespace
+
+    from well_viewer.core import plot_card_actions as pca
+
+    plot = SimpleNamespace(export_full_fidelity=False)
+    ctx = SimpleNamespace(state=SimpleNamespace(plot=plot))
+
+    import well_viewer.core.plot_orchestrator as orch
+    original = orch.redraw_app
+    orch.redraw_app = lambda c: None
+    try:
+        with pytest.raises(RuntimeError):
+            with pca._captured_at_full_fidelity(ctx, "_line_card"):
+                raise RuntimeError("save failed")
+    finally:
+        orch.redraw_app = original
+    assert plot.export_full_fidelity is False
+
+
+def test_a_card_with_no_budgets_is_not_repainted():
+    """Bar and scatter cards draw everything already; capturing must not churn."""
+    from types import SimpleNamespace
+
+    from well_viewer.core import plot_card_actions as pca
+
+    calls: list[int] = []
+    plot = SimpleNamespace(export_full_fidelity=False)
+    ctx = SimpleNamespace(state=SimpleNamespace(plot=plot))
+
+    import well_viewer.core.plot_orchestrator as orch
+    original = orch.redraw_app
+    orch.redraw_app = lambda c: calls.append(1)
+    try:
+        with pca._captured_at_full_fidelity(ctx, "_bar_card"):
+            pass
+    finally:
+        orch.redraw_app = original
+    assert calls == [], "a card with no screen budgets was repainted twice"
+
+
+def test_the_renderer_honours_the_flag(axes):
+    """And the flag reaches the budgets — the half that makes it worth setting."""
+    series = _series(96)
+    # Full fidelity: what a capture repaint produces.
+    _render(axes, series)
+    assert len(axes.cdf.get_lines()[0].get_xdata()) == CELLS
+    assert len(axes.mean.get_legend().get_texts()) == 96

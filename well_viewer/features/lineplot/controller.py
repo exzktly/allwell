@@ -928,6 +928,7 @@ def redraw_line_plots(
     _cdf_xrange = (_edit_float("_cdf_xmin_edit", 0.0),
                    _edit_float("_cdf_xmax_edit", 300.0))
     axes = LineAxes(ax_mean, ax_frac, ax_n, ax_cdf)
+    _full_fidelity = bool(getattr(ctx.state.plot, "export_full_fidelity", False))
     render_line_series(
         axes, series_list,
         fov_active=_fov_active, fc_active=bool(fc_vs_ctrl or fc_vs_t0),
@@ -938,12 +939,15 @@ def redraw_line_plots(
         cdf_xrange=_cdf_xrange,
         empty_cdf_msg=f"No {ctx.state.channel.active_channel.upper()} data found.",
         draggable_legends=True,
-        # Screen budgets. The export paths pass neither and so draw every CDF
-        # vertex and name every trace: a figure saved at 300 dpi is read at a
-        # resolution where both can matter, and a silently thinned export is a
-        # degraded artifact that looks like a complete one.
-        cdf_point_budget=SCREEN_CDF_POINTS,
-        legend_max=SCREEN_LEGEND_ENTRIES,
+        # Screen budgets — dropped while a capture is in flight. The batch
+        # exporter renders onto its own axes and never passes them; the tab's
+        # own Export menu saves *this* figure object, so it raises
+        # ``export_full_fidelity`` and repaints before capturing. A figure read
+        # at 300 dpi has room for every CDF vertex and every trace name, and a
+        # silently thinned export is a degraded artifact that looks exactly like
+        # a complete one.
+        cdf_point_budget=None if _full_fidelity else SCREEN_CDF_POINTS,
+        legend_max=None if _full_fidelity else SCREEN_LEGEND_ENTRIES,
     )
 
     ctx.notify.set_status(line_status_text(

@@ -294,3 +294,94 @@ def test_the_cdf_memo_declines_on_a_different_column(ctx):
     base = _cdf(ctx)
     other = _cdf(ctx, val_col="mcherry_mean_intensity")
     assert not np.array_equal(base, other)
+
+
+# ── The scatter-gate signature, which no argument carries ────────────────────
+#
+# ``_gate_cache_sig`` is the one key component covering ctx state that appears in
+# no argument: the thresholding on-column, the "use scatter gates" flag, the gate
+# geometry and both choice sets. The file docstring claimed every declared
+# component was mutated on its own; these are the cases that were missing, and
+# they are the ones that matter most, because nothing in the call signature would
+# hint that the answer had changed.
+
+def test_turning_on_scatter_thresholding_declines(ctx):
+    """Gate membership becomes the on-population, so the fraction changes.
+
+    The flag alone is not enough to activate it: ``_thresh_on_col`` returns
+    ``None`` unless a gate also exists, so a first draft of this test that set
+    only the flag asserted a state the app correctly treats as thresholding-off.
+    That was the test being wrong, not the key.
+    """
+    ctx.state.dataset.cache[WELL]["Gate_On"] = [1] * 6 + [0] * 6
+    base = _agg(ctx)
+    ctx.state.cell_gating.use_scatter_thresh = True
+    ctx.state.cell_gating.scatter_gates = [
+        {"name": "Gate 1", "x_col": "gfp_mean_intensity",
+         "y_col": "mcherry_mean_intensity", "x0": 0.0, "x1": 50.0,
+         "y0": 0.0, "y1": 50.0},
+    ]
+    ctx.state.cell_gating.thresh_choices = None
+    assert _agg(ctx) != base, (
+        "switching the on-population from 'value > threshold' to gate "
+        "membership returned the old fractions"
+    )
+
+
+def test_editing_a_gate_in_place_declines(ctx):
+    """A gate kept by name but moved is a different gate.
+
+    The geometry appears in no argument, so if the signature did not fold it in,
+    resizing a box would leave every cached aggregate valid by key and wrong by
+    value.
+    """
+    ctx.state.cell_gating.use_scatter_thresh = True
+    ctx.state.cell_gating.scatter_gates = [
+        {"name": "Gate 1", "x_col": "gfp_mean_intensity",
+         "y_col": "mcherry_mean_intensity", "x0": 0.0, "x1": 50.0,
+         "y0": 0.0, "y1": 50.0},
+    ]
+    base = _agg(ctx)
+    ctx.state.cell_gating.scatter_gates = [
+        {"name": "Gate 1", "x_col": "gfp_mean_intensity",
+         "y_col": "mcherry_mean_intensity", "x0": 0.0, "x1": 999.0,
+         "y0": 0.0, "y1": 999.0},
+    ]
+    assert _agg(ctx) != base, "a gate resized in place kept its name and its key"
+
+
+def test_narrowing_the_gate_selection_declines(ctx):
+    """Which gates are ticked is part of the answer, not of the arguments."""
+    ctx.state.cell_gating.use_scatter_thresh = True
+    ctx.state.cell_gating.scatter_gates = [
+        {"name": "Gate 1", "x_col": "gfp_mean_intensity",
+         "y_col": "mcherry_mean_intensity", "x0": 0.0, "x1": 50.0,
+         "y0": 0.0, "y1": 50.0},
+    ]
+    ctx.state.cell_gating.thresh_choices = None       # all gates
+    base = _agg(ctx)
+    ctx.state.cell_gating.thresh_choices = set()      # none of them
+    assert _agg(ctx) != base, "the gate selection did not reach the key"
+
+
+def test_a_different_timepoint_column_declines(ctx):
+    """``tp_col`` — declared in the key and previously untested."""
+    ctx.state.dataset.cache[WELL]["other_hours"] = 99.0
+    base = _agg(ctx)
+    other = _agg(ctx, tp_col="other_hours")
+    assert other != base
+
+
+def test_a_different_well_declines(ctx):
+    """``label`` — the most obvious component, and it had no case either."""
+    other_rows = _rows()
+    other_rows[VAL_COL] = other_rows[VAL_COL] + 500.0
+    ctx.state.dataset.well_paths["B02"] = ctx.state.dataset.data_dir / "B02.csv"
+    ctx.state.dataset.cache["B02"] = other_rows
+    from well_viewer.domain.stats_compute import aggregate_well_cached
+
+    a = _agg(ctx)
+    b = aggregate_well_cached(
+        ctx, "B02", threshold=0.0, use_sem=False, val_col=VAL_COL,
+        fluor_gates={}, per_fov_spread=False, tp_col="timepoint_hours")
+    assert a != b, "two different wells were served the same aggregate"

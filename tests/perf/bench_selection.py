@@ -238,8 +238,23 @@ def run_collects(ctx, repeats: int) -> dict:
     out: dict = {}
     tp0 = TIMEPOINTS[0][1]
 
-    def _measure(name, setup, call):
+    def _measure(name, setup, call, *, cold=True):
+        """Time one scenario, from a cold memo unless told otherwise.
+
+        The invalidate is the whole point. Without it each scenario inherited
+        the previous one's memo, so any scenario sharing a key with an earlier
+        row measured cache hits and reported them as click cost — the pooled
+        group row came out 920x faster than a cold click actually is. A harness
+        that fails open will confirm anything, and this one is the evidence for
+        every number in the PR.
+
+        ``timed`` takes best-of-N, so with a memo iterations 2..N are hits by
+        construction; ``repeats > 1`` therefore reports warm times whatever this
+        does, and is refused below.
+        """
         setup()
+        if cold:
+            ctx.state.stats_cache.invalidate()
         with CallCounter(stats_compute, "aggregate_well") as counter:
             ms, _ = timed(call, repeats)
         out[name] = (ms, counter.count)
@@ -261,6 +276,10 @@ def run_collects(ctx, repeats: int) -> dict:
         "line collect, 95 -> 96 wells",
         _setup_one_more,
         lambda: collect_line_series(ctx, threshold=app_threshold(ctx), use_sem=True),
+        # Deliberately NOT cold: the setup warms 95 wells and the measured call
+        # adds one. A cold memo here would measure a first draw, which is a
+        # different question from the one this row asks.
+        cold=False,
     )
     _measure(
         "bar collect, 96 wells x 6 tps",
@@ -362,7 +381,10 @@ def run_draw(ctx, repeats: int) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--plate", type=Path, default=Path("/tmp/allwell-bench-plate"))
-    ap.add_argument("--repeats", type=int, default=1)
+    ap.add_argument(
+        "--repeats", type=int, default=1,
+        help="best-of-N. Only 1 is meaningful: the collect paths memoise, so "
+             "every iteration after the first is a cache hit by construction.")
     ap.add_argument("--no-draw", action="store_true")
     args = ap.parse_args()
 

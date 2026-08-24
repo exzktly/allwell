@@ -265,13 +265,15 @@ def _set_groups_hidden(ctx, sels, *, target=None) -> None:
             changed = True
     if changed:
         # Visibility, not definition: the statistics on this plate are still
-        # correct, so they are kept. See ``note_group_visibility_changed``.
-        # Reached through the window seam rather than called directly, the way
-        # the old ``_invalidate_stats_cache`` call was — that seam is what the
-        # pure-logic tests stub, and bypassing it made them reach a Qt button
-        # walk with a context that has no widgets.
-        app._note_group_visibility_changed()
-        app._rebuild_all()
+        # correct, so they are kept.
+        #
+        # This is ONE call, not two. An earlier version notified and then called
+        # ``_rebuild_all()`` beside it — whose first act is to invalidate the
+        # stats cache — so the whole plate's statistics were discarded a line
+        # after being deliberately preserved, and the change bought nothing at
+        # all. The refresh has to know not to invalidate; being told separately
+        # is not the same thing.
+        app._rebuild_all(invalidate=False)
 
 
 PLOTTING_TABS = frozenset({
@@ -976,14 +978,24 @@ def enforce_well_exclusivity(ctx) -> None:
 
 
 
-def rebuild_all(ctx) -> None:
+def rebuild_all(ctx, *, invalidate: bool = True) -> None:
     app = ctx.window  # transitional bridge (A3)
     """
     Single authoritative refresh called after ANY data change.
     Always synchronous — no debounce — because it is only called on
     explicit user actions (button clicks / dialog OK), never during drag.
+
+    ``invalidate=False`` is for the one caller whose change cannot move a
+    computed value: toggling a group's *visibility*. Everything else here — the
+    Groups panel, the plate map, the visible redraws — still has to happen, so
+    that caller needs this function rather than a smaller one; what it does not
+    need is the plate's statistics thrown away. See
+    :func:`note_group_visibility_changed`, which measured that.
     """
-    app._invalidate_stats_cache()
+    if invalidate:
+        app._invalidate_stats_cache()
+    else:
+        note_group_visibility_changed(ctx)
     app._groups_centre_refresh()          # Home: GROUPS panel + map
     app._refresh_sidebar_map()            # line-graph picker: rep colours
     # Only redraw plots that are actually on screen. An off-screen plot is fully

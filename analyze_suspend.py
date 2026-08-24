@@ -26,16 +26,20 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
     QWidget,
 )
 
 from dataclasses import dataclass
 
+import theme
 from services import run_journal
 from services.run_spec import RunSpec, RunSpecError
 from services.suspend_record import (
@@ -60,8 +64,24 @@ class _Resumable:
 
     spec: dict
     output_dir: str
+    #: The whole offer as one sentence. Not what the banner renders — it is
+    #: what the *log line* and the discard dialog say, both of which are prose
+    #: in a stream of prose and have nowhere to put a layout. Composed from the
+    #: three fields below rather than written beside them, so the strip and the
+    #: log cannot come to describe the same run differently.
     headline: str
     from_journal: bool
+    #: Two words naming the state the run is in — "Failed run", "Suspended
+    #: run". The first thing read, and the only part that is the same length
+    #: for every offer, so the strip has a fixed shape whatever it is about.
+    kicker: str = ""
+    #: Which plate, and when — the identity line. Answers "is this about the
+    #: dataset I am looking at?", which is the question the user has before
+    #: any other and the one an unscoped offer used to get wrong.
+    title: str = ""
+    #: What happened, and what Resume will do about it. Prose, and the only
+    #: part that wraps to more than one line.
+    detail: str = ""
     #: When the run stopped, as a unix timestamp. Only used to rank offers
     #: across the two records when no folder is on the form — each record is
     #: already newest-first within itself, but "the newest of both" cannot be
@@ -80,15 +100,53 @@ _UNFINISHED_PHRASES = {
 }
 
 
-def _unfinished_headline(out_dir: str, journal) -> str:
-    """One sentence naming the plate, when the run started, and how it ended."""
+#: The two words the strip leads with for each outcome — the *state*, not the
+#: sentence about it. Separate from the phrases above because they are read in
+#: different places: the kicker is scanned, the phrase is read. A run the app
+#: was killed during has no outcome recorded at all and is keyed on ``None``,
+#: for the reason :data:`AnalyzeSuspendMixin._UNFINISHED_CAUSE` gives — reaching
+#: it as a fallback would describe an outcome outside the roster as a crash,
+#: which is a specific claim about a thing that did not happen.
+_UNFINISHED_KICKERS = {
+    "error": "Failed run",
+    "stopped": "Stopped run",
+    "suspended": "Suspended run",
+    None: "Interrupted run",
+}
+
+#: What Resume does, said once. The strip, the one-sentence headline and the
+#: log line all say it, and a user who reads one and then another must not be
+#: told two things — which is what three separately-worded copies of this
+#: sentence had already produced. The wording is the manual's.
+_INCREMENTAL_NOTE = ("Resuming continues it, computing only the "
+                     "field/timepoint groups still missing.")
+
+
+def _unfinished_parts(out_dir: str, journal) -> tuple[str, str, str, str]:
+    """``(kicker, title, detail, headline)`` for a run the journal calls unfinished.
+
+    One function rather than four because every one of them is built from the
+    same two facts — when it started and how it ended — and a strip whose
+    kicker says "Stopped run" above a sentence saying it failed would be worse
+    than either alone. The headline is composed here too, from the same locals,
+    so the one-sentence rendering the log and the discard dialog use cannot
+    drift from the three-part one on screen.
+    """
     when = time.strftime("%d %b %H:%M", time.localtime(journal.opened_at))
     if journal.is_open:
+        outcome = None
         ended = "never finished — All-Well closed while it was going"
     else:
-        ended = _UNFINISHED_PHRASES.get(journal.outcome or "", "did not finish")
-    return (f"A run on {plate_name(out_dir)} started {when} and {ended}. "
-            f"Resuming continues it, computing only what is missing.")
+        outcome = journal.outcome or ""
+        ended = _UNFINISHED_PHRASES.get(outcome, "did not finish")
+    plate = plate_name(out_dir)
+    kicker = _UNFINISHED_KICKERS.get(outcome, "Unfinished run")
+    return (
+        kicker,
+        f"{plate} · started {when}",
+        f"It {ended}. {_INCREMENTAL_NOTE}",
+        f"A run on {plate} started {when} and {ended}. {_INCREMENTAL_NOTE}",
+    )
 
 
 class AnalyzeSuspendMixin:
@@ -193,29 +251,102 @@ class AnalyzeSuspendMixin:
 
     # ── the banner ───────────────────────────────────────────────────────
     def _build_resume_banner(self, parent: QWidget) -> QWidget:
-        """A strip above the form offering the most recent suspended run.
+        """A card above the form offering the most recent unfinished run.
 
         Hidden whenever there is nothing to resume, which is the normal state —
-        it costs one row of chrome only when it has something to say.
+        it costs a block of chrome only when it has something to say.
+
+        **Stacked, not a row, and deliberately not ``widgets.ContextBanner``.**
+        That widget is this app's banner idiom and the first thing to reach for,
+        but it is one ``QHBoxLayout``: glyph, sentence, confirm, cancel, all on
+        one line. It fits where it is used because it is used on a *page* — the
+        Job Queue borrows the wide right-hand area — and a sentence beside two
+        buttons there still has most of the width. This strip lives in the
+        Analyze sidebar, which is ``app_shell_view.RAIL_W`` (329 px) and fixed,
+        and whose scrolling viewport is 319 px of that. Measured in a real
+        ``AnalyzeTab`` at the app's default window size, ``Resume`` and
+        ``Discard`` beside the text leave the label **139 px**, so the offer
+        reflows into a 192-px column of twelve lines running down the side of
+        two buttons floating in the middle of it. Stacking the text above its
+        own action row gives the same words **295 px** and four lines.
+
+        Four labels rather than one paragraph, for the same reason: the strip
+        has to answer four questions in a fixed order — what state the run is
+        in, which plate and when, what happened and what Resume will do, and
+        what the run recorded — and a single wrapping ``QLabel`` renders all
+        four in one weight with no way to tell where one ends. The tally in
+        particular is the *last* thing worth reading and was the hardest to
+        skip past.
         """
         banner = QWidget(parent)
         banner.setObjectName("ResumeBanner")
-        row = QHBoxLayout(banner)
-        row.setContentsMargins(12, 8, 12, 8)
-        row.setSpacing(8)
+        # A plain QWidget subclass ignores its own background rule without
+        # this, so the card would paint nothing and read as loose page chrome —
+        # which is what it did. ContextBanner carries the same line.
+        banner.setAttribute(Qt.WA_StyledBackground, True)
+        banner.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        col = QVBoxLayout(banner)
+        col.setContentsMargins(theme.Spacing.md, theme.Spacing.sm,
+                               theme.Spacing.md, theme.Spacing.sm)
+        col.setSpacing(theme.Spacing.xs)
+
+        self._resume_kicker = QLabel("", banner)
+        self._resume_kicker.setObjectName("AnalyzeBannerKicker")
+        col.addWidget(self._resume_kicker)
+
+        self._resume_title = QLabel("", banner)
+        self._resume_title.setObjectName("AnalyzeBannerTitle")
+        self._resume_title.setWordWrap(True)
+        col.addWidget(self._resume_title)
+
+        # Keeps the name the mixin and its tests have always used: this is the
+        # label carrying the offer's prose.
         self._resume_label = QLabel("", banner)
+        self._resume_label.setObjectName("AnalyzeBannerBody")
         self._resume_label.setWordWrap(True)
-        row.addWidget(self._resume_label, 1)
-        resume_btn = QPushButton("Resume", banner)
-        resume_btn.setProperty("variant", "primary")
-        resume_btn.clicked.connect(self._resume_suspended)
-        row.addWidget(resume_btn)
-        discard_btn = QPushButton("Discard", banner)
-        discard_btn.clicked.connect(self._discard_suspended)
-        row.addWidget(discard_btn)
+        col.addWidget(self._resume_label)
+
+        self._resume_tally = QLabel("", banner)
+        self._resume_tally.setObjectName("AnalyzeBannerTally")
+        self._resume_tally.setWordWrap(True)
+        col.addWidget(self._resume_tally)
+
+        col.addWidget(self._build_resume_actions(banner))
         self._resume_banner = banner
         banner.setVisible(False)
         return banner
+
+    def _build_resume_actions(self, banner: QWidget) -> QWidget:
+        """The action row: Discard, then Resume, pushed to the right.
+
+        Resume last because it is the one the strip exists for, and last is
+        where the eye finishes a right-aligned group. Discard is not destructive
+        — it drops two bookkeeping pointers and deletes nothing the run produced
+        — but it is irreversible from the strip, so it keeps the default control
+        look rather than being reduced to a link that can be hit on the way past,
+        and the accent fill on Resume is what carries the ranking.
+        """
+        row = QWidget(banner)
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(0, theme.Spacing.xs, 0, 0)
+        lay.setSpacing(theme.Spacing.sm)
+        lay.addStretch(1)
+
+        discard_btn = QPushButton("Discard", row)
+        discard_btn.setToolTip(
+            "Stop offering this run. Nothing is deleted — every well that "
+            "already finished keeps its CSV and its out.zip, and you can pick "
+            "the plate up later by re-running the input with 'incremental' "
+            "ticked.")
+        discard_btn.clicked.connect(self._discard_suspended)
+        lay.addWidget(discard_btn)
+
+        resume_btn = QPushButton("Resume", row)
+        resume_btn.setProperty("variant", "primary")
+        resume_btn.setToolTip(_INCREMENTAL_NOTE)
+        resume_btn.clicked.connect(self._resume_suspended)
+        lay.addWidget(resume_btn)
+        return row
 
     def _hide_resume_banner(self) -> None:
         """Take the strip down without reading anything.
@@ -247,7 +378,16 @@ class AnalyzeSuspendMixin:
         if offer is None or getattr(self, "_running", False):
             banner.setVisible(False)
             return
-        self._resume_label.setText(offer.headline + self._journal_detail(offer))
+        self._resume_kicker.setText(offer.kicker)
+        self._resume_title.setText(offer.title)
+        self._resume_label.setText(offer.detail)
+        tally = self._journal_tally(offer)
+        self._resume_tally.setText(tally)
+        # An offer whose journal recorded nothing has no tally line, and an
+        # empty QLabel still takes its line height plus the column's spacing —
+        # a gap under the prose with nothing in it, which reads as a rendering
+        # fault rather than as absence.
+        self._resume_tally.setVisible(bool(tally))
         banner.setVisible(True)
 
     # ── what there is to resume ──────────────────────────────────────────
@@ -365,11 +505,12 @@ class AnalyzeSuspendMixin:
             _Resumable(
                 spec=run.spec,
                 output_dir=run.output_dir,
-                headline=(
-                    f"A suspended run is waiting: {run.describe()}. Resuming "
-                    f"continues it — only the field/timepoint groups still "
-                    f"missing are computed."),
+                headline=(f"A suspended run is waiting: {run.describe()}. "
+                          f"{_INCREMENTAL_NOTE}"),
                 from_journal=False,
+                kicker="Suspended run",
+                title=f"{run.plate()} · suspended {run.when()}",
+                detail=f"It got {run.progress()}. {_INCREMENTAL_NOTE}",
                 at=float(getattr(run, "suspended_at", 0.0) or 0.0),
             )
             for run in load_all()
@@ -408,11 +549,15 @@ class AnalyzeSuspendMixin:
                 # this: the journal is closed ``suspended``, which is exactly
                 # what ``is_unfinished`` is for.
                 continue
+            kicker, title, detail, headline = _unfinished_parts(out_dir, journal)
             offers.append(_Resumable(
                 spec=journal.spec,
                 output_dir=out_dir,
-                headline=_unfinished_headline(out_dir, journal),
+                headline=headline,
                 from_journal=True,
+                kicker=kicker,
+                title=title,
+                detail=detail,
                 # When it stopped, not when it began: a run opened yesterday
                 # and killed this morning is newer than one that began and
                 # ended in between. An open record has no closing time, so it
@@ -421,10 +566,18 @@ class AnalyzeSuspendMixin:
             ))
         return offers
 
-    def _journal_detail(self, offer: _Resumable) -> str:
-        """The per-well line under the headline, or ``""`` when there is none."""
+    def _journal_tally(self, offer: _Resumable) -> str:
+        """The run's own per-well tally, as its own line, or ``""`` for none.
+
+        ``RunRecord.tally`` returns a sentence written to be *concatenated* — it
+        opens with a space, and with "It recorded", so it reads on from whatever
+        precedes it. The other surface that renders it (the pre-run report in
+        ``analyze_preflight``) still concatenates, so the shape stays as it is
+        and the space is stripped here. Standing alone the sentence is still
+        correct: the line above it has just named the run.
+        """
         journal = run_journal.read_journal(offer.output_dir)
-        return journal.tally() if journal is not None else ""
+        return journal.tally().strip() if journal is not None else ""
 
     def _forget_resumable(self, offer: _Resumable) -> None:
         """Stop offering *offer* — from **both** records, not the one it came from.
@@ -621,11 +774,10 @@ class AnalyzeSuspendMixin:
             # that then failed to start would strand the half-finished output.
             self._forget_resumable(offer)
             self.refresh_resume_banner()
-            self._log_line(
-                f"\n[Resuming] {offer.headline} Incremental, so only the "
-                f"field/timepoint groups missing from the output are computed.\n",
-                "INFO",
-            )
+            # The headline already carries `_INCREMENTAL_NOTE`; the sentence
+            # that used to follow it here said the same thing in different
+            # words, which on a log line reads as two separate claims.
+            self._log_line(f"\n[Resuming] {offer.headline}\n", "INFO")
         except RunSpecError as exc:
             QMessageBox.critical(self, "Resume Error", str(exc))
         except Exception:

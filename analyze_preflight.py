@@ -63,9 +63,12 @@ import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QTimer, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtWidgets import (
+    QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+)
 
+import theme
 from services import run_journal
 from services.input_resolution_service import plan_incremental_scope
 from pipeline import completeness
@@ -109,34 +112,79 @@ class AnalyzePreflightMixin:
         journal — so they are built together rather than from two lines in
         ``analyze_tab_form``, which is against its line budget and whose every
         addition has to buy its place.
+
+        They share a holder purely so there is a gap *between* them when both
+        are up: the form's own layout runs at zero spacing, and two bordered
+        cards stacked flush read as one box with a line through it. The holder
+        takes no margins of its own — the cards run the full width of the
+        sidebar, which is what puts their text on the same 12-px left edge as
+        every section body beneath — and a holder whose children are both
+        hidden, which is the normal state, contributes no height at all.
         """
-        parent.layout().addWidget(self._build_resume_banner(parent))
-        parent.layout().addWidget(self._build_preflight_banner(parent))
+        holder = QWidget(parent)
+        strips = QVBoxLayout(holder)
+        strips.setContentsMargins(0, 0, 0, 0)
+        strips.setSpacing(theme.Spacing.sm)
+        strips.addWidget(self._build_resume_banner(holder))
+        strips.addWidget(self._build_preflight_banner(holder))
+        parent.layout().addWidget(holder)
 
     def _build_preflight_banner(self, parent: QWidget) -> QWidget:
-        """The strip that reports what is already in the output folder.
+        """The card that reports what is already in the output folder.
 
         Hidden until there is something to report, which is the normal state
-        for a fresh plate — it costs a row of chrome only when it has something
-        to say.
+        for a fresh plate — it costs a block of chrome only when it has
+        something to say.
+
+        Built to the same shape as the resume strip directly above it (see
+        ``analyze_suspend._build_resume_banner`` for why that shape is stacked
+        rather than a row): text first, its own right-aligned action row
+        beneath. The reason is sharper here, because this one's buttons are the
+        wider pair: *Load these settings* and *Dismiss* side by side left the
+        report **74 px** of the sidebar's 319-px viewport to wrap into — 224 px
+        of text two words wide — and the report runs to three sentences once
+        the coverage scan and the scope line have landed. Stacked, the same
+        words get 295 px.
+
+        It is the quieter of the two by design. The resume strip carries an
+        action the user can take right now and is bordered in ``accent``; this
+        one states what is already true of the folder and is bordered in
+        ``border``. Their fills are the same, so they read as one family of
+        report rather than as two unrelated pieces of chrome.
         """
         banner = QWidget(parent)
         banner.setObjectName("PreflightBanner")
-        row = QHBoxLayout(banner)
-        row.setContentsMargins(12, 8, 12, 8)
-        row.setSpacing(8)
+        # Without this a plain QWidget subclass ignores its own background
+        # rule — see widgets/context_banner.py, which carries the same line.
+        banner.setAttribute(Qt.WA_StyledBackground, True)
+        banner.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        col = QVBoxLayout(banner)
+        col.setContentsMargins(theme.Spacing.md, theme.Spacing.sm,
+                               theme.Spacing.md, theme.Spacing.sm)
+        col.setSpacing(theme.Spacing.xs)
         self._preflight_label = QLabel("", banner)
+        self._preflight_label.setObjectName("AnalyzeBannerBody")
         self._preflight_label.setWordWrap(True)
-        row.addWidget(self._preflight_label, 1)
-        self._preflight_load_btn = QPushButton("Load these settings", banner)
+        col.addWidget(self._preflight_label)
+
+        row = QWidget(banner)
+        actions = QHBoxLayout(row)
+        actions.setContentsMargins(0, theme.Spacing.xs, 0, 0)
+        actions.setSpacing(theme.Spacing.sm)
+        actions.addStretch(1)
+        dismiss = QPushButton("Dismiss", row)
+        dismiss.setToolTip(
+            "Close this report for the folder in the form. It comes back if "
+            "you point somewhere else, or once a run has written here again.")
+        dismiss.clicked.connect(self._dismiss_preflight)
+        actions.addWidget(dismiss)
+        self._preflight_load_btn = QPushButton("Load these settings", row)
         self._preflight_load_btn.setToolTip(
             "Fill the form with the settings that produced the output already "
             "in this folder. Reprocessing options are left as you have them.")
         self._preflight_load_btn.clicked.connect(self._load_previous_settings)
-        row.addWidget(self._preflight_load_btn)
-        dismiss = QPushButton("Dismiss", banner)
-        dismiss.clicked.connect(self._dismiss_preflight)
-        row.addWidget(dismiss)
+        actions.addWidget(self._preflight_load_btn)
+        col.addWidget(row)
         self._preflight_banner = banner
         banner.setVisible(False)
 

@@ -28,6 +28,7 @@ import zipfile
 
 import pytest
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QLabel
 
 from services import run_journal as J
 from services import suspend_record
@@ -95,7 +96,17 @@ def _point_at(tab, path) -> None:
 
 
 def _text(tab) -> str:
-    return tab._resume_label.text()
+    """Everything the strip has on screen, whichever label holds it.
+
+    The offer is rendered across four labels — the state it is in, which plate
+    and when, the prose, and the run's own tally — because one wrapping
+    paragraph beside two buttons left the text 149 px of the 329-px sidebar.
+    Reading the labels rather than one of them is also the stronger assertion:
+    these tests are about what the user is told, not about which widget the
+    words landed in.
+    """
+    return " ".join(lbl.text() for lbl in tab._resume_banner.findChildren(QLabel)
+                    if lbl.text())
 
 
 # ── which runs are offered at all ───────────────────────────────────────────
@@ -188,8 +199,10 @@ def test_the_offer_names_the_plate_not_the_output_folder(tab, tmp_path):
     plate = _plate(tmp_path, "PlateA")
     _journal(plate, outcome="error")
     _point_at(tab, plate)
-    assert "PlateA" in _text(tab)
-    assert "A run on out " not in _text(tab)
+    assert tab._resume_title.text().startswith("PlateA"), (
+        "the identity line leads with the plate, not with the folder it "
+        "happens to be written into")
+    assert not tab._resume_title.text().startswith("out")
 
 
 @pytest.mark.parametrize("out_dir,expected", [

@@ -373,7 +373,7 @@ Analyze at a raw `.ome.tif` just shows a reminder to convert it.
 
 You can also explicitly override the output folder.
 
-**If that output folder already holds a run, a strip above the form says so
+**If that output folder already holds a run, a card above the form says so
 before you press anything.** It names when the last run against this folder
 started and how it ended — completed, failed, stopped, suspended, or *never
 finished*, which means All-Well was closed while it was going — followed by how
@@ -391,7 +391,10 @@ changes until you press it, so anything you have already typed is safe. The
 reprocessing options — **force**, the per-well force list, and **incremental** —
 are deliberately *not* restored: they describe what the last run was told to do,
 not what you want this one to do. A plate that was forced once would otherwise
-be forced again the moment you loaded its settings back. **Dismiss** hides the strip for that folder.
+be forced again the moment you loaded its settings back. Both buttons sit on
+their own row beneath the report, so the text has the full width of the sidebar.
+**Dismiss** hides the card for that folder; it comes back if you point somewhere
+else, or once a run has written there again.
 
 ### 3. Channel tokens
 
@@ -945,12 +948,14 @@ and by `remote_fetch_report.txt` in the output folder.
   remembers what you were running. Use it when the run is fine but you need the
   machine back — it takes a little longer to stop than **Stop** does, because it
   is waiting for those fields to land. You can close All-Well afterwards; next
-  time you open the Analyze pane a strip at the top offers to carry on, naming
-  the folder and how far it got. **Resume** continues it, computing only the
-  field/timepoint groups still missing. **Discard** forgets the offer and
-  deletes nothing — the results already written stay exactly as they are, and
-  you can still finish the plate later by re-running that input with
-  **incremental** ticked.
+  time you open the Analyze pane a card at the top of the sidebar offers to
+  carry on. It reads top to bottom: what state the run is in (*Suspended run*),
+  which plate and when (*Plate_07 · suspended 24 Aug 14:32*), what resuming will
+  do, and what the run recorded. **Resume**, at the bottom right, continues it,
+  computing only the field/timepoint groups still missing. **Discard** beside it
+  forgets the offer and deletes nothing — the results already written stay
+  exactly as they are, and you can still finish the plate later by re-running
+  that input with **incremental** ticked.
 - **Stop** signals the entire pipeline process group (sub-workers included) and
   discards whatever is in flight. Press it a second time during a Suspend if you
   do not want to wait for the in-flight fields.
@@ -960,10 +965,12 @@ and by `remote_fetch_report.txt` in the output folder.
 - **A run that does not finish is offered back the same way, whatever ended it.**
   You do not have to have pressed Suspend: a run that failed, one you stopped,
   and one cut short because All-Well closed or crashed all leave the wells that
-  got through on disk, and all three are offered. The strip names the plate, says
-  when the run started and how it ended, and how many wells it recorded as
-  finished, failed, or produced on a remote machine but never downloaded —
-  **Resume** picks it up from there.
+  got through on disk, and all three are offered. The card's first line names
+  which of them it was — *Failed run*, *Stopped run*, *Suspended run*, or
+  *Interrupted run* for one cut short because All-Well closed or crashed — and
+  the lines under it name the plate, say when the run started and how it ended,
+  and report how many wells it recorded as finished, failed, or produced on a
+  remote machine but never downloaded. **Resume** picks it up from there.
 - The offer is about **the folder in the input field**. If you have not chosen
   one yet — the state the pane opens in — it offers the most recent unfinished
   run on any plate, which is how you carry on with something from yesterday.

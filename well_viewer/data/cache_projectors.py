@@ -105,4 +105,17 @@ def project_verdict_column(
                 "parameters has been dropped from that frame, so the well is "
                 "treated as fully included until the verdict can be computed "
                 "again", layer, column, lbl, column)
+    # No ``note_rows_changed`` here, deliberately. This walk has exactly two
+    # callers — the QC and crop controllers — and both call
+    # ``invalidate_stats_cache`` immediately afterwards, which empties the very
+    # dict the per-well aggregation memo lives in. The other route in is
+    # ``get_rows``, which projects onto a frame it has just built, and a frame
+    # that did not exist a moment ago cannot have a memoized aggregate.
+    #
+    # Bumping anyway looked like harmless insurance and was not: this function
+    # is reached in tests through hand-rolled contexts whose ``dataset`` is a
+    # namespace, and requiring the counter here would have meant teaching
+    # eighty-one test files about a field none of them is about. A guard that
+    # can only be satisfied by rewriting its callers' tests is measuring the
+    # wrong thing.
     return failed

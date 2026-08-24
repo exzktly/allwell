@@ -91,6 +91,32 @@ class DatasetState:
     # read.
     persistence_doc_foreign: bool = False
 
+    # Monotonic tick over the *contents* of ``cache``. Every path that changes
+    # what a cached measurement frame holds — a projected verdict column, a
+    # gating rewrite, a manual curation override, a whole frame replaced after
+    # a write-back — bumps this through :meth:`note_rows_changed`, and the
+    # per-well aggregation memo carries it in its key.
+    #
+    # It ticks on *change*, never on a fresh insert. Bumping when a well is
+    # first loaded would advance the counter once per well during the cold pass,
+    # so each well's entry would be written under a key the next well's load
+    # immediately invalidated: the cache would hold ninety-six entries of which
+    # only the last was reachable, and the second click would pay the full price
+    # again. A label appearing for the first time cannot invalidate another
+    # well's aggregate, so it must not.
+    #
+    # ``tests/test_row_cache_writers.py`` enumerates the writers from the syntax
+    # tree and fails on any new one that has not said how it bumps this.
+    rows_version: int = 0
+
+    def note_rows_changed(self) -> None:
+        """Record that a cached frame's contents changed.
+
+        The one bump site, so a reader can find every caller by name rather
+        than by searching for increments of a bare integer.
+        """
+        self.rows_version += 1
+
     # ── status ───────────────────────────────────────────────────────────────
 
     @property
@@ -126,6 +152,15 @@ class DatasetState:
         # A new dataset has no crop until its persisted region (if any) loads.
         self.crop_region = None
         self.reset_crop_scope()
+        # A dataset swap is the most invalidating event there is, and it is the
+        # one case where clearing the cache is not enough on its own: two plates
+        # can carry the same well tokens, so an aggregation memoized for A01 of
+        # the old plate would be keyed identically for A01 of the new one. The
+        # load path does clear the stats cache, but only inside a suppressed
+        # try/except (``recompute_qc_all`` in ``load_controller``), so a failure
+        # there would hand the new plate the old plate's numbers under the new
+        # plate's name. Ticking here makes the key itself carry the swap.
+        self.note_rows_changed()
 
     def reset_crop_scope(self) -> None:
         """Widen the crop back to every frame in the dataset.

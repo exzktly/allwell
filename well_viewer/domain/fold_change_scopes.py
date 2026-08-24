@@ -191,8 +191,17 @@ def redraw_scopes_after_load(app, *, default_redraw=None) -> None:
     """
     visible = visible_scope_names(app)
     dirty = _dirty_set(app)
+    # Identity on the *scope*, not on its redraw callable. ``line``,
+    # ``distribution`` and ``heatmap`` are all registered with the same
+    # ``_redraw_app_scope`` function object, so ``scope.redraw is
+    # default_redraw`` matched all three — and cleared the dirty marks that
+    # ``plot_orchestrator.redraw`` had just set for the two hidden ones, leaving
+    # them neither drawn nor owed. The default scope is one scope; name it.
+    default_name = next(
+        (s.name for s in registered_scopes() if s.redraw is default_redraw),
+        None) if default_redraw is not None else None
     for scope in registered_scopes():
-        if default_redraw is not None and scope.redraw is default_redraw:
+        if default_name is not None and scope.name == default_name:
             dirty.discard(scope.name)
         elif scope.name in visible:
             _call_redraw(app, scope)

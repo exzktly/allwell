@@ -34,7 +34,7 @@ from well_viewer.domain import plot_members as _members
 from well_viewer.domain.time_rescale import format_scaled as _rescale_tp
 from well_viewer.domain.stats_compute import (
     aggregate_group,
-    aggregate_well,
+    aggregate_well_cached,
     compute_rep_n_above_stats,
     compute_rep_n_above_total,
     compute_rep_per_fov_stats,
@@ -439,10 +439,10 @@ def collect_bar_items(
                     # error bars), consistent with the Mean/Fraction panels —
                     # rather than a spread-less total.
                     n_above_val, n_above_err = compute_rep_n_above_stats(
-                        ctx, rset, target_t, use_sem)
+                        ctx, rset, target_t, use_sem, threshold)
                 # The CSV's integer column keeps meaning the cross-well total,
                 # which is a different number from the mean drawn above.
-                n_above_total = compute_rep_n_above_total(ctx, rset, target_t)
+                n_above_total = compute_rep_n_above_total(ctx, rset, target_t, threshold)
                 t0_mean = None
                 t0_spread = None
                 t0_frac = None
@@ -602,7 +602,7 @@ def collect_bar_items(
             fc_force_nan, fc_nan_frac, fc_nan_n = panel_nan_flags(
                 fc_vs_ctrl, fc_outcome,
                 eff_ctrl_mean_t, eff_ctrl_frac_t, eff_ctrl_n_t)
-            pts = aggregate_well(ctx,
+            pts = aggregate_well_cached(ctx,
                 label, threshold=threshold, use_sem=use_sem,
                 val_col=ctx.state.channel.active_val_col,
                 fluor_gates=fluor_gates,
@@ -840,7 +840,7 @@ def collect_bar_items_for_group(
             rset_per_fov = replicate_unit(len(wells), per_fov_spread) == "fov"
             all_tps: set = set()
             for w in wells:
-                for t, *_ in aggregate_well(ctx, w, threshold=threshold,
+                for t, *_ in aggregate_well_cached(ctx, w, threshold=threshold,
                                             use_sem=False, val_col=val_col,
                                             fluor_gates=fluor_gates):
                     all_tps.add(t)
@@ -851,7 +851,7 @@ def collect_bar_items_for_group(
                 # integer column keeps. The spread used to be dropped on the
                 # floor here and the total conflated with index 4, so the batch
                 # bar truncated a 7.5 mean to 7 and drew no error bar.
-                ntotal = compute_rep_n_above_total(ctx, rset, t)
+                ntotal = compute_rep_n_above_total(ctx, rset, t, threshold)
                 if rset_per_fov:
                     gm, gerr, gf, gfe, gnpf_m, gnpf_s = compute_rep_per_fov_stats(
                         ctx, rset, t, threshold, use_sem)
@@ -859,7 +859,7 @@ def collect_bar_items_for_group(
                 else:
                     gm, gerr, gf, gfe = compute_rep_stats(ctx, rset, t, threshold, use_sem)
                     # Per-well mean, matching the Bar tab's own numerator.
-                    nval, nspread = compute_rep_n_above_stats(ctx, rset, t, use_sem)
+                    nval, nspread = compute_rep_n_above_stats(ctx, rset, t, use_sem, threshold)
                     # ``gfe`` is the fraction spread the producer returned; it
                     # was discarded and replaced with 0.0, so a batch export
                     # reported ``err_frac`` as zero where the tab drew a real

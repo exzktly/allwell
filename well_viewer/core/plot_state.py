@@ -132,6 +132,15 @@ class PlotState:
     # the control normalisation is applied).
     fc_order: str = "ctrl_first"  # one of {"ctrl_first", "t0_first"}
     fc_dirty_scopes: set[str] = field(default_factory=set)
+    # True only while a figure is being captured for a file, the clipboard or
+    # the Saved-Plots gallery. The Line tab draws its CDF from a sample of each
+    # well's cells and names only the first few traces in the legend, because a
+    # plate-wide selection is otherwise both illegible and slow — but the tab's
+    # own Export menu saves *the very figure object on screen*, so without this
+    # a figure saved at 300 dpi carried the screen's shortcuts into a file
+    # headed for a paper. The export actions set it, repaint, capture, clear it
+    # and repaint back.
+    export_full_fidelity: bool = False
 
     # ── fold change ──────────────────────────────────────────────────────────
 

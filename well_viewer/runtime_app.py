@@ -525,7 +525,8 @@ class WellViewerApp(QWidget):
 
     def _groups_centre_refresh(self) -> None: return groups_centre_refresh(self._ctx)
 
-    def _rebuild_all(self) -> None: return rebuild_all(self._ctx)
+    def _rebuild_all(self, *, invalidate: bool = True) -> None:
+        return rebuild_all(self._ctx, invalidate=invalidate)
 
     # ── Bar group persistence (delegates to well_viewer.persistence.bar_groups)
 

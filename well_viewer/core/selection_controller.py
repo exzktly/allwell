@@ -264,8 +264,16 @@ def _set_groups_hidden(ctx, sels, *, target=None) -> None:
             s["hidden"] = target
             changed = True
     if changed:
-        app._invalidate_stats_cache()
-        app._rebuild_all()
+        # Visibility, not definition: the statistics on this plate are still
+        # correct, so they are kept.
+        #
+        # This is ONE call, not two. An earlier version notified and then called
+        # ``_rebuild_all()`` beside it — whose first act is to invalidate the
+        # stats cache — so the whole plate's statistics were discarded a line
+        # after being deliberately preserved, and the change bought nothing at
+        # all. The refresh has to know not to invalidate; being told separately
+        # is not the same thing.
+        app._rebuild_all(invalidate=False)
 
 
 PLOTTING_TABS = frozenset({
@@ -970,14 +978,24 @@ def enforce_well_exclusivity(ctx) -> None:
 
 
 
-def rebuild_all(ctx) -> None:
+def rebuild_all(ctx, *, invalidate: bool = True) -> None:
     app = ctx.window  # transitional bridge (A3)
     """
     Single authoritative refresh called after ANY data change.
     Always synchronous — no debounce — because it is only called on
     explicit user actions (button clicks / dialog OK), never during drag.
+
+    ``invalidate=False`` is for the one caller whose change cannot move a
+    computed value: toggling a group's *visibility*. Everything else here — the
+    Groups panel, the plate map, the visible redraws — still has to happen, so
+    that caller needs this function rather than a smaller one; what it does not
+    need is the plate's statistics thrown away. See
+    :func:`note_group_visibility_changed`, which measured that.
     """
-    app._invalidate_stats_cache()
+    if invalidate:
+        app._invalidate_stats_cache()
+    else:
+        note_group_visibility_changed(ctx)
     app._groups_centre_refresh()          # Home: GROUPS panel + map
     app._refresh_sidebar_map()            # line-graph picker: rep colours
     # Only redraw plots that are actually on screen. An off-screen plot is fully
@@ -1085,17 +1103,52 @@ def sel_set_composition(ctx, sid, wells=None, replicates=None) -> None:
 
 
 
-def invalidate_stats_cache(ctx) -> None:
-    """Discard cached group statistics. Call whenever group definitions change."""
-    ctx.state.stats_cache.invalidate()
-    # Replicate-set visibility may have shifted, so re-check whether the
-    # per-FOV toggle is still applicable. Cheap; only walks the FOV btn bank.
+def note_group_visibility_changed(ctx) -> None:
+    """A group was shown or hidden. Nothing computed has changed.
+
+    Showing and hiding groups used to go through :func:`invalidate_stats_cache`,
+    which throws away every cached statistic on the plate. It never needed to.
+    Hiding a group changes which of the already-computed results are *drawn*,
+    not what any of them is: ``active_replicate_sets`` filters hidden sets out
+    before anything is computed, and no cache key carries ``hidden`` — the keys
+    are the set's name, its wells, the timepoint, the threshold and the gate and
+    ratio signatures. So a plate of twelve groups paid for twelve groups'
+    statistics every time one of them was toggled off.
+
+    Measured rather than reasoned: a full collect over twelve groups of eight
+    wells fills 312 entries; toggling ``hidden`` on one group and recomputing
+    every one of them from scratch gives 312 comparable keys and zero value
+    differences.
+
+    What a toggle does still need is the per-FOV button refresh, which syncs the
+    button bank's label and variant from ``plot.use_fov_replicates`` and calls
+    its observers. It is kept here and nothing else is: the other two things
+    ``invalidate_stats_cache`` does — bumping the Review Image override version
+    and cueing the Image Table as stale — both describe a change in *inclusion*,
+    and a visibility toggle does not change which cells are included.
+    """
     from well_viewer.core.plot_toggles import refresh_fov_btn_state
     refresh_fov_btn_state(ctx)
-    # Cell gating writes new ``Included`` flags onto cached rows, which
-    # the Review Image include map mirrors. Bumping the version key
-    # forces the next refresh to recompute the include map (cheap)
-    # while reusing the cached image arrays + boundary mask (expensive).
+
+
+def invalidate_stats_cache(ctx) -> None:
+    """Discard cached group statistics. Call whenever group definitions change.
+
+    For a change in group *visibility* rather than definition, call
+    :func:`note_group_visibility_changed` — it costs nothing and keeps the
+    plate's statistics.
+    """
+    ctx.state.stats_cache.invalidate()
+    # The per-FOV toggle's label and variant are synced from plot state here so
+    # every path that disturbs the groups leaves the button bank consistent.
+    note_group_visibility_changed(ctx)
+    # Cell gating writes new ``Included`` flags onto cached rows, which the
+    # Review Image include map mirrors. This is a CACHE KEY, not a repaint cue:
+    # ``data/inclusion.py`` memoises the per-well excluded-nucleus map on this
+    # version, and names this function as its bump site. Bumping forces the next
+    # refresh to recompute the include map (cheap) while reusing the cached
+    # image arrays and boundary mask (expensive). Anything that moves or drops
+    # this bump makes that map outlive the edit it describes.
     # No-op when Image Browser is disabled (no review_image slice).
     _review_image = ctx.state.feature_slice("review_image")
     if _review_image is not None:

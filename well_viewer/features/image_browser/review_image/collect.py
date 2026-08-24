@@ -487,6 +487,11 @@ def apply_review_overrides_to_cache(ctx, label: str | None = None) -> None:
             except (TypeError, ValueError):
                 return 1 if str(val).strip() == "1" else 0
         df.loc[mask, "Included"] = override_for_row[mask].map(_coerce).astype(int)
+        # Manual curation just changed which cells this well contributes, so a
+        # memoized aggregation of it is stale. The bump lives here rather than
+        # in the callers because there are four of them and one — the dataset
+        # loader — does not invalidate afterwards.
+        ctx.state.dataset.note_rows_changed()
 
 
 def review_row_keys(ctx, row: dict) -> tuple[str, str, str]:

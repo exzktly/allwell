@@ -34,7 +34,7 @@ def _mk_app(tab, *, selections, selected):
         _current_centre_tab=lambda: tab,
         _refresh_sidebar_map=lambda: None,
         _invalidate_stats_cache=lambda: None,
-        _rebuild_all=lambda: None,
+        _rebuild_all=lambda **kw: None,
         _event_bus=SimpleNamespace(
             selection_changed=SimpleNamespace(emit=lambda s: emitted.append(s))),
     )

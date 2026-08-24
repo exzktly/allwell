@@ -15,7 +15,58 @@ Qt-free at import time; the clipboard helper is imported lazily.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 from well_viewer.core.safe import swallowed
+
+#: Cards whose on-screen figure is drawn with deliberate shortcuts — a sampled
+#: CDF curve, a legend naming only the first few traces — because a plate-wide
+#: selection is otherwise illegible and slow to paint. Capturing one of these
+#: has to repaint it at full fidelity first, because the Export menu saves the
+#: very figure object on screen rather than re-rendering onto its own axes the
+#: way the batch exporter does.
+_BUDGETED_CARDS = frozenset({"_line_card"})
+
+
+@contextmanager
+def _captured_at_full_fidelity(ctx, card_attr: str | None):
+    """Repaint *card_attr* without its screen budgets for the duration.
+
+    A figure saved at 300 dpi, copied into a vector editor, or filed in the
+    gallery is read at a resolution where a thinned curve and an abbreviated
+    legend both matter — and a degraded artifact that looks exactly like a
+    complete one is the failure this whole path exists to avoid. The flag lives
+    on ``PlotState`` rather than being threaded through the renderer's
+    arguments because the capture happens two layers above the call that draws.
+
+    Restored in a ``finally`` and repainted back, so an export that raises
+    cannot leave the tab showing the slow figure for the rest of the session.
+    Cards with no budgets skip both repaints entirely.
+    """
+    if card_attr not in _BUDGETED_CARDS:
+        yield
+        return
+    from well_viewer.core.plot_orchestrator import redraw_app
+
+    plot = ctx.state.plot
+    saved = getattr(plot, "export_full_fidelity", False)
+    plot.export_full_fidelity = True
+    try:
+        redraw_app(ctx)
+        yield
+    finally:
+        plot.export_full_fidelity = saved
+        with swallowed_repaint():
+            redraw_app(ctx)
+
+
+@contextmanager
+def swallowed_repaint():
+    """A failed restore repaint must not mask the export's own outcome."""
+    try:
+        yield
+    except Exception:
+        swallowed()
 
 # (widget-registry name, default Save-As filename) for each plot card, in
 # visible-priority order — the first *visible* card wins.
@@ -100,17 +151,18 @@ def copy_active_card_as_svg(ctx, card_attr: str | None = None) -> None:
     if fig is None:
         return
     prev_theme = getattr(card, "_plot_theme", "screen")
-    try:
-        if hasattr(card, "setPlotTheme") and prev_theme != "publication":
-            card.setPlotTheme("publication")
-        status = copy_figure_to_clipboard(fig)
-    finally:
-        if (hasattr(card, "setPlotTheme")
-                and getattr(card, "_plot_theme", "screen") != prev_theme):
-            try:
-                card.setPlotTheme(prev_theme)
-            except Exception:
-                swallowed()  # was: pass (silent except)
+    with _captured_at_full_fidelity(ctx, card_attr):
+        try:
+            if hasattr(card, "setPlotTheme") and prev_theme != "publication":
+                card.setPlotTheme("publication")
+            status = copy_figure_to_clipboard(fig)
+        finally:
+            if (hasattr(card, "setPlotTheme")
+                    and getattr(card, "_plot_theme", "screen") != prev_theme):
+                try:
+                    card.setPlotTheme(prev_theme)
+                except Exception:
+                    swallowed()  # was: pass (silent except)
     # Status bar is a genuine app/window-level service — via the named accessor.
     ctx.notify.set_status(status)
 
@@ -131,10 +183,11 @@ def save_active_card_figure(ctx, card_attr: str | None = None) -> None:
     if fig is None:
         return
     # Save-As dialog is a genuine app/window-level service — via the named accessor.
-    try:
-        ctx.figures.save(fig, default)
-    except Exception:
-        swallowed()  # was: pass (silent except)
+    with _captured_at_full_fidelity(ctx, card_attr):
+        try:
+            ctx.figures.save(fig, default)
+        except Exception:
+            swallowed()  # was: pass (silent except)
 
 
 def save_card_to_gallery(ctx, card_attr: str) -> None:
@@ -145,5 +198,7 @@ def save_card_to_gallery(ctx, card_attr: str) -> None:
     even when another tab's card is visible too (Split View).
     """
     card = ctx.widgets.get_or_none(card_attr)
-    if card is not None and hasattr(card, "saveFigureToGallery"):
+    if card is None or not hasattr(card, "saveFigureToGallery"):
+        return
+    with _captured_at_full_fidelity(ctx, card_attr):
         card.saveFigureToGallery()

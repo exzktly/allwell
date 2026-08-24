@@ -18,7 +18,14 @@ def qapp():
 # ── ProgressTracker: per-well lifecycle stage events ─────────────────────────
 
 def _stages_for(tracker, line):
-    return [p for k, p in tracker.parse(line) if k == "well_stage"]
+    """The (well, stage) pairs the plate is painted from.
+
+    A completion event carries a third element — the word the *journal* records
+    — which is not the plate's business and is asserted where the record is
+    (``tests/test_run_progress_and_threshold.py``). This is the lifecycle the
+    dashboard sees, so it reads the first two.
+    """
+    return [tuple(p[:2]) for k, p in tracker.parse(line) if k == "well_stage"]
 
 
 def test_tracker_emits_full_per_well_lifecycle():

@@ -3111,6 +3111,27 @@ which `tests/test_layout_readout_single_source.py` enforces by requiring the
 readout label to be written from a value rather than from a hand-composed
 sentence.
 
+**One decision is not enough if the numbers in it come from somewhere else.**
+The fold-loose message names a count, and that count used to be a glob over TIF
+suffixes while the *act* goes through `plan_loose_append`, which rejects a name
+whose well token will not parse and a file already present in its target
+archive. On a folder holding one new image, one duplicate and one calibration
+frame the readout said "Will fold 3 loose TIF(s)" and the run folded one. Given
+the form's `filename_schema` / `filename_sep`, `plan_input_layout` asks that same
+planner, so preview and run cannot disagree; without them it falls back to the
+file count and says nothing it cannot support. A folder whose loose files are
+*all* duplicates is reported as `grouped` with the reason, rather than as a fold
+of nothing.
+
+`tif_files_in` is the other half of that: `TIF_GLOB` is a suffix match, and a
+suffix is not a decision about whether a file is one of the run's images. It
+matched `._<name>.tif`, the AppleDouble fork macOS writes beside every file
+copied to a non-HFS volume — so a real plate arrived with exactly twice as many
+"TIFs" as images, in a count that feeds the readout, the `tifs > 3` threshold
+selecting `zip_root`, `count_expected_wells`' fallback, and the `source_tifs`
+tuples the post-run deletion closures are built from. A leading dot is excluded,
+which costs nothing real: no acquisition names an image with one.
+
 The actions are the layouts. A folder **named** `in` is the input directly
 (output `../out`); a folder that **contains** `in/` feeds the pipeline from that
 subfolder (output `<selected>/out`). Either way the same classification runs on
@@ -4403,6 +4424,40 @@ deliberately disjoint from `completeness.HEALTH_STATES` so the two vocabularies
 cannot be mistaken for each other; `tests/test_no_second_journal_vocabulary.py`
 fails on a second literal roster anywhere in the tree.
 
+**What "finished" means depends on where the run happened**, so the tally that
+renders those states comes in two groupings and the run's own `mode` picks one.
+`analysed` is written from the pipeline's stdout and means the same thing
+locally and remotely — *the pipeline announced this well finished* — but locally
+the CSV and out-zip are on disk the moment that line prints, while remotely they
+are on the host and only `fetched` says they arrived. `TALLY_GROUPS_LOCAL` files
+`analysed` under "finished"; `TALLY_GROUPS_REMOTE` gives it a heading of its own,
+because a remote run that died before reconciliation otherwise told the user a
+well was finished when nothing of it had reached their machine. The roster
+liveness test covers both groupings: adding a state to one and not the other is
+the same silent omission with a mode attached.
+
+**A well this run did not compute is recorded as one it did not compute.** Three
+markers reach `ProgressTracker._count_well_done` — `— done.`, `up to date` (an
+incremental well with no new FOVs) and `SKIP … output already exists` (a re-run
+without `--force`) — and all three mean the well is complete, which is why they
+share a counter and why the plate is told `process` for all three. Only the first
+means anything was computed. The other two also emit `well_uncomputed`, which
+only the journal writer reads, and it records `skipped`: without it, an
+incremental run that touched 6 of 96 wells recorded 96 `analysed` and the readout
+said "It recorded 96 finished". The distinction travels as its own event rather
+than as a new `well_stage` value because `RunDashboard.set_well_stage` ignores any
+stage outside its own roster — sending it one would have stopped those wells
+being marked done, trading a wrong record for a wrong picture.
+
+**One surface offers any given unfinished run.** `RunJournal.queued` records that
+the job queue started it, written by `open_run` and set for the duration of
+`start_from_queue`. The Analyze pane's banner skips those. Suspending a
+queue-driven job closes its journal `suspended`, which is exactly what
+`is_unfinished` is for, so the banner offered the plate the moment `_running`
+cleared while the queue still held the job — resume from the banner, let the
+queue start, and the same plate runs twice concurrently into one output
+directory.
+
 **Nothing is written on the worker host.** `services/run_journal.py` is not in
 `_REQUIRED_REMOTE_FILES`, so the module never reaches the remote and the pipeline
 there cannot call it even by accident; the journal is written entirely on the
@@ -4706,10 +4761,19 @@ truncates the destination the instant it opens, so anything that interrupts the
 write leaves a file that is neither the old content nor the new one — and for
 `pipeline_info.json` that is the user's gating, sample definitions, ratios and
 notes gone at once, which is precisely what the tools rewriting it exist to
-preserve. Two specialised versions stay: `well_viewer.persistence._io.atomic_write_json`
-wraps both the open and the replace in a retry for Windows `PermissionError`,
-and `services.run_journal._atomic_write_json` returns `False` instead of raising,
-because a run that cannot write its own bookkeeping must still produce data.
+preserve. One specialised version stays: `well_viewer.persistence._io.atomic_write_json`
+wraps both the open and the replace in a retry for Windows `PermissionError`.
+The two bookkeeping records — the run journal and the suspended-run pointer —
+need a return value rather than an exception, because a run that cannot write its
+own bookkeeping must still produce data; that is one line of difference, so it is
+`util.json_write.try_write_json_atomic` rather than a copy in each of them. They
+had a copy each once and the copies diverged in both available directions: one
+caught the `TypeError` a caller-supplied `spec` raises and the other did not, and
+one removed its staging file on failure and the other did not. The second gap was
+not cosmetic — `suspend_record.save` raising escaped a function whose contract is
+a boolean, into `_suspend`'s own handler, which returns *before*
+`PipelineRunner.suspend()` is reached, so the Suspend button did nothing at all
+and said nothing about it.
 `tests/test_dataset_tool_integrity.py` scans every application source file
 (`tests/_repo_scan.python_sources`) for the shapes that truncate a destination:
 `write_text` / `write_bytes` of a serialised payload, including one bound to a

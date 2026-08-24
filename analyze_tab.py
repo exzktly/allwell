@@ -368,7 +368,12 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
         )
         self._fluor_frame_layout.addWidget(row)
         self._fluor_refresh_remove_buttons()
-        self._refresh_schema_preview()
+        # The same call the other two sites make. Adding a row is as much a
+        # change to the channel set as removing one or retyping a token, and
+        # leaving this one on the older, narrower refresh gave the file two
+        # definitions of "the rows changed" — which is how the segmentation
+        # hint went stale in the first place.
+        self._refresh_channel_dependents()
 
     def _fluor_remove_row(self, row: QWidget, remove_btn: QPushButton) -> None:
         if len(self._fluor_rows) <= 1:

@@ -840,9 +840,6 @@ class RemoteFormDialog(QDialog):
             return
 
         key_path = self._ssh_key_edit.text().strip()
-        self._test_btn.setEnabled(False)
-        suffix = f" (with key {Path(key_path).name})" if key_path else ""
-        self._test_result_lbl.setText(f"Testing {alias}{suffix}…")
 
         def _done(ok: bool, detail: str) -> None:
             self._test_btn.setEnabled(True)
@@ -852,7 +849,15 @@ class RemoteFormDialog(QDialog):
                 msg = detail.splitlines()[-1] if detail else "(no error message)"
                 self._test_result_lbl.setText(f"✗ {msg[:120]}")
 
-        probe_ssh_async(self, alias, key_path, _done)
+        # Start first, then take the control. A refused probe means one is
+        # already running and owns both the button and the label; disabling
+        # ahead of the call and then returning would leave the button dark with
+        # nobody scheduled to bring it back.
+        if not probe_ssh_async(self, alias, key_path, _done):
+            return
+        self._test_btn.setEnabled(False)
+        suffix = f" (with key {Path(key_path).name})" if key_path else ""
+        self._test_result_lbl.setText(f"Testing {alias}{suffix}…")
 
     # ── geometry persistence ──────────────────────────────────────────────
 
@@ -1141,10 +1146,11 @@ class SSHKeyWizardDialog(QDialog):
         ``tests/test_hardcoded_tokens.py``, whose scan matched a whole string
         literal, so they could not follow a theme and nothing said so.
         """
+        if not probe_ssh_async(self, self._ssh_alias, str(self._key_path),
+                               self._on_verified):
+            return          # one already in flight; it owns the button
         self._verify_btn.setEnabled(False)
         self._verify_status_lbl.setText("Verifying…")
-        probe_ssh_async(self, self._ssh_alias, str(self._key_path),
-                        self._on_verified)
 
     def _on_verified(self, ok: bool, detail: str) -> None:
         self._verify_btn.setEnabled(True)
@@ -1655,9 +1661,6 @@ class ManageRemotesDialog(QDialog):
                 f"Remote '{name}' has been deleted from the file.")
             self._reload()
             return
-        self._test_btn.setEnabled(False)
-        self._test_btn.setText("Testing…")
-
         def _done(ok: bool, detail: str) -> None:
             self._test_btn.setText("Test")
             self._refresh_button_state()
@@ -1676,7 +1679,10 @@ class ManageRemotesDialog(QDialog):
                     detail or "(ssh returned non-zero with no message)",
                 )
 
-        probe_ssh_async(self, host.ssh_alias, host.ssh_key_path, _done)
+        if not probe_ssh_async(self, host.ssh_alias, host.ssh_key_path, _done):
+            return          # one already in flight; it owns the button
+        self._test_btn.setEnabled(False)
+        self._test_btn.setText("Testing…")
 
     def _on_bootstrap(self) -> None:
         name = self._selected_name()

@@ -640,3 +640,62 @@ def test_the_flag_clears_when_the_probe_answers(qtbot, monkeypatch):
     qtbot.waitUntil(lambda: bool(seen), timeout=3000)
     assert ard.probe_in_flight(owner) is False
     assert ard.probe_ssh_async(owner, "hpc", "", lambda *a: None) is True
+
+
+def test_a_refused_probe_takes_nothing_from_the_widget():
+    """The refusal must not claim a control it did not start a probe for.
+
+    Each handler disabled its button and set its label *before* calling
+    ``probe_ssh_async``, then ignored the return — so a refusal left the control
+    dark and mid-flight with nobody scheduled to restore it. The order is now
+    start-then-take, and a refused call is a no-op on the widget.
+
+    **This is defence, not a fix for a reachable bug, and the distinction is
+    worth writing down** rather than dressing up: the first press disables the
+    button, and a disabled ``QPushButton``'s ``click()`` never reaches its slot,
+    so no sequence of presses gets a second call in. Driving the three handlers
+    through their widgets was tried and measured nothing — it passed identically
+    against the un-reordered code. What the reorder buys is that the return
+    value now means something to a fourth caller, and that the guard below can
+    assert the property directly instead of asserting a path nobody walks.
+    """
+    import analyze_remote_dialog as ard
+
+    owner = QWidget()
+    owner.setProperty("_aw_ssh_probe_in_flight", True)   # as if one were running
+    assert ard.probe_in_flight(owner)
+    assert ard.probe_ssh_async(owner, "hpc", "", lambda *a: None) is False
+
+
+def test_every_probe_call_site_reads_the_return_before_taking_its_control():
+    """Syntactic, because the runtime path above cannot be driven.
+
+    A caller that disables its button ahead of the call and ignores the answer
+    is the shape this reorder removed; it is decidable from the syntax tree, and
+    a fourth call site written the old way is the thing to catch.
+    """
+    import ast
+    import inspect
+
+    import analyze_remote_dialog as ard
+
+    src = inspect.getsource(ard)
+    assert "probe_ssh_async" in src and len(src) > 20_000, len(src)
+    tree = ast.parse(src)
+
+    unchecked: list[int] = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "probe_ssh_async"):
+            continue
+        parent = next(
+            (p for p in ast.walk(tree)
+             for f in ast.iter_child_nodes(p) if f is node), None)
+        # A bare `probe_ssh_async(...)` as a statement discards the answer.
+        if isinstance(parent, ast.Expr):
+            unchecked.append(node.lineno)
+    assert not unchecked, (
+        "these call probe_ssh_async and throw the answer away, so a refused "
+        f"probe leaves their control mid-flight: lines {unchecked} "
+        "(relative to the module source)")

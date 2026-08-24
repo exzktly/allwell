@@ -158,21 +158,34 @@ def _docstring_nodes(tree: ast.AST) -> set[int]:
 
 
 def _hex_offenders() -> list[str]:
-    """Every inline colour, whole-literal or embedded, outside the allowlists."""
+    """Every inline colour, whole-literal or embedded, outside the allowlists.
+
+    The two allowlists are consulted at different granularities on purpose.
+    ``COLOUR_ALLOWLIST`` is per *file* and exempts only the whole-literal scan,
+    because that is the shape it was written for — an icon painter's palette,
+    where every literal in the file is a colour by design.
+    ``EMBEDDED_HEX_ALLOWLIST`` is per *site*, keyed ``(file, colour)``.
+
+    Letting the file-level exemption cover the embedded scan too was the
+    original mistake here, and it is the one CLAUDE.md §7.5 #10 names — allowlist
+    the site, not the file — broken inside the file that documents the rule. A
+    hex buried in an f-string inside an allowlisted file is exactly what the
+    embedded scan was added to find, and it was the one place it could not look.
+    """
     offenders = []
     for path in python_sources():
         if path.name in _TOKEN_HOMES:
             continue
         rel = _rel(path)
-        if rel in COLOUR_ALLOWLIST:
-            continue
+        whole_literals_exempt = rel in COLOUR_ALLOWLIST
         tree = ast.parse(path.read_text(), filename=str(path))
         docs = _docstring_nodes(tree)
         for node in ast.walk(tree):
             if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
                 continue
             if _HEX.match(node.value):
-                offenders.append(f"{rel}:{node.lineno} — {node.value}")
+                if not whole_literals_exempt:
+                    offenders.append(f"{rel}:{node.lineno} — {node.value}")
             elif id(node) not in docs:
                 for found in _EMBEDDED_HEX.findall(node.value):
                     if (rel, found) in EMBEDDED_HEX_ALLOWLIST:

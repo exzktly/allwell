@@ -29,13 +29,14 @@ rather than a write-up. **Delete it in the PR that closes the last group.**
 | Group | Theme | Branch | Version | PR | State |
 |---|---|---|---|---|---|
 | 1 | Stop the data loss | `…-ugoecl` | 9.0.1 | [#842](https://github.com/exzktly/allwell/pull/842) | **merged** |
-| 2 | One definition of an image, and an honest verdict | `claude/analysis-job-failure-recovery-ugoecl` | 9.0.2 | [#846](https://github.com/exzktly/allwell/pull/846) | **open, complete** — lane green, CI green, reviewed |
-| 3 | The record and the resume path | `claude/analyze-audit-group3-record` | 9.0.2 | [#847](https://github.com/exzktly/allwell/pull/847) | **open, complete** — lane 5,665 passed, reviewed, all 15 review findings fixed |
-| 4 | The Analyze pane | `claude/analyze-audit-group4-pane` | 9.0.2 | [#844](https://github.com/exzktly/allwell/pull/844) | **open, complete** — lane 5715 passed, CI green, reviewed, all 8 review findings fixed |
-| 5 | Numbers and parsing | `claude/analyze-audit-group5-numbers` | 9.0.2 | [#845](https://github.com/exzktly/allwell/pull/845) | **open, complete** — CI green, two reviews, all 19 review findings fixed |
+| 2 | One definition of an image, and an honest verdict | `claude/analysis-job-failure-recovery-ugoecl` | 9.0.3 | [#846](https://github.com/exzktly/allwell/pull/846) | **open, complete** — lane green, CI green, reviewed |
+| 3 | The record and the resume path | `claude/analyze-audit-group3-record` | 9.0.3 | [#847](https://github.com/exzktly/allwell/pull/847) | **open, complete** — lane 5,665 passed, three review passes, all 29 review findings fixed or stated |
+| 4 | The Analyze pane | `claude/analyze-audit-group4-pane` | 9.0.2 | [#844](https://github.com/exzktly/allwell/pull/844) | **merged** |
+| 5 | Numbers and parsing | `claude/analyze-audit-group5-numbers` | 9.0.3 | [#845](https://github.com/exzktly/allwell/pull/845) | **open, complete** — CI green, two reviews, all 19 review findings fixed |
 
-**All five branches carry version 9.0.2**, and that is deliberate rather than a
-mistake to correct. `scripts/preflight.sh` requires the net delta from
+**Group 4 has merged**, so `main` carries 9.0.2 and the three branches still
+open carry 9.0.3. That they share a number is deliberate rather than a mistake
+to correct. `scripts/preflight.sh` requires the net delta from
 `origin/main` to be exactly *one* increment, so the pre-assigned 9.0.3 / 9.0.4 /
 9.0.5 scheme in an earlier revision of this file was wrong on three branches:
 each is a separate PR off the same base, so each bumps to the same next number.
@@ -43,12 +44,14 @@ Whichever merges first leaves the others to rebase and re-bump. Check
 `git diff origin/main -- version.py` immediately before every push.
 
 Counts, taken by scanning this file's own tables rather than by memory:
-**108 rows, all `done`**, plus **2 dropped** and **2 open questions**, and
-nothing outstanding. Every audit finding in all five groups is fixed, and so is
+**122 rows** — 119 `done`, one `stated` (a limitation this
+group's plan puts out of scope, documented rather than half-fixed), one `open`
+(a deliberately-kept function) and one `by design` — plus **2 dropped** and
+**2 open questions**. Every audit finding in all five groups is fixed, and so is
 every finding the five adversarial reviews raised against those fixes. The total
 exceeds the audit's 69 because the reviewers' findings are rows in their own
-right, and falls short of 69 + 57 because several rows collapse a run of related
-findings (`U11–U17`, `X9–X11`).
+right, and falls short of the sum of the audit's 69 and the reviews' 71 because
+several rows collapse a run of related findings (`U11–U17`, `X9–X11`).
 
 > **Two interruptions, 23 August, and what they cost.** Both parallel workers
 > and the Group 2 reviewer were killed mid-task by an API session limit; later
@@ -360,6 +363,20 @@ rules already name.
 | G3-R13 | A test docstring asserted the position L10 overturns, twenty lines above the test that overturns it | done |
 | G3-R14 | A completion split across two queue events restores L9's defect under log pressure: neither `well_stage` nor `well_uncomputed` is in `_CONTROL_KINDS`, so they are dropped independently and losing only the second journals `analysed` for a well nothing computed | done — the record's word rides inside the completion event |
 | G3-R15 | X3's claim was measured on `_journal_outcome()` rather than the record, and the claim itself was wrong: run end to end, an input failure is journalled *nothing*, because the resolver fails before the journal has a home | done — docstring and test both say what happens, and the test reads `run.json` |
+| G3-R16 | The atomicity argument for merging the two completion events was false — nothing enqueues a `well_stage`, `parse` is called on the GUI thread and its events are applied inline, so the queue's only drop unit is the whole line and the two-event shape was already atomic | done — the one-event shape stays on the honest ground that it is simpler; the fictional guard is replaced by two real ones |
+| G3-R17 | The "N of M well(s)" denominator was swept on one surface of five; the pane's own last-run card read "94/94 · check did not finish" beside a readout saying 94 of 96 | done — `completeness.plate_total`, with a guard proven against `origin/main` naming all four missed sites |
+| G3-R18 | A guard was deleted and its name and docstring kept, leaving audit L5 unprotected — the one-line revert that restores L5 left 124 tests green | done |
+| G3-R19 | `_write_suspend_record`'s `queued=` had no test: deleting it restores the double-offer defect and left 260 tests green | done |
+| G3-R20 | `scan_run`'s `unreadable += 1` had no test: deleting it makes the denominator fix a silent no-op and left 260 tests green | done |
+| G3-R21 | The schema pass-through changes which action the run takes, reaching a path that deletes source images — undocumented | done — measured both ways; it is a fix, and the wrong-separator case is refused by G1's `landed`/`claimed` check |
+| G3-R22 | The failed-open warning reached only the help drawer, not the run log the user is watching | done |
+| G3-R23 | ARCHITECTURE's well-states table said `analysed` comes from `_journal_well_stage`, which after the merge it cannot; and the local `skipped` write had no row | done |
+| G3-R24 | The dead `"process"` row in `_JOURNAL_STAGES` let the `WELL_STATES` liveness roster pass on an entry nothing could reach (§7.5 #10) | done — states moved to `ProgressTracker._RECORD_FOR_MARKER` and the roster's scan surface widened to see the module that decides them |
+| G3-R25 | The four remote journal writers still contaminate a previous run's record when a *remote* run's own `open_run` fails | stated — four call sites in `remote_runner.py`, which this plan puts out of scope; fixing two of four would be the half-sweep §7.5 #5 names. Documented in ARCHITECTURE with what it costs |
+| G3-R26 | An outcome outside `_UNFINISHED_CAUSE` fell back to telling the user the app was killed, which is a specific checkable claim about a thing that did not happen | done |
+| G3-R27 | A stale `well_uncomputed` kind left in a test's filter | done |
+| G3-R28 | `run_journal.forget` is now dead production code, with a docstring describing a case nothing exercises | open — kept deliberately: it is the only way to remove an entry, and `dismiss` is not a replacement for that |
+| G3-R29 | This tracker's copy on Group 3's branch is stale, because the file is edited on Group 2's branch only | by design — the alternative is the two-definitions failure the audit is about, in the document tracking it |
 
 Also from the lane, and worth recording because it is a rule in CLAUDE.md §7.6
 breaking on its Nth repeat: L3's fix called `swallowed()` outside an `except`

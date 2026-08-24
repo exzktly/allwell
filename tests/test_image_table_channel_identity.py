@@ -24,6 +24,7 @@ wrong.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -104,23 +105,51 @@ def test_parse_lut_still_falls_back_to_the_row_when_no_channel_is_named():
     assert IC._parse_lut(ctx, 0, None) == (0.0, 100.0)
 
 
-# ── item 60: the composite column keeps each cell's render mode ──────────────
+# ── item 60: raw vs corrected travels with the CHANNEL, not the row ──────────
+#
+# The finding was found in ``composite_column_rgb``, which asked
+# ``_row_display_opts(ctx, r)`` with no channel — that resolves no spec at all,
+# so every cell of a mixed-channel grid loaded raw whatever its channel was set
+# to. That function has since been deleted (it was unreachable from the app: the
+# Overlay switch went to per-cell blending in "Fix Image Table Overlay to blend
+# channels into one cell", and nothing has called the column compositor since),
+# so the behavioural test that pinned it had nothing left to drive.
+#
+# The RULE outlives the function, and every live caller obeys it. This guard is
+# what the deleted test was really for, applied to the callers that can actually
+# run: a ``_row_display_opts`` call with no channel argument is the defect, and
+# there are eleven such call sites across three modules to keep honest.
 
-def test_composite_column_loads_each_cell_with_its_own_render_mode(monkeypatch):
-    seen = []
+_IMAGE_TABLE_DIR = (
+    Path(__file__).resolve().parents[1]
+    / "well_viewer" / "features" / "image_browser" / "image_table"
+)
 
-    def spy(_ctx, _cache, _well, chan, _tp, _fov, *, use_tophat=False):
-        seen.append((chan, use_tophat))
-        return np.full((8, 8), 30, dtype=np.uint16)
 
-    monkeypatch.setattr(IC, "_load_array", spy)
-    cells = [[_cell(chan="DAPI")], [_cell(chan="GFP")]]
-    ctx = _ctx(cells=cells, channel_opts={"DAPI": {"render": "corrected"},
-                                          "GFP": {"render": "raw"}})
-    IC.composite_column_rgb(ctx, {}, cells, None, 0, {})
-    # The bug asked for the row's options with no channel, which resolves no
-    # spec at all, so BOTH loaded raw.
-    assert seen == [("DAPI", True), ("GFP", False)]
+def test_every_render_mode_lookup_names_the_channel_it_is_for():
+    import ast
+
+    offenders = []
+    for path in sorted(_IMAGE_TABLE_DIR.glob("*.py")):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
+            if name != "_row_display_opts":
+                continue
+            # (ctx, row_idx, chan) — the definition itself is the one "call"
+            # shape with a default, and it is not a call at all.
+            has_chan = len(node.args) >= 3 or any(
+                kw.arg == "chan" for kw in node.keywords)
+            if not has_chan:
+                offenders.append(f"{path.name}:{node.lineno}")
+    assert not offenders, (
+        "these _row_display_opts calls name no channel, so they resolve the "
+        "row's representative spec instead of the cell's own and load a raw "
+        f"frame for a channel set to corrected: {offenders}"
+    )
 
 
 # ── items 57 / 59: a cell is badged for the channels it is drawn from ───────

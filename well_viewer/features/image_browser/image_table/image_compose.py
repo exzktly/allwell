@@ -734,41 +734,6 @@ def composite_additive_rgb(rgbs) -> np.ndarray | None:
     return _np.clip(acc, 0.0, 255.0).astype(_np.uint8)
 
 
-def composite_column_rgb(ctx, cache, cells, crop_tool, c: int, rendered):
-    """Build the additive composite RGB for grid column *c*.
-
-    Gathers each grid row's displayed RGB (via :func:`cell_display_rgb`) for
-    column *c* and merges them with :func:`composite_additive_rgb`. Uses a
-    ``rendered`` array when the caller supplies one, else lazy-loads through the
-    decode cache (mirroring the export path; the live render model stores no
-    arrays). Returns a uint8 (H, W, 3) array, or ``None``.
-    """
-    rendered = rendered or {}
-    rgbs = []
-    for r, row in enumerate(cells):
-        if c >= len(row):
-            continue
-        cell = row[c]
-        arr = rendered.get((r, c))
-        if arr is None:
-            well = cell["well"]
-            chan = cell["chan"]
-            tp = cell["tp"]
-            fov = cell["fov"]
-            if well and chan and tp:
-                # raw vs corrected travels with the CHANNEL, not the row: a grid
-                # whose rows are wells holds a different channel in every column,
-                # and omitting ``chan`` here resolved no spec at all, so every
-                # lazy-loaded cell fetched the raw frame even where the channel
-                # is set to corrected.
-                use_tophat = _row_display_opts(ctx, r, chan)[0]
-                arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
-        rgb = cell_display_rgb(ctx, cache, cell, r, crop_tool, arr)
-        if rgb is not None:
-            rgbs.append(rgb)
-    return composite_additive_rgb(rgbs)
-
-
 def _ratio_for_overlay(ctx, chan) -> RatioMetric | None:
     """The RatioMetric whose display label matches *chan* (case-insensitive), else
     None. Inlined so this render layer stays free of a ``grid_layout`` import

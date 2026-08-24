@@ -76,7 +76,6 @@ from well_viewer.features.image_browser.image_table.image_compose import (  # no
     cell_identity_label,
     cell_chrome_kwargs,
     composite_additive_rgb,
-    composite_column_rgb,
     draw_cell_chrome,
     is_raw_fallback,
     mark_uncorrected,

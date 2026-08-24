@@ -198,7 +198,14 @@ class BarBatchExportPanel(BatchExportPanel):
         if out_dir is None:
             return
 
+        # Read the (Channel, Property) selection ONCE, here, so every job in the
+        # run shares it. ``_run_batch_jobs`` pumps ``processEvents()`` between
+        # jobs, so these combos can move mid-export; snapshotting the channel but
+        # re-reading the column and the metric per job split the pair, and a
+        # figure then carried one channel's name over another channel's numbers.
         _ch_selected = self._selected_export_channel() or self._ctx.state.channel.active_channel
+        _val_col_selected = self._export_val_col_for("_bar_channel_cb")
+        _metric_selected = self._selected_export_metric_key("_bar_channel_cb")
         # The cutoff lookup keys by the canonical channel/ratio key, not by the
         # dropdown's display label — translate ratio labels first so the bar
         # plot draws against the user-configured cutoff instead of the default
@@ -206,7 +213,7 @@ class BarBatchExportPanel(BatchExportPanel):
         # the column the panel's own Property combo selected.
         threshold = _on_cutoff_for_column(
             self._ctx,
-            self._export_val_col_for("_bar_channel_cb"),
+            _val_col_selected,
             channel=self._resolved_channel_key(_ch_selected),
         )
         use_sem = self._ctx.state.plot.use_sem
@@ -273,9 +280,9 @@ class BarBatchExportPanel(BatchExportPanel):
                     bar_metric_fieldnames, bar_metric_row,
                     well_name_for, well_names_joined,
                 )
-                _val_col = self._export_val_col_for("_bar_channel_cb")
+                _val_col = _val_col_selected
                 _ch = _ch_selected
-                _metric = self._selected_export_metric_key("_bar_channel_cb")
+                _metric = _metric_selected
                 _well_labels = _well_labels_map(self._ctx)
                 _fluor_gates = _get_all_fluor_gates(self._ctx)
                 _per_fov_spread = bool(self._ctx.state.plot.use_fov_replicates)
@@ -583,6 +590,7 @@ class BarBatchExportPanel(BatchExportPanel):
             placeholder_color=_CLR_PLACEHOLDER,
             disabled_well_color=_CLR_DISABLED_WELL,
             err_bar_color=_CLR_ERR_BAR,
+            n_axis_integer=not bool(self._ctx.state.plot.use_fov_replicates),
         )
         # This figure is built here rather than by the on-tab renderer, so the
         # marker that renderer adds has to be added here too: the tick labels and

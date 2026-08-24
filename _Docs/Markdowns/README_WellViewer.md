@@ -1229,6 +1229,15 @@ Below the table is the readout:
   from a layer that ran and removed nothing, and is never shown as `−0`. Manual
   curation and the intensity gate share a line because they write the same
   underlying column and cannot be told apart after the fact.
+- **A well whose verdict could not be recomputed is named.** If applying the QC
+  gate, or a crop, to a particular well fails — a measurements column that is not
+  numeric, most often — that well's verdict is dropped rather than left showing
+  the previous settings' answer, which means every one of its cells then counts.
+  That is the honest outcome but an invisible one, so a warning names the wells
+  in a message and in a pop-up notice: the controls in front of you would
+  otherwise say those wells are filtered when they are not. The crop's own
+  "Crop region set…" line carries the warning along with it, so writing the
+  outcome does not wipe it off the status line a moment later.
 - **Included for analysis** — a live count under the gate controls, e.g.
   `Included for analysis: 12,345 / 20,000 cells  ·  1,204 failed QC`. The first
   number is the population every plot, statistic, and export actually uses, so
@@ -1261,20 +1270,36 @@ spinbox (default 2), walking the wells along the Rows / Columns direction. On
 the Groups plate every well is tinted by its **group's** colour, so all wells in
 a group read as one condition and match the group's row swatch.
 
+**Editing a group on a partly-loaded plate keeps the wells you cannot see.** If
+you opened a folder that holds only some of the plate's wells, the picker can
+only paint those — but the group's other members are still part of it. Adding
+or removing a well changes only what you clicked; the members the plate cannot
+show stay in the group.
+
 #### Well Labels
 
 Give wells / groups human-readable names; these show in every plot legend
 instead of the raw well token. **Add Prefix** and **Add Suffix** apply to the
 wells currently selected on the plate beside the tab.
 
+Labels are stored with the dataset, and editing one on a load that holds only
+part of the plate leaves the rest of the plate's labels alone. Clearing a label
+on a well that *is* loaded still deletes it, and
+[Starting over](#starting-over) → **Sample definitions** still clears every
+label on the plate, loaded or not.
+
 #### Ratios
 
 Define a ratio channel (e.g. `GFP/MCHERRY`) computed at read time as
-*numerator / (denominator + ε)*; it appears as a virtual channel in the channel
-selector everywhere. **ε** is added to the denominator before dividing, so a
-cell whose denominator reads 0 yields `NaN` and drops out at ε = 0, or survives
-with the ratio biased toward 0 at a small positive ε. **Apply** commits the
-table and persists it with the dataset.
+*numerator / max(denominator, ε)*; it appears as a virtual channel in the
+channel selector everywhere. **ε** is the floor the denominator is clamped to
+before dividing rather than a constant added to it, which matters on
+background-subtracted channels: those read slightly negative for some cells,
+and adding ε there flips the divisor's sign and produces an arbitrarily large
+ratio, while clamping keeps it positive. A cell whose denominator reads 0
+yields `NaN` and drops out at ε = 0, or survives with the ratio biased toward 0
+at a small positive ε. **Apply** commits the table and persists it with the
+dataset.
 
 #### Pipeline Info
 
@@ -1613,9 +1638,11 @@ two are both named, and three or more read `vs own control` — with the CSV's
 `fold_change_control` column carrying which sample used which.
 
 A Batch Export panel inherits the per-sample mapping in force when you open
-it, so a batch run reproduces the figure on screen. The panel's own Control
-dropdown offers no per-sample entry — picking a control there switches that
-panel back to a single control. A group member the inherited mapping does not
+it, so a batch run reproduces the figure on screen, and its Control dropdown
+says so: while the inherited mapping is what the panel will export, the dropdown
+reads **Per-sample (from the plot tab)**. The mapping itself is edited on the
+plot tab, not here — picking any single control in the panel switches that panel
+to that one control and the inherited entry disappears from the list. A group member the inherited mapping does not
 name is exported blank rather than falling back to one control, since the
 panel's groups are its own and need not match the plot tab's. A control naming a replicate
 set in a *different* batch group works: one group per condition, with the
@@ -1916,8 +1943,15 @@ place cells in a grid that mirrors your plate or your experimental design.
     Total / Max / Min / Std intensity, because the cutoff is a *mean* intensity
     and cutting a total with it would compare two different scales; those fall
     back to *Mean (all cells)*.
-  - **Timepoint** dropdown (reads e.g. `Timepoint: 4.0h`; its position
-    persists across reopen).
+  - **Timepoint** dropdown (reads e.g. `Timepoint: 4.0h`). The timepoint you
+    were on is remembered with the dataset and comes back as *the same hour*, not
+    the same position in the list — so extending a plate with more timepoints
+    and reloading it (an **Incremental** re-run, see
+    [Compute options](#9-compute-options)) still brings
+    the map back on the timepoint you saved it on. If the plate no longer has
+    that hour at all, the map opens on its default timepoint and the log says
+    which hour was missing, rather than putting up a neighbouring one that would
+    look exactly like the one you saved.
 
   Under **Display ▾**, since these set how the grid is coloured rather than what
   it shows:
@@ -1963,6 +1997,13 @@ place cells in a grid that mirrors your plate or your experimental design.
 - **Optimal use** — build a layout once that matches your plate, pin the colour
   **Scale** to *Fixed* vmin/vmax so frames are comparable, then step through
   the **Timepoint** dropdown to watch the metric evolve.
+- **A session that never opens this tab leaves its saved settings alone.** The
+  colour map, the scale mode and its vmin/vmax, the log-scale and rep-set-average
+  toggles and the timepoint are all stored with the dataset, and they are
+  rewritten from the controls only once the controls exist. So opening a plate,
+  working entirely on other tabs and closing it leaves them exactly as you left
+  them last time. Resetting the view clears them, as it does the rest of the
+  view.
 
 ### Statistics
 
@@ -2240,6 +2281,18 @@ reviewing and curating individual cells.
   binary + mask-overlay controls; the QC debris gate. **Hover** a nucleus to
   read its pixel value, cell id, and **mean fluorescence (MFI)** for the current
   channel (the same per-cell readout the Image Table shows).
+- **The status line says when it is showing you less than it was asked for.**
+  Two cases, each of which would otherwise look like an ordinary picture. If reading the
+  well's archive stopped part way, the line ends with **INCOMPLETE** and the
+  reason — the FOV and timepoint menus above it are then shorter than the dataset
+  actually is, which is otherwise indistinguishable from a well that holds that
+  few frames. And if you switch on the binary (≥ threshold) view for a field the
+  measurements do not cover — no rows for the well, or none for this
+  FOV/timepoint — the binary view is declined rather than drawn: you get the
+  ordinary intensity image and a line saying the threshold could not be measured
+  for this field. An all-black binary image means *measured, and no cell passed*,
+  which is a real result; a field nothing measured is a different fact and no
+  longer draws the same picture.
 - **Definition.** *Included* is the per-cell keep/drop flag every plot and
   export honours. A cell counts only when it is manually **kept** *and* it
   passes QC. Overrides persist to `cell_overrides.json` next to the CSVs.
@@ -2413,7 +2466,20 @@ channel for every well).
   further LUT changes. They are also left out of **Auto**'s pooled brightness window,
   so they cannot darken the rest of the grid. The status line after **Generate**
   counts them; the badge says which. If a whole block of the plate is marked, the
-  correction never ran for those wells — check the run's `errors/` folder.
+  correction never ran for those wells — check the run's `errors/` folder. An
+  **Overlay** cell and a **ratio** cell are marked when *any* of the channels they
+  are built from was served raw — a blend or a ratio carrying one uncorrected
+  input is an uncorrected image — and the status line counts marked *cells*, so
+  the number matches what you can see rather than counting a three-channel
+  overlay three times.
+- **A well whose images could not all be listed says so.** If reading a well's
+  archive stops part way — a damaged zip, a drive that drops out — the table
+  still draws the frames it did get, because a partial answer beats none. But a
+  short list of real images looks exactly like a well that genuinely holds that
+  few, so the status line after **Generate** names the wells whose inventory was
+  cut short and why, and a PNG saved from the table repeats it: that file
+  outlives the status line and is short by however many frames were never
+  reached.
 - **Action strip** — **Generate** · **Table ▾** (*Reset table layout*, back to
   defaults; *Clear rendered images*, which keeps the layout so Generate re-renders
   in one click) · **Crop view ▾** (drag a region on any image — the button reads
@@ -2688,6 +2754,9 @@ rather than a single panel.
     and the status line names how many were missed and which ones. The same
     line goes to the log drawer, where it stays after the status line has moved
     on.
+- **Clear all** asks first, and only clears if you say yes. If the
+  confirmation cannot be shown at all, nothing is cleared — an answer that could
+  not be obtained is not consent.
 - **Export all** — write the whole gallery as a multi-page **PDF report** (a
   cover page plus one full-quality page per plot with its parameters). The
   Image Table grid can be saved here too.
@@ -3082,6 +3151,16 @@ What it does to the data:
   thresholds and sample definitions carry over from dataset 1 and apply to
   dataset 2's rows too — worth reviewing after the merge, since they were set
   from dataset 1's imaging conditions.
+- **Carried-over cell-inclusion overrides are re-stamped against the copy.**
+  Each override records a fingerprint of the segmentation it was made on, so a
+  later re-run of the pipeline drops overrides that would otherwise re-attach to
+  different cells. Copying a dataset re-stamps that fingerprint from the new
+  folder's own QC archive. If a well has no QC archive in the destination — a
+  run made without QC images, say — the override is carried **without** a
+  fingerprint rather than with the source's, which would have looked stale to
+  the next check and been thrown away; the log line says how many, and what it
+  costs: those overrides will no longer be dropped if that well really is
+  re-segmented. Subset and Merge Plates do exactly the same.
 - **Before finishing, the merge verifies itself** — that it actually wrote
   measurement data at all (rather than only copying images), that every row's
   timepoint label and its numeric hours agree, that dataset 2's timepoints
@@ -3100,6 +3179,20 @@ dataset stores its QC images as per-well folders rather than zip archives (a
 layout Concatenate doesn't support). A column present in one dataset's
 measurements but not the other's — a channel one dataset didn't collect,
 say — gets called out too, since those rows will have a blank value for it.
+
+**A dataset that spells one well two ways is refused before anything is
+copied** — and the same is true of Subset and Merge Plates. If a folder holds
+both `in/A1.zip` and `in/A01.zip` (or two `A01_out.zip`-style QC archives, or
+two measurements CSVs for one well under the same prefix), those are the same
+plate position written two different ways, which happens when a plate is
+exported by one tool and later topped up by another. Everything that looks a
+well up by name — the pipeline, Review, and all three copy tools — can only
+see one of them, so a copy would silently be a whole well's images short and
+the well count would never mention it. The refusal lists every well affected and
+every file claiming it, so you can see which two spellings to reconcile. To see
+the rest of the plate at the same time, run
+[Validate & Repair](#validate--repair-dataset), which reports the same thing as
+a finding rather than stopping at the first one.
 
 **If a run is interrupted** (the app is closed, the machine loses power, the
 disk fills up) partway through, just point Concatenate at the same three
@@ -3152,8 +3245,14 @@ say — the raw log says so and the findings are unaffected.
    measurements recorded, grey = not read yet), and a findings list below names
    anything wrong — exactly which timepoints a well is missing, a sidecar
    that's out of sync with what's on disk, a CSV that looks like a well's
-   data but isn't, or cell-inclusion overrides that no longer match the
-   current segmentation. Before a check there is no findings list on screen at
+   data but isn't, cell-inclusion overrides that no longer match the
+   current segmentation, or a plate position that more than one file claims
+   under two different spellings (`in/A1.zip` beside `in/A01.zip`). That last
+   one is listed first and counts as an error, because everything that looks a
+   well up by name can only see one of the two files, and the Datasets copy
+   tools refuse to run on such a dataset at all — the finding names every
+   colliding position and the exact paths, which is what you need to reconcile
+   them. Before a check there is no findings list on screen at
    all — it appears with the first thing it has to say, and disappears again
    when you pick a different dataset rather than leaving an earlier check's
    results up.
@@ -3230,6 +3329,18 @@ by well only is the fastest case — nothing inside those wells' archives has
 to be touched at all — and narrowing by timepoint or FOV costs roughly in
 proportion to how much you keep.
 
+A dataset that spells one well two ways (`in/A1.zip` beside `in/A01.zip`, say)
+is refused before anything is copied, for the reason given under
+[Concatenate datasets](#concatenate-datasets).
+
+If a well's measurements CSV was written by an older run that left the numeric
+timepoint column blank, its rows are still matched against your timepoint
+filter — the label column and the image filename are read as fallbacks, so the
+rows and the images agree about what a timepoint is. When a subset genuinely
+ends up with no measurement rows at all, the error says which of the three
+reasons it was: the rows could not be read against the filter at all, the images
+matched a filter the rows did not, or nothing in the source matched.
+
 Timepoints keep their original hours — a subset spanning 24h–72h stays
 labelled 24h–72h in the new dataset, it isn't relabelled to start at 0. Cell-
 inclusion overrides carry over for cells that survive the filter (dropped for
@@ -3274,6 +3385,18 @@ structure yet) into the layout Analyze reads directly.
    leaving alone. Once an in-place run succeeds, **Zip folder** goes dark — the
    folder holds archives now, not loose images, and a second run would replace
    the result with a failure.
+
+   **Group in place also converts well folders that were already there.** The
+   scan above it looks at loose TIFs only, but the in-place run zips — and
+   deletes the TIFs of — every `A01/`-style subfolder in the source, not just
+   the wells it groups out of the loose files. That is deliberate: it leaves the
+   folder in one uniform ready-to-run layout, and it is what lets a run that was
+   interrupted be started again, since the wells it already grouped have no
+   loose TIFs left to find. So the folders are named rather than skipped: as
+   soon as you tick **Group in place**, the readout adds a line listing them, the
+   confirmation dialog repeats it above the delete warning, and the run's own
+   summary says how many of the wells it produced came from folders that were
+   already in the source rather than from loose images.
 3. As soon as the scan finds any wells, a status panel appears below showing
    a "Ready — N well(s) to zip" plate preview. Press **Zip folder** and
    that same plate fills in as each well is zipped, the same graphical
@@ -3319,11 +3442,26 @@ Concatenate); sample definitions from both datasets are merged, with dataset
 happen to share a name with one of dataset 1's.
 
 It refuses when the two datasets weren't analysed the same way (same checks
-Concatenate applies), when a remap target isn't a valid 96-well position, or
-when a remap would push a well past the edge of the plate. Timepoints
+Concatenate applies), when a remap target isn't a valid 96-well position, when a
+remap would push a well past the edge of the plate, or when either dataset
+spells one well two ways (see
+[Concatenate datasets](#concatenate-datasets)). Timepoints
 differing between the two plates is only a warning, not a refusal — the
 merged plate is legitimately ragged in that case, and plots will show gaps
 for the combinations one plate doesn't have.
+
+It also refuses when a remapped well holds an image whose filename does not
+match the dataset's schema closely enough for the well token in it to be
+rewritten — a name with the wrong number of separator-delimited fields, or one
+naming a different well than the folder it sits in. Such a file would land in
+the destination well's archive still labelled for the plate position it came
+from, and nothing downstream could tell that apart from a correct merge, since
+Review matches a measurement row to an image by filename. The message names the
+file, both wells, and what is wrong with the name, so you can fix or remove it —
+or merge that well without remapping it. Files that were never images —
+`.DS_Store`, an editor's backup, a `readme.txt` you put in an archive on
+purpose — carry no well token, are not this tool's business, and pass through
+under their own names.
 
 ### Job Queue
 
@@ -3436,6 +3574,20 @@ recognised field names and worked examples.
 
 `pipeline_info.json` records the schema you ran the pipeline with, so the
 viewer doesn't need you to re-enter it.
+
+**A lower-case `f` followed by digits is read as a field, never as row F.** When
+Review has to find a well's images in a folder whose filenames it cannot parse
+positionally, it falls back to looking for a well token anywhere in the name —
+and `A01_GFP_f1_t0.tif` contains `f1`. Reading that as well `F01` meant every
+plate written in the standard `…_{well}_f{fov}_{tp}` layout answered "yes, this
+is F01" for every well's first field, so selecting F01 in Review drew A01's
+image, F02 drew B02's, and each well showed another well's picture with nothing
+on screen to say so. Row letters are matched case-insensitively for every row
+except **F**, where only the upper-case spelling counts. The cost is narrow and
+deliberate: a plate whose filenames spell a row-F well in lower case (`f01_GFP_…`)
+is no longer found by that free-text fallback — such names are genuinely
+ambiguous — while a plate whose filenames match the schema you gave the run is
+read by position, which is not ambiguous at all, and is unaffected.
 
 ---
 

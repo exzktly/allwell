@@ -441,12 +441,18 @@ def test_disabling_a_leaf_feature_drops_it_everywhere():
 # ── EventBus signal catalogue is capped ───────────────────────────────────────
 
 def test_event_bus_signal_catalogue_is_capped():
-    """ARCHITECTURE §9 (EventBus): a small, capped catalogue of exactly five
+    """ARCHITECTURE §9 (EventBus): a small, capped catalogue of exactly four
     cross-cutting signals. Adding one is a real architectural decision — update
-    the docstring + this guard deliberately, don't let it creep."""
+    the docstring + this guard deliberately, don't let it creep.
+
+    Freezing a roster keeps signals from creeping in; it does not keep a dead
+    one from staying. ``redraw_requested`` sat here with no emitter and no
+    subscriber, held in place by this very assertion, while the docstring
+    beside it called the bus load-bearing. The companion test below is the
+    other half: every name in this set has to be reachable from somewhere."""
     expected = {
         "channel_changed", "selection_changed", "dataset_loaded",
-        "plot_options_changed", "redraw_requested",
+        "plot_options_changed",
     }
     tree = _parse(WELL_VIEWER / "core" / "event_bus.py")
     signals = set()
@@ -460,8 +466,48 @@ def test_event_bus_signal_catalogue_is_capped():
                         signals.add(t.id)
     assert signals == expected, (
         f"EventBus signal catalogue changed: {sorted(signals)} != "
-        f"{sorted(expected)}. The bus is intentionally capped at 5 — if this is "
+        f"{sorted(expected)}. The bus is intentionally capped at 4 — if this is "
         "deliberate, update ARCHITECTURE.md §9 and this guard together."
+    )
+
+
+def test_every_event_bus_signal_is_reachable():
+    """A frozen roster stops signals creeping in; it does not stop one dying.
+
+    ``redraw_requested`` lived on the bus with no emitter and no subscriber,
+    held in place by the roster above while the module docstring cited the
+    catalogue as evidence that the bus is load-bearing. This is the other
+    direction: every signal declared on ``EventBus`` must be named somewhere
+    outside its own module and outside the tests — an ``.emit(`` or a
+    ``.connect(`` on ``bus.<name>``, or a subscriber wiring it up.
+    """
+    tree = _parse(WELL_VIEWER / "core" / "event_bus.py")
+    signals = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            fn = node.value.func
+            if (isinstance(fn, ast.Name) and fn.id == "Signal") or (
+                isinstance(fn, ast.Attribute) and fn.attr == "Signal"):
+                for t in node.targets:
+                    if isinstance(t, ast.Name):
+                        signals.add(t.id)
+
+    from tests._repo_scan import python_sources
+
+    seen: set[str] = set()
+    for path in python_sources():
+        if path.name == "event_bus.py" or "tests" in path.parts:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for name in signals:
+            if f".{name}." in text or f".{name}\n" in text:
+                seen.add(name)
+
+    dead = sorted(signals - seen)
+    assert not dead, (
+        f"EventBus signals with no emitter and no subscriber anywhere: {dead}. "
+        "A signal nobody sends is a claim about the design the code does not "
+        "support — remove it, or wire it up."
     )
 
 

@@ -52,7 +52,7 @@ def project_verdict_column(
     column: str,
     verdict: Callable,
     layer: str,
-) -> None:
+) -> list[str]:
     """Write *column* onto cached well frame(s) from *verdict*.
 
     The walk every inclusion-verdict projector performs: with *label* given,
@@ -69,9 +69,26 @@ def project_verdict_column(
     than raised — the remaining wells still get their column. Fail-open is the
     verdict functions' own job: they return all-pass when their inputs are
     absent, so a frame that simply predates a feature still reads as included.
+
+    **Stepping over a failure drops the column rather than leaving it.** This walk
+    is a *re-*projection as often as it is a first one — the user moves a QC
+    threshold or a crop region and every cached frame is rewritten. A frame that
+    kept the value from the previous parameters would then be filtered by settings
+    the UI no longer shows anywhere, and it would look exactly like a frame that
+    had just been recomputed and agreed. Dropping it puts the frame in the one
+    state the whole stack already handles honestly: every consumer guards its read
+    with ``if column in df.columns`` and treats an absent verdict as all-pass, the
+    same as a frame that predates the feature. Wrong-and-known beats
+    stale-and-invisible.
+
+    Returns the labels whose verdict could not be computed — empty on a clean
+    pass. The frame itself is the primary signal (the column is gone, so nothing
+    downstream can mistake old parameters for new); the list lets a caller that
+    wants to say so on screen name the wells without re-walking the cache.
     """
     cache = ctx.state.dataset.cache
     labels = [label] if label is not None else list(cache.keys())
+    failed: list[str] = []
     for lbl in labels:
         df = cache.get(lbl)
         if df is None or df.empty:
@@ -79,5 +96,13 @@ def project_verdict_column(
         try:
             df[column] = verdict(df, lbl).astype(int)
         except Exception:
+            failed.append(lbl)
+            # ``errors="ignore"``: a FIRST projection has no column to remove, and
+            # the frame is mutated in place because that is this walk's contract.
+            df.drop(columns=[column], inplace=True, errors="ignore")
             _logger.exception(
-                "%s: failed to compute %s for well %s", layer, column, lbl)
+                "%s: failed to compute %s for well %s — any %s from earlier "
+                "parameters has been dropped from that frame, so the well is "
+                "treated as fully included until the verdict can be computed "
+                "again", layer, column, lbl, column)
+    return failed

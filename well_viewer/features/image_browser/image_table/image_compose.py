@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from typing import Any
     from pathlib import Path
-    from PySide6.QtGui import QPixmap
     from well_viewer.domain.ratio_models import RatioMetric
     import numpy as np
 
@@ -53,22 +52,24 @@ def _load_array(ctx, cache: dict, well: str, chan_upper: str, tp: str, fov: str,
                 *, use_tophat: bool = False):
     """:func:`data.frame_load.load_frame_array`, bound to this render pass.
 
-    The pass-scoped ``scan_misses`` / ``raw_fallbacks`` sets live on the Image
-    Table's own state slice, which the data layer must not name. They are
-    supplied here instead, so every Image Table call site keeps reporting what
-    it always reported and the loader stays feature-free.
+    The pass-scoped ``scan_misses`` / ``raw_fallbacks`` / ``partial_scans`` sets
+    live on the Image Table's own state slice, which the data layer must not
+    name. They are supplied here instead, so every Image Table call site keeps
+    reporting what it always reported and the loader stays feature-free.
     """
     return load_frame_array(ctx, cache, well, chan_upper, tp, fov,
                             use_tophat=use_tophat,
                             raw_fallbacks=_raw_fallbacks(ctx),
-                            scan_misses=_scan_misses(ctx))
+                            scan_misses=_scan_misses(ctx),
+                            partial_scans=_partial_scans(ctx))
 
 
 def _load_well_channel(ctx, cache, well, chan_lower, *, use_tophat: bool = False):
     """:func:`data.frame_load.load_well_channel`, bound to this render pass."""
     return load_well_channel(ctx, cache, well, chan_lower,
                              use_tophat=use_tophat,
-                             scan_misses=_scan_misses(ctx))
+                             scan_misses=_scan_misses(ctx),
+                             partial_scans=_partial_scans(ctx))
 
 
 def _load_mask_array(ctx, cache, well, tp, fov):
@@ -206,8 +207,12 @@ def _row_cmap_name(ctx, r: int, chan=None) -> str | None:
 def _export_binary_mask(ctx, cache, well, chan, tp, fov, binary_mode, crop_tool) -> np.ndarray | None:
     """Compute the shown-cells array for a binary-mode cell (cropped).
 
-    Mirrors the live ``_render_mask_binary`` / ``_render_threshold_binary``
-    selection so the export matches the on-screen thumbnails.
+    This **is** the live selection: the grid, the export figure and the
+    clipboard copies all reach binary mode through here. Two sibling renderers
+    (``_render_mask_binary`` / ``_render_threshold_binary``) used to do the same
+    job for the live thumbnails and were left behind, imported and never called,
+    while docstrings on both sides went on calling them "the live path" — so a
+    fix applied to one of them could not affect anything. They are gone.
 
     The **label ids survive**: shown cells keep their own id and everything else
     is 0, rather than the array being flattened to a 0/1 membership mask. ``> 0``
@@ -227,7 +232,7 @@ def _export_binary_mask(ctx, cache, well, chan, tp, fov, binary_mode, crop_tool)
             from well_viewer.features.image_browser.review_image.controller import (
                 review_build_threshold_map, review_norm_fov,
             )
-            # Mirror the live _render_threshold_binary path: the CSV row keys are
+            # The CSV row keys are
             # normalised (timepoint "0h" -> "0", fov tokens), and gating is per
             # the cell's OWN channel. Passing the raw tp/fov + no channel (as
             # this path used to) matches no rows → every cell reads as
@@ -240,9 +245,33 @@ def _export_binary_mask(ctx, cache, well, chan, tp, fov, binary_mode, crop_tool)
             gate_channel = chan_l if chan_l in fluor else None
             above_by_nid = review_build_threshold_map(
                 ctx, mask_arr, well, norm_fov, norm_tp, channel=gate_channel
-            ) or {}
+            )
         except Exception:
-            above_by_nid = {}
+            # ``{}`` here rendered an all-black silhouette — the *same* picture
+            # a cell with genuinely no nuclei above threshold produces, which
+            # is a real and common result. The failure was therefore
+            # indistinguishable from the measurement. ``None`` is the value
+            # this function already uses for "cannot render this cell", and the
+            # caller labels it; the log line names the cell.
+            logger.exception(
+                "image_table: could not build the threshold map for well=%r "
+                "channel=%r tp=%r fov=%r — the cell is reported unrenderable "
+                "rather than drawn as an empty mask", well, chan, tp, fov,
+            )
+            return None
+        if above_by_nid is None:
+            # The threshold could not be evaluated for this field — no rows for
+            # the well, or none covering this (fov, tp). Drawing it would produce
+            # the all-black silhouette that means "measured, nothing passed", so
+            # the cell is reported unrenderable and the caller labels it, exactly
+            # as for the exception above. ``or {}`` used to stand here and made
+            # the two cases the same picture.
+            logger.info(
+                "image_table: no threshold measurement covers well=%r channel=%r "
+                "tp=%r fov=%r — the cell is reported unrenderable rather than "
+                "drawn as an empty mask", well, chan, tp, fov,
+            )
+            return None
         m = _np.asarray(mask_arr)
         passing = [nid for nid, ok in above_by_nid.items() if ok]
         bm = _np.isin(m, passing) if passing else _np.zeros(m.shape, dtype=bool)
@@ -378,10 +407,11 @@ def _parse_lut(ctx, row_idx: int, chan=None) -> tuple[float | None, float | None
     With a builder channel spec (``chan`` given) the range comes from the
     channel's own ``lut_min``/``lut_max`` (None ⇒ inherit the shared per-channel
     default, then the pooled Auto window, then per-cell auto-fit). Without a spec
-    (``chan`` omitted / no channel_opts entry) the range inherits the shared
-    per-channel default (a brightness tuned in Review Image), then the pooled Auto
-    window, else auto-fits. The pooled window is what makes Auto comparable
-    cell-to-cell (see ``controller._compute_auto_luts``)."""
+    the range inherits the shared per-channel default (a brightness tuned in Review
+    Image) for *chan* — or, only when the caller named no channel at all, for the
+    row's representative channel — then the pooled Auto window, else auto-fits. The
+    pooled window is what makes Auto comparable cell-to-cell (see
+    ``controller._compute_auto_luts``)."""
     spec = _channel_opts_for(ctx, chan)
     if spec is not None:
         lo = spec.get("lut_min")
@@ -394,9 +424,14 @@ def _parse_lut(ctx, row_idx: int, chan=None) -> tuple[float | None, float | None
             if pooled is not None:
                 return pooled
         return lo, hi
-    # No channel spec → inherit the shared per-channel default. ``_shared_channel_lut``
-    # reads the grid cell's own channel (raw row index), correct per band.
-    shared = _shared_channel_lut(ctx, row_idx)
+    # No channel spec → inherit the shared per-channel default for the channel the
+    # CALLER named. ``_shared_channel_lut`` answers for the row's representative
+    # channel — ``cells[row_idx][0]['chan']``, i.e. column 0's — which is only the
+    # right question when no channel was named at all. Asking it for a named
+    # channel handed every cell in the row column 0's brightness window, so a row
+    # of mixed channels was drawn with one channel's LUT.
+    shared = (_shared_channel_lut_for(ctx, chan) if chan
+              else _shared_channel_lut(ctx, row_idx))
     if shared is not None:
         return shared
     pooled = _auto_lut_for(ctx, chan or _row_channel(ctx, row_idx))
@@ -438,16 +473,17 @@ def _row_log_scale(ctx, row_idx: int, chan=None) -> bool:
 def reset_scan_misses(ctx) -> None:
     """Start a render pass with clean per-pass load bookkeeping.
 
-    Called at the top of every Generate / export run. Two records are scoped to
+    Called at the top of every Generate / export run. Three records are scoped to
     a single pass and cleared here: the empty-scan set (without the reset a
     well/channel that came up empty once would stay written off for the rest of
-    the session) and the raw-fallback set (which the status line counts, so it
-    has to describe the pass that just ran and no earlier one).
+    the session), the raw-fallback set, and the truncated-inventory set — the
+    last two are counted by the status line, so both have to describe the pass
+    that just ran and no earlier one.
     """
     st = getattr(getattr(ctx, "state", None), "image_table", None)
     if st is None:
         return
-    for attr in ("scan_misses", "raw_fallbacks"):
+    for attr in ("scan_misses", "raw_fallbacks", "partial_scans"):
         rec = getattr(st, attr, None)
         if isinstance(rec, set):
             rec.clear()
@@ -478,6 +514,34 @@ def _raw_fallbacks(ctx) -> set:
     st = getattr(getattr(ctx, "state", None), "image_table", None)
     rec = getattr(st, "raw_fallbacks", None)
     return rec if isinstance(rec, set) else set()
+
+
+def _partial_scans(ctx) -> set:
+    """The current render pass's set of ``((well, channel, variant), reason)``
+    inventories that were TRUNCATED — see :func:`load_well_channel`.
+
+    Same lifetime and same stub tolerance as :func:`_scan_misses`. Kept apart
+    from that set because the two are opposite failures: a miss draws no cell at
+    all, while a truncated inventory draws real cells and simply has fewer of
+    them than the dataset holds — the grid looks finished, which is why the
+    status line has to say otherwise.
+    """
+    st = getattr(getattr(ctx, "state", None), "image_table", None)
+    rec = getattr(st, "partial_scans", None)
+    return rec if isinstance(rec, set) else set()
+
+
+def partial_scan_report(ctx) -> tuple[list[str], list[str]]:
+    """``(wells, reasons)`` for the truncated inventories of the current pass.
+
+    The public reader over :func:`_partial_scans`, so the status line does not
+    have to know the set's tuple shape. Both lists are de-duplicated and stable
+    (sorted wells, reasons in first-seen order); empty on a clean pass.
+    """
+    rec = _partial_scans(ctx)
+    wells = sorted({str(key[0]) for key, _reason in rec})
+    reasons = list(dict.fromkeys(str(r) for _k, r in rec if r))
+    return wells, reasons
 
 
 def _load_ratio_array(ctx, cache, well, ratio, tp, fov, *, use_tophat) -> Path | None:
@@ -562,69 +626,6 @@ def _format_pixel_intensity(arr, y: int, x: int) -> str:
     if a.ndim == 2:
         return _fmt(px)
     return ",".join(_fmt(v) for v in np.atleast_1d(px).tolist())
-
-def _render_mask_binary(ctx, cache, well, tp, fov, crop_tool, sz) -> QPixmap | None:
-    """White-on-black image of every segmented cell (full mask)."""
-    from well_viewer.core.ui_helpers import make_overlay_thumb
-    import numpy as _np
-
-    mask_arr = _load_mask_array(ctx, cache, well, tp, fov)
-    if mask_arr is None:
-        return None
-    cm = crop_tool.apply_to_array(mask_arr) if crop_tool else mask_arr
-    binary = (_np.asarray(cm) > 0).astype(_np.uint8) * 255
-    rgb = _np.stack([binary, binary, binary], axis=-1)
-    return make_overlay_thumb(rgb, sz, sz, None, None)
-
-def _render_threshold_binary(ctx, cache, well, chan, tp, fov, crop_tool, sz) -> QPixmap | None:
-    """White-on-black image of only the cells above the active ON threshold.
-
-    Reuses the Review Image gating logic (``review_build_threshold_map``) so
-    the "above threshold" definition matches the bar plot / review tab exactly
-    (cell-area gating + every fluor gate + value-column > ON threshold). That
-    helper also emits the ``[binary-mask]`` diagnostic line.
-    """
-    from well_viewer.core.ui_helpers import make_overlay_thumb
-    import numpy as _np
-
-    mask_arr = _load_mask_array(ctx, cache, well, tp, fov)
-    if mask_arr is None:
-        return None
-    above_by_nid: dict[int, bool] = {}
-    try:
-        from well_viewer.features.image_browser.review_image.controller import (
-            review_build_threshold_map, review_norm_fov,
-        )
-        # The CSV row keys are normalised (e.g. timepoint "0h" -> "0"); the
-        # Image Table cell carries the raw image-filename token, so normalise
-        # tp/fov the same way the Review Image tab does before the lookup —
-        # otherwise no rows match and every cell reads as below-threshold
-        # (an all-black mask) for any non-integer timepoint token.
-        norm_tp = norm_timepoint(ctx, tp)
-        norm_fov = review_norm_fov(fov)
-        # Gate each cell by ITS OWN channel's ThreshFracOn (set per-channel in
-        # Home → Cell Gating), not whatever channel the Segmentation tab last
-        # showed. Only override for real fluor channels — nuc+seg / ratio cells
-        # fall back to the displayed-channel default.
-        chan_l = str(chan or "").strip().lower()
-        fluor = {str(c).strip().lower() for c in (ctx.state.channel.fluor_channels or [])}
-        gate_channel = chan_l if chan_l in fluor else None
-        above_by_nid = review_build_threshold_map(
-            ctx, mask_arr, well, norm_fov, norm_tp, channel=gate_channel
-        ) or {}
-    except Exception:  # fall back to an all-off mask on any error
-        above_by_nid = {}
-    m = _np.asarray(mask_arr)
-    passing = [nid for nid, ok in above_by_nid.items() if ok]
-    binary = _np.isin(m, passing) if passing else _np.zeros(m.shape, dtype=bool)
-    b = binary.astype(_np.uint8) * 255
-    cm = crop_tool.apply_to_array(b) if crop_tool else b
-    rgb = _np.stack([cm, cm, cm], axis=-1)
-    return make_overlay_thumb(rgb, sz, sz, None, None)
-
-
-# ── Composite row: additive merge of the LUT-colored rows above ─────────────
-
 
 def cell_display_rgb(ctx, cache, cell, r: int, crop_tool, arr) -> np.ndarray | None:
     """Return the uint8 (H, W, 3) RGB shown for grid cell ``cell`` in row *r*.
@@ -733,41 +734,18 @@ def composite_additive_rgb(rgbs) -> np.ndarray | None:
     return _np.clip(acc, 0.0, 255.0).astype(_np.uint8)
 
 
-def composite_column_rgb(ctx, cache, cells, crop_tool, c: int, rendered):
-    """Build the additive composite RGB for grid column *c*.
-
-    Gathers each grid row's displayed RGB (via :func:`cell_display_rgb`) for
-    column *c* and merges them with :func:`composite_additive_rgb`. Uses a
-    ``rendered`` array when the caller supplies one, else lazy-loads through the
-    decode cache (mirroring the export path; the live render model stores no
-    arrays). Returns a uint8 (H, W, 3) array, or ``None``.
-    """
-    rendered = rendered or {}
-    rgbs = []
-    for r, row in enumerate(cells):
-        if c >= len(row):
-            continue
-        cell = row[c]
-        arr = rendered.get((r, c))
-        if arr is None:
-            well = cell["well"]
-            chan = cell["chan"]
-            tp = cell["tp"]
-            fov = cell["fov"]
-            if well and chan and tp:
-                use_tophat = _row_display_opts(ctx, r)[0]
-                arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
-        rgb = cell_display_rgb(ctx, cache, cell, r, crop_tool, arr)
-        if rgb is not None:
-            rgbs.append(rgb)
-    return composite_additive_rgb(rgbs)
-
-
 def _ratio_for_overlay(ctx, chan) -> RatioMetric | None:
     """The RatioMetric whose display label matches *chan* (case-insensitive), else
     None. Inlined so this render layer stays free of a ``grid_layout`` import
-    (which would cycle: grid_layout imports this module)."""
-    for r in (ctx.state.channel.ratio_metrics or []):
+    (which would cycle: grid_layout imports this module).
+
+    Resolved defensively because this module's render helpers are also driven by
+    callers that carry no channel state at all (the render-resilience tests pass
+    a bare stub, and some pass no ctx); a context without ratio metrics simply
+    has no ratio to find, which is not a failure worth an exception."""
+    metrics = getattr(getattr(getattr(ctx, "state", None), "channel", None),
+                      "ratio_metrics", None)
+    for r in (metrics or []):
         if r.display_label().upper() == str(chan or "").strip().upper():
             return r
     return None
@@ -1067,7 +1045,36 @@ UNCORRECTED_MARK = "raw"
 UNCORRECTED_TOOLTIP = "shown uncorrected — no corrected image for this field"
 
 
-def is_raw_fallback(ctx, cell) -> bool:
+def cell_source_channels(ctx, cell, overlay_chans=None) -> list[str]:
+    """Every REAL channel whose frame *cell* draws from.
+
+    A cell's ``chan`` is what the axis calls it, and for two kinds of cell that
+    is not a channel the loader ever reads:
+
+    * an :data:`OVERLAY_CHAN` cell blends the whole selected channel set
+      (``overlay_cell_rgb``), which the caller supplies as *overlay_chans*
+      because only the layout knows it;
+    * a ratio cell's token is a :class:`RatioMetric` display label, and the
+      loader reads the metric's numerator and denominator
+      (:func:`_load_ratio_array`).
+
+    Everything else draws from its own channel. Returns ``[]`` for an unset cell.
+    Used wherever a per-cell answer has to be looked up in a record the loader
+    keyed by the channel it actually opened — see :func:`is_raw_fallback`.
+    """
+    chan = (cell.get("chan") or "") if hasattr(cell, "get") else ""
+    if not chan:
+        return []
+    if chan == OVERLAY_CHAN:
+        return [str(c) for c in (overlay_chans or []) if c and c != OVERLAY_CHAN]
+    ratio = _ratio_for_overlay(ctx, chan)
+    if ratio is not None:
+        return [c for c in ((ratio.numerator_channel or "").strip(),
+                            (ratio.denominator_channel or "").strip()) if c]
+    return [chan]
+
+
+def is_raw_fallback(ctx, cell, overlay_chans=None) -> bool:
     """Whether *cell* was served the raw frame after asking for the corrected one.
 
     Reads the current render pass's :func:`_raw_fallbacks` set, whose keys
@@ -1075,14 +1082,23 @@ def is_raw_fallback(ctx, cell) -> bool:
     The set is populated by whichever pass loaded the cell first — the pooled
     Auto-LUT pass runs before the render loop — so this answers correctly for
     both.
+
+    The lookup is per SOURCE channel (:func:`cell_source_channels`), not per axis
+    token. An overlay cell and a ratio cell are both drawn from channels whose
+    names appear nowhere on the grid, so keying on the cell's own token asked the
+    record for a channel the loader never wrote and answered "corrected" for a
+    cell that is not: the fallback was counted under a channel the user cannot
+    see and badged on nothing. True when ANY source channel fell back, because a
+    blend or a ratio carrying one uncorrected input is an uncorrected image.
     """
     well = (cell.get("well") or "") if hasattr(cell, "get") else ""
-    chan = (cell.get("chan") or "") if hasattr(cell, "get") else ""
-    if not well or not chan:
+    if not well:
         return False
-    key = (well, _binary_base(chan).strip().lower(),
-           str(cell.get("tp") or ""), str(cell.get("fov") or ""))
-    return key in _raw_fallbacks(ctx)
+    tp = str(cell.get("tp") or "")
+    fov = str(cell.get("fov") or "")
+    rec = _raw_fallbacks(ctx)
+    return any((well, _binary_base(ch).strip().lower(), tp, fov) in rec
+               for ch in cell_source_channels(ctx, cell, overlay_chans))
 
 
 def _mark_corner(st) -> str:
@@ -1095,7 +1111,7 @@ def _mark_corner(st) -> str:
     return "tr"
 
 
-def mark_uncorrected(ctx, cell, rgb):
+def mark_uncorrected(ctx, cell, rgb, overlay_chans=None):
     """Burn :data:`UNCORRECTED_MARK` into *rgb* when *cell* fell back to raw.
 
     A cell whose corrected (top-hat) image is missing still draws — it draws the
@@ -1112,7 +1128,7 @@ def mark_uncorrected(ctx, cell, rgb):
     identity label use, so the live thumbnail and the exported figure carry it
     identically. Returns *rgb* untouched for a cell that got what it asked for.
     """
-    if rgb is None or not is_raw_fallback(ctx, cell):
+    if rgb is None or not is_raw_fallback(ctx, cell, overlay_chans):
         return rgb
     st = ctx.state.image_table
     return draw_cell_chrome(

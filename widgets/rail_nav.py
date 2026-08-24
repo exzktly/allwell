@@ -97,7 +97,14 @@ class _RailNavRow(QFrame):
         self._glyph = QLabel(body)
         self._glyph.setObjectName("RailNavRowGlyph")
         # ~14× viewer text height — was 15px hardcoded; scales with font.
+        # Kept on the row: the *ink* below has to be drawn at the same size as
+        # the box reserved here, and it used to be a hardcoded 15 in a box that
+        # follows the font. At the default that is a 15px glyph in a 14px box;
+        # at 150% font scaling the box grows and the glyph does not. The sweep
+        # that made this box font-derived converted the reservation and left
+        # the ink behind.
         _gs = max(12, round(self.fontMetrics().height() * 1.0))
+        self._glyph_px = _gs
         self._glyph.setFixedSize(_gs, _gs)
         self._glyph.setVisible(bool(icon))
 
@@ -154,7 +161,7 @@ class _RailNavRow(QFrame):
         token = "accent" if active else "text_muted"
         dpr = self.devicePixelRatioF() if hasattr(self, "devicePixelRatioF") else 1.0
         self._glyph.setPixmap(
-            icons.make_pixmap(self._icon_name, token, 15, dpr or 1.0)
+            icons.make_pixmap(self._icon_name, token, self._glyph_px, dpr or 1.0)
         )
 
     def mousePressEvent(self, ev):

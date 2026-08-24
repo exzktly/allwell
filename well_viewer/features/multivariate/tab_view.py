@@ -127,8 +127,8 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
                                                       tooltip="Export this plot")
     add_menu_action(export_menu, "Export CSV…", lambda: mv_ctrl.mv_export_csv(ctx),
                     tooltip="Export feature matrix")
-    add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx))
-    add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx))
+    add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx, "_mv_card"))
+    add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx, "_mv_card"))
     export_menu.addSeparator()
     add_menu_action(export_menu, "Save to Saved Plots",
                     lambda: save_card_to_gallery(ctx, "_mv_card"))

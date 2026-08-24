@@ -30,15 +30,18 @@ class EventBus(QObject):
     - ``dataset_loaded`` — a dataset finished loading; payload ``DatasetState``.
     - ``plot_options_changed`` — a plot option (fold-change mode, error bars,
       ordering, …) changed; payload ``PlotState``.
-    - ``redraw_requested`` — an explicit request to redraw a named scope;
-      payload the scope name (``"bar"`` / ``"line"`` / …).
 
-    The catalogue is deliberately capped at these five: an event bus that
-    accumulates dozens of signals has just become a new god-object.
+    The catalogue is deliberately capped at these four: an event bus that
+    accumulates dozens of signals has just become a new god-object. It is also
+    load-bearing — every signal here has a real emitter and a real subscriber.
+    A fifth, ``redraw_requested``, had neither: it was documented, frozen in
+    place by the guard below, and cited as evidence that the bus is
+    load-bearing, while nothing in the app ever emitted or listened for it. A
+    signal nobody sends is not a seam, it is a claim about the design that the
+    code does not support.
     """
 
     channel_changed = Signal(object)       # ChannelState
     selection_changed = Signal(object)     # SelectionState
     dataset_loaded = Signal(object)        # DatasetState
     plot_options_changed = Signal(object)  # PlotState
-    redraw_requested = Signal(str)         # scope name

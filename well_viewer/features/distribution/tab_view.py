@@ -122,8 +122,8 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     export_btn, export_menu = make_action_menu_button("Export ▾", ctrl,
                                                       tooltip="Export this plot")
     add_menu_action(export_menu, "Export CSV…", lambda: export_distribution_data(ctx))
-    add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx))
-    add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx))
+    add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx, "_distribution_card"))
+    add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx, "_distribution_card"))
     export_menu.addSeparator()
     add_menu_action(export_menu, "Save to Saved Plots",
                     lambda: save_card_to_gallery(ctx, "_distribution_card"))

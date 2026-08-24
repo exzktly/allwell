@@ -37,6 +37,7 @@ from well_viewer.features.image_browser.image_table.image_compose import (
     draw_cell_chrome,
     mark_uncorrected,
     overlay_cell_rgb,
+    partial_scan_report,
     reset_scan_misses,
     resolve_chrome_plan,
 )
@@ -462,7 +463,10 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None):
                     rgb = draw_cell_chrome(rgb, **ck)
                 # A figure that dropped the uncorrected mark would leave the app
                 # carrying exactly the ambiguity the live grid no longer has.
-                rgb = mark_uncorrected(ctx, cell, rgb)
+                # ``overlay_chans`` because an overlay cell's own token names no
+                # channel the loader ever recorded — without it the figure would
+                # silently drop the mark on exactly the cells the screen shows it on.
+                rgb = mark_uncorrected(ctx, cell, rgb, overlay_chans)
 
             if rgb is not None:
                 if cell_max_px:
@@ -531,7 +535,15 @@ def image_table_export(ctx) -> None:
         if fmt == "png":
             kw["dpi"] = dpi
         fig.savefig(out, **kw)
-        ctx.notify.set_status(f"Image table saved → {Path(out).name}")
+        # A PNG on disk outlives the status line, so a truncated inventory has
+        # to be said at the moment of saving: the file is short by however many
+        # frames the scan never reached, and nothing in it says so.
+        partial_wells, _reasons = partial_scan_report(ctx)
+        short = (
+            f"  WARNING: the image list for {', '.join(partial_wells)} is "
+            "INCOMPLETE — frames the dataset holds are missing from this file."
+        ) if partial_wells else ""
+        ctx.notify.set_status(f"Image table saved → {Path(out).name}{short}")
     except Exception as exc:
         QMessageBox.critical(ctx.window, "Export failed", str(exc))
 

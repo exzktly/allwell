@@ -53,6 +53,7 @@ _SAMPLE_LIMIT = 400           # names sampled — "briefly scanning", not a full
 _TP_RE = re.compile(r"(?i)^t\d+$")
 _FOV_RE = re.compile(r"(?i)^f\d+$")
 _HAS_ALPHA_RE = re.compile(r"[A-Za-z]")
+_BARE_NUM_RE = re.compile(r"^\d+$")
 
 
 @dataclass
@@ -274,6 +275,29 @@ def _classify_slots(rows: list[list[str]], k: int) -> tuple[list[str], int | Non
     chan_i = _pick_channel_slot(cols, used)
     if chan_i is not None:
         fields[chan_i] = "channel"; used.add(chan_i)
+
+    # Last pass: a bare-number FOV slot. ``_is_fov`` accepts only ``f<n>``,
+    # deliberately — a bare number also reads as a timepoint or an experiment
+    # index, and letting the FOV predicate claim one would be the same
+    # out-of-domain judgement that put every image in well F01. So a plate
+    # written ``exp_gfp_A01_3_t2`` left the FOV slot as ``ignore``, and every
+    # field of view in a well merged into one.
+    #
+    # Claimed here rather than in ``_is_fov`` because it is only decidable once
+    # the other slots are taken: a leftover numeric column, with the timepoint
+    # slot already found (so this is not it), with more than one distinct value
+    # (so the single-value experiment rule already passed on it). Everything
+    # else stays ``ignore``.
+    if fov_i is None and tp_i is not None:
+        for i in range(k):
+            if i in used:
+                continue
+            col = cols[i]
+            if len(set(col)) < 2:
+                continue
+            if all(_BARE_NUM_RE.match(v or "") for v in col):
+                fields[i] = "fov"; fov_i = i; used.add(i)
+                break
     return fields, well_i, chan_i
 
 

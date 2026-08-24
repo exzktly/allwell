@@ -11,9 +11,13 @@ overrides to silently re-bind to unrelated cells. The fingerprint is the
 stored entry whose fingerprint no longer matches the on-disk zip is
 discarded with a warning.
 
-v1 files (no fingerprint) load with a warning telling the user their
-overrides may be stale if the pipeline has been re-run since the
-overrides were last saved.
+Two situations cannot yield a verdict, and both are reported rather than
+passed off as a match: a row with no stored fingerprint at all (a v1 file,
+or a v2 row saved while the well's zip was missing or unreadable), and a row
+whose fingerprint has nothing to compare against because the well's
+``<well>_out.zip`` is not in the data directory. Those rows are kept — a
+moved zip must not cost the user their curation — and counted in a warning
+naming how many were loaded unchecked.
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ import logging
 from pathlib import Path
 
 from util.well_token import canonical_well_label
+from well_viewer.core.safe import swallowed
 from well_viewer.data.image_identity import CellKey
 from well_viewer.persistence._io import atomic_write_json
 
@@ -62,7 +67,11 @@ def _well_zip_fingerprints(ctx) -> dict[str, str]:
         try:
             out[well] = f"{zip_path.stat().st_mtime_ns}"
         except OSError:
-            pass
+            # No fingerprint for this well. Both callers treat a missing entry
+            # as "cannot verify" and say so rather than assuming a match, but
+            # the stat failure itself must not be silent — it is the reason a
+            # later load reports overrides it could not check.
+            swallowed(f"cell_overrides: could not stat {zip_path}")
     return out
 
 
@@ -108,7 +117,7 @@ def _fingerprints_for_data_dir(data_dir: Path) -> dict[str, str]:
         try:
             out[well] = f"{zip_path.stat().st_mtime_ns}"
         except OSError:
-            pass
+            swallowed(f"cell_overrides: could not stat {zip_path}")
     return out
 
 
@@ -145,6 +154,7 @@ def load_overrides(data_dir: Path) -> dict[tuple[str, str, str, str], str]:
     new_map: dict = {}
     dropped_stale = 0
     legacy_unfingerprinted = 0
+    unverifiable = 0
     for entry in overrides:
         if not isinstance(entry, dict):
             continue
@@ -158,7 +168,17 @@ def load_overrides(data_dir: Path) -> dict[tuple[str, str, str, str], str]:
             continue
         if stored_fp:
             current_fp = fingerprints.get(well, "")
-            if current_fp and stored_fp != current_fp:
+            if not current_fp:
+                # The well has no ``<well>_out.zip`` on disk (never written,
+                # deleted, or a stat that failed above), so the fingerprint
+                # this row carries cannot be checked against anything. That is
+                # *not* the same as a match: the row is kept — dropping curation
+                # because a zip was moved would be an unrecoverable loss — but
+                # it is counted and reported, so an override binding to a
+                # re-segmented cell is never indistinguishable from a verified
+                # one. This branch previously fell through silently.
+                unverifiable += 1
+            elif stored_fp != current_fp:
                 # Pipeline re-run since this override was saved — nucleus
                 # IDs no longer match the original segmentation. Drop.
                 dropped_stale += 1
@@ -183,12 +203,26 @@ def load_overrides(data_dir: Path) -> dict[tuple[str, str, str, str], str]:
             "pipeline re-run since the overrides were saved).",
             dropped_stale,
         )
-    if legacy_unfingerprinted and file_version < _SCHEMA_VERSION:
+    if legacy_unfingerprinted:
+        # Not gated on ``file_version``: a v2 file can carry rows with an empty
+        # ``seg_fp`` too (the well's zip was missing, or unreadable, when the
+        # override was saved), and those rows are exactly as unchecked as a v1
+        # file's. Gating the warning on the file version meant the v2 case
+        # warned about nothing at all. The version is reported so the message
+        # says which of the two situations produced it.
         _logger.warning(
-            "cell_overrides: %d v1 override(s) loaded without a segmentation "
-            "fingerprint — they may bind to unrelated cells if the pipeline "
-            "has been re-run since they were saved. Save to upgrade.",
-            legacy_unfingerprinted,
+            "cell_overrides: %d override(s) in this v%d file carry no "
+            "segmentation fingerprint — they may bind to unrelated cells if "
+            "the pipeline has been re-run since they were saved. Re-save to "
+            "stamp the current segmentation.",
+            legacy_unfingerprinted, file_version,
+        )
+    if unverifiable:
+        _logger.warning(
+            "cell_overrides: %d override(s) could not be checked against a "
+            "segmentation zip because the well's ``<well>_out.zip`` is not in "
+            "this data directory; they were kept unverified.",
+            unverifiable,
         )
     return new_map
 

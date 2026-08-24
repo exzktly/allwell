@@ -1020,10 +1020,35 @@ def save_to_data_dir(ctx) -> None:
     _doc.set_section(ctx, "view_state", state)
 
 
+def forget_absent_wells(ctx) -> None:
+    """Drop the cross-plate "absent" stashes (X14).
+
+    ``restore`` remembers the wells a saved view named that the plate in front
+    of it does not hold, so :func:`snapshot` can union them back and a subset
+    load does not prune them. Those two sets describe *one particular
+    persistence.json*, and they are the only piece of view state that is
+    written by ``restore`` and read by ``snapshot`` without either being keyed
+    to a data directory — so carrying them into another dataset unions one
+    plate's wells into another plate's saved selection.
+
+    ``restore`` reassigns both, but it only runs when the new plate has a
+    ``view_state`` section; when it has none the assignment never happens and
+    the previous plate's wells survive. Hence a clear that runs before that
+    decision rather than inside it.
+    """
+    ctx.runtime.view_state.absent_wells = set()
+    ctx.runtime.view_state.absent_solo = set()
+
+
 def load_from_data_dir(ctx) -> None:
     app = ctx.window  # transitional bridge (B4)
     if not app._app_state.dataset.data_dir:
         return
+    # Before the section is read, and therefore before every path that can
+    # return without reaching ``restore``: a plate with no saved view, a doc
+    # that cannot be migrated, a section that is not a dict. Each of those
+    # left the previous plate's absent wells in place to be re-saved here.
+    forget_absent_wells(ctx)
     state = _doc.get_section(ctx, "view_state")
     if not isinstance(state, dict):
         return

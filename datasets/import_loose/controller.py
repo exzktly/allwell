@@ -178,6 +178,13 @@ class ImportLooseController(DatasetToolController):
         note = self.page.unmatched_note()
         if note:
             tail.insert(0, note)
+        folders = self.page.existing_folder_note()
+        if folders:
+            # The scope beyond the loose files. It goes first: it is the part
+            # of the operation the counts above do not cover, and the part a
+            # user reading "N file(s) into M well archive(s)" has no other way
+            # to learn about before consenting to a delete.
+            tail.insert(0, folders)
         answer = QMessageBox.question(
             self.page,
             "Group in place?",

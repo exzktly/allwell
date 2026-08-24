@@ -29,7 +29,6 @@ import json
 import logging
 import os
 import shutil
-from util.json_write import write_json_atomic
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -37,6 +36,7 @@ from collections.abc import Iterable
 
 from well_viewer.domain import selections_model as _sel_model
 from well_viewer.domain.viewer_state import resolve_pipeline_info_path
+from well_viewer.persistence._io import update_json_atomic
 
 
 _logger = logging.getLogger("well_viewer.domain.sample_definitions")
@@ -122,6 +122,18 @@ def save_to_pipeline_info(
 
     Raises FileNotFoundError when the pipeline file does not yet exist —
     the caller should run the pipeline first so the file gets created.
+
+    **The read-modify-write goes through**
+    :func:`well_viewer.persistence._io.update_json_atomic`, which re-reads the
+    file and compares it byte-for-byte against the copy the mutation was built
+    from immediately before the replace, and re-applies the mutation when
+    somebody else landed a write in between. ``pipeline_info.json`` has several
+    writers, and the pipeline itself — often in another process, on another
+    host — rewrites ``fluor_tokens``, ``schema`` and ``available_timepoints`` at
+    the end of a run. Analyze and Review share one window, so that run can
+    finish between this function's read and its write. A plain read-modify-write
+    here reverted the pipeline's keys, and it did so silently: the viewer simply
+    stopped being able to see a channel or a timepoint the run had produced.
     """
     info_path = _resolve_pipeline_info_path(out_dir)
     if not info_path.exists():
@@ -129,32 +141,51 @@ def save_to_pipeline_info(
             f"{PIPELINE_INFO_FILENAME} was not found in {out_dir} "
             f"(or its parent). Run the pipeline first to create it."
         )
-    try:
-        existing = json.loads(info_path.read_text())
-        if not isinstance(existing, dict):
-            raise ValueError(f"{info_path} is not a JSON object.")
-    except (OSError, json.JSONDecodeError, ValueError) as exc:
-        raise OSError(f"Could not read {info_path}: {exc}") from exc
 
-    old_block = existing.get(SAMPLE_DEFINITIONS_KEY)
-    writing_v2 = _sel_model.block_is_v2(sample_definitions)
-    old_was_v1 = isinstance(old_block, dict) and not _sel_model.block_is_v2(old_block)
-    if writing_v2 and old_was_v1:
-        try:
-            _backup_pre_v2(info_path)
-        except OSError as exc:
-            raise OSError(
-                f"Refusing to save: couldn't write a pre-upgrade backup of "
-                f"{info_path.name} ({exc})."
-            ) from exc
+    backup_failure: list[OSError] = []
+    backed_up = False
 
-    existing[SAMPLE_DEFINITIONS_KEY] = sample_definitions
+    def _mutate(existing: dict) -> dict | None:
+        # Runs against the bytes this attempt actually read, and may run again
+        # if another writer lands in between — so the v1 test is made on the
+        # content being replaced, not on a copy read earlier, and the backup is
+        # taken at most once per call.
+        nonlocal backed_up
+        old_block = existing.get(SAMPLE_DEFINITIONS_KEY)
+        writing_v2 = _sel_model.block_is_v2(sample_definitions)
+        old_was_v1 = isinstance(old_block, dict) and not _sel_model.block_is_v2(old_block)
+        if writing_v2 and old_was_v1 and not backed_up:
+            try:
+                _backup_pre_v2(info_path)
+            except OSError as exc:
+                # Abandon the update rather than destroy the only old copy;
+                # the caller is told by the re-raise below.
+                backup_failure.append(exc)
+                return None
+            backed_up = True
+        existing[SAMPLE_DEFINITIONS_KEY] = sample_definitions
+        return existing
+
     # ``durable=False``: this is the debounced sample-definitions autosave,
     # called on the GUI thread every time the user stops typing. An fsync on a
     # network share is a visible pause there, and the value is rewritten within
     # seconds anyway — what matters is that a reader never sees a half-written
     # file, which the rename gives regardless.
-    write_json_atomic(info_path, existing, durable=False)
+    wrote = update_json_atomic(info_path, _mutate, durable=False)
+    if backup_failure:
+        raise OSError(
+            f"Refusing to save: couldn't write a pre-upgrade backup of "
+            f"{info_path.name} ({backup_failure[0]})."
+        ) from backup_failure[0]
+    if not wrote:
+        # update_json_atomic has already logged which of its refusals this was
+        # (unreadable, not a JSON object, unwritable, or a writer it could not
+        # get ahead of). The caller's contract is an exception, not a silent
+        # no-op autosave.
+        raise OSError(
+            f"Could not save {SAMPLE_DEFINITIONS_KEY} into {info_path} — see "
+            f"the log for which read or write step refused."
+        )
     return info_path
 
 

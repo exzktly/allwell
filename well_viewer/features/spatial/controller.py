@@ -475,7 +475,11 @@ def _write_summary_csv(ctx, rows) -> None:
     # working directory instead of beside the dataset.
     dataset_dir = str(getattr(ctx.state.dataset, "data_dir", None) or "")
     default = "spatial_summary.csv"
-    parent = None
+    # Parented, like every other file dialog in the app: an unparented
+    # QFileDialog on macOS opens as a detached window rather than an app
+    # sheet, and can fall behind the main window with no way back to it.
+    # ``widgets/path_field.py`` records the same reason at its own site.
+    parent = ctx.window
     path, _ = QFileDialog.getSaveFileName(
         parent, "Export Spatial Summary CSV",
         f"{dataset_dir}/{default}" if dataset_dir else default,

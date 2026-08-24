@@ -27,6 +27,17 @@ Two modes, one code path each:
   ``run_zipper`` call produces. Calling it here previously left every well as
   a bare folder, never a zip, with no error — the run reported success.
 
+  Its scope is therefore **every** well folder under the source, not only the
+  wells grouped out of the loose TIFs: a folder a user (or an earlier tool)
+  organised by hand is zipped and has its TIFs deleted too. That is deliberate —
+  it is what leaves the folder in one uniform, ready-to-run layout, and it is
+  what lets an interrupted run resume, since a crashed attempt's already-grouped
+  wells have no loose TIFs left to find. It is also invisible to the preview,
+  which is loose-TIF-only and non-recursive, so
+  :func:`~datasets.import_loose.import_loose_compute.existing_well_folders`
+  measures it with the same walk and both the page and the run's own summary
+  name those folders before and after acting on them.
+
 Both modes report per-well progress through the same ``(well, "writing" |
 "done")`` callback shape, so :mod:`~datasets.import_loose.dashboard`'s
 :class:`~datasets.import_loose.dashboard.ImportLooseDashboard` — a per-well
@@ -46,7 +57,10 @@ from util.zip_write import atomic_zip, replace_folder_with_archive
 from datasets._common.concurrency import pick_workers
 from datasets._common.containers import WellFraction
 from datasets._common.dataset_paths import DatasetPaths, destination_has_content
-from datasets.import_loose.import_loose_compute import group_files_by_well
+from datasets.import_loose.import_loose_compute import (
+    existing_well_folders,
+    group_files_by_well,
+)
 
 
 def _null_log(_message: str) -> None:
@@ -297,6 +311,18 @@ def convert_in_place(
     emit = log or _null_log
     report = progress or _null_progress
 
+    # Measured *before* run_zipper, because after it every grouped well is a
+    # well folder too and the two are no longer distinguishable on disk. These
+    # are the folders this run will convert on top of the loose TIFs it was
+    # pointed at — the scope the preview's loose-TIF-only, non-recursive scan
+    # cannot see, and which was previously acted on without ever being named.
+    pre_existing = existing_well_folders(Path(search_dir))
+    if pre_existing:
+        emit(
+            f"  Note: {len(pre_existing)} well folder(s) were already here and "
+            f"will be zipped as well: {', '.join(pre_existing)}\n"
+        )
+
     def _on_grouped(well: str) -> None:
         report(well, "writing")
 
@@ -309,4 +335,15 @@ def convert_in_place(
     zipped = _zip_well_folders(
         Path(search_dir), log_fn=emit, progress=report, sub_progress=sub_progress,
     )
-    return f"Grouped loose TIFs in {search_dir} into {zipped} per-well zip(s)."
+    summary = f"Grouped loose TIFs in {search_dir} into {zipped} per-well zip(s)."
+    if pre_existing:
+        # Folded into the summary, not left as a log line: the raw log is hidden
+        # by default, so a run that also emptied folders the user never asked
+        # about would say so only where nobody looks. The summary is what the
+        # dashboard headline shows and what the Job Queue records for the run.
+        summary = (
+            f"{summary} {len(pre_existing)} of those well(s) came from folders "
+            f"already in the source ({', '.join(pre_existing)}), not from loose "
+            "TIFs."
+        )
+    return summary

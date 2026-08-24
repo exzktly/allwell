@@ -62,6 +62,21 @@ PIXEL_SETTERS = frozenset({
 # 0 = "no constraint"; 16777215 = Qt's QWIDGETSIZE_MAX, the same statement.
 FREE_VALUES = frozenset({0, 16777215})
 
+# What this roster deliberately does NOT cover, so the omission is a recorded
+# decision rather than something the next reader has to rediscover:
+#
+#   * ``setSpacing`` / ``setContentsMargins`` — 147 bare literals across the
+#     app at the time of writing. Many are ``0`` ("no gap", not a design
+#     value) and the rest are a sweep in their own right, not a ratchet that
+#     can be closed alongside unrelated work. Adding the names here without
+#     doing that sweep would only add an allowlist the size of the violation.
+#   * ``font-size`` inside QSS strings — the guard reads the AST, so a size
+#     written into a stylesheet f-string is invisible to it. ``selection_chip``
+#     had one and it was found by reading, not by this.
+#
+# Both are real gaps. Widening the roster is the fix; doing it means converting
+# the sites first, exactly as the pixel setters were converted.
+
 
 
 
@@ -73,7 +88,6 @@ FREE_VALUES = frozenset({0, 16777215})
 # work rather than a reason to weaken the scan. Shrink-only: name one, delete
 # its line.
 EXPRESSION_ALLOWLIST = {
-    "well_viewer/core/plot_toggles.py:59",
     "widgets/color_picker_popover.py:237",
     "widgets/color_picker_popover.py:242",
     "widgets/empty_state.py:93",

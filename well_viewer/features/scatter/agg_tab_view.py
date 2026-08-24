@@ -106,8 +106,8 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     _export_btn, _export_menu = make_action_menu_button(
         "Export ▾", ctrl, tooltip="Export, copy, and save")
     add_menu_action(_export_menu, "Export CSV…", lambda: export_scatter_agg_data(ctx))
-    add_menu_action(_export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx))
-    add_menu_action(_export_menu, "Save figure…", lambda: save_active_card_figure(ctx))
+    add_menu_action(_export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx, "_scatter_agg_card"))
+    add_menu_action(_export_menu, "Save figure…", lambda: save_active_card_figure(ctx, "_scatter_agg_card"))
     _export_menu.addSeparator()
     add_menu_action(_export_menu, "Save to Saved Plots",
                     lambda: save_card_to_gallery(ctx, "_scatter_agg_card"))

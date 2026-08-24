@@ -166,6 +166,18 @@ def _update_preview_impl(ctx, well_label: str | None) -> None:
         dirs = f"in={state.dataset.in_dir}  out={state.dataset.data_dir}"
         msg = f"No images found for {tok}. Searched: {dirs}"
         _logger.warning(msg)
+        # An empty result and a scan that failed before it read anything are two
+        # different answers, and this path used to leave the *previous* well's
+        # status text on screen for both — so the canvas showed one well and the
+        # line beneath it described another. Say which of the two happened, here,
+        # where the draw that would normally rewrite the line never runs.
+        status = widgets.get_or_none("_review_image_status")
+        if status is not None:
+            shortfall = _scan_shortfall_suffix(ctx)
+            status.setText(
+                (f"No images could be read for {tok}.{shortfall}") if shortfall
+                else f"No images found for {tok}. Searched: {dirs}"
+            )
         return
 
     fov_menu = widgets.get_or_none("_review_image_fov_menu")
@@ -408,6 +420,48 @@ def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: 
     )
 
 
+def _scan_shortfall_suffix(ctx) -> str:
+    """The status-line clause naming a truncated image scan, or ``""``.
+
+    ``find_well_images_and_masks`` returns
+    :class:`~well_viewer.data.zip_members.ScanResult` inventories that carry
+    their own provenance: ``partial`` is True when the walk over the archive or
+    folder stopped early, and ``reason`` says why. A truncated inventory is the
+    same shape as a complete one — a short dict of real images — so the FOV and
+    timepoint menus built from it are simply shorter, with nothing on screen to
+    distinguish "this well holds two fields" from "the scan reached two fields
+    and then hit a bad CRC". Reading the flag here is what puts the difference
+    where the user is already looking.
+
+    The four maps are checked together because any one of them being short
+    makes the displayed frame potentially the wrong one: a missing mask draws no
+    boundaries, a missing top-hat frame silently falls back to raw.
+    """
+    st = getattr(ctx, "state", None)
+    preview = getattr(st, "preview", None)
+    if preview is None:
+        return ""
+    maps = (
+        getattr(preview, "fluor", None),
+        getattr(preview, "tophat_fluor", None),
+        getattr(preview, "overlay", None),
+        getattr(preview, "mask", None),
+    )
+    reasons = [
+        str(getattr(m, "reason", "") or "")
+        for m in maps
+        if getattr(m, "partial", False)
+    ]
+    if not reasons:
+        return ""
+    why = "; ".join(dict.fromkeys(r for r in reasons if r)) or "a scan stopped short"
+    return (
+        "  ·  WARNING: this well's image list is INCOMPLETE — "
+        f"{why}. Fields or timepoints the well holds may be missing from the "
+        "menus above, so what is shown is not the whole well."
+    )
+
+
 def draw_review_image(
     ctx,
     fluor_arr,
@@ -476,12 +530,19 @@ def draw_review_image(
             (center_view != padded[1:-1, 2:])
         )
 
-    binary_mask_mode = bool(state.review_image.binary_mask)
+    # ``above_by_nid is None`` means the per-cell threshold could not be
+    # EVALUATED for this field — no rows cover it, the row keys did not resolve,
+    # the well has no rows at all (``review_build_threshold_map`` returns None
+    # for each). Coercing that to ``{}`` painted the identical all-black
+    # silhouette the renderer paints for "measured, and no cell passed", which
+    # is a measurement. So the binary view is declined instead: the ordinary
+    # intensity image is drawn and the status line says the threshold is
+    # unmeasured, which nothing can mistake for a plate of negative cells.
+    threshold_unmeasured = bool(state.review_image.binary_mask) and above_by_nid is None
+    binary_mask_mode = bool(state.review_image.binary_mask) and not threshold_unmeasured
     sel_nid = state.review_image.selected_nucleus
 
     if binary_mask_mode:
-        if above_by_nid is None:
-            above_by_nid = {}
         rgb = _np.zeros((h, w, 3), dtype=_np.uint8)
         above_ids = [int(nid) for nid, ab in above_by_nid.items() if ab]
         if above_ids:
@@ -544,14 +605,23 @@ def draw_review_image(
     suffix = f"  ·  highlighted nucleus {sel_nid}" if sel_nid is not None else ""
     status = ctx.widgets.get_or_none("_review_image_status")
     if status is not None:
-        if binary_mask_mode:
-            status.setText(
+        if threshold_unmeasured:
+            text = (
+                "Binary mask UNAVAILABLE: the per-cell threshold for "
+                f"{active_channel_label(ctx)} could not be evaluated for this "
+                "field, so the plain image is shown instead — an all-black "
+                "frame here would have meant no cell passed, which is not what "
+                f"was measured.{suffix}"
+            )
+        elif binary_mask_mode:
+            text = (
                 f"Binary mask: cells above threshold for {active_channel_label(ctx)} shown white.{suffix}"
             )
         else:
-            status.setText(
+            text = (
                 f"Showing channel {state.channel.active_image_channel.upper()} with included cell boundaries.{suffix}"
             )
+        status.setText(f"{text}{_scan_shortfall_suffix(ctx)}")
     if _debug_flags.review_image_channel_switch_debug_enabled():
         _logger.debug(
             "[RI-CHSW step 7] draw_review_image complete status_channel=%r zoom=%.3f pan=(%.1f, %.1f)",

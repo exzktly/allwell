@@ -65,7 +65,14 @@ class SearchInput(QLineEdit):
         )
 
     def _hint_width(self) -> int:
-        if not self._hint.isVisible() or not self._hint.text():
+        # ``isVisibleTo(self)``, not ``isVisible()``. The latter is False while
+        # *any* ancestor is hidden — which is exactly during construction and
+        # for as long as the popover holding this input is closed, the two
+        # moments the hint is first laid out. Measured on the real LutSelector:
+        # the "32 / 32" chip opened at QRect(0,0,56,15) with a right margin of
+        # 0, corrected to QRect(202,7,49,15) only once the user typed, and
+        # regressed on every re-open.
+        if not self._hint.isVisibleTo(self) or not self._hint.text():
             return 0
         return self.fontMetrics().horizontalAdvance(self._hint.text()) + theme.Spacing.md
 
@@ -74,7 +81,7 @@ class SearchInput(QLineEdit):
         right_margin = self._hint_width()
         m = self.textMargins()
         self.setTextMargins(m.left(), m.top(), right_margin, m.bottom())
-        if self._hint.isVisible():
+        if self._hint.isVisibleTo(self):
             self._hint.adjustSize()
             x = self.rect().right() - self._hint.width() - theme.Spacing.sm
             y = (self.rect().height() - self._hint.height()) // 2

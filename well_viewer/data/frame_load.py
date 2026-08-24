@@ -29,6 +29,11 @@ the caller owns and passes in:
   was served the raw one. A pipeline commonly corrects a subset of a well's
   frames, and a grid that quietly mixes corrected and raw frames would look
   like a uniformly corrected one.
+* ``partial_scans`` — a ``(well, channel, variant)`` whose image inventory was
+  truncated: the walk over the archive or folder raised part way and returned
+  what it had. The inventory that comes back is a short dict of real images,
+  which is the same shape as a well that genuinely holds that few frames, so
+  the grid drawn from it is short with nothing to say why.
 
 They are parameters rather than something read off ``ctx`` because they belong
 to the *caller's* pass. A caller that passes neither still gets its pixels; it
@@ -148,6 +153,31 @@ def numeric_token(value: object) -> float | None:
 
 # ── Address → pixels ─────────────────────────────────────────────────────────
 
+def _record_partial_scan(partials: set, key: tuple, result) -> None:
+    """Note a truncated inventory in the caller's *partials* set, once per key.
+
+    *result* is whatever ``find_well_images_and_masks`` handed back. A
+    :class:`~well_viewer.data.zip_members.ScanResult` that stopped short carries
+    ``partial``/``reason``; a plain dict (a stub, or the empty fallback after a
+    discovery exception) carries neither and is left alone. The set doubles as
+    the dedupe for the log line — a grid of ninety cells over one truncated
+    well/channel should say so once, not ninety times.
+    """
+    if not getattr(result, "partial", False):
+        return
+    reason = str(getattr(result, "reason", "") or "a scan stopped short")
+    if any(k == key for k, _r in partials):
+        return
+    partials.add((key, reason))
+    well, chan_lower, variant = key
+    logger.warning(
+        "frame_load: the %s image inventory for well=%r channel=%r is "
+        "INCOMPLETE — %s. Cells drawn from it are real, but frames the dataset "
+        "holds are missing from the grid.",
+        variant, well, chan_lower, reason,
+    )
+
+
 def load_well_channel(
     ctx,
     cache: dict[tuple[str, str, str], dict],
@@ -156,6 +186,7 @@ def load_well_channel(
     *,
     use_tophat: bool = False,
     scan_misses: set | None = None,
+    partial_scans: set | None = None,
 ) -> dict:
     """Return the (fov, tp) → ImgRef dict for (well, channel), with caching.
 
@@ -181,13 +212,27 @@ def load_well_channel(
     still scans a genuinely-absent well/channel only once, and the next
     Generate retries it. A caller that passes no set gets a throwaway one,
     which suppresses nothing beyond this call.
+
+    **A truncated scan is reported, not absorbed.** ``find_well_images_and_masks``
+    returns :class:`~well_viewer.data.zip_members.ScanResult` inventories that
+    know whether their walk reached the end of the archive or folder. A
+    truncated one holds real images and is a perfectly ordinary dict, so a grid
+    built from it is simply short — indistinguishable from a well that holds
+    that few frames. Each such ``(well, channel, variant)`` is added to the
+    caller's *partial_scans* set (which also dedupes the warning), so a pass
+    rendering many cells can say once that its grid is missing frames the
+    dataset holds. It is recorded on cache hits as well as misses, because the
+    flag rides on the cached inventory and every cell drawn from it is equally
+    affected.
     """
     from well_viewer.data.image_discovery import find_well_images_and_masks
 
     is_overlay = chan_lower == NUC_SEG_TOKEN.lower()
     variant = "tophat" if (use_tophat and not is_overlay) else "raw"
     key = (well, chan_lower, variant)
+    partials = partial_scans if partial_scans is not None else set()
     if key in cache:
+        _record_partial_scan(partials, key, cache[key])
         return cache[key]
     misses = scan_misses if scan_misses is not None else set()
     if key in misses:
@@ -231,6 +276,7 @@ def load_well_channel(
         result = tophat
     else:
         result = fluor
+    _record_partial_scan(partials, key, result)
     if result:
         cache[key] = result
     else:
@@ -317,7 +363,8 @@ def match_image_ref(images: dict, fov: str, tp: str):
 def load_frame_array(ctx, cache: dict, well: str, chan_upper: str, tp: str,
                      fov: str, *, use_tophat: bool = False,
                      raw_fallbacks: set | None = None,
-                     scan_misses: set | None = None) -> np.ndarray | None:
+                     scan_misses: set | None = None,
+                     partial_scans: set | None = None) -> np.ndarray | None:
     """Load the float32 array for one (well, channel, timepoint, fov).
 
     The dropdown emits tokens normalized via ``norm_token`` (``"1.0"`` →
@@ -342,6 +389,10 @@ def load_frame_array(ctx, cache: dict, well: str, chan_upper: str, tp: str,
     fallback is recorded in the caller's *raw_fallbacks* set so the pass can
     say how many cells it served uncorrected; a caller that passes none simply
     has no pass to report against.
+
+    *partial_scans* is threaded through to :func:`load_well_channel` unchanged —
+    see its docstring; a truncated inventory belongs to the whole
+    ``(well, channel, variant)``, not to the one cell that happened to ask first.
     """
     # A "GFP (binary)" / "GFP (mask)" / "GFP (raw)" token loads the same pixels as
     # "GFP" — the render is applied downstream (cell_display_rgb); here we just
@@ -349,7 +400,8 @@ def load_frame_array(ctx, cache: dict, well: str, chan_upper: str, tp: str,
     chan_lower = base_channel(chan_upper).strip().lower()
     is_overlay = chan_lower == NUC_SEG_TOKEN.lower()
     fluor = load_well_channel(ctx, cache, well, chan_lower,
-                              use_tophat=use_tophat, scan_misses=scan_misses)
+                              use_tophat=use_tophat, scan_misses=scan_misses,
+                              partial_scans=partial_scans)
     ref, kind = match_image_ref(fluor, fov, tp) if fluor else (None, "")
     # An unresolved top-hat cell drops back to raw rather than rendering
     # "(no image)". ``kind == "ambiguous_fov"`` is a deliberate refusal (an empty
@@ -357,7 +409,8 @@ def load_frame_array(ctx, cache: dict, well: str, chan_upper: str, tp: str,
     # to stand instead of being retried against a dict with the same ambiguity.
     if ref is None and not kind.startswith("ambiguous") and use_tophat and not is_overlay:
         raw = load_well_channel(ctx, cache, well, chan_lower,
-                                use_tophat=False, scan_misses=scan_misses)
+                                use_tophat=False, scan_misses=scan_misses,
+                                partial_scans=partial_scans)
         if raw:
             ref, kind = match_image_ref(raw, fov, tp)
             if ref is not None:

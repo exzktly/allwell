@@ -111,6 +111,36 @@ class FolderReplacement:
     folder_removed: bool
 
 
+def _entry_identity(path: Path) -> tuple[str, str]:
+    """A folder entry's identity for :func:`replace_folder_with_archive`: its
+    own final name, under its parent directory's real path.
+
+    Deliberately **not** ``Path.resolve()``, which follows the last component
+    too and so hands back one path for a symlink and the file it points at.
+    That conflation lost something in both directions:
+
+    * A symlink *inside* the folder pointing at an archived file resolved equal
+      to that file, so it was not counted among the files left behind — the
+      folder looked empty of un-archived content and was removed, taking a name
+      the archive holds no member for. That is the destructive half.
+    * An archived path that is *itself* a symlink out of the folder resolved to
+      somewhere outside, so it was dropped from the archived set and then
+      reported back as ``kept``. A caller's log line listing "files not
+      archived" named a file that was archived, and never removed the link.
+
+    Resolving only the *parent* keeps a symlinked ancestor directory from
+    splitting two spellings of the same folder apart, while leaving the final
+    component lexical — which is the level a zip member name lives at, and the
+    level at which two hard links to one inode are correctly two entries.
+    """
+    return (os.path.realpath(path.parent), path.name)
+
+
+def _is_under(candidate: str, root: str) -> bool:
+    """Whether the real directory *candidate* is *root* or sits inside it."""
+    return candidate == root or candidate.startswith(root.rstrip(os.sep) + os.sep)
+
+
 def replace_folder_with_archive(
     folder: Path | str,
     archived: Iterable[Path | str],
@@ -149,28 +179,36 @@ def replace_folder_with_archive(
     Paths in *archived* that are not inside *folder* are ignored: this deletes
     a caller's own inputs, so a mistaken path must not reach outside the folder
     it was handed.
+
+    **A symlink is its own name, never its target's.** A zip member is a name,
+    so the unit this compares is a name too — see :func:`_entry_identity` for
+    the two ways the previous identity (``Path.resolve()`` on both sides) lost
+    something. Every entry that is not a real directory counts, symlinks
+    included: a link the archive holds no member for is a file left in the
+    folder, and the folder must survive carrying it.
     """
     folder = Path(folder)
-    root = folder.resolve()
+    root = os.path.realpath(folder)
 
-    archived_resolved: set[Path] = set()
+    archived_entries: dict[tuple[str, str], Path] = {}
     for p in archived:
-        rp = Path(p).resolve()
-        if rp != root and root in rp.parents:
-            archived_resolved.add(rp)
+        path = Path(p)
+        key = _entry_identity(path)
+        if _is_under(key[0], root):
+            archived_entries[key] = path
 
     kept: list[str] = []
     for p in sorted(folder.rglob("*")):
-        if not p.is_file():
+        if p.is_dir() and not p.is_symlink():
             continue
-        if p.resolve() in archived_resolved:
+        if _entry_identity(p) in archived_entries:
             continue
         kept.append(p.relative_to(folder).as_posix())
 
     if kept:
         # Leave the folder standing, holding the remainder. Drop only what the
         # archive now carries, so the bytes exist in exactly one place.
-        for p in sorted(archived_resolved):
+        for p in sorted(archived_entries.values()):
             try:
                 p.unlink()
             except FileNotFoundError:
@@ -186,7 +224,13 @@ def replace_folder_with_archive(
         remove_dir(folder)
     else:
         shutil.rmtree(folder, ignore_errors=True)
-    return FolderReplacement(kept=(), folder_removed=True)
+    # ``ignore_errors=True`` returns quietly on a locked file or a permission
+    # error, and this used to report ``folder_removed=True`` regardless — a
+    # caller that logs "replaced the folder with the archive", or that counts
+    # reclaimed space, was told a removal had happened that had not. The
+    # question the flag is meant to answer is whether the folder is gone, so
+    # ask the filesystem.
+    return FolderReplacement(kept=(), folder_removed=not folder.exists())
 
 
 @contextmanager

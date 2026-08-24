@@ -9,6 +9,7 @@ import argparse
 # validate_schema reported the same verdict with different wording.
 # ---------------------------------------------------------------------------
 from util.image_exts import is_run_input_member  # noqa: E402
+from util.plate_grid import PLATE_MAX_COL, PLATE_ROWS  # noqa: E402
 from util.schema import (  # noqa: E402  (module-level, after the stdlib block)
     DEFAULT_SCHEMA,
     DEFAULT_SEP,
@@ -52,7 +53,18 @@ def build_arg_parser():
 
 
 def generate_wells() -> list[str]:
-    return [f"{r}{c:02d}" for r in "ABCDEFGH" for c in range(1, 13)]
+    """Every 96-well label, A01 → H12.
+
+    The rows and the column bound come from ``util.plate_grid``, which owns the
+    plate geometry; this file used to spell ``"ABCDEFGH"`` and ``range(1, 13)``
+    out a third time, beside the copy in ``plate_grid`` and the one in
+    ``util.well_token``. Three spellings of one vocabulary is three places to
+    change should a plate format ever stop being 96 wells, and two of them
+    would be missed.
+    """
+    return [f"{r}{c:02d}"
+            for r in PLATE_ROWS
+            for c in range(1, PLATE_MAX_COL + 1)]
 
 
 def _well_index_from_schema(schema: list[str]) -> int | None:
@@ -164,6 +176,20 @@ def group_by_well(
     return out
 
 
+def _same_file(a: str, b: str) -> bool:
+    """Whether *a* and *b* are the same file on disk.
+
+    Only ever asked about a path that exists, but a race or a dangling link can
+    still make the check itself fail; a file that cannot be compared is treated
+    as a different one, so the caller warns and leaves both alone rather than
+    overwriting on a guess.
+    """
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
 def folder_well(
     well: str, files: list[str], output_dir: str,
     *, move: bool = False,
@@ -186,9 +212,41 @@ def folder_well(
     well_dir = os.path.join(output_dir, well)
     os.makedirs(well_dir, exist_ok=True)
     place = shutil.move if move else shutil.copy2
+    placed = 0
+    collisions: list[tuple[str, str]] = []
     for f in files:
-        place(f, os.path.join(well_dir, os.path.basename(f)))
-    print(f"{well}: {len(files)} files")
+        target = os.path.join(well_dir, os.path.basename(f))
+        if os.path.exists(target):
+            if _same_file(f, target):
+                # Already exactly where it belongs — a re-run over a folder a
+                # previous pass has partly converted, or an --output-dir equal
+                # to --search-dir walked recursively. Nothing to do, and it is
+                # not a loss, so it counts as placed.
+                placed += 1
+                continue
+            collisions.append((f, target))
+            continue
+        place(f, target)
+        placed += 1
+    for source, target in collisions:
+        # Two files from different subfolders share a basename, which only
+        # ``--recursive`` can produce. ``copy2``/``move`` onto an existing name
+        # simply overwrite it: the first file's bytes were replaced by the
+        # second's, and with ``--move-source-tifs`` the loser's original was
+        # gone from disk as well — one image destroyed with no copy anywhere,
+        # while this function printed the *source* count and the pipeline read
+        # one image fewer than the log claimed. First-write-wins instead (the
+        # rule the zip writers already use for a duplicate member name), the
+        # loser is left untouched where it is, and the count below is what
+        # actually landed.
+        print(
+            f"warning: {well}: {source} was not grouped — {target} already "
+            f"exists with different contents. Both files are called "
+            f"{os.path.basename(source)}; only one can live in {well}/, so the "
+            f"first one found was kept and this one was left where it is.",
+            file=sys.stderr, flush=True,
+        )
+    print(f"{well}: {placed} files")
 
 
 def main():
@@ -213,7 +271,12 @@ def main():
     # a CLI invocation rejects the same schemas (e.g. two "well" slots)
     # the GUI would reject. Previously the zipper silently used
     # `schema.index("well")` and misclassified.
-    schema_errors = validate_schema(schema)
+    # ``("well",)``, not the pipeline's ``("channel", "well")``: this tool
+    # groups files by well and never reads the channel slot, and the
+    # ``--filename_schema`` help above says exactly that. Validating against the
+    # pipeline's pair rejected a valid ``well:fov`` with an error about a field
+    # the zipper does not use.
+    schema_errors = validate_schema(schema, required=("well",))
     if schema_errors:
         for msg in schema_errors:
             print(f"error: {msg}", file=sys.stderr)

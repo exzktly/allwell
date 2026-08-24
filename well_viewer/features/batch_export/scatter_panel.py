@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import theme
@@ -46,6 +47,41 @@ _compose_scatter_agg_stat = _lazy("well_viewer.features.scatter.controller", "co
 
 
 _logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ScatterAxes:
+    """What one batch run plots, read once and then fixed for the whole run.
+
+    ``_run_batch_jobs`` pumps ``QApplication.processEvents()`` between jobs so
+    the progress bar can paint, which leaves every combo on the panel live for
+    the duration of the export. Each job used to re-read the axis combos, so
+    changing the X channel or its metric after the first group produced one
+    output directory, under one manifest, holding figures and CSVs plotted
+    against two different columns — with nothing in either file naming which.
+    The panel is asked once, before the first job, and the answer is passed
+    down.
+
+    ``mode`` is carried for completeness rather than as a fix: it is assigned in
+    ``__init__`` and never reassigned, so unlike the combos it cannot drift
+    mid-run. Keeping it here means the stem, the status line and the branch that
+    picks a job all read one value rather than three separate live lookups of a
+    thing the run is not allowed to change.
+
+    Only the fields belonging to ``mode`` are filled; the others stay ``""``.
+    """
+
+    mode: str
+    #: cells mode — the resolved CSV column / ratio key per axis, and the bare
+    #: channel token each was derived from (which selects the fluor gate).
+    col_x: str = ""
+    col_y: str = ""
+    ch_x_base: str = ""
+    ch_y_base: str = ""
+    #: aggregate mode — the ``Mean Fluorescence GFP (Total Intensity)``-style
+    #: stat string each axis resolves to.
+    stat_x: str = ""
+    stat_y: str = ""
 
 
 class ScatterBatchExportPanel(BatchExportPanel):
@@ -400,6 +436,29 @@ class ScatterBatchExportPanel(BatchExportPanel):
         metric_label = str(prop_cb.currentText() or "Mean Intensity")
         return _compose_scatter_agg_stat(self._ctx, channel, metric_label)
 
+    def _snapshot_scatter_axes(self) -> ScatterAxes:
+        """Read the axis controls once, for the whole of one batch run.
+
+        See :class:`ScatterAxes`. Called before the first job, never inside one.
+        """
+        if self._scatter_mode == "cells":
+            return ScatterAxes(
+                mode="cells",
+                col_x=self._scatter_axis_col(
+                    self._sc_cells_x_cb, self._sc_cells_metric_x_cb),
+                col_y=self._scatter_axis_col(
+                    self._sc_cells_y_cb, self._sc_cells_metric_y_cb),
+                ch_x_base=self._sc_cells_x_cb.currentText().split(" ")[0],
+                ch_y_base=self._sc_cells_y_cb.currentText().split(" ")[0],
+            )
+        return ScatterAxes(
+            mode="aggregate",
+            stat_x=self._scatter_axis_stat(
+                self._sc_agg_x_cb, self._sc_agg_metric_x_cb),
+            stat_y=self._scatter_axis_stat(
+                self._sc_agg_y_cb, self._sc_agg_metric_y_cb),
+        )
+
     def _run_batch(self) -> None:
         groups_with_data = _groups_with_loaded_wells(
             self._groups_for_export(), self._ctx.state.dataset.well_paths,
@@ -425,6 +484,10 @@ class ScatterBatchExportPanel(BatchExportPanel):
             return
         fmt = self._fmt_cb.currentText()
         split_by_tp = self._scatter_split_tp_cb.isChecked()
+        # Read once, here: everything below runs with the event loop pumping
+        # between jobs, so anything read inside a job is whatever the user has
+        # left the panel on by then.
+        axes = self._snapshot_scatter_axes()
         used_stems: set = set()  # uniquify output stems across groups
         if split_by_tp:
             jobs = [(grp, tp) for grp in groups_with_data for tp in timepoints]
@@ -438,13 +501,15 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 safe_grp = re.sub(r"[^A-Za-z0-9_\-]", "_", grp.name)
                 safe_tp = f"{tp_h:.1f}".replace(".", "_")
                 stem = unique_export_stem(
-                    f"scatter_{self._scatter_mode}_{safe_grp}_t{safe_tp}", used_stems)
+                    f"scatter_{axes.mode}_{safe_grp}_t{safe_tp}", used_stems)
                 # Stage into write_dir (audit X3); committed to out_dir on success.
                 csv_path = write_dir / f"{stem}.csv"
                 fig_path = write_dir / f"{stem}.{fmt}"
-                if self._scatter_mode == "cells":
-                    return self._run_scatter_cells_job(grp, tp_h, csv_path, fig_path, fmt)
-                return self._run_scatter_agg_job(grp, tp_h, csv_path, fig_path, fmt)
+                if axes.mode == "cells":
+                    return self._run_scatter_cells_job(
+                        grp, tp_h, csv_path, fig_path, fmt, axes)
+                return self._run_scatter_agg_job(
+                    grp, tp_h, csv_path, fig_path, fmt, axes)
         else:
             jobs = list(groups_with_data)
 
@@ -456,20 +521,22 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 grp = job
                 safe_grp = re.sub(r"[^A-Za-z0-9_\-]", "_", grp.name)
                 stem = unique_export_stem(
-                    f"scatter_{self._scatter_mode}_{safe_grp}_all_tps", used_stems)
+                    f"scatter_{axes.mode}_{safe_grp}_all_tps", used_stems)
                 # Stage into write_dir (audit X3); committed to out_dir on success.
                 csv_path = write_dir / f"{stem}.csv"
                 fig_path = write_dir / f"{stem}.{fmt}"
-                if self._scatter_mode == "cells":
-                    return self._run_scatter_cells_multi_tp_job(grp, timepoints, csv_path, fig_path, fmt)
-                return self._run_scatter_agg_multi_tp_job(grp, timepoints, csv_path, fig_path, fmt)
+                if axes.mode == "cells":
+                    return self._run_scatter_cells_multi_tp_job(
+                        grp, timepoints, csv_path, fig_path, fmt, axes)
+                return self._run_scatter_agg_multi_tp_job(
+                    grp, timepoints, csv_path, fig_path, fmt, axes)
 
         self._run_batch_jobs(
             jobs=jobs,
             progress_text_fn=_progress,
             run_job_fn=_run_job,
             success_text=f"\u2713 {len(jobs)} group(s) \u2192 {out_dir.name}/",
-            status_text=f"Scatter batch export ({self._scatter_mode}): {len(jobs)} group(s) \u2192 {out_dir}",
+            status_text=f"Scatter batch export ({axes.mode}): {len(jobs)} group(s) \u2192 {out_dir}",
             out_dir=out_dir,
         )
 
@@ -493,19 +560,19 @@ class ScatterBatchExportPanel(BatchExportPanel):
 
     def _run_scatter_cells_job(
         self, grp: BarGroup, tp_h: float, csv_path: Path, fig_path: Path, fmt: str,
+        axes: ScatterAxes,
     ) -> str | None:
         from well_viewer.features.scatter.controller import collect_scatter_data as _collect_scatter_data
         self._warn_if_live_gates_ignored()
-        col_x = self._scatter_axis_col(self._sc_cells_x_cb, self._sc_cells_metric_x_cb)
-        col_y = self._scatter_axis_col(self._sc_cells_y_cb, self._sc_cells_metric_y_cb)
+        # *axes*, not the combos: the run's definition of X and Y was fixed
+        # before the first job (see :class:`ScatterAxes`).
+        col_x, col_y = axes.col_x, axes.col_y
         with self._app_group_scope(grp):
-            ch_x_base = self._sc_cells_x_cb.currentText().split(" ")[0]
-            ch_y_base = self._sc_cells_y_cb.currentText().split(" ")[0]
             scatter_data = _collect_scatter_data(
                 self._ctx, col_x, col_y, tp_h,
                 well_colors=WELL_COLORS,
-                fluor_gate_x=_get_fluor_gate(self._ctx, ch_x_base),
-                fluor_gate_y=_get_fluor_gate(self._ctx, ch_y_base),
+                fluor_gate_x=_get_fluor_gate(self._ctx, axes.ch_x_base),
+                fluor_gate_y=_get_fluor_gate(self._ctx, axes.ch_y_base),
             )
         if not scatter_data:
             # ``SkippedJob``, not a plain string: the runner discards the
@@ -645,10 +712,10 @@ class ScatterBatchExportPanel(BatchExportPanel):
 
     def _run_scatter_agg_job(
         self, grp: BarGroup, tp_h: float, csv_path: Path, fig_path: Path, fmt: str,
+        axes: ScatterAxes,
     ) -> str | None:
         from well_viewer.features.scatter.controller import collect_scatter_agg_data as _collect_scatter_agg_data
-        stat_x = self._scatter_axis_stat(self._sc_agg_x_cb, self._sc_agg_metric_x_cb)
-        stat_y = self._scatter_axis_stat(self._sc_agg_y_cb, self._sc_agg_metric_y_cb)
+        stat_x, stat_y = axes.stat_x, axes.stat_y
         with self._app_group_scope(grp):
             scatter_data = _collect_scatter_agg_data(
                 self._ctx, stat_x, stat_y, [tp_h],
@@ -717,22 +784,23 @@ class ScatterBatchExportPanel(BatchExportPanel):
     def _run_scatter_cells_multi_tp_job(
         self, grp: BarGroup, timepoints: list[float],
         csv_path: Path, fig_path: Path, fmt: str,
+        axes: ScatterAxes,
     ) -> str | None:
         from well_viewer.features.scatter.controller import collect_scatter_data as _collect_scatter_data
         combined_rows: list[dict] = []
         combined_series: list[tuple] = []
         self._warn_if_live_gates_ignored()
+        # One definition of X and Y across every timepoint of this job as well
+        # as across the run's jobs: the loop below is itself long enough for the
+        # combos to move under it.
+        col_x, col_y = axes.col_x, axes.col_y
         for tp_h in sorted(timepoints):
-            col_x = self._scatter_axis_col(self._sc_cells_x_cb, self._sc_cells_metric_x_cb)
-            col_y = self._scatter_axis_col(self._sc_cells_y_cb, self._sc_cells_metric_y_cb)
             with self._app_group_scope(grp):
-                ch_x_base = self._sc_cells_x_cb.currentText().split(" ")[0]
-                ch_y_base = self._sc_cells_y_cb.currentText().split(" ")[0]
                 scatter_data = _collect_scatter_data(
                     self._ctx, col_x, col_y, tp_h,
                     well_colors=WELL_COLORS,
-                    fluor_gate_x=_get_fluor_gate(self._ctx, ch_x_base),
-                    fluor_gate_y=_get_fluor_gate(self._ctx, ch_y_base),
+                    fluor_gate_x=_get_fluor_gate(self._ctx, axes.ch_x_base),
+                    fluor_gate_y=_get_fluor_gate(self._ctx, axes.ch_y_base),
                 )
             from well_viewer.features.export.service import _well_labels_map, well_name_for
             _well_labels = _well_labels_map(self._ctx)
@@ -766,19 +834,18 @@ class ScatterBatchExportPanel(BatchExportPanel):
         except OSError as exc:
             return f"{grp.name} scatter-cells CSV: {exc}"
         try:
-            col_x = self._scatter_axis_col(self._sc_cells_x_cb, self._sc_cells_metric_x_cb)
-            col_y = self._scatter_axis_col(self._sc_cells_y_cb, self._sc_cells_metric_y_cb)
+            # Still ``axes``: this second collection feeds the FIGURE while the
+            # CSV above was written from the loop, so re-reading the combos here
+            # put a figure and its own CSV on different columns inside one job.
             with self._app_group_scope(grp):
                 # One collection over all selected timepoints so the figure has
                 # per-point tp arrays (Color by time) and proper per-group
                 # entries (faceting) \u2014 the CSV above keeps its per-tp rows.
-                ch_x_base = self._sc_cells_x_cb.currentText().split(" ")[0]
-                ch_y_base = self._sc_cells_y_cb.currentText().split(" ")[0]
                 fig_data = _collect_scatter_data(
                     self._ctx, col_x, col_y, sorted(timepoints),
                     well_colors=WELL_COLORS,
-                    fluor_gate_x=_get_fluor_gate(self._ctx, ch_x_base),
-                    fluor_gate_y=_get_fluor_gate(self._ctx, ch_y_base),
+                    fluor_gate_x=_get_fluor_gate(self._ctx, axes.ch_x_base),
+                    fluor_gate_y=_get_fluor_gate(self._ctx, axes.ch_y_base),
                 )
                 self._render_scatter_cells_figure(
                     fig_data, col_x=col_x, col_y=col_y, tps_list=sorted(timepoints),
@@ -792,10 +859,10 @@ class ScatterBatchExportPanel(BatchExportPanel):
     def _run_scatter_agg_multi_tp_job(
         self, grp: BarGroup, timepoints: list[float],
         csv_path: Path, fig_path: Path, fmt: str,
+        axes: ScatterAxes,
     ) -> str | None:
         from well_viewer.features.scatter.controller import collect_scatter_agg_data as _collect_scatter_agg_data
-        stat_x = self._scatter_axis_stat(self._sc_agg_x_cb, self._sc_agg_metric_x_cb)
-        stat_y = self._scatter_axis_stat(self._sc_agg_y_cb, self._sc_agg_metric_y_cb)
+        stat_x, stat_y = axes.stat_x, axes.stat_y
         with self._app_group_scope(grp):
             scatter_data = _collect_scatter_agg_data(
                 self._ctx, stat_x, stat_y, sorted(timepoints),
@@ -845,6 +912,15 @@ class ScatterBatchExportPanel(BatchExportPanel):
                         data["x"], data["y"],
                         xerr=data["x_err"], yerr=data["y_err"],
                         label=data.get("label", ""),
+                        # ``color`` is the whole point of the multi-timepoint
+                        # figure: ``collect_scatter_agg_data`` paints each point
+                        # with its timepoint's position on the viridis gradient,
+                        # which is what makes a time course readable. Omitting it
+                        # let matplotlib assign its own cycle per series, so the
+                        # colours in the exported figure said nothing \u2014 and said
+                        # something different from the same plot on the tab and
+                        # from the single-timepoint export beside it.
+                        color=data["color"],
                         marker=data.get("marker", "o"),
                         linestyle="none", capsize=5, alpha=0.75,
                     )

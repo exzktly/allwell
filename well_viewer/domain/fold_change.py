@@ -68,6 +68,7 @@ import math
 from typing import NamedTuple
 from collections.abc import Callable
 from well_viewer.domain.stats_compute import compute_rep_stats
+from well_viewer.domain.numeric import is_number
 from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
 from well_viewer.domain.stats_compute import compute_rep_n_above_stats
 from well_viewer.domain.stats_compute import aggregate_well
@@ -153,13 +154,13 @@ def _subtract_pt(
     """
     m = pt[1]
     s = pt[2]
-    if not (isinstance(m, (int, float)) and math.isfinite(m)):
+    if not is_number(m):
         new = list(pt); new[1] = float("nan"); new[2] = 0.0
         return tuple(new)
     if not math.isfinite(shift):
         new = list(pt); new[1] = float("nan"); new[2] = 0.0
         return tuple(new)
-    s_val = s if isinstance(s, (int, float)) and math.isfinite(s) else 0.0
+    s_val = s if is_number(s) else 0.0
     shift_var = float(shift_spread) ** 2 if math.isfinite(shift_spread) else 0.0
     new_spread = math.sqrt(s_val * s_val + shift_var)
     new = list(pt)
@@ -469,7 +470,7 @@ def pts_to_mean_by_t(pts) -> dict[float, float]:
     for pt in pts or ():
         t = float(pt[0])
         m = pt[1]
-        if isinstance(m, (int, float)) and math.isfinite(m):
+        if is_number(m):
             out[t] = float(m)
     return out
 
@@ -627,7 +628,7 @@ def normalize_pts(
                         baseline = float(m)
                         s = pt[2] if len(pt) > 2 else 0.0
                         baseline_spread = (
-                            float(s) if isinstance(s, (int, float)) and math.isfinite(s)
+                            float(s) if is_number(s)
                             else 0.0
                         )
                     else:
@@ -648,7 +649,7 @@ def normalize_pts(
                     baseline = float(m)
                     s = pt[2] if len(pt) > 2 else 0.0
                     baseline_spread = (
-                        float(s) if isinstance(s, (int, float)) and math.isfinite(s)
+                        float(s) if is_number(s)
                         else 0.0
                     )
                     break
@@ -724,10 +725,10 @@ def _pt_frac(pt) -> tuple[float | None, float]:
     if len(pt) < 4:
         return None, 0.0
     f = pt[3]
-    if not isinstance(f, (int, float)) or not math.isfinite(f):
+    if not is_number(f):
         return None, 0.0
     fs = pt[6] if len(pt) >= 7 else 0.0
-    fs = float(fs) if isinstance(fs, (int, float)) and math.isfinite(fs) else 0.0
+    fs = float(fs) if is_number(fs) else 0.0
     return float(f), fs
 
 
@@ -754,7 +755,7 @@ def baseline_from_points(
                     s = pt[2] if len(pt) > 2 else 0.0
                     return (
                         float(m),
-                        float(s) if isinstance(s, (int, float)) and math.isfinite(s) else 0.0,
+                        float(s) if is_number(s) else 0.0,
                     )
                 # Matched tp but its mean isn't finite/non-zero — fall
                 # through to earliest so the bar still normalises.
@@ -769,7 +770,7 @@ def baseline_from_points(
             s = pt[2] if len(pt) > 2 else 0.0
             return (
                 float(m),
-                float(s) if isinstance(s, (int, float)) and math.isfinite(s) else 0.0,
+                float(s) if is_number(s) else 0.0,
             )
     return None, 0.0
 
@@ -795,7 +796,7 @@ def baseline_from_points_resolved(
                     return (
                         t,
                         float(m),
-                        float(s) if isinstance(s, (int, float)) and math.isfinite(s) else 0.0,
+                        float(s) if is_number(s) else 0.0,
                     )
                 break
     for pt in sorted(pts, key=lambda p: p[0]):
@@ -805,7 +806,7 @@ def baseline_from_points_resolved(
             return (
                 float(pt[0]),
                 float(m),
-                float(s) if isinstance(s, (int, float)) and math.isfinite(s) else 0.0,
+                float(s) if is_number(s) else 0.0,
             )
     return None, None, 0.0
 
@@ -993,9 +994,7 @@ def _member_series(
 
 def _finite_spread(value) -> float:
     """A spread field as a float, or 0.0 when it is missing or not finite."""
-    return float(value) if (
-        isinstance(value, (int, float)) and math.isfinite(value)
-    ) else 0.0
+    return float(value) if is_number(value) else 0.0
 
 
 def member_n_series(
@@ -1014,16 +1013,13 @@ def member_n_series(
             _, _, _, _, n_mean, n_spread = compute_rep_per_fov_stats(ctx,
                 rset, t, threshold, use_sem,
             )
-            # Deliberately NOT `_finite_spread`: that helper also requires
-            # `isinstance(value, (int, float))`, which this site never did. The
-            # difference is unreachable today only because
-            # `stats_compute._reduce_reps` coerces with `float()` three call
-            # levels away — and if that ever returned a `numpy.float32`, the
-            # stricter guard would silently turn a real spread into "no error
-            # bar", which is the computed-as-zero-versus-not-computed
-            # conflation §7 of CLAUDE.md names.
-            return (float(n_mean),
-                    float(n_spread) if math.isfinite(n_spread) else 0.0)
+            # ``_finite_spread`` is safe here now. It used to be stricter than
+            # this site — it required ``isinstance(value, (int, float))``, which
+            # a ``numpy.float32`` fails — so using it would have turned a real
+            # spread into "no error bar". Its guard is ``_is_number`` now, which
+            # asks whether the value can be used as a number rather than which
+            # class produced it, and the two sites agree.
+            return (float(n_mean), _finite_spread(n_spread))
         # Mean of the per-well counts, with the cross-well spread — the same
         # statistic both plotting tabs draw for a replicate set's Events panel.
         # This used to be ``compute_rep_n_above``, a *total* across the set's
@@ -1475,7 +1471,7 @@ def member_mean_series(
 
     def well_stat(pt) -> float | None:
         m = pt[1]
-        if isinstance(m, (int, float)) and math.isfinite(m):
+        if is_number(m):
             return float(m)
         return None
 
@@ -1548,7 +1544,7 @@ def apply_cell_scale(vals, spec: CellScaleSpec | None):
         if op == "subtract":
             return a - float(denom)
         # ratio
-        if not (isinstance(denom, (int, float)) and math.isfinite(denom) and denom != 0):
+        if not (is_number(denom) and denom != 0):
             return _np.full_like(a, _np.nan)
         return a / float(denom)
 
@@ -1750,7 +1746,7 @@ def member_stats_series(
 
     def well_stat(pt) -> tuple | None:
         m = pt[1]
-        if not (isinstance(m, (int, float)) and math.isfinite(m)):
+        if not is_number(m):
             return None
         return (float(m), _finite_spread(pt[2] if len(pt) > 2 else 0.0))
 
@@ -1780,13 +1776,13 @@ def member_frac_stats_series(
         compute = compute_rep_per_fov_stats if per_fov_spread else compute_rep_stats
         res = compute(ctx, rset, t, threshold, use_sem)
         gf, ferr = res[2], res[3]
-        if not (isinstance(gf, (int, float)) and math.isfinite(gf)):
+        if not is_number(gf):
             return None
         return (float(gf), _finite_spread(ferr))
 
     def well_stat(pt) -> tuple | None:
         f = pt[3] if len(pt) > 3 else None
-        if not (isinstance(f, (int, float)) and math.isfinite(f)):
+        if not is_number(f):
             return None
         return (float(f), _finite_spread(pt[6] if len(pt) > 6 else 0.0))
 
@@ -1907,7 +1903,7 @@ def member_frac_series(
             )
         else:
             _, _, gf, gerr_f = compute_rep_stats(ctx, rset, t, threshold, use_sem)
-        if not (isinstance(gf, (int, float)) and math.isfinite(gf)):
+        if not is_number(gf):
             return None
         return (float(gf), _finite_spread(gerr_f))
 
@@ -2052,6 +2048,6 @@ def first_tp_value(pts) -> float | None:
         return None
     for pt in sorted(pts, key=lambda p: p[0]):
         m = pt[1]
-        if isinstance(m, (int, float)) and math.isfinite(m):
+        if is_number(m):
             return float(m)
     return None

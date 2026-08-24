@@ -27,11 +27,18 @@ from datasets._common.dataset_paths import (
     make_dataset_api,
     DatasetPaths,
     dataset_wells,
+    describe_well_collisions,
+    well_spelling_collisions,
     destination_is_complete_dataset,
     has_folder_mode_output,
     in_containers,
     out_csvs,
     out_zips,
+)
+from datasets._common.containers import (
+    FILENAME_COLUMN,
+    TIMEPOINT_COLUMN,
+    TIMEPOINT_HOURS_COLUMN,
 )
 from datasets._common.member_names import discover_parsed_member
 from datasets._common.dataset_paths import known_channel_tokens
@@ -115,6 +122,22 @@ class SubsetPlan:
     dest_is_restart: bool = False
 
 
+def _refuse_well_collisions(paths: DatasetPaths, label: str) -> None:
+    """Refuse *paths* when two files claim one well under different
+    spellings.
+
+    Every well this tool copies is found through ``in_containers`` /
+    ``out_zips`` / ``out_csvs``, each of which maps a canonical well to one
+    path — so an ``A1.zip`` sitting beside an ``A01.zip`` is simply not in
+    the map the copy walks, and a whole well's images leave no trace in the
+    destination or in the summary. The map cannot say that happened, so the
+    folder is asked directly, once, before anything is written.
+    """
+    message = describe_well_collisions(well_spelling_collisions(paths))
+    if message:
+        raise SubsetError(f"{label} can't be copied. {message}")
+
+
 def build_subset_plan(
     src_root: Path | str, dest_root: Path | str, filt: SubsetFilter,
 ) -> SubsetPlan:
@@ -141,6 +164,8 @@ def build_subset_plan(
             "created by a previous subset attempt — choose an empty folder."
         )
     dest_is_restart = destination_is_failed_run(dest)
+
+    _refuse_well_collisions(src, "The source dataset")
 
     if has_folder_mode_output(src):
         raise SubsetError(
@@ -212,17 +237,89 @@ def member_matches(
     return True
 
 
-def row_matches(row: dict, filt: SubsetFilter) -> bool:
+#: What :func:`row_verdict` decided about one measurement row. ``UNJUDGEABLE``
+#: is the state the row filter used to collapse into "no match": a row the
+#: filter could not test at all is not a row the filter rejected, and the
+#: difference is the whole of what ``apply._verify`` needs to name the real
+#: cause instead of blaming the filter.
+ROW_KEEP = "keep"
+ROW_DROP = "drop"
+ROW_UNJUDGEABLE = "unjudgeable"
+
+
+def row_hours(
+    row: dict, *, schema: PipelineSchema | None = None, channels: tuple[str, ...] = (),
+) -> float | None:
+    """A measurement row's timepoint in hours, or ``None`` if the row carries
+    none this dataset's schema can resolve.
+
+    :func:`member_matches` reads the *filename's* timepoint token; this used to
+    read only the ``timepoint_hours`` **column**, and the two therefore answered
+    the same question from different places. A legacy CSV — one written before
+    the numeric column existed, or by a run whose parser left it blank — carries
+    nothing there, so every row failed the timepoint test while every image
+    passed it: the images copied, the measurements did not, and the
+    verification error blamed the user's filter for a column the pipeline never
+    filled.
+
+    So the sources are tried in the order of how directly each states the
+    answer: the numeric column, then the ``timepoint`` label column through
+    :func:`~util.timepoint.parse_hours` (the same parse the member side does),
+    then the ``filename`` column's own timepoint token — which is literally the
+    value :func:`member_matches` reads, so the last fallback makes the two
+    predicates read the identical token rather than merely a comparable one.
+    """
+    try:
+        return float(row.get(TIMEPOINT_HOURS_COLUMN, ""))
+    except (TypeError, ValueError):
+        pass
+    hours = parse_hours(str(row.get(TIMEPOINT_COLUMN, "") or ""))
+    if hours is not None:
+        return hours
+    name = str(row.get(FILENAME_COLUMN, "") or "")
+    if not name or schema is None:
+        return None
+    parsed, _discovered_channel = discover_parsed_member(name, schema, channels)
+    parts = parsed.stem.split(schema.sep)
+    if len(parts) != len(schema.fields):
+        return None
+    return parse_hours(parsed.fields.get("timepoint", ""))
+
+
+def row_verdict(
+    row: dict, filt: SubsetFilter, *,
+    schema: PipelineSchema | None = None, channels: tuple[str, ...] = (),
+) -> str:
+    """Whether *row* survives *filt* — :data:`ROW_KEEP`, :data:`ROW_DROP`, or
+    :data:`ROW_UNJUDGEABLE` when the row states no timepoint at all.
+
+    The FOV axis has no unjudgeable state on purpose. A blank ``fov`` column
+    normalizes to ``"1"`` app-wide (:func:`~well_viewer.data.image_identity.normalize_fov`,
+    and ``CellKey`` in the override reader) — on a single-FOV dataset that is
+    the FOV, not a missing value — so reading it as undefined here would invent
+    a second meaning for a blank the rest of the app has already settled.
+    """
     if filt.fovs is not None and normalize_fov(row.get("fov", "")) not in filt.fov_tokens:
-        return False
+        return ROW_DROP
     if filt.timepoint_hours is not None:
-        try:
-            hours = float(row.get("timepoint_hours", ""))
-        except (TypeError, ValueError):
-            return False
+        hours = row_hours(row, schema=schema, channels=channels)
+        if hours is None:
+            return ROW_UNJUDGEABLE
         if not any(tp_close(hours, h) for h in filt.timepoint_hours):
-            return False
-    return True
+            return ROW_DROP
+    return ROW_KEEP
+
+
+def row_matches(
+    row: dict, filt: SubsetFilter, *,
+    schema: PipelineSchema | None = None, channels: tuple[str, ...] = (),
+) -> bool:
+    """Whether *row* survives *filt*. An unjudgeable row is not a match — it is
+    dropped, exactly as before. A caller that has to tell "the filter rejected
+    it" from "the filter could never test it" (``apply._verify``, which must not
+    blame the filter for a CSV that states no timepoint) reads
+    :func:`row_verdict` instead."""
+    return row_verdict(row, filt, schema=schema, channels=channels) == ROW_KEEP
 
 
 __all__ = [
@@ -240,5 +337,10 @@ __all__ = [
     "out_zips",
     "read_info",
     "resolve_dataset",
+    "ROW_DROP",
+    "ROW_KEEP",
+    "ROW_UNJUDGEABLE",
+    "row_hours",
     "row_matches",
+    "row_verdict",
 ]

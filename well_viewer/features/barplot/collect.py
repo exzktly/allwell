@@ -524,7 +524,17 @@ def collect_bar_items(
                     if fc_nan_n:
                         n_above_val, n_above_err = float("nan"), 0.0
                 has_mean = not math.isnan(gm)
-                has_frac = has_mean and not math.isnan(gf)
+                # Not coupled to ``has_mean``. The two are answers to different
+                # questions: the mean is the average intensity *of the cells
+                # above threshold*, undefined when there are none, while the
+                # fraction is ``n_above / n_total``, and a set where nothing
+                # passed the cut has a fraction of exactly 0 — a measurement,
+                # and usually the point of the experiment. Coupling them drew
+                # the "could not be computed" placeholder over that zero in
+                # pooled mode while the per-well branch below (which does not
+                # couple them) drew the honest 0, so the same set read two ways
+                # depending on a layout toggle.
+                has_frac = not math.isnan(gf)
                 gk = rset_disp if group_mode == "well" else tp_str
                 out.append(BarItem(
                     key=rset.name, display=display, color=color,
@@ -936,7 +946,9 @@ def collect_bar_items_for_group(
                     fc_op_ctrl=fc_op_ctrl, fc_op_t0=fc_op_t0, fc_order=fc_order,
                     baseline_ctrl=lambda tp, _k=key: denoms.baseline_at(_k, tp))
                 has_mean = not math.isnan(m)
-                has_frac = has_mean and not math.isnan(f)
+                # See the note in the rep-set branch above: a fraction of zero
+                # is a measurement even when the above-threshold mean is not.
+                has_frac = not math.isnan(f)
             else:
                 # Nothing measured here. ``n_above_total`` is bound in this
                 # branch too: it was set only inside the ``if matched:`` arm, so

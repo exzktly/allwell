@@ -36,3 +36,52 @@ class NotificationService:
         fn = getattr(self._ctx.window, "_toast", None)
         if callable(fn):
             fn(message, kind=kind, msec=msec)
+
+
+def report_verdict_failures(ctx, *, layer: str, column: str,
+                            failed: list[str] | None) -> str:
+    """Say on screen which wells' inclusion verdict could not be computed.
+
+    :func:`well_viewer.data.cache_projectors.project_verdict_column` returns the
+    labels whose *column* it had to drop, and dropping it is the honest choice —
+    every consumer reads an absent verdict as all-pass, the same as a frame that
+    predates the feature. Honest, but invisible: the plate keeps drawing, the
+    numbers move, and those wells are now filtered by nothing at all while the
+    QC or Crop controls on screen say they are filtered by whatever the user
+    just set. This is the one call that turns that into something the user can
+    see.
+
+    A module-level function rather than a :class:`NotificationService` method
+    because the two callers (``qc.controller.recompute_qc_all`` and
+    ``crop.controller.recompute_crop_all``) must not drift into two different
+    sentences for one situation. A ``ctx`` with no notification service — a
+    stub, or a headless caller — is a silent no-op; the failure is already in
+    the log by the time this runs.
+
+    **Returns the message** (empty string on a clean pass) as well as showing
+    it. The status line is a single slot, and a caller that writes its own
+    outcome line immediately afterwards — every crop action does — would erase
+    this one within the same tick. Those callers append the returned string to
+    their own message instead, so the warning survives the very actions most
+    likely to produce it. The toast is raised here regardless, because it is the
+    surface that cannot be overwritten by the next line of the same handler.
+    """
+    if not failed:
+        return ""
+    wells = ", ".join(sorted(str(w) for w in failed))
+    msg = (
+        f"WARNING — {layer}: {column} could not be computed for "
+        f"{len(failed)} well(s) ({wells}). Those wells are now filtered by no "
+        f"{layer} rule at all — every one of their cells counts — while the "
+        "controls still show the settings you set. See the log for the reason."
+    )
+    notify = getattr(ctx, "notify", None)
+    if notify is None:
+        return msg
+    fn = getattr(notify, "set_status", None)
+    if callable(fn):
+        fn(msg)
+    fn = getattr(notify, "toast", None)
+    if callable(fn):
+        fn(msg, kind="error", msec=8000)
+    return msg

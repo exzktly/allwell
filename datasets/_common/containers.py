@@ -47,6 +47,7 @@ import zipfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from util.aw_safe import swallow
 from util.zip_write import atomic_zip
 from datasets._common.dataset_paths import DatasetPaths
 from datasets._common.zip_passthrough import copy_member_raw, member_is_raw_copyable
@@ -218,6 +219,23 @@ def write_zip(
             if progress is not None:
                 progress(done, total)
     return frozenset(written), frozenset(dropped)
+
+
+def container_dest(src: Path, dest_dir: Path, well: str) -> Path:
+    """Where *src* belongs in *dest_dir*, named for *well* rather than for itself.
+
+    A dataset is read back by well token: ``in/<WELL>.zip`` for a zipped well,
+    ``in/<WELL>/`` for a folder-mode one. Every path that rewrites a container
+    builds that name from the well; the copy-it-whole paths built it from
+    ``src.name`` instead, so a source plate written with unpadded tokens landed
+    as ``in/A1.zip`` beside an ``out/A01_out.zip`` produced by the same run, and
+    nothing downstream matched the two up. Merge Plates was half-swept on its
+    own: its QC branch already named the destination for the well while its
+    input branch did not.
+
+    The extension follows the source, because a folder-mode well stays a folder.
+    """
+    return dest_dir / (well if src.is_dir() else f"{well}.zip")
 
 
 def publish_container(src: Path, dest: Path) -> None:
@@ -416,6 +434,61 @@ def copy_container_members(
                     progress(done, total)
 
     return frozenset(written), frozenset(dropped)
+
+
+def restamp_overrides(entries: list[dict], out_dir: Path) -> int:
+    """Re-stamp every entry's ``seg_fp`` to its destination ``<WELL>_out.zip``'s
+    mtime. Returns how many entries could **not** be stamped.
+
+    Every tool that carries ``cell_overrides.json`` across to a destination has
+    to re-fingerprint it: a repack changes the archive's mtime even though the
+    segmentation itself is untouched, and the fingerprint exists to catch a real
+    re-segmentation, so the source dataset's stamp is meaningless against the
+    file the destination actually holds.
+
+    The stamp used to be assigned *inside* the ``swallow`` that guards the
+    ``stat`` — so a well with no ``<WELL>_out.zip`` in the destination (a run
+    made without QC images, or a well whose archive was tidied away) silently
+    kept the **source** dataset's fingerprint. Validate then compares that
+    against the destination archive, finds it different, and prunes the entry:
+    the user's manual cell exclusions vanish, with every step reporting
+    success. A fingerprint that could not be computed is not a fingerprint, so
+    the key is removed instead — an entry with no ``seg_fp`` is the legacy,
+    unfingerprinted shape both readers already understand and keep
+    (``well_viewer.persistence.cell_overrides.load_overrides``,
+    ``datasets.validate.apply._prune_stale_overrides``).
+
+    The count is returned rather than logged here so each caller can say it in
+    its own voice, in the summary its dashboard shows: an override carried over
+    without a fingerprint survives, but it will no longer be dropped when the
+    well really is re-segmented, and that is a fact about the artifact the run
+    just produced.
+    """
+    unstamped = 0
+    for entry in entries:
+        well = str(entry.get("well", "")).strip()
+        zip_path = out_dir / f"{well}_out.zip"
+        stamp: str | None = None
+        with swallow(f"stat {zip_path}"):
+            stamp = f"{zip_path.stat().st_mtime_ns}"
+        if stamp is None:
+            entry.pop("seg_fp", None)
+            unstamped += 1
+        else:
+            entry["seg_fp"] = stamp
+    return unstamped
+
+
+def unstamped_note(unstamped: int) -> str:
+    """The one sentence a tool adds to its cell-override log line when
+    :func:`restamp_overrides` could not fingerprint every entry, or ``""``."""
+    if not unstamped:
+        return ""
+    return (
+        f" {unstamped} of them could not be fingerprinted against a destination "
+        "<WELL>_out.zip (none was written for that well), so they are carried "
+        "without one and will not be dropped if that well is re-segmented."
+    )
 
 
 def clear_destination(dest: DatasetPaths) -> None:

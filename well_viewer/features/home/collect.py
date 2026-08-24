@@ -216,6 +216,16 @@ def plate_cells(ctx) -> dict:
             cells[well] = CELL_NO_OUTPUT
         else:
             cells[well] = CELL_UNCHECKED
+    # Wells the dataset holds but the record does not. They used to be left out
+    # of this dict entirely, and ``_paint_plate`` calls ``setEnabledWells`` with
+    # its keys — so a well loaded into Review but absent from the completeness
+    # record was disabled on Home's plate, painted nothing, and had no legend
+    # row to say why. It could not be selected there at all. A record written
+    # before the well was added, or one covering a subset of a merged dataset,
+    # both produce that. ``unchecked`` is the state for it: not fine, not
+    # broken, nothing known.
+    for label in (getattr(getattr(ctx.state, "dataset", None), "well_paths", None) or {}):
+        cells.setdefault(label, CELL_UNCHECKED)
     return cells
 
 
@@ -244,10 +254,11 @@ def plate_legend(ctx) -> list:
     states makes the reader work out what a colour would have meant.
 
     The two states that describe an *absence* (``unchecked``, ``no_output``) are
-    the exception: they appear only when the plate actually holds one. They are
-    also mutually exclusive — ``unchecked`` is what a plate with no record at
-    all is made of, ``no_output`` can only come from a record — so at most one
-    of them is ever on screen, and no well is left with no row to explain it.
+    the exception: they appear only when the plate actually holds one. Both can
+    be on screen at once — ``unchecked`` is what a plate with no record is made
+    of, and it is also what a well the record does not mention gets, while
+    ``no_output`` only ever comes from a record. Either way no well is left
+    without a row to explain it, which is the property that matters.
     """
     cells = plate_cells(ctx)
     order = (

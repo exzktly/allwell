@@ -92,7 +92,14 @@ def _visible_tab_names(app) -> frozenset[str]:
             if tab:
                 return frozenset((tab,))
         except Exception:
-            return frozenset()
+            # Same treatment as the ``_visible_centre_tabs`` arm above. An
+            # empty set here is not neutral: ``visible_scope_names`` returns
+            # nothing, so ``redraw_scopes_or_defer`` defers every scope and the
+            # fold-change redraw never happens. Returning it silently made a
+            # failed lookup indistinguishable from a window with no visible
+            # tab, which is a legitimate state.
+            from well_viewer.core.safe import swallowed
+            swallowed("fold_change_scopes: _current_centre_tab failed")
     return frozenset()
 
 

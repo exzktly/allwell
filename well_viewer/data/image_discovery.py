@@ -35,12 +35,15 @@ from well_viewer.data.image_resolver import (
     find_well_subfolder_path as _find_well_subfolder_path,
     normalize_well_token as _normalize_well_token,
     output_suffixes_for_kind as _output_suffixes_for_kind,
+    _WELL_TOKEN_IN_TEXT_RE,
     well_token_matches_text as _well_token_matches_text,
 )
 from well_viewer.data.zip_members import (
     classify_member as _preview_classify_member,
     open_imgref_as_array as _preview_open_imgref_as_array,
     read_member_bytes as _preview_read_member_bytes,
+    ScanResult,
+    merge_partial,
     scan_zip_members as _preview_scan_zip_members,
 )
 
@@ -440,12 +443,18 @@ def scan_folder_members(
     _fov_tp_extractor=None,
     _pipeline_info: dict | None = None,
 ):
-    """Scan a plain disk folder for fluor/overlay/mask/tophat/smfish images."""
-    fluor: dict[tuple[str, str], ImgRef] = {}
-    overlay: dict[tuple[str, str], ImgRef] = {}
-    mask: dict[tuple[str, str], ImgRef] = {}
-    tophat_fluor: dict[tuple[str, str], ImgRef] = {}
-    smfish: dict[tuple[str, str], ImgRef] = {}
+    """Scan a plain disk folder for fluor/overlay/mask/tophat/smfish images.
+
+    Returns :class:`ScanResult` inventories — same sibling contract as
+    :func:`scan_zip_members`: a directory that could not be walked to the end
+    yields what it gathered, flagged, rather than a short dict indistinguishable
+    from a folder that really holds that little.
+    """
+    fluor: ScanResult = ScanResult()
+    overlay: ScanResult = ScanResult()
+    mask: ScanResult = ScanResult()
+    tophat_fluor: ScanResult = ScanResult()
+    smfish: ScanResult = ScanResult()
     try:
         _logger.info("Scanning folder %s", folder_path)
         for p in sorted(folder_path.iterdir()):
@@ -471,7 +480,16 @@ def scan_folder_members(
             elif kind == "smfish":
                 smfish.setdefault(key, ref)
     except Exception as exc:
-        _logger.warning("Failed scanning folder %s: %s", folder_path, exc)
+        _logger.warning(
+            "Failed scanning folder %s: %s. Partial inventory returned: "
+            "%d fluor, %d tophat, %d smfish, %d overlay(s), %d mask(s) — images "
+            "after the failure point are missing from it, so this well may show "
+            "fewer frames than the folder holds.",
+            folder_path, exc,
+            len(fluor), len(tophat_fluor), len(smfish), len(overlay), len(mask),
+        )
+        for _d in (fluor, overlay, mask, tophat_fluor, smfish):
+            _d.mark_partial(f"scanning folder {folder_path} failed: {exc}")
     return fluor, overlay, mask, tophat_fluor, smfish
 
 
@@ -495,6 +513,72 @@ def _merge_scan(targets, scan_result) -> None:
         mask.setdefault(k, v)
     for k, v in th.items():
         tophat_fluor.setdefault(k, v)
+    # A well is assembled from up to four scans, so an accumulator is only as
+    # complete as the least complete scan that fed it. Without this the flag
+    # would die at the merge and the well would again look whole.
+    merge_partial(fluor, g)
+    merge_partial(overlay, ov)
+    merge_partial(mask, mk)
+    merge_partial(tophat_fluor, th)
+
+
+def _raw_file_names_some_well(p: Path, _pipeline_info: dict | None) -> str | None:
+    """The well *p*'s own filename names, or ``None`` when it names none.
+
+    Runs the same three vocabularies :func:`_raw_file_well_passes` uses, in the
+    same order — pipeline schema, the legacy 5-field regex, and finally the
+    free-text token scan — asked in the open ("which well?") rather than against
+    a target ("is it this one?"). Using anything narrower here would leave the two
+    functions disagreeing about what counts as naming a well, and the free-text
+    scan is precisely the branch that does the work for the common
+    ``A01_GFP_f1_t0.tif`` shape, which neither parser above it matches.
+
+    ``_WELL_TOKEN_IN_TEXT_RE`` is imported rather than re-spelled: it *is* the
+    vocabulary ``well_token_matches_text`` matches with, and a second copy here
+    would be free to drift from the predicate it has to agree with.
+    """
+    parsed = extract_pipeline_fields(p.stem, _pipeline_info)
+    parsed_well = _norm_well(str(parsed.get("well", ""))) if parsed else None
+    if parsed_well:
+        return parsed_well
+    m = _FNAME_RE.match(p.stem)
+    if m:
+        legacy = _norm_well(m.group("well"))
+        if legacy:
+            return legacy
+    found = _WELL_TOKEN_IN_TEXT_RE.findall(p.name)
+    return _norm_well(found[0]) if found else None
+
+
+def _raw_file_passes_unknown_well(
+    p: Path, _pipeline_info: dict | None, image_load_debug: bool,
+) -> bool:
+    """Section 3 filter for a well whose LABEL does not parse into a token.
+
+    The label is *unknown*, which is not the same as *unrestricted* — and the
+    difference is not academic. With the filter disabled entirely, a directory of
+    several wells' loose files admitted all of them into this one well, and since
+    they collide on ``(fov, tp)`` and the merge is first-hit-wins, the well simply
+    rendered the alphabetically first *other* well's image with no sign that it
+    had. A picture of A01 under a label that is not A01 is the worst outcome
+    available here, worse than showing nothing.
+
+    So the question flips: rather than "is this file mine?" — unanswerable without
+    a token — ask "could this file be someone else's?". A file whose own name
+    resolves to a well is a file that belongs to that well, and with no token to
+    compare it against it cannot be claimed. A file that names no well at all
+    contradicts nothing, which keeps the case this fallback exists for working: a
+    single-well directory of images whose names carry no well field.
+    """
+    other = _raw_file_names_some_well(p, _pipeline_info)
+    if other is None:
+        return True
+    if image_load_debug:
+        _logger.info(
+            "[image-load-debug] skip %s names well=%s but the requested well's "
+            "label does not parse, so it cannot be matched", p.name, other,
+        )
+    return False
 
 
 def _raw_file_well_passes(
@@ -510,7 +594,12 @@ def _raw_file_well_passes(
     or — in the default-extractor path — carries no recognisable well token at
     all. Preserves the original three-way branch verbatim: schema-parsed well,
     then the legacy 5-field regex, then a free-text token match.
+
+    With no *well_token* the branch order does not apply and
+    :func:`_raw_file_passes_unknown_well` answers instead.
     """
+    if not well_token:
+        return _raw_file_passes_unknown_well(p, _pipeline_info, image_load_debug)
     parsed = extract_pipeline_fields(p.stem, _pipeline_info)
     parsed_well = _norm_well(str(parsed.get("well", ""))) if parsed else None
     if parsed_well:
@@ -582,7 +671,9 @@ def _scan_raw_disk_files(
             )
             if not kind:
                 continue
-            if well_token and not _raw_file_well_passes(
+            # No ``well_token and`` guard: a token this scan could not derive is
+            # the case the filter is MOST needed for, not a reason to drop it.
+            if not _raw_file_well_passes(
                 p, well_token, _fov_tp_extractor, _pipeline_info, image_load_debug,
             ):
                 continue
@@ -669,6 +760,18 @@ def _discover_from_layouts(
 def _log_find_result(well_label, well_token, targets, channel_switch_debug: bool) -> None:
     """Emit the not-found warnings + the channel-switch trace (audit A4)."""
     fluor, overlay, mask, tophat_fluor = targets
+    # Said first, because it changes what every count below means: these are the
+    # images that were reachable, not the images the well holds.
+    partial = [d for d in targets if getattr(d, "partial", False)]
+    if partial:
+        _logger.warning(
+            "Image discovery for %r (token=%r) is INCOMPLETE — %s. The counts "
+            "below describe what could be read, not what the well contains, so "
+            "Review will show fewer frames than exist.",
+            well_label, well_token,
+            "; ".join(dict.fromkeys(d.reason for d in partial if d.reason))
+            or "a scan stopped short",
+        )
     if not fluor:
         _logger.warning("No fluor images found for %r (token=%r)", well_label, well_token)
     if not overlay:
@@ -694,28 +797,27 @@ def find_well_images_and_masks(
 ):
     """Find fluor / overlay / mask / tophat images for a well across all layouts."""
     well_token = _extract_well_token(well_label)
-    # A label the token parser cannot read is *unknown*, not *unrestricted*:
-    # Section 3's per-file well filter is skipped when the token is falsy, so
-    # every well's images are admitted into this one well's accumulators. That
-    # is said out loud rather than left silent. It is not *fixed* here, because
-    # the filter's predicate (``well_token_matches_text``) is written against a
-    # canonical token and answers "no" — or raises — for anything else, so
-    # feeding it the raw label swaps an over-permissive scan for one that
-    # matches nothing at all. Narrowing it properly needs a predicate that can
-    # judge a non-canonical label, which is a change to the well vocabulary
-    # itself.
+    # A label the token parser cannot read is *unknown*, not *unrestricted*.
+    # Section 3's per-file filter now handles that case itself
+    # (``_raw_file_passes_unknown_well``): it admits only files that name no well
+    # of their own, so another well's image can no longer be drawn under this
+    # label. The trade is visible and is the right way round — a well that shows
+    # nothing is a question the user can act on; a well that shows a neighbour's
+    # picture is one they cannot even see.
     if not well_token and str(well_label or "").strip():
         _logger.warning(
-            "Image discovery: %r does not parse as a well label, so the "
-            "loose-file scan cannot filter by well — images belonging to other "
-            "wells may be included for this one.",
+            "Image discovery: %r does not parse as a well label. The loose-file "
+            "scan therefore accepts only images whose own filenames name no "
+            "well; any file that names a well is skipped, because there is no "
+            "token to match it against. This well may show fewer images than "
+            "the directory holds.",
             well_label,
         )
     fluor_lower = fluor_token.lower()
-    fluor: dict[tuple[str, str], ImgRef] = {}
-    overlay: dict[tuple[str, str], ImgRef] = {}
-    mask: dict[tuple[str, str], ImgRef] = {}
-    tophat_fluor: dict[tuple[str, str], ImgRef] = {}
+    fluor: ScanResult = ScanResult()
+    overlay: ScanResult = ScanResult()
+    mask: ScanResult = ScanResult()
+    tophat_fluor: ScanResult = ScanResult()
 
     _logger.info(
         "Searching images: well=%r token=%r  in_dir=%s  data_dir=%s",
@@ -754,9 +856,13 @@ def find_well_images_and_masks(
 
     _log_find_result(well_label, well_token, targets, channel_switch_debug)
 
+    # ``derive`` and not ``dict(...)``: sorting through the plain constructor is
+    # exactly the copy that silently drops the partial flag, which would put the
+    # caller back where it started — holding a short inventory with no way to ask
+    # whether it is short because the well is or because a scan stopped.
     return (
-        dict(sorted(fluor.items())),
-        dict(sorted(overlay.items())),
-        dict(sorted(mask.items())),
-        dict(sorted(tophat_fluor.items())),
+        fluor.derive(sorted(fluor.items())),
+        overlay.derive(sorted(overlay.items())),
+        mask.derive(sorted(mask.items())),
+        tophat_fluor.derive(sorted(tophat_fluor.items())),
     )

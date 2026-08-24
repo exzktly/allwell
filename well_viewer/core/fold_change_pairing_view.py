@@ -26,7 +26,7 @@ Cancel that cannot un-draw the plot behind it is a lie.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -224,12 +224,26 @@ def build_pairing_window(ctx, scope: str) -> QDialog | None:
     close_btn.clicked.connect(win.hide)
 
     def _write(mapping: dict) -> None:
+        # No ``_populate()`` after this. ``set_fold_change_state`` syncs every
+        # scope whose name is not the ``initiating_scope``, and this passes the
+        # empty string, so no scope is skipped — the sync therefore reaches
+        # ``refresh_pairing_window``, which calls this window's own
+        # ``_aw_populate``. The explicit call here rebuilt the whole table a
+        # second time on every single-combo edit.
         from well_viewer.core.fold_change_controls_view import set_fold_change_state
         set_fold_change_state(ctx, control_map=mapping, initiating_scope="")
-        _populate()
 
     def _current_map() -> dict:
         return dict(getattr(ctx.state.plot, "fc_control_map", {}) or {})
+
+    # True only while a row's combo signal is being handled. The state write
+    # stays synchronous — callers, and the tests that pin them, are entitled to
+    # see the mapping the moment the combo changes — but the *rebuild* that
+    # write triggers must not run yet: it goes through ``_fill_row``, whose
+    # ``setCellWidget`` for this row destroys the very combo whose signal is
+    # still on the stack, freeing the C++ object under the Python wrapper
+    # mid-emission. So only the repopulate is deferred, and only on this path.
+    _in_row_change = {"v": False}
 
     def _on_row_control_changed(member: str, combo: QComboBox) -> None:
         mapping = _current_map()
@@ -238,9 +252,19 @@ def build_pairing_window(ctx, scope: str) -> QDialog | None:
             mapping.pop(member, None)
         else:
             mapping[member] = ref
-        _write(mapping)
+        _in_row_change["v"] = True
+        try:
+            _write(mapping)
+        finally:
+            _in_row_change["v"] = False
 
     def _populate() -> None:
+        if _in_row_change["v"]:
+            # Re-entered from a combo's own signal — rebuild once it returns.
+            # ``singleShot`` is safe here because this is the GUI thread; from a
+            # worker it would silently drop (CLAUDE.md §5).
+            QTimer.singleShot(0, _populate)
+            return
         rows = pairing_rows(ctx, scope)
         table.blockSignals(True)
         try:

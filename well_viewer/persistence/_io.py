@@ -1,7 +1,9 @@
 """Shared I/O helpers for persistence modules.
 
 Centralises the tmp + ``os.replace`` pattern so a crash, signal, or full-disk
-condition mid-write can't leave a truncated JSON sidecar.
+condition mid-write can't leave a truncated JSON sidecar, and the
+read-modify-write pattern layered on top of it (:func:`update_json_atomic`) so
+one writer's update cannot silently discard another's.
 
 Windows-specific note: ``os.replace`` and ``open(..., "w")`` can both raise
 ``PermissionError`` when another process briefly holds a handle on the
@@ -16,13 +18,17 @@ transient handle conflicts so the smFISH writer doesn't surface
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from well_viewer.core.safe import swallowed
+
+_logger = logging.getLogger("well_viewer")
 
 
 # Bounded retry budget for transient Windows handle conflicts (AV,
@@ -64,7 +70,8 @@ def _retry_on_permission_error(op_name: str, op):
     raise last_exc
 
 
-def atomic_write_json(path: Path, data: Any, *, indent: int = 2) -> None:
+def atomic_write_json(path: Path, data: Any, *, indent: int = 2,
+                      durable: bool = True) -> None:
     """Serialise *data* as JSON to *path*, atomically.
 
     Writes to a uniquified ``<path>.<pid>.<rand>.tmp`` then
@@ -72,6 +79,13 @@ def atomic_write_json(path: Path, data: Any, *, indent: int = 2) -> None:
     partial file. Parents are created on demand. Both the initial
     ``open`` and the final ``os.replace`` retry on Windows
     ``PermissionError`` (AV / cloud sync / viewer holding the handle).
+
+    ``durable=False`` skips the ``fsync`` before the replace. The replace is
+    still atomic, so no reader ever sees a partial file; what is given up is
+    the guarantee that the bytes have reached the platter before this returns,
+    which only matters if the machine loses power in the next moment. Debounced
+    autosaves on the GUI thread pass False: an fsync on a network share is a
+    visible pause there, and the value is rewritten seconds later anyway.
 
     Raises ``OSError`` on filesystem failure — callers decide whether to
     catch (usually yes, with a logger.warning) or propagate (Save-via-dialog
@@ -85,6 +99,8 @@ def atomic_write_json(path: Path, data: Any, *, indent: int = 2) -> None:
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=indent)
             fh.flush()
+            if not durable:
+                return
             try:
                 os.fsync(fh.fileno())
             except OSError:
@@ -137,3 +153,104 @@ def atomic_write_text(path: Path, text: str) -> None:
                 _retry_on_permission_error("unlink", tmp.unlink)
         except OSError:
             swallowed("atomic_write_text: tmp cleanup unlink failed")
+
+
+def update_json_atomic(
+    path: Path,
+    mutate: "Callable[[dict], dict | None]",
+    *,
+    create_missing: bool = False,
+    attempts: int = 4,
+    durable: bool = True,
+) -> bool:
+    """Read *path*, apply *mutate* to the object in it, and write it back.
+
+    Returns ``True`` when the file was written, ``False`` on every refusal:
+    a missing file (unless *create_missing*), a payload that is not a JSON
+    object, a *mutate* that returned ``None``, an unwritable destination, or a
+    file being rewritten so persistently by somebody else that the update could
+    not be landed on a copy it had actually read.
+
+    **Why this exists.** ``pipeline_info.json`` has several writers — the smFISH
+    thresholds, the cell-gating block, the sample definitions, and the pipeline
+    itself, which owns ``fluor_tokens``, ``schema`` and ``available_timepoints``
+    and rewrites the file at the end of a run. Analyze and Review share one
+    window, so a run can finish while the viewer is between its own read and its
+    own write. Each writer preserved the keys it *read*, which makes a lost
+    update look like the pipeline's keys reverting on their own — the symptom of
+    a viewer that suddenly cannot see a channel or a timepoint the run produced.
+
+    **What the guard is, and what it is not.** The file is compared byte-for-byte
+    against the copy that was read, immediately before the replace; a difference
+    means another writer landed in between, so the mutation is re-applied to the
+    new content instead of overwriting it. That is optimistic concurrency, not a
+    lock: it narrows the window from "however long the caller takes to build its
+    block" — arbitrarily long, since callers read state, format values and log —
+    to the microseconds between the final comparison and ``os.replace``. It
+    needs no cooperation from the other writer, which is what makes it usable
+    here at all: the pipeline runs in a separate process (often on a remote
+    host) and takes no lock this code could share. A residual race remains and
+    is deliberate; the alternative is a lock protocol every writer of the file,
+    in every process, would have to honour.
+
+    *mutate* is called with the parsed object and returns the object to write,
+    or ``None`` to abandon the update. It must be free of side effects the
+    caller cannot afford to repeat, because a concurrent write re-runs it.
+
+    *durable* is passed to :func:`atomic_write_json`; pass False from a
+    debounced GUI-thread autosave, where an fsync per keystroke-pause is a
+    visible stall on a network share.
+    """
+    path = Path(path)
+    for attempt in range(max(1, attempts)):
+        try:
+            raw = path.read_bytes() if path.exists() else None
+        except OSError as exc:
+            _logger.warning("Could not read %s: %s", path, exc)
+            return False
+        if raw is None:
+            if not create_missing:
+                return False
+            doc: Any = {}
+        else:
+            try:
+                doc = json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                _logger.warning("Could not parse %s: %s", path, exc)
+                return False
+            if not isinstance(doc, dict):
+                _logger.warning("%s is not a JSON object; not updating.", path)
+                return False
+
+        updated = mutate(doc)
+        if updated is None:
+            return False
+
+        # Re-read immediately before the write and compare against the bytes
+        # the mutation was built from. Content, not mtime: two writes inside one
+        # filesystem timestamp tick are exactly the case this has to catch.
+        try:
+            current = path.read_bytes() if path.exists() else None
+        except OSError as exc:
+            _logger.warning("Could not re-read %s: %s", path, exc)
+            return False
+        if current != raw:
+            _logger.info(
+                "%s changed while it was being updated (attempt %d of %d); "
+                "re-applying the change to the new contents.",
+                path, attempt + 1, max(1, attempts),
+            )
+            continue
+
+        try:
+            atomic_write_json(path, updated, durable=durable)
+        except OSError as exc:
+            _logger.warning("Could not write %s: %s", path, exc)
+            return False
+        return True
+
+    _logger.warning(
+        "Gave up updating %s after %d attempts — another writer is rewriting "
+        "it continuously. The change was not saved.", path, max(1, attempts),
+    )
+    return False

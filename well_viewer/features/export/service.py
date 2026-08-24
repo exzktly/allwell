@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
+from well_viewer.domain.numeric import is_number
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.domain.selections_model import active_replicate_sets
@@ -147,12 +148,17 @@ def line_metric_row(pt, *, ch: str, metric: str, threshold: float,
     return {
         "time_h": f"{t:.4f}",
         f"mean_{ch}_{metric}": f"{mean:.6f}" if not math.isnan(mean) else "",
-        f"{band_lbl.lower()}_{ch}_{metric}": f"{spread:.6f}",
+        # Empty, not the string "nan". The bar CSV's own writer blanks a
+        # non-finite spread here, and a spreadsheet reads a literal ``nan``
+        # cell as text — so the column stops being numeric for every row below
+        # it, and a chart built on it silently drops the series.
+        f"{band_lbl.lower()}_{ch}_{metric}": (
+            f"{spread:.6f}" if is_number(spread) else ""),
         "n_above_threshold": (
             int(n_above_total) if n_above_total is not None else n_above),
         "n_above_replicate_mean": (
             f"{float(n_above):.6f}"
-            if isinstance(n_above, (int, float)) and math.isfinite(float(n_above))
+            if is_number(n_above)
             else ""),
         f"err_n_above_replicate_{band_lbl}": (
             f"{float(n_above_spread):.6f}"
@@ -446,11 +452,11 @@ def export_plot_data(ctx) -> None:
                 npt = norm_pts[i]
                 fmean = npt[1] if not (isinstance(npt[1], float) and math.isnan(npt[1])) else float("nan")
                 row["fold_change_mean"] = (
-                    f"{fmean:.6f}" if isinstance(fmean, (int, float)) and not math.isnan(fmean) else ""
+                    f"{fmean:.6f}" if is_number(fmean) else ""
                 )
                 fspread = npt[2]
                 row[f"fold_change_{band_lbl.lower()}"] = (
-                    f"{fspread:.6f}" if isinstance(fspread, (int, float)) and not math.isnan(fspread) else ""
+                    f"{fspread:.6f}" if is_number(fspread) else ""
                 )
                 row["fold_change_mode"] = _fc_mode_str(fc_vs_ctrl, fc_vs_t0)
                 row["fold_change_control"] = (

@@ -32,13 +32,6 @@ _GRID_INDENT = 18
 _QUANTITY_LBL_W = 92
 
 
-def _num(text: str) -> float:
-    try:
-        return float(str(text).strip() or "0")
-    except (TypeError, ValueError):
-        return 0.0
-
-
 def _fmt(v: float | None) -> str:
     return "" if v is None else f"{v:g}"
 
@@ -166,15 +159,28 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     })
 
     def _fields_params() -> QCParams:
-        return QCParams(
-            enabled=enable_cb.isChecked(),
-            min_area=_num(min_area_edit.text()) or None,
-            max_area=_num(max_area_edit.text()) or None,
-            min_solidity=_num(min_sol_edit.text()) or None,
-            max_region_area=_num(max_region_edit.text()) or None,
-            min_circularity=_num(min_circ_edit.text()) or None,
-            max_circularity=_num(max_circ_edit.text()) or None,
-        ).with_updates()
+        """The six boxes as a normalised :class:`QCParams`.
+
+        The bounds go through ``with_updates`` **as keyword arguments**, which
+        is the only way its ``_pos`` normalisation runs — it filters on
+        ``k in changes``, so a bare ``.with_updates()`` after the constructor
+        normalises nothing. ``_pos`` is where the rule lives: a blank,
+        unparseable, zero or negative box means *no bound*, which for a
+        **maximum** is the whole point (``qc_params._pos``'s own docstring calls
+        ``max_area == 0`` a foot-gun — it would exclude every cell), and for a
+        minimum is the same population a bound of zero would keep anyway. This
+        function briefly coerced the text itself and passed the result to the
+        constructor, which left a typed ``0`` in ``max_area`` intact and blanked
+        every plot.
+        """
+        return QCParams(enabled=enable_cb.isChecked()).with_updates(
+            min_area=min_area_edit.text(),
+            max_area=max_area_edit.text(),
+            min_solidity=min_sol_edit.text(),
+            max_region_area=max_region_edit.text(),
+            min_circularity=min_circ_edit.text(),
+            max_circularity=max_circ_edit.text(),
+        )
 
     def _sync_enabled() -> None:
         on = enable_cb.isChecked()

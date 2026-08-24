@@ -134,10 +134,15 @@ def retry_io(
     advice: str = VOLUME_ADVICE,
     log_fn: Callable[[str], None] | None = None,
     path: Any = None,
+    action: str = "write",
 ) -> T:
     """Run *fn*, retrying an ``OSError`` with an exponential backoff.
 
-    *what* names the target in both the retry warnings and the final message.
+    *what* names the target in both the retry warnings and the final message,
+    and *action* names what was being done to it. Both messages used to say
+    "write" unconditionally, which is wrong for the read call sites this helper
+    also serves — a failed read reported as a failed write sends the reader
+    looking at disk space and permissions on the wrong end of the operation.
     *cleanup* (if given) runs after every failed attempt, including the last, so
     a partial staging file is never left behind. *log_fn* receives one line per
     retry — pass the remote runner's log sink to make the retries visible in the
@@ -178,12 +183,19 @@ def retry_io(
             if attempt + 1 >= attempts:
                 hint = volume_hint(exc)
                 hint_txt = f" {hint[0].upper()}{hint[1:]}." if hint else ""
+                # ``OSError(errno, strerror)`` rather than ``OSError(str)``:
+                # the single-argument form leaves ``.errno`` as None, so every
+                # caller that branches on the errno — and the ENOSPC rewrite a
+                # dozen lines up is itself one — silently stopped being able to
+                # once the retry budget ran out. The original errno is the one
+                # piece of machine-readable information in the failure.
                 raise OSError(
-                    f"Failed to write {what} after {attempts} attempts "
+                    code,
+                    f"Failed to {action} {what} after {attempts} attempts "
                     f"({exc}).{hint_txt} {advice}"
                 ) from exc
             msg = (
-                f"write {what} failed ({exc}); retry {attempt + 1}/"
+                f"{action} {what} failed ({exc}); retry {attempt + 1}/"
                 f"{attempts - 1} after backoff"
             )
             if log_fn is not None:
@@ -191,4 +203,15 @@ def retry_io(
             else:
                 _LOGGER.warning("%s", msg)
             time.sleep(base_delay * (2 ** attempt))
+        except BaseException:
+            # ``cleanup`` is documented as running after every failed attempt,
+            # and it exists so a partial staging file is never left behind. It
+            # ran only for ``OSError``, so a zipfile ``BadZipFile``, a
+            # ``MemoryError`` or a ``KeyboardInterrupt`` mid-write left the
+            # half-written file on disk under its real name. Nothing retries
+            # those — they are re-raised untouched — but the staging still has
+            # to go.
+            if cleanup is not None:
+                cleanup()
+            raise
     raise AssertionError("unreachable: the loop either returns or raises")

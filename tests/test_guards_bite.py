@@ -25,7 +25,11 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 
+import shutil
+
 import pytest
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _write(tmp_path: Path, name: str, body: str) -> Path:
@@ -114,6 +118,67 @@ def test_colour_guard_catches_an_inline_hex(tmp_path, monkeypatch):
 
 def test_colour_guard_clears_a_token_read(tmp_path, monkeypatch):
     good = _write(tmp_path, "good_colour.py", "ACCENT = theme.Colors.accent\n")
+    assert _run_scan(monkeypatch, "tests.test_hardcoded_tokens",
+                     "test_no_inline_hex_colours", [good]) is None
+
+
+EMBEDDED_HEX_VIOLATIONS = {
+    # The two that shipped in analyze_remote_dialog.py: a hex inside a longer
+    # f-string, which the whole-literal `^…$` match walked straight past.
+    "fstring": ('def paint(lbl, alias):\n'
+                '    lbl.setText(f"<span style=\'color: #4caf50;\'>ok {alias}</span>")\n'),
+    "plain": 'STYLE = "QLabel { color: #e57373; }"\n',
+    "qss_block": ('def qss():\n'
+                  '    return """\n    QFrame { background: #1A2230; }\n    """\n'),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(EMBEDDED_HEX_VIOLATIONS))
+def test_colour_guard_catches_a_hex_embedded_in_a_longer_string(
+        tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_embedded.py", EMBEDDED_HEX_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_hardcoded_tokens",
+                    "test_no_inline_hex_colours", [bad])
+    assert exc is not None, f"the {shape} embedded hex went uncaught"
+    assert "bad_embedded.py" in str(exc)
+
+
+def test_a_file_level_colour_exemption_does_not_cover_an_embedded_hex(
+        tmp_path, monkeypatch):
+    """The two allowlists have different granularities, on purpose.
+
+    ``COLOUR_ALLOWLIST`` is per *file* and was written for an icon painter,
+    where every whole literal in the file is a colour by design.
+    ``EMBEDDED_HEX_ALLOWLIST`` is per *site*. Letting the file-level exemption
+    also cover the embedded scan is CLAUDE.md §7.5 #10 — allowlist the site, not
+    the file — broken inside the file that documents the rule, and it made the
+    one place a buried hex is hardest to see the one place the scan could not
+    look.
+    """
+    import tests.test_hardcoded_tokens as guard
+
+    bad = _write(tmp_path, "exempt_file.py",
+                 'PALETTE = ["#FF6B35", "#1A2230"]\n'
+                 'STYLE = "QLabel { color: #e57373; }"\n')
+    monkeypatch.setattr(guard, "COLOUR_ALLOWLIST", {str(bad)})
+    exc = _run_scan(monkeypatch, "tests.test_hardcoded_tokens",
+                    "test_no_inline_hex_colours", [bad])
+    assert exc is not None, (
+        "a hex embedded in a string went uncaught because the file carried a "
+        "whole-literal exemption")
+    assert "#e57373" in str(exc)
+    # ...and the exemption still does what it is for.
+    assert "#FF6B35" not in str(exc) and "#1A2230" not in str(exc), (
+        f"the file-level exemption stopped covering whole literals: {exc}")
+
+
+def test_colour_guard_clears_a_hex_named_in_a_docstring(tmp_path, monkeypatch):
+    """Prose that names a colour is documentation, not paint — this repository's
+    own guard file names four in its comments. Flagging those would push the
+    guard's own authors toward writing vaguer notes."""
+    good = _write(tmp_path, "good_docstring.py",
+                  '"""The [active] rule alone gives #98a2b3, which is wrong."""\n'
+                  "COLOUR = theme.Colors.accent\n")
     assert _run_scan(monkeypatch, "tests.test_hardcoded_tokens",
                      "test_no_inline_hex_colours", [good]) is None
 
@@ -2201,3 +2266,160 @@ def test_image_ext_guard_still_misses_a_split_string(tmp_path, monkeypatch):
                      "test_no_second_spelling_of_the_image_extension_set",
                      [evasion]) is None, (
         "the guard now catches a split string — good; delete this test")
+# ── ruff's F821 (undefined-name) ────────────────────────────────────────────
+#
+# F821 was in ``pyproject.toml``'s ignore list, justified by false positives on
+# quoted forward-reference annotations whose names are imported lazily in
+# workers. Ruff resolves those correctly now (every such site in this tree
+# declares the name under ``if TYPE_CHECKING:``) and the tree has zero hits, so
+# the rule is enforced — closing the blind spot CLAUDE.md §7.5 #11 records,
+# where deleting an ``app = ctx.window`` bridge left ``app`` unbound in three
+# functions and lint stayed green.
+#
+# Re-adding "F821" to the ignore list is a one-line edit that nothing else would
+# notice. ``test_f821_is_enforced_by_the_lint_config`` is what notices, and it
+# reads the config rather than running anything, so it holds in **every**
+# environment — including CI's pytest job, which installs
+# ``tests/requirements-dev.txt`` and has no ``ruff`` binary at all (ruff runs
+# there as its own job, with its own pin). The subprocess cases below add the
+# behavioural half — that ruff really does flag these shapes and really does
+# clear the TYPE_CHECKING spelling — and skip where the binary is absent. The
+# first draft had only those, so the whole block failed in CI on a missing
+# executable; the rule they guard is decidable from the config, and that is
+# where the durable assertion belongs.
+
+_RUFF = shutil.which("ruff")
+
+F821_VIOLATIONS = {
+    "plain unbound name": "def f():\n    return app\n",
+    "unbound after a deleted binding": (
+        "def f(ctx):\n"
+        "    return ctx.window\n"
+        "\n"
+        "def g():\n"
+        "    return app.state\n"
+    ),
+    "unbound in a comprehension": "def f(rows):\n    return [r for r in rows if r in missing]\n",
+}
+
+F821_CLEAN = {
+    # The pattern the ignore entry was justified by, spelled the way this
+    # codebase actually spells it: a ``TYPE_CHECKING`` import, which costs
+    # nothing at runtime and gives ruff the name. A *bare* quoted reference to
+    # a name imported only inside a worker function does trip F821 — that is
+    # the one thing enforcement changes, and the fix at such a site is this
+    # import, or a targeted per-line suppression, not turning the rule back off.
+    "lazy worker annotation via TYPE_CHECKING": (
+        "from __future__ import annotations\n"
+        "\n"
+        "from typing import TYPE_CHECKING\n"
+        "\n"
+        "if TYPE_CHECKING:\n"
+        "    from stardist.models import StarDist2D\n"
+        "\n"
+        "def f(model: 'StarDist2D | None' = None):\n"
+        "    return model\n"
+    ),
+    "ordinary bound name": "def f(ctx):\n    app = ctx.window\n    return app\n",
+    "module import": "import os\n\ndef f():\n    return os.getcwd()\n",
+}
+
+
+def _lint_config() -> dict:
+    import tomllib
+
+    data = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text())
+    return data.get("tool", {}).get("ruff", {}).get("lint", {})
+
+
+def test_f821_is_enforced_by_the_lint_config():
+    """The durable half: no binary, so it holds wherever the suite runs."""
+    lint = _lint_config()
+    ignored = set(lint.get("ignore", []))
+    assert "F821" not in ignored, (
+        "F821 (undefined-name) is back in pyproject.toml's ignore list. That is "
+        "the blind spot CLAUDE.md 7.5 #11 records: an unbound name left behind "
+        "by a rename passes lint. A site that genuinely needs a quoted "
+        "forward reference declares the name under `if TYPE_CHECKING:`, or "
+        "takes a per-line suppression."
+    )
+    selected = set(lint.get("select", []))
+    assert selected & {"F", "F8", "F82", "F821", "ALL"}, (
+        f"nothing in select={sorted(selected)} reaches F821, so ignoring it "
+        "would be beside the point — the rule is not switched on"
+    )
+
+
+def _f821_offenders(tmp_path, body):
+    """Run the repo's own ruff config over *body*; return its F821 output."""
+    import subprocess
+
+    path = tmp_path / "probe.py"
+    path.write_text(body)
+    proc = subprocess.run(
+        [_RUFF, "check", "--no-cache", "--select", "F821",
+         "--config", str(_REPO_ROOT / "pyproject.toml"), str(path)],
+        capture_output=True, text=True, cwd=str(_REPO_ROOT),
+    )
+    return proc.stdout if "F821" in proc.stdout else None
+
+
+@pytest.mark.skipif(_RUFF is None, reason="no ruff binary (CI runs it as its own job)")
+@pytest.mark.parametrize("shape", sorted(F821_VIOLATIONS))
+def test_f821_guard_catches(tmp_path, shape):
+    got = _f821_offenders(tmp_path, F821_VIOLATIONS[shape])
+    assert got is not None, (
+        f"ruff did not flag the {shape} spelling under this repo's own config"
+    )
+
+
+@pytest.mark.skipif(_RUFF is None, reason="no ruff binary (CI runs it as its own job)")
+@pytest.mark.parametrize("shape", sorted(F821_CLEAN))
+def test_f821_guard_clears(tmp_path, shape):
+    got = _f821_offenders(tmp_path, F821_CLEAN[shape])
+    assert got is None, f"ruff fired F821 on a legitimate {shape}: {got}"
+
+
+# ── file dialogs ────────────────────────────────────────────────────────────
+
+DIALOG_VIOLATIONS = {
+    "literal": ('def go(ctx):\n'
+                '    QFileDialog.getSaveFileName(None, "t", "", "*")\n'),
+    # The spelling the third site used, and the one a literal-only check reads
+    # as compliant: the None is bound to a name on the line above the call.
+    "via_local": ('def go(ctx):\n'
+                  '    parent = None\n'
+                  '    QFileDialog.getSaveFileName(parent, "t", "", "*")\n'),
+    "directory": ('def go(ctx):\n'
+                  '    QFileDialog.getExistingDirectory(None, "t", "")\n'),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(DIALOG_VIOLATIONS))
+def test_dialog_guard_catches_an_unparented_call(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, f"bad_dialog_{shape}.py", DIALOG_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_file_dialogs_are_parented",
+                    "test_no_unparented_file_dialog", [bad])
+    assert exc is not None and f"bad_dialog_{shape}.py" in str(exc)
+
+
+DIALOG_CLEARED = {
+    "window": ('def go(ctx):\n'
+               '    QFileDialog.getSaveFileName(ctx.window, "t", "", "*")\n'),
+    # A parameter defaulting to None still passes: the caller decides, and
+    # `widgets/path_field.py` is built exactly this way on purpose.
+    "forwarded": ('def go(ctx, parent=None):\n'
+                  '    QFileDialog.getSaveFileName(parent, "t", "", "*")\n'),
+    # Reassigned to a real window after a None initialiser — not a violation.
+    "reassigned": ('def go(ctx, stacked):\n'
+                   '    parent = None\n'
+                   '    parent = ctx.window\n'
+                   '    QFileDialog.getSaveFileName(parent, "t", "", "*")\n'),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(DIALOG_CLEARED))
+def test_dialog_guard_clears_a_parented_call(tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, f"good_dialog_{shape}.py", DIALOG_CLEARED[shape])
+    assert _run_scan(monkeypatch, "tests.test_file_dialogs_are_parented",
+                     "test_no_unparented_file_dialog", [good]) is None

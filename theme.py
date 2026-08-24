@@ -94,7 +94,16 @@ class Colors:
     text_secondary  = "#98A2B3"   # --text-secondary : labels-on-controls, metadata
     text_muted      = "#5F6B7C"   # --text-muted     : hints, inactive labels, ticks
     text_faint      = "#404B5C"   # --text-faint     : decorative separators
-    text_disabled   = "#A0AEC0"   # --text-disabled  : disabled control label text
+    #: Ink for a plot element that stands for something **undefined** — today
+    #: the dashed edge of the bar plots' "could not be computed" placeholder
+    #: and their disabled-well outline. It was called ``text_disabled`` and
+    #: documented as "disabled control label text", which it has never been:
+    #: no ``:disabled`` rule in ``qss()`` reads it, both consumers are
+    #: matplotlib painters, and the name invited exactly the wrong fix —
+    #: re-pointing it at the muted grey the stylesheet's ``:disabled`` rules
+    #: use took the placeholder's contrast against ``plot_bg`` from 7.75:1 to
+    #: 3.23:1, on the one marker whose whole job is to be noticed.
+    plot_undefined_ink = "#A0AEC0"
     placeholder     = "#64748B"   # --placeholder    : empty-field placeholder text
 
     # ── Accent (interactive / brand) ─────────────────────────────────────
@@ -1296,6 +1305,15 @@ _GREY = {
         "text_muted": "#878D95", "text_faint": "#5E646C",
         "accent": "#2D8CEB", "accent_hover": "#43A0FF", "accent_pressed": "#1668B8",
         "accent_dim": "#22415E", "accent_fg": "#FFFFFF",
+        # ``accent2`` has to move with ``accent``. It is the *neighbouring*
+        # hue — the second series colour, the dial's other half — and the
+        # relationship, not the absolute value, is what makes the pair read as
+        # one family. Left at the default while the five tokens above were
+        # overridden, the gap went from 38° to 55° and the saturations diverged
+        # (206 against 110), so on every remote-run plate the two stopped
+        # looking related. Derived by carrying the default theme's own hue
+        # offset (+38°) and saturation/value ratios onto this accent.
+        "accent2": "#6D5BE5",
         # The brand tokens (version-pill fill + text) are not overridden here:
         # the pill stays the default transparent-with-white-text in every theme.
         "success": "#3FB950", "warn": "#FFB300", "danger": "#F04747",

@@ -36,6 +36,29 @@ from PySide6.QtWidgets import (
 import theme
 
 
+def segment_text_color(seg) -> str:
+    """The text tone a segment paints itself in, for its current state.
+
+    ``_Segment.paintEvent`` suppresses the style's own text rendering so it can
+    centre the icon + label itself, which also means the ``color:`` declarations
+    in :meth:`SegmentedControl._build_qss` never reach the drawn text — Qt
+    resolves a QSS pseudo-state colour into the painter it would have used, not
+    into the widget palette a custom ``paintEvent`` can read. Reading the
+    palette therefore returned one near-identical tone for every state, and a
+    checked segment was indistinguishable from an unchecked one.
+
+    The tones live here so the painter and the stylesheet cannot drift:
+    ``_build_qss`` declares the same four, and
+    ``tests/test_segmented_control_tones.py`` fails if they stop matching.
+    """
+    c = theme.Colors
+    if not seg.isEnabled():
+        return c.text_faint
+    if seg.isChecked() or seg.underMouse():
+        return c.text_primary
+    return c.text_secondary
+
+
 class _Segment(QToolButton):
     def __init__(self, text: str, icon: QIcon | None, parent: QWidget | None) -> None:
         super().__init__(parent)
@@ -77,7 +100,7 @@ class _Segment(QToolButton):
         to centre Review / Analyze labels in their Expanding segments.
         """
         from PySide6.QtCore import QRect
-        from PySide6.QtGui import QPalette
+        from PySide6.QtGui import QColor
 
         p = QPainter(self)
         try:
@@ -116,19 +139,7 @@ class _Segment(QToolButton):
                 x += iw + spacing
 
             if has_text:
-                # ``QPalette.Disabled`` is a colour *group*, not a *role* —
-                # pass it as the group argument (with the ButtonText role), not
-                # as the sole role (which raised "called with wrong argument
-                # type" and crashed the paint when a segment was disabled).
-                if self.isEnabled():
-                    col = self.palette().color(QPalette.ButtonText)
-                else:
-                    col = self.palette().color(QPalette.Disabled, QPalette.ButtonText)
-                # Honour QSS-resolved text colour by querying the palette via
-                # the current style option (the platform style filled it in).
-                if opt.palette is not None:
-                    col = opt.palette.color(QPalette.ButtonText)
-                p.setPen(col)
+                p.setPen(QColor(segment_text_color(self)))
                 p.drawText(QRect(x, cr.top(), tw, cr.height()),
                            Qt.AlignVCenter | Qt.AlignLeft, text)
         finally:

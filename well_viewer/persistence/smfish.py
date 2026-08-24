@@ -20,7 +20,7 @@ import logging
 from pathlib import Path
 from typing import Any  # Any used in save_threshold
 
-from well_viewer.persistence._io import atomic_write_json
+from well_viewer.persistence._io import update_json_atomic
 from well_viewer.domain.viewer_state import resolve_pipeline_info_path
 
 _logger = logging.getLogger("well_viewer")
@@ -74,20 +74,17 @@ def clear_thresholds(ctx) -> bool:
     info_path = _resolve_pipeline_info_path(Path(data_dir))
     if not info_path.exists():
         return False
-    try:
-        existing = json.loads(info_path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        _logger.warning("Could not read %s: %s", info_path, exc)
-        return False
-    if not isinstance(existing, dict) or _SMFISH_THRESHOLDS_KEY not in existing:
-        return False
-    existing.pop(_SMFISH_THRESHOLDS_KEY, None)
-    try:
-        atomic_write_json(info_path, existing)
-    except OSError as exc:
-        _logger.warning("Could not write %s: %s", info_path, exc)
-        return False
-    return True
+
+    def _drop_block(existing: dict) -> dict | None:
+        if _SMFISH_THRESHOLDS_KEY not in existing:
+            return None  # nothing to remove; leave the file alone
+        existing.pop(_SMFISH_THRESHOLDS_KEY, None)
+        return existing
+
+    # Through the shared read-modify-write helper: the pipeline owns keys in
+    # this same file and rewrites it at the end of a run, so a plain
+    # read-then-write can drop whatever it wrote in between.
+    return update_json_atomic(info_path, _drop_block)
 
 
 def save_threshold(ctx, channel: str, threshold: float) -> None:
@@ -121,20 +118,7 @@ def save_threshold(ctx, channel: str, threshold: float) -> None:
         )
         return
     info_path = _resolve_pipeline_info_path(Path(data_dir))
-    existing: dict[str, Any]
-    if info_path.exists():
-        try:
-            existing = json.loads(info_path.read_text())
-            if not isinstance(existing, dict):
-                _logger.warning("%s is not a JSON object; not updating.", info_path)
-                return
-        except (OSError, json.JSONDecodeError) as exc:
-            _logger.warning("Could not read %s: %s", info_path, exc)
-            return
-    else:
-        # Sidecar is missing — create a minimal one. The pipeline's next
-        # run will merge with these keys, so this is non-destructive.
-        existing = {}
+    if not info_path.exists():
         _logger.info(
             "smFISH save_threshold: %s did not exist; creating it with "
             "only the smfish_thresholds block (the pipeline will merge "
@@ -142,28 +126,35 @@ def save_threshold(ctx, channel: str, threshold: float) -> None:
             info_path,
         )
 
-    block = existing.get(_SMFISH_THRESHOLDS_KEY)
-    if not isinstance(block, dict):
-        block = {}
-    block[ch] = float(threshold)
-    existing[_SMFISH_THRESHOLDS_KEY] = block
+    def _set_threshold(existing: dict[str, Any]) -> dict[str, Any]:
+        block = existing.get(_SMFISH_THRESHOLDS_KEY)
+        if not isinstance(block, dict):
+            block = {}
+        block[ch] = float(threshold)
+        existing[_SMFISH_THRESHOLDS_KEY] = block
+        return existing
 
     # Mirror onto the in-memory cache so a subsequent channel switch
-    # restores the just-saved value without a round-trip to disk.
+    # restores the just-saved value without a round-trip to disk. Before the
+    # write, deliberately: the threshold is already baked into the CSVs on
+    # disk by the time this runs, so the spinbox must show it even if the
+    # sidecar cannot be written.
     saved = ctx.runtime.smfish.thresholds_saved
     if saved is None:
         saved = {}
         ctx.runtime.smfish.thresholds_saved = saved
     saved[ch] = float(threshold)
 
-    try:
-        atomic_write_json(info_path, existing)
+    # The read and the write go through one helper that verifies the file has
+    # not been rewritten in between — the pipeline owns ``fluor_tokens`` /
+    # ``available_timepoints`` in this same file and rewrites it at the end of
+    # a run, which can land while Review is saving a threshold in the same
+    # window.
+    if update_json_atomic(info_path, _set_threshold, create_missing=True):
         _logger.info(
             "smFISH save_threshold: wrote %s=%g to %s",
             ch, float(threshold), info_path,
         )
-    except OSError as exc:
-        _logger.warning("Could not write %s: %s", info_path, exc)
 
 
 def load_from_pipeline_info(ctx) -> bool:

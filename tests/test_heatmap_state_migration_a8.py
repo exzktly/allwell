@@ -30,8 +30,22 @@ def test_slice_defaults(viewer_app):
     assert not hasattr(viewer_app, "_heatmap_log_scale")
 
 
-def test_settings_collect_reads_the_slice(viewer_app):
+def test_settings_collect_reads_the_slice(viewer_app, qtbot):
+    """The collector reads ``HeatmapState``, not the old god-object attributes.
+
+    The tab is built first because ``_collect_settings`` declines to read the
+    slice at all when it has not been: with no Heat Map widgets in the session
+    every typed field is still at its dataclass default, and reading them there
+    is what overwrote a saved settings block with defaults on the next save of
+    any section. Setting the slice by hand without a tab is a state the app
+    never reaches, so asserting the collector's answer in it would pin the
+    defect rather than the migration this file is about.
+    """
     app = viewer_app
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    build_heatmap_tab(app._ctx, parent)
+
     app._app_state.heatmap.scale_mode = "Fixed"
     app._app_state.heatmap.repset_avg = True
     app._app_state.heatmap.log_scale = True
@@ -39,6 +53,10 @@ def test_settings_collect_reads_the_slice(viewer_app):
     assert settings["scale_mode"] == "Fixed"
     assert settings["repset_avg"] is True
     assert settings["log_scale"] is True
+
+    # The builder ends in a redraw serviced by a queued ``draw_idle``; let it
+    # settle while the canvas is alive. Same reason as the sibling below.
+    qtbot.wait(1)
 
 
 def test_persistence_round_trip_through_slice(viewer_app, qtbot):

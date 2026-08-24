@@ -34,6 +34,24 @@ from tests._repo_scan import python_sources, rel as _rel
 
 
 _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
+#: The same colour, anywhere inside a string rather than as the whole of one.
+#: The first version of this scan matched only a whole literal, so a hex written
+#: into a longer f-string — ``f"<span style='color: #4caf50;'>✓ …"``, the two
+#: that shipped in ``analyze_remote_dialog.py`` — was invisible to it. The file
+#: was not in the allowlist below, so those were an evasion rather than an
+#: exemption: a colour that cannot follow a theme, with nothing saying so.
+_EMBEDDED_HEX = re.compile(r"#[0-9a-fA-F]{6}\b")
+
+#: Embedded hexes that are prose rather than paint: ``(path, colour)`` -> why.
+#: Keyed on the colour rather than the line so an unrelated edit above it does
+#: not silently retarget the entry, and narrow enough that a *second* hex in the
+#: same file is still reported. ``test_the_embedded_hex_allowlist_is_live``
+#: fails on an entry that has stopped describing a real site.
+EMBEDDED_HEX_ALLOWLIST = {
+    ("widgets/rail_nav.py", "#98a2b3"):
+        "a measured before/after inside a QSS /* */ comment, not a painted value",
+    ("widgets/rail_nav.py", "#e6e9ef"): "the same comment's other half",
+}
 
 # ── colour allowlist ────────────────────────────────────────────────────────
 # path -> why. A palette's stops are data; a `__main__` block is a developer
@@ -62,6 +80,21 @@ PIXEL_SETTERS = frozenset({
 # 0 = "no constraint"; 16777215 = Qt's QWIDGETSIZE_MAX, the same statement.
 FREE_VALUES = frozenset({0, 16777215})
 
+# What this roster deliberately does NOT cover, so the omission is a recorded
+# decision rather than something the next reader has to rediscover:
+#
+#   * ``setSpacing`` / ``setContentsMargins`` — 147 bare literals across the
+#     app at the time of writing. Many are ``0`` ("no gap", not a design
+#     value) and the rest are a sweep in their own right, not a ratchet that
+#     can be closed alongside unrelated work. Adding the names here without
+#     doing that sweep would only add an allowlist the size of the violation.
+#   * ``font-size`` inside QSS strings — the guard reads the AST, so a size
+#     written into a stylesheet f-string is invisible to it. ``selection_chip``
+#     had one and it was found by reading, not by this.
+#
+# Both are real gaps. Widening the roster is the fix; doing it means converting
+# the sites first, exactly as the pixel setters were converted.
+
 
 
 
@@ -73,7 +106,6 @@ FREE_VALUES = frozenset({0, 16777215})
 # work rather than a reason to weaken the scan. Shrink-only: name one, delete
 # its line.
 EXPRESSION_ALLOWLIST = {
-    "well_viewer/core/plot_toggles.py:59",
     "widgets/color_picker_popover.py:237",
     "widgets/color_picker_popover.py:242",
     "widgets/empty_state.py:93",
@@ -118,25 +150,95 @@ def _bare_ints(node: ast.AST) -> list[int]:
     return []
 
 
-def test_no_inline_hex_colours():
+def _docstring_nodes(tree: ast.AST) -> set[int]:
+    """The ``id()`` of every module/class/function docstring constant.
+
+    A docstring naming a colour is documentation, not a painted value — this
+    file's own prose names four — so the embedded scan skips them. A docstring
+    is the only string in the tree that is definitionally not an argument to
+    anything.
+    """
+    docs = set()
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if not isinstance(node, (ast.Module, ast.ClassDef,
+                                 ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if (body and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)):
+            docs.add(id(body[0].value))
+    return docs
+
+
+def _hex_offenders() -> list[str]:
+    """Every inline colour, whole-literal or embedded, outside the allowlists.
+
+    The two allowlists are consulted at different granularities on purpose.
+    ``COLOUR_ALLOWLIST`` is per *file* and exempts only the whole-literal scan,
+    because that is the shape it was written for — an icon painter's palette,
+    where every literal in the file is a colour by design.
+    ``EMBEDDED_HEX_ALLOWLIST`` is per *site*, keyed ``(file, colour)``.
+
+    Letting the file-level exemption cover the embedded scan too was the
+    original mistake here, and it is the one CLAUDE.md §7.5 #10 names — allowlist
+    the site, not the file — broken inside the file that documents the rule. A
+    hex buried in an f-string inside an allowlisted file is exactly what the
+    embedded scan was added to find, and it was the one place it could not look.
+    """
     offenders = []
     for path in python_sources():
         if path.name in _TOKEN_HOMES:
             continue
         rel = _rel(path)
-        if rel in COLOUR_ALLOWLIST:
-            continue
+        whole_literals_exempt = rel in COLOUR_ALLOWLIST
         tree = ast.parse(path.read_text(), filename=str(path))
+        docs = _docstring_nodes(tree)
         for node in ast.walk(tree):
-            if (isinstance(node, ast.Constant) and isinstance(node.value, str)
-                    and _HEX.match(node.value)):
-                offenders.append(f"{rel}:{node.lineno} — {node.value}")
+            if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+                continue
+            if _HEX.match(node.value):
+                if not whole_literals_exempt:
+                    offenders.append(f"{rel}:{node.lineno} — {node.value}")
+            elif id(node) not in docs:
+                for found in _EMBEDDED_HEX.findall(node.value):
+                    if (rel, found) in EMBEDDED_HEX_ALLOWLIST:
+                        continue
+                    offenders.append(f"{rel}:{node.lineno} — {found} (inside a string)")
+    return offenders
+
+
+def test_no_inline_hex_colours():
+    offenders = _hex_offenders()
     assert not offenders, (
         "Inline hex colour(s). Add a token to `theme.Colors` (screen chrome and "
         "plot accents) or `theme.CPub` (the dark-on-light ink an exported figure "
         "draws with) and read it from there, so the colour can follow a theme:\n  "
         + "\n  ".join(sorted(offenders))
     )
+
+
+def test_the_embedded_hex_allowlist_is_live():
+    """An entry that no longer names a real embedded hex is a ratchet that has
+    stopped biting — the same failure the expression allowlist guards against
+    below, and the reason the colour list is keyed on the colour rather than a
+    line number."""
+    live = set()
+    for path in python_sources():
+        if path.name in _TOKEN_HOMES:
+            continue
+        rel = _rel(path)
+        tree = ast.parse(path.read_text(), filename=str(path))
+        docs = _docstring_nodes(tree)
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                    and id(node) not in docs and not _HEX.match(node.value)):
+                for found in _EMBEDDED_HEX.findall(node.value):
+                    live.add((rel, found))
+    stale = sorted(set(EMBEDDED_HEX_ALLOWLIST) - live)
+    assert not stale, (
+        "These embedded-hex exemptions no longer name a real site — delete "
+        "them:\n  " + "\n  ".join(f"{path} — {colour}" for path, colour in stale))
 
 
 def test_no_inline_pixel_sizes():

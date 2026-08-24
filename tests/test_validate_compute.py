@@ -746,3 +746,62 @@ def test_a_well_stranded_on_the_remote_is_not_put_on_the_force_list(tmp_path):
     report = _Report()
     report.wells = (stranded, ordinary)
     assert wells_needing_force(report) == ("A02",)
+
+
+# ── one plate position spelled two ways ──────────────────────────────────────
+#
+# ``in/A1.zip`` beside ``in/A01.zip`` canonicalises to one key in every
+# ``dataset_paths`` map, so one archive is invisible to everything that looks a
+# well up by name. The Datasets copy tools refuse such a dataset outright; this
+# is the check the user is sent to afterwards, and before it existed Validate
+# reported the plate as holding one A01 and said nothing at all about the other
+# file.
+
+
+def _duplicate_spelling(root, well: str, unpadded: str) -> None:
+    """Copy ``in/<well>.zip`` to ``in/<unpadded>.zip`` — the same position,
+    spelled without the zero padding."""
+    import shutil
+
+    src = root / "in" / f"{well}.zip"
+    shutil.copy2(src, root / "in" / f"{unpadded}.zip")
+
+
+def test_two_spellings_of_one_well_are_reported_and_named(tmp_path):
+    build_dataset(tmp_path, wells=["A01", "B02"], timepoints=["0h"])
+    _duplicate_spelling(tmp_path, "A01", "A1")
+
+    report = vc.build_report(tmp_path)
+
+    collisions = [f for f in report.findings
+                  if f.code == "well_spelling_collision"]
+    assert len(collisions) == 1
+    finding = collisions[0]
+    assert finding.well == "A01"
+    assert finding.severity == "error"
+    # Both paths named: the user has to be able to go and look at them.
+    assert "in/A01.zip" in finding.message and "in/A1.zip" in finding.message
+    # A dataset the copy tools refuse is not a clean one.
+    assert not report.is_clean
+
+
+def test_a_healthy_plate_reports_no_spelling_collision(tmp_path):
+    build_dataset(tmp_path, wells=["A01", "B02"], timepoints=["0h"])
+
+    report = vc.build_report(tmp_path)
+
+    assert not [f for f in report.findings
+                if f.code == "well_spelling_collision"]
+    assert report.is_clean
+
+
+def test_a_zip_beside_its_own_well_folder_is_not_a_collision(tmp_path):
+    """Settled precedence, not a collision — the pipeline ignores well folders
+    whenever any zip is present, and ``well_spelling_collisions`` says so."""
+    build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
+    (tmp_path / "in" / "A01").mkdir()
+
+    report = vc.build_report(tmp_path)
+
+    assert not [f for f in report.findings
+                if f.code == "well_spelling_collision"]

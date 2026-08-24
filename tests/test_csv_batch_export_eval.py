@@ -580,6 +580,58 @@ def test_batch_scatter_cells_replicates_and_single_wells(ctx, tmp_path):
     assert {"group", "member", "well", "timepoint_h", "x", "y"} <= set(rows[0])
 
 
+def _select_tps(panel, tps) -> None:
+    panel._tp_lb.clearSelection()
+    for i in range(panel._tp_lb.count()):
+        it = panel._tp_lb.item(i)
+        if it.text() in tps:
+            it.setSelected(True)
+
+
+def test_a_mid_run_axis_change_does_not_split_one_scatter_batch(ctx, tmp_path,
+                                                                monkeypatch):
+    """One batch run, one definition of X and Y.
+
+    ``_run_batch_jobs`` pumps ``QApplication.processEvents()`` between jobs, so
+    the axis combos are live for the whole run — and each job re-read them.
+    Changing X after the first group therefore wrote one output directory, under
+    one manifest, holding figures and CSVs plotted against two different
+    columns, with nothing in either file saying which.
+
+    The assertion is on the column handed to the collector, which is what the
+    figure and the CSV are actually built from.
+    """
+    from well_viewer.features.batch_export import ScatterBatchExportPanel
+    from well_viewer.features.scatter import controller as scatter_controller
+
+    panel = ScatterBatchExportPanel(ctx, None, scatter_mode="cells",
+                                    use_sidebar_groups=False)
+    panel._groups = [_make_mixed_group("Cond1"), _make_mixed_group("Cond2")]
+    panel._out_dir_edit.setText(str(tmp_path / "batch_axis"))
+    _select_tps(panel, ("0.0",))
+
+    metric_cb = panel._sc_cells_metric_x_cb
+    assert metric_cb.count() > 1, "need a second metric to switch to"
+    other = metric_cb.itemText(1) if metric_cb.currentIndex() == 0 else metric_cb.itemText(0)
+
+    seen: list[tuple[str, str]] = []
+    real = scatter_controller.collect_scatter_data
+
+    def _spy(ctx_, col_x, col_y, tp_h, **kw):
+        seen.append((col_x, col_y))
+        # The user changes the X metric while the run is between jobs.
+        metric_cb.setCurrentText(other)
+        return real(ctx_, col_x, col_y, tp_h, **kw)
+
+    monkeypatch.setattr(scatter_controller, "collect_scatter_data", _spy)
+    panel._run_batch()
+
+    assert len(seen) >= 2, seen
+    assert len(set(seen)) == 1, (
+        "the same batch plotted two different X columns: " + repr(seen)
+    )
+
+
 def _run_scatter_agg_batch(ctx, groups, out_dir, *, tps=("0.0",)):
     from well_viewer.features.batch_export import ScatterBatchExportPanel
 
@@ -598,8 +650,21 @@ def _run_scatter_agg_batch(ctx, groups, out_dir, *, tps=("0.0",)):
 
 def test_batch_scatter_agg_replicates_and_single_wells(ctx, tmp_path):
     """Aggregate scatter batch of a mixed group emits ONE aggregated point per
-    replicate set and one per single well, with the single well's spread = 0
-    (no replicates) and the replicate set's spread = per-well-mean SEM."""
+    replicate set and one per single well: the replicate set's spread is the
+    per-well-mean SEM, and the single well's spread is **undefined**.
+
+    That last assertion used to read ``== "0"``, under a comment saying "no
+    replicates". Zero and undefined are not the same fact, and conflating them
+    is the defect this review exists to remove: a solo well exported
+    ``err = 0.000000`` and drew a bar with no whisker beside sets whose whiskers
+    were measured, so a reader could not tell "the replicates agreed exactly"
+    from "there was only one". ``_reduce_reps`` carries a paragraph promising
+    NaN here and is the producer that now keeps it.
+
+    The test was red on ``origin/main`` and on this branch alike, and nothing
+    reported it: it carries the ``slow`` mark, so CI's fast lane deselects it and
+    every green run since the producer was corrected went green over a test it
+    never executed."""
     out_dir = tmp_path / "batch_scatter_agg"
     panel = _run_scatter_agg_batch(ctx, [_make_mixed_group("Cond1")], out_dir,
                                    tps=("0.0",))
@@ -613,7 +678,8 @@ def test_batch_scatter_agg_replicates_and_single_wells(ctx, tmp_path):
     assert by_label["RepA"]["x"] == "108.5"           # pooled/per-well-mean GFP
     assert by_label["RepA"]["x_err"] == "5"           # SEM of per-well means
     assert by_label["B01"]["x"] == "123.5"            # solo well GFP
-    assert by_label["B01"]["x_err"] == "0"            # single well → no spread
+    # Undefined, not zero — one replicate has no spread to measure.
+    assert by_label["B01"]["x_err"] in ("", "nan"), by_label["B01"]["x_err"]
 
 
 def test_batch_scatter_cells_honors_display_options(ctx, tmp_path, monkeypatch):
@@ -675,7 +741,8 @@ def test_batch_scatter_agg_honors_log_scale(ctx, tmp_path, monkeypatch):
     grp = BarGroup("Cond1", members=[ReplicateSet("RepA", ["A01", "A02"])],
                    solo_wells=["B01"])
     err = panel._run_scatter_agg_job(grp, 0.0, tmp_path / "a.csv",
-                                     tmp_path / "a.png", "png")
+                                     tmp_path / "a.png", "png",
+                                     panel._snapshot_scatter_axes())
     assert err is None, err
     ax0 = captured["fig"].axes[0]
     assert getattr(ax0, "_aw_force_xlog", False) is True

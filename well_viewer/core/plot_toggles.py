@@ -35,6 +35,80 @@ _refresh_bar_layout_btn_state = _lazy(
 )
 
 
+#: Room the FOV toggle reserves beyond its widest label, in pixels: the QSS
+#: padding on both sides plus the border. Written at the call site until the
+#: pixel-literal ratchet reached this module; named here so the number has a
+#: reason attached rather than an allowlist entry.
+_FOV_BTN_SLACK_PX = 26
+
+
+def _live_buttons(bank) -> list:
+    """The still-alive buttons in *bank*, with the dead ones dropped from it.
+
+    The SEM and FOV banks are append-only: ``ui_helpers`` and the batch-export
+    ``base_panel`` append to them and nothing ever removes an entry. A
+    batch-export panel that has since been closed leaves its buttons behind as
+    Python wrappers around deleted C++ objects, and the first call on one raises
+    ``RuntimeError: Internal C++ object already deleted``. Because the button
+    loops were unguarded, that aborted the toggle part-way: the buttons after
+    the dead one kept the previous label and variant while the state had already
+    flipped, and in ``toggle_sem`` the ``redraw_app`` below never ran, so the
+    plots kept the old error band too. The observer loops immediately beneath
+    each button loop already guarded the identical case.
+
+    Pruning rather than skipping keeps the bank from growing without bound
+    across a session of opening and closing export panels.
+    """
+    live = []
+    for btn in list(bank or []):
+        try:
+            btn.objectName()
+        except RuntimeError:
+            continue
+        live.append(btn)
+    if bank is not None and len(live) != len(bank):
+        bank[:] = live
+    return live
+
+
+def _style_button(btn, fn) -> None:
+    """Apply *fn* to *btn*, letting one dead widget not abort the whole bank."""
+    try:
+        fn(btn)
+    except RuntimeError:
+        swallowed()
+
+
+def _notify_observers(bank, value) -> None:
+    """Call each observer in *bank*, dropping the ones whose widget has died.
+
+    The observer banks grow the same way the button banks do — every
+    batch-export panel appends and nothing removes — and an observer closing
+    over a deleted widget raises ``RuntimeError`` on every toggle for the rest
+    of the session. Guarding without pruning meant the failure was survivable
+    but permanent: a log line per stale observer per click, for ever. The
+    button banks were pruned here and these were not, which is the half-sweep
+    CLAUDE.md §7.5 #5 is about — the same unbounded growth, in the list
+    immediately below the one that was fixed.
+
+    Only a ``RuntimeError`` prunes. Any other exception is the observer's own
+    bug, not a dead widget, and dropping it would silently unsubscribe a live
+    listener; those are logged and the observer is kept.
+    """
+    live = []
+    for obs in list(bank or []):
+        try:
+            obs(value)
+        except RuntimeError:
+            swallowed()
+            continue
+        except Exception:
+            swallowed()  # was: pass (silent except)
+        live.append(obs)
+    if bank is not None and len(live) != len(bank):
+        bank[:] = live
+
+
 def refresh_fov_btn_state(ctx) -> None:
     """Sync every per-FOV toggle button's text/variant state."""
     is_on = bool(ctx.state.plot.use_fov_replicates)
@@ -46,7 +120,8 @@ def refresh_fov_btn_state(ctx) -> None:
         "otherwise FOVs are pooled within each well. Pairs with the SEM/SD toggle."
     )
     from PySide6.QtGui import QFontMetrics
-    for btn in list(ctx.runtime.fov.btns or []):
+
+    def _apply_fov(btn) -> None:
         btn.setEnabled(True)
         btn.setText(text)
         btn.setToolTip(tooltip)
@@ -56,14 +131,13 @@ def refresh_fov_btn_state(ctx) -> None:
         # popover whose size is fixed at first show and won't re-expand when the
         # text grows. Size for the widest label + QSS padding/border slack.
         fm = QFontMetrics(btn.font())
-        btn.setMinimumWidth(fm.horizontalAdvance("FOV ✓") + 26)
+        btn.setMinimumWidth(fm.horizontalAdvance("FOV ✓") + _FOV_BTN_SLACK_PX)
         btn.style().unpolish(btn)
         btn.style().polish(btn)
-    for obs in list(ctx.runtime.fov.observers or []):
-        try:
-            obs(is_on)
-        except Exception:
-            swallowed()  # was: pass (silent except)
+
+    for btn in _live_buttons(ctx.runtime.fov.btns):
+        _style_button(btn, _apply_fov)
+    _notify_observers(ctx.runtime.fov.observers, is_on)
 
 
 def toggle_sem(ctx) -> None:
@@ -71,16 +145,16 @@ def toggle_sem(ctx) -> None:
     is_sem = ctx.state.plot.toggle_sem()
     text = "SEM" if is_sem else "SD"
     variant = "sem" if is_sem else "sem_warn"
-    for btn in list(ctx.runtime.sem.btns or []):
+
+    def _apply_sem(btn) -> None:
         btn.setText(text)
         btn.setProperty("variant", variant)
         btn.style().unpolish(btn)
         btn.style().polish(btn)
-    for obs in list(ctx.runtime.sem.observers or []):
-        try:
-            obs(is_sem)
-        except Exception:
-            swallowed()  # was: pass (silent except)
+
+    for btn in _live_buttons(ctx.runtime.sem.btns):
+        _style_button(btn, _apply_sem)
+    _notify_observers(ctx.runtime.sem.observers, is_sem)
     redraw_app(ctx)
     # Redraw the bar pane too whenever it is on screen — in Split View it can be
     # visible alongside another pane without being the focused tab.

@@ -69,10 +69,17 @@ ignore = [
     # `# noqa: F401` with a reason. Keep new unused imports out of the tree.
     "F811",  # redefinition-while-unused: harmless local re-imports inside
              # functions that also import at module scope.
-    "F821",  # undefined-name: false positives from quoted forward-reference
-             # type annotations whose names are imported lazily in workers
-             # (e.g. "StarDist2D | None").
 ]
+# F821 (undefined-name) is ENFORCED. It was ignored for quoted
+# forward-reference annotations whose names are imported lazily in workers
+# ("StarDist2D | None"); every such site in this tree now declares the name
+# under `if TYPE_CHECKING:`, which costs nothing at runtime and satisfies the
+# rule, so the tree has zero hits. A new site that cannot do that takes a
+# targeted `# noqa: F821` rather than turning the rule back off — leaving it off
+# was the blind spot CLAUDE.md 7.5 #11 records: deleting an `app = ctx.window`
+# bridge left `app` unbound in three functions and lint stayed green.
+# `tests/test_guards_bite.py` proves the rule fires on an unbound name and
+# clears the TYPE_CHECKING spelling.
 
 [tool.ruff.lint.per-file-ignores]
 # Tests may shadow builtins and use loose patterns.

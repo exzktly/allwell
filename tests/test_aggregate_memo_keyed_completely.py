@@ -244,3 +244,53 @@ def test_every_documented_key_component_has_a_test():
         "these components are documented as part of the memo key but are no "
         f"longer in it: {missing}"
     )
+
+
+# ── The CDF memo, keyed the same way ─────────────────────────────────────────
+
+def _cdf(ctx, **over):
+    from well_viewer.data.data_loading import _all_fluor_values_filtered
+    from well_viewer.domain.stats_compute import cdf_values_cached
+
+    kw = dict(val_col=VAL_COL, fluor_gates={},
+              compute=_all_fluor_values_filtered)
+    kw.update(over)
+    return cdf_values_cached(ctx, WELL, **kw)
+
+
+def test_the_cdf_memo_serves_a_repeat(ctx):
+    import numpy as np
+
+    first = _cdf(ctx)
+    second = _cdf(ctx)
+    assert np.array_equal(first, second)
+    assert first.size, "precondition: the well has cells to draw"
+
+
+def test_the_cdf_memo_declines_when_the_rows_change(ctx):
+    """The same silent-staleness risk as the aggregate, on the raw population.
+
+    The CDF panel draws every included cell rather than a statistic of them, so
+    a gating pass that excludes half the well must change the curve. Without
+    ``rows_version`` in the key it would keep drawing the old population under
+    the new gate.
+    """
+    base = _cdf(ctx)
+    assert base.size
+    ctx.state.dataset.cache[WELL]["Included"] = 0
+    ctx.state.dataset.note_rows_changed()
+    assert _cdf(ctx).size == 0, "the CDF kept the excluded cells"
+
+
+def test_the_cdf_memo_declines_on_a_different_gate(ctx):
+    base = _cdf(ctx)
+    other = _cdf(ctx, fluor_gates={"mcherry": 30.0})
+    assert other.size < base.size, "a gate that filters rows changed nothing"
+
+
+def test_the_cdf_memo_declines_on_a_different_column(ctx):
+    import numpy as np
+
+    base = _cdf(ctx)
+    other = _cdf(ctx, val_col="mcherry_mean_intensity")
+    assert not np.array_equal(base, other)

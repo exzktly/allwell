@@ -523,6 +523,47 @@ def aggregate_well_cached(
     return result
 
 
+def cdf_values_cached(ctx, label: str, *, val_col: str,
+                      fluor_gates: dict[str, float] | None, compute):
+    """The per-cell values behind one well's CDF curve, memoized.
+
+    The CDF panel needs every included cell's value, not an aggregate, so this
+    is a filter over the whole frame rather than a reduction of it — and it ran
+    once per well on every redraw. With the aggregates memoized it became almost
+    the entire remaining cost of a collect: 95 ms of 99 ms for ninety-six wells.
+
+    *compute* is the filter itself, passed in rather than imported, because the
+    caller already receives it as a parameter and a second copy resolved here
+    could drift from the one actually used. Its identity is part of the key, so
+    a caller supplying a different filter cannot be served another's answer.
+
+    Keyed like :func:`aggregate_well_cached` minus the arguments that do not
+    reach it: no threshold and no ``use_sem``, because the CDF draws the raw
+    filtered population rather than a statistic of it. ``rows_version`` carries
+    everything about the frame, so a gating pass or a dataset swap declines
+    here exactly as it does there.
+    """
+    store = getattr(ctx.state, "stats_cache", None)
+    rows = get_rows(ctx, label)
+    if store is None:
+        return compute(rows, val_col=val_col, fluor_gates=fluor_gates,
+                       ratios=ctx.state.channel.ratio_index)
+    key = (
+        "well_cdf", label, val_col,
+        tuple(sorted((fluor_gates or {}).items())),
+        _ratio_sig_for(ctx, val_col),
+        ctx.state.dataset.rows_version,
+        id(compute),
+    )
+    hit = store.cache.get(key)
+    if hit is not None:
+        return hit
+    result = compute(rows, val_col=val_col, fluor_gates=fluor_gates,
+                     ratios=ctx.state.channel.ratio_index)
+    store.cache[key] = result
+    return result
+
+
 def _gate_cache_sig(ctx) -> tuple | None:
     """Signature of the scatter-gate state for the stats cache — both layers.
 

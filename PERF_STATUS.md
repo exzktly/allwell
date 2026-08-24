@@ -1,6 +1,6 @@
 # STATUS — well-selection / plotting performance
 
-**Updated:** 2026-08-24 05:05 UTC
+**Updated:** 2026-08-24 05:20 UTC
 **Branch:** `claude/well-selection-performance-7phaix`
 **Base:** `44c0d38` (main, includes PR #847)
 **Version:** main is at 9.0.5 → this PR bumps to **9.0.6** (not yet applied)
@@ -30,7 +30,7 @@ last, after local fast lane + slow lane + adversarial review all pass.
 | 5 | Group-visibility cache clear | ✅ done | 312 entries kept instead of discarded per toggle |
 | 6 | Visible-only redraw | ⬜ not started | extend `fc_dirty_scopes`, no parallel flag |
 | 8 | CDF decimation | ✅ done | draw 5,219 → 2,413 ms on its own |
-| 9 | CDF collection residual | ⬜ not started | `_all_fluor_values_filtered` |
+| 9 | CDF collection residual | ✅ done | warm collect 98.6 → **4.8 ms** |
 | 11 | **Legend cap (NEW)** | ✅ done | draw 5,219 → 3,290 ms on its own; with Step 8, **1,498 ms** |
 | — | Re-measure, decide 3/7/10 | ⬜ | step 4 DROPPED |
 | — | ARCHITECTURE.md / README | ⬜ | |
@@ -286,6 +286,20 @@ valid pre-change baseline without needing a worktree of main.
 Noted, not changed: matplotlib warns that `loc="best"` is slow with many artists. With the
 cap at 12 entries it is cheap; on the uncapped export path it is not. Moving the legend is
 user-visible and belongs in its own change.
+
+## Step 9 — the CDF collection residual (landed)
+
+With the aggregates memoized, building `cdf_vals` was almost the entire remaining collect:
+**95 ms of 99 ms** for 96 wells. `cdf_values_cached` memoizes it on the same
+`rows_version` key, minus threshold and `use_sem` (the CDF draws the raw filtered
+population, not a statistic of it).
+
+The filter is **passed in** rather than imported — the caller already receives it as a
+parameter, and a second copy resolved inside could drift from the one actually used. Its
+identity is part of the key, so a caller supplying a different filter cannot be served
+another's answer.
+
+Warm collect, 96 wells: **98.6 ms → 4.8 ms**.
 
 ## Decisions log (for user confirmation at the end)
 

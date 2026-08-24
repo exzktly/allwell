@@ -11,7 +11,7 @@ from well_viewer.domain import fold_change as _fc
 from well_viewer.domain.numeric import is_number, is_numeric
 from well_viewer.domain.stats_compute import compute_rep_stats
 from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
-from well_viewer.domain.stats_compute import aggregate_well_cached
+from well_viewer.domain.stats_compute import aggregate_well_cached, cdf_values_cached
 from well_viewer.domain.stats_compute import compute_rep_n_above_stats
 from well_viewer.domain.stats_compute import compute_rep_n_above_total
 from well_viewer.domain.stats_compute import replicate_unit
@@ -291,15 +291,13 @@ def collect_line_series(
                 ):
                     all_tps.add(t)
                 if include_cdf and all_fluor_values_filtered is not None:
-                    rows = get_rows(ctx, lbl)
                     # Collect the arrays and concatenate once. ``.extend`` here
                     # boxed every value into a Python float, four times the
                     # memory of the array it was handed and the reason a large
                     # plate ran out of it in the CDF panel.
-                    cdf_parts.append(all_fluor_values_filtered(
-                        rows, val_col=val_col,
-                        fluor_gates=fluor_gates,
-                        ratios=ctx.state.channel.ratio_index,
+                    cdf_parts.append(cdf_values_cached(
+                        ctx, lbl, val_col=val_col, fluor_gates=fluor_gates,
+                        compute=all_fluor_values_filtered,
                     ))
             _raw_pts: list = []
             for t in sorted(all_tps):
@@ -414,14 +412,12 @@ def _per_well_series(ctx, denoms, hidden_members, *, threshold, use_sem, val_col
         points = [_aggpoint_to_linepoint(pt) for pt in (pts or [])]
         cdf_vals = np.empty(0, dtype=float)
         if include_cdf and all_fluor_values_filtered is not None:
-            rows = get_rows(ctx, label)
             # Straight through as the array it already is; ``list()`` here was
             # a boxed copy of every cell in the well.
-            cdf_vals = (all_fluor_values_filtered(
-                rows, val_col=val_col,
-                fluor_gates=fluor_gates,
-                ratios=ctx.state.channel.ratio_index,
-            ))
+            cdf_vals = cdf_values_cached(
+                ctx, label, val_col=val_col, fluor_gates=fluor_gates,
+                compute=all_fluor_values_filtered,
+            )
         display = well_display_label(ctx, label)
         _ctrl_ref, _outcome = denoms.control_for(label)
         out.append(LineSeries(

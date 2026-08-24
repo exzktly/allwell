@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QLabel, QPushButton, QTextEdit, QWidget,
 )
 
+from pipeline import completeness
 import theme
 from well_viewer.core.safe import swallowed
 from well_viewer.core.ui_helpers import build_hline_separator
@@ -106,9 +107,16 @@ def _completeness_line(info: dict) -> str:
     if check.get("skipped"):
         return "Completeness: check was turned off for this run"
     totals = check.get("totals") or {}
-    n_wells = int(totals.get("wells") or 0)
+    # The plate's size, not the subset the scan recorded — the same denominator
+    # the pre-run readout prints. This card read "94/94 well(s) complete ·
+    # check did not finish", which is a full-marks fraction with a hedge beside
+    # it, in the same pane as a readout saying 94 of 96.
+    n_wells = completeness.plate_total(totals)
     complete = int(totals.get("complete") or 0)
     bits = [f"{complete}/{n_wells} well(s) complete"]
+    note = completeness.unreadable_note(totals)
+    if note:
+        bits.append(note)
     if int(totals.get("partial") or 0):
         bits.append(f"{int(totals['partial'])} partial")
     if check.get("suspended"):

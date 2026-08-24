@@ -321,6 +321,17 @@ class ProgressTracker:
         seen.add(part)
         return not was_complete and {"zip", "csv"} <= seen
 
+    #: What the run journal records for each of the three terminal markers,
+    #: keyed by the marker's own name. Exhaustive on purpose — a new marker
+    #: raises here rather than defaulting to one of the two answers, because
+    #: guessing wrong in either direction is a record that claims work that did
+    #: not happen or denies work that did. It is a dict literal so that
+    #: ``tests/test_run_journal.py::test_every_well_state_is_written_by_some_caller``
+    #: can see both states: that roster's liveness check reads dict values, and
+    #: an earlier spelling as a conditional expression left ``analysed``
+    #: visible only in a mapping nothing reached (CLAUDE.md §7.5 #10).
+    _RECORD_FOR_MARKER = {"process": "analysed", "uptodate": "skipped"}
+
     def _count_well_done(self, well: str,
                          stage: str = "process") -> list[tuple[str, object]]:
         """Record that *well* reached a terminal state, counting it once.
@@ -364,19 +375,29 @@ class ProgressTracker:
         events.append(("well_done", (self.well_done, self.well_total)))
         # The plate is told "process" whatever the marker was: all three mean
         # this well is finished, and the plate paints finished wells alike. The
-        # journal is told the truth, and it rides in the *same* event: what the
-        # plate paints and what the record says are one fact, so they are one
-        # message. Two messages would be dropped independently — only
-        # ``PipelineRunner._CONTROL_KINDS`` survive a full queue — and losing
-        # only the second one journals ``analysed`` for a well nothing
-        # computed, which is the exact defect this distinction exists to
-        # prevent, restored under log pressure. The stage stays "process"
-        # because the dashboard ignores any stage outside its ``_STAGE_KEYS``;
-        # sending it the record's word would have stopped those wells being
-        # marked done on the plate, trading a wrong record for a wrong picture.
+        # journal is told the truth, and it rides in the *same* event, because
+        # what the plate paints and what the record says are one fact about one
+        # well and nothing downstream should be able to have one without the
+        # other. The stage stays "process" because the dashboard ignores any
+        # stage outside its ``_STAGE_KEYS``; sending it the record's word would
+        # have stopped those wells being marked done on the plate, trading a
+        # wrong record for a wrong picture.
+        #
+        # This is a simplification, not a bug fix, and the difference is worth
+        # writing down because the commit that made the change claimed
+        # otherwise. The two-event shape it replaced was said to be droppable
+        # half-way — two events outside ``PipelineRunner._CONTROL_KINDS``,
+        # dropped independently on a full queue. Measured, that cannot happen:
+        # ``parse`` is called in one place (``AnalyzeTab._poll_log``) on the
+        # GUI thread, and every event it returns except ``line`` and
+        # ``workers`` is applied inline rather than re-queued. The only thing
+        # the queue can drop is the whole ``("line", …)`` these are derived
+        # from, which loses both facts together. Describing an unreachable
+        # branch as the app's behaviour is worse than saying nothing
+        # (CLAUDE.md §7.1 #3), and the one-event shape has to stand on being
+        # simpler, which it is.
         events.append(("well_stage",
-                       (well, "process",
-                        "analysed" if stage == "process" else "skipped")))
+                       (well, "process", self._RECORD_FOR_MARKER[stage])))
         return events
 
     def parse(self, line: str) -> list[tuple[str, object]]:
@@ -1179,6 +1200,18 @@ class PipelineRunner:
                 "the run journal in %s could not be opened, so this run will "
                 "not write one — the previous run's record is left as it "
                 "stands", output_dir)
+            # And on the surface the user is actually reading. The logger
+            # reaches the help drawer's Log tab, which nobody has open during a
+            # run; every other message from this function goes to the run log
+            # as a "[warn]" line, and a run that silently keeps no record of
+            # itself is exactly the degraded-looks-like-good case (§7).
+            self._enqueue((
+                "line",
+                "[warn] Could not open the run journal in "
+                f"{output_dir} — this run will not be recorded, so it cannot "
+                "be offered for resume if it is interrupted. The output "
+                "itself is unaffected.\n",
+            ))
             return
         self._journal_dir = output_dir
 

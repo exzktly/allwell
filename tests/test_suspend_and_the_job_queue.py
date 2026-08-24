@@ -239,3 +239,60 @@ def test_a_queue_started_run_is_marked_as_the_queue_s(tmp_path, monkeypatch):
     J.open_run(out, input_dir="/in", mode="local", spec={})
     assert J.read_journal(out).queued is False, (
         "the flag survived into a run the queue did not start")
+
+
+def test_the_suspend_record_is_marked_by_the_writer_not_the_reader(
+        tmp_path, monkeypatch):
+    """The other writer of ``queued``, driven rather than hand-built.
+
+    ``test_the_banner_asks_both_records_and_filters_both`` constructs a
+    ``SuspendedRun(..., queued=…)`` itself, so it enters one step past the
+    line that decides the flag — the same shape its own docstring warns about
+    for the offer. Deleting ``queued=`` from ``_write_suspend_record`` fully
+    restores the reported defect (the field then defaults False and the new
+    filter never filters), and left the whole suspend-and-queue surface green.
+
+    This drives the writer. The journal side already has its symmetric guard
+    in ``test_a_queue_started_run_is_marked_as_the_queue_s``.
+    """
+    import analyze_suspend as AS
+
+    written: list[object] = []
+    monkeypatch.setattr(AS, "save", lambda run: written.append(run) or True)
+
+    class _Spec:
+        def to_json(self):
+            return {"input_dir": "/in"}
+
+    class _Edit:
+        def text(self):
+            return "/in"
+
+    class _Runner:
+        journal_queued = True
+
+    class _Pane(AS.AnalyzeSuspendMixin):
+        _input_edit = _Edit()
+        _runner = _Runner()
+        _well_done = 3
+        _well_total = 12
+
+        def _collect_run_spec(self):
+            return _Spec()
+
+        def _log_line(self, *a, **k):
+            pass
+
+    _Pane()._write_suspend_record(tmp_path / "out")
+
+    assert written, "no suspend record was written"
+    assert written[-1].queued is True, (
+        "the suspend record does not say the job queue started this run, so "
+        "the banner offers a plate the queue still holds and the same output "
+        "directory is written by two runs at once")
+
+    _Runner.journal_queued = False
+    written.clear()
+    _Pane()._write_suspend_record(tmp_path / "out")
+    assert written[-1].queued is False, (
+        "the flag is hardcoded rather than read from the run")

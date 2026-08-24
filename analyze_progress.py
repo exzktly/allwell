@@ -61,12 +61,13 @@ class AnalyzeProgressMixin:
 
     #: The ``well_stage`` values that mean a well reached a terminal state, and
     #: what the run journal should record for each — for the events that state
-    #: only a stage. A completion event names its own record state as a third
-    #: element and never comes through here; ``"process"`` is listed because
-    #: this map is also the answer to "what does that stage mean", and a stage
-    #: whose meaning is recorded in two places that disagree is worse than one
-    #: unused row.
-    _JOURNAL_STAGES = {"process": "analysed", "error": "failed"}
+    #: only a stage. A completion names its own record state as a third element
+    #: and never comes through here, so ``"process"`` is deliberately absent:
+    #: keeping it as an unreachable row made ``analysed`` appear *only* in this
+    #: dict, and `tests/test_run_journal.py::test_every_well_state_is_written_by
+    #: _some_caller` reads dict values — so the roster's liveness check passed
+    #: on an entry nothing could reach (CLAUDE.md §7.5 #10).
+    _JOURNAL_STAGES = {"error": "failed"}
 
     def _journal_well_stage(self, well: str, stage: str) -> None:
         """Record a terminal well stage in the output directory's run journal.

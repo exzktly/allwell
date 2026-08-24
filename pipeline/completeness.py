@@ -542,6 +542,37 @@ def well_record(cov: WellCoverage, *, max_missing: int = MAX_MISSING_PER_WELL) -
     }
 
 
+def plate_total(totals: dict) -> int:
+    """How many wells the plate has, for anything printing a fraction.
+
+    ``totals["wells"]`` is ``len(records)`` — how many the scan managed to
+    record — and a well that raised never enters ``records``. Using it as a
+    denominator shrinks both sides of the fraction together, so a plate with
+    two unreadable wells reads "94 of 94 well(s) are complete": the shortfall
+    made invisible by the very sentence meant to surface it (CLAUDE.md §7).
+
+    Every surface that renders "N of M well(s)" asks here, so a plate cannot
+    have two sizes in one app. ``tests/test_one_plate_size.py`` fails on a
+    denominator built from ``totals["wells"]`` anywhere else.
+    """
+    return int(totals.get("wells") or 0) + int(totals.get("unreadable") or 0)
+
+
+def unreadable_note(totals: dict) -> str:
+    """The clause naming the wells the scan could not read, or ``""``.
+
+    Beside the fraction rather than inside it: the count belongs in the
+    denominator *and* the reason belongs in words, because "94 of 96" alone
+    reads as two wells short rather than two wells unreadable, and those have
+    different fixes.
+    """
+    n = int(totals.get("unreadable") or 0)
+    if not n:
+        return ""
+    return (f"{n} well(s) could not be read — their state is unknown, not "
+            f"incomplete")
+
+
 def build_block(
     records: dict, *, finished_at: str = "", started_at_iso: str = "",
     duration_s: float | None = None, host: str = "", mode: str = "",
@@ -686,9 +717,16 @@ def log_summary(block: dict, *, log) -> None:
     where the wording means something.
     """
     totals = block.get("totals") or {}
-    n_wells = int(totals.get("wells") or 0)
+    # The plate, not the subset the scan recorded — the same denominator the
+    # Analyze readout, the last-run card, Review Home and Validate all print.
+    n_wells = plate_total(totals)
     partial = int(totals.get("partial") or 0)
     missing_groups = int(totals.get("intent") or 0) - int(totals.get("covered_any") or 0)
+    note = unreadable_note(totals)
+    if note:
+        # Said before the verdict below, because that verdict is computed from
+        # the wells that *could* be read and is therefore a floor.
+        log.warning("INCOMPLETE: %s.", note)
     if block.get("suspended"):
         log.info(
             "Completeness: run was suspended — %d of %d well(s) cover every "

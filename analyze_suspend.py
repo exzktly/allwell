@@ -517,8 +517,18 @@ class AnalyzeSuspendMixin:
                 rec = _journal.read_journal(out)
                 if rec is not None and rec.input_dir and same_dir(
                         rec.input_dir, raw_input):
+                    # ``None`` is the *record left open* case, and it is
+                    # keyed on the record being open rather than reached as a
+                    # fallback: an outcome outside the roster — an index entry
+                    # that still reads unfinished while the record on disk says
+                    # something else — would otherwise be described to the user
+                    # as "the app was killed while it went", which is a
+                    # specific, checkable claim about a thing that did not
+                    # happen. Whole point of the change was to stop saying one.
+                    if not rec.outcome:
+                        return self._UNFINISHED_CAUSE[None]
                     return self._UNFINISHED_CAUSE.get(
-                        rec.outcome, self._UNFINISHED_CAUSE[None])
+                        rec.outcome, "a run that did not finish")
         return None
 
     def resume_aware_spec(self, spec: RunSpec) -> RunSpec:

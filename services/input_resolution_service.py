@@ -1503,9 +1503,25 @@ def resolve_input_output(
     # call omitted the schema while holding it in its own signature, so the run
     # recomputed a schema-less plan: the readout said "Will fold 1 loose TIF(s)"
     # and this side logged 3 — the audit's own worked example, reproduced by the
-    # fix for it, with only the surface it appears on moved. The two can also
-    # disagree about the *action*, since an all-duplicate folder is `grouped`
-    # with the schema and `fold_loose` without it.
+    # fix for it, with only the surface it appears on moved.
+    #
+    # The two can also disagree about the *action*, and that is not cosmetic:
+    # an all-duplicate folder is `grouped` with the schema and `fold_loose`
+    # without it, and `fold_loose` returns early while `grouped` falls through
+    # to the resume tail, which consumes loose images at the dataset root and
+    # returns the closure that deletes them after a clean run.
+    #
+    # Measured on a plate holding `in/A01.zip`, a duplicate of one of its
+    # members loose inside `in/`, and two genuinely ungrouped `B02` images at
+    # the root: with the schema the action is `grouped`, the B02 images are
+    # consumed into the archives and their loose copies deleted only once the
+    # pipeline completes cleanly. Without it the action was `fold_loose`, which
+    # returns before the root is looked at — so those two images were never
+    # processed at all. The change is a fix, and it is written down here
+    # because the same `folded == 0` also fires when nothing parses as this
+    # schema's images, i.e. when the user typed the wrong separator. Measured
+    # for that case too: the zipper matches nothing and the `landed`/`claimed`
+    # check in the tail refuses the run rather than deleting anything.
     plan = plan_input_layout(raw, filename_schema=filename_schema,
                              filename_sep=filename_sep)
     if not plan.runnable:

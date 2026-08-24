@@ -68,6 +68,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 from services import run_journal
 from services.input_resolution_service import plan_incremental_scope
+from pipeline import completeness
 from well_viewer.core.safe import swallow, swallowed
 
 #: How long the input field must stay still before anything touches the disk.
@@ -444,18 +445,21 @@ class AnalyzePreflightMixin:
         intent = int(totals.get("intent") or 0)
         covered = int(totals.get("covered_any") or 0)
         complete = int(totals.get("complete") or 0)
-        wells = int(totals.get("wells") or 0)
         unreadable = int(totals.get("unreadable") or 0)
-        if not wells and not unreadable:
+        # The plate's size decides whether there is anything to say at all, so
+        # it is asked for once and used for both the gate and the fraction. It
+        # counts the wells that could not be read: a scan where *every* well
+        # raised used to return here without a word, which is the worst case of
+        # the thing this readout exists to report.
+        plate = completeness.plate_total(totals)
+        if not plate:
             return
         # The denominator is the plate, not the subset the scan managed to
-        # read. ``totals["wells"]`` is ``len(records)``, and a well that raised
-        # never enters ``records`` — so both sides of the fraction shrank
-        # together and a plate with two unreadable wells reported "94 of 94
-        # well(s) are complete" followed by a warning that the count was a
-        # floor. The shortfall was made invisible by the sentence written to
-        # make it visible.
-        head = f"{complete} of {wells + unreadable} well(s) are complete."
+        # read, and it comes from ``completeness.plate_total`` because three
+        # other surfaces print the same fraction and one pane holding two
+        # plate sizes is worse than all of them being wrong the same way
+        # (CLAUDE.md §7.5 #5).
+        head = f"{complete} of {plate} well(s) are complete."
         # A scan that gave up part-way reported its partial totals as though
         # they were the plate's. `scan_run` sets `partial_scan` for exactly
         # this — one unreadable well must not cost the record for the other

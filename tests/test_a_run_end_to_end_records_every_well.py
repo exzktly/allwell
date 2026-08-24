@@ -8,7 +8,7 @@ between them**:
 * ``PipelineRunner._run_pipeline_thread`` opens the journal, and closes it in
   its ``finally`` the instant the pipeline subprocess exits — on the **worker**
   thread;
-* ``analyze_progress._journal_well_stage`` writes ``analysed`` when the
+* ``analyze_progress``'s ``well_stage`` branch writes ``analysed`` when the
   ``Well X … done.`` line is *parsed*, which happens on the **GUI** thread as
   ``AnalyzeTab._poll_log`` drains ``log_q`` in bounded 15 ms slices.
 

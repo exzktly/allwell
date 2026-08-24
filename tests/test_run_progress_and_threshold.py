@@ -447,22 +447,56 @@ def test_the_journal_records_an_uncomputed_well_as_skipped(tmp_path, monkeypatch
     assert "1 finished" in tally and "1 skipped" in tally, tally
 
 
-def test_a_full_queue_cannot_turn_a_skipped_well_into_an_analysed_one(
+def test_a_completion_is_one_event_so_nothing_downstream_can_split_it(
         tmp_path, monkeypatch):
-    """Under log pressure, the record may be missing but never wrong.
+    """The plate's word and the record's word arrive together or not at all.
 
-    ``PipelineRunner._enqueue`` drops any event outside ``_CONTROL_KINDS`` when
-    the queue is full, individually and silently. So a completion split across
-    two messages — "the plate may paint this well finished" and "but nothing
-    was computed" — is not one fact travelling together: the first can land and
-    the second can be dropped, and the journal then says ``analysed`` for a
-    well this run never touched. That is the defect the split existed to
-    prevent, restored by the transport (CLAUDE.md §7).
+    This replaces a test that measured something the app cannot do. It built
+    the tracker's events and pushed them through ``PipelineRunner._enqueue``
+    one at a time, on the premise that two events outside ``_CONTROL_KINDS``
+    are dropped independently on a full queue — so losing only the second
+    journals ``analysed`` for a well nothing computed. Measured, no such path
+    exists: ``ProgressTracker.parse`` is called in exactly one place
+    (``AnalyzeTab._poll_log``), on the GUI thread, and every event it returns
+    except ``line`` and ``workers`` is applied inline rather than re-queued.
+    Nothing enqueues a ``well_stage``. The queue's drop unit is the whole
+    ``("line", …)`` the events are derived from, which loses both facts
+    together — so the old two-event shape was already atomic, and the guard
+    written for it failed on the base branch only because it drove a sequence
+    the app never performs (CLAUDE.md §7.1 #3, §7.7 #1).
 
-    Driven at the boundary (§7.4 #1): the assertion is on the record on disk
-    after the surviving events have been applied, not on what the tracker
-    returned. The number of free slots is swept from none to all of them, so
-    the test does not depend on how many events a completion happens to be.
+    What is worth guarding is the property the one-event shape actually has:
+    a completion is a single message, so no consumer — present or future —
+    can act on half of it. Two facts in one tuple cannot be separated by any
+    transport, which is the durable version of what the old test was reaching
+    for.
+    """
+    from services.pipeline_runner import ProgressTracker
+
+    pt = ProgressTracker()
+    pt.parse("Zip mode: 3 well(s) to process, 1 worker(s).")
+
+    for line, expected in (
+            ("Well A01 — done.", "analysed"),
+            ("Well B02 — up to date (no new FOVs).", "skipped"),
+            ("SKIP well C03 — output already exists", "skipped")):
+        events = pt.parse(line)
+        bearing = [p for k, p in events
+                   if k == "well_stage" and len(p) > 2]
+        assert len(bearing) == 1, (
+            f"{line!r} produced {len(bearing)} record-bearing events; a "
+            f"completion split across more than one can be half-delivered: "
+            f"{events}")
+        assert bearing[0][2] == expected, bearing
+
+
+def test_a_dropped_line_takes_both_facts_with_it(tmp_path, monkeypatch):
+    """The real drop unit, driven the way ``_poll_log`` drives it.
+
+    A full queue drops the pipeline's stdout line. The plate then never hears
+    the well finished *and* the journal never hears it was skipped — degraded,
+    but not wrong, which is the distinction that matters (CLAUDE.md §7). The
+    assertion is on the record on disk (§7.4 #1).
     """
     import analyze_progress
     from services import run_journal as J
@@ -471,32 +505,12 @@ def test_a_full_queue_cannot_turn_a_skipped_well_into_an_analysed_one(
 
     monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
 
-    pt = ProgressTracker()
-    pt.parse("Zip mode: 1 well(s) to process, 1 worker(s).")
-    events = pt.parse("Well B02 — up to date (no new FOVs).")
-    assert events, "the tracker said nothing about a completed well"
-
     class _Dash:
         def __getattr__(self, name):
             return lambda *a, **k: None
 
-    for free in range(len(events) + 1):
-        out = tmp_path / f"out{free}"
-        out.mkdir()
-        token = J.open_run(out, input_dir="/in", mode="local", spec={})
-
-        runner = PipelineRunner.__new__(PipelineRunner)
-        runner.log_q = RunEventQueue(maxsize=len(events) + 1)
-        runner._log_overflow_warned = False
-        for i in range(runner.log_q.maxsize - free):
-            runner.log_q.put_nowait(("line", f"filler {i}\n"))
-        for ev in events:
-            runner._enqueue(ev)
-
-        survivors = []
-        while not runner.log_q.empty():
-            survivors.append(runner.log_q.get_nowait())
-
+    def _drain_and_apply(out, token, survivors):
+        """What ``AnalyzeTab._poll_log`` does, minus the widgets."""
         class _Runner:
             last_output_dir = out
             journal_token = token
@@ -507,13 +521,38 @@ def test_a_full_queue_cannot_turn_a_skipped_well_into_an_analysed_one(
                 self._dashboard = _Dash()
 
         m = _Mixin()
+        tracker = ProgressTracker()
+        tracker.parse("Zip mode: 1 well(s) to process, 1 worker(s).")
         for kind, payload in survivors:
-            if kind in ("well_stage", "well_uncomputed"):
-                m._apply_progress_event(kind, payload)
+            if kind != "line":
+                continue
+            for ev_kind, ev_payload in tracker.parse(payload):
+                # ``well_done`` drives the ETA, which parents a QTimer to its
+                # host and needs a real QObject; it says nothing about the
+                # record.
+                if ev_kind != "well_done":
+                    m._apply_progress_event(ev_kind, ev_payload)
+
+    line = ("line", "Well B02 — up to date (no new FOVs).\n")
+    for free, expected in ((0, None), (1, "skipped")):
+        out = tmp_path / f"out{free}"
+        out.mkdir()
+        token = J.open_run(out, input_dir="/in", mode="local", spec={})
+
+        runner = PipelineRunner.__new__(PipelineRunner)
+        runner.log_q = RunEventQueue(maxsize=2)
+        runner._log_overflow_warned = False
+        for i in range(runner.log_q.maxsize - free):
+            runner.log_q.put_nowait(("line", f"filler {i}\n"))
+        runner._enqueue(line)
+
+        survivors = []
+        while not runner.log_q.empty():
+            survivors.append(runner.log_q.get_nowait())
+        _drain_and_apply(out, token, survivors)
 
         state = J.read_journal(out).wells.get("B02")
         state = None if state is None else state.state
-        assert state in (None, "skipped"), (
-            f"with {free} free slot(s) of {runner.log_q.maxsize}, a well this "
-            f"run did not compute was journalled {state!r}; the surviving "
-            f"events were {survivors}")
+        assert state == expected, (
+            f"with {free} free slot(s) the record says {state!r}, expected "
+            f"{expected!r}; survivors were {survivors}")

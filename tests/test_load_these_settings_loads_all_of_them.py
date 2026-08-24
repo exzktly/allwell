@@ -63,8 +63,41 @@ def test_an_explicit_negative_wins_over_the_positive():
     assert got["no_auto_threshold"] is True
 
 
-def test_the_journal_branch_translates_and_the_sidecar_branch_does_not():
-    """§7.7 #1 — the helper is worth nothing if the caller skips it."""
+def test_the_journal_branch_translates_and_the_sidecar_branch_does_not(tmp_path):
+    """§7.7 #1 — the helper is worth nothing if the caller skips it.
+
+    L5 was that skip: the journal stores the *form's* spelling
+    (``auto_threshold`` / ``run_check``, positive) and the applier reads the
+    pipeline's (``no_auto_threshold`` / ``no_run_check``, negative), so
+    "Load these settings" silently dropped both. ``_as_sidecar_polarity``
+    translates, and this asserts the journal branch calls it while the
+    ``pipeline_info.json`` branch — already in the applier's own spelling —
+    does not.
+
+    Asserted on what ``_previous_settings`` returns rather than on the source
+    text, because the source is what an earlier version of this test read and
+    it could not tell a call from a mention.
+    """
+    from analyze_preflight import _previous_settings
+    from services import run_journal as J
+
+    out = tmp_path / "out"
+    out.mkdir()
+    J.open_run(out, input_dir=str(tmp_path / "in"), mode="local",
+               spec={"opts": {"auto_threshold": True, "run_check": False}})
+
+    opts, source = _previous_settings(out)
+    assert source == "run journal", source
+    assert opts.get("no_auto_threshold") is False, (
+        "the journal branch returned the form's own spelling, so the applier "
+        "silently drops auto_threshold: " + repr(opts))
+    assert opts.get("no_run_check") is True, (
+        "the journal branch returned the form's own spelling, so the applier "
+        "silently drops run_check: " + repr(opts))
+
+
+def test_the_coverage_line_counts_the_whole_plate():
+    """The denominator and the named shortfall, at the paint seam."""
     from analyze_preflight import AnalyzePreflightMixin
     from pipeline.completeness import build_block
 

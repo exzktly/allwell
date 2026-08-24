@@ -451,7 +451,14 @@ def test_a_local_tally_groups_analysed_and_fetched_together(out_dir):
 #: the ``Fetcher`` wrapper that forwards to it with the best-effort guard
 #: around it. Naming both is what keeps this test narrow — a scan wide enough
 #: to catch every indirection is a scan wide enough to pass on prose.
-_RECORDING_SEAMS = ("record_well", "_journal_well")
+#: Call names that write a well's state, and the name of the map that *decides*
+#: one. The second kind matters because the scan below gates on a module
+#: mentioning one of these before it reads it at all: the state a completion
+#: records is chosen in ``services/pipeline_runner.py``, which calls neither
+#: recorder, so a roster keyed only on the recorders could not see it and
+#: reported ``analysed`` as written by nobody (CLAUDE.md §7.5 #3 — the scan
+#: surface is half the rule).
+_RECORDING_SEAMS = ("record_well", "_journal_well", "_RECORD_FOR_MARKER")
 
 
 @pytest.mark.parametrize("state", J.WELL_STATES)
@@ -467,8 +474,9 @@ def test_every_well_state_is_written_by_some_caller(state):
     ``"uploaded"`` on the strength of a *phrase table* that happened to contain
     the word — a liveness test that could not fail, which is worse than none.
     Only two shapes count now: a literal handed to ``record_well`` or to the
-    one-line wrapper that forwards to it, and the values of a dict literal (the
-    ``well_stage -> state`` mapping ``analyze_progress`` looks the state up in).
+    one-line wrapper that forwards to it, and the values of a dict literal —
+    ``analyze_progress``'s stage map, and ``ProgressTracker._RECORD_FOR_MARKER``,
+    which is what a completion's third element is looked up in.
     """
     import ast
 

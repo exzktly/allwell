@@ -1372,9 +1372,16 @@ class PipelineRunner:
             # Group and Download both end up covering the whole plate — a well
             # that was already current locally is, by the end, fetched locally.
             # The stages between them only ever see what was uploaded, which is
-            # what the run's own total counts.
-            for _stage in ("group", "download"):
-                self._enqueue(("stage_total", (_stage, len(grouped))))
+            # what the run's own total counts. Upload is given that number here
+            # rather than left to inherit the plate's: the run's own total does
+            # not arrive until the pipeline announces it, which is after the
+            # upload is over, so until then the Upload rail row (and the
+            # headline naming the same count) divided the wells being sent by
+            # the whole plate.
+            for _stage, _n in (("group", len(grouped)),
+                               ("download", len(grouped)),
+                               ("upload", len(zipped.well_zips))):
+                self._enqueue(("stage_total", (_stage, _n)))
 
             est = self._remote_runner.estimate(zipped)
             self._enqueue(("line", f"[remote] {est.format()}\n"))

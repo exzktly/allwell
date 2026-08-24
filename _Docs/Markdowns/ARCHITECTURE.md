@@ -3197,7 +3197,8 @@ set: with nothing appended it returns before touching the key.
 Rendering the run's progress is a third mixin, `analyze_progress.AnalyzeProgressMixin`:
 `_apply_progress_event` turns each `ProgressTracker` event into dashboard state
 (headline, overall bar, per-well plate colour, per-well FOV and transfer dials),
-and the ETA cluster (`_update_eta` / `_render_eta` / `_stop_eta_timer`) projects a
+`_apply_grouping_event` does the same for the grouping phase's own four events
+(`zipper_start` / `zipper_well` / `zipper_done` / `stage_total`), and the ETA cluster (`_update_eta` / `_render_eta` / `_stop_eta_timer`) projects a
 deadline from the cumulative per-well rate and ticks it down at 1 Hz between
 events. It answers to one rule: **what it draws must never overstate what the run
 achieved.** A run that finishes with fewer wells than it announced gets a headline
@@ -6094,9 +6095,13 @@ which is how the rail came to read `Group 40/6` and `Download 34/6`, numerators
 counting the plate against a denominator counting the run, with Download ahead
 of an Upload that had not started. `set_stage_total(stage, total)` overrides one
 row's divisor; `services.pipeline_runner` announces the grouped population for
-`group` and `download` (a `stage_total` event, rendered by
-`analyze_progress._apply_grouping_event`) and leaves the stages between them on
-the run's own well count.
+`group` and `download`, and the uploaded population for `upload` (a
+`stage_total` event, rendered by `analyze_progress._apply_grouping_event`),
+leaving `process` and `threshold` on the run's own well count. Upload is
+announced rather than inherited because the run's own total does not arrive
+until the pipeline prints its banner, which is after the upload has finished —
+so until then the row (and the headline naming the same count) divided the wells
+being sent by the whole plate.
 
 **rsync has to be told to narrate.** Everything the Upload rail and the plate's
 per-well transfer state are built from is parsed out of rsync's own stdout:
@@ -7305,6 +7310,41 @@ Notable members worth knowing about by name:
 | `RunDashboard` | A thin `PlateProgress` subclass — the live, visual pipeline-run view shown above the Analyze log: a left stage rail (`group → upload → process → threshold → download`, the upload/download rungs only for remote runs) plus a centre plate map that colours each well by the stage it has reached. **Every well that has started is drawn as a dial rather than a solid disc** (`PlateProgress.set_well_fraction` → `WellPlateSelector.setWellFraction`): the well body itself is a two-tone pie of its own state colour — dark for the share completed, light for what is left, filled clockwise from twelve — so the hue still says which stage the well is in while the fill says how far through it is. Before that, a well on its first FOV-group and one on its last looked identical for however long the well took, which on a timelapse plate is most of the run. **The dial tracks whichever stage the well is actually inside**, decided by `_well_fraction`: a transfer in flight wins (bytes of its input zip sent while uploading, bytes of its output zip landed while downloading — a download outranks everything else, since a well being fetched has by definition already computed), then the FOV-group counts `set_well_fov` records from `well_fov` events, then the stages reached. A well sitting uploaded on the remote, waiting its turn, reads as a **full** dial: its archive is there in full, the dial has just spent the whole upload filling with the bytes sent, and what it waits for now is its turn rather than more transfer. Emptying it there — which is what "started but nothing finished" used to mean — reset the well from nearly-full to empty at the exact instant its upload completed, so the transfer appeared to undo itself. A full dial therefore means *uploaded* or *computed* depending on the well's colour, which is the accepted cost of a dial that never runs backwards. A well that is genuinely computing with no group measured yet is the empty dial, and that zero is true. A well with nothing started (grouped at most) and an errored well have no dial at all, since a part-filled ring beside the `✕` would suggest it is still going. Per-well transfer fractions arrive as `well_xfer` events (see `pipeline_runner` in §7) and are held in `_xfer` only while the transfer is live: a fraction of 1.0 *ends* the transfer rather than pinning the dial full, because a well is marked `upload` as rsync starts sending it. `setWellFraction` is opt-in, and only a surface that is *reporting a run* sets it — this dashboard, the four Datasets tool pages that copy per-well data, and nothing else — so Review's rail, the heat-map drag source and the replicate pickers are untouched. A computing well carries **no glyph** — the `⚙` it used to wear sat in the middle of exactly the area the dial now fills, and the fill plus the colour already say it is working; only `✕` for an error survives as a marker. There is no rail of per-well progress bars beneath the plate: the dial carries that information where the eye already is, and the exact counts (`FOV 7/12`, `downloading 42%`) live in the well's hover tooltip. |
 
 The dial covers **transfers as well as compute**: a well filling with the bytes of its own archive while it uploads or downloads, and with FOV-groups while it computes, so the stages that dominate a remote run's wall-clock are the ones the plate describes best. Plate-wide transfer progress is separate and lives on the status line, fed by `remote_xfer` (below). An uploaded-but-not-started well has its own colour on a remote run (`accent2`): it used to share `warn` with a computing well, so a plate mid-run was one block of amber that said nothing about which wells were actually being worked on — and once a computing well gained a dial, the two differed in *shape* while their colour still claimed they were the same state. `accent2` is a neighbour of the `accent` used for "computed, awaiting fetch"; both mean "it is over there", so the pair reads as one family. The legend gains a matching **uploaded** row, on remote runs only.
+
+**The headline is derived from the phase the run is in, never pushed at it.**
+`AnalyzeProgressMixin` holds one phase per run — prepare, group, grouped,
+upload, queued, launch, process, finalize — and `_phase_headline` renders the
+sentence for whichever one is current; `_render_headline` writes it only when it
+differs from what the label already says, comparing against
+`PlateProgress.headline_text()` rather than against a remembered copy, so the
+comparison stays honest when the tab has written a terminal state since. Events
+move the run between phases: the grouping events open and close `group`, a
+coarse `("stage", name)` event maps through `_STAGE_PHASES`, a `sched` event
+means `queued` (or `launch` once the allocation is granted), and any compute
+event means `process` — or `finalize`, once every announced well is in, since
+the auto-threshold pass, the download drain and the remote cleanup all run after
+the last well. `("stage", "download")` deliberately maps to nothing: the fetcher
+pulls a finished well's output while later wells are still computing, so
+honouring it flips the headline between two phases for the length of a plate.
+The phases that count wells read their numerator and denominator from the same
+place the rail does (`RunDashboard.stage_progress`), so the two cannot name
+different figures for one stage — which matters because the rail lives in the
+collapsible body and the headline does not. **A run's terminal state outranks
+the phase machine**: `_render_headline` writes nothing once the dashboard
+carries an outcome (`PlateProgress.outcome()`, set by the failed/cancelled
+setters) or once `_end_run_phase` has latched the end of a successful run — a
+remote run keeps talking after it dies, since `verify_and_cleanup` fetches what
+it can and logs it, and a phase sentence written over the reason a run failed
+would replace the one thing the user needs. The success headline needs the latch
+because the tab writes it as plain text rather than through `set_done`: a run
+that finished short of the wells it announced says so there, and painting that
+green would be the shortfall dressed as a clean plate. Before this, each phase that had
+something to say wrote the headline itself and the phases that had nothing to
+say wrote nothing, so a remote run's staging step, upload and queue wait all
+inherited the grouping phase's last sentence: the reported symptom was a plate
+sitting in a SLURM queue under the words "Grouped — pipeline (segmentation +
+zipping)…", describing a step that had finished and naming the one thing that
+was not happening.
 
 **The status line belongs to whatever phase is current.** `remote_xfer` events carry the plate-wide rsync fraction; `AnalyzeTab` hands them to `RunDashboard.set_transfer(pct)`, and the first compute-phase event (`well_total` / `well_done` / `well_fov`, in `AnalyzeProgressMixin._COMPUTE_PHASE_EVENTS`) hands it `None`. The dashboard holds the fraction as state and formats the label itself. Two different objects drive this dashboard — `analyze_tab` for the runner's own events, `analyze_progress` for the pipeline's — and the label used to be a string one of them pushed and neither retracted, so it sat on the last transfer tick (`Transferring… 92%`) for the whole compute phase, until the end of the run cleared it. Clearing is keyed off the pipeline's own progress rather than off rsync reporting exactly 100%, which it need not do: the final tick before rsync exits can be any value, and in batched mode it is scaled per batch.
 

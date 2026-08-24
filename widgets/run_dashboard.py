@@ -167,6 +167,16 @@ class RunDashboard(PlateProgress):
     def _stage_total(self, stage: str) -> int:
         return self._stage_totals.get(stage, self._total)
 
+    def stage_progress(self, stage: str) -> tuple[int, int]:
+        """``(done, total)`` for one rail row — the numbers the rail draws.
+
+        For a host that names a stage in the headline as well: the rail is
+        collapsible, so the headline is sometimes the only place those counts
+        are visible, and reading them from here is what stops the two saying
+        different things about the same stage.
+        """
+        return self._count(stage), self._stage_total(stage)
+
     def set_well_stage(self, well_id: str, stage: str) -> None:
         """Record that *well_id* reached *stage* (the main driver). Each stage is
         tracked independently — reaching one does not imply any other."""

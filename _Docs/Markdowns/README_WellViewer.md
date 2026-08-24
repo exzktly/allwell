@@ -882,6 +882,16 @@ and by `remote_fetch_report.txt` in the output folder.
   starts computing, then fills again with the fields measured. Wells still to
   be started have no dial, and neither does a failed well: a part-filled ring
   beside the ✕ would suggest it was still going.
+- **The headline says what the run is doing now.** It follows the run from step
+  to step rather than holding the last thing that had something to say —
+  *Grouping 12 / 40 wells*, then *Grouped — preparing the upload…*, *Uploading 6
+  / 40 wells*, *Queued on the scheduler — waiting for a node…*, *Processing 18 /
+  40 wells*, and *Processed 40 well(s) — finalizing…* while the auto-threshold
+  pass, the last downloads and the remote cleanup finish. A local run goes
+  straight from grouping to processing. Results are fetched in the background
+  while later wells are still being computed, so the headline keeps counting the
+  wells being processed and leaves the fetching to the Download row on the stage
+  rail and to the status line.
 - The line under the headline reports the plate-wide transfer while one is
   running (`Transferring… 42%`), and clears itself the moment the pipeline
   starts computing rather than lingering on whatever percentage the transfer
@@ -917,10 +927,11 @@ and by `remote_fetch_report.txt` in the output folder.
 - **Waiting for a cluster scheduler.** If your remote host runs the pipeline
   through a scheduler (an `srun …` compute launcher — set up in the remote host
   dialog), the run does not start the moment the upload finishes: it joins a
-  queue, and on a busy cluster that can be minutes or hours. The status line
-  says so and counts up — *Waiting for the scheduler — 4m12s (job 4812345)* —
-  and the log repeats it every couple of minutes together with the exact
-  request that was made. A batched run queues once per batch, and the log names
+  queue, and on a busy cluster that can be minutes or hours. The headline says
+  so — *Queued on the scheduler — waiting for a node…* — the status line beside
+  it counts up, *Waiting for the scheduler — 4m12s (job 4812345)*, and the log
+  repeats it every couple of minutes together with the exact request that was
+  made. A batched run queues once per batch, and the log names
   which batch is waiting.
   - **Use the job number.** It is the one you would pass to `squeue -j 4812345`
     on the cluster to see why the job is pending. `Priority` or `Resources`

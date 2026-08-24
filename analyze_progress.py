@@ -45,6 +45,45 @@ def _fmt_secs(secs: float) -> str:
     return f"{secs}s"
 
 
+#: The phases a run passes through, named for what the headline says while the
+#: run is in each. A run is in exactly one of them at a time.
+_PHASE_PREPARE = "prepare"
+_PHASE_GROUP = "group"
+_PHASE_GROUPED = "grouped"
+_PHASE_UPLOAD = "upload"
+_PHASE_QUEUED = "queued"
+_PHASE_LAUNCH = "launch"
+_PHASE_PROCESS = "process"
+_PHASE_FINALIZE = "finalize"
+
+#: Which phase a coarse ``("stage", name)`` event puts the run into.
+#:
+#: ``download`` is deliberately absent. The fetcher pulls a finished well's
+#: output while the wells after it are still computing, so a download event says
+#: nothing about which phase the *run* is in — honouring it would flip the
+#: headline between "Downloading" and "Processing" for the length of a plate.
+#: What the downloads are doing is on the status line and in the Download rail
+#: row; once the last well is computed, the finalize phase covers the drain.
+_STAGE_PHASES = {
+    "upload": _PHASE_UPLOAD,
+    "process": _PHASE_PROCESS,
+    "finalize": _PHASE_FINALIZE,
+}
+
+
+def _counted(verb: str, done: int, total: int, noun: str = "wells") -> str:
+    """``"Grouping 3 / 40 wells  (7%)"`` — one spelling for every counted phase.
+
+    A total of zero means the phase's population is not known yet rather than
+    that it is empty, so the phrase counts up without a denominator instead of
+    dividing by it — and says only what it is doing when nothing has been
+    counted at all.
+    """
+    if total <= 0:
+        return f"{verb} {noun}…" if done <= 0 else f"{verb} {done} {noun}…"
+    return f"{verb} {done} / {total} {noun}  ({int(done / total * 100)}%)"
+
+
 class AnalyzeProgressMixin:
     """Progress-event rendering for ``AnalyzeTab``.
 
@@ -68,6 +107,118 @@ class AnalyzeProgressMixin:
     #: _some_caller` reads dict values — so the roster's liveness check passed
     #: on an entry nothing could reach (CLAUDE.md §7.5 #10).
     _JOURNAL_STAGES = {"error": "failed"}
+
+    # ── the headline: one phase, one writer ─────────────────────────────────
+    # The headline had several writers and none of them owned it. Each wrote a
+    # string when its own phase started, and that string stayed on screen until
+    # some *other* phase happened to write another — so every phase that wrote
+    # nothing inherited whatever the previous one had said. A remote plate sat
+    # on "Grouped — pipeline (segmentation + zipping)…" for the whole staging
+    # step, the whole upload and the whole scheduler queue wait, describing work
+    # that had already finished and naming the one thing that was not happening.
+    #
+    # So the headline is derived, never pushed: an event moves the run into a
+    # phase and the phase decides the sentence. A phase that has nothing to say
+    # leaves the label alone rather than blanking it, which is what keeps the
+    # run's terminal states (Complete / Failed / Cancelled, written by the tab)
+    # from being overwritten by a late progress event.
+
+    def _reset_run_phase(self, *, remote: bool) -> None:
+        """Put the run back in its pre-flight phase, for the run about to start.
+
+        ``remote`` decides only what the phases *say* — a local run is starting
+        a pipeline where a remote one is preparing an upload — so it is recorded
+        here rather than re-derived per phase.
+        """
+        self._run_remote = bool(remote)
+        self._run_phase = _PHASE_PREPARE
+        self._run_ended = False
+        self._render_headline()
+
+    def _end_run_phase(self) -> None:
+        """The run is over; its terminal state owns the headline from here.
+
+        For the *success* headline, which the tab writes as plain text rather
+        than through :meth:`~widgets.plate_progress.PlateProgress.set_done` —
+        a run that finished short of the wells it announced says so there, and
+        painting that green would be the shortfall dressed as a clean plate.
+        Failures and cancels record an outcome the dashboard can be asked for,
+        so they need no latch of their own.
+        """
+        self._run_ended = True
+
+    def _set_run_phase(self, phase: str) -> None:
+        """Move the run into *phase* and repaint the headline from it."""
+        self._run_phase = phase
+        self._render_headline()
+
+    def _set_compute_phase(self) -> None:
+        """Processing, or the finalize that follows the last well.
+
+        The pipeline is still busy after the final well — the auto-threshold
+        pass, and on a remote run the download drain and the remote cleanup —
+        and a headline reading "Processing 40 / 40 wells  (100%)" throughout
+        named the one thing the run had finished doing.
+        """
+        total, done = int(self._well_total), int(self._well_done)
+        self._set_run_phase(_PHASE_FINALIZE if 0 < total <= done
+                            else _PHASE_PROCESS)
+
+    def _render_headline(self) -> None:
+        """Write the current phase's sentence, if it has one and it changed.
+
+        Nothing is written once the run has ended. A remote run keeps talking
+        after it dies — ``verify_and_cleanup`` fetches what it can and logs it,
+        so per-well events arrive after the failure has been painted — and a
+        phase sentence written over the reason a run failed would replace the
+        one thing the user needs with a description of a phase that is no
+        longer running.
+
+        What is written is compared against the label rather than against a
+        remembered string: the tab writes the run's terminal states straight to
+        the dashboard, so a cached copy here would go stale the moment a run
+        ended and the comparison would then be against something nobody could
+        see.
+        """
+        if getattr(self, "_run_ended", False) or self._dashboard.outcome():
+            return
+        text = self._phase_headline()
+        if text and text != self._dashboard.headline_text():
+            self._dashboard.set_headline(text)
+
+    def _phase_headline(self) -> str:
+        """The sentence for the phase the run is in; ``""`` if it has none."""
+        phase = getattr(self, "_run_phase", _PHASE_PREPARE)
+        if phase == _PHASE_PREPARE:
+            return "Preparing…"
+        if phase == _PHASE_GROUP:
+            return _counted("Grouping", int(getattr(self, "_zipper_done", 0)),
+                            self._dashboard.overall_maximum())
+        if phase == _PHASE_GROUPED:
+            # Staging rewrites every archive before the first byte is sent, and
+            # on a large plate that is minutes — so the remote wording names the
+            # upload it is preparing rather than a pipeline that will not start
+            # until the scheduler says so.
+            return ("Grouped — preparing the upload…"
+                    if getattr(self, "_run_remote", False)
+                    else "Grouped — starting the pipeline…")
+        if phase == _PHASE_UPLOAD:
+            done, total = self._dashboard.stage_progress("upload")
+            return _counted("Uploading", done, total)
+        if phase == _PHASE_QUEUED:
+            # The wait's own clock and the job id are on the status line, which
+            # ticks; saying the elapsed time twice in two places is how the two
+            # come to disagree.
+            return "Queued on the scheduler — waiting for a node…"
+        if phase == _PHASE_LAUNCH:
+            return "Starting the pipeline on the remote…"
+        if phase == _PHASE_PROCESS:
+            total, done = int(self._well_total), int(self._well_done)
+            return _counted("Processing",
+                            min(done, total) if total > 0 else done, total)
+        if phase == _PHASE_FINALIZE:
+            return f"Processed {int(self._well_done)} well(s) — finalizing…"
+        return ""
 
     def _journal_well_stage(self, well: str, stage: str) -> None:
         """Record a terminal well stage in the output directory's run journal.
@@ -120,11 +271,13 @@ class AnalyzeProgressMixin:
             self._set_scheduler_status(
                 f"Allocation granted{f' — job {job_id}' if job_id else ''}; "
                 f"starting the pipeline…")
+            self._set_run_phase(_PHASE_LAUNCH)
             return
         # The upload is over and the pipeline has not begun. Retract the
         # transfer label here rather than waiting for a compute event, which is
         # exactly what never arrives during a queue wait.
         self._dashboard.set_transfer(None)
+        self._set_run_phase(_PHASE_QUEUED)
         if getattr(self, "_sched_since", None) is None:
             self._sched_since = _time.monotonic()
             self._sched_breadcrumb_at = self._sched_since
@@ -273,11 +426,16 @@ class AnalyzeProgressMixin:
         """Render the grouping phase's own events onto the dashboard.
 
         ``zipper_start`` opens the Group stage with the well count it is about
-        to cover; ``stage_total`` gives one rail row a denominator of its own,
-        for a stage whose population differs from the run's (see
+        to cover, ``zipper_well`` advances it one well, and ``zipper_done``
+        closes it and hands the run to the pipeline. ``stage_total`` gives one
+        rail row a denominator of its own, for a stage whose population differs
+        from the run's (see
         :meth:`widgets.run_dashboard.RunDashboard.set_stage_total`) — on a
         remote run Group and Download span the whole plate while the stages
         between them only ever see the wells the upload split sent.
+
+        All four live here rather than in the tab's polling loop because they
+        write the headline, and every writer of that label is in this module.
         """
         if kind == "zipper_start":
             n = payload or 96
@@ -286,7 +444,27 @@ class AnalyzeProgressMixin:
             self._dashboard.set_overall_range(n)
             self._dashboard.set_overall(0)
             self._dashboard.set_active_stage("group")
-            self._dashboard.set_headline(f"Grouping 0 / {n} wells")
+            self._set_run_phase(_PHASE_GROUP)
+        elif kind == "zipper_well":
+            self._zipper_done = int(getattr(self, "_zipper_done", 0)) + 1
+            self._dashboard.set_overall(self._zipper_done)
+            self._update_eta(self._zipper_done,
+                             self._dashboard.overall_maximum() or 96)
+            self._dashboard.set_active_stage("group")
+            if payload:
+                self._dashboard.set_well_stage(str(payload), "group")
+            self._set_run_phase(_PHASE_GROUP)
+        elif kind == "zipper_done":
+            self._dashboard.set_overall_range(100)
+            self._dashboard.set_overall(0)
+            self._well_total = 0
+            self._well_done = 0
+            self._set_run_phase(_PHASE_GROUPED)
+            self._stop_eta_timer()
+            self._dashboard.set_eta("ETA")
+            # Reset the per-phase clock so the pipeline-phase ETA isn't biased
+            # by the (typically short) grouping phase.
+            self._pipeline_started_at = _time.monotonic()
         elif kind == "stage_total":
             stage, total = payload  # type: ignore[misc]
             self._dashboard.set_stage_total(str(stage), int(total))
@@ -326,15 +504,13 @@ class AnalyzeProgressMixin:
             self._dashboard.set_total(total)
             self._dashboard.set_overall_range(total)
             self._dashboard.set_overall(done)
-            self._dashboard.set_headline(f"Processing {done} / {total} wells")
+            self._set_compute_phase()
         elif kind == "well_done":
             done, total = payload  # type: ignore[misc]
             self._well_done = int(done)
             self._dashboard.set_overall(self._well_done)
-            pct = int(self._well_done / max(1, total) * 100)
             self._update_eta(self._well_done, total)
-            self._dashboard.set_headline(
-                f"Processing {self._well_done} / {total} wells  ({pct}%)")
+            self._set_compute_phase()
             # The auto-threshold pass runs *after* the last well — show
             # an explicit finalizing state so the user doesn't see the
             # progress bar pinned at 100% with nothing happening.
@@ -354,10 +530,24 @@ class AnalyzeProgressMixin:
                 "WARNING",
             )
         elif kind == "stage":
-            self._dashboard.set_active_stage(str(payload))
+            name = str(payload)
+            self._dashboard.set_active_stage(name)
+            phase = _STAGE_PHASES.get(name)
+            if phase == _PHASE_PROCESS:
+                self._set_compute_phase()
+            elif phase is not None:
+                self._set_run_phase(phase)
         elif kind == "well_stage":
             well, stage, *record = payload  # type: ignore[misc]
             self._dashboard.set_well_stage(str(well), str(stage))
+            # A well reaching a stage is what moves that stage's count, and a
+            # counting phase spells its count into the headline — so the
+            # sentence is re-derived here rather than only when the *phase*
+            # changes. Without it the upload phase froze at "Uploading 0 / 6"
+            # for the whole upload: the phase was entered once, at the first
+            # `("stage", "upload")` event, and every well that landed after it
+            # moved the rail and nothing else.
+            self._render_headline()
             if record:
                 # The completion event carries the journal's word for what
                 # happened, because the plate's word for it is deliberately
@@ -379,6 +569,11 @@ class AnalyzeProgressMixin:
         elif kind == "well_fov":
             well, done, total = payload  # type: ignore[misc]
             self._dashboard.set_well_fov(str(well), int(done), int(total))
+            # A field measured is a well computing, whatever the run announced
+            # on its way here — the backstop for a host whose scheduler
+            # hand-off went unannounced, matching the transfer/clock retraction
+            # above.
+            self._set_compute_phase()
         elif kind == "well_xfer":
             well, direction, frac = payload  # type: ignore[misc]
             self._dashboard.set_well_transfer(str(well), str(direction), float(frac))

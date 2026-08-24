@@ -352,6 +352,26 @@ class PlateProgress(QWidget):
         self._headline.setText(text or "")
         self._clear_headline_decoration()
 
+    def outcome(self) -> str:
+        """The terminal state this run reached — ``""`` while it is still going.
+
+        ``"done"`` / ``"failed"`` / ``"cancelled"``, as the outcome setters
+        recorded it. Readable from outside so a host that *derives* the headline
+        can stand down once the run has ended: the reason a run failed must
+        outlive the phase it failed in.
+        """
+        return self._outcome
+
+    def headline_text(self) -> str:
+        """What the headline currently says.
+
+        For a caller that derives the headline and repaints it only when the
+        sentence changes: comparing against the label itself, rather than
+        against its own copy of what it last wrote, keeps the comparison honest
+        when somebody else (a run's terminal state) has written it since.
+        """
+        return self._headline.text()
+
     def set_eta(self, text: str) -> None:
         self._eta.setText(text or "")
 

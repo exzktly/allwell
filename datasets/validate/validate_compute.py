@@ -517,8 +517,17 @@ def _well_intent(
         return set(), None
     if members is None:
         return set(), f"{container.name} could not be read as a zip/folder."
+    # `images_only=True`, exactly as `pipeline.completeness.coverage_for_well`
+    # passes it. This is an *intent* count — how many FOV-groups the user's
+    # input holds — and without it an AppleDouble twin parses one schema slot
+    # early, contributes a key nothing in `done` can ever match, and the well
+    # reads `partial` for ever. Converting `coverage_for_well` and not this
+    # left the two surfaces disagreeing about the same well: Review Home said
+    # complete, Datasets → Validate said partial, and ARCHITECTURE claims in
+    # writing that cannot happen.
     intent = fov_keys_from_member_names(
-        members, schema=schema_fields, sep=sep, skip_hidden=container.is_dir())
+        members, schema=schema_fields, sep=sep, skip_hidden=container.is_dir(),
+        images_only=True)
     return intent, None
 
 

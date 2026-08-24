@@ -24,8 +24,14 @@ from datasets.validate.validate_compute import (
 )
 
 # What each dataset-health state says in the raw log, per well.
+#: One phrase per health state that is not `partial` (which carries a count).
+#: Read with `.get`, never `[]`: this is indexed by whatever
+#: `pipeline.completeness.HEALTH_STATES` currently holds, and a state added
+#: there and forgotten here used to raise `KeyError` inside a pool thread —
+#: a scan that died rather than a word that was missing.
 _STATE_WORD = {
     "complete": "complete",
+    "csv_only": "measurements, but no output archive",
     "missing": "no measurements CSV",
     "no_output": "no output",
 }
@@ -67,7 +73,7 @@ class ValidateWorker(QThread):
         state = well_health(well_report)
         detail = (
             f"{len(well_report.missing)} (fov, timepoint) pair(s) missing"
-            if state == "partial" else _STATE_WORD[state]
+            if state == "partial" else _STATE_WORD.get(state, state)
         )
         self.logLine.emit(f"  {well_report.well}: {detail}")
 

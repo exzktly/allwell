@@ -86,6 +86,10 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/auto_threshold.py",
     "pipeline/background.py",
     "pipeline/capacity.py",
+    # The pipeline's argparse declaration. The remote runs process_microscopy,
+    # which imports it at module scope, so a missing file here aborts the run
+    # with ModuleNotFoundError before it reads a single image.
+    "pipeline/cli_args.py",
     "pipeline/cellpose.py",
     # The one definition of "is this well complete", shared by the end-of-run
     # check and the Datasets Validate tool.
@@ -94,6 +98,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # Per-FOV resume checkpoints, keyed on the output directory and the run's
     # settings so one plate cannot resume another's intermediates.
     "pipeline/fov_checkpoint.py",
+    # Which of the three input layouts a plate is in; process_microscopy
+    # imports it at module scope.
+    "pipeline/input_layout.py",
     "pipeline/incremental_keys.py",
     "pipeline/well_skip.py",
     "pipeline/io.py",

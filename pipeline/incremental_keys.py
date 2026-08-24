@@ -76,6 +76,7 @@ def fov_tp_from_name(name: str, *, schema: str | list[str], sep: str) -> tuple[s
 
 def fov_keys_from_member_names(
     names, *, schema: str | list[str], sep: str, skip_hidden: bool = False,
+    images_only: bool = False,
 ) -> set[tuple[str, str]]:
     """``(fov, timepoint)`` pairs for member/file names already in hand.
 
@@ -90,11 +91,32 @@ def fov_keys_from_member_names(
     the zip reader passes ``False`` because it never had that filter, and
     quietly changing what an incremental run considers done is not this
     helper's job.
+
+    *images_only* is the **intent**-side rule, and it is a different question
+    from *skip_hidden*. A caller asking "how many FOV-groups does this plate
+    hold?" is asking about the user's data; a plate carries a great deal that
+    is not — an AppleDouble ``._Plate_A01_F1.tif`` beside every image, a
+    ``__MACOSX/`` directory inside every zip written on a Mac, a ``.DS_Store``,
+    and zip directory entries with no bytes at all. Those parse to *different*
+    ``(fov, timepoint)`` keys rather than to nothing, so they do not fall out
+    of the set: measured on a two-image well with its two macOS twins, intent
+    came back 4 and two keys were permanently missing, so a finished plate
+    reported ``partial`` for ever.
+
+    It defaults to ``False`` deliberately. The **done**-side readers must keep
+    the behaviour ``test_incremental_keys_shared.py::test_zip_reader_keeps_its_own_hidden_file_behaviour``
+    pins, because changing what a resumed run considers already finished is a
+    different decision from fixing what it counts as present, and making both
+    at once would make neither reviewable.
     """
+    from util.image_exts import is_run_input_member
+
     keys: set[tuple[str, str]] = set()
     for name in names:
         base = Path(name).name
         if not base or (skip_hidden and base.startswith(".")):
+            continue
+        if images_only and not is_run_input_member(name):
             continue
         keys.add(fov_tp_from_name(base, schema=schema, sep=sep))
     keys.discard(("", ""))

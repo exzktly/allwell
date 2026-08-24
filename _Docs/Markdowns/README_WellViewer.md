@@ -373,7 +373,7 @@ Analyze at a raw `.ome.tif` just shows a reminder to convert it.
 
 You can also explicitly override the output folder.
 
-**If that output folder already holds a run, a strip above the form says so
+**If that output folder already holds a run, a card above the form says so
 before you press anything.** It names when the last run against this folder
 started and how it ended — completed, failed, stopped, suspended, or *never
 finished*, which means All-Well was closed while it was going — followed by how
@@ -391,7 +391,10 @@ changes until you press it, so anything you have already typed is safe. The
 reprocessing options — **force**, the per-well force list, and **incremental** —
 are deliberately *not* restored: they describe what the last run was told to do,
 not what you want this one to do. A plate that was forced once would otherwise
-be forced again the moment you loaded its settings back. **Dismiss** hides the strip for that folder.
+be forced again the moment you loaded its settings back. Both buttons sit on
+their own row beneath the report, so the text has the full width of the sidebar.
+**Dismiss** hides the card for that folder; it comes back if you point somewhere
+else, or once a run has written there again.
 
 ### 3. Channel tokens
 
@@ -882,6 +885,16 @@ and by `remote_fetch_report.txt` in the output folder.
   starts computing, then fills again with the fields measured. Wells still to
   be started have no dial, and neither does a failed well: a part-filled ring
   beside the ✕ would suggest it was still going.
+- **The headline says what the run is doing now.** It follows the run from step
+  to step rather than holding the last thing that had something to say —
+  *Grouping 12 / 40 wells*, then *Grouped — preparing the upload…*, *Uploading 6
+  / 40 wells*, *Queued on the scheduler — waiting for a node…*, *Processing 18 /
+  40 wells*, and *Processed 40 well(s) — finalizing…* while the auto-threshold
+  pass, the last downloads and the remote cleanup finish. A local run goes
+  straight from grouping to processing. Results are fetched in the background
+  while later wells are still being computed, so the headline keeps counting the
+  wells being processed and leaves the fetching to the Download row on the stage
+  rail and to the status line.
 - The line under the headline reports the plate-wide transfer while one is
   running (`Transferring… 42%`), and clears itself the moment the pipeline
   starts computing rather than lingering on whatever percentage the transfer
@@ -917,10 +930,11 @@ and by `remote_fetch_report.txt` in the output folder.
 - **Waiting for a cluster scheduler.** If your remote host runs the pipeline
   through a scheduler (an `srun …` compute launcher — set up in the remote host
   dialog), the run does not start the moment the upload finishes: it joins a
-  queue, and on a busy cluster that can be minutes or hours. The status line
-  says so and counts up — *Waiting for the scheduler — 4m12s (job 4812345)* —
-  and the log repeats it every couple of minutes together with the exact
-  request that was made. A batched run queues once per batch, and the log names
+  queue, and on a busy cluster that can be minutes or hours. The headline says
+  so — *Queued on the scheduler — waiting for a node…* — the status line beside
+  it counts up, *Waiting for the scheduler — 4m12s (job 4812345)*, and the log
+  repeats it every couple of minutes together with the exact request that was
+  made. A batched run queues once per batch, and the log names
   which batch is waiting.
   - **Use the job number.** It is the one you would pass to `squeue -j 4812345`
     on the cluster to see why the job is pending. `Priority` or `Resources`
@@ -934,12 +948,14 @@ and by `remote_fetch_report.txt` in the output folder.
   remembers what you were running. Use it when the run is fine but you need the
   machine back — it takes a little longer to stop than **Stop** does, because it
   is waiting for those fields to land. You can close All-Well afterwards; next
-  time you open the Analyze pane a strip at the top offers to carry on, naming
-  the folder and how far it got. **Resume** continues it, computing only the
-  field/timepoint groups still missing. **Discard** forgets the offer and
-  deletes nothing — the results already written stay exactly as they are, and
-  you can still finish the plate later by re-running that input with
-  **incremental** ticked.
+  time you open the Analyze pane a card at the top of the sidebar offers to
+  carry on. It reads top to bottom: what state the run is in (*Suspended run*),
+  which plate and when (*Plate_07 · suspended 24 Aug 14:32*), what resuming will
+  do, and what the run recorded. **Resume**, at the bottom right, continues it,
+  computing only the field/timepoint groups still missing. **Discard** beside it
+  forgets the offer and deletes nothing — the results already written stay
+  exactly as they are, and you can still finish the plate later by re-running
+  that input with **incremental** ticked.
 - **Stop** signals the entire pipeline process group (sub-workers included) and
   discards whatever is in flight. Press it a second time during a Suspend if you
   do not want to wait for the in-flight fields.
@@ -949,13 +965,21 @@ and by `remote_fetch_report.txt` in the output folder.
 - **A run that does not finish is offered back the same way, whatever ended it.**
   You do not have to have pressed Suspend: a run that failed, one you stopped,
   and one cut short because All-Well closed or crashed all leave the wells that
-  got through on disk, and all three are offered. The strip names the plate, says
-  when the run started and how it ended, and how many wells it recorded as
-  finished, failed, or produced on a remote machine but never downloaded —
-  **Resume** picks it up from there.
+  got through on disk, and all three are offered. The card's first line names
+  which of them it was — *Failed run*, *Stopped run*, *Suspended run*, or
+  *Interrupted run* for one cut short because All-Well closed or crashed — and
+  the lines under it name the plate, say when the run started and how it ended,
+  and report how many wells it recorded as finished, failed, or produced on a
+  remote machine but never downloaded. **Resume** picks it up from there.
 - The offer is about **the folder in the input field**. If you have not chosen
   one yet — the state the pane opens in — it offers the most recent unfinished
   run on any plate, which is how you carry on with something from yesterday.
+- The card directly beneath it reports what the folder already holds, and while
+  the offer above is describing the same folder it does not repeat it: it drops
+  its own account of the run and shows only what the offer cannot — how many
+  wells are already complete, and what this run would do about images added
+  since the last one. Dismiss the offer and that account comes back, since the
+  report is then the only thing left saying what happened.
 - On success the app switches to Review and loads the output folder.
 - The **Job Queue** (Datasets pane) works the same way. **Pause queue** winds
   the running job down and keeps what it finished; the job stays in the list

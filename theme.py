@@ -1199,6 +1199,62 @@ QWidget#ContextBanner QLabel {{
     color: {c.text_primary};
 }}
 
+/* ── The Analyze pane's folder banners ───────────────────────────────── */
+/* Two strips at the head of the Analyze sidebar, reporting what the folder in
+   the form already holds: the resume offer (analyze_suspend) and the pre-run
+   report (analyze_preflight). Both were built with an object name and styled
+   nowhere, so they had no fill, no edge and no separation from the form —
+   loose page chrome that happened to have buttons in it. Contained here, and
+   ranked against each other: the resume strip carries an action the user can
+   take right now and takes the accent edge; the pre-run report states what is
+   already true and takes the neutral one. The shared fill keeps them one
+   family. Both call sites set WA_StyledBackground, without which a plain
+   QWidget subclass ignores its own background rule entirely.
+
+   `panel`, not ContextBanner's `accent_dim` fill, and the reason is measured
+   rather than a preference. ContextBanner carries one sentence at
+   text_primary, which reads 9.07:1 on accent_dim. These two carry three tiers
+   — identity, prose, tally — and on accent_dim the muted tier measures 2.04:1
+   in the blue theme and 3.16:1 in grey, so the tier whose whole job is to be
+   quiet becomes the tier that cannot be read. On `panel` the same three
+   measure 14.38 / 6.79 / 3.23 (blue) and 12.65 / 7.93 / 4.48 (grey). */
+QWidget#ResumeBanner {{
+    background-color: {c.panel};
+    border: {m.hairline}px solid {c.accent};
+    border-radius: {r.md}px;
+}}
+QWidget#PreflightBanner {{
+    background-color: {c.panel};
+    border: {m.hairline}px solid {c.border};
+    border-radius: {r.md}px;
+}}
+/* The four text tiers inside them. Scoped to the banners rather than reusing
+   the global QLabel[muted="true"] / [secondary="true"] roles, because those
+   are colour-only and these need their own size and weight ramp — one that
+   has to stay legible against `panel` rather than against the app canvas. */
+QLabel#AnalyzeBannerKicker {{
+    color: {c.accent};
+    font-size: {t.caption_size}px;
+    font-weight: {t.semibold};
+}}
+QLabel#AnalyzeBannerTitle {{
+    color: {c.text_primary};
+    font-size: {t.body_size}px;
+    font-weight: {t.semibold};
+}}
+QLabel#AnalyzeBannerBody {{
+    color: {c.text_secondary};
+    font-size: {t.small_size}px;
+}}
+/* Ranked below the prose by size, not by colour. It is the one line in the
+   strip carrying numbers the user is meant to read, and `text_muted` measures
+   3.23:1 on `panel` — the right weight for a hint that restates a control's
+   own label, and the wrong one for the only report of what the run did. */
+QLabel#AnalyzeBannerTally {{
+    color: {c.text_secondary};
+    font-size: {t.caption_size}px;
+}}
+
 /* ── Splitter ────────────────────────────────────────────────────────── */
 /* A styled ::handle with no width/height collapses the grab area to ~1px and
    overrides setHandleWidth — so give it an explicit size per orientation. */

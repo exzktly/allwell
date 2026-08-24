@@ -99,16 +99,29 @@ class SuspendedRun:
             queued=bool(data.get("queued")),
         )
 
-    def describe(self) -> str:
-        """One line for the banner: which plate, how far it got, when."""
-        name = plate_name(self.output_dir)
+    # The three pieces below are separate from :meth:`describe` because the
+    # resume banner sets them into separate labels — the plate is the identity
+    # line, the progress is body prose — while the log line and the discard
+    # dialog still want one sentence. Composing the sentence *from* the pieces
+    # rather than restating them keeps the two renderings from drifting apart.
+    def plate(self) -> str:
+        """The name a user recognises this run's dataset by."""
+        return plate_name(self.output_dir)
+
+    def progress(self) -> str:
+        """How far it got, or ``"progress unknown"`` for a record with no counts."""
         if self.wells_total:
-            progress = f"{self.wells_done} of {self.wells_total} well(s) done"
-        else:
-            progress = "progress unknown"
-        when = (time.strftime("%d %b %H:%M", time.localtime(self.suspended_at))
+            return f"{self.wells_done} of {self.wells_total} well(s) done"
+        return "progress unknown"
+
+    def when(self) -> str:
+        """When it was suspended, in the banner's short form."""
+        return (time.strftime("%d %b %H:%M", time.localtime(self.suspended_at))
                 if self.suspended_at else "an earlier session")
-        return f"{name} — {progress}, suspended {when}"
+
+    def describe(self) -> str:
+        """One line for the log and the discard dialog: plate, progress, when."""
+        return f"{self.plate()} — {self.progress()}, suspended {self.when()}"
 
 
 def plate_name(output_dir: str) -> str:

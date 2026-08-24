@@ -3197,7 +3197,8 @@ set: with nothing appended it returns before touching the key.
 Rendering the run's progress is a third mixin, `analyze_progress.AnalyzeProgressMixin`:
 `_apply_progress_event` turns each `ProgressTracker` event into dashboard state
 (headline, overall bar, per-well plate colour, per-well FOV and transfer dials),
-and the ETA cluster (`_update_eta` / `_render_eta` / `_stop_eta_timer`) projects a
+`_apply_grouping_event` does the same for the grouping phase's own four events
+(`zipper_start` / `zipper_well` / `zipper_done` / `stage_total`), and the ETA cluster (`_update_eta` / `_render_eta` / `_stop_eta_timer`) projects a
 deadline from the cumulative per-well rate and ticks it down at 1 Hz between
 events. It answers to one rule: **what it draws must never overstate what the run
 achieved.** A run that finishes with fewer wells than it announced gets a headline
@@ -3396,6 +3397,38 @@ planner's own words. A coverage comparison that comes back incoherent (more
 field groups covered than the input was measured to hold, which means the
 filename schema is not parsing both sides the same way) is reported as such
 rather than printed as a ratio over 1.
+
+The report is built to the same stacked shape as the resume strip above it
+(§6.5), and for a sharper version of the same reason: its buttons are the wider
+pair, so *Load these settings* and *Dismiss* beside the text left the report
+**74 px** of the sidebar's 319-px viewport to wrap three sentences into — 224 px
+of text two words wide. The two strips share a
+holder — the form's own layout runs at zero spacing, and two bordered cards
+stacked flush read as one box with a line through it — which takes no margins of
+its own, so the cards run the full width of the sidebar and their text sits on
+the same 12-px left edge as every section body beneath them, and so that a
+holder whose children are both hidden, the normal state, contributes no height
+at all.
+
+**It says nothing the card above it has already said.** The resume offer and
+this report are built from the same journal, so with an unfinished run on the
+folder in the form both used to lead with the same fact and both appended the
+journal's own `tally()` — the identical sentence, in two bordered cards stacked
+one above the other. While the offer is up for *this* folder
+(`_resume_card_covers`, keyed on the folder rather than on the card merely
+being visible, since with no folder on the form the offer falls back to the
+newest unfinished run on any plate) the report drops its own account of the run
+and keeps what only it knows: the coverage line and the scope line. The
+decision is made at paint time from the offer's live state and the unsuppressed
+sentence is what is stored, because the card can come down with the folder
+unchanged — a Discard, a Resume — and the report is then the only surface left
+that can say what the last run did; `analyze_suspend._note_resume_card` calls
+`resume_card_changed` so that repaint happens, and that repaint is skipped
+unless the answer has actually flipped, since it runs `_scope_line` and that
+reads the input directory. A report left with its sentence suppressed and no
+coverage line yet is *hidden* rather than shown as a bordered strip holding two
+buttons and no words; it comes up when the scan lands.
+`tests/test_the_two_cards_do_not_say_the_same_thing.py` holds both halves.
 
 The report is refreshed on every change to the input field, once at construction,
 and again when a run settles (`resync_preflight`, from `_on_run_settled`) —
@@ -4797,7 +4830,11 @@ two records beside them are for.
 
 `services/suspend_record.py` persists the `RunSpec` that was running, plus
 enough to describe it — the same `to_json` the job queue already uses, so there
-is no second serialisation to keep in step with the form. It lives at
+is no second serialisation to keep in step with the form. It describes itself
+in pieces — `plate()`, `progress()`, `when()` — with `describe()` composing the
+one-line form from those three rather than restating them, because the resume
+strip sets the plate and the progress into separate labels while the log line
+and the discard dialog still want one sentence (§6.5). It lives at
 `~/.allwell/suspended_runs.json` rather than in the output folder because at
 startup the app does not yet know which output folder to look in, and it holds a
 list keyed by output directory so several plates can be suspended at once. The
@@ -4976,10 +5013,49 @@ essentially every run and says it identically for two different plates.
 Resuming forces `incremental=True` into the spec: that flag is not a preference
 here — without it the pipeline skips any well whose CSV exists and reprocesses
 nothing, so a half-done plate would come back still half-done with the run
-reporting success. The banner's second line is the journal's own per-well tally
+reporting success. The banner's last line is the journal's own per-well tally
 (finished / failed / never fetched), reported rather than derived, and it says
 nothing about how complete the *output* is — that is `completeness`'s answer and
 §6.1's pre-run readout carries it.
+
+**The strip is a stacked card, not a row, and it is not `ContextBanner`.** That
+widget (§9) is the app's banner idiom and the right first reach, but it is one
+`QHBoxLayout` — glyph, sentence, confirm, cancel — and it fits where it is used
+because it is used on a *page*, where a sentence beside two buttons still has
+most of the width. This strip lives in the Analyze sidebar, which is
+`app_shell_view.RAIL_W` and fixed at it, with 319 px of scrolling viewport
+inside that. Measured in a real `AnalyzeTab` at the app's default window size,
+`Resume` and `Discard` beside the label leave the offer **139 px**, so it
+reflows into a 192-px column of twelve lines running down the side of two
+buttons floating in the middle of it. Text above its own right-aligned action
+row gives the same words **295 px** and four lines.
+`tests/test_analyze_banners_are_readable.py` holds that as geometry rather than
+as inspection: the label must get at least four fifths of the strip, which fails
+for a row layout however it is spelled.
+
+The offer is rendered across four labels rather than as one wrapping paragraph,
+because it answers four questions in a fixed order and a single label renders
+all four in one weight with nothing to say where any of them ends: a **kicker**
+naming the state in two words (`Failed run`, `Suspended run`, `Interrupted run`
+for a record the app never closed), an **identity** line carrying the plate and
+when the run started, the **prose** saying what happened and what Resume will
+do, and the **tally**. `_Resumable` carries those three strings beside the
+one-sentence `headline`, which is what the log line and the discard dialog use —
+both are prose in a stream of prose and have nowhere to put a layout — and the
+headline is composed from the same locals as the parts, so the two renderings
+cannot describe the same run differently. `_INCREMENTAL_NOTE` is the single
+statement of what Resume does, said by the strip, the headline and the log line
+alike; three separately-worded copies of it is how a user comes to read two
+different accounts of one behaviour.
+
+`RunRecord.tally` returns a sentence written to be *concatenated* — it opens
+with a space and with "It recorded", so it reads on from whatever precedes it.
+The pre-run readout still concatenates it, so the shape stays as it is and the
+resume strip strips the leading space for its own line; standing alone the
+sentence is still correct, because the line above it has just named the run. A
+run whose journal recorded nothing has no tally, and that label is hidden rather
+than left empty, since an empty `QLabel` still takes its line height and the
+column's spacing with it.
 
 `PipelineRunner._run_pipeline_thread` is where the journal opens and closes:
 just below where the output directory is created and `_last_output_dir` is set,
@@ -6094,9 +6170,13 @@ which is how the rail came to read `Group 40/6` and `Download 34/6`, numerators
 counting the plate against a denominator counting the run, with Download ahead
 of an Upload that had not started. `set_stage_total(stage, total)` overrides one
 row's divisor; `services.pipeline_runner` announces the grouped population for
-`group` and `download` (a `stage_total` event, rendered by
-`analyze_progress._apply_grouping_event`) and leaves the stages between them on
-the run's own well count.
+`group` and `download`, and the uploaded population for `upload` (a
+`stage_total` event, rendered by `analyze_progress._apply_grouping_event`),
+leaving `process` and `threshold` on the run's own well count. Upload is
+announced rather than inherited because the run's own total does not arrive
+until the pipeline prints its banner, which is after the upload has finished —
+so until then the row (and the headline naming the same count) divided the wells
+being sent by the whole plate.
 
 **rsync has to be told to narrate.** Everything the Upload rail and the plate's
 per-well transfer state are built from is parsed out of rsync's own stdout:
@@ -7306,6 +7386,41 @@ Notable members worth knowing about by name:
 
 The dial covers **transfers as well as compute**: a well filling with the bytes of its own archive while it uploads or downloads, and with FOV-groups while it computes, so the stages that dominate a remote run's wall-clock are the ones the plate describes best. Plate-wide transfer progress is separate and lives on the status line, fed by `remote_xfer` (below). An uploaded-but-not-started well has its own colour on a remote run (`accent2`): it used to share `warn` with a computing well, so a plate mid-run was one block of amber that said nothing about which wells were actually being worked on — and once a computing well gained a dial, the two differed in *shape* while their colour still claimed they were the same state. `accent2` is a neighbour of the `accent` used for "computed, awaiting fetch"; both mean "it is over there", so the pair reads as one family. The legend gains a matching **uploaded** row, on remote runs only.
 
+**The headline is derived from the phase the run is in, never pushed at it.**
+`AnalyzeProgressMixin` holds one phase per run — prepare, group, grouped,
+upload, queued, launch, process, finalize — and `_phase_headline` renders the
+sentence for whichever one is current; `_render_headline` writes it only when it
+differs from what the label already says, comparing against
+`PlateProgress.headline_text()` rather than against a remembered copy, so the
+comparison stays honest when the tab has written a terminal state since. Events
+move the run between phases: the grouping events open and close `group`, a
+coarse `("stage", name)` event maps through `_STAGE_PHASES`, a `sched` event
+means `queued` (or `launch` once the allocation is granted), and any compute
+event means `process` — or `finalize`, once every announced well is in, since
+the auto-threshold pass, the download drain and the remote cleanup all run after
+the last well. `("stage", "download")` deliberately maps to nothing: the fetcher
+pulls a finished well's output while later wells are still computing, so
+honouring it flips the headline between two phases for the length of a plate.
+The phases that count wells read their numerator and denominator from the same
+place the rail does (`RunDashboard.stage_progress`), so the two cannot name
+different figures for one stage — which matters because the rail lives in the
+collapsible body and the headline does not. **A run's terminal state outranks
+the phase machine**: `_render_headline` writes nothing once the dashboard
+carries an outcome (`PlateProgress.outcome()`, set by the failed/cancelled
+setters) or once `_end_run_phase` has latched the end of a successful run — a
+remote run keeps talking after it dies, since `verify_and_cleanup` fetches what
+it can and logs it, and a phase sentence written over the reason a run failed
+would replace the one thing the user needs. The success headline needs the latch
+because the tab writes it as plain text rather than through `set_done`: a run
+that finished short of the wells it announced says so there, and painting that
+green would be the shortfall dressed as a clean plate. Before this, each phase that had
+something to say wrote the headline itself and the phases that had nothing to
+say wrote nothing, so a remote run's staging step, upload and queue wait all
+inherited the grouping phase's last sentence: the reported symptom was a plate
+sitting in a SLURM queue under the words "Grouped — pipeline (segmentation +
+zipping)…", describing a step that had finished and naming the one thing that
+was not happening.
+
 **The status line belongs to whatever phase is current.** `remote_xfer` events carry the plate-wide rsync fraction; `AnalyzeTab` hands them to `RunDashboard.set_transfer(pct)`, and the first compute-phase event (`well_total` / `well_done` / `well_fov`, in `AnalyzeProgressMixin._COMPUTE_PHASE_EVENTS`) hands it `None`. The dashboard holds the fraction as state and formats the label itself. Two different objects drive this dashboard — `analyze_tab` for the runner's own events, `analyze_progress` for the pipeline's — and the label used to be a string one of them pushed and neither retracted, so it sat on the last transfer tick (`Transferring… 92%`) for the whole compute phase, until the end of the run cleared it. Clearing is keyed off the pipeline's own progress rather than off rsync reporting exactly 100%, which it need not do: the final tick before rsync exits can be any value, and in batched mode it is scaled per batch.
 
 **Transfer progress is live state, so it stays out of the log.** A remote
@@ -7385,7 +7500,7 @@ The **Upload rail** counts wells off `[remote] ↑ …<well>.zip` lines, which u
 | `SavedSelectionsList` | The rich saved-selection list with composition (drag-to-reorder, per-group flat well editing, recolour popovers). A group is one condition — its wells are its implicit replicate set, so there are no replicate sub-partitions / solo strips. |
 | `LutSelector`, `GradientStrip`, `ColorPickerPopover` | The colour-map picker + its preview strip + the freeform colour-picker popover. |
 | `lut_cmaps.lut_cmap` | Qt-free resolver that maps a LUT name to a matplotlib colormap: single-hue names (Reds/Greens/Blues/Purples/Oranges) become a **black→colour** `LinearSegmentedColormap` (so a dark background reads as "off"), Greys stays black→white, everything else is the builtin (`_r`-aware). Routed through `ui_helpers.make_fluor_thumb` / `lut_colormap_to_rgb` and `LutSelector._cmap_stops`, so thumbnails, the Image Table compose/composite/export paths, Playground, and the picker strip all flip together. |
-| `ContextBanner` (`widgets/context_banner.py`) | A strip of glyph + sentence + confirm + cancel saying a page is being used for something other than its own job — the Job Queue borrows a tool's page to set up or correct a queued job (§6b). Host-agnostic: it knows nothing about queues or jobs, and whoever shows it decides what confirming means. Deliberately not a dialog and it does not block the page beneath, since the point is that the user is editing that page. `EmptyState` is *not* a substitute for a one-line caption in the same situations — it is `Expanding/Expanding`, so a single sentence in one renders as a page-height bordered box. |
+| `ContextBanner` (`widgets/context_banner.py`) | A strip of glyph + sentence + confirm + cancel saying a page is being used for something other than its own job — the Job Queue borrows a tool's page to set up or correct a queued job (§6b). Host-agnostic: it knows nothing about queues or jobs, and whoever shows it decides what confirming means. Deliberately not a dialog and it does not block the page beneath, since the point is that the user is editing that page. It is one `QHBoxLayout`, which is why it suits a *page* and not a rail: the Analyze pane's two folder banners (§6.5) answer the same brief in the 329-px sidebar and stack their text above their own action row instead. `EmptyState` is *not* a substitute for a one-line caption in the same situations — it is `Expanding/Expanding`, so a single sentence in one renders as a page-height bordered box. |
 | `Popover`, `Drawer`, `Toast`, `EmptyState` | Generic overlay primitives. `Drawer` slides in from `edge="right"` (default — the Help drawer) or `edge="bottom"` (a full-width panel sized by `height_hint`/`height_fraction` — the Application Log drawer, whose long lines the narrow right panel clipped). |
 | `FlowLayout` | A `QLayout` (not a widget) that reflows its children onto multiple lines instead of clipping — the standard Qt Flow Layout adapted to PySide6. Control rows that carry more widgets than fit at a narrow width (the plotting / image-review "TabCtrl" rows) use it so **Split View** halving the pane grows the row taller rather than hiding controls off the right edge. Four rules go with it. (1) A flow row skips hidden widgets when it places items, so *which* widgets are visible is an input to the layout, not merely a blanked slot — `_FlowItemVisibility` watches show/hide on every managed widget and invalidates the layout, without which a row that swaps one option group for another (the Multivariate tab's per-mode row) keeps the positions computed for the previous visible set and paints the newly-shown group on top of them. That watcher resolves the layout from its own `parent()` and keeps **no** per-instance state: its C++ object belongs to the layout, so it outlives the Python instance `__init__` ran on, and PySide builds a fresh wrapper for it once that instance is collected. Anything stashed on `self` is gone by then — a watcher that remembered its layout in an attribute raised `AttributeError` inside the Qt event loop on every subsequent show and hide, and the row stopped reflowing. (2) A label and the control it names must go in as one `flow_group` item, or the row can wrap between them. (3) A host whose row may wrap needs `sync_flow_height`, since a stacked page sizes the row from its one-line minimum and clips the second line otherwise. (4) Spacing is fixed — 14px horizontal, `theme.Spacing.xs` vertical — **not** derived from the platform style, and no call site overrides it. Deriving it asks `pixelMetric(PM_Layout*Spacing)`, which Qt documents as returning -1 on styles that implement the size-class-aware `layoutSpacing()` instead. Measured, the two styles are exact opposites: QMacStyle reports `pixelMetric = -1, layoutSpacing = 14`, Fusion reports `pixelMetric = 6, layoutSpacing = -1`. The layout clamps with `max(0, …)`, so on macOS every row that relied on the derived value packed its controls edge to edge, while CI (on Fusion) saw 6 and looked fine. The 14 is QMacStyle's own button-row spacing, adopted app-wide because it is the one number measured against a real control row — it is deliberately off the `theme.Spacing` scale. Passing `-1` still derives, but now asks both APIs and falls back to the defaults rather than to nothing. |
 | `MplToolbar` | The slim toolbar shown under every matplotlib figure (home / pan / zoom / save + coords readout). |
@@ -7453,6 +7568,30 @@ from "broken". The Spatial band does this with a swapped tooltip on both of its
 gated pickers — the Metric picker names the vizzes that ignore it, and the
 Timepoint picker states that Summary walks every timepoint because they are the
 columns of the matrix it draws.
+
+**An object name is not a style.** A widget given `setObjectName(…)` and no
+matching rule in `qss()` paints exactly like a bare `QWidget`: no fill, no
+edge, no separation from what surrounds it. The Analyze pane's two folder
+banners (§6.1, §6.5) each carried an object name for months with no rule behind
+either, so an offer to resume yesterday's run read as the first paragraph of the
+Analyze form. Both are styled here now — `#ResumeBanner` bordered in `accent`
+because it carries an action the user can take right now, `#PreflightBanner` in
+`border` because it states what is already true, a shared `panel` fill so they
+read as one family of report — and both call sites set `Qt.WA_StyledBackground`,
+without which a plain `QWidget` subclass ignores its own background rule
+entirely. `tests/test_analyze_banners_are_readable.py` holds both halves.
+
+Their fill is `panel` rather than `ContextBanner`'s `accent_dim`, and the reason
+is a measurement rather than a preference. `ContextBanner` carries one sentence
+at `text_primary`, which reads 9.07:1 on `accent_dim`. These two carry a ramp of
+four — kicker, identity, prose, tally — and on `accent_dim` the quietest tier
+measures 2.04:1 in the `blue` theme and 3.16:1 in `grey`, so the tier whose
+whole job is to be unobtrusive becomes the tier that cannot be read at all. On
+`panel` the same tiers measure 14.38 / 6.79 / 3.23 (blue) and 12.65 / 7.93 /
+4.48 (grey). The tally itself takes `text_secondary` rather than `text_muted`
+and is ranked below the prose by size instead: it is the one line in the strip
+carrying numbers the user is meant to read, which is a different job from a hint
+restating a control's own label.
 
 **`accent` and `accent2` mean two different things, and every caller has to
 pick the right one.** `Colors.accent` is used across several Datasets

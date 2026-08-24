@@ -606,6 +606,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
         self._well_repeats = 0
         self._progress_tracker.reset()
         self._dashboard.reset(remote=remote is not None)
+        self._reset_run_phase(remote=remote is not None)
         if getattr(self, "_last_run_card", None) is not None:
             self._last_run_card.setVisible(False)  # C4: hide stale summary while running
         # Hand back the raw-log toggle if the previous run's failure opened it
@@ -655,6 +656,9 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
         # it summarises.
         self._log_lines(pending)
         self._run_ok = True
+        # The headline below is the run's last word; the phase machine stands
+        # down so a straggling progress event cannot write over it.
+        self._end_run_phase()
         n = self._well_done or getattr(self, "_zipper_done", 0)
         missing = max(0, self._well_total - self._well_done)
         if missing:
@@ -727,30 +731,9 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
                             self._apply_progress_event(ev_kind, ev_payload)
                     if not is_transient_progress(payload):
                         pending.append((payload, classify_log_line(payload)))
-                elif kind in ("zipper_start", "stage_total"):
+                elif kind in ("zipper_start", "zipper_well", "zipper_done",
+                              "stage_total"):
                     self._apply_grouping_event(kind, payload)
-                elif kind == "zipper_well":
-                    n_total = self._dashboard.overall_maximum() or 96
-                    self._zipper_done = getattr(self, "_zipper_done", 0) + 1
-                    self._dashboard.set_overall(self._zipper_done)
-                    pct = int(self._zipper_done / n_total * 100)
-                    self._update_eta(self._zipper_done, n_total)
-                    self._dashboard.set_active_stage("group")
-                    if payload:
-                        self._dashboard.set_well_stage(str(payload), "group")
-                    self._dashboard.set_headline(
-                        f"Grouping {self._zipper_done} / {n_total} wells  ({pct}%)")
-                elif kind == "zipper_done":
-                    self._dashboard.set_overall_range(100)
-                    self._dashboard.set_overall(0)
-                    self._well_total = 0
-                    self._well_done  = 0
-                    self._dashboard.set_headline("Grouped — pipeline (segmentation + zipping)…")
-                    self._stop_eta_timer()
-                    self._dashboard.set_eta("ETA")
-                    # Reset the per-phase clock so the pipeline-phase ETA
-                    # isn't biased by the (typically short) grouping phase.
-                    self._pipeline_started_at = _time.monotonic()
                 elif kind == "workers":
                     pending.append(
                         (f"[info] Workers: {payload} parallel well(s).\n", "INFO"))

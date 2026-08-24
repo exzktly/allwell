@@ -47,7 +47,13 @@ if python3 -c "import pytest, PySide6" >/dev/null 2>&1; then
   log "test stack present"
 else
   log "installing tests/requirements-dev.txt"
-  python3 -m pip install --quiet --upgrade pip
+  # The upgrade is a convenience, never a precondition: a container whose pip
+  # came from the distro has no RECORD file, so pip refuses to uninstall itself
+  # and exits non-zero — and under `set -e` that aborted the hook before the
+  # test stack was installed at all, leaving a session where every test
+  # collection dies at `import PySide6`. Failing here costs nothing; failing
+  # the line below is what matters.
+  python3 -m pip install --quiet --upgrade pip || log "pip upgrade skipped"
   python3 -m pip install --quiet -r tests/requirements-dev.txt
 fi
 

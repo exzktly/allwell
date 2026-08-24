@@ -63,9 +63,12 @@ import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QTimer, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtWidgets import (
+    QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+)
 
+import theme
 from services import run_journal
 from services.input_resolution_service import plan_incremental_scope
 from pipeline import completeness
@@ -109,34 +112,79 @@ class AnalyzePreflightMixin:
         journal — so they are built together rather than from two lines in
         ``analyze_tab_form``, which is against its line budget and whose every
         addition has to buy its place.
+
+        They share a holder purely so there is a gap *between* them when both
+        are up: the form's own layout runs at zero spacing, and two bordered
+        cards stacked flush read as one box with a line through it. The holder
+        takes no margins of its own — the cards run the full width of the
+        sidebar, which is what puts their text on the same 12-px left edge as
+        every section body beneath — and a holder whose children are both
+        hidden, which is the normal state, contributes no height at all.
         """
-        parent.layout().addWidget(self._build_resume_banner(parent))
-        parent.layout().addWidget(self._build_preflight_banner(parent))
+        holder = QWidget(parent)
+        strips = QVBoxLayout(holder)
+        strips.setContentsMargins(0, 0, 0, 0)
+        strips.setSpacing(theme.Spacing.sm)
+        strips.addWidget(self._build_resume_banner(holder))
+        strips.addWidget(self._build_preflight_banner(holder))
+        parent.layout().addWidget(holder)
 
     def _build_preflight_banner(self, parent: QWidget) -> QWidget:
-        """The strip that reports what is already in the output folder.
+        """The card that reports what is already in the output folder.
 
         Hidden until there is something to report, which is the normal state
-        for a fresh plate — it costs a row of chrome only when it has something
-        to say.
+        for a fresh plate — it costs a block of chrome only when it has
+        something to say.
+
+        Built to the same shape as the resume strip directly above it (see
+        ``analyze_suspend._build_resume_banner`` for why that shape is stacked
+        rather than a row): text first, its own right-aligned action row
+        beneath. The reason is sharper here, because this one's buttons are the
+        wider pair: *Load these settings* and *Dismiss* side by side left the
+        report **74 px** of the sidebar's 319-px viewport to wrap into — 224 px
+        of text two words wide — and the report runs to three sentences once
+        the coverage scan and the scope line have landed. Stacked, the same
+        words get 295 px.
+
+        It is the quieter of the two by design. The resume strip carries an
+        action the user can take right now and is bordered in ``accent``; this
+        one states what is already true of the folder and is bordered in
+        ``border``. Their fills are the same, so they read as one family of
+        report rather than as two unrelated pieces of chrome.
         """
         banner = QWidget(parent)
         banner.setObjectName("PreflightBanner")
-        row = QHBoxLayout(banner)
-        row.setContentsMargins(12, 8, 12, 8)
-        row.setSpacing(8)
+        # Without this a plain QWidget subclass ignores its own background
+        # rule — see widgets/context_banner.py, which carries the same line.
+        banner.setAttribute(Qt.WA_StyledBackground, True)
+        banner.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        col = QVBoxLayout(banner)
+        col.setContentsMargins(theme.Spacing.md, theme.Spacing.sm,
+                               theme.Spacing.md, theme.Spacing.sm)
+        col.setSpacing(theme.Spacing.xs)
         self._preflight_label = QLabel("", banner)
+        self._preflight_label.setObjectName("AnalyzeBannerBody")
         self._preflight_label.setWordWrap(True)
-        row.addWidget(self._preflight_label, 1)
-        self._preflight_load_btn = QPushButton("Load these settings", banner)
+        col.addWidget(self._preflight_label)
+
+        row = QWidget(banner)
+        actions = QHBoxLayout(row)
+        actions.setContentsMargins(0, theme.Spacing.xs, 0, 0)
+        actions.setSpacing(theme.Spacing.sm)
+        actions.addStretch(1)
+        dismiss = QPushButton("Dismiss", row)
+        dismiss.setToolTip(
+            "Close this report for the folder in the form. It comes back if "
+            "you point somewhere else, or once a run has written here again.")
+        dismiss.clicked.connect(self._dismiss_preflight)
+        actions.addWidget(dismiss)
+        self._preflight_load_btn = QPushButton("Load these settings", row)
         self._preflight_load_btn.setToolTip(
             "Fill the form with the settings that produced the output already "
             "in this folder. Reprocessing options are left as you have them.")
         self._preflight_load_btn.clicked.connect(self._load_previous_settings)
-        row.addWidget(self._preflight_load_btn)
-        dismiss = QPushButton("Dismiss", banner)
-        dismiss.clicked.connect(self._dismiss_preflight)
-        row.addWidget(dismiss)
+        actions.addWidget(self._preflight_load_btn)
+        col.addWidget(row)
         self._preflight_banner = banner
         banner.setVisible(False)
 
@@ -193,8 +241,11 @@ class AnalyzePreflightMixin:
         if target != self._preflight_dir:
             # A different folder: nothing either banner is showing applies to
             # it, and leaving them up until the timer fires would have the
-            # sidebar describing a plate the form no longer names.
+            # sidebar describing a plate the form no longer names. The stored
+            # headline goes with the coverage line — it is the previous
+            # folder's sentence, and it is what a repaint would put back up.
             self._preflight_coverage = ""
+            self._preflight_headline_text = ""
             banner.setVisible(False)
             self._hide_resume_banner()
         self._preflight_dir = target
@@ -313,6 +364,45 @@ class AnalyzePreflightMixin:
         dismissed = getattr(self, "_preflight_dismissed", "")
         return not (target and dismissed and _same(dismissed, target))
 
+    def _resume_card_covers(self, target: str) -> bool:
+        """Whether the resume card is up, describing this same folder.
+
+        When it is, it has already said what the last run did and what it
+        recorded — from the same journal this report reads — so the report
+        saying it again puts the identical sentence in two bordered cards
+        stacked one above the other.
+
+        Keyed on the folder, not on "is the card visible": with no folder on
+        the form the card falls back to the newest unfinished run on any plate,
+        and that offer says nothing about the folder this report describes.
+        """
+        shown = getattr(self, "_resume_shown_dir", "")
+        return bool(shown and target and _same(shown, target))
+
+    def resume_card_changed(self) -> None:
+        """Repaint the report because the card above appeared or went away.
+
+        Called by ``analyze_suspend._note_resume_card``. What the report says
+        depends on whether that card is covering the same folder, so the
+        decision is made at paint time and every path that changes the card —
+        a folder settling, Discard, Resume, a run starting or ending — comes
+        back through here rather than each having to remember.
+
+        Two early returns, and both are about cost rather than tidiness.
+        Repainting runs :meth:`_scope_line`, which reads the input directory
+        and the central directory of every archive a loose image belongs to,
+        and this is reached once per settle — so it repaints only when the
+        answer it depends on has actually flipped, and never before the folder
+        has been read at all, which is the settle's own job and is about to
+        happen anyway.
+        """
+        if not getattr(self, "_preflight_headline_text", ""):
+            return
+        covers = self._resume_card_covers(self._preflight_dir)
+        if covers == getattr(self, "_preflight_suppressed", None):
+            return
+        self._render_preflight(self._preflight_headline_text)
+
     def _render_preflight(self, headline: str) -> None:
         """Paint the banner, coverage line included when one has arrived.
 
@@ -334,11 +424,21 @@ class AnalyzePreflightMixin:
         banner = getattr(self, "_preflight_banner", None)
         if banner is None:
             return
+        # Stored unsuppressed. The suppression below is a fact about what is
+        # on screen *now*, and the card above can come down — a Discard, a
+        # Resume — with this folder unchanged, at which point the report is the
+        # only thing left that can say what the last run did.
         self._preflight_headline_text = headline
-        self._preflight_label.setText(
-            " ".join(p for p in (headline, self._preflight_coverage,
-                                 self._scope_line()) if p))
-        banner.setVisible(self._preflight_is_wanted())
+        self._preflight_suppressed = self._resume_card_covers(self._preflight_dir)
+        head = "" if self._preflight_suppressed else headline
+        text = " ".join(p for p in (head, self._preflight_coverage,
+                                    self._scope_line()) if p)
+        self._preflight_label.setText(text)
+        # An empty report is not a report. With its account of the run
+        # suppressed and no coverage line arrived yet, there is nothing in the
+        # card but its buttons, and a bordered strip holding two buttons and no
+        # sentence reads as a rendering fault. It comes up when the scan lands.
+        banner.setVisible(bool(text) and self._preflight_is_wanted())
 
     def _scope_line(self) -> str:
         """What this run will do about images added since the last one.

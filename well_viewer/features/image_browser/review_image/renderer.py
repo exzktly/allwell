@@ -408,6 +408,48 @@ def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: 
     )
 
 
+def _scan_shortfall_suffix(ctx) -> str:
+    """The status-line clause naming a truncated image scan, or ``""``.
+
+    ``find_well_images_and_masks`` returns
+    :class:`~well_viewer.data.zip_members.ScanResult` inventories that carry
+    their own provenance: ``partial`` is True when the walk over the archive or
+    folder stopped early, and ``reason`` says why. A truncated inventory is the
+    same shape as a complete one — a short dict of real images — so the FOV and
+    timepoint menus built from it are simply shorter, with nothing on screen to
+    distinguish "this well holds two fields" from "the scan reached two fields
+    and then hit a bad CRC". Reading the flag here is what puts the difference
+    where the user is already looking.
+
+    The four maps are checked together because any one of them being short
+    makes the displayed frame potentially the wrong one: a missing mask draws no
+    boundaries, a missing top-hat frame silently falls back to raw.
+    """
+    st = getattr(ctx, "state", None)
+    preview = getattr(st, "preview", None)
+    if preview is None:
+        return ""
+    maps = (
+        getattr(preview, "fluor", None),
+        getattr(preview, "tophat_fluor", None),
+        getattr(preview, "overlay", None),
+        getattr(preview, "mask", None),
+    )
+    reasons = [
+        str(getattr(m, "reason", "") or "")
+        for m in maps
+        if getattr(m, "partial", False)
+    ]
+    if not reasons:
+        return ""
+    why = "; ".join(dict.fromkeys(r for r in reasons if r)) or "a scan stopped short"
+    return (
+        "  ·  WARNING: this well's image list is INCOMPLETE — "
+        f"{why}. Fields or timepoints the well holds may be missing from the "
+        "menus above, so what is shown is not the whole well."
+    )
+
+
 def draw_review_image(
     ctx,
     fluor_arr,
@@ -545,13 +587,14 @@ def draw_review_image(
     status = ctx.widgets.get_or_none("_review_image_status")
     if status is not None:
         if binary_mask_mode:
-            status.setText(
+            text = (
                 f"Binary mask: cells above threshold for {active_channel_label(ctx)} shown white.{suffix}"
             )
         else:
-            status.setText(
+            text = (
                 f"Showing channel {state.channel.active_image_channel.upper()} with included cell boundaries.{suffix}"
             )
+        status.setText(f"{text}{_scan_shortfall_suffix(ctx)}")
     if _debug_flags.review_image_channel_switch_debug_enabled():
         _logger.debug(
             "[RI-CHSW step 7] draw_review_image complete status_channel=%r zoom=%.3f pan=(%.1f, %.1f)",

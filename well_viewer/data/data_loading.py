@@ -311,6 +311,42 @@ def detect_review_image_channels(df: pd.DataFrame, fluor_channels: list[str], se
 
 # ── DataFrame helpers ────────────────────────────────────────────────────────
 
+#: Entry points that have already announced a missing ``area_px``, so the
+#: warning below is one line per load rather than one per redraw. Cleared by
+#: ``reset_missing_area_warnings`` when a dataset is opened: a process-global
+#: that is never reset says nothing at all about the *second* dataset a session
+#: opens, which is the one the user is more likely to be puzzled by.
+_missing_area_warned: set[str] = set()
+
+
+def reset_missing_area_warnings() -> None:
+    """Let the next dataset announce its own missing ``area_px`` column."""
+    _missing_area_warned.clear()
+
+
+def _warn_no_area_column(where: str) -> None:
+    """Say out loud that a frame has no ``area_px``, once.
+
+    Both aggregation entry points return an empty result when the column is
+    absent, which is correct — cell area is the gate every downstream statistic
+    is defined against — but they returned it silently. Every plot in the app
+    then drew nothing at all, with no status line, no log line and no empty
+    state naming a cause, on a dataset that had loaded without complaint. A
+    CSV written by an older pipeline, or one hand-edited down to a few columns,
+    lands exactly here.
+    """
+    if where in _missing_area_warned:
+        return
+    _missing_area_warned.add(where)
+    _logger.warning(
+        "%s: the loaded CSVs have no 'area_px' column, so no cells can be "
+        "gated by area and every aggregation returns empty — the plots will "
+        "draw nothing. This column is written by the segmentation step; a CSV "
+        "from an older pipeline run, or one that has been edited down, will "
+        "not have it.", where,
+    )
+
+
 def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True) -> pd.Series:
     """Rows that count toward analysis: ``Included == 1`` composed with the QC,
     crop, and scatter-gate layers.
@@ -372,20 +408,34 @@ def get_rows(ctx, label: str) -> pd.DataFrame:
         # registered projectors — no features/ import in the data layer.
         for _project in iter_cache_projectors():
             _project(ctx, label)
-        # Check the FOV labels once, while the frame is being built. Every
-        # per-field number in the app groups on this column, and a well whose
-        # filenames didn't match the schema arrives with every row labelled
-        # field "1" — which is indistinguishable, after loading, from a well
-        # that genuinely has one field.
-        verdict = check_fov_labels(cache[label])
-        ctx.state.dataset.fov_integrity[label] = verdict
-        if not verdict.trusted:
-            _logger.warning(
-                "Well %s: %s. Per-field statistics (error bars, events per "
-                "field, the Statistics tab's n) are undefined for this well "
-                "until the CSV carries usable FOV labels.", label, verdict.reason,
-            )
+        record_fov_verdict(ctx, label, cache[label])
     return cache[label]
+
+
+def record_fov_verdict(ctx, label: str, df) -> None:
+    """Judge one well's ``fov`` column and store the verdict.
+
+    Every per-field number in the app groups on that column, and a well whose
+    filenames did not match the schema arrives with every row labelled field
+    "1" — indistinguishable, after loading, from a well that genuinely has one
+    field. So the check runs once, as the frame is built.
+
+    A function rather than four lines inside :func:`get_rows`, because
+    ``get_rows`` is not the only way a frame is built. ``load_controller.
+    load_directory`` fills ``dataset.cache`` itself, well by well, and so never
+    reached this — which left ``dataset.fov_integrity`` empty for the whole
+    session and ``_report_unusable_fov_labels`` with nothing to report. The
+    warning existed, was tested, and could not fire. Any future path that
+    builds a frame calls this too, or it inherits the same silence.
+    """
+    verdict = check_fov_labels(df)
+    ctx.state.dataset.fov_integrity[label] = verdict
+    if not verdict.trusted:
+        _logger.warning(
+            "Well %s: %s. Per-field statistics (error bars, events per "
+            "field, the Statistics tab's n) are undefined for this well "
+            "until the CSV carries usable FOV labels.", label, verdict.reason,
+        )
 
 
 def get_all_timepoints(ctx) -> list[float]:
@@ -417,9 +467,12 @@ def resolve_value_series(
 ) -> pd.Series:
     """Vectorised counterpart of the old per-row ``resolve_value``.
 
-    For ratio keys (``ratio:<name>``) returns ``num / (den + epsilon)`` with
-    NaN where the denominator (after epsilon) is zero or either operand is
-    non-finite. For real columns returns the column coerced via
+    For ratio keys (``ratio:<name>``) returns ``num / max(den, epsilon)`` —
+    epsilon is the floor the denominator is clamped to, not a term added to
+    it, because background-subtracted channels go legitimately negative and
+    ``den + epsilon`` sign-flips near zero. ``RatioMetric`` states the rule in
+    full. The result is NaN where the clamped denominator is zero or either
+    operand is non-finite. For real columns returns the column coerced via
     ``pd.to_numeric``, with non-finite values mapped to NaN.
 
     Returns NaN-filled Series of the right index when columns/ratios are
@@ -560,6 +613,7 @@ def aggregate_with_threshold_df(
             # them — same dataset, different counts.
             mask &= np.isfinite(area)
     else:
+        _warn_no_area_column("aggregate_with_threshold_df")
         return []
 
     for channel, gate in active_fluor_gates(fluor_gates).items():
@@ -782,6 +836,7 @@ def _all_fluor_values_filtered(
         with np.errstate(invalid="ignore"):
             mask &= np.isfinite(area)
     else:
+        _warn_no_area_column("all_fluor_values_filtered")
         return np.empty(0, dtype=float)
 
     for channel, gate in active_fluor_gates(fluor_gates).items():

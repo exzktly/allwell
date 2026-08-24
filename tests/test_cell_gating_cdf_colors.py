@@ -31,7 +31,12 @@ def _make_ctx(*, fluor_data, ratio_data=None, cell_areas=None):
     from matplotlib.figure import Figure
 
     return SimpleNamespace(
-        state=SimpleNamespace(cell_gating=SimpleNamespace(fluor_gates={})),
+        # ``CellGatingState`` carries both cutoff banks and the renderer draws
+        # a line from each, so the stub has to as well.
+        state=SimpleNamespace(
+            cell_gating=SimpleNamespace(fluor_gates={}, thresh_frac_on={}),
+            channel=SimpleNamespace(seg_channel_token=""),
+        ),
         runtime=SimpleNamespace(cell_gating=SimpleNamespace(
             figure=Figure(),
             canvas=_FakeCanvas(),

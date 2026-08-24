@@ -463,6 +463,16 @@ def figure_pref_key(ctx, fig) -> str:
     editor opens two of them, so it was the ordinary path for those tabs rather
     than an edge case. It says so now instead of returning quietly.
     """
+    if fig is None:
+        # ``None is None`` matches the first *unregistered* name in the map, so
+        # a missing figure was handed the key belonging to whichever tab had not
+        # been built yet — and returned it without tripping the warning below,
+        # because the loop had "found" a match. Callers do pass None: a tab
+        # whose lazy body has not been built has no ``_<name>_fig`` in the
+        # registry, and ``plot_orchestrator.redraw_app`` reads the line figure
+        # straight out of it. The prefs of one tab were then read and written
+        # under another tab's key.
+        return "fig:none"
     for attr, key in _FIG_PREF_KEY_MAP:
         if ctx.widgets.get_or_none(attr) is fig:
             return key
@@ -955,6 +965,11 @@ def apply_export_style_to_current(ctx, fig, canvas=None) -> None:
     # Per-figure view (shared publication style + *this* figure's axis limits,
     # log scaling and mark styling) so neither leaks across tabs. A8 teardown:
     # takes ``ctx``.
+    if fig is None:
+        # Nothing to style, and asking for a key would allocate a prefs bucket
+        # for a figure that does not exist. Callers reach here with None
+        # whenever a tab's lazy body has not been built yet.
+        return
     prefs = figure_prefs(ctx, fig)
     apply_export_style_prefs(fig, prefs)
     if canvas is not None:

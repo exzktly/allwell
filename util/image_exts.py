@@ -43,10 +43,12 @@ GROUP_IMAGE_EXTS: frozenset[str] = frozenset(
 def is_group_image(name: str) -> bool:
     """Whether *name* is an image the pipeline would group as input.
 
-    Takes a bare name or a path; only the suffix is read. A leading dot is the
-    caller's business — ``.DS_Store`` has no image suffix and is rejected here
-    anyway, but ``._x.tif`` (an AppleDouble sidecar) does not have one, so
-    callers that read real archives still test for it separately.
+    Takes a bare name or a path; only the suffix is read, so this answers one
+    question and not two. ``.DS_Store`` has no image suffix and is rejected.
+    ``._x.tif`` — an AppleDouble sidecar, which is not an image at all — has
+    one, and is **accepted** here: a caller reading a real archive has to reject
+    those itself, by name, before asking this. The docstring used to claim the
+    opposite, which is the more dangerous way round to be wrong.
     """
     dot = name.rfind(".")
     return dot > 0 and name[dot:].lower() in GROUP_IMAGE_EXTS

@@ -252,7 +252,7 @@ def export_saved_plot(ctx, plot_id: str) -> None:
 
         suggested = f"{rec.tab.replace(' ', '_')}_{rec.id}.png"
         dest, _flt = QFileDialog.getSaveFileName(
-            None, "Export saved plot", suggested, "PNG image (*.png)")
+            ctx.window, "Export saved plot", suggested, "PNG image (*.png)")
         if dest:
             from pathlib import Path
             Path(dest).write_bytes(src.read_bytes())
@@ -275,7 +275,7 @@ def export_report_pdf(ctx) -> None:
         suggested = str(Path(data_dir) / "saved_plots_report.pdf") if data_dir \
             else "saved_plots_report.pdf"
         dest, _flt = QFileDialog.getSaveFileName(
-            None, "Export Saved Plots report", suggested, "PDF document (*.pdf)")
+            ctx.window, "Export Saved Plots report", suggested, "PDF document (*.pdf)")
         if not dest:
             return
         # Gallery order, not storage order. The gallery shows newest first and

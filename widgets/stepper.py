@@ -352,6 +352,16 @@ class Stepper(QFrame):
             background-color: {c.hover};
             color: {c.text_primary};
         }}
+        /* Without these a disabled stepper is indistinguishable from a live
+           one: the arrows keep their full-strength secondary tone and the
+           value keeps its primary tone, so the only cue that the control is
+           inert is that clicking it does nothing. */
+        #Stepper QLineEdit#StepperEdit:disabled {{ color: {c.text_faint}; }}
+        #Stepper QToolButton#StepperUp:disabled,
+        #Stepper QToolButton#StepperDown:disabled {{
+            color: {c.text_faint};
+            background-color: transparent;
+        }}
         """
 
 

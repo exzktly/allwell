@@ -42,10 +42,17 @@ _LOG_FILE = None          # lazily-opened append handle for the boot log
 _LOG_PATH: Path | None = None
 
 
-def _log_dir() -> Path:
-    """Per-user log directory, platform-appropriate, with fallbacks. Prefers
-    ``%LOCALAPPDATA%\\allwell`` on Windows and ``~/.cache/allwell`` elsewhere;
-    falls back to the system temp dir if neither is writable."""
+def user_state_dir() -> Path:
+    """Per-user directory for anything this app keeps between launches.
+
+    Platform-appropriate, with fallbacks: ``%LOCALAPPDATA%\\allwell`` on
+    Windows, ``~/.cache/allwell`` elsewhere, the system temp dir if neither is
+    writable. The boot log lives here, and so does matplotlib's font cache in a
+    frozen build — ``mpl_bootstrap`` used the directory holding its own source
+    file, which under PyInstaller is inside ``sys._MEIPASS``, a fresh temp tree
+    unpacked per launch. The cache was therefore rebuilt every single launch,
+    which is precisely what that module exists to prevent.
+    """
     candidates = []
     if os.name == "nt" and os.environ.get("LOCALAPPDATA"):
         candidates.append(Path(os.environ["LOCALAPPDATA"]) / "allwell")
@@ -65,7 +72,7 @@ def log_path() -> Path:
     """Absolute path to the boot log (stable for the process lifetime)."""
     global _LOG_PATH
     if _LOG_PATH is None:
-        _LOG_PATH = _log_dir() / "allwell-boot.log"
+        _LOG_PATH = user_state_dir() / "allwell-boot.log"
     return _LOG_PATH
 
 

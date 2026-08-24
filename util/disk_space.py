@@ -22,9 +22,12 @@ to the home volume rather than the one holding the dataset.
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 from pathlib import Path
+
+_LOGGER = logging.getLogger("allwell.disk_space")
 
 __all__ = ["directory_bytes", "free_bytes", "same_volume", "space_message"]
 
@@ -55,10 +58,25 @@ def same_volume(a: Path | str, b: Path | str) -> bool:
 
 
 def directory_bytes(path: Path | str) -> int:
-    """Total size of every file under *path*; 0 when it can't be walked."""
+    """Total size of every file under *path*; 0 when it can't be walked.
+
+    ``os.walk`` swallows the errors it meets — it yields nothing for a
+    directory it cannot list and carries on — so the outer handler here never
+    fired and an unreadable subtree simply counted zero bytes. The figure then
+    fed a pre-flight free-space check that concluded the run would fit. The
+    ``onerror`` hook below is the only way to hear about it.
+    """
     total = 0
+
+    def _unreadable(exc: OSError) -> None:
+        _LOGGER.warning(
+            "Could not read %s while sizing %s — its contents are counted as "
+            "zero bytes, so any free-space estimate built on this figure is a "
+            "lower bound: %s", getattr(exc, "filename", "?"), path, exc,
+        )
+
     try:
-        for root, _dirs, files in os.walk(path):
+        for root, _dirs, files in os.walk(path, onerror=_unreadable):
             for name in files:
                 try:
                     total += os.stat(os.path.join(root, name)).st_size

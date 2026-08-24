@@ -27,8 +27,6 @@ from analyze_tab_chrome import AnalyzeFormChromeMixin
 from analyze_tab_fields import (  # noqa: F401 — re-exported for analyze_tab
     _INT_FIELDS,
     _numeric_option_errors,
-    _safe_qc_float,
-    _safe_seg_float,
 )
 from analyze_tab_pinfo import AnalyzePipelineInfoMixin
 from analyze_tab_seg_params import AnalyzeSegParamsMixin
@@ -920,11 +918,13 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
         return None
 
     def _collect_run_options(self) -> dict:
+        """The form's fields as one run-options dict. Every numeric field is
+        carried as the **raw text** the user typed: coercing here would put the
+        value out of ``_numeric_option_errors``' reach, which cannot tell a typo
+        from a deliberate blank once both have become ``0.0``.
+        ``build_pipeline_args`` coerces once, after validation has had its say.
+        """
         method = self._seg_method()
-        try:
-            min_area = int(self._min_nucleus_area_edit.text().strip() or "50")
-        except ValueError:
-            min_area = 50
         cyto = self._cytoplasm_edit.text().strip()
         if method != "stardist_seeded_watershed_cell":
             cyto = ""
@@ -978,17 +978,17 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
             pos_control_well=self._pos_control_well_edit.text().strip(),
             neg_control_well=self._neg_control_well_edit.text().strip(),
             qc_remove_debris=self._qc_remove_debris_cb.isChecked(),
-            qc_min_area=_safe_qc_float(self._qc_min_area_edit.text()),
-            qc_max_area=_safe_qc_float(self._qc_max_area_edit.text()),
-            qc_min_solidity=_safe_qc_float(self._qc_min_solidity_edit.text()),
+            qc_min_area=self._qc_min_area_edit.text().strip(),
+            qc_max_area=self._qc_max_area_edit.text().strip(),
+            qc_min_solidity=self._qc_min_solidity_edit.text().strip(),
             phase_token=self._phase_token(),
             segmentation_method=method,
             cytoplasm_token=cyto,
-            min_nucleus_area_px=min_area,
+            min_nucleus_area_px=self._min_nucleus_area_edit.text().strip(),
             cellpose_model=self._cellpose_model_cb.currentText(),
-            cellpose_diameter=_safe_seg_float(self._cellpose_diameter_edit.text(), 0.0),
-            cellpose_flow_threshold=_safe_seg_float(self._cellpose_flow_thr_edit.text(), 0.4),
-            cellpose_cellprob_threshold=_safe_seg_float(self._cellpose_cellprob_thr_edit.text(), 0.0),
+            cellpose_diameter=self._cellpose_diameter_edit.text().strip(),
+            cellpose_flow_threshold=self._cellpose_flow_thr_edit.text().strip(),
+            cellpose_cellprob_threshold=self._cellpose_cellprob_thr_edit.text().strip(),
             cellpose_nuclei_channel=self._cellpose_nuclei_channel_edit.text().strip(),
         )
         return opts

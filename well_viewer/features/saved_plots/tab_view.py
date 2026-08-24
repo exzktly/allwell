@@ -122,15 +122,25 @@ def build_saved_plots_tab(ctx, parent: QWidget) -> None:
 
 
 def _confirm_clear(ctx) -> None:
+    """Ask before deleting every saved plot for this dataset, and its PNGs.
+
+    An answer that could not be obtained is not consent. This used to fall
+    through to clearing when the dialog raised — the rationale being a headless
+    run with no dialog available — which turns "the confirmation failed" into
+    "the user said yes" for the one action in this tab that destroys work and
+    cannot be undone. If the question cannot be asked, nothing is cleared.
+    """
+    from PySide6.QtWidgets import QMessageBox
     try:
-        from PySide6.QtWidgets import QMessageBox
-        if QMessageBox.question(
+        answer = QMessageBox.question(
             None, "Clear saved plots",
             "Remove all saved plots for this dataset?",
-        ) != QMessageBox.Yes:
-            return
+        )
     except Exception:
-        swallowed()  # no dialog (e.g. headless) — fall through to clearing
+        swallowed("saved_plots: clear was not confirmed; nothing cleared")
+        return
+    if answer != QMessageBox.Yes:
+        return
     C.clear_saved_plots(ctx)
 
 

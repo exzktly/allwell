@@ -26,12 +26,12 @@ if _ROOT not in _sys.path:
 from PySide6.QtCore import (
     QEasingCurve, QPointF, QPropertyAnimation, QTimer, Qt,
 )
-from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QWidget,
 )
 
 import theme
+from widgets._support import with_alpha
 from widgets.status_dot import StatusDot
 from util.aw_safe import swallowed
 
@@ -67,7 +67,7 @@ class Toast(QWidget):
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(theme.Spacing.md)
         shadow.setOffset(0, 4)
-        shadow.setColor(QColor(0, 0, 0, round(0.35 * 255)))
+        shadow.setColor(with_alpha(theme.Colors.ink_dark, 0.35))
         card.setGraphicsEffect(shadow)
 
         self.setStyleSheet(self._build_qss())

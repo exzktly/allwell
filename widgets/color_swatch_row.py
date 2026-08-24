@@ -40,6 +40,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 import theme
+from widgets._support import with_alpha
 
 
 class ColorSwatchRow(QWidget):
@@ -251,7 +252,7 @@ class ColorSwatchRow(QWidget):
         # a small white "+" on a dark disc in the centre
         d = rect.width() * 0.46
         disc = QRectF(rect.center().x() - d / 2, rect.center().y() - d / 2, d, d)
-        p.setBrush(QColor(0, 0, 0, 130))
+        p.setBrush(with_alpha(theme.Colors.ink_dark, 130 / 255))
         p.setPen(Qt.NoPen)
         p.drawEllipse(disc)
         p.setPen(QPen(QColor(theme.Colors.ink_light), max(1.0, d * 0.12)))

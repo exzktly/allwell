@@ -1,0 +1,122 @@
+"""Y-limit fitting and tick selection for the bar plot's three panels.
+
+Pure axis arithmetic over a list of ``BarItem`` records: no Qt, no app state,
+one matplotlib call each. Extracted from ``controller.render_bar_items``, which
+is under a line budget, and because the two decisions here are both ones the
+codebase has got wrong by copying a sibling's rule without checking it applies:
+
+* the y-limit must scan the same items the panel *draws*, so a panel whose
+  bar is drawn from ``n_above`` cannot scan on ``has_mean``;
+* whether the events axis takes integer ticks depends on **two** facts, and the
+  other function that draws that panel only has to ask one of them.
+
+Both are argued at their call sites below.
+"""
+
+from __future__ import annotations
+
+import math
+
+from well_viewer.domain.numeric import is_number
+
+#: Headroom above the tallest bar-plus-error, so the error caps are not clipped.
+HEADROOM = 1.08
+
+
+def tops_lows(items, get_val, get_spread) -> tuple[list[float], list[float]]:
+    """``(tops, lows)`` — each drawable item's value ± its spread.
+
+    Items whose value is absent or non-finite are skipped, and a non-finite or
+    negative spread counts as zero: an undefined spread must not widen the axis
+    as though it had been measured.
+    """
+    tops: list[float] = []
+    lows: list[float] = []
+    for it in items:
+        v = get_val(it)
+        if v is None or not math.isfinite(v):
+            continue
+        s = get_spread(it) or 0.0
+        if not math.isfinite(s) or s < 0:
+            s = 0.0
+        tops.append(v + s)
+        lows.append(v - s)
+    return tops, lows
+
+
+def autofit(ax, tops, lows, *, cap=None, floor_hi=None) -> None:
+    """Set *ax*'s y-limits from *tops* / *lows*, on an honest zero baseline.
+
+    The axis dips below zero only for genuine negatives, so a bar of zero
+    height sits on the axis rather than floating above it. *cap* bounds the top
+    (the fraction panel, which cannot exceed 1 unless fold change makes it a
+    ratio); *floor_hi* raises it (the events panel, so a plate of small counts
+    does not get a one-unit-tall axis).
+    """
+    if not tops:
+        return
+    hi = max(tops) * HEADROOM
+    if floor_hi is not None:
+        hi = max(hi, floor_hi)
+    if cap is not None:
+        hi = min(hi, cap)
+    lo = min([0.0] + lows)
+    if hi > lo:
+        ax.set_ylim(lo, hi)
+
+
+def events_axis_is_integer(*, requested: bool | None, per_fov: bool,
+                           fc_active: bool) -> bool:
+    """Whether the events-above-threshold axis should take integer ticks.
+
+    N is a count of events, so integer ticks are the default. Two things make
+    the drawn value something other than a count, and **both** have to be
+    asked, because either alone gives the wrong answer half the time:
+
+    * *per_fov* — Aggregate-FOVs mode, where the bar is a per-FOV *mean* of
+      counts;
+    * *fc_active* — fold change, where the bar is a ratio or a difference of
+      them.
+
+    ``renderer.draw_per_well_n_bars`` asks only the first, and is right to: its
+    own docstring records that nothing it draws is fold-changed, and it is never
+    handed a fold-change state. Copying that rule wholesale into the path that
+    *is* fold-changed rounded a measured fold change of 1.35 to ticks of 0, 1,
+    2.
+
+    *requested* is a caller's explicit choice (the batch-export panel passes one
+    derived from the FOV toggle alone). Fold change is applied **after** it,
+    never before: a fold-changed count is a ratio whoever asked for the panel.
+    """
+    integer = (not per_fov) if requested is None else bool(requested)
+    return integer and not fc_active
+
+
+def fit_bar_panels(ax_mean, ax_frac, ax_n, items, *, fc_active: bool,
+                   n_axis_integer: bool | None, per_fov: bool) -> None:
+    """Fit all three bar panels and set the events axis' tick locator."""
+    autofit(ax_mean, *tops_lows(
+        items,
+        lambda it: it.mean if it.has_mean else float("nan"),
+        lambda it: it.spread))
+    # cap=1.05 only when FC is off — under FC the frac may be a ratio > 1.
+    autofit(ax_frac, *tops_lows(
+        items,
+        lambda it: it.frac if it.has_frac else float("nan"),
+        lambda it: it.frac_spread), cap=None if fc_active else 1.05)
+    if ax_n is None:
+        return
+    # Scanned on ``n_above`` itself, not on ``has_mean``. The mean is NaN
+    # exactly when nothing passed the threshold, so scanning on it left every
+    # measured-zero bar out of the y-limit — the same coupling the bar's own
+    # draw gate had.
+    autofit(ax_n, *tops_lows(
+        items,
+        lambda it: float(it.n_above) if is_number(it.n_above) else float("nan"),
+        lambda it: it.n_above_spread), floor_hi=1.0)
+    try:
+        from matplotlib.ticker import MaxNLocator
+    except ImportError:
+        return
+    ax_n.yaxis.set_major_locator(MaxNLocator(integer=events_axis_is_integer(
+        requested=n_axis_integer, per_fov=per_fov, fc_active=fc_active)))

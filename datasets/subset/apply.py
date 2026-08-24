@@ -30,16 +30,20 @@ from datasets._common.containers import (
     WellFraction,
     clear_destination,
     copy_container_members,
+    restamp_overrides,
+    unstamped_note,
 )
 from datasets.subset.subset_compute import (
     IN_PROGRESS_MARKER,
+    ROW_KEEP,
+    ROW_UNJUDGEABLE,
     SubsetError,
     SubsetPlan,
     in_containers,
     member_matches,
     out_csvs,
     out_zips,
-    row_matches,
+    row_verdict,
 )
 
 
@@ -115,25 +119,59 @@ def _copy_filtered_overrides(plan: SubsetPlan, kept_keys: dict[str, set[tuple[st
     if not kept_entries:
         return 0
 
-    for entry in kept_entries:
-        well = str(entry.get("well", "")).strip()
-        zip_path = plan.dest.out_dir / f"{well}_out.zip"
-        with swallow(f"stat {zip_path}"):
-            entry["seg_fp"] = f"{zip_path.stat().st_mtime_ns}"
+    unstamped = restamp_overrides(kept_entries, plan.dest.out_dir)
 
     payload = {"version": OVERRIDES_SCHEMA_VERSION, "overrides": kept_entries}
     write_json_atomic(plan.dest.out_dir / OVERRIDES_FILENAME, payload, indent=None)
-    emit(f"Carried over {len(kept_entries)} cell override(s).")
+    emit(f"Carried over {len(kept_entries)} cell override(s).{unstamped_note(unstamped)}")
     return len(kept_entries)
 
 
-def _verify(plan: SubsetPlan, well_row_counts: dict[str, int]) -> None:
-    if sum(well_row_counts.values()) == 0:
+def _verify(
+    plan: SubsetPlan,
+    well_row_counts: dict[str, int],
+    kept_members: dict[str, int],
+    unjudgeable_rows: dict[str, int],
+) -> None:
+    """Fail the subset when it wrote no measurement rows, naming the cause it
+    can actually see.
+
+    Zero rows had one message — "check that the filter actually matches data in
+    the source dataset" — which is right for exactly one of the three ways this
+    happens and actively misleading for the other two. A run whose *images*
+    matched the same filter in their thousands has a filter that matches data
+    fine; what disagrees is the measurements CSV, and sending the user back to
+    re-pick timepoints cannot fix that. A run whose rows could not be tested at
+    all (:data:`~datasets.subset.subset_compute.ROW_UNJUDGEABLE`) has a CSV
+    that states no timepoint anywhere the schema can find one.
+    """
+    if sum(well_row_counts.values()):
+        return
+    wells = len(plan.wells_kept)
+    unjudgeable = sum(unjudgeable_rows.values())
+    members = sum(kept_members.values())
+    if unjudgeable:
         raise SubsetError(
             "Verification failed: the subset wrote zero measurement rows across "
-            f"{len(plan.wells_kept)} well(s) — check that the filter actually "
-            "matches data in the source dataset."
+            f"{wells} well(s), and {unjudgeable} row(s) could not be tested "
+            "against the filter at all — their 'timepoint_hours' and 'timepoint' "
+            "columns are both blank or unparseable and their 'filename' column "
+            "does not resolve against this dataset's schema. The filter is not "
+            "the problem; the measurements CSVs are."
         )
+    if members:
+        raise SubsetError(
+            "Verification failed: the subset wrote zero measurement rows across "
+            f"{wells} well(s), even though {members} image(s) matched the same "
+            "filter — the measurements CSVs and the image filenames disagree "
+            "about timepoint/FOV, so no row could match a filter every image "
+            "did."
+        )
+    raise SubsetError(
+        "Verification failed: the subset wrote zero measurement rows across "
+        f"{wells} well(s) — check that the filter actually "
+        "matches data in the source dataset."
+    )
 
 
 def execute_plan(
@@ -190,6 +228,8 @@ def execute_plan(
 
     well_row_counts: dict[str, int] = {}
     kept_keys_by_well: dict[str, set[tuple[str, str]]] = {}
+    kept_members_by_well: dict[str, int] = {}
+    unjudgeable_by_well: dict[str, int] = {}
 
     callback_lock = threading.Lock()
 
@@ -210,8 +250,15 @@ def execute_plan(
                 return name
             return None
 
+        # ``None`` means "there was no raw-input container to compare a row
+        # against"; an *empty* set means "there was one and the filter kept
+        # nothing from it". Those were one value, and the row check below read
+        # the empty set as the first case — so the one archive that certainly
+        # cannot hold a row's image was the one archive whose rows went
+        # unchecked, and the subset reported success with a CSV naming files
+        # its own in/ folder does not contain.
         container = in_map.get(well)
-        kept_in_names: frozenset[str] = frozenset()
+        kept_in_names: frozenset[str] | None = None
         if container is not None:
             kept_in_names, _dropped = copy_container_members(
                 plan.dest.in_dir / f"{well}.zip", [container], _keep,
@@ -231,19 +278,32 @@ def execute_plan(
 
         csv_path = csv_map.get(well)
         row_count = 0
+        unjudgeable = 0
         keys: set[tuple[str, str]] = set()
         if csv_path is not None:
             rows, fieldnames = _read_csv(csv_path)
-            kept_rows = [r for r in rows if row_matches(r, plan.filt)]
+            verdicts = [
+                row_verdict(r, plan.filt, schema=plan.schema, channels=plan.channels)
+                for r in rows
+            ]
+            unjudgeable = sum(1 for v in verdicts if v == ROW_UNJUDGEABLE)
+            kept_rows = [r for r, v in zip(rows, verdicts) if v == ROW_KEEP]
             if kept_rows:
                 _write_rows(plan.dest.out_dir / csv_path.name, fieldnames, kept_rows)
                 row_count = len(kept_rows)
                 for row in kept_rows:
                     fname = row.get(FILENAME_COLUMN)
-                    if fname and kept_in_names and fname not in kept_in_names:
+                    if fname and kept_in_names is not None and fname not in kept_in_names:
                         raise SubsetError(
                             f"Verification failed: well {well}'s row references "
-                            f"{fname!r}, which isn't in the filtered in/{well}.zip."
+                            f"{fname!r}, which isn't in the filtered in/{well}.zip"
+                            + (
+                                " — the filter kept no member of that archive at "
+                                "all, so the destination has no in/"
+                                f"{well}.zip for the row to point into."
+                                if not kept_in_names
+                                else "."
+                            )
                         )
                     # cell_overrides.json stores fov/tp already normalized (via
                     # CellKey.as_tuple, well_viewer/data/image_identity.py), so
@@ -255,17 +315,19 @@ def execute_plan(
         # well's dial closes here rather than lingering at whatever the last
         # container pass left it on.
         fraction.finish()
-        return well, row_count, keys
+        return well, row_count, keys, len(kept_in_names or ()), unjudgeable
 
     with ThreadPoolExecutor(max_workers=pick_workers(workers, len(plan.wells_kept))) as ex:
         futures = [ex.submit(_copy_one_well, well) for well in plan.wells_kept]
         for fut in as_completed(futures):
-            well, row_count, keys = fut.result()
+            well, row_count, keys, kept_members, unjudgeable = fut.result()
             well_row_counts[well] = row_count
             kept_keys_by_well[well] = keys
+            kept_members_by_well[well] = kept_members
+            unjudgeable_by_well[well] = unjudgeable
             report(well, "done" if row_count else "empty")
 
-    _verify(plan, well_row_counts)
+    _verify(plan, well_row_counts, kept_members_by_well, unjudgeable_by_well)
     _copy_filtered_overrides(plan, kept_keys_by_well, emit)
 
     write_json_atomic(plan.dest.out_dir / "pipeline_info.json", plan.merged_info)

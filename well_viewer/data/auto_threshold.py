@@ -424,6 +424,7 @@ def apply_auto_thresholds_to_pipeline_info(
     from well_viewer.domain.gating_state import (
         build_gating_block,
         read_gating_params,
+        read_nuclear_token,
         save_gating_to_pipeline_info,
     )
 
@@ -472,6 +473,14 @@ def apply_auto_thresholds_to_pipeline_info(
         scatter_gate_choices_gating=existing_choices_gating,
         scatter_gate_choices_thresh=existing_choices_thresh,
         use_scatter_thresh=existing_use_thresh,
+        # The nuclear channel's ThreshFracOn default is not the one every other
+        # channel gets, so ``build_gating_block`` has to know which channel is
+        # nuclear before it diffs against defaults. Called without it, a nuclear
+        # cutoff sitting at the ordinary readout default read as "unchanged" and
+        # was dropped on write, while the zero it starts at was written out as
+        # though the user had chosen it. ARCHITECTURE §5.7 names this call as
+        # one of the three sites that must pass the token.
+        seg_channel_token=read_nuclear_token(out_dir),
         thresh_count_on=existing_tco,
     )
     save_gating_to_pipeline_info(out_dir, block)

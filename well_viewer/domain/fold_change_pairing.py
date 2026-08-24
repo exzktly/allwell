@@ -527,11 +527,25 @@ def tick_labels(items) -> list[str]:
     play: an empty slot beside bars that drew is the exact ambiguity the
     outcome vocabulary exists for.
     """
-    # Distinct by the **reference**, matching ``distinct_controls``. Keying on
-    # ``display_name`` collapsed ``A01`` the well and ``A01`` the replicate set
-    # into one control — the exact collision ``ControlRef`` exists to make
-    # unrepresentable — so a plate using both would drop the per-bar lines that
-    # say which is which, on the one layout that needs them most.
+    # Distinct by the **reference**. Keying on ``display_name`` collapsed ``A01``
+    # the well and ``A01`` the replicate set into one control — the exact
+    # collision ``ControlRef`` exists to make unrepresentable — so a plate using
+    # both would drop the per-bar lines that say which is which, on the one
+    # layout that needs them most.
+    #
+    # This is *not* the same key ``ControlPairing.distinct_controls`` uses, and
+    # an earlier comment here claimed it was. That one keys on **resolved
+    # wells**, because the pairing knows them; this function is handed bar items
+    # carrying a ``ControlRef`` and nothing else, so resolutions are not
+    # available to it. The two therefore disagree in exactly one configuration:
+    # a replicate set holding a single well, alongside that same well as a
+    # control. The pairing calls those one control and the axis title names it;
+    # this calls them two and each bar names its own, so the control is stated
+    # twice. Redundant, not wrong — and the alternative, dropping the per-bar
+    # line whenever two references happen to resolve alike, loses the
+    # distinction on a layout where it is the only thing distinguishing the
+    # bars. If that redundancy ever needs closing, hand this function the
+    # pairing rather than changing the key it has.
     distinct = {
         it.fc_control
         for it in items

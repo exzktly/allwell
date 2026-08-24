@@ -132,7 +132,6 @@ ALLOWLIST = {
     # (_build_header_lines / _format_group_summary_lines / _format_pairwise_lines
     # / _resolve_sample_units / _sig_marker) were extracted and unit-tested; the
     # function is now CC 30. Removed from the allowlist.
-    "well_viewer/features/barplot/controller.py::render_bar_items",
     "well_viewer/core/load_controller.py::load_directory",
     # DONE: collect_line_series dropped below the threshold once the control
     # denominators moved behind ``fold_change_pairing.ControlDenominators`` and

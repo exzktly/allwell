@@ -37,6 +37,8 @@ from datasets._common.dataset_paths import (
     make_dataset_api,
     DatasetPaths,
     dataset_wells,
+    describe_well_collisions,
+    well_spelling_collisions,
     destination_is_complete_dataset,
     has_folder_mode_output,
     in_containers,
@@ -65,6 +67,22 @@ destination_has_unrecognized_content = _api.destination_has_unrecognized_content
 
 _PLATE_ROWS = "ABCDEFGH"
 _PLATE_MAX_COL = 12
+
+
+def _refuse_well_collisions(paths: DatasetPaths, label: str) -> None:
+    """Refuse *paths* when two files claim one well under different
+    spellings.
+
+    Every well this tool copies is found through ``in_containers`` /
+    ``out_zips`` / ``out_csvs``, each of which maps a canonical well to one
+    path — so an ``A1.zip`` sitting beside an ``A01.zip`` is simply not in
+    the map the copy walks, and a whole well's images leave no trace in the
+    destination or in the summary. The map cannot say that happened, so the
+    folder is asked directly, once, before anything is written.
+    """
+    message = describe_well_collisions(well_spelling_collisions(paths))
+    if message:
+        raise MergePlatesError(f"{label} can't be merged. {message}")
 
 
 def block_shift_well_map(wells, *, target_origin: str) -> dict[str, str]:
@@ -330,6 +348,9 @@ def build_plate_merge_plan(
     info1 = read_info(ds1, label="dataset 1")
     info2 = read_info(ds2, label="dataset 2")
     check_compatible(info1, info2, error_cls=MergePlatesError)
+
+    _refuse_well_collisions(ds1, "Dataset 1")
+    _refuse_well_collisions(ds2, "Dataset 2")
 
     if has_folder_mode_output(ds1) or has_folder_mode_output(ds2):
         which = "dataset 1" if has_folder_mode_output(ds1) else "dataset 2"

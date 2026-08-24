@@ -239,7 +239,8 @@ def render_scatter_points(
                         (line,) = ax.plot(
                             wx[m], wy[m], marker="o", linestyle="none",
                             label="_nolegend_", color=tp_color[tp],
-                            alpha=0.6, markersize=6, markeredgecolor="none",
+                            alpha=0.6, markersize=marker_size,
+                            markeredgecolor="none",
                         )
                         # Tag scatter-only so export-style never adds a line.
                         line._scatter_only_artist = True
@@ -276,7 +277,7 @@ def render_scatter_points(
                 (line,) = ax.plot(
                     well_data["x"], well_data["y"], marker="o", linestyle="none",
                     label=legend_label if first_well_in_group else "_nolegend_",
-                    color=data["color"], alpha=0.6, markersize=6,
+                    color=data["color"], alpha=0.6, markersize=marker_size,
                     markeredgecolor="none",
                 )
                 # Tag scatter-only so export-style never adds a connecting line.

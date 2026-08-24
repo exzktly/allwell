@@ -54,11 +54,23 @@ def _emit_execution_flags(args: list[str], opts: dict) -> None:
     malformed value is skipped rather than raising, matching the long-standing
     behaviour for these performance knobs.
     """
-    for key, flag, positive_only in (
-        ("tf_threads", "--tf_threads", False),
-        ("workers", "--workers", True),
-        ("stardist_tile_px", "--stardist_tile_px", True),
+    method = str(opts.get("segmentation_method", "") or "")
+    for key, flag, positive_only, needs_method in (
+        ("tf_threads", "--tf_threads", False, ""),
+        ("workers", "--workers", True, ""),
+        ("stardist_tile_px", "--stardist_tile_px", True, "stardist"),
     ):
+        # A flag no routine reads must not reach argv, because argv is what
+        # ``util.settings_digest`` hashes: a tile size left in the box from an
+        # earlier StarDist run would otherwise change a Cellpose plate's reuse
+        # key and force it to recompute for a setting that cannot affect it.
+        # The Analyze form gates the same field the same way
+        # (``analyze_tab_fields._METHOD_GATED_INT_FIELDS``); the two are held
+        # together by ``tests/test_tile_size_belongs_to_one_routine.py``, which
+        # is the shape used for the StarDist threshold rule for the same reason
+        # — ``services`` must not import the form's module.
+        if needs_method and not method.startswith(needs_method):
+            continue
         try:
             v = int(opts.get(key, 0) or 0)
         except (TypeError, ValueError):

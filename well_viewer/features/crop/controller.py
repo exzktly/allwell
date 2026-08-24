@@ -52,7 +52,7 @@ def get_crop_scope(ctx) -> FrameScope:
     )
 
 
-def apply_crop_to_cache(ctx, label: str | None = None) -> None:
+def apply_crop_to_cache(ctx, label: str | None = None) -> list[str]:
     """Write the ``Crop_Pass`` column onto cached well frame(s).
 
     With ``label`` given, only that well; otherwise every cached well. Writes an
@@ -65,10 +65,15 @@ def apply_crop_to_cache(ctx, label: str | None = None) -> None:
 
     A8 residuals-ledger R1: takes ``ctx`` — region + scope + row cache from typed
     state, so the crop projection is a pure ``ctx`` operation the row-fetch data
-    service can call."""
+    service can call.
+
+    Returns the labels whose verdict could not be computed, exactly as
+    ``qc.controller.apply_qc_to_cache`` does — ``project_verdict_column`` drops
+    ``Crop_Pass`` from those frames, which reads downstream as "no crop applies
+    to this well". :func:`recompute_crop_all` is where that reaches the user."""
     region = get_crop_region(ctx)
     scope = get_crop_scope(ctx)
-    project_verdict_column(
+    return project_verdict_column(
         ctx, label,
         column="Crop_Pass",
         verdict=lambda df, well: compute_crop_pass(df, region, scope, well),
@@ -76,15 +81,35 @@ def apply_crop_to_cache(ctx, label: str | None = None) -> None:
     )
 
 
-def recompute_crop_all(ctx) -> None:
+def _appended(warning: str) -> str:
+    """*warning* as a clause to hang off the end of a status line, or ``""``."""
+    return f"  {warning}" if warning else ""
+
+
+def recompute_crop_all(ctx) -> str:
     """Re-project ``Crop_Pass`` onto all cached wells and bust the stats cache so
-    downstream consumers recompute on the next read."""
+    downstream consumers recompute on the next read.
+
+    Returns the warning naming any well whose verdict could not be computed, or
+    ``""``. Every crop action writes its own outcome to the status line one or
+    two calls after this returns, which would erase the warning
+    :func:`report_verdict_failures` just put there — so each of them appends
+    this string to its own message. The sibling of
+    ``qc.controller.recompute_qc_all``, whose caller writes no status of its own
+    and therefore needs no such thread-through.
+    """
+    from well_viewer.core.notifications import report_verdict_failures
     from well_viewer.core.selection_controller import invalidate_stats_cache
-    apply_crop_to_cache(ctx, None)
+    failed = apply_crop_to_cache(ctx, None)
+    # A well whose Crop_Pass had to be dropped is now cropped by nothing, while
+    # the outline on the canvas says otherwise.
+    warning = report_verdict_failures(
+        ctx, layer="Crop", column="Crop_Pass", failed=failed)
     try:
         invalidate_stats_cache(ctx)  # clears stats cache + bumps override_version
     except Exception:
         swallowed()  # was: pass (silent except)
+    return warning
 
 
 def _save_redraw_refresh(ctx) -> None:
@@ -122,7 +147,9 @@ def set_crop_region(ctx, region: CropRegion | None) -> None:
         ctx.notify.set_status("Crop region: box too small — no crop applied.")
         return
     ctx.state.dataset.crop_region = region
-    recompute_crop_all(ctx)
+    # Appended to whichever outcome line this function ends on, so the
+    # re-projection warning is not overwritten by it — see recompute_crop_all.
+    warning = _appended(recompute_crop_all(ctx))
     _save_redraw_refresh(ctx)
 
     # Report the crop's actual effect so a silent no-op is never mistaken for a
@@ -145,13 +172,13 @@ def set_crop_region(ctx, region: CropRegion | None) -> None:
         )
         ctx.notify.set_status(
             f"Crop region set ({where}) — but this dataset has no centroid "
-            "columns, so no cells were excluded."
+            f"columns, so no cells were excluded.{warning}"
         )
         return
     ctx.notify.set_status(
         f"Crop region set ({where}{scoped}): excluded {removed:,} of "
         f"{total_incl:,} otherwise-included cell(s) across {n_wells} loaded "
-        "well(s)."
+        f"well(s).{warning}"
     )
 
 
@@ -207,14 +234,14 @@ def _on_crop_scope_changed(ctx) -> None:
     with a tick still settling), where the button is gone; relabelling first
     made the widget the gate on the re-projection ever happening.
     """
-    recompute_crop_all(ctx)
+    warning = _appended(recompute_crop_all(ctx))
     _save_redraw_refresh(ctx)
     refresh_crop_scope_button(ctx)
     if get_crop_region(ctx) is None:
         # Arming frames before drawing a box is a legitimate order of
         # operations, but "excluded 0 cells" would read as a broken crop.
         ctx.notify.set_status(
-            "Crop scope set — draw a crop rectangle to apply it."
+            f"Crop scope set — draw a crop rectangle to apply it.{warning}"
         )
         return
     removed, total_incl, _has_centroids, n_wells = _crop_effect_counts(ctx)
@@ -224,7 +251,7 @@ def _on_crop_scope_changed(ctx) -> None:
     # numbers from reading as a contradiction of the scope the button states.
     ctx.notify.set_status(
         f"Crop scope updated: now excluding {removed:,} of {total_incl:,} "
-        f"otherwise-included cell(s) across {n_wells} loaded well(s)."
+        f"otherwise-included cell(s) across {n_wells} loaded well(s).{warning}"
     )
 
 
@@ -303,10 +330,11 @@ def clear_crop_region(ctx) -> None:
     ds.crop_region = None
     ds.reset_crop_scope()
     refresh_crop_scope_button(ctx)
-    recompute_crop_all(ctx)
+    warning = _appended(recompute_crop_all(ctx))
     _save_redraw_refresh(ctx)
     ctx.notify.set_status(
-        "Crop region and scope cleared." if was_scoped else "Crop region cleared."
+        ("Crop region and scope cleared." if was_scoped
+         else "Crop region cleared.") + warning
     )
 
 

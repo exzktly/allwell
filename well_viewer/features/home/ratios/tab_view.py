@@ -52,11 +52,13 @@ class RatioMetricsPanel(QWidget):
 
         intro = QLabel(
             "Define ratio metrics computed at read time as "
-            "<i>numerator / (denominator + ε)</i>. Ratios appear as virtual "
+            "<i>numerator / max(denominator, ε)</i>. Ratios appear as virtual "
             "channels in every plot tab.<br>"
-            "<b>ε (epsilon)</b> is a small constant added to the denominator "
-            "before dividing — it prevents division by zero when the "
-            "denominator channel reads 0. Use 0 to drop those cells (NaN); "
+            "<b>ε (epsilon)</b> is the floor the denominator is clamped to "
+            "before dividing, not a constant added to it — it prevents "
+            "division by zero when the denominator channel reads 0, and it "
+            "keeps the divisor positive on background-subtracted channels "
+            "that read slightly negative. Use 0 to drop those cells (NaN); "
             "use a small positive number (e.g. 1) to keep them.",
             self,
         )

@@ -306,6 +306,18 @@ def _reduce_reps(reps, field: str, use_sem: bool) -> tuple[float, float]:
     return m, (sd / math.sqrt(n) if use_sem else sd)
 
 
+def replicate_mean(reps, field: str) -> float:
+    """The mean across a per-replicate field — the value Bar and Line draw.
+
+    A public name for the reduction half of :func:`_reduce_reps`, for consumers
+    that want the central value and not the spread. Sharing the reducer is the
+    point: it skips non-finite replicates the same way, so a surface using this
+    cannot disagree with a bar drawn from the same replicate list.
+    """
+    mean, _spread = _reduce_reps(reps, field, use_sem=False)
+    return mean
+
+
 def _thresh_on_col(ctx) -> str | None:
     """Return ``"Gate_On"`` when scatter-gate *thresholding* is active (mode on
     and a gate selected), else ``None``.

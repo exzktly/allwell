@@ -39,18 +39,35 @@ class AnalyzeInputMixin:
     """Input-folder resolution + the OME-TIFF redirect for the Analyze pane."""
 
     def _ome_input_hint(self) -> str | None:
-        """Return a redirect message when the input is a raw OME-TIFF, else ``None``.
+        """Return a message that must block the run, or ``None`` to let it start.
 
-        Analyze processes folders; a packed OME-TIFF must be de-interleaved in the
-        Datasets converter first.
+        Analyze processes folders; a packed OME-TIFF must be de-interleaved in
+        the Datasets converter first, so one selected here earns
+        :data:`PACKED_OME_MESSAGE`.
+
+        A check that could not be *made* is reported too, rather than read as a
+        pass. The guard used to answer ``None`` for any exception — a permission
+        error part-way through the walk, an unreadable directory — which is the
+        one answer that means "carry on", so the run went ahead against an input
+        Analyze cannot process and the redirect this guard exists for never
+        fired. Saying so costs a refusal the user can act on; failing open costs
+        a run.
         """
         raw_str = self._input_edit.text().strip() if hasattr(self, "_input_edit") else ""
         if not raw_str:
             return None
         try:
             detected = detect_ome_input(Path(raw_str))
-        except Exception:  # pragma: no cover — defensive
-            return None
+        except Exception as exc:
+            # Deliberately broad, and deliberately not silent: this runs from
+            # the Run button's own slot, so a type not listed here would kill
+            # the click rather than report anything (see the Manage-Remotes
+            # dead-button defect this audit found next door).
+            return (f"Could not inspect the selected input:\n{raw_str}\n\n"
+                    f"{type(exc).__name__}: {exc}\n\n"
+                    "Analyze checks here whether the folder holds a packed "
+                    "OME-TIFF, which has to be converted in Datasets first. "
+                    "The check did not complete, so the run is not started.")
         return PACKED_OME_MESSAGE if detected is not None else None
 
     def _resolve_run_dirs_for_runner(self, opts: dict, log_q: queue.Queue,

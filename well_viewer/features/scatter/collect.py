@@ -36,6 +36,17 @@ from well_viewer.domain.viewer_state import parse_rc
 
 _logger = logging.getLogger(__name__)
 
+#: Marker shapes for the aggregate scatter, in assignment order. Group identity
+#: is shape here (colour carries the timepoint), so the length of this list is
+#: the number of groups the plot can actually distinguish. It was ten, which a
+#: 96-well plate's worth of replicate sets passes without difficulty; these are
+#: the matplotlib markers that stay legible at a data-point size, filled ones
+#: first because they read at a glance and take a face colour.
+GROUP_MARKERS: tuple[str, ...] = (
+    "o", "s", "^", "D", "v", "p", "*", "h", "H", "8",
+    "<", ">", "P", "X", "d", "+", "x", "1", "2", "3",
+)
+
 
 def timepoint_color_map(timepoints) -> dict[float, Any]:
     """Map sorted timepoints → viridis RGBA — the per-cell + aggregate convention.
@@ -478,8 +489,22 @@ def collect_scatter_agg_data(
             (lbl, well_display_label(ctx, lbl), [lbl]) for lbl in selected_wells
         ]
 
-    # Define markers for each well/group
-    markers = ['o', 's', '^', 'D', 'v', 'p', '*', 'h', '+', 'x']  # circle, square, triangle, diamond, etc.
+    # Group identity is encoded as marker *shape* here — colour is spent on the
+    # timepoint — so two groups sharing a shape are two groups the reader cannot
+    # tell apart, on the plot and in the legend both.
+    markers = GROUP_MARKERS
+    if len(labels_to_process) > len(markers):
+        # Nothing downstream can recover identity once the shapes wrap, and the
+        # figure gives no sign that it happened: the legend simply lists the
+        # same swatch twice. Say it once, by name, rather than letting the plot
+        # quietly claim more groups than it can distinguish.
+        _logger.warning(
+            "Scatter aggregate is drawing %d groups with %d distinct marker "
+            "shapes: %s share a shape with an earlier group and cannot be told "
+            "apart on the plot or in the legend.",
+            len(labels_to_process), len(markers),
+            ", ".join(disp for _i, disp, _w in labels_to_process[len(markers):]),
+        )
 
     # Create color gradient for timepoints using a colormap (shared with the
     # per-cell "Color by time" path via timepoint_color_map).

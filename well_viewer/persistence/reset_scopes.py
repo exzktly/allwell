@@ -118,6 +118,14 @@ def _clear_sample_definitions(ctx) -> None:
     "nothing to say", deliberately, so a folder shared without the sidecar keeps
     its groups. That makes clearing only one of the two a no-op in practice, so
     both are written here.
+
+    The sample-definitions block goes out through
+    ``sample_definitions.autosave_forgetting_absent_labels`` rather than the
+    registry's ordinary ``sample_definitions`` save: that one preserves the
+    labels of wells the current load does not hold, by reading them back out of
+    the file. Correct for an edit, wrong for a reset — the user asked for every
+    label to go, and on a subset load the ordinary path would restore most of
+    them.
     """
     sel = ctx.state.selection
     ctx.state.dataset.well_labels.clear()
@@ -129,7 +137,11 @@ def _clear_sample_definitions(ctx) -> None:
     _clear_notes_editors(ctx)
 
     _save(ctx, "plot_groups")
-    _save(ctx, "sample_definitions")
+    from well_viewer.persistence import sample_definitions as _sd
+    try:
+        _sd.autosave_forgetting_absent_labels(ctx)
+    except Exception:
+        _logger.exception("reset: clearing the sample_definitions block failed")
 
     _refresh(ctx, "_label_panel_refresh")
     _refresh(ctx, "_groups_centre_refresh")
@@ -281,6 +293,17 @@ def reset_view(ctx) -> None:
     """
     from well_viewer.persistence import view_state
     view_state.reset(ctx)
+
+    # ``view_state.reset`` clears the live draw order (it is two ``PlotState``
+    # fields, so ``restore_defaults`` empties them), but the order has a second
+    # home: its own ``line_order`` section of persistence.json. Leaving that
+    # section behind made the reset look complete and then undo itself — the
+    # next load re-read it and ``line_order._reorder_selections_by_line_order``
+    # re-applied the order to ``selections``, permanently reordering them. This
+    # module's promise is that what resets live is what is dropped from disk, so
+    # the emptied order is written in the same pass, after ``reset`` has cleared
+    # it rather than before.
+    _save(ctx, "line_order")
 
     ctx.runtime.heatmap.layouts = []
     hm = ctx.state.feature_slice("heatmap")

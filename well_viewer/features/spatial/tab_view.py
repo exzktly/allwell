@@ -236,8 +236,8 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
         export_menu, "Export Summary CSV…",
         lambda: sp_ctrl.sp_export_summary_csv(ctx),
         tooltip="Summary level only")
-    add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx))
-    add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx))
+    add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx, "_sp_card"))
+    add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx, "_sp_card"))
     export_menu.addSeparator()
     add_menu_action(export_menu, "Save to Saved Plots",
                     lambda: save_card_to_gallery(ctx, "_sp_card"))

@@ -14,7 +14,7 @@ from __future__ import annotations
 import csv
 import json
 import threading
-from datasets._common.containers import publish_container
+from datasets._common.containers import container_dest, publish_container
 from util.json_write import write_json_atomic
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -31,8 +31,14 @@ from datasets._common.containers import (
     WellFraction,
     clear_destination,
     copy_container_members,
+    restamp_overrides,
+    unstamped_note,
 )
-from datasets._common.member_names import rewrite_member_field
+from datasets._common.member_names import (
+    IMAGE_EXTS,
+    is_os_junk_member,
+    rewrite_member_field,
+)
 from datasets.merge_plates.merge_plates_compute import (
     IN_PROGRESS_MARKER,
     MergePlatesError,
@@ -74,31 +80,112 @@ def _remap_well_field(name: str, *, schema, channels, old_well: str, new_well: s
     return rewrite_member_field(name, schema=schema, channels=channels, field="well", new_value=_predicate)
 
 
-def _remap(plan: PlateMergePlan, src_well: str, dest_well: str):
+def _carries_a_well_token(name: str) -> bool:
+    """Whether this merge is entitled to insist *name*'s well token moved.
+
+    ``rewrite_member_field``'s structural gate answers "did the well token get
+    rewritten?" for every member of an archive, and everything it cannot parse
+    answers *no* — including the members that were never image filenames to
+    begin with. A ``.DS_Store``, an AppleDouble ``._`` sidecar, a ``readme.txt``
+    a user dropped in on purpose: none of them carries a well token, none is
+    this tool's business, and all of them are meant to pass through under their
+    own names. Asking a domain predicate about items outside its domain is what
+    makes a whole archive look unrewritable, so the entitlement is decided
+    first: a member with a catalogued image extension that is not OS debris is
+    claiming to be one of this well's images, and nothing else is.
+    """
+    if is_os_junk_member(name):
+        return False
+    return Path(name).suffix.lower() in IMAGE_EXTS
+
+
+def _remap(plan: PlateMergePlan, src_well: str, dest_well: str, unrewritten: list[str]):
     """The per-member rename ``copy_container_members`` applies for this well.
 
     Merge plates drops nothing — every member of a remapped container is kept,
     under a name whose well token has been rewritten — so this never returns
     ``None``.
+
+    ``rewrite_member_field`` returns ``(new_name, was_rewritten)`` and this used
+    to take ``[0]`` and discard the flag. A member that failed the structural
+    gate — one field too many, an extension the role catalog does not know, a
+    well token that is not the source well — therefore landed in the
+    *destination* well's archive still spelled with **dataset 2's** well, and
+    the merge reported success. The CSV row for it went unrewritten in exactly
+    the same way, so the ``dest_in_names`` cross-check compared two consistent
+    wrong answers and passed. Every image whose name claims to be one of this
+    well's images and did not move is appended to *unrewritten*, and the caller
+    refuses the merge (:func:`_refuse_unrewritten`).
     """
     def _rename(_container: Path, name: str) -> str | None:
-        return _remap_well_field(
+        new_name, rewrote = _remap_well_field(
             name, schema=plan.schema, channels=plan.channels,
             old_well=src_well, new_well=dest_well,
-        )[0]
+        )
+        if not rewrote and _carries_a_well_token(name):
+            unrewritten.append(name)
+        return new_name
     return _rename
 
 
-def _copy_container_as_is(src: Path, dest_dir: Path) -> None:
+def _copy_container_as_is(src: Path, dest_dir: Path, well: str) -> None:
     """The path taken for every well this merge does not remap — which is all
     of dataset 1's. Staged and renamed by ``publish_container`` for the same
     reason the member-by-member path is: an interrupted copy must not leave a
-    truncated well behind."""
-    publish_container(src, dest_dir / src.name)
+    truncated well behind. Named for the well by ``container_dest``, the way
+    the remapping branch below and the QC branch beside it already were."""
+    publish_container(src, container_dest(src, dest_dir, well))
 
 
 def _needs_rewrite(src_well: str, dest_well: str) -> bool:
     return src_well != dest_well
+
+
+def _refuse_dropped(src_well: str, dest_well: str, dropped, where: str) -> None:
+    """Fail the merge when members collided by name and were skipped.
+
+    ``copy_container_members`` is first-write-wins: a member whose name is
+    already in the destination is silently not written, and the set of those
+    names is its second return value. This tool bound that set to ``_dropped``
+    and threw it away, so a remapping that landed two source members on one
+    destination name produced an archive holding fewer images than the source,
+    and reported success. Concatenate treats the identical event as a
+    verification failure, in the same words; a well token rewrite is not a
+    reason for the two tools to disagree about whether losing data is an error.
+    """
+    if not dropped:
+        return
+    names = sorted(dropped)
+    raise MergePlatesError(
+        f"Verification failed: {len(names)} file(s) from well {src_well} "
+        f"collided by name while being written to {where} and were dropped "
+        f"(e.g. {names[0]!r}) — that data did not survive the merge into "
+        f"{dest_well}."
+    )
+
+
+def _refuse_unrewritten(src_well: str, dest_well: str, unrewritten, where: str) -> None:
+    """Fail the merge when an image's well token did not move with it.
+
+    The same verdict :func:`_refuse_dropped` reaches for a name collision, and
+    for the same reason: the destination would hold an archive that reads as
+    complete while carrying an image labelled for a plate position it is not in.
+    Nothing downstream can tell that apart from a correct merge — Review matches
+    a CSV row to an image by filename, and the pipeline reads the well from the
+    filename's own token — so it is refused rather than announced.
+    """
+    if not unrewritten:
+        return
+    names = sorted(set(unrewritten))
+    raise MergePlatesError(
+        f"Verification failed: {len(names)} image(s) from well {src_well} could "
+        f"not have their well token rewritten to {dest_well} while being "
+        f"written to {where} (e.g. {names[0]!r}) — their filenames don't match "
+        "this dataset's schema (wrong number of separator-delimited fields, or "
+        f"a well token that isn't {src_well}), so they would land in "
+        f"{dest_well}'s archive still labelled for another well. Fix or remove "
+        "those filenames, or merge without remapping this well."
+    )
 
 
 def _merge_input(
@@ -122,7 +209,7 @@ def _merge_input(
         fraction.skip()
         return None
     if not _needs_rewrite(src_well, dest_well):
-        _copy_container_as_is(container, plan.dest.in_dir)
+        _copy_container_as_is(container, plan.dest.in_dir, dest_well)
         fraction.skip()
         return None
     if container.is_dir():
@@ -132,11 +219,14 @@ def _merge_input(
             "rewrite well tokens inside zip archives. Re-run the pipeline with "
             "compressed input, or don't remap this well."
         )
-    written, _dropped = copy_container_members(
+    unrewritten: list[str] = []
+    written, dropped = copy_container_members(
         plan.dest.in_dir / f"{dest_well}.zip", [container],
-        _remap(plan, src_well, dest_well),
+        _remap(plan, src_well, dest_well, unrewritten),
         progress=fraction.slice_progress(),
     )
+    _refuse_dropped(src_well, dest_well, dropped, f"in/{dest_well}.zip")
+    _refuse_unrewritten(src_well, dest_well, unrewritten, f"in/{dest_well}.zip")
     return written
 
 
@@ -153,11 +243,14 @@ def _merge_qc_zip(
         publish_container(container, plan.dest.out_dir / f"{dest_well}_out.zip")
         fraction.skip()
         return
-    copy_container_members(
+    unrewritten: list[str] = []
+    _written, dropped = copy_container_members(
         plan.dest.out_dir / f"{dest_well}_out.zip", [container],
-        _remap(plan, src_well, dest_well),
+        _remap(plan, src_well, dest_well, unrewritten),
         progress=fraction.slice_progress(),
     )
+    _refuse_dropped(src_well, dest_well, dropped, f"out/{dest_well}_out.zip")
+    _refuse_unrewritten(src_well, dest_well, unrewritten, f"out/{dest_well}_out.zip")
 
 
 def _read_csv(path: Path) -> tuple[list[dict], list[str]]:
@@ -197,6 +290,16 @@ def _merge_measurements(
     rows, fieldnames = _read_csv(csv_path)
     mismatches: list[str] = []
     if _needs_rewrite(src_well, dest_well):
+        # The row's own copy of the four coupled values (see the compute
+        # module's docstring). A ``filename`` that would not rewrite is refused
+        # here for the same reason the archive member is: the row would say
+        # ``well = <dest>`` while naming an image labelled for the source plate,
+        # and the ``dest_in_names`` check below cannot see it — the member was
+        # left unrewritten too, so the two agree with each other and disagree
+        # with the truth. The check runs even when this well has no raw-input
+        # container at all, which is the one case the archive-side refusal
+        # cannot cover.
+        unrewritten: list[str] = []
         for row in rows:
             row["well"] = dest_well
             fname = row.get(FILENAME_COLUMN)
@@ -207,6 +310,9 @@ def _merge_measurements(
                 )
                 if rewrote:
                     row[FILENAME_COLUMN] = new_name
+                elif _carries_a_well_token(fname):
+                    unrewritten.append(fname)
+        _refuse_unrewritten(src_well, dest_well, unrewritten, csv_path.name)
 
     dest_name = f"{_csv_prefix(csv_path)}_{dest_well}.csv"
     _write_rows(plan.dest.out_dir / dest_name, fieldnames, rows)
@@ -240,13 +346,13 @@ def _merge_cell_overrides(plan: PlateMergePlan, emit: Callable[[str], None]) -> 
 
     if not entries:
         return
-    for entry in entries:
-        zip_path = plan.dest.out_dir / f"{entry.get('well', '')}_out.zip"
-        with swallow(f"stat {zip_path}"):
-            entry["seg_fp"] = f"{zip_path.stat().st_mtime_ns}"
+    unstamped = restamp_overrides(entries, plan.dest.out_dir)
     payload = {"version": OVERRIDES_SCHEMA_VERSION, "overrides": entries}
     write_json_atomic(plan.dest.out_dir / OVERRIDES_FILENAME, payload, indent=None)
-    emit(f"Carried over {len(entries)} cell override(s) from the source dataset(s).")
+    emit(
+        f"Carried over {len(entries)} cell override(s) from the source "
+        f"dataset(s).{unstamped_note(unstamped)}"
+    )
 
 
 def _verify(plan: PlateMergePlan, row_counts: dict[str, int], mismatches: dict[str, list[str]]) -> None:

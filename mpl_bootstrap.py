@@ -14,7 +14,9 @@ happens. Call it **once, before matplotlib is first imported** (from
 behaviour untouched rather than breaking startup.
 
 Note: on a *cold* cache the very first ``import matplotlib.font_manager`` still
-builds once; after that the limited cache persists (in the repo's ``.mplcache``)
+builds once; after that the limited cache persists (in the repo's ``.mplcache``
+when running from source, in the per-user state directory in a frozen build —
+``sys._MEIPASS`` is a fresh temp tree per launch and cannot hold a cache)
 and every launch skips the scan. To remove even the first-build cost, pre-warm
 the cache during environment provisioning by launching the app once.
 """
@@ -23,6 +25,7 @@ from __future__ import annotations
 
 import glob
 import os
+import sys as _sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _FONTS_DIR = os.path.join(_HERE, "assets", "fonts")
@@ -35,16 +38,33 @@ def _bundled_fonts() -> list[str]:
     return out
 
 
+def _cache_root() -> str:
+    """Where the pinned font cache lives — and it has to survive the launch.
+
+    From source that is ``.mplcache`` beside this file, which is stable across
+    launches and easy to pre-warm during provisioning. In a **frozen** build it
+    cannot be: PyInstaller unpacks the bundle into ``sys._MEIPASS``, a fresh
+    temp tree per launch, and ``_HERE`` points inside it — so the "stable"
+    cache was thrown away and rebuilt every single time the app started, which
+    is exactly the cost this module exists to remove. A frozen build uses the
+    per-user state directory instead, the same one the boot log goes to.
+    """
+    if getattr(_sys, "frozen", False) or hasattr(_sys, "_MEIPASS"):
+        from boot_diag import user_state_dir
+        return os.path.join(str(user_state_dir()), "mplcache")
+    return os.path.join(_HERE, ".mplcache")
+
+
 def _set_cachedir() -> None:
     """Pin MPLCONFIGDIR to a stable local dir so the cache isn't rebuilt every
     session or written to slow/roaming storage. Respects a caller-set value."""
     if os.environ.get("MPLCONFIGDIR"):
         return
-    cache = os.path.join(_HERE, ".mplcache")
     try:
+        cache = _cache_root()
         os.makedirs(cache, exist_ok=True)
         os.environ["MPLCONFIGDIR"] = cache
-    except OSError:
+    except (OSError, ImportError):
         pass  # fall back to matplotlib's default cachedir
 
 

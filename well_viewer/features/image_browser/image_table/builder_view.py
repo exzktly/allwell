@@ -439,13 +439,11 @@ def _set_plate(ctx, on: bool) -> None:
 
 
 def _wrap_applicable(spec) -> bool:
-    """Wrap only applies when neither axis nests a root *and* channels (the
-    grouped/banding layout path is single-dimension per axis), and never in plate
-    mode (the plate fixes both axes to well row/col)."""
-    if getattr(spec, "plate", False):
-        return False
-    return not (spec.rows.root and spec.rows.channels) \
-        and not (spec.cols.root and spec.cols.channels)
+    """Wrap applies to any axis pairing except plate mode, which fixes both axes
+    to the well row/col dims and so has nowhere to band. Nested axes (a root with
+    channels under it) band on the column *product*, so they wrap like the flat
+    single-dimension case rather than being excluded from it."""
+    return not getattr(spec, "plate", False)
 
 
 def _refresh_wrap(ctx, spec) -> None:
@@ -779,8 +777,8 @@ def build_shelf(ctx, parent: QWidget) -> None:
 
     # Wrap cols: fold the columns into vertically-stacked bands of N — e.g. the
     # first N wells across all channels, then the next N below. Writes the spec's
-    # wrap; enabled only when each axis carries a single dimension (the banding
-    # path can't mix with nested root+channels axes).
+    # wrap; disabled only in plate mode, which pins both axes to the plate's own
+    # row/column dims and so has nothing left to band.
     wrap_lbl = QLabel("Wrap cols:", parent)
     wrap_lbl.setObjectName("ITBSub")
     header.addWidget(wrap_lbl)
@@ -789,7 +787,7 @@ def build_shelf(ctx, parent: QWidget) -> None:
     wrap.setFixedWidth(_WRAP_W)
     wrap.setToolTip("Wrap the columns into vertically-stacked bands of this many "
                     "columns (e.g. the first N wells across all channels, then the "
-                    "next N below). 0 = off. Applies when each axis has one dimension.")
+                    "next N below). 0 = off. Unavailable in plate mode.")
     wrap.valueChanged.connect(lambda v: _set_wrap(ctx, int(v)))
     reg.register("_image_table_wrap_stepper", wrap)
     _rt(ctx).wrap_stepper = wrap

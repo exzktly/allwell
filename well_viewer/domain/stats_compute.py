@@ -722,7 +722,12 @@ def compute_rep_n_above_total(ctx, rset: ReplicateSet, target_t: float) -> int:
     for lbl in rset.wells:
         if lbl not in ctx.state.dataset.well_paths:
             continue
-        pts = aggregate_well(
+        # Through the memo like every other per-well aggregation here. This
+        # loop was the last one reaching the raw function, and it is called once
+        # per group per timepoint — 576 full-well passes on a plate of twelve
+        # groups over six timepoints, all of them recomputing wells the
+        # neighbouring producers had already aggregated at the same settings.
+        pts = aggregate_well_cached(
             ctx,
             lbl, threshold=threshold, use_sem=False,
             val_col=ctx.state.channel.active_val_col,

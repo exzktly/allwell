@@ -1,6 +1,6 @@
 # STATUS — well-selection / plotting performance
 
-**Updated:** 2026-08-24 05:40 UTC
+**Updated:** 2026-08-24 06:00 UTC
 **Branch:** `claude/well-selection-performance-7phaix`
 **Base:** `44c0d38` (main, includes PR #847)
 **Version:** main is at 9.0.5 → this PR bumps to **9.0.6** (not yet applied)
@@ -324,6 +324,20 @@ the nested notebook page, the way the sub-tab strip does. A test calling
 `ctx.features.redraw` directly would prove the figure *can* be refreshed while the app
 never does. Proved to bite: reverting the skip gives *"a Distribution tab nobody is looking
 at was repainted anyway"*.
+
+## The last uncached loop
+
+The bench kept reporting 672 `aggregate_well` calls for a group collect where the key
+probe found only 96 distinct keys. Rather than assume the memo was working, the calls were
+attributed by stack: **576 of them came from `compute_rep_n_above_total`**, which had its
+own loop reaching the raw function — 12 groups x 6 timepoints x 8 wells, every one
+recomputing a well the neighbouring producers had already aggregated at identical settings.
+
+Routed through the memo: **672 → 96 calls, group collect 2,909 → 1,862 ms.**
+
+Worth naming as a method point: the wrapper-level probe said "96 distinct keys" and was
+telling the truth about the wrapper while 576 calls went around it. A count taken at the
+seam you changed does not describe the calls that never reach that seam.
 
 ## Decisions log (for user confirmation at the end)
 

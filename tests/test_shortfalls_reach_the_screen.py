@@ -142,6 +142,80 @@ def test_the_mask_scan_being_truncated_is_reported_too():
     assert "truncated" in status.last
 
 
+class _Combo:
+    def __init__(self) -> None:
+        self.values: list[str] = []
+        self._text = ""
+
+    def clear(self):
+        self.values = []
+
+    def addItems(self, items):
+        self.values.extend(items)
+
+    def currentText(self):
+        return self._text
+
+    def setCurrentText(self, t):
+        self._text = str(t)
+
+    def blockSignals(self, blocked):
+        return False
+
+    def count(self):
+        return len(self.values)
+
+
+class _Label:
+    def __init__(self) -> None:
+        self.text = ""
+
+    def setText(self, t):
+        self.text = str(t)
+
+
+def test_a_well_whose_scan_read_nothing_says_so_instead_of_the_previous_well(
+        monkeypatch):
+    """The "no images" path writes no status at all before this.
+
+    It returns before the draw that would normally rewrite the line, so the
+    canvas showed the newly-selected well while the line under it still
+    described the previous one — and "this well has no images" and "the scan
+    failed before it read one" arrived as the same silence.
+    """
+    from well_viewer.features.image_browser.review_image import renderer as R
+
+    empty_but_failed = ScanResult()
+    empty_but_failed.mark_partial("B02.zip could not be opened")
+    monkeypatch.setattr(
+        "well_viewer.data.image_discovery.find_well_images_and_masks",
+        lambda *a, **k: (empty_but_failed, ScanResult(), ScanResult(), ScanResult()),
+    )
+
+    status = _Status()
+    widgets = _Widgets(
+        _review_image_status=status,
+        _preview_well_lbl=_Label(), _review_image_well_lbl=_Label(),
+        _review_image_fov_menu=_Combo(), _review_image_tp_menu=_Combo(),
+    )
+    ctx = SimpleNamespace(
+        state=SimpleNamespace(
+            preview=SimpleNamespace(fluor={}, overlay={}, mask={},
+                                    tophat_fluor={}, selected_well=None,
+                                    update_in_progress=False),
+            review_image=SimpleNamespace(preserve_view_on_refresh=False),
+            channel=SimpleNamespace(active_image_channel="gfp"),
+            dataset=SimpleNamespace(data_dir=None, in_dir=None,
+                                    pipeline_info={}, fov_tp_extractor=None),
+        ),
+        widgets=widgets,
+    )
+    R._update_preview_impl(ctx, "B02")
+
+    assert "No images could be read for B02." in status.last
+    assert "B02.zip could not be opened" in status.last
+
+
 def _loader_ctx(data_dir):
     return SimpleNamespace(state=SimpleNamespace(dataset=SimpleNamespace(
         data_dir=data_dir, in_dir=None, pipeline_info={}, fov_tp_extractor=None)))

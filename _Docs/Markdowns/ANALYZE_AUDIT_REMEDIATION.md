@@ -30,7 +30,7 @@ rather than a write-up. **Delete it in the PR that closes the last group.**
 |---|---|---|---|---|---|
 | 1 | Stop the data loss | `…-ugoecl` | 9.0.1 | [#842](https://github.com/exzktly/allwell/pull/842) | **merged** |
 | 2 | One definition of an image, and an honest verdict | `claude/analysis-job-failure-recovery-ugoecl` | 9.0.2 | [#846](https://github.com/exzktly/allwell/pull/846) | **open, complete** — lane green, CI green, reviewed |
-| 3 | The record and the resume path | `claude/analyze-audit-group3-record` | 9.0.2 | — | **in review** — all 20 findings done, lane running, review running, no PR yet |
+| 3 | The record and the resume path | `claude/analyze-audit-group3-record` | 9.0.2 | [#847](https://github.com/exzktly/allwell/pull/847) | **open, complete** — lane 5,665 passed, reviewed, all 15 review findings fixed |
 | 4 | The Analyze pane | `claude/analyze-audit-group4-pane` | 9.0.2 | [#844](https://github.com/exzktly/allwell/pull/844) | **open, complete** — lane 5715 passed, CI green, reviewed, all 8 review findings fixed |
 | 5 | Numbers and parsing | `claude/analyze-audit-group5-numbers` | 9.0.2 | [#845](https://github.com/exzktly/allwell/pull/845) | **open, complete** — CI green, two reviews, all 19 review findings fixed |
 
@@ -42,10 +42,13 @@ each is a separate PR off the same base, so each bumps to the same next number.
 Whichever merges first leaves the others to rebase and re-bump. Check
 `git diff origin/main -- version.py` immediately before every push.
 
-Counts: **81 done**, **2 dropped**, **2 open questions**, **0 outstanding** —
-every audit finding in all five groups is fixed, and so is every finding the
-four adversarial reviews raised against those fixes. The total exceeds the
-audit's 69 because the reviewers' findings are rows in their own right.
+Counts, taken by scanning this file's own tables rather than by memory:
+**108 rows, all `done`**, plus **2 dropped** and **2 open questions**, and
+nothing outstanding. Every audit finding in all five groups is fixed, and so is
+every finding the five adversarial reviews raised against those fixes. The total
+exceeds the audit's 69 because the reviewers' findings are rows in their own
+right, and falls short of 69 + 57 because several rows collapse a run of related
+findings (`U11–U17`, `X9–X11`).
 
 > **Two interruptions, 23 August, and what they cost.** Both parallel workers
 > and the Group 2 reviewer were killed mid-task by an API session limit; later
@@ -79,25 +82,23 @@ subagents share one filesystem and a bare `git checkout` in one moved another's
 branch out from under it. If those are gone, re-create them from the pushed
 branches; nothing is lost.
 
-**What is left.**
+**What is left.** Nothing in the audit itself — all five groups are fixed,
+reviewed and open as pull requests. What remains is the mechanics of landing
+them.
 
-1. **Group 3** — every finding fixed and committed; its first full lane and its
-   adversarial review were running when this was written. Read both, fix what
-   the review finds, re-run, push, and open the PR. It is the only group without
-   one.
-2. **Merging.** Four PRs are open against the same base and all four carry
+1. **Merging.** Four PRs are open against the same base and all four carry
    9.0.2. Whichever merges first leaves the other three to rebase onto the new
    `main` and re-bump — `scripts/preflight.sh` is what catches a missed re-bump,
    and `git diff origin/main -- version.py` is the check to run before each
    push. Nothing else is shared: the file partition below held, and no two
    branches touch the same module.
-3. **One cross-branch dependency, by design.** Group 4's
+2. **One cross-branch dependency, by design.** Group 4's
    `tests/test_stardist_threshold_rule_is_one_rule.py` carries a
    `FORM_IS_STRICTER` roster with a liveness test, and one entry (`nan`) stops
    describing a real gap the moment Group 5's `parse_threshold` fix lands. That
    test failing after a merge is the two branches meeting as intended, not a
    regression: delete the entry.
-4. **Delete this file** in the PR that closes the last group.
+3. **Delete this file** in the PR that closes the last group.
 
 **The two open questions below are still open** and are the maintainer's, not
 this work's: C17 (whether the Otsu sampler should contrast a per-cell mean
@@ -258,11 +259,11 @@ a guard needing its own says why in the file.
 
 ---
 
-## Group 3 — The record and the resume path · `in review`
+## Group 3 — The record and the resume path · `complete`
 
-Branch `claude/analyze-audit-group3-record`, version 9.0.2, **no PR yet**. All
-twenty findings are fixed and committed; its first full lane and its adversarial
-review are what stand between it and a pull request.
+PR [#847](https://github.com/exzktly/allwell/pull/847), version 9.0.2.
+All twenty audit findings are fixed, and so are the fifteen the adversarial
+review raised across two passes.
 
 | ID | Finding | State |
 |---|---|---|
@@ -336,13 +337,43 @@ What the finished ones turned into, where the shape is worth carrying forward:
   non-HFS volume — and that count is the readout, the `tifs > 3` threshold, and
   the `source_tifs` tuples the post-run deletion closures are built from.
 
+### Review findings on Group 3's own fixes
+
+Two passes. Four of the first pass's thirteen were live defects the branch had
+introduced or left half-done, and every one of those is a shape this file's own
+rules already name.
+
+| ID | Finding | State |
+|---|---|---|
+| G3-R1 | L3's token guard was disarmed in exactly the scenario its docstring describes: `open_run` answers `None` for a failed write, which never reached the handler, so `_close_journal` still ran with no token | done |
+| G3-R2 | L8 half-swept — the `queued` filter went on the journal offer and not on the suspend record, and `_resumable` ranks the suspend record first, so the plate was still offered | done |
+| G3-R3 | X7 half-swept — `resolve_input_output` holds the schema in its own signature and passed it to the preview but not to the run, so the log reproduced the defect the readout had just been fixed for | done |
+| G3-R4 | Discard silently disarmed the incremental recovery: L4 made it drop both pointers, L1 made the recovery key on those same pointers | done — it dismisses now; the entry stays and a new run clears the flag |
+| G3-R5 | The L1 guard read `start_run`'s source for a string and compared line numbers, so deleting the assignment left it and 44 neighbours green | done — it asserts the opts the runner received |
+| G3-R6 | The L2 guard looked up a method that does not exist, always took the `else` arm, and grepped the whole module | done — it drives `_on_coverage_scanned` and reads the sentence |
+| G3-R7 | L2's sentence measured the wrong denominator — `totals["wells"]` is `len(records)` and a well that raised never enters `records`, so a plate with two unreadable wells read "94 of 94 well(s) are complete" | done |
+| G3-R8 | The resume message named one of the four events that can trigger it | done — `_input_has_unfinished_work` answers with the phrase, and the line names Force as the way to decline |
+| G3-R9 | No guard held the form's collect and restore vocabularies together — L5's own defect, uncatchable | done — a roster guard with each exemption naming the alias or module that handles it, and a test that the alias is really read |
+| G3-R10 | Two docstrings cited a `util.atomic_json` that exists nowhere | done |
+| G3-R11 | `start()`'s docstring still promised callers may omit `proc_hook`, which X5 removed | done |
+| G3-R12 | A dead `TALLY_GROUPS` alias carried an invented justification | done |
+| G3-R13 | A test docstring asserted the position L10 overturns, twenty lines above the test that overturns it | done |
+| G3-R14 | A completion split across two queue events restores L9's defect under log pressure: neither `well_stage` nor `well_uncomputed` is in `_CONTROL_KINDS`, so they are dropped independently and losing only the second journals `analysed` for a well nothing computed | done — the record's word rides inside the completion event |
+| G3-R15 | X3's claim was measured on `_journal_outcome()` rather than the record, and the claim itself was wrong: run end to end, an input failure is journalled *nothing*, because the resolver fails before the journal has a home | done — docstring and test both say what happens, and the test reads `run.json` |
+
+Also from the lane, and worth recording because it is a rule in CLAUDE.md §7.6
+breaking on its Nth repeat: L3's fix called `swallowed()` outside an `except`
+block, logging a suppressed failure with `exc_info` and no exception in flight
+every time `open_run` simply answered no. `tests/test_safe_helpers_used_right.py`
+is the guard that caught it, on the first full lane after the commit.
+
 ---
 
 ## Group 4 — The Analyze pane · `complete`
 
 PR [#844](https://github.com/exzktly/allwell/pull/844), version 9.0.2. All
-seventeen `U` findings are done. The adversarial review returned **8 findings**;
-four are fixed, four are owed.
+seventeen `U` findings are done. The adversarial review returned **8 findings**,
+all of them fixed.
 
 | ID | Finding | State |
 |---|---|---|

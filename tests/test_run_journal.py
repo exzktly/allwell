@@ -350,18 +350,70 @@ def test_re_running_the_same_folder_replaces_its_index_entry(out_dir):
 
 # ── the rosters stay live ───────────────────────────────────────────────────
 
-def test_every_well_state_is_reported_somewhere(out_dir):
-    """A state missing from ``TALLY_GROUPS`` is a well nobody is ever told about.
+@pytest.mark.parametrize("roster", ["TALLY_GROUPS_LOCAL", "TALLY_GROUPS_REMOTE"])
+def test_every_well_state_is_reported_somewhere(roster):
+    """A state missing from a grouping is a well nobody is ever told about.
 
     §7.5 #10: pair every roster with a liveness test. Without one, adding a
     state to ``WELL_STATES`` and forgetting to group it produces no error and no
     output — the well is recorded, counted by nothing, and reported by nobody,
     which is exactly the silent omission the roster guard exists to prevent.
+
+    There are two groupings and both are checked, because adding a state to one
+    and not the other is the same omission with a mode attached.
     """
-    grouped = {state for _label, states in J.TALLY_GROUPS for state in states}
+    # Resolved inside the test, not in the decorator: a name that does not exist
+    # yet must fail this one test, not stop the module importing and take every
+    # other guard in the file down with it.
+    grouped = {state for _label, states in getattr(J, roster) for state in states}
     assert grouped == set(J.WELL_STATES), (
         f"ungrouped: {sorted(set(J.WELL_STATES) - grouped)}; "
         f"unknown: {sorted(grouped - set(J.WELL_STATES))}")
+
+
+def test_the_two_groupings_differ_only_in_where_analysed_is_filed():
+    """The one difference is the finding; anything else is drift.
+
+    ``analysed`` means "the pipeline announced this well finished" in both
+    modes. Locally that puts the CSV and out-zip on disk; remotely it puts them
+    on the host, and only ``fetched`` says they arrived here.
+    """
+    def _by_state(groups):
+        return {state: label for label, states in groups for state in states}
+
+    local, remote = _by_state(J.TALLY_GROUPS_LOCAL), _by_state(J.TALLY_GROUPS_REMOTE)
+    differing = {s for s in local if local[s] != remote.get(s)}
+    assert differing == {"analysed"}, (
+        f"the two groupings differ on {sorted(differing)}, not just 'analysed'")
+    assert local["analysed"] == "finished"
+    assert remote["analysed"] != "finished"
+    assert remote["fetched"] == "finished"
+
+
+def test_a_remote_run_does_not_call_an_undownloaded_well_finished(out_dir):
+    """The reported defect, at the sentence a user actually reads.
+
+    A remote run that died before reconciliation has wells the host computed
+    and this machine never received. Filing those under "finished" erases the
+    distinction the journal exists to draw — and it is the sentence the resume
+    banner and the pre-run readout both print.
+    """
+    J.open_run(out_dir, input_dir="/in", mode="remote", spec={})
+    J.record_well(out_dir, "A01", "fetched")
+    J.record_well(out_dir, "A02", "analysed")
+    tally = J.read_journal(out_dir).tally()
+    assert "1 finished" in tally, tally
+    assert "2 finished" not in tally, (
+        f"a well the host computed and never sent was called finished: {tally}")
+    assert "not downloaded" in tally, tally
+
+
+def test_a_local_run_still_calls_an_analysed_well_finished(out_dir):
+    """...and the local reading is unchanged, because locally it *is* finished."""
+    J.open_run(out_dir, input_dir="/in", mode="local", spec={})
+    J.record_well(out_dir, "A01", "analysed")
+    J.record_well(out_dir, "A02", "analysed")
+    assert "2 finished" in J.read_journal(out_dir).tally()
 
 
 @pytest.mark.parametrize("state", J.WELL_STATES)
@@ -376,10 +428,20 @@ def test_the_tally_is_empty_when_nothing_was_recorded(out_dir):
     assert J.read_journal(out_dir).tally() == ""
 
 
-def test_the_tally_groups_analysed_and_fetched_together(out_dir):
-    """One well that finished locally and one fetched from a remote are both
-    just "finished" to a user; the distinction is the journal's, not theirs."""
+def test_a_local_tally_groups_analysed_and_fetched_together(out_dir):
+    """On a **local** run both really are finished, and the wording says so.
+
+    This test used to carry the general claim — "the distinction is the
+    journal's, not theirs" — and passed only because ``_open`` defaults to
+    ``mode="local"``. That claim is exactly what the remote grouping overturns:
+    remotely, ``analysed`` puts the files on the host and only ``fetched`` says
+    they arrived here, so calling both finished is the erasure the journal
+    exists to prevent. The remote half is
+    ``test_a_remote_run_does_not_call_an_undownloaded_well_finished``.
+    """
     _open(out_dir)
+    assert J.read_journal(out_dir).mode == "local", (
+        "this fixture's mode is what makes the assertion below correct")
     J.record_well(out_dir, "A01", "analysed")
     J.record_well(out_dir, "A02", "fetched")
     assert "2 finished" in J.read_journal(out_dir).tally()
@@ -389,7 +451,14 @@ def test_the_tally_groups_analysed_and_fetched_together(out_dir):
 #: the ``Fetcher`` wrapper that forwards to it with the best-effort guard
 #: around it. Naming both is what keeps this test narrow — a scan wide enough
 #: to catch every indirection is a scan wide enough to pass on prose.
-_RECORDING_SEAMS = ("record_well", "_journal_well")
+#: Call names that write a well's state, and the name of the map that *decides*
+#: one. The second kind matters because the scan below gates on a module
+#: mentioning one of these before it reads it at all: the state a completion
+#: records is chosen in ``services/pipeline_runner.py``, which calls neither
+#: recorder, so a roster keyed only on the recorders could not see it and
+#: reported ``analysed`` as written by nobody (CLAUDE.md §7.5 #3 — the scan
+#: surface is half the rule).
+_RECORDING_SEAMS = ("record_well", "_journal_well", "_RECORD_FOR_MARKER")
 
 
 @pytest.mark.parametrize("state", J.WELL_STATES)
@@ -405,8 +474,9 @@ def test_every_well_state_is_written_by_some_caller(state):
     ``"uploaded"`` on the strength of a *phrase table* that happened to contain
     the word — a liveness test that could not fail, which is worse than none.
     Only two shapes count now: a literal handed to ``record_well`` or to the
-    one-line wrapper that forwards to it, and the values of a dict literal (the
-    ``well_stage -> state`` mapping ``analyze_progress`` looks the state up in).
+    one-line wrapper that forwards to it, and the values of a dict literal —
+    ``analyze_progress``'s stage map, and ``ProgressTracker._RECORD_FOR_MARKER``,
+    which is what a completion's third element is looked up in.
     """
     import ast
 

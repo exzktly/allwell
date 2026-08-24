@@ -8,7 +8,7 @@ between them**:
 * ``PipelineRunner._run_pipeline_thread`` opens the journal, and closes it in
   its ``finally`` the instant the pipeline subprocess exits — on the **worker**
   thread;
-* ``analyze_progress._journal_well_stage`` writes ``analysed`` when the
+* ``analyze_progress``'s ``well_stage`` branch writes ``analysed`` when the
   ``Well X … done.`` line is *parsed*, which happens on the **GUI** thread as
   ``AnalyzeTab._poll_log`` drains ``log_q`` in bounded 15 ms slices.
 
@@ -76,8 +76,9 @@ def _drain_like_the_gui(runner, tracker, out_dir, journal_stage, events) -> None
             continue
         for ev_kind, ev_payload in tracker.parse(payload):
             if ev_kind == "well_stage":
-                well, stage = ev_payload
-                journal_stage(str(well), str(stage))
+                well, stage, *record = ev_payload
+                journal_stage(str(well), str(stage),
+                              str(record[0]) if record else "")
 
 
 def _run_a_plate(tmp_path, wells, *, per_well: float):
@@ -93,10 +94,12 @@ def _run_a_plate(tmp_path, wells, *, per_well: float):
     recorded: list[tuple[str, bool]] = []
     _seen_events: list[tuple[str, object]] = []
 
-    def journal_stage(well: str, stage: str) -> None:
-        # What `analyze_progress._journal_well_stage` does, minus the widget.
-        state = {"process": "analysed", "error": "failed"}.get(stage)
-        if state is None:
+    def journal_stage(well: str, stage: str, record: str) -> None:
+        # What `analyze_progress`'s `well_stage` branch does, minus the widget.
+        # A completion states its own record word; the stage-only events are
+        # mapped, as the mixin maps them.
+        state = record or {"process": "analysed", "error": "failed"}.get(stage)
+        if not state:
             return
         recorded.append((well, bool(J.record_well(out_dir, well, state))))
 

@@ -124,3 +124,55 @@ def test_an_unwritable_home_reports_failure_rather_than_raising(monkeypatch):
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/proc/x/y")))
     assert sr.save(_run("/data/out")) is False
     assert sr.load_all() == []
+
+
+# ── a write that fails answers False; it never raises ───────────────────────
+#
+# The record carries a `spec` the caller handed in, so one unserialisable value
+# in it makes `json.dump` raise and the disk never enters into it. `_write_all`
+# caught `OSError` alone, so that `TypeError` escaped a function whose whole
+# contract is a boolean — past `analyze_suspend._suspend`'s outer handler, and
+# *before* `PipelineRunner.suspend()` was reached. The button did nothing.
+
+def _unserialisable_run(out: str):
+    known = {"output_dir": out, "input_dir": out, "suspended_at": 1.0,
+             "spec": {"opts": {"raw": object()}}, "wells_done": 0,
+             "wells_total": 0}
+    return sr.SuspendedRun(
+        **{f: known.get(f, 0) for f in sr.SuspendedRun.__dataclass_fields__})
+
+
+def test_a_spec_json_cannot_serialise_answers_false_rather_than_raising(tmp_path):
+    assert sr.save(_unserialisable_run(str(tmp_path))) is False, (
+        "save() must answer False; raising reaches _suspend's own handler, "
+        "which returns before the run is ever asked to wind down"
+    )
+
+
+def test_a_failed_write_leaves_no_staging_file_behind(tmp_path, _fake_home):
+    # Guarded so this measures the leftover rather than re-measuring the raise
+    # the test above pins: against the unfixed code `save` raises here, and an
+    # exception escaping would mask what this test is actually for.
+    try:
+        sr.save(_unserialisable_run(str(tmp_path)))
+    except Exception:                       # noqa: BLE001 — pinned above
+        pass
+    here = sr.record_path().parent
+    leftovers = sorted(p.name for p in here.glob("*")
+                       if p.name != sr.record_path().name)
+    assert leftovers == [], (
+        f"a failed write left {leftovers} behind; these are per-suspend writes, "
+        "so a plate that keeps failing silts the folder up"
+    )
+
+
+def test_a_failed_write_does_not_disturb_the_records_already_there(tmp_path):
+    sr.save(_run(str(tmp_path / "good")))
+    assert len(sr.load_all()) == 1
+    try:
+        sr.save(_unserialisable_run(str(tmp_path / "bad")))
+    except Exception:                       # noqa: BLE001 — pinned above
+        pass
+    kept = sr.load_all()
+    assert len(kept) == 1 and kept[0].output_dir == str(tmp_path / "good"), (
+        "the failed write replaced or truncated the file it could not write")

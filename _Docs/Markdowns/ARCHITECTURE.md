@@ -3287,6 +3287,42 @@ which `tests/test_layout_readout_single_source.py` enforces by requiring the
 readout label to be written from a value rather than from a hand-composed
 sentence.
 
+**One decision is not enough if the numbers in it come from somewhere else.**
+The fold-loose message names a count, and that count used to be a glob over TIF
+suffixes while the *act* goes through `plan_loose_append`, which rejects a name
+whose well token will not parse and a file already present in its target
+archive. On a folder holding one new image, one duplicate and one calibration
+frame the readout said "Will fold 3 loose TIF(s)" and the run folded one. Given
+the form's `filename_schema` / `filename_sep`, `plan_input_layout` asks that same
+planner, so preview and run cannot disagree; without them it falls back to the
+file count and says nothing it cannot support. `resolve_input_output` passes
+them too — it holds both in its own signature, and omitting them made the *run*
+recompute a schema-less plan and log the glob count, which reproduced the
+original defect on the log line instead of the readout. A folder whose loose files are
+*all* duplicates is reported as `grouped` with the reason, rather than as a fold
+of nothing.
+
+`tif_files_in` is the other half of that, and it asks `is_run_input_member`
+rather than matching a suffix, because a suffix is not a decision about whether
+a file is one of the run's images. Its glob matched `._<name>.tif`, the
+AppleDouble fork macOS writes beside every file copied to a non-HFS volume — so
+a real plate arrived with exactly twice as many "TIFs" as images — and it read
+`.tif`/`.tiff` only, so a PNG plate looked like a folder holding nothing, and it
+did not ask `is_file()`, so a dangling symlink counted as an image the zipper
+would then skip as unreadable while the deletion pass unlinked it. That count
+feeds the readout, the `tifs > 3` threshold selecting `zip_root`,
+`count_expected_wells`' fallback, and the `source_tifs` tuples the post-run
+deletion closures are built from: a predicate applied to files it is not
+entitled to judge, in the place that decides what gets deleted.
+
+The `tifs > 3` threshold moves in both directions as a result, and neither is
+hypothetical. A folder of three real images beside their three sidecars used to
+count six and clear it and now counts three and does not, so a very small plate
+copied to a non-HFS volume reports "No TIF files or in/ folder found" where it
+previously ran; a folder of PNGs used to count zero and now counts them all, so
+a plate that could not be grouped at all now can. The `> 3` cliff itself
+predates both.
+
 The actions are the layouts. A folder **named** `in` is the input directly
 (output `../out`); a folder that **contains** `in/` feeds the pipeline from that
 subfolder (output `<selected>/out`). Either way the same classification runs on
@@ -4568,7 +4604,7 @@ Small dependency-light service modules used by `analyze_tab.py`:
 |--------|------|
 | `pipeline_service.py` | `find_pipeline_script` / `build_pipeline_args` / `spawn_pipeline`. `build_pipeline_args` emits each flag only when present and non-zero (including `--stardist_tile_px` (>0 only) and `--phase_token`); it is decomposed into small table-driven emitters to satisfy the complexity ratchet, behaviour unchanged (`tests/test_pipeline_arg_validation.py`). The StarDist detection thresholds get their own emitter (`_emit_stardist_threshold_flags`) rather than the integer one: they are probabilities, and blank / `auto` / out-of-range emits nothing so the run falls back to the pretrained model's own value. |
 | `frame_preview.py` | The GUI-side StarDist inference behind the Playground's **Segment** button. Holds the session's single loaded model (`_GUI_STARDIST_MODEL`) and the `find_spec` dependency probe, and calls the pipeline's own `pipeline.stardist.segment_nuclei` — so what the Playground shows cannot disagree with what a run produces. **TF and StarDist are imported inside `segment_frame`, never at module scope**: the Playground's controller imports its worker (and through it this module) at GUI start-up, so a module-scope TF import would add tens of seconds and gigabytes to launching the app for everyone who never presses Segment. Qt-free and `well_viewer`-free, which is why it sits here rather than beside the feature that uses it. `segment_frame` takes an optional `on_stage(name)` — a plain callable, so the module stays Qt-free — and reports `STAGE_LOADING` then `STAGE_SEGMENTING`, because only the first call of a session pays the model load and a UI that reports both phases identically leaves that one looking like a hang. |
-| `pipeline_runner.py` | Asynchronous subprocess + stdout-streaming wrapper used by Analyze. Hosts `ProgressTracker`, a stateless log-line parser that turns the pipeline's stdout into structured run events — coarse `("stage", name)`, per-well `("well_stage", (well, stage))` (`upload`/`active`/`process`/`threshold`/`download`), per-well FOV sub-progress `("well_fov", (well, done, total))`, per-well transfer progress `("well_xfer", (well, "up"|"down", fraction))`, and `("zipper_well", well)` — which drive the live `RunDashboard`. `download` fires only once **both** the output zip and the well's CSV(s) have landed (a server-side threshold or a zip-only fetch must not read as "downloaded"). Well completion is counted by **identity, not by marker**: the three terminal markers (`Well X — done.`, `Well X — up to date`, `SKIP well X — output already exists`) all feed one set of finished wells, so a well announced terminal twice is counted once and reported as `("well_repeat", well)`. That matters in batched remote mode, where the pipeline is launched once per batch: a well announced terminal by one batch and again by the next drove the headline to "N / N wells (100%)" with wells still outstanding. The batches once shared a remote input directory and relied on the Fetcher having emptied it in time, which is where the repeats came from; the driver's whole-directory swap removes that particular source, and the identity-based count stays because it is the honest way to count a marker that can legitimately repeat. The announced total is a floor, never a ceiling — more distinct wells finishing than the banner promised raises it (a fresh `("well_total", n)`) rather than printing a fraction over 100%. |
+| `pipeline_runner.py` | Asynchronous subprocess + stdout-streaming wrapper used by Analyze. Hosts `ProgressTracker`, a stateless log-line parser that turns the pipeline's stdout into structured run events — coarse `("stage", name)`, per-well `("well_stage", (well, stage))` (`upload`/`active`/`process`/`threshold`/`download`) — a completion carries a third element, the word the run journal should record for that well, because the plate's `process` is deliberately lossy about whether anything was computed, per-well FOV sub-progress `("well_fov", (well, done, total))`, per-well transfer progress `("well_xfer", (well, "up"|"down", fraction))`, and `("zipper_well", well)` — which drive the live `RunDashboard`. `download` fires only once **both** the output zip and the well's CSV(s) have landed (a server-side threshold or a zip-only fetch must not read as "downloaded"). Well completion is counted by **identity, not by marker**: the three terminal markers (`Well X — done.`, `Well X — up to date`, `SKIP well X — output already exists`) all feed one set of finished wells, so a well announced terminal twice is counted once and reported as `("well_repeat", well)`. That matters in batched remote mode, where the pipeline is launched once per batch: a well announced terminal by one batch and again by the next drove the headline to "N / N wells (100%)" with wells still outstanding. The batches once shared a remote input directory and relied on the Fetcher having emptied it in time, which is where the repeats came from; the driver's whole-directory swap removes that particular source, and the identity-based count stays because it is the honest way to count a marker that can legitimately repeat. The announced total is a floor, never a ceiling — more distinct wells finishing than the banner promised raises it (a fresh `("well_total", n)`) rather than printing a fraction over 100%. |
 | `remote_manifest.py` | `_REQUIRED_REMOTE_FILES` — the one list of files a remote run needs on the worker. A data declaration with no behaviour, and it lives apart from `remote_runner` because the two guards over it pulled opposite ways: `tests/test_remote_manifest.py` requires an entry for every new `pipeline/` or `util/` module, while `REMOTE_RUNNER_BUDGET` caps the file it used to sit in — so a required entry could fail the budget, and the budget could only be met by omitting it. Here a new entry costs the runner nothing. Re-exported by `remote_runner`, so `scripts/_bootstrap_lib`, the PyInstaller spec, the manifest tests and the several `util/` and `pipeline/` docstrings that cite it by that path all keep working — with the same re-export caveat as the row below: patching the name on `remote_runner` does not reach a reader that imports it from here. |
 | `remote_transport.py` | How bytes and commands reach a remote host: what this rsync build supports (`_rsync_version` and the capability probes over it), how a path is quoted so the remote shell expands `~` rather than making a directory called it (`_remote_quote` / `_remote_join`), the retry funnel every transfer passes through (`_rsync_with_retry`, `_rsync_run_cancellable`), and the reader that turns rsync's progress chatter back into lines. Knows nothing about a *run* — no run id, no journal, no well. Re-exported by `remote_runner`, with one caveat worth knowing: a re-export is a **binding**, so a test patching one of these names on `remote_runner` does not reach a caller that also lives here. Patch `remote_transport`. |
 | `remote_run_id.py` | Where a remote run lives, and whether an earlier one's work may be reused — two questions sharing a module because they are keyed on the same facts, and every reuse defect here came from one being keyed on less than the other. `_compute_run_id` and `pipeline_argv_digest` decide the address; `_choose_remote_output_dir` decides whether a recorded one may be used instead; `remote_run_dir` / `remote_run_paths` are its single spelling. Pure — no ssh, no filesystem — which is what lets the highest-stakes predicate in the remote path be tested directly rather than through a harness. |
@@ -4580,7 +4616,7 @@ Small dependency-light service modules used by `analyze_tab.py`:
 | `ssh_key_setup.py` | Ed25519 keypair generation at `~/.ssh/allwell_<alias>` + the `ssh-copy-id` walkthrough behind the remote-host wizard. |
 | `subprocess_kill.py` | Kills a spawned pipeline's whole process group / session (what Stop uses). |
 | *(pipeline)* `settings_record.py` + `util/settings_digest.py` | Which configuration produced each well's output, recorded beside it as `<out>/.aw_settings/<WELL>.json`. `KEYED_ON` is the roster of what invalidates a prior result — the segmenter and every one of its thresholds, the channels quantified, the QC gate, both top-hat radii and FFT bands, the mesh background parameters, the flat-field and blank, the auto-threshold controls and their control wells, and the filename schema — with the reason each entry is in it; `settings_digest` hashes whatever of them a run states. **The keys are `process_microscopy.build_parser()` destinations**, because the one caller digests that parser's namespace: a key spelled any other way contributes nothing, silently, which is how the first version of the roster came to name six options that do not exist and leave fifteen real ones unkeyed. `NOT_KEYED_ON` is its complement, carrying the reason each remaining option is outside the key, so the two partition the parser exactly and a newly added option fails the suite until someone classifies it. Both of the pipeline's reuse predicates consult the record: the plain re-run skip (`well_skip.output_exists_for_well`) and the incremental done-set. Without it, re-running a plate with a different segmenter was answered "up to date" while `write_pipeline_info` rewrote the sidecar to advertise the new configuration, so the plate described a setup that had produced none of the numbers in it. The marker is written by the worker, after both the CSV and the archive are on disk and past every short circuit — a well that logged "up to date (no new FOVs)" computed nothing and must not be credited with this run's settings. A remote run's marker is written on the worker host, so `Fetcher._pull_settings_marker` brings each well's back with its output rather than the client recomputing a second copy of the digest. **A well with no recorded digest is accepted**, so introducing the check forces nobody to reprocess anything; the cost is that a plate written before the record existed keeps the old behaviour until its next forced run. The digest is deliberately blind to the paths, to `--force`/`--incremental` and to anything about the machine, so a plate computed locally and on a worker host produces the same key. Registered in `tests/test_reuse_is_keyed_completely.py`, which drives every key through `well_settings_allow_reuse` itself rather than only through the digest. |
-| `run_journal.py` | The record of what a run intended, where it sent the work, and what became of each well — opened before the first well is processed, amended as the run goes, closed with an outcome, so a record still open at the next start-up is a run the app was killed during (§6.5). Stdlib-only. Writes `<output_dir>/.aw_journal/`: `run.json` for the run and one `wells/<WELL>.json` per well, `pipeline/run_report.py`'s one-atomic-file-per-unit shape so the orchestrator, the worker pool and the Fetcher thread all record without a lock. **Evidence, never authority** — `pipeline.completeness` stays the answer to "is this well complete" and the artefacts stay the done-set, so a journal that goes missing costs answers rather than making a good dataset look empty. It drives exactly one decision, the remote re-attach above. A well record can name the run it belongs to: `open_run` returns a token, and a writer that hands it back cannot file its progress under a previous run's surviving record — which is what a run whose own `open_run` failed would otherwise do. The local path passes it (`analyze_progress._journal_well_stage`); the three remote writers do not, so they are trusted writes and that protection does not extend to them — while a run's *own* completion lines, which are parsed on the GUI thread and therefore arrive after the worker thread closed the record, are still accepted. Asking the cheaper question instead, "is a run open here", refused the tail of every plate: a 24-well run recorded four wells and the pre-run readout said so. `tests/test_a_run_end_to_end_records_every_well.py` drives a real run through a real drain and is the only test on either side of this record that does. `WELL_STATES` is the single roster of what a run can have done to a well, guarded by `tests/test_no_second_journal_vocabulary.py` — which walks dict keys as well as tuples, lists and sets, because a states-to-words table is presentation only for as long as the module holding it also consults the canonical roster; one that does not is holding its only copy, and anything iterating it drops every state it fails to spell. |
+| `run_journal.py` | The record of what a run intended, where it sent the work, and what became of each well — opened before the first well is processed, amended as the run goes, closed with an outcome, so a record still open at the next start-up is a run the app was killed during (§6.5). Stdlib-only. Writes `<output_dir>/.aw_journal/`: `run.json` for the run and one `wells/<WELL>.json` per well, `pipeline/run_report.py`'s one-atomic-file-per-unit shape so the orchestrator, the worker pool and the Fetcher thread all record without a lock. **Evidence, never authority** — `pipeline.completeness` stays the answer to "is this well complete" and the artefacts stay the done-set, so a journal that goes missing costs answers rather than making a good dataset look empty. It drives exactly one decision, the remote re-attach above. A well record can name the run it belongs to: `open_run` returns a token, and a writer that hands it back cannot file its progress under a previous run's surviving record — which is what a run whose own `open_run` failed would otherwise do. The local path passes it (`analyze_progress._journal_well`); the remote writers — `_record_remote_in_journal` and the Fetcher's three `record_well` calls — do not, so they are trusted writes and that protection does not extend to them. The consequence is worth stating rather than leaving implied: on a *remote* run whose own `open_run` failed, those four still write into whatever record survives in that directory, which in that exact scenario is the previous run's, still open because the index is holding it for resume. Measured: run 2's remote address and its uploaded wells land inside run 1's record. Re-attach is keyed on the cache key and would therefore decline, so no wrong numbers follow — but run 1's tally and per-well detail are corrupted, and its resume offer describes a run that did not produce them — while a run's *own* completion lines, which are parsed on the GUI thread and therefore arrive after the worker thread closed the record, are still accepted. Asking the cheaper question instead, "is a run open here", refused the tail of every plate: a 24-well run recorded four wells and the pre-run readout said so. `tests/test_a_run_end_to_end_records_every_well.py` drives a real run through a real drain and is the only test on either side of this record that does. `WELL_STATES` is the single roster of what a run can have done to a well, guarded by `tests/test_no_second_journal_vocabulary.py` — which walks dict keys as well as tuples, lists and sets, because a states-to-words table is presentation only for as long as the module holding it also consults the canonical roster; one that does not is holding its only copy, and anything iterating it drops every state it fails to spell. |
 
 These modules deliberately have no Qt imports beyond what the Analyze tab
 itself uses — keeping them potentially reusable for a CLI driver.
@@ -4792,6 +4828,73 @@ deliberately disjoint from `completeness.HEALTH_STATES` so the two vocabularies
 cannot be mistaken for each other; `tests/test_no_second_journal_vocabulary.py`
 fails on a second literal roster anywhere in the tree.
 
+**What "finished" means depends on where the run happened**, so the tally that
+renders those states comes in two groupings and the run's own `mode` picks one.
+`analysed` is written from the pipeline's stdout and means the same thing
+locally and remotely — *the pipeline announced this well finished* — but locally
+the CSV and out-zip are on disk the moment that line prints, while remotely they
+are on the host and only `fetched` says they arrived. `TALLY_GROUPS_LOCAL` files
+`analysed` under "finished"; `TALLY_GROUPS_REMOTE` gives it a heading of its own,
+because a remote run that died before reconciliation otherwise told the user a
+well was finished when nothing of it had reached their machine. The roster
+liveness test covers both groupings: adding a state to one and not the other is
+the same silent omission with a mode attached.
+
+**A well this run did not compute is recorded as one it did not compute.** Three
+markers reach `ProgressTracker._count_well_done` — `— done.`, `up to date` (an
+incremental well with no new FOVs) and `SKIP … output already exists` (a re-run
+without `--force`) — and all three mean the well is complete, which is why they
+share a counter and why the plate is told `process` for all three. Only the first
+means anything was computed, so the other two carry `skipped` for the journal:
+without that, an incremental run that touched 6 of 96 wells recorded 96
+`analysed` and the readout said "It recorded 96 finished".
+
+The record's word rides inside the completion event, as a third element beside
+the well and the stage, and both halves of that shape are load-bearing. The
+stage stays `process` because `RunDashboard.set_well_stage` ignores any stage
+outside its own roster — sending it the record's word would have stopped those
+wells being marked done, trading a wrong record for a wrong picture. And it is
+*one* event rather than two because `PipelineRunner._enqueue` drops anything
+outside `_CONTROL_KINDS` when the queue is full, individually: a completion
+split across two messages loses "nothing was computed" while keeping "this well
+is finished", which is the same wrong record arriving by way of the transport.
+Stage-only events — `error`, `upload`, `download` — still carry no third
+element and are mapped by `AnalyzeProgressMixin._JOURNAL_STAGES`.
+
+**One surface offers any given unfinished run.** `RunJournal.queued` and
+`SuspendedRun.queued` record that the job queue started it, written by
+`open_run` and by `_suspend` respectively, and the Analyze pane's banner skips
+both. Suspending a queue-driven job closes its journal `suspended`, which is
+exactly what `is_unfinished` is for, so the banner offered the plate the moment
+`_running` cleared while the queue still held the job — resume from the banner,
+let the queue start, and the same plate runs twice concurrently into one output
+directory.
+
+**Both** records carry the flag, and that is not belt-and-braces. A suspend
+writes both pointers, and `_resumable` ranks the suspend record *ahead* of the
+journal offer for the folder on the form — so filtering the journal alone left
+the offer standing, unchanged, sourced from the record that was still saying
+yes.
+
+**Dismissing an offer is not a claim that the plate finished.** Discard calls
+`run_journal.dismiss`, which flags the index entry; it used to call `forget`,
+which deletes it. The entry is read by two things with opposite intents (§7.7
+#1): the banner, which honours the dismissal, and `resume_aware_spec`, which
+reads `unfinished_runs()` to decide whether the next Run must be
+`--incremental`. Deleting it therefore disarmed the mid-flight-well recovery as
+a side effect of closing a banner — the user who said "I know, I'll just re-run
+it" got the permanently-3-of-12 plate the forcing exists to prevent, with
+nothing said, while the record on disk still stated the plate was unfinished. A
+*new* run of the same directory clears the flag, because `_index_upsert` builds
+a fresh entry: the dismissal was about the run that had been offered.
+
+**The resume message names the cause it found.** `resume_aware_spec` fires on
+every outcome in `UNFINISHED_OUTCOMES` plus a record left open, which is four
+different events — a suspend, a stop, a failure, and an app that was killed. One
+sentence saying "a suspended run" was true of a quarter of them (§7.7 #4), so
+`_input_has_unfinished_work` answers with the phrase rather than a boolean, and
+the line names Force as the way to decline.
+
 **Nothing is written on the worker host.** `services/run_journal.py` is not in
 `_REQUIRED_REMOTE_FILES`, so the module never reaches the remote and the pipeline
 there cannot call it even by accident; the journal is written entirely on the
@@ -4813,8 +4916,9 @@ single appended log:
 | The run begins, output dir now known | `open_run` | `PipelineRunner._run_pipeline_thread` | worker |
 | The remote address is decided | `record_remote` | `RemoteRunner.spawn`, and the batched path | worker |
 | A well's archive finished uploading | `uploaded` | `upload_subset`, after that rsync returns | worker |
-| The pipeline said a well is done | `analysed` | `ProgressTracker` → `AnalyzeProgressMixin._journal_well_stage` | GUI |
-| The pipeline said a well failed | `failed` | the same tracker, error stage | GUI |
+| The pipeline said a well is done and computed it | `analysed` | `ProgressTracker._count_well_done` → the completion event's third element | GUI |
+| The pipeline said a well is done and computed nothing | `skipped` + reason | the same event, third element `skipped` | GUI |
+| The pipeline said a well failed | `failed` | the same tracker's error stage, via `AnalyzeProgressMixin._journal_well_stage` | GUI |
 | A well's output was pulled back | `fetched` | `Fetcher._fetch_one` | Fetcher |
 | A well needed no transfer | `skipped` + reason | `Fetcher._already_local` | Fetcher |
 | The end-of-run retry ran | `fetched` / `not-fetched` | `RemoteRunner._retry_missing_wells` | worker |
@@ -5142,10 +5246,19 @@ truncates the destination the instant it opens, so anything that interrupts the
 write leaves a file that is neither the old content nor the new one — and for
 `pipeline_info.json` that is the user's gating, sample definitions, ratios and
 notes gone at once, which is precisely what the tools rewriting it exist to
-preserve. Two specialised versions stay: `well_viewer.persistence._io.atomic_write_json`
-wraps both the open and the replace in a retry for Windows `PermissionError`,
-and `services.run_journal._atomic_write_json` returns `False` instead of raising,
-because a run that cannot write its own bookkeeping must still produce data.
+preserve. One specialised version stays: `well_viewer.persistence._io.atomic_write_json`
+wraps both the open and the replace in a retry for Windows `PermissionError`.
+The two bookkeeping records — the run journal and the suspended-run pointer —
+need a return value rather than an exception, because a run that cannot write its
+own bookkeeping must still produce data; that is one line of difference, so it is
+`util.json_write.try_write_json_atomic` rather than a copy in each of them. They
+had a copy each once and the copies diverged in both available directions: one
+caught the `TypeError` a caller-supplied `spec` raises and the other did not, and
+one removed its staging file on failure and the other did not. The second gap was
+not cosmetic — `suspend_record.save` raising escaped a function whose contract is
+a boolean, into `_suspend`'s own handler, which returns *before*
+`PipelineRunner.suspend()` is reached, so the Suspend button did nothing at all
+and said nothing about it.
 `tests/test_dataset_tool_integrity.py` scans every application source file
 (`tests/_repo_scan.python_sources`) for the shapes that truncate a destination:
 `write_text` / `write_bytes` of a serialised payload, including one bound to a

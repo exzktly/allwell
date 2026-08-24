@@ -108,6 +108,12 @@ class AnalyzeSuspendMixin:
         stopped, which the user can decline; the other order risks a run that
         winds down having left nothing behind to resume it with.
 
+        First does not mean *conditional on*. The record is a pointer to the
+        output folder, and the output folder is the work — so a record that
+        cannot be written costs the resume banner and nothing else, and the
+        run must still wind down. That is why the write has a scope of its own
+        below rather than sharing this method's handler.
+
         Never lets an exception escape — PySide6 ≥ 6.5 aborts the process on an
         unhandled exception out of a Qt slot, and this one is reached from a
         button the user presses precisely when they want the work kept.
@@ -122,7 +128,13 @@ class AnalyzeSuspendMixin:
                     "This run has not resolved its output folder yet — there is "
                     "nothing to resume from. Use Stop to cancel it.")
                 return
-            self._write_suspend_record(out_dir)
+            # The record is best-effort; winding the run down is not. Anything
+            # escaping the record write used to land in this method's own
+            # handler, which returns — so the run carried on, and the button
+            # the user pressed precisely to keep their work did nothing and
+            # said nothing. Its own scope keeps the two independent.
+            with swallow("writing the suspend record"):
+                self._write_suspend_record(out_dir)
             self._runner.suspend()
             self._log_line(
                 "\n[Suspending] Finishing the FOV-group(s) already in flight, "
@@ -145,6 +157,11 @@ class AnalyzeSuspendMixin:
             input_dir=self._input_edit.text().strip(),
             output_dir=str(out_dir),
             suspended_at=time.time(),
+            # Both pointers carry it, because a suspend writes both. Filtering
+            # the journal offer and not this one left the banner offering a
+            # plate the queue still held — and `_resumable` puts the suspend
+            # record *first* for the current folder, so the unfiltered one won.
+            queued=bool(getattr(self._runner, "journal_queued", False)),
             wells_done=int(getattr(self, "_well_done", 0) or 0),
             wells_total=int(getattr(self, "_well_total", 0) or 0),
         )
@@ -265,6 +282,13 @@ class AnalyzeSuspendMixin:
         """
         if current is None:
             current = self._current_output_dir()
+        if current == self.UNRESOLVED:
+            # The form names an input this cannot resolve. That is not "no
+            # folder named": falling through would rank every unfinished run
+            # on record and offer the newest, described as though it were the
+            # plate on screen, and accepting it would start an incremental run
+            # against another dataset's output directory.
+            return None
         # Filtering by folder *before* reading anything is the point: the index
         # holds an entry per plate ever run, and reading every one of their
         # journals to then discard all but one turned a keystroke into a
@@ -287,8 +311,28 @@ class AnalyzeSuspendMixin:
                             key=lambda o: (-o.at, o.from_journal))
         return offers[0] if offers else None
 
+    #: `_current_output_dir`'s answer when the form names an input it cannot
+    #: resolve. Distinct from `""`, which means "the form names nothing at
+    #: all" — see `_current_output_dir` for why conflating them offered the
+    #: user a different plate.
+    UNRESOLVED = "\x00unresolved"
+
     def _current_output_dir(self) -> str:
-        """The output folder the form is pointing at, or ``""``.
+        """The output folder the form is pointing at.
+
+        Three answers, not two. ``""`` means the field is empty and the user
+        has named nothing; :data:`UNRESOLVED` means they named something this
+        cannot turn into an output folder — a path that does not exist, a
+        volume that has gone away, a planner that raised; and anything else is
+        the folder.
+
+        Collapsing the middle case into ``""`` is what made the resume banner
+        dangerous. ``_resumable`` reads ``""`` as "no folder named, so offer
+        the newest unfinished run *anywhere*" — which is right for an empty
+        form and wrong for a typo'd path, where it offered a resume for a
+        completely different plate, described in the banner as though it were
+        the one on screen. Accepting it would have started an incremental run
+        against another dataset's output directory.
 
         Read through the same planner the readout and the run both use, so
         "which folder is on screen" cannot come to mean two things.
@@ -298,15 +342,25 @@ class AnalyzeSuspendMixin:
             raw = self._input_edit.text().strip()
         if not raw:
             return ""
+        resolved = self.UNRESOLVED
         with swallow("resolving the output folder for the resume banner"):
             from services.input_resolution_service import plan_input_layout
 
             plan = plan_input_layout(Path(raw))
-            return str(plan.output_dir) if plan.output_dir is not None else ""
-        return ""
+            if plan.output_dir is not None:
+                resolved = str(plan.output_dir)
+        return resolved
 
     def _suspended_offers(self, *, only_dir: str = "") -> list[_Resumable]:
-        """Suspended runs on record, newest first; one folder's when named."""
+        """Suspended runs on record, newest first; one folder's when named.
+
+        A run the job queue started is skipped for the same reason
+        :meth:`_journal_offers` skips one: the queue's own entry is already
+        offering it, and resuming here while the queue still holds the job runs
+        the same plate twice, concurrently, into one output directory. Both
+        records have to be filtered, not one — a suspend writes both, and this
+        is the one `_resumable` ranks first for the current folder.
+        """
         return [
             _Resumable(
                 spec=run.spec,
@@ -319,7 +373,8 @@ class AnalyzeSuspendMixin:
                 at=float(getattr(run, "suspended_at", 0.0) or 0.0),
             )
             for run in load_all()
-            if not only_dir or same_dir(run.output_dir, only_dir)
+            if not run.queued
+            and (not only_dir or same_dir(run.output_dir, only_dir))
         ]
 
     def _journal_offers(self, *, only_dir: str = "") -> list[_Resumable]:
@@ -338,6 +393,20 @@ class AnalyzeSuspendMixin:
             # An index entry outlives the folder it names — a deleted or moved
             # output directory must not produce a banner offering to resume it.
             if journal is None or not journal.spec or not journal.is_unfinished:
+                continue
+            if entry.get("dismissed"):
+                # The user has closed this offer. That is a statement about the
+                # banner; the entry stays unfinished so the incremental
+                # recovery still fires on the next Run.
+                continue
+            if journal.queued:
+                # The job queue started this run, so the queue's own entry is
+                # already offering it. Offering it here too let a user resume
+                # from the banner while the queue still held the job, and the
+                # same plate then ran twice, concurrently, into one output
+                # directory. Suspending from the queue is the case that reaches
+                # this: the journal is closed ``suspended``, which is exactly
+                # what ``is_unfinished`` is for.
                 continue
             offers.append(_Resumable(
                 spec=journal.spec,
@@ -358,14 +427,32 @@ class AnalyzeSuspendMixin:
         return journal.tally() if journal is not None else ""
 
     def _forget_resumable(self, offer: _Resumable) -> None:
-        """Stop offering *offer*, whichever record it came from.
+        """Stop offering *offer* — from **both** records, not the one it came from.
 
-        Neither branch deletes anything the run produced: the output folder is
-        the work, and this drops only the pointer that keeps asking about it.
+        Neither call deletes anything the run produced: the output folder is
+        the work, and these drop only the pointers that keep asking about it.
+
+        There are two pointers and a plate can carry both. A run that was
+        suspended writes a suspend record *and* leaves a journal entry, so
+        dropping only the one the offer happened to be built from left the
+        other behind: Discard cleared the banner, the next refresh read the
+        surviving record, and the banner came straight back. The user's answer
+        was recorded against one bookkeeping file and the question was being
+        asked by two.
+
+        `from_journal` still decides which record *sourced* the offer — that is
+        what the banner's wording depends on — but it is not a claim that the
+        other record does not exist.
         """
-        if offer.from_journal:
-            run_journal.forget(offer.output_dir)
-        else:
+        with swallow(f"dropping the journal offer for {offer.output_dir}"):
+            # ``dismiss``, not ``forget``. The index entry is what
+            # ``unfinished_runs`` returns, and ``resume_aware_spec`` reads that
+            # to decide whether the next Run must be incremental — so deleting
+            # it here made Discard silently disarm the recovery, and the user
+            # who dismissed the offer and pressed Run got the permanently
+            # 3-of-12 plate the forcing exists to prevent.
+            run_journal.dismiss(offer.output_dir)
+        with swallow(f"dropping the suspend record for {offer.output_dir}"):
             clear(offer.output_dir)
 
     def _on_run_settled(self) -> None:
@@ -392,8 +479,60 @@ class AnalyzeSuspendMixin:
         except Exception:
             swallowed()
 
+    #: How a previous run of the same input ended, in the words the resume
+    #: message uses. The journal's `UNFINISHED_OUTCOMES` are three different
+    #: events, and a line that says "suspended" about a run that *failed* is a
+    #: statement the user can check and find untrue.
+    _UNFINISHED_CAUSE = {
+        "suspended": "a suspended run",
+        "stopped": "a run that was stopped part-way",
+        "error": "a run that failed part-way",
+        None: "a run that never finished — the app was killed while it went",
+    }
+
+    def _input_has_unfinished_work(self, raw_input: str) -> str | None:
+        """How *raw_input*'s last unfinished run ended, or ``None`` if none did.
+
+        A phrase rather than a boolean, because the caller puts it in a sentence.
+        Widening this from the suspend record to the journal widened the set of
+        *causes* with it — an open record means the app was killed, and a closed
+        one can say `error` or `stopped` as easily as `suspended` — and one
+        message naming only the last of those is true a quarter of the time.
+
+        The journal's index is keyed on the *output* directory, so the input it
+        was run against is read from the journal in that directory rather than
+        inferred: an output directory can be re-pointed between runs, and
+        guessing one from the other is how a resume gets offered for a
+        different plate.
+        """
+        from services import run_journal as _journal
+
+        if any(same_dir(r.input_dir, raw_input) for r in load_all()):
+            return self._UNFINISHED_CAUSE["suspended"]
+        for entry in _journal.unfinished_runs():
+            out = str(entry.get("output_dir") or "")
+            if not out:
+                continue
+            with swallow(f"reading the run journal in {out}"):
+                rec = _journal.read_journal(out)
+                if rec is not None and rec.input_dir and same_dir(
+                        rec.input_dir, raw_input):
+                    # ``None`` is the *record left open* case, and it is
+                    # keyed on the record being open rather than reached as a
+                    # fallback: an outcome outside the roster — an index entry
+                    # that still reads unfinished while the record on disk says
+                    # something else — would otherwise be described to the user
+                    # as "the app was killed while it went", which is a
+                    # specific, checkable claim about a thing that did not
+                    # happen. Whole point of the change was to stop saying one.
+                    if not rec.outcome:
+                        return self._UNFINISHED_CAUSE[None]
+                    return self._UNFINISHED_CAUSE.get(
+                        rec.outcome, "a run that did not finish")
+        return None
+
     def resume_aware_spec(self, spec: RunSpec) -> RunSpec:
-        """Force incremental when this spec's input has a suspended run behind it.
+        """Force incremental when this spec's input has an unfinished run behind it.
 
         The Job Queue re-runs a job from its stored spec, and that spec has no
         ``incremental`` in it — the flag is not a form field, it is set by
@@ -409,20 +548,32 @@ class AnalyzeSuspendMixin:
         Matching is on the input directory, which is what the record stores and
         what ``opts["raw"]`` carries, and is exactly the identity the queue
         preserves when it re-runs a job.
+
+        **Two records, not one.** ``suspend_record`` holds the runs the user
+        wound down deliberately; the run journal holds every run that did not
+        finish, including the ones nobody was there to record — an app that was
+        killed, a machine that lost power, a crash. Asking only the suspend
+        record meant the killed case, the one no artefact can report because a
+        killed run and a run that simply processed fewer wells leave identical
+        output, never got ``incremental`` and so left every half-finished well
+        skipped as complete for ever. That is the defect this is for; the
+        suspend case was only the half that already had a record.
         """
         try:
             raw = str((spec.opts or {}).get("raw") or "").strip()
             if not raw or spec.opts.get("incremental"):
                 return spec
-            if not any(same_dir(r.input_dir, raw) for r in load_all()):
+            cause = self._input_has_unfinished_work(raw)
+            if cause is None:
                 return spec
             opts = dict(spec.opts)
             opts["incremental"] = True
             self._log_line(
-                "[resume] This input has a suspended run behind it — processing "
-                "incrementally, so wells that were part-way through when it was "
-                "suspended recover their missing field/timepoint groups instead "
-                "of being skipped as complete.\n",
+                f"[resume] This input has {cause} behind it — processing "
+                "incrementally, so wells that were part-way through recover "
+                "their missing field/timepoint groups instead of being skipped "
+                "as complete. Tick Force to recompute the plate from scratch "
+                "instead.\n",
                 "INFO",
             )
             return RunSpec(

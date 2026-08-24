@@ -16,13 +16,20 @@ Sitting in ``util`` puts it where every layer can reach it: ``datasets/``,
 import from here, and it pulls in nothing but the standard library and
 ``util.aw_safe``.
 
-Two specialised versions remain on purpose, and neither is a copy of this rule.
+One specialised version remains on purpose, and it is not a copy of this rule:
 ``well_viewer.persistence._io.atomic_write_json`` wraps *both* the open and the
 replace in a retry for Windows ``PermissionError`` (an antivirus scanner or a
 cloud-sync client holding the handle), which is a different control flow rather
-than an argument. ``services.run_journal._atomic_write_json`` returns ``False``
-instead of raising, because a run that cannot write its own bookkeeping must
-still produce data.
+than an argument.
+
+The bookkeeping records — the run journal in the output folder and the
+suspended-run pointer in ``~/.allwell`` — need a return value rather than an
+exception, because a run that cannot write its own bookkeeping must still
+produce data. That is one line of difference, not a second rule, so it is
+:func:`try_write_json_atomic` here rather than a copy in each of them. They had
+a copy each once, and the copies diverged in both of the available directions:
+one caught the ``TypeError`` a caller-supplied ``spec`` can raise and the other
+did not, and one removed its staging file on failure and the other did not.
 """
 
 from __future__ import annotations
@@ -120,3 +127,34 @@ def _carry_mode(dest: Path, staging: str) -> None:
         # Some filesystems (a few network mounts, and Windows for the group and
         # other bits) refuse chmod. The write itself is still correct.
         swallowed(f"write_json_atomic: could not set the mode on {staging}")
+
+
+def try_write_json_atomic(path: Path | str, data: Any, *,
+                          what: str = "record", indent: int = 2,
+                          durable: bool = True) -> bool:
+    """:func:`write_json_atomic`, answering ``False`` instead of raising.
+
+    For the two records that describe work already done — the run journal and
+    the suspended-run pointer. Neither is the user's data: the outputs are the
+    authoritative account of what a run produced, so a failed write must cost a
+    log line and nothing more.
+
+    *what* names the record in that log line, so a reader can tell a journal
+    write from a suspend-record write without a traceback.
+
+    The exception list is not defensive breadth. ``OSError`` is the filesystem;
+    ``TypeError`` and ``ValueError`` are ``json.dump`` refusing a payload, which
+    is a live case here rather than a hypothetical one — both records carry a
+    ``spec`` handed in by the caller, and one unserialisable value in it raises
+    from the serialiser with the disk never involved. The copy in
+    ``suspend_record`` caught ``OSError`` alone, so such a spec raised out of a
+    function whose whole contract is a boolean, past ``_suspend``'s outer
+    handler and *before* ``PipelineRunner.suspend()`` was reached: the Suspend
+    button did nothing at all and said nothing about it.
+    """
+    try:
+        write_json_atomic(path, data, indent=indent, durable=durable)
+        return True
+    except (OSError, TypeError, ValueError):
+        swallowed(f"could not write the {what} at {path}")
+        return False

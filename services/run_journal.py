@@ -56,14 +56,13 @@ read it without the GUI.
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from services.remote_config import default_state_dir
-from util.aw_safe import swallow, swallowed
+from util.json_write import try_write_json_atomic
+from util.aw_safe import swallowed
 
 #: Bumped when the on-disk shape changes incompatibly. A record written by any
 #: other version reads as "no journal" rather than raising — see
@@ -124,8 +123,28 @@ _WELL_STAGE_ORDER = {
 #: roster guard exists to prevent. Two surfaces render this (the resume banner
 #: and the pre-run readout) and both had their own copy, which between them
 #: dropped ``uploaded`` and ``skipped``.
-TALLY_GROUPS = (
+#: ...and what "finished" means depends on where the run happened, which is why
+#: there are two of these rather than one. ``analysed`` is written from the
+#: pipeline's own stdout by ``analyze_progress``, on a local and a remote run
+#: alike, and it means the same thing in both: *the pipeline announced this well
+#: finished*. Where it ran is what differs. Locally the CSV and the out-zip are
+#: on disk the moment that line is printed, so the well is done. Remotely they
+#: are on the host, and only ``fetched`` says they arrived — so filing
+#: ``analysed`` under "finished" told a user whose remote run died before
+#: reconciliation that a well was finished when nothing of it had reached their
+#: machine. That is the one distinction the journal exists to draw, erased in
+#: the sentence that reports it.
+TALLY_GROUPS_LOCAL = (
     ("finished", ("analysed", "fetched")),
+    ("failed", ("failed",)),
+    ("never fetched", ("not-fetched",)),
+    ("skipped", ("skipped",)),
+    ("uploaded only", ("uploaded",)),
+)
+
+TALLY_GROUPS_REMOTE = (
+    ("finished", ("fetched",)),
+    ("computed remotely but not downloaded", ("analysed",)),
     ("failed", ("failed",)),
     ("never fetched", ("not-fetched",)),
     ("skipped", ("skipped",)),
@@ -184,6 +203,13 @@ class RunJournal:
     argv: tuple[str, ...]
     spec: dict
     remote: dict
+    #: Whether the job queue started this run and therefore owns resuming it.
+    #: Two surfaces offer an unfinished run — the Analyze pane's banner and the
+    #: queue's own entry — and a run started from the queue is on both lists
+    #: unless one of them is told. Resuming from the banner while the queue
+    #: still holds the job runs the same plate twice, concurrently, into one
+    #: output directory.
+    queued: bool = False
     wells: dict[str, WellRecord] = field(default_factory=dict)
 
     @property
@@ -222,8 +248,16 @@ class RunJournal:
         surface because the grouping is a statement about ``WELL_STATES``, and
         the two surfaces that render it had drifted into dropping two states
         between them.
+
+        The grouping is chosen by this run's ``mode``: see
+        :data:`TALLY_GROUPS_REMOTE`. A remote run that died before it
+        reconciled has wells the host finished and this machine never received,
+        and calling those "finished" is the distinction the journal exists for,
+        deleted in the one sentence that reports it.
         """
-        parts = [f"{n} {label}" for label, states in TALLY_GROUPS
+        groups = (TALLY_GROUPS_REMOTE if str(self.mode).startswith("remote")
+                  else TALLY_GROUPS_LOCAL)
+        parts = [f"{n} {label}" for label, states in groups
                  if (n := len(self.wells_in(*states)))]
         return f" It recorded {', '.join(parts)}." if parts else ""
 
@@ -258,36 +292,11 @@ def _atomic_write_json(path: Path, payload: dict | list) -> bool:
     """Replace *path* with *payload*, atomically. ``False`` on any failure.
 
     A run that cannot write its own bookkeeping must still produce data, so
-    every caller here treats the return value as advisory and carries on.
+    every caller here treats the return value as advisory and carries on. The
+    implementation is shared with the suspended-run record — the two had a copy
+    each and the copies had diverged; see ``util.json_write``.
     """
-    tmp = ""
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp_",
-                                   suffix=".json")
-        with os.fdopen(fd, "w") as fh:
-            json.dump(payload, fh, indent=2)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, path)
-        return True
-    except (OSError, TypeError, ValueError):
-        # ``TypeError`` and ``ValueError`` are not hypothetical here: the
-        # payload carries a ``spec`` handed in by the caller, and one
-        # unserialisable value in it makes ``json.dump`` raise rather than the
-        # filesystem. Catching only ``OSError`` let that escape a function
-        # whose whole contract is that bookkeeping never fails a run, past
-        # callers that guard the same narrow type, and into the worker thread.
-        swallowed(f"could not write the run journal at {path}")
-        return False
-    finally:
-        # ``mkstemp`` created a file; every failure after that point leaves it
-        # behind, and these are per-run and per-well writes, so a plate that
-        # keeps failing would silt the output folder up with ``.tmp_*.json``.
-        # ``os.replace`` consumed it on the success path, hence ``missing_ok``.
-        if tmp:
-            with swallow(f"could not remove the temporary journal file {tmp}"):
-                Path(tmp).unlink(missing_ok=True)
+    return try_write_json_atomic(path, payload, what="run journal")
 
 
 def _read_run_payload(output_dir: Path | str) -> dict | None:
@@ -308,6 +317,7 @@ def open_run(
     mode: str,
     input_dir: Path | str,
     argv: list[str] | tuple[str, ...] = (),
+    queued: bool = False,
 ) -> float | None:
     """Record that a run has begun, before it does any work.
 
@@ -336,6 +346,9 @@ def open_run(
     An unrecognised *mode* is refused rather than written, like an unrecognised
     well state: every surface that renders this record words the run by its
     mode, and one nobody spells is a run described as neither local nor remote.
+
+    ``queued`` records that the job queue started this run, which decides who
+    may offer to resume it — see :attr:`RunJournal.queued`.
     """
     if mode not in RUN_MODES:
         raise ValueError(
@@ -356,6 +369,7 @@ def open_run(
         "argv": [str(a) for a in argv],
         "spec": spec if isinstance(spec, dict) else {},
         "remote": carried if isinstance(carried, dict) else {},
+        "queued": bool(queued),
     }
     ok = _atomic_write_json(_run_path(output_dir), payload)
     # Only once the new record is on disk. Clearing first meant a write that
@@ -521,15 +535,28 @@ def close_run(
     *,
     outcome: str,
     message: str = "",
+    run_token: float | None = None,
 ) -> bool:
     """Close the record with how the run ended.
 
     Until this lands the record reads as open, which after a restart is how the
     app knows a run died rather than finished. So it must run on **every** exit
     the app survives — success, failure, Stop and Suspend alike.
+
+    *run_token* mirrors :func:`record_well`'s refusal and exists for the same
+    reason. ``open_run``'s write is allowed to fail, and when it does the
+    previous run's ``run.json`` is what remains on disk. Without the check this
+    run's ending is written over *that* run's record: a run the app was killed
+    during, which the index is holding open precisely so it can be offered for
+    resume, is closed as `ok` by the next run's exit — and the offer disappears
+    for a plate that never finished. Passing ``None`` keeps the old behaviour
+    for a caller that has no token, which is the honest reading of "I cannot
+    tell which run this is".
     """
     payload = _read_run_payload(output_dir)
     if payload is None:
+        return False
+    if run_token is not None and float(payload.get("opened_at") or 0.0) != run_token:
         return False
     closed_at = time.time()
     payload["closed_at"] = closed_at
@@ -579,6 +606,7 @@ def read_journal(output_dir: Path | str) -> RunJournal | None:
         argv=tuple(str(a) for a in (payload.get("argv") or [])),
         spec=payload.get("spec") if isinstance(payload.get("spec"), dict) else {},
         remote=payload.get("remote") if isinstance(payload.get("remote"), dict) else {},
+        queued=bool(payload.get("queued")),
         wells=_read_wells(output_dir),
     )
 
@@ -714,6 +742,12 @@ def unfinished_runs() -> list[dict]:
 
     The entry alone is not enough to act on — read the journal in the named
     directory for the spec and the per-well detail.
+
+    A **dismissed** entry is still here, deliberately. Dismissing is a statement
+    about the banner and not about the plate, and this list is read for both —
+    by the offer, which honours the dismissal, and by the incremental-recovery
+    check, which must not (see :func:`dismiss`). Callers that are deciding
+    whether to *offer* filter on ``dismissed`` themselves.
     """
     entries = [
         e for e in _load_index()
@@ -726,9 +760,8 @@ def unfinished_runs() -> list[dict]:
 def forget(output_dir: Path | str) -> bool:
     """Drop *output_dir*'s index entry, leaving the journal itself in place.
 
-    Called when the user has been shown an interrupted run and dealt with it,
-    so the same banner does not reappear for ever. The journal stays because it
-    is the dataset's provenance; only the "look at this" pointer goes.
+    For a run there is genuinely nothing more to say about. Dismissing a banner
+    is **not** that — see :func:`dismiss`.
     """
     from services.suspend_record import same_dir
 
@@ -736,3 +769,35 @@ def forget(output_dir: Path | str) -> bool:
     keep = [e for e in _load_index()
             if not same_dir(str(e.get("output_dir")), target)]
     return _atomic_write_json(index_path(), keep)
+
+
+def dismiss(output_dir: Path | str) -> bool:
+    """Stop offering *output_dir*, without claiming its run finished.
+
+    Discard used to call :func:`forget`, which drops the entry — and the entry
+    is what :func:`unfinished_runs` reads, which is what
+    ``resume_aware_spec`` asks before forcing ``--incremental``. So dismissing
+    the banner silently disarmed the recovery: a user who said "I know, I'll
+    just re-run it" and pressed Run got the permanently-3-of-12 outcome the
+    forcing exists to prevent, with nothing said, while the record on disk still
+    stated the plate was unfinished.
+
+    They are two different statements. "Do not ask me about this again" is about
+    the banner; "this run did not finish" is about the plate, and only the run
+    itself may retract that. The entry stays and stays unfinished; it carries a
+    flag the *offer* reads and the *recovery* does not.
+
+    A **new run** of the same output directory clears it, because
+    :func:`_index_upsert` builds a fresh entry rather than amending the old one.
+    That is the wanted behaviour and not an accident of the write: the dismissal
+    was about the run that had just been offered, and a later run of the same
+    plate is a different thing to be asked about.
+    """
+    from services.suspend_record import same_dir
+
+    target = str(output_dir)
+    entries = _load_index()
+    for e in entries:
+        if same_dir(str(e.get("output_dir")), target):
+            e["dismissed"] = True
+    return _atomic_write_json(index_path(), entries)

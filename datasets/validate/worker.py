@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QThread, Signal
 
+from pipeline import completeness
 from util.aw_safe import swallowed
 from datasets.validate.apply import RepairResult, apply_repairs
 from datasets.validate.record import write_record
@@ -140,6 +141,6 @@ class ValidateWorker(QThread):
         totals = block.get("totals") or {}
         self.logLine.emit(
             f"Recorded into pipeline_info.json — {totals.get('complete', 0)} of "
-            f"{totals.get('wells', 0)} well(s) complete. Review's Home page "
-            "reports this."
+            f"{completeness.plate_total(totals)} well(s) complete. Review's "
+            "Home page reports this."
         )

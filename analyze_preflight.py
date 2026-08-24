@@ -68,6 +68,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 from services import run_journal
 from services.input_resolution_service import plan_incremental_scope
+from pipeline import completeness
 from well_viewer.core.safe import swallow, swallowed
 
 #: How long the input field must stay still before anything touches the disk.
@@ -297,8 +298,39 @@ class AnalyzePreflightMixin:
             head = f"The last run here started {when} and {ended}."
         return head + journal.tally()
 
+    def _preflight_is_wanted(self) -> bool:
+        """Whether the report may be on screen at all, right now.
+
+        Two states forbid it, and both are answers the user has already given:
+        a run is going, so the report describes a folder this run is in the
+        middle of making untrue (:meth:`suspend_preflight`); or they closed the
+        strip for this folder, and it must stay closed until they point
+        somewhere else.
+        """
+        if getattr(self, "_running", False):
+            return False
+        target = self._preflight_dir
+        dismissed = getattr(self, "_preflight_dismissed", "")
+        return not (target and dismissed and _same(dismissed, target))
+
     def _render_preflight(self, headline: str) -> None:
-        """Paint the banner, coverage line included when one has arrived."""
+        """Paint the banner, coverage line included when one has arrived.
+
+        The visibility gates are asked here rather than by each caller because
+        this is the only place the strip is shown, and the callers are not all
+        immediate: a coverage scan walks the output volume on a worker thread
+        and lands whenever it lands. ``settle_folder_banners`` checked both
+        gates and this did not, so a scan of a slow volume that started before
+        Run was pressed came back five seconds into the run and put the strip
+        up describing the folder the running job was overwriting — the exact
+        thing ``suspend_preflight``'s docstring says must not happen — and a
+        strip the user had dismissed came back the same way, with no second
+        dismissal available because the banner had never been re-offered.
+
+        The text is still updated when the strip is not wanted: it is what the
+        next legitimate paint will show, and computing it twice is the only
+        alternative.
+        """
         banner = getattr(self, "_preflight_banner", None)
         if banner is None:
             return
@@ -306,7 +338,7 @@ class AnalyzePreflightMixin:
         self._preflight_label.setText(
             " ".join(p for p in (headline, self._preflight_coverage,
                                  self._scope_line()) if p))
-        banner.setVisible(True)
+        banner.setVisible(self._preflight_is_wanted())
 
     def _scope_line(self) -> str:
         """What this run will do about images added since the last one.
@@ -413,10 +445,43 @@ class AnalyzePreflightMixin:
         intent = int(totals.get("intent") or 0)
         covered = int(totals.get("covered_any") or 0)
         complete = int(totals.get("complete") or 0)
-        wells = int(totals.get("wells") or 0)
-        if not wells:
+        unreadable = int(totals.get("unreadable") or 0)
+        # The plate's size decides whether there is anything to say at all, so
+        # it is asked for once and used for both the gate and the fraction. It
+        # counts the wells that could not be read: a scan where *every* well
+        # raised used to return here without a word, which is the worst case of
+        # the thing this readout exists to report.
+        plate = completeness.plate_total(totals)
+        if not plate:
             return
-        head = f"{complete} of {wells} well(s) are complete."
+        # The denominator is the plate, not the subset the scan managed to
+        # read, and it comes from ``completeness.plate_total`` because three
+        # other surfaces print the same fraction and one pane holding two
+        # plate sizes is worse than all of them being wrong the same way
+        # (CLAUDE.md §7.5 #5).
+        head = f"{complete} of {plate} well(s) are complete."
+        # A scan that gave up part-way reported its partial totals as though
+        # they were the plate's. `scan_run` sets `partial_scan` for exactly
+        # this — one unreadable well must not cost the record for the other
+        # 95, so it keeps going and says so — and two other surfaces already
+        # read the flag (the Home plate and the run log). This line did not,
+        # so "94 of 96 well(s) are complete" could mean two wells short or two
+        # wells unreadable, and the user is about to decide whether to re-run
+        # on the strength of it.
+        if block.get("partial_scan"):
+            # Named, not merely hedged. "Some wells" left the user unable to
+            # tell two unreadable wells from twenty, and the all-unreadable
+            # case — every well failed, so ``wells`` is 0 — used to return
+            # above without a word, which is the worst instance of the very
+            # thing this line exists to report.
+            how_many = (f"{unreadable} well(s) could not be read"
+                        if unreadable else "Some wells could not be read")
+            self._preflight_coverage = (
+                f"{head} {how_many}, so this count is a floor rather than the "
+                f"plate's — check the log for what the scan skipped before "
+                f"deciding whether to re-run.")
+            self._render_preflight(getattr(self, "_preflight_headline_text", ""))
+            return
         # The fraction is only printed when it is one. ``covered_any`` counts
         # the output's field groups and ``intent`` the input's, so more covered
         # than intended is not a plate that is more than finished — it is the
@@ -503,13 +568,41 @@ def _same(a: str, b: str) -> bool:
 
 
 
+def _as_sidecar_polarity(opts: dict) -> dict:
+    """Restate a form ``opts`` dict in the polarity the applier reads.
+
+    Two settings are spelled one way in the form and its journal spec and the
+    other way in the sidecar: the form carries ``auto_threshold`` and
+    ``run_check`` as positives, and the pipeline records the negatives it was
+    given on the command line, ``no_auto_threshold`` and ``no_run_check``.
+    ``_apply_pinfo_settings`` reads the sidecar's spelling.
+
+    So a journal-sourced settings load handed the applier a dict that named
+    neither key it was looking for, and both silently kept whatever the form
+    happened to be showing. "Load these settings" restored eighteen fields and
+    quietly left two alone — the two that decide whether the plate gets a gate
+    and whether the run audits itself.
+
+    Translated here, at the one place the journal shape enters, rather than by
+    teaching the applier a second vocabulary: the applier has one source of
+    truth for what a settings key is called, and adding a synonym to it is how
+    the next pair comes to disagree.
+    """
+    out = dict(opts)
+    for positive, negative in (("auto_threshold", "no_auto_threshold"),
+                               ("run_check", "no_run_check")):
+        if positive in out and negative not in out:
+            out[negative] = not bool(out[positive])
+    return out
+
+
 def _previous_settings(out_dir: Path) -> tuple[dict, str]:
     """The form settings this folder records, and where they came from."""
     journal = run_journal.read_journal(out_dir)
     spec = (journal.spec if journal is not None else None) or {}
     opts = spec.get("opts") if isinstance(spec.get("opts"), dict) else None
     if opts:
-        return dict(opts), "run journal"
+        return _as_sidecar_polarity(opts), "run journal"
     info_path = out_dir / "pipeline_info.json"
     if info_path.is_file():
         import json

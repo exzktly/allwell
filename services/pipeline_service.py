@@ -288,6 +288,15 @@ def spawn_pipeline(args: list[str]) -> subprocess.Popen:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        # A pipeline's stdout is not guaranteed to be UTF-8: a filename can
+        # carry any byte the filesystem allows, and it is echoed back in log
+        # lines. Without `errors` a single such byte raises UnicodeDecodeError
+        # out of the *reader's* iterator, which skips `proc.wait()` and leaves
+        # a process the reader started with `start_new_session=True` — its own
+        # session leader, so nothing else will reap it — running against the
+        # user's plate while the GUI reports the run never started.
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
         **kwargs,

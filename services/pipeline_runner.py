@@ -28,6 +28,7 @@ Event protocol (queue payloads are ``(kind, payload)`` tuples):
 from __future__ import annotations
 
 import collections
+import logging
 import os
 import queue
 import re
@@ -36,6 +37,7 @@ import threading
 from pathlib import Path
 from collections.abc import Callable
 
+from services.input_resolution_service import has_well_zip
 from services.pipeline_service import build_pipeline_args, spawn_pipeline
 from services.remote_config import RemoteHost
 from services.remote_runner import (
@@ -47,7 +49,9 @@ from services.remote_runner import (
 )
 from services import run_journal
 from services.subprocess_kill import signal_subprocess
-from util.aw_safe import swallowed
+from util.aw_safe import swallow, swallowed
+
+_LOG = logging.getLogger("allwell.pipeline_runner")
 
 #: How many of the pipeline's own trailing output lines ride along with a
 #: non-zero exit. Enough to carry a refusal sentence or a traceback's last
@@ -317,8 +321,29 @@ class ProgressTracker:
         seen.add(part)
         return not was_complete and {"zip", "csv"} <= seen
 
-    def _count_well_done(self, well: str) -> list[tuple[str, object]]:
+    #: What the run journal records for each of the three terminal markers,
+    #: keyed by the marker's own name. Exhaustive on purpose — a new marker
+    #: raises here rather than defaulting to one of the two answers, because
+    #: guessing wrong in either direction is a record that claims work that did
+    #: not happen or denies work that did. It is a dict literal so that
+    #: ``tests/test_run_journal.py::test_every_well_state_is_written_by_some_caller``
+    #: can see both states: that roster's liveness check reads dict values, and
+    #: an earlier spelling as a conditional expression left ``analysed``
+    #: visible only in a mapping nothing reached (CLAUDE.md §7.5 #10).
+    _RECORD_FOR_MARKER = {"process": "analysed", "uptodate": "skipped"}
+
+    def _count_well_done(self, well: str,
+                         stage: str = "process") -> list[tuple[str, object]]:
         """Record that *well* reached a terminal state, counting it once.
+
+        *stage* is what the marker said happened, and it is not always
+        "processed". Three lines reach here — "— done.", "up to date" and
+        "SKIP … output already exists" — and all three mean the well is
+        complete *for progress purposes*, which is why they share a counter.
+        Only the first means the pipeline computed anything. Collapsing them
+        into one stage made an incremental run that touched 6 of 96 wells
+        journal 96 as ``analysed`` and the readout say "It recorded 96
+        finished", which is a claim about work that did not happen.
 
         Progress is the number of DISTINCT wells that finished, not the number
         of completion markers seen. The two diverge in batched remote mode: the
@@ -348,7 +373,31 @@ class ProgressTracker:
             self.well_total = self.well_done
             events.append(("well_total", self.well_total))
         events.append(("well_done", (self.well_done, self.well_total)))
-        events.append(("well_stage", (well, "process")))
+        # The plate is told "process" whatever the marker was: all three mean
+        # this well is finished, and the plate paints finished wells alike. The
+        # journal is told the truth, and it rides in the *same* event, because
+        # what the plate paints and what the record says are one fact about one
+        # well and nothing downstream should be able to have one without the
+        # other. The stage stays "process" because the dashboard ignores any
+        # stage outside its ``_STAGE_KEYS``; sending it the record's word would
+        # have stopped those wells being marked done on the plate, trading a
+        # wrong record for a wrong picture.
+        #
+        # This is a simplification, not a bug fix, and the difference is worth
+        # writing down because the commit that made the change claimed
+        # otherwise. The two-event shape it replaced was said to be droppable
+        # half-way — two events outside ``PipelineRunner._CONTROL_KINDS``,
+        # dropped independently on a full queue. Measured, that cannot happen:
+        # ``parse`` is called in one place (``AnalyzeTab._poll_log``) on the
+        # GUI thread, and every event it returns except ``line`` and
+        # ``workers`` is applied inline rather than re-queued. The only thing
+        # the queue can drop is the whole ``("line", …)`` these are derived
+        # from, which loses both facts together. Describing an unreachable
+        # branch as the app's behaviour is worse than saying nothing
+        # (CLAUDE.md §7.1 #3), and the one-event shape has to stand on being
+        # simpler, which it is.
+        events.append(("well_stage",
+                       (well, "process", self._RECORD_FOR_MARKER[stage])))
         return events
 
     def parse(self, line: str) -> list[tuple[str, object]]:
@@ -487,14 +536,72 @@ class ProgressTracker:
             # progress count, and all name their well, so they share one
             # identity-aware counter. An up-to-date well never emits "— done.";
             # a skipped one never runs at all; both are complete.
-            md = (
-                _RE_WELL_DONE_ID.search(line)
-                or _RE_WELL_UPTODATE.search(line)
-                or _RE_WELL_SKIP.search(line)
-            )
-            if md:
-                events.extend(self._count_well_done(md.group(1)))
+            # Matched separately rather than as one `or` chain, because which
+            # of the three fired is the thing the journal needs: they agree
+            # that the well is complete and disagree about whether this run
+            # computed it.
+            for pattern, stage in (
+                (_RE_WELL_DONE_ID, "process"),
+                (_RE_WELL_UPTODATE, "uptodate"),
+                (_RE_WELL_SKIP, "uptodate"),
+            ):
+                md = pattern.search(line)
+                if md:
+                    events.extend(self._count_well_done(md.group(1), stage))
+                    break
         return events
+
+
+class RunEventQueue(queue.Queue):
+    """The run's event queue, which notices a failure however it is put.
+
+    ``log_q`` is public, and it has to be: the input resolver the Analyze pane
+    passes to :meth:`PipelineRunner.start` is handed the queue directly and
+    reports its own failures on it. So a failure could reach the GUI without
+    passing through :meth:`PipelineRunner._enqueue_error`, and two pieces of
+    per-run bookkeeping that live in that method were then simply not done.
+
+    The one the user saw: ``cancel_state_at_failure`` is a snapshot of the stop
+    and suspend flags taken *when the failure was queued*, because the GUI reads
+    them a timer tick later and a Stop clicked inside that window makes a
+    genuine failure read as a deliberate cancel. An error that bypassed the
+    snapshot read ``(False, False)`` — so pressing Stop while a large plate was
+    grouping painted the dashboard red with a signal exit code as the headline
+    and forced open the raw log pane the user had closed, while the journal
+    correctly recorded ``stopped``. Two surfaces, one run, opposite verdicts.
+
+    The one nobody had reported: ``_had_error`` was not set either, so a failure
+    put here by a writer outside the runner left the run journalling ``ok`` —
+    recorded as a run that succeeded, and therefore never offered for resume.
+
+    Where that bites is worth stating precisely, because the obvious case is not
+    it. An input failure — a folder that no longer exists, a schema the resolver
+    rejects — is reported *during resolution*, and the journal has no home until
+    the output directory is resolved a few lines later, so such a run writes no
+    record at all: the flag is still set, which is what the dashboard reads, but
+    there is nothing on disk for it to be wrong in. The outcome the flag decides
+    is the one for a failure put on this queue once the run is under way, and
+    that is what ``tests/test_every_failure_goes_through_one_seam.py`` measures —
+    on the record, through the app's own open-fail-close order, rather than on
+    the flag.
+
+    Latching here rather than in ``_enqueue`` is deliberate: ``_enqueue`` is one
+    of the writers, not the boundary. Every write goes through ``Queue.put``,
+    including ``put_nowait``, which CPython implements in terms of it.
+    """
+
+    def __init__(self, maxsize: int = 0) -> None:
+        super().__init__(maxsize)
+        self._on_error: Callable[[], None] | None = None
+
+    def put(self, item, block: bool = True, timeout: float | None = None) -> None:
+        # Before the put, not after: the snapshot has to be of the flags as
+        # they stood when the failure happened, and a ``put`` on a full queue
+        # blocks for as long as the GUI takes to drain it.
+        if (isinstance(item, tuple) and item and item[0] == "error"
+                and self._on_error is not None):
+            self._on_error()
+        super().put(item, block, timeout)
 
 
 class PipelineRunner:
@@ -511,9 +618,10 @@ class PipelineRunner:
     _LOG_QUEUE_MAXSIZE = 10000
 
     def __init__(self) -> None:
-        self.log_q: queue.Queue[tuple[str, object]] = queue.Queue(
+        self.log_q: RunEventQueue = RunEventQueue(
             maxsize=self._LOG_QUEUE_MAXSIZE,
         )
+        self.log_q._on_error = self._latch_error_state
         self._proc: subprocess.Popen | None = None
         # The grouping-phase subprocess (WellPlateZipper). Tracked
         # separately so a Stop click during grouping cancels it instead
@@ -554,6 +662,17 @@ class PipelineRunner:
         # into the journal so a run that dies can be offered back with the
         # settings it had. ``None`` for a caller that supplies none.
         self._journal_spec: dict | None = None
+        # Whether the job queue started this run and therefore owns resuming
+        # it; see ``RunJournal.queued``.
+        self._journal_queued: bool = False
+        #: Where this run's journal lives, and its token — `open_run`'s
+        #: `opened_at`, handed to every write so a record can say *which* run
+        #: it belongs to. Declared here rather than only in `start()`, because
+        #: a runner that is asked about them before its first run should get
+        #: `None` rather than an `AttributeError`: `stop()` and the queue's
+        #: gate can both be reached on a freshly built runner.
+        self._journal_dir: Path | None = None
+        self._journal_token: float | None = None
         # Remote-execution state. Set in start() when the user chose a
         # remote host; the runner threads it through _run_pipeline_thread
         # to swap spawn_pipeline for the SSH-staged remote run.
@@ -599,7 +718,14 @@ class PipelineRunner:
                         "still captured in the help-drawer log tab.\n",
                     ))
                 except queue.Full:
-                    pass
+                    # The overflow warning itself could not be queued, which
+                    # means the reader has not drained a single slot since the
+                    # queue filled. Nothing to do and nothing to say — the one
+                    # channel for saying it is the thing that is full — and the
+                    # flag above already ensures this is attempted once per run
+                    # rather than per dropped line.
+                    swallowed("the log-overflow warning could not be queued "
+                              "either; the reader has drained nothing")
 
     @property
     def is_running(self) -> bool:
@@ -631,6 +757,16 @@ class PipelineRunner:
     @property
     def last_output_dir(self) -> Path | None:
         return self._last_output_dir
+
+    @property
+    def journal_queued(self) -> bool:
+        """Whether the job queue started the run currently in flight.
+
+        Read by the suspend record, which has to answer the same
+        who-owns-resuming-this question the journal does — a suspend writes both
+        pointers, and filtering one is filtering neither.
+        """
+        return self._journal_queued
 
     @property
     def journal_token(self) -> float | None:
@@ -667,13 +803,18 @@ class PipelineRunner:
         dry_run_cleanup: bool = False,
         selective_channels: bool = True,
         journal_spec: dict | None = None,
+        queued: bool = False,
     ) -> None:
         """Spawn the worker thread that runs the pipeline subprocess.
 
         ``resolve_dirs`` is called with ``(opts, log_q, proc_hook=…)`` where
-        ``proc_hook`` is the runner's zipper-tracking callback (forwarded
-        to the grouping subprocess so Stop can reach it). Old call sites
-        that ignore the kwarg still work.
+        ``proc_hook`` is the runner's zipper-tracking callback (forwarded to the
+        grouping subprocess so Stop can reach it). It is **required**: the
+        ``except TypeError`` that used to accept a resolver without it was
+        removed, because it could not be entered by a caller with the wrong
+        signature — only by a ``TypeError`` raised *inside* resolution, which it
+        answered by re-running a function that groups images and deletes their
+        sources.
 
         ``journal_spec`` is the ``RunSpec.to_json()`` payload behind this run,
         recorded into the output directory's run journal. It arrives here
@@ -714,6 +855,25 @@ class PipelineRunner:
         self._dry_run_cleanup = dry_run_cleanup
         self._selective_channels = selective_channels
         self._journal_spec = journal_spec
+        self._journal_queued = bool(queued)
+        # Every per-run flag is cleared **here**, on the caller's thread,
+        # before the worker is started — not at the top of the worker itself.
+        # `start()` returns as soon as the thread is created, and the thread
+        # may not be scheduled for some time after that. A Stop pressed in
+        # that gap sets `_stop_requested`, and the worker's first act used to
+        # be clearing it: the run carried on with the user's cancellation
+        # discarded, and the button had already gone back to its idle state.
+        # Clearing before the thread exists closes the window entirely.
+        self._stop_requested.clear()
+        self._suspend_requested.clear()
+        self._error_was_stopped = False
+        self._error_was_suspended = False
+        self._had_error = False
+        # Cleared per run rather than at ``close_run``: a setup-phase failure
+        # returns before the journal is ever opened, and a stale directory
+        # from the previous run would then be closed in this run's name.
+        self._journal_dir = None
+        self._journal_token = None
         self._thread = threading.Thread(
             target=self._run_pipeline_thread,
             args=(pipeline, opts, resolve_dirs),
@@ -795,11 +955,21 @@ class PipelineRunner:
         """
         return self._error_was_stopped, self._error_was_suspended
 
-    def _enqueue_error(self, message: str) -> None:
-        """Queue a failure, recording the cancel state at this instant."""
+    def _latch_error_state(self) -> None:
+        """Record that this run failed, and how things stood when it did.
+
+        Called by :class:`RunEventQueue` for every ``("error", …)`` event put on
+        the queue, whoever puts it — so a failure reported by the input resolver
+        (which is handed ``log_q`` directly) is bookkept exactly like one the
+        runner raises itself. Idempotent by construction: a second failure
+        re-snapshots flags that only ever move from unset to set.
+        """
         self._error_was_stopped = self._stop_requested.is_set()
         self._error_was_suspended = self._suspend_requested.is_set()
         self._had_error = True
+
+    def _enqueue_error(self, message: str) -> None:
+        """Queue a failure. The queue itself records the cancel state."""
         self._enqueue(("error", message))
 
     def _journal_outcome(self) -> str:
@@ -870,22 +1040,6 @@ class PipelineRunner:
         opts: dict,
         resolve_dirs: Callable[..., tuple[Path, Path] | None],
     ) -> None:
-        # Each run starts with a fresh "not cancelled" state.
-        self._stop_requested.clear()
-        self._suspend_requested.clear()
-        self._error_was_stopped = False
-        self._error_was_suspended = False
-        self._had_error = False
-        # Cleared here rather than at ``close_run``: a setup-phase failure
-        # returns before the journal is ever opened, and a stale directory
-        # from the previous run would then be closed in this run's name.
-        self._journal_dir: Path | None = None
-        #: This run's journal token — ``open_run``'s ``opened_at``. Handed to
-        #: every well write so a record can say *which* run it belongs to.
-        #: ``None`` for a run whose journal could not be opened, which is how a
-        #: writer knows to stop rather than file its progress under the
-        #: previous run's surviving record.
-        self._journal_token: float | None = None
         # The Analyze "Scratch disk" field routes per-well working files via
         # ALLWELL_SCRATCH_DIR. Set it on this process's env so the local
         # pipeline subprocess (inherits os.environ) and the in-process remote
@@ -897,12 +1051,19 @@ class PipelineRunner:
         else:
             os.environ.pop("ALLWELL_SCRATCH_DIR", None)
         try:
-            # Try the new signature first (with proc_hook); fall back for
-            # callers that haven't been updated yet.
-            try:
-                resolved = resolve_dirs(opts, self.log_q, proc_hook=self._track_zipper_proc)
-            except TypeError:
-                resolved = resolve_dirs(opts, self.log_q)
+            # No compatibility fallback. The only production caller,
+            # `analyze_input._resolve_run_dirs_for_runner`, takes `proc_hook`,
+            # and the `except TypeError` that used to sit here could therefore
+            # not be entered by a caller with the wrong signature — only by a
+            # `TypeError` raised from *inside* the resolver, which it then
+            # answered by running the whole resolver a second time. That
+            # resolver groups loose images into archives and deletes their
+            # sources; running it twice on a partially-completed first pass is
+            # not a fallback, it is a second pass over a directory the first
+            # one had already changed. Without `proc_hook` the grouping
+            # subprocess is also untracked, so Stop cannot reach it.
+            resolved = resolve_dirs(
+                opts, self.log_q, proc_hook=self._track_zipper_proc)
             # Stop button may have fired during the (potentially long)
             # grouping / resolution phase. Bail before launching the
             # pipeline in that case.
@@ -922,7 +1083,16 @@ class PipelineRunner:
                 input_dir, output_dir, on_success = resolved  # type: ignore[misc]
             else:
                 input_dir, output_dir = resolved  # type: ignore[misc]
-            if any(input_dir.glob("*.zip")):
+            # A *well* archive, not any archive. ``has_well_zip`` asks the
+            # well-token canonicaliser, which is the same question the pipeline
+            # asks when it decides to segment from ``in/<WELL>.zip`` — so a
+            # stray ``archive.zip`` or ``backup.zip`` a user left in a
+            # folder-mode ``in/`` no longer tells them their compression
+            # settings were ignored when they were not.
+            # ``has_well_content``'s own docstring records this exact defect
+            # being fixed for the layout planner; this was the surviving
+            # sibling.
+            if has_well_zip(input_dir):
                 self._enqueue((
                     "line",
                     "[warn] Zip mode detected; folder-mode compression options do not apply.\n",
@@ -1002,6 +1172,7 @@ class PipelineRunner:
                 mode=mode,
                 input_dir=input_dir,
                 argv=argv,
+                queued=self._journal_queued,
             )
         except (OSError, ValueError):
             # ``ValueError`` is ``open_run`` refusing a mode it does not know —
@@ -1009,6 +1180,38 @@ class PipelineRunner:
             # it, because the artefacts and not this record are what the run
             # produces. It is logged with its reason rather than passed over.
             swallowed(f"could not open the run journal in {output_dir}")
+            return
+        if self._journal_token is None:
+            # ``open_run`` answers ``None`` for a write that failed as well as
+            # raising for a mode it will not accept, and only the second reached
+            # the handler above. Recording the directory anyway armed
+            # ``_close_journal`` with no token, and ``close_run`` treats a
+            # missing token as "close it anyway" — so the *previous* run's
+            # record, which the index is holding open precisely so it can be
+            # offered for resume, was closed as this run's outcome and the
+            # offer vanished. That is the exact scenario ``close_run``'s
+            # docstring describes, and the guard could not see it because this
+            # side never told it there was nothing to guard.
+            # Not ``swallowed``: nothing was raised here. ``open_run``
+            # answered, and its answer was no. A warning rather than a debug
+            # line because the run continues with no record of itself, and a
+            # degraded run must not look like a good one (§7).
+            _LOG.warning(
+                "the run journal in %s could not be opened, so this run will "
+                "not write one — the previous run's record is left as it "
+                "stands", output_dir)
+            # And on the surface the user is actually reading. The logger
+            # reaches the help drawer's Log tab, which nobody has open during a
+            # run; every other message from this function goes to the run log
+            # as a "[warn]" line, and a run that silently keeps no record of
+            # itself is exactly the degraded-looks-like-good case (§7).
+            self._enqueue((
+                "line",
+                "[warn] Could not open the run journal in "
+                f"{output_dir} — this run will not be recorded, so it cannot "
+                "be offered for resume if it is interrupted. The output "
+                "itself is unaffected.\n",
+            ))
             return
         self._journal_dir = output_dir
 
@@ -1024,7 +1227,12 @@ class PipelineRunner:
         if output_dir is None:
             return
         try:
-            run_journal.close_run(output_dir, outcome=self._journal_outcome())
+            # Keyed on this run's own token, so a run whose `open_run` write
+            # failed cannot close the record still standing from the run
+            # before it — which the index is holding open precisely so that
+            # run can be offered for resume.
+            run_journal.close_run(output_dir, outcome=self._journal_outcome(),
+                                  run_token=self._journal_token)
         except OSError:
             swallowed(f"could not close the run journal in {output_dir}")
 
@@ -1046,11 +1254,30 @@ class PipelineRunner:
             # the user as "Pipeline exited with code 2", which names nothing, so
             # keep the tail and attach it to the failure.
             tail: collections.deque[str] = collections.deque(maxlen=_ERROR_TAIL_LINES)
-            for line in proc.stdout:
-                self._enqueue(("line", line))
-                if line.strip():
-                    tail.append(line.rstrip("\n"))
-            proc.wait()
+            try:
+                for line in proc.stdout:
+                    self._enqueue(("line", line))
+                    if line.strip():
+                        tail.append(line.rstrip("\n"))
+            except Exception as exc:
+                # Whatever ends the read, the child must still be signalled and
+                # reaped. It was started with `start_new_session=True`, so it
+                # is its own session leader and nothing else will reap it: an
+                # exception escaping here left the pipeline running against the
+                # user's plate while the GUI reported the run had never
+                # started. The decode case is now impossible (`errors="replace"`
+                # on the spawn) and this is the general guarantee, not a fix
+                # for that one cause.
+                self._enqueue((
+                    "line",
+                    f"[warn] reading the pipeline's output stopped early "
+                    f"({type(exc).__name__}: {exc}); the run is being "
+                    f"stopped.\n"))
+                self._signal_subprocess(proc)
+                raise
+            finally:
+                with swallow("waiting for the pipeline subprocess"):
+                    proc.wait()
             rc = proc.returncode
             if rc == 0:
                 # v5.x.x: zipper-fired-this-run source cleanup. Only
@@ -1183,11 +1410,30 @@ class PipelineRunner:
             # with no wells it recognises — reaches the user here too, and did so
             # as a naked exit code.
             tail: collections.deque[str] = collections.deque(maxlen=_ERROR_TAIL_LINES)
-            for line in proc.stdout:
-                self._enqueue(("line", line))
-                if line.strip():
-                    tail.append(line.rstrip("\n"))
-            proc.wait()
+            try:
+                for line in proc.stdout:
+                    self._enqueue(("line", line))
+                    if line.strip():
+                        tail.append(line.rstrip("\n"))
+            except Exception as exc:
+                # Whatever ends the read, the child must still be signalled and
+                # reaped. It was started with `start_new_session=True`, so it
+                # is its own session leader and nothing else will reap it: an
+                # exception escaping here left the pipeline running against the
+                # user's plate while the GUI reported the run had never
+                # started. The decode case is now impossible (`errors="replace"`
+                # on the spawn) and this is the general guarantee, not a fix
+                # for that one cause.
+                self._enqueue((
+                    "line",
+                    f"[warn] reading the pipeline's output stopped early "
+                    f"({type(exc).__name__}: {exc}); the run is being "
+                    f"stopped.\n"))
+                self._signal_subprocess(proc)
+                raise
+            finally:
+                with swallow("waiting for the pipeline subprocess"):
+                    proc.wait()
             rc = proc.returncode
 
             ok = self._remote_runner.verify_and_cleanup(
@@ -1235,11 +1481,15 @@ class PipelineRunner:
             elif rc != 0:
                 self._enqueue_error(exit_message(rc, tail, where="Remote pipeline"))
             else:
-                self._enqueue((
-                    "error",
+                # Through `_enqueue_error`, not by hand. Building the tuple
+                # here skipped `_had_error` and the cancel-state latch, so a
+                # remote run that finished and then failed local verification
+                # was journalled `ok`: the index held it as a completed run,
+                # the resume banner never offered it, and the remote files it
+                # had deliberately preserved for retry were never fetched.
+                self._enqueue_error(
                     "Remote pipeline finished but local verification failed; "
-                    "remote files preserved for retry.\n",
-                ))
+                    "remote files preserved for retry.\n")
         except Exception as exc:  # surface any failure to the GUI
             self._enqueue_error(f"Failed to run pipeline remotely: {exc}\n")
         finally:

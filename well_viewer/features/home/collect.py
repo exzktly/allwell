@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from pipeline import completeness
+
 #: What the plate paints, over and above the recorded health states. These are
 #: *renderings*, derived from numbers already in the record — not a second
 #: opinion about whether a well is complete. ``pipeline.completeness.health``
@@ -292,7 +294,10 @@ def stat_tiles(ctx) -> list:
     tiles = []
 
     if totals:
-        n_wells = int(totals.get("wells") or 0)
+        # The plate, not the subset the scan recorded: a well that raised is
+        # missing from ``totals["wells"]``, so this tile read "94 of 94" for a
+        # plate of 96 with two unreadable.
+        n_wells = completeness.plate_total(totals)
         complete = int(totals.get("complete") or 0)
         tiles.append(Stat("wells", "Wells", complete, f"of {n_wells} complete"))
     else:

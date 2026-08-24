@@ -56,6 +56,7 @@ def test_a_scan_of_a_healthy_plate_records_every_well_complete(tmp_path):
 
     assert block["totals"] == {
         "wells": 2, "complete": 2, "partial": 0, "missing_csv": 0, "no_output": 0,
+        "unreadable": 0,
         "intent": block["totals"]["intent"],
         "covered_csv": block["totals"]["covered_csv"],
         "covered_any": block["totals"]["covered_any"],

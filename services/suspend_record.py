@@ -27,10 +27,11 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
+
+from util.json_write import try_write_json_atomic
 
 RECORD_VERSION = 1
 
@@ -51,6 +52,14 @@ class SuspendedRun:
     wells_done: int = 0
     wells_total: int = 0
     note: str = ""
+    #: Whether the job queue started the run this record describes, and so owns
+    #: offering it back. The same question ``RunJournal.queued`` answers, asked
+    #: of the other pointer, because a suspend writes *both* — filtering one and
+    #: not the other left the Analyze banner offering a plate the queue was
+    #: still holding, which is the whole defect. It is the *record* that carries
+    #: it rather than the reader inferring it, so a reader that forgets to ask
+    #: fails visibly rather than by omission.
+    queued: bool = False
 
     def to_json(self) -> dict:
         return {
@@ -62,6 +71,7 @@ class SuspendedRun:
             "wells_done": self.wells_done,
             "wells_total": self.wells_total,
             "note": self.note,
+            "queued": self.queued,
         }
 
     @classmethod
@@ -86,6 +96,7 @@ class SuspendedRun:
             wells_done=int(data.get("wells_done") or 0),
             wells_total=int(data.get("wells_total") or 0),
             note=str(data.get("note") or ""),
+            queued=bool(data.get("queued")),
         )
 
     def describe(self) -> str:
@@ -162,17 +173,15 @@ def same_dir(a: str, b: str) -> bool:
 
 
 def _write_all(runs: list[SuspendedRun]) -> bool:
-    """Replace the file atomically, or return False having changed nothing."""
-    path = record_path()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp_",
-                                   suffix=".json")
-        with os.fdopen(fd, "w") as fh:
-            json.dump([r.to_json() for r in runs], fh, indent=2)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, path)
-        return True
-    except OSError:
-        return False
+    """Replace the file atomically, or return False having changed nothing.
+
+    The writer is shared with the run journal (``util.json_write``) rather
+    than restated here. The copy that used to sit in this function caught
+    ``OSError`` alone, and the record carries a ``spec`` the caller handed in —
+    so one unserialisable value in it raised a ``TypeError`` out of a function
+    whose whole contract is a boolean, past ``_suspend``'s outer handler and
+    *before* ``PipelineRunner.suspend()`` was ever reached. The Suspend button
+    then did nothing at all and said nothing about it.
+    """
+    return try_write_json_atomic(record_path(), [r.to_json() for r in runs],
+                                what="suspended-run record")

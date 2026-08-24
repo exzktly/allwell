@@ -186,3 +186,115 @@ def test_the_readout_never_promises_more_than_the_run_delivers(tmp_path):
             assert label.startswith("✓") is runnable, (target, action, label)
             assert tab._output_lbl.text() == (
                 str(root / "out") if runnable else "—")
+
+
+# ── the readout counts what the run will fold ───────────────────────────────
+#
+# `loose_count` came from a glob over TIF suffixes while the *act* goes through
+# `plan_loose_append`, which rejects a name whose well token will not parse and
+# a file already present in its target archive. The two disagree by
+# construction, and the readout is the one the user reads before pressing Run.
+
+SCHEMA = "experiment:channel:well:fov:timepoint"
+
+
+def _fold_fixture(tmp_path: Path) -> Path:
+    """One new image, one duplicate of an archived member, one calibration frame."""
+    grouped = tmp_path / "in"
+    grouped.mkdir()
+    _zip(grouped / "A01.zip", ("Exp_GFP_A01_F1_T1.tif",))
+    for name in ("Exp_GFP_A01_F2_T1.tif",      # new
+                 "Exp_GFP_A01_F1_T1.tif",      # already in the archive
+                 "calibration.tif"):           # no well token
+        _tif(grouped / name)
+    return grouped
+
+
+def test_the_fold_readout_counts_what_the_run_folds(tmp_path):
+    from services.input_resolution_service import plan_loose_append
+
+    grouped = _fold_fixture(tmp_path)
+    plan = plan_input_layout(grouped, filename_schema=SCHEMA, filename_sep="_")
+    acted = plan_loose_append(grouped, filename_schema=SCHEMA, filename_sep="_")
+
+    assert plan.action == FOLD_LOOSE
+    assert acted.total == 1, "the fixture no longer produces a mismatch to catch"
+    assert plan.loose_count == acted.total, (
+        f"the readout promises {plan.loose_count} and the run folds "
+        f"{acted.total}")
+    assert "1 loose TIF" in plan.message, plan.message
+
+
+def test_without_a_schema_the_count_is_still_the_glob(tmp_path):
+    """The schema is optional, and its absence is stated rather than guessed.
+
+    Two internal callers want the layout and not the count. Given no schema
+    there is no way to know which files would fold, and reporting a number
+    derived from a rule that has not been supplied would be worse than
+    reporting the plain file count.
+    """
+    grouped = _fold_fixture(tmp_path)
+    plan = plan_input_layout(grouped)
+    assert plan.action == FOLD_LOOSE
+    assert plan.loose_count == 3
+
+
+def test_a_folder_whose_loose_files_are_all_duplicates_is_not_a_fold(tmp_path):
+    """"Will fold 0" invites the user to wonder what broke; nothing at all hides
+    that the folder is untidy. It is a grouped root, and the line says why."""
+    grouped = tmp_path / "in"
+    grouped.mkdir()
+    _zip(grouped / "A01.zip", ("Exp_GFP_A01_F1_T1.tif",))
+    _tif(grouped / "Exp_GFP_A01_F1_T1.tif")
+
+    plan = plan_input_layout(grouped, filename_schema=SCHEMA, filename_sep="_")
+    assert plan.action == GROUPED
+    assert plan.loose_count == 0
+    assert "already in the well zips" in plan.message, plan.message
+
+
+# ── a sidecar is not one of the run's images ────────────────────────────────
+
+def test_an_appledouble_twin_is_not_counted_as_a_loose_tif(tmp_path):
+    """`TIF_GLOB` is a suffix match, and a suffix is not a decision.
+
+    macOS writes `._<name>` beside every file copied to a non-HFS volume, which
+    is the commonest way a real plate arrives with exactly twice as many "TIFs"
+    as it has images. That count is the readout, the `tifs > 3` threshold that
+    decides the whole folder is a zipper input, and the `source_tifs` tuples
+    the post-run deletion closures are built from.
+    """
+    from services.input_resolution_service import tif_files_in
+
+    root = tmp_path / "plate"
+    root.mkdir()
+    for name in ("Exp_GFP_A01_F1_T1.tif", "._Exp_GFP_A01_F1_T1.tif",
+                 "Exp_GFP_A02_F1_T1.TIFF", "._Exp_GFP_A02_F1_T1.TIFF"):
+        _tif(root / name)
+
+    found = sorted(p.name for p in tif_files_in(root))
+    assert found == ["Exp_GFP_A01_F1_T1.tif", "Exp_GFP_A02_F1_T1.TIFF"], found
+
+
+def test_the_run_computes_the_same_plan_the_readout_showed(tmp_path):
+    """`resolve_input_output` held the schema and did not pass it on.
+
+    The readout's count came from the planner that acts; the run recomputed a
+    schema-less plan and logged the glob count instead — so "Will fold 1 loose
+    TIF(s)" on screen and "Found 3 loose TIF(s)" in the log, which is the
+    audit's own worked example reproduced by the fix for it, with only the
+    surface it appears on moved.
+    """
+    from services.input_resolution_service import resolve_input_output
+
+    grouped = _fold_fixture(tmp_path)
+    readout = plan_input_layout(grouped, filename_schema=SCHEMA, filename_sep="_")
+
+    lines: list[str] = []
+    resolve_input_output(grouped, log_fn=lines.append,
+                         filename_schema=SCHEMA, filename_sep="_")
+    folded = [ln for ln in lines if "loose TIF" in ln]
+    assert folded, lines
+    assert f"Found {readout.loose_count} loose TIF(s)" in folded[0], (
+        f"the readout promised {readout.loose_count} and the run log says "
+        f"{folded[0]!r}")

@@ -526,7 +526,15 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
             self._output_lbl.setText("—"); self._layout_lbl.setText("")
             self._refresh_folder_banners(None, immediate=immediate)
             return
-        plan = plan_input_layout(Path(raw_str))
+        # The form's schema goes with it, so the fold-loose readout counts the
+        # files the run would actually fold rather than everything with a TIF
+        # suffix — the two disagree on a duplicate, a calibration frame, and
+        # anything whose well token will not parse.
+        plan = plan_input_layout(
+            Path(raw_str),
+            filename_schema=self._build_schema_arg(),
+            filename_sep=self._filename_sep(),
+        )
         self._output_lbl.setText(
             str(plan.output_dir) if plan.output_dir is not None else "—")
         self._layout_lbl.setText(plan.message)

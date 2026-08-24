@@ -60,14 +60,21 @@ class AnalyzeProgressMixin:
     _SCHED_BREADCRUMB_S = 120.0
 
     #: The ``well_stage`` values that mean a well reached a terminal state, and
-    #: what the run journal should record for each. ``"process"`` is emitted
-    #: from exactly one place — ``ProgressTracker._count_well_done``, the method
-    #: that decides a well has finished — so it is the run's own statement that
-    #: a well is done rather than a guess made from a log line here.
-    _JOURNAL_STAGES = {"process": "analysed", "error": "failed"}
+    #: what the run journal should record for each — for the events that state
+    #: only a stage. A completion names its own record state as a third element
+    #: and never comes through here, so ``"process"`` is deliberately absent:
+    #: keeping it as an unreachable row made ``analysed`` appear *only* in this
+    #: dict, and `tests/test_run_journal.py::test_every_well_state_is_written_by
+    #: _some_caller` reads dict values — so the roster's liveness check passed
+    #: on an entry nothing could reach (CLAUDE.md §7.5 #10).
+    _JOURNAL_STAGES = {"error": "failed"}
 
     def _journal_well_stage(self, well: str, stage: str) -> None:
         """Record a terminal well stage in the output directory's run journal.
+
+        For the stage-only events. ``ProgressTracker._count_well_done`` — the
+        method that decides a well has finished — states the record's word in
+        the event itself, so completions do not pass through this mapping.
 
         Hung off the same event the dashboard paints from, so what the record
         says and what the user saw cannot disagree — and written as it happens,
@@ -81,6 +88,10 @@ class AnalyzeProgressMixin:
         state = self._JOURNAL_STAGES.get(stage)
         if state is None:
             return
+        self._journal_well(well, state)
+
+    def _journal_well(self, well: str, state: str, *, reason: str = "") -> None:
+        """Write one well's state into this run's journal, best-effort."""
         out_dir = getattr(self._runner, "last_output_dir", None)
         if out_dir is None:
             return
@@ -92,7 +103,8 @@ class AnalyzeProgressMixin:
         if token is None:
             return
         with swallow(f"journalling {well} as {state}"):
-            run_journal.record_well(out_dir, well, state, run_token=token)
+            run_journal.record_well(out_dir, well, state, run_token=token,
+                                    reason=reason)
 
     def _on_scheduler(self, state: str, job_id: str, launcher: str) -> None:
         """A scheduler queued this run, or has just granted it a node.
@@ -344,9 +356,26 @@ class AnalyzeProgressMixin:
         elif kind == "stage":
             self._dashboard.set_active_stage(str(payload))
         elif kind == "well_stage":
-            well, stage = payload  # type: ignore[misc]
+            well, stage, *record = payload  # type: ignore[misc]
             self._dashboard.set_well_stage(str(well), str(stage))
-            self._journal_well_stage(str(well), str(stage))
+            if record:
+                # The completion event carries the journal's word for what
+                # happened, because the plate's word for it is deliberately
+                # lossy: three different markers all paint "process". A run
+                # that printed "up to date" (an incremental well with no new
+                # FOVs) or "SKIP … output already exists" (a re-run without
+                # --force) computed nothing, and recording those as
+                # ``analysed`` claims work that did not happen — an
+                # incremental run that touched 6 of 96 wells then read "It
+                # recorded 96 finished". The journal has had a ``skipped``
+                # state for exactly this since it was written; the local path
+                # never wrote it.
+                state = str(record[0])
+                self._journal_well(
+                    str(well), state,
+                    reason="already up to date" if state == "skipped" else "")
+            else:
+                self._journal_well_stage(str(well), str(stage))
         elif kind == "well_fov":
             well, done, total = payload  # type: ignore[misc]
             self._dashboard.set_well_fov(str(well), int(done), int(total))

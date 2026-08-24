@@ -127,12 +127,12 @@ def test_incremental_progress_markers():
     assert ("well_fov", ("A01", 0, 2)) in kinds("Well A01 — 2 FOV-group(s)")
     ev = kinds("Well A01 — done.")
     assert ("well_done", (1, 4)) in ev
-    assert ("well_stage", ("A01", "process")) in ev
+    assert ("well_stage", ("A01", "process", "analysed")) in ev
 
     # up-to-date well: no "done." line, but its own marker counts + advances it.
     ev = kinds("Well B02 — up to date (no new FOVs).")
     assert ("well_done", (2, 4)) in ev
-    assert ("well_stage", ("B02", "process")) in ev
+    assert ("well_stage", ("B02", "process", "skipped")) in ev
 
     # new well: ordinary lifecycle.
     kinds("Well C03 — starting (pid 9)")
@@ -157,7 +157,7 @@ def test_per_well_markers_tolerate_mangled_separator():
         assert any(k == "well_fov" for k, _ in ev), sep
         ev = pt.parse(f"Well A01 {sep} done.")
         assert ("well_done", (1, 20)) in ev, sep
-        assert ("well_stage", ("A01", "process")) in ev, sep
+        assert ("well_stage", ("A01", "process", "analysed")) in ev, sep
 
 
 def test_standalone_auto_threshold_is_rounded_to_integer(tmp_path):
@@ -352,3 +352,207 @@ def test_the_status_line_is_only_retracted_when_it_is_ours(qapp):
     host._dashboard.set_status("Finalizing…")
     host._apply_progress_event("well_done", (2, 2))
     assert host._dashboard._status.text() == "Finalizing…"
+
+
+# ── a well this run did not compute is recorded as one it did not compute ────
+
+def test_an_uncomputed_well_is_reported_as_such_without_changing_the_plate():
+    """Three markers mean "complete"; only one means "this run computed it".
+
+    ``— done.``, ``up to date`` and ``SKIP … output already exists`` all reach
+    ``_count_well_done`` and all three must advance the plate, which is why they
+    share a counter. Collapsing them for the *journal* too made an incremental
+    run that touched 6 of 96 wells record 96 ``analysed``, and the readout then
+    said "It recorded 96 finished" — a claim about work that did not happen.
+
+    The plate still hears ``process`` for all three: it paints finished wells
+    alike, and ``RunDashboard.set_well_stage`` ignores any stage outside its own
+    roster, so a new value there would have stopped those wells being marked
+    done — trading a wrong record for a wrong picture.
+    """
+    from services.pipeline_runner import ProgressTracker
+
+    pt = ProgressTracker()
+    pt.parse("Zip mode: 3 well(s) to process, 2 worker(s).")
+
+    computed = pt.parse("Well A01 — done.")
+    assert ("well_stage", ("A01", "process", "analysed")) in computed, (
+        f"a well the pipeline actually processed was not recorded as "
+        f"analysed: {computed}")
+
+    for line, well in (("Well B02 — up to date (no new FOVs).", "B02"),
+                       ("SKIP well C03 — output already exists", "C03")):
+        ev = pt.parse(line)
+        stages = [e for e in ev if e[0] == "well_stage"]
+        assert stages == [("well_stage", (well, "process", "skipped"))], (
+            f"{well} must advance the plate as \"process\" and carry "
+            f"\"skipped\" for the record, in one event: {ev}")
+
+
+def test_the_journal_records_an_uncomputed_well_as_skipped(tmp_path, monkeypatch):
+    """At the boundary: what reaches ``record_well``, not what the tracker returns."""
+    import analyze_progress
+    from services import run_journal as J
+    from services.pipeline_runner import ProgressTracker
+
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    out = tmp_path / "out"
+    out.mkdir()
+    token = J.open_run(out, input_dir="/in", mode="local", spec={})
+
+    class _Runner:
+        last_output_dir = out
+        journal_token = token
+
+    class _Dash:
+        """Absorbs every dashboard call and remembers the one under test."""
+
+        def __init__(self):
+            self.stages: list[tuple[str, str]] = []
+
+        def set_well_stage(self, well, stage):
+            self.stages.append((well, stage))
+
+        def __getattr__(self, name):
+            return lambda *a, **k: None
+
+    class _Mixin(analyze_progress.AnalyzeProgressMixin):
+        def __init__(self):
+            self._runner = _Runner()
+            self._dashboard = _Dash()
+
+    # Driven through the handler the run actually calls, with the events the
+    # tracker actually produces (CLAUDE.md §7.6): calling ``_journal_well``
+    # directly enters one step past every decision under test.
+    m = _Mixin()
+    pt = ProgressTracker()
+    pt.parse("Zip mode: 2 well(s) to process, 1 worker(s).")
+    for line in ("Well A01 — done.",
+                 "Well B02 — up to date (no new FOVs)."):
+        for kind, payload in pt.parse(line):
+            # ``well_done`` drives the ETA, which builds a QTimer parented to
+            # its host; that needs a real QObject and says nothing about the
+            # record. Everything the record is made of goes through.
+            if kind != "well_done":
+                m._apply_progress_event(kind, payload)
+
+    assert m._dashboard.stages == [("A01", "process"), ("B02", "process")], (
+        f"the plate must paint both wells finished: {m._dashboard.stages}")
+
+    rec = J.read_journal(out)
+    assert rec.wells["A01"].state == "analysed"
+    assert rec.wells["B02"].state == "skipped"
+    assert "up to date" in rec.wells["B02"].reason
+    tally = rec.tally()
+    assert "1 finished" in tally and "1 skipped" in tally, tally
+
+
+def test_a_completion_is_one_event_so_nothing_downstream_can_split_it(
+        tmp_path, monkeypatch):
+    """The plate's word and the record's word arrive together or not at all.
+
+    This replaces a test that measured something the app cannot do. It built
+    the tracker's events and pushed them through ``PipelineRunner._enqueue``
+    one at a time, on the premise that two events outside ``_CONTROL_KINDS``
+    are dropped independently on a full queue — so losing only the second
+    journals ``analysed`` for a well nothing computed. Measured, no such path
+    exists: ``ProgressTracker.parse`` is called in exactly one place
+    (``AnalyzeTab._poll_log``), on the GUI thread, and every event it returns
+    except ``line`` and ``workers`` is applied inline rather than re-queued.
+    Nothing enqueues a ``well_stage``. The queue's drop unit is the whole
+    ``("line", …)`` the events are derived from, which loses both facts
+    together — so the old two-event shape was already atomic, and the guard
+    written for it failed on the base branch only because it drove a sequence
+    the app never performs (CLAUDE.md §7.1 #3, §7.7 #1).
+
+    What is worth guarding is the property the one-event shape actually has:
+    a completion is a single message, so no consumer — present or future —
+    can act on half of it. Two facts in one tuple cannot be separated by any
+    transport, which is the durable version of what the old test was reaching
+    for.
+    """
+    from services.pipeline_runner import ProgressTracker
+
+    pt = ProgressTracker()
+    pt.parse("Zip mode: 3 well(s) to process, 1 worker(s).")
+
+    for line, expected in (
+            ("Well A01 — done.", "analysed"),
+            ("Well B02 — up to date (no new FOVs).", "skipped"),
+            ("SKIP well C03 — output already exists", "skipped")):
+        events = pt.parse(line)
+        bearing = [p for k, p in events
+                   if k == "well_stage" and len(p) > 2]
+        assert len(bearing) == 1, (
+            f"{line!r} produced {len(bearing)} record-bearing events; a "
+            f"completion split across more than one can be half-delivered: "
+            f"{events}")
+        assert bearing[0][2] == expected, bearing
+
+
+def test_a_dropped_line_takes_both_facts_with_it(tmp_path, monkeypatch):
+    """The real drop unit, driven the way ``_poll_log`` drives it.
+
+    A full queue drops the pipeline's stdout line. The plate then never hears
+    the well finished *and* the journal never hears it was skipped — degraded,
+    but not wrong, which is the distinction that matters (CLAUDE.md §7). The
+    assertion is on the record on disk (§7.4 #1).
+    """
+    import analyze_progress
+    from services import run_journal as J
+    from services.pipeline_runner import (PipelineRunner, ProgressTracker,
+                                          RunEventQueue)
+
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+
+    class _Dash:
+        def __getattr__(self, name):
+            return lambda *a, **k: None
+
+    def _drain_and_apply(out, token, survivors):
+        """What ``AnalyzeTab._poll_log`` does, minus the widgets."""
+        class _Runner:
+            last_output_dir = out
+            journal_token = token
+
+        class _Mixin(analyze_progress.AnalyzeProgressMixin):
+            def __init__(self):
+                self._runner = _Runner()
+                self._dashboard = _Dash()
+
+        m = _Mixin()
+        tracker = ProgressTracker()
+        tracker.parse("Zip mode: 1 well(s) to process, 1 worker(s).")
+        for kind, payload in survivors:
+            if kind != "line":
+                continue
+            for ev_kind, ev_payload in tracker.parse(payload):
+                # ``well_done`` drives the ETA, which parents a QTimer to its
+                # host and needs a real QObject; it says nothing about the
+                # record.
+                if ev_kind != "well_done":
+                    m._apply_progress_event(ev_kind, ev_payload)
+
+    line = ("line", "Well B02 — up to date (no new FOVs).\n")
+    for free, expected in ((0, None), (1, "skipped")):
+        out = tmp_path / f"out{free}"
+        out.mkdir()
+        token = J.open_run(out, input_dir="/in", mode="local", spec={})
+
+        runner = PipelineRunner.__new__(PipelineRunner)
+        runner.log_q = RunEventQueue(maxsize=2)
+        runner._log_overflow_warned = False
+        for i in range(runner.log_q.maxsize - free):
+            runner.log_q.put_nowait(("line", f"filler {i}\n"))
+        runner._enqueue(line)
+
+        survivors = []
+        while not runner.log_q.empty():
+            survivors.append(runner.log_q.get_nowait())
+        _drain_and_apply(out, token, survivors)
+
+        state = J.read_journal(out).wells.get("B02")
+        state = None if state is None else state.state
+        assert state == expected, (
+            f"with {free} free slot(s) the record says {state!r}, expected "
+            f"{expected!r}; survivors were {survivors}")

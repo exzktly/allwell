@@ -76,7 +76,7 @@ def test_skipped_wells_count_as_done():
     pt.parse("Zip mode: 3 well zip(s) detected.")          # well_total = 3
     ev = pt.parse("SKIP well A01 — output already exists. Use --force to reprocess.")
     assert ("well_done", (1, 3)) in ev
-    assert ("well_stage", ("A01", "process")) in ev
+    assert ("well_stage", ("A01", "process", "skipped")) in ev
     pt.parse("SKIP well B02 — output already exists. Use --force to reprocess.")
     pt.parse("Well C03 — starting (pid 1)")
     ev = pt.parse("Well C03 — done.")

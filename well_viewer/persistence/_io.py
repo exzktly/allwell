@@ -70,7 +70,8 @@ def _retry_on_permission_error(op_name: str, op):
     raise last_exc
 
 
-def atomic_write_json(path: Path, data: Any, *, indent: int = 2) -> None:
+def atomic_write_json(path: Path, data: Any, *, indent: int = 2,
+                      durable: bool = True) -> None:
     """Serialise *data* as JSON to *path*, atomically.
 
     Writes to a uniquified ``<path>.<pid>.<rand>.tmp`` then
@@ -78,6 +79,13 @@ def atomic_write_json(path: Path, data: Any, *, indent: int = 2) -> None:
     partial file. Parents are created on demand. Both the initial
     ``open`` and the final ``os.replace`` retry on Windows
     ``PermissionError`` (AV / cloud sync / viewer holding the handle).
+
+    ``durable=False`` skips the ``fsync`` before the replace. The replace is
+    still atomic, so no reader ever sees a partial file; what is given up is
+    the guarantee that the bytes have reached the platter before this returns,
+    which only matters if the machine loses power in the next moment. Debounced
+    autosaves on the GUI thread pass False: an fsync on a network share is a
+    visible pause there, and the value is rewritten seconds later anyway.
 
     Raises ``OSError`` on filesystem failure — callers decide whether to
     catch (usually yes, with a logger.warning) or propagate (Save-via-dialog
@@ -91,6 +99,8 @@ def atomic_write_json(path: Path, data: Any, *, indent: int = 2) -> None:
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=indent)
             fh.flush()
+            if not durable:
+                return
             try:
                 os.fsync(fh.fileno())
             except OSError:
@@ -151,6 +161,7 @@ def update_json_atomic(
     *,
     create_missing: bool = False,
     attempts: int = 4,
+    durable: bool = True,
 ) -> bool:
     """Read *path*, apply *mutate* to the object in it, and write it back.
 
@@ -185,6 +196,10 @@ def update_json_atomic(
     *mutate* is called with the parsed object and returns the object to write,
     or ``None`` to abandon the update. It must be free of side effects the
     caller cannot afford to repeat, because a concurrent write re-runs it.
+
+    *durable* is passed to :func:`atomic_write_json`; pass False from a
+    debounced GUI-thread autosave, where an fsync per keystroke-pause is a
+    visible stall on a network share.
     """
     path = Path(path)
     for attempt in range(max(1, attempts)):
@@ -228,7 +243,7 @@ def update_json_atomic(
             continue
 
         try:
-            atomic_write_json(path, updated)
+            atomic_write_json(path, updated, durable=durable)
         except OSError as exc:
             _logger.warning("Could not write %s: %s", path, exc)
             return False

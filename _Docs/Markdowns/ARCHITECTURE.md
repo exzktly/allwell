@@ -3410,6 +3410,26 @@ the same 12-px left edge as every section body beneath them, and so that a
 holder whose children are both hidden, the normal state, contributes no height
 at all.
 
+**It says nothing the card above it has already said.** The resume offer and
+this report are built from the same journal, so with an unfinished run on the
+folder in the form both used to lead with the same fact and both appended the
+journal's own `tally()` — the identical sentence, in two bordered cards stacked
+one above the other. While the offer is up for *this* folder
+(`_resume_card_covers`, keyed on the folder rather than on the card merely
+being visible, since with no folder on the form the offer falls back to the
+newest unfinished run on any plate) the report drops its own account of the run
+and keeps what only it knows: the coverage line and the scope line. The
+decision is made at paint time from the offer's live state and the unsuppressed
+sentence is what is stored, because the card can come down with the folder
+unchanged — a Discard, a Resume — and the report is then the only surface left
+that can say what the last run did; `analyze_suspend._note_resume_card` calls
+`resume_card_changed` so that repaint happens, and that repaint is skipped
+unless the answer has actually flipped, since it runs `_scope_line` and that
+reads the input directory. A report left with its sentence suppressed and no
+coverage line yet is *hidden* rather than shown as a bordered strip holding two
+buttons and no words; it comes up when the scan lands.
+`tests/test_the_two_cards_do_not_say_the_same_thing.py` holds both halves.
+
 The report is refreshed on every change to the input field, once at construction,
 and again when a run settles (`resync_preflight`, from `_on_run_settled`) —
 hidden for the duration of the run in between. Without that last refresh it would

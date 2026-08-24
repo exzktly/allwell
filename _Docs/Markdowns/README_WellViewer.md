@@ -974,6 +974,12 @@ and by `remote_fetch_report.txt` in the output folder.
 - The offer is about **the folder in the input field**. If you have not chosen
   one yet — the state the pane opens in — it offers the most recent unfinished
   run on any plate, which is how you carry on with something from yesterday.
+- The card directly beneath it reports what the folder already holds, and while
+  the offer above is describing the same folder it does not repeat it: it drops
+  its own account of the run and shows only what the offer cannot — how many
+  wells are already complete, and what this run would do about images added
+  since the last one. Dismiss the offer and that account comes back, since the
+  report is then the only thing left saying what happened.
 - On success the app switches to Review and loads the output folder.
 - The **Job Queue** (Datasets pane) works the same way. **Pause queue** winds
   the running job down and keeps what it finished; the job stays in the list

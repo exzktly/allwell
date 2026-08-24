@@ -18,6 +18,7 @@ import shutil
 import zipfile
 
 import pytest
+from PySide6.QtWidgets import QLabel
 
 from pathlib import Path
 
@@ -92,6 +93,21 @@ def _text(tab) -> str:
     return tab._preflight_label.text()
 
 
+def _sidebar_text(tab) -> str:
+    """Everything the two folder strips have on screen, whichever holds it.
+
+    The report and the resume offer are built from the same journal, so while
+    the offer is up for this folder the report drops its own account of the run
+    rather than printing it a second time (``_resume_card_covers``, and
+    ``tests/test_the_two_cards_do_not_say_the_same_thing.py``). Tests whose
+    subject is *that the user is told* therefore read both, since which of the
+    two says it is exactly what that suppression moves around.
+    """
+    labels = [tab._preflight_label]
+    labels += tab._resume_banner.findChildren(QLabel)
+    return " ".join(lbl.text() for lbl in labels if lbl.text())
+
+
 class _FakeThread:
     """A ``threading.Thread`` stand-in that records the start and runs nothing.
 
@@ -111,26 +127,39 @@ class _FakeThread:
 # ── tier one: what the journal says ─────────────────────────────────────────
 
 def test_an_unfinished_run_is_reported(tab, plate):
+    """Read across both strips: an unfinished run is also a *resumable* one, so
+    the offer above the report is up for this same folder and the report defers
+    its own account of the run to it. What must hold either way is that the
+    sidebar says the run never finished and says what it recorded."""
     _journal(plate / "out", plate / "in",
              wells=[("A01", "fetched"), ("A02", "not-fetched")])
     _point_at(tab, plate)
-    assert not tab._preflight_banner.isHidden()
-    assert "never finished" in _text(tab)
-    assert "1 finished" in _text(tab) and "1 never fetched" in _text(tab)
+    assert not tab._resume_banner.isHidden()
+    assert "never finished" in _sidebar_text(tab)
+    assert "1 finished" in _sidebar_text(tab)
+    assert "1 never fetched" in _sidebar_text(tab)
 
 
 @pytest.mark.parametrize("outcome,phrase", [
     ("ok", "completed"),
-    ("error", "failed"),
+    ("error", "Failed run"),
     ("stopped", "was stopped"),
     ("suspended", "was suspended"),
 ])
 def test_a_closed_run_is_reported_by_how_it_ended(tab, plate, outcome, phrase):
     """A run that ended is not the same as one that died, and the four ways it
-    can end are not the same as each other."""
+    can end are not the same as each other.
+
+    Read across both strips, and the expected wording is each strip's own. Only
+    ``ok`` leaves nothing to resume, so only ``ok`` is still said by the report;
+    the other three are said by the offer above it, which leads with the state
+    as two words. The point of the test is unchanged — four endings, four
+    distinct strings, none of them the crash wording.
+    """
     _journal(plate / "out", plate / "in", closed=outcome)
     _point_at(tab, plate)
-    assert phrase in _text(tab) and "never finished" not in _text(tab)
+    assert phrase in _sidebar_text(tab)
+    assert "never finished" not in _sidebar_text(tab)
 
 
 def test_a_folder_with_a_sidecar_but_no_journal_is_still_reported(tab, plate):
@@ -152,7 +181,11 @@ def test_an_empty_output_folder_reports_nothing(tab, tmp_path):
 
 
 def test_dismissing_hides_it_until_the_folder_changes(tab, plate, tmp_path):
-    _journal(plate / "out", plate / "in")
+    # A *completed* run, so the report is the strip carrying the sentence: an
+    # unfinished one is resumable, and the offer above would take the sentence
+    # over, leaving this test measuring the suppression instead of the
+    # dismissal it is about.
+    _journal(plate / "out", plate / "in", closed="ok")
     _point_at(tab, plate)
     assert not tab._preflight_banner.isHidden()
     tab._dismiss_preflight()
@@ -490,9 +523,13 @@ def test_the_readout_re_reads_the_folder_after_a_failure(tab, plate):
     tab._set_running_ui_state(remote=None)
     _finish(tab, "error", plate / "out", plate / "in", wells=[("A01", "analysed")])
 
-    assert not tab._preflight_banner.isHidden()
-    assert "failed" in _text(tab)
-    assert "completed" not in _text(tab)
+    # The failed run is resumable, so the offer above now carries the account
+    # of it and the report keeps the coverage and scope lines. What this test
+    # is about — that *something* re-read the folder, rather than the sidebar
+    # still describing the run before this one — is read across both.
+    assert not tab._resume_banner.isHidden()
+    assert "Failed run" in _sidebar_text(tab)
+    assert "completed" not in _sidebar_text(tab)
 
 
 def test_a_dismissal_does_not_outlive_the_run_that_followed_it(tab, plate):
@@ -504,7 +541,12 @@ def test_a_dismissal_does_not_outlive_the_run_that_followed_it(tab, plate):
     assert tab._preflight_banner.isHidden()
 
     _finish(tab, "error", plate / "out", plate / "in")
-    assert not tab._preflight_banner.isHidden()
+    assert not tab._preflight_dismissed, (
+        "the dismissal was scoped to the folder as it stood when it was waved "
+        "away, and a run has since written to it")
+    # And the sidebar is describing the folder again. The run that just failed
+    # is resumable, so it is the offer that says so.
+    assert not tab._resume_banner.isHidden()
 
 
 def test_the_stale_coverage_line_is_dropped_after_a_run(tab, plate):
@@ -545,7 +587,9 @@ def _deliver_scan(tab, plate, *, partial=False):
 
 
 def test_a_scan_landing_mid_run_does_not_put_the_report_back(tab, plate):
-    _journal(plate / "out", plate / "in")
+    # Closed ``ok`` for the reason the dismissal test gives: this needs the
+    # report itself on screen to watch it stay down.
+    _journal(plate / "out", plate / "in", closed="ok")
     _point_at(tab, plate)
     assert not tab._preflight_banner.isHidden(), "fixture did not show the strip"
 

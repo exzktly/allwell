@@ -241,8 +241,11 @@ class AnalyzePreflightMixin:
         if target != self._preflight_dir:
             # A different folder: nothing either banner is showing applies to
             # it, and leaving them up until the timer fires would have the
-            # sidebar describing a plate the form no longer names.
+            # sidebar describing a plate the form no longer names. The stored
+            # headline goes with the coverage line — it is the previous
+            # folder's sentence, and it is what a repaint would put back up.
             self._preflight_coverage = ""
+            self._preflight_headline_text = ""
             banner.setVisible(False)
             self._hide_resume_banner()
         self._preflight_dir = target
@@ -361,6 +364,45 @@ class AnalyzePreflightMixin:
         dismissed = getattr(self, "_preflight_dismissed", "")
         return not (target and dismissed and _same(dismissed, target))
 
+    def _resume_card_covers(self, target: str) -> bool:
+        """Whether the resume card is up, describing this same folder.
+
+        When it is, it has already said what the last run did and what it
+        recorded — from the same journal this report reads — so the report
+        saying it again puts the identical sentence in two bordered cards
+        stacked one above the other.
+
+        Keyed on the folder, not on "is the card visible": with no folder on
+        the form the card falls back to the newest unfinished run on any plate,
+        and that offer says nothing about the folder this report describes.
+        """
+        shown = getattr(self, "_resume_shown_dir", "")
+        return bool(shown and target and _same(shown, target))
+
+    def resume_card_changed(self) -> None:
+        """Repaint the report because the card above appeared or went away.
+
+        Called by ``analyze_suspend._note_resume_card``. What the report says
+        depends on whether that card is covering the same folder, so the
+        decision is made at paint time and every path that changes the card —
+        a folder settling, Discard, Resume, a run starting or ending — comes
+        back through here rather than each having to remember.
+
+        Two early returns, and both are about cost rather than tidiness.
+        Repainting runs :meth:`_scope_line`, which reads the input directory
+        and the central directory of every archive a loose image belongs to,
+        and this is reached once per settle — so it repaints only when the
+        answer it depends on has actually flipped, and never before the folder
+        has been read at all, which is the settle's own job and is about to
+        happen anyway.
+        """
+        if not getattr(self, "_preflight_headline_text", ""):
+            return
+        covers = self._resume_card_covers(self._preflight_dir)
+        if covers == getattr(self, "_preflight_suppressed", None):
+            return
+        self._render_preflight(self._preflight_headline_text)
+
     def _render_preflight(self, headline: str) -> None:
         """Paint the banner, coverage line included when one has arrived.
 
@@ -382,11 +424,21 @@ class AnalyzePreflightMixin:
         banner = getattr(self, "_preflight_banner", None)
         if banner is None:
             return
+        # Stored unsuppressed. The suppression below is a fact about what is
+        # on screen *now*, and the card above can come down — a Discard, a
+        # Resume — with this folder unchanged, at which point the report is the
+        # only thing left that can say what the last run did.
         self._preflight_headline_text = headline
-        self._preflight_label.setText(
-            " ".join(p for p in (headline, self._preflight_coverage,
-                                 self._scope_line()) if p))
-        banner.setVisible(self._preflight_is_wanted())
+        self._preflight_suppressed = self._resume_card_covers(self._preflight_dir)
+        head = "" if self._preflight_suppressed else headline
+        text = " ".join(p for p in (head, self._preflight_coverage,
+                                    self._scope_line()) if p)
+        self._preflight_label.setText(text)
+        # An empty report is not a report. With its account of the run
+        # suppressed and no coverage line arrived yet, there is nothing in the
+        # card but its buttons, and a bordered strip holding two buttons and no
+        # sentence reads as a rendering fault. It comes up when the scan lands.
+        banner.setVisible(bool(text) and self._preflight_is_wanted())
 
     def _scope_line(self) -> str:
         """What this run will do about images added since the last one.

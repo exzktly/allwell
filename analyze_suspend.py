@@ -358,6 +358,27 @@ class AnalyzeSuspendMixin:
         banner = getattr(self, "_resume_banner", None)
         if banner is not None:
             banner.setVisible(False)
+        self._note_resume_card("")
+
+    def _note_resume_card(self, output_dir: str) -> None:
+        """Record which folder the card is describing, and say that it changed.
+
+        The pre-run report sits directly beneath and is built from the same
+        journal, so when this card is up for a folder the two state the same
+        thing twice in a row. The report drops its own account of the run when
+        that happens — which means it has to be told, and told by the one
+        function that can change this card's visibility rather than by each of
+        its callers. ``""`` means the card is down.
+
+        The report is a sibling mixin on the same tab, and this is the reverse
+        of the call ``settle_folder_banners`` already makes into this module.
+        Guarded because the two are separable: a caller that mixes in the
+        suspend behaviour without the pre-run report has no report to tell.
+        """
+        self._resume_shown_dir = str(output_dir or "")
+        told = getattr(self, "resume_card_changed", None)
+        if told is not None:
+            told()
 
     def refresh_resume_banner(self, *, current_output_dir: str | None = None) -> None:
         """Show or hide the banner against what is on disk right now.
@@ -377,6 +398,7 @@ class AnalyzeSuspendMixin:
         offer = self._resumable(current_output_dir)
         if offer is None or getattr(self, "_running", False):
             banner.setVisible(False)
+            self._note_resume_card("")
             return
         self._resume_kicker.setText(offer.kicker)
         self._resume_title.setText(offer.title)
@@ -389,6 +411,7 @@ class AnalyzeSuspendMixin:
         # fault rather than as absence.
         self._resume_tally.setVisible(bool(tally))
         banner.setVisible(True)
+        self._note_resume_card(offer.output_dir)
 
     # ── what there is to resume ──────────────────────────────────────────
     def _resumable(self, current: str | None = None) -> _Resumable | None:

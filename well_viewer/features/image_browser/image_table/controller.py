@@ -81,6 +81,7 @@ from well_viewer.features.image_browser.image_table.image_compose import (  # no
     is_raw_fallback,
     mark_uncorrected,
     overlay_cell_rgb,
+    partial_scan_report,
     reset_scan_misses,
     resolve_chrome_plan,
     UNCORRECTED_TOOLTIP,
@@ -1146,6 +1147,19 @@ def image_table_generate(ctx) -> None:
                 if is_raw_fallback(ctx, cell, overlay_chans))
     if n_raw:
         msg += f" {n_raw} shown uncorrected (no corrected image)."
+    # Inventories that were TRUNCATED rather than empty. Every cell this pass
+    # drew from one is a real image, so nothing above counts them and the grid
+    # reads as complete — it is short by however many frames the scan never
+    # reached. This is the one place that can say so without reading the log.
+    partial_wells, partial_reasons = partial_scan_report(ctx)
+    if partial_wells:
+        msg += (
+            f" WARNING: the image list for {len(partial_wells)} well"
+            f"{'' if len(partial_wells) == 1 else 's'} "
+            f"({', '.join(partial_wells)}) is INCOMPLETE, so this grid is "
+            "missing frames the dataset holds — "
+            f"{'; '.join(partial_reasons) or 'a scan stopped short'}."
+        )
     ctx.notify.set_status(msg)
     if n == 0 and rendered:
         # Zero hits across the whole grid means key drift somewhere — log

@@ -31,7 +31,7 @@ def get_qc_params(ctx) -> QCParams:
     return qc.params
 
 
-def apply_qc_to_cache(ctx, label: str | None = None) -> None:
+def apply_qc_to_cache(ctx, label: str | None = None) -> list[str]:
     """Write the ``QC_Pass`` column onto cached well frame(s).
 
     With ``label`` given, only that well; otherwise every cached well. A no-op
@@ -42,9 +42,18 @@ def apply_qc_to_cache(ctx, label: str | None = None) -> None:
 
     A8 residuals-ledger R1: takes ``ctx`` — the params and the row cache both
     come from typed state, so the QC projection is a pure ``ctx`` operation the
-    row-fetch data service can call."""
+    row-fetch data service can call.
+
+    Returns the labels whose verdict could not be computed — see
+    :func:`well_viewer.data.cache_projectors.project_verdict_column`, which
+    drops ``QC_Pass`` from those frames rather than leaving the previous
+    parameters' values on them. Registered as a cache projector, so the
+    per-well load path calls it and discards the answer (a load already logs
+    per well); the re-projection path in :func:`recompute_qc_all` is where it
+    reaches the user, because that is where the gate the user just moved
+    silently stops applying to a well."""
     params = get_qc_params(ctx)
-    project_verdict_column(
+    return project_verdict_column(
         ctx, label,
         column="QC_Pass",
         verdict=lambda df, _well: compute_qc_pass(df, params),
@@ -58,8 +67,14 @@ def recompute_qc_all(ctx) -> None:
 
     A8 teardown: takes ``ctx`` — projects QC over typed state and invalidates the
     stats cache through the ctx-native ``invalidate_stats_cache`` core helper."""
+    from well_viewer.core.notifications import report_verdict_failures
     from well_viewer.core.selection_controller import invalidate_stats_cache
-    apply_qc_to_cache(ctx, None)
+    failed = apply_qc_to_cache(ctx, None)
+    # Reported here, at the re-projection, rather than at the per-well load:
+    # this is the pass that runs when the user moves a threshold, and it is the
+    # only moment at which a well can silently stop being gated by the settings
+    # the controls are showing.
+    report_verdict_failures(ctx, layer="QC", column="QC_Pass", failed=failed)
     try:
         invalidate_stats_cache(ctx)  # clears stats cache + bumps override_version
     except Exception:

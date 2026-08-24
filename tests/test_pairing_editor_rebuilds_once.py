@@ -3,6 +3,8 @@
 Two defects sat in the per-sample pairing editor, both reachable only by
 actually operating the combo a user operates.
 
+The state write stays synchronous; only the rebuild it triggers is deferred.
+
 ``_write`` called ``_populate()`` after ``set_fold_change_state``. That sync
 walks every scope whose name is not the ``initiating_scope`` and ``_write``
 passes the empty string, so no scope is skipped and the sync already reaches
@@ -55,7 +57,18 @@ def editor(qtbot, monkeypatch):
     writes: list[dict] = []
     populates: list[int] = []
 
-    monkeypatch.setattr(V, "pairing_rows", lambda _c, _s: [_row("S1"), _row("S2")])
+    def _rows(_c, _s):
+        # Counted here, not by wrapping ``_aw_populate``. Every real rebuild
+        # reads the rows through this function, whereas the wrapper sees only
+        # the calls routed through it — an earlier version of this test wrapped
+        # ``_aw_populate`` and so could not see ``_write``'s own direct
+        # ``_populate()``, which is the exact call the fix removes. A counter
+        # blind to the defect it is written for passes for the wrong reason
+        # (CLAUDE.md section 7.3 #1).
+        populates.append(1)
+        return [_row("S1"), _row("S2")]
+
+    monkeypatch.setattr(V, "pairing_rows", _rows)
     monkeypatch.setattr(V, "unused_rows", lambda _c, _s: [])
 
     ctx = types.SimpleNamespace(
@@ -88,13 +101,7 @@ def editor(qtbot, monkeypatch):
     assert win is not None
     qtbot.addWidget(win)
 
-    real_populate = win._aw_populate
-
-    def _counting():
-        populates.append(1)
-        real_populate()
-
-    win._aw_populate = _counting
+    populates.clear()          # discard the build's own first populate
     return win, writes, populates
 
 
@@ -106,8 +113,10 @@ def _combo(win, row) -> QComboBox:
 def test_one_edit_writes_once_and_rebuilds_once(editor, qtbot):
     win, writes, populates = editor
     _combo(win, 0).setCurrentIndex(1)
-    # The handler defers by one event-loop turn, so nothing has happened yet.
-    assert writes == []
+    # The write is synchronous — callers, and the tests in
+    # test_fold_change_pairing_view.py, are entitled to see the mapping the
+    # moment the combo changes. Only the rebuild it triggers is deferred.
+    assert len(writes) == 1, "the row's control was not written synchronously"
     QCoreApplication.processEvents()
 
     assert len(writes) == 1, "the row's control was written more than once"

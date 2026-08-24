@@ -166,6 +166,14 @@ class ImageTableState:
     # ``scan_misses``; the Generate status line reports its size so a grid that
     # mixes corrected and raw frames says so instead of reading as uniform.
     raw_fallbacks: set = field(default_factory=set)
+    # ``((well, chan_lower, variant), reason)`` pairs whose image inventory was
+    # TRUNCATED — the walk over the archive or folder raised part way and
+    # returned what it had. Distinct from ``scan_misses``, which records a scan
+    # that legitimately found nothing: a truncated inventory holds real images,
+    # so the grid draws and looks finished while frames the dataset holds are
+    # simply absent from it. Same per-pass lifetime as the other two, and the
+    # Generate status line reports it for the same reason.
+    partial_scans: set = field(default_factory=set)
 
     def clear_caches(self) -> None:
         """Drop the per-generate render / image caches (call on dataset swap)."""
@@ -175,6 +183,7 @@ class ImageTableState:
         self.prefetched_cells.clear()
         self.scan_misses.clear()
         self.raw_fallbacks.clear()
+        self.partial_scans.clear()
 
     def effective_row_dims(self) -> list:
         """Ordered row dimensions — ``row_dims`` if set, else ``[row_axis]``.

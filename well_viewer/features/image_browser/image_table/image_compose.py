@@ -52,22 +52,24 @@ def _load_array(ctx, cache: dict, well: str, chan_upper: str, tp: str, fov: str,
                 *, use_tophat: bool = False):
     """:func:`data.frame_load.load_frame_array`, bound to this render pass.
 
-    The pass-scoped ``scan_misses`` / ``raw_fallbacks`` sets live on the Image
-    Table's own state slice, which the data layer must not name. They are
-    supplied here instead, so every Image Table call site keeps reporting what
-    it always reported and the loader stays feature-free.
+    The pass-scoped ``scan_misses`` / ``raw_fallbacks`` / ``partial_scans`` sets
+    live on the Image Table's own state slice, which the data layer must not
+    name. They are supplied here instead, so every Image Table call site keeps
+    reporting what it always reported and the loader stays feature-free.
     """
     return load_frame_array(ctx, cache, well, chan_upper, tp, fov,
                             use_tophat=use_tophat,
                             raw_fallbacks=_raw_fallbacks(ctx),
-                            scan_misses=_scan_misses(ctx))
+                            scan_misses=_scan_misses(ctx),
+                            partial_scans=_partial_scans(ctx))
 
 
 def _load_well_channel(ctx, cache, well, chan_lower, *, use_tophat: bool = False):
     """:func:`data.frame_load.load_well_channel`, bound to this render pass."""
     return load_well_channel(ctx, cache, well, chan_lower,
                              use_tophat=use_tophat,
-                             scan_misses=_scan_misses(ctx))
+                             scan_misses=_scan_misses(ctx),
+                             partial_scans=_partial_scans(ctx))
 
 
 def _load_mask_array(ctx, cache, well, tp, fov):
@@ -471,16 +473,17 @@ def _row_log_scale(ctx, row_idx: int, chan=None) -> bool:
 def reset_scan_misses(ctx) -> None:
     """Start a render pass with clean per-pass load bookkeeping.
 
-    Called at the top of every Generate / export run. Two records are scoped to
+    Called at the top of every Generate / export run. Three records are scoped to
     a single pass and cleared here: the empty-scan set (without the reset a
     well/channel that came up empty once would stay written off for the rest of
-    the session) and the raw-fallback set (which the status line counts, so it
-    has to describe the pass that just ran and no earlier one).
+    the session), the raw-fallback set, and the truncated-inventory set — the
+    last two are counted by the status line, so both have to describe the pass
+    that just ran and no earlier one.
     """
     st = getattr(getattr(ctx, "state", None), "image_table", None)
     if st is None:
         return
-    for attr in ("scan_misses", "raw_fallbacks"):
+    for attr in ("scan_misses", "raw_fallbacks", "partial_scans"):
         rec = getattr(st, attr, None)
         if isinstance(rec, set):
             rec.clear()
@@ -511,6 +514,34 @@ def _raw_fallbacks(ctx) -> set:
     st = getattr(getattr(ctx, "state", None), "image_table", None)
     rec = getattr(st, "raw_fallbacks", None)
     return rec if isinstance(rec, set) else set()
+
+
+def _partial_scans(ctx) -> set:
+    """The current render pass's set of ``((well, channel, variant), reason)``
+    inventories that were TRUNCATED — see :func:`load_well_channel`.
+
+    Same lifetime and same stub tolerance as :func:`_scan_misses`. Kept apart
+    from that set because the two are opposite failures: a miss draws no cell at
+    all, while a truncated inventory draws real cells and simply has fewer of
+    them than the dataset holds — the grid looks finished, which is why the
+    status line has to say otherwise.
+    """
+    st = getattr(getattr(ctx, "state", None), "image_table", None)
+    rec = getattr(st, "partial_scans", None)
+    return rec if isinstance(rec, set) else set()
+
+
+def partial_scan_report(ctx) -> tuple[list[str], list[str]]:
+    """``(wells, reasons)`` for the truncated inventories of the current pass.
+
+    The public reader over :func:`_partial_scans`, so the status line does not
+    have to know the set's tuple shape. Both lists are de-duplicated and stable
+    (sorted wells, reasons in first-seen order); empty on a clean pass.
+    """
+    rec = _partial_scans(ctx)
+    wells = sorted({str(key[0]) for key, _reason in rec})
+    reasons = list(dict.fromkeys(str(r) for _k, r in rec if r))
+    return wells, reasons
 
 
 def _load_ratio_array(ctx, cache, well, ratio, tp, fov, *, use_tophat) -> Path | None:

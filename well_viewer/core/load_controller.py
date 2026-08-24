@@ -423,6 +423,7 @@ def load_directory(ctx, d: Path, label=None) -> None:
         _image_table.last_render = {}
         _image_table.prefetched_cells = set()
         _image_table.scan_misses = set()
+        _image_table.partial_scans = set()
         # Cleared per load, set True by view_state_io.apply_image_table when it
         # restores a saved grid for this load — tells the on_dataset_loaded reset
         # hook below (registry._loaded_image_table) not to clobber a selection

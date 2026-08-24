@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import numpy as np
+
+from pipeline.threshold_optimize import relative_gap
 import pandas as pd
 
 from well_viewer.features.home.cell_gating.gating_compute import (
@@ -39,10 +41,16 @@ def test_scan_fc_vs_control_ratio_is_scale_invariant_where_control_on():
     a = np.array([5, 6, 7, 8, 9, 10], float)
     b = np.array([0, 1, 2, 3, 4, 5], float)
     ctrl = np.array([10, 10, 10, 10], float)  # frac-on = 1.0 across th in [0,8]
-    _fa_raw, _fb_raw, d_raw = scan_fc_fractions(th, a, b)
+    fa_raw, fb_raw, _d_raw = scan_fc_fractions(th, a, b)
     _fa, _fb, diffs = scan_fc_fractions(th, a, b, ctrl_values=ctrl, op_ctrl="ratio")
     assert np.all(np.isfinite(diffs))
-    assert np.allclose(d_raw, diffs)
+    # Compared against the *unsmoothed* gap of the same raw fractions, not
+    # against `scan_fc_fractions`' own no-fold-change return. That branch is
+    # Laplace-smoothed — its fractions are k/n and both n are known — while the
+    # fold-changed branch is not, because `scale_bar_value`'s output is no
+    # longer a count. Comparing the two would measure the smoothing, not the
+    # scale invariance this test is named for.
+    assert np.allclose(relative_gap(fa_raw, fb_raw), diffs)
 
 
 def test_scan_fc_vs_baseline_reshapes_the_metric():

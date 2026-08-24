@@ -1502,6 +1502,30 @@ untouched and the output is bit-for-bit identical to a corrected one — the
 silent substitution §7 of `CLAUDE.md` is about, and the reason `severity` is
 honoured on a receipt row at all.
 
+**`subtract_background` says when it corrected nothing, for the same reason.**
+Four of its paths are the identity transform wearing a correction's name, each
+a legitimate response to an input it cannot work with and each previously
+indistinguishable — in the output *and* in the log — from a correction that ran.
+`fft_bandpass` with a radius of 1 px or less builds an all-ones transfer function
+and the round trip returns the frame (a cliff between radius 1 and radius 2);
+`robust_mesh` zeroes the whole mesh when not one tile yields a finite level, and
+subtracting zero changes nothing; `fov_median` substituted a level of `0.0` for a
+frame with no finite pixel, which is a measured zero and an unmeasurable one
+written identically; and `empty_well` returns the frame when the channel has no
+background field, or when the field it has is a different shape from the frame —
+a blank acquired at a different binning or crop from the plate.
+`_require_empty_well_models` catches only the case where *no* model was built at
+all, so a per-channel gap passed through it. There is nothing else for any of
+the four to do, so each warns under the pipeline's own logger naming what did
+not happen. A frame whose median really is zero is not one of these and says
+nothing.
+
+`fft_bandpass`'s line says the frame is returned "UNCHANGED", which is true of
+that function and not quite of the pipeline: `subtract_background` hands the
+result to `_floor_after_subtract`, which zeroes non-finite pixels and clips
+negatives. The distinction only matters for a frame that already carries
+negatives or NaNs.
+
 **Before a dataset is open, the page is not shown at all.** Home's body is
 wrapped in the shared `wrap_with_empty_state` stack like every other Review
 page, so the same "Load a directory." placeholder covers it and the same
@@ -3547,6 +3571,47 @@ discards its staging file). A read-vs-write timing line is logged so the dominan
 cost is visible; the parallelism grain is per-well, so a degenerate single-well
 grid stays serial.
 
+**Timepoint tokens come from `DeltaT`, in whatever unit the file states.**
+`_parse_ome_labels` converts each plane's `DeltaT` to hours through two tables,
+consulted in order, and renders the result as `<hours>h`. Those tokens become
+the filename's timepoint field and the app's chronological key, so a wrong
+conversion scales every hours axis in Review by the ratio of the two units while
+leaving the ordering intact — the failure mode where nothing looks broken.
+
+`_DELTA_T_HOURS_PER_SYMBOL` comes first and is matched **case-sensitively**,
+because OME's `UnitsTime` enumeration contains both `Ms` (megasecond) and `ms`
+(millisecond) and only their case tells them apart: a case-insensitive lookup
+read a megasecond as a millisecond, off by a factor of 10⁹. It holds the SI
+prefixes that carry that hazard — `Ms`, `ks`, `hs`, `das`, `ds`, `cs`, `ms`.
+`_DELTA_T_HOURS_PER_UNIT` follows, matched on the lower-cased unit, and spells
+out the values an acquisition realistically writes whose meaning does not depend
+on case (`s`, `min`, `h`, `d`, `µs` in both its Unicode spellings, `ns`, plus the
+long forms). An *absent* `DeltaTUnit` is seconds, which is the schema's own
+default; an empty one is read the same way.
+
+**Every route back to a positional token is announced.** A `t0`/`t1` plate whose
+writer recorded no `DeltaT` and one whose elapsed times were dropped produce
+byte-identical archives, so the run log is the only thing that separates a file
+stating no time from one whose time was lost. `_parse_ome_labels` collects every
+reason and warns once, naming it — a unit neither table can read; a `TheT`
+outside `0..SizeT-1`, which is a writer using one-based indexing and would
+otherwise attach each elapsed time to the wrong array slot while still passing
+the completeness count; two elapsed times rendering to the same label, where the
+second timepoint's images would be written over the first's; and a time the
+app's own parser could not read back. The warning fires only when the fallback
+actually happens: one channel's planes carrying a bad unit while another's carry
+seconds leaves every timepoint resolved, and a log line asserting data loss that
+did not occur sends a user to re-export a plate for nothing.
+
+`_hours_token` does the rendering, in **fixed** notation at six significant
+figures. `f"{v:g}"` switches to exponent form below 1e-4, which was rare while
+every `DeltaT` was read as seconds and became routine once the sub-second units
+were added: a six-frame time-lapse 100 ms apart rendered `2.77778e-05h`, and
+`util/timepoint`'s `_UNIT_RE` matches no exponent — so `parse_hours` answered
+`None`, `sort_key` sorted those tokens as text, and frames 5 and 6 landed ahead
+of frames 2 to 4. A number the app cannot read back is worse than a wrong one,
+which at least orders correctly.
+
 **The file already knows most of the layout.** An OME-TIFF's `<Plane>`
 elements carry `PositionX`/`PositionY` — where on the stage each image was taken
 — and `read_ome_layout` collects them into `OmeLayout.stage_positions` from **both**
@@ -3851,6 +3916,23 @@ back to enumerating pages, so each plane's channel and timepoint is a guess.
 compared against the series that actually came out, since that is the axis the
 converter splits into positions. The other two are collected for a caller that
 wants them and are not themselves a refusal.
+**Two labels that reduce to one filename token:** every image is published as
+`<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif`, and `_safe_token` keeps
+alphanumerics only, so `"488 nm"` and `"488nm"` — or `"GFP-1"` and `"GFP_1"`, or
+two channels a file simply names alike — become one token and write the same
+member name into one archive. `zipfile` keeps both copies of the bytes under one
+name and a reader returns only the last, so one channel is unreachable while the
+run reports both as written; `atomic_zip`'s verification cannot see it either,
+because the duplicate name appears on both sides of `sorted(namelist())`. Two
+`DeltaT` values that render alike at `%g`'s six significant figures collide the
+same way. `OmeLayout._colliding_tokens` finds the first such clash across the
+channel tokens and the timepoint tokens, and `validation_report` refuses the file
+by naming the colliding labels in the spelling the acquisition software shows
+them. The timepoint half is a backstop: `_parse_ome_labels` drops a whole file
+back to positional tokens when its `DeltaT`-derived ones are not unique, which
+names every timepoint distinctly and loses only a number the file did not really
+state — there is no such fallback for a channel, whose identity *is* its name — which is why `OmeLayout` also carries `raw_channel_names`, the names
+before tokenisation, used for nothing else.
 `OmeLayout.warnings` keeps what `tifffile` logged while reading — it diagnoses
 every one of these in its own words and writes them to a logger nothing was
 attached to, which is the file's own account of what is wrong with it.
@@ -3973,7 +4055,63 @@ tail of `main()`, with three modes:
 |---|---|
 | `--no_auto_threshold` | nothing |
 | no control wells | Otsu on a pooled per-cell / background-pixel distribution, per channel (`pipeline.auto_threshold.estimate_thresholds_from_outputs`) |
-| `--pos_control_well` **and** `--neg_control_well` | per channel, the threshold maximising the relative fraction-on gap between those two wells (`pipeline.threshold_optimize.estimate_thresholds_from_controls`) |
+| `--pos_control_well` **and** `--neg_control_well` | per channel, the threshold maximising the support-weighted relative fraction-on gap between those two wells (`pipeline.threshold_optimize.estimate_thresholds_from_controls`) |
+
+**The control-well objective is Laplace-smoothed, and reports its plateau.**
+`relative_gap` divides `|fa - fb|` by `max(|fa|, |fb|)`, which is exactly 1.0 at
+every threshold where the negative control is empty however few positive cells
+sit above the cut — so the objective could not tell "97 % of positives on
+against 0 %" from "one cell on against none". Given the two population sizes,
+both fractions are smoothed to `(k + 1) / (n + 2)` before the ratio is taken,
+which costs nothing where the counts are real and collapses the score where they
+are not. The counts are a keyword rather than a requirement because the viewer's
+fold-change scan (`gating_compute.scan_fc_fractions`) adjusts each fraction
+before the gap is taken, so its values are no longer `k / n` — they exceed 1 and
+go negative — and there is no `k` to add one to; that path keeps the unsmoothed
+objective.
+
+Smoothing shortens the tied run without moving the answer, and the distinction
+matters because only the second half is what a user feels. `np.argmax` returns
+the *first* tied index, and the tied run's lower edge is set by where the
+negative control's fraction-on reaches zero — which smoothing does not touch.
+Measured on two well-separated 400-cell control populations, smoothing cuts the
+grid points at the maximum from 485 of 512 to 354, every one of them off the top
+of the run; the reported threshold is identical, and moving a single
+negative-control cell out to 1500 still shifts the gate by 1252 intensity units
+either way. So the instability the audit found is still present, and what ships
+against it is visibility rather than a cure. `best_from_curves` records how many
+grid points scored the identical best objective, how wide a threshold range they
+cover, and whether those points are adjacent on the grid (`tie_count`,
+`tie_span`, `tie_contiguous` on `ThreshFracOptimizationResult`), and the pipeline
+logs all three: fraction-on is a step function, so the best score is usually
+shared by a run of grid points and the reported threshold is merely the lowest of
+them. Contiguity is part of the report because `tie_span` is `max - min` of the
+tied thresholds, which for a bimodal objective covers ground that scored lower —
+describing that as a span would state that every threshold between the two
+maxima had scored the best. Which point of a genuine plateau *ought* to be
+reported is a question about the assay, and is deliberately left open rather than
+answered with a silently different default.
+
+**A stored threshold is rounded, never rounded away.** All three estimators
+wrote `float(round(x))`, which is right for camera counts — a cut of 547.7 reads
+better as 548 and is what the user can type back into the form — and
+catastrophic below 1: `_safe_imwrite` writes float32 TIFFs, so a channel
+normalised to 0–1 is a real input, and its Otsu threshold of 0.4048 stored as
+`0.0`, a gate that passes every cell written as the one value that also means
+"this channel was never measured" (every estimator omits a channel it could not
+measure). `round_stored_threshold` keeps three significant figures and never
+fewer digits than integer rounding gave, so anything at or above 100 — every
+real camera-intensity threshold — is unchanged, and a sub-1 value keeps enough
+resolution to stay non-zero. A non-finite estimate is skipped with a warning
+rather than stored.
+
+Three, not two: the pipeline's control-well and Otsu passes
+(`pipeline/threshold_optimize.py`, `pipeline/auto_threshold.py`) and the Cell
+Gating tab's own Auto-threshold button, whose sampler is the near-twin
+`well_viewer/data/auto_threshold.py`. The viewer's copy imports
+`round_stored_threshold` rather than restating the rule, because a rounding rule
+that holds on the batch path and not on the button is the one a user meets
+first.
 
 **The Otsu mode reads its samples out of the output archives, and pairs them by
 name.** `estimate_thresholds_from_outputs` walks `<output_dir>/*_out.zip` and
@@ -4000,7 +4138,16 @@ schema cannot place looks exactly like a well that held no images, and every
 channel then reports `only 0 sample(s)` — a line that reads as "no data" and
 names neither the schema nor a filename. A well that yields nothing while holding
 role-suffixed members now warns, naming the schema, the separator and an example
-stem. The dispatcher separates the two outcomes it used to report as one, as
+stem; one that yields nothing because it holds no `_labels` member at all warns
+in its own words, so the two are told apart at the well rather than left to a
+per-channel line that describes neither. **Which members `_index_members` is
+entitled to judge is part of that**: the extension test goes through
+`util.image_exts.is_group_image`, the one answer to "would the pipeline group
+this file", rather than a local `tif`/`tiff` list — a run that wrote `.png`
+had every member dropped *before* the role and schema checks, so `unplaceable`
+stayed empty, the warning above could not fire, and the only thing the user saw
+was `only 0 sample(s)` per channel. Directory entries and leading-dot basenames
+(`.DS_Store`, AppleDouble sidecars) are skipped ahead of it. The dispatcher separates the two outcomes it used to report as one, as
 well: "no new defaults" (every channel already had a stored value) is routine,
 while estimating nothing at all for every readout channel is a warning — and it
 cannot hide behind the segmentation channel's unconditional zero, which is itself
@@ -4106,6 +4253,36 @@ noted:
 - `stardist_nuclei` / `stardist_seeded_watershed_cell` — StarDist (needs a
   fluorescent stain); watershed adds a cytoplasm token + min-nucleus-area.
 
+  **Seeding the watershed is whole-array work.** `nucleus_seed_markers` plants
+  one single-pixel marker at each surviving nucleus's rounded centroid, taking
+  the areas from `_label_areas` (a `bincount` over the label image, with an
+  `np.unique` fallback for a label image whose ids are negative or larger than
+  the array, so the fast path cannot be made to allocate by one stray id) and the
+  centroids from one `ndi.center_of_mass` over the whole index list. Both used to
+  be per-nucleus calls over boolean masks — one and two full passes over the
+  frame *each* — which measured 1.43 s and 23.67 s for 1500 nuclei on a 2048²
+  frame against 0.08 s and 0.25 s here, roughly 25 s per FOV and 2.7 hours across
+  a 96-well plate at 4 FOVs, none of it visible in the per-FOV `seg` line, which
+  times only `predict_instances`. The arithmetic is identical, ties included:
+  NumPy's indexed assignment keeps the last write, which is what the loop's
+  overwrite did when two centroids landed on one pixel.
+
+  **A FOV that yields no cells says which reason it was.** Three outcomes were
+  silent, in the same function whose nuclear half refuses a near-constant input
+  with an explicit warning. A constant cytoplasm channel cannot be
+  strictly exceeded by any of its own pixels, so the mask is empty
+  (`cytoplasm_mask` warns twice over: once for the constant input and once for
+  an empty mask however it arose). That case is **tested for** rather than
+  caught: `threshold_otsu` was assumed to raise on a constant image and with the
+  pinned skimage it returns the constant value instead, so the handler never
+  fired while four places described it as the behaviour. An *empty* frame does
+  raise, as `IndexError` rather than `ValueError`, and is its own branch. Every nucleus below
+  `min_nucleus_area_px` leaves no seed at all. And a seed outside the mask is
+  dropped by `watershed(mask=…)` without a word, which is what happens when a
+  cytoplasm stain does not cover its nuclei — those are counted and named. Each
+  line carries the FOV label the module already tracks for the `seg-input`
+  diagnostics.
+
   **Detection thresholds.** Both methods take `--stardist_prob_thresh` (the
   object-probability cut applied to the network's objectness map before polygon
   NMS: lower detects more nuclei, including dim and marginal ones; higher keeps
@@ -4122,10 +4299,13 @@ noted:
   only interpretable next to them.
 
   **One spelling of "auto".** `pipeline.stardist.parse_threshold` is the single
-  rule: blank, the word `auto`, unparseable, or the CLI's negative sentinel all
-  resolve to `None` (model default); anything else must be a probability in
-  `[0, 1]` and is **rejected rather than clamped**, since a silently clamped
-  threshold segments a plate with a parameter nobody chose. The CLI validates
+  rule: blank, the word `auto`, unparseable, `NaN`, or the CLI's negative
+  sentinel all resolve to `None` (model default); anything else must be a
+  probability in `[0, 1]` and is **rejected rather than clamped**, since a
+  silently clamped threshold segments a plate with a parameter nobody chose.
+  `NaN` is in that list because it is neither `< 0` nor `> 1.0` — it fails every
+  comparison — so it passed both bounds and reached `predict_instances`, where
+  every candidate nucleus compares false against it. The CLI validates
   through it in `main()`, the Analyze form emits blank-or-in-range text through
   `pipeline_service._emit_stardist_threshold_flags`, and the Playground parses
   its own two fields with it.
@@ -4209,7 +4389,29 @@ role per channel name for both the OME converter and the Analyze folder scan. A
 strong nuclear stain (`DAPI`/`Hoechst`/…) takes the segmentation role, else a
 secondary `NIR`/`RFP` channel, else the first channel that does *not* read as
 phase/brightfield (`_PHASE_HINT_RE` — `phase`, `brightfield`, `trans`, `dic`,
-`bf`). That last exclusion matters because the channel list arrives in
+`bf`). **Where each of those may match is part of the rule.** A channel read as
+phase skips both flat-field and background subtraction and is then written under
+the usual `_tophat` suffix, so a fluorescence channel misread as phase is
+quantified from raw frames with nothing downstream able to tell — which is what
+`trans` as a bare substring did to a transfection marker, and `dic` to
+`Ca-Indicator`. The three short alternatives (`trans`, `dic`, `bf`) therefore
+carry a boundary on both sides, and neither of them `\b`: no *letter* may
+precede or follow the hint (so `GFPtrans`, `BFP`, `Ca-Indicator` and `DICOM` are
+out), while a digit may sit on either side (so `w1BF`, the ImageXpress spelling,
+is in, and so are `BF1`, `DIC2` and `NIR_BF2`, which a scope with two
+transmitted-light paths produces). The bound is letters only rather than
+alphanumeric because forbidding a trailing digit rejected those numbered phase
+channels and prevented no misreading in return — no fluorescent channel is
+spelled as one of these three tokens followed by a digit. `phase` and
+`brightfield` stay unbounded deliberately: they are the hints that genuinely do
+head longer words, and a trailing bound would reject `PhaseContrast` and
+`BrightfieldLED`, while at five letters and more neither turns up as an
+incidental fragment the way `dic` sits inside `Predicted`. The secondary *nuclear* tier
+(`nir|rfp`) is also left unbounded on purpose: `mRFP` / `TagRFP` / `iRFP` are
+RFP-family stains, which is exactly what that tier is for, and its mistake only
+proposes which channel segmentation runs on — overridden by any strong nuclear
+stain, and editable in the form — rather than silently changing a number.
+That last exclusion matters because the channel list arrives in
 sorted-filename order rather than acquisition order, so a `DIC` channel leads it
 routinely; only when every channel reads as phase does one of them take the
 segmentation role, since segmentation still needs an input.
@@ -4227,8 +4429,9 @@ prefixed run-ons (`w1BF`, the ImageXpress spelling this repo's own default token
 use), and as ordinary words that merely start the same way (`GFP_transfected`,
 `GFPtrans`). `\b` finds no boundary at an underscore, so `\bbf\b` matched neither
 of the first two spellings; a bare `trans` substring matched the last. The rule is
-that no *letter* may precede a hint (rejecting `GFPtrans` and `BFP`), a digit may
-(accepting `w1BF`), and nothing alphanumeric may follow.
+letters only, on both sides: no letter may precede a hint (rejecting `GFPtrans`
+and `BFP`) and none may follow (rejecting `DICOM`), while a digit is allowed
+either side (accepting `w1BF` and `DIC2`).
 
 **Worker-pool memory + failure accounting.** Two properties of how the
 parent process supervises the per-well worker pool:
@@ -8959,6 +9162,21 @@ control row, so only a per-mode pass exercises the one that makes the row wrap.
   drifts in both directions at once — the ones this rule displaced rejected a
   trailing space and a lower-case `a1/` directory that the canonicaliser
   accepts, while accepting an `A0` or `A13` that it rejects.
+  **A digit means an ASCII digit.** `\d` is Unicode by default and matches some
+  six hundred decimal digits, and `int()` / `float()` convert all of them, so
+  `"A1"`, `"A１"` and `"A١"` — three distinct filename tokens naming three
+  distinct files — all canonicalised to `"A01"` and merged onto one well.
+  `util/well_token` and `util/timepoint` — the two modules whose parse decides
+  *identity*, and where a merge is therefore unrecoverable — spell their digit
+  classes `[0-9]`, and `parse_hours` gates its bare-`float()` fallback on `str.isascii`
+  because the regex is not the only way a number gets out of that function. A
+  token whose digits come from another alphabet is opaque, and an opaque token is
+  kept as-is rather than guessed at — which is what both modules already promise
+  everywhere else. `util/fov` and `util/schema_infer` still spell theirs `\d`,
+  deliberately: nothing there decides identity. `parse_fov`'s own docstring
+  records the reason — only *sorting* depends on it, equality still compares the
+  raw token strings, and `sort_key`'s last tuple element is that raw token — so
+  a non-ASCII digit costs an ordering, never a merge.
   `tests/test_well_token_single_parser.py` fails on any *whole-token* well
   pattern outside `util/well_token.py`. Two neighbouring shapes are deliberately
   not caught by it, because they are different operations: a **trailing**-token

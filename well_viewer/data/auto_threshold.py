@@ -51,10 +51,17 @@ from pipeline.auto_threshold import (
     pick_endpoint_timepoints as _pick_endpoint_timepoints,
     sample_cell_and_bg as _sample_cell_and_bg,
 )
+from pipeline.threshold_optimize import round_stored_threshold
 from well_viewer.core.safe import swallowed
 
 
 logger = logging.getLogger("well_viewer.data.auto_threshold")
+
+#: ``skimage.filters.threshold_otsu``, bound on first use rather than at import:
+#: skimage is a heavy dependency and this module is imported by the Review shell
+#: whether or not anyone presses Auto-threshold. A test may set it directly to
+#: drive :func:`thresholds_from_samples` with a known value.
+_threshold_otsu = None
 
 
 # ── Image loading ──────────────────────────────────────────────────────────
@@ -232,11 +239,18 @@ def compute_auto_thresholds(
         _emit(f"Auto-threshold: data directory not found ({out_dir!r}).")
         return {}
 
-    try:
-        from skimage.filters import threshold_otsu as _threshold_otsu
-    except Exception as exc:  # third party guard
-        _emit(f"Auto-threshold: skimage.filters.threshold_otsu unavailable: {exc}")
-        return {}
+    # Checked here, before the walk, so a missing skimage costs nothing rather
+    # than being discovered after every well has been read. Bound on the module
+    # so ``thresholds_from_samples`` can be driven with a known value.
+    global _threshold_otsu
+    if _threshold_otsu is None:
+        try:
+            from skimage.filters import threshold_otsu
+        except Exception as exc:  # third party guard
+            _emit(f"Auto-threshold: skimage.filters.threshold_otsu "
+                  f"unavailable: {exc}")
+            return {}
+        _threshold_otsu = threshold_otsu
 
     pipeline_info = _read_pipeline_info(out_dir)
     rng = random.Random(rng_seed)
@@ -321,10 +335,29 @@ def compute_auto_thresholds(
         _emit(f"Auto-threshold: completed well "
               f"{w_idx}/{len(targets)} ({label_of(target)})")
 
+    return thresholds_from_samples(
+        channels, per_channel, per_channel_attempted,
+        per_channel_decode_failed, _emit)
+
+
+def thresholds_from_samples(
+    channels: Iterable[str],
+    per_channel: dict[str, list[float]],
+    attempted_by_channel: dict[str, int],
+    failed_by_channel: dict[str, int],
+    emit: Callable[[str], None],
+) -> dict[str, float]:
+    """Per-channel Otsu thresholds from already-gathered samples.
+
+    Separated from the walk above so the *decision* can be driven without an
+    output folder: the gathering is IO and the rounding is arithmetic, and the
+    arithmetic is where this went wrong. It is also the seam the sweep guard
+    reads — every estimator in the app must round through one rule.
+    """
     thresholds: dict[str, float] = {}
     for ch in channels:
-        attempted = per_channel_attempted.get(ch, 0)
-        failed = per_channel_decode_failed.get(ch, 0)
+        attempted = attempted_by_channel.get(ch, 0)
+        failed = failed_by_channel.get(ch, 0)
         if attempted and failed / attempted >= 0.25:
             logger.warning(
                 "auto_threshold: %s — %d/%d image pair(s) failed to decode "
@@ -334,26 +367,40 @@ def compute_auto_thresholds(
             )
         values = per_channel.get(ch) or []
         if len(values) < 2:
-            _emit(f"Auto-threshold: skipping {ch.upper()} — only "
-                  f"{len(values)} sample(s).")
+            emit(f"Auto-threshold: skipping {ch.upper()} — only "
+                 f"{len(values)} sample(s).")
             continue
         arr = np.asarray(values, dtype=np.float64)
         # Otsu fails on a constant array; guard.
         if arr.max() <= arr.min():
-            _emit(f"Auto-threshold: skipping {ch.upper()} — constant "
-                  f"distribution (min == max == {arr.min():.3g}).")
+            emit(f"Auto-threshold: skipping {ch.upper()} — constant "
+                 f"distribution (min == max == {arr.min():.3g}).")
             continue
+        otsu = _threshold_otsu
+        if otsu is None:                    # a direct caller, not through the walk
+            from skimage.filters import threshold_otsu as otsu
         try:
-            # Round to the nearest integer before saving — the gating cut is an
-            # intensity value; a clean integer default matches the pipeline's
-            # auto-threshold and what the user can type back in.
-            thr = float(round(float(_threshold_otsu(arr))))
+            # The pipeline's rule, imported rather than restated: round for
+            # readability without rounding the value away. ``round()`` alone is
+            # right for camera counts — a cut of 547.7 reads better as 548 and
+            # is what the user can type back in — and catastrophic below 1. A
+            # channel normalised to 0–1 is a real input (``_safe_imwrite``
+            # writes float32), and its Otsu threshold of 0.2496 became ``0.0``:
+            # a gate that passes every cell, stored as the one value that also
+            # means "this channel was never measured". Measured on a 0–1
+            # channel: 0.25 gates 50.0% of cells, 0.0 gates 100.0%.
+            #
+            # This is the third estimator to answer this question, and it is
+            # the one behind the Cell Gating tab's Auto-threshold button —
+            # fixing the two pipeline-side ones and not this is the half-sweep
+            # CLAUDE.md §7.5 #5 warns about, with the interactive path left
+            # holding the defect.
+            thr = round_stored_threshold(float(otsu(arr)))
         except Exception as exc:
-            _emit(f"Auto-threshold: Otsu failed for {ch.upper()}: {exc}")
+            emit(f"Auto-threshold: Otsu failed for {ch.upper()}: {exc}")
             continue
         thresholds[ch] = thr
-        _emit(f"Auto-threshold: {ch.upper()} → {thr:.4g} "
-              f"(n={arr.size})")
+        emit(f"Auto-threshold: {ch.upper()} → {thr:.4g} (n={arr.size})")
 
     return thresholds
 

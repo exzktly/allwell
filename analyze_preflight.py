@@ -445,9 +445,17 @@ class AnalyzePreflightMixin:
         covered = int(totals.get("covered_any") or 0)
         complete = int(totals.get("complete") or 0)
         wells = int(totals.get("wells") or 0)
-        if not wells:
+        unreadable = int(totals.get("unreadable") or 0)
+        if not wells and not unreadable:
             return
-        head = f"{complete} of {wells} well(s) are complete."
+        # The denominator is the plate, not the subset the scan managed to
+        # read. ``totals["wells"]`` is ``len(records)``, and a well that raised
+        # never enters ``records`` — so both sides of the fraction shrank
+        # together and a plate with two unreadable wells reported "94 of 94
+        # well(s) are complete" followed by a warning that the count was a
+        # floor. The shortfall was made invisible by the sentence written to
+        # make it visible.
+        head = f"{complete} of {wells + unreadable} well(s) are complete."
         # A scan that gave up part-way reported its partial totals as though
         # they were the plate's. `scan_run` sets `partial_scan` for exactly
         # this — one unreadable well must not cost the record for the other
@@ -457,10 +465,17 @@ class AnalyzePreflightMixin:
         # wells unreadable, and the user is about to decide whether to re-run
         # on the strength of it.
         if block.get("partial_scan"):
+            # Named, not merely hedged. "Some wells" left the user unable to
+            # tell two unreadable wells from twenty, and the all-unreadable
+            # case — every well failed, so ``wells`` is 0 — used to return
+            # above without a word, which is the worst instance of the very
+            # thing this line exists to report.
+            how_many = (f"{unreadable} well(s) could not be read"
+                        if unreadable else "Some wells could not be read")
             self._preflight_coverage = (
-                f"{head} Some wells could not be read, so this count is a "
-                f"floor rather than the plate's — check the log for what the "
-                f"scan skipped before deciding whether to re-run.")
+                f"{head} {how_many}, so this count is a floor rather than the "
+                f"plate's — check the log for what the scan skipped before "
+                f"deciding whether to re-run.")
             self._render_preflight(getattr(self, "_preflight_headline_text", ""))
             return
         # The fraction is only printed when it is one. ``covered_any`` counts

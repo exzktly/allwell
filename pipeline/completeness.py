@@ -461,6 +461,12 @@ def scan_run(
     wells = sorted(set(in_map) | wells_with_output(out_dir, csv_prefix))
     records: dict[str, dict] = {}
     partial_scan = False
+    # Counted, not just flagged. ``totals["wells"]`` is ``len(records)``, so an
+    # unreadable well leaves *both* sides of "N of M well(s) are complete"
+    # smaller — a plate with two wells the scan could not read reported a
+    # full-marks fraction with a hedge after it, which is the shortfall being
+    # made invisible in the sentence written to make it visible.
+    unreadable = 0
 
     for well in wells:
         try:
@@ -483,6 +489,7 @@ def scan_run(
         except Exception:
             # One unreadable well must not cost the record for the other 95.
             partial_scan = True
+            unreadable += 1
             continue
         records[well] = well_record(cov, max_missing=max_missing_per_well)
 
@@ -494,6 +501,7 @@ def scan_run(
         finished_at=finished_at, started_at_iso=started_at_iso,
         duration_s=duration_s, host=host, mode=mode, schema=schema, sep=sep,
         csv_prefix=csv_prefix, suspended=suspended, partial_scan=partial_scan,
+        unreadable=unreadable,
         errors={"files": error_count, "by_type": error_types},
         findings=findings,
     )
@@ -538,7 +546,8 @@ def build_block(
     records: dict, *, finished_at: str = "", started_at_iso: str = "",
     duration_s: float | None = None, host: str = "", mode: str = "",
     schema=(), sep: str = "", csv_prefix: str = "", suspended: bool = False,
-    partial_scan: bool = False, errors: dict | None = None,
+    partial_scan: bool = False, unreadable: int = 0,
+    errors: dict | None = None,
     findings=None, source: str = "run",
 ) -> dict:
     """Assemble a ``run_check`` block from per-well records.
@@ -554,6 +563,11 @@ def build_block(
         state = rec.get("health")
         if state in totals:
             totals[state] += 1
+    # ``wells`` is how many were *recorded*; ``unreadable`` is how many the scan
+    # could not record. A reader that prints a fraction needs both, or its
+    # denominator silently shrinks by exactly the wells it is meant to be
+    # warning about.
+    totals["unreadable"] = int(unreadable)
     return {
         "version": 1,
         "source": source,
@@ -572,6 +586,7 @@ def build_block(
         "wells": records,
         "totals": {
             "wells": len(records),
+            "unreadable": totals["unreadable"],
             "complete": totals["complete"],
             "partial": totals["partial"],
             "missing_csv": totals["missing"],

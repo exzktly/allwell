@@ -1499,7 +1499,15 @@ def resolve_input_output(
     exit, user cancel), skip it — the loose TIFs stay intact so
     the user can retry from scratch.
     """
-    plan = plan_input_layout(raw)
+    # The *same* plan the readout showed, which means the same arguments. This
+    # call omitted the schema while holding it in its own signature, so the run
+    # recomputed a schema-less plan: the readout said "Will fold 1 loose TIF(s)"
+    # and this side logged 3 — the audit's own worked example, reproduced by the
+    # fix for it, with only the surface it appears on moved. The two can also
+    # disagree about the *action*, since an all-duplicate folder is `grouped`
+    # with the schema and `fold_loose` without it.
+    plan = plan_input_layout(raw, filename_schema=filename_schema,
+                             filename_sep=filename_sep)
     if not plan.runnable:
         raise ValueError(_layout_error(plan, raw))
 

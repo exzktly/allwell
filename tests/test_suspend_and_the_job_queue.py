@@ -181,6 +181,52 @@ def test_the_banner_does_not_offer_a_run_the_queue_owns(tmp_path, monkeypatch):
         "here runs the plate a second time into the same output folder")
 
 
+def test_the_banner_asks_both_records_and_filters_both(tmp_path, monkeypatch):
+    """`_journal_offers` was filtered and `_suspended_offers` was not.
+
+    A suspend writes *both* pointers — `_suspend` calls `_write_suspend_record`
+    for any running job — and `_resumable` ranks the suspend record **first**
+    for the current folder, so the unfiltered one won and the plate was offered
+    anyway. Filtering one of two records is filtering neither, which is the
+    half-sweep §7.5 #5 is about: one function now holding two definitions of who
+    owns a run.
+
+    Driven through `_resumable`, which is what the banner calls. The previous
+    test called `_journal_offers` directly and so entered one step past the bug.
+    """
+    import analyze_suspend
+    from services import run_journal as J
+    from services import suspend_record as SR
+
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    monkeypatch.setattr(SR, "record_path", lambda: tmp_path / "suspended.json")
+    monkeypatch.setattr(analyze_suspend, "record_path",
+                        lambda: tmp_path / "suspended.json", raising=False)
+    out = tmp_path / "out"
+    out.mkdir()
+
+    class _Pane(analyze_suspend.AnalyzeSuspendMixin):
+        def _current_output_dir(self):
+            return str(out)
+
+    def _both_records(queued: bool):
+        J.open_run(out, input_dir=str(tmp_path / "in"), mode="local",
+                   spec={"opts": {"raw": str(tmp_path / "in")}}, queued=queued)
+        J.close_run(out, outcome="suspended")
+        SR.save(SR.SuspendedRun(
+            spec={"opts": {"raw": str(tmp_path / "in")}},
+            input_dir=str(tmp_path / "in"), output_dir=str(out),
+            suspended_at=1.0, queued=queued))
+        return _Pane()._resumable()
+
+    assert _both_records(queued=False) is not None, (
+        "the fixture no longer produces an offer, so the assertion below would "
+        "pass for the wrong reason")
+    assert _both_records(queued=True) is None, (
+        "the banner offered a plate the queue still holds — the suspend record "
+        "is unfiltered, and `_resumable` ranks it ahead of the journal offer")
+
+
 def test_a_queue_started_run_is_marked_as_the_queue_s(tmp_path, monkeypatch):
     """The flag is written by the run, not inferred by the reader."""
     from services import run_journal as J

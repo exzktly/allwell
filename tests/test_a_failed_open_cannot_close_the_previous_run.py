@@ -18,6 +18,7 @@ is the shape this follows: drive the order the app runs, not the unit's API.
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 
 import pytest
 
@@ -84,3 +85,53 @@ def test_close_run_and_record_well_ask_the_same_question():
         assert 'float(payload.get("opened_at") or 0.0) != run_token' in src, (
             f"{name} does not compare the token against the record's own "
             f"opened_at, so the two writers disagree about which run owns it")
+
+
+# ── the scenario the guard was written for ──────────────────────────────────
+
+def test_a_failed_open_run_leaves_the_previous_record_alone(tmp_path, monkeypatch):
+    """The case `close_run`'s docstring describes, driven through the runner.
+
+    `open_run` answers `None` for a write that failed as well as *raising* for a
+    mode it will not accept, and only the second reached `_open_journal`'s
+    handler. So a failed write still set `_journal_dir`, `_close_journal` then
+    called `close_run(run_token=None)`, and the guard treats a missing token as
+    "close it anyway" — the previous run's record, which the index is holding
+    open precisely so it can be offered for resume, was closed as this run's
+    outcome and the offer vanished.
+
+    Every existing test in this file drove `close_run` directly with a
+    mismatched float the runner cannot produce (§7.6 #2), and one of them
+    asserts the `run_token=None` escape hatch that causes this.
+    """
+    from services import run_journal as J
+    from services.pipeline_runner import PipelineRunner
+
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    out = tmp_path / "out"
+    out.mkdir()
+    J.open_run(out, input_dir="/in", mode="local", spec={"a": 1}, argv=["run1"])
+    assert [e["output_dir"] for e in J.unfinished_runs()] == [str(out)]
+
+    runner = PipelineRunner()
+    real_open = J.open_run
+    J.open_run = lambda *a, **k: None                          # the write fails
+    try:
+        runner._open_journal(Path("/in"), out, ["run2"], {})
+    finally:
+        # Restored by hand rather than with ``monkeypatch.undo``, which would
+        # also undo the ``index_path`` redirection above and send the
+        # assertions below at the developer's real index.
+        J.open_run = real_open
+
+    assert runner._journal_dir is None, (
+        "the runner armed itself with a journal it never opened")
+    runner._close_journal()
+
+    rec = J.read_journal(out)
+    assert rec.outcome is None, (
+        f"run 1's record was closed as {rec.outcome!r} by run 2, whose own "
+        "journal write had failed")
+    assert rec.argv == ("run1",), "run 2 overwrote run 1's record"
+    assert [e["output_dir"] for e in J.unfinished_runs()] == [str(out)], (
+        "the resume offer for a plate that never finished has disappeared")

@@ -721,6 +721,16 @@ class PipelineRunner:
         return self._last_output_dir
 
     @property
+    def journal_queued(self) -> bool:
+        """Whether the job queue started the run currently in flight.
+
+        Read by the suspend record, which has to answer the same
+        who-owns-resuming-this question the journal does — a suspend writes both
+        pointers, and filtering one is filtering neither.
+        """
+        return self._journal_queued
+
+    @property
     def journal_token(self) -> float | None:
         """This run's journal token, for a writer that is not on this thread.
 
@@ -760,9 +770,13 @@ class PipelineRunner:
         """Spawn the worker thread that runs the pipeline subprocess.
 
         ``resolve_dirs`` is called with ``(opts, log_q, proc_hook=…)`` where
-        ``proc_hook`` is the runner's zipper-tracking callback (forwarded
-        to the grouping subprocess so Stop can reach it). Old call sites
-        that ignore the kwarg still work.
+        ``proc_hook`` is the runner's zipper-tracking callback (forwarded to the
+        grouping subprocess so Stop can reach it). It is **required**: the
+        ``except TypeError`` that used to accept a resolver without it was
+        removed, because it could not be entered by a caller with the wrong
+        signature — only by a ``TypeError`` raised *inside* resolution, which it
+        answered by re-running a function that groups images and deletes their
+        sources.
 
         ``journal_spec`` is the ``RunSpec.to_json()`` payload behind this run,
         recorded into the output directory's run journal. It arrives here
@@ -1128,6 +1142,21 @@ class PipelineRunner:
             # it, because the artefacts and not this record are what the run
             # produces. It is logged with its reason rather than passed over.
             swallowed(f"could not open the run journal in {output_dir}")
+            return
+        if self._journal_token is None:
+            # ``open_run`` answers ``None`` for a write that failed as well as
+            # raising for a mode it will not accept, and only the second reached
+            # the handler above. Recording the directory anyway armed
+            # ``_close_journal`` with no token, and ``close_run`` treats a
+            # missing token as "close it anyway" — so the *previous* run's
+            # record, which the index is holding open precisely so it can be
+            # offered for resume, was closed as this run's outcome and the
+            # offer vanished. That is the exact scenario ``close_run``'s
+            # docstring describes, and the guard could not see it because this
+            # side never told it there was nothing to guard.
+            swallowed(f"the run journal in {output_dir} could not be opened, so "
+                      "this run will not write one — the previous run's record "
+                      "is left as it stands")
             return
         self._journal_dir = output_dir
 

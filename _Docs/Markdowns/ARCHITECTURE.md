@@ -3119,7 +3119,10 @@ archive. On a folder holding one new image, one duplicate and one calibration
 frame the readout said "Will fold 3 loose TIF(s)" and the run folded one. Given
 the form's `filename_schema` / `filename_sep`, `plan_input_layout` asks that same
 planner, so preview and run cannot disagree; without them it falls back to the
-file count and says nothing it cannot support. A folder whose loose files are
+file count and says nothing it cannot support. `resolve_input_output` passes
+them too — it holds both in its own signature, and omitting them made the *run*
+recompute a schema-less plan and log the glob count, which reproduced the
+original defect on the log line instead of the readout. A folder whose loose files are
 *all* duplicates is reported as `grouped` with the reason, rather than as a fold
 of nothing.
 
@@ -3130,7 +3133,12 @@ copied to a non-HFS volume — so a real plate arrived with exactly twice as man
 "TIFs" as images, in a count that feeds the readout, the `tifs > 3` threshold
 selecting `zip_root`, `count_expected_wells`' fallback, and the `source_tifs`
 tuples the post-run deletion closures are built from. A leading dot is excluded,
-which costs nothing real: no acquisition names an image with one.
+which costs nothing an acquisition writes: no microscope names an image with
+one. It does narrow the `tifs > 3` threshold — a folder of three real images
+beside their three sidecars used to count six and clear it, and now counts three
+and does not — so a very small plate copied to a non-HFS volume reports "No TIF
+files or in/ folder found" where it previously ran. The `> 3` cliff itself
+predates this.
 
 The actions are the layouts. A folder **named** `in` is the input directly
 (output `../out`); a folder that **contains** `in/` feeds the pipeline from that
@@ -4449,14 +4457,39 @@ than as a new `well_stage` value because `RunDashboard.set_well_stage` ignores a
 stage outside its own roster — sending it one would have stopped those wells
 being marked done, trading a wrong record for a wrong picture.
 
-**One surface offers any given unfinished run.** `RunJournal.queued` records that
-the job queue started it, written by `open_run` and set for the duration of
-`start_from_queue`. The Analyze pane's banner skips those. Suspending a
-queue-driven job closes its journal `suspended`, which is exactly what
-`is_unfinished` is for, so the banner offered the plate the moment `_running`
-cleared while the queue still held the job — resume from the banner, let the
-queue start, and the same plate runs twice concurrently into one output
+**One surface offers any given unfinished run.** `RunJournal.queued` and
+`SuspendedRun.queued` record that the job queue started it, written by
+`open_run` and by `_suspend` respectively, and the Analyze pane's banner skips
+both. Suspending a queue-driven job closes its journal `suspended`, which is
+exactly what `is_unfinished` is for, so the banner offered the plate the moment
+`_running` cleared while the queue still held the job — resume from the banner,
+let the queue start, and the same plate runs twice concurrently into one output
 directory.
+
+**Both** records carry the flag, and that is not belt-and-braces. A suspend
+writes both pointers, and `_resumable` ranks the suspend record *ahead* of the
+journal offer for the folder on the form — so filtering the journal alone left
+the offer standing, unchanged, sourced from the record that was still saying
+yes.
+
+**Dismissing an offer is not a claim that the plate finished.** Discard calls
+`run_journal.dismiss`, which flags the index entry; it used to call `forget`,
+which deletes it. The entry is read by two things with opposite intents (§7.7
+#1): the banner, which honours the dismissal, and `resume_aware_spec`, which
+reads `unfinished_runs()` to decide whether the next Run must be
+`--incremental`. Deleting it therefore disarmed the mid-flight-well recovery as
+a side effect of closing a banner — the user who said "I know, I'll just re-run
+it" got the permanently-3-of-12 plate the forcing exists to prevent, with
+nothing said, while the record on disk still stated the plate was unfinished. A
+*new* run of the same directory clears the flag, because `_index_upsert` builds
+a fresh entry: the dismissal was about the run that had been offered.
+
+**The resume message names the cause it found.** `resume_aware_spec` fires on
+every outcome in `UNFINISHED_OUTCOMES` plus a record left open, which is four
+different events — a suspend, a stop, a failure, and an app that was killed. One
+sentence saying "a suspended run" was true of a quarter of them (§7.7 #4), so
+`_input_has_unfinished_work` answers with the phrase rather than a boolean, and
+the line names Force as the way to decline.
 
 **Nothing is written on the worker host.** `services/run_journal.py` is not in
 `_REQUIRED_REMOTE_FILES`, so the module never reaches the remote and the pipeline

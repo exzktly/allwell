@@ -65,52 +65,80 @@ def test_an_explicit_negative_wins_over_the_positive():
 
 def test_the_journal_branch_translates_and_the_sidecar_branch_does_not():
     """§7.7 #1 — the helper is worth nothing if the caller skips it."""
-    import ast
-    import inspect
-    import textwrap
+    from analyze_preflight import AnalyzePreflightMixin
+    from pipeline.completeness import build_block
 
-    import analyze_preflight
+    recorded: list[str] = []
 
-    src = textwrap.dedent(inspect.getsource(analyze_preflight._previous_settings))
-    tree = ast.parse(src)
-    calls = [ast.unparse(n) for n in ast.walk(tree) if isinstance(n, ast.Call)]
-    assert any("_as_sidecar_polarity" in c for c in calls), (
-        "the journal branch returns the form's own spelling, so the applier "
-        "silently drops both settings")
-    assert any("_pinfo_flat" in c for c in calls), (
-        "the sidecar branch is gone; this test names a shape that no longer "
-        "exists")
+    class _Pane(AnalyzePreflightMixin):
+        _preflight_dir = "/out"
+        _preflight_coverage = ""
+        _preflight_scanning = ""
+        _preflight_scan_queued = False
+        _preflight_headline_text = ""
+
+        def _render_preflight(self, headline):
+            recorded.append(self._preflight_coverage)
+
+        def _start_coverage_scan(self):
+            pass
+
+        def _scope_line(self):
+            return ""
+
+    recs = {f"A{i:02d}": {"health": "complete", "intent": 4,
+                          "covered_any": 4, "covered_csv": 4}
+            for i in range(1, 95)}
+
+    pane = _Pane()
+    pane._on_coverage_scanned("/out", build_block(recs, partial_scan=True,
+                                                  unreadable=2))
+    assert recorded, "the coverage line was never rendered"
+    line = recorded[-1]
+
+    # The denominator is the plate's, not the subset the scan managed to read.
+    # `totals["wells"]` is `len(records)` and a well that raised never enters
+    # `records`, so both sides of the fraction shrank together and this read
+    # "94 of 94 well(s) are complete" with a hedge after it.
+    assert "94 of 96 well(s) are complete" in line, line
+    assert "2 well(s) could not be read" in line, line
+    assert "floor rather than the plate's" in line, line
+
+    # ...and the clean scan says none of it.
+    recorded.clear()
+    pane._on_coverage_scanned("/out", build_block(recs))
+    assert recorded and "floor rather than" not in recorded[-1], recorded
 
 
-# ── L2: a scan that gave up, reported as a complete one ─────────────────────
+def test_a_scan_where_every_well_failed_is_not_silent():
+    """The worst instance of the defect, and the one left unreported.
 
-def test_the_coverage_line_says_when_the_scan_did_not_finish():
-    """`scan_run` sets `partial_scan` when it could not read a well.
-
-    One unreadable well must not cost the record for the other 95, so the scan
-    keeps going and flags itself. Two surfaces already read that flag — the
-    Home plate and the run log — and the pre-run coverage line did not. So
-    "94 of 96 well(s) are complete" meant either two wells short or two wells
-    unreadable, with nothing to tell them apart, and it is the line the user
-    reads while deciding whether to re-run.
+    `if not wells: return` preceded the partial check, so a scan that could read
+    nothing at all said nothing at all — indistinguishable from a plate with no
+    wells in it.
     """
-    import ast
-    import inspect
-    import textwrap
+    from analyze_preflight import AnalyzePreflightMixin
+    from pipeline.completeness import build_block
 
-    import analyze_preflight
+    recorded: list[str] = []
 
-    fn = analyze_preflight.AnalyzePreflightMixin._on_coverage_ready \
-        if hasattr(analyze_preflight, "AnalyzePreflightMixin") \
-        and hasattr(analyze_preflight.AnalyzePreflightMixin, "_on_coverage_ready") \
-        else None
-    src = (textwrap.dedent(inspect.getsource(fn)) if fn is not None
-           else inspect.getsource(analyze_preflight))
-    assert "partial_scan" in src, (
-        "the pre-run coverage line never reads partial_scan, so a scan that "
-        "gave up part-way is reported as the plate's true state")
+    class _Pane(AnalyzePreflightMixin):
+        _preflight_dir = "/out"
+        _preflight_coverage = ""
+        _preflight_scanning = ""
+        _preflight_scan_queued = False
+        _preflight_headline_text = ""
 
-    tree = ast.parse(src)
-    reads = [n for n in ast.walk(tree)
-             if isinstance(n, ast.Call) and "partial_scan" in ast.unparse(n)]
-    assert reads, "partial_scan is mentioned but never read"
+        def _render_preflight(self, headline):
+            recorded.append(self._preflight_coverage)
+
+        def _start_coverage_scan(self):
+            pass
+
+        def _scope_line(self):
+            return ""
+
+    _Pane()._on_coverage_scanned("/out", build_block({}, partial_scan=True,
+                                                     unreadable=96))
+    assert recorded, "a scan that read nothing reported nothing"
+    assert "96 well(s) could not be read" in recorded[-1], recorded[-1]

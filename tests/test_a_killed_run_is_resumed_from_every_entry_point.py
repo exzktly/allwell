@@ -24,6 +24,7 @@ from __future__ import annotations
 import ast
 import inspect
 import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -34,30 +35,50 @@ def _source(obj) -> str:
     return inspect.getsource(obj)
 
 
-def test_the_run_button_asks_the_same_question_the_queue_does():
-    """§7.7 #1: test the caller's sequence, not the unit's API.
+def test_the_run_button_hands_the_runner_the_incremental_spec(tmp_path, qtbot,
+                                                              monkeypatch):
+    """§7.7 #1: assert what the runner *received*, not what the source says.
 
-    Every existing test drove `resume_aware_spec` directly, and all of them
-    would pass against a `start_run` that never called it — which is exactly
-    how a correct helper ships behind a branch the app does not take.
+    The first version of this test read `start_run`'s source for the string
+    `resume_aware_spec` and compared two line numbers. Deleting the assignment —
+    `self.resume_aware_spec(spec)` with the result discarded, so the feature is
+    entirely dead — left it and all 44 of its neighbours green. A source-text
+    guard cannot tell a rule that is applied from one that is merely mentioned.
     """
-    import analyze_run_spec
+    import analyze_tab_form
+    from services import run_journal as J
 
-    src = _source(analyze_run_spec.AnalyzeRunMixin.start_run)
-    assert "resume_aware_spec" in src, (
-        "start_run does not consult the resume record, so restarting a killed "
-        "plate with the Run button skips every well that was mid-flight")
+    monkeypatch.setattr(analyze_tab_form, "load_remotes", lambda: {})
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "state" / "idx.json")
 
-    tree = ast.parse(textwrap.dedent(src))
-    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
-    starts = [n for n in calls
-              if isinstance(n.func, ast.Attribute) and n.func.attr == "start"]
-    resumes = [n for n in calls
-               if isinstance(n.func, ast.Attribute)
-               and n.func.attr == "resume_aware_spec"]
-    assert starts and resumes, (src, starts, resumes)
-    assert resumes[0].lineno < starts[0].lineno, (
-        "the spec is adjusted after the runner has already been started")
+    in_dir, out_dir = tmp_path / "in", tmp_path / "out"
+    in_dir.mkdir()
+    out_dir.mkdir()
+    J.open_run(out_dir, input_dir=str(in_dir), mode="local",
+               spec={"opts": {"raw": str(in_dir)}})     # left open: app killed
+
+    from analyze_tab import AnalyzeTab
+
+    tab = AnalyzeTab()
+    qtbot.addWidget(tab)
+
+    seen: list[dict] = []
+    monkeypatch.setattr(type(tab._runner), "start",
+                        lambda self, *a, **k: seen.append(dict(k.get("opts") or (a[1] if len(a) > 1 else {}))))
+    monkeypatch.setattr(type(tab), "_validate_run_request",
+                        lambda self: Path("pm.py"))
+
+    spec = tab._collect_run_spec()
+    spec.opts["raw"] = str(in_dir)
+    spec.opts.pop("incremental", None)
+    tab.start_run(spec)
+
+    assert seen, "the runner was never started"
+    assert seen[0].get("incremental") is True, (
+        "the Run button started a plate the app was killed during without "
+        "--incremental, so every well that was mid-flight is skipped as "
+        "complete and stays permanently part-done"
+    )
 
 
 def test_the_queue_does_not_apply_it_twice():

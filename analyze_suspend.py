@@ -157,6 +157,11 @@ class AnalyzeSuspendMixin:
             input_dir=self._input_edit.text().strip(),
             output_dir=str(out_dir),
             suspended_at=time.time(),
+            # Both pointers carry it, because a suspend writes both. Filtering
+            # the journal offer and not this one left the banner offering a
+            # plate the queue still held — and `_resumable` puts the suspend
+            # record *first* for the current folder, so the unfiltered one won.
+            queued=bool(getattr(self._runner, "journal_queued", False)),
             wells_done=int(getattr(self, "_well_done", 0) or 0),
             wells_total=int(getattr(self, "_well_total", 0) or 0),
         )
@@ -347,7 +352,15 @@ class AnalyzeSuspendMixin:
         return resolved
 
     def _suspended_offers(self, *, only_dir: str = "") -> list[_Resumable]:
-        """Suspended runs on record, newest first; one folder's when named."""
+        """Suspended runs on record, newest first; one folder's when named.
+
+        A run the job queue started is skipped for the same reason
+        :meth:`_journal_offers` skips one: the queue's own entry is already
+        offering it, and resuming here while the queue still holds the job runs
+        the same plate twice, concurrently, into one output directory. Both
+        records have to be filtered, not one — a suspend writes both, and this
+        is the one `_resumable` ranks first for the current folder.
+        """
         return [
             _Resumable(
                 spec=run.spec,
@@ -360,7 +373,8 @@ class AnalyzeSuspendMixin:
                 at=float(getattr(run, "suspended_at", 0.0) or 0.0),
             )
             for run in load_all()
-            if not only_dir or same_dir(run.output_dir, only_dir)
+            if not run.queued
+            and (not only_dir or same_dir(run.output_dir, only_dir))
         ]
 
     def _journal_offers(self, *, only_dir: str = "") -> list[_Resumable]:
@@ -379,6 +393,11 @@ class AnalyzeSuspendMixin:
             # An index entry outlives the folder it names — a deleted or moved
             # output directory must not produce a banner offering to resume it.
             if journal is None or not journal.spec or not journal.is_unfinished:
+                continue
+            if entry.get("dismissed"):
+                # The user has closed this offer. That is a statement about the
+                # banner; the entry stays unfinished so the incremental
+                # recovery still fires on the next Run.
                 continue
             if journal.queued:
                 # The job queue started this run, so the queue's own entry is
@@ -426,7 +445,13 @@ class AnalyzeSuspendMixin:
         other record does not exist.
         """
         with swallow(f"dropping the journal offer for {offer.output_dir}"):
-            run_journal.forget(offer.output_dir)
+            # ``dismiss``, not ``forget``. The index entry is what
+            # ``unfinished_runs`` returns, and ``resume_aware_spec`` reads that
+            # to decide whether the next Run must be incremental — so deleting
+            # it here made Discard silently disarm the recovery, and the user
+            # who dismissed the offer and pressed Run got the permanently
+            # 3-of-12 plate the forcing exists to prevent.
+            run_journal.dismiss(offer.output_dir)
         with swallow(f"dropping the suspend record for {offer.output_dir}"):
             clear(offer.output_dir)
 
@@ -454,8 +479,25 @@ class AnalyzeSuspendMixin:
         except Exception:
             swallowed()
 
-    def _input_has_unfinished_work(self, raw_input: str) -> bool:
-        """Whether *raw_input* has a suspended **or** interrupted run behind it.
+    #: How a previous run of the same input ended, in the words the resume
+    #: message uses. The journal's `UNFINISHED_OUTCOMES` are three different
+    #: events, and a line that says "suspended" about a run that *failed* is a
+    #: statement the user can check and find untrue.
+    _UNFINISHED_CAUSE = {
+        "suspended": "a suspended run",
+        "stopped": "a run that was stopped part-way",
+        "error": "a run that failed part-way",
+        None: "a run that never finished — the app was killed while it went",
+    }
+
+    def _input_has_unfinished_work(self, raw_input: str) -> str | None:
+        """How *raw_input*'s last unfinished run ended, or ``None`` if none did.
+
+        A phrase rather than a boolean, because the caller puts it in a sentence.
+        Widening this from the suspend record to the journal widened the set of
+        *causes* with it — an open record means the app was killed, and a closed
+        one can say `error` or `stopped` as easily as `suspended` — and one
+        message naming only the last of those is true a quarter of the time.
 
         The journal's index is keyed on the *output* directory, so the input it
         was run against is read from the journal in that directory rather than
@@ -466,7 +508,7 @@ class AnalyzeSuspendMixin:
         from services import run_journal as _journal
 
         if any(same_dir(r.input_dir, raw_input) for r in load_all()):
-            return True
+            return self._UNFINISHED_CAUSE["suspended"]
         for entry in _journal.unfinished_runs():
             out = str(entry.get("output_dir") or "")
             if not out:
@@ -475,11 +517,12 @@ class AnalyzeSuspendMixin:
                 rec = _journal.read_journal(out)
                 if rec is not None and rec.input_dir and same_dir(
                         rec.input_dir, raw_input):
-                    return True
-        return False
+                    return self._UNFINISHED_CAUSE.get(
+                        rec.outcome, self._UNFINISHED_CAUSE[None])
+        return None
 
     def resume_aware_spec(self, spec: RunSpec) -> RunSpec:
-        """Force incremental when this spec's input has a suspended run behind it.
+        """Force incremental when this spec's input has an unfinished run behind it.
 
         The Job Queue re-runs a job from its stored spec, and that spec has no
         ``incremental`` in it — the flag is not a form field, it is set by
@@ -510,15 +553,17 @@ class AnalyzeSuspendMixin:
             raw = str((spec.opts or {}).get("raw") or "").strip()
             if not raw or spec.opts.get("incremental"):
                 return spec
-            if not self._input_has_unfinished_work(raw):
+            cause = self._input_has_unfinished_work(raw)
+            if cause is None:
                 return spec
             opts = dict(spec.opts)
             opts["incremental"] = True
             self._log_line(
-                "[resume] This input has a suspended run behind it — processing "
-                "incrementally, so wells that were part-way through when it was "
-                "suspended recover their missing field/timepoint groups instead "
-                "of being skipped as complete.\n",
+                f"[resume] This input has {cause} behind it — processing "
+                "incrementally, so wells that were part-way through recover "
+                "their missing field/timepoint groups instead of being skipped "
+                "as complete. Tick Force to recompute the plate from scratch "
+                "instead.\n",
                 "INFO",
             )
             return RunSpec(

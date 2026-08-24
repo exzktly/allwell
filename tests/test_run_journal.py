@@ -428,10 +428,20 @@ def test_the_tally_is_empty_when_nothing_was_recorded(out_dir):
     assert J.read_journal(out_dir).tally() == ""
 
 
-def test_the_tally_groups_analysed_and_fetched_together(out_dir):
-    """One well that finished locally and one fetched from a remote are both
-    just "finished" to a user; the distinction is the journal's, not theirs."""
+def test_a_local_tally_groups_analysed_and_fetched_together(out_dir):
+    """On a **local** run both really are finished, and the wording says so.
+
+    This test used to carry the general claim — "the distinction is the
+    journal's, not theirs" — and passed only because ``_open`` defaults to
+    ``mode="local"``. That claim is exactly what the remote grouping overturns:
+    remotely, ``analysed`` puts the files on the host and only ``fetched`` says
+    they arrived here, so calling both finished is the erasure the journal
+    exists to prevent. The remote half is
+    ``test_a_remote_run_does_not_call_an_undownloaded_well_finished``.
+    """
     _open(out_dir)
+    assert J.read_journal(out_dir).mode == "local", (
+        "this fixture's mode is what makes the assertion below correct")
     J.record_well(out_dir, "A01", "analysed")
     J.record_well(out_dir, "A02", "fetched")
     assert "2 finished" in J.read_journal(out_dir).tally()

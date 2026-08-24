@@ -274,3 +274,27 @@ def test_an_appledouble_twin_is_not_counted_as_a_loose_tif(tmp_path):
 
     found = sorted(p.name for p in tif_files_in(root))
     assert found == ["Exp_GFP_A01_F1_T1.tif", "Exp_GFP_A02_F1_T1.TIFF"], found
+
+
+def test_the_run_computes_the_same_plan_the_readout_showed(tmp_path):
+    """`resolve_input_output` held the schema and did not pass it on.
+
+    The readout's count came from the planner that acts; the run recomputed a
+    schema-less plan and logged the glob count instead — so "Will fold 1 loose
+    TIF(s)" on screen and "Found 3 loose TIF(s)" in the log, which is the
+    audit's own worked example reproduced by the fix for it, with only the
+    surface it appears on moved.
+    """
+    from services.input_resolution_service import resolve_input_output
+
+    grouped = _fold_fixture(tmp_path)
+    readout = plan_input_layout(grouped, filename_schema=SCHEMA, filename_sep="_")
+
+    lines: list[str] = []
+    resolve_input_output(grouped, log_fn=lines.append,
+                         filename_schema=SCHEMA, filename_sep="_")
+    folded = [ln for ln in lines if "loose TIF" in ln]
+    assert folded, lines
+    assert f"Found {readout.loose_count} loose TIF(s)" in folded[0], (
+        f"the readout promised {readout.loose_count} and the run log says "
+        f"{folded[0]!r}")

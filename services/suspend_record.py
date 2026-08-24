@@ -52,6 +52,14 @@ class SuspendedRun:
     wells_done: int = 0
     wells_total: int = 0
     note: str = ""
+    #: Whether the job queue started the run this record describes, and so owns
+    #: offering it back. The same question ``RunJournal.queued`` answers, asked
+    #: of the other pointer, because a suspend writes *both* — filtering one and
+    #: not the other left the Analyze banner offering a plate the queue was
+    #: still holding, which is the whole defect. It is the *record* that carries
+    #: it rather than the reader inferring it, so a reader that forgets to ask
+    #: fails visibly rather than by omission.
+    queued: bool = False
 
     def to_json(self) -> dict:
         return {
@@ -63,6 +71,7 @@ class SuspendedRun:
             "wells_done": self.wells_done,
             "wells_total": self.wells_total,
             "note": self.note,
+            "queued": self.queued,
         }
 
     @classmethod
@@ -87,6 +96,7 @@ class SuspendedRun:
             wells_done=int(data.get("wells_done") or 0),
             wells_total=int(data.get("wells_total") or 0),
             note=str(data.get("note") or ""),
+            queued=bool(data.get("queued")),
         )
 
     def describe(self) -> str:
@@ -165,7 +175,7 @@ def same_dir(a: str, b: str) -> bool:
 def _write_all(runs: list[SuspendedRun]) -> bool:
     """Replace the file atomically, or return False having changed nothing.
 
-    The writer is shared with the run journal (``util.atomic_json``) rather
+    The writer is shared with the run journal (``util.json_write``) rather
     than restated here. The copy that used to sit in this function caught
     ``OSError`` alone, and the record carries a ``spec`` the caller handed in —
     so one unserialisable value in it raised a ``TypeError`` out of a function

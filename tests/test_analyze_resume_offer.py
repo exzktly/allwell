@@ -237,9 +237,17 @@ def test_resuming_stops_the_offer_repeating(tab, tmp_path, qtbot, monkeypatch):
                       if b.text() == "Resume")
     qtbot.mouseClick(resume_btn, Qt.LeftButton)
 
-    assert J.unfinished_runs() == []
-    # The journal itself stays: it is the dataset's provenance, and only the
-    # "look at this" pointer is dropped.
+    # Asserted at the banner, which is what "the offer stops repeating" means.
+    # The index entry itself now *stays*, carrying a dismissal: it is also what
+    # `resume_aware_spec` reads to force `--incremental` on the next Run, and
+    # deleting it silently disarmed that recovery.
+    assert tab._resumable() is None, "the banner still offers the same run"
+    entries = [e for e in J.unfinished_runs()
+               if str(e.get("output_dir")) == str(plate / "out")]
+    assert entries and entries[0].get("dismissed"), (
+        "the entry was deleted rather than dismissed, so the next Run will not "
+        "be forced incremental and every mid-flight well is skipped as complete")
+    # The journal itself stays: it is the dataset's provenance.
     assert J.read_journal(plate / "out") is not None
 
 

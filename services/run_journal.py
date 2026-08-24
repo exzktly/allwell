@@ -151,11 +151,6 @@ TALLY_GROUPS_REMOTE = (
     ("uploaded only", ("uploaded",)),
 )
 
-#: The local grouping, kept under the original name because every reader that
-#: does not know a run's mode wants the reading that treats ``analysed`` as
-#: done — which is what a local run's ``analysed`` is.
-TALLY_GROUPS = TALLY_GROUPS_LOCAL
-
 #: The outcomes a run can be closed with. ``None`` while it is still open, which
 #: after a restart means the run died without closing its own record.
 RUN_OUTCOMES = ("ok", "error", "stopped", "suspended")
@@ -299,7 +294,7 @@ def _atomic_write_json(path: Path, payload: dict | list) -> bool:
     A run that cannot write its own bookkeeping must still produce data, so
     every caller here treats the return value as advisory and carries on. The
     implementation is shared with the suspended-run record — the two had a copy
-    each and the copies had diverged; see ``util.atomic_json``.
+    each and the copies had diverged; see ``util.json_write``.
     """
     return try_write_json_atomic(path, payload, what="run journal")
 
@@ -747,6 +742,12 @@ def unfinished_runs() -> list[dict]:
 
     The entry alone is not enough to act on — read the journal in the named
     directory for the spec and the per-well detail.
+
+    A **dismissed** entry is still here, deliberately. Dismissing is a statement
+    about the banner and not about the plate, and this list is read for both —
+    by the offer, which honours the dismissal, and by the incremental-recovery
+    check, which must not (see :func:`dismiss`). Callers that are deciding
+    whether to *offer* filter on ``dismissed`` themselves.
     """
     entries = [
         e for e in _load_index()
@@ -759,9 +760,8 @@ def unfinished_runs() -> list[dict]:
 def forget(output_dir: Path | str) -> bool:
     """Drop *output_dir*'s index entry, leaving the journal itself in place.
 
-    Called when the user has been shown an interrupted run and dealt with it,
-    so the same banner does not reappear for ever. The journal stays because it
-    is the dataset's provenance; only the "look at this" pointer goes.
+    For a run there is genuinely nothing more to say about. Dismissing a banner
+    is **not** that — see :func:`dismiss`.
     """
     from services.suspend_record import same_dir
 
@@ -769,3 +769,35 @@ def forget(output_dir: Path | str) -> bool:
     keep = [e for e in _load_index()
             if not same_dir(str(e.get("output_dir")), target)]
     return _atomic_write_json(index_path(), keep)
+
+
+def dismiss(output_dir: Path | str) -> bool:
+    """Stop offering *output_dir*, without claiming its run finished.
+
+    Discard used to call :func:`forget`, which drops the entry — and the entry
+    is what :func:`unfinished_runs` reads, which is what
+    ``resume_aware_spec`` asks before forcing ``--incremental``. So dismissing
+    the banner silently disarmed the recovery: a user who said "I know, I'll
+    just re-run it" and pressed Run got the permanently-3-of-12 outcome the
+    forcing exists to prevent, with nothing said, while the record on disk still
+    stated the plate was unfinished.
+
+    They are two different statements. "Do not ask me about this again" is about
+    the banner; "this run did not finish" is about the plate, and only the run
+    itself may retract that. The entry stays and stays unfinished; it carries a
+    flag the *offer* reads and the *recovery* does not.
+
+    A **new run** of the same output directory clears it, because
+    :func:`_index_upsert` builds a fresh entry rather than amending the old one.
+    That is the wanted behaviour and not an accident of the write: the dismissal
+    was about the run that had just been offered, and a later run of the same
+    plate is a different thing to be asked about.
+    """
+    from services.suspend_record import same_dir
+
+    target = str(output_dir)
+    entries = _load_index()
+    for e in entries:
+        if same_dir(str(e.get("output_dir")), target):
+            e["dismissed"] = True
+    return _atomic_write_json(index_path(), entries)

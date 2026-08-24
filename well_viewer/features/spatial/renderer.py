@@ -322,7 +322,14 @@ def _render_nnd_histogram(ax, payload) -> None:
 
 def _render_ripley(ax, payload) -> None:
     ripley = payload.get("ripley")
-    if ripley is None:
+    # ``None`` is the controller declining to compute (it guards on a minimum
+    # cell count); an all-NaN curve is ``ripley_l`` itself declining, which it
+    # does below two points rather than returning the all-zero curve inside a
+    # zero-width envelope that used to read as *perfect* randomness. Both mean
+    # the same thing to a reader, so both get the same words — otherwise the
+    # NaN case drew an empty axes carrying a legend and a zero line, which
+    # looks like a measurement that came out flat.
+    if ripley is None or not np.isfinite(ripley.L_minus_r).any():
         _msg_ax(ax, "Not enough cells for Ripley's L.")
         return
     _style_axes(ax,
@@ -460,19 +467,35 @@ def _render_boundary_interior(ax, payload) -> None:
         return
     _style_axes(ax, title=f"{metric_col} · boundary vs interior",
                 xlabel="", ylabel=metric_col)
-    positions = [1, 2]
-    data = [interior if interior.size else np.array([0.0]),
-            boundary if boundary.size else np.array([0.0])]
+    # An empty partition used to be substituted with ``np.array([0.0])`` and
+    # drawn as a violin: a shape sitting on zero, with a mean marker on it,
+    # reading as "every cell in this partition measured zero" when in fact no
+    # cell was in it. Only the populated partitions get a violin now, and the
+    # empty one is named on the axis instead of silently invented.
+    partitions = [("interior", interior, _OBSERVED_COLOR),
+                  ("boundary", boundary, _REFERENCE_COLOR)]
+    positions = [i for i, (_n, arr, _c) in enumerate(partitions, start=1) if arr.size]
+    data = [arr for _n, arr, _c in partitions if arr.size]
+    colours = [c for _n, arr, c in partitions if arr.size]
+    for i, (name, arr, _c) in enumerate(partitions, start=1):
+        if not arr.size:
+            ax.annotate(f"no {name} cells", xy=(i, 0.5),
+                        xycoords=("data", "axes fraction"),
+                        ha="center", va="center", fontsize=8,
+                        color=theme.Colors.text_muted, rotation=90)
     parts = ax.violinplot(data, positions=positions, showmeans=True,
                            showextrema=False)
-    colours = [_OBSERVED_COLOR, _REFERENCE_COLOR]
     for body, colour in zip(parts["bodies"], colours):
         body.set_facecolor(colour)
         body.set_alpha(0.6)
         body.set_edgecolor(colour)
-    ax.set_xticks(positions)
+    # Both ticks, always, even when one partition drew no violin: the reader
+    # has to be able to see *which* partition is the empty one, and an axis
+    # with a single tick reads as a chart that only ever had one category.
+    ax.set_xticks([1, 2])
     ax.set_xticklabels([f"Interior (n={interior.size})",
                         f"Boundary (n={boundary.size})"])
+    ax.set_xlim(0.4, 2.6)
 
 
 # ── viz: Summary panel (per-(well, timepoint) matrix) ────────────────────────

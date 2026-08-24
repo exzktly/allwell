@@ -26,6 +26,35 @@ def _focus_cdf_xaxis(ax, vals) -> None:
     ax.set_xlim(lo - pad, hi + pad)
 
 
+def _effective_thresh_frac_on(ctx, channel: str) -> float | None:
+    """The ON cutoff in force for *channel*, or ``None`` when there is none.
+
+    Goes through ``on_cutoff_for_column``, the **one resolver**, and hands it
+    the column this panel actually draws — the channel's mean-intensity column.
+    Two earlier attempts reached past it: first by reading
+    ``thresh_frac_on.get(channel.lower())`` here, then by delegating to the raw
+    ``get_thresh_frac_on`` accessor. ``tests/test_on_cutoff_sweep.py`` refuses
+    both, and it is right to: there are three ON cutoffs because there are
+    three scales, and a path that picks for itself is how a spot tally came to
+    be measured against a fluorescence threshold that sits above its entire
+    range. The panel drawing intensities does want ThreshFracOn — but that is
+    the resolver's answer to give, not this function's to assume.
+
+    ``None`` only for a cutoff of zero, which is "no cut" — the nuclear
+    channel's default, among others — and a line on the axis edge claiming to
+    be a threshold is worse than no line.
+    """
+    from well_viewer.core.channel_state_controller import on_cutoff_for_column
+
+    token = str(channel or "").strip().lower()
+    try:
+        value = float(on_cutoff_for_column(
+            ctx, f"{token}_mean_intensity", channel=token))
+    except (TypeError, ValueError):
+        return None
+    return value if value else None
+
+
 def _cell_gating_plot_cdf(ctx) -> None:
     ratio_data = ctx.runtime.cell_gating.ratio_data or {}
     if (not ctx.runtime.cell_gating.cell_areas
@@ -126,6 +155,17 @@ def _cell_gating_plot_cdf(ctx) -> None:
         if fluor_gate is not None:
             ax.axvline(x=float(fluor_gate), color=warn,
                        linestyle="--", linewidth=2, alpha=0.7)
+        # The ON cutoff, beside the gate it is constantly confused with. These
+        # CDFs are the surface for choosing it — the whole optimiser above them
+        # searches for it — and it was the one line not on them: only
+        # FluorGating was drawn, so a user setting ThreshFracOn had no way to
+        # see where it fell on the distribution. Drawn as the *effective*
+        # value, defaults included, because that is the number the fraction
+        # panel everywhere else divides by.
+        on_cutoff = _effective_thresh_frac_on(ctx, channel)
+        if on_cutoff is not None:
+            ax.axvline(x=float(on_cutoff), color=theme.Colors.accent,
+                       linestyle=":", linewidth=2, alpha=0.9)
         _focus_cdf_xaxis(ax, vals)
 
     for ratio_label, values in sorted(ratio_data.items()):

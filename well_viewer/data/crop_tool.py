@@ -23,6 +23,7 @@ for as long as it is on screen, which is memory no image cache can bound.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from collections.abc import Callable
 
@@ -37,6 +38,8 @@ except Exception:  # pragma: no cover
     _NP_AVAILABLE = False
 
 from well_viewer.core.ui_helpers import btn_secondary
+
+_logger = logging.getLogger(__name__)
 
 CropRect = tuple[int, int, int, int]  # (y0, x0, y1, x1) in source pixels
 
@@ -89,6 +92,13 @@ class CropTool:
         self._idle_status = idle_status
 
         self._crop: CropRect | None = None
+        #: Set by :meth:`apply_to_array` when the rectangle clamped to nothing
+        #: against an image it was handed — that image is shown uncropped, and
+        #: :meth:`status_text` says so rather than naming a region that was
+        #: never applied. Sticky until the crop itself changes, because this
+        #: runs once per grid cell and a per-cell flag would describe only the
+        #: last one drawn.
+        self._crop_missed: bool = False
         self._mode: bool = False
         self._drag: dict[str, Any] | None = None
 
@@ -114,12 +124,14 @@ class CropTool:
 
     def set_crop(self, crop: CropRect | None, *, notify: bool = True) -> None:
         self._crop = crop
+        self._crop_missed = False
         self._refresh_indicator()
         if notify:
             self._fire_change()
 
     def clear(self, *, notify: bool = True) -> None:
         self._crop = None
+        self._crop_missed = False
         self._refresh_indicator()
         if notify:
             self._fire_change()
@@ -153,11 +165,19 @@ class CropTool:
         return lbl
 
     def status_text(self) -> str:
-        """The crop state as one short phrase — ``(full FOV)`` or the region."""
+        """The crop state as one short phrase — ``(full FOV)`` or the region.
+
+        This is the region the user drew. Once :meth:`apply_to_array` has met
+        an image the rectangle does not overlap, the phrase says so until the
+        crop changes: those images are shown uncropped, and a readout naming a
+        region over an uncropped picture is the silent substitution this
+        codebase refuses to make.
+        """
         if self._crop is None:
             return self._idle_status
         y0, x0, y1, x1 = self._crop
-        return f"{x1 - x0}×{y1 - y0} px @ ({x0},{y0})"
+        region = f"{x1 - x0}×{y1 - y0} px @ ({x0},{y0})"
+        return f"{region} — outside some images" if self._crop_missed else region
 
     def set_status_widget(self, widget, *, template: str = "{status}") -> None:
         """Write the crop state into *widget*'s text instead of a loose label.
@@ -184,6 +204,33 @@ class CropTool:
         x0 = max(0, min(int(x0), iw))
         x1 = max(x0, min(int(x1), iw))
         if y1 <= y0 or x1 <= x0:
+            # The rectangle clamped to nothing: it was drawn on an image this
+            # one does not overlap — a different FOV size, or a montage frame
+            # smaller than the one the drag happened on. Returning the full
+            # array is the right call (an empty array renders as a blank cell
+            # and loses the image entirely), but doing it silently left the
+            # readout saying ``Crop: 300×300 px`` over an uncropped picture.
+            #
+            # The flag is **sticky for as long as this crop lasts**, and is
+            # cleared only by ``set_crop`` / ``clear``. It was cleared by the
+            # next image that *did* crop, which made it useless: this runs once
+            # per grid cell, so the readout described only whichever cell was
+            # rendered last, and a grid with one uncroppable image among fifty
+            # said nothing at all.
+            if not self._crop_missed:
+                # Region first, flag second: ``status_text`` appends the
+                # warning once the flag is set, so reading it after produced
+                # "Crop region 300×300 px — outside some images does not
+                # overlap a 200×200 image".
+                region = self.status_text()
+                self._crop_missed = True
+                _logger.warning(
+                    "Crop region %s does not overlap a %d×%d image — that "
+                    "image is shown uncropped. The readout describes the "
+                    "region you drew, not what was applied.",
+                    region, iw, ih,
+                )
+                self._refresh_indicator()
             return a
         return a[y0:y1, x0:x1]
 

@@ -1238,7 +1238,30 @@ def toast(ctx, msg: str, *, kind: str = "info", msec: int = 3500) -> None:
 
 
 
-def show_progress(ctx, maximum: int, msg: str = "") -> None:
+def _pump(*, allow_user_input: bool) -> None:
+    """Repaint without letting the caller's own work be re-entered.
+
+    ``processEvents`` dispatches everything queued, user input included, so a
+    progress pump inside a long loop hands control back to whatever the user
+    clicks — including the tab, sidebar and commit handlers that read the very
+    state the loop is halfway through rebuilding. ``load_directory`` is the
+    sharp case: it pumps once per CSV, after ``begin_load`` has already emptied
+    the caches, so a click landing between two files runs against a dataset
+    that is neither the old one nor the new one.
+
+    Long operations that offer a Cancel button need their input dispatched, so
+    this stays the default; the load path opts out.
+    """
+    from PySide6.QtCore import QEventLoop
+
+    if allow_user_input:
+        QApplication.processEvents()
+    else:
+        QApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
+
+
+def show_progress(ctx, maximum: int, msg: str = "", *,
+                  allow_user_input: bool = True) -> None:
     app = ctx.window  # transitional bridge (A3)
     """Display the progress bar and set its maximum value."""
     app._progress_bar.setValue(0)
@@ -1246,17 +1269,17 @@ def show_progress(ctx, maximum: int, msg: str = "") -> None:
     app._progress_bar.setVisible(True)
     if msg:
         app._set_status(msg)
-    QApplication.processEvents()
+    _pump(allow_user_input=allow_user_input)
 
 
-
-def step_progress(ctx, value: int, msg: str = "") -> None:
+def step_progress(ctx, value: int, msg: str = "", *,
+                  allow_user_input: bool = True) -> None:
     app = ctx.window  # transitional bridge (A3)
     """Advance the progress bar to *value* and repaint immediately."""
     app._progress_bar.setValue(value)
     if msg:
         app._set_status(msg)
-    QApplication.processEvents()
+    _pump(allow_user_input=allow_user_input)
 
 
 

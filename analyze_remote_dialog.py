@@ -46,10 +46,125 @@ from services.remote_config import (
 from services import remote_config
 from services import ssh_key_setup
 from services.subprocess_kill import signal_subprocess
+import theme
 
 
 # Alias must look like a TOML bare key — letters, digits, dash, underscore.
 _ALIAS_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+# How often a pending probe's result queue is checked, in milliseconds. One
+# hop per tick, so the event loop owns the wait rather than the GUI thread.
+_PROBE_POLL_MS = 120
+
+# How long one bootstrap-log drain slice may hold the GUI thread, and how many
+# lines it may carry — the same pair, for the same reason, as
+# ``analyze_tab._POLL_BUDGET_S`` / ``_POLL_MAX_LINES``. Restated rather than
+# imported: ``analyze_tab`` imports this module (lazily, from the Manage…
+# button), so importing it back would close the cycle.
+_POLL_BUDGET_S = 0.015
+_POLL_MAX_LINES = 500
+# The gap between slices when the queue has run dry. A slice that stopped
+# because it hit a limit re-arms at once instead.
+_POLL_IDLE_MS = 80
+
+
+def poll_queue_on(owner: QWidget, result_q: queue.Queue, on_result) -> QTimer:
+    """Call *on_result* on the GUI thread with the first item *result_q* yields.
+
+    The returned timer is **parented to** *owner*, which is the whole point:
+    Qt destroys a widget's children with it, so a dialog that is closed and
+    deleted while a probe is still in flight takes its poller down with it. A
+    free-standing ``QTimer.singleShot`` chain outlives the widget it was created
+    for and its callback then touches a C++ object that no longer exists. Until
+    these dialogs were destroyed on close, the leak was what hid that.
+    """
+    timer = QTimer(owner)
+    timer.setInterval(_PROBE_POLL_MS)
+
+    def _poll() -> None:
+        try:
+            result = result_q.get_nowait()
+        except queue.Empty:
+            return
+        timer.stop()
+        on_result(*result)
+
+    timer.timeout.connect(_poll)
+    timer.start()
+    return timer
+
+
+#: Set on the owning widget for the life of one probe. A dynamic property
+#: rather than an attribute so it costs no ``__init__`` line in three dialog
+#: classes and cannot be forgotten by a fourth.
+_PROBE_IN_FLIGHT = "_aw_ssh_probe_in_flight"
+
+
+def probe_in_flight(owner: QWidget) -> bool:
+    """Whether *owner* has an ssh probe running that has not answered yet.
+
+    Read it wherever a button's enabled state is recomputed from something
+    other than the probe itself — a selection change, a wizard step advancing —
+    so the recompute cannot hand back a control the probe is using.
+    """
+    return bool(owner.property(_PROBE_IN_FLIGHT))
+
+
+def probe_ssh_async(
+    owner: QWidget,
+    ssh_alias: str,
+    ssh_key_path: str,
+    on_result,
+    *,
+    timeout: int = 15,
+) -> bool:
+    """Run one ``ssh <alias> echo ok`` off the GUI thread; call *on_result* with
+    ``(ok, detail)`` on the GUI thread when it answers.
+
+    The single definition of "test this host" for every button in this module.
+    Three of them called :func:`services.ssh_key_setup.probe_ssh_connection`
+    directly, and only one of the three did it on a worker thread — so a remote
+    behind a VPN the user is not on froze the whole application, log pane and
+    all, for the probe's full 15-second timeout, with no spinner and no label to
+    say why.
+
+    *on_result* is invoked at most once, and never after *owner* is destroyed.
+    The worker always puts something, so a probe that raises ends the poll
+    rather than leaving it spinning with the button stuck disabled.
+
+    **One probe per owner at a time.** Returns ``False`` without starting
+    anything when *owner* already has one in flight. Every caller disables its
+    own button for the duration, which was thought to be enough and is not: the
+    Manage Remotes list re-enables Test from ``itemSelectionChanged``, so
+    picking another row mid-probe handed back a button still reading "Testing…"
+    that started a second probe against a different host. Two pollers then ran
+    on one dialog and whichever answered first popped its message box and
+    re-enabled the button under the other. The refusal lives here rather than in
+    each handler because it is a property of the owner, not of any one button,
+    and there are three call sites that each got it wrong differently.
+    """
+    if probe_in_flight(owner):
+        return False
+    owner.setProperty(_PROBE_IN_FLIGHT, True)
+    result_q: queue.Queue = queue.Queue()
+
+    def _runner() -> None:
+        try:
+            result_q.put(ssh_key_setup.probe_ssh_connection(
+                ssh_alias, ssh_key_path, timeout=timeout))
+        except Exception as exc:
+            result_q.put((False, f"error: {exc}"))
+
+    def _finish(ok: bool, detail: str) -> None:
+        # Cleared before the callback so a handler that re-tests from inside
+        # its own result — or asks ``probe_in_flight`` while rebuilding its
+        # buttons — sees the probe as finished, which it is.
+        owner.setProperty(_PROBE_IN_FLIGHT, False)
+        on_result(ok, detail)
+
+    threading.Thread(target=_runner, daemon=True).start()
+    poll_queue_on(owner, result_q, _finish)
+    return True
 
 # Prefilled into the "Scheduler command" field the first time a user
 # switches a host to scheduled compute, so they have a working SLURM
@@ -423,6 +538,10 @@ class RemoteFormDialog(QDialog):
                 "or close this dialog and use Edit instead.",
             )
             return
+        form_error = self.form_error()
+        if form_error is not None:
+            QMessageBox.critical(self, "Invalid Form", form_error)
+            return
         try:
             host = self.result_host()
         except ValueError as exc:
@@ -438,6 +557,29 @@ class RemoteFormDialog(QDialog):
             return
         self.accept()
 
+    def form_error(self) -> str | None:
+        """The reason this form cannot be saved, or ``None``.
+
+        "On a node it schedules" with an empty Scheduler command saved as
+        ``compute_launcher=""`` — which is the spelling of *run on the SSH host
+        itself* — and reopening the host showed "On the remote machine itself",
+        with no trace of the choice. A user who cleared the seeded ``srun`` line
+        meaning to paste their own therefore ran a multi-hour segmentation on an
+        HPC login node, the exact thing this control exists to prevent.
+        """
+        if (self._compute_loc_combo.currentData() == "scheduled"
+                and not self._compute_launcher_edit.text().strip()):
+            return (
+                "“Run compute: on a node it schedules” needs a scheduler "
+                "command — the line that asks your batch system for a compute "
+                "node, e.g.\n\n    " + _DEFAULT_COMPUTE_LAUNCHER + "\n\n"
+                "Saving it empty would mean “run on the SSH host itself”, "
+                "which on a login node is what this setting exists to avoid. "
+                "Fill it in, or switch Run compute back to “On the remote "
+                "machine itself”."
+            )
+        return None
+
     def result_host(self) -> RemoteHost:
         """Build a ``RemoteHost`` from the current form state.
 
@@ -446,17 +588,25 @@ class RemoteFormDialog(QDialog):
         fall back to the dataclass defaults — the v5.2.1 Advanced
         expander uses placeholders to communicate this so users
         don't need to retype the defaults.
+
+        Those fallbacks are read off ``RemoteHost`` itself. Written out as
+        string literals they were a second copy of three values the same class
+        already defines — and the placeholders beside them are read from the
+        dataclass, so changing a default would have moved the hint while the
+        saved value kept the old path.
         """
         raw_extras = self._extra_args_edit.text().strip()
         extras: tuple[str, ...] = tuple(raw_extras.split()) if raw_extras else ()
+        defaults = RemoteHost(name="_", ssh_alias="_")
         return RemoteHost(
             name=self._name_edit.text().strip(),
             ssh_alias=self._ssh_alias_edit.text().strip(),
-            remote_project_dir=self._project_dir_edit.text().strip() or "~/allwell",
-            remote_staging_dir=self._staging_dir_edit.text().strip() or "~/.allwell-staging",
+            remote_project_dir=(self._project_dir_edit.text().strip()
+                                or defaults.remote_project_dir),
+            remote_staging_dir=(self._staging_dir_edit.text().strip()
+                                or defaults.remote_staging_dir),
             remote_scratch_dir=self._scratch_dir_edit.text().strip(),
-            remote_python=self._python_edit.text().strip()
-                or "~/miniforge3/envs/allwell/bin/python",
+            remote_python=self._python_edit.text().strip() or defaults.remote_python,
             cpu_only=self._cpu_only_cb.isChecked(),
             extra_args=extras,
             cache_budget_gb=self._cache_budget_spin.value(),
@@ -617,12 +767,7 @@ class RemoteFormDialog(QDialog):
 
         threading.Thread(target=_runner, daemon=True).start()
 
-        def _poll() -> None:
-            try:
-                ok, profiles, detail = result_q.get_nowait()
-            except queue.Empty:
-                QTimer.singleShot(120, _poll)
-                return
+        def _done(ok: bool, profiles: list, detail: str) -> None:
             self._fetch_prof_btn.setEnabled(True)
             if not ok:
                 msg = detail.splitlines()[-1] if detail else "profile discovery failed"
@@ -638,7 +783,7 @@ class RemoteFormDialog(QDialog):
                 f"✓ {len(profiles)} profile(s) from {alias}'s JupyterHub config."
             )
 
-        QTimer.singleShot(120, _poll)
+        poll_queue_on(self, result_q, _done)
 
     # ── advanced expander ──────────────────────────────────────────────────
 
@@ -667,24 +812,27 @@ class RemoteFormDialog(QDialog):
             )
             return
         dlg = SSHKeyWizardDialog(self, ssh_alias=alias)
-        if dlg.exec() == QDialog.Accepted and dlg.installed_key_path:
-            self._ssh_key_edit.setText(str(dlg.installed_key_path))
+        try:
+            if dlg.exec() == QDialog.Accepted and dlg.installed_key_path:
+                self._ssh_key_edit.setText(str(dlg.installed_key_path))
+        finally:
+            dlg.deleteLater()
 
     # ── inline test ────────────────────────────────────────────────────────
 
     def _test_ssh(self) -> None:
-        """Fire a one-shot ``ssh <alias> echo ok``.
+        """Fire a one-shot ``ssh <alias> echo ok`` off the GUI thread.
 
-        Runs in a worker thread so the dialog stays responsive. The
-        result lands in ``_test_result_lbl`` via a tiny queue + QTimer
-        — same pattern as PipelineRunner but cut to one event.
+        Routes through ``ssh_key_setup.probe_ssh_connection`` (via
+        :func:`probe_ssh_async`) so the current form's ``ssh_key_path`` — set by
+        the Setup SSH Key wizard — is actually passed as ``-i <key>``. Pre-fix,
+        this used bare ssh and would say "Permission denied" right after a
+        successful wizard run, because the wizard's key sits at a non-default
+        path that ssh's identity search does not try.
 
-        v5.2.2: routes through ``ssh_key_setup.probe_ssh_connection``
-        so the current form's ``ssh_key_path`` (set by the Setup SSH
-        Key wizard) is actually passed as ``-i <key>``. Pre-fix, this
-        used bare ssh and would say "Permission denied" right after a
-        successful wizard run because the wizard's key sits at a
-        non-default path that ssh's identity search doesn't try.
+        The success line names *alias* as captured here, not the field's text at
+        poll time: editing the alias while the probe was in flight made the
+        dialog report "✓ newalias reachable" about a host it never contacted.
         """
         alias = self._ssh_alias_edit.text().strip()
         if not alias:
@@ -692,38 +840,24 @@ class RemoteFormDialog(QDialog):
             return
 
         key_path = self._ssh_key_edit.text().strip()
-        self._test_btn.setEnabled(False)
-        suffix = f" (with key {Path(key_path).name})" if key_path else ""
-        self._test_result_lbl.setText(f"Testing {alias}{suffix}…")
-        result_q: queue.Queue = queue.Queue()
 
-        def _runner() -> None:
-            # Always put a result — a raised probe would otherwise leave _poll
-            # spinning forever with the Test button stuck disabled (audit E17).
-            try:
-                ok, detail = ssh_key_setup.probe_ssh_connection(
-                    alias, key_path, timeout=15,
-                )
-                result_q.put(("ok" if ok else "fail", detail))
-            except Exception as exc:
-                result_q.put(("fail", f"error: {exc}"))
-
-        threading.Thread(target=_runner, daemon=True).start()
-
-        def _poll() -> None:
-            try:
-                outcome, detail = result_q.get_nowait()
-            except queue.Empty:
-                QTimer.singleShot(120, _poll)
-                return
+        def _done(ok: bool, detail: str) -> None:
             self._test_btn.setEnabled(True)
-            if outcome == "ok":
-                self._test_result_lbl.setText(f"✓ {self._ssh_alias_edit.text().strip()} reachable.")
+            if ok:
+                self._test_result_lbl.setText(f"✓ {alias} reachable.")
             else:
                 msg = detail.splitlines()[-1] if detail else "(no error message)"
                 self._test_result_lbl.setText(f"✗ {msg[:120]}")
 
-        QTimer.singleShot(120, _poll)
+        # Start first, then take the control. A refused probe means one is
+        # already running and owns both the button and the label; disabling
+        # ahead of the call and then returning would leave the button dark with
+        # nobody scheduled to bring it back.
+        if not probe_ssh_async(self, alias, key_path, _done):
+            return
+        self._test_btn.setEnabled(False)
+        suffix = f" (with key {Path(key_path).name})" if key_path else ""
+        self._test_result_lbl.setText(f"Testing {alias}{suffix}…")
 
     # ── geometry persistence ──────────────────────────────────────────────
 
@@ -888,6 +1022,7 @@ class SSHKeyWizardDialog(QDialog):
     # ── steps ────────────────────────────────────────────────────────────
 
     def _on_generate(self) -> None:
+        replacing = False
         self._generate_btn.setEnabled(False)
         self._generate_status_lbl.setText("Checking key…")
         QApplication.processEvents()
@@ -920,16 +1055,26 @@ class SSHKeyWizardDialog(QDialog):
                 )
                 return
             # User opted in: remove both halves so generate_keypair's
-            # idempotency check produces a fresh key.
-            try:
-                self._key_path.unlink()
-            except OSError:
-                pass
+            # idempotency check produces a fresh key. If either unlink fails,
+            # that check finds the pair still there, does nothing, and returns
+            # "no work done" — which this method then reported as "✓ Key
+            # already present — reusing", over the very key the user had just
+            # clicked Yes to replace. Verify would go on failing with
+            # "Permission denied", the opaque failure this wizard exists to
+            # remove. Say what happened instead, and stop.
             pub = self._key_path.with_suffix(self._key_path.suffix + ".pub")
-            try:
-                pub.unlink()
-            except OSError:
-                pass
+            failed = self._unlink_key_halves(self._key_path, pub)
+            if failed:
+                self._generate_btn.setEnabled(True)
+                self._generate_status_lbl.setText(
+                    f"✗ Could not remove the existing key: {failed}. The "
+                    "passphrase-protected key is still in place and AllWell "
+                    "cannot use it. Delete it yourself, then click Generate "
+                    "again."
+                )
+                return
+
+            replacing = True
 
         self._generate_status_lbl.setText("Generating…")
         QApplication.processEvents()
@@ -942,36 +1087,76 @@ class SSHKeyWizardDialog(QDialog):
                 f"Could not generate {self._key_path}:\n{err}",
             )
             return
+        if replacing and not created:
+            # Both halves were deleted a moment ago, so "no work done" cannot
+            # be true here. Whatever happened, this is not the fresh key the
+            # user asked for, and "reusing" would be the wrong word for it.
+            self._generate_status_lbl.setText(
+                f"✗ {self._key_path} was replaced, but no new key was "
+                "generated in its place. Check the path by hand before "
+                "trying again."
+            )
+            return
         msg = f"✓ Key generated at {self._key_path}" if created else \
               f"✓ Key already present at {self._key_path} — reusing."
         self._generate_status_lbl.setText(msg)
         self._populate_step2()
+
+    @staticmethod
+    def _unlink_key_halves(*paths: Path) -> str:
+        """Delete each of *paths* that exists; return "" or a reason it failed.
+
+        Reported rather than swallowed: the caller's next step is idempotent, so
+        a file that survived turns "replace this key" into "reuse it" with no
+        outward sign.
+        """
+        reasons = []
+        for path in paths:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                continue                     # already gone is the wanted state
+            except OSError as exc:
+                reasons.append(f"{path.name}: {exc.strerror or exc}")
+        return "; ".join(reasons)
 
     def _populate_step2(self) -> None:
         cmd = ssh_key_setup.build_copy_command(self._ssh_alias, self._key_path)
         self._command_edit.setText(cmd)
         self._command_edit.setEnabled(True)
         self._copy_btn.setEnabled(True)
-        self._verify_btn.setEnabled(True)
+        self._verify_btn.setEnabled(not probe_in_flight(self))
 
     def _on_copy_command(self) -> None:
         cb = QGuiApplication.clipboard()
         if cb is not None:
             cb.setText(self._command_edit.text())
             self._copy_btn.setText("Copied ✓")
-            QTimer.singleShot(2000, lambda: self._copy_btn.setText("Copy"))
+            # Bound to the button, so closing the wizard inside those two
+            # seconds cannot fire it at a deleted widget.
+            QTimer.singleShot(2000, self._copy_btn,
+                              lambda: self._copy_btn.setText("Copy"))
 
     def _on_verify(self) -> None:
+        """Check the remote now accepts the key, without freezing the window.
+
+        The probe is an ssh round trip with a 10-second timeout; run inline it
+        held the GUI thread for all of it. The two status colours are theme
+        tokens: written as hex inside these f-strings they were invisible to
+        ``tests/test_hardcoded_tokens.py``, whose scan matched a whole string
+        literal, so they could not follow a theme and nothing said so.
+        """
+        if not probe_ssh_async(self, self._ssh_alias, str(self._key_path),
+                               self._on_verified):
+            return          # one already in flight; it owns the button
         self._verify_btn.setEnabled(False)
         self._verify_status_lbl.setText("Verifying…")
-        QApplication.processEvents()
-        ok, detail = ssh_key_setup.verify_key_works(
-            self._ssh_alias, self._key_path,
-        )
+
+    def _on_verified(self, ok: bool, detail: str) -> None:
         self._verify_btn.setEnabled(True)
         if ok:
             self._verify_status_lbl.setText(
-                f"<span style='color: #4caf50;'>✓ Key accepted by "
+                f"<span style='color: {theme.Colors.success};'>✓ Key accepted by "
                 f"{self._ssh_alias}. AllWell will use this key going forward.</span>"
             )
             self.installed_key_path = self._key_path
@@ -983,7 +1168,7 @@ class SSHKeyWizardDialog(QDialog):
             ok_btn.setDefault(True)
         else:
             self._verify_status_lbl.setText(
-                f"<span style='color: #e57373;'>✗ {detail}</span><br>"
+                f"<span style='color: {theme.Colors.danger};'>✗ {detail}</span><br>"
                 "<small>The key may not be installed yet. Make sure you "
                 "ran the Step 2 command and the remote accepted your "
                 "password. Then click Verify again.</small>"
@@ -1032,6 +1217,11 @@ class BootstrapLogDialog(QDialog):
         self._started_at: float | None = None
         self._exit_code: int | None = None
         self._finished_emitted = False
+        # Lines the reader could not enqueue, and how many of those the log has
+        # already been told about. One writer each — the reader thread owns the
+        # first, the GUI thread the second — so neither needs a lock.
+        self._dropped = 0
+        self._dropped_reported = 0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 12)
@@ -1070,8 +1260,15 @@ class BootstrapLogDialog(QDialog):
         layout.addLayout(btn_row)
 
         self._restore_geometry()
-        QTimer.singleShot(0, self._spawn)
-        QTimer.singleShot(80, self._poll)
+        # Both bound to this dialog, so neither survives it: the dialog is
+        # destroyed when it closes, and a free-standing timer chain would go on
+        # calling into a deleted C++ object. _poll re-arms itself through
+        # ``self._poll_timer`` for the same reason.
+        QTimer.singleShot(0, self, self._spawn)
+        self._poll_timer = QTimer(self)
+        self._poll_timer.setSingleShot(True)
+        self._poll_timer.timeout.connect(self._poll)
+        self._poll_timer.start(_POLL_IDLE_MS)
 
     # ── lifecycle ────────────────────────────────────────────────────────
 
@@ -1117,10 +1314,11 @@ class BootstrapLogDialog(QDialog):
                     try:
                         self._log_q.put_nowait(("line", line))
                     except queue.Full:
-                        # Buffer overflow — drop silently; the
-                        # QPlainTextEdit maximumBlockCount cap handles
-                        # the tail of a very long run gracefully.
-                        pass
+                        # Counted, and reported in the log by _poll. Dropping
+                        # silently leaves unmarked holes mid-log, which is not
+                        # what setMaximumBlockCount does — that trims the head,
+                        # and the reader can tell you it did.
+                        self._dropped += 1
                 self._proc.wait()
                 self._log_q.put_nowait(("finished", self._proc.returncode))
             except Exception as exc:  # surface to dialog
@@ -1130,9 +1328,25 @@ class BootstrapLogDialog(QDialog):
         self._reader_thread.start()
 
     def _poll(self) -> None:
+        """Drain what the bootstrap has said, in bounded slices.
+
+        The twin of ``AnalyzeTab._poll_log`` and, until now, the version that
+        never got its fix: this loop ran until the queue reported empty, which
+        during a TensorFlow install's output bursts it does not do for seconds
+        at a time. While it spins the dialog answers nothing — including Cancel,
+        the one control a user needs when a bootstrap is wedged.
+
+        A slice ends on ``_POLL_BUDGET_S`` or ``_POLL_MAX_LINES``, whichever
+        comes first, and re-arms immediately when there is more, so throughput
+        is unchanged and the event loop gets a turn in between.
+        """
+        deadline = time.monotonic() + _POLL_BUDGET_S
+        drained = 0
+        more = True
         try:
-            while True:
+            while drained < _POLL_MAX_LINES and time.monotonic() < deadline:
                 kind, payload = self._log_q.get_nowait()
+                drained += 1
                 if kind == "line":
                     self._append(payload)
                 elif kind == "error":
@@ -1140,9 +1354,15 @@ class BootstrapLogDialog(QDialog):
                 elif kind == "finished":
                     self._mark_finished(int(payload))
         except queue.Empty:
-            pass
+            more = False
+        if self._dropped > self._dropped_reported:
+            lost = self._dropped - self._dropped_reported
+            self._dropped_reported = self._dropped
+            self._append(
+                f"[warn] {lost} bootstrap log line(s) dropped — the reader "
+                "outran this window. The install itself is unaffected.\n")
         if self._exit_code is None:
-            QTimer.singleShot(80, self._poll)
+            self._poll_timer.start(0 if more else _POLL_IDLE_MS)
 
     def _mark_finished(self, code: int) -> None:
         if self._finished_emitted:
@@ -1286,17 +1506,40 @@ class ManageRemotesDialog(QDialog):
 
     # ── list management ─────────────────────────────────────────────────
 
+    def _load_remotes_or_report(self) -> dict | None:
+        """``load_remotes()``, or ``None`` after telling the user why not.
+
+        ``None`` rather than ``{}`` so a caller can tell "the file says there
+        are no remotes" from "the file could not be read". ``_on_edit`` reading
+        an empty dict would go on to report the selected host as *deleted from
+        the file*, which is a different and untrue thing to say about a file
+        nothing could parse.
+
+        Every entry point into this dialog reads that file, and each read is
+        reached from a ``clicked`` slot. ``_reload`` caught ``ValueError`` and
+        not ``OSError``; ``_on_edit`` and ``_on_test`` caught neither. Under
+        PySide6 6.7.3 an exception escaping a slot prints a traceback and lets
+        the event loop carry on, so a hand-edited ``remotes.toml`` did not crash
+        the app — it made Edit…, Test and Manage… buttons that do nothing at
+        all, with the only evidence in a boot log nobody reads. ``analyze_tab``
+        has caught the pair around this same call for as long as the combo has
+        existed; this carries that knowledge across.
+        """
+        try:
+            return load_remotes()
+        except (ValueError, OSError) as exc:
+            QMessageBox.critical(
+                self, "remotes.toml error",
+                f"Could not read your remotes.toml:\n{exc}\n\n"
+                "Fix the file (or move it aside) and reopen this dialog. "
+                "Until then AllWell has no configured remotes to offer.",
+            )
+            return None
+
     def _reload(self) -> None:
         prev = self._selected_name()
         self._list.clear()
-        try:
-            remotes = load_remotes()
-        except ValueError as exc:
-            QMessageBox.critical(
-                self, "remotes.toml error",
-                f"Could not parse your remotes.toml:\n{exc}",
-            )
-            remotes = {}
+        remotes = self._load_remotes_or_report() or {}
         for name, host in remotes.items():
             item = QListWidgetItem(f"{name}    (ssh:{host.ssh_alias})", self._list)
             item.setData(Qt.UserRole, name)
@@ -1318,7 +1561,10 @@ class ManageRemotesDialog(QDialog):
         has_sel = self._selected_name() is not None
         self._edit_btn.setEnabled(has_sel)
         self._delete_btn.setEnabled(has_sel)
-        self._test_btn.setEnabled(has_sel)
+        # Test is the one button this can be asked to re-enable while it is in
+        # use: the probe runs off the GUI thread, and a selection change is the
+        # commonest thing a user does while waiting for one.
+        self._test_btn.setEnabled(has_sel and not probe_in_flight(self))
         self._bootstrap_btn.setEnabled(has_sel)
 
     # ── actions ─────────────────────────────────────────────────────────
@@ -1329,29 +1575,40 @@ class ManageRemotesDialog(QDialog):
             for i in range(self._list.count())
         }
 
-    def _on_add(self) -> None:
-        dlg = RemoteFormDialog(
-            self, host=None, existing_names=self._existing_names(),
-        )
-        if dlg.exec() == QDialog.Accepted:
+    def _open_form(self, dlg: RemoteFormDialog) -> None:
+        """Run one add/edit form to completion and dispose of it.
+
+        Every dialog opened from here used to stay parented to this one for the
+        life of the window, holding its own children with it — five opens
+        measured five live dialogs.
+        """
+        try:
+            accepted = dlg.exec() == QDialog.Accepted
+        finally:
+            dlg.deleteLater()
+        if accepted:
             self._reload()
             self.remotes_changed.emit()
+
+    def _on_add(self) -> None:
+        self._open_form(RemoteFormDialog(
+            self, host=None, existing_names=self._existing_names(),
+        ))
 
     def _on_edit(self) -> None:
         name = self._selected_name()
         if name is None:
             return
-        remotes = load_remotes()
+        remotes = self._load_remotes_or_report()
+        if remotes is None:
+            return                      # already reported; the file is unreadable
         host = remotes.get(name)
         if host is None:
             QMessageBox.warning(self, "Gone",
                 f"Remote '{name}' has been deleted from the file.")
             self._reload()
             return
-        dlg = RemoteFormDialog(self, host=host)
-        if dlg.exec() == QDialog.Accepted:
-            self._reload()
-            self.remotes_changed.emit()
+        self._open_form(RemoteFormDialog(self, host=host))
 
     def _on_delete(self) -> None:
         name = self._selected_name()
@@ -1379,35 +1636,53 @@ class ManageRemotesDialog(QDialog):
         self.remotes_changed.emit()
 
     def _on_test(self) -> None:
+        """Probe the selected host, off the GUI thread.
+
+        Routed through ``ssh_key_setup.probe_ssh_connection`` (via
+        :func:`probe_ssh_async`) so a configured ``ssh_key_path`` is passed as
+        ``-i <key>``: without it, a host whose only accepted credential is the
+        wizard-generated ``~/.ssh/allwell_<alias>`` key reports "Permission
+        denied" here even after the wizard has verified it.
+
+        Called inline, this held the whole application — every window, and a
+        running pipeline's log pane — for the probe's 15-second timeout
+        whenever the host was unreachable. Its twin one class up has run on a
+        worker thread since it was written; both now share that one helper.
+        """
         name = self._selected_name()
         if name is None:
             return
-        remotes = load_remotes()
+        remotes = self._load_remotes_or_report()
+        if remotes is None:
+            return                      # already reported; the file is unreadable
         host = remotes.get(name)
         if host is None:
+            QMessageBox.warning(self, "Gone",
+                f"Remote '{name}' has been deleted from the file.")
+            self._reload()
             return
-        # v5.2.2: routed through ssh_key_setup.probe_ssh_connection so a
-        # configured ssh_key_path is passed as -i <key>. Without this,
-        # a host whose only accepted credential is the wizard-generated
-        # ~/.ssh/allwell_<alias> key reports "Permission denied" here
-        # even after the wizard verified the key.
-        ok, detail = ssh_key_setup.probe_ssh_connection(
-            host.ssh_alias, host.ssh_key_path, timeout=15,
-        )
-        if ok:
-            extras = (
-                f" (using key {Path(host.ssh_key_path).name})"
-                if host.ssh_key_path else ""
-            )
-            QMessageBox.information(
-                self, f"Test passed: {name}",
-                f"{host.ssh_alias} responded{extras}.",
-            )
-        else:
-            QMessageBox.critical(
-                self, f"Test failed: {name}",
-                detail or "(ssh returned non-zero with no message)",
-            )
+        def _done(ok: bool, detail: str) -> None:
+            self._test_btn.setText("Test")
+            self._refresh_button_state()
+            if ok:
+                extras = (
+                    f" (using key {Path(host.ssh_key_path).name})"
+                    if host.ssh_key_path else ""
+                )
+                QMessageBox.information(
+                    self, f"Test passed: {name}",
+                    f"{host.ssh_alias} responded{extras}.",
+                )
+            else:
+                QMessageBox.critical(
+                    self, f"Test failed: {name}",
+                    detail or "(ssh returned non-zero with no message)",
+                )
+
+        if not probe_ssh_async(self, host.ssh_alias, host.ssh_key_path, _done):
+            return          # one already in flight; it owns the button
+        self._test_btn.setEnabled(False)
+        self._test_btn.setText("Testing…")
 
     def _on_bootstrap(self) -> None:
         name = self._selected_name()
@@ -1420,7 +1695,10 @@ class ManageRemotesDialog(QDialog):
             self.remotes_changed.emit()
 
         dlg.finished_ok.connect(_on_finish)
-        dlg.exec()
+        try:
+            dlg.exec()
+        finally:
+            dlg.deleteLater()
 
     # ── geometry persistence ──────────────────────────────────────────────
 

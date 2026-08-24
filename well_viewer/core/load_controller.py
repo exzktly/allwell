@@ -20,6 +20,8 @@ from well_viewer.core.channel_state_controller import recalculate_threshold, set
 from well_viewer.core.ui_helpers import (
     clear_notes_editors as _clear_notes_editors,
     refresh_plot_empty_states,
+    show_progress as _show_progress,
+    step_progress as _step_progress,
 )
 from well_viewer.core.safe import swallowed
 
@@ -48,7 +50,11 @@ def _make_opening_dialog(ctx, text: str) -> QProgressDialog | None:
         dlg.setAutoReset(False)
         dlg.setValue(0)
         dlg.show()
-        QApplication.processEvents()
+        # Same opt-out as every other pump in this module: nothing the user
+        # clicks during a dataset open should be dispatched, and this one runs
+        # after ``begin_load`` has already emptied the caches.
+        from PySide6.QtCore import QEventLoop
+        QApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
         app._opening_dialog = dlg
         return dlg
     except Exception:
@@ -59,18 +65,29 @@ def _make_opening_dialog(ctx, text: str) -> QProgressDialog | None:
 def _opening_set_phase(ctx, text: str, *, value=None, maximum=None) -> None:
     app = ctx.window  # transitional bridge (A3)
     """Update the opening dialog's label / progress and pump the event loop so
-    the window repaints (and Windows doesn't mark it 'Not Responding')."""
+    the window repaints (and Windows doesn't mark it 'Not Responding').
+
+    ``ExcludeUserInputEvents``, for the reason ``ui_helpers._pump`` gives: this
+    is called once per CSV from ``load_directory``'s loop, immediately after the
+    progress helpers that already opt out, and a bare ``processEvents()`` here
+    dispatched the clicks they had just refused — so the opt-out only ever held
+    on the one route that has no opening dialog. Repainting is the whole point
+    of the call and is unaffected; only input dispatch is withheld, and the
+    dialog carries no Cancel button (``setCancelButton(None)``) for it to make
+    unreachable.
+    """
     dlg = getattr(app, "_opening_dialog", None)
     if dlg is None:
         return
     try:
+        from PySide6.QtCore import QEventLoop
         from PySide6.QtWidgets import QApplication
         if maximum is not None:
             dlg.setMaximum(int(maximum))
         dlg.setLabelText(text)
         if value is not None:
             dlg.setValue(int(value))
-        QApplication.processEvents()
+        QApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
     except Exception:
         swallowed()
 
@@ -374,6 +391,13 @@ def load_directory(ctx, d: Path, label=None) -> None:
     # DatasetState resets the per-dataset caches (data dir, well paths, row
     # cache, persistence doc) for the switch to the new data directory.
     app._app_state.dataset.begin_load(d)
+    # Let this dataset speak for itself about a missing ``area_px``. The
+    # warning is deduplicated per entry point so it is one line rather than one
+    # per redraw, and a set never cleared makes the *second* dataset a session
+    # opens the silent one — which is the one whose empty plots are harder to
+    # explain, because the first dataset's warning has scrolled away.
+    from well_viewer.data.data_loading import reset_missing_area_warnings
+    reset_missing_area_warnings()
     app._app_state.selection.selected_wells.clear()
     app._app_state.selection.last_sel = None
     app._app_state.selection.prev_sel = set()
@@ -399,6 +423,7 @@ def load_directory(ctx, d: Path, label=None) -> None:
         _image_table.last_render = {}
         _image_table.prefetched_cells = set()
         _image_table.scan_misses = set()
+        _image_table.partial_scans = set()
         # Cleared per load, set True by view_state_io.apply_image_table when it
         # restores a saved grid for this load — tells the on_dataset_loaded reset
         # hook below (registry._loaded_image_table) not to clobber a selection
@@ -445,14 +470,27 @@ def load_directory(ctx, d: Path, label=None) -> None:
         except Exception:
             swallowed()  # was: pass (silent except)
     n = len(csvs)
-    app._show_progress(n, f"Loading {n} CSV file(s)…")
+    # ``allow_user_input=False`` on both pumps below: this loop empties the
+    # caches first and refills them one CSV at a time, so a click dispatched
+    # between two files reaches the sidebar, commit and tab handlers while the
+    # dataset is half-built. The repaint is still wanted — a plate of CSVs on a
+    # network share takes long enough that a frozen window reads as a hang.
+    _show_progress(ctx, n, f"Loading {n} CSV file(s)…", allow_user_input=False)
     _opening_set_phase(ctx, f"Loading {n} well CSV(s)…", value=0, maximum=n)
     for i, p in enumerate(csvs, 1):
         tok = app._extract_well_token(p.stem)
         key = tok if tok else p.stem
         app._app_state.dataset.well_paths[key] = p
-        app._app_state.dataset.cache[key] = app._load_well_csv(p)
-        app._step_progress(i, f"Loading {i}/{n}: {p.name}")
+        frame = app._load_well_csv(p)
+        app._app_state.dataset.cache[key] = frame
+        # This path builds the frame itself rather than going through
+        # ``get_rows``, so it has to record the FOV verdict itself too —
+        # otherwise ``dataset.fov_integrity`` stays empty for the session and
+        # ``_report_unusable_fov_labels`` below has nothing to report.
+        from well_viewer.data.data_loading import record_fov_verdict
+        record_fov_verdict(ctx, key, frame)
+        _step_progress(ctx, i, f"Loading {i}/{n}: {p.name}",
+                       allow_user_input=False)
         _opening_set_phase(ctx, f"Loading {i}/{n}: {p.name}", value=i)
     app._hide_progress()
     app._rebuild_all_timepoints_cache()
@@ -661,9 +699,25 @@ def _kick_off_gating_after_load(ctx) -> None:
     # has a per-channel edit to inspect).
     use_scatter = app._app_state.cell_gating.use_scatter_gates
     use_thresh = app._app_state.cell_gating.use_scatter_thresh
+    # One import for both names, deliberately: the core→feature import ratchet
+    # (``test_guardrails.test_core_feature_import_budget``) counts import
+    # *statements* under ``core/``, and it only moves down. Two statements for
+    # one module would have raised it.
+    from well_viewer.features.home.cell_gating.controller import (
+        cell_gating_refresh_included_count,
+        cell_gating_start_gating_worker,
+    )
     if has_non_default_gate or use_scatter or use_thresh:
-        from well_viewer.features.home.cell_gating.controller import cell_gating_start_gating_worker
         cell_gating_start_gating_worker(ctx)
+        return
+    # No worker, so nothing else repaints the tab's "Included for analysis"
+    # line and its funnel — and this is the commonest path, since a dataset
+    # whose gates are all at their defaults takes it. Without the refresh the
+    # label keeps the *previous* dataset's counts after a plate swap: a real
+    # number, for the wrong plate, with nothing to distinguish it from the
+    # right one. ``cell_gating_refresh_included_count`` recomputes from the row
+    # cache and no-ops when the label has not been built yet.
+    cell_gating_refresh_included_count(ctx)
 
 
 def _looks_like_well_measurement_csv(path: Path) -> bool:

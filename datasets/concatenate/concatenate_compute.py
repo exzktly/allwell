@@ -43,11 +43,13 @@ from datasets._common.dataset_paths import (
     make_dataset_api,
     DatasetPaths,
     dataset_wells,
+    describe_well_collisions,
     destination_is_complete_dataset,
     has_folder_mode_output,
     in_containers,  # noqa: F401 — re-exported for datasets.concatenate.apply
     out_csvs,
     out_zips,  # noqa: F401 — re-exported for datasets.concatenate.apply
+    well_spelling_collisions,
     check_compatible as _check_compatible,
     known_channel_tokens as _known_channel_tokens,
 )
@@ -241,6 +243,22 @@ def _interval_hours(sorted_hours: list[float]) -> float:
     return statistics.median(diffs)
 
 
+def _refuse_well_collisions(paths: DatasetPaths, label: str) -> None:
+    """Refuse *paths* when two files claim one well under different
+    spellings.
+
+    Every well this tool copies is found through ``in_containers`` /
+    ``out_zips`` / ``out_csvs``, each of which maps a canonical well to one
+    path — so an ``A1.zip`` sitting beside an ``A01.zip`` is simply not in
+    the map the copy walks, and a whole well's images leave no trace in the
+    destination or in the summary. The map cannot say that happened, so the
+    folder is asked directly, once, before anything is written.
+    """
+    message = describe_well_collisions(well_spelling_collisions(paths))
+    if message:
+        raise ConcatError(f"{label} can't be concatenated. {message}")
+
+
 def compute_offset(info1: dict, info2: dict) -> tuple[float, float, float]:
     """Compute the additive hour offset that makes dataset 2 continue after
     dataset 1. Returns ``(offset_hours, ds1_last_hours, ds1_interval_hours)``."""
@@ -391,6 +409,12 @@ class MergePlan:
     dest_is_restart: bool = False       # dest has leftovers from an earlier, unfinished attempt
     format_warning: str | None = None
     column_warnings: tuple[str, ...] = ()
+    #: User-side blocks dataset 2 carried that the merged sidecar does not.
+    #: ``merge_info`` takes these from dataset 1 wholesale — the documented
+    #: rule — but it was applied silently, and ``wells_ds2_only`` is normally
+    #: non-empty, so a plate's replicate sets, groups, notes and ratios simply
+    #: were not in the merged dataset with nothing saying they had been left.
+    ds2_blocks_dropped: tuple[str, ...] = ()
 
 
 def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path | str) -> MergePlan:
@@ -440,6 +464,9 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
             "filenames can't be located — concatenation can't relabel dataset 2."
         )
 
+    _refuse_well_collisions(ds1, "Dataset 1")
+    _refuse_well_collisions(ds2, "Dataset 2")
+
     if has_folder_mode_output(ds1) or has_folder_mode_output(ds2):
         which = "dataset 1" if has_folder_mode_output(ds1) else "dataset 2"
         raise ConcatError(
@@ -454,6 +481,10 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
         [str(t) for t in info1.get("available_timepoints", []) or []]
     )
     merged_info = merge_info(info1, info2, offset_hours=offset, tp_format=tp_format)
+    ds2_blocks_dropped = tuple(
+        name for name in ("sample_definitions", "notes", "ratios", "cell_gating")
+        if (info2 or {}).get(name)
+    )
 
     wells1 = dataset_wells(ds1)
     wells2 = dataset_wells(ds2)
@@ -473,6 +504,7 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
         ds1_interval_hours=interval,
         wells_ds1_only=tuple(sorted(wells1 - wells2)),
         wells_ds2_only=tuple(sorted(wells2 - wells1)),
+        ds2_blocks_dropped=ds2_blocks_dropped,
         wells_both=wells_both,
         merged_info=merged_info,
         dest_is_restart=dest_is_restart,

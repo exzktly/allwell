@@ -17,15 +17,37 @@ REVIEW_BAR_DEBUG: bool = False
 REVIEW_SCATTER_DEBUG: bool = False
 REVIEW_IMAGE_DEBUG: bool = False
 REVIEW_IMAGE_LOAD_DEBUG: bool = False
-# Focused channel-switch trace toggle (kept ON for targeted diagnosis).
-REVIEW_IMAGE_CHANNEL_SWITCH_DEBUG: bool = True
+# Focused channel-switch trace. It shipped ON — "kept ON for targeted
+# diagnosis" outlived the diagnosis, and every user's log then carried a trace
+# nobody had asked for while the documentation said the flags are off by
+# default. ``tests/test_debug_flags_default_off.py`` holds the whole roster to
+# False so the next targeted session has to turn its flag back off.
+REVIEW_IMAGE_CHANNEL_SWITCH_DEBUG: bool = False
 
 # Movie Montage tab debug switches
 MOVIE_MONTAGE_DEBUG: bool = False
 MOVIE_MONTAGE_LOAD_DEBUG: bool = False
 
 # Cell Gating tab debug switch (covers GatingWorker progress/start/finish logs).
-CELL_GATING_DEBUG: bool = True
+CELL_GATING_DEBUG: bool = False
+
+#: Every toggle this module exposes, in declaration order. ``allwell.main``
+#: copies its own top-of-file constants onto these by name; it used to name four
+#: of them one at a time, so the other six could only be changed by editing this
+#: file — and two of those six shipped ON.
+FLAG_NAMES: tuple[str, ...] = (
+    "REVIEW_TAB_DEBUG",
+    "ANALYZE_TAB_DEBUG",
+    "REVIEW_BAR_DEBUG",
+    "REVIEW_SCATTER_DEBUG",
+    "REVIEW_IMAGE_DEBUG",
+    "REVIEW_IMAGE_LOAD_DEBUG",
+    "REVIEW_IMAGE_CHANNEL_SWITCH_DEBUG",
+    "MOVIE_MONTAGE_DEBUG",
+    "MOVIE_MONTAGE_LOAD_DEBUG",
+    "CELL_GATING_DEBUG",
+)
+
 
 def review_bar_debug_enabled() -> bool:
     """Return whether Review tab bar-plot debug output is enabled."""

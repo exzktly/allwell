@@ -8,13 +8,12 @@ the matplotlib axes to draw into.
 from __future__ import annotations
 
 from well_viewer.features.barplot.controller import refresh_bar_layout_btn_state
-from well_viewer.features.barplot.collect import collect_bar_items_for_app
+from well_viewer.features.barplot.collect import bar_err_settings, collect_bar_items_for_app
 
 from well_viewer.domain.selections_model import (color_for_replicate_set, color_for_well, well_display_label, active_replicate_sets)
 from well_viewer.core.channel_state_controller import get_all_fluor_gates, on_cutoff_for_column
 from well_viewer.core.empty_state_copy import NO_DATASET_MESSAGE
 from well_viewer.data.data_loading import get_rows
-from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.domain.text_columns import timepoint_text
 from well_viewer.domain.time_rescale import format_scaled as _rescale_tp
 from well_viewer.domain import fold_change_pairing as _pairing_mod
@@ -126,6 +125,27 @@ def _format_tp_title(target_ts: list[float], tp_str: str) -> str:
     return f"t = [{tp_str}] h"
 
 
+def _timepoint_hours(df) -> np.ndarray:
+    """Numeric timepoint-in-hours per row, falling back to the text column.
+
+    ``timepoint_hours`` is the parsed column and is present on anything the
+    current pipeline wrote, but older CSVs — and any row whose parse failed —
+    carry only the text ``timepoint``. The beeswarm renderer had this fallback
+    and the violin renderer did not: it required ``timepoint_hours`` outright
+    and drew nothing without it, so the same well showed a populated beeswarm
+    and an empty violin, one toggle apart, with nothing saying why.
+    """
+    if "timepoint_hours" in df.columns:
+        tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy(dtype=float)
+    else:
+        tp = np.full(len(df), np.nan)
+    need = ~np.isfinite(tp)
+    if need.any() and "timepoint" in df.columns:
+        fallback = timepoint_text(df.loc[need]).map(parse_timepoint_hours)
+        tp[need] = fallback.fillna(np.nan).to_numpy(dtype=float)
+    return tp
+
+
 def draw_violin(
     ctx,
     ax_mean,
@@ -188,9 +208,9 @@ def draw_violin(
         df = _pooled_rows(ctx, lbl, pool_groups)
         vals = np.empty(0, dtype=float)
         n_total = n_above = 0
-        if df is not None and not df.empty and "timepoint_hours" in df.columns:
+        if df is not None and not df.empty:
             mask = df_included_mask(df).to_numpy(copy=True)
-            tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
+            tp = _timepoint_hours(df)
             with np.errstate(invalid="ignore"):
                 mask &= np.isfinite(tp) & tp_close_mask(tp, col_tp)
             v = resolve_value_series(df, ctx.state.channel.active_val_col, ratios).to_numpy()
@@ -214,7 +234,11 @@ def draw_violin(
             spec = cell_scale(lbl, col_tp)
             if spec.missing:
                 # Baseline unresolved — render a blank slot instead of
-                # misleading raw values.
+                # misleading raw values. The fraction panel below is
+                # deliberately unaffected: it is the raw ``n_above / n_total``
+                # off the rows whatever the fold-change state says (see the
+                # note beside ``_set_frac_ylim``), so it stays a real
+                # measurement even when this column has no baseline.
                 continue
             vals = _fc.apply_cell_scale(vals, spec)
             vals = vals[np.isfinite(vals)]
@@ -353,14 +377,7 @@ def draw_beeswarm(
         frac_val: float | None = None
         if df is not None and not df.empty:
             mask = df_included_mask(df).to_numpy(copy=True)
-            if "timepoint_hours" in df.columns:
-                tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
-            else:
-                tp = np.full(len(df), np.nan)
-            need = ~np.isfinite(tp)
-            if need.any() and "timepoint" in df.columns:
-                fallback = timepoint_text(df.loc[need]).map(parse_timepoint_hours)
-                tp[need] = fallback.fillna(np.nan).to_numpy(dtype=float)
+            tp = _timepoint_hours(df)
             with np.errstate(invalid="ignore"):
                 mask &= np.isfinite(tp) & tp_close_mask(tp, col_tp)
             val = resolve_value_series(df, ctx.state.channel.active_val_col, ratios).to_numpy()
@@ -695,7 +712,7 @@ def draw_grouped_bar_mode(
         warn_color=theme.Colors.warn,
         border_color=theme.Colors.border,
         placeholder_color=theme.Colors.placeholder,
-        disabled_well_color=theme.Colors.text_disabled,
+        disabled_well_color=theme.Colors.plot_undefined_ink,
         err_bar_color=theme.Colors.err_bar,
         fc_active=bool(ctx.state.plot.fold_change_active),
         ctx=ctx,
@@ -795,7 +812,6 @@ def redraw_bars(ctx) -> None:
     # user just created a replicate set, which otherwise never refreshed the
     # button's visibility.
     refresh_bar_layout_btn_state(ctx)
-    bar_selected = selected_bar_wells(ctx, active_rsets)
 
     _ch = ctx.state.channel.active_channel.upper()
     from well_viewer.data.metric_labels import (
@@ -831,7 +847,11 @@ def redraw_bars(ctx) -> None:
     if not ctx.state.dataset.well_paths:
         draw_bar_empty_state(ctx, ax_mean, ax_frac, NO_DATASET_MESSAGE, ax_n=ax_n)
         return
-    if not bar_selected and not active_rsets:
+    from well_viewer.core.selection_controller import has_plottable_selection
+    # One answer to "is there anything to draw?", in core, next to the state
+    # it reads: the four renderers each spelled the condition out and could
+    # therefore disagree with the placeholder drawn over them.
+    if not has_plottable_selection(ctx):
         # One line, where this used to paint the same sentence onto all three
         # panels. On screen it is invisible — the tab's shared placeholder covers
         # this canvas and says it properly — but the figure is what Export,
@@ -946,16 +966,6 @@ def resolve_bar_timepoints(ctx) -> list[tuple]:
         return [(float(tp_str), tp_str)]
     except ValueError:
         return []
-
-
-def selected_bar_wells(ctx, active_rsets) -> list[str]:
-    if active_rsets:
-        return []
-    return sorted(
-        (lbl for lbl in ctx.state.selection.selected_wells
-         if lbl in ctx.state.dataset.well_paths),
-        key=lambda lbl: parse_rc(lbl),
-    )
 
 
 def _drop_hidden_columns(ctx, wells, colors, short, full, pool_groups):
@@ -1232,6 +1242,13 @@ def draw_per_well_n_bars(
     fluor_gates = get_all_fluor_gates(ctx)
     per_fov_spread = ctx.state.plot.use_fov_replicates
     use_sem = bool(ctx.state.plot.use_sem)
+    # The Properties → Statistics controls govern this panel too. ``use_sem``
+    # above only chooses SD versus SEM upstream; the Show mode ("Mean", bars
+    # only) and the error-bar type ("None", "95 % CI") are decided here, and
+    # were not consulted at all — so turning error bars off left them on in
+    # per-cell view, and 95 % CI drew a bare SEM. ``bar_err_settings`` is the
+    # same accessor the aggregate path uses, so the two panels cannot drift.
+    _err_kind, _ci_scale, _draw_err = bar_err_settings(ctx)
     n = len(wells)
     if xs is None:
         xs = list(range(n))
@@ -1259,25 +1276,32 @@ def draw_per_well_n_bars(
             )
         matched = [pt for pt in pts if tp_close(pt[0], col_tp)]
         color = colors[i % len(colors)] if colors else color_for_well(lbl)
+        # ``bar_val > 0`` conflated two different facts, in the direction that
+        # hides real data: a well the pipeline measured as having no events
+        # above threshold drew the dashed "could not be computed" placeholder,
+        # identical to a well with no point at this timepoint at all. Zero is a
+        # measurement — it gets a real, zero-height bar. ``render_bar_items``
+        # beside this one already decides it this way; the two draw the same
+        # panel and must not disagree.
+        known = False
+        bar_val = err_val = 0.0
         if matched:
             pt = matched[0]
             if per_fov_spread:
                 # AggPoint index 7 = mean per-FOV n_above; index 8 = SD/SEM.
-                bar_val = float(pt[7]) if len(pt) >= 8 else 0.0
+                bar_val = float(pt[7]) if len(pt) >= 8 else float("nan")
                 err_val = float(pt[8]) if len(pt) >= 9 else 0.0
             else:
                 # AggPoint index 4 = total n_above for the well.
                 bar_val = float(pt[4])
                 err_val = 0.0
-        else:
-            bar_val = 0.0
-            err_val = 0.0
-        if bar_val > 0:
+            known = math.isfinite(bar_val)
+        if known:
             ax_n.bar(xi, bar_val, width=bar_w, color=color, alpha=0.85, zorder=3, linewidth=0)
-            if err_val > 0:
-                ax_n.errorbar(xi, bar_val, yerr=err_val, fmt="none", ecolor=theme.Colors.err_bar, elinewidth=1.4, capsize=4, zorder=4)
+            if _draw_err and err_val > 0:
+                ax_n.errorbar(xi, bar_val, yerr=err_val * _ci_scale, fmt="none", ecolor=theme.Colors.err_bar, elinewidth=1.4, capsize=4, zorder=4)
         else:
-            ax_n.bar(xi, 0, width=bar_w, color=theme.Colors.placeholder, linewidth=1, edgecolor=theme.Colors.text_disabled, linestyle="--", zorder=3)
+            ax_n.bar(xi, 0, width=bar_w, color=theme.Colors.placeholder, linewidth=1, edgecolor=theme.Colors.plot_undefined_ink, linestyle="--", zorder=3)
     ax_n.set_xticks(xs)
     ax_n.set_xticklabels(xlabels, rotation=45 if n > 8 else 0, ha="right" if n > 8 else "center", fontsize=7)
     xlim_lo = (min(xs) - 0.6) if xs else -0.6

@@ -33,7 +33,7 @@ def logdir(tmp_path, monkeypatch):
     `_LOG_PATH` and `_LOG_FILE` are module globals that a real process sets once;
     the tests here stand in for several launches, so each 'launch' resets them.
     """
-    monkeypatch.setattr(boot_diag, "_log_dir", lambda: tmp_path)
+    monkeypatch.setattr(boot_diag, "user_state_dir", lambda: tmp_path)
     monkeypatch.setattr(boot_diag, "_LOG_PATH", None, raising=False)
     monkeypatch.setattr(boot_diag, "_LOG_FILE", None, raising=False)
     return tmp_path

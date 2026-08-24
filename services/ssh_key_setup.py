@@ -245,17 +245,3 @@ def probe_ssh_connection(
     if not detail:
         detail = f"ssh exited {result.returncode}"
     return False, detail[:240]
-
-
-def verify_key_works(
-    ssh_alias: str, key_path: Path, *, timeout: int = 10,
-) -> tuple[bool, str]:
-    """Test that the key is now accepted on the remote.
-
-    Thin shim over :func:`probe_ssh_connection` that requires a key
-    path — used by the SSH Key wizard's Verify step where the key
-    path is the whole point of the probe. New callers should use
-    ``probe_ssh_connection`` directly so the no-key case is supported
-    in one place.
-    """
-    return probe_ssh_connection(ssh_alias, key_path, timeout=timeout)

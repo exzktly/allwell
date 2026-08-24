@@ -39,7 +39,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-from well_viewer.persistence._io import atomic_write_json
+from well_viewer.persistence._io import update_json_atomic
 from well_viewer.domain.viewer_state import resolve_pipeline_info_path
 
 
@@ -218,26 +218,45 @@ def save_gating_to_pipeline_info(
             "be persisted across sessions for this dataset.", info_path,
         )
         return None
-    try:
-        existing = json.loads(info_path.read_text())
-        if not isinstance(existing, dict):
-            _logger.warning("%s is not a JSON object; not updating.", info_path)
-            return None
-    except (OSError, json.JSONDecodeError) as exc:
-        _logger.warning("Could not read %s: %s", info_path, exc)
-        return None
+    def _merge_block(existing: dict[str, Any]) -> dict[str, Any]:
+        if gating_block:
+            existing[CELL_GATING_KEY] = gating_block
+        else:
+            existing.pop(CELL_GATING_KEY, None)
+        return existing
 
-    if gating_block:
-        existing[CELL_GATING_KEY] = gating_block
-    else:
-        existing.pop(CELL_GATING_KEY, None)
-
-    try:
-        atomic_write_json(info_path, existing)
-    except OSError as exc:
-        _logger.warning("Could not write %s: %s", info_path, exc)
+    # Read and write through the one helper that checks the file has not been
+    # rewritten in between. ``pipeline_info.json`` is shared with the pipeline,
+    # which rewrites it at the end of a run — in the same window Review is
+    # running in — so a plain read-then-write here could put back a copy that
+    # predates ``fluor_tokens`` / ``available_timepoints`` being updated, and
+    # the gating write would silently revert them.
+    if not update_json_atomic(info_path, _merge_block):
         return None
     return info_path
+
+
+def read_nuclear_token(out_dir: Path) -> str:
+    """The dataset's nuclear/segmentation channel token, or ``""``.
+
+    :func:`build_gating_block` needs it to diff ThreshFracOn against the right
+    default — the nuclear channel's differs from every other channel's — and
+    the token is recorded in the same ``pipeline_info.json`` the gating block
+    lives in. Callers that rebuild the block from disk have no other source for
+    it, and passing nothing silently drops a nuclear cutoff that happens to
+    equal the ordinary readout default.
+    """
+    info_path = _resolve_pipeline_info_path(out_dir)
+    if not info_path.exists():
+        return ""
+    try:
+        data = json.loads(info_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        _logger.warning("Could not read %s: %s", info_path, exc)
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    return str(data.get("nuclear_token", "") or "").strip().lower()
 
 
 def read_gating_params(out_dir: Path) -> dict[str, Any] | None:

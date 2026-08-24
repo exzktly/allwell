@@ -28,6 +28,7 @@ from __future__ import annotations
 # Names used only in annotations. Under ``from __future__ import
 # annotations`` these are never evaluated, so importing them for real would
 # add startup cost and, for several of these, an import cycle.
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -337,10 +338,7 @@ if _HAVE_MPL:
             )
             # Capture in publication mode (the canonical export look), then
             # revert — mirrors the whole-canvas Copy path.
-            prev = self._plot_theme
-            try:
-                if prev != "publication":
-                    self.setPlotTheme("publication")
+            with self._publication_capture():
                 bbox = axis_tight_bbox_inches(
                     ax, pad_in=theme.Spacing.xs / float(self.figure.dpi))
                 # Hide sibling panels while cropping so a neighbour's title /
@@ -352,10 +350,6 @@ if _HAVE_MPL:
                         svg_kwargs={"bbox_inches": bbox},
                         pdf_kwargs={"bbox_inches": bbox},
                     )
-            finally:
-                if self._plot_theme != prev:
-                    self.setPlotTheme(prev)
-                self.canvas.draw_idle()
             failed = status.startswith("Copy failed")
             # Neutral message: this is a clipboard copy, not tied to any one app.
             msg = status if failed else "Copied panel to clipboard"
@@ -386,11 +380,8 @@ if _HAVE_MPL:
             )
             # Render the hovered panel in publication mode (the canonical export
             # look), mirroring the Copy path, then revert.
-            prev = self._plot_theme
             png_bytes = b""
-            try:
-                if prev != "publication":
-                    self.setPlotTheme("publication")
+            with self._publication_capture():
                 bbox = axis_tight_bbox_inches(
                     ax, pad_in=theme.Spacing.xs / float(self.figure.dpi))
                 # Hide sibling panels while cropping so a neighbour's title /
@@ -402,10 +393,6 @@ if _HAVE_MPL:
                         buf, format="png", bbox_inches=bbox, dpi=300,
                         facecolor=self.figure.get_facecolor())
                 png_bytes = buf.getvalue()
-            finally:
-                if self._plot_theme != prev:
-                    self.setPlotTheme(prev)
-                self.canvas.draw_idle()
             label = ""
             try:
                 label = (ax.get_title() or "").strip()
@@ -430,20 +417,13 @@ if _HAVE_MPL:
 
             # Render the entire figure in publication mode (the canonical export
             # look), mirroring the per-panel save path, then revert.
-            prev = self._plot_theme
             png_bytes = b""
-            try:
-                if prev != "publication":
-                    self.setPlotTheme("publication")
+            with self._publication_capture():
                 buf = io.BytesIO()
                 self.figure.savefig(
                     buf, format="png", bbox_inches="tight", dpi=300,
                     facecolor=self.figure.get_facecolor())
                 png_bytes = buf.getvalue()
-            finally:
-                if self._plot_theme != prev:
-                    self.setPlotTheme(prev)
-                self.canvas.draw_idle()
             label = ""
             try:
                 sup = getattr(self.figure, "_suptitle", None)
@@ -534,15 +514,18 @@ if _HAVE_MPL:
 
         def setThemeToggleVisible(self, visible: bool) -> None:
             """Hide the in-header ``Publication ↔ Screen`` toggle (and the
-            'preview only' chip). ``setPlotTheme`` still works programmatically."""
+            'preview only' chip). ``setPlotTheme`` still works programmatically.
+
+            The choice is remembered rather than applied once, because
+            :meth:`_sync_theme_ui` runs again on every ``setPlotTheme`` call and
+            would otherwise put the 'preview only' chip back the first time the
+            card switched to the screen theme — leaving a card that was asked
+            to hide its theme UI showing half of it.
+            """
+            self._theme_toggle_visible = bool(visible)
             if self._header is None:
                 return
-            if getattr(self, "_theme_sc", None) is not None:
-                self._theme_sc.setVisible(bool(visible))
-            if not visible:
-                self._preview_chip.setVisible(False)
-            else:
-                self._sync_theme_ui()
+            self._sync_theme_ui()
 
         def headerWidget(self) -> QWidget | None:
             return self._header
@@ -648,8 +631,10 @@ if _HAVE_MPL:
         def _sync_theme_ui(self) -> None:
             if self._header is None:
                 return
-            self._preview_chip.setVisible(self._plot_theme == "screen")
+            show_toggle = getattr(self, "_theme_toggle_visible", True)
+            self._preview_chip.setVisible(show_toggle and self._plot_theme == "screen")
             if getattr(self, "_theme_sc", None) is not None:
+                self._theme_sc.setVisible(show_toggle)
                 try:
                     self._theme_sc.blockSignals(True)
                     self._theme_sc.setCurrentByData(self._plot_theme)
@@ -679,6 +664,15 @@ if _HAVE_MPL:
                 err_sc.currentChanged.connect(lambda *_a: self._set_error(err_sc.currentData()))
                 v.addWidget(err_sc)
             pop.setContentWidget(content)
+            # Each click built a fresh Popover and dropped the reference to the
+            # previous one onto this attribute. The old popover is a child of
+            # this card, so Qt keeps it alive for the card's whole life: a
+            # session of poking the chip accumulated one hidden window per
+            # click, each holding its own segmented controls.
+            prev = getattr(self, "_stats_pop", None)
+            if prev is not None:
+                prev.close()
+                prev.deleteLater()
             self._stats_pop = pop
             pop.popup(self._stats_chip, side="bottom", align="end")
 
@@ -707,6 +701,42 @@ if _HAVE_MPL:
         def traceColors(self) -> list:
             return _plot_palette(self._plot_theme)
 
+        @contextmanager
+        def _publication_capture(self):
+            """Hold the publication theme for the duration of a capture.
+
+            ``setPlotTheme`` emits ``plotThemeChanged``, and the tabs connect
+            that straight to a full recompute. A capture flips the theme twice
+            — into publication and back — so one Copy or Save click ran two
+            complete recomputes, and the first of them landed *between* the
+            flip and the ``savefig`` it was wrapping, rebuilding the figure
+            mid-capture.
+
+            The theme is back where it started before this returns, so nothing
+            outside has anything to react to; the signal is suppressed across
+            the pair rather than fired twice for a round trip.
+            """
+            prev = self._plot_theme
+            self._theme_signal_suppressed = True
+            try:
+                if prev != "publication":
+                    self.setPlotTheme("publication")
+                yield
+            finally:
+                # Nested, so the clear cannot be skipped. The restoring flip has
+                # to happen with the flag still set — suppressing one half of a
+                # round trip emits the very recompute the bracket exists to
+                # avoid — but a plain sequence of "flip, then clear" loses the
+                # clear if the flip raises, and the flag would then stay True
+                # for the card's whole life: one failed capture would silently
+                # unsubscribe every tab recompute from the theme, for ever.
+                try:
+                    if self._plot_theme != prev:
+                        self.setPlotTheme(prev)
+                finally:
+                    self._theme_signal_suppressed = False
+                    self.canvas.draw_idle()
+
         def setPlotTheme(self, mode: str) -> None:
             mode = "publication" if str(mode).lower().startswith("pub") else "screen"
             if mode == self._plot_theme:
@@ -732,7 +762,8 @@ if _HAVE_MPL:
             self.setStyleSheet(self._build_qss())
             self._sync_theme_ui()
             self.draw()
-            self.plotThemeChanged.emit(mode)
+            if not getattr(self, "_theme_signal_suppressed", False):
+                self.plotThemeChanged.emit(mode)
 
         def _apply_rcparams(self) -> None:
             bg, fg, muted, grid, spine = _plot_tokens(self._plot_theme)

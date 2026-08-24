@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from well_viewer.features.barplot._axis_fit import fit_bar_panels
+from well_viewer.domain.numeric import is_number
 from well_viewer.domain.selections_model import well_display_label, active_replicate_sets
 from well_viewer.domain.viewer_state import parse_rc
 from widgets import menu_exec
@@ -149,6 +151,7 @@ def render_bar_items(
     err_bar_color: str,
     ax_n=None,
     fc_active: bool = False,
+    n_axis_integer: bool | None = None,
     ctx=None,
 ) -> None:
     """Draw mean / fraction / events-above-threshold bar panels.
@@ -235,11 +238,16 @@ def render_bar_items(
             # count could not be computed. Both drew the dashed placeholder.
             # Zero is a measurement — it gets a real (zero-height) bar, and the
             # placeholder is kept for the undefined case.
-            _n_above_known = (
-                item.has_mean
-                and isinstance(item.n_above, (int, float))
-                and math.isfinite(float(item.n_above))
-            )
+            #
+            # **Not gated on ``has_mean``**, which was the same conflation one
+            # step removed: ``_aggregate_arrays`` sets ``mean = nan`` exactly
+            # when nothing passed the threshold, so requiring a mean here threw
+            # the placeholder over the commonest measured zero there is. The
+            # count answers its own question — the mean is the average intensity
+            # *of the cells above threshold*, undefined when there are none,
+            # while the count of those cells is 0 and known. This is the same
+            # separation ``has_frac`` needed in the collector.
+            _n_above_known = is_number(item.n_above)
             if _n_above_known:
                 ax_n.bar(x, item.n_above, width=bar_w, color=color,
                          alpha=0.85, zorder=3, linewidth=0)
@@ -278,58 +286,21 @@ def render_bar_items(
 
     # ── Auto-fit y-limits ────────────────────────────────────────────────────
     # Honest 0 baseline; trim top to tallest bar + error + ~8% headroom so the
-    # error caps aren't clipped. Frac panel is capped at 1.05 when FC is off.
-    # User-entered y-limits (Properties sidebar) are applied last, per-panel, by
-    # ``apply_export_style_to_current`` at the end of ``redraw_bars``.
-    _HEADROOM = 1.08
-
-    def _tops_lows(get_val, get_spread):
-        tops: list[float] = []
-        lows: list[float] = []
-        for it in items:
-            v = get_val(it)
-            if v is None or not math.isfinite(v):
-                continue
-            s = get_spread(it) or 0.0
-            if not math.isfinite(s) or s < 0:
-                s = 0.0
-            tops.append(v + s)
-            lows.append(v - s)
-        return tops, lows
-
-    def _autofit(ax, tops, lows, *, cap=None, floor_hi=None):
-        if not tops:
-            return
-        hi = max(tops) * _HEADROOM
-        if floor_hi is not None:
-            hi = max(hi, floor_hi)
-        if cap is not None:
-            hi = min(hi, cap)
-        lo = min([0.0] + lows)   # honest 0 baseline; dip below only for genuine negatives
-        if hi > lo:
-            ax.set_ylim(lo, hi)
-
-    _autofit(ax_mean, *_tops_lows(
-        lambda it: it.mean if it.has_mean else float("nan"),
-        lambda it: it.spread))
-    # cap=1.05 only when FC is off — under FC the frac may be a ratio > 1.
-    _autofit(ax_frac, *_tops_lows(
-        lambda it: it.frac if it.has_frac else float("nan"),
-        lambda it: it.frac_spread), cap=None if fc_active else 1.05)
-
-    if ax_n is not None:
-        _autofit(ax_n, *_tops_lows(
-            lambda it: float(it.n_above) if it.has_mean else float("nan"),
-            lambda it: it.n_above_spread), floor_hi=1.0)
-        # Default to integer ticks because N is a count of events; in
-        # Aggregate-FOVs mode the bar shows a per-FOV mean which can be
-        # fractional, so let matplotlib pick auto ticks then.
-        try:
-            from matplotlib.ticker import MaxNLocator
-            ax_n.yaxis.set_major_locator(MaxNLocator(integer=False))
-        except ImportError:
-            pass
-
+    # error caps aren't clipped. User-entered y-limits (Properties sidebar) are
+    # applied last, per-panel, by ``apply_export_style_to_current`` at the end
+    # of ``redraw_bars``. The arithmetic and the events-axis tick rule live in
+    # ``_axis_fit``; both are decisions this codebase has got wrong by copying a
+    # sibling's rule without checking it applied, and the reasoning is written
+    # out there.
+    fit_bar_panels(
+        ax_mean, ax_frac, ax_n, items,
+        fc_active=fc_active,
+        n_axis_integer=n_axis_integer,
+        per_fov=bool(
+            getattr(getattr(ctx, "state", None), "plot", None)
+            and ctx.state.plot.use_fov_replicates
+        ),
+    )
 
 # ── Drag-and-drop reordering ─────────────────────────────────────────────────
 #

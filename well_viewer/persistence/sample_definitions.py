@@ -34,7 +34,59 @@ def save_notes(ctx) -> None:
         _logger.exception("Notes auto-save failed")
 
 
-def autosave_to_pipeline_info(ctx) -> None:
+def _labels_to_write(ds, *, keep_absent: bool) -> dict[str, str]:
+    """The ``well_labels`` map to persist: live labels, plus — when
+    *keep_absent* — the saved labels of wells this load does not hold.
+
+    ``load_from_pipeline_info`` hydrates a label only for a token in
+    ``dataset.well_paths``, which is right (a label for a well that is not
+    here has nothing to attach to), but the block written back was rebuilt
+    from that pruned map alone. Opening one plate's ``out/`` folder, or any
+    other load that sees a subset of the wells, and then touching a single
+    label rewrote the file without every other well's — the labels were gone
+    from the only place they existed. ``view_state`` solved the same problem
+    for selected wells with its ``absent_wells`` stash; here the file itself
+    is the stash, so the merge is a read of what is already on disk rather
+    than session state that has to survive a dataset swap.
+
+    The rule the merge encodes: a token this dataset **holds** takes the live
+    value, including its absence — clearing a label has to be able to delete
+    it. A token it does not hold keeps whatever the file says.
+
+    *keep_absent* is ``False`` for exactly one caller, the "Sample definitions"
+    reset scope, which is the user asking for every label to go and would
+    otherwise get back every label the current load cannot see.
+    """
+    live = {
+        str(tok): str(lab)
+        for tok, lab in (ds.well_labels or {}).items()
+        if str(lab).strip()
+    }
+    if not keep_absent or not ds.data_dir:
+        return live
+    from well_viewer.domain.sample_definitions import read_sample_definitions
+    stored = (read_sample_definitions(ds.data_dir) or {}).get("well_labels")
+    if not isinstance(stored, dict):
+        return live
+    loaded = set(ds.well_paths or {})
+    merged: dict[str, str] = {}
+    for tok, lab in stored.items():
+        token = str(tok)
+        if token in loaded:
+            continue  # the live map is authoritative for a well that is here
+        text = str(lab).strip()
+        if text:
+            merged[token] = text
+    if merged:
+        _logger.debug(
+            "sample_definitions: preserving %d label(s) for well(s) outside "
+            "this load: %s", len(merged), ", ".join(sorted(merged)),
+        )
+    merged.update(live)
+    return merged
+
+
+def autosave_to_pipeline_info(ctx, *, keep_absent_labels: bool = True) -> None:
     app = ctx.window  # transitional bridge (B4)
     """Debounced-autosave variant of :func:`save_to_pipeline_info`.
 
@@ -43,6 +95,10 @@ def autosave_to_pipeline_info(ctx) -> None:
     is safe to fire on every edit through the persistence registry (matching how
     notes / ratios / view-state already autosave). The explicit Save button
     keeps using the loud :func:`save_to_pipeline_info`.
+
+    *keep_absent_labels* merges the saved labels of wells this load does not
+    hold back into the block (see :func:`_labels_to_write`). Only the reset
+    scope passes ``False``, through :func:`autosave_forgetting_absent_labels`.
     """
     from well_viewer.domain.sample_definitions import (
         build_sample_definitions_v2,
@@ -59,11 +115,12 @@ def autosave_to_pipeline_info(ctx) -> None:
     selections = list(app._app_state.selection.selections or [])
     current_id = app._app_state.selection.current_selection_id
     plot_groups = list(app._app_state.selection.plot_groups or [])
-    block = build_sample_definitions_v2(
-        ds.well_labels, selections, current_id, notes=notes_text,
-        plot_groups=plot_groups,
-    )
     try:
+        block = build_sample_definitions_v2(
+            _labels_to_write(ds, keep_absent=keep_absent_labels),
+            selections, current_id, notes=notes_text,
+            plot_groups=plot_groups,
+        )
         _write_block(ds.data_dir, block)
     except Exception:
         # Autosave is best-effort and runs off a debounce timer with no user
@@ -71,6 +128,18 @@ def autosave_to_pipeline_info(ctx) -> None:
         # error) must be logged rather than propagated or swallowed — else the
         # user's sample definitions silently fail to persist (audit E16).
         _logger.exception("sample_definitions autosave failed")
+
+
+def autosave_forgetting_absent_labels(ctx) -> None:
+    """Write the sample-definitions block with **no** merge of absent labels.
+
+    The "Sample definitions" reset scope's promise is that every well label
+    goes. Going through the ordinary autosave would read the labels back out of
+    the file it is about to overwrite and restore each one belonging to a well
+    the current load does not contain — a reset that reports success and leaves
+    most of the plate labelled.
+    """
+    autosave_to_pipeline_info(ctx, keep_absent_labels=False)
 
 
 def save_to_pipeline_info(app) -> None:
@@ -98,8 +167,8 @@ def save_to_pipeline_info(app) -> None:
     current_id = app._app_state.selection.current_selection_id
     plot_groups = list(app._app_state.selection.plot_groups or [])
     block = build_sample_definitions_v2(
-        app._app_state.dataset.well_labels, selections, current_id,
-        notes=notes_text, plot_groups=plot_groups,
+        _labels_to_write(app._app_state.dataset, keep_absent=True),
+        selections, current_id, notes=notes_text, plot_groups=plot_groups,
     )
     try:
         info_path = _write_block(app._app_state.dataset.data_dir, block)

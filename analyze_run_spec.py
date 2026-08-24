@@ -156,9 +156,27 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
         return self._queue_btn
 
     def _on_queue_requested(self) -> None:
+        """Queue the current form, through the same gate as Run.
+
+        "+ Queue" used to hand the sink whatever ``collect_spec`` produced,
+        skipping ``_validate_run_request`` entirely — so a run with no input
+        folder, an unparseable schema, no fluorescent channels or an
+        out-of-range numeric field was accepted without a word and sat in the
+        queue looking identical to a valid job. It failed at dequeue time, in
+        ``start_from_queue``, which reports through ``jobFinished`` because
+        there is no dialog to show it to: the user came back to a queue entry
+        marked failed and no statement of what was wrong with it.
+
+        Validating here is not a duplicate of Run's check — it is the same
+        check, and it has to be the same one, or the two buttons disagree about
+        what a runnable form is.
+        """
         sink = getattr(self, "_queue_sink", None)
-        if sink is not None:
-            sink(self.collect_spec())
+        if sink is None:
+            return
+        if self._validate_run_request() is None:
+            return              # already reported in a dialog naming the field
+        sink(self.collect_spec())
 
     def collect_spec(self) -> dict:
         """The current form's run, as a job queue's JSON spec."""

@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from well_viewer.domain import fold_change as _fc
+from well_viewer.domain.numeric import is_number, is_numeric
 from well_viewer.domain.stats_compute import compute_rep_stats
 from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
 from well_viewer.domain.stats_compute import aggregate_well
@@ -92,7 +93,7 @@ class LinePoint:
         as 7; the CSV's integer count now comes from index 10 instead.
         """
         n_above = (float(self.n_above)
-                   if isinstance(self.n_above, (int, float)) and math.isfinite(self.n_above)
+                   if is_number(self.n_above)
                    else float("nan"))
         return (
             self.t, self.mean, self.spread, self.frac,
@@ -163,16 +164,16 @@ class LineAxes:
 def _aggpoint_to_linepoint(pt) -> LinePoint:
     """Lift a raw AggPoint tuple into a :class:`LinePoint`."""
     t = float(pt[0])
-    mean = float(pt[1]) if isinstance(pt[1], (int, float)) else float("nan")
-    spread = float(pt[2]) if isinstance(pt[2], (int, float)) else 0.0
-    frac = float(pt[3]) if (len(pt) > 3 and isinstance(pt[3], (int, float))) else float("nan")
+    mean = float(pt[1]) if is_numeric(pt[1]) else float("nan")
+    spread = float(pt[2]) if is_numeric(pt[2]) else 0.0
+    frac = float(pt[3]) if (len(pt) > 3 and is_numeric(pt[3])) else float("nan")
     # n_above may be a fold-change ratio (float, or NaN at a missing-control
     # timepoint) once FC normalizes the N panel, so keep it float / NaN-safe
     # rather than int(): the renderer reads ``float(p.n_above)`` and skips
     # points without a mean anyway.
     _n_raw = pt[4] if len(pt) > 4 else 0
     n_above = (float(_n_raw)
-               if isinstance(_n_raw, (int, float)) and math.isfinite(_n_raw)
+               if is_number(_n_raw)
                else float("nan"))
     n_total = int(pt[5]) if len(pt) > 5 else 0
     frac_spread = float(pt[6]) if len(pt) > 6 else 0.0
@@ -359,7 +360,37 @@ def collect_line_series(
             ))
         return series_out, band_lbl
 
-    # Per-well branch.
+    if ctx.state.selection.selections:
+        # Group mode (replicate sets / groups defined) with every group hidden
+        # → no series. The per-well branch below would fall back to
+        # ``selected_wells``, but in group mode the plate is passive and clicks
+        # toggle group visibility, so that set is stale: falling back
+        # resurrected every well after "Deselect all". ``ordered_bar_keys``
+        # refuses the same fallback for the same reason, and the two panes
+        # sitting side by side must not disagree about what is selected.
+        return series_out, band_lbl
+
+    series_out.extend(_per_well_series(
+        ctx, denoms, hidden_members,
+        threshold=threshold, use_sem=use_sem, val_col=val_col,
+        fluor_gates=fluor_gates, per_fov_spread=per_fov_spread,
+        include_cdf=include_cdf,
+        all_fluor_values_filtered=all_fluor_values_filtered,
+        norm_kw=_norm_kw,
+    ))
+    return series_out, band_lbl
+
+
+def _per_well_series(ctx, denoms, hidden_members, *, threshold, use_sem, val_col,
+                     fluor_gates, per_fov_spread, include_cdf,
+                     all_fluor_values_filtered, norm_kw) -> list:
+    """One :class:`LineSeries` per selected well, in the saved line order.
+
+    Split out of :func:`collect_line_series` so that function stays under the
+    complexity ratchet — the group-mode guard above it is one more branch, and
+    this loop was already the larger half of the body.
+    """
+    out: list[LineSeries] = []
     selected = sorted(
         (lbl for lbl in ctx.state.selection.selected_wells if lbl in ctx.state.dataset.well_paths),
         key=lambda lbl: parse_rc(lbl),
@@ -379,7 +410,7 @@ def collect_line_series(
             fluor_gates=fluor_gates,
             per_fov_spread=per_fov_spread,
         )
-        pts = normalize_member_pts(list(pts or []), denoms, label, **_norm_kw)
+        pts = normalize_member_pts(list(pts or []), denoms, label, **norm_kw)
         points = [_aggpoint_to_linepoint(pt) for pt in (pts or [])]
         cdf_vals = np.empty(0, dtype=float)
         if include_cdf and all_fluor_values_filtered is not None:
@@ -393,12 +424,12 @@ def collect_line_series(
             ))
         display = well_display_label(ctx, label)
         _ctrl_ref, _outcome = denoms.control_for(label)
-        series_out.append(LineSeries(
+        out.append(LineSeries(
             key=label, display=display, color=color, kind="well",
             wells=[label], points=points, cdf_vals=cdf_vals,
             fc_control=_ctrl_ref, fc_outcome=str(_outcome or ""),
         ))
-    return series_out, band_lbl
+    return out
 
 
 def _paint_series(axes: LineAxes, series, *, fov_active: bool) -> tuple[bool, bool, bool]:
@@ -793,7 +824,11 @@ def redraw_line_plots(
         canvas.draw_idle()
         ctx.notify.set_status("No data loaded.")
         return
-    if not selected and not active_rsets:
+    from well_viewer.core.selection_controller import has_plottable_selection
+    # One answer to "is there anything to draw?", in core, next to the state
+    # it reads: the four renderers each spelled the condition out and could
+    # therefore disagree with the placeholder drawn over them.
+    if not has_plottable_selection(ctx):
         # The words are the tab's shared empty-state placeholder, which covers
         # this canvas. What is left to do here is make sure the figure *behind*
         # it is genuinely empty: Export ▾ / Save figure / per-panel Copy read the

@@ -126,7 +126,7 @@ class SelectionChip(QFrame):
         QLabel#SelectionChipText {{
             color: {fg};
             font-family: {t.family_mono};
-            font-size: 10px;
+            font-size: {t.caption_size}px;
             font-weight: 600;
             background: transparent;
             border: 0;

@@ -1,10 +1,14 @@
 """A8 R2 — the heat-map value grid is computed from ``ctx`` (not the god-object).
 
 ``redraw_heatmap`` and its helpers were converted to take ``ctx``. This locks in
-the *data* path: ``_cell_value(ctx, …)`` must resolve the aggregation delegate
+the *data* path: ``_cell_value(ctx, …)`` must resolve the aggregation delegates
 via ``ctx.app``, the rep-set-average toggle via ``ctx.state.heatmap``, and the
 loaded wells via ``ctx.state.dataset`` — producing the same per-cell scalar the
-god-object path did. (The imshow/colorbar *paint* is covered by an interactive
+god-object path did.
+
+Both delegates are served here. The averaging metrics reduce one replicate per
+well and so reach ``_aggregate_well``; ``METRIC_COUNT`` is a set total and still
+reaches ``_aggregate_group``. (The imshow/colorbar *paint* is covered by an interactive
 smoke, not here.)
 """
 from __future__ import annotations
@@ -32,6 +36,16 @@ def _ctx(*, pts_by_group, well_paths, repset_avg=False):
         return list(pts_by_group.get(frozenset(wells), []))
 
     app._aggregate_group = _aggregate_group
+
+    # The averaging metrics reduce one replicate per well, so the *well*
+    # delegate is the one they reach — ``group_replicate_stats`` calls
+    # ``aggregate_well`` per member. Without it the real DataFrame path runs
+    # and tries to read a CSV at the well's path, which in this pure-logic
+    # fixture is the bare string "A01".
+    def _aggregate_well(label, **_kw):
+        return list(pts_by_group.get(frozenset({label}), []))
+
+    app._aggregate_well = _aggregate_well
 
     from well_viewer.core.app_state import AppState
     from well_viewer.features.registry import attach_feature_state

@@ -63,25 +63,27 @@ _OPTS = {
     "pos_control_well": "A1",
     "neg_control_well": "A2",
     "qc_remove_debris": True,
-    "qc_min_area": 10.0,
-    "qc_max_area": 900.0,
-    "qc_min_solidity": 0.5,
+    "qc_min_area": "10.0",
+    "qc_max_area": "900.0",
+    "qc_min_solidity": "0.5",
     "phase_token": "BF",
     "segmentation_method": "stardist_seeded_watershed_cell",
     "cytoplasm_token": "GFP",
-    "min_nucleus_area_px": 75,
+    "min_nucleus_area_px": "75",
     "cellpose_model": "nuclei",
-    "cellpose_diameter": 30.0,
-    "cellpose_flow_threshold": 0.6,
-    "cellpose_cellprob_threshold": 0.1,
+    "cellpose_diameter": "30.0",
+    "cellpose_flow_threshold": "0.6",
+    "cellpose_cellprob_threshold": "0.1",
     "cellpose_nuclei_channel": "1",
 }
 
-# ``cleanup_remote`` / ``dry_run_cleanup`` are remote-only settings. For a
-# local run the form pins them (``AnalyzeTab._refresh_remote_controls`` forces
-# auto-delete back on and dry-run off whenever "Run on:" is Local), so the only
-# spec a local form can ever collect is this one. A spec that varies them is
-# only meaningful against a named remote — ``_REMOTE_SPEC`` below.
+# ``cleanup_remote`` / ``dry_run_cleanup`` are remote-only settings: nothing
+# reads either on a local run, because ``PipelineRunner`` passes them only down
+# the remote branch. This local spec therefore carries the form's own defaults,
+# and the variants that matter are the ones naming a remote — ``_REMOTE_SPEC``
+# below. (The form no longer rewrites the two boxes when "Run on:" returns to
+# Local; it only hides them. Doing so silently dropped a dry-run tick and
+# re-armed an auto-delete the user had turned off.)
 _SPEC = {
     "opts": dict(_OPTS),
     "remote_name": None,
@@ -92,9 +94,9 @@ _SPEC = {
 }
 
 # Both remote variants below are combinations the form can actually reach.
-# ``_refresh_remote_controls`` gates dry-run on auto-delete being checked, so
-# "auto-delete off, dry-run on" is not a spec any form can collect — only a
-# hand-edited job_queue.json could hold one, and hydrating it normalises it.
+# ``_refresh_remote_controls`` *enables* dry-run only while auto-delete is
+# checked, so "auto-delete off, dry-run on" is a state the user cannot get to
+# by clicking; only a hand-edited job_queue.json could hold one.
 _REMOTE_SPEC = {
     **_SPEC,
     "remote_name": "bench-box",

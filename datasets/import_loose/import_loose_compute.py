@@ -60,6 +60,16 @@ class ImportPreview:
     #: out the fields the schema never mentioned instead of reporting a count
     #: for them.
     schema_fields: tuple[str, ...] = field(default_factory=tuple)
+    #: Well-named subfolders already sitting at the top level that hold TIFs.
+    #: The in-place mode converts **every** well folder it finds — including
+    #: ones it did not create — because that is what leaves the folder in a
+    #: uniform, ready-to-run layout and what lets an interrupted run resume.
+    #: The preview otherwise never mentions them: it is loose-TIF-only and
+    #: non-recursive, so a user reading "2 well(s)" had no way to know four
+    #: more folders would be zipped and have their TIFs deleted. This is that
+    #: scope, measured with the same walk, so what the page promises and what
+    #: the run does are the same list.
+    existing_well_folders: tuple[str, ...] = field(default_factory=tuple)
 
     def summary(self) -> str:
         """One line describing what this folder will become — or, when that is
@@ -96,6 +106,26 @@ class ImportPreview:
         if "channel" in self.schema_fields:
             line += f" · channels: {', '.join(self.channels) or '(none)'}"
         return line
+
+    def existing_folder_note(self) -> str:
+        """A sentence naming the well folders already in this folder that an
+        in-place run will also zip, or ``""``.
+
+        The in-place mode's scope is every well folder under the source, not
+        only the wells it groups from the loose TIFs, and those folders have
+        their TIFs deleted too. Nothing on the page said so, which made the
+        preview an understatement of a destructive operation rather than a
+        description of it.
+        """
+        if not self.existing_well_folders:
+            return ""
+        names = ", ".join(self.existing_well_folders[:6])
+        more = "" if len(self.existing_well_folders) <= 6 else ", …"
+        return (
+            f"{len(self.existing_well_folders)} well folder(s) already in this "
+            f"folder ({names}{more}) will also be zipped, and their TIFs "
+            "deleted, by an in-place run."
+        )
 
 
 @dataclass(frozen=True)
@@ -161,6 +191,38 @@ def _walk(
     )
 
 
+def existing_well_folders(search_dir: Path) -> tuple[str, ...]:
+    """Canonical wells of the top-level ``<well>/`` subfolders that already hold
+    TIFs — the extra scope an in-place run takes on beyond the loose files.
+
+    Deliberately the same shape :func:`datasets.import_loose.apply._zip_well_folders`
+    walks (top level only, a directory whose name canonicalises to a well, at
+    least one ``.tif``/``.tiff`` directly inside it), so the number the page
+    shows is the number the run acts on rather than a second, nearby estimate.
+    """
+    wells: list[str] = []
+    try:
+        entries = sorted(Path(search_dir).iterdir())
+    except OSError:
+        return ()
+    for entry in entries:
+        if not entry.is_dir():
+            continue
+        well = canonical_well_label(entry.name)
+        if not well:
+            continue
+        try:
+            has_tifs = any(
+                f.is_file() and f.suffix.lower() in _IMAGE_SUFFIXES
+                for f in entry.iterdir()
+            )
+        except OSError:
+            continue
+        if has_tifs:
+            wells.append(well)
+    return tuple(wells)
+
+
 #: Stop counting nested images once the answer is "plenty". The count exists to
 #: say *which* problem this is, and any number past this reads the same.
 _NESTED_PROBE_CAP = 500
@@ -212,6 +274,7 @@ def scan_folder(
         unparsed_files=tuple(result.unparsed_files),
         nested_count=nested,
         schema_fields=tuple(schema),
+        existing_well_folders=existing_well_folders(Path(search_dir)),
     )
 
 

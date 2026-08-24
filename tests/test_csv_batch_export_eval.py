@@ -650,8 +650,21 @@ def _run_scatter_agg_batch(ctx, groups, out_dir, *, tps=("0.0",)):
 
 def test_batch_scatter_agg_replicates_and_single_wells(ctx, tmp_path):
     """Aggregate scatter batch of a mixed group emits ONE aggregated point per
-    replicate set and one per single well, with the single well's spread = 0
-    (no replicates) and the replicate set's spread = per-well-mean SEM."""
+    replicate set and one per single well: the replicate set's spread is the
+    per-well-mean SEM, and the single well's spread is **undefined**.
+
+    That last assertion used to read ``== "0"``, under a comment saying "no
+    replicates". Zero and undefined are not the same fact, and conflating them
+    is the defect this review exists to remove: a solo well exported
+    ``err = 0.000000`` and drew a bar with no whisker beside sets whose whiskers
+    were measured, so a reader could not tell "the replicates agreed exactly"
+    from "there was only one". ``_reduce_reps`` carries a paragraph promising
+    NaN here and is the producer that now keeps it.
+
+    The test was red on ``origin/main`` and on this branch alike, and nothing
+    reported it: it carries the ``slow`` mark, so CI's fast lane deselects it and
+    every green run since the producer was corrected went green over a test it
+    never executed."""
     out_dir = tmp_path / "batch_scatter_agg"
     panel = _run_scatter_agg_batch(ctx, [_make_mixed_group("Cond1")], out_dir,
                                    tps=("0.0",))
@@ -665,7 +678,8 @@ def test_batch_scatter_agg_replicates_and_single_wells(ctx, tmp_path):
     assert by_label["RepA"]["x"] == "108.5"           # pooled/per-well-mean GFP
     assert by_label["RepA"]["x_err"] == "5"           # SEM of per-well means
     assert by_label["B01"]["x"] == "123.5"            # solo well GFP
-    assert by_label["B01"]["x_err"] == "0"            # single well → no spread
+    # Undefined, not zero — one replicate has no spread to measure.
+    assert by_label["B01"]["x_err"] in ("", "nan"), by_label["B01"]["x_err"]
 
 
 def test_batch_scatter_cells_honors_display_options(ctx, tmp_path, monkeypatch):

@@ -37,7 +37,7 @@ last row.**
 | W3 | Image identity and batch export (themes 4, 7) | worker | 14 | **in progress** |
 | ME | smFISH, fold change, stats, guards, docs | lead | 11 | **in progress** |
 
-Counts: **41 done · 0 reported (unverified) · 0 declined · 0 deferred · 1 outstanding** of 42.
+Counts: **42 done · 0 reported (unverified) · 0 declined · 0 deferred · 0 outstanding** of 42.
 
 The four groups are partitioned by file, not by theme, so that they can run at
 the same time without touching the same lines. Where a theme's items live in
@@ -204,6 +204,29 @@ unnoticed.
    a matching zip, skip it" rule, so it can announce a folder the run will not
    touch.
 
+## A red test that no gate could see
+
+`test_csv_batch_export_eval::test_batch_scatter_agg_replicates_and_single_wells`
+asserted a solo well's aggregate-scatter spread was `"0"`, under a comment
+reading "no replicates". It was failing with `assert 'nan' == '0'` — on this
+branch, on the branch tip before the last work package started, **and on
+`origin/main`**. It was nobody's regression here.
+
+Nothing reported it because the test carries the `slow` mark and CI's fast lane
+deselects it. Every green run since `_reduce_reps` was corrected to return NaN
+for a single replicate went green over a test it never executed.
+
+The assertion was the older convention, and removing that convention is a large
+part of what this review was for: zero and undefined are different facts, and a
+solo well exporting `err = 0.000000` is indistinguishable from a set whose
+replicates agreed exactly. The test now expects an undefined spread and says why
+at the site.
+
+**The general point is worth more than the fix.** This repository's gate is the
+fast lane, and the slow lane is not run anywhere — not in CI, not on this branch
+at any point. Whatever else is red in it has been red silently for as long as it
+has been wrong. Someone should run it.
+
 ## A lesson this work paid for
 
 Checkpointing a group's in-flight tree into `HEAD` silently invalidated the
@@ -262,7 +285,7 @@ or they will go red on files another group is still holding:
 | 82 | Medium | done | `absent_wells` / `absent_solo` survive a dataset swap and are reassigned only inside `restore()`, which is skipped when the new dataset has no `view_state` section: datas | Verified by reading the diff and by mutation. `view_state.forget_absent_wells` clears both stashes and is called at the top of `load_from_data_dir`, before the section is read, so every early return is covered. Deleting that call fails `test_a_plate_with_no_saved_view_does_not_inherit_the_previous_plate_s_wells` with `AssertionError: plate A's wells were written into plate B's saved view: ['A03', 'A04', 'B01']`; the X14 case still passes, so the clear did not break the behaviour it guards. tests/test_view_state_absent_wells_dataset_swap.py, 2 passed. |
 | 83 | Medium | done | The heatmap timepoint is persisted as a combo **index**, which §9.7's add-timepoints workflow invalidates. | Verified by reading the diff and by mutation. `heatmap_layouts._collect_settings` writes `tp_value` beside `tp_index` and `_restore_timepoint` matches the saved value against the plate's live timepoints with `math.isclose`, declining (with a log line) when the plate does not have it rather than falling back to the index. Forcing the index path fails two tests with real `AssertionError`s — "the heat map came back on a different timepoint than the one saved (24 h)" and "a saved timepoint this plate does not have must leave the combo on its default, not on index 2". The `_collect_settings` defaults-overwrite defect found alongside it is separate and is owed-work item 2 below. tests/test_heatmap_timepoint_persisted_by_value.py, 4 passed. |
 | 84 | Medium | done | `well_labels` are hydrated pruned to loaded wells and then autosaved back, erasing labels for wells absent from a subset load. `view_state` solved this with `absent_wells | Verified by reading the diff and by mutation. `persistence/sample_definitions._labels_to_write(ds, keep_absent=…)` merges the on-disk labels of tokens outside `dataset.well_paths` back into the block; both `autosave_to_pipeline_info` and the loud `save_to_pipeline_info` use it, and the reset scope calls the new `autosave_forgetting_absent_labels` so a deliberate wipe is not undone by the merge. Forcing the merge to return the live map only fails `test_a_subset_load_that_autosaves_keeps_the_other_wells_labels` with `AssertionError: labels outside the subset were erased`. tests/test_sample_definitions_absent_labels.py, 3 passed. |
-| 85 | Medium | disputed | Unlocked read-modify-write of `pipeline_info.json` from a viewer sharing a window with a running Analyze pass; a lost update reverts `available_timepoints` / `fluor_token | Partial. The two sites the finding named are fixed and proved: `persistence/smfish.py` (`save_threshold`, `clear_thresholds`) and `domain/gating_state.py::save_gating_to_pipeline_info` both route through the new `persistence/_io.update_json_atomic`, whose re-read-and-byte-compare before `os.replace` bites — neutralising the comparison fails all three cases of tests/test_pipeline_info_concurrent_update.py with "the run's fluor_tokens were reverted by the threshold write: ['gfp']". But the reported defect can still occur: `well_viewer/domain/sample_definitions.py::save_to_pipeline_info` is still an unlocked read-modify-write of `pipeline_info.json` (`json.loads` → mutate → `write_json_atomic`) and it is on the viewer's debounced sample-definitions autosave path, so a viewer write can still revert a running pass's `fluor_tokens` / `available_timepoints`. That is owed-work item 1 below; this row cannot close until it is converted. |
+| 85 | Medium | done | Unlocked read-modify-write of `pipeline_info.json` from a viewer sharing a window with a running Analyze pass; a lost update reverts `available_timepoints` / `fluor_token | Closed. The remaining unlocked read-modify-write in `domain/sample_definitions.py::save_to_pipeline_info` now runs its read, its v1-to-v2 backup decision and its block replacement inside a `_mutate` closure handed to `update_json_atomic`, which re-reads and byte-compares before the replace and re-applies on a concurrent write. The helper gained a `durable` flag so this caller keeps the deliberate `durable=False` of its debounced GUI-thread autosave. tests/test_pipeline_info_concurrent_update.py — mutating the call back to the pre-fix read-modify-write gives `assert ['gfp'] == ['gfp', 'cy5']`. |
 | 86 | Medium | done | A bare mid-function `return` skips `apply_range` and the whole gating-hydration tail, so `threshold_min/max` keep the previous dataset's range (`begin_load` clears only t | Verified by reading the diff and by mutation. The `all_vals.size == 0` branch of `channel_state_controller._recalculate_threshold` now calls the new `reset_threshold_range(channel_state)` — which reads the defaults off a fresh `ChannelState` rather than hard-coding them — and logs before returning. Deleting the call fails `test_a_dataset_with_no_values_does_not_inherit_the_previous_range` with `assert (120.0, 48000.0) == (0.0, 1.0)`. The kept `return` is sound: `load_controller` (line 599) hydrates gating separately through `app._load_gating_from_pipeline_info()` in the same load. tests/test_threshold_range_no_cross_dataset_leak.py, 3 passed. |
 | 88 | Low | done | A plate edit rewrites a group's membership from the plate alone, permanently dropping wells the current dataset does not hold — and autosaves that. | Verified by reading the diff and by mutation. `groups/panel_view._commit_plate_to_current` now carries through the group's wells outside `dataset.well_paths` instead of rebuilding membership from the plate, with a new `_plate_order` key that tolerates a token `parse_rc` cannot read. Setting the carried-through list to empty fails `test_adding_a_well_keeps_the_members_outside_this_dataset` with `AssertionError: the group members this dataset does not hold were deleted by a plate edit: ['A01', 'A02']`. The tests drive the real `WellPlateSelector` and emit `selectionDragFinished`, so they enter through the closure that held the bug rather than one step past it. tests/test_groups_panel_keeps_absent_wells.py, 3 passed. |
 | 90 | Medium | done | `_confirm_clear` falls through to clearing when the confirmation dialog raises — an unconfirmed destructive wipe of the gallery and its PNGs. | Verified by reading the diff and by mutation. `saved_plots/tab_view._confirm_clear` returns after `swallowed(...)` when the confirmation dialog raises instead of falling through to `C.clear_saved_plots(ctx)`. Turning that refusal back into consent fails `test_a_dialog_that_cannot_open_clears_nothing` with `AssertionError: the gallery was wiped without a confirmation, because the confirmation dialog raised`; the answering-no and answering-yes controls both still pass. tests/test_saved_plots_clear_needs_confirmation.py, 3 passed. |

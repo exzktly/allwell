@@ -22,13 +22,47 @@ from well_viewer.core.safe import swallowed
 _logger = logging.getLogger("well_viewer")
 
 
+# The three widgets ``apply_persisted_settings`` treats as proof that the Heat
+# Map tab has been built. Named once so the save side and the restore side
+# cannot come to disagree about what "built" means.
+_BUILT_MARKERS = ("_heatmap_cmap_cb", "_heatmap_scale_cb", "_heatmap_repset_avg_cb")
+
+
+def _tab_was_built(app) -> bool:
+    """Whether the Heat Map tab exists in this session.
+
+    ``ctx.widgets.register`` also stamps ``app._<name>``, so these attributes
+    appear exactly when the tab's controls do.
+    """
+    return any(getattr(app, name, None) is not None for name in _BUILT_MARKERS)
+
+
 def _collect_settings(app) -> dict:
+    hm = app._app_state.feature_slice("heatmap")
+    if not _tab_was_built(app):
+        # Nothing has been read out of the widgets, because there are none.
+        # ``load_from_data_dir`` parks the file's settings on
+        # ``hm.persisted_settings`` and ``apply_persisted_settings`` bails on
+        # exactly this test, so the typed fields below are all still at their
+        # dataclass defaults — reading them here and writing the answer to disk
+        # replaced a saved ``{cmap: magma, scale_mode: Manual, vmin: 10.0,
+        # vmax: 900.0, repset_avg: True, log_scale: True, tp_value: 72.0}`` with
+        # ``{cmap: '', scale_mode: Auto, vmin: None, vmax: None,
+        # repset_avg: False, log_scale: False, tp_value: None}``. Any save at
+        # all did it: another section's autosave writes the whole document.
+        #
+        # So hand back what was loaded, unchanged. A reset clears the slice
+        # (``reset_scopes.restore_slice_defaults`` puts ``persisted_settings``
+        # back to ``None``) before it saves, so a reset still empties the
+        # section rather than being undone here.
+        saved = getattr(hm, "persisted_settings", None) if hm is not None else None
+        return dict(saved) if isinstance(saved, dict) else {}
+
     def _f(v) -> float | None:
         if isinstance(v, (int, float)) and math.isfinite(float(v)):
             return float(v)
         return None
     tp_cb = getattr(app, "_heatmap_tp_cb", None)
-    hm = app._app_state.feature_slice("heatmap")
     tp_index = int(tp_cb.currentIndex()) if tp_cb is not None else 0
     # The timepoint the index is *pointing at*. The combo is rebuilt from
     # ``tp_values`` every time the plate's timepoints change, so an index alone

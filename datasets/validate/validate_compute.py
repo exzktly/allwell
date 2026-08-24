@@ -72,6 +72,7 @@ from datasets._common.dataset_paths import (
     resolve_dataset,
     schema_values_from_stems,
     split_stem_well,
+    well_spelling_collisions,
 )
 
 _TIMEPOINT_HOURS_COLUMN = "timepoint_hours"
@@ -973,6 +974,41 @@ def _check_stale_overrides(paths, zip_map: dict[str, Path]) -> tuple[int, list[F
     return stale_count, findings
 
 
+def _check_well_spelling_collisions(paths) -> list[Finding]:
+    """One finding per plate position that more than one file claims.
+
+    ``in/A1.zip`` beside ``in/A01.zip`` — the state a plate exported by a scope
+    that does not zero-pad and later topped up by a run that does is left in —
+    canonicalises to a single key in every ``dataset_paths`` map, so one of the
+    two archives is simply absent from the map the Datasets copy tools read.
+    Those tools now refuse such a dataset outright rather than write a copy that
+    is quietly a whole well short. That refusal is correct and, on its own,
+    unactionable: it names the well it tripped over and nothing about the rest
+    of the plate. This is the check the user is sent to afterwards, so it lists
+    every colliding position and the exact paths that collide.
+
+    ``error`` severity, so ``DatasetReport.is_clean`` is False — a dataset the
+    copy tools will not copy is not a clean one.
+    """
+    findings: list[Finding] = []
+    for well, group in sorted(well_spelling_collisions(paths).items()):
+        names = ", ".join(str(p.relative_to(paths.root)) for p in group)
+        findings.append(Finding(
+            severity="error", code="well_spelling_collision", well=well,
+            message=(
+                f"Well {well} is claimed by {len(group)} files with different "
+                f"spellings of the same position: {names}. Only one of them is "
+                "visible to anything that looks a well up by name — the "
+                "pipeline, Review, and every Datasets copy tool — so the "
+                "others' images are silently absent from any copy of this "
+                "dataset, and the copy tools refuse to run until it is "
+                "resolved. Rename or merge them so each plate position is "
+                "spelled one way."
+            ),
+        ))
+    return findings
+
+
 def build_report(
     root: Path | str, *, workers: int = 0, progress: ScanProgress | None = None,
 ) -> DatasetReport:
@@ -1023,8 +1059,13 @@ def build_report(
             known_members=members_by_container)
     )
     stale_override_count, override_findings = _check_stale_overrides(paths, out_zips(paths))
+    collision_findings = _check_well_spelling_collisions(paths)
 
-    findings = [*csv_findings, *well_findings, *availability_findings, *override_findings]
+    # Collisions come first: every count below them is a count of the wells the
+    # maps could represent, and a colliding position is exactly the well those
+    # counts do not mention.
+    findings = [*collision_findings, *csv_findings, *well_findings,
+                *availability_findings, *override_findings]
 
     return DatasetReport(
         root=paths.root,

@@ -2,9 +2,9 @@
 
 ``pipeline_info.json`` has several writers. The pipeline owns ``schema``,
 ``fluor_tokens`` and ``available_timepoints`` and rewrites the file when a run
-ends; Review writes the smFISH thresholds and the cell-gating block into the
-same file, each by reading the whole document, replacing its own key and writing
-it all back. Analyze and Review share one window, so a run can finish while the
+ends; Review writes the smFISH thresholds, the cell-gating block and the sample
+definitions into the same file, each by reading the whole document, replacing
+its own key and writing it all back. Analyze and Review share one window, so a run can finish while the
 viewer is between that read and that write — and the viewer then puts back a
 copy of the document that predates the run. The user sees the new channel or
 timepoint disappear from Review with nothing in the log to explain it.
@@ -24,6 +24,7 @@ from types import SimpleNamespace
 import pytest
 
 from well_viewer.domain.gating_state import save_gating_to_pipeline_info
+from well_viewer.domain.sample_definitions import save_to_pipeline_info
 from well_viewer.persistence import smfish
 
 
@@ -139,3 +140,54 @@ def test_clearing_the_thresholds_keeps_the_run_s_channels(sidecar):
     assert doc["fluor_tokens"] == ["gfp", "cy5"], (
         f"the run's fluor_tokens were reverted by the clear: {doc['fluor_tokens']}"
     )
+
+
+# ── the sample-definitions writer ────────────────────────────────────────────
+#
+# The third writer of this file, and the last one to be converted. It is also
+# the one that fires most often: the sample-definitions autosave runs off a
+# debounce timer every time the user stops typing a well label, so its window
+# is open far more of the time than either of the two above.
+
+V2_BLOCK = {"schema_version": 2, "selections": [], "well_labels": {"A01": "x"},
+            "current_id": None}
+
+
+def test_saving_the_sample_definitions_keeps_the_run_s_channels(sidecar):
+    tmp_path, info = sidecar(BEFORE_THE_RUN, AFTER_THE_RUN)
+
+    written = save_to_pipeline_info(tmp_path, V2_BLOCK)
+
+    assert written == info
+    doc = _doc(info)
+    # The run's keys, not the copy this writer had read before the run ended.
+    assert doc["fluor_tokens"] == AFTER_THE_RUN["fluor_tokens"]
+    assert doc["available_timepoints"] == AFTER_THE_RUN["available_timepoints"]
+    # And its own block still landed — surviving the race must not mean
+    # abandoning the write.
+    assert doc["sample_definitions"] == V2_BLOCK
+
+
+def test_the_sample_definitions_write_still_lands_with_no_concurrent_writer(tmp_path):
+    info = tmp_path / "pipeline_info.json"
+    info.write_text(json.dumps(BEFORE_THE_RUN))
+
+    save_to_pipeline_info(tmp_path, V2_BLOCK)
+
+    doc = _doc(info)
+    assert doc["sample_definitions"] == V2_BLOCK
+    assert doc["fluor_tokens"] == BEFORE_THE_RUN["fluor_tokens"]
+
+
+def test_a_sample_definitions_save_that_cannot_be_written_raises(tmp_path, monkeypatch):
+    """The caller's contract is an exception, not a silent no-op autosave.
+
+    ``update_json_atomic`` reports every refusal as ``False``; the two callers
+    (the Save button's dialog and the autosave's ``logger.exception``) both key
+    off ``OSError``, so the boolean has to be turned back into one.
+    """
+    info = tmp_path / "pipeline_info.json"
+    info.write_text("not json at all")
+
+    with pytest.raises(OSError):
+        save_to_pipeline_info(tmp_path, V2_BLOCK)

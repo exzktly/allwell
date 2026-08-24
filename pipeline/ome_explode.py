@@ -33,6 +33,7 @@ inside the pipeline self-sufficiency contract (ARCHITECTURE §6.2).
 
 from __future__ import annotations
 
+import math
 import io
 import logging
 import os
@@ -160,6 +161,55 @@ class OmeLayout:
     # where on the *plate*, so they are the one place a starting well can come
     # from rather than be typed.
     position_names: list[str] = field(default_factory=list)
+    # The channel names as the OME-XML spells them, before ``_safe_token``
+    # strips them to filename tokens. Kept only so a token collision can name
+    # the two channels a user has to go and rename; nothing decides anything
+    # from these.
+    raw_channel_names: list[str] = field(default_factory=list)
+
+    def _colliding_tokens(self) -> tuple[str, str, list[str]] | None:
+        """The first token collision the exploded filenames would carry.
+
+        Returns ``(what, token, the names that produced it)``, or ``None``.
+
+        Every image is published as
+        ``<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif``, so two channels
+        whose names reduce to the same token — ``"488 nm"`` and ``"488nm"``,
+        ``"GFP-1"`` and ``"GFP_1"``, or simply two channels both called ``GFP`` —
+        write the *same member name* into one archive. ``zipfile`` accepts that
+        with a ``UserWarning`` and keeps both copies of the bytes; a reader
+        returns only the last, so one channel is unreachable and the run reports
+        two images written for one readable image. ``atomic_zip``'s
+        verification cannot catch it either: the duplicate name is on both sides
+        of the comparison, so ``landed == written``. The same holds for two
+        timepoints whose ``DeltaT`` values render alike at ``%g``'s six
+        significant figures — though :func:`_parse_ome_labels` heads that half
+        off by falling back to positional tokens, so in practice this fires on
+        channel names. The timepoint arm stays because the invariant belongs to
+        the member name rather than to one producer of it.
+        """
+        for what, tokens, sources in (
+            ("channel", self.channel_names,
+             self.raw_channel_names or self.channel_names),
+            ("timepoint", self.timepoint_tokens, self.timepoint_tokens),
+        ):
+            # Keyed case-**insensitively**, because every consumer of these
+            # tokens folds case: `_SchemaReader.channel`, `auto_threshold`'s
+            # member index and `process_microscopy`'s two grouping sites all
+            # `.lower()` the channel they read out of a filename. So `GFP` and
+            # `gfp` write two distinct member names, pass this check and pass
+            # `atomic_zip` — and then collapse into one key downstream, which
+            # is the same channel-becomes-unreachable outcome by a slower
+            # route. Comparing raw tokens made the refusal blind to exactly
+            # the pair a user is most likely to produce.
+            seen: dict[str, list[str]] = {}
+            for i, tok in enumerate(tokens):
+                src = sources[i] if i < len(sources) else tok
+                seen.setdefault(str(tok).lower(), []).append(str(src))
+            for tok, names in seen.items():
+                if len(names) > 1:
+                    return what, tok, names
+        return None
 
     def _ragged_positions(self) -> tuple[str, int, int, int] | None:
         """The first axis on which the positions disagree, or ``None``.
@@ -236,6 +286,25 @@ class OmeLayout:
                 f"has to carry the same {ax} for the timepoints and channels to "
                 f"line up across the plate. Re-export it from the acquisition "
                 f"software, or export the affected position separately."
+            )
+        # Names, not shape: two channels (or two timepoints) that reduce to one
+        # filename token would publish one member name twice, and the second
+        # copy is unreachable for ever after. Refused here, before an archive is
+        # written, because nothing downstream can see it — see
+        # :meth:`_colliding_tokens`.
+        collision = self._colliding_tokens()
+        if collision:
+            what, tok, names = collision
+            shown = ", ".join(repr(n) for n in names)
+            return (
+                f"{subject} has {len(names)} {what}s whose names all reduce to "
+                f"the filename token {tok!r}: {shown}. Every image is named "
+                f"<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif, so those "
+                f"would be written to the same name inside one archive and only "
+                f"the last would be readable — the rest would be lost without "
+                f"the run reporting a single missing image. Rename the {what}s "
+                f"in the acquisition software so they differ by more than "
+                f"punctuation or spacing, and export again."
             )
         realised = self.n_frames if self.single_image else self.size_t
         declared_t = int(self.declared_sizes.get("T", 0))
@@ -335,56 +404,131 @@ def _safe_token(value: object, fallback: str) -> str:
     return tok or fallback
 
 
+# OME's ``UnitsTime`` enumeration, as hours per unit. Only the units an
+# acquisition realistically writes are listed, plus the spellings this module
+# accepted before (``minute``, and the bare ``m`` that OME itself does not
+# define). ``µ`` is here twice: MICRO SIGN (U+00B5) is what OME's schema uses and
+# GREEK SMALL LETTER MU (U+03BC) is what several writers emit instead, and they
+# are different characters.
+#
+# Anything *not* in this table is unknown, and unknown is not a synonym for
+# seconds. Treating it as seconds is how a file whose DeltaT is in milliseconds
+# produced a "1000h" token for a frame taken one hour in — the token becomes the
+# filename's timepoint field and the app's chronological key, so every hours axis
+# in Review was scaled by 1000. An unreadable unit now leaves the timepoint
+# tokens positional (``t0``, ``t1``, …), which orders correctly and states no
+# number it cannot back up.
+
+#: Named for the module so a converted OME-TIFF's warnings land in the run log
+#: beside everything else the pipeline says about that file.
+_log = logging.getLogger(__name__)
+
+#: SI symbols whose meaning depends on their case, and which therefore must be
+#: matched **before** the case-insensitive table below. OME's `UnitsTime`
+#: enumeration contains both `Ms` (megasecond) and `ms` (millisecond);
+#: lower-casing the lookup folded them together and read a megasecond as a
+#: millisecond — off by a factor of 10^9, which is the same class of error, an
+#: order of magnitude worse, that reading every unit as seconds produced.
+_DELTA_T_HOURS_PER_SYMBOL = {
+    "Ms": 1_000_000.0 / 3600.0,     # megasecond
+    "ks": 1_000.0 / 3600.0,         # kilosecond
+    "hs": 100.0 / 3600.0,           # hectosecond
+    "das": 10.0 / 3600.0,           # decasecond
+    "ds": 0.1 / 3600.0,             # decisecond
+    "cs": 0.01 / 3600.0,            # centisecond
+    "ms": 1.0 / 3_600_000.0,        # millisecond
+}
+
+_DELTA_T_HOURS_PER_UNIT = {
+    "ms": 1.0 / 3_600_000.0,
+    "millisecond": 1.0 / 3_600_000.0,
+    "milliseconds": 1.0 / 3_600_000.0,
+    "µs": 1.0 / 3_600_000_000.0,
+    "μs": 1.0 / 3_600_000_000.0,
+    "us": 1.0 / 3_600_000_000.0,
+    "microsecond": 1.0 / 3_600_000_000.0,
+    "microseconds": 1.0 / 3_600_000_000.0,
+    "ns": 1.0 / 3.6e12,
+    "nanosecond": 1.0 / 3.6e12,
+    "nanoseconds": 1.0 / 3.6e12,
+    "s": 1.0 / 3600.0,
+    "sec": 1.0 / 3600.0,
+    "secs": 1.0 / 3600.0,
+    "second": 1.0 / 3600.0,
+    "seconds": 1.0 / 3600.0,
+    "min": 1.0 / 60.0,
+    "mins": 1.0 / 60.0,
+    "minute": 1.0 / 60.0,
+    "minutes": 1.0 / 60.0,
+    "m": 1.0 / 60.0,
+    "h": 1.0,
+    "hr": 1.0,
+    "hrs": 1.0,
+    "hour": 1.0,
+    "hours": 1.0,
+    "d": 24.0,
+    "day": 24.0,
+    "days": 24.0,
+}
+
+
 def _localname(tag: str) -> str:
     """Strip an XML namespace (``{ns}Local`` → ``Local``)."""
     return tag.rsplit("}", 1)[-1] if "}" in tag else tag
 
 
-def _parse_ome_labels(
-    ome_xml: str | None, size_c: int, size_t: int
-) -> tuple[list[str], list[str]]:
-    """Return ``(channel_names, timepoint_tokens)`` parsed from OME-XML.
+def _hours_token(hours: float) -> str:
+    """``"<hours>h"`` in a spelling ``util.timepoint`` can read, or ``""``.
 
-    Channel names come from the first ``Image``'s ``Channel`` elements (channels
-    are the same across positions in a plate scan). Timepoint tokens come from
-    the per-plane ``DeltaT`` when present — rendered as ``"<hours>h"`` so the
-    app's timepoint parser reads them chronologically — otherwise positional
-    ``t0``, ``t1``, …. Any parse failure falls back cleanly to positional tokens
-    for both, so a malformed or absent metadata block never aborts the explode.
+    Six significant figures in **fixed** notation. ``f"{v:g}"`` switches to
+    exponent form below 1e-4, which was rare while every DeltaT was read as
+    seconds and became routine once milliseconds, microseconds and nanoseconds
+    were added: a six-frame time-lapse 100 ms apart rendered
+    ``2.77778e-05h``, and ``util.timepoint._UNIT_RE`` matches no exponent, so
+    ``parse_hours`` answered ``None`` and ``sort_key`` fell back to sorting
+    those tokens as text — putting frames 5 and 6 before frames 2 to 4. A
+    number the parser cannot read is worse than the wrong number it replaced,
+    because the wrong one at least ordered correctly.
+
+    Answers ``""`` for a value the parser cannot represent at all: not finite,
+    or negative (``_UNIT_RE`` accepts no sign, and a writer stamping a
+    pre-treatment frame at a negative elapsed time is the case that produces
+    one). The caller reads that as a reason to name every timepoint by
+    position, and says so.
     """
-    channel_names = [f"c{i}" for i in range(size_c)]
-    timepoint_tokens = [f"t{i}" for i in range(size_t)]
-    if not ome_xml:
-        return channel_names, timepoint_tokens
+    if not math.isfinite(hours) or hours < 0.0:
+        return ""
+    if hours == 0.0:
+        return "0h"
+    # Decimal places chosen so six significant figures survive, capped: below
+    # a microsecond in hours the label is more zeros than number, and two such
+    # timepoints colliding is caught by the duplicate check either way.
+    places = min(12, max(0, 5 - int(math.floor(math.log10(hours)))))
+    text = f"{hours:.{places}f}".rstrip("0").rstrip(".")
+    return f"{text}h" if text and text != "0" else "0h"
 
-    try:
-        root = ET.fromstring(ome_xml)
-    except ET.ParseError:
-        return channel_names, timepoint_tokens
 
-    image = next((el for el in root.iter() if _localname(el.tag) == "Image"), None)
-    if image is None:
-        return channel_names, timepoint_tokens
+@dataclass(frozen=True)
+class _DeltaTScan:
+    """What one file's ``<Plane>`` elements yielded, and what they could not.
 
-    pixels = next(
-        (el for el in image.iter() if _localname(el.tag) == "Pixels"), None
-    )
-    if pixels is None:
-        return channel_names, timepoint_tokens
+    Kept as a value rather than four return values because every field is
+    evidence for the same decision — whether the timepoints can be named by
+    elapsed time — and three of them exist only to be reported when they cannot.
+    """
 
-    # Channel names, in channel order.
-    names: list[str] = []
-    for el in pixels:
-        if _localname(el.tag) == "Channel":
-            names.append(el.get("Name") or "")
-    if names:
-        channel_names = [
-            _safe_token(names[i] if i < len(names) else "", f"c{i}")
-            for i in range(size_c)
-        ]
+    hours_by_index: dict[int, float]
+    unreadable_units: frozenset[str]
+    unreadable_planes: int
+    out_of_range: int
 
-    # Timepoints from DeltaT (seconds by default) on the T-index planes.
-    delta_by_t: dict[int, float] = {}
+
+def _scan_delta_t(pixels, size_t: int) -> _DeltaTScan:
+    """Read every ``<Plane>``'s ``DeltaT`` into hours, keyed by ``TheT``."""
+    hours: dict[int, float] = {}
+    unreadable: set[str] = set()
+    unreadable_planes = 0
+    out_of_range = 0
     for el in pixels:
         if _localname(el.tag) != "Plane":
             continue
@@ -394,19 +538,175 @@ def _parse_ome_labels(
             continue
         try:
             ti = int(the_t)
-            secs = float(delta)
+            value = float(delta)
         except ValueError:
             continue
-        unit = (el.get("DeltaTUnit") or "s").lower()
-        hours = secs / 60.0 if unit in ("min", "minute", "m") else secs / 3600.0
-        delta_by_t.setdefault(ti, hours)
-    if delta_by_t and len(delta_by_t) >= size_t:
-        timepoint_tokens = [
-            f"{delta_by_t[i]:g}h" if i in delta_by_t else f"t{i}"
-            for i in range(size_t)
+        # ``TheT`` is a zero-based index into the T axis, and a writer that
+        # stamps it one-based is the common deviation. Unchecked, those keys
+        # still satisfy the completeness test below while attaching every
+        # elapsed time to the wrong array index — a file with TheT 1,2,3 and
+        # SizeT 3 rendered ``['t0', '0h', '1h']``, mixing the two vocabularies
+        # and giving two timepoints the same 0 h reading, with nothing saying so.
+        if not (0 <= ti < size_t):
+            out_of_range += 1
+            continue
+        # OME's default for DeltaT is seconds, so an *absent* unit is seconds.
+        # An unrecognised one is not: it is a unit this module cannot convert.
+        unit = (el.get("DeltaTUnit") or "s").strip()
+        per_hour = _hours_per_unit(unit)
+        if per_hour is None:
+            unreadable.add(unit)
+            unreadable_planes += 1
+            continue
+        hours.setdefault(ti, value * per_hour)
+    return _DeltaTScan(hours, frozenset(unreadable), unreadable_planes,
+                       out_of_range)
+
+
+def _hours_per_unit(unit: str) -> float | None:
+    """Hours per one *unit*, or ``None`` when this module cannot convert it."""
+    # Case-sensitive symbols first: ``Ms`` and ``ms`` are different units and
+    # only their case tells them apart.
+    per_hour = _DELTA_T_HOURS_PER_SYMBOL.get(unit)
+    if per_hour is not None:
+        return per_hour
+    if unit.lower() in _DELTA_T_HOURS_PER_SYMBOL:
+        # A case-significant symbol in a spelling OME does not use. ``"MS"`` is
+        # neither of its two, and lower-casing it would make it the millisecond
+        # — the exact 10^9 fold that table exists to prevent. Silently picking
+        # the smaller of two units a spelling could mean is worse than
+        # declining to read it.
+        return None
+    return _DELTA_T_HOURS_PER_UNIT.get(unit.lower())
+
+
+def _fallback_reasons(scan: _DeltaTScan, size_t: int, tokens: list[str],
+                      collided: list[str], unrenderable: list[int]) -> list[str]:
+    """Why the timepoints cannot be named by elapsed time, in the log's words."""
+    why: list[str] = []
+    if scan.unreadable_units:
+        why.append(
+            f"{scan.unreadable_planes} plane(s) carry a DeltaTUnit this "
+            f"converter cannot read ({', '.join(sorted(scan.unreadable_units))})")
+    if scan.out_of_range:
+        why.append(
+            f"{scan.out_of_range} plane(s) carry a TheT outside "
+            f"0..{size_t - 1}, so the file's T indexing is not this "
+            f"converter's")
+    if collided:
+        why.append(
+            f"the elapsed times render to {len(set(tokens))} distinct label(s) "
+            f"for {len(tokens)} timepoint(s) — {', '.join(collided)} repeat(s), "
+            f"and two timepoints sharing a label would write every image of the "
+            f"second over the first")
+    if unrenderable:
+        why.append(
+            f"{len(unrenderable)} elapsed time(s) are not finite or not "
+            f"positive, and the app's timepoint parser reads neither")
+    if not why:
+        why.append(
+            f"only {len(scan.hours_by_index)} of {size_t} timepoint(s) carry a "
+            f"readable DeltaT")
+    return why
+
+
+def _timepoint_tokens(pixels, size_t: int) -> list[str] | None:
+    """``["0h", "1h", …]`` from the planes' ``DeltaT``, or ``None``.
+
+    ``None`` means the caller keeps its positional tokens, and this function has
+    already said in the run log why. Every route here is a *degradation*: the
+    file stated a time and the archive will not carry it, so Review orders the
+    timepoints by index and can put no number on an axis. Each one says so,
+    because a ``t0``/``t1`` plate is otherwise indistinguishable from one whose
+    writer recorded no ``DeltaT`` at all.
+
+    The warning is emitted only when the fallback actually happens. Reporting an
+    unreadable unit wherever one was seen said "the timepoints are named by
+    position" about a file whose timepoints had resolved perfectly — one
+    channel's planes carrying a bad unit while another's carried seconds is
+    enough — and a log line asserting data loss that did not occur sends a user
+    to re-export a plate for nothing.
+    """
+    scan = _scan_delta_t(pixels, size_t)
+    if not size_t:
+        return None
+
+    complete = len(scan.hours_by_index) >= size_t
+    tokens = ([_hours_token(scan.hours_by_index[i]) for i in range(size_t)]
+              if complete else [])
+    # ``%g`` renders six significant figures, so two deltas that differ by less
+    # than that — or a writer that stamps the same placeholder on every plane —
+    # produce one token for two timepoints, and every image of the second would
+    # be written over the first's member name. Positional tokens name them all
+    # distinctly and lose only a number the file did not really state.
+    collided = sorted({t for t in tokens if tokens.count(t) > 1})
+    unrenderable = [i for i, t in enumerate(tokens) if not t]
+
+    if complete and not collided and not unrenderable:
+        return tokens
+    _log.warning(
+        "OME timepoints: naming by position (t0, t1, …) rather than by "
+        "elapsed time — %s.",
+        "; ".join(_fallback_reasons(scan, size_t, tokens, collided,
+                                    unrenderable)),
+    )
+    return None
+
+
+def _parse_ome_labels(
+    ome_xml: str | None, size_c: int, size_t: int
+) -> tuple[list[str], list[str], list[str]]:
+    """Return ``(channel_names, timepoint_tokens, raw_channel_names)`` from OME-XML.
+
+    Channel names come from the first ``Image``'s ``Channel`` elements (channels
+    are the same across positions in a plate scan). ``raw_channel_names`` are
+    those names before ``_safe_token`` normalises them, which is what a refusal
+    message has to quote: the user renames a channel in their acquisition
+    software, not in the filename token it reduces to.
+
+    Timepoint tokens come from the per-plane ``DeltaT`` when present — rendered
+    as ``"<hours>h"`` so the app's timepoint parser reads them chronologically —
+    otherwise positional ``t0``, ``t1``, …. :func:`_timepoint_tokens` owns that
+    decision and says in the run log whenever it falls back. Any parse failure
+    here falls back cleanly to positional tokens for both, so a malformed or
+    absent metadata block never aborts the explode.
+    """
+    channel_names = [f"c{i}" for i in range(size_c)]
+    timepoint_tokens = [f"t{i}" for i in range(size_t)]
+    raw_names: list[str] = []
+    if not ome_xml:
+        return channel_names, timepoint_tokens, raw_names
+
+    try:
+        root = ET.fromstring(ome_xml)
+    except ET.ParseError:
+        return channel_names, timepoint_tokens, raw_names
+
+    image = next((el for el in root.iter() if _localname(el.tag) == "Image"), None)
+    if image is None:
+        return channel_names, timepoint_tokens, raw_names
+
+    pixels = next(
+        (el for el in image.iter() if _localname(el.tag) == "Pixels"), None
+    )
+    if pixels is None:
+        return channel_names, timepoint_tokens, raw_names
+
+    # Channel names, in channel order.
+    names: list[str] = []
+    for el in pixels:
+        if _localname(el.tag) == "Channel":
+            names.append(el.get("Name") or "")
+    if names:
+        raw_names = [str(names[i]) if i < len(names) else "" for i in range(size_c)]
+        channel_names = [
+            _safe_token(names[i] if i < len(names) else "", f"c{i}")
+            for i in range(size_c)
         ]
 
-    return channel_names, timepoint_tokens
+    timepoint_tokens = _timepoint_tokens(pixels, size_t) or timepoint_tokens
+
+    return channel_names, timepoint_tokens, raw_names
 
 
 # ``tifffile`` sizes a series' page list from the dimensions the *metadata*
@@ -872,7 +1172,7 @@ def read_ome_layout(ome_path: Path | str) -> OmeLayout:
     single_image = len(series) == 1
     # For a single-image file the T axis is the frame sequence, not timepoints, so
     # don't manufacture size_t timepoint tokens (there could be thousands).
-    channel_names, timepoint_tokens = _parse_ome_labels(
+    channel_names, timepoint_tokens, raw_channel_names = _parse_ome_labels(
         ome_xml, size_c, 0 if single_image else size_t
     )
     ome_positions, positions_in_um = _stage_positions(ome_xml)
@@ -906,6 +1206,7 @@ def read_ome_layout(ome_path: Path | str) -> OmeLayout:
         position_names=_position_names(ome_xml),
         metadata_blocks=blocks,
         metadata_key_sample=key_sample,
+        raw_channel_names=raw_channel_names,
     )
 
 

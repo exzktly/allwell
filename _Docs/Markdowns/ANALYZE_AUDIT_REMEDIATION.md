@@ -29,10 +29,10 @@ rather than a write-up. **Delete it in the PR that closes the last group.**
 | Group | Theme | Branch | Version | PR | State |
 |---|---|---|---|---|---|
 | 1 | Stop the data loss | `…-ugoecl` | 9.0.1 | [#842](https://github.com/exzktly/allwell/pull/842) | **merged** |
-| 2 | One definition of an image, and an honest verdict | `claude/analysis-job-failure-recovery-ugoecl` | 9.0.2 | [#846](https://github.com/exzktly/allwell/pull/846) | **open, complete** — lane 5613 passed, CI green, reviewed, findings fixed |
-| 3 | The record and the resume path | `claude/analyze-audit-group3-record` | 9.0.2 | — | **in progress** — 13 of 20 done; no PR yet |
-| 4 | The Analyze pane | `claude/analyze-audit-group4-pane` | 9.0.2 | [#844](https://github.com/exzktly/allwell/pull/844) | **open** — reviewed; 4 of 8 review findings fixed |
-| 5 | Numbers and parsing | `claude/analyze-audit-group5-numbers` | 9.0.2 | [#845](https://github.com/exzktly/allwell/pull/845) | **open** — reviewed; all 13 review findings fixed, lane re-running |
+| 2 | One definition of an image, and an honest verdict | `claude/analysis-job-failure-recovery-ugoecl` | 9.0.2 | [#846](https://github.com/exzktly/allwell/pull/846) | **open, complete** — lane green, CI green, reviewed |
+| 3 | The record and the resume path | `claude/analyze-audit-group3-record` | 9.0.2 | — | **in review** — all 20 findings done, lane running, review running, no PR yet |
+| 4 | The Analyze pane | `claude/analyze-audit-group4-pane` | 9.0.2 | [#844](https://github.com/exzktly/allwell/pull/844) | **open, complete** — lane 5715 passed, CI green, reviewed, all 8 review findings fixed |
+| 5 | Numbers and parsing | `claude/analyze-audit-group5-numbers` | 9.0.2 | [#845](https://github.com/exzktly/allwell/pull/845) | **open, complete** — CI green, two reviews, all 19 review findings fixed |
 
 **All five branches carry version 9.0.2**, and that is deliberate rather than a
 mistake to correct. `scripts/preflight.sh` requires the net delta from
@@ -42,10 +42,10 @@ each is a separate PR off the same base, so each bumps to the same next number.
 Whichever merges first leaves the others to rebase and re-bump. Check
 `git diff origin/main -- version.py` immediately before every push.
 
-Counts: **62 done**, **2 dropped**, **2 open questions**, **19 outstanding** —
-Group 2: 0, Group 3: 7, Group 4: 4, Group 5: 0. The total exceeds the audit's 69
-because it also carries the reviewers' findings on each group's own fixes, which
-are rows in their own right.
+Counts: **81 done**, **2 dropped**, **2 open questions**, **0 outstanding** —
+every audit finding in all five groups is fixed, and so is every finding the
+four adversarial reviews raised against those fixes. The total exceeds the
+audit's 69 because the reviewers' findings are rows in their own right.
 
 > **Two interruptions, 23 August, and what they cost.** Both parallel workers
 > and the Group 2 reviewer were killed mid-task by an API session limit; later
@@ -54,8 +54,9 @@ are rows in their own right.
 > — but the ground rules below were broken in one specific way worth recording:
 > Groups 4 and 5 opened their PRs *before* their adversarial reviews, because
 > the reviewers had been killed. Both have since been reviewed, and both reviews
-> found real defects the CI-green PRs were carrying. **CI green is not the
-> review**, and a PR opened without one is not finished.
+> found real defects the CI-green PRs were carrying — including four regressions
+> Group 5 had introduced itself. **CI green is not the review**, and a PR opened
+> without one is not finished.
 >
 > Group 4's review found the sharpest instance of this file's own rules failing:
 > a guard whose entire purpose is to notice a rule drifting was left *red* by a
@@ -71,38 +72,37 @@ are rows in their own right.
 
 ## Resume here
 
-The state a new session needs, in the order it needs it. Everything below is
-committed and pushed; nothing lives only in a container.
+Everything below is committed and pushed; nothing lives only in a container.
 
 **Worktrees.** Each group is a `git worktree` under `/tmp/wt-<group>`, because
 subagents share one filesystem and a bare `git checkout` in one moved another's
 branch out from under it. If those are gone, re-create them from the pushed
 branches; nothing is lost.
 
-**1. Group 5 — one step from done.** Every review finding is fixed and
-committed. The fast lane was re-running when the session ended; read it, then
-push to `claude/analyze-audit-group5-numbers` and rewrite PR #845's body. The
-last two commits are substantial and the body does not describe them yet.
+**What is left.**
 
-**2. Group 4 — four review findings still owed**, listed in its table below as
-`queued`: `_fluor_add_row` left out of the `_refresh_channel_dependents` sweep;
-`probe_ssh_async`'s refusal return value discarded at all three call sites;
-`test_hardcoded_tokens.py`'s new embedded-hex scan inheriting the *file*-level
-allowlist bypass (§7.5 #10, in the file that documents the rule); and the
-tile-size gate disagreeing with the tile-size emitter about the field's domain.
-Then run the lane and push.
+1. **Group 3** — every finding fixed and committed; its first full lane and its
+   adversarial review were running when this was written. Read both, fix what
+   the review finds, re-run, push, and open the PR. It is the only group without
+   one.
+2. **Merging.** Four PRs are open against the same base and all four carry
+   9.0.2. Whichever merges first leaves the other three to rebase onto the new
+   `main` and re-bump — `scripts/preflight.sh` is what catches a missed re-bump,
+   and `git diff origin/main -- version.py` is the check to run before each
+   push. Nothing else is shared: the file partition below held, and no two
+   branches touch the same module.
+3. **One cross-branch dependency, by design.** Group 4's
+   `tests/test_stardist_threshold_rule_is_one_rule.py` carries a
+   `FORM_IS_STRICTER` roster with a liveness test, and one entry (`nan`) stops
+   describing a real gap the moment Group 5's `parse_threshold` fix lands. That
+   test failing after a merge is the two branches meeting as intended, not a
+   regression: delete the entry.
+4. **Delete this file** in the PR that closes the last group.
 
-**3. Group 3 — seven findings left**, and it has never had a lane run, a review,
-or a PR: L8, L9, L10, X7, X9, X10, X11. Read the audit's own entry for each
-before starting — the rollup rows are terse here because the audit carries the
-measurement, and `/tmp/audit.txt` (a text extraction of the published artifact)
-was how this session read them.
-
-**4. Then, for every group:** full `scripts/test.sh`, adversarial review of the
-pushed diff, fix what it finds, re-run, push, open or update the PR. Group 3
-still owes all of that; Groups 4 and 5 owe the second lane and the PR body.
-
-**5. Delete this file** in the PR that closes the last group.
+**The two open questions below are still open** and are the maintainer's, not
+this work's: C17 (whether the Otsu sampler should contrast a per-cell mean
+against a background *distribution*), and whether a fourth document in
+`_Docs/Markdowns/` was acceptable for the duration.
 
 ---
 
@@ -258,11 +258,11 @@ a guard needing its own says why in the file.
 
 ---
 
-## Group 3 — The record and the resume path · `in progress`
+## Group 3 — The record and the resume path · `in review`
 
-Branch `claude/analyze-audit-group3-record`, version 9.0.2, **no PR yet**. Never
-had a full lane run and never had an adversarial review; both are owed before it
-opens one.
+Branch `claude/analyze-audit-group3-record`, version 9.0.2, **no PR yet**. All
+twenty findings are fixed and committed; its first full lane and its adversarial
+review are what stand between it and a pull request.
 
 | ID | Finding | State |
 |---|---|---|
@@ -273,19 +273,19 @@ opens one.
 | L5 | "Load these settings" silently drops `auto_threshold` and `run_check` | done |
 | L6 | A late coverage scan re-shows a banner hidden for a running job, or dismissed | done |
 | L7 | An unresolvable input path reads as "no folder", so Resume offers a different plate | done |
-| L8 | A queue-driven Suspend leaves the plate offered twice, and it runs twice concurrently | queued |
-| L9 | A well skipped as up-to-date is journalled "analysed" | queued |
-| L10 | `TALLY_GROUPS` files "analysed" under "finished" | queued |
+| L8 | A queue-driven Suspend leaves the plate offered twice, and it runs twice concurrently | done |
+| L9 | A well skipped as up-to-date is journalled "analysed" | done |
+| L10 | `TALLY_GROUPS` files "analysed" under "finished" | done |
 | L11 | `suspend_record._write_all` never got its sibling's lesson, and Suspend became a silent no-op | done |
 | X2 | A remote run that fails local verification is journalled "ok", so it is never offered for resume | done |
 | X3 | Stop during grouping paints a red failure and forces the log open | done |
 | X4 | One undecodable byte orphans the pipeline as a session leader while the GUI reports it never started | done |
 | X5 | A `TypeError` compat shim silently runs the whole resolver twice | done |
 | X6 | Per-run state is reset inside the worker thread, so a Stop in the scheduling gap is discarded | done |
-| X7 | `plan_input_layout` describes a different run than the one that happens | queued |
-| X9 | `tif_files_in` judges files it is not entitled to judge (`TIF_GLOB` matches AppleDouble sidecars) | queued |
-| X10 | "Zip mode detected" fires for any stray `.zip`, and the startup warning names a fallback that is not taken | queued |
-| X11 | Six typed silent excepts; the one at `input_resolution_service.py:1329` takes the X1 path on an unreadable `in/` | queued |
+| X7 | `plan_input_layout` describes a different run than the one that happens | done |
+| X9 | `tif_files_in` judges files it is not entitled to judge (`TIF_GLOB` matches AppleDouble sidecars) | done |
+| X10 | "Zip mode detected" fires for any stray `.zip`, and the startup warning names a fallback that is not taken | done |
+| X11 | Six typed silent excepts; the one at `input_resolution_service.py:1329` takes the X1 path on an unreadable `in/` | done |
 
 What the finished ones turned into, where the shape is worth carrying forward:
 
@@ -313,10 +313,32 @@ What the finished ones turned into, where the shape is worth carrying forward:
   its own scope now and the wind-down happens either way.
 - **Nothing in the repo pressed the Suspend button** until
   `tests/test_the_suspend_button_winds_the_run_down.py`.
+- **L9 and L10 are the same sentence lying in two ways.** L9: three stdout
+  markers reach one counter and only one of them means the pipeline computed
+  anything, so an incremental run that touched 6 of 96 wells recorded 96
+  `analysed`. L10: `analysed` means "the pipeline announced this well finished"
+  locally *and* remotely, but only locally does that put the files on this
+  machine — so a remote run that died before reconciliation called a
+  never-downloaded well finished. The first travels as its own event because
+  `RunDashboard.set_well_stage` ignores any stage outside its roster and
+  a new value there would have stopped those wells being marked done: a wrong
+  picture traded for a wrong record. The second is two groupings picked by the
+  run's own `mode`.
+- **X7's fix is a count sourced from the function that acts.** The readout said
+  "Will fold 3 loose TIF(s)" and the run folded one, because the preview globbed
+  TIF suffixes while `append_loose_images_to_zips` goes through
+  `plan_loose_append`, which rejects an unparseable well token and a file
+  already in its target archive. `plan_input_layout` takes the schema and asks
+  that same planner; without a schema it falls back to the file count and says
+  nothing it cannot support.
+- **X9 changed a predicate that decides what gets deleted.** `TIF_GLOB` matched
+  `._name.tif` — the AppleDouble fork macOS writes beside every file copied to a
+  non-HFS volume — and that count is the readout, the `tifs > 3` threshold, and
+  the `source_tifs` tuples the post-run deletion closures are built from.
 
 ---
 
-## Group 4 — The Analyze pane · `in review`
+## Group 4 — The Analyze pane · `complete`
 
 PR [#844](https://github.com/exzktly/allwell/pull/844), version 9.0.2. All
 seventeen `U` findings are done. The adversarial review returned **8 findings**;
@@ -343,10 +365,10 @@ four are fixed, four are owed.
 | G4-R2 | The QC `min ≤ max` comparison reads the shipped default `0` as a real ceiling, refusing a form that runs on `main` | done |
 | G4-R3 | `min_nucleus_area_px` validated for every routine though only one shows or reads it — and a correctly gated rule already existed | done |
 | G4-R4 | The `-1` threshold sentinel exception is justified by a restore path the repo explicitly prevents | done |
-| G4-R5 | `_fluor_add_row` left out of the `_refresh_channel_dependents` sweep — one file, two definitions of "the rows changed" | queued |
-| G4-R6 | `probe_ssh_async`'s refusal return value is discarded at all three call sites, and each has already disabled its button | queued |
-| G4-R7 | The new embedded-hex scan in `test_hardcoded_tokens.py` inherits the *file*-level `COLOUR_ALLOWLIST` bypass (§7.5 #10) | queued |
-| G4-R8 | The tile-size gate and `_emit_execution_flags` disagree about which routines `stardist_tile_px` belongs to | queued |
+| G4-R5 | `_fluor_add_row` left out of the `_refresh_channel_dependents` sweep — one file, two definitions of "the rows changed" | done |
+| G4-R6 | `probe_ssh_async`'s refusal return value is discarded at all three call sites, and each has already disabled its button | done — the runtime path is unreachable (a disabled button's `click()` never reaches its slot), so the guard is an AST rule and the tests say so |
+| G4-R7 | The new embedded-hex scan in `test_hardcoded_tokens.py` inherits the *file*-level `COLOUR_ALLOWLIST` bypass (§7.5 #10) | done — no live violation was hiding there, so this closes a hole; `test_guards_bite.py` carries the case |
+| G4-R8 | The tile-size gate and `_emit_execution_flags` disagree about which routines `stardist_tile_px` belongs to | done |
 
 Also raised and worth carrying: `parse_threshold("nan")` returns `nan` on this
 branch, so `--stardist_prob_thresh nan` passes argparse *and* the CLI pre-flight
@@ -362,7 +384,7 @@ offscreen and drove every control; reuse that shape. Do **not** reach for the
 
 ---
 
-## Group 5 — Numbers and parsing · `in review`
+## Group 5 — Numbers and parsing · `complete`
 
 PR [#845](https://github.com/exzktly/allwell/pull/845), version 9.0.2. Every
 audit finding and every review finding is fixed and committed; the lane was

@@ -28,6 +28,11 @@ from __future__ import annotations
 
 import ast
 import inspect
+import os
+import time
+from pathlib import Path
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from services import pipeline_runner
 
@@ -130,19 +135,98 @@ def test_a_suspend_during_grouping_is_latched_the_same_way():
     assert r.cancel_state_at_failure == (False, True)
 
 
-def test_an_input_failure_with_no_stop_is_journalled_as_a_failure():
-    """A run that never started must not be recorded as one that succeeded.
+def test_a_failure_on_the_public_queue_reaches_the_record(tmp_path, monkeypatch):
+    """At the boundary (§7.4 #1): what the record says, not what a flag says.
 
-    `_had_error` was set in `_enqueue_error` only, so an input folder that no
-    longer exists — a real failure, no Stop in play — journalled `ok`. The index
-    then held it complete and it was never offered for resume.
+    The first version of this asserted `_journal_outcome() == "error"`, which
+    is the value in the middle of the mechanism rather than the end of it. The
+    claim is about the record on disk and about the resume banner that reads
+    it, so that is what is measured here — through the sequence the app runs
+    (§7.7 #1): open the journal, report the failure on the public queue the way
+    a writer outside the runner does, close in the `finally`.
     """
+    from services import run_journal as J
+
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    out = tmp_path / "out"
+    out.mkdir()
+
     r = _runner()
+    r._journal_spec = {}
+    r._open_journal(tmp_path / "in", out, ["process_microscopy.py"], {})
+    assert r.journal_token is not None, "the journal did not open; nothing below measures anything"
+
+    # Exactly what `analyze_input._resolve_run_dirs_for_runner` does: the queue
+    # is public and this writer never passes through `_enqueue_error`.
     r.log_q.put(("error", "Input error: no such folder\n"))
-    assert r._journal_outcome() == "error", (
-        "a run that failed during input resolution was journalled as a "
-        "successful run, so nothing will ever offer it for resume"
-    )
+    r._close_journal()
+
+    rec = J.read_journal(out)
+    assert rec.outcome == "error", (
+        f"a run that failed was recorded as {rec.outcome!r}, so the index "
+        f"holds it complete and the banner will never offer it for resume")
+    assert [e for e in J.unfinished_runs() if Path(e.get("output_dir", "")) == out], (
+        "the failed run is not offered for resume")
+
+
+def test_a_failure_before_the_journal_opens_leaves_the_previous_record_alone(
+        tmp_path, monkeypatch):
+    """The other half of the same claim, stated honestly.
+
+    An input failure is reported *during resolution*, and the journal has no
+    home until the output directory is resolved — so this run writes no record
+    at all, rather than the `ok` the old wording claimed. That is the right
+    outcome (there is nothing to write into), but it has a sharp edge: the
+    directory may already hold the previous run's record, still open because
+    the index is holding it for resume. A run that never started must not
+    close it.
+
+    That last assertion is a pin rather than a proof: no path today reaches
+    ``_close_journal`` with the previous run's directory, and it is here so that
+    a future one cannot arrive unnoticed. What bites in this test is the latch —
+    disarming it makes ``_had_error`` read False for a failure the user will be
+    shown.
+    """
+    from services import run_journal as J
+    from services.pipeline_runner import PipelineRunner
+
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    out = tmp_path / "out"
+    out.mkdir()
+    in_dir = tmp_path / "in"
+    in_dir.mkdir()
+
+    # A previous run that died: open, never closed. This is what the banner
+    # offers, and what the failed run below must not touch.
+    J.open_run(out, input_dir=str(in_dir), mode="local", spec={})
+    before = (out / J.JOURNAL_DIRNAME / "run.json").read_text()
+
+    def _resolver(opts, log_q, proc_hook=None):
+        log_q.put(("error", "Input error: no such folder\n"))
+        return None
+
+    r = PipelineRunner()
+    r.start(Path("process_microscopy.py"),
+            {"input_dir": str(in_dir), "output_dir": str(out),
+             "filename_schema": "experiment:channel:well:fov:timepoint",
+             "filename_sep": "_"},
+            resolve_dirs=_resolver)
+    for _ in range(400):
+        if not r.is_busy:
+            break
+        time.sleep(0.02)
+    assert not r.is_busy, "the run never finished"
+
+    assert r._had_error is True, (
+        "the dashboard would paint this failure as an ordinary end of run")
+    assert r.journal_token is None and r.last_output_dir is None, (
+        "the failed run opened a journal for a run that never started")
+    assert (out / J.JOURNAL_DIRNAME / "run.json").read_text() == before, (
+        "a run that failed before it started rewrote the previous run's "
+        "record, which the index is holding open so it can be offered "
+        "for resume")
+    assert [e for e in J.unfinished_runs() if Path(e.get("output_dir", "")) == out], (
+        "the previous run's resume offer was lost")
 
 
 def test_an_ordinary_line_latches_nothing():

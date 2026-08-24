@@ -4449,13 +4449,21 @@ markers reach `ProgressTracker._count_well_done` — `— done.`, `up to date` (
 incremental well with no new FOVs) and `SKIP … output already exists` (a re-run
 without `--force`) — and all three mean the well is complete, which is why they
 share a counter and why the plate is told `process` for all three. Only the first
-means anything was computed. The other two also emit `well_uncomputed`, which
-only the journal writer reads, and it records `skipped`: without it, an
-incremental run that touched 6 of 96 wells recorded 96 `analysed` and the readout
-said "It recorded 96 finished". The distinction travels as its own event rather
-than as a new `well_stage` value because `RunDashboard.set_well_stage` ignores any
-stage outside its own roster — sending it one would have stopped those wells
-being marked done, trading a wrong record for a wrong picture.
+means anything was computed, so the other two carry `skipped` for the journal:
+without that, an incremental run that touched 6 of 96 wells recorded 96
+`analysed` and the readout said "It recorded 96 finished".
+
+The record's word rides inside the completion event, as a third element beside
+the well and the stage, and both halves of that shape are load-bearing. The
+stage stays `process` because `RunDashboard.set_well_stage` ignores any stage
+outside its own roster — sending it the record's word would have stopped those
+wells being marked done, trading a wrong record for a wrong picture. And it is
+*one* event rather than two because `PipelineRunner._enqueue` drops anything
+outside `_CONTROL_KINDS` when the queue is full, individually: a completion
+split across two messages loses "nothing was computed" while keeping "this well
+is finished", which is the same wrong record arriving by way of the transport.
+Stage-only events — `error`, `upload`, `download` — still carry no third
+element and are mapped by `AnalyzeProgressMixin._JOURNAL_STAGES`.
 
 **One surface offers any given unfinished run.** `RunJournal.queued` and
 `SuspendedRun.queued` record that the job queue started it, written by

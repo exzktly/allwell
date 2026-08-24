@@ -60,14 +60,20 @@ class AnalyzeProgressMixin:
     _SCHED_BREADCRUMB_S = 120.0
 
     #: The ``well_stage`` values that mean a well reached a terminal state, and
-    #: what the run journal should record for each. ``"process"`` is emitted
-    #: from exactly one place — ``ProgressTracker._count_well_done``, the method
-    #: that decides a well has finished — so it is the run's own statement that
-    #: a well is done rather than a guess made from a log line here.
+    #: what the run journal should record for each — for the events that state
+    #: only a stage. A completion event names its own record state as a third
+    #: element and never comes through here; ``"process"`` is listed because
+    #: this map is also the answer to "what does that stage mean", and a stage
+    #: whose meaning is recorded in two places that disagree is worse than one
+    #: unused row.
     _JOURNAL_STAGES = {"process": "analysed", "error": "failed"}
 
     def _journal_well_stage(self, well: str, stage: str) -> None:
         """Record a terminal well stage in the output directory's run journal.
+
+        For the stage-only events. ``ProgressTracker._count_well_done`` — the
+        method that decides a well has finished — states the record's word in
+        the event itself, so completions do not pass through this mapping.
 
         Hung off the same event the dashboard paints from, so what the record
         says and what the user saw cannot disagree — and written as it happens,
@@ -349,21 +355,26 @@ class AnalyzeProgressMixin:
         elif kind == "stage":
             self._dashboard.set_active_stage(str(payload))
         elif kind == "well_stage":
-            well, stage = payload  # type: ignore[misc]
+            well, stage, *record = payload  # type: ignore[misc]
             self._dashboard.set_well_stage(str(well), str(stage))
-            self._journal_well_stage(str(well), str(stage))
-        elif kind == "well_uncomputed":
-            # This run did not compute the well: the pipeline printed "up to
-            # date" (an incremental well with no new FOVs) or "SKIP … output
-            # already exists" (a re-run without --force). It is complete, and
-            # the plate has already been told so by the ``well_stage`` event
-            # beside this one — but recording it as ``analysed`` claims work
-            # that did not happen, and an incremental run that touched 6 of 96
-            # wells then read "It recorded 96 finished". The journal has had a
-            # ``skipped`` state for exactly this since it was written; the
-            # local path never wrote it.
-            self._journal_well(str(payload), "skipped",
-                               reason="already up to date")
+            if record:
+                # The completion event carries the journal's word for what
+                # happened, because the plate's word for it is deliberately
+                # lossy: three different markers all paint "process". A run
+                # that printed "up to date" (an incremental well with no new
+                # FOVs) or "SKIP … output already exists" (a re-run without
+                # --force) computed nothing, and recording those as
+                # ``analysed`` claims work that did not happen — an
+                # incremental run that touched 6 of 96 wells then read "It
+                # recorded 96 finished". The journal has had a ``skipped``
+                # state for exactly this since it was written; the local path
+                # never wrote it.
+                state = str(record[0])
+                self._journal_well(
+                    str(well), state,
+                    reason="already up to date" if state == "skipped" else "")
+            else:
+                self._journal_well_stage(str(well), str(stage))
         elif kind == "well_fov":
             well, done, total = payload  # type: ignore[misc]
             self._dashboard.set_well_fov(str(well), int(done), int(total))

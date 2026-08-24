@@ -28,6 +28,7 @@ Event protocol (queue payloads are ``(kind, payload)`` tuples):
 from __future__ import annotations
 
 import collections
+import logging
 import os
 import queue
 import re
@@ -49,6 +50,8 @@ from services.remote_runner import (
 from services import run_journal
 from services.subprocess_kill import signal_subprocess
 from util.aw_safe import swallow, swallowed
+
+_LOG = logging.getLogger("allwell.pipeline_runner")
 
 #: How many of the pipeline's own trailing output lines ride along with a
 #: non-zero exit. Enough to carry a refusal sentence or a traceback's last
@@ -360,15 +363,20 @@ class ProgressTracker:
             events.append(("well_total", self.well_total))
         events.append(("well_done", (self.well_done, self.well_total)))
         # The plate is told "process" whatever the marker was: all three mean
-        # this well is finished, and the plate paints finished wells alike.
-        events.append(("well_stage", (well, "process")))
-        if stage != "process":
-            # The journal is told the truth. A separate event rather than a
-            # different ``well_stage`` value, because the dashboard ignores any
-            # stage outside ``_STAGE_KEYS`` — sending it one would have stopped
-            # those wells being marked done on the plate, trading a wrong record
-            # for a wrong picture.
-            events.append(("well_uncomputed", well))
+        # this well is finished, and the plate paints finished wells alike. The
+        # journal is told the truth, and it rides in the *same* event: what the
+        # plate paints and what the record says are one fact, so they are one
+        # message. Two messages would be dropped independently — only
+        # ``PipelineRunner._CONTROL_KINDS`` survive a full queue — and losing
+        # only the second one journals ``analysed`` for a well nothing
+        # computed, which is the exact defect this distinction exists to
+        # prevent, restored under log pressure. The stage stays "process"
+        # because the dashboard ignores any stage outside its ``_STAGE_KEYS``;
+        # sending it the record's word would have stopped those wells being
+        # marked done on the plate, trading a wrong record for a wrong picture.
+        events.append(("well_stage",
+                       (well, "process",
+                        "analysed" if stage == "process" else "skipped")))
         return events
 
     def parse(self, line: str) -> list[tuple[str, object]]:
@@ -541,11 +549,20 @@ class RunEventQueue(queue.Queue):
     and forced open the raw log pane the user had closed, while the journal
     correctly recorded ``stopped``. Two surfaces, one run, opposite verdicts.
 
-    The one nobody had reported: ``_had_error`` was not set either, so a genuine
-    input failure with no Stop in play — an input folder that no longer exists,
-    a schema the resolver rejects — was journalled ``ok``. A run that never
-    started was recorded as a run that succeeded, and was therefore never
-    offered for resume.
+    The one nobody had reported: ``_had_error`` was not set either, so a failure
+    put here by a writer outside the runner left the run journalling ``ok`` —
+    recorded as a run that succeeded, and therefore never offered for resume.
+
+    Where that bites is worth stating precisely, because the obvious case is not
+    it. An input failure — a folder that no longer exists, a schema the resolver
+    rejects — is reported *during resolution*, and the journal has no home until
+    the output directory is resolved a few lines later, so such a run writes no
+    record at all: the flag is still set, which is what the dashboard reads, but
+    there is nothing on disk for it to be wrong in. The outcome the flag decides
+    is the one for a failure put on this queue once the run is under way, and
+    that is what ``tests/test_every_failure_goes_through_one_seam.py`` measures —
+    on the record, through the app's own open-fail-close order, rather than on
+    the flag.
 
     Latching here rather than in ``_enqueue`` is deliberate: ``_enqueue`` is one
     of the writers, not the boundary. Every write goes through ``Queue.put``,
@@ -1154,9 +1171,14 @@ class PipelineRunner:
             # offer vanished. That is the exact scenario ``close_run``'s
             # docstring describes, and the guard could not see it because this
             # side never told it there was nothing to guard.
-            swallowed(f"the run journal in {output_dir} could not be opened, so "
-                      "this run will not write one — the previous run's record "
-                      "is left as it stands")
+            # Not ``swallowed``: nothing was raised here. ``open_run``
+            # answered, and its answer was no. A warning rather than a debug
+            # line because the run continues with no record of itself, and a
+            # degraded run must not look like a good one (§7).
+            _LOG.warning(
+                "the run journal in %s could not be opened, so this run will "
+                "not write one — the previous run's record is left as it "
+                "stands", output_dir)
             return
         self._journal_dir = output_dir
 

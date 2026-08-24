@@ -11,7 +11,7 @@ from well_viewer.domain import fold_change as _fc
 from well_viewer.domain.numeric import is_number, is_numeric
 from well_viewer.domain.stats_compute import compute_rep_stats
 from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
-from well_viewer.domain.stats_compute import aggregate_well
+from well_viewer.domain.stats_compute import aggregate_well_cached
 from well_viewer.domain.stats_compute import compute_rep_n_above_stats
 from well_viewer.domain.stats_compute import compute_rep_n_above_total
 from well_viewer.domain.stats_compute import replicate_unit
@@ -284,7 +284,7 @@ def collect_line_series(
             all_tps: set = set()
             cdf_parts: list = []
             for lbl in valid_wells:
-                for t, *_ in aggregate_well(ctx,
+                for t, *_ in aggregate_well_cached(ctx,
                     lbl, threshold=threshold, use_sem=False,
                     val_col=val_col,
                     fluor_gates=fluor_gates,
@@ -404,7 +404,7 @@ def _per_well_series(ctx, denoms, hidden_members, *, threshold, use_sem, val_col
         if label in hidden_members:
             continue
         color = color_for_well(label)
-        pts = aggregate_well(ctx,
+        pts = aggregate_well_cached(ctx,
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates,

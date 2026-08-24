@@ -34,7 +34,7 @@ from well_viewer.domain import plot_members as _members
 from well_viewer.domain.time_rescale import format_scaled as _rescale_tp
 from well_viewer.domain.stats_compute import (
     aggregate_group,
-    aggregate_well,
+    aggregate_well_cached,
     compute_rep_n_above_stats,
     compute_rep_n_above_total,
     compute_rep_per_fov_stats,
@@ -602,7 +602,7 @@ def collect_bar_items(
             fc_force_nan, fc_nan_frac, fc_nan_n = panel_nan_flags(
                 fc_vs_ctrl, fc_outcome,
                 eff_ctrl_mean_t, eff_ctrl_frac_t, eff_ctrl_n_t)
-            pts = aggregate_well(ctx,
+            pts = aggregate_well_cached(ctx,
                 label, threshold=threshold, use_sem=use_sem,
                 val_col=ctx.state.channel.active_val_col,
                 fluor_gates=fluor_gates,
@@ -840,7 +840,7 @@ def collect_bar_items_for_group(
             rset_per_fov = replicate_unit(len(wells), per_fov_spread) == "fov"
             all_tps: set = set()
             for w in wells:
-                for t, *_ in aggregate_well(ctx, w, threshold=threshold,
+                for t, *_ in aggregate_well_cached(ctx, w, threshold=threshold,
                                             use_sem=False, val_col=val_col,
                                             fluor_gates=fluor_gates):
                     all_tps.add(t)

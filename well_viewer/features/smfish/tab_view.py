@@ -1028,9 +1028,17 @@ def _smfish_apply_to_all(ctx) -> None:
 
 
 def _smfish_refresh_app_cache(ctx) -> None:
+    replaced = False
     for label, path in ctx.state.dataset.well_paths.items():
         if label in ctx.state.dataset.cache:
             ctx.state.dataset.cache[label] = load_well_csv(path)
+            replaced = True
+    if replaced:
+        # A replaced frame invalidates a memoized aggregation of that well
+        # exactly as hard as an edited column does. Guarded on something
+        # actually having been replaced, so a refresh that found nothing cached
+        # does not tick the counter for free.
+        ctx.state.dataset.note_rows_changed()
     recalculate_threshold(ctx)
     # The per-well DataFrames now carry new smfish_count values; the
     # stats cache keys do not include CSV content, so without an

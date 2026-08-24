@@ -201,6 +201,22 @@ def grouped_selection(ctx, n_groups: int, per_group: int) -> None:
     sel.active_solo_wells = []
 
 
+def app_threshold(ctx) -> float:
+    """The cutoff the Line tab itself would pass.
+
+    Passing a hardcoded 0.0 here made the bench unrepresentative in a way that
+    showed up as a doubled cache-miss count: ``compute_rep_n_above_stats`` and
+    ``compute_rep_n_above_total`` ignore the caller's threshold and recompute
+    their own from the active channel, so a bench that passed 0.0 asked the
+    aggregation for two different cutoffs in one collect where the app asks for
+    one. The app's own redraw resolves the cutoff with this exact expression.
+    """
+    from well_viewer.core.channel_state_controller import on_cutoff_for_column
+    return on_cutoff_for_column(
+        ctx, ctx.state.channel.active_val_col,
+        channel=ctx.state.channel.active_channel)
+
+
 def stub_bar_runtime(ctx) -> None:
     """The two runtime accessors bar collect has no default for."""
     def _current_keys():
@@ -231,20 +247,20 @@ def run_collects(ctx, repeats: int) -> dict:
     _measure(
         "line collect, 96 wells",
         lambda: solo_selection(ctx, WELLS),
-        lambda: collect_line_series(ctx, threshold=0.0, use_sem=True),
+        lambda: collect_line_series(ctx, threshold=app_threshold(ctx), use_sem=True),
     )
     # One more well on an otherwise unchanged selection — the click the report is
     # about. The setup selects 95, collects once so any memo is warm for those,
     # then selects 96; the measured call should then do one well's work, not 96.
     def _setup_one_more():
         solo_selection(ctx, WELLS[:95])
-        collect_line_series(ctx, threshold=0.0, use_sem=True)
+        collect_line_series(ctx, threshold=app_threshold(ctx), use_sem=True)
         solo_selection(ctx, WELLS)
 
     _measure(
         "line collect, 95 -> 96 wells",
         _setup_one_more,
-        lambda: collect_line_series(ctx, threshold=0.0, use_sem=True),
+        lambda: collect_line_series(ctx, threshold=app_threshold(ctx), use_sem=True),
     )
     _measure(
         "bar collect, 96 wells x 6 tps",
@@ -254,7 +270,7 @@ def run_collects(ctx, repeats: int) -> dict:
     _measure(
         "line collect, 12 groups x 8",
         lambda: grouped_selection(ctx, 12, 8),
-        lambda: collect_line_series(ctx, threshold=0.0, use_sem=True),
+        lambda: collect_line_series(ctx, threshold=app_threshold(ctx), use_sem=True),
     )
     # Both replicate modes, because they take different branches and only one
     # of them carries the three-producer redundancy. Pooled concatenates a
@@ -302,7 +318,7 @@ def run_draw(ctx, repeats: int) -> dict:
     from well_viewer.features.lineplot.controller import collect_line_series
 
     solo_selection(ctx, WELLS)
-    series, _ = collect_line_series(ctx, threshold=0.0, use_sem=True)
+    series, _ = collect_line_series(ctx, threshold=app_threshold(ctx), use_sem=True)
 
     def _draw(*, legend: bool):
         fig, axes = plt.subplots(2, 2, figsize=(12, 8))

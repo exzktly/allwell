@@ -1,6 +1,6 @@
 # STATUS — well-selection / plotting performance
 
-**Updated:** 2026-08-24 03:45 UTC
+**Updated:** 2026-08-24 04:05 UTC
 **Branch:** `claude/well-selection-performance-7phaix`
 **Base:** `44c0d38` (main, includes PR #847)
 **Version:** main is at 9.0.5 → this PR bumps to **9.0.6** (not yet applied)
@@ -26,7 +26,7 @@ last, after local fast lane + slow lane + adversarial review all pass.
 | 0a | Perf bench | ✅ done | runs on fresh main; has both collect and draw phases; baseline captured below |
 | 0b | Equivalence corpus | ✅ done | 14 cases green on unchanged HEAD; `tests/test_aggregate_equivalence.py` |
 | 1 | String timepoint short-circuit | ✅ done | **6.1x**: `aggregate_well` x96 1,091 → 180 ms, measured back-to-back |
-| 2 | Per-well memo | 🔵 in progress | AST writer guard ✅ landed (7 sites); memo next |
+| 2 | Per-well memo | ✅ done | 1,248 calls → **96 distinct keys**; one-click cost 1,150 → **3.4 ms** |
 | 5 | Group-visibility cache clear | ⬜ not started | split cache-clear from UI cues |
 | 6 | Visible-only redraw | ⬜ not started | extend `fc_dirty_scopes`, no parallel flag |
 | 8 | CDF decimation | ⬜ not started | at `ax_cdf.plot` only, `n` from full array |
@@ -154,6 +154,58 @@ And one false positive it produced, then fixed: the first version matched any at
 spelled `.cache` and reported `stats_compute.py`, which writes `stats_cache.cache[key]` —
 a different cache with a different lifetime. A domain predicate applied outside its domain
 (§7.1). The owner must be `dataset`; a bite test now pins both directions.
+
+## Step 2b — the memo (landed)
+
+`aggregate_well_cached` in `stats_compute`, called by the collectors. `aggregate_well`
+itself is untouched — memoizing inside it would widen its ctx contract from four
+attributes to include the stats cache and gate signature, and the pure-logic tests that
+build hand-rolled contexts satisfying exactly that narrow surface would fail.
+
+`DatasetState.rows_version` is the new tick, bumped via `note_rows_changed()` at the
+writer sites the AST guard enumerated, plus `begin_load` (a dataset swap: two plates can
+carry the same well tokens, and the load-time stats-cache clear sits inside a suppressed
+`try/except`).
+
+**Key verified by probe, not by reading:** across a full 12-group collect, 1,248 calls
+resolve to **96 distinct keys** — only `label` varies. Nothing spurious is in the key.
+
+**Killed the feature and watched it fail** (§7.7 #2): dropping `rows_version` from the key
+in a worktree of HEAD, then excluding every cell of a well, returns the pre-edit aggregate —
+a full set of plausible numbers, drawn and reported as current. Real `AssertionError`.
+
+Also fixed while here: `GatingWorker`'s **cancel path never invalidated the stats cache**.
+The wells already gated keep their rewritten inclusion columns, so a cancelled scan left
+group statistics computed from pre-gating rows. Half-applied gating is still applied.
+
+### Measured after Steps 1 + 2
+
+| Action | Before | After | |
+|---|---|---|---|
+| line collect, 96 wells | 1,146 ms | 272 ms | 4.2x |
+| **line collect, 95 → 96 wells (one click)** | **1,150 ms** | **3.4 ms** | **338x** |
+| bar collect, 96 wells x 6 tps | 7,449 ms | 7.4 ms | 1,000x |
+| line collect, 12 groups x 8 | 22,054 ms | 2,832 ms | 7.8x |
+| bar collect, 12 groups x 8 | 6,491 ms | 5.7 ms | 1,139x |
+| one 96-well click, collect + draw | 2,540 ms | 1,565 ms | 1.6x |
+
+The click is now **83% draw, 17% collect**. Everything remaining is on the draw side —
+Steps 8 and 11.
+
+### Found, not fixed: two thresholds in one collect
+
+The key probe surfaced the reviewer's finding #2 as a live divergence. `compute_rep_stats`
+takes the caller's `threshold`; `compute_rep_n_above_stats` and `compute_rep_n_above_total`
+ignore it and recompute their own from `active_channel`. With the bench passing a literal
+0.0 they disagreed (0.0 vs 50.0) and the memo saw 192 keys instead of 96.
+
+In the Line tab they agree by coincidence — `redraw_line_plots` resolves the cutoff with the
+identical expression. They do **not** agree in batch export of a non-active channel, because
+`_app_val_col_scope` swaps `active_val_col` but not `active_channel`. That is a
+pre-existing correctness bug affecting exported numbers, out of scope for a perf branch,
+and Step 3 must not paper over it by picking one threshold. **Flagged for a follow-up PR.**
+
+The bench now passes the app's own cutoff so it measures what the app does.
 
 ## Decisions log (for user confirmation at the end)
 

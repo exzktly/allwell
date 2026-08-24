@@ -216,8 +216,16 @@ def group_replicate_stats(ctx, wells, target_t, *, use_fov, val_col, threshold,
     reps: list[ReplicateStat] = []
     if unit == "well":
         for lbl in loaded:
-            pts = aggregate_well(ctx, lbl, threshold=threshold, use_sem=False,
-                                 val_col=val_col, fluor_gates=fluor_gates)
+            # Memoized: three separately-keyed producers (compute_rep_stats,
+            # compute_rep_n_above_stats, compute_rep_n_above_total) each call
+            # this function for the same wells at the same timepoint, and each
+            # call re-aggregated the whole well to keep one timepoint's row. On
+            # a plate of twelve groups over six timepoints that was 1,824 full
+            # passes to draw twelve curves; through the memo the distinct keys
+            # number one per well.
+            pts = aggregate_well_cached(ctx, lbl, threshold=threshold,
+                                        use_sem=False, val_col=val_col,
+                                        fluor_gates=fluor_gates)
             rs = _rep_from(_safe_rows(ctx, lbl), pts, target_t, threshold,
                            val_col, fluor_gates, ratios, on_col)
             if rs is not None:
@@ -382,6 +390,137 @@ def _ratio_cache_sig(ctx) -> tuple | None:
         ratio.denominator_metric,
         repr(ratio.epsilon),
     )
+
+
+def _ratio_sig_for(ctx, val_col: str) -> tuple | None:
+    """Signature of the ratio definition *this call* will actually resolve.
+
+    :func:`_ratio_cache_sig` signs ``ctx.state.channel.active_val_col``, which is
+    right for the replicate-set keys because those read the active column. The
+    per-well memo below does not: :func:`aggregate_well` resolves the ``val_col``
+    it was *handed*, and the two coincide today only because
+    ``batch_export.base_panel._app_val_col_scope`` swaps the active column for
+    the duration of an off-screen export.
+
+    That is a caller-side convention holding up a cache key. A future caller
+    passing ``val_col`` without the swap would get a key signing a different
+    ratio's definition than the one it computes with, so editing ratio B in
+    place while ratio A is active would return B's stale numbers under A's key.
+    Signing the argument closes that off regardless of what any caller does.
+    """
+    col = str(val_col or "")
+    if not col.startswith(RATIO_PREFIX):
+        return None
+    ratio = (ctx.state.channel.ratio_index or {}).get(col)
+    if ratio is None:
+        return (col,)
+    return (
+        col,
+        ratio.numerator_channel,
+        ratio.numerator_metric,
+        ratio.denominator_channel,
+        ratio.denominator_metric,
+        repr(ratio.epsilon),
+    )
+
+
+def aggregate_well_cached(
+    ctx,
+    label: str,
+    threshold: float,
+    use_sem: bool,
+    val_col: str,
+    fluor_gates: dict[str, float] | None = None,
+    per_fov_spread: bool = False,
+    tp_col: str = "timepoint_hours",
+) -> tuple:
+    """:func:`aggregate_well`, memoized per well for the duration of the inputs.
+
+    The collectors call this; :func:`aggregate_well` itself is left alone. That
+    split is deliberate rather than stylistic. ``aggregate_well`` reads exactly
+    four things off ``ctx`` — the aggregation delegate, the ratio index, the
+    thresholding on-column, and the dataset — and a number of pure-logic tests
+    build hand-rolled contexts that satisfy precisely that surface and nothing
+    else. Memoizing inside it widens its contract to include the stats cache and
+    the gate signature, and those tests fail on the attributes they never had to
+    supply. Widening a domain function's dependencies to buy a cache would trade
+    a real architectural property for a speed-up that belongs a layer up.
+
+    **Why this is worth the risk it carries.** Selecting one more well used to
+    re-aggregate every well already selected: the per-well plot branches called
+    ``aggregate_well`` straight through, so a ninety-sixth click cost
+    ninety-six full passes over 21,600-row frames. Only the replicate-set
+    results were ever cached.
+
+    The key is the whole of the correctness, so each part earns its place:
+
+    ``label`` / ``val_col`` / ``threshold`` / ``use_sem`` / ``per_fov_spread`` /
+    ``tp_col``
+        The arguments the computation is a function of. ``use_sem`` and
+        ``per_fov_spread`` change which spread is reported and which trailing
+        per-FOV fields are filled, not merely how a number is presented.
+
+    ``fluor_gates``
+        Per-channel gates filter rows out before anything is computed.
+
+    :func:`_gate_cache_sig`
+        The scatter-gate layers, including the thresholding on-column that
+        :func:`_thresh_on_col` resolves — none of which appears in the arguments.
+
+    :func:`_ratio_sig_for`
+        The ratio *definition* behind ``val_col``, keyed on the argument rather
+        than on the active column. See that function.
+
+    ``dataset.rows_version``
+        Everything about the frame itself. QC and crop verdicts, gating
+        rewrites, manual curation overrides, a frame replaced after a write-back
+        and a whole dataset swap all change what the rows say without changing
+        any argument here. ``tests/test_row_cache_writers.py`` enumerates those
+        sites from the syntax tree, so a new one fails the build rather than
+        silently returning yesterday's numbers.
+
+    Read the version into the key *before* computing, never after: the gating
+    worker mutates frames from a ``QThread``, and a version sampled afterwards
+    could stamp a pre-edit result with a post-edit tick.
+
+    The result is a ``tuple``. ``aggregate_well`` returns a fresh ``list`` on
+    every call and several callers treat that as theirs to keep; handing the
+    same list to all of them would make one caller's edit everyone's.
+    """
+    delegate = ctx.runtime.aggregate.well
+    if callable(delegate):
+        # A test backend answers from its own in-memory map, which the test may
+        # rewrite between calls. It is not ours to cache.
+        return tuple(aggregate_well(
+            ctx, label, threshold=threshold, use_sem=use_sem, val_col=val_col,
+            fluor_gates=fluor_gates, per_fov_spread=per_fov_spread,
+            tp_col=tp_col,
+        ) or ())
+
+    store = getattr(ctx.state, "stats_cache", None)
+    if store is None:  # a context too thin to cache with: compute, don't guess
+        return tuple(aggregate_well(
+            ctx, label, threshold=threshold, use_sem=use_sem, val_col=val_col,
+            fluor_gates=fluor_gates, per_fov_spread=per_fov_spread,
+            tp_col=tp_col,
+        ) or ())
+
+    key = (
+        "well_agg", label, val_col, threshold, use_sem, per_fov_spread, tp_col,
+        tuple(sorted((fluor_gates or {}).items())),
+        _gate_cache_sig(ctx),
+        _ratio_sig_for(ctx, val_col),
+        ctx.state.dataset.rows_version,
+    )
+    hit = store.cache.get(key)
+    if hit is not None:
+        return hit
+    result = tuple(aggregate_well(
+        ctx, label, threshold=threshold, use_sem=use_sem, val_col=val_col,
+        fluor_gates=fluor_gates, per_fov_spread=per_fov_spread, tp_col=tp_col,
+    ) or ())
+    store.cache[key] = result
+    return result
 
 
 def _gate_cache_sig(ctx) -> tuple | None:

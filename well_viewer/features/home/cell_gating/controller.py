@@ -161,6 +161,13 @@ class GatingWorker(QThread):
                         "GatingWorker cancelled at well %d/%d (%s)",
                         idx, total, label,
                     )
+                # Cancelling does not un-write the wells already gated. Their
+                # frames carry new inclusion columns and the version counter has
+                # already moved, but the stats cache was only ever cleared on the
+                # success path below — so a cancelled scan used to leave group
+                # statistics computed from the pre-gating rows. Clear them here
+                # too: a half-applied gating is still an applied gating.
+                invalidate_stats_cache(self._ctx)
                 return
 
             df = get_rows(self._ctx, label)
@@ -178,6 +185,13 @@ class GatingWorker(QThread):
                 thresh_gates=thresh_gates,
                 ratios=ratios,
             )
+
+            # This well's inclusion columns just changed, so any memoized
+            # aggregation of it must decline. Bumped per well rather than once
+            # at the end: the scan yields to the GUI thread between wells, so a
+            # redraw can land mid-scan and must not be served a stale entry for
+            # a well already rewritten.
+            self._ctx.state.dataset.note_rows_changed()
 
             included_total += well_included
             excluded_total += row_count - well_included

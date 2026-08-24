@@ -105,4 +105,10 @@ def project_verdict_column(
                 "parameters has been dropped from that frame, so the well is "
                 "treated as fully included until the verdict can be computed "
                 "again", layer, column, lbl, column)
+    # Every projection that reached a frame changed what an aggregation of that
+    # frame computes, so the per-well memo keyed on this counter must decline.
+    # Bumped once for the walk rather than per well: the counter is a tick, not
+    # a tally, and one bump invalidates every entry either way.
+    if labels:
+        ctx.state.dataset.note_rows_changed()
     return failed

@@ -1,0 +1,123 @@
+# STATUS — well-selection / plotting performance
+
+**Updated:** 2026-08-24 03:20 UTC
+**Branch:** `claude/well-selection-performance-7phaix`
+**Base:** `44c0d38` (main, includes PR #847)
+**Version:** main is at 9.0.5 → this PR bumps to **9.0.6** (not yet applied)
+**PR:** not opened yet — deliberately. CI bills on `pull_request:` only, so the PR opens
+last, after local fast lane + slow lane + adversarial review all pass.
+
+---
+
+## Gate
+
+| | |
+|---|---|
+| PR 847 merged | ✅ 03:02 UTC, `44c0d38` |
+| Branch rebased onto fresh main | ✅ |
+| Step 0a commit carried forward | ✅ `e363890` |
+
+---
+
+## Steps
+
+| # | Step | State | Notes |
+|---|---|---|---|
+| 0a | Perf bench | ✅ done | runs on fresh main; has both collect and draw phases; baseline captured below |
+| 0b | Equivalence corpus | ✅ done | 14 cases green on unchanged HEAD; `tests/test_aggregate_equivalence.py` |
+| 1 | String timepoint short-circuit | ⬜ not started | gate on `isfinite(tp_num[mask]).all()` |
+| 2 | Per-well memo | ⬜ not started | AST writer guard FIRST; memo in a wrapper, never inside `aggregate_well` |
+| 5 | Group-visibility cache clear | ⬜ not started | split cache-clear from UI cues |
+| 6 | Visible-only redraw | ⬜ not started | extend `fc_dirty_scopes`, no parallel flag |
+| 8 | CDF decimation | ⬜ not started | at `ax_cdf.plot` only, `n` from full array |
+| 9 | CDF collection residual | ⬜ not started | `_all_fluor_values_filtered` |
+| 11 | **Legend cost (NEW)** | ⬜ not started | diagnosed below; largest single cost in the click |
+| — | Re-measure, decide 3/7/10 | ⬜ | step 4 DROPPED |
+| — | ARCHITECTURE.md / README | ⬜ | |
+| — | Local fast lane | ⬜ | required: no CI during dev |
+| — | Local slow lane | ⬜ | file or two per process |
+| — | Adversarial Opus review | ⬜ | against full local diff |
+| — | Push + open PR | ⬜ | LAST |
+
+---
+
+## Baseline on fresh main (`44c0d38`), measured 03:09 UTC
+
+96-well plate, 6 tps x 9 fovs x 400 cells = 2.07M rows, row cache warm.
+
+| Action | ms | `aggregate_well` |
+|---|---|---|
+| line collect, 96 wells | 1,146 | 96 |
+| line collect, 95 → 96 wells (one click) | 1,150 | 96 |
+| bar collect, 96 wells x 6 tps | 7,449 | 576 |
+| line collect, 12 groups x 8 | 22,054 | 1,824 |
+| bar collect, 12 groups x 8 (pooled) | 7,660 | 576 |
+| bar collect, 12 groups x 8 (unpooled) | 6,491 | 576 |
+| iter_plot_groups, 12 groups x 8 | 946 | — |
+| figure draw, 96 series, with legend | 1,394 | — |
+| figure draw, 96 series, no legend | 324 | — |
+
+**One 96-well click = 2,540 ms: 45% collect, 55% draw.**
+
+### Step 11 — the legend, diagnosed
+
+Draw with legend 1,394 ms vs without 324 ms ⇒ **the legend costs ~1,070 ms**, ~42% of the
+whole click. Invisible until the bench included the draw half.
+
+Decomposition of ONE panel (`scratchpad/legend_prof.py`):
+
+| | ms |
+|---|---|
+| draw, no legend | 65 |
+| draw, legend 8 entries | 146 |
+| draw, legend 32 entries | 232 |
+| draw, legend 96 entries | 404 |
+| draw, legend 96 entries, handles suppressed | 410 |
+
+**Cause: FreeType text measurement inside the legend's offsetbox packing.** Profile of the
+96-entry draw: `FT2Font.set_text` 99 ms / 700 calls, `Text._get_layout` 181 ms cumulative,
+`offsetbox._get_bbox_and_child_offsets` 326 ms cumulative. `_get_layout` runs ~6x per label
+because the VPacker/HPacker re-measures each entry while packing. Roughly 80 ms fixed +
+3.4 ms per entry. Suppressing the handles changes nothing (410 vs 404 ms), so it is not the
+glyph drawing — it is measuring the label strings.
+
+**It is 4x worse in the real app than in the bench.** `_finalize_line_axes` calls
+`_place_legend` on all four panels (`lineplot/controller.py:583-600`), so a 96-series
+redraw builds FOUR 96-entry legends.
+
+**Fix: cap the number of legend entries.** A 96-entry legend at fontsize 7 is unreadable —
+it overruns the axes and tells the user nothing. Draw the first N (N ~ 12-15) and append a
+single "+84 more" entry. This is a legibility fix that happens to be the largest perf win
+available. It is user-visible, so it needs a README note and the cap must be stated in the
+figure rather than silently applied (CLAUDE.md §7: a degraded artifact must announce
+itself). Export paths take the full legend or a higher cap — a saved figure is read at
+300 dpi where 96 entries can be legible.
+
+These absolute numbers run ~25-35% higher than the earlier session's measurements of the
+same operations (893 → 1,146 ms for the same 96-well collect). Container contention, not a
+regression — CLAUDE.md §2 documents the same 3x spread on the test lane. Ratios and call
+counts reproduce exactly (1,824 = 12 x 6 x 3 x 8 + 96), so the shape is sound; treat the
+ratios as the signal and re-measure everything in one sitting before/after.
+
+---
+
+## Decisions log (for user confirmation at the end)
+
+1. **Started early against pre-847 main, then reverted** — user overruled; zero commits lost.
+2. **Trigger uses a Bash merge check** (`git log | grep "#847"`) because triggered sessions
+   don't inherit MCP connector grants. Worked.
+3. **PR opens last, not first** — CI bills on `pull_request:`; feature-branch pushes are free.
+4. **Running the fast lane locally, contradicting CLAUDE.md §2** ("CI is the gate"). That
+   convention assumes CI runs per push, which it does not for feature branches. With no PR
+   open there is no gate at all, so local runs are mandatory here, not wasteful.
+5. **Version 9.0.6** — read off fresh main (9.0.5) rather than assumed.
+6. **Status doc lives in the scratchpad, not `_Docs/Markdowns/`** — CLAUDE.md §5 caps that
+   directory at three live documents and says status write-ups belong in git history / PRs.
+
+## Open risks
+
+- ~~Bench not verified to run~~ — verified, baseline captured.
+- The draw half (55%) is larger than the collect half (45%). Steps 1/2/9 address collect
+  only; without steps 8 and 11 the felt latency improves by less than half.
+- Step 2's writer list must come from an AST guard, not a grep (§7.5 #4).
+- Step 4 dropped on evidence; steps 3/7/10 deferred until the post-change numbers exist.

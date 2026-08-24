@@ -1,9 +1,9 @@
 # STATUS — well-selection / plotting performance
 
-**Updated:** 2026-08-24 06:00 UTC
+**Updated:** 2026-08-24 06:20 UTC
 **Branch:** `claude/well-selection-performance-7phaix`
 **Base:** `44c0d38` (main, includes PR #847)
-**Version:** main is at 9.0.5 → this PR bumps to **9.0.6** (not yet applied)
+**Version:** 9.0.5 on main → **9.0.6** applied
 **PR:** not opened yet — deliberately. CI bills on `pull_request:` only, so the PR opens
 last, after local fast lane + slow lane + adversarial review all pass.
 
@@ -32,8 +32,8 @@ last, after local fast lane + slow lane + adversarial review all pass.
 | 8 | CDF decimation | ✅ done | draw 5,219 → 2,413 ms on its own |
 | 9 | CDF collection residual | ✅ done | warm collect 98.6 → **4.8 ms** |
 | 11 | **Legend cap (NEW)** | ✅ done | draw 5,219 → 3,290 ms on its own; with Step 8, **1,498 ms** |
-| — | Re-measure, decide 3/7/10 | ⬜ | step 4 DROPPED |
-| — | ARCHITECTURE.md / README | ⬜ | |
+| — | Re-measure, decide 3/7/10 | ✅ done | see below; step 4 DROPPED |
+| — | ARCHITECTURE.md / README | ✅ done | orchestrator, stats_compute, DatasetState, data_loading rows rewritten; README legend/CDF note |
 | — | Local fast lane | ⬜ | required: no CI during dev |
 | — | Local slow lane | ⬜ | file or two per process |
 | — | Adversarial Opus review | ⬜ | against full local diff |
@@ -338,6 +338,38 @@ Routed through the memo: **672 → 96 calls, group collect 2,909 → 1,862 ms.**
 Worth naming as a method point: the wrapper-level probe said "96 distinct keys" and was
 telling the truth about the wrapper while 576 calls went around it. A count taken at the
 seam you changed does not describe the calls that never reach that seam.
+
+## Steps 3, 7, 10 — decided on the numbers
+
+- **Step 3 (merge the three `compute_rep_*` producers): NOT DONE, deliberately.** After the
+  memo their per-well work is already deduplicated (672 → 96 calls), so the remaining win is
+  a constant factor. And it cannot be done safely as specified: the two `n_above` producers
+  ignore the caller's threshold and recompute their own from `active_channel`, so a shared
+  producer must pick one — which changes exported numbers on the batch path. Flagged as a
+  follow-up bug rather than papered over here.
+- **Step 7 (cache the pooled group frames): NOT DONE.** `iter_plot_groups` is down to 452 ms
+  from 946 ms as a side effect of the other work, its only consumers are Distribution and
+  the exporter, and after Step 6 that cost is paid only while Distribution is visible.
+  Caching it would hold ~247 MB permanently — twice the row cache — to save ~450 ms on a
+  tab the user is looking at. Bad trade.
+- **Step 10 (off-thread collect): NOT NEEDED.** Collect is 273 ms cold and 3.6 ms
+  incremental. The remaining latency is matplotlib on the UI thread, which a collect worker
+  would not touch.
+
+## Final numbers
+
+| Action | Before | After | |
+|---|---|---|---|
+| line collect, 96 wells | 1,146 ms | 273 ms | 4.2x |
+| **line collect, 95 → 96 wells (one click)** | **1,150 ms** | **3.6 ms** | **319x** |
+| bar collect, 96 wells x 6 tps | 7,449 ms | 7.5 ms | 993x |
+| line collect, 12 groups x 8 | 22,054 ms | 1,862 ms | 11.8x |
+| bar collect, 12 groups x 8 | 6,491 ms | 5.6 ms | 1,159x |
+| `iter_plot_groups`, 12 groups x 8 | 946 ms | 452 ms | 2.1x |
+| figure draw, 96 series | 5,219 ms | 1,589 ms | 3.3x |
+| **one 96-well click, collect + draw** | **6,365 ms** | **1,862 ms** | **3.4x** |
+
+`aggregate_well` calls for a 12-group collect: **1,824 → 96** — one per well.
 
 ## Decisions log (for user confirmation at the end)
 

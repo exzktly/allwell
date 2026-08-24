@@ -1328,7 +1328,15 @@ show stay in the group.
 #### Well Labels
 
 Give wells / groups human-readable names; these show in every plot legend
-instead of the raw well token. **Add Prefix** and **Add Suffix** apply to the
+instead of the raw well token. On screen the Line Graphs legend names the first
+twelve traces and ends with a row saying how many it did not list — a legend
+with one entry per well of a full plate overruns the panel it is meant to
+annotate, and drawing it was slower than drawing all of the data. Every trace is
+still plotted, and a **saved or batch-exported figure names them all**: the cap
+is a screen setting, not a change to what the figure contains. The same applies
+to the cumulative-distribution panel, which is drawn from a sample of each
+well's cells on screen and from every cell in an export; the cell count printed
+beside each curve is always the well's real one. **Add Prefix** and **Add Suffix** apply to the
 wells currently selected on the plate beside the tab.
 
 Labels are stored with the dataset, and editing one on a load that holds only

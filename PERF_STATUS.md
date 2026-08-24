@@ -1,6 +1,6 @@
 # STATUS — well-selection / plotting performance
 
-**Updated:** 2026-08-24 04:30 UTC
+**Updated:** 2026-08-24 05:05 UTC
 **Branch:** `claude/well-selection-performance-7phaix`
 **Base:** `44c0d38` (main, includes PR #847)
 **Version:** main is at 9.0.5 → this PR bumps to **9.0.6** (not yet applied)
@@ -29,9 +29,9 @@ last, after local fast lane + slow lane + adversarial review all pass.
 | 2 | Per-well memo | ✅ done | 1,248 calls → **96 distinct keys**; one-click cost 1,150 → **3.4 ms** |
 | 5 | Group-visibility cache clear | ✅ done | 312 entries kept instead of discarded per toggle |
 | 6 | Visible-only redraw | ⬜ not started | extend `fc_dirty_scopes`, no parallel flag |
-| 8 | CDF decimation | ⬜ not started | at `ax_cdf.plot` only, `n` from full array |
+| 8 | CDF decimation | ✅ done | draw 5,219 → 2,413 ms on its own |
 | 9 | CDF collection residual | ⬜ not started | `_all_fluor_values_filtered` |
-| 11 | **Legend cost (NEW)** | ⬜ not started | diagnosed below; largest single cost in the click |
+| 11 | **Legend cap (NEW)** | ✅ done | draw 5,219 → 3,290 ms on its own; with Step 8, **1,498 ms** |
 | — | Re-measure, decide 3/7/10 | ⬜ | step 4 DROPPED |
 | — | ARCHITECTURE.md / README | ⬜ | |
 | — | Local fast lane | ⬜ | required: no CI during dev |
@@ -242,6 +242,50 @@ It was redundant anyway. The walk has exactly two callers, the QC and crop contr
 both call `invalidate_stats_cache` immediately afterwards, which empties the dict the memo
 lives in. The other route in is `get_rows`, projecting onto a frame it has just built, which
 cannot have a memoized aggregate. Removed, with the reasoning recorded in the roster.
+
+## Steps 8 + 11 — the draw half (landed)
+
+Both are budgets the **caller** sets, `None` for export. `render_line_series` *is* the
+export path (its own docstring says so, and `batch_export/base_panel` calls it), so
+"decimate in the renderer not the collector" was never a sufficient rule — the budget has
+to be a parameter.
+
+- **Step 8** — `_decimated()` thins the CDF to `SCREEN_CDF_POINTS` (512) at the
+  `ax_cdf.plot` call. `n` is read off the **full** array before thinning, so the legend
+  still says `n=21,600` rather than `n=512`. y comes from the original ranks, so the curve
+  still ends at 1.0.
+- **Step 11** — `_capped_legend()` names `SCREEN_LEGEND_ENTRIES` (12) traces and appends
+  `+84 more (not listed)`. The overflow is stated in the legend rather than left implicit:
+  a legend that silently stops at 12 of 96 looks exactly like a complete one.
+
+### The bench was measuring a figure nobody draws
+
+`run_draw` hand-rolled four `ax.plot` loops instead of calling `render_line_series`. It
+therefore could not see either budget, and it under-reported the real draw cost by 3.7x
+(1,394 ms vs 5,219 ms). Rewritten to drive the real renderer.
+
+| Draw, 96 series | ms |
+|---|---|
+| no budgets (= pre-change behaviour) | 5,219 |
+| legend cap only | 3,290 |
+| CDF budget only | 2,413 |
+| **both — what the tab now does** | **1,498** |
+
+With budgets unset the renderer does exactly what it did before, so the 5,219 ms row is a
+valid pre-change baseline without needing a worktree of main.
+
+### Whole click, end to end
+
+| | collect | draw | total |
+|---|---|---|---|
+| before | 1,146 ms | 5,219 ms | **6,365 ms** |
+| after | 285 ms | 1,498 ms | **1,783 ms** |
+
+**3.6x overall**; the incremental click (95 → 96 wells) is 1,150 ms → 3.4 ms.
+
+Noted, not changed: matplotlib warns that `loc="best"` is slow with many artists. With the
+cap at 12 entries it is cheap; on the uncapped export path it is not. Moving the legend is
+user-visible and belongs in its own change.
 
 ## Decisions log (for user confirmation at the end)
 

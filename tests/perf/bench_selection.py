@@ -304,48 +304,58 @@ def run_collects(ctx, repeats: int) -> dict:
 
 
 def run_draw(ctx, repeats: int) -> dict:
-    """Time building and painting the real figure for a 96-well selection.
+    """Time painting the real figure for a 96-well selection.
 
     This is the half a Qt-free bench cannot see, and it is most of what the user
     waits for. Agg rather than a Qt canvas: the same matplotlib work, without
-    needing a QApplication. The legend is measured separately because it is a
-    large share of the total and is a setting, not a fixed cost.
+    needing a QApplication.
+
+    It goes through ``render_line_series`` — the function the tab and the batch
+    exporter both call — rather than hand-rolling four ``ax.plot`` loops. A
+    hand-rolled figure measures a figure nobody draws: it cannot see the screen
+    budgets, so it would have reported no change from the two settings that
+    matter most here, and it would drift from the real renderer silently.
+
+    The budgeted and unbudgeted draws are timed separately because that is
+    exactly the difference between what the tab does and what an export does.
     """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    from well_viewer.features.lineplot.controller import collect_line_series
+    from well_viewer.features.lineplot.controller import (
+        SCREEN_CDF_POINTS,
+        SCREEN_LEGEND_ENTRIES,
+        LineAxes,
+        collect_line_series,
+        render_line_series,
+    )
+    from well_viewer.data.data_loading import _all_fluor_values_filtered
 
     solo_selection(ctx, WELLS)
-    series, _ = collect_line_series(ctx, threshold=app_threshold(ctx), use_sem=True)
+    series, _ = collect_line_series(
+        ctx, threshold=app_threshold(ctx), use_sem=True,
+        all_fluor_values_filtered=_all_fluor_values_filtered)
 
-    def _draw(*, legend: bool):
-        fig, axes = plt.subplots(2, 2, figsize=(12, 8))
-        panels = axes.ravel()
-        for s in series:
-            tps = [p.t for p in s.points]
-            for ax, values in zip(panels[:3], (
-                [p.mean for p in s.points],
-                [p.frac for p in s.points],
-                [p.n_above for p in s.points],
-            )):
-                ax.plot(tps, values, label=s.display)
-            if getattr(s, "cdf_vals", None) is not None and len(s.cdf_vals):
-                vals = np.sort(np.asarray(s.cdf_vals, dtype=float))
-                panels[3].plot(vals, np.linspace(0, 1, vals.size),
-                               label=f"{s.display} (n={vals.size:,})")
-        if legend:
-            for ax in panels:
-                ax.legend(fontsize=5, ncol=2)
+    def _draw(**budgets):
+        fig, axs = plt.subplots(4, 1, figsize=(6, 10), dpi=100)
+        render_line_series(
+            LineAxes(*axs), series, fov_active=False, fc_active=False,
+            threshold=0.0, legend_kw=dict(fontsize=7),
+            warn_color="#c00", muted_fg="#888", **budgets)
         fig.canvas.draw()
         plt.close(fig)
 
     out = {}
-    out["figure draw, 96 series, with legend"] = (
-        timed(lambda: _draw(legend=True), repeats)[0], 0)
-    out["figure draw, 96 series, no legend"] = (
-        timed(lambda: _draw(legend=False), repeats)[0], 0)
+    out["figure draw, 96 series (export: no budgets)"] = (
+        timed(lambda: _draw(), repeats)[0], 0)
+    out["figure draw, 96 series (screen budgets)"] = (
+        timed(lambda: _draw(cdf_point_budget=SCREEN_CDF_POINTS,
+                            legend_max=SCREEN_LEGEND_ENTRIES), repeats)[0], 0)
+    out["figure draw, 96 series (legend cap only)"] = (
+        timed(lambda: _draw(legend_max=SCREEN_LEGEND_ENTRIES), repeats)[0], 0)
+    out["figure draw, 96 series (cdf budget only)"] = (
+        timed(lambda: _draw(cdf_point_budget=SCREEN_CDF_POINTS), repeats)[0], 0)
     return out
 
 
@@ -379,7 +389,7 @@ def main() -> int:
         print(f"{name:<{width}}  {ms:9.1f}  {calls_txt:>14}")
 
     collect = results.get("line collect, 96 wells", (0, 0))[0]
-    draw = results.get("figure draw, 96 series, with legend", (0, 0))[0]
+    draw = results.get("figure draw, 96 series (screen budgets)", (0, 0))[0]
     if draw:
         total = collect + draw
         print()

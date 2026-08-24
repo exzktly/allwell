@@ -432,7 +432,31 @@ def _per_well_series(ctx, denoms, hidden_members, *, threshold, use_sem, val_col
     return out
 
 
-def _paint_series(axes: LineAxes, series, *, fov_active: bool) -> tuple[bool, bool, bool]:
+#: Vertices a CDF curve is worth drawing on screen. A sorted CDF is monotone,
+#: so between two adjacent pixels it can only rise; drawing a thousand vertices
+#: into a panel a few hundred pixels wide paints the same line more slowly.
+#: ``None`` means draw every point, which is what the export paths pass — a
+#: figure saved at 300 dpi is read at a resolution where the extra vertices can
+#: matter, and a silently thinned export is a degraded artifact.
+SCREEN_CDF_POINTS = 512
+
+
+def _decimated(values, budget: int | None):
+    """*values* thinned to at most *budget* points, endpoints kept.
+
+    Returns the indices as well, because the CDF's y-axis is a function of each
+    point's ORIGINAL rank among all the cells — thin the x values and compute y
+    from the thinned length and the curve stops being that well's CDF.
+    """
+    n = values.size
+    if budget is None or n <= budget:
+        return values, np.arange(1, n + 1, dtype=float)
+    idx = np.linspace(0, n - 1, budget).astype(int)
+    return values[idx], (idx + 1).astype(float)
+
+
+def _paint_series(axes: LineAxes, series, *, fov_active: bool,
+                  cdf_point_budget: int | None = None) -> tuple[bool, bool, bool]:
     """Draw one collected line series onto the mean / fraction / N / CDF axes
     (audit A5). Returns ``(painted_ts, painted_cdf, painted_n)`` — the caller
     ORs these across series to decide legend/empty handling. Pure side effect on
@@ -514,14 +538,15 @@ def _paint_series(axes: LineAxes, series, *, fov_active: bool) -> tuple[bool, bo
     cdf_vals = np.asarray(series.cdf_vals, dtype=float)
     if cdf_vals.size:
         fluor_s = np.sort(cdf_vals)
+        # ``n`` is the well's cell count and comes from the FULL array, before
+        # any thinning. Reading it off the drawn curve instead would put
+        # "n=512" in the legend of a well holding 21,600 cells — a wrong number
+        # in the one place a reader goes to find the right one.
         n = fluor_s.size
-        cdf_label = (
-            f"{series.display} (n={n:,})"
-            if series.kind == "repset"
-            else f"{series.display} (n={n:,})"
-        )
+        cdf_label = f"{series.display} (n={n:,})"
+        x, ranks = _decimated(fluor_s, cdf_point_budget)
         ax_cdf.plot(
-            fluor_s, np.arange(1, n + 1, dtype=float) / n,
+            x, ranks / n,
             color=color, lw=1.8, label=cdf_label, zorder=3,
         )
         any_cdf = True
@@ -536,6 +561,39 @@ def _has_labeled(ax) -> bool:
 
 _DEFAULT_LEGEND_VISIBLE = {"mean": True, "frac": True, "n": True, "cdf": True}
 
+#: How many traces a legend names before it stops naming them individually.
+#: A plate-wide selection puts one entry per well in every panel, and at 96
+#: entries the legend is both illegible — it overruns the axes it is supposed to
+#: annotate — and the single most expensive thing in the redraw: matplotlib
+#: measures every label through FreeType while packing the legend box, several
+#: times per label, which cost more than drawing all the data.
+#:
+#: ``None`` means name them all, which is what the export paths pass: a figure
+#: saved at 300 dpi has room for a legend the screen does not.
+SCREEN_LEGEND_ENTRIES = 12
+
+
+def _capped_legend(ax, legend_kw: dict, legend_max: int | None):
+    """``ax.legend`` naming at most *legend_max* traces, and saying so.
+
+    The overflow is announced in the legend itself rather than left implicit.
+    A legend that silently stops after twelve of ninety-six entries is a
+    degraded artifact that looks exactly like a complete one — the reader has
+    no way to tell that the trace they are looking for is drawn but unnamed.
+    The final entry says how many are not listed.
+    """
+    handles, labels = ax.get_legend_handles_labels()
+    if legend_max is None or len(handles) <= legend_max:
+        return ax.legend(**legend_kw)
+    from matplotlib.lines import Line2D
+
+    hidden = len(handles) - legend_max
+    handles = list(handles[:legend_max])
+    labels = list(labels[:legend_max])
+    handles.append(Line2D([], [], linestyle="none"))
+    labels.append(f"+{hidden:,} more (not listed)")
+    return ax.legend(handles, labels, **legend_kw)
+
 
 def _finalize_line_axes(
     axes: LineAxes, *, any_ts: bool, any_cdf: bool, any_n: bool,
@@ -546,6 +604,7 @@ def _finalize_line_axes(
     cdf_xrange: tuple[float, float] | None = None,
     empty_cdf_msg: str | None = None,
     draggable_legends: bool = False,
+    legend_max: int | None = None,
 ) -> None:
     """Post-paint axis finishing (audit A5): N-panel integer ticks, per-panel
     legends (honouring saved visibility), and the CDF threshold line / x-range /
@@ -564,7 +623,7 @@ def _finalize_line_axes(
         legend_visible = _DEFAULT_LEGEND_VISIBLE
 
     def _place_legend(ax, key: str):
-        leg = ax.legend(**legend_kw)
+        leg = _capped_legend(ax, legend_kw, legend_max)
         if draggable_legends:
             leg.set_draggable(True)
         leg.set_visible(legend_visible.get(key, True))
@@ -612,6 +671,8 @@ def render_line_series(
     cdf_xrange: tuple[float, float] | None = None,
     empty_cdf_msg: str | None = None,
     draggable_legends: bool = False,
+    cdf_point_budget: int | None = None,
+    legend_max: int | None = None,
 ) -> tuple[bool, bool, bool]:
     """Paint every :class:`LineSeries` onto *axes* then finalize the panels.
 
@@ -627,7 +688,8 @@ def render_line_series(
     """
     any_ts = any_cdf = any_n = False
     for series in series_list:
-        ts, cdf, n = _paint_series(axes, series, fov_active=fov_active)
+        ts, cdf, n = _paint_series(axes, series, fov_active=fov_active,
+                                   cdf_point_budget=cdf_point_budget)
         any_ts = any_ts or ts
         any_cdf = any_cdf or cdf
         any_n = any_n or n
@@ -653,7 +715,7 @@ def render_line_series(
         threshold=threshold, warn=warn_color, muted_fg=muted_fg,
         legend_visible=legend_visible, show_threshold_line=show_threshold_line,
         cdf_xrange=cdf_xrange, empty_cdf_msg=empty_cdf_msg,
-        draggable_legends=draggable_legends,
+        draggable_legends=draggable_legends, legend_max=legend_max,
     )
     return any_ts, any_cdf, any_n
 
@@ -880,6 +942,12 @@ def redraw_line_plots(
         cdf_xrange=_cdf_xrange,
         empty_cdf_msg=f"No {ctx.state.channel.active_channel.upper()} data found.",
         draggable_legends=True,
+        # Screen budgets. The export paths pass neither and so draw every CDF
+        # vertex and name every trace: a figure saved at 300 dpi is read at a
+        # resolution where both can matter, and a silently thinned export is a
+        # degraded artifact that looks like a complete one.
+        cdf_point_budget=SCREEN_CDF_POINTS,
+        legend_max=SCREEN_LEGEND_ENTRIES,
     )
 
     ctx.notify.set_status(line_status_text(

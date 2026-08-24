@@ -72,14 +72,16 @@ _GOVERNED = (
 #: single legitimate literal.
 _MARKER = "aw-image-exts-ok:"
 
-#: The one exception to the marker rule, because it names a file this change
-#: does not own. Delete it when that group's work lands.
+#: The one file-level exemption left, and it is the definition itself. The
+#: entry for `pipeline/auto_threshold.py` was a cross-branch placeholder —
+#: another group owned that file's sampler filter — and it is gone now that
+#: that group has landed and converted it. Its removal was not remembered:
+#: `test_the_file_level_exemptions_still_name_a_real_literal` went red on the
+#: merge and said so, which is the whole reason an allowlist here carries a
+#: liveness test beside it (CLAUDE.md §7.5 #10).
 _ALLOWED_FILES: dict[str, str] = {
     "util/image_exts.py":
         "the one definition itself",
-    "pipeline/auto_threshold.py":
-        "its sampler filter is converted by the group that owns that file; "
-        "remove this entry once that lands",
 }
 
 

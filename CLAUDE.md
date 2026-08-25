@@ -98,19 +98,52 @@ CI also tolerates a PySide6 teardown SIGSEGV by gating on the JUnit report
 instead of the exit code — a 139 after a green run is expected, a missing report
 is a real failure.
 
-**Run the suite only when asked.** Do not run `scripts/test.sh` — or install the
-test stack — as a reflex before each commit. Work lands as a series of commits on
-one PR, and a full lane per commit is wasted minutes. Commit, push, move on.
+**Local runs are the gate; CI is the receipt.** A CI run costs real money, and
+`ci.yml` fires `on: pull_request` (plus pushes to `main`). Read that literally,
+because it decides the whole cadence:
 
-Run it when: the user asks; you changed the test harness itself (`conftest.py`,
-`scripts/test.sh`, the pytest config, `requirements-dev.txt`); or CI went red and
-you are reproducing the failure. Otherwise **CI is the gate** — it runs on every
-push and supersedes its own in-flight runs, so a broken intermediate commit costs
-nothing but a red check you then fix.
+- Pushing to a session branch with **no PR open yet** starts nothing. It is free.
+- Pushing to a branch whose **PR is already open** starts a run — every time.
 
-This trades away local pre-commit signal on purpose. Say plainly what you did and
-did not verify — "not run locally, CI will tell us" is the honest line, and it is
-never a substitute for reporting a failure you already know about.
+So **commit and push as you go, and open the PR last.** Commits stay one per
+coherent change and go to the branch as soon as they are made; nothing is held
+back, and nothing is billed. Opening the PR at the end of the task is what
+triggers the one CI run that matters. §6 has the sequence.
+
+Once the PR is open the arithmetic inverts, so from that point batch by **round**
+rather than by commit: finish a round of work (a review comment, a follow-up fix,
+a second body of work stacking onto the branch), verify it locally, then push it
+as one push. Five commits in a round is fine; five pushes is five billed runs,
+most of them cancelled mid-flight by the next one — and a cancelled run still
+costs.
+
+That puts the verification burden on this machine, which is where it belongs
+anyway. Before the push that opens the PR — and before each later round's push —
+run what the change touches:
+
+- **The guard family, always.** `test_optional_returns_declared`,
+  `test_no_unbound_names`, `test_no_silent_except`, `test_safe_helpers_used_right`,
+  `test_architecture_contracts`, `test_layering`, `test_guardrails`,
+  `test_complexity_ratchet`, `test_monolith_budgets`, `test_stale_app_attrs`,
+  `test_doc_version_sync`, `test_ctx_app_burndown`. Thirty seconds for the lot,
+  and they are the checks most likely to fail on something a feature test would
+  never look at. Run them as a **set** — picking the four that feel relevant is
+  how an unannotated `-> X | None` reached CI.
+- **The test files covering what you changed**, plus the ones that import it.
+- **`ruff check .`**, which is a second of it.
+- **The full `scripts/test.sh` fast lane** when the change is broad, when it
+  touches the harness itself (`conftest.py`, `scripts/test.sh`, the pytest
+  config, `requirements-dev.txt`), or when you cannot enumerate what it could
+  break. ~4 minutes on a quiet container; cheaper than a billed CI round trip
+  and far cheaper than a red PR.
+
+Then open the PR and read that one CI run. **Do not wait on CI before the PR
+exists** — there is nothing to wait for, because no run has been started.
+
+Report what you ran, honestly and specifically. "The guard family and the four
+files this touches, green; the full lane not run" is the shape. Never let a
+failure you already know about go unmentioned because the summary reads better
+without it.
 
 ### Waiting on a long run
 
@@ -258,11 +291,21 @@ history lives in `git log`, `git blame`, and the PRs. When behaviour changes,
 beside the old one. `tests/test_doc_version_sync.py::test_no_introduced_in_version_markers`
 fails on any version reference outside the two sanctioned current-release sites.
 
-**Open a PR by default.** Finish a task by committing to the session branch,
-pushing with `git push -u origin <branch>`, and opening a pull request — don't
-wait to be asked. Follow the repo's PR template if one exists. Then keep the PR
-green: watch CI, fix what your diff broke, and resolve merge conflicts against
-the default branch yourself. Resolve them by editing the conflict markers —
+**Open a PR by default — at the end, not at the start.** Commit and push to the
+session branch as the work goes (`git push -u origin <branch>`); that costs
+nothing while no PR is open, and it means the work survives this container. Then,
+once the task is actually done: run the checks §2 lists, push the last of it, and
+open the pull request — don't wait to be asked. That is the one CI run, and the
+one result to read. Follow the repo's PR template if one exists.
+
+Opening the PR early, then pushing to it a dozen times, is the specific thing
+this ordering exists to prevent: each push bills a run, and each new push cancels
+the previous mid-flight, so most of what is paid for is never even reported.
+
+Then keep the PR green: read that run, fix what your diff broke, and resolve
+merge conflicts against the default branch yourself — batching each round of
+follow-up into a single push, per §2. Resolve conflicts by editing the conflict
+markers —
 `git checkout --ours/--theirs <file>` takes the *whole* file from one side, so on
 a doc that conflicts only on the version line it silently discards your prose
 edits elsewhere in it. If you do use it, re-apply and verify what it dropped.
@@ -519,8 +562,10 @@ Two ways that went wrong here, both worth naming:
   reporting that something is already there.
 - **Overcorrection costs as much as the original mistake.** After being burned by
   CI failures I instructed agents to run every test file matching a grep, which
-  pulled in slow-lane full-app files at minutes apiece. CI is the gate here (§2);
-  a broad local sweep buys a signal that was already coming for free.
+  pulled in **slow-lane full-app files** at minutes apiece. §2 asks for the guard
+  family, the files covering the change, and the fast lane when the change is
+  broad — a grep-wide sweep that drags in `loaded_app` tests is not a thorough
+  version of that, it is the wrong lane.
 
 **The habit underneath all of this:** when a user reports a symptom, the first
 move is to restate their observation as constraints — this number, this shape,

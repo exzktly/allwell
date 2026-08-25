@@ -186,3 +186,143 @@ def test_a_timepoint_that_no_longer_exists_falls_back_to_the_first(qtbot, monkey
     stats_update_tp_menu(ctx)
 
     assert cb.currentText() == "0"
+
+
+# ── the controls, pressed ───────────────────────────────────────────────────
+#
+# Everything above drives the two functions directly. That is one step past the
+# bug CLAUDE.md §7.6 describes: a control that exists is not a control that
+# works, and the Timepoint combo shipped for a long time with no handler at all
+# while a test of the handler would have passed. So this section builds the real
+# results panel and moves each real widget the way a click does.
+
+def _built_panel(qtbot, monkeypatch, timepoints=(0.0, 24.0, 48.0)):
+    """The real Statistics control band, over a stub state."""
+    import pandas as pd
+    from PySide6.QtWidgets import QWidget
+
+    import well_viewer.data.data_loading as _dl
+    from well_viewer.features.stats import controller as ctrl
+    from well_viewer.features.stats.tab_view import build_stats_results_panel
+
+    frame = pd.DataFrame({"timepoint_hours": list(timepoints)})
+    monkeypatch.setattr(ctrl, "get_rows", lambda _c, _l: frame, raising=False)
+    monkeypatch.setattr(_dl, "get_rows", lambda _c, _l: frame, raising=False)
+
+    class _Reg:
+        """Registers like the real one, and stamps the legacy ``app._stats_*``
+        names onto ``ctx.window`` the way production's registry does — several
+        stats controllers still read the widgets that way, and a registry that
+        skipped it would send them down a branch the app never takes."""
+
+        def __init__(self, window):
+            self._m = {}
+            self._window = window
+
+        def register(self, name, w):
+            self._m[name] = w
+            setattr(self._window, name, w)
+            return w
+
+        def get_or_none(self, name):
+            return self._m.get(name)
+
+        def get(self, name):
+            return self._m[name]
+
+        def has(self, name):
+            return name in self._m
+
+    # ``set_active_metric`` propagates the Property to global channel state and
+    # has its own tests; what is under test here is the invalidation that runs
+    # before it, so it is recorded rather than executed.
+    monkeypatch.setattr(ctrl, "set_active_metric", lambda _c, _m: None,
+                        raising=False)
+
+    stats = StatsState()
+    emitted: list[object] = []
+    window = SimpleNamespace()
+    state = SimpleNamespace(
+        stats=stats,
+        plot=SimpleNamespace(show_significance=True, use_fov_replicates=False),
+        channel=SimpleNamespace(active_channel="gfp",
+                                fluor_channels=["gfp", "cy5"],
+                                smfish_channels=[], ratio_metrics=[],
+                                shape_features=[], active_metric="mean_intensity"),
+        dataset=SimpleNamespace(well_paths={"A01": None}),
+    )
+    state.feature_slice = lambda name: getattr(state, name, None)
+    ctx = SimpleNamespace(
+        state=state,
+        widgets=_Reg(window),
+        bus=SimpleNamespace(plot_options_changed=SimpleNamespace(
+            emit=lambda s: emitted.append(s))),
+        # The Property combo reaches its handler through this namespace in
+        # production; pointing it at the real function is the difference between
+        # testing the wiring and testing a stub of it.
+        runtime=SimpleNamespace(stats=SimpleNamespace(
+            property_change=lambda: ctrl.on_stats_property_change(ctx),
+            run=lambda: None)),
+        notify=SimpleNamespace(set_status=lambda *_a, **_k: None),
+        window=window,
+    )
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    build_stats_results_panel(ctx, parent)
+    # Keep the parent alive on the ctx the test holds. Every combo below is a
+    # child of it, so letting it fall out of scope has Qt delete the C++ objects
+    # underneath the Python wrappers and every access raises — a fixture that
+    # destroys the control it means to press.
+    ctx._parent = parent
+    return ctx, emitted
+
+
+@pytest.mark.parametrize("widget,value", [
+    ("_stats_tp_cb", "48"),
+    ("_stats_channel_cb", "CY5"),
+    ("_stats_statistic_cb", "Fraction above threshold"),
+    ("_stats_test_cb", "Mann-Whitney U"),
+    ("_stats_property_cb", "Total Intensity"),
+])
+def test_moving_a_scope_control_invalidates_the_run(qtbot, monkeypatch,
+                                                    widget, value):
+    """Each control that decides what gets tested, driven as a user drives it.
+
+    The Timepoint case is the one that was broken — it had no handler — but the
+    others are here because a shared handler is exactly the kind of thing a
+    later edit disconnects one arm of, and none of them had a test that pressed
+    the widget.
+    """
+    ctx, _emitted = _built_panel(qtbot, monkeypatch)
+    cb = ctx.widgets.get(widget)
+    ctx.state.stats.pairwise = list(RUN)
+
+    cb.setCurrentText(value)
+
+    assert cb.currentText() == value, "the fixture did not move the control"
+    assert ctx.state.stats.pairwise == [], (
+        f"moving {widget} changed what would be tested but left the previous "
+        f"run in place to keep drawing brackets")
+
+
+def test_moving_a_scope_control_repaints_the_bar_plot(qtbot, monkeypatch):
+    ctx, emitted = _built_panel(qtbot, monkeypatch)
+    ctx.state.stats.pairwise = list(RUN)
+    ctx.widgets.get("_stats_tp_cb").setCurrentText("48")
+    assert emitted, "the brackets were invalidated but nothing repainted"
+
+
+def test_building_the_panel_does_not_invalidate_anything(qtbot, monkeypatch):
+    """The build seeds all five combos, which is a repopulate and not a change.
+
+    ``build_stats_results_panel`` ends by calling ``stats_update_tp_menu``; if
+    that counted as the user editing the test, simply arriving on the tab would
+    throw away a run.
+    """
+    ctx, emitted = _built_panel(qtbot, monkeypatch)
+    ctx.state.stats.pairwise = list(RUN)
+    from well_viewer.features.stats.controller import stats_update_tp_menu
+    emitted.clear()
+    stats_update_tp_menu(ctx)
+    assert ctx.state.stats.pairwise == list(RUN)
+    assert emitted == []

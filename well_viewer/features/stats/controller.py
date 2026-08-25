@@ -749,20 +749,34 @@ def stats_on_test_change(ctx) -> None:
     plot saying "no test has been run yet" instead, which is true.
     """
     _stats_write_result(ctx, "")
-    stats_state = ctx.state.feature_slice("stats")
-    had_results = bool(getattr(stats_state, "pairwise", None)) if stats_state else False
-    if stats_state is not None:
-        stats_state.pairwise = []
+    invalidate_stats_run(ctx)
     # Keep the stats Property combo in sync with the channel (ratio
     # channels collapse the metric set to "Calculated Val").
     try:
         refresh_stats_property_combo(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
-    # Repaint the Bar plot so its brackets go with the results they came from.
-    # Only when there were results and the toggle is on — otherwise this fires a
-    # redraw on every combo touch for no visible change. Bus-only, no feature
-    # import from this controller (G5/§5.9), same as ``run_stats``.
+
+
+def invalidate_stats_run(ctx) -> None:
+    """Drop the stored comparison and let the Bar plot know.
+
+    Split out of :func:`stats_on_test_change` so the Property combo can reach it
+    too. That combo does not route through the test-change handler — it goes to
+    :func:`on_stats_property_change`, which propagates the metric to global
+    state — and calling the handler from there would re-enter the Property combo
+    it is refreshing. What both need is this half: the previous run described a
+    different measure, so it is gone.
+
+    The repaint is conditional on there having *been* a run and on the
+    significance toggle being on, so an ordinary combo touch does not fire a bar
+    redraw for no visible change. Bus-only, no feature import from this
+    controller (G5/§5.9), the same way ``run_stats`` nudges the plot.
+    """
+    stats_state = ctx.state.feature_slice("stats")
+    had_results = bool(getattr(stats_state, "pairwise", None)) if stats_state else False
+    if stats_state is not None:
+        stats_state.pairwise = []
     if had_results and ctx.state.plot.show_significance:
         try:
             ctx.bus.plot_options_changed.emit(ctx.state.plot)
@@ -806,20 +820,20 @@ def stats_update_tp_menu(ctx) -> None:
         # timepoint back to the earliest one. The user then ran a test at a
         # timepoint they had not chosen, and the Bar plot's significance
         # brackets, gated on the tested timepoint matching the bars, drew
-        # nothing. Fall back to the first entry only when the previous choice is
-        # genuinely gone, and do it with signals blocked so a repopulate is not
-        # mistaken for the user changing the test.
+        # nothing.
+        #
+        # So fall back to the first entry only when the previous choice is
+        # genuinely gone — and when it is, let the change signal through. The
+        # tested timepoint really has moved at that point (a different dataset,
+        # a channel with different acquisitions), so the stored run describes
+        # something that is no longer on offer and ``stats_on_test_change``
+        # clearing it is the right outcome rather than a side effect to
+        # suppress. The preserving path above emits nothing, because
+        # ``set_combo_values`` blocks signals around its own repopulate.
         _prev = tp_cb.currentText() if hasattr(tp_cb, "currentText") else ""
         set_combo_values(tp_cb, tp_strs or ["—"])
         if _prev not in (tp_strs or ["—"]) and hasattr(tp_cb, "setCurrentText"):
-            _block = getattr(tp_cb, "blockSignals", None)
-            if callable(_block):
-                _block(True)
-            try:
-                tp_cb.setCurrentText(tp_strs[0] if tp_strs else "—")
-            finally:
-                if callable(_block):
-                    _block(False)
+            tp_cb.setCurrentText(tp_strs[0] if tp_strs else "—")
 
     # Channel dropdown -- list every measurement column so the user can
     # pick any value to compare. Mirrors the scatter-tab dropdown so the
@@ -1048,5 +1062,11 @@ def on_stats_property_change(ctx) -> None:
     metric = METRIC_LABEL_TO_KEY.get(str(cb.currentText() or ""), "mean_intensity")
     if metric == "smfish_count" and ctx.state.channel.active_channel not in ctx.state.channel.smfish_channels:
         metric = "mean_intensity"
+    # The Property decides what gets measured, so the previous run no longer
+    # describes the test on offer — same rule as every other control on the
+    # band, reached through the shared half rather than through
+    # ``stats_on_test_change``, which would re-enter this combo's own refresh.
+    _stats_write_result(ctx, "")
+    invalidate_stats_run(ctx)
     set_active_metric(ctx, metric)
 

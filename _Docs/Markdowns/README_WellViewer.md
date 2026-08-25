@@ -1829,10 +1829,17 @@ of individual cells. This is the default Plotting sub-tab.
     different channel or metric than the bars show, at a different timepoint,
     or when a compared group doesn't line up with any single bar.
 
+    **Violin**, **Beeswarm** and Properties → Statistics → **Show: All points**
+    draw per-cell points instead of bars, so there is no bar for a bracket to
+    sit on and none is drawn in those modes. "All points" is the one worth
+    knowing about: it is a sidebar setting rather than a visible mode switch, so
+    turning it on makes the asterisks disappear from what still looks like the
+    same plot.
+
     **Whenever they are withheld, the panel says why**, in small type in its
-    top-left corner — naming the tested channel and the drawn one, or the tested
-    timepoint and the drawn one, so you can see which of the two selectors to
-    move. The same sentence goes to the status line. The note is part of the
+    top-left corner — naming the tested channel and the drawn one, the tested
+    timepoint and the drawn one, or the per-cell mode that is on, so you can see
+    which control to move. The same sentence goes to the status line. The note is part of the
     figure, so a copied or exported plot carries it too: a plot with no
     asterisks never leaves you guessing whether a comparison was withheld or
     simply never run. With **Significance** off, nothing is drawn and nothing is

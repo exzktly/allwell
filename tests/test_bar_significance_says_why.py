@@ -180,3 +180,136 @@ def test_the_note_is_cleared_by_the_next_redraw():
     ax_mean.cla()
     assert not any(getattr(t, SIGNIFICANCE_NOTE_TAG, False) for t in ax_mean.texts)
     plt.close("all")
+
+
+# ── the seventh absence: the per-cell modes ─────────────────────────────────
+#
+# Violin, Beeswarm and Properties → Statistics → "Show: All points" all route
+# through ``draw_per_cell_bar_mode``, which returns before
+# ``draw_significance_brackets`` is ever called. None of them draws a bar, so
+# there is no bar top for a bracket and no bar for a compared group to resolve
+# to — withholding the comparison is right. Saying nothing about it was not, and
+# it is the one absence the renderer's own gates cannot report, because the
+# renderer is not reached.
+#
+# "Show: All points" is the one that reads as a bug: it is a sidebar setting
+# rather than a visible mode switch, so the asterisks vanish from what still
+# looks like the same plot.
+
+def _per_cell_redraw(qtbot, monkeypatch, **bar_flags):
+    """Run the real ``redraw_bars`` far enough to take the per-cell branch."""
+    from types import SimpleNamespace as NS
+
+    from well_viewer.features.barplot import renderer as r
+
+    from well_viewer.core.plot_state import PlotState
+
+    fig, (ax_mean, ax_frac, ax_n) = plt.subplots(3, 1)
+    app = _app(list(MATCHING_RUN), active_val_col="gfp_mean_intensity")
+    # The real ``PlotState``: ``redraw_bars`` runs the fold-change title
+    # machinery on its way to the branch, and a namespace holding only the
+    # fields this test cares about sends it down a path the app never takes.
+    plot = PlotState()
+    app._app_state.plot = plot
+    plot.show_significance = True
+    app._app_state.bar = NS(violin=bar_flags.get("violin", False),
+                            swarm=bar_flags.get("swarm", False))
+    plot.bar_show_mode = bar_flags.get("show_mode", "mean_spread")
+    status: list[str] = []
+    app._ctx.notify = NS(set_status=lambda m, *a, **k: status.append(m))
+
+    # Everything ``redraw_bars`` needs before the branch, stubbed to the
+    # shortest path that still reaches it. The branch itself is real.
+    monkeypatch.setattr(r, "draw_per_cell_bar_mode", lambda *_a, **_k: True)
+    monkeypatch.setattr(r, "apply_export_style_to_current",
+                        lambda *_a, **_k: None)
+    monkeypatch.setattr(r, "resolve_bar_timepoints", lambda _c: [(24.0, "24")])
+    monkeypatch.setattr(r, "refresh_bar_layout_btn_state", lambda _c: None)
+    monkeypatch.setattr(r, "on_cutoff_for_column",
+                        lambda *_a, **_k: 0.0)
+    monkeypatch.setattr(r, "active_replicate_sets", lambda *_a, **_k: [])
+    # Deferred import inside ``redraw_bars``, so it is patched at its home.
+    import well_viewer.core.selection_controller as _sel
+    monkeypatch.setattr(_sel, "has_plottable_selection", lambda _c: True)
+    plot.use_sem = True
+    plot.use_fov_replicates = False
+    app._app_state.channel.active_channel = "gfp"
+    app._app_state.channel.active_metric = "mean_intensity"
+    app._app_state.channel.threshold = 0.0
+    app._app_state.dataset.well_paths = {"A01": None}
+    app._ax_bar_mean, app._ax_bar_frac, app._ax_bar_n = ax_mean, ax_frac, ax_n
+    app._ctx.widgets = _HasW(app)
+    app._ctx.runtime.barplot.fig = fig
+
+    r.redraw_bars(app._ctx)
+
+    notes = [t.get_text() for a in (ax_mean, ax_frac, ax_n) for t in a.texts
+             if getattr(t, SIGNIFICANCE_NOTE_TAG, False)]
+    plt.close("all")
+    return notes, status
+
+
+class _HasW:
+    """``ctx.widgets`` with the ``has``/``get_or_none`` pair ``redraw_bars``
+    uses, over the fake app's bare attributes."""
+
+    def __init__(self, app):
+        self._app = app
+
+    def has(self, name):
+        return getattr(self._app, name, None) is not None
+
+    def get_or_none(self, name):
+        return getattr(self._app, name, None)
+
+
+@pytest.mark.parametrize("flags,expected", [
+    ({"violin": True}, "Violin"),
+    ({"swarm": True}, "Beeswarm"),
+    ({"show_mode": "all_pts"}, "Show: All points"),
+])
+def test_a_per_cell_mode_says_the_brackets_cannot_be_drawn(qtbot, monkeypatch,
+                                                           flags, expected):
+    notes, status = _per_cell_redraw(qtbot, monkeypatch, **flags)
+    assert len(notes) == 1, "the per-cell branch left no explanation"
+    assert expected in notes[0], (
+        f"the note has to name the control that is on, not 'per-cell mode' — "
+        f"three separate switches reach it. Got: {notes[0]!r}")
+    assert status and status[0].startswith("Significance: ")
+
+
+def test_a_per_cell_mode_says_nothing_when_the_toggle_is_off(qtbot, monkeypatch):
+    from types import SimpleNamespace as NS
+    from well_viewer.features.barplot import renderer as r
+
+    from well_viewer.core.plot_state import PlotState
+
+    fig, (ax_mean, ax_frac, ax_n) = plt.subplots(3, 1)
+    app = _app(list(MATCHING_RUN), active_val_col="gfp_mean_intensity")
+    app._app_state.plot = PlotState()
+    app._app_state.plot.show_significance = False
+    app._app_state.bar = NS(violin=True, swarm=False)
+    app._app_state.channel.active_channel = "gfp"
+    app._app_state.channel.active_metric = "mean_intensity"
+    app._app_state.channel.threshold = 0.0
+    app._app_state.dataset.well_paths = {"A01": None}
+    status: list[str] = []
+    app._ctx.notify = NS(set_status=lambda m, *a, **k: status.append(m))
+    monkeypatch.setattr(r, "draw_per_cell_bar_mode", lambda *_a, **_k: True)
+    monkeypatch.setattr(r, "apply_export_style_to_current", lambda *_a, **_k: None)
+    monkeypatch.setattr(r, "resolve_bar_timepoints", lambda _c: [(24.0, "24")])
+    monkeypatch.setattr(r, "refresh_bar_layout_btn_state", lambda _c: None)
+    monkeypatch.setattr(r, "on_cutoff_for_column", lambda *_a, **_k: 0.0)
+    monkeypatch.setattr(r, "active_replicate_sets", lambda *_a, **_k: [])
+    import well_viewer.core.selection_controller as _sel
+    monkeypatch.setattr(_sel, "has_plottable_selection", lambda _c: True)
+    app._ax_bar_mean, app._ax_bar_frac, app._ax_bar_n = ax_mean, ax_frac, ax_n
+    app._ctx.widgets = _HasW(app)
+    app._ctx.runtime.barplot.fig = fig
+
+    r.redraw_bars(app._ctx)
+
+    notes = [t for a in (ax_mean, ax_frac, ax_n) for t in a.texts
+             if getattr(t, SIGNIFICANCE_NOTE_TAG, False)]
+    plt.close("all")
+    assert notes == [] and status == []

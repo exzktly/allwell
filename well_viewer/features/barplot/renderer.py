@@ -526,6 +526,21 @@ def _val_col_label(col: str) -> str:
     return parts[2] if parts else col
 
 
+def _per_cell_mode_name(ctx) -> str:
+    """Which of the three per-cell modes is on, named as the control names it.
+
+    The note has to point at a control the user can find. "Per-cell mode" would
+    not: three separate switches reach it, two on the Bar tab's Display popover
+    and one in the Properties sidebar, and the sidebar one is the reason this
+    reads as a bug rather than a mode.
+    """
+    if getattr(ctx.state.bar, "violin", False):
+        return "Violin"
+    if getattr(ctx.state.bar, "swarm", False):
+        return "Beeswarm"
+    return "Show: All points"
+
+
 def _no_significance(ctx, ax, reason: str) -> None:
     """Say on the figure why the Significance toggle produced no brackets.
 
@@ -980,6 +995,24 @@ def redraw_bars(ctx) -> None:
         tp_str=tp_str_combined,
         threshold=threshold,
     ):
+        # The seventh way the brackets go missing, and the only one
+        # ``draw_significance_brackets`` cannot report on, because the per-cell
+        # path returns here without ever calling it. Violin, Beeswarm and
+        # Properties → Statistics → "Show: All points" all route through
+        # ``draw_per_cell_bar_mode``, and none of them draws a bar: there is no
+        # bar top for a bracket to sit on and no bar for a compared group to
+        # resolve to. So the comparison is withheld — correctly — and, like
+        # every other withheld comparison, it says so rather than leaving the
+        # user to notice the asterisks are gone.
+        #
+        # "All points" is the one that reads as a bug rather than a mode: it is
+        # a Properties-sidebar setting rather than a visible mode switch, so the
+        # asterisks disappear from what still looks like the same plot.
+        if getattr(ctx.state.plot, "show_significance", False):
+            _no_significance(
+                ctx, ax_mean,
+                f"{_per_cell_mode_name(ctx)} draws per-cell points rather than "
+                f"bars, and the brackets need bars to sit on.")
         apply_export_style_to_current(ctx, ctx.runtime.barplot.fig, getattr(ctx.runtime.barplot, "canvas", None))
         return
     draw_grouped_bar_mode(

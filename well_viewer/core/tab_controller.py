@@ -86,6 +86,40 @@ def _section_plates(frame) -> list:
         return []
 
 
+def _size_sections_to_their_plates(ctx, visible_frames) -> None:
+    """Give the rail's vertical slack to the section that still has a picker.
+
+    Hiding a child does not release its parent's share of a layout. The sidebar
+    adds each section with a stretch of 1, so a frame whose plate has just been
+    hidden went on claiming the same height and drew it as a hole: measured, the
+    main frame held 303px of empty rail above the Statistics picker, and the
+    picker itself — squeezed into what was left — came out 152px tall against
+    the 233px it has when it is the focused section's.
+
+    Sizing a plate-less section to its own content closes both. The picker keeps
+    its full height whichever pane owns it, and the rail no longer has a void in
+    it. What remains is a small step — the residual height of the other
+    section's own controls, which still sit above — and that is honest layout
+    rather than empty space.
+
+    ``activate()`` is not optional: a stretch factor set after the layout has
+    run changes nothing until the layout is asked again, which is how the first
+    attempt at this measured no difference at all.
+    """
+    main = ctx.widgets.get_or_none("_sidebar_main_frame")
+    parent = main.parentWidget() if main is not None else None
+    layout = parent.layout() if parent is not None else None
+    if layout is None:
+        return
+    try:
+        for frame in visible_frames:
+            has_plate = any(not p.isHidden() for p in _section_plates(frame))
+            layout.setStretchFactor(frame, 1 if has_plate else 0)
+        layout.activate()
+    except (AttributeError, RuntimeError):
+        swallowed("tab_controller: could not re-balance the sidebar sections")
+
+
 def on_tab_change(ctx, _e=None) -> None:
     """Show/hide the sidebar and refresh whichever tab is now active.
 
@@ -207,6 +241,7 @@ def on_tab_change(ctx, _e=None) -> None:
             continue
         for _plate in _section_plates(_frame):
             _plate.setVisible(False)
+    _size_sections_to_their_plates(ctx, _focused_frames)
 
     run_tab_switch_smoke_checks(ctx, prev_tab, tab, prev_selected)
     ctx.runtime.tab.last_tab_name = tab

@@ -163,6 +163,71 @@ def test_a_single_pane_is_untouched(loaded_app):
     assert len(_shown_plates(app)) == 1
 
 
+def _frame_h(app, name):
+    frame = app._ctx.widgets.get_or_none(name)
+    return None if frame is None or frame.isHidden() else frame.height()
+
+
+def _picker_height(app):
+    for name in _SECTION_FRAMES:
+        frame = app._ctx.widgets.get_or_none(name)
+        if frame is None or frame.isHidden():
+            continue
+        for plate in _plates_in(frame):
+            if not plate.isHidden():
+                return plate.height()
+    return None
+
+
+@pytest.mark.slow
+def test_a_section_without_a_picker_does_not_hold_the_rail_open(loaded_app):
+    """Hiding a plate does not release its frame's share of the layout.
+
+    Each section is added to the rail with a stretch of 1, so the frame whose
+    plate had just been hidden went on claiming the same height and drew it as a
+    hole. Measured on a 1600x1000 window: 303px of empty rail above the
+    Statistics picker, which is what "a large blank space" was.
+    """
+    app = loaded_app
+    app.resize(1600, 1000)
+    app.show()          # geometry is only real once the layout has been shown
+    app._notebook.setCurrentByName("Plotting")
+    _split(app, "Plotting", "Statistics")
+    from well_viewer.core.split_view import focus_split
+    focus_split(app._ctx, "Statistics")
+
+    empty = _frame_h(app, "_sidebar_main_frame")
+    assert empty is not None
+    assert empty < 150, (
+        f"the plate-less section is {empty}px tall — it is holding the rail "
+        f"open around a picker it no longer has")
+
+
+@pytest.mark.slow
+def test_the_picker_keeps_its_size_whichever_pane_owns_it(loaded_app):
+    """The void's other half: squeezed into what the empty frame left, the
+    picker came out 152px tall against the 233px it has when it is the focused
+    section's. A picker that changes size as you click between panes reads as
+    two different controls."""
+    from well_viewer.core.split_view import focus_split
+
+    app = loaded_app
+    app.resize(1600, 1000)
+    app.show()          # geometry is only real once the layout has been shown
+    app._notebook.setCurrentByName("Plotting")
+    _split(app, "Plotting", "Statistics")
+
+    focus_split(app._ctx, "Plotting")
+    plots_h = _picker_height(app)
+    focus_split(app._ctx, "Statistics")
+    stats_h = _picker_height(app)
+
+    assert plots_h and stats_h
+    assert abs(plots_h - stats_h) <= 8, (
+        f"the picker is {plots_h}px under one pane and {stats_h}px under the "
+        f"other")
+
+
 @pytest.mark.slow
 def test_two_plot_panes_share_one_picker(loaded_app):
     """Both panes' sections are the same frame here, so there is one plate and

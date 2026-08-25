@@ -1060,6 +1060,8 @@ un-nested page's body starts.
 The band is pinned to `tab_bar_height()` and carries no vertical padding of its
 own, and holds nothing but the mode bar and the current page's tabs.
 
+**Split View shows both panes' sidebar sections.** `on_tab_change` hides every per-tab sidebar frame and then runs the `on_activate` hook of the tab `current_centre_tab` reports — which, while split, is the *focused* leaf. So the other pane's frame was hidden by the first half and never shown by the second: Plots beside Statistics left the Statistics group-definition editor invisible until the user clicked that pane, on a panel they were already looking at the tab for. The handler now runs the hook for every visible leaf, the unfocused one(s) first so that anything two hooks both write — the plate's mode, the rep-colour map — settles on the focused pane's terms. Only the hook runs for an unfocused pane: the descriptor-less fallback ends in a full `redraw_app`, which belongs to the tab being switched *to*, and the other pane's redraw is already the scope coalescer's job. The `_heatmap_sidebar_frame` follows the same rule, but `sync_heatmap_well_drag_mode` deliberately does not — drag mode changes what a plate *click* does and the plate is shared, so following an unfocused Heat Map would rewire the clicks of the pane being worked in. `tests/test_split_sidebar_shows_both_panes.py` pins both halves.
+
 **Split View borrows the bars.** With two pages side by side there is one band
 and two strips to draw, so each pane mounts its own page's bar in a header of
 its own and the band shows its blank page — `lend_page_tab_bar` /

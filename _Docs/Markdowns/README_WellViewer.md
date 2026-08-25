@@ -1503,8 +1503,12 @@ the next.
   is edited.
 - **Split View** — the **Split** toggle in the top bar puts two *different*
   centre tabs side-by-side, both live (e.g. Scatter Plot beside Cell Browser).
-  Click into a pane to focus it — the focused pane drives the sidebar and the
-  well picker, and both panes refresh on a selection or channel change. Each
+  Click into a pane to focus it. **Both panes' sidebar sections are on screen
+  at once** — split Plots against Statistics and the Statistics group-definition
+  editor sits under the well picker straight away, without focusing that pane
+  first — and both panes refresh on a selection or channel change. Focus still
+  decides how the shared well picker itself behaves, since a plate click means
+  different things to different pages and only one of them can win. Each
   pane keeps its own row of page tabs at its top, so a page's sub-tabs stay
   where its content is and either side can be switched without focusing it
   first; the shared row across the top of the window is empty while you are

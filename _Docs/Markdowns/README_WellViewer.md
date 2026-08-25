@@ -1845,6 +1845,12 @@ of individual cells. This is the default Plotting sub-tab.
     simply never run. With **Significance** off, nothing is drawn and nothing is
     said — that absence is the one you asked for.
 
+    The brackets stack above the tallest bar, and they respect an axis limit
+    you set for that panel: if you have typed a **Y max** under
+    Properties → Axes, they are fitted underneath it rather than drawn above it
+    where the limit would hide them. If the limit leaves no room above the bars
+    at all, the panel says so instead of annotating nothing.
+
     Changing any of the Statistics tab's test settings — **Channel**,
     **Property**, **Statistic**, **Test** or **Timepoint** — clears the last
     run, and the brackets go with it. That keeps the two halves honest: an empty

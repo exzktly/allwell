@@ -526,6 +526,36 @@ def _val_col_label(col: str) -> str:
     return parts[2] if parts else col
 
 
+def _user_y_ceiling(ctx, ax):
+    """The user's own upper y-limit for *ax*, or ``None`` when they set none.
+
+    Read through the same per-panel lookup ``apply_export_style_prefs`` uses —
+    the figure's ``axis_buckets`` entry for this panel first, then the flat
+    pref — so the number this function honours is the number that pass will
+    apply afterwards. Reading only the flat pref would have been right for a
+    single-axis figure and wrong for the Value / Fraction / Events stack, which
+    is the figure this actually draws on.
+
+    ``None`` means "no override", which is not the same as a limit of zero; a
+    caller that conflated them would refuse to draw on a panel the user had
+    simply left alone.
+    """
+    fig = getattr(ax, "figure", None)
+    if fig is None:
+        return None
+    try:
+        from well_viewer.core.plot_style import axis_scoped_value, figure_prefs
+        prefs = figure_prefs(ctx, fig)
+        idx = list(fig.axes).index(ax) + 1
+        raw = axis_scoped_value(prefs, idx, "y_lim_max", None)
+        if raw in (None, ""):
+            return None
+        return float(raw)
+    except Exception:
+        swallowed("barplot: could not read the panel's user y-limit")
+        return None
+
+
 def _per_cell_mode_name(ctx) -> str:
     """Which of the three per-cell modes is on, named as the control names it.
 
@@ -762,9 +792,36 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
     # Shortest spans lowest so nested brackets stack cleanly.
     matched.sort(key=lambda m: abs(x_by_key[m[1]] - x_by_key[m[2]]))
     y0, y1 = ax.get_ylim()
-    span = (y1 - y0) or 1.0
-    step = span * 0.08
     base = max(top_by_key.values())
+    # Where the brackets are allowed to reach. Growing the axis to fit them
+    # works only while nothing overrules the growth — and something does:
+    # ``apply_export_style_to_current`` runs at the end of ``redraw_bars`` and
+    # re-applies the user's own axis limits **last**. A limit set on this panel
+    # therefore clipped the brackets straight back off the top, and because
+    # ``clip_on`` is False they were not clipped so much as drawn outside the
+    # panel entirely. Nothing had gone wrong by this function's own reckoning —
+    # every gate passed, the artists exist — so nothing said anything, and the
+    # asterisks simply were not there. That is the one shape of this bug the
+    # notes above cannot describe, because it is not a decline.
+    #
+    # So the ceiling is read here instead, and the brackets are stacked to fit
+    # under it. The user's limit wins: it is an explicit statement about the
+    # panel, and quietly overriding it to make room would trade one silent
+    # substitution for another.
+    ceiling = _user_y_ceiling(ctx, ax)
+    if ceiling is None:
+        step = ((y1 - y0) or 1.0) * 0.08
+        top = base + step * (len(matched) + 1)
+    else:
+        headroom = float(ceiling) - base
+        if headroom <= 0:
+            _no_significance(
+                ctx, ax,
+                "the y-limit set for this panel leaves no room above the bars "
+                "for the brackets — raise it or clear it in Properties → Axes.")
+            return
+        step = headroom / (len(matched) + 1)
+        top = float(ceiling)
     fg = tokens_for(ax)[1]
     for level, (p_show, ka, kb) in enumerate(matched):
         xa, xb = x_by_key[ka], x_by_key[kb]
@@ -784,7 +841,10 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
                 ha="center", va="bottom", fontsize=8, color=fg,
                 zorder=6, clip_on=False)
     # Grow the y-limit so the top bracket clears the panel (keeps the floor).
-    ax.set_ylim(y0, base + step * (len(matched) + 1))
+    # When the user set their own ceiling this is already that number, so the
+    # export-style pass re-applying it a moment later is a no-op rather than a
+    # clip.
+    ax.set_ylim(y0, top)
 
 
 def draw_grouped_bar_mode(

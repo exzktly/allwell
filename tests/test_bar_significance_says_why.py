@@ -313,3 +313,101 @@ def test_a_per_cell_mode_says_nothing_when_the_toggle_is_off(qtbot, monkeypatch)
              if getattr(t, SIGNIFICANCE_NOTE_TAG, False)]
     plt.close("all")
     assert notes == [] and status == []
+
+
+# ── brackets drawn, then clipped out of sight ───────────────────────────────
+#
+# The eighth way the asterisks go missing, and the only one that is not a
+# decline: every gate passes, the artists are created, and they are then put
+# where nobody can see them.
+#
+# ``draw_significance_brackets`` grew the panel's y-limit to fit the brackets it
+# had just stacked above the bars. ``apply_export_style_to_current`` runs at the
+# end of ``redraw_bars`` and re-applies the user's own axis limits **last**, so a
+# y-limit set on that panel clipped the growth straight back off — and because
+# the brackets are drawn with ``clip_on=False`` they were not clipped so much as
+# drawn outside the panel altogether. No gate had fired, so no note could
+# describe it; the asterisks were simply not there.
+#
+# The fix reads the ceiling before placing them and stacks to fit under it. The
+# user's limit wins: it is an explicit statement about the panel, and quietly
+# overriding it to make room would trade one silent substitution for another.
+
+def _with_user_ylimit(ymax, *, bars=None):
+    """Draw the brackets with *ymax* set the way the Properties sidebar sets it.
+
+    Axis limits are **figure**-scoped, so this writes through ``figure_prefs``
+    rather than the flat global dict. A probe that wrote the global one measured
+    nothing: the renderer read a limit that was not there, took the no-ceiling
+    path, and the bug reproduced under a test that claimed to be exercising the
+    fix.
+    """
+    from well_viewer.core.export_prefs_state import ExportPrefsState
+    from well_viewer.core.plot_style import apply_export_style_prefs, figure_prefs
+
+    fig, (ax_mean, ax_frac) = plt.subplots(2, 1)
+    ax_mean.set_ylim(0, 10)
+    ax_frac.set_ylim(0, 1)
+    app = _app(list(MATCHING_RUN), active_val_col="gfp_mean_intensity")
+    app._app_state.export_prefs = ExportPrefsState()
+    status: list[str] = []
+    app._ctx.notify = SimpleNamespace(set_status=lambda m, *a, **k: status.append(m))
+
+    prefs = figure_prefs(app._ctx, fig)
+    if ymax is not None:
+        prefs["y_lim_max"] = str(ymax)
+
+    draw_significance_brackets(app._ctx, bars or _bars(), ax_mean=ax_mean,
+                               ax_frac=ax_frac, target_ts=[24.0])
+    # The pass that used to undo the growth. Running it is the point.
+    apply_export_style_prefs(fig, prefs)
+
+    stars = [t for t in ax_mean.texts if t.get_text() in ("*", "**", "***", "ns")]
+    notes = [t.get_text() for t in ax_mean.texts
+             if getattr(t, SIGNIFICANCE_NOTE_TAG, False)]
+    hi = ax_mean.get_ylim()[1]
+    off = [t.get_position()[1] for t in stars if t.get_position()[1] > hi]
+    plt.close("all")
+    return SimpleNamespace(stars=stars, notes=notes, off_panel=off,
+                           ylim_top=hi, status=status)
+
+
+@pytest.mark.parametrize("ymax", [7.0, 8.0, 12.0, 20.0])
+def test_a_user_y_limit_no_longer_pushes_the_brackets_off_the_panel(ymax):
+    out = _with_user_ylimit(ymax)
+    assert out.stars, f"no bracket drawn at y_lim_max={ymax}"
+    assert not out.off_panel, (
+        f"y_lim_max={ymax} left {len(out.off_panel)} asterisk(s) above the "
+        f"visible top ({out.ylim_top}) — drawn, and invisible")
+    assert out.notes == []
+
+
+def test_the_user_s_own_ceiling_is_not_overridden_to_make_room():
+    """Growing past the limit would make the brackets visible by ignoring an
+    explicit instruction — one silent substitution traded for another."""
+    out = _with_user_ylimit(7.0)
+    assert out.ylim_top == pytest.approx(7.0)
+
+
+def test_no_user_limit_still_grows_the_panel_to_fit():
+    out = _with_user_ylimit(None)
+    assert out.stars and not out.off_panel
+    assert out.ylim_top > 6.5, "the auto-grow path must still make room"
+
+
+def test_a_ceiling_with_no_room_above_the_bars_says_so():
+    """The honest end of the same rule. The tallest bar plus its spread is 6.5,
+    so a ceiling of 6.5 leaves nothing to stack into — and the user is told
+    which control to move rather than left with a bar plot that quietly stopped
+    annotating itself."""
+    out = _with_user_ylimit(6.5)
+    assert out.stars == []
+    assert len(out.notes) == 1
+    assert "y-limit" in out.notes[0]
+    assert out.status and out.status[0].startswith("Significance: ")
+
+
+def test_a_ceiling_below_the_bars_says_so_too():
+    out = _with_user_ylimit(5.0)
+    assert out.stars == []
+    assert len(out.notes) == 1 and "y-limit" in out.notes[0]

@@ -103,22 +103,25 @@ def _cases():
 
 
 @pytest.mark.parametrize("case", sorted(_cases()))
-def test_every_declined_draw_reaches_the_status_line(case):
-    stars, _notes, status = _draw(**_cases()[case])
-    assert stars == []
-    assert status and status[0].startswith("Significance: "), (
-        f"'{case}' drew nothing and said nothing")
-
-
-@pytest.mark.parametrize("case", sorted(_cases()))
 def test_every_declined_draw_is_written_on_the_panel(case):
-    """The status line is transient and is not part of an exported figure. A
-    reader who opens a copied PNG with no asterisks on it should still be able
-    to tell that a comparison was withheld, and why."""
+    """A reader who opens a copied PNG with no asterisks on it should still be
+    able to tell that a comparison was withheld, and why."""
     stars, notes, _status = _draw(**_cases()[case])
     assert stars == []
     assert len(notes) == 1, f"'{case}' left no explanation on the panel"
     assert notes[0].startswith("Significance: ")
+
+
+@pytest.mark.parametrize("case", sorted(_cases()))
+def test_no_declined_draw_writes_the_persistent_status_line(case):
+    """``set_status`` is the *persistent* bar, not a transient one. A reason
+    written there survives the condition that produced it: run a test and the
+    panel note goes with the redraw while the status bar keeps insisting no
+    comparison is stored, contradicting the plot above it with no redraw able to
+    correct it. The figure is the only place this belongs."""
+    _stars, _notes, status = _draw(**_cases()[case])
+    assert status == [], (
+        f"'{case}' left a message on the persistent status bar: {status!r}")
 
 
 def test_the_note_names_both_channels_so_the_mismatch_is_actionable():
@@ -275,7 +278,7 @@ def test_a_per_cell_mode_says_the_brackets_cannot_be_drawn(qtbot, monkeypatch,
     assert expected in notes[0], (
         f"the note has to name the control that is on, not 'per-cell mode' — "
         f"three separate switches reach it. Got: {notes[0]!r}")
-    assert status and status[0].startswith("Significance: ")
+    assert status == [], "the per-cell note must not reach the persistent status bar"
 
 
 def test_a_per_cell_mode_says_nothing_when_the_toggle_is_off(qtbot, monkeypatch):
@@ -404,7 +407,7 @@ def test_a_ceiling_with_no_room_above_the_bars_says_so():
     assert out.stars == []
     assert len(out.notes) == 1
     assert "y-limit" in out.notes[0]
-    assert out.status and out.status[0].startswith("Significance: ")
+    assert out.status == []
 
 
 def test_a_ceiling_below_the_bars_says_so_too():
@@ -434,4 +437,6 @@ def test_the_empty_store_note_does_not_deny_that_a_test_ran():
     assert "has been run" not in note, (
         f"the note asserts something it cannot know: {note!r}")
     assert "Statistics" in note and "results panel" in note
-    assert status[0] == f"Significance: {note.split('Significance: ', 1)[1]}"
+    assert status == [], (
+        "this is the exact message that outlived its condition on the "
+        "persistent status bar — it belongs on the figure only")

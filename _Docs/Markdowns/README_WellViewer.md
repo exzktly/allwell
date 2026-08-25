@@ -1506,9 +1506,16 @@ the next.
   Click into a pane to focus it. **Both panes' sidebar sections are on screen
   at once** — split Plots against Statistics and the Statistics group-definition
   editor sits under the well picker straight away, without focusing that pane
-  first — and both panes refresh on a selection or channel change. Focus still
-  decides how the shared well picker itself behaves, since a plate click means
-  different things to different pages and only one of them can win. Each
+  first — and both panes refresh on a selection or channel change.
+
+  **There is still only one well picker.** Several pages carry their own plate
+  map in the sidebar (Statistics paints wells into comparison groups; Image
+  Table and Segmentation pick the well to show), and while split you get the
+  focused pane's, not both stacked. Click into the other pane and the picker
+  goes with the focus — so the Statistics plate is one click away, while its
+  group list stays visible the whole time. Focus decides this for the same
+  reason it decides drag-and-drop on the Heat Map: a plate click means different
+  things to different pages, and only one of them can win. Each
   pane keeps its own row of page tabs at its top, so a page's sub-tabs stay
   where its content is and either side can be switched without focusing it
   first; the shared row across the top of the window is empty while you are
@@ -1843,7 +1850,7 @@ of individual cells. This is the default Plotting sub-tab.
     **Whenever they are withheld, the panel says why**, in small type in its
     top-left corner — naming the tested channel and the drawn one, the tested
     timepoint and the drawn one, or the per-cell mode that is on, so you can see
-    which control to move. The same sentence goes to the status line. The note is part of the
+    which control to move. It is on the figure rather than in the status line so that it cannot outlive the thing it describes — it is redrawn with the plot, so if the note is there the reason is true right now. The note is part of the
     figure, so a copied or exported plot carries it too: a plot with no
     asterisks never leaves you guessing whether a comparison was withheld or
     simply never run. With **Significance** off, nothing is drawn and nothing is

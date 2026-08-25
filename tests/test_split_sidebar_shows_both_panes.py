@@ -14,6 +14,14 @@ never shown by the second — visible pane, invisible controls.
 Slow lane on purpose: this is about two real panes, a real sidebar and the real
 activation dispatch, and every cheaper seam is underneath the thing that was
 broken.
+
+**This file asserts that the sections are shown; it does not assert what is in
+them, and that gap shipped a regression.** Four sidebar sections build their own
+well picker, so showing two of them put two pickers on the rail — which every
+assertion here passes happily, because a visibility flag is not a picker.
+``tests/test_split_sidebar_one_well_picker.py`` counts the pickers. Read the two
+together: this one says the section is on screen, that one says the rail is not
+duplicated.
 """
 
 from __future__ import annotations

@@ -1838,10 +1838,12 @@ of individual cells. This is the default Plotting sub-tab.
     simply never run. With **Significance** off, nothing is drawn and nothing is
     said — that absence is the one you asked for.
 
-    Changing any of the Statistics tab's test settings clears the last run, and
-    the brackets go with it. That keeps the two halves honest: an empty results
-    panel beside a plot still carrying asterisks attributed to it would be
-    claiming a comparison that no longer exists.
+    Changing any of the Statistics tab's test settings — **Channel**,
+    **Property**, **Statistic**, **Test** or **Timepoint** — clears the last
+    run, and the brackets go with it. That keeps the two halves honest: an empty
+    results panel beside a plot still carrying asterisks attributed to it would
+    be claiming a comparison that no longer exists. Run the test again once the
+    settings say what you want.
   - **Reset Order** — restore the default order after you **drag bars to
     reorder** them.
   - The shared [Fold-change](#fold-change-normalization) dropdowns, applied in

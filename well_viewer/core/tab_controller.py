@@ -37,6 +37,55 @@ split_visible_provider = None   # fn(ctx) -> set[str] of visible leaves | None
 split_nav_intercept = None      # fn(ctx, key) -> bool (True = consume nav)
 
 
+#: The per-tab sidebar sections, in the order they are stacked on the rail.
+#: Hidden together at the top of every tab change and shown again by whichever
+#: ``on_activate`` hooks run. ``_sidebar_cell_browser_frame`` is deliberately in
+#: the list even though it is designed to show *alongside* the main frame: it
+#: carries no plate, so it never competes for the picker.
+SIDEBAR_SECTION_FRAMES = (
+    "_sidebar_main_frame",
+    "_sidebar_preview_frame",
+    "_sidebar_image_table_frame",
+    "_sidebar_sample_frame",
+    "_sidebar_stats_frame",
+    "_sidebar_cell_browser_frame",
+)
+
+
+def _sidebar_section_frames(ctx) -> list:
+    """Every per-tab sidebar section that currently exists.
+
+    Missing entries are skipped rather than assumed: several of these frames
+    belong to removable features, and a profile build without one registers no
+    widget for it.
+    """
+    out = []
+    for name in SIDEBAR_SECTION_FRAMES:
+        frame = ctx.widgets.get_or_none(name)
+        if frame is not None:
+            out.append(frame)
+    return out
+
+
+def _section_plates(frame) -> list:
+    """The well pickers inside one sidebar section.
+
+    Walks the widget tree rather than consulting a roster of registered names.
+    The four sidebar plates are registered two different ways — the main, Stats
+    and Segmentation pickers through ``ctx.widgets``, the Image Table's through
+    ``ctx.runtime.image_table`` — so a list keyed on either mechanism would be
+    blind to the other, and a list keyed on both would be a second place to
+    remember when a fifth section grows a picker.
+    """
+    from widgets.well_plate_selector import WellPlateSelector
+    try:
+        return list(frame.findChildren(WellPlateSelector))
+    except (AttributeError, RuntimeError):
+        # A frame whose C++ side is already gone during teardown.
+        swallowed("tab_controller: could not scan a sidebar section for plates")
+        return []
+
+
 def on_tab_change(ctx, _e=None) -> None:
     """Show/hide the sidebar and refresh whichever tab is now active.
 
@@ -65,16 +114,13 @@ def on_tab_change(ctx, _e=None) -> None:
         except Exception:
             swallowed()  # was: pass (silent except)
 
-    ctx.widgets.get("_sidebar_main_frame").setVisible(False)
-    ctx.widgets.get("_sidebar_preview_frame").setVisible(False)
-    _it_frame = ctx.widgets.get_or_none("_sidebar_image_table_frame")
-    if _it_frame is not None:
-        _it_frame.setVisible(False)
-    ctx.widgets.get("_sidebar_sample_frame").setVisible(False)
-    ctx.widgets.get("_sidebar_stats_frame").setVisible(False)
-    _cb_frame = ctx.widgets.get_or_none("_sidebar_cell_browser_frame")
-    if _cb_frame is not None:
-        _cb_frame.setVisible(False)
+    _frames = _sidebar_section_frames(ctx)
+    for _frame in _frames:
+        _frame.setVisible(False)
+        # Undo any plate suppression a previous Split View pass left behind, so
+        # a section that gets the focus back brings its picker with it.
+        for _plate in _section_plates(_frame):
+            _plate.setVisible(True)
     # Every pane that is on screen gets its sidebar section, not just the
     # focused one. In Split View two leaves are visible at once, and the sidebar
     # used to follow the focus alone: opening Plots beside Statistics left the
@@ -120,6 +166,9 @@ def on_tab_change(ctx, _e=None) -> None:
                 swallowed(f"tab_controller: on_activate failed for {_other!r}")
         else:
             ctx.widgets.get("_sidebar_main_frame").setVisible(True)
+    # Which frames the unfocused panes turned on. Everything was hidden a few
+    # lines above, so "visible now" is exactly "shown by one of those hooks".
+    _other_frames = [f for f in _frames if not f.isHidden()]
 
     desc = ctx.features.get(tab)
     if desc is not None and desc.on_activate is not None:
@@ -128,6 +177,36 @@ def on_tab_change(ctx, _e=None) -> None:
         ctx.widgets.get("_sidebar_main_frame").setVisible(True)
         ctx.coordinator.refresh_sidebar_map()
         redraw_app(ctx)
+
+    # **One well picker on screen, and it belongs to the focused pane.** Four
+    # sidebar sections build their own ``WellPlateSelector`` — the shared one in
+    # `_sidebar_main_frame`, plus Statistics, Segmentation and Image Table — and
+    # they were mutually exclusive for as long as only one section showed at a
+    # time. Showing every visible pane's section (above) put two of them on the
+    # rail at once, stacked and identical-looking while meaning different things:
+    # the Statistics plate paints wells into comparison groups, the shared one
+    # selects wells to plot. Two pickers with different consequences and no way
+    # to tell them apart is worse than the click this change removed.
+    #
+    # So the sections all stay, and the *plates* of the unfocused ones go. That
+    # is the rule already applied to the heat-map drag mode a few lines above:
+    # frames follow visibility, interaction follows focus — and a plate is
+    # interaction. Found by walking the frame rather than by a roster of widget
+    # names, because the four are registered two different ways (three through
+    # ``ctx.widgets``, Image Table's through ``ctx.runtime``) and a list keyed on
+    # either would miss the other.
+    _focused_frames = [f for f in _frames if not f.isHidden()]
+    # The frames the focused hook turned on are the ones it did not inherit.
+    # When it inherits everything — two plot tabs sharing ``_sidebar_main_frame``
+    # — there is one frame and therefore one plate, and the main frame is the
+    # right thing to keep.
+    _newly = [f for f in _focused_frames if f not in _other_frames]
+    _keep = _newly or [ctx.widgets.get_or_none("_sidebar_main_frame")]
+    for _frame in _focused_frames:
+        if _frame in _keep:
+            continue
+        for _plate in _section_plates(_frame):
+            _plate.setVisible(False)
 
     run_tab_switch_smoke_checks(ctx, prev_tab, tab, prev_selected)
     ctx.runtime.tab.last_tab_name = tab

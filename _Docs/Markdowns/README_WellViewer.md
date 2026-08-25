@@ -2903,6 +2903,11 @@ rather than a single panel.
     decoding a grid you may only have wanted the settings from. The shelf header
     says **edited — press Generate** so it is clear the images below it are not
     yet of what the shelf now describes.
+  - A plot saved with **statistics** comes back with its comparison groups in
+    the Statistics sidebar, not only in the test it re-runs. The groups are
+    listed and coloured on the group-editor plate exactly as if you had defined
+    them, so you can see what the restored brackets were computed from and edit
+    it from there.
   - A plot saved before its tab began recording its own settings can only
     restore the settings shared across tabs — channel, metric, wells, gating.
     The status line says so by name when it happens, because a silent partial

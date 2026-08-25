@@ -1818,9 +1818,30 @@ of individual cells. This is the default Plotting sub-tab.
     comparisons the [Statistics](#statistics) tab last ran. A bracket appears
     over the two bars its comparison was computed from, whether those bars are
     replicate sets or individual wells — a group holding a single well brackets
-    that well's own bar. When a comparison doesn't line up with any bar (a group
-    spread across several bars, say), the status line says so instead of the
-    bracket quietly going missing.
+    that well's own bar.
+
+    Brackets are drawn only while the comparison still describes what the bars
+    show. The Statistics tab carries its own **Channel**, **Property** and
+    **Timepoint** selectors, separate from the Plotting band's, so a test run on
+    one column can easily end up being looked at over another's bars — and a
+    comparison drawn over data it wasn't computed from would be worse than no
+    comparison at all. So the brackets are withheld when the test was run on a
+    different channel or metric than the bars show, at a different timepoint,
+    or when a compared group doesn't line up with any single bar.
+
+    **Whenever they are withheld, the panel says why**, in small type in its
+    top-left corner — naming the tested channel and the drawn one, or the tested
+    timepoint and the drawn one, so you can see which of the two selectors to
+    move. The same sentence goes to the status line. The note is part of the
+    figure, so a copied or exported plot carries it too: a plot with no
+    asterisks never leaves you guessing whether a comparison was withheld or
+    simply never run. With **Significance** off, nothing is drawn and nothing is
+    said — that absence is the one you asked for.
+
+    Changing any of the Statistics tab's test settings clears the last run, and
+    the brackets go with it. That keeps the two halves honest: an empty results
+    panel beside a plot still carrying asterisks attributed to it would be
+    claiming a comparison that no longer exists.
   - **Reset Order** — restore the default order after you **drag bars to
     reorder** them.
   - The shared [Fold-change](#fold-change-normalization) dropdowns, applied in

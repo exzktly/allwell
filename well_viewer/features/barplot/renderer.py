@@ -502,6 +502,63 @@ def _significance_marker(p: float) -> str:
     return "ns"
 
 
+#: Marks the "why there are no brackets" note, so a later pass — or a test —
+#: can find it among the panel's other texts.
+SIGNIFICANCE_NOTE_TAG = "_aw_significance_note"
+
+
+def _val_col_label(col: str) -> str:
+    """Readable name for a value column, for the no-brackets note.
+
+    The note names the tested column and the drawn one side by side, so it has
+    to read the way the channel menus do — ``GFP Mean Intensity``, not
+    ``gfp_mean_intensity``. Falls back to the raw key for anything the label
+    tables don't recognise, which is still more use than nothing.
+    """
+    col = str(col or "")
+    if not col:
+        return "—"
+    from well_viewer.domain.ratio_models import is_ratio_key
+    if is_ratio_key(col):
+        return col.split(":", 1)[-1]
+    from well_viewer.data.metric_labels import split_metric_col
+    parts = split_metric_col(col)
+    return parts[2] if parts else col
+
+
+def _no_significance(ctx, ax, reason: str) -> None:
+    """Say on the figure why the Significance toggle produced no brackets.
+
+    Every way this renderer can decline to draw used to be a bare ``return``.
+    Six of them, and only one said anything — so with "Significance: On" showing
+    on the toolbar, a plot with no asterisks looked identical whether no test had
+    been run, the test was run on another channel, the bars had moved to another
+    timepoint, or every comparison genuinely came back drawable and simply had
+    not been asked for. That is the silent-substitution failure CLAUDE.md §7
+    names: degraded output indistinguishable from good output, with the software
+    knowing and not saying.
+
+    The status line alone is not enough. It is transient, it is at the other end
+    of the window from the plot, and in Split View — where the Statistics pane
+    and the Bar plot are on screen together and either one's channel or timepoint
+    can be changed in a click — the brackets appear and vanish faster than anyone
+    watches a status bar. So the reason goes **on the panel**, in muted type
+    inside the top-left corner, where it is part of the figure and survives a
+    copy or an export. It is cleared by the next redraw's ``cla()`` like any
+    other artist.
+    """
+    setter = getattr(ctx.notify, "set_status", None)
+    if callable(setter):
+        setter(f"Significance: {reason}")
+    if ax is None:
+        return
+    note = ax.text(
+        0.01, 0.98, f"Significance: {reason}", transform=ax.transAxes,
+        ha="left", va="top", fontsize=7, color=tokens_for(ax)[2],
+        zorder=6, clip_on=False)
+    setattr(note, SIGNIFICANCE_NOTE_TAG, True)
+
+
 def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
                                target_ts=None) -> None:
     """Draw significance brackets from the Statistics tab's pairwise results (N7).
@@ -518,9 +575,20 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
     run on — otherwise a comparison computed for one channel would be drawn over
     a different channel's bars. A bracket is drawn for every compared pair whose
     both groups map to a bar — by replicate-set name, else by well membership;
-    pairs that don't line up with the current bars are skipped (with a status
-    hint). The BH-adjusted p drives the asterisk where available. No-op in
-    per-cell mode (this is only called from the aggregate bar path)."""
+    pairs that don't line up with the current bars are skipped. The BH-adjusted p
+    drives the asterisk where available. No-op in per-cell mode (this is only
+    called from the aggregate bar path).
+
+    **Every one of those gates reports itself** through :func:`_no_significance`.
+    The gates are all deliberate — the Statistics tab carries its own Channel,
+    Property and Timepoint selectors, independent of the Plotting band's, so the
+    two sides drift apart in ordinary use and a comparison drawn over the wrong
+    bars would be worse than none. What was not deliberate is that they were
+    silent: with the toggle reading "On", a plot without asterisks said nothing
+    about which of them had fired, so the feature read as unreliable rather than
+    as conditional. Only the user switching the toggle off draws nothing and says
+    nothing, because there the absence is what they asked for.
+    """
     if not getattr(ctx.state.plot, "show_significance", False):
         return
     # ``feature_slice`` rather than attribute access: Statistics is removable,
@@ -532,9 +600,14 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
     # the significance toggle on.
     stats_state = ctx.state.feature_slice("stats")
     if stats_state is None:
+        _no_significance(ctx, ax_mean,
+                         "the Statistics feature is not in this build.")
         return
     pairwise = list(getattr(stats_state, "pairwise", []) or [])
     if not pairwise:
+        _no_significance(ctx, ax_mean,
+                         "no test has been run yet — run one on the "
+                         "Statistics tab.")
         return
     rec0 = pairwise[0]
     # Context gate: don't overlay a test computed for a different channel/metric
@@ -544,11 +617,24 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
     if rec_val_col is not None:
         cur_val_col = str(getattr(ctx.state.channel, "active_val_col", "") or "")
         if str(rec_val_col) != cur_val_col:
+            _no_significance(
+                ctx, ax_mean,
+                f"the test was run on {_val_col_label(rec_val_col)}; "
+                f"these bars show {_val_col_label(cur_val_col)}.")
             return
     rec_tp = rec0.get("target_t")
     if rec_tp is not None and target_ts:
         try:
             if not any(tp_close(float(t), float(rec_tp)) for t in target_ts):
+                # Named through the Properties → Time correction, so the note
+                # reads in the same units as the tick labels beside it rather
+                # than in the hours the filenames happen to carry.
+                _rs = _time_rescale_for(ctx.state.plot)
+                _shown = ", ".join(_rescale_tp(t, _rs) for t in target_ts)
+                _no_significance(
+                    ctx, ax_mean,
+                    f"the test was run at t={_rescale_tp(rec_tp, _rs)}; "
+                    f"these bars show t={_shown}.")
                 return
         except (TypeError, ValueError):
             pass
@@ -560,10 +646,18 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
     else:
         ax, val_attr, spread_attr, has_attr = ax_mean, "mean", "spread", "has_mean"
     if ax is None:
+        # The tested measure's panel isn't on this figure. Note it on the Mean
+        # panel when that is the one still present, so the message has somewhere
+        # to land even though its own panel does not.
+        _no_significance(
+            ctx, ax_mean,
+            "the panel this test belongs on is not on this figure.")
         return
     keys = list(getattr(ctx.runtime.barplot, "xs_keys", []) or [])
     xs = list(getattr(ctx.runtime.barplot, "xs", []) or [])
     if not keys or len(keys) != len(xs):
+        _no_significance(ctx, ax,
+                         "the bar positions for this layout aren't available.")
         return
 
     # ``keys``/``xs`` are parallel to ``items``. In multi-timepoint mode one key
@@ -643,11 +737,11 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
     if not matched:
         # Significance is on and a test has run, but no comparison lines up with
         # the current bars (e.g. per-well bars, or groups spanning several bars).
-        # Say so rather than silently drawing nothing.
-        setter = ctx.notify.set_status
-        if callable(setter):
-            setter("Significance: no comparison matches the current bars — "
-                   "pool replicates so each compared group is a single bar.")
+        # The one gate that already said something; it now says it on the panel
+        # too, like the rest.
+        _no_significance(ctx, ax,
+                         "no comparison matches the current bars — pool "
+                         "replicates so each compared group is a single bar.")
         return
 
     # Shortest spans lowest so nested brackets stack cleanly.

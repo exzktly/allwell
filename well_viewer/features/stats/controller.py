@@ -732,14 +732,42 @@ def stats_resync_from_sample_defs(ctx) -> None:
 
 
 def stats_on_test_change(ctx) -> None:
-    """Clear results when test changes; update UI hints."""
+    """Invalidate the last run when the test configuration changes.
+
+    Every control that decides *what gets tested* — Channel, Property,
+    Statistic, Test, Timepoint — lands here. Changing one makes the stored
+    result a description of a test the tab is no longer offering, so the result
+    text and the structured ``pairwise`` records go together.
+
+    They did not, before: only the text was cleared, and ``pairwise`` survived
+    to keep drawing significance brackets on the Bar plot. The Bar renderer's
+    context gate compares the stored run against the **bars**, not against the
+    Statistics tab, so a run invalidated here still drew its asterisks for as
+    long as the bar plot happened to show the column it was run on. In Split
+    View that is plainly visible and plainly wrong: an empty result panel beside
+    a plot carrying asterisks attributed to it. Clearing both leaves the bar
+    plot saying "no test has been run yet" instead, which is true.
+    """
     _stats_write_result(ctx, "")
+    stats_state = ctx.state.feature_slice("stats")
+    had_results = bool(getattr(stats_state, "pairwise", None)) if stats_state else False
+    if stats_state is not None:
+        stats_state.pairwise = []
     # Keep the stats Property combo in sync with the channel (ratio
     # channels collapse the metric set to "Calculated Val").
     try:
         refresh_stats_property_combo(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
+    # Repaint the Bar plot so its brackets go with the results they came from.
+    # Only when there were results and the toggle is on — otherwise this fires a
+    # redraw on every combo touch for no visible change. Bus-only, no feature
+    # import from this controller (G5/§5.9), same as ``run_stats``.
+    if had_results and ctx.state.plot.show_significance:
+        try:
+            ctx.bus.plot_options_changed.emit(ctx.state.plot)
+        except Exception:
+            swallowed()
 
 
 def _stats_write_result(ctx, text: str) -> None:
@@ -769,9 +797,29 @@ def stats_update_tp_menu(ctx) -> None:
     sorted_tps = sorted(all_tps)
     tp_strs = [f"{t:.4g}" for t in sorted_tps]
     if tp_cb is not None:
+        # ``set_combo_values`` already blocks signals and keeps the current
+        # selection when the new list still holds it. The line that used to
+        # follow threw that away: it set the combo to ``tp_strs[0]``
+        # unconditionally, so every repopulate — a channel switch
+        # (``registry._channel_stats``) or simply arriving on the Statistics tab
+        # (``registry._activate_statistics``) — silently moved the tested
+        # timepoint back to the earliest one. The user then ran a test at a
+        # timepoint they had not chosen, and the Bar plot's significance
+        # brackets, gated on the tested timepoint matching the bars, drew
+        # nothing. Fall back to the first entry only when the previous choice is
+        # genuinely gone, and do it with signals blocked so a repopulate is not
+        # mistaken for the user changing the test.
+        _prev = tp_cb.currentText() if hasattr(tp_cb, "currentText") else ""
         set_combo_values(tp_cb, tp_strs or ["—"])
-        if hasattr(tp_cb, "setCurrentText"):
-            tp_cb.setCurrentText(tp_strs[0] if tp_strs else "—")
+        if _prev not in (tp_strs or ["—"]) and hasattr(tp_cb, "setCurrentText"):
+            _block = getattr(tp_cb, "blockSignals", None)
+            if callable(_block):
+                _block(True)
+            try:
+                tp_cb.setCurrentText(tp_strs[0] if tp_strs else "—")
+            finally:
+                if callable(_block):
+                    _block(False)
 
     # Channel dropdown -- list every measurement column so the user can
     # pick any value to compare. Mirrors the scatter-tab dropdown so the

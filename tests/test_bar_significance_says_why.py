@@ -1,0 +1,182 @@
+"""With "Significance: On", a plot without asterisks has to say why.
+
+The bracket renderer declines to draw for six different reasons, and five of
+them used to be a bare ``return``. The gates themselves are right — the
+Statistics tab carries its own Channel, Property and Timepoint selectors,
+independent of the Plotting band's, so a comparison run on one column can easily
+be looked at over another's bars, and drawing it there would be worse than
+drawing nothing. What was wrong is that declining was invisible.
+
+That is the failure CLAUDE.md §7 names: degraded output indistinguishable from
+good output, with the software knowing and not saying. From the outside the
+feature read as *unreliable* — asterisks that come and go — rather than as
+conditional, which is what it is. In Split View, where the Statistics pane and
+the Bar plot are on screen together and either side's channel or timepoint is
+one click away, it is the normal experience rather than an edge case.
+
+So each gate now states its reason twice: in the status line, and — because a
+status line is transient, sits at the other end of the window, and is not part
+of anything you export — in muted type on the panel itself.
+"""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+import pytest  # noqa: E402
+
+from tests.test_bar_significance import _app, _axes, _bars  # noqa: E402
+from well_viewer.features.barplot.renderer import (  # noqa: E402
+    SIGNIFICANCE_NOTE_TAG,
+    draw_significance_brackets,
+)
+
+#: A run whose context matches the bars the fixture draws.
+MATCHING_RUN = [{"a": "CTRL", "b": "DRUG", "p": 0.001, "p_adj": 0.001,
+                 "stat": "mean", "val_col": "gfp_mean_intensity",
+                 "target_t": 24.0}]
+
+
+def _draw(pairwise, *, active_val_col="gfp_mean_intensity", target_ts=(24.0,),
+          xs_keys=None, xs=None, show_significance=True):
+    """Run the real renderer and report what reached the user.
+
+    Returns ``(stars, notes, status)`` — the asterisk texts actually drawn, the
+    on-panel explanations, and whatever went to the status line.
+    """
+    ax_mean, ax_frac = _axes()
+    app = _app(list(pairwise), active_val_col=active_val_col)
+    app._app_state.plot.show_significance = show_significance
+    if xs_keys is not None:
+        app._bar_xs_keys = xs_keys
+    if xs is not None:
+        app._bar_xs = xs
+    status: list[str] = []
+    app._ctx.notify = SimpleNamespace(set_status=lambda m, *a, **k: status.append(m))
+    draw_significance_brackets(app._ctx, _bars(), ax_mean=ax_mean, ax_frac=ax_frac,
+                               target_ts=list(target_ts) if target_ts else None)
+    stars = [t.get_text() for a in (ax_mean, ax_frac) for t in a.texts
+             if t.get_text() in ("*", "**", "***", "ns")]
+    notes = [t.get_text() for a in (ax_mean, ax_frac) for t in a.texts
+             if getattr(t, SIGNIFICANCE_NOTE_TAG, False)]
+    plt.close("all")
+    return stars, notes, status
+
+
+# ── the case that works is unchanged ────────────────────────────────────────
+
+def test_a_matching_run_still_draws_its_asterisks_and_says_nothing():
+    """The note is for the absence. A drawn bracket explains itself."""
+    stars, notes, status = _draw(MATCHING_RUN)
+    # ``**``, not ``***``: the marker thresholds are strict ``<``, so p = 0.001
+    # falls to the less-significant bucket. Pinned here because this test's job
+    # is that the working path is untouched, which includes its wording.
+    assert stars == ["**"]
+    assert notes == []
+    assert status == []
+
+
+def test_the_toggle_being_off_stays_silent():
+    """The one absence the user asked for. Explaining it would be noise."""
+    stars, notes, status = _draw(MATCHING_RUN, show_significance=False)
+    assert (stars, notes, status) == ([], [], [])
+
+
+# ── every other way of drawing nothing ──────────────────────────────────────
+
+def _cases():
+    return {
+        "no test has been run": dict(pairwise=[]),
+        "tested another channel": dict(
+            pairwise=[{**MATCHING_RUN[0], "val_col": "cy5_mean_intensity"}]),
+        "tested another timepoint": dict(
+            pairwise=MATCHING_RUN, target_ts=(48.0,)),
+        "bar positions missing": dict(pairwise=MATCHING_RUN, xs_keys=[]),
+        "bar positions mismatched": dict(
+            pairwise=MATCHING_RUN, xs_keys=["CTRL"], xs=[0.0, 1.0]),
+        "groups match no bar": dict(
+            pairwise=[{**MATCHING_RUN[0], "a": "GROUP_X", "b": "GROUP_Y"}]),
+    }
+
+
+@pytest.mark.parametrize("case", sorted(_cases()))
+def test_every_declined_draw_reaches_the_status_line(case):
+    stars, _notes, status = _draw(**_cases()[case])
+    assert stars == []
+    assert status and status[0].startswith("Significance: "), (
+        f"'{case}' drew nothing and said nothing")
+
+
+@pytest.mark.parametrize("case", sorted(_cases()))
+def test_every_declined_draw_is_written_on_the_panel(case):
+    """The status line is transient and is not part of an exported figure. A
+    reader who opens a copied PNG with no asterisks on it should still be able
+    to tell that a comparison was withheld, and why."""
+    stars, notes, _status = _draw(**_cases()[case])
+    assert stars == []
+    assert len(notes) == 1, f"'{case}' left no explanation on the panel"
+    assert notes[0].startswith("Significance: ")
+
+
+def test_the_note_names_both_channels_so_the_mismatch_is_actionable():
+    """"Doesn't match" is not enough to act on: the fix is to move one of the
+    two selectors, and the note has to say which two values are in play. Read as
+    the channel menus write them, not as raw column keys."""
+    _stars, notes, _status = _draw(
+        [{**MATCHING_RUN[0], "val_col": "cy5_mean_intensity"}],
+        active_val_col="gfp_mean_intensity")
+    assert "CY5 Mean Intensity" in notes[0]
+    assert "GFP Mean Intensity" in notes[0]
+    assert "cy5_mean_intensity" not in notes[0]
+
+
+def test_the_note_names_both_timepoints():
+    _stars, notes, _status = _draw(MATCHING_RUN, target_ts=(48.0,))
+    assert "24" in notes[0] and "48" in notes[0]
+
+
+def test_the_timepoint_note_reads_in_the_units_of_the_axis_beside_it():
+    """The Properties → Time correction relabels every timepoint on the figure.
+    A note naming raw filename hours next to ticks reading corrected ones would
+    send the user to check a timepoint that appears nowhere on screen."""
+    from well_viewer.domain.time_rescale import TimeRescale
+
+    ax_mean, ax_frac = _axes()
+    app = _app(list(MATCHING_RUN), active_val_col="gfp_mean_intensity")
+    app._app_state.plot.show_significance = True
+    app._app_state.plot.time_scale = 4.0
+    app._app_state.plot.time_offset = -2.0
+    status: list[str] = []
+    app._ctx.notify = SimpleNamespace(set_status=lambda m, *a, **k: status.append(m))
+    draw_significance_brackets(app._ctx, _bars(), ax_mean=ax_mean,
+                               ax_frac=ax_frac, target_ts=[48.0])
+    note = next(t.get_text() for t in ax_mean.texts
+                if getattr(t, SIGNIFICANCE_NOTE_TAG, False))
+    plt.close("all")
+
+    rs = TimeRescale(factor=4.0, offset=-2.0)
+    from well_viewer.domain.time_rescale import format_scaled
+    # 24 × 4 − 2 = 94 and 48 × 4 − 2 = 190 — the numbers the ticks carry.
+    assert f"t={format_scaled(24.0, rs)}" in note
+    assert f"t={format_scaled(48.0, rs)}" in note
+    # And not the uncorrected hours, which appear nowhere on the figure.
+    assert "t=24" not in note and "t=48" not in note
+
+
+def test_the_note_is_cleared_by_the_next_redraw():
+    """It is an ordinary artist on the panel, so ``cla()`` at the top of
+    ``redraw_bars`` takes it with everything else — a stale explanation beside
+    fresh brackets would be its own version of this bug."""
+    ax_mean, ax_frac = _axes()
+    app = _app([], active_val_col="gfp_mean_intensity")
+    app._app_state.plot.show_significance = True
+    app._ctx.notify = SimpleNamespace(set_status=lambda *_a, **_k: None)
+    draw_significance_brackets(app._ctx, _bars(), ax_mean=ax_mean,
+                               ax_frac=ax_frac, target_ts=[24.0])
+    assert any(getattr(t, SIGNIFICANCE_NOTE_TAG, False) for t in ax_mean.texts)
+    ax_mean.cla()
+    assert not any(getattr(t, SIGNIFICANCE_NOTE_TAG, False) for t in ax_mean.texts)
+    plt.close("all")

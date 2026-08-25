@@ -242,8 +242,17 @@ class MockApp:
         """
         from types import SimpleNamespace
         from well_viewer.core.app_runtime import AppRuntime
+        # ``notify`` is on the real ``ViewerContext`` unconditionally, and
+        # renderers reach it to explain a shortfall — a bar plot that declines
+        # to draw its significance brackets says why through
+        # ``ctx.notify.set_status``. Leaving it off made this stand-in the one
+        # place that path could not run, which is the fixture-diverges-from-
+        # production trap: a test proving a renderer survives a stripped build
+        # instead proved it survives a ctx no build ever has.
         return SimpleNamespace(app=self, state=self._app_state,
-                               runtime=AppRuntime(self))
+                               runtime=AppRuntime(self),
+                               notify=SimpleNamespace(
+                                   set_status=lambda *_a, **_k: None))
 
     @property
     def _selected_wells(self):

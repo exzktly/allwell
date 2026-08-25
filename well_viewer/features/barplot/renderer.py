@@ -526,7 +526,7 @@ def _val_col_label(col: str) -> str:
     return parts[2] if parts else col
 
 
-def _user_y_ceiling(ctx, ax):
+def _user_y_ceiling(ctx, ax) -> float | None:
     """The user's own upper y-limit for *ax*, or ``None`` when they set none.
 
     Read through the same per-panel lookup ``apply_export_style_prefs`` uses —

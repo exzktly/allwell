@@ -35,9 +35,17 @@ def _app(pairwise, *, rsets=(), active_val_col="gfp_mean_intensity"):
     _sels = [{"name": r.name, "wells": list(getattr(r, "wells", []) or [])}
              for r in rsets]
     _wp = {w: None for r in rsets for w in (getattr(r, "wells", []) or [])}
+    # A real ``StatsState``, not a namespace holding a list. The store is keyed
+    # by run context and the renderer looks runs up through it, so a stand-in
+    # exposing only ``pairwise`` sends the renderer down a path production never
+    # takes — and would have made every test here measure a shape the app does
+    # not have.
+    from well_viewer.features.stats.state import StatsState
+    _stats = StatsState()
+    _stats.pairwise = list(pairwise or [])
     state = SimpleNamespace(
         plot=SimpleNamespace(show_significance=True),
-        stats=SimpleNamespace(pairwise=pairwise),
+        stats=_stats,
         channel=SimpleNamespace(active_val_col=active_val_col),
         selection=SimpleNamespace(selections=_sels, selected_wells=set()),
         dataset=SimpleNamespace(well_paths=_wp),

@@ -39,6 +39,7 @@ from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current
 from well_viewer.core.plot_style import apply_time_rescale
 from well_viewer.domain.time_rescale import axis_label as time_axis_label
+from well_viewer.domain.time_rescale import rescale_for as time_rescale_for
 
 
 #: Written onto an otherwise-empty figure so an *exported* copy states its
@@ -846,11 +847,11 @@ def redraw_line_plots(
     # it, and the label carries the factor so a rescaled axis can't be mistaken
     # for one drawn on the hours the run actually recorded (the timepoint menus
     # and every export still show those).
-    _time_scale = ctx.state.plot.time_scale
-    _time_lbl = time_axis_label("Time (hours)", _time_scale)
+    _time_rescale = time_rescale_for(ctx.state.plot)
+    _time_lbl = time_axis_label("Time (hours)", _time_rescale)
     for _ax_time in (ax_mean, ax_frac, ax_n):
         _ax_time.set_xlabel(_time_lbl, fontsize=8, labelpad=5)
-        apply_time_rescale(_ax_time, _time_scale)
+        apply_time_rescale(_ax_time, _time_rescale)
     # Same rule as the Bar tab's ``renderer._set_frac_ylim``, and for the same
     # reason: a raw fraction is bounded, so the clamp is a good default, but
     # under fold change the field is a ratio (which can exceed 1) or a

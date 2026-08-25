@@ -50,10 +50,10 @@ def test_bar_panels_gain_a_marker_label_only_while_rescaled():
 
     fig, (ax_mean, ax_frac) = plt.subplots(2, 1)
     try:
-        mark_time_rescale(ax_mean, ax_frac, factor=1)
+        mark_time_rescale(ax_mean, ax_frac, rescale=1)
         assert ax_frac.get_xlabel() == ""
 
-        mark_time_rescale(ax_mean, ax_frac, factor=4)
+        mark_time_rescale(ax_mean, ax_frac, rescale=4)
         assert "4" in ax_frac.get_xlabel()
         # Only the bottom panel: three stacked copies of the same sentence is
         # noise, and the panels share one x-axis reading.
@@ -67,7 +67,7 @@ def test_bar_marker_lands_on_the_n_panel_when_there_is_one():
 
     fig, (ax_mean, ax_frac, ax_n) = plt.subplots(3, 1)
     try:
-        mark_time_rescale(ax_mean, ax_frac, ax_n, factor=4)
+        mark_time_rescale(ax_mean, ax_frac, ax_n, rescale=4)
         assert "4" in ax_n.get_xlabel()
         assert ax_frac.get_xlabel() == ""
     finally:
@@ -79,7 +79,7 @@ def test_bar_marker_tolerates_a_missing_n_panel():
 
     fig, (ax_mean, ax_frac) = plt.subplots(2, 1)
     try:
-        mark_time_rescale(ax_mean, ax_frac, None, factor=4)
+        mark_time_rescale(ax_mean, ax_frac, None, rescale=4)
         assert "4" in ax_frac.get_xlabel()
     finally:
         plt.close(fig)
@@ -158,3 +158,52 @@ def test_the_marker_text_names_the_factor_that_was_used():
     for factor in (2, 4, 0.5, 60):
         marked = axis_label("Time (hours)", factor)
         assert re.search(rf"×\s*{factor:g}\b", marked), marked
+
+
+# ── the offset half of the correction ───────────────────────────────────────
+
+def test_a_shifted_axis_is_marked_as_loudly_as_a_scaled_one():
+    """An offset moves every tick away from what the timepoint menus, the
+    Statistics tab and every exported CSV say, exactly as a factor does. An
+    axis that carried the marker only for the multiplier would present a
+    shifted axis as real hours."""
+    from well_viewer.domain.time_rescale import TimeRescale
+
+    rs = TimeRescale(factor=1, offset=2)
+    for base in TIME_AXIS_LABELS:
+        marked = axis_label(base, rs)
+        assert marked != base
+        assert "2" in marked
+
+
+def test_the_marker_names_both_terms_on_a_categorical_stack():
+    from well_viewer.core.plot_style import mark_time_rescale
+    from well_viewer.domain.time_rescale import TimeRescale
+
+    fig, (ax_mean, ax_frac) = plt.subplots(2, 1)
+    try:
+        mark_time_rescale(ax_mean, ax_frac, rescale=TimeRescale(factor=4, offset=-2))
+        label = ax_frac.get_xlabel()
+        assert "4" in label and "2" in label
+        assert ax_mean.get_xlabel() == ""
+    finally:
+        plt.close(fig)
+
+
+def test_an_offset_only_stack_is_still_marked():
+    from well_viewer.core.plot_style import mark_time_rescale
+    from well_viewer.domain.time_rescale import TimeRescale
+
+    fig, (ax_mean, ax_frac) = plt.subplots(2, 1)
+    try:
+        mark_time_rescale(ax_mean, ax_frac, rescale=TimeRescale(factor=1, offset=2))
+        assert "2" in ax_frac.get_xlabel()
+    finally:
+        plt.close(fig)
+
+
+def test_the_off_state_is_byte_identical_with_both_halves_at_rest():
+    from well_viewer.domain.time_rescale import OFF
+
+    for base in TIME_AXIS_LABELS:
+        assert axis_label(base, OFF) == base

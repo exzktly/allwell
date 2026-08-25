@@ -187,6 +187,11 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
 
     tp_cb = reg.register("_stats_tp_cb", LabeledComboBox("Timepoint"))
     tp_cb.addItems(["—"])
+    # The timepoint is a test parameter like any other, and it was the one
+    # control that changed what would be tested without invalidating what had
+    # been: the previous run's results stayed on screen, and its significance
+    # brackets stayed on the Bar plot, describing a different timepoint.
+    tp_cb.currentIndexChanged.connect(lambda _i: stats_on_test_change(ctx))
     stats_ctrl.add_scope("", tp_cb)
 
     test_cb = reg.register("_stats_test_cb", QComboBox())

@@ -732,14 +732,56 @@ def stats_resync_from_sample_defs(ctx) -> None:
 
 
 def stats_on_test_change(ctx) -> None:
-    """Clear results when test changes; update UI hints."""
+    """Invalidate the last run when the test configuration changes.
+
+    Every control that decides *what gets tested* — Channel, Property,
+    Statistic, Test, Timepoint — lands here. Changing one makes the stored
+    result a description of a test the tab is no longer offering, so the result
+    text and the structured ``pairwise`` records go together.
+
+    They did not, before: only the text was cleared, and ``pairwise`` survived
+    to keep drawing significance brackets on the Bar plot. The Bar renderer's
+    context gate compares the stored run against the **bars**, not against the
+    Statistics tab, so a run invalidated here still drew its asterisks for as
+    long as the bar plot happened to show the column it was run on. In Split
+    View that is plainly visible and plainly wrong: an empty result panel beside
+    a plot carrying asterisks attributed to it. Clearing both leaves the bar
+    plot saying "no test has been run yet" instead, which is true.
+    """
     _stats_write_result(ctx, "")
+    invalidate_stats_run(ctx)
     # Keep the stats Property combo in sync with the channel (ratio
     # channels collapse the metric set to "Calculated Val").
     try:
         refresh_stats_property_combo(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
+
+
+def invalidate_stats_run(ctx) -> None:
+    """Drop the stored comparison and let the Bar plot know.
+
+    Split out of :func:`stats_on_test_change` so the Property combo can reach it
+    too. That combo does not route through the test-change handler — it goes to
+    :func:`on_stats_property_change`, which propagates the metric to global
+    state — and calling the handler from there would re-enter the Property combo
+    it is refreshing. What both need is this half: the previous run described a
+    different measure, so it is gone.
+
+    The repaint is conditional on there having *been* a run and on the
+    significance toggle being on, so an ordinary combo touch does not fire a bar
+    redraw for no visible change. Bus-only, no feature import from this
+    controller (G5/§5.9), the same way ``run_stats`` nudges the plot.
+    """
+    stats_state = ctx.state.feature_slice("stats")
+    had_results = bool(getattr(stats_state, "pairwise", None)) if stats_state else False
+    if stats_state is not None:
+        stats_state.pairwise = []
+    if had_results and ctx.state.plot.show_significance:
+        try:
+            ctx.bus.plot_options_changed.emit(ctx.state.plot)
+        except Exception:
+            swallowed()
 
 
 def _stats_write_result(ctx, text: str) -> None:
@@ -769,8 +811,28 @@ def stats_update_tp_menu(ctx) -> None:
     sorted_tps = sorted(all_tps)
     tp_strs = [f"{t:.4g}" for t in sorted_tps]
     if tp_cb is not None:
+        # ``set_combo_values`` already blocks signals and keeps the current
+        # selection when the new list still holds it. The line that used to
+        # follow threw that away: it set the combo to ``tp_strs[0]``
+        # unconditionally, so every repopulate — a channel switch
+        # (``registry._channel_stats``) or simply arriving on the Statistics tab
+        # (``registry._activate_statistics``) — silently moved the tested
+        # timepoint back to the earliest one. The user then ran a test at a
+        # timepoint they had not chosen, and the Bar plot's significance
+        # brackets, gated on the tested timepoint matching the bars, drew
+        # nothing.
+        #
+        # So fall back to the first entry only when the previous choice is
+        # genuinely gone — and when it is, let the change signal through. The
+        # tested timepoint really has moved at that point (a different dataset,
+        # a channel with different acquisitions), so the stored run describes
+        # something that is no longer on offer and ``stats_on_test_change``
+        # clearing it is the right outcome rather than a side effect to
+        # suppress. The preserving path above emits nothing, because
+        # ``set_combo_values`` blocks signals around its own repopulate.
+        _prev = tp_cb.currentText() if hasattr(tp_cb, "currentText") else ""
         set_combo_values(tp_cb, tp_strs or ["—"])
-        if hasattr(tp_cb, "setCurrentText"):
+        if _prev not in (tp_strs or ["—"]) and hasattr(tp_cb, "setCurrentText"):
             tp_cb.setCurrentText(tp_strs[0] if tp_strs else "—")
 
     # Channel dropdown -- list every measurement column so the user can
@@ -1000,5 +1062,11 @@ def on_stats_property_change(ctx) -> None:
     metric = METRIC_LABEL_TO_KEY.get(str(cb.currentText() or ""), "mean_intensity")
     if metric == "smfish_count" and ctx.state.channel.active_channel not in ctx.state.channel.smfish_channels:
         metric = "mean_intensity"
+    # The Property decides what gets measured, so the previous run no longer
+    # describes the test on offer — same rule as every other control on the
+    # band, reached through the shared half rather than through
+    # ``stats_on_test_change``, which would re-enter this combo's own refresh.
+    _stats_write_result(ctx, "")
+    invalidate_stats_run(ctx)
     set_active_metric(ctx, metric)
 

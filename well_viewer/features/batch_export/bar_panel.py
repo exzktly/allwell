@@ -463,8 +463,9 @@ class BarBatchExportPanel(BatchExportPanel):
         # numeric targets rather than the incoming strings, which are selection
         # keys and stay in the hours the pipeline parsed.
         from well_viewer.domain.time_rescale import format_scaled as _rescale_tp
-        _tp_scale = self._ctx.state.plot.time_scale
-        _tp_titles = [_rescale_tp(t, _tp_scale) for t in target_ts]
+        from well_viewer.domain.time_rescale import rescale_for as _time_rescale_for
+        _tp_rescale = _time_rescale_for(self._ctx.state.plot)
+        _tp_titles = [_rescale_tp(t, _tp_rescale) for t in target_ts]
         tp_title = (_tp_titles[0] if len(_tp_titles) == 1
                     else f"[{', '.join(_tp_titles)}]")
         fig = _Figure(figsize=(8, 10), dpi=300, facecolor=theme.CPub.bg)
@@ -597,8 +598,9 @@ class BarBatchExportPanel(BatchExportPanel):
         # the suptitle above already follow the rescale factor, and without this
         # a saved PNG reads t=4, t=8 with nothing on it saying those are not the
         # hours the run recorded. No-op while the factor is off.
+        from well_viewer.domain.time_rescale import rescale_for as _tr_for
         mark_time_rescale(ax_mean, ax_frac, ax_n,
-                          factor=self._ctx.state.plot.time_scale)
+                          rescale=_tr_for(self._ctx.state.plot))
         return fig
 
     def _render_per_cell_panels(
@@ -693,8 +695,9 @@ class BarBatchExportPanel(BatchExportPanel):
         # labels off them left this figure printing "t=1" under a suptitle
         # reading "t = 4 h", with the rescale marker beneath both.
         from well_viewer.domain.time_rescale import format_scaled as _rescale_tp
-        _tp_scale = self._ctx.state.plot.time_scale
-        tp_labels = [_rescale_tp(t, _tp_scale) for t in target_ts]
+        from well_viewer.domain.time_rescale import rescale_for as _time_rescale_for
+        _tp_rescale = _time_rescale_for(self._ctx.state.plot)
+        tp_labels = [_rescale_tp(t, _tp_rescale) for t in target_ts]
         if group_mode == "timepoint":
             for t, t_str in zip(target_ts, tp_labels):
                 for w, c, full in zip(base_wells, base_colors, base_full):
@@ -743,5 +746,5 @@ class BarBatchExportPanel(BatchExportPanel):
         # only ever see the two they draw, so left to them the marker lands on
         # the middle panel of a three-panel figure; naming the whole stack here
         # moves it to the bottom one, where this figure's on-tab twin puts it.
-        mark_time_rescale(ax_mean, ax_frac, ax_n, factor=_tp_scale)
+        mark_time_rescale(ax_mean, ax_frac, ax_n, rescale=_tp_rescale)
 

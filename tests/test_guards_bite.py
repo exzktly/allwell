@@ -2423,3 +2423,69 @@ def test_dialog_guard_clears_a_parented_call(tmp_path, monkeypatch, shape):
     good = _write(tmp_path, f"good_dialog_{shape}.py", DIALOG_CLEARED[shape])
     assert _run_scan(monkeypatch, "tests.test_file_dialogs_are_parented",
                      "test_no_unparented_file_dialog", [good]) is None
+
+
+# ── the two halves of the Time correction ───────────────────────────────────
+
+_TIME_RESCALE_GUARD = (
+    "tests.test_time_rescale_is_swept",
+    "test_only_the_four_owners_read_the_time_fields_apart",
+)
+
+TIME_RESCALE_VIOLATIONS = {
+    # The shape every converted call site had: reach through the context for
+    # the multiplier and format with it, silently dropping the offset.
+    "attribute-chain": 'def draw(ctx, t):\n'
+                       '    return fmt(t, ctx.state.plot.time_scale)\n',
+    # The same read one hop shorter, as the batch-export panels spelled it.
+    "self-ctx": 'class P:\n'
+                '    def draw(self, t):\n'
+                '        return fmt(t, self._ctx.state.plot.time_scale)\n',
+    # The offset alone is exactly as wrong as the factor alone: an axis
+    # shifted but not scaled, marked as fully corrected.
+    "offset-only": 'def draw(ctx, t):\n'
+                   '    return fmt(t, ctx.state.plot.time_offset)\n',
+    # `getattr` is the spelling an attribute-only scan walks straight past,
+    # and it is the spelling the sidebar itself uses — so it is the one a
+    # copy-paste out of the sidebar would carry into a renderer.
+    "getattr-string": 'def draw(plot, t):\n'
+                      '    return fmt(t, getattr(plot, "time_scale", 1.0))\n',
+    # Reading both is still a violation: two reads is two chances to drift,
+    # and `rescale_for` is one line. The rule is the funnel, not the count.
+    "both-fields": 'def draw(ctx, t):\n'
+                   '    return fmt(t, ctx.state.plot.time_scale,\n'
+                   '               ctx.state.plot.time_offset)\n',
+}
+
+TIME_RESCALE_CLEAN = {
+    # The funnel, which is what the sweep converted every site to.
+    "rescale-for": 'from well_viewer.domain.time_rescale import rescale_for\n'
+                   'def draw(ctx, t):\n'
+                   '    return fmt(t, rescale_for(ctx.state.plot))\n',
+    # A local named for what it holds. The guard is keyed on the *fields*, not
+    # on the word "time", so an ordinary variable is not a violation.
+    "local-name": 'def draw(ctx, t):\n'
+                  '    rescale = time_rescale_for(ctx.state.plot)\n'
+                  '    return fmt(t, rescale)\n',
+    # An unrelated attribute that merely reads similarly.
+    "near-miss-attr": 'def draw(ctx):\n    return ctx.state.plot.time_window\n',
+    # Prose mentioning the setting, which every docstring in the area does.
+    "prose": 'MSG = "the Time section holds an interval and an offset"\n',
+}
+
+
+@pytest.mark.parametrize("shape", sorted(TIME_RESCALE_VIOLATIONS))
+def test_time_rescale_sweep_guard_catches(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, f"bad_timerescale_{shape}.py",
+                 TIME_RESCALE_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, *_TIME_RESCALE_GUARD, [bad])
+    assert exc is not None and bad.name in str(exc), (
+        f"the {shape} spelling walked past the guard")
+
+
+@pytest.mark.parametrize("shape", sorted(TIME_RESCALE_CLEAN))
+def test_time_rescale_sweep_guard_clears(tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, f"good_timerescale_{shape}.py",
+                  TIME_RESCALE_CLEAN[shape])
+    assert _run_scan(monkeypatch, *_TIME_RESCALE_GUARD, [good]) is None, (
+        f"the guard fired on a legitimate {shape}")

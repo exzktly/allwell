@@ -75,14 +75,26 @@ def on_tab_change(ctx, _e=None) -> None:
     _cb_frame = ctx.widgets.get_or_none("_sidebar_cell_browser_frame")
     if _cb_frame is not None:
         _cb_frame.setVisible(False)
+    # Every pane that is on screen gets its sidebar section, not just the
+    # focused one. In Split View two leaves are visible at once, and the sidebar
+    # used to follow the focus alone: opening Plots beside Statistics left the
+    # Statistics group-definition editor hidden under the well picker until the
+    # user clicked into the Statistics pane to make it focused — a click that
+    # bought nothing, on a panel they were already looking at the tab for.
+    _visible_tabs = visible_centre_tabs(ctx)
+    _also_visible = [t for t in sorted(_visible_tabs) if t and t != tab]
+
     # Heat-map layout configurator lives inside the standard sidebar but is
-    # only relevant on the Heat Map tab.
+    # only relevant on the Heat Map tab — in either pane.
     _hm_frame = ctx.widgets.get_or_none("_heatmap_sidebar_frame")
     if _hm_frame is not None:
-        _hm_frame.setVisible(tab == "Heat Map")
+        _hm_frame.setVisible("Heat Map" in _visible_tabs)
     # The sidebar plate-map doubles as the heat-map drag source on the
     # Heat Map tab -- flip each WellButton into drag-source mode while
-    # that tab is active.
+    # that tab is active. Focused tab only, unlike the frame above: drag mode
+    # changes what a plate *click* does, and the plate is shared, so following
+    # an unfocused Heat Map would rewire the clicks of the pane the user is
+    # actually working in.
     sync_heatmap_well_drag_mode(ctx, tab == "Heat Map")
 
     # Per-tab activation is dispatched through the feature registry: each
@@ -91,6 +103,24 @@ def on_tab_change(ctx, _e=None) -> None:
     # tab with no descriptor / no hook falls back to the generic plot path
     # (unified picker + redraw) — the same behaviour the old ``else`` gave Line
     # Graphs and any unknown leaf.
+    # The other visible pane first, so anything the two hooks both write —
+    # the plate's mode, the rep-colour map — settles on the focused pane's
+    # terms. Only the hook runs for it: the descriptor-less fallback below
+    # ends in a full ``redraw_app``, which belongs to the tab being switched
+    # *to*, and the unfocused pane's own redraw is already handled by the
+    # scope coalescer (``fold_change_scopes.redraw_scopes_or_defer``, which is
+    # Split-View-aware). A pane with no descriptor shares the main frame, so
+    # showing that is all it needs here.
+    for _other in _also_visible:
+        _other_desc = ctx.features.get(_other)
+        if _other_desc is not None and _other_desc.on_activate is not None:
+            try:
+                _other_desc.on_activate(ctx)
+            except Exception:
+                swallowed(f"tab_controller: on_activate failed for {_other!r}")
+        else:
+            ctx.widgets.get("_sidebar_main_frame").setVisible(True)
+
     desc = ctx.features.get(tab)
     if desc is not None and desc.on_activate is not None:
         desc.on_activate(ctx)

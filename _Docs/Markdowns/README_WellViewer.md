@@ -1503,8 +1503,12 @@ the next.
   is edited.
 - **Split View** — the **Split** toggle in the top bar puts two *different*
   centre tabs side-by-side, both live (e.g. Scatter Plot beside Cell Browser).
-  Click into a pane to focus it — the focused pane drives the sidebar and the
-  well picker, and both panes refresh on a selection or channel change. Each
+  Click into a pane to focus it. **Both panes' sidebar sections are on screen
+  at once** — split Plots against Statistics and the Statistics group-definition
+  editor sits under the well picker straight away, without focusing that pane
+  first — and both panes refresh on a selection or channel change. Focus still
+  decides how the shared well picker itself behaves, since a plate click means
+  different things to different pages and only one of them can win. Each
   pane keeps its own row of page tabs at its top, so a page's sub-tabs stay
   where its content is and either side can be switched without focusing it
   first; the shared row across the top of the window is empty while you are
@@ -1590,14 +1594,17 @@ row, holding four actions:
   limit set on the Fraction or Events panel sticks instead of that panel
   auto-scaling. Settings persist across redraws.
 
-#### Interval per timepoint
+#### Interval per timepoint, and Offset
 
-Under **Properties → Time**, **Interval per timepoint** states how far apart the
-timepoints really are, and multiplies the numbers printed on every time axis to
-match. It is there for plates whose filenames don't encode the real acquisition
-cadence: a run numbered `T01 … T12` but imaged every four hours is read by the
-pipeline as 1, 2, 3 … hours, and setting the interval to `4` makes the axes read
-4, 8, 12 … instead. `1` — the default — turns it off.
+Under **Properties → Time** are two controls that together state what the
+timepoints on your plate really are, and correct the numbers printed on every
+time axis to match. They are there for plates whose filenames don't encode the
+real acquisition schedule.
+
+**Interval per timepoint** states how far apart the timepoints are, and
+multiplies the printed numbers. A run numbered `T01 … T12` but imaged every four
+hours is read by the pipeline as 1, 2, 3 … hours, and setting the interval to
+`4` makes the axes read 4, 8, 12 … instead. `1` — the default — turns it off.
 
 The value is a multiplier on the hours the pipeline parsed out of the filenames,
 which is the interval itself only while those filenames number the timepoints
@@ -1605,20 +1612,32 @@ which is the interval itself only while those filenames number the timepoints
 correction factor instead — a run whose names say 4, 8, 12 with the interval set
 to `4` draws 16, 32, 48.
 
-It changes **labels only**. The plotted points, the **Timepoint** dropdowns, the
+**Offset** states where the first image sits, and adds a fixed amount to every
+printed number. It is applied *after* the interval, so the axis reads
+(filename value × interval) + offset. For the same `T01 … T12` plate imaged
+every four hours, but with the first image taken two hours after the treatment
+rather than at it, an interval of `4` and an offset of `−2` make the axes read
+2, 6, 10 … Negative values are ordinary — moving a first image back off the
+origin is what the control is mostly for. `0` — the default — turns it off.
+
+The two are independent: a plate can need either without the other, and each
+control leaves the other alone.
+
+They change **labels only**. The plotted points, the **Timepoint** dropdowns, the
 Statistics tab and every exported CSV keep the hours read from the filenames, so
-while a factor is in force a bar reading `t=16` sits under a Timepoint menu
+while a correction is in force a bar reading `t=16` sits under a Timepoint menu
 reading `4`. That is deliberate — nothing that another part of All-Well reads is
-touched — and it is why any axis the factor changes names it in the axis label,
-so a rescaled figure can't be mistaken for one drawn on the hours the run
-recorded. The factor is saved with the rest of the view state.
+touched — and it is why any axis either control changes names the whole
+correction in its axis label (`Time (hours, filename value × 4 − 2)`), so a
+corrected figure can't be mistaken for one drawn on the hours the run recorded.
+Both values are saved with the rest of the view state.
 
 Applies to the Line Graphs panels, the Bar Plots tick labels and panel titles,
 the Spatial summary panel, and every Batch Export figure — including the scatter
 figures, which have no time axis and so name the timepoint in their title
 instead. Batch **CSV** columns and output **filenames** are unaffected: those hold
 what the pipeline measured and what you picked from the timepoint list, so a
-downstream script reads the same numbers whatever this is set to.
+downstream script reads the same numbers whatever these are set to.
 
 The Heat Map and Distribution tabs pick a timepoint from a menu rather than
 drawing a time axis, so their titles keep naming the filename's own value,
@@ -1803,9 +1822,45 @@ of individual cells. This is the default Plotting sub-tab.
     comparisons the [Statistics](#statistics) tab last ran. A bracket appears
     over the two bars its comparison was computed from, whether those bars are
     replicate sets or individual wells — a group holding a single well brackets
-    that well's own bar. When a comparison doesn't line up with any bar (a group
-    spread across several bars, say), the status line says so instead of the
-    bracket quietly going missing.
+    that well's own bar.
+
+    Brackets are drawn only while the comparison still describes what the bars
+    show. The Statistics tab carries its own **Channel**, **Property** and
+    **Timepoint** selectors, separate from the Plotting band's, so a test run on
+    one column can easily end up being looked at over another's bars — and a
+    comparison drawn over data it wasn't computed from would be worse than no
+    comparison at all. So the brackets are withheld when the test was run on a
+    different channel or metric than the bars show, at a different timepoint,
+    or when a compared group doesn't line up with any single bar.
+
+    **Violin**, **Beeswarm** and Properties → Statistics → **Show: All points**
+    draw per-cell points instead of bars, so there is no bar for a bracket to
+    sit on and none is drawn in those modes. "All points" is the one worth
+    knowing about: it is a sidebar setting rather than a visible mode switch, so
+    turning it on makes the asterisks disappear from what still looks like the
+    same plot.
+
+    **Whenever they are withheld, the panel says why**, in small type in its
+    top-left corner — naming the tested channel and the drawn one, the tested
+    timepoint and the drawn one, or the per-cell mode that is on, so you can see
+    which control to move. The same sentence goes to the status line. The note is part of the
+    figure, so a copied or exported plot carries it too: a plot with no
+    asterisks never leaves you guessing whether a comparison was withheld or
+    simply never run. With **Significance** off, nothing is drawn and nothing is
+    said — that absence is the one you asked for.
+
+    The brackets stack above the tallest bar, and they respect an axis limit
+    you set for that panel: if you have typed a **Y max** under
+    Properties → Axes, they are fitted underneath it rather than drawn above it
+    where the limit would hide them. If the limit leaves no room above the bars
+    at all, the panel says so instead of annotating nothing.
+
+    Changing any of the Statistics tab's test settings — **Channel**,
+    **Property**, **Statistic**, **Test** or **Timepoint** — clears the last
+    run, and the brackets go with it. That keeps the two halves honest: an empty
+    results panel beside a plot still carrying asterisks attributed to it would
+    be claiming a comparison that no longer exists. Run the test again once the
+    settings say what you want.
   - **Reset Order** — restore the default order after you **drag bars to
     reorder** them.
   - The shared [Fold-change](#fold-change-normalization) dropdowns, applied in

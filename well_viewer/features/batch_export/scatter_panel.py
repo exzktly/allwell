@@ -556,7 +556,8 @@ class ScatterBatchExportPanel(BatchExportPanel):
         is nothing for the message to disagree with.
         """
         from well_viewer.domain.time_rescale import figure_timepoint_label
-        return figure_timepoint_label(tp_h, self._ctx.state.plot.time_scale)
+        from well_viewer.domain.time_rescale import rescale_for as _time_rescale_for
+        return figure_timepoint_label(tp_h, _time_rescale_for(self._ctx.state.plot))
 
     def _run_scatter_cells_job(
         self, grp: BarGroup, tp_h: float, csv_path: Path, fig_path: Path, fmt: str,

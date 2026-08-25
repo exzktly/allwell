@@ -32,6 +32,7 @@ from well_viewer.domain.fold_change_pairing import (
 )
 from well_viewer.domain import plot_members as _members
 from well_viewer.domain.time_rescale import format_scaled as _rescale_tp
+from well_viewer.domain.time_rescale import rescale_for as _time_rescale_for
 from well_viewer.domain.stats_compute import (
     aggregate_group,
     aggregate_well_cached,
@@ -388,7 +389,7 @@ def collect_bar_items(
         # because that is the bar's identity — drag order, the x-position map
         # and the significance-bracket matching all key on it, and none of them
         # should move when the user changes how the axis is *printed*.
-        return _rescale_tp(t, ctx.state.plot.time_scale)
+        return _rescale_tp(t, _time_rescale_for(ctx.state.plot))
 
     def _items_for_tp(target_t: float) -> list[BarItem]:
         """Build one ``BarItem`` per bar key at this timepoint.
@@ -902,7 +903,7 @@ def collect_bar_items_for_group(
         # because that is the bar's identity — drag order, the x-position map
         # and the significance-bracket matching all key on it, and none of them
         # should move when the user changes how the axis is *printed*.
-        return _rescale_tp(t, ctx.state.plot.time_scale)
+        return _rescale_tp(t, _time_rescale_for(ctx.state.plot))
 
     def _items_for_tp(target_t: float) -> list[BarItem]:
         out: list[BarItem] = []
@@ -1111,14 +1112,14 @@ def collect_bar_items_fov_pooled(
     # Same split as the per-well branch: the key is identity and stays in the
     # hours the pipeline parsed, the display is a label and follows the
     # Properties sidebar's rescale factor.
-    _tp_label = ctx.state.plot.time_scale
+    _tp_rescale = _time_rescale_for(ctx.state.plot)
 
     items: list[BarItem] = []
     if not tp_chunks:
         for t in target_ts:
             items.append(BarItem(
                 key=f"t{t:.4g}",
-                display=f"t={_rescale_tp(t, _tp_label)} h",
+                display=f"t={_rescale_tp(t, _tp_rescale)} h",
                 color=color_for_well("A01"),
                 mean=float("nan"), spread=0.0, has_mean=False,
                 frac=float("nan"), frac_spread=0.0, has_frac=False,
@@ -1150,7 +1151,7 @@ def collect_bar_items_fov_pooled(
                 matched = pt
                 break
         color = _WELL_COLORS[i % len(_WELL_COLORS)]
-        display = f"t={_rescale_tp(t, _tp_label)}"
+        display = f"t={_rescale_tp(t, _tp_rescale)}"
         if matched is None:
             items.append(BarItem(
                 key=f"t{float(t):.4g}", display=display, color=color,

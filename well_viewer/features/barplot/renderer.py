@@ -8,7 +8,7 @@ the matplotlib axes to draw into.
 from __future__ import annotations
 
 from well_viewer.features.barplot.controller import refresh_bar_layout_btn_state
-from well_viewer.features.barplot.collect import bar_err_settings, collect_bar_items_for_app
+from well_viewer.features.barplot.collect import _bar_debug, bar_err_settings, collect_bar_items_for_app
 
 from well_viewer.domain.selections_model import (color_for_replicate_set, color_for_well, well_display_label, active_replicate_sets)
 from well_viewer.core.channel_state_controller import get_all_fluor_gates, on_cutoff_for_column
@@ -16,6 +16,7 @@ from well_viewer.core.empty_state_copy import NO_DATASET_MESSAGE
 from well_viewer.data.data_loading import get_rows
 from well_viewer.domain.text_columns import timepoint_text
 from well_viewer.domain.time_rescale import format_scaled as _rescale_tp
+from well_viewer.domain.time_rescale import rescale_for as _time_rescale_for
 from well_viewer.domain import fold_change_pairing as _pairing_mod
 from well_viewer.domain import plot_members as _members
 from well_viewer.data.data_loading import (
@@ -312,7 +313,7 @@ def draw_violin(
     # says — it is ``n_above / n_total`` off the rows — which is why
     # its title carries no fold-change suffix either.
     _set_frac_ylim(ctx, ax_frac, normalised=False)
-    mark_time_rescale(ax_mean, ax_frac, factor=ctx.state.plot.time_scale)
+    mark_time_rescale(ax_mean, ax_frac, rescale=_time_rescale_for(ctx.state.plot))
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB, fraction_title
     from well_viewer.domain import fold_change as _fc
@@ -464,7 +465,7 @@ def draw_beeswarm(
     # says — it is ``n_above / n_total`` off the rows — which is why
     # its title carries no fold-change suffix either.
     _set_frac_ylim(ctx, ax_frac, normalised=False)
-    mark_time_rescale(ax_mean, ax_frac, factor=ctx.state.plot.time_scale)
+    mark_time_rescale(ax_mean, ax_frac, rescale=_time_rescale_for(ctx.state.plot))
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     from well_viewer.data.metric_labels import (
         METRIC_KEY_TO_LABEL as _MLB,
@@ -501,6 +502,108 @@ def _significance_marker(p: float) -> str:
     return "ns"
 
 
+#: Marks the "why there are no brackets" note, so a later pass — or a test —
+#: can find it among the panel's other texts.
+SIGNIFICANCE_NOTE_TAG = "_aw_significance_note"
+
+
+def _val_col_label(col: str) -> str:
+    """Readable name for a value column, for the no-brackets note.
+
+    The note names the tested column and the drawn one side by side, so it has
+    to read the way the channel menus do — ``GFP Mean Intensity``, not
+    ``gfp_mean_intensity``. Falls back to the raw key for anything the label
+    tables don't recognise, which is still more use than nothing.
+    """
+    col = str(col or "")
+    if not col:
+        return "—"
+    from well_viewer.domain.ratio_models import is_ratio_key
+    if is_ratio_key(col):
+        return col.split(":", 1)[-1]
+    from well_viewer.data.metric_labels import split_metric_col
+    parts = split_metric_col(col)
+    return parts[2] if parts else col
+
+
+def _user_y_ceiling(ctx, ax) -> float | None:
+    """The user's own upper y-limit for *ax*, or ``None`` when they set none.
+
+    Read through the same per-panel lookup ``apply_export_style_prefs`` uses —
+    the figure's ``axis_buckets`` entry for this panel first, then the flat
+    pref — so the number this function honours is the number that pass will
+    apply afterwards. Reading only the flat pref would have been right for a
+    single-axis figure and wrong for the Value / Fraction / Events stack, which
+    is the figure this actually draws on.
+
+    ``None`` means "no override", which is not the same as a limit of zero; a
+    caller that conflated them would refuse to draw on a panel the user had
+    simply left alone.
+    """
+    fig = getattr(ax, "figure", None)
+    if fig is None:
+        return None
+    try:
+        from well_viewer.core.plot_style import axis_scoped_value, figure_prefs
+        prefs = figure_prefs(ctx, fig)
+        idx = list(fig.axes).index(ax) + 1
+        raw = axis_scoped_value(prefs, idx, "y_lim_max", None)
+        if raw in (None, ""):
+            return None
+        return float(raw)
+    except Exception:
+        swallowed("barplot: could not read the panel's user y-limit")
+        return None
+
+
+def _per_cell_mode_name(ctx) -> str:
+    """Which of the three per-cell modes is on, named as the control names it.
+
+    The note has to point at a control the user can find. "Per-cell mode" would
+    not: three separate switches reach it, two on the Bar tab's Display popover
+    and one in the Properties sidebar, and the sidebar one is the reason this
+    reads as a bug rather than a mode.
+    """
+    if getattr(ctx.state.bar, "violin", False):
+        return "Violin"
+    if getattr(ctx.state.bar, "swarm", False):
+        return "Beeswarm"
+    return "Show: All points"
+
+
+def _no_significance(ctx, ax, reason: str) -> None:
+    """Say on the figure why the Significance toggle produced no brackets.
+
+    Every way this renderer can decline to draw used to be a bare ``return``.
+    Six of them, and only one said anything — so with "Significance: On" showing
+    on the toolbar, a plot with no asterisks looked identical whether no test had
+    been run, the test was run on another channel, the bars had moved to another
+    timepoint, or every comparison genuinely came back drawable and simply had
+    not been asked for. That is the silent-substitution failure CLAUDE.md §7
+    names: degraded output indistinguishable from good output, with the software
+    knowing and not saying.
+
+    The status line alone is not enough. It is transient, it is at the other end
+    of the window from the plot, and in Split View — where the Statistics pane
+    and the Bar plot are on screen together and either one's channel or timepoint
+    can be changed in a click — the brackets appear and vanish faster than anyone
+    watches a status bar. So the reason goes **on the panel**, in muted type
+    inside the top-left corner, where it is part of the figure and survives a
+    copy or an export. It is cleared by the next redraw's ``cla()`` like any
+    other artist.
+    """
+    setter = getattr(ctx.notify, "set_status", None)
+    if callable(setter):
+        setter(f"Significance: {reason}")
+    if ax is None:
+        return
+    note = ax.text(
+        0.01, 0.98, f"Significance: {reason}", transform=ax.transAxes,
+        ha="left", va="top", fontsize=7, color=tokens_for(ax)[2],
+        zorder=6, clip_on=False)
+    setattr(note, SIGNIFICANCE_NOTE_TAG, True)
+
+
 def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
                                target_ts=None) -> None:
     """Draw significance brackets from the Statistics tab's pairwise results (N7).
@@ -517,9 +620,20 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
     run on — otherwise a comparison computed for one channel would be drawn over
     a different channel's bars. A bracket is drawn for every compared pair whose
     both groups map to a bar — by replicate-set name, else by well membership;
-    pairs that don't line up with the current bars are skipped (with a status
-    hint). The BH-adjusted p drives the asterisk where available. No-op in
-    per-cell mode (this is only called from the aggregate bar path)."""
+    pairs that don't line up with the current bars are skipped. The BH-adjusted p
+    drives the asterisk where available. No-op in per-cell mode (this is only
+    called from the aggregate bar path).
+
+    **Every one of those gates reports itself** through :func:`_no_significance`.
+    The gates are all deliberate — the Statistics tab carries its own Channel,
+    Property and Timepoint selectors, independent of the Plotting band's, so the
+    two sides drift apart in ordinary use and a comparison drawn over the wrong
+    bars would be worse than none. What was not deliberate is that they were
+    silent: with the toggle reading "On", a plot without asterisks said nothing
+    about which of them had fired, so the feature read as unreliable rather than
+    as conditional. Only the user switching the toggle off draws nothing and says
+    nothing, because there the absence is what they asked for.
+    """
     if not getattr(ctx.state.plot, "show_significance", False):
         return
     # ``feature_slice`` rather than attribute access: Statistics is removable,
@@ -531,9 +645,27 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
     # the significance toggle on.
     stats_state = ctx.state.feature_slice("stats")
     if stats_state is None:
+        _no_significance(ctx, ax_mean,
+                         "the Statistics feature is not in this build.")
         return
     pairwise = list(getattr(stats_state, "pairwise", []) or [])
     if not pairwise:
+        # Careful with the wording. "No test has been run" is the common case
+        # and was the first thing this said, but it is not the only way the
+        # store ends up empty: ``stats.compute_pairwise`` returns ``[]`` after a
+        # run too — fewer than two groups with wells, any group with under two
+        # replicate values, a misconfigured KS test, scipy missing, or every
+        # pair coming back with an error. In several of those the Statistics
+        # tab has already printed a result explaining itself, so a note here
+        # flatly denying a test happened would contradict the panel beside it
+        # and send the user to re-run something that had run.
+        #
+        # So this says what is actually known — the store is empty — and points
+        # at the place that knows why.
+        _no_significance(ctx, ax_mean,
+                         "no comparison is stored — run a test on the "
+                         "Statistics tab, or read its results panel if you "
+                         "already did.")
         return
     rec0 = pairwise[0]
     # Context gate: don't overlay a test computed for a different channel/metric
@@ -543,11 +675,24 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
     if rec_val_col is not None:
         cur_val_col = str(getattr(ctx.state.channel, "active_val_col", "") or "")
         if str(rec_val_col) != cur_val_col:
+            _no_significance(
+                ctx, ax_mean,
+                f"the test was run on {_val_col_label(rec_val_col)}; "
+                f"these bars show {_val_col_label(cur_val_col)}.")
             return
     rec_tp = rec0.get("target_t")
     if rec_tp is not None and target_ts:
         try:
             if not any(tp_close(float(t), float(rec_tp)) for t in target_ts):
+                # Named through the Properties → Time correction, so the note
+                # reads in the same units as the tick labels beside it rather
+                # than in the hours the filenames happen to carry.
+                _rs = _time_rescale_for(ctx.state.plot)
+                _shown = ", ".join(_rescale_tp(t, _rs) for t in target_ts)
+                _no_significance(
+                    ctx, ax_mean,
+                    f"the test was run at t={_rescale_tp(rec_tp, _rs)}; "
+                    f"these bars show t={_shown}.")
                 return
         except (TypeError, ValueError):
             pass
@@ -559,10 +704,18 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
     else:
         ax, val_attr, spread_attr, has_attr = ax_mean, "mean", "spread", "has_mean"
     if ax is None:
+        # The tested measure's panel isn't on this figure. Note it on the Mean
+        # panel when that is the one still present, so the message has somewhere
+        # to land even though its own panel does not.
+        _no_significance(
+            ctx, ax_mean,
+            "the panel this test belongs on is not on this figure.")
         return
     keys = list(getattr(ctx.runtime.barplot, "xs_keys", []) or [])
     xs = list(getattr(ctx.runtime.barplot, "xs", []) or [])
     if not keys or len(keys) != len(xs):
+        _no_significance(ctx, ax,
+                         "the bar positions for this layout aren't available.")
         return
 
     # ``keys``/``xs`` are parallel to ``items``. In multi-timepoint mode one key
@@ -642,19 +795,46 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
     if not matched:
         # Significance is on and a test has run, but no comparison lines up with
         # the current bars (e.g. per-well bars, or groups spanning several bars).
-        # Say so rather than silently drawing nothing.
-        setter = ctx.notify.set_status
-        if callable(setter):
-            setter("Significance: no comparison matches the current bars — "
-                   "pool replicates so each compared group is a single bar.")
+        # The one gate that already said something; it now says it on the panel
+        # too, like the rest.
+        _no_significance(ctx, ax,
+                         "no comparison matches the current bars — pool "
+                         "replicates so each compared group is a single bar.")
         return
 
     # Shortest spans lowest so nested brackets stack cleanly.
     matched.sort(key=lambda m: abs(x_by_key[m[1]] - x_by_key[m[2]]))
     y0, y1 = ax.get_ylim()
-    span = (y1 - y0) or 1.0
-    step = span * 0.08
     base = max(top_by_key.values())
+    # Where the brackets are allowed to reach. Growing the axis to fit them
+    # works only while nothing overrules the growth — and something does:
+    # ``apply_export_style_to_current`` runs at the end of ``redraw_bars`` and
+    # re-applies the user's own axis limits **last**. A limit set on this panel
+    # therefore clipped the brackets straight back off the top, and because
+    # ``clip_on`` is False they were not clipped so much as drawn outside the
+    # panel entirely. Nothing had gone wrong by this function's own reckoning —
+    # every gate passed, the artists exist — so nothing said anything, and the
+    # asterisks simply were not there. That is the one shape of this bug the
+    # notes above cannot describe, because it is not a decline.
+    #
+    # So the ceiling is read here instead, and the brackets are stacked to fit
+    # under it. The user's limit wins: it is an explicit statement about the
+    # panel, and quietly overriding it to make room would trade one silent
+    # substitution for another.
+    ceiling = _user_y_ceiling(ctx, ax)
+    if ceiling is None:
+        step = ((y1 - y0) or 1.0) * 0.08
+        top = base + step * (len(matched) + 1)
+    else:
+        headroom = float(ceiling) - base
+        if headroom <= 0:
+            _no_significance(
+                ctx, ax,
+                "the y-limit set for this panel leaves no room above the bars "
+                "for the brackets — raise it or clear it in Properties → Axes.")
+            return
+        step = headroom / (len(matched) + 1)
+        top = float(ceiling)
     fg = tokens_for(ax)[1]
     for level, (p_show, ka, kb) in enumerate(matched):
         xa, xb = x_by_key[ka], x_by_key[kb]
@@ -674,7 +854,23 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
                 ha="center", va="bottom", fontsize=8, color=fg,
                 zorder=6, clip_on=False)
     # Grow the y-limit so the top bracket clears the panel (keeps the floor).
-    ax.set_ylim(y0, base + step * (len(matched) + 1))
+    # When the user set their own ceiling this is already that number, so the
+    # export-style pass re-applying it a moment later is a no-op rather than a
+    # clip.
+    ax.set_ylim(y0, top)
+    # Opt-in diagnostic (``review_bar_debug``). Every way this function can
+    # decline now says so on the figure, so a report of "the toggle is on, no
+    # note appeared, and the asterisks are still missing" means the brackets
+    # were drawn and something downstream removed or hid them. That is a
+    # different investigation, and it needs the count this line prints — how
+    # many comparisons arrived, how many resolved to bars, and where they were
+    # put — rather than another round of reading.
+    _bar_debug(
+        f"significance drew {len(matched)}/{len(pairwise)} bracket(s) on "
+        f"{'frac' if stat == 'fraction' else 'mean'} at y={base:.4g}..{top:.4g} "
+        f"(ceiling={'auto' if ceiling is None else ceiling}) keys="
+        + repr([m[1:] for m in matched])
+    )
 
 
 def draw_grouped_bar_mode(
@@ -842,7 +1038,8 @@ def redraw_bars(ctx) -> None:
                 "N(above)",
             )
     _set_frac_ylim(ctx, ax_frac)
-    mark_time_rescale(ax_mean, ax_frac, ax_n, factor=ctx.state.plot.time_scale)
+    mark_time_rescale(ax_mean, ax_frac, ax_n,
+                      rescale=_time_rescale_for(ctx.state.plot))
 
     if not ctx.state.dataset.well_paths:
         draw_bar_empty_state(ctx, ax_mean, ax_frac, NO_DATASET_MESSAGE, ax_n=ax_n)
@@ -870,8 +1067,8 @@ def redraw_bars(ctx) -> None:
     # The panel titles ("t = … h") are read off the same figure as the tick
     # labels, so they follow the rescale factor too — the selection keys these
     # come from stay in the hours the pipeline parsed.
-    _tp_scale = ctx.state.plot.time_scale
-    tp_strs = [_rescale_tp(t, _tp_scale) for t in target_ts]
+    _tp_rescale = _time_rescale_for(ctx.state.plot)
+    tp_strs = [_rescale_tp(t, _tp_rescale) for t in target_ts]
     tp_str_combined = ", ".join(tp_strs)
 
     if draw_per_cell_bar_mode(
@@ -884,6 +1081,24 @@ def redraw_bars(ctx) -> None:
         tp_str=tp_str_combined,
         threshold=threshold,
     ):
+        # The seventh way the brackets go missing, and the only one
+        # ``draw_significance_brackets`` cannot report on, because the per-cell
+        # path returns here without ever calling it. Violin, Beeswarm and
+        # Properties → Statistics → "Show: All points" all route through
+        # ``draw_per_cell_bar_mode``, and none of them draws a bar: there is no
+        # bar top for a bracket to sit on and no bar for a compared group to
+        # resolve to. So the comparison is withheld — correctly — and, like
+        # every other withheld comparison, it says so rather than leaving the
+        # user to notice the asterisks are gone.
+        #
+        # "All points" is the one that reads as a bug rather than a mode: it is
+        # a Properties-sidebar setting rather than a visible mode switch, so the
+        # asterisks disappear from what still looks like the same plot.
+        if getattr(ctx.state.plot, "show_significance", False):
+            _no_significance(
+                ctx, ax_mean,
+                f"{_per_cell_mode_name(ctx)} draws per-cell points rather than "
+                f"bars, and the brackets need bars to sit on.")
         apply_export_style_to_current(ctx, ctx.runtime.barplot.fig, getattr(ctx.runtime.barplot, "canvas", None))
         return
     draw_grouped_bar_mode(
@@ -1105,7 +1320,7 @@ def draw_per_cell_bar_mode(
     multi_tp = len(target_ts) > 1
     if group_mode == "timepoint":
         for t in target_ts:
-            tp_lbl = _rescale_tp(t, ctx.state.plot.time_scale)
+            tp_lbl = _rescale_tp(t, _time_rescale_for(ctx.state.plot))
             for w, c, short, full in zip(base_wells, base_colors, base_short, base_full):
                 plot_wells.append(w)
                 plot_colors.append(c)
@@ -1116,7 +1331,7 @@ def draw_per_cell_bar_mode(
     else:
         for w, c, short, full in zip(base_wells, base_colors, base_short, base_full):
             for t in target_ts:
-                tp_lbl = _rescale_tp(t, ctx.state.plot.time_scale)
+                tp_lbl = _rescale_tp(t, _time_rescale_for(ctx.state.plot))
                 plot_wells.append(w)
                 plot_colors.append(c)
                 # cluster header = well/rset identity; per-bar tick = tp

@@ -72,7 +72,17 @@ class _W:
 
 
 def _artists(ax):
-    return len(ax.lines) + len(ax.texts)
+    """Count the *bracket* artists on *ax* — the lines and their asterisks.
+
+    Not every artist. The renderer also writes a muted one-line note saying why
+    it declined to draw (``SIGNIFICANCE_NOTE_TAG``), and that note is the
+    opposite of a bracket: counting it would make "drew nothing" tests pass on a
+    panel that drew a bracket and fail on one that correctly explained itself.
+    ``tests/test_bar_significance_says_why.py`` is where the note is asserted.
+    """
+    from well_viewer.features.barplot.renderer import SIGNIFICANCE_NOTE_TAG
+    texts = [t for t in ax.texts if not getattr(t, SIGNIFICANCE_NOTE_TAG, False)]
+    return len(ax.lines) + len(texts)
 
 
 def _axes():

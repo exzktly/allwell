@@ -1,8 +1,9 @@
-"""The time-axis label multiplier (``domain/time_rescale.py``).
+"""The time-axis label correction (``domain/time_rescale.py``).
 
-Pure-logic: no Qt, no app, no dataset. The module is deliberately tiny — its job
-is to print a different number, not to change one — so these tests are mostly
-about what it refuses to do.
+The interval multiplier and the fixed offset, together ``filename hours ×
+factor + offset``. Pure-logic: no Qt, no app, no dataset. The module is
+deliberately tiny — its job is to print a different number, not to change one —
+so these tests are mostly about what it refuses to do.
 """
 
 from __future__ import annotations
@@ -172,3 +173,164 @@ def test_figure_timepoint_label_survives_a_non_numeric_value():
 
 def test_figure_timepoint_label_unit_is_overridable():
     assert tr.figure_timepoint_label(1.0, 1, unit="") == "t=1"
+
+
+# ── the offset ──────────────────────────────────────────────────────────────
+#
+# The second half of the correction, and the half that can be wrong in a way the
+# first cannot: a factor of one is visibly "off", while an offset silently left
+# at zero looks exactly like an offset the user never set.
+
+def test_labels_are_shifted_by_the_offset():
+    assert tr.scaled(1, tr.TimeRescale(factor=1, offset=2)) == 3.0
+    assert tr.scaled(0, tr.TimeRescale(factor=1, offset=2)) == 2.0
+
+
+def test_the_offset_is_applied_after_the_multiplier():
+    """The interval turns a filename *index* into hours; the offset is a shift
+    *in hours*. Applying it first would scale the user's own number out from
+    under them — an offset of 2 at a factor of 4 would move the axis by 8."""
+    rs = tr.TimeRescale(factor=4, offset=2)
+    assert tr.scaled(1, rs) == 6.0          # 1×4 + 2, not (1+2)×4
+    assert tr.scaled(3, rs) == 14.0
+
+
+def test_a_plate_whose_first_image_is_two_hours_in():
+    """The reported case for this half: T01…T12 every four hours, with imaging
+    starting two hours after the treatment rather than at it."""
+    rs = tr.TimeRescale(factor=4, offset=-2)
+    labels = [tr.format_scaled(h, rs) for h in range(1, 13)]
+    assert labels[0] == "2"
+    assert labels[-1] == "46"
+    assert labels == [str(4 * h - 2) for h in range(1, 13)]
+
+
+def test_a_negative_offset_is_ordinary():
+    """Unlike the factor, where a negative mirrors the axis, a negative offset
+    is the common case — it is what moves a first image off the origin."""
+    assert tr.coerce_offset(-2) == -2.0
+    assert tr.coerce_offset(-0.5) == -0.5
+    assert tr.is_active(tr.TimeRescale(factor=1, offset=-2))
+    assert tr.scaled(1, tr.TimeRescale(factor=1, offset=-2)) == -1.0
+
+
+def test_an_offset_of_zero_is_the_off_state():
+    assert not tr.is_active(tr.TimeRescale(factor=1, offset=0))
+    assert not tr.is_active(tr.TimeRescale())
+    assert tr.describe(tr.TimeRescale(factor=1, offset=0)) == ""
+    for base in ("Time (hours)", "Timepoint (h)"):
+        assert tr.axis_label(base, tr.TimeRescale(factor=1, offset=0)) == base
+
+
+def test_an_offset_a_hair_from_zero_is_still_off():
+    """Same reason as the factor: it arrives from a text field and round-trips
+    through persistence, so a part in a billion is someone typing 0."""
+    assert not tr.is_active(tr.TimeRescale(factor=1, offset=1e-12))
+    assert not tr.is_active(tr.TimeRescale(factor=1, offset=-1e-12))
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"),
+                                 "x", None])
+def test_an_unusable_offset_falls_back(bad):
+    """Narrower than the factor's rejection list on purpose: only the values
+    that are not numbers, or that matplotlib cannot place a tick at."""
+    assert tr.coerce_offset(bad, fallback=3.0) == 3.0
+    assert tr.coerce_offset(bad) == tr.DEFAULT_OFFSET
+    assert not tr.is_active(tr.TimeRescale(factor=1, offset=bad))
+
+
+def test_an_offset_alone_still_marks_the_axis():
+    """An axis shifted by two hours disagrees with the timepoint menus exactly
+    as loudly as one multiplied by four, so it needs the marker just as much.
+    Unmarked, it is indistinguishable from an axis drawn on real hours — the one
+    outcome this module exists to prevent."""
+    rs = tr.TimeRescale(factor=1, offset=2)
+    assert tr.describe(rs) == "filename value + 2"
+    assert tr.axis_label("Time (hours)", rs) == "Time (hours, filename value + 2)"
+
+
+def test_a_pure_shift_does_not_name_a_multiplier_it_did_not_use():
+    """"filename value × 1 + 2" invites the 1 to be read as part of the
+    correction. Each term appears only while it is doing something."""
+    assert "×" not in tr.describe(tr.TimeRescale(factor=1, offset=2))
+
+
+def test_the_marker_states_both_terms_when_both_are_in_force():
+    assert tr.describe(tr.TimeRescale(factor=4, offset=2)) == \
+        "filename value × 4 + 2"
+
+
+def test_a_negative_offset_reads_as_a_subtraction():
+    """The sign is the operator, so the number beside it is never itself signed
+    — "+ -2" reads as a typo, and a marker a reader distrusts is no marker."""
+    assert tr.describe(tr.TimeRescale(factor=4, offset=-2)) == \
+        "filename value × 4 − 2"
+    assert "-2" not in tr.describe(tr.TimeRescale(factor=4, offset=-2))
+
+
+def test_the_marker_states_the_numbers_the_labels_actually_used():
+    """A marker naming a different correction than the axis applied would be
+    worse than none at all."""
+    rs = tr.TimeRescale(factor=4, offset=-2)
+    marker = tr.describe(rs)
+    assert "4" in marker and "2" in marker
+    assert tr.format_scaled(1, rs) == "2"
+
+
+def test_a_figure_title_carries_the_whole_correction():
+    """A scatter figure has no time axis, so the title is the only place the
+    timepoint appears — and the only place that can say it was corrected."""
+    rs = tr.TimeRescale(factor=4, offset=-2)
+    assert tr.figure_timepoint_label(1.0, rs) == "t=2 h, filename value × 4 − 2"
+
+
+def test_zero_still_prints_as_zero_under_an_offset():
+    """The falsy-zero class again: an offset that lands a timepoint exactly on
+    zero must print "0", not a blank tick that reads as a missing one."""
+    assert tr.format_scaled(1, tr.TimeRescale(factor=1, offset=-1)) == "0"
+
+
+def test_a_non_numeric_value_still_formats_as_empty_under_an_offset():
+    assert tr.format_scaled("not a number", tr.TimeRescale(factor=4, offset=2)) == ""
+    assert math.isnan(tr.scaled(None, tr.TimeRescale(factor=4, offset=2)))
+
+
+# ── the value that carries both ─────────────────────────────────────────────
+#
+# One object rather than two arguments, so no call site can pass half a
+# correction. `tests/test_time_rescale_is_swept.py` holds the other half of that
+# rule at the source level.
+
+def test_a_bare_number_still_reads_as_a_factor_with_no_offset():
+    """The pre-offset spelling stays meaningful — it is a real state, and it is
+    what the stamp a matplotlib axes carries replays."""
+    assert tr.scaled(1, 4) == tr.scaled(1, tr.TimeRescale(factor=4, offset=0))
+    assert tr.describe(4) == tr.describe(tr.TimeRescale(factor=4))
+
+
+def test_the_rescale_value_coerces_what_it_is_built_from():
+    """There is no second, unchecked way in: a value built straight from typed
+    or persisted input is already safe to format with."""
+    assert tr.TimeRescale(factor=0).factor == tr.DEFAULT_FACTOR
+    assert tr.TimeRescale(factor=-4).factor == tr.DEFAULT_FACTOR
+    assert tr.TimeRescale(offset=float("nan")).offset == tr.DEFAULT_OFFSET
+    assert tr.TimeRescale(factor="x", offset="y") == tr.OFF
+
+
+def test_the_rescale_value_is_frozen():
+    """A renderer holding one cannot write back into the sidebar's setting."""
+    import dataclasses
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        tr.TimeRescale(factor=4).factor = 8
+
+
+def test_rescale_for_reads_both_halves_off_the_state():
+    class _Plot:
+        time_scale = 4.0
+        time_offset = -2.0
+    assert tr.rescale_for(_Plot()) == tr.TimeRescale(factor=4, offset=-2)
+
+
+def test_rescale_for_survives_a_state_object_that_has_neither():
+    """It runs from tick formatters and from tests holding a bare stand-in."""
+    assert tr.rescale_for(object()) == tr.OFF

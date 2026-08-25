@@ -619,21 +619,42 @@ class ExportStyleSidebar(QWidget):
         thr_tog.toggled.connect(_on_threshold_line_toggle)
         add_row(s_over, "", thr_tog)
 
-        # ── Time ────────────────────────────────────────────────────────────
-        # Time-axis label multiplier. Drives PlotState.time_scale, read by the
-        # Line, Bar and Spatial renderers. Its own section rather than a row
-        # under Overlays: it draws nothing on the figure, it renames the numbers
-        # an existing axis already prints. Label-only: the plotted values, the
-        # timepoint menus, the Statistics tab and every export keep the hours
-        # the pipeline parsed out of the filenames, and any axis it changes says
-        # so in its label.
+        # ── Time ─────────────────────────────────────────────────────
+        # The time-axis label correction: an interval multiplier and a fixed
+        # offset, together the map ``filename hours × scale + offset``. Drives
+        # PlotState.time_scale / .time_offset, read by the Line, Bar, Spatial
+        # and batch-export renderers through ``time_rescale.rescale_for``. Its
+        # own section rather than a row under Overlays: it draws nothing on the
+        # figure, it renames the numbers an existing axis already prints.
+        # Label-only: the plotted values, the timepoint menus, the Statistics tab
+        # and every export keep the hours the pipeline parsed out of the
+        # filenames, and any axis it changes says so in its label.
+        #
+        # Two controls rather than one because they answer two independent
+        # questions about the plate — how far apart the images are, and where
+        # the first one sits — and a plate can need either without the other.
         s_time = section("Time", expanded=False)
         _time_preview = QLabel("")
         _time_preview.setObjectName("Muted")
         s_time.setValueWidget(_time_preview)
 
-        def _time_preview_text(factor: float) -> str:
-            return "Off" if float(factor) == 1.0 else f"×{float(factor):g}"
+        def _time_preview_text() -> str:
+            """The collapsed section's one-glance summary of both controls.
+
+            Built from the live state rather than from the value that just
+            changed, so editing either control redraws a summary that describes
+            both — a preview showing only the half last touched would say "Off"
+            on an axis that is still being shifted.
+            """
+            plot = self._app._app_state.plot
+            factor = float(getattr(plot, "time_scale", 1.0))
+            offset = float(getattr(plot, "time_offset", 0.0))
+            bits = []
+            if factor != 1.0:
+                bits.append(f"×{factor:g}")
+            if offset != 0.0:
+                bits.append(f"{'−' if offset < 0 else '+'}{abs(offset):g}")
+            return " ".join(bits) if bits else "Off"
 
         time_scale = _Stepper(minimum=0.001, maximum=1000.0, single_step=0.5,
                               value=float(getattr(
@@ -649,19 +670,50 @@ class ExportStyleSidebar(QWidget):
             "already carry real hours, this is a correction factor. 1 = off.\n\n"
             "Labels only — the timepoint menus, the Statistics tab and every "
             "exported CSV keep the hours read from the filenames, so a rescaled "
-            "axis names the factor to say why the numbers differ.")
+            "axis names the correction to say why the numbers differ.")
 
         def _on_time_scale(value: float) -> None:
             self._app._app_state.plot.time_scale = float(value)
-            _time_preview.setText(_time_preview_text(value))
+            _time_preview.setText(_time_preview_text())
             try:
                 self._redraw_active_plot()
             except Exception:
                 swallowed()
         time_scale.valueChanged.connect(_on_time_scale)
         add_row(s_time, "Interval per timepoint", time_scale)
-        _time_preview.setText(_time_preview_text(
-            getattr(self._app._app_state.plot, "time_scale", 1.0)))
+
+        # Applied *after* the multiplier, and stated that way in the tooltip:
+        # the interval turns a filename index into hours, so a shift typed in
+        # hours has to land on the result rather than on the index.
+        time_offset = _Stepper(minimum=-100000.0, maximum=100000.0,
+                               single_step=1.0,
+                               value=float(getattr(
+                                   self._app._app_state.plot, "time_offset", 0.0)),
+                               decimals=3)
+        time_offset.setToolTip(
+            "A fixed amount added to every time label, applied after the "
+            "interval above — the axis reads (filename value × interval) + "
+            "offset.\n\n"
+            "For a plate imaged every 4 hours whose first image was taken 2 "
+            "hours after treatment rather than at it, set an interval of 4 and "
+            "an offset of −2, and the axis reads 2, 6, 10 … Negative values are "
+            "ordinary; 0 = off.\n\n"
+            "Labels only, on the same terms as the interval — the timepoint "
+            "menus, the Statistics tab and every exported CSV keep the hours "
+            "read from the filenames, and every axis it shifts names the "
+            "correction in its label.")
+
+        def _on_time_offset(value: float) -> None:
+            self._app._app_state.plot.time_offset = float(value)
+            _time_preview.setText(_time_preview_text())
+            try:
+                self._redraw_active_plot()
+            except Exception:
+                swallowed()
+        time_offset.valueChanged.connect(_on_time_offset)
+        add_row(s_time, "Offset", time_offset)
+
+        _time_preview.setText(_time_preview_text())
 
         # ── Lines & Markers ─────────────────────────────────────────────────
         s_lm = section("Lines & Markers", expanded=False)

@@ -1590,14 +1590,17 @@ row, holding four actions:
   limit set on the Fraction or Events panel sticks instead of that panel
   auto-scaling. Settings persist across redraws.
 
-#### Interval per timepoint
+#### Interval per timepoint, and Offset
 
-Under **Properties → Time**, **Interval per timepoint** states how far apart the
-timepoints really are, and multiplies the numbers printed on every time axis to
-match. It is there for plates whose filenames don't encode the real acquisition
-cadence: a run numbered `T01 … T12` but imaged every four hours is read by the
-pipeline as 1, 2, 3 … hours, and setting the interval to `4` makes the axes read
-4, 8, 12 … instead. `1` — the default — turns it off.
+Under **Properties → Time** are two controls that together state what the
+timepoints on your plate really are, and correct the numbers printed on every
+time axis to match. They are there for plates whose filenames don't encode the
+real acquisition schedule.
+
+**Interval per timepoint** states how far apart the timepoints are, and
+multiplies the printed numbers. A run numbered `T01 … T12` but imaged every four
+hours is read by the pipeline as 1, 2, 3 … hours, and setting the interval to
+`4` makes the axes read 4, 8, 12 … instead. `1` — the default — turns it off.
 
 The value is a multiplier on the hours the pipeline parsed out of the filenames,
 which is the interval itself only while those filenames number the timepoints
@@ -1605,20 +1608,32 @@ which is the interval itself only while those filenames number the timepoints
 correction factor instead — a run whose names say 4, 8, 12 with the interval set
 to `4` draws 16, 32, 48.
 
-It changes **labels only**. The plotted points, the **Timepoint** dropdowns, the
+**Offset** states where the first image sits, and adds a fixed amount to every
+printed number. It is applied *after* the interval, so the axis reads
+(filename value × interval) + offset. For the same `T01 … T12` plate imaged
+every four hours, but with the first image taken two hours after the treatment
+rather than at it, an interval of `4` and an offset of `−2` make the axes read
+2, 6, 10 … Negative values are ordinary — moving a first image back off the
+origin is what the control is mostly for. `0` — the default — turns it off.
+
+The two are independent: a plate can need either without the other, and each
+control leaves the other alone.
+
+They change **labels only**. The plotted points, the **Timepoint** dropdowns, the
 Statistics tab and every exported CSV keep the hours read from the filenames, so
-while a factor is in force a bar reading `t=16` sits under a Timepoint menu
+while a correction is in force a bar reading `t=16` sits under a Timepoint menu
 reading `4`. That is deliberate — nothing that another part of All-Well reads is
-touched — and it is why any axis the factor changes names it in the axis label,
-so a rescaled figure can't be mistaken for one drawn on the hours the run
-recorded. The factor is saved with the rest of the view state.
+touched — and it is why any axis either control changes names the whole
+correction in its axis label (`Time (hours, filename value × 4 − 2)`), so a
+corrected figure can't be mistaken for one drawn on the hours the run recorded.
+Both values are saved with the rest of the view state.
 
 Applies to the Line Graphs panels, the Bar Plots tick labels and panel titles,
 the Spatial summary panel, and every Batch Export figure — including the scatter
 figures, which have no time axis and so name the timepoint in their title
 instead. Batch **CSV** columns and output **filenames** are unaffected: those hold
 what the pipeline measured and what you picked from the timepoint list, so a
-downstream script reads the same numbers whatever this is set to.
+downstream script reads the same numbers whatever these are set to.
 
 The Heat Map and Distribution tabs pick a timepoint from a menu rather than
 drawing a time axis, so their titles keep naming the filename's own value,

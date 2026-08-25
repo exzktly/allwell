@@ -1850,7 +1850,7 @@ of individual cells. This is the default Plotting sub-tab.
     **Whenever they are withheld, the panel says why**, in small type in its
     top-left corner — naming the tested channel and the drawn one, the tested
     timepoint and the drawn one, or the per-cell mode that is on, so you can see
-    which control to move. The same sentence goes to the status line. The note is part of the
+    which control to move. It is on the figure rather than in the status line so that it cannot outlive the thing it describes — it is redrawn with the plot, so if the note is there the reason is true right now. The note is part of the
     figure, so a copied or exported plot carries it too: a plot with no
     asterisks never leaves you guessing whether a comparison was withheld or
     simply never run. With **Significance** off, nothing is drawn and nothing is

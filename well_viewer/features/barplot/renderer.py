@@ -583,18 +583,22 @@ def _no_significance(ctx, ax, reason: str) -> None:
     names: degraded output indistinguishable from good output, with the software
     knowing and not saying.
 
-    The status line alone is not enough. It is transient, it is at the other end
-    of the window from the plot, and in Split View — where the Statistics pane
-    and the Bar plot are on screen together and either one's channel or timepoint
-    can be changed in a click — the brackets appear and vanish faster than anyone
-    watches a status bar. So the reason goes **on the panel**, in muted type
-    inside the top-left corner, where it is part of the figure and survives a
-    copy or an export. It is cleared by the next redraw's ``cla()`` like any
-    other artist.
+    The reason goes **on the panel**, in muted type inside the top-left corner,
+    where it is part of the figure and survives a copy or an export — and where
+    the next redraw's ``cla()`` takes it away with every other artist.
+
+    **It deliberately does not go to the status line.** That was the first
+    design and it was wrong: ``ctx.notify.set_status`` writes the *persistent*
+    status bar — the one its own docstring contrasts with the self-dismissing
+    ``toast`` — so the message sat there after the condition that produced it had
+    gone. Run a test and the panel note vanishes on the redraw while the status
+    bar goes on insisting no comparison is stored, which is worse than saying
+    nothing: it contradicts the plot above it and there is no redraw that can
+    correct it, because a successful draw has no reason to write anything.
+
+    A note that lives on the figure cannot go stale, because the thing that
+    clears it is the same thing that would have replaced it.
     """
-    setter = getattr(ctx.notify, "set_status", None)
-    if callable(setter):
-        setter(f"Significance: {reason}")
     if ax is None:
         return
     note = ax.text(

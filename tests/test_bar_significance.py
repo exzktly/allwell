@@ -198,7 +198,19 @@ def test_solo_well_group_does_not_bracket_a_pooled_bar_of_the_same_name():
     assert _artists(ax_mean) == 0
 
 
-def test_no_match_sets_status_and_draws_nothing():
+def test_no_match_says_why_on_the_panel_and_draws_nothing():
+    """A comparison that lines up with no bar is explained, not silently dropped.
+
+    This used to assert the explanation reached ``ctx.notify.set_status``. It no
+    longer goes there, and the change is deliberate rather than a regression:
+    that is the *persistent* status bar, so the message outlived the condition
+    it described — run a test and the panel note went with the redraw while the
+    bar kept insisting the comparison could not be placed. The reason now lives
+    on the figure only, where the redraw that resolves it is the same redraw
+    that clears it.
+    """
+    from well_viewer.features.barplot.renderer import SIGNIFICANCE_NOTE_TAG
+
     ax_mean, ax_frac = _axes()
     msgs = []
     pairwise = [{"a": "X", "b": "Y", "a_wells": ["Z01"], "b_wells": ["Z02"],
@@ -207,7 +219,10 @@ def test_no_match_sets_status_and_draws_nothing():
     app._set_status = lambda m, *_a, **_k: msgs.append(m)
     draw_significance_brackets(app._ctx, _bars(), ax_mean=ax_mean, ax_frac=ax_frac)
     assert _artists(ax_mean) == 0 and _artists(ax_frac) == 0
-    assert msgs and "no comparison matches" in msgs[0]
+    notes = [t.get_text() for t in ax_mean.texts
+             if getattr(t, SIGNIFICANCE_NOTE_TAG, False)]
+    assert len(notes) == 1 and "no comparison matches" in notes[0]
+    assert msgs == [], "the reason must not reach the persistent status bar"
 
 
 def test_off_toggle_draws_nothing():

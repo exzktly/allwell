@@ -22,10 +22,12 @@ _logger = logging.getLogger("well_viewer")
 # Stats is a removable feature → import lazily (a call, not a module-scope
 # ``import`` statement, so it's off the deferred-feature-import budget and honours
 # the removability contract). See tests/test_deferred_imports + core/lazy.py.
-_compute_pairwise, _deserialize_stats_groups = lazy_names(
-    "well_viewer.features.stats.controller",
-    "compute_pairwise", "deserialize_stats_groups",
-)
+_compute_pairwise, _deserialize_stats_groups, _stats_refresh_group_list, \
+    _stats_refresh_map = lazy_names(
+        "well_viewer.features.stats.controller",
+        "compute_pairwise", "deserialize_stats_groups",
+        "stats_refresh_group_list", "stats_refresh_map",
+    )
 
 
 def wire_save_to_gallery(ctx, card, tab_name: str) -> None:
@@ -215,8 +217,36 @@ def _restore_stats(ctx, cfg) -> None:
         if stats_state is not None:
             stats_state.groups = groups
             stats_state.pairwise = pairwise
+            # Writing the state is not showing it. The Statistics sidebar's
+            # group list and its plate are painted by explicit refresh calls —
+            # every other route that changes ``stats.groups`` (add, delete,
+            # rename, clear, sync-from-home) funnels through them — and this one
+            # went straight to the field. So a restored plot came back with its
+            # groups live in every way except the one the user can see: the test
+            # ran on them, "Load groups from Home" warned about overwriting
+            # them, and the sidebar showed none of them.
+            #
+            # ``_activate_statistics`` does not cover it either: it re-seeds only
+            # when the group list is *empty*, which is exactly what this has just
+            # made false, so arriving at the tab repaints nothing.
+            _refresh_stats_group_views(ctx)
     except Exception:
         _logger.debug("saved_plots: stats re-run failed", exc_info=True)
+
+
+def _refresh_stats_group_views(ctx) -> None:
+    """Repaint the Statistics group list and plate from ``stats.groups``.
+
+    Kept out of the caller's ``except`` so a refresh failure is reported as
+    itself rather than being read as "the stats re-run failed" — they are
+    different problems and the second one is the misleading of the two.
+    """
+    try:
+        _stats_refresh_group_list(ctx)
+        _stats_refresh_map(ctx)
+    except Exception:
+        _logger.debug("saved_plots: stats group views did not refresh",
+                      exc_info=True)
 
 
 def delete_saved_plot(ctx, plot_id: str) -> None:

@@ -1565,6 +1565,20 @@ parameters and must leave the user looking at the tab that figure came from.
 Sending it to Home instead would apply the whole restored view to a tab nobody
 is on, which on screen is indistinguishable from a restore that did nothing.
 
+**Restoring a plot's statistics repaints the group list, not just the state.**
+`_restore_stats` re-runs the saved test and writes `stats.groups` /
+`stats.pairwise`, and it now calls `stats_refresh_group_list` /
+`stats_refresh_map` after doing so. Every *other* route that changes those groups
+— add, delete, rename, clear, sync-from-home — funnels through those two, which
+are what actually draw the sidebar's group cards and colour its plate; this one
+went round them. The result was groups live in every way except the visible one:
+the Statistics tab ran its test on them and "Load groups from Home" warned about
+overwriting them, while the rail showed an empty list. `_activate_statistics` is
+not a backstop, because it re-seeds only when the group list is *empty* — which
+the restore has just made false. The refresh sits in its own helper outside the
+caller's `except`, so a repaint failure is not reported as "the stats re-run
+failed"; they are different problems and the second is the misleading one.
+
 Two other ways that restore can look like it did nothing. A tab that renders on
 demand rather than on every state change comes back with its controls restored
 and its picture untouched — that is the Image Table, which does not regenerate

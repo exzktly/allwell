@@ -43,15 +43,26 @@ class PlotState:
     # panel). Off by default — opt in via the Properties sidebar.
     show_threshold_line: bool = False
 
-    # Time-axis label multiplier (Properties → Time → "Interval per timepoint").
-    # 1.0 = off. Applied by ``domain/time_rescale.py`` to what a time axis
-    # *prints* and to nothing else: the plotted values, the timepoint menus, the
-    # Statistics tab and every exported CSV keep the hours parsed out of the
-    # filenames. It exists for plates whose filename cadence isn't the real one
-    # (``T01…T12`` imaged every four hours), and every axis it touches carries
-    # the factor in its label — the numbers disagree with the rest of the app on
-    # purpose, so the figure has to say so.
+    # The time-axis label correction (Properties → Time). Together these two
+    # numbers are the affine map ``filename hours × time_scale + time_offset``
+    # that ``domain/time_rescale.py`` applies to what a time axis *prints* and
+    # to nothing else: the plotted values, the timepoint menus, the Statistics
+    # tab and every exported CSV keep the hours parsed out of the filenames.
+    #
+    # ``time_scale`` (1.0 = off) is "Interval per timepoint": it exists for
+    # plates whose filename cadence isn't the real one (``T01…T12`` imaged every
+    # four hours). ``time_offset`` (0.0 = off, negatives ordinary) is "Offset":
+    # it exists for plates whose first image is not at the zero the user wants
+    # on the axis — imaging started two hours after treatment, so ``T01`` should
+    # read 2 rather than 4.
+    #
+    # Read them through ``time_rescale.rescale_for`` rather than separately; a
+    # figure that picked up one and not the other would be wrong and marked as
+    # correct. Every axis they touch carries the correction in its label — the
+    # numbers disagree with the rest of the app on purpose, so the figure has to
+    # say so.
     time_scale: float = 1.0
+    time_offset: float = 0.0
 
     bar_order: list | None = None
     line_order_rsets: list[str] = field(default_factory=list)
@@ -338,10 +349,13 @@ class PlotState:
         self.line_order_wells = []
         self.bar_group_mode = "well"
         self.bar_order = None
-        # The "Interval per timepoint" multiplier: a statement about the plate
-        # whose filename cadence does not match the hours it was imaged at.
-        # ``view_state`` restores it only when the new plate saved one, which
-        # is precisely the early-return case this reset exists for — so plate
-        # A's factor relabelled every time axis on plate B, with the factor
-        # printed in the label so it read as the data.
+        # The Time correction: a statement about the plate whose filename
+        # cadence does not match the hours it was imaged at, or whose first
+        # image is not at the axis's zero. ``view_state`` restores these only
+        # when the new plate saved them, which is precisely the early-return
+        # case this reset exists for — so plate A's correction relabelled every
+        # time axis on plate B, printed in the label so it read as the data.
+        # Both halves reset together: a stale offset left behind by a cleared
+        # factor is the same bug in a quieter form.
         self.time_scale = 1.0
+        self.time_offset = 0.0

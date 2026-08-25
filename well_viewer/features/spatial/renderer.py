@@ -21,6 +21,8 @@ import theme
 from well_viewer.core.plot_style import apply_time_rescale, style_legend, tokens_for
 from well_viewer.domain.time_rescale import axis_label as time_axis_label
 from well_viewer.domain.time_rescale import format_scaled as format_scaled_tp
+from well_viewer.domain.time_rescale import OFF as tr_OFF
+from well_viewer.domain.time_rescale import rescale_for as time_rescale_for
 from well_viewer.features.spatial import state as sp_state
 
 _logger = logging.getLogger("well_viewer")
@@ -54,7 +56,7 @@ def render_spatial(ctx) -> None:
                 # what resolves it.
                 _draw_message(fig, "Press Recompute to build the summary.")
             else:
-                _render_summary_panel(fig, st, ctx.state.plot.time_scale)
+                _render_summary_panel(fig, st, time_rescale_for(ctx.state.plot))
         elif not st.frames:
             # The per-frame levels are placeholder-gated, so an empty selection
             # never reaches here: this is wells chosen whose frames would not
@@ -537,7 +539,7 @@ def sp_state_metric_catalog():
     return SUMMARY_METRICS
 
 
-def _render_summary_panel(fig, st, time_scale=1.0) -> None:
+def _render_summary_panel(fig, st, rescale=tr_OFF) -> None:
     payload = st.last_result
     key = payload.get("summary_metric_key") or "nnd_median"
     display = payload.get("summary_display") or sp_state.SUMMARY_DISPLAY_HEATMAP
@@ -552,16 +554,16 @@ def _render_summary_panel(fig, st, time_scale=1.0) -> None:
 
     if display == sp_state.SUMMARY_DISPLAY_HEATMAP:
         _render_summary_heatmap(fig, matrix, wells, tps, label, units,
-                                time_scale)
+                                rescale)
     else:
-        _render_summary_lines(fig, matrix, wells, tps, ylabel, time_scale)
+        _render_summary_lines(fig, matrix, wells, tps, ylabel, rescale)
 
 
 def _render_summary_heatmap(fig, matrix, wells, tps, label, units,
-                            time_scale=1.0) -> None:
+                            rescale=tr_OFF) -> None:
     ax = fig.add_subplot(111)
     _style_axes(ax, title=f"{label} · well × timepoint",
-                xlabel=time_axis_label("Timepoint (h)", time_scale),
+                xlabel=time_axis_label("Timepoint (h)", rescale),
                 ylabel="Well")
     # Both axes are category positions, not measurements: x is the index of a
     # timepoint and y the index of a well. Without these flags the shared
@@ -579,7 +581,7 @@ def _render_summary_heatmap(fig, matrix, wells, tps, label, units,
                    vmin=vmin, vmax=vmax, origin="lower",
                    interpolation="nearest")
     ax.set_xticks(range(len(tps)))
-    ax.set_xticklabels([format_scaled_tp(t, time_scale) for t in tps])
+    ax.set_xticklabels([format_scaled_tp(t, rescale) for t in tps])
     ax.set_yticks(range(len(wells)))
     ax.set_yticklabels(wells)
     cbar = fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
@@ -589,14 +591,14 @@ def _render_summary_heatmap(fig, matrix, wells, tps, label, units,
 
 
 def _render_summary_lines(fig, matrix, wells, tps, ylabel: str,
-                          time_scale=1.0) -> None:
+                          rescale=tr_OFF) -> None:
     ax = fig.add_subplot(111)
     _style_axes(ax, title="Summary vs timepoint · one line per well",
-                xlabel=time_axis_label("Timepoint (h)", time_scale),
+                xlabel=time_axis_label("Timepoint (h)", rescale),
                 ylabel=ylabel)
     # Real timepoint values on this one, so the labels are rescaled by the tick
     # formatter rather than written out.
-    apply_time_rescale(ax, time_scale)
+    apply_time_rescale(ax, rescale)
     import matplotlib
     cmap = matplotlib.colormaps["tab20"]
     for i, w in enumerate(wells):

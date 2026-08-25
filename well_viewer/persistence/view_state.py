@@ -124,10 +124,14 @@ def snapshot(ctx) -> dict:
         "use_fov_replicates": bool(ctx.state.plot.use_fov_replicates),
         "show_threshold_line": bool(ctx.state.plot.show_threshold_line),
         "show_significance": bool(ctx.state.plot.show_significance),
-        # The time-axis label multiplier. Captured because it changes what every
-        # time axis in a restored view reads, and a saved plot whose axis said
-        # 4, 8, 12 must not come back saying 1, 2, 3 with no explanation.
+        # The time-axis label correction, both halves. Captured because it
+        # changes what every time axis in a restored view reads, and a saved
+        # plot whose axis said 4, 8, 12 must not come back saying 1, 2, 3 with
+        # no explanation. Saved as two keys rather than one because they are two
+        # independent statements about the plate; an older file carrying only
+        # ``time_scale`` restores to a zero offset, which is that file's truth.
         "time_scale": float(ctx.state.plot.time_scale),
+        "time_offset": float(ctx.state.plot.time_offset),
         # Per-panel legend-trace visibility, the user's Line-graph draw order (the
         # Bar draw order rides in the per-tab block), and the cross-tab focus
         # timepoint — all shape the rendered plot but were previously uncaptured.
@@ -520,6 +524,19 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> list[str]:
             ctx.state.plot.time_scale = coerce_factor(state["time_scale"])
         except Exception:
             failed.append("time scale")
+            swallowed()
+
+    if "time_offset" in state:
+        # ``coerce_offset`` is the wider door of the two: a negative offset is
+        # ordinary and zero is the off state, so only a non-number or a
+        # non-finite value is refused. Restored under its own key so a file
+        # written before the offset existed leaves it at zero rather than
+        # inheriting whatever the previous plate had.
+        try:
+            from well_viewer.domain.time_rescale import coerce_offset
+            ctx.state.plot.time_offset = coerce_offset(state["time_offset"])
+        except Exception:
+            failed.append("time offset")
             swallowed()
 
     lv = state.get("legend_visible")

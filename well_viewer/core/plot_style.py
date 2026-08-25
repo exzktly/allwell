@@ -223,36 +223,44 @@ def _to_float_or_none(value: str) -> float | None:
     return float(s)
 
 
-def apply_time_rescale(ax, factor) -> None:
-    """Print a time axis's ticks multiplied by *factor*, leaving the data alone.
+def apply_time_rescale(ax, rescale) -> None:
+    """Print a time axis's ticks under *rescale*, leaving the data alone.
 
     Used by the plots whose x-axis is elapsed time (the Line tab's three panels).
     The tick *positions* stay at the values the pipeline parsed out of the
     filenames, so nothing that reads the axis — limits, picks, exports — sees a
     different number; only the text changes.
 
-    The factor is stamped on the axes as ``_aw_time_scale`` because
+    *rescale* is a ``domain.time_rescale.TimeRescale``, carrying both the
+    multiplier and the offset, so an axis cannot end up printing half of the
+    user's correction. A bare number is still read as a factor with no offset,
+    which is what the stamp below replays.
+
+    The rescale is stamped on the axes as ``_aw_time_rescale`` because
     :func:`apply_export_style_prefs` runs after the renderer and calls
     ``set_xscale``, which resets an axis's locator and formatter. That pass reads
     the stamp back and re-installs, the same way ``_aw_log_plus1`` and
     ``_categorical_xaxis`` let an axes carry its own requirements through the
     shared restyle.
 
-    A factor of one installs nothing: every redraw rebuilds its axes, so an
+    An inactive rescale installs nothing: every redraw rebuilds its axes, so an
     unstamped axis is already showing the default formatter.
     """
-    from well_viewer.domain.time_rescale import format_scaled, is_active
+    from well_viewer.domain.time_rescale import (
+        format_scaled, is_active, as_rescale,
+    )
 
-    ax._aw_time_scale = factor
-    if not is_active(factor):
+    rs = as_rescale(rescale)
+    ax._aw_time_rescale = rs
+    if not is_active(rs):
         return
     from matplotlib.ticker import FuncFormatter
     ax.xaxis.set_major_formatter(
-        FuncFormatter(lambda v, _pos, _f=factor: format_scaled(v, _f)))
+        FuncFormatter(lambda v, _pos, _r=rs: format_scaled(v, _r)))
 
 
-def mark_time_rescale(*axes, factor) -> None:
-    """Name the rescale factor under a stack of categorical time panels.
+def mark_time_rescale(*axes, rescale) -> None:
+    """Name the rescale correction under a stack of categorical time panels.
 
     The companion to :func:`apply_time_rescale`, for the figures whose x-axis is
     *categorical* — the Bar tab and its batch-export twin, where the timepoint is
@@ -261,7 +269,7 @@ def mark_time_rescale(*axes, factor) -> None:
 
     The label goes on the bottom-most panel only: the panels are stacked over one
     shared x reading, and three copies of the same sentence is noise. Nothing is
-    written while the factor is off, so an unrescaled figure draws exactly as it
+    written while the rescale is off, so an unrescaled figure draws exactly as it
     did before this existed.
 
     **Called more than once per figure, it still marks exactly one panel.** The
@@ -271,7 +279,7 @@ def mark_time_rescale(*axes, factor) -> None:
     first on the bottom one. So each marked axes is tagged, and every call clears
     the tags it finds on the same figure before writing to whichever candidate
     sits lowest. The bottom is decided by axes position rather than by argument
-    order, because the caller that knows the factor is not always the one that
+    order, because the caller that knows the rescale is not always the one that
     knows how many panels the figure ended up with.
 
     Without it a bar reading ``t=16`` sits under a Timepoint menu reading 4 and
@@ -284,7 +292,7 @@ def mark_time_rescale(*axes, factor) -> None:
     """
     from well_viewer.domain.time_rescale import describe
 
-    marker = describe(factor)
+    marker = describe(rescale)
     present = [ax for ax in axes if ax is not None]
     if not marker or not present:
         return
@@ -901,8 +909,10 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
                 apply_axis_log_scale(ax, "y", _ylog)
             # ``set_xscale`` above resets the axis's locator and formatter, so a
             # time axis that asked to have its ticks rescaled has to say so
-            # again. The renderer stamped the factor; re-install from it.
-            _ts = getattr(ax, "_aw_time_scale", None)
+            # again. The renderer stamped the whole correction; re-install from
+            # it — re-installing a factor alone would drop the offset here and
+            # nowhere else, which is the worst place for the two to disagree.
+            _ts = getattr(ax, "_aw_time_rescale", None)
             if _ts is not None:
                 apply_time_rescale(ax, _ts)
 

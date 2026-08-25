@@ -2091,11 +2091,12 @@ class BatchExportPanel(QWidget):
         # figures of the same series must not print two different time axes.
         from well_viewer.core.plot_style import apply_time_rescale
         from well_viewer.domain.time_rescale import axis_label as _time_axis_label
-        _time_scale = self._ctx.state.plot.time_scale
-        _time_lbl = _time_axis_label("Time (hours)", _time_scale)
+        from well_viewer.domain.time_rescale import rescale_for as _time_rescale_for
+        _time_rescale = _time_rescale_for(self._ctx.state.plot)
+        _time_lbl = _time_axis_label("Time (hours)", _time_rescale)
         for _ax_time in (ax_mean, ax_frac, ax_n):
             _ax_time.set_xlabel(_time_lbl, fontsize=8, labelpad=5)
-            apply_time_rescale(_ax_time, _time_scale)
+            apply_time_rescale(_ax_time, _time_rescale)
         # Same rule as the on-tab figures (``barplot.renderer._set_frac_ylim``,
         # ``lineplot.controller``): a raw fraction is bounded so the clamp is a
         # good default, but under fold change the field is a ratio or a

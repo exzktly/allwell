@@ -411,3 +411,27 @@ def test_a_ceiling_below_the_bars_says_so_too():
     out = _with_user_ylimit(5.0)
     assert out.stars == []
     assert len(out.notes) == 1 and "y-limit" in out.notes[0]
+
+
+# ── an empty store is not proof that no test was run ────────────────────────
+
+def test_the_empty_store_note_does_not_deny_that_a_test_ran():
+    """"No test has been run yet" was this note's first wording, and it is only
+    the *common* reason the store is empty.
+
+    ``stats.compute_pairwise`` also returns ``[]`` after a run: fewer than two
+    groups with wells, any group with under two replicate values, a
+    misconfigured KS test, scipy missing, or every pair coming back with an
+    error. In several of those the Statistics tab has already printed a result
+    explaining itself — so a note flatly denying a test happened would
+    contradict the panel beside it and send the user to re-run something that
+    had already run. The note states what is known and points at what knows
+    why.
+    """
+    _stars, notes, status = _draw([])
+    note = notes[0]
+    assert "no comparison is stored" in note
+    assert "has been run" not in note, (
+        f"the note asserts something it cannot know: {note!r}")
+    assert "Statistics" in note and "results panel" in note
+    assert status[0] == f"Significance: {note.split('Significance: ', 1)[1]}"

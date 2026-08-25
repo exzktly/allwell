@@ -8,7 +8,7 @@ the matplotlib axes to draw into.
 from __future__ import annotations
 
 from well_viewer.features.barplot.controller import refresh_bar_layout_btn_state
-from well_viewer.features.barplot.collect import bar_err_settings, collect_bar_items_for_app
+from well_viewer.features.barplot.collect import _bar_debug, bar_err_settings, collect_bar_items_for_app
 
 from well_viewer.domain.selections_model import (color_for_replicate_set, color_for_well, well_display_label, active_replicate_sets)
 from well_viewer.core.channel_state_controller import get_all_fluor_gates, on_cutoff_for_column
@@ -650,9 +650,22 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
         return
     pairwise = list(getattr(stats_state, "pairwise", []) or [])
     if not pairwise:
+        # Careful with the wording. "No test has been run" is the common case
+        # and was the first thing this said, but it is not the only way the
+        # store ends up empty: ``stats.compute_pairwise`` returns ``[]`` after a
+        # run too — fewer than two groups with wells, any group with under two
+        # replicate values, a misconfigured KS test, scipy missing, or every
+        # pair coming back with an error. In several of those the Statistics
+        # tab has already printed a result explaining itself, so a note here
+        # flatly denying a test happened would contradict the panel beside it
+        # and send the user to re-run something that had run.
+        #
+        # So this says what is actually known — the store is empty — and points
+        # at the place that knows why.
         _no_significance(ctx, ax_mean,
-                         "no test has been run yet — run one on the "
-                         "Statistics tab.")
+                         "no comparison is stored — run a test on the "
+                         "Statistics tab, or read its results panel if you "
+                         "already did.")
         return
     rec0 = pairwise[0]
     # Context gate: don't overlay a test computed for a different channel/metric
@@ -845,6 +858,19 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
     # export-style pass re-applying it a moment later is a no-op rather than a
     # clip.
     ax.set_ylim(y0, top)
+    # Opt-in diagnostic (``review_bar_debug``). Every way this function can
+    # decline now says so on the figure, so a report of "the toggle is on, no
+    # note appeared, and the asterisks are still missing" means the brackets
+    # were drawn and something downstream removed or hid them. That is a
+    # different investigation, and it needs the count this line prints — how
+    # many comparisons arrived, how many resolved to bars, and where they were
+    # put — rather than another round of reading.
+    _bar_debug(
+        f"significance drew {len(matched)}/{len(pairwise)} bracket(s) on "
+        f"{'frac' if stat == 'fraction' else 'mean'} at y={base:.4g}..{top:.4g} "
+        f"(ceiling={'auto' if ceiling is None else ceiling}) keys="
+        + repr([m[1:] for m in matched])
+    )
 
 
 def draw_grouped_bar_mode(

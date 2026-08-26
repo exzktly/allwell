@@ -157,7 +157,19 @@ class SavedPlotsStore:
         self._persist(ctx)
         return True
 
-    def attach_vector(self, ctx, rec: SavedPlot, svg_bytes: bytes) -> bool:
+    def persist(self, ctx) -> None:
+        """Write the section out. Public so a batch caller can write once.
+
+        ``attach_vector`` per record would otherwise read and rewrite the whole
+        of ``persistence.json`` — which also holds view state and Batch Export
+        config — once per plot, so repairing a gallery of forty old plots is
+        forty full read/write cycles of a file none of them is the only writer
+        of.
+        """
+        self._persist(ctx)
+
+    def attach_vector(self, ctx, rec: SavedPlot, svg_bytes: bytes,
+                      *, persist: bool = True) -> bool:
         """Give an existing record a vector capture it did not have.
 
         Written to disk beside its PNG and persisted, so a plot regenerated once
@@ -179,7 +191,8 @@ class SavedPlotsStore:
             _logger.warning("saved_plots: failed to write vector capture: %s", exc)
             return False
         rec.svg_filename = name
-        self._persist(ctx)
+        if persist:
+            self._persist(ctx)
         return True
 
     def _discard_files(self, ctx, rec: SavedPlot) -> None:

@@ -90,6 +90,13 @@ apply_review_overrides_to_cache = _lazy(
 logger = logging.getLogger("well_viewer.gating_worker")
 
 
+#: How long a synchronous recompute waits for an in-flight async pass to unwind
+#: before starting its own. Same bound and the same reasoning as the restart in
+#: ``cell_gating_start_gating_worker``: ``cancel()`` is what makes it safe, and
+#: the wait is only a courtesy.
+_SYNC_GATING_CANCEL_MS = 50
+
+
 class GatingWorker(QThread):
     """Apply cell-gating thresholds to every cached well row off the GUI thread.
 
@@ -1647,6 +1654,39 @@ def _cell_gating_on_progress(ctx, current: int, total: int) -> None:
     if bar.maximum() != total:
         bar.setRange(0, total)
     bar.setValue(current)
+
+
+def cell_gating_recompute_now(ctx) -> bool:
+    """Run the gating pass **synchronously**, on the calling thread.
+
+    The normal path is a ``QThread`` whose completion is delivered by a queued
+    signal, which is right for a user editing a threshold and wrong for a caller
+    that must read the result before it returns. The Saved Plots export is that
+    caller: it replays a saved plot's gating and captures the figure a line
+    later, and with the async path that capture reads the *previous* pass's
+    ``Included`` flags — so the figure is drawn under a gating that is neither
+    the plot's nor the user's, and nothing on it says so.
+
+    Any worker already in flight is cancelled first, so the pass this runs is the
+    one whose result survives. Returns False when the recompute could not run, so
+    a caller that depends on it can decline rather than capture the wrong thing.
+    """
+    prev = ctx.runtime.cell_gating.worker
+    if prev is not None and prev.isRunning():
+        prev.cancel()
+        prev.wait(_SYNC_GATING_CANCEL_MS)
+    worker = GatingWorker(ctx)
+    try:
+        worker._run_inner()
+    except Exception:
+        logger.exception("gating: synchronous recompute failed")
+        return False
+    # The same three things ``_cell_gating_on_finished`` does, minus the progress
+    # bar it never showed: the pass has rewritten Included / Gate_Pass / Gate_On
+    # on every cached frame, so any statistic computed from them is stale.
+    invalidate_stats_cache(ctx)
+    cell_gating_refresh_included_count(ctx)
+    return True
 
 
 def _cell_gating_on_finished(ctx) -> None:

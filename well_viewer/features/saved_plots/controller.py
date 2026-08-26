@@ -32,6 +32,14 @@ _compute_pairwise, _deserialize_stats_groups, _stats_refresh_group_list, \
         "stats_refresh_group_list", "stats_refresh_map",
     )
 
+# The synchronous gating recompute, for the export's redraw. Cell Gating is a
+# removable sub-feature, so this is a proxy rather than an import; a build
+# without it simply cannot finish a gating pass, and ``_regenerate_one`` treats
+# that as "do not capture" rather than capturing the wrong population.
+_gating_recompute_now = lazy(
+    "well_viewer.features.home.cell_gating.controller",
+    "cell_gating_recompute_now")
+
 # The gallery view, bound the same way. A plain function-local ``import`` here
 # would be a deferred feature import — a cycle workaround, which the budget in
 # ``tests/test_deferred_imports`` exists to stop accumulating. The cycle is real
@@ -467,56 +475,151 @@ def export_deck_pptx(ctx) -> None:
         ctx.notify.set_status(f"PowerPoint export failed: {exc}")
 
 
+class _LiveState:
+    """Everything ``restore_saved_plot`` mutates, captured so it can be undone.
+
+    ``view_state.snapshot`` is not enough and never was. It captures twenty keys
+    and **none** of the three domains a restore actually replaces: the replicate
+    ``selections`` (``_restore_selections`` deep-copies the record's over them),
+    the cell-gating slice (``restore_gating_block`` clears every gate and writes
+    the record's), and the Statistics groups and comparisons
+    (``_restore_stats``). Restoring only what ``view_state`` knows about left the
+    user's replicate sets, their gates and their stats groups replaced by the
+    last regenerated plot's, with no way back — and the clobbered gating then
+    reached ``pipeline_info.json`` on their next gate edit.
+
+    So this snapshots by asking what the restore touches, not by asking what the
+    snapshot helper happens to cover.
+    """
+
+    def __init__(self, ctx) -> None:
+        import copy
+
+        from well_viewer.domain.gating_state import build_gating_block
+
+        self.view = view_state.snapshot(ctx)
+        selection = ctx.state.selection
+        self.selections = copy.deepcopy(list(selection.selections or []))
+        self.current_selection_id = selection.current_selection_id
+        self.solo_wells = set(selection.active_solo_wells or ())
+        gating = ctx.state.cell_gating
+        self.gating = build_gating_block(
+            dict(gating.fluor_gates), dict(gating.thresh_frac_on),
+            scatter_gates=list(gating.scatter_gates or []),
+            use_scatter_gates=bool(gating.use_scatter_gates),
+            use_scatter_thresh=bool(gating.use_scatter_thresh),
+        )
+        stats = ctx.state.feature_slice("stats")
+        self.stats_groups = copy.deepcopy(getattr(stats, "groups", None)) \
+            if stats is not None else None
+        self.stats_pairwise = copy.deepcopy(getattr(stats, "pairwise", None)) \
+            if stats is not None else None
+
+    def restore(self, ctx) -> None:
+        """Put every domain back, each independently of the others' failures."""
+        import copy
+
+        with swallow("saved_plots: restore selections after regenerating"):
+            selection = ctx.state.selection
+            selection.selections = copy.deepcopy(self.selections)
+            selection.current_selection_id = self.current_selection_id
+            selection.active_solo_wells = set(self.solo_wells)
+        with swallow("saved_plots: restore gating after regenerating"):
+            _restore_thresholds(ctx, self.gating)
+        with swallow("saved_plots: restore stats after regenerating"):
+            stats = ctx.state.feature_slice("stats")
+            if stats is not None and self.stats_groups is not None:
+                stats.groups = copy.deepcopy(self.stats_groups)
+                stats.pairwise = copy.deepcopy(self.stats_pairwise)
+                _refresh_stats_group_views(ctx)
+        with swallow("saved_plots: restore the view after regenerating"):
+            view_state.restore(ctx, dict(self.view))
+
+
 def regenerate_missing_vectors(ctx, store, records) -> set[str]:
     """Redraw plots that have no vector capture, so the deck can make them editable.
 
     A plot filed before the app began capturing vector is a PNG and nothing
     else, and no amount of reading it will produce shapes. What the record *does*
     carry is the parameters that drew it, and the app can draw them again — so
-    the export replays each such record onto its own tab, captures the live
-    figure as vector, and keeps it. The redraw is a one-off repair: the capture
-    is stored on the record, so every later export of that plot is editable
-    without paying for it again.
+    the export replays each such record, captures the live figure as vector, and
+    keeps it. The redraw is a one-off repair: the capture is stored on the
+    record, so every later export of that plot is editable without paying for it
+    again.
 
-    Returns the ids it regenerated, which the deck marks on their slides. That
-    marking is not decoration. A redrawn figure is drawn from **today's** data
-    and today's gating, and the gating recompute is asynchronous, so it can
-    differ from the image the user saved — subtly, and in a direction nothing on
-    the slide would otherwise reveal.
+    Returns the ids it regenerated, which the deck marks on their slides,
+    because a redrawn figure is drawn from today's data rather than from the
+    image the user filed.
 
-    The user's own view is snapshotted and put back afterwards: an export is not
-    a navigation, and leaving them on the last plot's tab with its settings
-    applied would be a side effect nobody asked for.
+    **Nothing starts unless the user's own state can be put back.** Replaying a
+    record replaces their replicate sets, their gating and their stats groups, so
+    a snapshot that failed would mean a repair that cannot be undone — and the
+    old code simply skipped the restore in that case, silently. If the snapshot
+    raises, this declines the whole repair and says so.
     """
     missing = [r for r in records if not r.svg_filename]
     if not missing:
         return set()
     cards_by_tab = ctx.runtime.saved_plots.cards_by_tab or {}
-    if not cards_by_tab:
+
+    live = None
+    try:
+        live = _LiveState(ctx)
+    except Exception:
+        _logger.debug("saved_plots: could not snapshot the live state",
+                      exc_info=True)
+        ctx.notify.set_status(
+            "Older plots were exported as pictures: this session's settings "
+            "could not be saved and restored, and redrawing them would have "
+            "left your groups and gating replaced.")
         return set()
 
     regenerated: set[str] = set()
-    before = None
-    with swallow("saved_plots: snapshot the view before regenerating"):
-        before = view_state.snapshot(ctx)
+    skipped_tabs: set[str] = set()
     try:
         for rec in missing:
-            card = cards_by_tab.get(rec.tab)
-            # No card for this tab means no figure to redraw — the Image Table
-            # composes its snapshot from microscopy frames rather than drawing a
-            # chart, so it has never had vector and cannot acquire it here.
+            card = _card_for_tab(ctx, cards_by_tab, rec.tab)
             if card is None or not hasattr(card, "captureVectorSvg"):
+                skipped_tabs.add(rec.tab or "?")
                 continue
             if _regenerate_one(ctx, store, rec, card):
                 regenerated.add(rec.id)
+        if regenerated:
+            store.persist(ctx)      # one write for the batch, not one per record
     finally:
-        if before is not None:
-            with swallow("saved_plots: restore the view after regenerating"):
-                view_state.restore(ctx, dict(before))
+        live.restore(ctx)
+    if skipped_tabs:
+        # Named, because the slide's advice ("re-save it") is right for a tab
+        # that draws no chart and useless for one that simply was not open.
+        _logger.info("saved_plots: no figure to redraw for %s",
+                     ", ".join(sorted(skipped_tabs)))
     if regenerated:
         _logger.info("saved_plots: redrew %d plot(s) that had no vector capture",
                      len(regenerated))
     return regenerated
+
+
+def _card_for_tab(ctx, cards_by_tab, tab: str):
+    """The live plot card for *tab*, building the tab first if it has not been.
+
+    Multivariate, Spatial and smFISH are ``lazy_only``: their bodies — and so
+    their cards — exist only once the user has opened them. Without this, a
+    plot saved from one of those tabs last week is skipped on export and its
+    slide tells the user to re-save it, which is the outcome this whole repair
+    exists to remove. The Image Table is the case that genuinely has no chart to
+    redraw, and it stays skipped.
+    """
+    card = cards_by_tab.get(tab)
+    if card is not None or not tab:
+        return card
+    with swallow(f"saved_plots: build {tab!r} to redraw its plot"):
+        notebook = getattr(ctx.window, "_notebook", None)
+        if notebook is not None and notebook.setCurrentByName(tab):
+            # Selecting the page is what builds a lazy_only body, and building it
+            # is what runs its plot-card decorators — which is where
+            # ``cards_by_tab`` is filled.
+            card = (ctx.runtime.saved_plots.cards_by_tab or {}).get(tab)
+    return card
 
 
 def _regenerate_one(ctx, store, rec, card) -> bool:
@@ -529,8 +632,15 @@ def _regenerate_one(ctx, store, rec, card) -> bool:
     kept = False
     with swallow(f"saved_plots: redraw {rec.id!r} for the deck"):
         restore_saved_plot(ctx, rec.id)
+        # ``restore_saved_plot`` applies the record's gating by kicking a worker
+        # thread and returning. Capturing here would read the *previous* pass's
+        # Included flags, so the figure would be drawn under a gating that is
+        # neither this record's nor the user's — a wrong population with a
+        # confident caption. Finish the pass on this thread first.
+        if _gating_recompute_now(ctx):
+            _reapply_target_tab(ctx, rec.params.get("active_centre_tab") or rec.tab)
         svg = card.captureVectorSvg()
-        kept = bool(svg) and store.attach_vector(ctx, rec, svg)
+        kept = bool(svg) and store.attach_vector(ctx, rec, svg, persist=False)
     return kept
 
 

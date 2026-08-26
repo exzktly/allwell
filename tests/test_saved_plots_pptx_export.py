@@ -437,19 +437,40 @@ def _png_bytes() -> bytes:
 # ── the app's own sequence ───────────────────────────────────────────────────
 
 def _stub_ctx(tmp_path):
-    """The slice of ``ctx`` the store, the capture and the export read.
+    """A ctx carrying the app's **real** state object.
 
-    Deliberately not the full app: the thing under test here is the order in
-    which four real modules touch one record, and building an eighteen-hundred
-    object window to watch that would put the test in the slow lane for nothing.
+    Not a namespace of the fields that happen to be read: the export snapshots
+    the live state and puts it back, and that snapshot walks selection, channel,
+    plot, cell-gating and every feature's view-state hook. A stub shaped from
+    the outside lets a restore that never ran look like one that did — and it did
+    exactly that, which is how "put the user back" shipped both untested and,
+    in production, silently skippable.
+
+    ``AppState()`` constructs standalone and costs nothing, so there is no reason
+    to approximate it.
     """
     from well_viewer.core.app_runtime import AppRuntime
+    from well_viewer.core.app_state import AppState
+    from well_viewer.core.widget_registry import WidgetRegistry
+    from well_viewer.features.registry import (
+        attach_feature_state, build_feature_registry,
+    )
 
-    dataset = SimpleNamespace(data_dir=tmp_path, persistence_doc=None,
-                              well_paths={}, well_labels={})
-    state = SimpleNamespace(dataset=dataset)
+    state = AppState()
+    # Attach the feature-owned slices, as app construction does. Without them
+    # ``view_state.snapshot`` raises on the first slice it reaches — which is
+    # the condition the export now declines on, so a stub missing them would
+    # test the refusal path and nothing else.
+    attach_feature_state(state)
+    state.dataset.data_dir = tmp_path
+    state.dataset.persistence_doc = None
     app = SimpleNamespace(_app_state=state)
-    ctx = SimpleNamespace(app=app, state=state, runtime=AppRuntime(app))
+    said: list[str] = []
+    ctx = SimpleNamespace(app=app, state=state, runtime=AppRuntime(app),
+                          widgets=WidgetRegistry(app), window=None,
+                          features=build_feature_registry(),
+                          notify=SimpleNamespace(set_status=said.append))
+    ctx.said = said
     app._ctx = ctx
     return ctx
 
@@ -1031,3 +1052,180 @@ def test_a_tab_with_no_figure_is_left_as_a_picture(qapp, tmp_path):
 
     assert C.regenerate_missing_vectors(ctx, store, [rec]) == set()
     assert rec.svg_filename == ""
+
+
+# ── what the redraw must actually guarantee ──────────────────────────────────
+#
+# The feature shipped with one test that monkeypatched `restore_saved_plot` to a
+# no-op, so it proved the plumbing — bytes captured, file written, note on the
+# slide — and nothing about the record. Deleting the replay entirely left all 44
+# tests green. Everything below is about the part that monkeypatch removed.
+
+def _card_that_draws_what_it_is_told(ctx):
+    """A real PlotCard plus a stand-in restore that redraws it per record.
+
+    The stand-in is the point: it makes "which record was replayed" visible in
+    the captured bytes, so the assertions can be about identity and ordering
+    rather than about the mechanism.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from widgets.plot_card import PlotCard
+
+    card = PlotCard(figsize=(4, 3))
+    ax = card.figure.add_subplot(1, 1, 1)
+
+    def _replay(_ctx, plot_id):
+        ax.clear()
+        ax.bar([0, 1], [3, 5])
+        ax.set_title(f"figure for {plot_id}")
+
+    C.wire_save_to_gallery(ctx, card, "Bar Plots")
+    return card, _replay
+
+
+@pytest.mark.qt
+def test_each_record_is_captured_from_its_own_redrawn_figure(qapp, tmp_path,
+                                                             monkeypatch):
+    """Record N's stored capture must be record N's figure.
+
+    Two things fail this and neither is exotic: capturing before the replay runs
+    (every record gets whatever was on screen), and capturing after the *next*
+    record's replay (every record gets its successor's figure). Both put a real
+    figure on a slide under the wrong plot's title and parameters, which is the
+    failure this repository cares most about — wrong output that looks right.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    card, replay = _card_that_draws_what_it_is_told(ctx)
+    monkeypatch.setattr(C, "restore_saved_plot", replay)
+
+    records = []
+    for pid in ("p1", "p2", "p3"):
+        rec = SavedPlot(id=pid, created_at="2026-01-01T00:00:00", tab="Bar Plots",
+                        title=f"Plot {pid}", png_filename=f"{pid}.png", params={})
+        assert store.add(ctx, rec, _png_bytes())
+        records.append(rec)
+
+    assert C.regenerate_missing_vectors(ctx, store, records) == {"p1", "p2", "p3"}
+
+    for rec in records:
+        stored = (tmp_path / "saved_plots" / rec.svg_filename).read_text()
+        assert f"figure for {rec.id}" in stored, (
+            f"{rec.id} was captured from another record's figure")
+        for other in records:
+            if other is not rec:
+                assert f"figure for {other.id}" not in stored
+
+
+@pytest.mark.qt
+def test_the_gating_pass_finishes_before_the_figure_is_captured(qapp, tmp_path,
+                                                               monkeypatch):
+    """`restore_saved_plot` applies gating by kicking a worker thread.
+
+    Capturing on the next line reads the *previous* pass's Included flags, so the
+    figure is drawn under a gating that is neither the record's nor the user's —
+    and the slide says it "reflects the current data". The recompute has to
+    finish on this thread, between the replay and the capture, or the number on
+    the slide is wrong with a confident caption.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    card, replay = _card_that_draws_what_it_is_told(ctx)
+    order = []
+    monkeypatch.setattr(C, "restore_saved_plot",
+                        lambda c, pid: (order.append("replay"), replay(c, pid))[1])
+    monkeypatch.setattr(C, "_gating_recompute_now",
+                        lambda c: (order.append("gating"), True)[1])
+    real_capture = type(card).captureVectorSvg
+    monkeypatch.setattr(type(card), "captureVectorSvg",
+                        lambda self: (order.append("capture"),
+                                      real_capture(self))[1])
+
+    rec = SavedPlot(id="p1", created_at="2026-01-01T00:00:00", tab="Bar Plots",
+                    title="Plot", png_filename="p1.png", params={})
+    assert store.add(ctx, rec, _png_bytes())
+    assert C.regenerate_missing_vectors(ctx, store, [rec]) == {"p1"}
+
+    assert order == ["replay", "gating", "capture"], (
+        "the gating pass must settle between the replay and the capture")
+
+
+@pytest.mark.qt
+def test_the_export_puts_the_user_s_own_work_back(qapp, tmp_path, monkeypatch):
+    """Replaying a record replaces the user's replicate sets, gating and stats.
+
+    `view_state.snapshot` captures none of the three, so restoring only what it
+    knows about left them replaced by the last regenerated plot's — permanently,
+    and with the clobbered gating reaching `pipeline_info.json` on the user's
+    next gate edit. An export is not a navigation and must not cost them work.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    card, _ = _card_that_draws_what_it_is_told(ctx)
+
+    mine = [{"id": "sel-mine", "name": "my replicates", "wells": ["A01", "A02"]}]
+    ctx.state.selection.selections = [dict(s) for s in mine]
+    ctx.state.selection.current_selection_id = "sel-mine"
+    ctx.state.cell_gating.fluor_gates["gfp"] = 123.0
+
+    def _replay_that_clobbers(_ctx, plot_id):
+        # What the real restore does: replace, wholesale.
+        _ctx.state.selection.selections = [{"id": "sel-theirs",
+                                            "name": "the plot's", "wells": []}]
+        _ctx.state.selection.current_selection_id = "sel-theirs"
+        _ctx.state.cell_gating.fluor_gates.clear()
+        _ctx.state.cell_gating.fluor_gates["rfp"] = 999.0
+
+    monkeypatch.setattr(C, "restore_saved_plot", _replay_that_clobbers)
+    monkeypatch.setattr(C, "_gating_recompute_now", lambda c: True)
+
+    rec = SavedPlot(id="p1", created_at="2026-01-01T00:00:00", tab="Bar Plots",
+                    title="Plot", png_filename="p1.png", params={})
+    assert store.add(ctx, rec, _png_bytes())
+    C.regenerate_missing_vectors(ctx, store, [rec])
+
+    assert [s["id"] for s in ctx.state.selection.selections] == ["sel-mine"]
+    assert ctx.state.selection.current_selection_id == "sel-mine"
+    assert ctx.state.cell_gating.fluor_gates.get("gfp") == 123.0
+    assert "rfp" not in ctx.state.cell_gating.fluor_gates
+
+
+@pytest.mark.qt
+def test_a_repair_that_cannot_be_undone_never_starts(qapp, tmp_path,
+                                                     monkeypatch):
+    """If the live state cannot be snapshotted, nothing is replayed.
+
+    The old code let the snapshot fail into `None` and skipped the restore in
+    silence, so a session whose state could not be saved was the one session
+    that got its state replaced. Declining is the only safe answer, and it is
+    said out loud rather than left as a deck that is quietly less editable.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    card, replay = _card_that_draws_what_it_is_told(ctx)
+    replayed = []
+    monkeypatch.setattr(C, "restore_saved_plot",
+                        lambda c, pid: replayed.append(pid))
+    monkeypatch.setattr(C.view_state, "snapshot",
+                        lambda c: (_ for _ in ()).throw(RuntimeError("no")))
+
+    rec = SavedPlot(id="p1", created_at="2026-01-01T00:00:00", tab="Bar Plots",
+                    title="Plot", png_filename="p1.png", params={})
+    assert store.add(ctx, rec, _png_bytes())
+
+    assert C.regenerate_missing_vectors(ctx, store, [rec]) == set()
+    assert replayed == [], "nothing may be replayed without a way back"
+    assert rec.svg_filename == ""
+    assert ctx.said and "could not be saved and restored" in ctx.said[0]

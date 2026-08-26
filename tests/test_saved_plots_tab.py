@@ -51,3 +51,58 @@ def test_empty_state_until_a_plot_is_saved(qapp, tmp_path):
 
     assert app._saved_plots_stack.currentIndex() == 1
     assert "1 saved plot" in app._saved_plots_count_lbl.text()
+
+
+def test_the_gallery_can_be_opened_at_one_particular_card(qapp, tmp_path):
+    """Home's thumbnails send the user here by plot id, and landing at the top
+    of the list is indistinguishable, from the page, from the link not working.
+
+    Driven through the real builder rather than by handing the function a
+    dictionary: the index it reads is written by ``populate_saved_plots_grid``,
+    and an index that were never populated — or populated under a different key
+    — would pass every test made against a fixture.
+    """
+    from well_viewer.features.saved_plots.tab_view import scroll_to_saved_plot
+
+    app = _app(tmp_path)
+    parent = QWidget()
+    ctx = SimpleNamespace(app=app, state=app._app_state,
+                          widgets=WidgetRegistry(app), runtime=AppRuntime(app))
+    build_saved_plots_tab(ctx, parent)
+    store = get_store(ctx)
+    for pid in ("r1", "r2", "r3"):
+        rec = _rec()
+        rec.id, rec.png_filename = pid, f"{pid}.png"
+        store.add(ctx, rec, b"not-a-real-png")
+    populate_saved_plots_grid(ctx)
+
+    assert scroll_to_saved_plot(ctx, "r2") is True
+    card = ctx.runtime.saved_plots.cards["r2"]
+    assert card.property("focusflash") == "true"
+
+    # A plot that is not in the gallery is reported, not silently ignored — the
+    # caller turns that into a message rather than leaving the user on a page
+    # that looks like it did nothing.
+    assert scroll_to_saved_plot(ctx, "never-saved") is False
+
+
+def test_the_card_index_is_rebuilt_rather_than_accumulated(qapp, tmp_path):
+    """``clear_layout`` destroys the previous cards' C++ objects.
+
+    An index that kept the old entries would hand out handles to deleted
+    widgets, and touching one raises from inside a Qt slot — where it surfaces as
+    a crash with no obvious connection to the delete that caused it.
+    """
+    app = _app(tmp_path)
+    parent = QWidget()
+    ctx = SimpleNamespace(app=app, state=app._app_state,
+                          widgets=WidgetRegistry(app), runtime=AppRuntime(app))
+    build_saved_plots_tab(ctx, parent)
+    store = get_store(ctx)
+    store.add(ctx, _rec(), b"not-a-real-png")
+    populate_saved_plots_grid(ctx)
+    assert set(ctx.runtime.saved_plots.cards) == {"r1"}
+
+    store.delete(ctx, "r1")
+    populate_saved_plots_grid(ctx)
+    assert ctx.runtime.saved_plots.cards == {}

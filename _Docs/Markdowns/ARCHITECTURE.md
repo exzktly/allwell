@@ -398,7 +398,9 @@ well_viewer/
 │   │   ├── ratios/       tab_view.py   ← the ratio-metric editor [removable]
 │   │   └── pipeline_info/ tab_view.py  ← read-only run parameters [removable]
 │   ├── spatial/      controller.py, collect.py, renderer.py, state.py, tab_view.py
-│   ├── saved_plots/  controller.py, collect.py, state.py, tab_view.py, _report.py
+│   ├── saved_plots/  controller.py, collect.py, state.py, tab_view.py,
+│   │                 _report.py (PDF), _deck.py + _pptx.py + _drawingml.py
+│   │                 + _svg_shapes.py (the PowerPoint export)
 │   ├── crop/         controller.py, region.py        ← support lib (always present)
 │   ├── qc/           controller.py, params.py, tab_view.py   ← support lib
 │   ├── export/       service.py, style.py, sidebar_view.py
@@ -710,7 +712,7 @@ and registers every centre page. The current page-list:
 | Images | **Image Browser** | Segmentation / Image Table / Cell Browser / Playground |
 | Images | **smFISH** | — |
 | Data | **Review CSV** | — |
-| Data | **Saved Plots** | — (the plot gallery; decorates every plot card with a "save to gallery" button) |
+| Data | **Saved Plots** | — (the plot gallery; decorates every plot card with a "save to gallery" button, and exports the gallery as a PDF report or a PowerPoint deck of editable figures) |
 | Data | **Batch Export** | — |
 
 **Plotting** is a `NamedPageStack`; **Image Browser** (`QTabWidget`: the unified
@@ -1650,6 +1652,177 @@ gated on `view_state.owns_tab_block`, which separates "this tab keeps no block"
 (true of most tabs, and not worth a warning) from "this record has none of the
 block this tab keeps" (worth one — the fix is to re-save the plot, and a user
 who is told nothing re-clicks Restore instead).
+
+#### Exporting the gallery (`features/saved_plots/_report.py`, `_deck.py`)
+
+The gallery goes out whole, in one of two formats, from a single Export menu on
+the page's control band. Both walk the records in **gallery order** —
+`controller.gallery_order`, which is `reversed(store.records)` — because the
+gallery shows newest first and the ▲/▼ buttons curate that sequence; an export
+that walked the records as stored came out in exactly the reverse of the order
+the user had arranged, silently, since both are plausible orderings of the same
+plots. One function answers it so the two exports cannot drift apart.
+
+**PDF (`_report.py`)** is one page per plot: the captured raster snapshot
+embedded large under a header, with the parameter summary as a caption. It draws
+through matplotlib's `PdfPages`, so the text around the figure is vector and the
+figure itself is the picture the gallery holds.
+
+**PowerPoint (`_deck.py`)** is one *slide* per plot, and the figure on it is not
+a picture — it is PowerPoint shapes. A bar arrives as a rectangle whose fill
+PowerPoint can change, an axis label as a text box that can be retyped, a marker
+as a curve. The whole figure sits in one `grpSp` group, so it moves and scales as
+a unit while a double-click still reaches the shapes inside it. That is the point
+of the format: restyling a figure for a talk or a thesis stops requiring a
+round-trip through All-Well or Illustrator.
+
+Four modules, in the order the data moves through them:
+
+| Module | Does |
+| --- | --- |
+| `_svg_shapes.py` | Reads a Matplotlib SVG into a flat, ordered list of `PathShape` / `TextShape` / `ImageShape` in absolute user-space points. Applies the transform stack, inherits styles down the tree, expands `<use>` references into real geometry, splits mathtext back into positioned runs, and clips to rectangular `<clipPath>`s. Not a general SVG reader — it handles the subset Matplotlib emits and records anything else in `Drawing.unsupported`. |
+| `_drawingml.py` | Turns those shapes into DrawingML. The only module that knows about EMUs (12,700 per point) and hundredths-of-a-point font sizes. `Placement.fit` letterboxes a figure into a target box on the slide. |
+| `_pptx.py` | Writes the Open Packaging container — the zip of XML parts, their relationships, one slide master, one blank layout, one theme. No `python-pptx`: the parts a deck of plain slides needs are small and fixed, so the export adds nothing to the runtime stack. |
+| `_deck.py` | Lays out the slide (title, source-tab badge, timestamp, parameter column) and decides how each plot reaches it. |
+
+**Vector capture is taken at save time, not at export time.** A gallery record
+holds parameters and a PNG, never a figure, so nothing downstream can reconstruct
+one — the only moment the figure exists is the moment the user clicks Save.
+`widgets/plot_card.py` therefore renders the panel twice in the same
+publication-mode capture: the 300 dpi PNG it always did, and an SVG through
+`fig_clipboard.render_figure_svg`, which sets `svg.fonttype="none"` so labels stay
+`<text>` rather than outlined paths. Both land in `<data_dir>/saved_plots/`, as
+`<id>.png` and `<id>.svg`, and `SavedPlot.svg_filename` is empty when there is no
+vector twin.
+
+**A plot without a vector capture is placed as a picture, and the slide says so.**
+Three things produce that: a record saved before the app captured vector, a
+capture that failed to render or to write, and the Image Table — which composes
+its gallery snapshot as a raster grid and has no Matplotlib figure to vectorise.
+None of them is an error, and all of them are stated rather than glossed. Each
+carries its own wording, because they have different fixes: "re-save it" is right
+for a record that never had a capture and wrong for one whose capture is corrupt
+on disk. `DeckResult` counts `vector` and `raster` separately and
+`DeckResult.summary()` names the split in the status line. A deck where some
+figures are editable and some are not is otherwise indistinguishable from one
+where all of them are — until someone tries to click a bar in front of a room.
+
+**A clip cuts a fill and an outline differently.** A shape that is both filled
+and stroked and crosses its clip rectangle needs two geometries: the fill closes
+along the clip edge, the outline simply stops there. Closing both — one rule for
+the whole shape — draws an edge the figure never had, so a bar running off the
+top of its axes acquires a cap exactly at the axis limit and reads as a bar whose
+value *is* the limit. That is a wrong number on the slide, produced by the
+exporter. `PathShape.stroke_subpaths` carries the second geometry, set only when
+a clip actually split the two, and `_custom_geometry` emits both into one
+`custGeom` as separate `a:path` entries — one `fill="norm" stroke="0"`, one
+`fill="none" stroke="1"` — so the bar stays a single object the user selects and
+recolours.
+
+**Mathtext is several runs, not one label.** Matplotlib writes `$\mu$m` as
+several `<tspan>`s grouped *by font rather than by reading order*, each carrying
+its own list of per-glyph x positions, so an italic span can hold the μ at one
+end of the label and an α sixty points along with the upright run between them in
+space and after them in the document. `_emit_tspan` splits each span back into
+runs at the gaps between glyph positions (`_positioned_runs`, breaking at
+`_RUN_BREAK_EMS` times the font size — no glyph in a proportional face is close
+to twice its point size wide) and emits each at its own coordinates. µm,
+superscripts and Greek are ordinary in microscopy axis labels; concatenating the
+element's text gave neither what the figure said nor where it said it.
+
+**Everything the reader could not translate reaches the artifact.**
+`Drawing.unsupported` names each construct once — a pattern fill (which is how
+Matplotlib writes a **hatch**, and which otherwise resolves to "no paint" and is
+indistinguishable from `fill: none`), an elliptical arc, an `<line>` element, a
+non-rectangular clip path approximated by its bounding box. A figure that lost
+one is drawn, and the slide carries a line under it saying what is missing;
+`DeckResult.summary()` repeats the list in the status line, and never behind the
+"all editable" branch — a deck can be entirely vector and still have lost a hatch
+out of one of its figures. The findings are collected *before* the shape cap
+decides anything, so a capped figure's are not discarded.
+
+**Text is sanitised, not merely escaped.** `escape` rewrites `&`, `<` and `>` and
+leaves the characters XML 1.0 forbids outright — and a plot title is free text a
+user types or pastes, with a paste out of Word carrying `\x0b` for a soft line
+break. One of those does not spoil a label: it makes the whole slide part
+unparseable, so PowerPoint offers to repair the file while the export reports
+success. `_drawingml.xml_text` / `xml_attr` drop them and every user-reachable
+string goes through one or the other.
+
+**The vector capture is capped before it is taken, not after.**
+`fig_clipboard.MAX_VECTOR_PATHS` is checked against `figure_path_count` — artist
+counts, so constant-time in the data — before `render_figure_svg` renders
+anything. A 300,000-point scatter is otherwise a four-second render on the UI
+thread and a 32 MB file written beside a 0.17 MB PNG, all of it discarded at
+export because it is past the shape cap. A test holds `MAX_VECTOR_PATHS` at or
+below `MAX_SHAPES_PER_SLIDE`, which is the tie between two numbers that cannot
+share a constant: the capture lives in `widgets/` and must not import a feature.
+`copy_figure_to_clipboard` is deliberately uncapped — that caller wants vector
+for its own sake rather than for a deck.
+
+**`_deck.MAX_SHAPES_PER_SLIDE` is a hard cap, not a quality setting.** A scatter
+of a hundred thousand cells is a hundred thousand PowerPoint shapes and a deck
+like that does not open — it hangs. Past the cap the figure is placed as a
+picture and the slide names the shape count, because "too complex" gives the user
+nothing to act on while "180,000 shapes" tells them to plot fewer cells.
+
+**`SavedPlotsStore._discard_files` removes both files.** Delete and Clear take the
+snapshot *and* its vector twin; taking only the PNG would leave the dataset folder
+accumulating SVGs for plots the gallery no longer lists, with nothing left to name
+them.
+
+#### Home's saved-plot thumbnails
+
+Home's Overview carries a **Saved plots** strip: the newest saved plots as
+clickable thumbnails, under the "Your work here" block. Home already counts what
+the user has *declared* about a plate; this shows what they have *made* from it.
+
+`home/collect.saved_plots_strip` returns `{"available", "total", "shown"}`.
+`available` is False when the build has no Saved Plots feature at all, and the
+card is then hidden entirely rather than shown empty — "you have saved no plots"
+is a lie in a build where saving one is impossible, and it is not a state the
+user can act on. An empty gallery in a build that *has* the feature is a
+different fact with an action attached, so it says so and points at how. `shown`
+is capped at `SAVED_PLOT_STRIP_LIMIT` and `total` is reported separately: a strip
+that showed twelve of ninety and said "12" would make the landing page quietly
+disagree with the gallery about how much work is saved.
+
+Each entry carries an image **path**, not bytes. That keeps `collect.py`'s rule
+intact — Home reads the record and opens no files — and leaves the one
+path-to-pixels conversion in the view, where every other image load in the app
+lives.
+
+**Clicking a thumbnail opens that plot, not merely the gallery.**
+`home.controller.open_saved_plot` → `saved_plots.controller.focus_saved_plot`,
+which selects the Saved Plots page (which is what *builds* it — the feature is
+`lazy_only`), repopulates, and calls `tab_view.scroll_to_saved_plot` to bring that
+card into view and outline it for a moment (`QFrame#Panel[focusflash="true"]`).
+Landing at the top of the list is, from the page, indistinguishable from the link
+not working, so `focus_saved_plot` returns False when it could not reach the card
+and Home turns that into a status message.
+
+Thumbnails are decoded **at thumbnail size**, through
+`QImageReader.setScaledSize` rather than by loading the file and scaling
+afterwards (`home/tab_view._thumbnail`). A saved plot's PNG is a 300 dpi capture,
+routinely 1500×960, and Home draws twelve of them at 152 px on every
+`refresh_home`, on the UI thread; decoding the full frame first does all that work
+and throws it away. The tile itself is a `QPushButton` holding the picture and the
+caption as **child labels in a vertical layout** — a button's own `icon` and
+`text` are laid out side by side, which on a tile this narrow puts the picture in
+the left half and runs the title off the right edge. The labels are transparent to
+the mouse, so a click anywhere on the tile still reaches the button.
+
+`populate_saved_plots_grid` rebuilds `ctx.runtime.saved_plots.cards` on every
+repaint rather than accumulating it: `clear_layout` has already destroyed the
+previous cards' C++ objects, and an index that outlived them would hand out
+handles to deleted widgets.
+
+Home reaches all of this through `core.lazy` proxies
+(`collect._saved_plots_store`, `controller._focus_saved_plot`) rather than
+function-local imports. Saved Plots is removable, and a `lazy(...)` call is not an
+`import` statement — it couples nothing at module load and resolves on first use,
+which is what keeps both the removability contract and
+`test_deferred_imports.py`'s budget intact.
 
 **Every shortfall Home reports offers the same next step: finish the run.**
 Failures, partial wells, images without measurements, staged-but-never-processed

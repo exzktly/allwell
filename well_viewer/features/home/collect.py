@@ -24,6 +24,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from pipeline import completeness
+from well_viewer.core.lazy import lazy
+
+# Saved Plots is removable, so this is a proxy rather than an import: it resolves
+# on first call and only in a build that ships the feature. The guard above every
+# call site is ``ctx.features.get("Saved Plots")``, so the proxy is never touched
+# in a build without it.
+_saved_plots_store = lazy("well_viewer.features.saved_plots.state", "get_store")
 
 #: What the plate paints, over and above the recorded health states. These are
 #: *renderings*, derived from numbers already in the record — not a second
@@ -633,6 +640,46 @@ def your_work(ctx) -> list:
         {"key": "ratios", "label": "Ratios", "count": len(ratios)},
         {"key": "notes", "label": "Notes", "count": 1 if notes.strip() else 0},
     ]
+
+
+#: The most thumbnails the Home strip offers. Home is a summary, and a gallery
+#: of ninety figures on the landing page is the gallery, not a summary of it —
+#: the strip says how many are not shown so the number is never the reader's to
+#: guess.
+SAVED_PLOT_STRIP_LIMIT = 12
+
+
+def saved_plots_strip(ctx) -> dict:
+    """The saved plots to show on Home, newest first, and how many there are.
+
+    Returns ``{"available": bool, "total": int, "shown": [...]}``. ``available``
+    is False when this build has no Saved Plots feature at all — the strip is
+    then absent rather than empty, because "you have saved no plots" is a lie in
+    a build where saving one is impossible.
+
+    Each entry carries ``id`` / ``title`` / ``tab`` / ``created_at`` and an
+    ``image`` **path**, not image bytes. That keeps this module's rule intact:
+    Home reads the record and opens no files, and the one place that turns a
+    path into pixels is the view, which is where every other image in the app is
+    loaded. It also means a thumbnail whose file has gone missing is the view's
+    problem to render, not a figure this module has to invent a value for.
+    """
+    if ctx.features.get("Saved Plots") is None:
+        return {"available": False, "total": 0, "shown": []}
+    store = _saved_plots_store(ctx)
+    store.ensure_loaded(ctx)
+    records = list(reversed(store.records))     # gallery order: newest first
+    shown = [
+        {
+            "id": rec.id,
+            "title": rec.title or rec.tab or "Saved plot",
+            "tab": rec.tab,
+            "created_at": rec.created_at,
+            "image": store.image_path(ctx, rec),
+        }
+        for rec in records[:SAVED_PLOT_STRIP_LIMIT]
+    ]
+    return {"available": True, "total": len(records), "shown": shown}
 
 
 def wells_needing_force(ctx) -> list[str]:

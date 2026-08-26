@@ -20,7 +20,8 @@ profile strips is never imported.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea,
     QTabWidget, QVBoxLayout, QWidget,
@@ -235,6 +236,7 @@ def build_home_overview(ctx, parent: QWidget) -> None:
     body.addWidget(reg.register("_home_tiles", _tile_strip(page)))
     body.addLayout(_build_health_and_receipt(ctx, page, reg))
     body.addWidget(_build_your_work(ctx, page, reg))
+    body.addWidget(_build_saved_plots(ctx, page, reg))
     body.addStretch(1)
 
     from .controller import hide_rail_body, refresh_home
@@ -444,6 +446,128 @@ def _build_your_work(ctx, page: QWidget, reg) -> QWidget:
     card, layout = _card(page, "Your work here")
     layout.addWidget(reg.register("_home_work", _rows_host(card)))
     return card
+
+
+# ── saved plots ─────────────────────────────────────────────────────────────
+
+#: The thumbnail tile's width in pixels, and the height its caption is given.
+#: A tile is sized rather than let float because the strip is a grid of them and
+#: an unsized tile takes its width from the longest plot title in the gallery,
+#: which reflows the whole page whenever a plot is renamed.
+_THUMB_W = 168
+_THUMB_H = 118
+_THUMB_CAPTION_H = 32
+
+
+def _build_saved_plots(ctx, page: QWidget, reg) -> QWidget:
+    """The strip of saved-plot thumbnails, and the route from one to the gallery.
+
+    Home already counts what the user has declared about a plate; this shows what
+    they have *made* from it. Clicking a thumbnail opens the Saved Plots gallery
+    at that plot rather than at the top of the list, which is the difference
+    between the strip being a shortcut and being a picture of a shortcut.
+
+    The card is built even in a profile without Saved Plots — building it and
+    hiding it keeps the page's block order fixed for every build — and the
+    controller hides it when the feature is absent or the gallery is empty.
+    """
+    card, layout = _card(page, "Saved plots")
+    layout.addWidget(reg.register("_home_saved_plots_note", _muted(card, "")))
+    host = reg.register("_home_saved_plots", QWidget(card))
+    grid = QGridLayout(host)
+    grid.setContentsMargins(0, 0, 0, 0)
+    grid.setHorizontalSpacing(theme.Spacing.md)
+    grid.setVerticalSpacing(theme.Spacing.md)
+    layout.addWidget(host)
+    return reg.register("_home_saved_plots_card", card)
+
+
+def _thumbnail(image_path) -> QPixmap | None:
+    """Decode *image_path* straight to thumbnail size, or ``None`` if it is gone.
+
+    Through ``QImageReader.setScaledSize`` rather than by loading the file and
+    scaling it after: a saved plot's PNG is a 300 dpi capture — routinely
+    1500×960 and a quarter of a megabyte — and Home draws twelve of them at
+    152 px on every refresh, on the UI thread. Decoding the full frame first
+    does all that work and throws it away. The reader scales during decode, so
+    the full-size image never exists.
+    """
+    from PySide6.QtGui import QImageReader
+
+    if image_path is None:
+        return None
+    reader = QImageReader(str(image_path))
+    source = reader.size()
+    if not reader.canRead() or not source.isValid() or source.isEmpty():
+        return None
+    box_w = _THUMB_W - 2 * theme.Spacing.xs
+    scale = min(box_w / source.width(), _THUMB_H / source.height())
+    reader.setScaledSize(QSize(max(1, round(source.width() * scale)),
+                               max(1, round(source.height() * scale))))
+    image = reader.read()
+    if image.isNull():
+        return None
+    return QPixmap.fromImage(image)
+
+
+def build_saved_plot_tile(ctx, parent: QWidget, entry: dict) -> QWidget:
+    """One clickable thumbnail: the figure, and its title underneath.
+
+    A button rather than a styled label, so the tile is reachable by keyboard and
+    announces itself as something that can be pressed — a bare pixmap that
+    happens to respond to clicks is the affordance this page's own notes warn
+    about elsewhere.
+
+    The picture and the caption are **child labels in a vertical layout**, not
+    the button's own ``icon`` and ``text``. A QPushButton lays those two out side
+    by side, which on a tile this width puts the thumbnail in the left half and
+    runs the title off the right edge — and neither ``icon()`` nor ``text()``
+    shows it, because both hold exactly what they were given. The labels are
+    transparent to the mouse so a click anywhere on the tile still reaches the
+    button.
+    """
+    tile = QPushButton(parent)
+    tile.setObjectName("HomeThumbTile")
+    tile.setFixedSize(_THUMB_W, _THUMB_H + _THUMB_CAPTION_H)
+    tile.setCursor(Qt.PointingHandCursor)
+    tile.setToolTip(
+        f"{entry['title']} — saved from {entry['tab'] or 'a plot'}"
+        f"\nOpen this plot in Saved Plots.")
+
+    column = QVBoxLayout(tile)
+    column.setContentsMargins(theme.Spacing.xs, theme.Spacing.xs,
+                              theme.Spacing.xs, theme.Spacing.xs)
+    column.setSpacing(theme.Spacing.xs)
+
+    picture = QLabel(tile)
+    picture.setAlignment(Qt.AlignCenter)
+    picture.setFixedHeight(_THUMB_H)
+    picture.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+    pixmap = _thumbnail(entry.get("image"))
+    if pixmap is None:
+        # The record exists and its image does not. Saying so on the tile keeps
+        # a missing file distinguishable from a plot that drew nothing, which is
+        # the whole point of the record carrying a filename at all.
+        picture.setObjectName("Muted")
+        picture.setText("(image unavailable)")
+    else:
+        picture.setPixmap(pixmap)
+    column.addWidget(picture)
+
+    caption = QLabel(tile)
+    caption.setObjectName("Muted")
+    caption.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
+    caption.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+    # Elided rather than wrapped: the tile is a fixed height, so a two-line title
+    # would push the picture out of it. The full title is in the tooltip.
+    caption.setText(caption.fontMetrics().elidedText(
+        entry["title"], Qt.ElideRight, _THUMB_W - 2 * theme.Spacing.sm))
+    column.addWidget(caption)
+
+    from .controller import open_saved_plot
+    tile.clicked.connect(
+        lambda _=False, _id=entry["id"]: open_saved_plot(ctx, _id))
+    return tile
 
 
 # ── rendering helpers used by the controller ────────────────────────────────

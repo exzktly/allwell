@@ -61,6 +61,66 @@ def _render_figure(fig, fmt, savefig_kwargs, rc_overrides) -> bytes:
         return b""
 
 
+#: The most drawable primitives a figure may hold before it is not worth
+#: capturing as vector. A figure past this becomes more PowerPoint shapes than a
+#: deck can open, so the consumer would place it as a picture anyway — and the
+#: capture itself is the expensive half: 300,000 points is a four-second render
+#: on the UI thread and a 32 MB file written beside a 0.17 MB PNG, all of it
+#: discarded later. Checked before rendering, from the artist counts, which costs
+#: nothing and does not scale with the data.
+#:
+#: ``tests/test_saved_plots_pptx_export.py`` holds this at or below the deck's
+#: own ``MAX_SHAPES_PER_SLIDE``, so a capture that is stored is never one the
+#: deck will refuse.
+MAX_VECTOR_PATHS = 4000
+
+
+def figure_path_count(fig) -> int:
+    """Roughly how many separate primitives *fig* will draw.
+
+    An estimate on purpose: it reads artist counts rather than rendering, so it
+    is constant-time in the number of data points. A scatter contributes its
+    offsets (one marker each) rather than its single shared marker path, which
+    is the case that matters — everything else is already small.
+    """
+    total = 0
+    for ax in getattr(fig, "axes", ()):
+        for collection in getattr(ax, "collections", ()):
+            offsets = 0
+            try:
+                offsets = len(collection.get_offsets())
+            except Exception:
+                swallowed("figure path count: collection offsets")
+            total += max(len(collection.get_paths()), offsets)
+        total += (len(getattr(ax, "lines", ())) + len(getattr(ax, "patches", ()))
+                  + len(getattr(ax, "texts", ())))
+    return total
+
+
+def render_figure_svg(fig, *, max_paths: int | None = MAX_VECTOR_PATHS,
+                      **savefig_kwargs) -> bytes:
+    """Render *fig* to SVG bytes, with text left as text.
+
+    ``svg.fonttype="none"`` is the whole point: Matplotlib's default writes every
+    glyph as an outlined path, which is faithful but dead — a title exported that
+    way cannot be retyped in PowerPoint or Illustrator, only redrawn. With it
+    off, each label stays a ``<text>`` element and survives into whatever reads
+    the SVG next.
+
+    Returns ``b""`` if the figure could not be rendered, so a caller capturing
+    vector alongside a raster never loses the raster to a vector failure — and
+    also when the figure holds more than *max_paths* primitives, for the reason
+    on that constant. Pass ``max_paths=None`` to render regardless, which is
+    what a caller wanting vector for its own sake (rather than for the deck)
+    should do.
+    """
+    if max_paths is not None and figure_path_count(fig) > max_paths:
+        return b""
+    kw = {"bbox_inches": "tight"}
+    kw.update(savefig_kwargs)
+    return _render_figure(fig, "svg", kw, {"svg.fonttype": "none"})
+
+
 def _macos_pasteboard_write(pdf_bytes: bytes, svg_bytes: bytes,
                             png_bytes: bytes) -> bool:
     """Write the figure to the macOS pasteboard under the UTIs Illustrator

@@ -10,12 +10,15 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from well_viewer.core.lazy import lazy_names
+from well_viewer.core.lazy import lazy, lazy_names
 from well_viewer.core.safe import swallowed
 from well_viewer.persistence import view_state
+from well_viewer.features.saved_plots._deck import build_saved_plots_deck
 from well_viewer.features.saved_plots._report import build_saved_plots_report
 from well_viewer.features.saved_plots.collect import build_summary, capture_params
-from well_viewer.features.saved_plots.state import SavedPlot, get_store
+from well_viewer.features.saved_plots.state import (
+    SavedPlot, SavedPlotsStore, get_store,
+)
 
 _logger = logging.getLogger("well_viewer")
 
@@ -29,18 +32,36 @@ _compute_pairwise, _deserialize_stats_groups, _stats_refresh_group_list, \
         "stats_refresh_group_list", "stats_refresh_map",
     )
 
+# The gallery view, bound the same way. A plain function-local ``import`` here
+# would be a deferred feature import — a cycle workaround, which the budget in
+# ``tests/test_deferred_imports`` exists to stop accumulating. The cycle is real
+# (the tab imports this controller for its button handlers) and this is the
+# sanctioned way through it: a proxy that resolves on first call and couples
+# nothing at module load.
+_scroll_to_saved_plot = lazy("well_viewer.features.saved_plots.tab_view",
+                             "scroll_to_saved_plot")
+
 
 def wire_save_to_gallery(ctx, card, tab_name: str) -> None:
     """Enable *card*'s hover "save to Saved Plots" button for *tab_name*."""
     if card is None or not hasattr(card, "set_save_handler"):
         return
     card.set_save_handler(
-        lambda png, label: save_plot_from_card(ctx, tab_name, png, label)
+        lambda png, label, svg=b"": save_plot_from_card(
+            ctx, tab_name, png, label, svg)
     )
 
 
-def save_plot_from_card(ctx, tab: str, png_bytes: bytes, panel_label: str) -> str:
+def save_plot_from_card(ctx, tab: str, png_bytes: bytes, panel_label: str,
+                        svg_bytes: bytes = b"") -> str:
     """Persist the captured panel + its params; refresh the gallery.
+
+    *svg_bytes* is the same render in vector, captured by the card at the same
+    moment. It is what the PowerPoint export later draws editable shapes from,
+    and it is optional: a card that could not render vector still saves, and the
+    plot exports as a picture. The default keeps that true for the callers that
+    have only a raster to hand — the Image Table composes its gallery snapshot
+    itself rather than rendering a Matplotlib figure.
 
     Returns a short status string (shown as a toast by ``PlotCard``)."""
     store = get_store(ctx)
@@ -57,11 +78,12 @@ def save_plot_from_card(ctx, tab: str, png_bytes: bytes, panel_label: str) -> st
         tab=tab,
         title=title,
         png_filename=f"{pid}.png",
+        svg_filename=f"{pid}.svg" if svg_bytes else "",
         params=params,
         thresholds=thresholds,
         summary=build_summary(tab, params, thresholds),
     )
-    if not store.add(ctx, rec, png_bytes):
+    if not store.add(ctx, rec, png_bytes, svg_bytes):
         return "Save failed: could not write image"
     refresh_saved_plots_gallery(ctx)
     return f"Saved “{title}” to Saved Plots"
@@ -249,6 +271,34 @@ def _refresh_stats_group_views(ctx) -> None:
                       exc_info=True)
 
 
+#: The Review page this feature owns, as the centre notebook names it. Stated
+#: once so the navigation below and any future caller cannot drift from the
+#: registry's ``FeatureDescriptor(name="Saved Plots")``.
+TAB_NAME = "Saved Plots"
+
+
+def focus_saved_plot(ctx, plot_id: str) -> bool:
+    """Open the gallery at the card for *plot_id*.
+
+    The other half of Home's saved-plot thumbnails: the strip there shows the
+    figure small, and clicking one has to land the user on the same plot at full
+    size rather than at the top of a gallery they then have to search. Returns
+    False when the plot could not be reached, which the caller says out loud —
+    silently arriving at the top of the list is the failure that reads as the
+    feature simply not working.
+
+    Navigation lives here rather than in Home because this feature owns its own
+    page name, and because the gallery has to be *built* before there is a card
+    to scroll to: selecting the page is what builds it (Saved Plots is
+    ``lazy_only``), so the two steps cannot be separated across features.
+    """
+    notebook = getattr(ctx.window, "_notebook", None)
+    if notebook is None or not notebook.setCurrentByName(TAB_NAME):
+        return False
+    refresh_saved_plots_gallery(ctx)
+    return bool(_scroll_to_saved_plot(ctx, plot_id))
+
+
 def delete_saved_plot(ctx, plot_id: str) -> None:
     get_store(ctx).delete(ctx, plot_id)
     refresh_saved_plots_gallery(ctx)
@@ -290,40 +340,116 @@ def export_saved_plot(ctx, plot_id: str) -> None:
         _logger.debug("saved_plots: export failed for %r", plot_id, exc_info=True)
 
 
-def export_report_pdf(ctx) -> None:
-    """Export all saved plots as a multi-page PDF report (cover + one page each)."""
+def gallery_order(store) -> list:
+    """The records in the order the gallery shows them — newest first.
+
+    Gallery order, not storage order. The gallery shows newest first and the
+    ▲/▼ buttons curate that sequence; an export that walked the records as
+    stored came out in exactly the reverse of the order the user had arranged —
+    silently, since both are plausible orderings of the same plots. Every export
+    goes through this so the PDF and the deck cannot disagree about it.
+    """
+    return list(reversed(store.records))
+
+
+def _export_destination(ctx, *, caption: str, default_name: str,
+                        file_filter: str) -> str:
+    """Ask where to write an export. ``""`` when the user cancelled."""
+    from pathlib import Path
+    from PySide6.QtWidgets import QFileDialog
+
+    data_dir = getattr(ctx.state.dataset, "data_dir", None)
+    suggested = str(Path(data_dir) / default_name) if data_dir else default_name
+    dest, _flt = QFileDialog.getSaveFileName(ctx.window, caption, suggested,
+                                             file_filter)
+    return dest or ""
+
+
+def _dataset_name(ctx) -> str:
+    from pathlib import Path
+    data_dir = getattr(ctx.state.dataset, "data_dir", None)
+    return Path(data_dir).name if data_dir else ""
+
+
+def _records_to_export(ctx) -> SavedPlotsStore | None:
+    """The loaded store, or ``None`` after saying there is nothing to export."""
     store = get_store(ctx)
     store.ensure_loaded(ctx)
     if not store.records:
         ctx.notify.set_status("No saved plots to export.")
+        return None
+    return store
+
+
+def export_report_pdf(ctx) -> None:
+    """Export all saved plots as a multi-page PDF report (cover + one page each)."""
+    store = _records_to_export(ctx)
+    if store is None:
         return
     try:
         from pathlib import Path
-        from PySide6.QtWidgets import QFileDialog
 
-        data_dir = getattr(ctx.state.dataset, "data_dir", None)
-        suggested = str(Path(data_dir) / "saved_plots_report.pdf") if data_dir \
-            else "saved_plots_report.pdf"
-        dest, _flt = QFileDialog.getSaveFileName(
-            ctx.window, "Export Saved Plots report", suggested, "PDF document (*.pdf)")
+        dest = _export_destination(
+            ctx, caption="Export Saved Plots report",
+            default_name="saved_plots_report.pdf",
+            file_filter="PDF document (*.pdf)")
         if not dest:
             return
-        # Gallery order, not storage order. The gallery shows newest first and
-        # the ▲/▼ buttons curate that sequence; the report walked the records
-        # as stored, so it came out in exactly the reverse of the order the
-        # user had arranged — silently, since both are plausible orderings of
-        # the same plots.
         n = build_saved_plots_report(
-            list(reversed(store.records)),
+            gallery_order(store),
             lambda r: store.image_path(ctx, r),
             dest,
-            dataset_name=(Path(data_dir).name if data_dir else ""),
+            dataset_name=_dataset_name(ctx),
             summary_for=lambda r: r.summary,
         )
         ctx.notify.set_status(f"Saved Plots report → {Path(dest).name} ({n} plots)")
     except Exception as exc:  # surface to the user
         _logger.debug("saved_plots: report export failed", exc_info=True)
         ctx.notify.set_status(f"Report export failed: {exc}")
+
+
+def export_deck_pptx(ctx) -> None:
+    """Export all saved plots as a PowerPoint deck of editable figures.
+
+    The sibling of :func:`export_report_pdf`, and the difference is the whole
+    point of it: the PDF embeds each plot's captured snapshot, while this rebuilds
+    the figures out of PowerPoint shapes, so a bar can be recoloured and an axis
+    label retyped in the deck itself.
+
+    A plot saved before the app began capturing vector has no such capture and is
+    placed as a picture instead. That is reported rather than glossed: the slide
+    says so, and so does the status line, because a deck where some figures are
+    editable and some are not is otherwise indistinguishable from one where all
+    of them are — until the user tries to click a bar in a talk.
+    """
+    store = _records_to_export(ctx)
+    if store is None:
+        return
+    try:
+        from pathlib import Path
+
+        dest = _export_destination(
+            ctx, caption="Export Saved Plots to PowerPoint",
+            default_name="saved_plots.pptx",
+            file_filter="PowerPoint presentation (*.pptx)")
+        if not dest:
+            return
+        result = build_saved_plots_deck(
+            gallery_order(store),
+            lambda r: store.vector_path(ctx, r),
+            lambda r: store.image_path(ctx, r),
+            dest,
+            dataset_name=_dataset_name(ctx),
+            summary_for=lambda r: r.summary,
+        )
+        if result.unsupported:
+            _logger.info("saved_plots: deck export met %s",
+                         ", ".join(result.unsupported))
+        ctx.notify.set_status(
+            f"PowerPoint deck → {Path(dest).name} ({result.summary()})")
+    except Exception as exc:  # surface to the user
+        _logger.debug("saved_plots: deck export failed", exc_info=True)
+        ctx.notify.set_status(f"PowerPoint export failed: {exc}")
 
 
 def refresh_saved_plots_gallery(ctx) -> None:

@@ -37,6 +37,9 @@ from well_viewer.features.batch_export.base_panel import BatchExportPanel, Skipp
 # ── ctx-native god-method forms (A8 / Epic-A14 panel conversion) ─────────────
 from well_viewer.core.lazy import lazy as _lazy
 from well_viewer.core.ui_helpers import build_hline_separator
+from well_viewer.core.plot_annotations import (
+    value_label_settings as _value_label_settings,
+)
 from well_viewer.core.plot_style import mark_time_rescale
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates as _get_all_fluor_gates,
@@ -598,6 +601,11 @@ class BarBatchExportPanel(BatchExportPanel):
             # tab's live error-bar / threshold-line state), so the mode is
             # resolved here and handed over explicitly.
             bar_color=_mono_bar_color(self._ctx.state.plot),
+            # Properties → Overlays, resolved here for the same reason the
+            # colour mode is: this call passes no ctx, and an exported figure
+            # missing the value labels the on-tab plot carries is a different
+            # figure of the same data.
+            value_labels=_value_label_settings(self._ctx),
         )
         # This figure is built here rather than by the on-tab renderer, so the
         # marker that renderer adds has to be added here too: the tick labels and

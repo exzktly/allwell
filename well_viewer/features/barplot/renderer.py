@@ -46,7 +46,15 @@ _logger = logging.getLogger(__name__)
 
 import theme
 
+from well_viewer.core.plot_annotations import (
+    LABEL_SPAN_HEADROOM as _LABEL_HEADROOM,
+    value_label_settings,
+)
 from well_viewer.domain.tp_match import tp_close, tp_close_mask
+from well_viewer.features.barplot._annotations import (
+    label_bar,
+    user_y_ceiling as _user_y_ceiling,
+)
 from well_viewer.features.barplot.controller import (
     cluster_centers as _cluster_centers,
     cluster_x_for_group_keys,
@@ -505,6 +513,33 @@ def draw_beeswarm(
         color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6)
 
 
+#: Vertical room one value label occupies, in typographic points: the offset it
+#: is drawn at plus its own cap height, rounded up. Used to lift the
+#: significance brackets clear of the labels when both are on.
+_LABEL_CLEARANCE_PT = 18
+
+
+def _points_to_data_y(ax, points: float) -> float:
+    """*points* of vertical space, expressed in *ax*'s data units.
+
+    The labels are placed in points and the brackets in data, so one of the two
+    has to be converted before they can be kept apart. Falls back to 8% of the
+    current span when the figure has no usable transform yet (an axes that has
+    never been drawn reports a degenerate bbox), which is the same step the
+    brackets already use.
+    """
+    try:
+        y0, y1 = ax.get_ylim()
+        height_px = float(ax.get_window_extent().height)
+        dpi = float(ax.figure.dpi)
+        if height_px > 0 and dpi > 0:
+            return abs(y1 - y0) * (points * dpi / 72.0) / height_px
+    except (AttributeError, ValueError, ZeroDivisionError):
+        swallowed("barplot: no usable transform for the bracket clearance")
+    y0, y1 = ax.get_ylim()
+    return abs(y1 - y0) * 0.08
+
+
 def _significance_marker(p: float) -> str:
     """Asterisk code for a p-value (matches the Statistics-tab text output)."""
     if p < 0.001:
@@ -538,36 +573,6 @@ def _val_col_label(col: str) -> str:
     from well_viewer.data.metric_labels import split_metric_col
     parts = split_metric_col(col)
     return parts[2] if parts else col
-
-
-def _user_y_ceiling(ctx, ax) -> float | None:
-    """The user's own upper y-limit for *ax*, or ``None`` when they set none.
-
-    Read through the same per-panel lookup ``apply_export_style_prefs`` uses —
-    the figure's ``axis_buckets`` entry for this panel first, then the flat
-    pref — so the number this function honours is the number that pass will
-    apply afterwards. Reading only the flat pref would have been right for a
-    single-axis figure and wrong for the Value / Fraction / Events stack, which
-    is the figure this actually draws on.
-
-    ``None`` means "no override", which is not the same as a limit of zero; a
-    caller that conflated them would refuse to draw on a panel the user had
-    simply left alone.
-    """
-    fig = getattr(ax, "figure", None)
-    if fig is None:
-        return None
-    try:
-        from well_viewer.core.plot_style import axis_scoped_value, figure_prefs
-        prefs = figure_prefs(ctx, fig)
-        idx = list(fig.axes).index(ax) + 1
-        raw = axis_scoped_value(prefs, idx, "y_lim_max", None)
-        if raw in (None, ""):
-            return None
-        return float(raw)
-    except Exception:
-        swallowed("barplot: could not read the panel's user y-limit")
-        return None
 
 
 def _per_cell_mode_name(ctx) -> str:
@@ -859,6 +864,14 @@ def _draw_one_run(ctx, items, pairwise, *, ax_mean, ax_frac, target_ts) -> None:
     matched.sort(key=lambda m: abs(x_by_key[m[1]] - x_by_key[m[2]]))
     y0, y1 = ax.get_ylim()
     base = max(top_by_key.values())
+    # The value labels, when they are on, sit at that same ``value + spread``
+    # anchor — the brackets and the text would be placed on the same band, and
+    # the first bracket at ``base + 8%`` of the span lands inside the label's
+    # own line. Start above them instead: this is the label's offset plus its
+    # cap height, converted from the points they are drawn in to the data units
+    # the brackets are placed in, so the clearance holds at any panel height.
+    if value_label_settings(ctx)[0]:
+        base += _points_to_data_y(ax, _LABEL_CLEARANCE_PT)
     # Where the brackets are allowed to reach. Growing the axis to fit them
     # works only while nothing overrules the growth — and something does:
     # ``apply_export_style_to_current`` runs at the end of ``redraw_bars`` and
@@ -1523,6 +1536,7 @@ def draw_per_well_n_bars(
     # per-cell view, and 95 % CI drew a bare SEM. ``bar_err_settings`` is the
     # same accessor the aggregate path uses, so the two panels cannot drift.
     _err_kind, _ci_scale, _draw_err = bar_err_settings(ctx)
+    _labels_on, _label_fmt = value_label_settings(ctx)
     # Properties → Colours. Resolved here rather than by each caller because
     # both the tab and the Batch Export panel reach these three renderers with a
     # real ``ctx``, so one line covers both surfaces.
@@ -1583,6 +1597,14 @@ def draw_per_well_n_bars(
             ax_n.bar(xi, bar_val, width=bar_w, color=color, alpha=0.85, zorder=3, linewidth=0)
             if _draw_err and err_val > 0:
                 ax_n.errorbar(xi, bar_val, yerr=err_val * _ci_scale, fmt="none", ecolor=theme.Colors.err_bar, elinewidth=1.4, capsize=4, zorder=4)
+            # Value labels (Properties → Overlays). This panel draws the same
+            # mean-and-spread the aggregate path does, from a different
+            # collector, so it labels them the same way — a rule honoured on
+            # one of two functions that draw one panel is the half-sweep this
+            # codebase keeps paying for.
+            if _labels_on:
+                label_bar(ax_n, xi, bar_val, err_val, draw_err=_draw_err,
+                          ci_scale=_ci_scale, fmt=_label_fmt)
         else:
             ax_n.bar(xi, 0, width=bar_w, color=theme.Colors.placeholder, linewidth=1, edgecolor=theme.Colors.plot_undefined_ink, linestyle="--", zorder=3)
     ax_n.set_xticks(xs)
@@ -1593,7 +1615,12 @@ def draw_per_well_n_bars(
     # Use float ticks when the bar shows a per-FOV mean (Aggregate FOVs
     # toggle on); otherwise the events-above value is an integer count.
     cur_lo, cur_hi = ax_n.get_ylim()
-    ax_n.set_ylim(0, max(cur_hi, 1))
+    # The labels sit above the error caps, so the panel needs the extra
+    # headroom the aggregate panels get — otherwise the tallest column's label
+    # is drawn over the title. The *span* multiplier, not the bar panels' one:
+    # this top is a matplotlib autoscale that has already had its own margin,
+    # not a raw scan of the data.
+    ax_n.set_ylim(0, max(cur_hi * (_LABEL_HEADROOM if _labels_on else 1.0), 1))
     ax_n.yaxis.set_major_locator(MaxNLocator(integer=not per_fov_spread))
     setattr(ax_n, "_categorical_xaxis", True)
     from well_viewer.data.metric_labels import (

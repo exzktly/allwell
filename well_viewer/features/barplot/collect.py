@@ -1219,6 +1219,34 @@ def cluster_x_for_group_keys(group_keys: list[str]) -> list[float]:
     return xs
 
 
+def cluster_centers(items, xs: list[float]):
+    """Yield ``(group_key, centre_x)`` for each non-empty cluster, in encounter
+    order.
+
+    Pure layout arithmetic over the items and the positions
+    ``clustered_x_positions`` gave them, which is why it sits here rather than
+    beside the two annotation passes that consume it (the headers above the
+    Mean panel and the footers under the tick rows). Those live in
+    ``barplot/_annotations.py`` and ``barplot/renderer.py``; keeping the maths
+    in the Qt-free half is what lets the private annotations module import it
+    without reaching back up into ``controller``.
+    """
+    cluster_x: dict = {}
+    cluster_order: list[str] = []
+    for it, x in zip(items, xs):
+        gk = it.group_key or ""
+        if not gk:
+            continue
+        if gk not in cluster_x:
+            cluster_x[gk] = []
+            cluster_order.append(gk)
+        cluster_x[gk].append(x)
+    for gk in cluster_order:
+        positions = cluster_x[gk]
+        if positions:
+            yield gk, sum(positions) / len(positions)
+
+
 def drop_redundant_cluster_keys(items: list[BarItem]) -> None:
     """Blank ``group_key`` for items whose cluster header would only duplicate
     the bar's own tick label, in place.

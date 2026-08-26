@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from well_viewer.core.plot_annotations import value_label_settings
+from well_viewer.features.barplot._annotations import (
+    annotate_bar_values,
+    annotate_cluster_headers as _annotate_cluster_headers,
+    mark_undefined_spread as _mark_undefined_spread,
+)
 from well_viewer.features.barplot._axis_fit import fit_bar_panels
 from well_viewer.domain.numeric import is_number
 from well_viewer.domain.selections_model import well_display_label, active_replicate_sets
@@ -49,6 +55,7 @@ from well_viewer.features.barplot.collect import (  # noqa: F401
     bar_guide_x,
     bar_idx_at_x,
     cluster_x_for_group_keys,
+    cluster_centers,
     clustered_x_positions,
     collect_bar_items,
     collect_bar_items_for_app,
@@ -86,57 +93,6 @@ def ordered_bar_keys(ctx) -> list:
 # ``barplot/collect.py`` (Qt-free layout math) and re-exported above.
 
 
-def cluster_centers(items: list[BarItem], xs: list[float]):
-    """Yield ``(gk, cx)`` for each non-empty cluster in encounter order.
-    Public so the renderer can re-use the same iteration for footers."""
-    cluster_x: dict = {}
-    cluster_order: list[str] = []
-    for it, x in zip(items, xs):
-        gk = it.group_key or ""
-        if not gk:
-            continue
-        if gk not in cluster_x:
-            cluster_x[gk] = []
-            cluster_order.append(gk)
-        cluster_x[gk].append(x)
-    for gk in cluster_order:
-        positions = cluster_x[gk]
-        if positions:
-            yield gk, sum(positions) / len(positions)
-
-
-def _annotate_cluster_headers(items: list[BarItem], xs: list[float], ax) -> None:
-    """Per-cluster label centred above the mean panel."""
-    if not items or not xs:
-        return
-    from well_viewer.core.plot_style import follows_theme, tokens_for
-    _fg = tokens_for(ax)[1]
-    for gk, cx in cluster_centers(items, xs):
-        follows_theme(ax.text(cx, 1.02, gk, transform=ax.get_xaxis_transform(),
-                              ha="center", va="bottom", fontsize=8,
-                              fontweight="bold", color=_fg))
-
-
-def _mark_undefined_spread(ax, x: float, y: float, color: str) -> None:
-    """Mark a bar whose spread could not be computed, when error bars are on.
-
-    A hollow cap and an ``n/a`` above the bar, in the error-bar colour. The
-    point is only to make "not computed" visually distinct from "computed and
-    small" — a bar that silently loses its whisker is indistinguishable from one
-    whose error bars were turned off, and that ambiguity is how a well with
-    pooled (unusable) FOV labels passed for a well with tight replicates.
-    """
-    import math as _math
-
-    if y is None or not _math.isfinite(float(y)):
-        return
-    ax.plot([x], [y], marker="_", markersize=9, markeredgewidth=1.4,
-            color=color, alpha=0.7, linestyle="none", zorder=4)
-    ax.annotate("n/a", (x, y), textcoords="offset points", xytext=(0, 7),
-                ha="center", va="bottom", fontsize=7, color=color, alpha=0.85,
-                zorder=5, annotation_clip=False)
-
-
 def render_bar_items(
     *,
     ax_mean,
@@ -153,6 +109,7 @@ def render_bar_items(
     fc_active: bool = False,
     n_axis_integer: bool | None = None,
     bar_color: str | None = None,
+    value_labels: tuple[bool, str] | None = None,
     ctx=None,
 ) -> None:
     """Draw mean / fraction / events-above-threshold bar panels.
@@ -171,6 +128,11 @@ def render_bar_items(
     function's other ctx-derived behaviour — and a mode the tab honours and
     the batch figures silently dropped is exactly the kind of divergence the
     two surfaces exist to avoid.
+
+    *value_labels* is the ``(enabled, fmt)`` value-label state, resolved by the
+    caller for the same reason and defaulting to whatever *ctx* says (nothing,
+    when there is no ctx). It reaches both the annotation pass and the y-fit,
+    which has to reserve the room the text needs.
     """
     n = len(items)
     # Drop cluster headers that would only duplicate a single bar's own tick
@@ -296,6 +258,11 @@ def render_bar_items(
         setattr(ax, "_categorical_xaxis", True)
     if has_clusters:
         _annotate_cluster_headers(items, xs, ax_mean)
+    # Value labels (Properties → Overlays). Drawn before the y-fit below so the
+    # fit can widen the headroom that keeps them inside the panel.
+    _labels = value_labels if value_labels is not None else value_label_settings(ctx)
+    annotate_bar_values(_labels, items, xs, ax_mean=ax_mean, ax_frac=ax_frac,
+                        ax_n=ax_n, ci_scale=ci_scale, draw_err=draw_err, ctx=ctx)
 
     # ── Auto-fit y-limits ────────────────────────────────────────────────────
     # Honest 0 baseline; trim top to tallest bar + error + ~8% headroom so the
@@ -309,6 +276,7 @@ def render_bar_items(
         ax_mean, ax_frac, ax_n, items,
         fc_active=fc_active,
         n_axis_integer=n_axis_integer,
+        value_labels=_labels[0],
         per_fov=bool(
             getattr(getattr(ctx, "state", None), "plot", None)
             and ctx.state.plot.use_fov_replicates

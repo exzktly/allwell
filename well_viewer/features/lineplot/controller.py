@@ -36,6 +36,12 @@ from well_viewer.core.channel_state_controller import (
 from well_viewer.data.data_loading import get_rows
 from well_viewer.core.empty_state_copy import NO_DATASET_MESSAGE
 from well_viewer.core.safe import swallowed
+from well_viewer.core.plot_annotations import (
+    LABEL_FRAC_CAP,
+    LABEL_SPAN_HEADROOM,
+    annotate_series,
+    value_label_settings,
+)
 from well_viewer.core.plot_style import apply_export_style_to_current
 from well_viewer.core.plot_style import apply_time_rescale
 from well_viewer.domain.time_rescale import axis_label as time_axis_label
@@ -453,14 +459,22 @@ def _decimated(values, budget: int | None):
 
 
 def _paint_series(axes: LineAxes, series, *, fov_active: bool,
-                  cdf_point_budget: int | None = None) -> tuple[bool, bool, bool]:
+                  cdf_point_budget: int | None = None,
+                  value_labels: bool = False,
+                  value_label_format: str = "") -> tuple[bool, bool, bool]:
     """Draw one collected line series onto the mean / fraction / N / CDF axes
     (audit A5). Returns ``(painted_ts, painted_cdf, painted_n)`` — the caller
     ORs these across series to decide legend/empty handling. Pure side effect on
     the axes; the drawing sequence mirrors the original inline loop exactly.
 
     Takes an explicit :class:`LineAxes` bundle (not ``ctx.widgets``) so the same
-    painter serves the on-tab redraw and off-screen batch export."""
+    painter serves the on-tab redraw and off-screen batch export.
+
+    *value_labels* prints each aggregate point's ``mean ± spread`` beside it
+    (Properties → Overlays), in the trace's own colour so a panel of several
+    series stays readable. The CDF panel takes none: its points are one per
+    cell, not a mean of anything, and there is nothing there to state a spread
+    for."""
     ax_mean = axes.mean
     ax_frac = axes.frac
     ax_n = axes.n
@@ -481,6 +495,9 @@ def _paint_series(axes: LineAxes, series, *, fov_active: bool,
             [m + e for m, e in zip(agg_means, agg_errs)],
             color=color, alpha=0.15, zorder=2,
         )
+        if value_labels:
+            annotate_series(ax_mean, agg_times, agg_means, agg_errs,
+                            fmt=value_label_format, color=color)
         vf = [(p.t, p.frac, p.frac_spread) for p in series.points if p.has_frac]
         if vf:
             vt2, vf2, vfe = zip(*vf)
@@ -504,6 +521,9 @@ def _paint_series(axes: LineAxes, series, *, fov_active: bool,
                 ax_frac.fill_between(
                     vt2, 0, vf2, color=color, alpha=0.10, zorder=2,
                 )
+            if value_labels:
+                annotate_series(ax_frac, vt2, vf2, vfe,
+                                fmt=value_label_format, color=color)
         any_ts = True
         # N events panel
         if fov_active:
@@ -528,6 +548,9 @@ def _paint_series(axes: LineAxes, series, *, fov_active: bool,
                 lo = [max(0.0, v - e) for v, e in zip(vnv, vne)]
                 hi = [v + e for v, e in zip(vnv, vne)]
                 ax_n.fill_between(vnt, lo, hi, color=color, alpha=0.15, zorder=2)
+            if value_labels:
+                annotate_series(ax_n, vnt, vnv, vne,
+                                fmt=value_label_format, color=color)
             any_n = True
     # ``np.asarray`` rather than assuming: the field is an array, but a caller
     # handing in a plain list must not silently draw nothing — and an array's
@@ -602,6 +625,7 @@ def _finalize_line_axes(
     empty_cdf_msg: str | None = None,
     draggable_legends: bool = False,
     legend_max: int | None = None,
+    value_labels: bool = False,
 ) -> None:
     """Post-paint axis finishing (audit A5): N-panel integer ticks, per-panel
     legends (honouring saved visibility), and the CDF threshold line / x-range /
@@ -626,6 +650,30 @@ def _finalize_line_axes(
         leg.set_visible(legend_visible.get(key, True))
         return leg
 
+    if value_labels:
+        # The labels are drawn beyond the outermost point of each trace, in ink
+        # rather than in data, so matplotlib's own 5% margin does not know
+        # about them and crops the extreme one. Widen the time panels before
+        # the N panel's clamp below reads them.
+        #
+        # The Fraction panel is in the list **only under fold change**, which is
+        # exactly when its clamp does not run: with fold change off,
+        # ``redraw_line_plots`` has already pinned it to the widened
+        # ``LABEL_FRAC_CAP`` and widening again would stack one allowance on
+        # the other. With it on, the field is a ratio, no clamp applies, and
+        # nothing else was giving this panel any room at all — the Bar tab's
+        # Fraction panel gets it from ``autofit``, so leaving it out here made
+        # two surfaces answer one question two ways.
+        _labelled = [ax_mean, ax_n] + ([ax_frac] if fc_active else [])
+        for _ax_lbl in _labelled:
+            _lo, _hi = _ax_lbl.get_ylim()
+            if _hi <= _lo:
+                continue
+            _pad = (_hi - _lo) * (LABEL_SPAN_HEADROOM - 1.0)
+            # Padded at both ends when the panel holds negatives: a label on a
+            # point below zero is drawn below it, so the room it needs is at
+            # the floor, where the top padding does nothing for it.
+            _ax_lbl.set_ylim(_lo - (_pad if _lo < 0 else 0.0), _hi + _pad)
     if any_n:
         cur_lo, cur_hi = ax_n.get_ylim()
         ax_n.set_ylim(0, max(cur_hi, 1))
@@ -670,6 +718,8 @@ def render_line_series(
     draggable_legends: bool = False,
     cdf_point_budget: int | None = None,
     legend_max: int | None = None,
+    value_labels: bool = False,
+    value_label_format: str = "",
 ) -> tuple[bool, bool, bool]:
     """Paint every :class:`LineSeries` onto *axes* then finalize the panels.
 
@@ -686,7 +736,9 @@ def render_line_series(
     any_ts = any_cdf = any_n = False
     for series in series_list:
         ts, cdf, n = _paint_series(axes, series, fov_active=fov_active,
-                                   cdf_point_budget=cdf_point_budget)
+                                   cdf_point_budget=cdf_point_budget,
+                                   value_labels=value_labels,
+                                   value_label_format=value_label_format)
         any_ts = any_ts or ts
         any_cdf = any_cdf or cdf
         any_n = any_n or n
@@ -713,6 +765,7 @@ def render_line_series(
         legend_visible=legend_visible, show_threshold_line=show_threshold_line,
         cdf_xrange=cdf_xrange, empty_cdf_msg=empty_cdf_msg,
         draggable_legends=draggable_legends, legend_max=legend_max,
+        value_labels=value_labels,
     )
     return any_ts, any_cdf, any_n
 
@@ -858,8 +911,12 @@ def redraw_line_plots(
     # difference (which can go negative). Clamping then clips the very effect
     # the normalisation exists to show, silently — the curve simply leaves the
     # panel. The two tabs draw the same field and disagreed about this.
+    _value_labels, _value_label_fmt = value_label_settings(ctx)
     if not _fc.fold_change_state(ctx).active:
-        ax_frac.set_ylim(-0.05, 1.05)
+        # The clamp opens up when the value labels are on, for the same reason
+        # the bar Fraction panel's cap does (both use ``LABEL_FRAC_CAP``):
+        # a trace sitting at 1.0 otherwise has its label drawn over the title.
+        ax_frac.set_ylim(-0.05, LABEL_FRAC_CAP if _value_labels else 1.05)
     ax_cdf.set_xlabel(f"{_ch} {metric_label}", fontsize=8, labelpad=5)
     ax_cdf.set_ylim(-0.02, 1.05)
 
@@ -949,6 +1006,10 @@ def redraw_line_plots(
         # a complete one.
         cdf_point_budget=None if _full_fidelity else SCREEN_CDF_POINTS,
         legend_max=None if _full_fidelity else SCREEN_LEGEND_ENTRIES,
+        # Properties → Overlays. Resolved above so the Fraction panel's clamp
+        # and the labels themselves cannot disagree about whether they are on.
+        value_labels=_value_labels,
+        value_label_format=_value_label_fmt,
     )
 
     ctx.notify.set_status(line_status_text(

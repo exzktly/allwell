@@ -125,6 +125,12 @@ def snapshot(ctx) -> dict:
         "use_fov_replicates": bool(ctx.state.plot.use_fov_replicates),
         "show_threshold_line": bool(ctx.state.plot.show_threshold_line),
         "show_significance": bool(ctx.state.plot.show_significance),
+        # The value-label overlay, both halves. Captured for the same reason
+        # the threshold marker is: a saved plot whose bars carried their
+        # numbers must not come back bare, and one whose numbers were pinned to
+        # a format must not come back in a different one.
+        "show_value_labels": bool(ctx.state.plot.show_value_labels),
+        "value_label_format": str(ctx.state.plot.value_label_format or ""),
         # The time-axis label correction, both halves. Captured because it
         # changes what every time axis in a restored view reads, and a saved
         # plot whose axis said 4, 8, 12 must not come back saying 1, 2, 3 with
@@ -509,6 +515,20 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> list[str]:
             ctx.state.plot.show_threshold_line = bool(state["show_threshold_line"])
         except Exception:
             failed.append("threshold line")
+            swallowed()
+
+    if "show_value_labels" in state:
+        try:
+            ctx.state.plot.show_value_labels = bool(state["show_value_labels"])
+        except Exception:
+            failed.append("value labels")
+            swallowed()
+
+    if "value_label_format" in state:
+        try:
+            ctx.state.plot.value_label_format = str(state["value_label_format"] or "")
+        except Exception:
+            failed.append("value-label format")
             swallowed()
 
     if "show_significance" in state:

@@ -2748,3 +2748,51 @@ def test_bar_colour_guard_clears_a_keyword_that_resolves_the_mode(
         tmp_path, monkeypatch, shape):
     good = _write(tmp_path, "good_bar_value.py", shape)
     assert _run_scan(monkeypatch, _BAR_MODE_GUARD, _BAR_MODE_TEST, [good]) is None
+
+
+# ── the dataset's display name is derived in one place ───────────────────────
+
+_DATASET_NAME_GUARD = "tests.test_dataset_name_is_derived_once"
+_DATASET_NAME_TEST = "test_nothing_re_derives_the_dataset_name"
+
+
+@pytest.mark.parametrize("shape", [
+    # The bare local, which is how Home's masthead had it.
+    'name = data_dir.name\n',
+    # Reached through the state object, spelled out at the call site.
+    'name = ctx.state.dataset.data_dir.name\n',
+    # Wrapped in a Path first, which is how the Saved Plots export had it and
+    # which a guard matching only the bare attribute walks straight past.
+    'name = Path(data_dir).name\n',
+    # The conditional form both real sites actually used.
+    'name = data_dir.name if data_dir is not None else ""\n',
+])
+def test_dataset_name_guard_catches_a_hand_derived_name(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_dataset_name.py", shape)
+    exc = _run_scan(monkeypatch, _DATASET_NAME_GUARD, _DATASET_NAME_TEST, [bad])
+    assert exc is not None and "bad_dataset_name.py" in str(exc)
+
+
+def test_dataset_name_guard_clears_the_shared_rule(tmp_path, monkeypatch):
+    good = _write(tmp_path, "good_dataset_name.py",
+                  "name = dataset_display_name(data_dir)\n")
+    assert _run_scan(monkeypatch, _DATASET_NAME_GUARD, _DATASET_NAME_TEST,
+                     [good]) is None
+
+
+def test_dataset_name_guard_clears_a_batch_export_destination(tmp_path, monkeypatch):
+    """Batch Export's ``out_dir`` is the folder the *user* chose to write into,
+    and its name is exactly what those status lines mean to say. An earlier
+    roster carrying both spellings of "output directory" flagged all four of
+    them."""
+    good = _write(tmp_path, "good_out_dir.py",
+                  'self._prog_lbl.setText(f"done -> {out_dir.name}/")\n')
+    assert _run_scan(monkeypatch, _DATASET_NAME_GUARD, _DATASET_NAME_TEST,
+                     [good]) is None
+
+
+def test_dataset_name_guard_clears_an_unrelated_name_read(tmp_path, monkeypatch):
+    good = _write(tmp_path, "good_unrelated_name.py",
+                  "label = record.name\nother = Path(csv_path).name\n")
+    assert _run_scan(monkeypatch, _DATASET_NAME_GUARD, _DATASET_NAME_TEST,
+                     [good]) is None

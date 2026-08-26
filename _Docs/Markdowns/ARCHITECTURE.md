@@ -8337,6 +8337,19 @@ load_controller.load_path(app, path)  ← well_viewer/core/load_controller.py
               └── app._redraw()                  ← plot_orchestrator.redraw
 ```
 
+**What the dataset is called is one rule, in one place.**
+`domain/dataset_name.dataset_display_name` answers it, and every place that
+shows a dataset's name goes through it: the shell's dataset button, Home's
+masthead title, and the cover page of both gallery exports. The rule is not
+"the folder's name", which is why it needs a home at all — Review loads
+`<dataset_root>/out` for the standard pipeline layout, so `data_dir.name` is the
+literal `out` on every such dataset, identical for all of them. The climb to the
+root is conditioned on a sibling `in` directory, detected structurally the same
+way `load_path` decides the layout when opening the folder, so a genuinely flat
+dataset whose own top-level folder happens to be called `out` keeps its own
+name. Three sites derived this independently and only the dataset button
+climbed; `tests/test_dataset_name_is_derived_once.py` holds the rest at one.
+
 **Cross-dataset state reset on swap.** The per-dataset persistence
 loaders **early-return** (or merge additively) when the new dataset's
 `pipeline_info` / sidecar block is absent, so on a dataset swap any in-memory

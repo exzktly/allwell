@@ -12,6 +12,7 @@ from datetime import datetime
 
 from well_viewer.core.lazy import lazy, lazy_names
 from well_viewer.core.safe import swallow, swallowed
+from well_viewer.domain.dataset_name import dataset_display_name
 from well_viewer.persistence import view_state
 from well_viewer.features.saved_plots._deck import build_saved_plots_deck
 from well_viewer.features.saved_plots._report import build_saved_plots_report
@@ -504,9 +505,13 @@ def _export_destination(ctx, *, caption: str, default_name: str,
 
 
 def _dataset_name(ctx) -> str:
-    from pathlib import Path
-    data_dir = getattr(ctx.state.dataset, "data_dir", None)
-    return Path(data_dir).name if data_dir else ""
+    """The dataset name for an export's cover page.
+
+    Through the shared rule rather than ``data_dir.name``: Review loads
+    ``<dataset_root>/out``, so the folder's own name is the literal "out" on
+    every pipeline dataset, and both exports opened by naming the dataset that.
+    """
+    return dataset_display_name(getattr(ctx.state.dataset, "data_dir", None))
 
 
 def _records_to_export(ctx) -> SavedPlotsStore | None:

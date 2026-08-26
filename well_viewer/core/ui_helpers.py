@@ -784,6 +784,61 @@ def add_menu_action(menu, label: str, callback, *, tooltip: str = ""):
     return action
 
 
+#: Label of the raw-cell export entry. Named once so the guard that checks every
+#: plot tab offers it, and the tests that trigger it, agree with the builder.
+SAVE_CELL_DATA_LABEL = "Save cell data…"
+
+
+def build_plot_save_menu(
+    ctx,
+    band,
+    *,
+    card_key: str,
+    data_label: str,
+    data_cb: Callable[[], None],
+    cells_cb: Callable[[], None],
+    data_tooltip: str = "",
+    cells_label: str = SAVE_CELL_DATA_LABEL,
+):
+    """The one ``Save ▾`` menu every plot tab gets, built here rather than by hand.
+
+    Returns ``(button, menu, data_action)``. The caller adds the button to its
+    control band; ``data_action`` is returned because Spatial enables and
+    disables its own data entry as the level changes.
+
+    Each of the eight plot tabs used to assemble this menu itself, with four or
+    five ``add_menu_action`` calls, and they had drifted: six read "Save Figure…"
+    against two "Save figure…", seven "Export CSV…" against one "Export Summary
+    CSV…". A menu assembled per tab also means a menu that can *miss* an entry
+    per tab, which is why ``cells_cb`` is required rather than optional — a tab
+    cannot acquire this menu without offering the cells the plot was drawn from.
+
+    The three figure entries are wired here, from ``core.plot_card_actions``,
+    so a tab supplies only its two data callbacks and its card key. That is what
+    keeps this helper in ``core/``: it names no feature, and the callbacks arrive
+    as plain callables (``tests/test_guardrails.py`` holds the core→feature
+    import budget at zero slack).
+    """
+    from well_viewer.core.plot_card_actions import (
+        copy_active_card_as_svg, save_active_card_figure, save_card_to_gallery,
+    )
+
+    button, menu = make_action_menu_button("Save ▾", band,
+                                           tooltip="Save this plot and its data")
+    data_action = add_menu_action(menu, data_label, data_cb, tooltip=data_tooltip)
+    add_menu_action(menu, cells_label, cells_cb,
+                    tooltip="Every cell this plot was computed from, all columns")
+    menu.addSeparator()
+    add_menu_action(menu, "Save figure…",
+                    lambda: save_active_card_figure(ctx, card_key))
+    add_menu_action(menu, "Copy figure as SVG",
+                    lambda: copy_active_card_as_svg(ctx, card_key))
+    menu.addSeparator()
+    add_menu_action(menu, "Save to Saved Plots",
+                    lambda: save_card_to_gallery(ctx, card_key))
+    return button, menu, data_action
+
+
 def install_canvas_wheel_scroll(canvas, scroll_area) -> None:
     """Forward wheel events from a matplotlib canvas to ``scroll_area``.
 

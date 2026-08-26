@@ -8,9 +8,6 @@ from __future__ import annotations
 
 from well_viewer.core.channel_state_controller import on_plot_channel_selected
 
-from well_viewer.core.plot_card_actions import (
-    copy_active_card_as_svg, save_active_card_figure, save_card_to_gallery,
-)
 
 
 from PySide6.QtWidgets import (
@@ -19,15 +16,16 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.core.ui_helpers import (
-    add_menu_action,
-    make_action_menu_button,
+    build_plot_save_menu,
     make_plot_with_right_dock,
     make_popover_button,
     make_properties_button,
     plotting_band_slot,
 )
 from well_viewer.core.channel_state_controller import refresh_metric_combo_for_channel
-from well_viewer.features.export.service import export_heatmap_data
+from well_viewer.features.export.service import (
+    export_cell_data_from, export_heatmap_data)
+from well_viewer.features.heatmap.cell_scope_compute import cell_scope
 from well_viewer.core.channel_state_controller import refresh_heatmap_aggregation_options
 from well_viewer.core.safe import swallowed
 import theme
@@ -169,14 +167,15 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
 
     band.add_action(display_btn)
 
-    export_btn, export_menu = make_action_menu_button("Export ▾", band,
-                                                      tooltip="Export this plot")
-    add_menu_action(export_menu, "Export CSV…", lambda: export_heatmap_data(ctx))
-    add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx, "_heatmap_card"))
-    add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx, "_heatmap_card"))
-    export_menu.addSeparator()
-    add_menu_action(export_menu, "Save to Saved Plots",
-                    lambda: save_card_to_gallery(ctx, "_heatmap_card"))
+    export_btn, export_menu, _export_data_act = build_plot_save_menu(
+        ctx, band,
+        card_key="_heatmap_card",
+        data_label="Save plot data…",
+        data_cb=lambda: export_heatmap_data(ctx),
+        cells_cb=lambda: export_cell_data_from(
+            ctx, cell_scope,
+            unavailable="Draw the heat map first — the export follows the grid on screen."),
+    )
     band.add_action(export_btn)
 
     band.add_action(make_properties_button(ctx, band, "heatmap"))

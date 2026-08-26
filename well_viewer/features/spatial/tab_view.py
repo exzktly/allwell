@@ -19,9 +19,6 @@ from widgets.control_band import ControlBand
 from widgets.icons import make_icon
 from widgets.labeled_combo import LabeledComboBox
 
-from well_viewer.core.plot_card_actions import (
-    copy_active_card_as_svg, save_active_card_figure, save_card_to_gallery,
-)
 from well_viewer.core.safe import swallowed
 from well_viewer.features.spatial import state as sp_state
 from well_viewer.features.spatial import controller as sp_ctrl
@@ -229,18 +226,20 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     reg.register("_sp_recompute_btn", recompute_btn)
     band.add_action(recompute_btn)
 
-    from well_viewer.core.ui_helpers import add_menu_action, make_action_menu_button
-    export_btn, export_menu = make_action_menu_button("Export ▾", band,
-                                                      tooltip="Export this plot")
-    export_csv_act = add_menu_action(
-        export_menu, "Export Summary CSV…",
-        lambda: sp_ctrl.sp_export_summary_csv(ctx),
-        tooltip="Summary level only")
-    add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx, "_sp_card"))
-    add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx, "_sp_card"))
-    export_menu.addSeparator()
-    add_menu_action(export_menu, "Save to Saved Plots",
-                    lambda: save_card_to_gallery(ctx, "_sp_card"))
+    from well_viewer.core.ui_helpers import build_plot_save_menu
+    from well_viewer.features.export.service import export_cell_data_from
+    from well_viewer.features.spatial.cell_scope_compute import cell_scope
+    export_btn, export_menu, export_csv_act = build_plot_save_menu(
+        ctx, band,
+        card_key="_sp_card",
+        data_label="Save summary data…",
+        data_cb=lambda: sp_ctrl.sp_export_summary_csv(ctx),
+        data_tooltip="Summary level only",
+        cells_cb=lambda: export_cell_data_from(
+            ctx, cell_scope,
+            unavailable="Draw the tab first — the export follows the level and "
+                        "frame on screen."),
+    )
     reg.register("_sp_export_btn", export_btn)
     reg.register("_sp_export_csv_act", export_csv_act)
     band.add_action(export_btn)

@@ -16,9 +16,6 @@ from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QSpinBox, QVBoxLayout, QWidget,
 )
 
-from well_viewer.core.plot_card_actions import (
-    copy_active_card_as_svg, save_active_card_figure, save_card_to_gallery,
-)
 from well_viewer.core.safe import swallowed
 from well_viewer.features.multivariate import state as mv_state
 from well_viewer.features.multivariate import controller as mv_ctrl
@@ -121,17 +118,21 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     band.add_scope("", std_cb)
 
     from well_viewer.core.ui_helpers import (
-        add_menu_action, make_action_menu_button, make_properties_button,
+        make_properties_button,
     )
-    export_btn, export_menu = make_action_menu_button("Export ▾", band,
-                                                      tooltip="Export this plot")
-    add_menu_action(export_menu, "Export CSV…", lambda: mv_ctrl.mv_export_csv(ctx),
-                    tooltip="Export feature matrix")
-    add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx, "_mv_card"))
-    add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx, "_mv_card"))
-    export_menu.addSeparator()
-    add_menu_action(export_menu, "Save to Saved Plots",
-                    lambda: save_card_to_gallery(ctx, "_mv_card"))
+    from well_viewer.core.ui_helpers import build_plot_save_menu
+    from well_viewer.features.export.service import export_cell_data_from
+    from well_viewer.features.multivariate.cell_scope_compute import cell_scope
+    export_btn, export_menu, _export_data_act = build_plot_save_menu(
+        ctx, band,
+        card_key="_mv_card",
+        data_label="Save plot data…",
+        data_cb=lambda: mv_ctrl.mv_export_csv(ctx),
+        data_tooltip="The feature matrix as analysed",
+        cells_cb=lambda: export_cell_data_from(
+            ctx, cell_scope,
+            unavailable="Tick at least one feature column first."),
+    )
     band.add_action(export_btn)
     band.add_action(make_properties_button(ctx, band, "multivariate"))
 

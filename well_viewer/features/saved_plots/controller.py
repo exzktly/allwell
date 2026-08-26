@@ -362,6 +362,75 @@ def export_saved_plot(ctx, plot_id: str) -> None:
         _logger.debug("saved_plots: export failed for %r", plot_id, exc_info=True)
 
 
+# ── progress ─────────────────────────────────────────────────────────────────
+#
+# An export blocks the GUI thread: it replays old plots onto their tabs, renders
+# each figure to vector, parses every capture and writes a zip, all between the
+# file dialog closing and the file appearing. Without a bar that is a frozen
+# window and no account of why — and the redraw phase navigates the app while it
+# runs, so the user watches their own tabs change with nothing saying what is
+# happening.
+
+def _progress_bar(ctx):
+    """The shell's progress bar, or ``None`` when there is no shell.
+
+    Reached through the widget registry rather than off ``ctx.window`` so a
+    headless caller — the tests, a profile without the status row — simply gets
+    no bar instead of an AttributeError.
+    """
+    widgets = getattr(ctx, "widgets", None)
+    return widgets.get_or_none("_progress_bar") if widgets is not None else None
+
+
+def _show_progress(ctx, total: int) -> None:
+    bar = _progress_bar(ctx)
+    if bar is None:
+        return
+    bar.setRange(0, max(1, int(total)))
+    bar.setValue(0)
+    bar.show()
+    _pump()
+
+
+def _step_progress(ctx, done: int, total: int, msg: str = "") -> None:
+    bar = _progress_bar(ctx)
+    if bar is not None:
+        if bar.maximum() != max(1, int(total)):
+            bar.setRange(0, max(1, int(total)))
+        bar.setValue(int(done))
+    if msg:
+        with swallow("saved_plots: progress message"):
+            ctx.notify.set_status(msg)
+    _pump()
+
+
+def _hide_progress(ctx) -> None:
+    """Called on **every** exit path, including failure. A bar left running
+    after an export died is its own false statement about what is happening."""
+    bar = _progress_bar(ctx)
+    if bar is None:
+        return
+    bar.setValue(0)
+    bar.hide()
+    _pump()
+
+
+def _pump() -> None:
+    """Repaint mid-export, without letting the user act on a half-done state.
+
+    The work runs on the GUI thread, so nothing redraws unless the event loop is
+    turned by hand. User input is excluded deliberately: the redraw phase moves
+    the app from tab to tab and rewrites the live selection as it goes, and a
+    click landing in the middle of that would act on a view that is about to be
+    replaced — and then be undone by the restore at the end.
+    """
+    with swallow("saved_plots: progress repaint"):
+        from PySide6.QtCore import QEventLoop
+        from PySide6.QtWidgets import QApplication
+
+        QApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
+
+
 def gallery_order(store) -> list:
     """The records in the order the gallery shows them — newest first.
 
@@ -457,16 +526,39 @@ def export_deck_pptx(ctx) -> None:
         if not dest:
             return
         records = gallery_order(store)
-        regenerated = regenerate_missing_vectors(ctx, store, records)
-        result = build_saved_plots_deck(
-            records,
-            lambda r: store.vector_path(ctx, r) or store.held_vector(r),
-            lambda r: store.image_path(ctx, r),
-            dest,
-            dataset_name=_dataset_name(ctx),
-            summary_for=lambda r: r.summary,
-            regenerated=regenerated,
-        )
+        # One bar across both phases, because the user is waiting for one thing.
+        # The redraw phase is the slow half and the one that visibly moves the
+        # app from tab to tab, so it gets its own steps rather than being folded
+        # into a single "working…" that sits still for most of the export.
+        redraws = sum(1 for r in records if not r.svg_filename)
+        total = redraws + len(records) + 1
+        _show_progress(ctx, total)
+        try:
+            regenerated = regenerate_missing_vectors(
+                ctx, store, records,
+                on_progress=lambda done, title: _step_progress(
+                    ctx, done, total,
+                    f"Redrawing “{title}” so it can export as editable shapes "
+                    f"({done} of {redraws})…"))
+            result = build_saved_plots_deck(
+                records,
+                lambda r: store.vector_path(ctx, r) or store.held_vector(r),
+                lambda r: store.image_path(ctx, r),
+                dest,
+                dataset_name=_dataset_name(ctx),
+                summary_for=lambda r: r.summary,
+                regenerated=regenerated,
+                on_progress=lambda done, slides, title: _step_progress(
+                    ctx, redraws + done, total,
+                    (f"Building slide {done + 1} of {slides - 1}…" if title
+                     else f"Writing {Path(dest).name}…")),
+            )
+            # Land on the full count before the bar goes away. Without it the
+            # last thing the user sees is a bar stopped short of the end, which
+            # reads as an export that gave up rather than one that finished.
+            _step_progress(ctx, total, total)
+        finally:
+            _hide_progress(ctx)
         if result.unsupported:
             _logger.info("saved_plots: deck export met %s",
                          ", ".join(result.unsupported))
@@ -538,7 +630,8 @@ class _LiveState:
             view_state.restore(ctx, dict(self.view))
 
 
-def regenerate_missing_vectors(ctx, store, records) -> set[str]:
+def regenerate_missing_vectors(ctx, store, records, *,
+                               on_progress=None) -> set[str]:
     """Redraw plots that have no vector capture, so the deck can make them editable.
 
     A plot filed before the app began capturing vector is a PNG and nothing
@@ -548,6 +641,10 @@ def regenerate_missing_vectors(ctx, store, records) -> set[str]:
     keeps it. The redraw is a one-off repair: the capture is stored on the
     record, so every later export of that plot is editable without paying for it
     again.
+
+    *on_progress* is called ``(done, title)`` as each plot is dealt with, so the
+    caller can move a bar: this phase replays plots onto their tabs and renders
+    each figure, which is seconds apiece and visibly moves the app around.
 
     Returns the ids it regenerated, which the deck marks on their slides,
     because a redrawn figure is drawn from today's data rather than from the
@@ -579,17 +676,32 @@ def regenerate_missing_vectors(ctx, store, records) -> set[str]:
     regenerated: set[str] = set()
     skipped_tabs: set[str] = set()
     skipped_panels = 0
+    done = 0
+
+    def _report(rec) -> None:
+        """Advance the caller's count. Every exit from the loop body calls this,
+        including the skips: a record left alone still took a turn, and a bar
+        that only moved on success would sit still through a gallery of plots
+        that are all being skipped."""
+        nonlocal done
+        done += 1
+        if on_progress is not None:
+            with swallow("saved_plots: regeneration progress"):
+                on_progress(done, rec.title or rec.tab or "plot")
     try:
         for rec in missing:
             card = _card_for_tab(ctx, cards_by_tab, rec.tab)
             if card is None or not hasattr(card, "captureVectorSvg"):
                 skipped_tabs.add(rec.tab or "?")
+                _report(rec)
                 continue
             if not _redraw_keeps_the_scope(ctx, store, rec, card):
                 skipped_panels += 1
+                _report(rec)
                 continue
             if _regenerate_one(ctx, store, rec, card):
                 regenerated.add(rec.id)
+            _report(rec)
         if regenerated:
             store.persist(ctx)      # one write for the batch, not one per record
     finally:

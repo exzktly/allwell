@@ -1569,3 +1569,130 @@ def test_an_unreadable_figure_leaves_the_plot_as_a_picture(qapp, tmp_path):
     rec.panel_only = None
     assert store.add(ctx, rec, b"not-a-png")
     assert C._redraw_keeps_the_scope(ctx, store, rec, card) is False
+
+
+# ── the progress bar ─────────────────────────────────────────────────────────
+
+def _bar_ctx(tmp_path):
+    """A ctx with a real progress bar registered, as the shell has."""
+    from PySide6.QtWidgets import QProgressBar, QWidget
+
+    ctx = _stub_ctx(tmp_path)
+    ctx.bar_host = QWidget()                       # held: Qt owns the child
+    bar = QProgressBar(ctx.bar_host)
+    bar.hide()
+    ctx.widgets.register("_progress_bar", bar)
+    return ctx
+
+
+@pytest.mark.qt
+def test_the_export_reports_progress_across_both_of_its_phases(qapp, tmp_path,
+                                                               monkeypatch):
+    """An export blocks the GUI thread for as long as it takes.
+
+    It replays old plots onto their tabs, renders each to vector, parses every
+    capture and writes a zip — all between the file dialog closing and the file
+    appearing. Without a bar that is a frozen window with no account of why, and
+    the redraw phase moves the app from tab to tab while it runs.
+
+    Asserted across **both** phases: a bar that covered only the deck build
+    would sit at zero through the slow half.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot
+
+    ctx = _bar_ctx(tmp_path)
+    store = C.get_store(ctx)
+    store.ensure_loaded(ctx)
+    card, replay = _card_that_draws_what_it_is_told(ctx)
+    monkeypatch.setattr(C, "restore_saved_plot", replay)
+    monkeypatch.setattr(C, "_gating_recompute_now", lambda c: True)
+    monkeypatch.setattr(C, "_export_destination",
+                        lambda c, **kw: str(tmp_path / "deck.pptx"))
+
+    for i in range(3):
+        store.add(ctx, SavedPlot(id=f"old{i}", created_at="", tab="Bar Plots",
+                                 title=f"Old plot {i}",
+                                 png_filename=f"old{i}.png", params={}),
+                  _png_bytes())
+
+    seen = []
+    real = C._step_progress
+    monkeypatch.setattr(C, "_step_progress",
+                        lambda c, d, t, m="": (seen.append((d, t, m)),
+                                               real(c, d, t, m))[1])
+    C.export_deck_pptx(ctx)
+
+    assert seen, "the export must report progress"
+    total = seen[0][1]
+    # Both phases move it: three redraws, then a step per slide, then the write.
+    redraw_steps = [m for _, _, m in seen if "Redrawing" in m]
+    slide_steps = [m for _, _, m in seen if "Building slide" in m]
+    write_steps = [m for _, _, m in seen if "Writing" in m]
+    assert len(redraw_steps) == 3
+    assert len(slide_steps) == 3
+    assert len(write_steps) == 1
+    # It reaches the end, rather than stopping short and vanishing — which reads
+    # as an export that gave up.
+    assert seen[-1][0] == total
+    # And the bar is put away on the way out. ``isHidden`` rather than
+    # ``isVisible``: a child of an unshown parent is never "visible", so
+    # ``not isVisible()`` is true whether or not anything hid it — an assertion
+    # that cannot fail. ``isHidden`` reflects the explicit hide.
+    assert ctx.widgets.get_or_none("_progress_bar").isHidden()
+
+
+@pytest.mark.qt
+def test_a_skipped_plot_still_advances_the_bar(qapp, tmp_path, monkeypatch):
+    """A record left alone still took a turn.
+
+    A bar that only moved on a successful redraw would sit still through a
+    gallery of plots that are all being skipped — which is the common case for
+    an older gallery of multi-panel figures, and looks exactly like a hang.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+
+    ctx = _bar_ctx(tmp_path)
+    store = SavedPlotsStore()
+    _multi_panel_card(ctx)          # multi-panel: an unknown record is skipped
+
+    records = []
+    for i in range(3):
+        rec = SavedPlot(id=f"old{i}", created_at="", tab="Bar Plots",
+                        title=f"Old {i}", png_filename=f"old{i}.png", params={})
+        rec.panel_only = None
+        assert store.add(ctx, rec, _png_bytes())
+        records.append(rec)
+
+    seen = []
+    assert C.regenerate_missing_vectors(
+        ctx, store, records,
+        on_progress=lambda done, title: seen.append(done)) == set()
+    assert seen == [1, 2, 3], "every record must advance the count, skips too"
+
+
+@pytest.mark.qt
+def test_the_bar_is_hidden_even_when_the_export_fails(qapp, tmp_path,
+                                                      monkeypatch):
+    """A bar left running after an export died is its own false statement."""
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot
+
+    ctx = _bar_ctx(tmp_path)
+    store = C.get_store(ctx)
+    store.ensure_loaded(ctx)
+    store.add(ctx, SavedPlot(id="p1", created_at="", tab="Bar Plots",
+                             title="P", png_filename="p1.png", params={},
+                             svg_filename=""), _png_bytes())
+    monkeypatch.setattr(C, "_export_destination",
+                        lambda c, **kw: str(tmp_path / "deck.pptx"))
+    monkeypatch.setattr(C, "build_saved_plots_deck",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")))
+
+    C.export_deck_pptx(ctx)
+
+    # ``isHidden``, not ``not isVisible()`` — see the note in the test above.
+    assert ctx.widgets.get_or_none("_progress_bar").isHidden()
+    assert any("failed" in m.lower() for m in ctx.said), \
+        "the failure must reach the status line"

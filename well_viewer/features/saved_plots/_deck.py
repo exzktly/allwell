@@ -385,6 +385,7 @@ def build_saved_plots_deck(
     dataset_name: str = "",
     summary_for: Callable[[object], str] | None = None,
     regenerated: set | None = None,
+    on_progress: Callable[[int, int, str], None] | None = None,
 ) -> DeckResult:
     """Write a ``.pptx`` with a cover slide and one slide per saved plot.
 
@@ -401,6 +402,12 @@ def build_saved_plots_deck(
     today's gating and can differ from the image that was saved, in a direction
     nothing else on the slide would reveal.
 
+    *on_progress* is called as ``(done, total, label)`` before each plot's slide
+    is built, and once more before the file is written. A plain callable rather
+    than anything Qt: this module stays importable and testable without a
+    running application, and the caller is the one that knows whether there is a
+    progress bar to move.
+
     Returns a :class:`DeckResult` — raises only on I/O failure writing the file.
     """
     recs = list(records)
@@ -410,7 +417,14 @@ def build_saved_plots_deck(
     result = DeckResult()
 
     _cover_slide(builder, dataset_name=dataset_name, count=len(recs))
-    for rec in recs:
+    # One step per plot, plus the write at the end — which is not free for a
+    # deck of large figures and is the step a user is most likely to be
+    # watching, since it is the one that produces the file.
+    total = len(recs) + 1
+    for index, rec in enumerate(recs):
+        if on_progress is not None:
+            on_progress(index, total,
+                        getattr(rec, "title", "") or getattr(rec, "tab", ""))
         slide = builder.new_slide()
         figure_w = _slide_chrome(slide, rec, summary=summary_for(rec))
         svg_bytes = _read(svg_path_for(rec))
@@ -440,5 +454,7 @@ def build_saved_plots_deck(
         _note(slide, "The saved image for this plot could not be read, so the "
                      "figure is missing from this slide.", figure_w=figure_w)
 
+    if on_progress is not None:
+        on_progress(len(recs), total, "")
     result.slides = builder.write(out_path)
     return result

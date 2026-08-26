@@ -3063,6 +3063,12 @@ rather than a single panel.
     deck is a normal `.pptx` that opens anywhere, and no add-in is needed.
 
   The Image Table grid can be saved to the gallery and exported either way.
+
+  Both exports show a progress bar in the status row while they run, naming what
+  they are doing — redrawing an older plot, building a slide, writing the file.
+  A deck of plots that all need redrawing takes a few seconds each and moves
+  between tabs as it goes; that is the repair happening, and the page you were
+  on comes back at the end.
 - **A plot saved from one panel stays that panel.** If you saved a single panel
   of a multi-panel figure, the export leaves it as a picture rather than
   redrawing it, because a redraw would give you every panel of that figure under

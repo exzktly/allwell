@@ -1749,6 +1749,23 @@ unparseable, so PowerPoint offers to repair the file while the export reports
 success. `_drawingml.xml_text` / `xml_attr` drop them and every user-reachable
 string goes through one or the other.
 
+**The export shows a progress bar across both of its phases.** It blocks the
+GUI thread from the moment the file dialog closes: it replays old plots onto
+their tabs, renders each figure to vector, parses every capture and writes a
+zip. `export_deck_pptx` sizes the bar as `redraws + plots + 1` and steps it
+through both — `regenerate_missing_vectors` takes an `on_progress(done, title)`
+and `build_saved_plots_deck` an `on_progress(done, total, label)`, the latter a
+plain callable so `_deck` stays Qt-free and testable without an application.
+Every path out of the redraw loop reports, skips included: a bar that only moved
+on a successful redraw sits still through a gallery that is all being skipped,
+which looks exactly like a hang. The bar is hidden in a `finally`, because one
+left running after a failed export is its own false statement.
+
+`_pump` turns the event loop by hand — nothing repaints otherwise — with
+`ExcludeUserInputEvents`: the redraw phase moves the app from tab to tab and
+rewrites the live selection as it goes, so a click landing mid-export would act
+on a view that is about to be replaced and then undone by the restore.
+
 **A plot with no vector capture is redrawn rather than written off.** A record
 filed before the app captured vector is a PNG and nothing else, and no amount of
 reading it produces shapes — but it carries the parameters that drew it, and the

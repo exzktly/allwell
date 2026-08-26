@@ -25,6 +25,7 @@ same precondition the tab's summary export already has.
 from __future__ import annotations
 
 from well_viewer.features.export.cell_scope_compute import CellScope, scope_from_ctx
+from well_viewer.features.heatmap.controller import _selected_metric, _selected_tp
 
 
 def cell_scope(ctx) -> CellScope | None:
@@ -42,8 +43,6 @@ def cell_scope(ctx) -> CellScope | None:
                 continue
             cell_of[well] = f"r{row}c{col}"
             wells.append((f"r{row}c{col}", well))
-
-    from well_viewer.features.heatmap.controller import _selected_metric, _selected_tp
 
     tp = _selected_tp(ctx)
     timepoints = (float(tp),) if tp is not None else ()

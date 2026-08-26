@@ -20,6 +20,8 @@ from well_viewer.core.channel_state_controller import (
 )
 from well_viewer.core.safe import swallow, swallowed
 from well_viewer.core.lazy import lazy as _lazy
+from well_viewer.features.export import cell_scope_compute as csc
+from well_viewer.features.export.worker import DONE, CellExportWriter
 # Bound lazily so export imports without scatter / barplot present — keeps those
 # features deletable. Each proxy resolves its target on first call.
 _scatter_collect_agg_data = _lazy("well_viewer.features.scatter.collect", "collect_scatter_agg_data")
@@ -1038,8 +1040,6 @@ def export_cell_data(ctx, scope) -> None:
 
     from well_viewer.core.worker_bridge import run_off_thread
     from well_viewer.data.data_loading import get_rows
-    from well_viewer.features.export import cell_scope_compute as csc
-    from well_viewer.features.export.worker import DONE, CellExportWriter
 
     if scope is None:
         return
@@ -1186,7 +1186,6 @@ def cancel_cell_export(ctx) -> None:
     cancel.set()
     chunks = getattr(ctx.runtime.export, "cell_queue", None)
     if chunks is not None:
-        from well_viewer.features.export.worker import DONE
         with swallow():
             chunks.put_nowait(DONE)
     ctx.runtime.export.cell_cancel = None

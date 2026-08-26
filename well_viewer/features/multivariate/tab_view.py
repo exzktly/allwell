@@ -16,6 +16,9 @@ from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QSpinBox, QVBoxLayout, QWidget,
 )
 
+from well_viewer.core.ui_helpers import build_plot_save_menu
+from well_viewer.features.export.service import export_cell_data_from
+from well_viewer.features.multivariate.cell_scope_compute import cell_scope
 from well_viewer.core.safe import swallowed
 from well_viewer.features.multivariate import state as mv_state
 from well_viewer.features.multivariate import controller as mv_ctrl
@@ -120,9 +123,6 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     from well_viewer.core.ui_helpers import (
         make_properties_button,
     )
-    from well_viewer.core.ui_helpers import build_plot_save_menu
-    from well_viewer.features.export.service import export_cell_data_from
-    from well_viewer.features.multivariate.cell_scope_compute import cell_scope
     export_btn, export_menu, _export_data_act = build_plot_save_menu(
         ctx, band,
         card_key="_mv_card",

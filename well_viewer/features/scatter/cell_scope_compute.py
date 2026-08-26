@@ -19,12 +19,19 @@ few hundred would empty the population; ``column_gating_exempt`` owns that rule
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pandas as pd
 
 from well_viewer.data.data_loading import resolve_value_series
 from well_viewer.domain.metric_registry import column_gating_exempt
 from well_viewer.features.export.cell_scope_compute import CellScope, scope_from_ctx
+from well_viewer.features.scatter.collect import gates_for_axes
+from well_viewer.features.scatter.controller import (
+    col_for_scatter_axis, scatter_axis_metric_key,
+)
+from well_viewer.features.scatter.gating import compute_gate_inclusion
 
 
 def _axis_marker(col: str, gate: float):
@@ -41,8 +48,6 @@ def _axis_marker(col: str, gate: float):
 
 
 def _gate_marker(gates, ratios):
-    from well_viewer.features.scatter.gating import compute_gate_inclusion
-
     def _marker(df, _scope):
         if not gates:
             return np.ones(len(df), dtype=bool)
@@ -73,10 +78,6 @@ def _selected_timepoints(ctx) -> tuple[float, ...]:
 def cell_scope(ctx) -> CellScope | None:
     """The per-cell Scatter tab's scope."""
     from well_viewer.core.channel_state_controller import get_fluor_gate
-    from well_viewer.features.scatter.collect import gates_for_axes
-    from well_viewer.features.scatter.controller import (
-        col_for_scatter_axis, scatter_axis_metric_key,
-    )
 
     ch_x_cb = ctx.widgets.get_or_none("_scatter_ch_x_cb")
     ch_y_cb = ctx.widgets.get_or_none("_scatter_ch_y_cb")
@@ -132,7 +133,6 @@ def agg_cell_scope(ctx) -> CellScope | None:
     scope = cell_scope(ctx)
     if scope is None:
         return None
-    from dataclasses import replace
     return replace(
         scope,
         plot="scatter_aggregate",

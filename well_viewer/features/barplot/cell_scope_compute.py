@@ -23,13 +23,12 @@ same name is used in every feature package that contributes a scope.
 from __future__ import annotations
 
 from well_viewer.core.channel_state_controller import on_cutoff_for_column
+from well_viewer.features.barplot.renderer import resolve_bar_timepoints
 from well_viewer.domain.stats_compute import _thresh_on_col
 from well_viewer.features.export.cell_scope_compute import CellScope, scope_from_ctx
 
 
 def cell_scope(ctx) -> CellScope:
-    from well_viewer.features.barplot.renderer import resolve_bar_timepoints
-
     val_col = ctx.state.channel.active_val_col
     try:
         timepoints = tuple(float(t) for t, _label in resolve_bar_timepoints(ctx))

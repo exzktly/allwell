@@ -117,7 +117,15 @@ FEATURE_PREFIX = "well_viewer.features"
 # instead: each tab is a descriptor whose `build` adapter in `features/registry.py`
 # holds the only import of its package, so the escape hatch is not re-opened
 # somewhere else.
-MAX_DEFERRED_FEATURE_IMPORTS = 104
+# 104 -> 103: the per-cell export added nine modules that reach across feature
+# packages, and every one of them resolved at module scope. Only the three that
+# genuinely cannot — the export service's lazy `barplot` / `scatter` proxies,
+# which exist so those features stay deletable — remain deferred, and the Save
+# menu's own builder takes its callbacks as plain callables rather than
+# importing anything. `export/service.py` also stopped deferring its two
+# intra-package imports (`cell_scope_compute`, `worker`), which were never a
+# cycle to begin with.
+MAX_DEFERRED_FEATURE_IMPORTS = 103
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

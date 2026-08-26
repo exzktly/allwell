@@ -19,6 +19,9 @@ from widgets.control_band import ControlBand
 from widgets.icons import make_icon
 from widgets.labeled_combo import LabeledComboBox
 
+from well_viewer.core.ui_helpers import build_plot_save_menu
+from well_viewer.features.export.service import export_cell_data_from
+from well_viewer.features.spatial.cell_scope_compute import cell_scope
 from well_viewer.core.safe import swallowed
 from well_viewer.features.spatial import state as sp_state
 from well_viewer.features.spatial import controller as sp_ctrl
@@ -226,9 +229,6 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     reg.register("_sp_recompute_btn", recompute_btn)
     band.add_action(recompute_btn)
 
-    from well_viewer.core.ui_helpers import build_plot_save_menu
-    from well_viewer.features.export.service import export_cell_data_from
-    from well_viewer.features.spatial.cell_scope_compute import cell_scope
     export_btn, export_menu, export_csv_act = build_plot_save_menu(
         ctx, band,
         card_key="_sp_card",

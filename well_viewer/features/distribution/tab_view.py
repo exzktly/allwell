@@ -8,9 +8,6 @@ from __future__ import annotations
 
 from well_viewer.core.channel_state_controller import on_plot_channel_selected
 
-from well_viewer.core.plot_card_actions import (
-    copy_active_card_as_svg, save_active_card_figure, save_card_to_gallery,
-)
 
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QSpinBox,
@@ -18,9 +15,10 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.core.ui_helpers import (
-    add_menu_action, make_action_menu_button,
-    make_plot_with_right_dock, make_properties_button, plotting_band_slot)
-from well_viewer.features.export.service import export_distribution_data
+    build_plot_save_menu, make_plot_with_right_dock, make_properties_button, plotting_band_slot)
+from well_viewer.features.export.service import (
+    export_cell_data_from, export_distribution_data)
+from well_viewer.features.distribution.cell_scope_compute import cell_scope
 from well_viewer.data.data_loading import get_all_timepoints
 from widgets.labeled_combo import LabeledComboBox
 
@@ -119,14 +117,14 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     log_y_cb.stateChanged.connect(_on_log_y_changed)
     ctrl.add_scope("", log_y_cb)
 
-    export_btn, export_menu = make_action_menu_button("Export ▾", ctrl,
-                                                      tooltip="Export this plot")
-    add_menu_action(export_menu, "Export CSV…", lambda: export_distribution_data(ctx))
-    add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx, "_distribution_card"))
-    add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx, "_distribution_card"))
-    export_menu.addSeparator()
-    add_menu_action(export_menu, "Save to Saved Plots",
-                    lambda: save_card_to_gallery(ctx, "_distribution_card"))
+    export_btn, export_menu, _export_data_act = build_plot_save_menu(
+        ctx, ctrl,
+        card_key="_distribution_card",
+        data_label="Save plot data…",
+        data_cb=lambda: export_distribution_data(ctx),
+        cells_cb=lambda: export_cell_data_from(
+            ctx, cell_scope),
+    )
     ctrl.add_action(export_btn)
     ctrl.add_action(make_properties_button(ctx, ctrl, "distribution"))
 

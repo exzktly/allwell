@@ -12,6 +12,7 @@ import math
 import re
 from pathlib import Path
 from collections.abc import Iterator
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -568,6 +569,61 @@ def _ordinal_timepoints_df(df: pd.DataFrame, tp_col: str = "timepoint_hours") ->
     return {s: float(i) for i, s in enumerate(sorted(raw_strings))}
 
 
+def resolved_timepoints(
+    df: pd.DataFrame,
+    tp_col: str = "timepoint_hours",
+    *,
+    rows_mask: np.ndarray | None = None,
+) -> np.ndarray:
+    """Each row's timepoint in hours, falling back to the string column.
+
+    The numeric ``timepoint_hours`` column is authoritative. Rows where it is
+    missing are resolved from the text ``timepoint`` column — parsed if it
+    parses, otherwise numbered through :func:`_ordinal_timepoints_df` — because
+    a plate whose filenames carry an unparseable token still has to plot.
+
+    *rows_mask* is the rows whose timepoint can actually reach the output, and
+    it is a performance contract rather than a filter: **the decision to run the
+    string fallback at all is made against those rows only.** The fallback is
+    two full-column passes, each widening a categorical to object and stripping
+    every row, and on a plate whose numeric column is complete neither result is
+    ever read — they were around nine tenths of
+    :func:`aggregate_with_threshold_df`'s cost. Testing every row instead hands
+    the whole well to the slow path for one *excluded* row carrying a bad token,
+    and the pipeline writes ``nan`` for exactly that, so real plates do carry
+    them. Passing ``None`` tests every row, which is what a caller with no
+    inclusion mask of its own must do.
+
+    Returns a float array the length of *df*; unresolvable rows are ``NaN``.
+    """
+    n = len(df)
+    if tp_col in df.columns:
+        tp_num = pd.to_numeric(df[tp_col], errors="coerce").to_numpy().astype(float)
+    else:
+        tp_num = np.full(n, np.nan)
+
+    need = ~np.isfinite(tp_num)
+    probe = need if rows_mask is None else need[rows_mask]
+    if not probe.any():
+        return tp_num
+
+    ord_map = _ordinal_timepoints_df(df, tp_col)
+    tp_str = timepoint_text(df).to_numpy()
+    cache: dict[str, float] = {}
+    for s in np.unique(tp_str[need]):
+        s_str = str(s)
+        if s_str == "":
+            cache[s_str] = 0.0
+        else:
+            v = parse_timepoint_hours(s_str)
+            if v is None:
+                v = ord_map.get(s_str)
+            cache[s_str] = float(v) if v is not None else float("nan")
+    for i in np.flatnonzero(need):
+        tp_num[i] = cache[str(tp_str[i])]
+    return tp_num
+
+
 def aggregate_with_threshold_df(
     df: pd.DataFrame,
     threshold: float,
@@ -595,8 +651,6 @@ def aggregate_with_threshold_df(
         return []
     if fluor_gates is None:
         fluor_gates = {}
-
-    n = len(df)
 
     # Inclusion must go through the single chokepoint so the bar/line aggregation
     # honors the same gating as every other plot/stat: effective inclusion is
@@ -636,42 +690,7 @@ def aggregate_with_threshold_df(
     if not mask.any():
         return []
 
-    if tp_col in df.columns:
-        tp_num = pd.to_numeric(df[tp_col], errors="coerce").to_numpy().astype(float)
-    else:
-        tp_num = np.full(n, np.nan)
-
-    # The string fallback below exists for rows whose numeric timepoint is
-    # missing. Deciding whether any row needs it is worth doing first, because
-    # the fallback is two full-column passes — ``_ordinal_timepoints_df`` and
-    # ``timepoint_text``, each widening a categorical to object and stripping
-    # every row — and on a plate whose ``timepoint_hours`` is complete, which is
-    # the ordinary case, neither result is ever read. Those two passes were
-    # around nine tenths of this function's cost.
-    #
-    # The test is on the INCLUDED rows, not on every row. A row the inclusion
-    # mask has already dropped cannot reach the output whatever its timepoint
-    # resolves to (``final`` masks it out below), so its missing numeric value
-    # is dead work rather than a difference. Testing every row instead would
-    # hand the whole well back to the slow path for one excluded row carrying an
-    # unparseable timepoint token — and the pipeline writes ``nan`` for exactly
-    # that, so real plates do carry them.
-    need = ~np.isfinite(tp_num)
-    if need[mask].any():
-        ord_map = _ordinal_timepoints_df(df, tp_col)
-        tp_str = timepoint_text(df).to_numpy()
-        cache: dict[str, float] = {}
-        for s in np.unique(tp_str[need]):
-            s_str = str(s)
-            if s_str == "":
-                cache[s_str] = 0.0
-            else:
-                v = parse_timepoint_hours(s_str)
-                if v is None:
-                    v = ord_map.get(s_str)
-                cache[s_str] = float(v) if v is not None else float("nan")
-        for i in np.flatnonzero(need):
-            tp_num[i] = cache[str(tp_str[i])]
+    tp_num = resolved_timepoints(df, tp_col, rows_mask=mask)
 
     val = resolve_value_series(df, val_col, ratios).to_numpy()
     if val.size == 0:
@@ -999,6 +1018,62 @@ def parse_well_token(token: str) -> tuple[int, int] | None:
 
 # ── Plot-group iteration ─────────────────────────────────────────────────────
 
+def plot_group_well_lists(ctx, fallback_to_all: bool = True) -> list[tuple[str, list[str], Any]]:
+    """The wells each plotted group is drawn from: ``[(name, [well, …], rset)]``.
+
+    **Which wells a plot is about is decided here and nowhere else.** It is not
+    simply "the selected wells": with replicate sets defined the plotted set is
+    every non-hidden group's wells *plus* the solo wells toggled on via
+    ``active_solo_wells``, and ``selected_wells`` is ignored entirely — group
+    visibility is the single source of truth in that mode. A second
+    implementation of that rule, however careful, produces a plausible result
+    with the wrong wells in it: right schema, right-looking counts, no error.
+    So :func:`iter_plot_groups` (pooled, for the renderers) and
+    :func:`iter_plot_group_wells` (unpooled, for the per-cell export) both call
+    this rather than each deciding for themselves, and
+    ``tests/test_plot_group_well_lists.py`` holds them to it.
+
+    ``rset`` is the replicate set an entry came from, or ``None`` for an entry
+    that is a single well standing for itself — the two colour differently, and
+    that is the only reason the caller needs to tell them apart.
+
+    Well *tokens* are what this returns, which the pooled frames cannot give
+    back: a pooled frame's ``well`` column is parsed from the image filename and
+    need not equal the token the app keys wells by.
+    """
+    from well_viewer.domain.selections_model import active_replicate_sets
+
+    well_paths = ctx.state.dataset.well_paths or {}
+    selections = ctx.state.selection.selections
+    rep_sets = list(active_replicate_sets(selections, well_paths))
+    selected = set(ctx.state.selection.selected_wells or set())
+
+    out: list[tuple[str, list[str], Any]] = []
+    if rep_sets:
+        in_any_group: set = set()
+        for rset in rep_sets:
+            wells = [w for w in rset.wells if w in well_paths]
+            in_any_group.update(wells)
+            if not wells:
+                continue
+            out.append((rset.name, wells, rset))
+        active_solo = ctx.state.selection.active_solo_wells or set()
+        for w in sorted(w for w in active_solo
+                        if w in well_paths and w not in in_any_group):
+            out.append((w, [w], None))
+        return out
+
+    if not selected:
+        if not fallback_to_all:
+            return out
+        selected = set(well_paths.keys())
+    for w in sorted(selected):
+        if w not in well_paths:
+            continue
+        out.append((w, [w], None))
+    return out
+
+
 def iter_plot_groups(ctx, fallback_to_all: bool = True) -> Iterator[tuple[str, str, pd.DataFrame]]:
     """Yield ``(name, color, df)`` for each replicate set or selected well.
 
@@ -1013,15 +1088,15 @@ def iter_plot_groups(ctx, fallback_to_all: bool = True) -> Iterator[tuple[str, s
     / ``_color_for_well`` override hooks were vestigial (never set anywhere) and
     are dropped. Colours are identical to the sidebar plate map + the Line / Bar /
     Scatter renderers (locked by test_iter_plot_groups_ctx).
+
+    Which wells each group holds comes from :func:`plot_group_well_lists`; only
+    the pooling and the colours are this function's own.
     """
     from well_viewer.domain.selections_model import (
-        _DEFAULT_COLOR, active_replicate_sets, color_for_replicate_set, color_for_wells,
+        _DEFAULT_COLOR, color_for_replicate_set, color_for_wells,
     )
 
-    well_paths = ctx.state.dataset.well_paths or {}
     selections = ctx.state.selection.selections
-    rep_sets = list(active_replicate_sets(selections, well_paths))
-    selected = set(ctx.state.selection.selected_wells or set())
 
     def _color_rset(rset) -> str:
         try:
@@ -1030,32 +1105,26 @@ def iter_plot_groups(ctx, fallback_to_all: bool = True) -> Iterator[tuple[str, s
             swallowed()  # was: pass (silent except)
         return _DEFAULT_COLOR
 
-    if rep_sets:
-        # With groups defined the active set on the plot is exactly
-        # ``rep_sets_active`` (every non-hidden group) plus any solo
-        # wells the user has explicitly toggled on via
-        # ``active_solo_wells``. ``selected_wells`` is not used in
-        # rep-mode — group visibility is the single source of truth.
-        in_any_group: set = set()
-        for rset in rep_sets:
-            wells = [w for w in rset.wells if w in well_paths]
-            in_any_group.update(wells)
-            if not wells:
-                continue
-            frames = [get_rows(ctx, w) for w in wells]
-            pooled = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
-            yield rset.name, _color_rset(rset), pooled
-        active_solo = ctx.state.selection.active_solo_wells or set()
-        for w in sorted(w for w in active_solo
-                        if w in well_paths and w not in in_any_group):
-            yield w, color_for_wells([w]), get_rows(ctx, w)
-        return
+    for name, wells, rset in plot_group_well_lists(ctx, fallback_to_all):
+        frames = [get_rows(ctx, w) for w in wells]
+        pooled = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
+        color = _color_rset(rset) if rset is not None else color_for_wells([name])
+        yield name, color, pooled
 
-    if not selected:
-        if not fallback_to_all:
-            return
-        selected = set(well_paths.keys())
-    for w in sorted(selected):
-        if w not in well_paths:
-            continue
-        yield w, color_for_wells([w]), get_rows(ctx, w)
+
+def iter_plot_group_wells(
+    ctx, fallback_to_all: bool = True,
+) -> Iterator[tuple[str, str, pd.DataFrame]]:
+    """Yield ``(group_name, well_label, df)`` — one entry per well, unpooled.
+
+    The per-cell export's view of the same selection :func:`iter_plot_groups`
+    draws from. It exists because the pooled generator loses two things the
+    export needs: the well token (a pooled frame carries only the
+    filename-parsed ``well`` column) and a usable row identity, since
+    ``pd.concat(..., ignore_index=True)`` renumbers a multi-well group while a
+    one-well group keeps the cached frame's own index — the same field meaning
+    two different things depending on how many wells a group happens to hold.
+    """
+    for name, wells, _rset in plot_group_well_lists(ctx, fallback_to_all):
+        for well in wells:
+            yield name, well, get_rows(ctx, well)

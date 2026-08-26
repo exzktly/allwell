@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from well_viewer.core.plot_card_actions import (
-    copy_active_card_as_svg, save_active_card_figure, save_card_to_gallery,
-)
 
 from PySide6.QtWidgets import (
     QComboBox, QPushButton, QVBoxLayout,
@@ -12,14 +9,16 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.core.ui_helpers import (
-    add_menu_action, make_action_menu_button, make_band_controls,
-    make_plot_with_right_dock, make_popover_button, make_properties_button,
-    plotting_band_slot)
+    make_band_controls,
+    build_plot_save_menu, make_plot_with_right_dock, make_popover_button,
+    make_properties_button, plotting_band_slot)
 from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
 from well_viewer.features.scatter.tp_selector_view import open_timepoint_selector
 from well_viewer.features.scatter.controller import on_scatter_agg_axis_change
 from well_viewer.features.scatter.controller import update_tp_selection_display
-from well_viewer.features.export.service import export_scatter_agg_data
+from well_viewer.features.export.service import (
+    export_cell_data_from, export_scatter_agg_data)
+from well_viewer.features.scatter.cell_scope_compute import agg_cell_scope
 
 
 def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
@@ -103,14 +102,15 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
 
     # Export / copy / save collapse into one "Export ▾" menu (mirrors the
     # per-cell scatter tab).
-    _export_btn, _export_menu = make_action_menu_button(
-        "Export ▾", ctrl, tooltip="Export, copy, and save")
-    add_menu_action(_export_menu, "Export CSV…", lambda: export_scatter_agg_data(ctx))
-    add_menu_action(_export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx, "_scatter_agg_card"))
-    add_menu_action(_export_menu, "Save figure…", lambda: save_active_card_figure(ctx, "_scatter_agg_card"))
-    _export_menu.addSeparator()
-    add_menu_action(_export_menu, "Save to Saved Plots",
-                    lambda: save_card_to_gallery(ctx, "_scatter_agg_card"))
+    _export_btn, _export_menu, _export_data_act = build_plot_save_menu(
+        ctx, ctrl,
+        card_key="_scatter_agg_card",
+        data_label="Save plot data…",
+        data_cb=lambda: export_scatter_agg_data(ctx),
+        cells_cb=lambda: export_cell_data_from(
+            ctx, agg_cell_scope,
+            unavailable="Pick both axes and a timepoint first."),
+    )
     ctrl.add_action(_export_btn)
     ctrl.add_action(make_properties_button(ctx, ctrl, "scatter_agg"))
 

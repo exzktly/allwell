@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from well_viewer.core.plot_card_actions import (
-    copy_active_card_as_svg, save_active_card_figure, save_card_to_gallery,
-)
 
 from PySide6.QtWidgets import (
     QComboBox, QLabel, QPushButton, QVBoxLayout,
@@ -12,14 +9,17 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.core.ui_helpers import (
-    add_menu_action, make_action_menu_button, make_plot_with_right_dock,
-    make_popover_button, make_properties_button, plotting_band_slot)
+    make_plot_with_right_dock,
+    build_plot_save_menu, make_popover_button, make_properties_button,
+    plotting_band_slot)
 from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
 from well_viewer.features.scatter.tp_selector_view import open_timepoint_selector
 from well_viewer.features.scatter.controller import on_scatter_axis_change
 from well_viewer.features.scatter.controller import update_scatter_tp_selection_display
 from functools import partial
-from well_viewer.features.export.service import export_scatter_data
+from well_viewer.features.export.service import (
+    export_cell_data_from, export_scatter_data)
+from well_viewer.features.scatter.cell_scope_compute import cell_scope
 from well_viewer.features.scatter.callbacks import on_scatter_click
 from well_viewer.features.scatter.callbacks import on_scatter_motion
 from well_viewer.features.scatter.gating import (
@@ -184,14 +184,15 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # Export / copy / save collapse into one "Export ▾" menu (they were trailing
     # icon buttons — the first controls clipped when the pane narrows). The X/Y
     # selectors, Timepoints and Display ▾ stay inline.
-    _export_btn, _export_menu = make_action_menu_button(
-        "Export ▾", ctrl, tooltip="Export, copy, and save")
-    add_menu_action(_export_menu, "Export CSV…", lambda: export_scatter_data(ctx))
-    add_menu_action(_export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx, "_scatter_card"))
-    add_menu_action(_export_menu, "Save figure…", lambda: save_active_card_figure(ctx, "_scatter_card"))
-    _export_menu.addSeparator()
-    add_menu_action(_export_menu, "Save to Saved Plots",
-                    lambda: save_card_to_gallery(ctx, "_scatter_card"))
+    _export_btn, _export_menu, _export_data_act = build_plot_save_menu(
+        ctx, ctrl,
+        card_key="_scatter_card",
+        data_label="Save plot data…",
+        data_cb=lambda: export_scatter_data(ctx),
+        cells_cb=lambda: export_cell_data_from(
+            ctx, cell_scope,
+            unavailable="Pick both axes and a timepoint first."),
+    )
     ctrl.add_action(_export_btn)
     ctrl.add_action(make_properties_button(ctx, ctrl, "scatter_cells"))
 

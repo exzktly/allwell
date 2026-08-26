@@ -6,9 +6,6 @@ from well_viewer.core.channel_state_controller import on_metric_selected
 
 from well_viewer.core.channel_state_controller import on_plot_channel_selected
 
-from well_viewer.core.plot_card_actions import (
-    copy_active_card_as_svg, save_active_card_figure, save_card_to_gallery,
-)
 
 from PySide6.QtWidgets import (
     QComboBox, QFrame, QHBoxLayout, QLabel, QScrollArea,
@@ -16,12 +13,14 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.core.ui_helpers import (
-    add_menu_action, install_canvas_wheel_scroll, make_action_menu_button,
+    build_plot_save_menu, install_canvas_wheel_scroll,
     make_band_controls, make_plot_with_right_dock, make_properties_button,
     plotting_band_slot)
 from functools import partial
 from well_viewer.core.plot_orchestrator import redraw_app
-from well_viewer.features.export.service import export_plot_data
+from well_viewer.features.export.service import (
+    export_cell_data_from, export_plot_data)
+from well_viewer.features.lineplot.cell_scope_compute import cell_scope
 from well_viewer.features.lineplot.controller import on_fig_click
 
 # The Line Graphs figure: four stacked subplots (mean / fraction / N(above) / CDF).
@@ -97,14 +96,14 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     _disp_lay.addWidget(make_band_controls(ctx, _disp_panel, with_fov=True))
     line_ctrl.add_action(_disp_btn)
 
-    export_btn, export_menu = make_action_menu_button("Export ▾", line_ctrl,
-                                                      tooltip="Export this plot")
-    add_menu_action(export_menu, "Export CSV…", lambda: export_plot_data(ctx))
-    add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx, "_line_card"))
-    add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx, "_line_card"))
-    export_menu.addSeparator()
-    add_menu_action(export_menu, "Save to Saved Plots",
-                    lambda: save_card_to_gallery(ctx, "_line_card"))
+    export_btn, export_menu, _export_data_act = build_plot_save_menu(
+        ctx, line_ctrl,
+        card_key="_line_card",
+        data_label="Save plot data…",
+        data_cb=lambda: export_plot_data(ctx),
+        cells_cb=lambda: export_cell_data_from(
+            ctx, cell_scope),
+    )
     line_ctrl.add_action(export_btn)
     line_ctrl.add_action(make_properties_button(ctx, line_ctrl, "line"))
 

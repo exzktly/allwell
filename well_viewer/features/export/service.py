@@ -18,8 +18,10 @@ from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates,
     on_cutoff_for_column,
 )
-from well_viewer.core.safe import swallowed
+from well_viewer.core.safe import swallow, swallowed
 from well_viewer.core.lazy import lazy as _lazy
+from well_viewer.features.export import cell_scope_compute as csc
+from well_viewer.features.export.worker import DONE, CellExportWriter
 # Bound lazily so export imports without scatter / barplot present — keeps those
 # features deletable. Each proxy resolves its target on first call.
 _scatter_collect_agg_data = _lazy("well_viewer.features.scatter.collect", "collect_scatter_agg_data")
@@ -929,3 +931,327 @@ def export_distribution_data(ctx) -> None:
         _error(ctx.window, "Export failed", str(exc))
 
 
+
+
+# ── Raw per-cell export ──────────────────────────────────────────────────────
+#
+# The "Save cell data…" entry every plot tab's Save menu carries. Each tab
+# contributes a ``CellScope`` from its own ``collect.py``; everything below is
+# shared. See ``export/cell_scope_compute.py`` for the rule about which rows a
+# scope names and why narrowing is a marker column rather than a filter.
+
+
+def _dataset_signature(ctx) -> tuple:
+    """What has to hold still for the file to describe one state of the data.
+
+    ``rows_version`` alone is not enough, and the gap is documented at its own
+    site: ``data/cache_projectors`` says "No ``note_rows_changed`` here,
+    deliberately", so rewriting ``QC_Pass`` or ``Crop_Pass`` across every cached
+    frame — which is what moving a QC threshold or editing the crop region does
+    — leaves the counter untouched. The QC params and the crop region are
+    therefore folded in beside it, along with the dataset directory (which
+    covers a swap, since ``cache.clear()`` does not bump either) and the gate
+    signature the stats cache already uses.
+    """
+    ds = ctx.state.dataset
+    qc = getattr(ctx.state, "qc", None)
+    params = getattr(qc, "params", None) if qc is not None else None
+    try:
+        qc_sig = tuple(sorted(params.to_dict().items())) if params is not None else None
+    except Exception:
+        swallowed("cell export: QC params signature")
+        qc_sig = None
+    from well_viewer.domain.stats_compute import _gate_cache_sig
+    return (
+        int(getattr(ds, "rows_version", 0) or 0),
+        str(getattr(ds, "data_dir", "") or ""),
+        qc_sig,
+        getattr(ds, "crop_region", None),
+        _gate_cache_sig(ctx),
+    )
+
+
+def _scope_block(ctx, scope, *, wells, missing_verdicts, header_len: int,
+                 unreadable=()) -> list[str]:
+    """The ``#`` lines above the header — what produced this file.
+
+    They travel *with* the data rather than in a sidecar, because a sidecar is
+    separated from its file the first time someone emails one of the two. The
+    last line names the row the table starts on, so a reader that would rather
+    not treat ``#`` as a comment can skip to it instead.
+    """
+    from well_viewer.domain.gating_state import active_fluor_gates
+
+    tps = ", ".join(f"{t:g}" for t in scope.timepoints) or "all"
+    on_rule = (f"{scope.on_col} > 0.5" if scope.on_col
+               else f"{scope.val_col} > {scope.threshold:g}")
+    gates = active_fluor_gates(scope.fluor_gates or {})
+    lines = [
+        "# All-Well per-cell export",
+        f"# plot: {scope.plot}",
+        f"# value column: {scope.val_col}",
+        f"# timepoints (h): {tps}",
+        f"# above-threshold rule: {on_rule}",
+        "# inclusion: Included AND QC_Pass AND Crop_Pass"
+        + (" AND Gate_Pass" if scope.include_gate else " (Gate_Pass not applied)"),
+        "# channel cutoffs: " + (", ".join(f"{c}>{g:g}" for c, g in sorted(gates.items()))
+                                 or "none"),
+        f"# rows are this plot's cell population; the figure drew {scope.drawn_subset}=1",
+        f"# wells ({len(wells)}): " + ", ".join(w for _g, w in wells),
+    ]
+    if missing_verdicts:
+        lines.append("# verdict layers not computed for every well (written as 1): "
+                     + ", ".join(missing_verdicts))
+    if unreadable:
+        # Otherwise a well whose rows would not load is indistinguishable from
+        # one that had no passing cells — both simply contribute nothing.
+        lines.append("# wells that could not be read (no rows in this file): "
+                     + ", ".join(unreadable))
+    for key, value in scope.notes:
+        lines.append(f"# {key}: {value}")
+    lines.append(f"# dataset signature: {_dataset_signature(ctx)}")
+    lines.append(f"# columns: {header_len}")
+    # The header row, which is what a reader skipping to it wants: pandas
+    # takes ``skiprows=N - 1`` and gets its column names. Naming the first
+    # *data* row instead would cost the header.
+    lines.append(f"# table starts on line {len(lines) + 2}")
+    return lines
+
+
+def _gating_busy(ctx) -> bool:
+    """True while the cell-gating ``QThread`` is rewriting cached frames.
+
+    It replaces ``Included`` / ``Gate_Pass`` / ``Gate_On`` well by well with a
+    short sleep between them so the GUI repaints, which makes the window where a
+    slice would straddle two gating generations wide rather than theoretical.
+    Refusing to start is cheaper than detecting it afterwards.
+    """
+    worker = getattr(ctx.runtime.cell_gating, "worker", None)
+    try:
+        return bool(worker is not None and worker.isRunning())
+    except (RuntimeError, AttributeError):
+        swallowed("cell export: gating worker liveness")
+        return False
+
+
+def export_cell_data(ctx, scope) -> None:
+    """Write every cell behind the current plot to a CSV, off the GUI thread.
+
+    The slicing runs on the GUI thread, one well per event-loop tick, and the
+    serialising runs on a writer thread — so the worker never holds a reference
+    to a cached frame that another thread rewrites in place. See
+    ``export/worker.py``.
+    """
+    import queue
+    import threading
+
+    from PySide6.QtCore import QTimer
+
+    from well_viewer.core.worker_bridge import run_off_thread
+    from well_viewer.data.data_loading import get_rows
+
+    if scope is None:
+        return
+    if getattr(ctx.runtime.export, "cell_cancel", None) is not None:
+        _warn(ctx.window, "Export", "A cell-data export is already running.")
+        return
+    if _gating_busy(ctx):
+        _warn(ctx.window, "Export",
+              "Cell gating is still recomputing. Wait for it to finish, then "
+              "export — otherwise the file would mix two gating states.")
+        return
+
+    wells = [(g, w) for g, w in scope.wells
+             if w in (ctx.state.dataset.well_paths or {})]
+    if not wells:
+        _warn(ctx.window, "Export",
+              "This plot is not drawing any wells — select wells first.")
+        return
+
+    frames = {}
+    unreadable: list[str] = []
+    for _group, well in wells:
+        try:
+            frames[well] = get_rows(ctx, well)
+        except Exception:
+            swallowed(f"cell export: rows for {well!r}")
+            unreadable.append(well)
+    frames_columns = [list(f.columns) for f in frames.values() if f is not None]
+    if not frames_columns:
+        _warn(ctx.window, "Export", "No rows to export for the current plot.")
+        return
+
+    header = csc.header_for(frames_columns, scope)
+    missing = csc.missing_verdict_layers(frames_columns)
+
+    tp_tag = (f"_t{scope.timepoints[0]:g}" if len(scope.timepoints) == 1 else "")
+    out_path = _ask_save_csv(
+        ctx, "Save cell data", f"{scope.plot}_cells{tp_tag}.csv")
+    if not out_path:
+        return
+
+    scope_lines = _scope_block(ctx, scope, wells=wells,
+                               missing_verdicts=missing, header_len=len(header),
+                               unreadable=unreadable)
+
+    well_labels = _well_labels_map(ctx)
+    well_paths = _well_paths_keys(ctx)
+    chunks: queue.Queue = queue.Queue(maxsize=2)
+    cancel = threading.Event()
+    baseline = _dataset_signature(ctx)
+    ctx.runtime.export.cell_cancel = cancel
+    ctx.runtime.export.cell_queue = chunks
+
+    writer = CellExportWriter(out_path=Path(out_path), header=header,
+                              scope_lines=scope_lines, chunks=chunks,
+                              cancel=cancel, total_wells=len(wells))
+
+    state = {"i": 0, "failed": False}
+
+    def _finish_ui() -> None:
+        ctx.runtime.export.cell_cancel = None
+        ctx.runtime.export.cell_queue = None
+        ctx.runtime.export.cell_bridge = None
+        ctx.runtime.export.cell_writer = None
+        ctx.runtime.export.cell_stop = None
+
+    def _abort(message: str) -> None:
+        cancel.set()
+        with swallow():
+            chunks.put_nowait(DONE)
+        state["failed"] = True
+        ctx.notify.set_status(f"Cell export cancelled — {message}")
+
+    def _tick() -> None:
+        if cancel.is_set() or state["failed"]:
+            return
+        if _dataset_signature(ctx) != baseline:
+            _abort("the data changed while it was running "
+                   "(gating, QC, crop or the dataset itself)")
+            return
+        if chunks.full():
+            # The writer is behind. Come back rather than blocking the GUI on
+            # ``put`` — a full queue must never stall the event loop. A dead
+            # writer leaves the queue permanently full, which is why
+            # ``state["failed"]`` is checked above rather than only here: with
+            # no terminal flag this branch reschedules itself at 100 Hz for the
+            # life of the process, pinning every well's frame as it goes.
+            QTimer.singleShot(10, _tick)
+            return
+        if state["i"] >= len(wells):
+            with swallow():
+                chunks.put_nowait(DONE)
+            return
+        group, well = wells[state["i"]]
+        state["i"] += 1
+        df = frames.get(well)
+        if df is None or df.empty:
+            QTimer.singleShot(0, _tick)
+            return
+        try:
+            chunk = csc.build_chunk(
+                df, scope, group=group, well_label=well,
+                well_name=well_name_for(well, well_labels,
+                                        well_paths=well_paths, strict=True),
+            )
+        except Exception as exc:
+            _abort(f"could not assemble {well}: {exc}")
+            return
+        # Re-check after the slice as well as before it: check-then-slice is not
+        # atomic, and a rewrite landing between the two is exactly what would
+        # put two gating generations in one file.
+        if _dataset_signature(ctx) != baseline:
+            _abort("the data changed while it was running "
+                   "(gating, QC, crop or the dataset itself)")
+            return
+        # An empty well still counts as handled, or the status line stalls
+        # short of the total for the whole run — "stuck at 92%" with nothing
+        # wrong. The writer counts what it writes; this counts what was offered.
+        if len(chunk):
+            chunks.put_nowait(chunk)
+        else:
+            _on_progress(state["i"], len(wells))
+        QTimer.singleShot(0, _tick)
+
+    def _on_done(result) -> None:
+        state["failed"] = True      # terminal either way — stop slicing
+        _finish_ui()
+        if not isinstance(result, dict) or result.get("cancelled"):
+            return
+        rows = result.get("rows", 0)
+        ctx.notify.set_status(
+            f"Saved {rows:,} cell(s) from {result.get('wells', 0)} well(s) "
+            f"→ {Path(out_path).name}")
+
+    def _on_failed(message: str) -> None:
+        # Stop the slicing chain first. ``_finish_ui`` only clears the handles;
+        # without the flag the chain never reaches a terminal condition, and
+        # clearing ``cell_cancel`` would let the user start a second export
+        # alongside the first one still ticking.
+        state["failed"] = True
+        cancel.set()
+        _finish_ui()
+        _error(ctx.window, "Export failed", str(message))
+
+    def _on_progress(done: int, total: int) -> None:
+        ctx.notify.set_status(f"Saving cell data… {done}/{total} well(s)")
+
+    ctx.runtime.export.cell_bridge = run_off_thread(
+        writer, on_done=_on_done, on_failed=_on_failed, on_progress=_on_progress)
+    ctx.runtime.export.cell_writer = writer
+    # The Review pane's teardown reaches the cancel through this rather than by
+    # importing the service — core must not name a feature, and a stopper the
+    # feature registers while it runs is the seam that keeps it from having to.
+    ctx.runtime.export.cell_stop = lambda: cancel_cell_export(ctx)
+    ctx.notify.set_status(f"Saving cell data for {len(wells)} well(s)…")
+    QTimer.singleShot(0, _tick)
+
+
+def cancel_cell_export(ctx) -> None:
+    """Stop a running per-cell export and leave no partial file behind.
+
+    Called from the Review pane's teardown as well as by the user. Both the
+    event *and* the sentinel are needed: setting the event does not wake a
+    writer already blocked on ``Queue.get()``, and the sentinel is what lets it
+    return through its own cleanup rather than being killed mid-write.
+    """
+    cancel = getattr(ctx.runtime.export, "cell_cancel", None)
+    if cancel is None:
+        return
+    cancel.set()
+    chunks = getattr(ctx.runtime.export, "cell_queue", None)
+    if chunks is not None:
+        with swallow():
+            chunks.put_nowait(DONE)
+    # Give the writer its own unwinding rather than letting the interpreter kill
+    # it: its ``finally`` is what removes the temp file, and a daemon thread
+    # killed at exit never runs one. One queue timeout plus a margin is enough
+    # for it to notice the sentinel and return.
+    writer = getattr(ctx.runtime.export, "cell_writer", None)
+    if writer is not None:
+        with swallow():
+            writer.finished.wait(timeout=1.0)
+    ctx.runtime.export.cell_cancel = None
+    ctx.runtime.export.cell_queue = None
+    ctx.runtime.export.cell_writer = None
+    ctx.runtime.export.cell_stop = None
+
+
+def export_cell_data_from(ctx, scope_fn, *, unavailable: str = "") -> None:
+    """Resolve a tab's scope and export it, or say why there is nothing to write.
+
+    The menu entry is wired to this rather than to :func:`export_cell_data` so
+    that a tab whose scope depends on a drawn figure — the Heat Map needs its
+    grid, Spatial its frame, Multivariate its feature picker — refuses with a
+    sentence instead of appearing to work and producing nothing.
+    """
+    try:
+        scope = scope_fn(ctx)
+    except Exception as exc:
+        _error(ctx.window, "Save cell data", str(exc))
+        return
+    if scope is None:
+        _warn(ctx.window, "Save cell data",
+              unavailable or "This plot has nothing to export yet.")
+        return
+    export_cell_data(ctx, scope)

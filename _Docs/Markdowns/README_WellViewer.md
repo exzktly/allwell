@@ -1451,7 +1451,7 @@ It is read-only — it reports what the run recorded, not something you set here
   well selection they drive is what every tab plots (see below).
 - **Controls band** — the row directly above the plot canvas: what is shown on
   the left (channel, property, timepoint, threshold), what to do with it on the
-  right (`Display ▾`, `Export ▾`, Properties).
+  right (`Display ▾`, `Save ▾`, Properties).
 - **Status bar** — a live status dot on the left, keyboard-shortcut chips on
   the right.
 - **Tab history** — `Ctrl+←` / `Ctrl+→` step back and forward through the tabs
@@ -1553,7 +1553,7 @@ empty — those tabs name Review's pages.
 Every tab in the Review pane states its controls the same way, in one row above
 the content: **what is shown** on the left — channel, property, timepoint,
 threshold, and whatever else scopes the data — and **what to do with it** on the
-right, flush to the edge: `Display ▾`, `Export ▾`, and the **Properties** button.
+right, flush to the edge: `Display ▾`, `Save ▾`, and the **Properties** button.
 Nothing is centred; which view you are looking at is the tab bar's job. When the
 pane is too narrow the left side wraps onto a second line rather than squeezing
 its controls, so nothing ever becomes unreachable.
@@ -1573,20 +1573,44 @@ row empty rather than starting its content higher — so moving between pages
 never shifts the top of what you are looking at. It grows only when it has to:
 on a narrow window, where the left side wraps onto a second line.
 
-#### Figure actions — the Export dropdown · Properties
+#### Figure actions — the Save dropdown · Properties
 
 Every plot tab (Bar Plot, Line Graphs, Scatter, Distribution, Heat Map,
-Spatial, Multivariate) carries the same **Export ▾** dropdown on its controls
-row, holding four actions:
+Spatial, Multivariate) carries the same **Save ▾** dropdown on its controls
+row, holding five actions:
 
-- **Export CSV…** (label varies by tab) — writes the underlying data behind
-  the current plot.
-- **Copy SVG** — puts a vector copy of the figure on the clipboard (paste into
-  Illustrator / Inkscape / Keynote / Slides). On macOS the clipboard is written
-  natively (PDF + SVG) so Illustrator pastes editable vector; this needs
-  `pyobjc-framework-Cocoa` (see `requirements.txt`).
-- **Save Figure…** — saves to disk; the file dialog picks the format from the
+- **Save plot data…** (Spatial says *Save summary data…*) — writes the plotted
+  summary: one row per bar, per line point, per heat-map cell.
+- **Save cell data…** — writes the **raw per-cell rows the plot was computed
+  from**, every column: the filename, well, field, timepoint and nucleus id
+  each cell came from, its area, every channel's intensity metrics, the
+  `shape_*` morphology columns, and the inclusion verdicts the app holds in
+  memory and the CSVs on disk do not (`QC_Pass`, `Crop_Pass`, `Gate_Pass`).
+
+  The file holds the plot's whole cell population and marks what the plot did
+  with each row rather than filtering any of it away — `plot_in_population` for
+  the cells the statistic was computed over, `plot_above_threshold` for the
+  "on" half of it, `plot_in_gate` on Scatter, and so on. That is deliberate:
+  the cells a cutoff excluded are the denominator a fraction was computed
+  against, so a file without them could not reproduce the number on the figure.
+  A `#` comment block above the table records the value column, timepoints,
+  threshold, gate layers and wells that produced it, and names the line the
+  table starts on. Read it with
+  `pandas.read_csv(path, comment="#", float_precision="round_trip")` — the
+  values are written at full precision, and pandas' default reader does not
+  return all of them exactly.
+
+  Large plates are written on a background thread, so the window stays
+  responsive; the file appears only when the write finishes. If the data
+  changes underneath it — you move a gating or QC threshold, edit the crop, or
+  open another dataset — the export stops and says so rather than writing a
+  file that is half one state and half another.
+- **Save figure…** — saves to disk; the file dialog picks the format from the
   extension (`.svg` / `.pdf` / `.eps` / `.png`).
+- **Copy figure as SVG** — puts a vector copy of the figure on the clipboard
+  (paste into Illustrator / Inkscape / Keynote / Slides). On macOS the
+  clipboard is written natively (PDF + SVG) so Illustrator pastes editable
+  vector; this needs `pyobjc-framework-Cocoa` (see `requirements.txt`).
 - **Save to Saved Plots** — sends the whole figure, plus the exact parameters
   that produced it, to the per-dataset [Saved Plots](#saved-plots) gallery.
   The same capture is also reachable by hovering a plot panel's top-right
@@ -2388,7 +2412,7 @@ the row stays short at Cell level and grows at Colony / Intra-colony / Summary:
 | Do edge cells look different from centre cells? | Intra-colony | Radial profile | Metric ± SEM binned by normalised radius `r/R` (0 = colony centre, 1 = furthest cell). |
 | Do boundary cells look different from interior cells? | Intra-colony | Boundary vs interior | Split violin of the metric partitioned by the Boundary % percentile. |
 | Where are my cells / colonies in the well? | any | Spatial map | Scatter of centroids in the well plane, coloured by metric / colony id / r/R, with optional convex-hull overlays per colony. |
-| **How do wells / timepoints compare *grossly*?** | **Summary** | **Summary panel** | Per-(well, timepoint) matrix of one summary scalar (median NND, colony count, mean colony size, packing density, ICC on the picked metric, …). Renders as either a wells × timepoints heatmap or one line per well over time. Click **Export CSV** to write one long-format row per (well, timepoint) with every summary column. This is the cross-condition view — everything else on the tab is a single-frame view. |
+| **How do wells / timepoints compare *grossly*?** | **Summary** | **Summary panel** | Per-(well, timepoint) matrix of one summary scalar (median NND, colony count, mean colony size, packing density, ICC on the picked metric, …). Renders as either a wells × timepoints heatmap or one line per well over time. Click **Save summary data…** to write one long-format row per (well, timepoint) with every summary column, or **Save cell data…** for the cells behind them. This is the cross-condition view — everything else on the tab is a single-frame view. |
 
 Every metric name, control label, and viz option carries a hover tooltip
 with the same one-line reading — the table above is what's on screen when
@@ -2403,7 +2427,7 @@ mean distance, median local density, mean colony size, median hull area,
 median packing density, and (if you picked a per-cell Metric) the
 between-vs-within ICC on that column. Pick which one to plot from the
 **Summary metric** dropdown and choose *Heatmap* or *Line plot* from
-**Display**. **Export CSV** writes every summary column at once (long
+**Display**. **Save summary data…** writes every summary column at once (long
 format: one row per `well × timepoint_hours`), so downstream analysis
 in pandas or Excel isn't restricted to whichever summary is currently
 plotted. The single-timepoint picker in row 1 is disabled at Summary
@@ -2666,7 +2690,7 @@ channel for every well).
   ThreshCountOn instead. Caption, value and write target move together, so the
   number you see is the number you are changing. A channel with no spot-count
   column has no count cutoff, so it keeps editing its ON threshold whatever the
-  Property says · **Export ▾** (to file ·
+  Property says · **Save ▾** (to file ·
   Copy PNG / SVG · Save to Saved Plots) · **zoom** (− · the current % · +; click the
   % to reset to 100) · a **Properties** button that slides out a
   right-side panel for the grouped view's **spacing gaps** and **label font sizes**,
@@ -3868,7 +3892,7 @@ architecture-specific and can't produce a universal binary.
 | Shortcut | Action |
 |---|---|
 | `⌘O` / `Ctrl+O` | Open a results folder |
-| `⌘E` / `Ctrl+E` | Export the active figure (drives the visible plot card's Save figure action) |
+| `⌘E` / `Ctrl+E` | Save the active figure (drives the visible plot card's Save figure action) |
 | `⌘←` / `Ctrl+←` | Back through tab history |
 | `⌘→` / `Ctrl+→` | Forward through tab history |
 | `⌘/` / `Ctrl+/` | Open the help drawer |

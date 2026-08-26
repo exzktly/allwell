@@ -6,9 +6,6 @@ from well_viewer.core.channel_state_controller import (
     on_metric_selected, on_plot_channel_selected,
 )
 
-from well_viewer.core.plot_card_actions import (
-    copy_active_card_as_svg, save_active_card_figure, save_card_to_gallery,
-)
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -17,8 +14,8 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.core.ui_helpers import (
-    add_menu_action, build_hline_separator, install_canvas_wheel_scroll,
-    make_action_menu_button, make_band_controls, make_plot_with_right_dock,
+    build_hline_separator, install_canvas_wheel_scroll,
+    build_plot_save_menu, make_band_controls, make_plot_with_right_dock,
     make_properties_button, plotting_band_slot)
 from well_viewer.features.barplot.controller import (
     bar_reset_order,
@@ -33,7 +30,9 @@ from well_viewer.features.barplot.controller import (
 )
 from well_viewer.features.barplot.renderer import redraw_bars
 from functools import partial
-from well_viewer.features.export.service import export_bar_plot_data
+from well_viewer.features.export.service import (
+    export_bar_plot_data, export_cell_data_from)
+from well_viewer.features.barplot.cell_scope_compute import cell_scope
 import theme
 
 # The Bar Plots figure: three stacked subplots (mean / fraction / n).
@@ -226,14 +225,14 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     reset_order_btn.clicked.connect(lambda _=False: bar_reset_order(ctx))
     bar_ctrl.add_action(reset_order_btn)
 
-    export_btn, export_menu = make_action_menu_button("Export ▾", bar_ctrl,
-                                                      tooltip="Export this plot")
-    add_menu_action(export_menu, "Export CSV…", lambda: export_bar_plot_data(ctx))
-    add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx, "_bar_card"))
-    add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx, "_bar_card"))
-    export_menu.addSeparator()
-    add_menu_action(export_menu, "Save to Saved Plots",
-                    lambda: save_card_to_gallery(ctx, "_bar_card"))
+    export_btn, export_menu, _export_data_act = build_plot_save_menu(
+        ctx, bar_ctrl,
+        card_key="_bar_card",
+        data_label="Save plot data…",
+        data_cb=lambda: export_bar_plot_data(ctx),
+        cells_cb=lambda: export_cell_data_from(
+            ctx, cell_scope),
+    )
     bar_ctrl.add_action(export_btn)
     bar_ctrl.add_action(make_properties_button(ctx, bar_ctrl, "bar"))
 

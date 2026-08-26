@@ -3035,6 +3035,14 @@ rather than a single panel.
     listed and coloured on the group-editor plate exactly as if you had defined
     them, so you can see what the restored brackets were computed from and edit
     it from there.
+  - **Every comparison you had run is saved, not just the last one.** The
+    Statistics tab keeps comparisons side by side — a second channel, a second
+    statistic, a second timepoint each add one rather than replacing what was
+    there — and a saved plot carries all of them, so a figure drawn with
+    brackets from two tests comes back with both. If the data behind one of them
+    is no longer available, the status line says how many of the saved
+    comparisons could not be re-run, rather than leaving you a figure with fewer
+    brackets than you saved and no reason given.
   - A plot saved before its tab began recording its own settings can only
     restore the settings shared across tabs — channel, metric, wells, gating.
     The status line says so by name when it happens, because a silent partial

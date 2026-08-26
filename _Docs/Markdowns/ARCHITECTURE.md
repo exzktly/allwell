@@ -1626,6 +1626,31 @@ parameters and must leave the user looking at the tab that figure came from.
 Sending it to Home instead would apply the whole restored view to a tab nobody
 is on, which on screen is indistinguishable from a restore that did nothing.
 
+**A saved plot carries every comparison the Statistics tab had run, not one.**
+The comparison store is keyed by `(val_col, target_t, stat)` (§ the Statistics
+tab) precisely so that testing a second channel — or a second statistic, or a
+second timepoint — adds a comparison rather than replacing the first, and a Bar
+plot draws whichever of the stored runs describe the bars in front of it.
+`collect._capture_stats_config` therefore walks `stats.runs` and writes one
+re-runnable block per stored run into `params["stats"]["runs"]`, each with its
+own threshold resolved from its own value column, since the ON cutoff is a
+per-channel cut. `stats.pairwise` is a *derived* view of that store meaning "the
+last run recorded", so capturing it saved one comparison out of however many the
+figure was drawing: a plot of GFP bars saved after a CY5 test had been run came
+back from Restore carrying the CY5 config, which matches no bar on it, and
+therefore with no brackets at all. The most recent run also sits at the top
+level of the block, which is where a record written before the block held
+several runs kept its only one — one shape for every reader of a single run's
+context, and the read path treats such a record as a one-run list.
+
+`_restore_stats` re-runs each block and rebuilds the store from them, replacing
+its contents rather than assigning `pairwise` (which records exactly one run):
+the record's runs are what the plot was drawn with, and a comparison left in the
+store from earlier in the session is not. A block whose data is no longer there
+returns no records, so the restored plot comes back with fewer brackets than it
+was saved with — `_report_unreproduced_stats` says so in the status line, because
+from the figure alone that is indistinguishable from a plot that never had them.
+
 **Restoring a plot's statistics repaints the group list, not just the state.**
 `_restore_stats` re-runs the saved test and writes `stats.groups` /
 `stats.pairwise`, and it now calls `stats_refresh_group_list` /

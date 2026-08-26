@@ -236,22 +236,42 @@ def _restore_selections(ctx, sels, solo_wells=None) -> None:
 
 
 def _restore_stats(ctx, cfg) -> None:
-    """Re-run the saved stats config to regenerate ``stats.pairwise`` + groups.
+    """Re-run the saved stats config to regenerate the comparison store + groups.
 
-    Deterministic re-run (same config + data → same brackets). No-op for saved
+    Every comparison the record carries, not just one. A saved plot stores one
+    block per run the Statistics tab had recorded (``cfg["runs"]``), because a
+    Bar plot draws brackets from every stored run that describes its bars — a
+    Mean comparison and a Fraction comparison of the same groups, or two
+    channels, are all on screen at once. A record written before the block held
+    several runs carries its single run at the top level instead, and is read
+    here as a one-run list.
+
+    Deterministic re-run (same config + data -> same brackets). No-op for saved
     plots without a ``stats`` block (backward compatible) or on any error."""
     if not isinstance(cfg, dict):
         return
+    wanted = 0
+    computed: list[list] = []
     try:
         groups = _deserialize_stats_groups(ctx, cfg.get("groups"))
-        target_t = cfg.get("target_t")
-        pairwise = _compute_pairwise(
-            ctx, groups=groups,
-            target_t=(float(target_t) if target_t is not None else None),
-            val_col=cfg.get("val_col"), statistic=cfg.get("statistic", "mean"),
-            threshold=cfg.get("threshold"), test=cfg.get("test", ""),
-            use_fov=bool(cfg.get("use_fov", True)),
-        )
+        blocks = cfg.get("runs")
+        if not isinstance(blocks, list) or not blocks:
+            blocks = [cfg]  # a record saved before the block held several runs
+        blocks = [b for b in blocks if isinstance(b, dict)]
+        wanted = len(blocks)
+        use_fov = bool(cfg.get("use_fov", True))
+        for block in blocks:
+            target_t = block.get("target_t")
+            records = _compute_pairwise(
+                ctx, groups=groups,
+                target_t=(float(target_t) if target_t is not None else None),
+                val_col=block.get("val_col"),
+                statistic=block.get("statistic", "mean"),
+                threshold=block.get("threshold"), test=block.get("test", ""),
+                use_fov=use_fov,
+            )
+            if records:
+                computed.append(records)
         # Same gate as the bar renderer's. Saved Plots and Statistics are
         # separately removable, so a build with one and not the other reaches
         # here — and this sits inside a broad ``except`` that logs at DEBUG, so
@@ -260,7 +280,13 @@ def _restore_stats(ctx, cfg) -> None:
         stats_state = ctx.state.feature_slice("stats")
         if stats_state is not None:
             stats_state.groups = groups
-            stats_state.pairwise = pairwise
+            # Replace the live store wholesale rather than assigning
+            # ``pairwise``, which records exactly one run: the record's runs are
+            # what this plot was drawn with, and any comparison sitting in the
+            # store from earlier in the session is not.
+            stats_state.runs.clear()
+            for records in computed:
+                stats_state.record_run(records)
             # Writing the state is not showing it. The Statistics sidebar's
             # group list and its plate are painted by explicit refresh calls —
             # every other route that changes ``stats.groups`` (add, delete,
@@ -276,6 +302,27 @@ def _restore_stats(ctx, cfg) -> None:
             _refresh_stats_group_views(ctx)
     except Exception:
         _logger.debug("saved_plots: stats re-run failed", exc_info=True)
+    _report_unreproduced_stats(ctx, wanted, len(computed))
+
+
+def _report_unreproduced_stats(ctx, wanted: int, produced: int) -> None:
+    """Say so when a restore could not reproduce every saved comparison.
+
+    A test whose data is no longer there returns no records, and the plot then
+    comes back with fewer brackets than it was saved with — or none. Silent,
+    that is indistinguishable from a plot that never had them, which is the one
+    thing the user cannot tell from the figure itself.
+    """
+    if produced >= wanted:
+        return
+    missing = wanted - produced
+    comparisons = "comparison" if wanted == 1 else "comparisons"
+    them = "it" if missing == 1 else "them"
+    with swallow("saved_plots: unreproduced-stats report"):
+        ctx.notify.set_status(
+            f"Restored the plot, but {missing} of its {wanted} saved "
+            f"{comparisons} could not be re-run — the data behind {them} is no "
+            f"longer available, so {them} draws no significance brackets.")
 
 
 def _refresh_stats_group_views(ctx) -> None:

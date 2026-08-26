@@ -20,6 +20,8 @@ profile strips is never imported.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
@@ -483,31 +485,50 @@ def _build_saved_plots(ctx, page: QWidget, reg) -> QWidget:
 
 
 def _thumbnail(image_path) -> QPixmap | None:
-    """Decode *image_path* straight to thumbnail size, or ``None`` if it is gone.
+    """A saved plot's thumbnail, decoded at thumbnail size and cached.
 
-    Through ``QImageReader.setScaledSize`` rather than by loading the file and
-    scaling it after: a saved plot's PNG is a 300 dpi capture — routinely
-    1500×960 and a quarter of a megabyte — and Home draws twelve of them at
-    152 px on every refresh, on the UI thread. Decoding the full frame first
-    does all that work and throws it away. The reader scales during decode, so
-    the full-size image never exists.
+    Two costs, and the cache is for the second one.
+
+    A saved plot's PNG is a 300 dpi capture — routinely 1500×1200 — and the
+    strip draws twelve of them at 152 px. Decoding the full frame and scaling
+    afterwards does all that work and throws it away, so the decode is scaled
+    by ``QImageReader.setScaledSize``: the full-size image never exists.
+
+    That still costs ~15 ms per plot, and ``refresh_home`` repaints the whole
+    strip — on the page build, on a dataset load, and on every record resync.
+    Twelve plots is ~200 ms of decoding on the UI thread, every time, for
+    pixels that have not changed. ``QPixmapCache`` is Qt's own store for exactly
+    this and is keyed here on the file's path, its modification time and the box
+    it was scaled into, so a plot that is re-saved (same name, new bytes) or a
+    strip that changes size decodes again and nothing else does.
     """
-    from PySide6.QtGui import QImageReader
+    from PySide6.QtGui import QImageReader, QPixmapCache
 
     if image_path is None:
         return None
+    box_w = _THUMB_W - 2 * theme.Spacing.xs
+    try:
+        stat = Path(image_path).stat()
+    except OSError:
+        return None
+    key = f"allwell.savedplot:{image_path}:{stat.st_mtime_ns}:{box_w}x{_THUMB_H}"
+    cached = QPixmapCache.find(key)
+    if cached is not None and not cached.isNull():
+        return cached
+
     reader = QImageReader(str(image_path))
     source = reader.size()
     if not reader.canRead() or not source.isValid() or source.isEmpty():
         return None
-    box_w = _THUMB_W - 2 * theme.Spacing.xs
     scale = min(box_w / source.width(), _THUMB_H / source.height())
     reader.setScaledSize(QSize(max(1, round(source.width() * scale)),
                                max(1, round(source.height() * scale))))
     image = reader.read()
     if image.isNull():
         return None
-    return QPixmap.fromImage(image)
+    pixmap = QPixmap.fromImage(image)
+    QPixmapCache.insert(key, pixmap)
+    return pixmap
 
 
 def build_saved_plot_tile(ctx, parent: QWidget, entry: dict) -> QWidget:

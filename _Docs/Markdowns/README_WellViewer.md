@@ -3063,6 +3063,12 @@ rather than a single panel.
     deck is a normal `.pptx` that opens anywhere, and no add-in is needed.
 
   The Image Table grid can be saved to the gallery and exported either way.
+- **A plot saved from one panel stays that panel.** If you saved a single panel
+  of a multi-panel figure, the export leaves it as a picture rather than
+  redrawing it, because a redraw would give you every panel of that figure under
+  the one panel's title. The same applies to any plot saved before this existed
+  from a multi-panel tab — the record does not say which it was, so it is left
+  alone. Save it again to get an editable version.
 - **Older plots are repaired automatically.** A plot saved by an earlier version
   of All-Well is only an image, so the export **redraws it** from the settings the
   card carries and captures it properly — once. From then on that plot exports as

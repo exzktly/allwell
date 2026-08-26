@@ -581,17 +581,12 @@ def regenerate_missing_vectors(ctx, store, records) -> set[str]:
     skipped_panels = 0
     try:
         for rec in missing:
-            if rec.panel_only:
-                # The record is one panel of a multi-panel figure and a redraw
-                # renders the whole card, so regenerating it would put a
-                # different figure on the slide — every panel, under this
-                # panel's title, beside this panel's parameters. A picture of
-                # the right plot beats shapes of the wrong one.
-                skipped_panels += 1
-                continue
             card = _card_for_tab(ctx, cards_by_tab, rec.tab)
             if card is None or not hasattr(card, "captureVectorSvg"):
                 skipped_tabs.add(rec.tab or "?")
+                continue
+            if not _redraw_keeps_the_scope(ctx, store, rec, card):
+                skipped_panels += 1
                 continue
             if _regenerate_one(ctx, store, rec, card):
                 regenerated.add(rec.id)
@@ -634,6 +629,41 @@ def _card_for_tab(ctx, cards_by_tab, tab: str):
             # ``cards_by_tab`` is filled.
             card = (ctx.runtime.saved_plots.cards_by_tab or {}).get(tab)
     return card
+
+
+def _redraw_keeps_the_scope(ctx, store, rec, card) -> bool:
+    """Whether redrawing *rec* would produce the same figure it stored.
+
+    A redraw renders the whole card. For a record that saved **one panel** of a
+    multi-panel figure that is a different figure — every panel, under this
+    panel's title, beside this panel's parameters — and a picture of the right
+    plot beats shapes of the wrong one.
+
+    ``rec.panel_only`` answers this outright for anything saved since the field
+    existed. For an older record it is ``None``: the record does not say, and
+    there is nothing in it that does. An earlier version of this compared the
+    stored image's aspect ratio against the live figure's, which is not evidence
+    — a plot card takes its size from the widget, so opening the Properties
+    sidebar alone changes the live figure's aspect by more than 40%, and the
+    window it is exported from is rarely the window it was saved from.
+
+    So the answer for an unknown record comes from the only thing that decides
+    whether a redraw *can* change the scope: **how many panels the card draws
+    now**. On a single-axis figure a redraw and a per-panel save are the same
+    picture, so it is safe whatever the record meant. On a multi-panel figure it
+    is not knowable, and not knowable means not redrawn.
+
+    The cost is that an old whole-figure record from a multi-panel tab stays a
+    picture. That is the right way to be wrong: re-saving it makes it editable,
+    and nothing about it is misrepresented in the meantime.
+    """
+    if rec.panel_only is not None:
+        return not rec.panel_only
+    try:
+        return len(card.figure.axes) <= 1
+    except Exception:
+        swallowed("saved_plots: could not count the figure's panels")
+        return False
 
 
 def _regenerate_one(ctx, store, rec, card) -> bool:

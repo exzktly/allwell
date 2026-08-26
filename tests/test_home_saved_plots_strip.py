@@ -332,3 +332,60 @@ def _write_png(path, width: int, height: int) -> None:
     mpimg.imsave(str(path),
                  (np.linspace(0, 1, height * width * 3)
                   .reshape(height, width, 3) * 255).astype("uint8"))
+
+
+@pytest.mark.qt
+def test_a_thumbnail_is_decoded_once_and_then_cached(qapp, tmp_path,
+                                                     monkeypatch):
+    """Home repaints its whole strip on every `refresh_home`.
+
+    A saved plot's PNG is a 300 dpi capture, and decoding twelve of them costs
+    ~200 ms on the UI thread — paid on the page build, on a dataset load and on
+    every record resync, for pixels that have not changed. Measured on the
+    reads, not on the clock: a wall-time assertion is the kind that passes on a
+    fast machine while the feature is still doing all the work.
+    """
+    from PySide6.QtGui import QImageReader
+
+    from well_viewer.features.home import tab_view
+
+    reads = []
+    real_read = QImageReader.read
+    monkeypatch.setattr(QImageReader, "read",
+                        lambda self: (reads.append(1), real_read(self))[1])
+
+    png = tmp_path / "plot.png"
+    _write_png(png, 1500, 1200)
+
+    assert tab_view._thumbnail(png) is not None
+    assert len(reads) == 1
+    for _ in range(11):
+        assert tab_view._thumbnail(png) is not None
+    assert len(reads) == 1, "a repaint must not decode the same file again"
+
+
+@pytest.mark.qt
+def test_a_re_saved_plot_is_decoded_again(qapp, tmp_path, monkeypatch):
+    """Cached on path *and* modification time, so re-saving a plot under the
+    same name shows the new figure rather than the cached old one."""
+    from PySide6.QtGui import QImageReader
+
+    from well_viewer.features.home import tab_view
+
+    reads = []
+    real_read = QImageReader.read
+    monkeypatch.setattr(QImageReader, "read",
+                        lambda self: (reads.append(1), real_read(self))[1])
+
+    png = tmp_path / "plot.png"
+    _write_png(png, 400, 300)
+    assert tab_view._thumbnail(png) is not None
+    assert len(reads) == 1
+
+    import os
+    _write_png(png, 400, 300)
+    stat = png.stat()
+    os.utime(png, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+
+    assert tab_view._thumbnail(png) is not None
+    assert len(reads) == 2, "a re-saved plot must not serve the cached pixels"

@@ -1374,10 +1374,17 @@ def test_a_panel_record_round_trips_through_persistence(tmp_path):
     rec = SavedPlot(id="p", created_at="", tab="Bar Plots", title="t",
                     png_filename="p.png", params={}, panel_only=True)
     assert SavedPlot.from_dict(rec.to_dict()).panel_only is True
-    # A record written before the flag existed reads as a whole-figure save,
-    # which is what the great majority of them are.
+    whole = SavedPlot(id="w", created_at="", tab="Bar Plots", title="t",
+                      png_filename="w.png", params={}, panel_only=False)
+    assert SavedPlot.from_dict(whole.to_dict()).panel_only is False
+
+    # A record written before the flag existed reads as **unknown**, not as a
+    # whole-figure save. This assertion used to pin the opposite, which is the
+    # guess that put a user's three-panel window on a slide in place of the one
+    # panel they had saved: absent and False are different facts, and only one
+    # of them is safe to redraw from.
     old = {k: v for k, v in rec.to_dict().items() if k != "panel_only"}
-    assert SavedPlot.from_dict(old).panel_only is False
+    assert SavedPlot.from_dict(old).panel_only is None
 
 
 @pytest.mark.qt
@@ -1413,3 +1420,152 @@ def test_a_capture_that_could_not_be_written_still_makes_this_deck_editable(
         lambda r: store.image_path(ctx, r), out, regenerated={"p1"})
     assert (result.vector, result.raster) == (1, 0)
     assert "figure for p1" in _slide_text(out, 2)
+
+
+# ── a record that does not say what it saved ─────────────────────────────────
+
+def _multi_panel_card(ctx, panels: int = 3):
+    from well_viewer.features.saved_plots import controller as C
+    from widgets.plot_card import PlotCard
+
+    card = PlotCard(figsize=(5, 8))
+    axes = [card.figure.add_subplot(panels, 1, i + 1) for i in range(panels)]
+    for i, ax in enumerate(axes):
+        ax.bar([0, 1, 2, 3], [3, 5, 2, 4])
+        ax.set_title(f"PANEL {i + 1}")
+    C.wire_save_to_gallery(ctx, card, "Bar Plots")
+    return card, axes
+
+
+def _png_of(card, bbox=None, hide=None):
+    import io
+
+    from widgets.fig_clipboard import hidden_sibling_axes
+
+    buf = io.BytesIO()
+    if hide is not None:
+        with hidden_sibling_axes(card.figure, hide):
+            card.figure.savefig(buf, format="png", bbox_inches=bbox, dpi=120)
+    else:
+        card.figure.savefig(buf, format="png", bbox_inches=bbox, dpi=120)
+    return buf.getvalue()
+
+
+@pytest.mark.qt
+def test_an_old_panel_record_is_not_redrawn_as_the_whole_figure(qapp, tmp_path):
+    """The defect a user hit: one saved panel came back as three.
+
+    A record written before the panel flag existed carries no scope, and
+    defaulting it to "whole figure" was a guess. Redrawing such a record renders
+    the whole card — a different figure, under the panel's title and beside the
+    panel's parameters. The record's own stored image says otherwise: one panel
+    of a three-panel card is about three times as wide for its height.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from widgets.fig_clipboard import axis_tight_bbox_inches
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    card, axes = _multi_panel_card(ctx)
+
+    rec = SavedPlot(id="old_panel", created_at="2026-01-01T00:00:00",
+                    tab="Bar Plots", title="PANEL 1",
+                    png_filename="old_panel.png", params={})
+    rec.panel_only = None                    # written before the flag existed
+    bbox = axis_tight_bbox_inches(axes[0], pad_in=0.05)
+    assert store.add(ctx, rec, _png_of(card, bbox, hide=axes[0]))
+
+    assert C._redraw_keeps_the_scope(ctx, store, rec, card) is False
+    assert C.regenerate_missing_vectors(ctx, store, [rec]) == set()
+    assert rec.svg_filename == "", "the panel record must stay a picture"
+
+
+@pytest.mark.qt
+def test_an_unknown_record_on_a_single_panel_figure_is_redrawn(qapp, tmp_path):
+    """Being conservative must not swallow the records the repair is for.
+
+    On a single-axis figure a redraw and a per-panel save are the same picture,
+    so the record's unknown scope cannot change what lands on the slide and the
+    repair is safe whatever it meant.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from widgets.plot_card import PlotCard
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    card = PlotCard(figsize=(5, 4))
+    card.figure.add_subplot(1, 1, 1).bar([0, 1, 2, 3], [3, 5, 2, 4])
+    C.wire_save_to_gallery(ctx, card, "Bar Plots")
+
+    rec = SavedPlot(id="old_single", created_at="2026-01-01T00:00:00",
+                    tab="Bar Plots", title="One plot",
+                    png_filename="old_single.png", params={})
+    rec.panel_only = None
+    assert store.add(ctx, rec, _png_of(card, "tight"))
+
+    assert C._redraw_keeps_the_scope(ctx, store, rec, card) is True
+
+
+@pytest.mark.qt
+def test_an_unknown_record_on_a_multi_panel_figure_is_left_alone(qapp, tmp_path):
+    """And on a multi-panel figure it is not knowable, so it is not redrawn.
+
+    This is the deliberate cost: an old *whole-figure* record from a multi-panel
+    tab stays a picture too, because nothing in the record distinguishes it from
+    a panel save. That is the right way to be wrong — re-saving makes it
+    editable, and nothing is misrepresented in the meantime. The alternative,
+    guessing from the stored image's aspect ratio, is not evidence at all: a
+    plot card takes its size from the widget, so opening the Properties sidebar
+    alone moves the live figure's aspect by more than 40%.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    card, _ = _multi_panel_card(ctx)
+
+    rec = SavedPlot(id="old_whole", created_at="2026-01-01T00:00:00",
+                    tab="Bar Plots", title="All panels",
+                    png_filename="old_whole.png", params={})
+    rec.panel_only = None
+    assert store.add(ctx, rec, _png_of(card, "tight"))
+
+    assert C._redraw_keeps_the_scope(ctx, store, rec, card) is False
+
+
+@pytest.mark.qt
+def test_a_record_that_states_its_scope_is_believed(qapp, tmp_path):
+    """A record that says what it saved is taken at its word — the panel count
+    is only consulted when the record does not say."""
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    card, _ = _multi_panel_card(ctx)
+
+    # Says "one panel" on a card whose panel count would otherwise allow a
+    # redraw: the record's own statement wins.
+    stated = SavedPlot(id="stated", created_at="", tab="Bar Plots", title="P",
+                       png_filename="stated.png", params={}, panel_only=True)
+    assert store.add(ctx, stated, _png_of(card, "tight"))
+    assert C._redraw_keeps_the_scope(ctx, store, stated, card) is False
+
+
+@pytest.mark.qt
+def test_an_unreadable_figure_leaves_the_plot_as_a_picture(qapp, tmp_path):
+    """A card whose panels cannot be counted is not redrawn from."""
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    card, _ = _multi_panel_card(ctx)
+    rec = SavedPlot(id="broken", created_at="", tab="Bar Plots", title="P",
+                    png_filename="broken.png", params={})
+    rec.panel_only = None
+    assert store.add(ctx, rec, b"not-a-png")
+    assert C._redraw_keeps_the_scope(ctx, store, rec, card) is False

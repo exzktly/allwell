@@ -942,7 +942,7 @@ def redraw_line_plots(
         draggable_legends=True,
         # Screen budgets — dropped while a capture is in flight. The batch
         # exporter renders onto its own axes and never passes them; the tab's
-        # own Export menu saves *this* figure object, so it raises
+        # own Save menu saves *this* figure object, so it raises
         # ``export_full_fidelity`` and repaints before capturing. A figure read
         # at 300 dpi has room for every CDF vertex and every trace name, and a
         # silently thinned export is a degraded artifact that looks exactly like

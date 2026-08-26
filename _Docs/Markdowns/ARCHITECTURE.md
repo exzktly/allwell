@@ -1681,7 +1681,13 @@ who is told nothing re-clicks Restore instead).
 #### Exporting the gallery (`features/saved_plots/_report.py`, `_deck.py`)
 
 The gallery goes out whole, in one of two formats, from a single Export menu on
-the page's control band. Both walk the records in **gallery order** —
+the page's control band, built by `core.ui_helpers.make_action_menu_button` —
+the one path in the app for a click-and-close menu, and the one the theme's
+caret rule is written for. That rule styles `QToolButton[hasMenu]`, so a
+`QPushButton` carrying a `QMenu` falls through to Qt's own
+`QPushButton::menu-indicator`: an unstyled arrow hard against the right edge and
+below the text's centre line. The helper puts the caret in the label and hides
+the native indicator, which is why every menu in the window reads the same. Both walk the records in **gallery order** —
 `controller.gallery_order`, which is `reversed(store.records)` — because the
 gallery shows newest first and the ▲/▼ buttons curate that sequence; an export
 that walked the records as stored came out in exactly the reverse of the order

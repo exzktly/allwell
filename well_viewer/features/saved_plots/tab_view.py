@@ -229,7 +229,7 @@ def build_saved_plots_tab(ctx, parent: QWidget) -> None:
     populate_saved_plots_grid(ctx)
 
 
-def _build_export_button(ctx, band) -> QPushButton:
+def _build_export_button(ctx, band) -> QWidget:
     """The gallery's Export control — one button, two destinations.
 
     A menu rather than two buttons because the choice is between *formats of the
@@ -237,26 +237,30 @@ def _build_export_button(ctx, band) -> QPushButton:
     order, to one file. The wording says what the user gets rather than naming the
     file type twice, since "editable in PowerPoint" is the whole reason to pick
     the second one over the first.
-    """
-    from PySide6.QtWidgets import QMenu
 
-    button = QPushButton("Export…", band)
-    button.setToolTip("Export every saved plot to a single file.")
-    menu = QMenu(button)
-    pdf_action = menu.addAction("PDF report…")
-    pdf_action.setToolTip(
-        "One page per saved plot, each showing the figure as it was captured.")
-    pdf_action.triggered.connect(lambda _=False: C.export_report_pdf(ctx))
-    pptx_action = menu.addAction("PowerPoint deck (editable figures)…")
-    pptx_action.setToolTip(
-        "One slide per saved plot, redrawn as PowerPoint shapes — bars, lines "
-        "and labels you can restyle in PowerPoint itself.")
-    pptx_action.triggered.connect(lambda _=False: C.export_deck_pptx(ctx))
-    # The menu is parented to the button, but ``setMenu`` is what makes the
-    # button show it: without it the actions exist and nothing can reach them,
-    # which is the failure this file already carries a note about elsewhere —
-    # a control that is offered is not a control that works.
-    button.setMenu(menu)
+    Built through ``make_action_menu_button``, which is what every other
+    click-and-close menu in the app uses — including the plot cards' own Save
+    menu, the one that feeds this gallery. Hand-rolling it as a ``QPushButton``
+    with a ``QMenu``, as this did, opts out of that: the theme styles the caret
+    for ``QToolButton`` only, so the button fell through to Qt's own
+    ``QPushButton::menu-indicator``, an unstyled arrow drawn hard against the
+    right edge and sitting low, below the text's centre line. The helper puts the
+    caret in the label instead and hides the native indicator, so this control
+    reads like every other menu in the window.
+    """
+    from well_viewer.core.ui_helpers import add_menu_action, make_action_menu_button
+
+    button, menu = make_action_menu_button(
+        "Export", band, tooltip="Export every saved plot to a single file.")
+    add_menu_action(
+        menu, "PDF report\u2026", lambda: C.export_report_pdf(ctx),
+        tooltip="One page per saved plot, each showing the figure as it was "
+                "captured.")
+    add_menu_action(
+        menu, "PowerPoint deck (editable figures)\u2026",
+        lambda: C.export_deck_pptx(ctx),
+        tooltip="One slide per saved plot, redrawn as PowerPoint shapes \u2014 "
+                "bars, lines and labels you can restyle in PowerPoint itself.")
     return button
 
 

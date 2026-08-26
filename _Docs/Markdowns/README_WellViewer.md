@@ -3057,7 +3057,7 @@ rather than a single panel.
 - **Clear all** asks first, and only clears if you say yes. If the
   confirmation cannot be shown at all, nothing is cleared — an answer that could
   not be obtained is not consent.
-- **Export…** — send the whole gallery, in the order the cards are arranged
+- **Export ▾** — send the whole gallery, in the order the cards are arranged
   here, to a single file. Two formats:
   - **PDF report** — a cover page plus one full-quality page per plot, each with
     its parameter summary. The figure on the page is the picture that was

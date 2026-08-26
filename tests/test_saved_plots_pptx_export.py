@@ -628,6 +628,34 @@ def test_the_export_menu_reaches_both_exporters(qapp, monkeypatch):
     assert called == ["pdf", "pptx"]
 
 
+def test_the_export_control_is_built_the_way_every_other_menu_in_the_app_is(qapp):
+    """The caret belongs in the label, on a QToolButton, like every other menu.
+
+    This was the one hand-rolled menu button in the app: a ``QPushButton`` with
+    ``setMenu``. The theme styles the drop-down caret for ``QToolButton`` only,
+    so it fell through to Qt's own ``QPushButton::menu-indicator`` — an unstyled
+    arrow drawn hard against the button's right edge and sitting below the
+    text's centre line, which is what a reader sees as misplaced.
+
+    Asserted on the built control rather than on how it looks, since a rendered
+    arrow's position is a pixel comparison that would break on any font change.
+    What decides the placement is which of the two paths the button is on.
+    """
+    from PySide6.QtWidgets import QToolButton, QWidget
+
+    from well_viewer.features.saved_plots import tab_view
+
+    band = QWidget()          # held: its child's C++ object dies with it
+    button = tab_view._build_export_button(object(), band)
+
+    assert isinstance(button, QToolButton), (
+        "a QPushButton with a menu gets Qt's own unstyled menu-indicator")
+    assert "\u25be" in button.text(), "the caret is part of the label"
+    assert button.popupMode() == QToolButton.InstantPopup, (
+        "the whole button opens the menu — the theme's caret rule assumes there "
+        "is no split default-action region")
+
+
 
 # ── the capture, and what it refuses ─────────────────────────────────────────
 

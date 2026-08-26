@@ -399,6 +399,22 @@ QFrame#Panel, QFrame[panel="true"] {{
     border: 1px solid {c.border_subtle};
     border-radius: {r.md}px;
 }}
+/* Home's saved-plot thumbnails. A tile is a button that looks like a card: it
+   carries the figure and its title as child labels, so the chrome here is the
+   frame around them and the hover state that says it can be pressed. */
+QPushButton#HomeThumbTile {{
+    background-color: {c.panel};
+    border: 1px solid {c.border_subtle};
+    border-radius: {r.md}px;
+    padding: 0;
+    text-align: center;
+}}
+QPushButton#HomeThumbTile:hover {{
+    border-color: {c.accent};
+}}
+QPushButton#HomeThumbTile:pressed {{
+    background-color: {c.hover};
+}}
 /* A panel the app has just navigated the user to. Set for a moment after a
    jump-to-this-card action, so the eye lands on the right card in a gallery of
    near-identical ones — the arrival is otherwise silent and the reader has to

@@ -333,8 +333,13 @@ def _paint_from(decls: dict, key: str, inherited: dict) -> Paint | None:
     """The fill or stroke paint named by *key*, or ``None`` for no paint."""
     raw = decls.get(key, inherited.get(key))
     if raw is None:
-        # SVG's initial values: fill black, stroke none.
-        raw = "#000000" if key == "fill" else "none"
+        # SVG 1.1's initial values for these two properties, in the spec's own
+        # spelling — ``_parse_color`` resolves the keyword. Written as the
+        # keyword rather than as hex because it is not a colour anyone chose:
+        # it is what the format says an unstyled shape is painted with, and a
+        # hex literal here would read like a theme decision this module has no
+        # business making.
+        raw = "black" if key == "fill" else "none"
     rgb = _parse_color(raw)
     if rgb is None:
         return None

@@ -14,6 +14,7 @@ import types
 
 import pytest
 
+import theme
 from well_viewer.features.home import collect as hc
 
 
@@ -135,7 +136,7 @@ def test_clicking_a_tile_opens_that_plot_and_not_merely_the_gallery(
     entry = hc.saved_plots_strip(ctx)["shown"][0]
     parent = QWidget()
     tile = tab_view.build_saved_plot_tile(ctx, parent, entry)
-    assert not tile.icon().isNull(), "the tile should carry the plot's thumbnail"
+    assert _picture(tile) is not None, "the tile should carry the plot's thumbnail"
     tile.click()
 
     assert opened == [entry["id"]] == ["p1"]
@@ -152,8 +153,8 @@ def test_a_tile_whose_image_is_gone_says_so_rather_than_drawing_nothing(
              "created_at": "", "image": tmp_path / "never-written.png"}
     parent = QWidget()
     tile = tab_view.build_saved_plot_tile(_ctx(tmp_path), parent, entry)
-    assert "image unavailable" in tile.text()
-    assert tile.icon().isNull()
+    assert _picture(tile) is None
+    assert any("image unavailable" in label.text() for label in _labels(tile))
 
 
 @pytest.mark.qt
@@ -191,3 +192,92 @@ def test_a_build_without_the_feature_never_reaches_the_gallery(tmp_path,
     HC.open_saved_plot(ctx, "p0")
 
     assert reached == []
+
+
+# ── how the tile is laid out, not what it was handed ─────────────────────────
+
+def _labels(tile):
+    from PySide6.QtWidgets import QLabel
+    return tile.findChildren(QLabel)
+
+
+def _picture(tile):
+    """The child label actually holding a pixmap, or ``None``."""
+    for label in _labels(tile):
+        pixmap = label.pixmap()
+        if pixmap is not None and not pixmap.isNull():
+            return label
+    return None
+
+
+@pytest.mark.qt
+def test_the_caption_sits_under_the_picture_and_not_beside_it(qapp, tmp_path):
+    """The defect this test exists for shipped once and no assertion saw it.
+
+    The tile was a ``QPushButton`` carrying the thumbnail as its ``icon`` and the
+    title as its ``text``. Qt lays those two out **side by side**, so on a tile
+    this narrow the picture took the left half and the title ran off the right
+    edge, clipped to a few characters. ``icon()`` and ``text()`` both returned
+    exactly what they had been given throughout, which is why asserting them
+    passed while the widget on screen was wrong — the assertion has to be on the
+    geometry the user sees.
+    """
+    from PySide6.QtWidgets import QWidget
+
+    from well_viewer.features.home import tab_view
+
+    ctx = _ctx(tmp_path)
+    _save(ctx, 1)
+    entry = hc.saved_plots_strip(ctx)["shown"][0]
+    parent = QWidget()
+    tile = tab_view.build_saved_plot_tile(ctx, parent, entry)
+    tile.show()
+
+    picture = _picture(tile)
+    captions = [label for label in _labels(tile) if label is not picture]
+    assert picture is not None and captions
+    caption = captions[0]
+
+    assert caption.y() >= picture.y() + picture.height(), (
+        "the caption must sit below the picture, not beside it")
+    assert picture.width() >= tile.width() - 4 * theme.Spacing.sm, (
+        "the picture should span the tile's width, not share it with the title")
+
+
+@pytest.mark.qt
+def test_a_long_title_is_elided_rather_than_running_off_the_tile(qapp, tmp_path):
+    """A fixed-height tile cannot wrap, so the title is shortened on purpose —
+    and the whole of it stays reachable in the tooltip."""
+    from PySide6.QtWidgets import QWidget
+
+    from well_viewer.features.home import tab_view
+
+    long_title = "Fraction ON over time, all conditions, 48 h, replicate 2"
+    entry = {"id": "p0", "title": long_title, "tab": "Line Graphs",
+             "created_at": "", "image": None}
+    parent = QWidget()
+    tile = tab_view.build_saved_plot_tile(_ctx(tmp_path), parent, entry)
+
+    caption = [label for label in _labels(tile) if label.pixmap() is None
+               or label.pixmap().isNull()]
+    shown = " ".join(label.text() for label in caption)
+    assert long_title not in shown and "…" in shown
+    assert long_title in tile.toolTip()
+
+
+@pytest.mark.qt
+def test_a_click_anywhere_on_the_tile_reaches_the_button(qapp, tmp_path):
+    """The labels cover the whole button, so they must not eat the click."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QWidget
+
+    from well_viewer.features.home import tab_view
+
+    ctx = _ctx(tmp_path)
+    _save(ctx, 1)
+    entry = hc.saved_plots_strip(ctx)["shown"][0]
+    parent = QWidget()
+    tile = tab_view.build_saved_plot_tile(ctx, parent, entry)
+    for label in _labels(tile):
+        assert label.testAttribute(Qt.WA_TransparentForMouseEvents), (
+            f"{label.objectName() or 'a label'} would swallow the tile's click")

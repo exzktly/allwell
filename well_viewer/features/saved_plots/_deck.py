@@ -134,8 +134,18 @@ def _fit_box(aspect: float, *, x: float, y: float, w: float, h: float) -> tuple:
 
 
 def _hex(color: str) -> str:
-    """A theme colour as the six bare hex digits DrawingML wants."""
-    return (color or "#000000").lstrip("#").upper()[:6]
+    """A theme colour as the six bare hex digits DrawingML wants.
+
+    Every caller passes a ``theme.CPub`` token, so there is no default here. A
+    colour that did not arrive is a wiring mistake in this module rather than a
+    condition the export can meet, and quietly substituting black would put text
+    on a slide in a colour nobody picked — indistinguishable, on the slide, from
+    a colour that was chosen.
+    """
+    digits = (color or "").lstrip("#").upper()
+    if len(digits) != 6:
+        raise ValueError(f"not a six-digit hex colour: {color!r}")
+    return digits
 
 
 def _cover_slide(builder: PptxBuilder, *, dataset_name: str, count: int) -> None:

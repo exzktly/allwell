@@ -482,37 +482,63 @@ def _build_saved_plots(ctx, page: QWidget, reg) -> QWidget:
 
 
 def build_saved_plot_tile(ctx, parent: QWidget, entry: dict) -> QWidget:
-    """One clickable thumbnail: the figure, its title, and where it came from.
+    """One clickable thumbnail: the figure, and its title underneath.
 
     A button rather than a styled label, so the tile is reachable by keyboard and
     announces itself as something that can be pressed — a bare pixmap that
     happens to respond to clicks is the affordance this page's own notes warn
     about elsewhere.
+
+    The picture and the caption are **child labels in a vertical layout**, not
+    the button's own ``icon`` and ``text``. A QPushButton lays those two out side
+    by side, which on a tile this width puts the thumbnail in the left half and
+    runs the title off the right edge — and neither ``icon()`` nor ``text()``
+    shows it, because both hold exactly what they were given. The labels are
+    transparent to the mouse so a click anywhere on the tile still reaches the
+    button.
     """
-    from PySide6.QtGui import QIcon, QPixmap
-    from PySide6.QtCore import QSize
+    from PySide6.QtGui import QPixmap
 
     tile = QPushButton(parent)
     tile.setObjectName("HomeThumbTile")
     tile.setFixedSize(_THUMB_W, _THUMB_H + _THUMB_CAPTION_H)
     tile.setCursor(Qt.PointingHandCursor)
-    tile.setText(entry["title"])
     tile.setToolTip(
         f"{entry['title']} — saved from {entry['tab'] or 'a plot'}"
         f"\nOpen this plot in Saved Plots.")
 
+    column = QVBoxLayout(tile)
+    column.setContentsMargins(theme.Spacing.xs, theme.Spacing.xs,
+                              theme.Spacing.xs, theme.Spacing.xs)
+    column.setSpacing(theme.Spacing.xs)
+
+    picture = QLabel(tile)
+    picture.setAlignment(Qt.AlignCenter)
+    picture.setFixedHeight(_THUMB_H)
+    picture.setAttribute(Qt.WA_TransparentForMouseEvents, True)
     image = entry.get("image")
     pixmap = QPixmap(str(image)) if image is not None else QPixmap()
     if pixmap.isNull():
         # The record exists and its image does not. Saying so on the tile keeps
         # a missing file distinguishable from a plot that drew nothing, which is
         # the whole point of the record carrying a filename at all.
-        tile.setText(f"{entry['title']}\n(image unavailable)")
+        picture.setObjectName("Muted")
+        picture.setText("(image unavailable)")
     else:
-        icon_size = QSize(_THUMB_W - theme.Spacing.md, _THUMB_H)
-        tile.setIcon(QIcon(pixmap.scaled(
-            icon_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
-        tile.setIconSize(icon_size)
+        picture.setPixmap(pixmap.scaled(
+            _THUMB_W - 2 * theme.Spacing.xs, _THUMB_H,
+            Qt.KeepAspectRatio, Qt.SmoothTransformation))
+    column.addWidget(picture)
+
+    caption = QLabel(tile)
+    caption.setObjectName("Muted")
+    caption.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
+    caption.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+    # Elided rather than wrapped: the tile is a fixed height, so a two-line title
+    # would push the picture out of it. The full title is in the tooltip.
+    caption.setText(caption.fontMetrics().elidedText(
+        entry["title"], Qt.ElideRight, _THUMB_W - 2 * theme.Spacing.sm))
+    column.addWidget(caption)
 
     from .controller import open_saved_plot
     tile.clicked.connect(

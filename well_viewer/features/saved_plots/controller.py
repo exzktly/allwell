@@ -13,9 +13,7 @@ from datetime import datetime
 from well_viewer.core.lazy import lazy, lazy_names
 from well_viewer.core.safe import swallow, swallowed
 from well_viewer.persistence import view_state
-from well_viewer.features.saved_plots._deck import (
-    build_saved_plots_deck, png_size,
-)
+from well_viewer.features.saved_plots._deck import build_saved_plots_deck
 from well_viewer.features.saved_plots._report import build_saved_plots_report
 from well_viewer.features.saved_plots.collect import build_summary, capture_params
 from well_viewer.features.saved_plots.state import (
@@ -633,14 +631,6 @@ def _card_for_tab(ctx, cards_by_tab, tab: str):
     return card
 
 
-#: How far the stored image's aspect ratio may differ from the live figure's
-#: before a redraw is treated as a different figure rather than the same one.
-#: A single panel of a three-panel card differs by a factor of three, and two
-#: renders of the same figure differ only by the crop's padding — so anything
-#: near 1.0 is the same scope and the threshold is nowhere near either case.
-_SCOPE_ASPECT_TOLERANCE = 0.25
-
-
 def _redraw_keeps_the_scope(ctx, store, rec, card) -> bool:
     """Whether redrawing *rec* would produce the same figure it stored.
 
@@ -650,46 +640,30 @@ def _redraw_keeps_the_scope(ctx, store, rec, card) -> bool:
     plot beats shapes of the wrong one.
 
     ``rec.panel_only`` answers this outright for anything saved since the field
-    existed. For an older record it is ``None``, and the honest answer is that
-    the record does not say. Guessing "whole figure" is what shipped, and it was
-    wrong for the first user to meet it. So the decision falls back to the one
-    piece of evidence such a record does carry: the **shape of the image it
-    stored**. One panel of a three-panel card is about three times as wide for
-    its height as the whole card; two renders of the same scope differ only by
-    the crop's padding. When the shapes disagree, the record is not what the
-    redraw would produce, whatever it is.
+    existed. For an older record it is ``None``: the record does not say, and
+    there is nothing in it that does. An earlier version of this compared the
+    stored image's aspect ratio against the live figure's, which is not evidence
+    — a plot card takes its size from the widget, so opening the Properties
+    sidebar alone changes the live figure's aspect by more than 40%, and the
+    window it is exported from is rarely the window it was saved from.
 
-    Unreadable either way → False. The plot stays the picture it already was,
-    which is the outcome that cannot be wrong.
+    So the answer for an unknown record comes from the only thing that decides
+    whether a redraw *can* change the scope: **how many panels the card draws
+    now**. On a single-axis figure a redraw and a per-panel save are the same
+    picture, so it is safe whatever the record meant. On a multi-panel figure it
+    is not knowable, and not knowable means not redrawn.
+
+    The cost is that an old whole-figure record from a multi-panel tab stays a
+    picture. That is the right way to be wrong: re-saving it makes it editable,
+    and nothing about it is misrepresented in the meantime.
     """
     if rec.panel_only is not None:
         return not rec.panel_only
-    stored = _stored_image_aspect(store.image_path(ctx, rec))
-    live = _figure_aspect(card)
-    if stored is None or live is None:
-        return False
-    return abs(stored / live - 1.0) <= _SCOPE_ASPECT_TOLERANCE
-
-
-def _stored_image_aspect(path) -> float | None:
-    """Width / height of a stored PNG, read from its header."""
-    if path is None:
-        return None
     try:
-        data = path.read_bytes() if path.exists() else b""
-    except OSError:
-        return None
-    size = png_size(data)
-    return (size[0] / size[1]) if size and size[1] else None
-
-
-def _figure_aspect(card) -> float | None:
-    """Width / height of the live figure a redraw would render."""
-    try:
-        width, height = card.figure.get_size_inches()
+        return len(card.figure.axes) <= 1
     except Exception:
-        return None
-    return (float(width) / float(height)) if height else None
+        swallowed("saved_plots: could not count the figure's panels")
+        return False
 
 
 def _regenerate_one(ctx, store, rec, card) -> bool:

@@ -1482,11 +1482,43 @@ def test_an_old_panel_record_is_not_redrawn_as_the_whole_figure(qapp, tmp_path):
 
 
 @pytest.mark.qt
-def test_an_old_whole_figure_record_is_still_redrawn(qapp, tmp_path):
-    """The conservative answer must not swallow the records the repair is for.
+def test_an_unknown_record_on_a_single_panel_figure_is_redrawn(qapp, tmp_path):
+    """Being conservative must not swallow the records the repair is for.
 
-    A record that saved the whole figure has the whole figure's shape, so
-    redrawing it produces what it stored and it becomes editable as intended.
+    On a single-axis figure a redraw and a per-panel save are the same picture,
+    so the record's unknown scope cannot change what lands on the slide and the
+    repair is safe whatever it meant.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from widgets.plot_card import PlotCard
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    card = PlotCard(figsize=(5, 4))
+    card.figure.add_subplot(1, 1, 1).bar([0, 1, 2, 3], [3, 5, 2, 4])
+    C.wire_save_to_gallery(ctx, card, "Bar Plots")
+
+    rec = SavedPlot(id="old_single", created_at="2026-01-01T00:00:00",
+                    tab="Bar Plots", title="One plot",
+                    png_filename="old_single.png", params={})
+    rec.panel_only = None
+    assert store.add(ctx, rec, _png_of(card, "tight"))
+
+    assert C._redraw_keeps_the_scope(ctx, store, rec, card) is True
+
+
+@pytest.mark.qt
+def test_an_unknown_record_on_a_multi_panel_figure_is_left_alone(qapp, tmp_path):
+    """And on a multi-panel figure it is not knowable, so it is not redrawn.
+
+    This is the deliberate cost: an old *whole-figure* record from a multi-panel
+    tab stays a picture too, because nothing in the record distinguishes it from
+    a panel save. That is the right way to be wrong — re-saving makes it
+    editable, and nothing is misrepresented in the meantime. The alternative,
+    guessing from the stored image's aspect ratio, is not evidence at all: a
+    plot card takes its size from the widget, so opening the Properties sidebar
+    alone moves the live figure's aspect by more than 40%.
     """
     from well_viewer.features.saved_plots import controller as C
     from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
@@ -1501,13 +1533,13 @@ def test_an_old_whole_figure_record_is_still_redrawn(qapp, tmp_path):
     rec.panel_only = None
     assert store.add(ctx, rec, _png_of(card, "tight"))
 
-    assert C._redraw_keeps_the_scope(ctx, store, rec, card) is True
+    assert C._redraw_keeps_the_scope(ctx, store, rec, card) is False
 
 
 @pytest.mark.qt
-def test_a_record_that_states_its_scope_is_believed_over_its_pixels(qapp,
-                                                                   tmp_path):
-    """The flag is evidence; the image shape is only a fallback for its absence."""
+def test_a_record_that_states_its_scope_is_believed(qapp, tmp_path):
+    """A record that says what it saved is taken at its word — the panel count
+    is only consulted when the record does not say."""
     from well_viewer.features.saved_plots import controller as C
     from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
 
@@ -1515,7 +1547,8 @@ def test_a_record_that_states_its_scope_is_believed_over_its_pixels(qapp,
     store = SavedPlotsStore()
     card, _ = _multi_panel_card(ctx)
 
-    # Says "one panel" while carrying a whole-figure image: the flag wins.
+    # Says "one panel" on a card whose panel count would otherwise allow a
+    # redraw: the record's own statement wins.
     stated = SavedPlot(id="stated", created_at="", tab="Bar Plots", title="P",
                        png_filename="stated.png", params={}, panel_only=True)
     assert store.add(ctx, stated, _png_of(card, "tight"))
@@ -1523,8 +1556,8 @@ def test_a_record_that_states_its_scope_is_believed_over_its_pixels(qapp,
 
 
 @pytest.mark.qt
-def test_an_unreadable_image_leaves_the_plot_as_a_picture(qapp, tmp_path):
-    """With no evidence either way, the outcome that cannot be wrong wins."""
+def test_an_unreadable_figure_leaves_the_plot_as_a_picture(qapp, tmp_path):
+    """A card whose panels cannot be counted is not redrawn from."""
     from well_viewer.features.saved_plots import controller as C
     from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
 

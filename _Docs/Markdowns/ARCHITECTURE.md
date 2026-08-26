@@ -1774,12 +1774,22 @@ panel's parameters — a different figure, not a worse one. `SavedPlot.panel_onl
 records which a save was, and it is **tri-state**: `None` means the record
 predates the field. Defaulting those to "whole figure" was a guess, and it put a
 user's three-panel window on a slide in place of the single panel they had
-saved. For an unknown record `_redraw_keeps_the_scope` decides from the evidence
-the record does carry — the aspect ratio of the image it stored, against the live
-figure's. One panel of a three-panel card is about three times as wide for its
-height; two renders of the same scope differ only by the crop's padding. No
-readable evidence either way means no redraw, because a picture of the right
-plot beats shapes of the wrong one.
+saved.
+
+For an unknown record there is nothing in it that says, so
+`_redraw_keeps_the_scope` asks the only question that decides whether a redraw
+*can* change the scope: **how many panels the card draws now**. One axis and a
+redraw is the same picture as a per-panel save, so it is safe whatever the
+record meant; more than one and it is not knowable, and not knowable means not
+redrawn. The cost is that an old whole-figure record from a multi-panel tab
+stays a picture — the right way to be wrong, since re-saving makes it editable
+and nothing is misrepresented meanwhile.
+
+Comparing the stored image's aspect ratio against the live figure's was tried
+and is **not** evidence: a plot card takes its size from the widget, so opening
+the Properties sidebar alone moves the live figure's aspect by more than 40%,
+and the window a deck is exported from is rarely the window its plots were saved
+from.
 
 **Those slides say the figure was redrawn**, and `DeckResult.redrawn` counts
 them. A redrawn figure is drawn from *today's* data and today's gating, and the

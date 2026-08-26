@@ -90,13 +90,6 @@ apply_review_overrides_to_cache = _lazy(
 logger = logging.getLogger("well_viewer.gating_worker")
 
 
-#: How long a synchronous recompute waits for an in-flight async pass to unwind
-#: before starting its own. Same bound and the same reasoning as the restart in
-#: ``cell_gating_start_gating_worker``: ``cancel()`` is what makes it safe, and
-#: the wait is only a courtesy.
-_SYNC_GATING_CANCEL_MS = 50
-
-
 class GatingWorker(QThread):
     """Apply cell-gating thresholds to every cached well row off the GUI thread.
 
@@ -1674,7 +1667,12 @@ def cell_gating_recompute_now(ctx) -> bool:
     prev = ctx.runtime.cell_gating.worker
     if prev is not None and prev.isRunning():
         prev.cancel()
-        prev.wait(_SYNC_GATING_CANCEL_MS)
+        # A literal, deliberately: ``test_state_lifecycle`` proves this bound is
+        # small by reading it out of the syntax tree, and a named constant is an
+        # ``ast.Name`` it cannot evaluate. Same 50 ms and same reasoning as the
+        # restart in ``cell_gating_start_gating_worker`` — ``cancel()`` is the
+        # mechanism, the wait is a courtesy to let the thread reach a checkpoint.
+        prev.wait(50)
     worker = GatingWorker(ctx)
     try:
         worker._run_inner()

@@ -40,8 +40,14 @@ def test_profile_filters_features_and_their_subleaves():
 def test_thin_profile_matches_this_branch():
     reg = build_feature_registry(load_profile("thin"))
     assert reg.get("Plotting") is not None
+    assert reg.get("Statistics") is not None
     assert reg.get("Home") is not None
     assert reg.get("Segmentation") is not None
+    # The features thin still leaves out, so that adding one is a deliberate
+    # edit here rather than a silent widening of the subset.
+    for dropped in ("Multivariate", "Spatial", "smFISH", "Review CSV",
+                    "Saved Plots", "Batch Export"):
+        assert reg.get(dropped) is None, dropped
 
 
 def test_active_profile_env(monkeypatch):
@@ -102,6 +108,34 @@ def test_app_boots_and_loads_under_subset_profile(qtbot, monkeypatch, mini_datas
     app._invalidate_stats_cache()
     from well_viewer.core.channel_state_controller import update_channel_selector
     update_channel_selector(app._ctx)
+
+
+@pytest.mark.slow
+def test_the_thin_build_ships_statistics(qtbot, monkeypatch, mini_dataset):
+    """Statistics is part of the thin build, and boots as one.
+
+    The manifest line is only half the claim: the tab has to build under the
+    subset too, and it is the one feature whose builder reaches outside its own
+    package for a host widget (the sidebar group-editor frame). Booting the
+    profile is what proves that frame exists in a build without the features
+    that surround it.
+    """
+    monkeypatch.setenv("ALLWELL_PROFILE", "thin")
+    from well_viewer.runtime_app import WellViewerApp
+
+    app = WellViewerApp()
+    qtbot.addWidget(app)
+    app._load_path(mini_dataset)
+
+    assert app._notebook.pageNames() == [
+        "Home", "Plotting", "Statistics", "Image Browser",
+    ]
+    assert app._app_state.feature_slice("stats") is not None
+
+    # Drive every surviving tab, so the Statistics builder and its activation
+    # hook actually run rather than merely being registered.
+    for name in list(app._notebook.pageNames()):
+        app._notebook.setCurrentByName(name)
 
 
 # ── non-removable sub-leaves ────────────────────────────────────────────────

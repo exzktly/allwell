@@ -25,6 +25,7 @@ from dataclasses import dataclass
 
 from pipeline import completeness
 from well_viewer.core.lazy import lazy
+from well_viewer.domain.dataset_name import dataset_display_name
 
 # Saved Plots is removable, so this is a proxy rather than an import: it resolves
 # on first call and only in a build that ships the feature. The guard above every
@@ -166,7 +167,10 @@ def identity(ctx) -> dict:
     info, block = _sidecar(ctx), _record(ctx)
     schema = str(info.get("schema") or "")
     return {
-        "name": data_dir.name if data_dir is not None else "",
+        # The shared rule, not ``data_dir.name``: Review loads
+        # ``<dataset_root>/out``, so the folder's own name is the literal "out"
+        # on every pipeline dataset and the masthead titled all of them that.
+        "name": dataset_display_name(data_dir),
         "path": str(data_dir) if data_dir is not None else "",
         "schema": schema,
         "separator": str(info.get("separator") or ""),

@@ -13,7 +13,9 @@ import logging
 import numpy as np
 
 import theme
-from well_viewer.core.plot_style import apply_ax_style, style_legend, tokens_for
+from well_viewer.core.plot_style import (
+    apply_ax_style, follows_theme, style_legend, tokens_for,
+)
 from well_viewer.core.plot_style import apply_export_style_to_current
 
 _logger = logging.getLogger("well_viewer")
@@ -69,8 +71,9 @@ def _draw_message(fig, text: str) -> None:
     fig.set_facecolor(bg)
     ax.set_facecolor(bg)
     ax.axis("off")
-    ax.text(0.5, 0.5, text, ha="center", va="center", wrap=True,
-            transform=ax.transAxes, color=muted_fg, fontsize=10)
+    follows_theme(ax.text(0.5, 0.5, text, ha="center", va="center", wrap=True,
+                          transform=ax.transAxes, color=muted_fg, fontsize=10),
+                  muted=True)
 
 
 def _footnote(fig, text: str) -> None:
@@ -248,9 +251,11 @@ def _render_splom(fig, res) -> None:
     if dropped:
         # On the figure, not in a tooltip: this is the only place an exported
         # copy can carry the shortfall.
-        fig.text(0.5, 0.005,
-                 "not shown: " + ", ".join(str(lbl) for lbl in dropped),
-                 ha="center", va="bottom", fontsize=6, color=muted_fg)
+        follows_theme(
+            fig.text(0.5, 0.005,
+                     "not shown: " + ", ".join(str(lbl) for lbl in dropped),
+                     ha="center", va="bottom", fontsize=6, color=muted_fg),
+            muted=True)
     fig.subplots_adjust(left=0.10, bottom=0.10 if not dropped else 0.13,
                         right=0.98, top=0.94,
                         hspace=0.15, wspace=0.15)

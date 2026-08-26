@@ -109,12 +109,12 @@ def _annotate_cluster_headers(items: list[BarItem], xs: list[float], ax) -> None
     """Per-cluster label centred above the mean panel."""
     if not items or not xs:
         return
-    from well_viewer.core.plot_style import tokens_for
+    from well_viewer.core.plot_style import follows_theme, tokens_for
     _fg = tokens_for(ax)[1]
     for gk, cx in cluster_centers(items, xs):
-        ax.text(cx, 1.02, gk, transform=ax.get_xaxis_transform(),
-                ha="center", va="bottom", fontsize=8, fontweight="bold",
-                color=_fg)
+        follows_theme(ax.text(cx, 1.02, gk, transform=ax.get_xaxis_transform(),
+                              ha="center", va="bottom", fontsize=8,
+                              fontweight="bold", color=_fg))
 
 
 def _mark_undefined_spread(ax, x: float, y: float, color: str) -> None:

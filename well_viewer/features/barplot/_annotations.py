@@ -17,9 +17,48 @@ from __future__ import annotations
 
 import math
 
-from well_viewer.core.plot_annotations import annotate_value
+from well_viewer.core.plot_annotations import (
+    _LABEL_OFFSET_OVER_MARK_PT,
+    LABEL_HEADROOM,
+    annotate_value,
+)
 from well_viewer.features.barplot.collect import cluster_centers
+from well_viewer.core.safe import swallowed
 from well_viewer.domain.numeric import is_number
+
+
+def user_y_ceiling(ctx, ax) -> float | None:
+    """The user's own upper y-limit for *ax*, or ``None`` when they set none.
+
+    Read through the same per-panel lookup ``apply_export_style_prefs`` uses —
+    the figure's ``axis_buckets`` entry for this panel first, then the flat
+    pref — so the number this function honours is the number that pass will
+    apply afterwards. Reading only the flat pref would have been right for a
+    single-axis figure and wrong for the Value / Fraction / Events stack, which
+    is the figure this actually draws on.
+
+    ``None`` means "no override", which is not the same as a limit of zero; a
+    caller that conflated them would refuse to draw on a panel the user had
+    simply left alone.
+
+    Two annotation passes need it — the significance brackets stack under it,
+    and a value label near it is turned inward — so it lives here with them
+    rather than in one of the two.
+    """
+    fig = getattr(ax, "figure", None)
+    if fig is None:
+        return None
+    try:
+        from well_viewer.core.plot_style import axis_scoped_value, figure_prefs
+        prefs = figure_prefs(ctx, fig)
+        idx = list(fig.axes).index(ax) + 1
+        raw = axis_scoped_value(prefs, idx, "y_lim_max", None)
+        if raw in (None, ""):
+            return None
+        return float(raw)
+    except Exception:
+        swallowed("barplot: could not read the panel's user y-limit")
+        return None
 
 
 def annotate_cluster_headers(items, xs: list[float], ax) -> None:
@@ -53,7 +92,7 @@ def mark_undefined_spread(ax, x: float, y: float, color: str) -> None:
 
 
 def label_bar(ax, x: float, value, spread, *, draw_err: bool,
-               ci_scale: float, fmt: str) -> None:
+              ci_scale: float, fmt: str, ceiling: float | None = None) -> None:
     """One bar's value label, anchored clear of its error cap.
 
     *spread* is printed — and used to place the text — only when an error bar
@@ -61,6 +100,15 @@ def label_bar(ax, x: float, value, spread, *, draw_err: bool,
     error-bar type on "None", the whisker is absent and so is the ± half: a
     label claiming a spread the panel does not draw would be the figure
     describing a plot other than itself.
+
+    Two things move the text off its default place. A bar whose spread is
+    undefined already carries :func:`mark_undefined_spread`'s ``n/a`` at the
+    same anchor and the same offset, so the value stacks above it rather than
+    on top of it. And when *ceiling* names a y-limit the user pinned for this
+    panel, a label that would sit near or above it is drawn on the inside of
+    the bar instead: ``apply_export_style_to_current`` re-applies that limit
+    after the draw, and these labels carry ``annotation_clip=False``, so an
+    outside one would end up over the panel title rather than clipped.
     """
     if ax is None or value is None:
         return
@@ -73,12 +121,32 @@ def label_bar(ax, x: float, value, spread, *, draw_err: bool,
         return
     drawn = s * ci_scale if (draw_err and math.isfinite(s) and s > 0) else None
     anchor = (v + drawn if v >= 0 else v - drawn) if drawn is not None else v
-    annotate_value(ax, x, v, drawn, fmt=fmt, anchor=anchor)
+    marked = draw_err and math.isnan(s)
+    annotate_value(
+        ax, x, v, drawn, fmt=fmt, anchor=anchor,
+        offset_pt=_LABEL_OFFSET_OVER_MARK_PT if marked else None,
+        inside=_over_ceiling(anchor, ceiling, ax),
+    )
+
+
+def _over_ceiling(anchor: float, ceiling: float | None, ax) -> bool:
+    """Whether a label at *anchor* would be drawn at or above the user's
+    *ceiling* for this panel.
+
+    The margin is the headroom the panel would otherwise have grown by, since
+    that is the room the text was sized against; a pinned ceiling is exactly
+    the case where that growth does not happen.
+    """
+    if ceiling is None or not math.isfinite(anchor):
+        return False
+    lo, hi = ax.get_ylim()
+    span = abs(hi - lo) or abs(ceiling) or 1.0
+    return anchor > ceiling - span * (LABEL_HEADROOM - 1.0)
 
 
 def annotate_bar_values(settings: tuple[bool, str], items, xs: list[float], *,
                         ax_mean, ax_frac, ax_n=None, ci_scale: float = 1.0,
-                        draw_err: bool = True) -> None:
+                        draw_err: bool = True, ctx=None) -> None:
     """Draw ``mean ± spread`` above every drawn bar, when the overlay is on.
 
     *settings* is the ``(enabled, fmt)`` pair from
@@ -91,18 +159,24 @@ def annotate_bar_values(settings: tuple[bool, str], items, xs: list[float], *,
     has-flag the bar was: a placeholder column (nothing was computable) gets no
     label, because a number over a dashed placeholder would be the one bar on
     the panel whose text and shape disagree.
+
+    *ctx*, when given, is used for one thing only: reading each panel's pinned
+    upper y-limit, so a label near it is turned inward instead of being drawn
+    over the title. It is read once per panel rather than once per bar.
     """
     enabled, fmt = settings
     if not enabled:
         return
+    ceilings = {id(ax): user_y_ceiling(ctx, ax)
+                for ax in (ax_mean, ax_frac, ax_n) if ax is not None}
     for i, item in enumerate(items):
         x = xs[i] if i < len(xs) else i
         if item.has_mean:
-            label_bar(ax_mean, x, item.mean, item.spread,
-                       draw_err=draw_err, ci_scale=ci_scale, fmt=fmt)
+            label_bar(ax_mean, x, item.mean, item.spread, draw_err=draw_err,
+                      ci_scale=ci_scale, fmt=fmt, ceiling=ceilings[id(ax_mean)])
         if item.has_frac:
-            label_bar(ax_frac, x, item.frac, item.frac_spread,
-                       draw_err=draw_err, ci_scale=ci_scale, fmt=fmt)
+            label_bar(ax_frac, x, item.frac, item.frac_spread, draw_err=draw_err,
+                      ci_scale=ci_scale, fmt=fmt, ceiling=ceilings[id(ax_frac)])
         if ax_n is not None and is_number(item.n_above):
-            label_bar(ax_n, x, item.n_above, item.n_above_spread,
-                       draw_err=draw_err, ci_scale=ci_scale, fmt=fmt)
+            label_bar(ax_n, x, item.n_above, item.n_above_spread, draw_err=draw_err,
+                      ci_scale=ci_scale, fmt=fmt, ceiling=ceilings[id(ax_n)])

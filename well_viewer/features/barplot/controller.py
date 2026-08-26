@@ -262,7 +262,7 @@ def render_bar_items(
     # fit can widen the headroom that keeps them inside the panel.
     _labels = value_labels if value_labels is not None else value_label_settings(ctx)
     annotate_bar_values(_labels, items, xs, ax_mean=ax_mean, ax_frac=ax_frac,
-                        ax_n=ax_n, ci_scale=ci_scale, draw_err=draw_err)
+                        ax_n=ax_n, ci_scale=ci_scale, draw_err=draw_err, ctx=ctx)
 
     # ── Auto-fit y-limits ────────────────────────────────────────────────────
     # Honest 0 baseline; trim top to tallest bar + error + ~8% headroom so the

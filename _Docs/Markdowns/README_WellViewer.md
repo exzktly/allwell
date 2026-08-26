@@ -1708,33 +1708,50 @@ Events panel of the Violin / Beeswarm views) and to the **Line Graphs** tab's
 three time panels. The CDF panel takes none: its points are one per cell rather
 than a mean of anything, so there is no spread to state and one label per cell
 would bury the curve. The **Batch Export** bar and line figures follow the
-switch too, so a plate exported in bulk carries the same numbers as the figure
-you set it on.
+switch too, so a plate exported in bulk is labelled like the figure you set the
+switch on. One caveat on the bar figures: the batch ones have always drawn a
+plain SEM whisker regardless of Properties → Statistics, so with *95 % CI* or
+*Error bars: None* selected their labels state that SEM — each figure's label
+matches its own whisker, but the exported figure and the tab will disagree.
 
-**The ± half appears only when an error bar is actually drawn.** Switch the
-error bars off (Properties → Statistics → *Show: Mean*, or *Error bars: None*)
-and the labels print the mean alone. A bar whose spread could not be computed —
-one replicate, or FOV labels that don't identify the fields — is likewise
-labelled with its mean alone, and keeps its "n/a" mark to say why. A label
-reading `± 0` over a spread that was never measured would claim the replicates
-agreed, which is exactly the confusion that mark exists to prevent. Where the
-error bars are 95 % confidence intervals, the label states the interval, not the
-SEM behind it.
+**A label always states the spread the panel beside it draws, and never any
+other.** On the Bar Plots tab that means the Properties → Statistics controls
+reach the text as well as the whisker: set *Show: Mean* or *Error bars: None*
+and the labels print the mean alone, set *95 % CI* and they state the interval
+rather than the SEM behind it. The Line Graphs tab has no such control — it
+draws a ±spread band whenever there is a spread — so its labels carry a ± to
+match. (*Error bars: SEM* / *SD* does reach the Line tab, because it chooses
+which spread is computed; the labels follow it, as the band does.)
+
+A bar whose spread could not be computed — one replicate, or FOV labels that
+don't identify the fields — is labelled with its mean alone, and keeps its
+"n/a" mark, drawn on its own line just beneath the value. A label reading `± 0`
+over a spread that was never measured would claim the replicates agreed, which
+is exactly the confusion that mark exists to prevent.
 
 **Value format** beside the switch takes a printf-style format for the numbers —
 `%.2f` for two decimals, `%.1e` for scientific notation, `%d` for a whole
-number. Leave it blank and each label picks a format from its own magnitude:
-whole numbers print without decimals so a count of events reads `310` rather
-than `310.00`, fractions get three places, and anything past a hundred thousand
-goes to scientific notation. Both halves of a label share one format so they
-read as a single number — with one exception, a spread that format would round
-to `0`, which keeps enough precision to stay visible rather than reading as a
-measured zero.
+number. A format you type governs both halves of a label, so the pair reads as
+one number the way you wrote it; the one exception is a spread that format
+would round to `0`, which keeps enough precision to stay visible rather than
+reading as a measured zero.
+
+Leave it blank and each half is formatted from its own magnitude: whole numbers
+print without decimals, so a count of events reads `310` rather than `310.00`,
+fractions get three places, and anything past a hundred thousand goes to
+scientific notation. The two halves are formatted separately on purpose. A
+replicate set of two wells counting 27 and 33 events has a mean of exactly 30
+and a spread of 4.24, and a shared whole-number format would truncate that to
+`30 ± 4` — a label understating the whisker drawn right beneath it.
 
 Panels make room for the text: the y-axis gains extra headroom while the labels
-are on, and the Fraction panel's usual ceiling of 1.05 opens up, so a bar or
-trace at the top of its range is not labelled over the panel title. Both the
-switch and the format are saved with the rest of the view state.
+are on — below the axis as well as above it, for bars a subtractive fold change
+has pushed negative — and the Fraction panels' usual ceiling of 1.05 opens up,
+so a bar or trace at the top of its range is not labelled over the panel title.
+Where you have pinned a panel's own upper limit under Properties → Axes, that
+limit wins, and a label that would sit above it is drawn inside the bar
+instead. Both the switch and the format are saved with the rest of the view
+state.
 
 #### Interval per timepoint, and Offset
 

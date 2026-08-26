@@ -21,10 +21,16 @@ than was measured:
   printed over a bar whose spread was never computed says the replicates agreed
   — the exact confusion ``_mark_undefined_spread`` exists to prevent, restated
   in text.
-* **A spread that would round to zero keeps its own precision.** The two halves
-  otherwise share the format chosen for the mean, so they read as one number;
-  but a mean of 1000 and a spread of 0.4 must not print ``1000 ± 0``, because
-  computed-as-zero and too-small-to-show are different facts.
+* **The spread is formatted from its own magnitude, not the mean's.** Sharing
+  one format is what a pair of numbers wants typographically and it is wrong
+  arithmetically: the mean's format is chosen from the mean, and a whole-number
+  mean takes ``%d``, which *truncates*. A replicate set of two wells counting 27
+  and 33 events has a mean of exactly 30 and an SD of 4.24, and under a shared
+  format the label read ``30 ± 4`` — understating the whisker drawn directly
+  beneath it by 43%. A user-typed format still governs both halves, because
+  there the shared look is the thing being asked for; even then a spread that
+  format would round away keeps its own precision, since computed-as-zero and
+  too-small-to-show are different facts.
 """
 
 from __future__ import annotations
@@ -49,9 +55,22 @@ _LABEL_OFFSET_PT = 7
 #: replaces the fraction panels' 1.05 ceiling, so a point at 1.0 is not
 #: labelled over the panel title. Each is a widening only: a figure with labels
 #: on must never crop data to make room for text.
+#:
+#: ``LABEL_FRAC_CAP`` is deliberately ``LABEL_HEADROOM`` applied to a full
+#: fraction of 1.0, and not a smaller round number. A cap below that binds
+#: before the headroom does, which made the Fraction panel the one panel
+#: starved of the room every other panel was given — a bar at 1.0 got 16% of
+#: its span where the Value panel got 22%, and its label was drawn over the
+#: title.
 LABEL_HEADROOM = 1.22
 LABEL_SPAN_HEADROOM = 1.14
-LABEL_FRAC_CAP = 1.16
+LABEL_FRAC_CAP = 1.22
+
+#: Where a value label sits when the same bar also carries an ``n/a`` mark.
+#: The mark is drawn at the same anchor, offset, alignment and point size, so
+#: the two are pixel-identical at the default — this clears the mark's own line
+#: (its offset plus its cap height) and stacks the value above it.
+_LABEL_OFFSET_OVER_MARK_PT = 18
 
 #: Point size for the label text. Deliberately smaller than the tick labels:
 #: one label per bar or per marker is a lot of text on a busy panel, and the
@@ -91,6 +110,17 @@ def _auto_format(value: float) -> str:
     return "%.3f"
 
 
+def _rounds_to_zero(text: str) -> bool:
+    """True when *text* shows no significant digit — ``"0"``, ``"0.00"``, ``"0 nM"``.
+
+    A digit scan rather than ``float(text)``: a user's format can carry units or
+    a literal ``%``, and the float conversion raised on exactly those, so the
+    guard below silently let ``± 0`` through for the formats most likely to
+    produce it.
+    """
+    return not any(ch in "123456789" for ch in text)
+
+
 def _apply_format(fmt: str, value: float) -> str:
     """*value* through the printf *fmt*, falling back to the automatic one.
 
@@ -110,9 +140,11 @@ def format_value_label(value, spread=None, *, fmt: str = "") -> str:
 
     *spread* of ``None``, a non-finite spread, or one that is not positive
     yields the mean alone — see the module docstring on why a ``± 0`` is not an
-    acceptable stand-in for a spread that was never computed. *fmt* is the
-    user's printf format; empty picks one from *value*'s magnitude and applies
-    it to both halves so they read as one number.
+    acceptable stand-in for a spread that was never computed.
+
+    *fmt* is the user's printf format and governs both halves when set. Empty
+    formats each half from **its own** magnitude, so the ± states the whisker
+    that was drawn rather than the whisker rounded into the mean's precision.
     """
     try:
         v = float(value)
@@ -130,14 +162,19 @@ def format_value_label(value, spread=None, *, fmt: str = "") -> str:
         return head
     if not math.isfinite(s) or s <= 0:
         return head
-    tail = _apply_format(chosen, s)
-    # A spread the mean's format rounds away keeps its own: "1000 ± 0" claims a
-    # measurement of zero for a spread that is merely small on this scale.
-    try:
-        if float(tail) == 0.0:
+    if fmt:
+        # The user asked for this format; it governs both halves, so the pair
+        # reads as one number the way they typed it.
+        tail = _apply_format(chosen, s)
+        # …except where that rounds the spread away. "1000 ± 0" claims a
+        # measurement of zero for a spread that is merely small on this scale.
+        if _rounds_to_zero(tail):
             tail = _apply_format(_auto_format(s), s)
-    except ValueError:
-        pass
+    else:
+        # No format asked for: the spread is its own number and is formatted
+        # from its own magnitude. See the module docstring — inheriting a whole
+        # mean's "%d" truncated 4.24 to 4.
+        tail = _apply_format(_auto_format(s), s)
     return f"{head} ± {tail}"
 
 
@@ -156,7 +193,8 @@ def value_label_settings(ctx) -> tuple[bool, str]:
 
 
 def annotate_value(ax, x: float, value, spread=None, *, fmt: str = "",
-                   color=None, anchor=None) -> None:
+                   color=None, anchor=None, offset_pt: float | None = None,
+                   inside: bool = False) -> None:
     """Draw the ``mean ± spread`` label for one point on *ax*.
 
     The label sits *outside* the datum: above it for a positive value, below
@@ -164,6 +202,17 @@ def annotate_value(ax, x: float, value, spread=None, *, fmt: str = "",
     change) is not labelled through its own body. *anchor* overrides the y the
     text is placed against — the bar renderers pass the top of the error cap so
     the text clears the whisker rather than landing on it.
+
+    *offset_pt* overrides how far from the anchor the text sits. The bar
+    renderer raises it for a bar that also carries an ``n/a`` mark: that mark is
+    drawn at the same anchor with the same offset, alignment and point size, so
+    at the default the two land on identical pixels and neither can be read —
+    and a single well with no replicate set has an undefined spread on every
+    bar, which is the commonest selection there is.
+
+    *inside* flips the text to the other side of the anchor: used when the
+    user has pinned this panel's upper y-limit and an outside label would be
+    drawn over the panel title.
 
     ``annotation_clip=False`` keeps a label near the top of the axes visible
     rather than vanishing; the panels that draw these also widen their headroom
@@ -181,13 +230,14 @@ def annotate_value(ax, x: float, value, spread=None, *, fmt: str = "",
         y = v
     if not math.isfinite(y):
         return
-    above = v >= 0
+    above = (v >= 0) if not inside else (v < 0)
     if color is None:
         from well_viewer.core.plot_style import tokens_for
         color = tokens_for(ax)[1]
+    off = _LABEL_OFFSET_PT if offset_pt is None else float(offset_pt)
     ax.annotate(
         text, (x, y), textcoords="offset points",
-        xytext=(0, _LABEL_OFFSET_PT if above else -_LABEL_OFFSET_PT),
+        xytext=(0, off if above else -off),
         ha="center", va="bottom" if above else "top",
         fontsize=_LABEL_FONT_PT, color=color, zorder=6,
         annotation_clip=False,

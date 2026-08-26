@@ -651,14 +651,29 @@ def _finalize_line_axes(
         return leg
 
     if value_labels:
-        # The labels are drawn above the topmost point of each trace, in ink
+        # The labels are drawn beyond the outermost point of each trace, in ink
         # rather than in data, so matplotlib's own 5% margin does not know
-        # about them and crops the highest one. Widen the time panels' tops
-        # before the N panel's clamp below reads them.
-        for _ax_lbl in (ax_mean, ax_n):
+        # about them and crops the extreme one. Widen the time panels before
+        # the N panel's clamp below reads them.
+        #
+        # The Fraction panel is in the list **only under fold change**, which is
+        # exactly when its clamp does not run: with fold change off,
+        # ``redraw_line_plots`` has already pinned it to the widened
+        # ``LABEL_FRAC_CAP`` and widening again would stack one allowance on
+        # the other. With it on, the field is a ratio, no clamp applies, and
+        # nothing else was giving this panel any room at all — the Bar tab's
+        # Fraction panel gets it from ``autofit``, so leaving it out here made
+        # two surfaces answer one question two ways.
+        _labelled = [ax_mean, ax_n] + ([ax_frac] if fc_active else [])
+        for _ax_lbl in _labelled:
             _lo, _hi = _ax_lbl.get_ylim()
-            if _hi > _lo:
-                _ax_lbl.set_ylim(_lo, _lo + (_hi - _lo) * LABEL_SPAN_HEADROOM)
+            if _hi <= _lo:
+                continue
+            _pad = (_hi - _lo) * (LABEL_SPAN_HEADROOM - 1.0)
+            # Padded at both ends when the panel holds negatives: a label on a
+            # point below zero is drawn below it, so the room it needs is at
+            # the floor, where the top padding does nothing for it.
+            _ax_lbl.set_ylim(_lo - (_pad if _lo < 0 else 0.0), _hi + _pad)
     if any_n:
         cur_lo, cur_hi = ax_n.get_ylim()
         ax_n.set_ylim(0, max(cur_hi, 1))

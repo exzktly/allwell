@@ -406,6 +406,17 @@ def test_the_batch_twins_do_not_clamp_the_fraction_under_fold_change(path):
         r"if not fc_active:\n(?:[ \t]*#[^\n]*\n)*[ \t]*ax_frac\.set_ylim\(-0\.05,",
         src)
     assert guarded, f"{path} clamps its fraction panel unconditionally"
+    # The ceiling itself is still pinned, just no longer to one number: either
+    # the bare 1.05, or the value-label widening that falls back to it. Without
+    # this the guard would wave through ``set_ylim(-0.05, 0.80)`` — a silent
+    # crop of a bounded panel, which is the same defect one axis down, and the
+    # literal it replaced did catch that.
+    ceiling = re.search(
+        r"ax_frac\.set_ylim\(-0\.05,\s*(?:_?LABEL_FRAC_CAP if \w+ else )?1\.05\)",
+        src)
+    assert ceiling, (
+        f"{path} clamps its fraction panel to something other than 1.05 (or the "
+        "value-label widening that falls back to it)")
 
 
 def test_only_the_stale_facet_columns_lose_their_label():

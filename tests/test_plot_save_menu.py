@@ -88,6 +88,32 @@ def test_no_plot_tab_still_hand_rolls_an_export_menu(relative):
         )
 
 
+@pytest.mark.parametrize("relative", PLOT_TAB_VIEWS)
+def test_no_plot_tab_still_describes_the_retired_export_button(relative):
+    """The prose around the menu drifts after the menu itself is fixed.
+
+    Renaming ``Export ▾`` to ``Save ▾`` swept the menu construction and left two
+    Spatial tooltips telling the user to "click Export CSV" for a button that no
+    longer exists — and the manual, updated in the same change, promises those
+    tooltips carry the same one-line reading as its own table. The menu tests
+    above could not see it: they read ``add_menu_action`` calls, and a tooltip is
+    an ordinary string sitting anywhere in the module.
+
+    So this reads every string constant in the tab, not just the labelled ones.
+    """
+    tree = ast.parse((FEATURES / relative).read_text())
+    offenders = [
+        node.value for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        and "export csv" in node.value.lower()
+    ]
+    assert not offenders, (
+        f"{relative} still names the retired Export CSV button in "
+        f"{len(offenders)} string(s): {offenders!r}. The entry is "
+        "`Save plot data…` (Spatial: `Save summary data…`) inside `Save ▾`."
+    )
+
+
 def test_the_builder_requires_the_cells_callback():
     """Not merely "the call sites pass one" — the signature must demand it.
 

@@ -2622,6 +2622,55 @@ def test_card_key_guard_clears(tmp_path):
         "the card-key guard fired on a correctly-built menu")
 
 
+# ── the retired Export CSV button, named in prose ───────────────────────────
+
+#: Two shapes of the defect that shipped: the label inside a tooltip constant,
+#: and the same words inside a long multi-line help string. The second is what
+#: actually survived the rename, so it is not the optional one.
+RETIRED_EXPORT_VIOLATIONS = {
+    "tooltip": 'BTN_TIP = "Export CSV writes one row per (well, timepoint)."\n',
+    "long_help": (
+        'HELP = (\n'
+        '    "Pick Heatmap for a matrix or Line plot for one series per "\n'
+        '    "well. Export CSV writes one long-format row per (well, "\n'
+        '    "timepoint) with every summary column at once."\n'
+        ')\n'
+    ),
+    "cased": 'TIP = "Click export csv to write the summary."\n',
+}
+
+#: The same sentences after the rename. Present so the guard is not merely a
+#: ban on the word "export": a tab may still say Batch Export, and does.
+RETIRED_EXPORT_CLEAN = (
+    'BTN_TIP = "Save summary data… writes one row per (well, timepoint)."\n'
+    'OTHER = "The Batch Export tab writes every well at once."\n'
+)
+
+
+def _retired_export_offenders(monkeypatch, root: Path):
+    """Run the guard with its feature tree pointed at *root*."""
+    module = importlib.import_module("tests.test_plot_save_menu")
+    monkeypatch.setattr(module, "FEATURES", root, raising=False)
+    try:
+        module.test_no_plot_tab_still_describes_the_retired_export_button(
+            "spatial/tab_view.py")
+    except AssertionError as exc:
+        return exc
+    return None
+
+
+@pytest.mark.parametrize("shape", sorted(RETIRED_EXPORT_VIOLATIONS))
+def test_retired_export_guard_catches(tmp_path, monkeypatch, shape):
+    _write(tmp_path, "spatial/tab_view.py", RETIRED_EXPORT_VIOLATIONS[shape])
+    assert _retired_export_offenders(monkeypatch, tmp_path), (
+        f"the {shape} spelling walked past the retired-Export-CSV guard")
+
+
+def test_retired_export_guard_clears_the_renamed_prose(tmp_path, monkeypatch):
+    _write(tmp_path, "spatial/tab_view.py", RETIRED_EXPORT_CLEAN)
+    assert _retired_export_offenders(monkeypatch, tmp_path) is None, (
+        "the guard fired on prose that already names the Save menu")
+
 # ── the bar colour mode ─────────────────────────────────────────────────────
 
 _BAR_MODE_GUARD = "tests.test_bar_render_callers_pass_color_mode"

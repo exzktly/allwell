@@ -43,9 +43,11 @@ def build_image_table_picker(ctx, parent: QWidget) -> None:
     # cell scale and same centring as every other plate map in the app. The
     # "rail" role hides the built-in action row — the rail keeps its own
     # Select All / Clear buttons below.
+    from well_viewer.core.rail_plate import mount_rail_plate
     from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
     apply_plate_geometry(plate, role="rail")
-    layout.addWidget(plate, 0, PLATE_ALIGNMENT)
+    mount_rail_plate(ctx, parent, plate, alignment=PLATE_ALIGNMENT,
+                     fallback_layout=layout)
     ctx.runtime.image_table.sidebar_plate = plate
 
     def _on_plate_changed(ids) -> None:

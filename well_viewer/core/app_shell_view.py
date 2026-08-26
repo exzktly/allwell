@@ -493,6 +493,17 @@ def build_ui(win) -> None:
     sidebar_layout.addWidget(win._section_nav)
     sidebar_layout.addWidget(build_hline_separator(None))
 
+    # One place for the well picker, above every section that offers one. The
+    # four pickers (main / Statistics / Segmentation / Image Table) are mounted
+    # here rather than into their own sections, so a picker's position on the
+    # rail no longer depends on whose section it is — see
+    # ``core/rail_plate.py`` for what that fixes. Stretch 0: the slot is sized
+    # by the plate, and the sections below keep the rail's slack as before.
+    from well_viewer.core.rail_plate import SLOT_KEY, build_rail_plate_slot
+    win._sidebar_plate_slot = win._ctx.widgets.register(
+        SLOT_KEY, build_rail_plate_slot(sidebar))
+    sidebar_layout.addWidget(win._sidebar_plate_slot, 0)
+
     win._sidebar_main_frame = win._ctx.widgets.register("_sidebar_main_frame", QWidget())
     QVBoxLayout(win._sidebar_main_frame).setContentsMargins(0, 0, 0, 0)
     sidebar_layout.addWidget(win._sidebar_main_frame, 1)

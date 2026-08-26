@@ -39,6 +39,7 @@ def build_sidebar(win, parent: QWidget) -> None:
       - Group-mode hint label
     """
     from well_viewer.domain.plate_layout import PLATE_ROWS as _PLATE_ROWS, PLATE_COLS as _PLATE_COLS
+    from well_viewer.core.rail_plate import mount_rail_plate
     from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
     from widgets.well_plate_selector import WellPlateSelector
 
@@ -62,7 +63,8 @@ def build_sidebar(win, parent: QWidget) -> None:
     # keeps its own All / None below. A trailing addStretch below keeps the
     # plate anchored to the top of the sidebar across tabs.
     apply_plate_geometry(plate, role="rail")
-    layout.addWidget(plate, 0, PLATE_ALIGNMENT)
+    mount_rail_plate(win._ctx, parent, plate, alignment=PLATE_ALIGNMENT,
+                     fallback_layout=layout)
     win._sidebar_plate = win._ctx.widgets.register("_sidebar_plate", plate)
     win._sidebar_map_outer = plate
 

@@ -61,9 +61,11 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     plate.setWellTooltipProvider(well_plate_tooltip_provider(ctx))
     # The app-wide plate geometry (widgets/plate_geometry.py): same caps, same
     # cell scale and same centring as every other plate map in the app.
+    from well_viewer.core.rail_plate import mount_rail_plate
     from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
     apply_plate_geometry(plate, role="rail")
-    layout.addWidget(plate, 0, PLATE_ALIGNMENT)
+    mount_rail_plate(ctx, parent, plate, alignment=PLATE_ALIGNMENT,
+                     fallback_layout=layout)
     ctx.widgets.register("_stats_map_plate", plate)
 
     layout.addWidget(build_hline_separator(parent))

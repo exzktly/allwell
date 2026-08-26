@@ -1505,9 +1505,10 @@ the next.
   centre tabs side-by-side, both live (e.g. Scatter Plot beside Cell Browser).
   Click into a pane to focus it. There is still only **one well picker**, and it
   belongs to the focused pane: the unfocused section shows its own controls
-  without a second picker, and gives up its share of the rail's height so there
-  is no gap where its picker would have been. **Both panes' sidebar sections are
-  on screen
+  without a second picker. The picker sits in the same place on the rail
+  whichever pane owns it, so clicking between the panes swaps which plate you
+  are painting on without moving it, or anything under it. **Both panes' sidebar
+  sections are on screen
   at once** — split Plots against Statistics and the Statistics group-definition
   editor sits under the well picker straight away, without focusing that pane
   first — and both panes refresh on a selection or channel change.
@@ -1517,7 +1518,7 @@ the next.
   Table and Segmentation pick the well to show), and while split you get the
   focused pane's, not both stacked. Click into the other pane and the picker
   goes with the focus — so the Statistics plate is one click away, while its
-  group list stays visible the whole time. Focus decides this for the same
+  group list stays visible, and stays put, the whole time. Focus decides this for the same
   reason it decides drag-and-drop on the Heat Map: a plate click means different
   things to different pages, and only one of them can win. Each
   pane keeps its own row of page tabs at its top, so a page's sub-tabs stay

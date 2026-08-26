@@ -7,6 +7,7 @@ Relocated from ``runtime_app.py`` (teardown Phase 9).
 from __future__ import annotations
 import logging
 from functools import partial
+from well_viewer.core import rail_plate as _rail_plate
 from well_viewer.core.safe import swallowed
 from well_viewer.core.lazy import lazy as _lazy
 
@@ -67,57 +68,24 @@ def _sidebar_section_frames(ctx) -> list:
     return out
 
 
-def _section_plates(frame) -> list:
-    """The well pickers inside one sidebar section.
+def _section_plates(ctx, frame) -> list:
+    """The well pickers that serve one sidebar section.
 
-    Walks the widget tree rather than consulting a roster of registered names.
-    The four sidebar plates are registered two different ways — the main, Stats
-    and Segmentation pickers through ``ctx.widgets``, the Image Table's through
-    ``ctx.runtime.image_table`` — so a list keyed on either mechanism would be
-    blind to the other, and a list keyed on both would be a second place to
-    remember when a fifth section grows a picker.
+    Every rail plate is mounted in the shared slot (``core/rail_plate.py``), so
+    a section no longer contains its own picker and walking the frame finds
+    nothing. The plates carry the section they serve instead, and that is what
+    is matched here. The walk stays as the fallback: a frame built directly by
+    a test has no slot to mount into, and its plate is still its child.
     """
+    from well_viewer.core.rail_plate import rail_plates, section_of
     from widgets.well_plate_selector import WellPlateSelector
     try:
-        return list(frame.findChildren(WellPlateSelector))
+        out = [p for p in rail_plates(ctx) if section_of(p) is frame]
+        return out + list(frame.findChildren(WellPlateSelector))
     except (AttributeError, RuntimeError):
         # A frame whose C++ side is already gone during teardown.
         swallowed("tab_controller: could not scan a sidebar section for plates")
         return []
-
-
-def _size_sections_to_their_plates(ctx, visible_frames) -> None:
-    """Give the rail's vertical slack to the section that still has a picker.
-
-    Hiding a child does not release its parent's share of a layout. The sidebar
-    adds each section with a stretch of 1, so a frame whose plate has just been
-    hidden went on claiming the same height and drew it as a hole: measured, the
-    main frame held 303px of empty rail above the Statistics picker, and the
-    picker itself — squeezed into what was left — came out 152px tall against
-    the 233px it has when it is the focused section's.
-
-    Sizing a plate-less section to its own content closes both. The picker keeps
-    its full height whichever pane owns it, and the rail no longer has a void in
-    it. What remains is a small step — the residual height of the other
-    section's own controls, which still sit above — and that is honest layout
-    rather than empty space.
-
-    ``activate()`` is not optional: a stretch factor set after the layout has
-    run changes nothing until the layout is asked again, which is how the first
-    attempt at this measured no difference at all.
-    """
-    main = ctx.widgets.get_or_none("_sidebar_main_frame")
-    parent = main.parentWidget() if main is not None else None
-    layout = parent.layout() if parent is not None else None
-    if layout is None:
-        return
-    try:
-        for frame in visible_frames:
-            has_plate = any(not p.isHidden() for p in _section_plates(frame))
-            layout.setStretchFactor(frame, 1 if has_plate else 0)
-        layout.activate()
-    except (AttributeError, RuntimeError):
-        swallowed("tab_controller: could not re-balance the sidebar sections")
 
 
 def on_tab_change(ctx, _e=None) -> None:
@@ -151,10 +119,6 @@ def on_tab_change(ctx, _e=None) -> None:
     _frames = _sidebar_section_frames(ctx)
     for _frame in _frames:
         _frame.setVisible(False)
-        # Undo any plate suppression a previous Split View pass left behind, so
-        # a section that gets the focus back brings its picker with it.
-        for _plate in _section_plates(_frame):
-            _plate.setVisible(True)
     # Every pane that is on screen gets its sidebar section, not just the
     # focused one. In Split View two leaves are visible at once, and the sidebar
     # used to follow the focus alone: opening Plots beside Statistics left the
@@ -213,7 +177,7 @@ def on_tab_change(ctx, _e=None) -> None:
         redraw_app(ctx)
 
     # **One well picker on screen, and it belongs to the focused pane.** Four
-    # sidebar sections build their own ``WellPlateSelector`` — the shared one in
+    # sidebar sections offer a ``WellPlateSelector`` — the shared one for
     # `_sidebar_main_frame`, plus Statistics, Segmentation and Image Table — and
     # they were mutually exclusive for as long as only one section showed at a
     # time. Showing every visible pane's section (above) put two of them on the
@@ -222,13 +186,17 @@ def on_tab_change(ctx, _e=None) -> None:
     # selects wells to plot. Two pickers with different consequences and no way
     # to tell them apart is worse than the click this change removed.
     #
-    # So the sections all stay, and the *plates* of the unfocused ones go. That
-    # is the rule already applied to the heat-map drag mode a few lines above:
-    # frames follow visibility, interaction follows focus — and a plate is
-    # interaction. Found by walking the frame rather than by a roster of widget
-    # names, because the four are registered two different ways (three through
-    # ``ctx.widgets``, Image Table's through ``ctx.runtime``) and a list keyed on
-    # either would miss the other.
+    # So the sections all stay and the picker follows the focus — the rule the
+    # heat-map drag mode already uses a few lines above: frames follow
+    # visibility, interaction follows focus, and a plate is interaction. All
+    # four plates live in one slot above the sections (``core/rail_plate.py``),
+    # so choosing whose picker shows is a visibility decision and not a change
+    # of anyone's height: the rail does not move when the focus does.
+    #
+    # Every plate is set, not only the ones whose section is on screen. A plate
+    # in the shared slot is not hidden by its section being hidden — that is
+    # what having one slot means — so a pass that only spoke for the visible
+    # sections would leave a hidden section's picker on the rail.
     _focused_frames = [f for f in _frames if not f.isHidden()]
     # The frames the focused hook turned on are the ones it did not inherit.
     # When it inherits everything — two plot tabs sharing ``_sidebar_main_frame``
@@ -236,12 +204,11 @@ def on_tab_change(ctx, _e=None) -> None:
     # right thing to keep.
     _newly = [f for f in _focused_frames if f not in _other_frames]
     _keep = _newly or [ctx.widgets.get_or_none("_sidebar_main_frame")]
-    for _frame in _focused_frames:
-        if _frame in _keep:
-            continue
-        for _plate in _section_plates(_frame):
-            _plate.setVisible(False)
-    _size_sections_to_their_plates(ctx, _focused_frames)
+    for _frame in _frames:
+        _show = _frame in _keep and _frame in _focused_frames
+        for _plate in _section_plates(ctx, _frame):
+            _plate.setVisible(_show)
+    _rail_plate.settle_slot(ctx)
 
     run_tab_switch_smoke_checks(ctx, prev_tab, tab, prev_selected)
     ctx.runtime.tab.last_tab_name = tab

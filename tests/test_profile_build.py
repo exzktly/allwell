@@ -264,14 +264,15 @@ def test_trim_readme_matches_real_thin_profile():
     prof = tomllib.loads(
         (_REPO / "profiles" / "thin.toml").read_text(encoding="utf-8"))
     out = trim_readme_for_profile(readme, prof["features"])
-    # thin = Plotting + Home + Image Browser.
+    # thin = Plotting + Statistics + Home + Image Browser.
     assert "### Bar Plots" in out
+    assert "### Statistics" in out
     assert "### Image Browser" in out
     assert "### Home" in out
     # Everything the thin profile excludes is gone from the shipped help.
     for dropped in ("### Multivariate analysis", "### Spatial analysis",
                     "### smFISH", "### Review CSV", "### Saved Plots",
-                    "### Batch export", "### Statistics"):
+                    "### Batch export"):
         assert dropped not in out, dropped
 
 

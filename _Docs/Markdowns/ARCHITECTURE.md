@@ -2307,6 +2307,14 @@ StarDist-only build can omit that file entirely. Guarded by
 `tests/test_feature_profile.py` (subset boots + loads), `test_derive_profile.py`
 (the strip plan), and `test_profile_build.py` (binary dep-gating).
 
+**The two shipped profiles.** `thin` is the distribution subset: Plotting,
+Statistics, Home and the Image Browser narrowed to Segmentation + Image Table.
+Statistics is in it because the group comparisons are what most users open the
+plots to argue about — a build with the bar chart and without the test behind it
+answers half the question. `plotting_only` is Plotting alone, and exists as the
+minimal case the profile guardrail boots: it proves the registry filter drops
+whole features and the app still starts and loads a dataset off what survives.
+
 **Defining a profile.** A named build *is* a file: `profiles/<name>.toml`. The
 `<name>` is the filename (minus `.toml`), and the same `ALLWELL_PROFILE=<name>`
 env var selects it for both running and building — there is nothing else to

@@ -7845,8 +7845,10 @@ The app has two complementary theme surfaces:
    redesign. `Colors`, `Typography`, `Spacing`, `Radii`, `Metrics` (control
    padding — themeable for density), plus a `qss()` builder that produces the
    full application stylesheet. The `widgets/` package and most of the app shell
-   read from `theme.Colors.*`; the default (`blue`) palette is the class
-   values here. This is the single source of the app chrome QSS. `theme.py`
+   read from `theme.Colors.*`; the `blue` palette is the class values here,
+   and is the baseline every theme is applied onto and restored to — the app
+   itself starts on `grey`. This is the single source of the app chrome QSS.
+   `theme.py`
    *also* holds the **theme registry** (`THEMES` / `apply_theme` /
    `select_theme_from_env`) — see "Selecting a theme" below.
 2. **`ui/theme/`** — a legacy remnant, down to exactly two colours with no
@@ -7937,18 +7939,30 @@ at construction, applying a theme up-front re-skins the whole app with **no
 per-widget rewiring**.
 
 - `theme.THEMES` maps a name → sparse override bundle. Built-ins:
-  `blue` (the default; the class values are its palette) and
-  `grey` (a **colour-only** variant — neutral charcoal-grey chrome, azure
-  accent, near-black plot canvas). The version pill reads the `Colors.brand` /
-  `Colors.brand_fg` tokens and is transparent with white text in both themes.
-  Both share the flat, tight control feel: the `Radii`/`Metrics` defaults
-  (small radii + crisp `control_border` + compact padding) are app-wide, so the
-  `grey` bundle overrides only `Colors`. (Its look was designed against
-  real Nikon NIS-Elements AR screenshots.)
+  `grey` (**the default the app starts on** — a colour-only variant: neutral
+  charcoal-grey chrome, restrained azure accent, near-black plot canvas, its
+  look designed against real Nikon NIS-Elements AR screenshots) and `blue`
+  (the **baseline**: an empty bundle, because the class values *are* its
+  palette). The version pill reads the `Colors.brand` / `Colors.brand_fg`
+  tokens and is transparent with white text in both. Both share the flat, tight
+  control feel: the `Radii`/`Metrics` defaults (small radii + crisp
+  `control_border` + compact padding) are app-wide, so the `grey` bundle
+  overrides only `Colors`.
+
+  **`blue` earns its entry by being the way back.** `apply_theme` restores every
+  themeable attribute to the value captured off the class at import and then
+  applies the named bundle, so applying `blue` *is* the reset. A registry
+  without it cannot return to the palette the classes hold. Both keys are
+  therefore spelled as string literals rather than as `DEFAULT_THEME`: written
+  `{DEFAULT_THEME: {}, "grey": _GREY}`, pointing that constant at `grey` writes
+  the same key twice in one dict literal, the second wins silently, and the
+  registry loses `blue` altogether. `tests/test_theme_registry.py` holds both
+  halves of that.
 - `theme.apply_theme(name)` resets every themeable attribute to its captured
   default, applies the bundle, and fires post-apply hooks
   (`register_theme_hook`). `select_theme_from_env()` reads the **`ALLWELL_THEME`**
-  env var (falling back to `blue` on unset/unknown). `allwell.main()`
+  env var (falling back to `DEFAULT_THEME` — `grey` — on unset/unknown).
+  `allwell.main()`
   calls it once, before building `AllWellApp`; `--theme <name>` overrides the env
   var. `tests/visual/render_views.py` honours it too, so
   `ALLWELL_THEME=grey … render_views.py` audits any theme.
@@ -7957,7 +7971,8 @@ per-widget rewiring**.
   marker); `all_well_launcher._apply_baked_theme` reads it and `setdefault`s the
   env var, so the shipped exe starts on that theme while a runtime `ALLWELL_THEME`
   / `--theme` still overrides. The `.spec` validates the name against
-  `theme.available_themes()` and skips baking an unknown one (build stays `blue`).
+  `theme.available_themes()` and skips baking an unknown one (the build then
+  starts on `DEFAULT_THEME` like any other).
 - **Startup-only, by design.** There is no in-app live switch — a runtime swap
   would need every cached inline QSS rebuilt on `QEvent.StyleChange` (see the
   per-instance-QSS note below), which hit a ~20 s repaint cascade. Selection is

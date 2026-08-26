@@ -252,7 +252,7 @@ if _profile_active:
 # bakes ``allwell_theme.txt`` at the bundle root; all_well_launcher._apply_baked_theme
 # reads it and setdefault()s ALLWELL_THEME, so the frozen app starts on that theme
 # while a runtime ALLWELL_THEME / --theme still overrides. Unknown names are ignored
-# (the build stays on the default 'blue'). Mirrors the profile marker above.
+# (the build then starts on theme.DEFAULT_THEME). Mirrors the profile marker above.
 _BAKED_THEME = os.environ.get("ALLWELL_THEME", "").strip()
 if _BAKED_THEME:
     import theme as _thememod  # Qt-free; safe at build time
@@ -263,7 +263,8 @@ if _BAKED_THEME:
         print(f"[all_well.spec] ALLWELL_THEME={_BAKED_THEME!r} — baking as the default theme")
     else:
         print(f"[all_well.spec] WARNING: ALLWELL_THEME={_BAKED_THEME!r} is not a known theme "
-              f"({_thememod.available_themes()}); not baking — the build defaults to 'blue'.")
+              f"({_thememod.available_themes()}); not baking — the build starts on "
+              f"{_thememod.DEFAULT_THEME!r} like any other.")
 
 datas = sibling_scripts + [mpl_data, stardist_data, csbdeep_data] + extra_data
 

@@ -11,7 +11,7 @@ import logging
 from datetime import datetime
 
 from well_viewer.core.lazy import lazy, lazy_names
-from well_viewer.core.safe import swallowed
+from well_viewer.core.safe import swallow, swallowed
 from well_viewer.persistence import view_state
 from well_viewer.features.saved_plots._deck import build_saved_plots_deck
 from well_viewer.features.saved_plots._report import build_saved_plots_report
@@ -43,13 +43,25 @@ _scroll_to_saved_plot = lazy("well_viewer.features.saved_plots.tab_view",
 
 
 def wire_save_to_gallery(ctx, card, tab_name: str) -> None:
-    """Enable *card*'s hover "save to Saved Plots" button for *tab_name*."""
+    """Enable *card*'s hover "save to Saved Plots" button for *tab_name*.
+
+    Also records the card against its tab. That map is what lets the PowerPoint
+    export redraw a plot filed before the app captured vector: it has the tab
+    name on the record and needs the live figure for it, and this hook is the one
+    place in the app where those two facts meet. Built here rather than from a
+    roster of card names so a tab added tomorrow is covered by wiring itself up.
+    """
     if card is None or not hasattr(card, "set_save_handler"):
         return
     card.set_save_handler(
         lambda png, label, svg=b"": save_plot_from_card(
             ctx, tab_name, png, label, svg)
     )
+    by_tab = ctx.runtime.saved_plots.cards_by_tab
+    if by_tab is None:
+        by_tab = {}
+    by_tab[tab_name] = card
+    ctx.runtime.saved_plots.cards_by_tab = by_tab
 
 
 def save_plot_from_card(ctx, tab: str, png_bytes: bytes, panel_label: str,
@@ -434,13 +446,16 @@ def export_deck_pptx(ctx) -> None:
             file_filter="PowerPoint presentation (*.pptx)")
         if not dest:
             return
+        records = gallery_order(store)
+        regenerated = regenerate_missing_vectors(ctx, store, records)
         result = build_saved_plots_deck(
-            gallery_order(store),
+            records,
             lambda r: store.vector_path(ctx, r),
             lambda r: store.image_path(ctx, r),
             dest,
             dataset_name=_dataset_name(ctx),
             summary_for=lambda r: r.summary,
+            regenerated=regenerated,
         )
         if result.unsupported:
             _logger.info("saved_plots: deck export met %s",
@@ -450,6 +465,73 @@ def export_deck_pptx(ctx) -> None:
     except Exception as exc:  # surface to the user
         _logger.debug("saved_plots: deck export failed", exc_info=True)
         ctx.notify.set_status(f"PowerPoint export failed: {exc}")
+
+
+def regenerate_missing_vectors(ctx, store, records) -> set[str]:
+    """Redraw plots that have no vector capture, so the deck can make them editable.
+
+    A plot filed before the app began capturing vector is a PNG and nothing
+    else, and no amount of reading it will produce shapes. What the record *does*
+    carry is the parameters that drew it, and the app can draw them again — so
+    the export replays each such record onto its own tab, captures the live
+    figure as vector, and keeps it. The redraw is a one-off repair: the capture
+    is stored on the record, so every later export of that plot is editable
+    without paying for it again.
+
+    Returns the ids it regenerated, which the deck marks on their slides. That
+    marking is not decoration. A redrawn figure is drawn from **today's** data
+    and today's gating, and the gating recompute is asynchronous, so it can
+    differ from the image the user saved — subtly, and in a direction nothing on
+    the slide would otherwise reveal.
+
+    The user's own view is snapshotted and put back afterwards: an export is not
+    a navigation, and leaving them on the last plot's tab with its settings
+    applied would be a side effect nobody asked for.
+    """
+    missing = [r for r in records if not r.svg_filename]
+    if not missing:
+        return set()
+    cards_by_tab = ctx.runtime.saved_plots.cards_by_tab or {}
+    if not cards_by_tab:
+        return set()
+
+    regenerated: set[str] = set()
+    before = None
+    with swallow("saved_plots: snapshot the view before regenerating"):
+        before = view_state.snapshot(ctx)
+    try:
+        for rec in missing:
+            card = cards_by_tab.get(rec.tab)
+            # No card for this tab means no figure to redraw — the Image Table
+            # composes its snapshot from microscopy frames rather than drawing a
+            # chart, so it has never had vector and cannot acquire it here.
+            if card is None or not hasattr(card, "captureVectorSvg"):
+                continue
+            if _regenerate_one(ctx, store, rec, card):
+                regenerated.add(rec.id)
+    finally:
+        if before is not None:
+            with swallow("saved_plots: restore the view after regenerating"):
+                view_state.restore(ctx, dict(before))
+    if regenerated:
+        _logger.info("saved_plots: redrew %d plot(s) that had no vector capture",
+                     len(regenerated))
+    return regenerated
+
+
+def _regenerate_one(ctx, store, rec, card) -> bool:
+    """Replay one record onto its tab and keep the figure it draws.
+
+    False on any failure — a plot that cannot be redrawn simply stays a picture,
+    which is what it already was. One record failing must not abandon the rest
+    of the export.
+    """
+    kept = False
+    with swallow(f"saved_plots: redraw {rec.id!r} for the deck"):
+        restore_saved_plot(ctx, rec.id)
+        svg = card.captureVectorSvg()
+        kept = bool(svg) and store.attach_vector(ctx, rec, svg)
+    return kept
 
 
 def refresh_saved_plots_gallery(ctx) -> None:

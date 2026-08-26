@@ -3054,19 +3054,23 @@ rather than a single panel.
     deck is a normal `.pptx` that opens anywhere, and no add-in is needed.
 
   The Image Table grid can be saved to the gallery and exported either way.
-- **When a slide says "placed here as a picture."** A figure can only be redrawn
-  as shapes if the plot was saved with a vector capture alongside its image.
-  Plots saved by an older version of All-Well have none, and neither does an
-  **Image Table** grid, which is assembled from your microscopy images rather
-  than drawn as a chart. Those plots still appear in the deck at full quality —
-  as a picture, with a line under the figure saying so and why. For an older
-  saved plot the fix is to open it with **Restore settings** and save it again;
-  the new card carries a vector capture.
-- **Very large figures are placed as pictures too.** A scatter of a hundred
-  thousand cells would become a hundred thousand PowerPoint shapes, and a deck
-  like that will not open. Past the limit no vector capture is taken at all — the
-  plot saves as usual and exports as a picture — so a very dense figure costs
-  nothing extra to save and does not fill the dataset folder.
+- **Older plots are repaired automatically.** A plot saved by an earlier version
+  of All-Well is only an image, so the export **redraws it** from the settings the
+  card carries and captures it properly — once. From then on that plot exports as
+  editable shapes like any other. The export takes a moment longer the first time
+  it meets such a plot, and the page you were on is put back afterwards. Those
+  slides carry a line saying the figure was redrawn rather than captured when you
+  saved it: a redraw uses today's data, so if the CSVs have changed since, the
+  figure will reflect that rather than the picture you filed.
+- **When a slide still says "placed here as a picture."** An **Image Table** grid
+  is assembled from your microscopy images rather than drawn as a chart, so there
+  is no chart to redraw; it stays a picture at full quality, with a line under it
+  saying so.
+- **Very large figures stay editable too.** A per-cell scatter of a whole plate
+  exports as shapes like anything else — the deck is simply bigger. Only past
+  about a quarter of a million points does the export give anything up, and even
+  then it gives up the least it can: the point cloud becomes a single image and
+  the axes, tick labels, title and legend stay editable.
 - **A figure can be editable and still be missing a detail.** A **hatch** has no
   PowerPoint equivalent this export can produce, so hatched bars arrive as plain
   outlines. When that or anything like it happens, the slide carries a line under

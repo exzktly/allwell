@@ -57,13 +57,14 @@ _PARAMS_W = 3.5
 _GUTTER = 0.25
 
 #: The most shapes one slide may carry before the figure is placed as a picture
-#: instead. A scatter of a hundred thousand cells is a hundred thousand
-#: PowerPoint shapes, and a deck like that does not open — it is not slow, it
-#: hangs. The cap is generous for a plot anyone would put in a talk (the bar and
-#: scatter figures this was built against land between forty and a few hundred)
-#: and the slide says outright when it bites, so a picture is never mistaken for
-#: a figure that simply had nothing editable in it.
-MAX_SHAPES_PER_SLIDE = 4000
+#: instead — a backstop, not a quality setting, and deliberately far above what
+#: any capture will produce. ``fig_clipboard.MAX_VECTOR_PATHS`` bounds the
+#: capture itself by rasterizing dense layers, so a figure reaching this number
+#: got here some other way: an SVG written by an older build, or one edited by
+#: hand in the dataset folder. Past it a deck does not open — it hangs — so the
+#: slide takes the picture and names the count, because "too complex" gives the
+#: user nothing to act on while "180,000 shapes" tells them what to change.
+MAX_SHAPES_PER_SLIDE = 300_000
 
 _TITLE_PT = 22.0
 _META_PT = 11.0
@@ -84,6 +85,10 @@ class DeckResult:
     slides: int = 0
     vector: int = 0
     raster: int = 0
+    #: Plots whose editable figure was redrawn from saved parameters rather than
+    #: captured at save time. A subset of ``vector`` — they are fully editable —
+    #: counted apart because they carry a caveat the others do not.
+    redrawn: int = 0
     #: Plots whose slide carries no figure at all — neither capture could be
     #: read. Counted separately and not folded into ``raster``, because it is a
     #: third outcome: the slide exists and names the plot, and the figure is
@@ -120,6 +125,9 @@ class DeckResult:
         # still have lost a hatch or an arc out of one of its figures, and
         # "all editable" said over the top of that is the shortfall being
         # hidden by the very line meant to describe it.
+        if self.redrawn:
+            text += (f"; {self.redrawn} redrawn from saved settings"
+                     " (older plots, now editable)")
         if self.unsupported:
             text += f" (not translated: {', '.join(self.unsupported)})"
         return text
@@ -332,6 +340,7 @@ def build_saved_plots_deck(
     *,
     dataset_name: str = "",
     summary_for: Callable[[object], str] | None = None,
+    regenerated: set | None = None,
 ) -> DeckResult:
     """Write a ``.pptx`` with a cover slide and one slide per saved plot.
 
@@ -341,9 +350,17 @@ def build_saved_plots_deck(
     and parameters and states that the figure is missing, which is the one
     outcome a silent export would have made indistinguishable from a blank plot.
 
+    *regenerated* names the plots whose vector capture was **redrawn from their
+    saved parameters** rather than captured when the user saved them — the repair
+    the export performs for a record filed before the app captured vector. Those
+    slides say so, because a redrawn figure is drawn from today's data and
+    today's gating and can differ from the image that was saved, in a direction
+    nothing else on the slide would reveal.
+
     Returns a :class:`DeckResult` — raises only on I/O failure writing the file.
     """
     recs = list(records)
+    regenerated = regenerated or set()
     summary_for = summary_for or (lambda r: getattr(r, "summary", "") or "")
     builder = PptxBuilder(title="Saved Plots")
     result = DeckResult()
@@ -358,6 +375,13 @@ def build_saved_plots_deck(
                                    result=result)
             if not reason:
                 result.vector += 1
+                if getattr(rec, "id", None) in regenerated:
+                    result.redrawn += 1
+                    _note(slide, "This figure was redrawn from the plot's saved "
+                                 "settings, because it was filed before All-Well "
+                                 "captured vector. It is editable, and it reflects "
+                                 "the current data rather than the image that was "
+                                 "saved.", figure_w=figure_w)
                 continue
         else:
             reason = ("This plot was saved without a vector capture, so it is "

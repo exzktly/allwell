@@ -80,6 +80,19 @@ def test_the_gallery_can_be_opened_at_one_particular_card(qapp, tmp_path):
     card = ctx.runtime.saved_plots.cards["r2"]
     assert card.property("focusflash") == "true"
 
+    # The scroll itself is deferred until the page has a layout, so let the
+    # event loop run before reading where it landed. Asserting only the return
+    # value is what let the shipped version pass while always landing on the
+    # first card: `ensureWidgetVisible` on an unlaid-out scroll area silently
+    # does nothing, and has no return value to say so.
+    for _ in range(20):
+        qapp.processEvents()
+    scroll = ctx.widgets.get_or_none("_saved_plots_scroll")
+    bar = scroll.verticalScrollBar()
+    top = card.mapTo(scroll.widget(), card.rect().topLeft()).y()
+    assert bar.value() == max(bar.minimum(), min(bar.maximum(), top - 8)), (
+        "the card the user clicked should be at the top of the view")
+
     # A plot that is not in the gallery is reported, not silently ignored — the
     # caller turns that into a message rather than leaving the user on a page
     # that looks like it did nothing.
@@ -106,3 +119,73 @@ def test_the_card_index_is_rebuilt_rather_than_accumulated(qapp, tmp_path):
     store.delete(ctx, "r1")
     populate_saved_plots_grid(ctx)
     assert ctx.runtime.saved_plots.cards == {}
+
+
+def test_the_gallery_scrolls_to_a_card_even_when_the_page_was_just_shown(
+        qapp, tmp_path):
+    """The defect this exists for is the whole feature failing silently.
+
+    Home's thumbnails call this immediately after switching to the Saved Plots
+    page, so the scroll area has no geometry yet: its range is zero and every
+    card sits at y=0. A scroll issued then is a scroll to the top of a list that
+    has not been laid out — which is what shipped, and it always landed on the
+    first card while reporting success, because `ensureWidgetVisible` returns
+    nothing at all.
+    """
+    from PySide6.QtWidgets import QStackedWidget
+    from well_viewer.features.saved_plots.tab_view import scroll_to_saved_plot
+
+    app = _app(tmp_path)
+    parent = QWidget()
+    parent.resize(900, 700)
+    from PySide6.QtWidgets import QVBoxLayout
+    QVBoxLayout(parent)
+    stack = QStackedWidget(parent)
+    parent.layout().addWidget(stack)
+    elsewhere = QWidget()
+    page = QWidget()
+    stack.addWidget(elsewhere)
+    stack.addWidget(page)
+    stack.setCurrentWidget(elsewhere)          # the user is on another page
+
+    ctx = SimpleNamespace(app=app, state=app._app_state,
+                          widgets=WidgetRegistry(app), runtime=AppRuntime(app))
+    build_saved_plots_tab(ctx, page)
+    store = get_store(ctx)
+    for pid in ("a", "b", "c", "d", "e", "f"):
+        rec = _rec()
+        rec.id, rec.png_filename, rec.title = pid, f"{pid}.png", f"Fig {pid}"
+        store.add(ctx, rec, _real_png())
+    parent.show()
+    qapp.processEvents()
+
+    # Exactly what focus_saved_plot does: switch page, repopulate, scroll — all
+    # in one turn of the event loop, before anything has been laid out.
+    stack.setCurrentWidget(page)
+    populate_saved_plots_grid(ctx)
+    assert scroll_to_saved_plot(ctx, "a") is True     # oldest → bottom of the list
+    for _ in range(20):
+        qapp.processEvents()
+
+    scroll = ctx.widgets.get_or_none("_saved_plots_scroll")
+    bar = scroll.verticalScrollBar()
+    assert bar.maximum() > 0, "the gallery should be taller than its viewport"
+    assert bar.value() > 0, "the view is still at the top of the list"
+    card = ctx.runtime.saved_plots.cards["a"]
+    top = card.mapTo(scroll.widget(), card.rect().topLeft()).y()
+    assert bar.value() == max(bar.minimum(), min(bar.maximum(), top - 8))
+
+
+def _real_png() -> bytes:
+    """A decodable PNG, so the cards get real heights to scroll past."""
+    import io
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.image as mpimg
+    import numpy as np
+
+    buf = io.BytesIO()
+    mpimg.imsave(buf, (np.linspace(0, 1, 60 * 80 * 3).reshape(60, 80, 3) * 255)
+                 .astype("uint8"), format="png")
+    return buf.getvalue()

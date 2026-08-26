@@ -50,6 +50,14 @@ _UP_BTN_W = 32
 #: gallery is holding.
 _FOCUS_FLASH_MS = 1600
 
+#: Gap left above a card the gallery has jumped to, so it does not sit flush
+#: against the control band.
+_SCROLL_TOP_MARGIN = 8
+
+#: How many event-loop passes the scroll may re-aim over while the gallery's
+#: layout settles. Bounded so a layout that never converges cannot spin.
+_SCROLL_SETTLE_TRIES = 8
+
 
 class _AspectImage(QLabel):
     """A QLabel that scales its source pixmap to fill the available width while
@@ -224,26 +232,60 @@ def populate_saved_plots_grid(ctx) -> None:
 
 
 def scroll_to_saved_plot(ctx, plot_id: str) -> bool:
-    """Bring the gallery card for *plot_id* into view and outline it briefly.
+    """Put the gallery card for *plot_id* at the top of the view, and outline it.
 
     Returns False when the gallery holds no card for that id — the tab has not
     been built yet, or the plot was deleted between the click and this call. The
     caller reports that rather than leaving the user on a page that looks like it
     ignored them.
+
+    The scroll itself is **deferred**, because the caller has just switched to
+    this page and the page has no geometry yet: the scroll area's range is still
+    zero, every card sits at y=0, and a scroll issued now is a scroll to the top
+    of a list that has not been laid out. That is not a hypothetical — it is what
+    shipped, and it always landed on the first card. ``_scroll_when_laid_out``
+    waits for the layout and then scrolls, so the return value here means "there
+    is a card and it has been asked for", which is the most this function can
+    honestly promise before the event loop has run.
     """
     cards = ctx.runtime.saved_plots.cards or {}
     card = cards.get(plot_id)
     scroll = ctx.widgets.get_or_none("_saved_plots_scroll")
     if card is None or scroll is None:
         return False
-    try:
-        scroll.ensureWidgetVisible(card)
-        _flash(card)
-    except RuntimeError:
-        # The gallery was rebuilt between the lookup and here, so the card's C++
-        # object is gone. Nothing to scroll to, and nothing broken.
-        return False
+    _scroll_when_laid_out(scroll, card)
+    _flash(card)
     return True
+
+
+def _scroll_when_laid_out(scroll, card) -> None:
+    """Scroll *card* to the top of *scroll*'s viewport once there is a layout."""
+    from PySide6.QtCore import QTimer
+
+    def _attempt(remaining: int, previous: int) -> None:
+        with swallow("saved_plots: scroll to card"):
+            host = scroll.widget()
+            if host is None or card.parent() is None:
+                return                      # the gallery was rebuilt under us
+            bar = scroll.verticalScrollBar()
+            # Explicitly to the card's top, not ``ensureWidgetVisible``: a saved
+            # figure is routinely taller than the viewport, and "make it visible"
+            # then means scrolling until its *bottom* shows — the user arrives at
+            # the foot of the plot they clicked. A few pixels of margin above it
+            # so the card does not sit flush against the band.
+            top = card.mapTo(host, card.rect().topLeft()).y()
+            target = max(bar.minimum(),
+                         min(bar.maximum(), top - _SCROLL_TOP_MARGIN))
+            bar.setValue(target)
+            # Keep going until the target stops moving. The cards size themselves
+            # from their pixmaps (``_AspectImage`` sets its height in
+            # ``resizeEvent``), so the list's height is still changing for a few
+            # passes after the page is shown and a scroll computed on the first
+            # one lands short of where the card ends up.
+            if remaining > 0 and target != previous:
+                QTimer.singleShot(0, lambda: _attempt(remaining - 1, target))
+
+    QTimer.singleShot(0, lambda: _attempt(_SCROLL_SETTLE_TRIES, -1))
 
 
 def _flash(card: QWidget) -> None:

@@ -157,6 +157,31 @@ class SavedPlotsStore:
         self._persist(ctx)
         return True
 
+    def attach_vector(self, ctx, rec: SavedPlot, svg_bytes: bytes) -> bool:
+        """Give an existing record a vector capture it did not have.
+
+        Written to disk beside its PNG and persisted, so a plot regenerated once
+        for an export is editable in every export after it — the redraw is a
+        one-off repair of an old record, not a cost paid on every deck.
+
+        Refuses to overwrite a capture the record already has: that one was taken
+        from the live figure at the moment the user saved it, which is a better
+        record of what they saw than anything redrawn later.
+        """
+        idir = self.images_dir(ctx)
+        if idir is None or not svg_bytes or rec.svg_filename:
+            return False
+        name = f"{rec.id}.svg"
+        try:
+            idir.mkdir(parents=True, exist_ok=True)
+            (idir / name).write_bytes(svg_bytes)
+        except OSError as exc:
+            _logger.warning("saved_plots: failed to write vector capture: %s", exc)
+            return False
+        rec.svg_filename = name
+        self._persist(ctx)
+        return True
+
     def _discard_files(self, ctx, rec: SavedPlot) -> None:
         """Remove every file a record owns — the snapshot and its vector twin.
 

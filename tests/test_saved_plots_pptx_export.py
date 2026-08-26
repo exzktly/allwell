@@ -603,32 +603,73 @@ def test_the_export_menu_reaches_both_exporters(qapp, monkeypatch):
 
 # ── the capture, and what it refuses ─────────────────────────────────────────
 
-def test_a_figure_past_the_cap_is_not_captured_at_all(tmp_path):
-    """The expensive half is the render, so the cap has to come before it.
+def test_a_dense_figure_keeps_everything_but_its_point_cloud_editable(tmp_path):
+    """Past the cap the figure is *not* refused — only its densest layer is.
 
-    A 300,000-point scatter is a four-second SVG render on the UI thread and a
-    32 MB file written beside a 0.17 MB PNG — and the deck then discards it,
-    because it is past the shape cap. Refusing after paying for it is the worst
-    of both, so the decision is made from the artist counts, which cost nothing.
+    Refusing outright is what shipped, and it defeated the format for exactly
+    the per-cell plots that most need restyling: the plot saved with no vector
+    capture at all, and the deck then placed a picture and told the user to
+    re-save a plot that would fail the same way again. Now the point cloud
+    becomes one embedded image and the axes, ticks, labels, title and legend
+    stay editable — the Illustrator workflow this export exists to replace.
+
+    Driven with an explicit low ``max_paths`` rather than by building a figure
+    past the real one: the contract under test is what happens on the far side
+    of the threshold, not where the threshold sits.
     """
     import numpy as np
     from matplotlib.figure import Figure
 
-    from widgets.fig_clipboard import (
-        MAX_VECTOR_PATHS, figure_path_count, render_figure_svg,
-    )
+    from widgets.fig_clipboard import figure_path_count, render_figure_svg
 
     rng = np.random.default_rng(0)
     fig = Figure(figsize=(4, 3))
     ax = fig.add_subplot()
-    ax.scatter(rng.random(MAX_VECTOR_PATHS + 1000),
-               rng.random(MAX_VECTOR_PATHS + 1000), s=1)
+    cloud = ax.scatter(rng.random(2000), rng.random(2000), s=1, label="cells")
+    ax.plot([0, 1], [0, 1], "r-", label="identity")
+    ax.set_title("Cells per well")
+    ax.set_xlabel("GFP")
+    ax.legend()
+    assert figure_path_count(fig) > 500
 
-    assert figure_path_count(fig) > MAX_VECTOR_PATHS
-    assert render_figure_svg(fig) == b""
-    # ...and the same figure still renders when a caller wants vector for its
-    # own sake rather than for the deck. Copy-as-SVG is that caller.
-    assert render_figure_svg(fig, max_paths=None).startswith(b"<?xml")
+    svg = render_figure_svg(fig, max_paths=500)
+    assert svg.startswith(b"<?xml"), "the figure must still be captured"
+
+    drawing = parse_svg(svg)
+    texts = [t.text for t in drawing.shapes if isinstance(t, TextShape)]
+    assert "Cells per well" in texts and "GFP" in texts and "cells" in texts
+    assert [s for s in drawing.shapes if isinstance(s, ImageShape)], (
+        "the dense layer should have become one embedded image")
+    # The cloud is a picture; everything else is still shapes.
+    assert len([s for s in drawing.shapes if isinstance(s, PathShape)]) > 5
+
+    # And the live figure is left exactly as it was found — this runs against the
+    # figure on screen, so a rasterized flag left behind would change how the
+    # user's own plot draws for the rest of the session.
+    assert cloud.get_rasterized() is False
+
+
+def test_an_ordinary_scatter_stays_fully_vector(tmp_path):
+    """A per-cell scatter of a whole plate must not be quietly downgraded.
+
+    Twenty thousand cells is an ordinary figure in this app, and the cap exists
+    for decks that will not open, not for decks that are merely large.
+    """
+    import numpy as np
+    from matplotlib.figure import Figure
+
+    from widgets.fig_clipboard import MAX_VECTOR_PATHS, render_figure_svg
+
+    assert MAX_VECTOR_PATHS >= 100_000, (
+        "an ordinary per-cell scatter must stay fully vector")
+    rng = np.random.default_rng(0)
+    fig = Figure(figsize=(4, 3))
+    ax = fig.add_subplot()
+    ax.scatter(rng.random(20000), rng.random(20000), s=1)
+
+    drawing = parse_svg(render_figure_svg(fig))
+    assert not [s for s in drawing.shapes if isinstance(s, ImageShape)]
+    assert len([s for s in drawing.shapes if isinstance(s, PathShape)]) > 19000
 
 
 def test_an_ordinary_figure_is_captured_normally(tmp_path):
@@ -897,3 +938,96 @@ def test_the_app_properties_follow_the_schema_order(tmp_path):
         app = ET.fromstring(zf.read("docProps/app.xml"))
     tags = [child.tag.split("}")[-1] for child in app]
     assert tags.index("Slides") < tags.index("Application")
+
+
+# ── repairing a plot filed before the app captured vector ────────────────────
+
+@pytest.mark.qt
+def test_a_png_only_plot_is_redrawn_so_the_deck_can_make_it_editable(
+        qapp, tmp_path, monkeypatch):
+    """The repair the export performs for an older record.
+
+    A plot filed before the app captured vector is a PNG and nothing else, and
+    no amount of reading it produces shapes. What the record does carry is the
+    parameters that drew it, so the export replays those onto the tab, captures
+    the live figure, and keeps the result on the record — the redraw is a one-off
+    repair, not a cost paid on every export.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from widgets.plot_card import PlotCard
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+
+    card = PlotCard(figsize=(4, 3))
+    ax = card.figure.add_subplot(1, 1, 1)
+    ax.bar([0, 1, 2, 3], [3, 5, 2, 4])
+    ax.set_title("Mean intensity per group")
+    C.wire_save_to_gallery(ctx, card, "Bar Plots")
+    # Replaying the parameters is the app's job and has its own tests; what this
+    # one is about is that the redraw happens, is captured, and is kept.
+    monkeypatch.setattr(C, "restore_saved_plot", lambda ctx_, pid: None)
+
+    rec = SavedPlot(id="old1", created_at="2026-01-01T00:00:00", tab="Bar Plots",
+                    title="Filed last week", png_filename="old1.png", params={})
+    assert store.add(ctx, rec, _png_bytes())
+    assert rec.svg_filename == "", "the record starts with no vector capture"
+
+    redrawn = C.regenerate_missing_vectors(ctx, store, [rec])
+
+    assert redrawn == {"old1"}
+    assert rec.svg_filename, "the redraw should have been kept on the record"
+    assert (tmp_path / "saved_plots" / rec.svg_filename).exists()
+
+    out = tmp_path / "deck.pptx"
+    result = build_saved_plots_deck(
+        [rec], lambda r: store.vector_path(ctx, r),
+        lambda r: store.image_path(ctx, r), out, regenerated=redrawn)
+
+    assert (result.vector, result.raster) == (1, 0)
+    assert result.redrawn == 1
+    text = _slide_text(out, 2)
+    assert "Mean intensity per group" in text          # editable, as shapes
+    # ...and the slide says the figure was redrawn rather than captured, because
+    # it reflects today's data rather than the image that was saved.
+    assert "redrawn from the plot's saved settings" in text
+    assert "redrawn from saved settings" in result.summary()
+
+
+@pytest.mark.qt
+def test_a_plot_that_already_has_vector_is_never_redrawn(qapp, tmp_path):
+    """The capture taken when the user saved is the better record of what they
+    saw, so it is never replaced by a later redraw."""
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    rec = SavedPlot(id="new1", created_at="2026-01-01T00:00:00", tab="Bar Plots",
+                    title="Saved today", png_filename="new1.png",
+                    svg_filename="new1.svg", params={})
+    assert store.add(ctx, rec, _png_bytes(), _bar_svg())
+    original = (tmp_path / "saved_plots" / "new1.svg").read_bytes()
+
+    assert C.regenerate_missing_vectors(ctx, store, [rec]) == set()
+    assert (tmp_path / "saved_plots" / "new1.svg").read_bytes() == original
+    assert store.attach_vector(ctx, rec, b"<svg/>") is False
+
+
+@pytest.mark.qt
+def test_a_tab_with_no_figure_is_left_as_a_picture(qapp, tmp_path):
+    """The Image Table composes its snapshot from microscopy frames rather than
+    drawing a chart, so it has never had vector and cannot acquire it here."""
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    rec = SavedPlot(id="grid", created_at="2026-01-01T00:00:00",
+                    tab="Image Table", title="Grid", png_filename="grid.png",
+                    params={})
+    assert store.add(ctx, rec, _png_bytes())
+
+    assert C.regenerate_missing_vectors(ctx, store, [rec]) == set()
+    assert rec.svg_filename == ""

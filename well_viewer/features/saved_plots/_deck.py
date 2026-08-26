@@ -150,7 +150,7 @@ class DeckResult:
         return text
 
 
-def _png_size(png: bytes) -> tuple[int, int] | None:
+def png_size(png: bytes) -> tuple[int, int] | None:
     """A PNG's pixel dimensions, read from its IHDR chunk.
 
     Straight from the header rather than through Pillow: this module is meant to
@@ -339,7 +339,7 @@ def _place_raster(slide: Slide, png: bytes, *, figure_w: float) -> bool:
     """Place the captured snapshot as a picture. False if there was no image."""
     if not png:
         return False
-    size = _png_size(png)
+    size = png_size(png)
     aspect = (size[0] / size[1]) if size else 1.0
     x, y, cx, cy = _fit_box(aspect, x=_MARGIN, y=_BODY_TOP, w=figure_w,
                             h=_BODY_H - 0.34)

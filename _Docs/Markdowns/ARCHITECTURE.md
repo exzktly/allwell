@@ -1767,6 +1767,20 @@ covered by wiring itself up rather than by a roster someone has to remember.
 A tab with no card — the Image Table, which composes microscopy frames rather
 than drawing a chart — is skipped and stays a picture.
 
+**A redraw that would change the figure's scope is declined.** The redraw
+renders the whole card, so a record that saved **one panel** of a multi-panel
+figure would come back as every panel, under that panel's title and beside that
+panel's parameters — a different figure, not a worse one. `SavedPlot.panel_only`
+records which a save was, and it is **tri-state**: `None` means the record
+predates the field. Defaulting those to "whole figure" was a guess, and it put a
+user's three-panel window on a slide in place of the single panel they had
+saved. For an unknown record `_redraw_keeps_the_scope` decides from the evidence
+the record does carry — the aspect ratio of the image it stored, against the live
+figure's. One panel of a three-panel card is about three times as wide for its
+height; two renders of the same scope differ only by the crop's padding. No
+readable evidence either way means no redraw, because a picture of the right
+plot beats shapes of the wrong one.
+
 **Those slides say the figure was redrawn**, and `DeckResult.redrawn` counts
 them. A redrawn figure is drawn from *today's* data and today's gating, and the
 gating recompute is asynchronous, so it can differ from the image the user saved
@@ -1852,9 +1866,14 @@ because a saved figure is routinely taller than the viewport and "make it
 visible" then means scrolling until its *bottom* shows — the user arrives at the
 foot of the plot they clicked.
 
-Thumbnails are decoded **at thumbnail size**, through
+Thumbnails are decoded **at thumbnail size and cached**, through
 `QImageReader.setScaledSize` rather than by loading the file and scaling
-afterwards (`home/tab_view._thumbnail`). A saved plot's PNG is a 300 dpi capture,
+afterwards (`home/tab_view._thumbnail`). The cache is `QPixmapCache`, keyed on
+the file's path, its modification time and the box it was scaled into — so a
+plot re-saved under the same name decodes again and nothing else does. Without
+it a twelve-plot strip cost ~200 ms of decoding on the UI thread on *every*
+`refresh_home` — the page build, a dataset load, every record resync — for
+pixels that had not changed; with it, ~10 ms. A saved plot's PNG is a 300 dpi capture,
 routinely 1500×960, and Home draws twelve of them at 152 px on every
 `refresh_home`, on the UI thread; decoding the full frame first does all that work
 and throws it away. The tile itself is a `QPushButton` holding the picture and the

@@ -28,6 +28,16 @@ from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer")
 
+def _optional_bool(value) -> bool | None:
+    """A tri-state flag read from JSON: True, False, or unknown.
+
+    A key that is absent reads as ``None`` rather than False, because "this
+    record predates the flag" and "this record is a whole-figure save" are
+    different facts and only one of them is safe to act on.
+    """
+    return None if value is None else bool(value)
+
+
 _SECTION = "saved_plots"
 _IMAGES_DIRNAME = "saved_plots"
 
@@ -43,14 +53,18 @@ class SavedPlot:
     png_filename: str          # basename under the images dir
     params: dict               # view_state.snapshot(app) — drives Restore
     svg_filename: str = ""     # vector twin of the PNG; "" when none was captured
-    #: True when the record is **one panel** of a multi-panel figure (the hover
-    #: save), False when it is the whole figure. A redraw renders the whole card,
-    #: so without this a panel record came back as every panel, shown under the
-    #: panel's title beside the panel's parameters — a different figure, not a
-    #: worse one. Absent on records written before this was tracked, which read
-    #: as False; those are whole-figure saves far more often than not, and the
-    #: redraw states on the slide that it is a redraw either way.
-    panel_only: bool = False
+    #: Whether the record is **one panel** of a multi-panel figure (the hover
+    #: save) or the whole figure. A redraw renders the whole card, so a panel
+    #: record redrawn comes back as every panel, shown under the panel's title
+    #: beside the panel's parameters — a different figure, not a worse one.
+    #:
+    #: ``None`` means *unknown*, which is what every record written before this
+    #: was tracked carries. Defaulting those to "whole figure" was a guess, and
+    #: it was wrong for the first user to meet it: their saved panel came back
+    #: as the whole three-panel window. Unknown is now its own value, and
+    #: ``scope_matches_figure`` decides it from the evidence the record does
+    #: carry — the shape of the image it stored.
+    panel_only: bool | None = None
     thresholds: dict = field(default_factory=dict)
     summary: str = ""          # human-readable parameter summary
 
@@ -66,7 +80,7 @@ class SavedPlot:
             title=str(d.get("title", "")),
             png_filename=str(d.get("png_filename", "")),
             svg_filename=str(d.get("svg_filename", "") or ""),
-            panel_only=bool(d.get("panel_only", False)),
+            panel_only=_optional_bool(d.get("panel_only")),
             params=dict(d.get("params", {}) or {}),
             thresholds=dict(d.get("thresholds", {}) or {}),
             summary=str(d.get("summary", "")),

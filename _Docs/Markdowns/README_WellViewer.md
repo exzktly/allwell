@@ -1648,6 +1648,35 @@ row, holding five actions:
   limit set on the Fraction or Events panel sticks instead of that panel
   auto-scaling. Settings persist across redraws.
 
+#### Bar colours — Plate or Grey
+
+The Bar Plots tab's Properties sidebar carries a **Colours** section with two
+modes for the bars themselves.
+
+**Plate** is the default and is what the tab has always drawn: each column takes
+the colour its well — or its replicate group — carries on the plate picker, so
+the plate beside the figure doubles as its legend. Read a colour off a bar and
+you can find the well it came from without checking the tick label.
+
+**Grey** paints every column one neutral grey instead. That is the mode for a
+figure whose columns are already named on the axis, where the colours are
+decoration competing with the data — most often a figure headed for a paper, or
+one going next to another plot that uses colour to mean something else.
+
+The setting applies to the whole tab, not just to the bars: switch to **Violin**
+or **Beeswarm** and those follow the same mode, as does the Events-above-threshold
+panel beneath them. The **Batch Export** bar figures follow it too, so a plate
+exported in bulk matches the figure you set the mode on.
+
+Two things deliberately keep their own colours in Grey mode. A column whose value
+could not be computed still draws its dashed placeholder, and a bar whose spread
+was never computable still draws its "n/a" mark — greying those to match a real
+bar would make a measurement that does not exist look like one that does. Error
+bars are unchanged as well.
+
+The mode is saved with the rest of the view state, so a dataset reopens in the
+mode you left it in.
+
 #### Interval per timepoint, and Offset
 
 Under **Properties → Time** are two controls that together state what the

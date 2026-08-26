@@ -47,7 +47,7 @@ clear_gates = _lazy("well_viewer.features.scatter.gating", "clear_gates")
 rename_gate = _lazy("well_viewer.features.scatter.gating", "rename_gate")
 set_gate_draw_mode = _lazy("well_viewer.features.scatter.gating", "set_gate_draw_mode")
 from well_viewer.data.metric_labels import gate_axes_label
-from well_viewer.core.safe import swallowed
+from well_viewer.core.safe import swallow, swallowed
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -100,6 +100,18 @@ _PER_AXIS_STYLE_KEYS = (
     "x_tick_angle", "group_label_size",
     "tick_major", "tick_minor", "tick_length", "tick_direction",
 )
+
+
+#: Human-readable text for the segment values that are re-seeded from
+#: ``PlotState`` on every panel open. Stated once so the initial label, the
+#: click handler and the re-seed cannot spell the same mode three ways.
+_SEGMENT_LABELS = {
+    "plate": "Plate",
+    "grey": "Grey",
+    "mean": "Mean",
+    "mean_spread": "Mean+spread",
+    "all_pts": "All points",
+}
 
 
 class ExportStyleSidebar(QWidget):
@@ -342,6 +354,53 @@ class ExportStyleSidebar(QWidget):
             fmt_edit.editingFinished.connect(self._on_cell_format_changed)
             add_row(s_cells, "Value format", fmt_edit)
 
+        # ── Bar plot: what the columns are coloured by ──────────────────────
+        # "Plate" is the historical behaviour — each column takes the colour
+        # its well or replicate group carries on the plate picker, so the
+        # plate doubles as the legend. "Grey" paints every column one neutral
+        # ink, for a figure whose columns are already named on the axis and
+        # whose colours would only compete with the data. Bar-figure-gated
+        # like the Density / Gates / Cell values sections above: the setting
+        # changes nothing on any other plot, so it does not appear on one.
+        if self._is_bar_fig():
+            from widgets.plot_card import _make_segmented as _seg_color
+            from well_viewer.domain.bar_colors import bar_color_mode as _bar_color_mode
+            s_colors = section("Colours", expanded=True)
+            _color_init = _bar_color_mode(self._app._app_state.plot)
+            color_sc = _seg_color(
+                [("Plate", "plate"), ("Grey", "grey")], current=_color_init,
+            )
+            if color_sc is not None:
+                self._color_seg = color_sc
+                _color_preview = QLabel(_SEGMENT_LABELS[_color_init])
+                _color_preview.setObjectName("Muted")
+                self._color_seg_preview = _color_preview
+                s_colors.setValueWidget(_color_preview)
+
+                def _on_color_mode_change(*_a) -> None:
+                    v = str(color_sc.currentData() or "plate")
+                    self._app._app_state.plot.bar_color_mode = v
+                    _color_preview.setText(_SEGMENT_LABELS[v])
+                    # A full redraw, not a restyle: the colour is chosen per
+                    # column while the bars / violins are built, and the
+                    # auto-wire restyle path never revisits an existing
+                    # artist's facecolor.
+                    #
+                    # The redraw is this control's *only* visible effect, so a
+                    # swallowed failure would leave the segment and its summary
+                    # both reading "Grey" over a figure still drawn in plate
+                    # colours, with nothing on screen saying so. Say so.
+                    if not self._redraw_bound_figure():
+                        with swallow():
+                            self._app._set_status(
+                                f"Bar colours set to {_SEGMENT_LABELS[v]}, but the "
+                                "plot could not be redrawn — switch tabs and back "
+                                "to refresh it."
+                            )
+
+                color_sc.currentChanged.connect(_on_color_mode_change)
+                add_stacked(s_colors, "Bar colours", color_sc)
+
         # File format selector intentionally omitted — the Save As… dialog
         # offers PDF / SVG / EPS / PNG via the file filter, so picking the
         # format up front was redundant. The "format" pref (read by
@@ -570,6 +629,7 @@ class ExportStyleSidebar(QWidget):
                     swallowed()
             show_sc.currentChanged.connect(_on_show_change)
             add_stacked(s_stats, "Show", show_sc)
+            self._show_seg = show_sc
 
         _update_stats_preview()
 
@@ -1258,6 +1318,10 @@ class ExportStyleSidebar(QWidget):
         """True only for the Heat Map figure (the cell-value format applies there)."""
         return getattr(self._app, "_heatmap_fig", None) is self._fig
 
+    def _is_bar_fig(self) -> bool:
+        """True only for the Bar plot figure (the colour mode applies there)."""
+        return getattr(self._app, "_bar_fig", None) is self._fig
+
     def _on_cell_format_changed(self) -> None:
         """Persist the Heat Map cell format, then redraw.
 
@@ -1452,6 +1516,53 @@ class ExportStyleSidebar(QWidget):
             app._redraw()
         except Exception:
             swallowed()  # was: pass (silent except)
+
+    def _resync_plot_state_segments(self) -> None:
+        """Re-seed the segments that write straight to ``PlotState``.
+
+        The *Error bars* and *Across* segments do not need this — they carry
+        observers on ``ctx.runtime.sem`` / ``ctx.runtime.fov`` because the plot
+        cards write those same flags and the two were seen drifting. *Show* and
+        *Bar colours* have no such observer: nothing else in the UI writes them,
+        so the only other writer is ``persistence.view_state``, which sets them
+        on a dataset load (``_apply_bar``) and on a reset (``restore_defaults``).
+
+        This panel is built once per figure and cached for the life of the
+        process, so without a re-seed here the widget keeps showing the previous
+        dataset's choice. That is worse than a stale label: re-selecting the
+        segment a ``SegmentedControl`` already believes is current emits no
+        signal, so clicking the mode the user wants does nothing until they
+        click the other one first.
+
+        Signals are blocked around the write — this is the widget catching up
+        with the state, not a user changing it, and letting it fire would run
+        the handler and redraw on every panel open.
+        """
+        plot = getattr(self._app._app_state, "plot", None)
+        if plot is None:
+            return
+        for attr, field, default in (
+            ("_color_seg", "bar_color_mode", "plate"),
+            ("_show_seg", "bar_show_mode", "mean_spread"),
+        ):
+            seg = getattr(self, attr, None)
+            if seg is None:
+                continue
+            want = str(getattr(plot, field, default) or default)
+            if seg.currentData() == want:
+                continue
+            seg.blockSignals(True)
+            try:
+                seg.setCurrentByData(want)
+            finally:
+                seg.blockSignals(False)
+            preview = getattr(self, f"{attr}_preview", None)
+            if preview is not None:
+                # Moving the widget and leaving its collapsed-section summary
+                # behind is the failure the *Error bars* observer already
+                # documents: the header reads one mode while the figure draws
+                # another, and nothing on screen says which is live.
+                preview.setText(_SEGMENT_LABELS.get(want, want))
 
     def _refresh_line_order_lists(self) -> None:
         """Repopulate the rep-set / well order lists from current app state.

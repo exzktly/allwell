@@ -11,6 +11,7 @@ from well_viewer.features.barplot.controller import refresh_bar_layout_btn_state
 from well_viewer.features.barplot.collect import _bar_debug, bar_err_settings, collect_bar_items_for_app
 
 from well_viewer.domain.selections_model import (color_for_replicate_set, color_for_well, well_display_label, active_replicate_sets)
+from well_viewer.domain.bar_colors import apply_bar_color_mode, mono_bar_color
 from well_viewer.core.channel_state_controller import get_all_fluor_gates, on_cutoff_for_column
 from well_viewer.core.empty_state_copy import NO_DATASET_MESSAGE
 from well_viewer.data.data_loading import get_rows
@@ -186,6 +187,11 @@ def draw_violin(
                      color=tokens_for(ax_mean)[2], fontsize=9)
         return
 
+    # Properties → Colours. Resolved here rather than by each caller because
+    # both the tab and the Batch Export panel reach these three renderers with a
+    # real ``ctx``, so one line covers both surfaces.
+    colors = apply_bar_color_mode(ctx.state.plot, colors)
+
     n = len(wells)
     if bw is None:
         slider = ctx.widgets.get_or_none("_violin_slider")
@@ -360,6 +366,10 @@ def draw_beeswarm(
 
     *target_t* — single ``float`` or a list of per-column floats.
     """
+    # Properties → Colours. Resolved here rather than by each caller because
+    # both the tab and the Batch Export panel reach these three renderers with a
+    # real ``ctx``, so one line covers both surfaces.
+    colors = apply_bar_color_mode(ctx.state.plot, colors)
     n = len(wells)
     if xs is None:
         xs = list(range(n))
@@ -950,6 +960,7 @@ def draw_grouped_bar_mode(
         disabled_well_color=theme.Colors.plot_undefined_ink,
         err_bar_color=theme.Colors.err_bar,
         fc_active=bool(ctx.state.plot.fold_change_active),
+        bar_color=mono_bar_color(ctx.state.plot),
         ctx=ctx,
     )
     if (str(getattr(ctx.state.plot, "bar_group_mode", "well") or "well") == "well"
@@ -1503,6 +1514,11 @@ def draw_per_well_n_bars(
     # per-cell view, and 95 % CI drew a bare SEM. ``bar_err_settings`` is the
     # same accessor the aggregate path uses, so the two panels cannot drift.
     _err_kind, _ci_scale, _draw_err = bar_err_settings(ctx)
+    # Properties → Colours. Resolved here rather than by each caller because
+    # both the tab and the Batch Export panel reach these three renderers with a
+    # real ``ctx``, so one line covers both surfaces.
+    _mono = mono_bar_color(ctx.state.plot)
+    colors = apply_bar_color_mode(ctx.state.plot, colors)
     n = len(wells)
     if xs is None:
         xs = list(range(n))
@@ -1529,7 +1545,11 @@ def draw_per_well_n_bars(
                 per_fov_spread=per_fov_spread,
             )
         matched = [pt for pt in pts if tp_close(pt[0], col_tp)]
-        color = colors[i % len(colors)] if colors else color_for_well(lbl)
+        # The no-``colors`` fallback re-derives the plate-rank colour, so it
+        # has to go back through the mode — otherwise a caller that passed no
+        # colours drew this panel in plate colours beside two grey ones.
+        color = (colors[i % len(colors)] if colors
+                 else (_mono or color_for_well(lbl)))
         # ``bar_val > 0`` conflated two different facts, in the direction that
         # hides real data: a well the pipeline measured as having no events
         # above threshold drew the dashed "could not be computed" placeholder,

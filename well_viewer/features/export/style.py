@@ -192,6 +192,19 @@ def launch_export_editor(win, fig, default_name: str, *, plot_bg: str = "",
             sb._refresh_line_order_lists()
         except Exception:
             swallowed()  # was: pass (silent except)
+        # Re-seed the segments that write straight to ``PlotState``. The sidebar
+        # is built once per figure and cached for the life of the process (it is
+        # only ever *hidden* on a tab change), so those widgets read their state
+        # exactly once — while ``view_state._apply_bar`` writes the same fields
+        # on every dataset load and ``view_state.reset`` writes them again. A
+        # segment left showing the previous dataset's mode is not merely
+        # cosmetic: re-selecting the segment a ``SegmentedControl`` already
+        # believes is current emits nothing, so the control does nothing until
+        # the user clicks the *other* option first.
+        try:
+            sb._resync_plot_state_segments()
+        except Exception:
+            swallowed()  # was: pass (silent except)
         return _ExportEditorSession(sb)
     except Exception as exc:
         QMessageBox.warning(win if isinstance(win, QWidget) else None,

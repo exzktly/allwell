@@ -1886,12 +1886,30 @@ event loop is a scroll to the top of a list that has not been laid out. That is
 what shipped, and it always landed on the first card while reporting success,
 because `QScrollArea.ensureWidgetVisible` returns nothing to say otherwise.
 `_scroll_when_laid_out` re-aims once per event-loop pass until the target stops
-moving (the cards size themselves from their pixmaps, so the list's height is
-still changing for a few passes), bounded by `_SCROLL_SETTLE_TRIES`. It sets the
+moving (the cards size themselves from their previews' aspect ratios, so the
+list's height is still changing for a few passes), bounded by
+`_SCROLL_SETTLE_TRIES`. It sets the
 scroll bar to the card's own top rather than calling `ensureWidgetVisible`,
 because a saved figure is routinely taller than the viewport and "make it
 visible" then means scrolling until its *bottom* shows — the user arrives at the
 foot of the plot they clicked.
+
+**A gallery card is sized from the file header and decoded when it is
+painted.** `tab_view._AspectImage` reads the PNG's declared size with
+`QImageReader.size()` — about 0.02 ms, no pixels — and reserves its height from
+that aspect ratio, then decodes the image in its first `paintEvent`. Qt does not
+paint a widget scrolled out of view, so the paint *is* the visibility signal:
+the pixels are read when a card comes into view, once, and never for a card the
+user never scrolls to. Decoding at build time instead cost about 18 ms per
+saved plot — a 300 dpi capture is routinely 1800×1200 — on every repopulate,
+which is opening the tab, saving a plot, deleting one, renaming one, reordering
+one; twenty saved plots was some 0.4 s of decoding to show two or three of them.
+(`QPixmap(path)` reads from Qt's own file cache when the same path is loaded
+twice, so a measurement that decodes one file repeatedly reports the cache and
+not the decode.) A file whose header parses and whose pixels do not leaves the
+preview labelled `(image unavailable)` rather than blank; a file that cannot be
+read at all yields no preview widget, and the card draws the same named
+placeholder in its place.
 
 Thumbnails are decoded **at thumbnail size and cached**, through
 `QImageReader.setScaledSize` rather than by loading the file and scaling

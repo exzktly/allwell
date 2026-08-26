@@ -45,7 +45,12 @@ _logger = logging.getLogger(__name__)
 
 import theme
 
+from well_viewer.core.plot_annotations import (
+    LABEL_SPAN_HEADROOM as _LABEL_HEADROOM,
+    value_label_settings,
+)
 from well_viewer.domain.tp_match import tp_close, tp_close_mask
+from well_viewer.features.barplot._annotations import label_bar
 from well_viewer.features.barplot.controller import (
     cluster_centers as _cluster_centers,
     cluster_x_for_group_keys,
@@ -1514,6 +1519,7 @@ def draw_per_well_n_bars(
     # per-cell view, and 95 % CI drew a bare SEM. ``bar_err_settings`` is the
     # same accessor the aggregate path uses, so the two panels cannot drift.
     _err_kind, _ci_scale, _draw_err = bar_err_settings(ctx)
+    _labels_on, _label_fmt = value_label_settings(ctx)
     # Properties → Colours. Resolved here rather than by each caller because
     # both the tab and the Batch Export panel reach these three renderers with a
     # real ``ctx``, so one line covers both surfaces.
@@ -1574,6 +1580,14 @@ def draw_per_well_n_bars(
             ax_n.bar(xi, bar_val, width=bar_w, color=color, alpha=0.85, zorder=3, linewidth=0)
             if _draw_err and err_val > 0:
                 ax_n.errorbar(xi, bar_val, yerr=err_val * _ci_scale, fmt="none", ecolor=theme.Colors.err_bar, elinewidth=1.4, capsize=4, zorder=4)
+            # Value labels (Properties → Overlays). This panel draws the same
+            # mean-and-spread the aggregate path does, from a different
+            # collector, so it labels them the same way — a rule honoured on
+            # one of two functions that draw one panel is the half-sweep this
+            # codebase keeps paying for.
+            if _labels_on:
+                label_bar(ax_n, xi, bar_val, err_val, draw_err=_draw_err,
+                          ci_scale=_ci_scale, fmt=_label_fmt)
         else:
             ax_n.bar(xi, 0, width=bar_w, color=theme.Colors.placeholder, linewidth=1, edgecolor=theme.Colors.plot_undefined_ink, linestyle="--", zorder=3)
     ax_n.set_xticks(xs)
@@ -1584,7 +1598,12 @@ def draw_per_well_n_bars(
     # Use float ticks when the bar shows a per-FOV mean (Aggregate FOVs
     # toggle on); otherwise the events-above value is an integer count.
     cur_lo, cur_hi = ax_n.get_ylim()
-    ax_n.set_ylim(0, max(cur_hi, 1))
+    # The labels sit above the error caps, so the panel needs the extra
+    # headroom the aggregate panels get — otherwise the tallest column's label
+    # is drawn over the title. The *span* multiplier, not the bar panels' one:
+    # this top is a matplotlib autoscale that has already had its own margin,
+    # not a raw scan of the data.
+    ax_n.set_ylim(0, max(cur_hi * (_LABEL_HEADROOM if _labels_on else 1.0), 1))
     ax_n.yaxis.set_major_locator(MaxNLocator(integer=not per_fov_spread))
     setattr(ax_n, "_categorical_xaxis", True)
     from well_viewer.data.metric_labels import (

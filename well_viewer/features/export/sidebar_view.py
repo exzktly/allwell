@@ -679,6 +679,53 @@ class ExportStyleSidebar(QWidget):
         thr_tog.toggled.connect(_on_threshold_line_toggle)
         add_row(s_over, "", thr_tog)
 
+        # Value labels: the "12.34 ± 1.20" text above each bar / marker. Drives
+        # PlotState.show_value_labels + .value_label_format, read by the Bar and
+        # Line renderers (and their Batch Export twins) through
+        # ``core.plot_annotations``. Global rather than per-figure, like the
+        # threshold marker beside it: it states the plotted statistic, which is
+        # the same statistic on whichever tab is showing it.
+        val_tog = ToggleSwitch("Show value labels")
+        val_tog.setChecked(bool(getattr(
+            self._app._app_state.plot, "show_value_labels", False)))
+        val_tog.setToolTip(
+            "Print each point's value beside it on the Bar and Line plots — "
+            "the mean, and ± the spread whenever an error bar is drawn for it. "
+            "A bar whose spread could not be computed is labelled with its mean "
+            "alone (the 'n/a' mark already says the spread is missing).")
+
+        def _on_value_labels_toggle(on: bool) -> None:
+            self._app._app_state.plot.show_value_labels = bool(on)
+            try:
+                self._redraw_active_plot()
+            except Exception:
+                swallowed()
+        val_tog.toggled.connect(_on_value_labels_toggle)
+        add_row(s_over, "", val_tog)
+
+        val_fmt = QLineEdit(str(getattr(
+            self._app._app_state.plot, "value_label_format", "") or ""))
+        val_fmt.setPlaceholderText("auto")
+        val_fmt.setToolTip(
+            "printf-style format for the value labels — %.2f for two decimals, "
+            "%.1e for scientific notation, %d for a whole number. Leave blank "
+            "to pick a format from each value's magnitude. Both halves of a "
+            "label share the format, except a spread it would round to zero — "
+            "that keeps its own precision rather than reading as a measured "
+            "zero.")
+
+        def _on_value_label_format() -> None:
+            self._app._app_state.plot.value_label_format = val_fmt.text().strip()
+            if not bool(getattr(self._app._app_state.plot,
+                                "show_value_labels", False)):
+                return
+            try:
+                self._redraw_active_plot()
+            except Exception:
+                swallowed()
+        val_fmt.editingFinished.connect(_on_value_label_format)
+        add_row(s_over, "Value format", val_fmt)
+
         # ── Time ─────────────────────────────────────────────────────
         # The time-axis label correction: an interval multiplier and a fixed
         # offset, together the map ``filename hours × scale + offset``. Drives

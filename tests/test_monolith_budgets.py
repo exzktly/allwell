@@ -120,7 +120,14 @@ SCATTER_CONTROLLER_BUDGET = 875
 # ``barplot/_drag_reorder.py``. A clean seam: nothing there draws a bar or
 # decides a value, and the controller re-exports the names so every caller is
 # unchanged. Genuine extraction — ratchet down to the new size.
-BARPLOT_CONTROLLER_BUDGET = 604
+# 604 -> 572: the three annotation passes over the bar panels (the cluster
+# headers, the ``n/a`` undefined-spread mark, and the value-label overlay)
+# moved into ``barplot/_annotations.py``. Same seam as ``_axis_fit``: nothing
+# there decides what a bar *is*, only what is written over it. ``cluster_centers``
+# went the other way, down into ``collect.py`` with the rest of the Qt-free
+# layout maths, so the annotations module can read it without importing back up
+# into this one.
+BARPLOT_CONTROLLER_BUDGET = 572
 # 963 -> 980: A8 ctx-seam. review_csv/tab_view stopped naming ctx.app (4 -> 0) by
 # calling refresh_review_csv[_rows] / on_review_csv_row_double_click with ctx; those
 # three fns gained thin ctx-adapter wrappers here that delegate to their unchanged

@@ -17,10 +17,16 @@ from __future__ import annotations
 
 import math
 
+from well_viewer.core.plot_annotations import LABEL_FRAC_CAP, LABEL_HEADROOM
 from well_viewer.domain.numeric import is_number
 
 #: Headroom above the tallest bar-plus-error, so the error caps are not clipped.
 HEADROOM = 1.08
+
+#: The fraction panel's ceiling. A raw fraction cannot exceed 1, so the axis
+#: stops just above it. Under fold change it does not apply at all — the field
+#: is then a ratio or a difference.
+FRAC_CAP = 1.05
 
 
 def tops_lows(items, get_val, get_spread) -> tuple[list[float], list[float]]:
@@ -44,7 +50,8 @@ def tops_lows(items, get_val, get_spread) -> tuple[list[float], list[float]]:
     return tops, lows
 
 
-def autofit(ax, tops, lows, *, cap=None, floor_hi=None) -> None:
+def autofit(ax, tops, lows, *, cap=None, floor_hi=None,
+            headroom: float = HEADROOM) -> None:
     """Set *ax*'s y-limits from *tops* / *lows*, on an honest zero baseline.
 
     The axis dips below zero only for genuine negatives, so a bar of zero
@@ -55,7 +62,7 @@ def autofit(ax, tops, lows, *, cap=None, floor_hi=None) -> None:
     """
     if not tops:
         return
-    hi = max(tops) * HEADROOM
+    hi = max(tops) * headroom
     if floor_hi is not None:
         hi = max(hi, floor_hi)
     if cap is not None:
@@ -93,17 +100,26 @@ def events_axis_is_integer(*, requested: bool | None, per_fov: bool,
 
 
 def fit_bar_panels(ax_mean, ax_frac, ax_n, items, *, fc_active: bool,
-                   n_axis_integer: bool | None, per_fov: bool) -> None:
-    """Fit all three bar panels and set the events axis' tick locator."""
+                   n_axis_integer: bool | None, per_fov: bool,
+                   value_labels: bool = False) -> None:
+    """Fit all three bar panels and set the events axis' tick locator.
+
+    *value_labels* says the ``mean ± spread`` overlay is on, which is a fact
+    about the axis and not only about the text: the label is drawn above the
+    error cap, so a panel fitted to the cap alone puts it over the title.
+    """
+    _hr = LABEL_HEADROOM if value_labels else HEADROOM
     autofit(ax_mean, *tops_lows(
         items,
         lambda it: it.mean if it.has_mean else float("nan"),
-        lambda it: it.spread))
-    # cap=1.05 only when FC is off — under FC the frac may be a ratio > 1.
+        lambda it: it.spread), headroom=_hr)
+    # The cap applies only when FC is off — under FC the frac may be a ratio > 1.
+    _cap = LABEL_FRAC_CAP if value_labels else FRAC_CAP
     autofit(ax_frac, *tops_lows(
         items,
         lambda it: it.frac if it.has_frac else float("nan"),
-        lambda it: it.frac_spread), cap=None if fc_active else 1.05)
+        lambda it: it.frac_spread), cap=None if fc_active else _cap,
+        headroom=_hr)
     if ax_n is None:
         return
     # Scanned on ``n_above`` itself, not on ``has_mean``. The mean is NaN
@@ -113,7 +129,7 @@ def fit_bar_panels(ax_mean, ax_frac, ax_n, items, *, fc_active: bool,
     autofit(ax_n, *tops_lows(
         items,
         lambda it: float(it.n_above) if is_number(it.n_above) else float("nan"),
-        lambda it: it.n_above_spread), floor_hi=1.0)
+        lambda it: it.n_above_spread), floor_hi=1.0, headroom=_hr)
     try:
         from matplotlib.ticker import MaxNLocator
     except ImportError:

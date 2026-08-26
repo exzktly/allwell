@@ -2089,9 +2089,14 @@ class BatchExportPanel(QWidget):
         # panels are well-separated by hspace, so each reads as its own graph.
         # Same rescale the on-tab Line figure applies, for the same reason: two
         # figures of the same series must not print two different time axes.
+        from well_viewer.core.plot_annotations import (
+            LABEL_FRAC_CAP as _LABEL_FRAC_CAP,
+            value_label_settings,
+        )
         from well_viewer.core.plot_style import apply_time_rescale
         from well_viewer.domain.time_rescale import axis_label as _time_axis_label
         from well_viewer.domain.time_rescale import rescale_for as _time_rescale_for
+        _value_labels, _value_label_fmt = value_label_settings(self._ctx)
         _time_rescale = _time_rescale_for(self._ctx.state.plot)
         _time_lbl = _time_axis_label("Time (hours)", _time_rescale)
         for _ax_time in (ax_mean, ax_frac, ax_n):
@@ -2104,7 +2109,10 @@ class BatchExportPanel(QWidget):
         # The batch twin of a fixed on-tab figure is exactly where a half-swept
         # rule hides — the exported PNG kept clipping after the tab stopped.
         if not fc_active:
-            ax_frac.set_ylim(-0.05, 1.05)
+            # Widened when the value labels are on, exactly as the on-tab Line
+            # figure widens it: a trace at 1.0 otherwise has its label drawn
+            # over the panel title.
+            ax_frac.set_ylim(-0.05, _LABEL_FRAC_CAP if _value_labels else 1.05)
         ax_cdf.set_xlabel(f"{_ch} {_metric_label}", fontsize=8, labelpad=5)
         ax_cdf.set_ylim(-0.02, 1.05)
 
@@ -2126,6 +2134,11 @@ class BatchExportPanel(QWidget):
             # x-range from the data (cdf_xrange=None).
             show_threshold_line=True, cdf_xrange=None,
             draggable_legends=False,
+            # Properties → Overlays, the same overlay the on-tab Line figure
+            # draws. The batch twin of an on-tab figure is exactly where a
+            # half-applied option hides: an exported PNG without the labels
+            # the user put on the plot looks like a complete figure.
+            value_labels=_value_labels, value_label_format=_value_label_fmt,
         )
         return fig
 

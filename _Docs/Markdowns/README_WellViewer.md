@@ -1695,6 +1695,47 @@ bars are unchanged as well.
 The mode is saved with the rest of the view state, so a dataset reopens in the
 mode you left it in.
 
+#### Value labels — printing the numbers on the plot
+
+Under **Properties → Overlays** is a **Show value labels** switch. Turn it on
+and every plotted point states its own value beside it — `1200 ± 85` above a
+bar, `0.420 ± 0.050` above a Line Graphs marker — so a figure can be read
+without going back to the CSV.
+
+It applies to the **Bar Plots** tab (all three panels: Value, Fraction and
+Events-above-threshold, in the grouped and per-well layouts, and the
+Events panel of the Violin / Beeswarm views) and to the **Line Graphs** tab's
+three time panels. The CDF panel takes none: its points are one per cell rather
+than a mean of anything, so there is no spread to state and one label per cell
+would bury the curve. The **Batch Export** bar and line figures follow the
+switch too, so a plate exported in bulk carries the same numbers as the figure
+you set it on.
+
+**The ± half appears only when an error bar is actually drawn.** Switch the
+error bars off (Properties → Statistics → *Show: Mean*, or *Error bars: None*)
+and the labels print the mean alone. A bar whose spread could not be computed —
+one replicate, or FOV labels that don't identify the fields — is likewise
+labelled with its mean alone, and keeps its "n/a" mark to say why. A label
+reading `± 0` over a spread that was never measured would claim the replicates
+agreed, which is exactly the confusion that mark exists to prevent. Where the
+error bars are 95 % confidence intervals, the label states the interval, not the
+SEM behind it.
+
+**Value format** beside the switch takes a printf-style format for the numbers —
+`%.2f` for two decimals, `%.1e` for scientific notation, `%d` for a whole
+number. Leave it blank and each label picks a format from its own magnitude:
+whole numbers print without decimals so a count of events reads `310` rather
+than `310.00`, fractions get three places, and anything past a hundred thousand
+goes to scientific notation. Both halves of a label share one format so they
+read as a single number — with one exception, a spread that format would round
+to `0`, which keeps enough precision to stay visible rather than reading as a
+measured zero.
+
+Panels make room for the text: the y-axis gains extra headroom while the labels
+are on, and the Fraction panel's usual ceiling of 1.05 opens up, so a bar or
+trace at the top of its range is not labelled over the panel title. Both the
+switch and the format are saved with the rest of the view state.
+
 #### Interval per timepoint, and Offset
 
 Under **Properties → Time** are two controls that together state what the

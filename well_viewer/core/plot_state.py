@@ -43,6 +43,21 @@ class PlotState:
     # panel). Off by default — opt in via the Properties sidebar.
     show_threshold_line: bool = False
 
+    # Print each plotted point's value beside it — "12.34 ± 1.20" above a bar
+    # or a line-plot marker, on the Bar and Line tabs and their Batch Export
+    # twins. Off by default; opt in via the Properties sidebar's Overlays
+    # section, next to the threshold marker.
+    #
+    # ``value_label_format`` is an optional printf format for the numbers
+    # (``"%.2f"``, ``"%.1e"``, ``"%d"``). Empty picks one from each value's
+    # magnitude. Both halves of a label share the format chosen for the mean,
+    # so the two numbers read as one — except a spread that format would round
+    # to zero, which keeps its own precision rather than claiming a measured
+    # zero. The label states a ± only when a spread was actually computed and
+    # drawn; see ``core/plot_annotations.py``.
+    show_value_labels: bool = False
+    value_label_format: str = ""
+
     # The time-axis label correction (Properties → Time). Together these two
     # numbers are the affine map ``filename hours × time_scale + time_offset``
     # that ``domain/time_rescale.py`` applies to what a time axis *prints* and

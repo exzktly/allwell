@@ -10,6 +10,8 @@ as a success.
 
 from __future__ import annotations
 
+import re
+
 import ast
 import pathlib
 
@@ -388,10 +390,22 @@ def test_a_well_with_nothing_in_the_gate_still_counts_in_the_denominator():
 def test_the_batch_twins_do_not_clamp_the_fraction_under_fold_change(path):
     """The batch twin of a fixed on-tab figure is exactly where a half-swept
     rule hides: the exported PNG kept clipping the fold-change effect after the
-    tab had stopped."""
+    tab had stopped.
+
+    Matched as "the clamp is inside the ``fc_active`` guard" rather than as one
+    literal line, because the ceiling itself is not fixed — the value-label
+    overlay lifts it so a bar at 1.0 is not labelled over the panel title. What
+    must not change is that the clamp happens only when fold change is off, and
+    that there is exactly one of them per file to reason about.
+    """
     src = (REPO_ROOT / path).read_text()
-    assert "if not fc_active:\n            ax_frac.set_ylim(-0.05, 1.05)" in src, (
-        f"{path} clamps its fraction panel unconditionally")
+    assert src.count("ax_frac.set_ylim(-0.05") == 1, (
+        f"{path} sets the fraction floor in more than one place; each would "
+        "need its own fold-change guard")
+    guarded = re.search(
+        r"if not fc_active:\n(?:[ \t]*#[^\n]*\n)*[ \t]*ax_frac\.set_ylim\(-0\.05,",
+        src)
+    assert guarded, f"{path} clamps its fraction panel unconditionally"
 
 
 def test_only_the_stale_facet_columns_lose_their_label():

@@ -2489,3 +2489,134 @@ def test_time_rescale_sweep_guard_clears(tmp_path, monkeypatch, shape):
                   TIME_RESCALE_CLEAN[shape])
     assert _run_scan(monkeypatch, *_TIME_RESCALE_GUARD, [good]) is None, (
         f"the guard fired on a legitimate {shape}")
+
+
+# ── the Save-menu guards ─────────────────────────────────────────────────────
+#
+# Two rules, one for each half of what the builder guarantees: that every plot
+# tab goes through it (so the eight menus cannot drift apart again, and none can
+# quietly lack the raw-cell export), and that the three figure actions all act
+# on the caller's own card (so Split View does not send Bar Plots' "Copy SVG" to
+# the line figure). Both are AST scans over the tab builders, and both have an
+# evasion worth pinning: ``_with_caret`` appends the caret, so a menu button
+# labelled "Save" renders identically to "Save ▾" and a scan for the caret alone
+# would miss it.
+
+SAVE_MENU_VIOLATIONS = {
+    # A tab assembling the menu itself, with the caret.
+    "hand-rolled-caret":
+        'def build(ctx, band):\n'
+        '    btn, menu = make_action_menu_button("Save ▾", band)\n'
+        '    add_menu_action(menu, "Save figure…", lambda: f(ctx))\n',
+    # The same, relying on _with_caret to add the caret for it.
+    "hand-rolled-bare":
+        'def build(ctx, band):\n'
+        '    btn, menu = make_action_menu_button("Save", band)\n'
+        '    add_menu_action(menu, "Save figure…", lambda: f(ctx))\n',
+    # The pre-unification spelling, which is the same menu under its old name.
+    "hand-rolled-export":
+        'def build(ctx, band):\n'
+        '    btn, menu = make_action_menu_button("Export ▾", band)\n'
+        '    add_menu_action(menu, "Export CSV…", lambda: f(ctx))\n',
+}
+
+SAVE_MENU_CLEAN = {
+    # A non-plot menu built with the same helper — the Preview panel has one.
+    "other-menu":
+        'def build(ctx, band):\n'
+        '    btn, menu = make_action_menu_button("Display ▾", band)\n',
+    # The sanctioned shape.
+    "builder":
+        'def build(ctx, band):\n'
+        '    btn, menu, act = build_plot_save_menu(\n'
+        '        ctx, band, card_key="_x_card", data_label="Save plot data…",\n'
+        '        data_cb=lambda: d(ctx), cells_cb=lambda: c(ctx))\n',
+}
+
+
+def _save_menu_offenders(paths):
+    """Replays test_plot_save_menu's scan: a hand-rolled save/export menu."""
+    import ast
+
+    out = []
+    for path in paths:
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and getattr(node.func, "id", "") == "make_action_menu_button"
+                    and node.args):
+                continue
+            first = node.args[0]
+            if not (isinstance(first, ast.Constant)
+                    and isinstance(first.value, str)):
+                continue
+            if first.value.replace("▾", "").strip().lower() in ("save", "export"):
+                out.append(f"{path.name}:{node.lineno}")
+    return out
+
+
+@pytest.mark.parametrize("shape", sorted(SAVE_MENU_VIOLATIONS))
+def test_save_menu_guard_catches(tmp_path, shape):
+    bad = _write(tmp_path, f"bad_savemenu_{shape}.py", SAVE_MENU_VIOLATIONS[shape])
+    assert _save_menu_offenders([bad]), (
+        f"the {shape} spelling walked past the Save-menu guard")
+
+
+@pytest.mark.parametrize("shape", sorted(SAVE_MENU_CLEAN))
+def test_save_menu_guard_clears(tmp_path, shape):
+    good = _write(tmp_path, f"good_savemenu_{shape}.py", SAVE_MENU_CLEAN[shape])
+    assert not _save_menu_offenders([good]), (
+        f"the Save-menu guard fired on a legitimate {shape}")
+
+
+CARD_KEY_VIOLATIONS = {
+    # No card named at all — the items fall back to "the first visible card".
+    "no-card-key":
+        'def build(ctx, band):\n'
+        '    build_plot_save_menu(ctx, band, data_label="d",\n'
+        '        data_cb=lambda: d(ctx), cells_cb=lambda: c(ctx))\n',
+    # A computed key, which cannot be read here and so cannot be checked.
+    "computed-card-key":
+        'def build(ctx, band):\n'
+        '    build_plot_save_menu(ctx, band, card_key=key_for(ctx),\n'
+        '        data_label="d", data_cb=lambda: d(ctx), cells_cb=lambda: c(ctx))\n',
+    # No cells callback — the entry a tab could otherwise quietly lack.
+    "no-cells-cb":
+        'def build(ctx, band):\n'
+        '    build_plot_save_menu(ctx, band, card_key="_x_card",\n'
+        '        data_label="d", data_cb=lambda: d(ctx))\n',
+}
+
+
+def _card_key_offenders(paths):
+    """Replays the per-tab half of test_export_menu_acts_on_its_own_card."""
+    import ast
+
+    out = []
+    for path in paths:
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and getattr(node.func, "id", "") == "build_plot_save_menu"):
+                continue
+            names = {kw.arg: kw.value for kw in node.keywords}
+            key = names.get("card_key")
+            if key is None or not (isinstance(key, ast.Constant)
+                                   and isinstance(key.value, str)):
+                out.append(f"{path.name}:{node.lineno}:card_key")
+            if "cells_cb" not in names:
+                out.append(f"{path.name}:{node.lineno}:cells_cb")
+    return out
+
+
+@pytest.mark.parametrize("shape", sorted(CARD_KEY_VIOLATIONS))
+def test_card_key_guard_catches(tmp_path, shape):
+    bad = _write(tmp_path, f"bad_cardkey_{shape}.py", CARD_KEY_VIOLATIONS[shape])
+    assert _card_key_offenders([bad]), (
+        f"the {shape} spelling walked past the card-key guard")
+
+
+def test_card_key_guard_clears(tmp_path):
+    good = _write(tmp_path, "good_cardkey.py", SAVE_MENU_CLEAN["builder"])
+    assert not _card_key_offenders([good]), (
+        "the card-key guard fired on a correctly-built menu")

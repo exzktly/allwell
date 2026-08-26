@@ -19,8 +19,6 @@ few hundred would empty the population; ``column_gating_exempt`` owns that rule
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 import numpy as np
 import pandas as pd
 
@@ -128,18 +126,70 @@ def cell_scope(ctx) -> CellScope | None:
     )
 
 
+def _agg_timepoints(ctx) -> tuple[float, ...]:
+    out: list[float] = []
+    for tp_str, on in (ctx.runtime.scatter.agg_tp_selections or {}).items():
+        if not on:
+            continue
+        try:
+            out.append(float(tp_str))
+        except (TypeError, ValueError):
+            continue
+    return tuple(out)
+
+
 def agg_cell_scope(ctx) -> CellScope | None:
-    """The aggregate Scatter tab's scope: the cells behind each well's point."""
-    scope = cell_scope(ctx)
-    if scope is None:
+    """The aggregate Scatter tab's scope: the cells behind each well's point.
+
+    Deliberately **not** ``replace(cell_scope(ctx), …)``. The two Scatter pages
+    are separate tabs with separate controls — ``_scatter_agg_ch_x_cb``,
+    ``_scatter_agg_stat_x_cb`` and ``ctx.runtime.scatter.agg_tp_selections``
+    against the per-cell page's own trio — so deriving one scope from the other
+    exports the wrong channel at the wrong timepoints under a scope block that
+    names a third thing. Right schema, right-looking counts, no error.
+
+    Three further differences from the per-cell page, all following from this
+    tab aggregating rather than drawing cells:
+
+    * the gate layer is **on**, because the aggregation filters through the
+      inclusion chokepoint like every other summary view — the per-cell page's
+      exemption exists only because it is where the gates are drawn;
+    * string timepoints resolve, because the path here is
+      ``collect_scatter_agg_data`` → ``group_replicate_stats`` →
+      ``aggregate_with_threshold_df``, which falls back to the ordinal map;
+    * there are no axis-floor markers, because a point is a statistic over a
+      well rather than a cell at an (x, y).
+    """
+    ch_x_cb = ctx.widgets.get_or_none("_scatter_agg_ch_x_cb")
+    if ch_x_cb is None:
         return None
-    return replace(
-        scope,
+    entry_x = ch_x_cb.currentText()
+    if not entry_x:
+        return None
+
+    # ``fraction_above_threshold`` is the agg tab's synthetic metric key: the
+    # aggregation treats it as a Fraction-On over the channel's mean-intensity
+    # column, so that is the column the exported cells are measured on.
+    metric_x = scatter_axis_metric_key(ctx, "x", agg=True)
+    if metric_x == "fraction_above_threshold":
+        metric_x = "mean_intensity"
+    col_x = col_for_scatter_axis(ctx, entry_x, metric_x)
+
+    return scope_from_ctx(
+        ctx,
         plot="scatter_aggregate",
+        val_col=col_x,
+        timepoints=_agg_timepoints(ctx),
         include_gate=True,
-        notes=scope.notes + (
+        tp_fallback=True,
+        required_columns=("area_px",),
+        notes=(
+            ("x axis", f"aggregated from {col_x}"),
             ("drawn statistic",
              "each point is one well's (or replicate set's) aggregate of these "
              "cells — group by well_label to reproduce it"),
+            ("replicate sets",
+             "a set's point is the mean of its wells' values with a cross-well "
+             "SD (ddof=1)"),
         ),
     )

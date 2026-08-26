@@ -7,8 +7,12 @@ CSV reader would reproduce by hand. What changes with the level is *scope*:
 
 * **Summary** faces the whole plate — every well, every timepoint — because its
   panel is a wells × timepoints matrix.
-* **Cell / Colony / Intra-colony** are per-frame: one well and one timepoint,
-  the pair the tab is displaying.
+* **Cell / Colony / Intra-colony** facet one panel per selected well, up to
+  ``_MAX_FRAME_PANELS``, at one timepoint. The export takes every well the tab
+  has a panel for — ``st.frames`` — not ``st.active_well``, which is merely
+  ``shown[0]`` (``controller.py:310``) and would silently export one well of
+  the eight on screen. Wells the panel cap dropped are counted in the scope
+  block rather than left unmentioned.
 
 The centroid columns are required, so a well whose pipeline run did not emit
 them contributes nothing rather than contributing rows the tab could not have
@@ -18,6 +22,10 @@ overriding.
 """
 
 from __future__ import annotations
+
+import pandas as pd
+
+from well_viewer.core.safe import swallowed
 
 from well_viewer.features.export.cell_scope_compute import (
     CellScope, plotted_wells, scope_from_ctx,
@@ -37,19 +45,33 @@ def cell_scope(ctx) -> CellScope | None:
     # it is a label rather than a plotted statistic.
     include_gate = True
 
+    notes: list[tuple[str, str]] = [("level", level or "cell")]
+
     if level == LEVEL_SUMMARY:
         wells = plotted_wells(ctx, fallback_to_all=True)
         timepoints: tuple[float, ...] = ()
     else:
-        active = str(getattr(st, "active_well", "") or "")
-        if not active:
-            wells = plotted_wells(ctx)
-            wells = wells[:1]
-        else:
-            group = next((g for g, w in plotted_wells(ctx, fallback_to_all=True)
-                          if w == active), active)
-            wells = ((group, active),)
+        # Every panel on screen, in the order the tab drew them.
+        groups = dict((w, g) for g, w in plotted_wells(ctx, fallback_to_all=True))
+        panels = [str(f.get("well") or "") for f in (getattr(st, "frames", None) or [])]
+        panels = [w for w in panels if w]
+        if not panels:
+            panels = [str(getattr(st, "active_well", "") or "")]
+            panels = [w for w in panels if w]
+        wells = tuple((groups.get(w, w), w) for w in panels)
+        dropped = int(getattr(st, "frames_truncated", 0) or 0)
+        if dropped:
+            notes.append(("wells not shown",
+                          f"{dropped} more selected well(s) exceeded the panel "
+                          "cap and are not in this file"))
+
+        # ``timepoint = None`` means "the first available" to the collector
+        # (``collect.collect_spatial_frame``), not "every timepoint" — reading
+        # it as the latter exports a file several times wider than the figure
+        # while the scope block claims it holds all of them.
         tp = getattr(st, "timepoint", None)
+        if tp is None:
+            tp = _first_timepoint(ctx, [w for _g, w in wells])
         timepoints = (float(tp),) if tp is not None else ()
 
     if not wells:
@@ -63,10 +85,36 @@ def cell_scope(ctx) -> CellScope | None:
         tp_fallback=False,
         wells=tuple(wells),
         required_columns=(CENTROID_ROW_COL, CENTROID_COL_COL),
-        notes=(
-            ("level", level or "cell"),
-            ("geometry",
-             f"positions are {CENTROID_ROW_COL} / {CENTROID_COL_COL}; every "
-             "spatial statistic on this tab is computed from those"),
-        ),
+        notes=tuple(notes) + ((
+            "geometry",
+            f"positions are {CENTROID_ROW_COL} / {CENTROID_COL_COL}; every "
+            "spatial statistic on this tab is computed from those"),),
     )
+
+
+def _first_timepoint(ctx, wells) -> float | None:
+    """The timepoint an unset picker resolves to — the collector's own rule.
+
+    ``collect_spatial_frame`` takes ``min(finite timepoint_hours)`` of the frame
+    it is drawing, so the export has to ask the same question of the same rows
+    rather than falling back to "all", which is a different figure.
+    """
+    import numpy as np
+
+    from well_viewer.data.data_loading import get_rows
+
+    best: float | None = None
+    for well in wells:
+        try:
+            df = get_rows(ctx, well)
+        except Exception:
+            swallowed(f"spatial scope: rows for {well!r}")
+            continue
+        if df is None or df.empty or "timepoint_hours" not in df.columns:
+            continue
+        values = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
+        finite = values[np.isfinite(values)]
+        if finite.size:
+            candidate = float(finite.min())
+            best = candidate if best is None else min(best, candidate)
+    return best

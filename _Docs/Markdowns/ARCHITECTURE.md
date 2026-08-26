@@ -1787,9 +1787,9 @@ level, Multivariate's tooltip) is a parameter rather than a fork.
 with and without the caret because `_with_caret` appends one.
 
 The five standard entries: an export-data action specific to the tab, "Save
-cell data…" (§ below), "Copy SVG"
-(`core.plot_card_actions.copy_active_card_as_svg`), "Save Figure…"
-(`save_active_card_figure`, a Save-As dialog), and "Save to Saved Plots"
+cell data…" (§ below), "Save figure…"
+(`save_active_card_figure`, a Save-As dialog), "Copy figure as SVG"
+(`core.plot_card_actions.copy_active_card_as_svg`), and "Save to Saved Plots"
 (`core.plot_card_actions.save_card_to_gallery`, which calls the card's
 `saveFigureToGallery()` — a public wrapper around the hover-save button's
 whole-figure capture, added so a persistent menu action can trigger it without

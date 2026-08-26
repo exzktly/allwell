@@ -1595,19 +1595,22 @@ row, holding five actions:
   against, so a file without them could not reproduce the number on the figure.
   A `#` comment block above the table records the value column, timepoints,
   threshold, gate layers and wells that produced it, and names the line the
-  table starts on. Read it with `pandas.read_csv(path, comment="#")`.
+  table starts on. Read it with
+  `pandas.read_csv(path, comment="#", float_precision="round_trip")` — the
+  values are written at full precision, and pandas' default reader does not
+  return all of them exactly.
 
   Large plates are written on a background thread, so the window stays
   responsive; the file appears only when the write finishes. If the data
   changes underneath it — you move a gating or QC threshold, edit the crop, or
   open another dataset — the export stops and says so rather than writing a
   file that is half one state and half another.
-- **Copy SVG** — puts a vector copy of the figure on the clipboard (paste into
-  Illustrator / Inkscape / Keynote / Slides). On macOS the clipboard is written
-  natively (PDF + SVG) so Illustrator pastes editable vector; this needs
-  `pyobjc-framework-Cocoa` (see `requirements.txt`).
-- **Save Figure…** — saves to disk; the file dialog picks the format from the
+- **Save figure…** — saves to disk; the file dialog picks the format from the
   extension (`.svg` / `.pdf` / `.eps` / `.png`).
+- **Copy figure as SVG** — puts a vector copy of the figure on the clipboard
+  (paste into Illustrator / Inkscape / Keynote / Slides). On macOS the
+  clipboard is written natively (PDF + SVG) so Illustrator pastes editable
+  vector; this needs `pyobjc-framework-Cocoa` (see `requirements.txt`).
 - **Save to Saved Plots** — sends the whole figure, plus the exact parameters
   that produced it, to the per-dataset [Saved Plots](#saved-plots) gallery.
   The same capture is also reachable by hovering a plot panel's top-right

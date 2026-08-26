@@ -45,7 +45,7 @@ def read_export(path):
     """
     text = path.read_text(encoding="utf-8")
     starts = [int(line.rsplit(" ", 1)[1]) for line in text.splitlines()
-              if line.startswith("# data starts on line ")]
+              if line.startswith("# table starts on line ")]
     assert starts, "the scope block must name the line the table starts on"
     frame = pd.read_csv(path, skiprows=starts[0] - 1, float_precision="round_trip")
     scope = [line for line in text.splitlines() if line.startswith("#")]
@@ -248,10 +248,12 @@ def test_bar_heights_recompute_from_the_exported_cells(
     heights, fracs = bar_heights(ax_mean), bar_heights(ax_frac)
     spreads = errorbar_spreads(ax_mean)
 
+    checked = 0
     for x, key in zip(xs, keys):
         rows = frame[frame["well_label"] == key]
         if rows.empty:
             continue
+        checked += 1
         stats = agg_family_a(rows, val_col)
         centre = round(float(x), 6)
         assert centre in heights, f"no bar drawn at {key}"
@@ -266,6 +268,7 @@ def test_bar_heights_recompute_from_the_exported_cells(
             assert centre not in spreads, (
                 "an undefined spread must draw no whisker — a zero-length one "
                 "would read as replicates that agreed exactly")
+    assert checked, "no bar was compared — the assertion did not run"
 
 
 # ── Line ─────────────────────────────────────────────────────────────────────
@@ -431,21 +434,47 @@ def test_multivariate_matrix_rows_are_marked(two_wells, qtbot, monkeypatch, tmp_
     assert int(frame["plot_in_matrix"].sum()) == len(frame)
     assert any("feature columns" in line for line in block)
 
+    # And the marker is computed rather than stamped: a feature column no well
+    # carries puts every row outside the matrix. Asserting only the all-1 case
+    # would pass against code that ignored the marker entirely.
+    state.feature_cols = ["gfp_mean_intensity", "no_such_feature"]
+    frame2, _block2 = run_export(ctx, qtbot, monkeypatch, tmp_path, cell_scope,
+                                 name="mv_missing_feature.csv")
+    assert int(frame2["plot_in_matrix"].sum()) == 0
+
 
 @pytest.mark.slow
-def test_spatial_requires_the_centroid_columns(two_wells, qtbot, monkeypatch, tmp_path):
-    """Without centroids the tab could not have placed a cell, so no rows."""
-    from well_viewer.features.spatial.cell_scope_compute import cell_scope
+def test_spatial_requires_the_centroid_columns(two_wells, qtbot, monkeypatch,
+                                               tmp_path):
+    """Without centroids the tab could not have placed a cell, so no rows.
 
-    ctx = two_wells._ctx
-    scope = cell_scope(ctx)
-    if scope is None:
-        pytest.skip("spatial is not in this build")
+    The mini dataset carries no ``shape_centroid_*`` columns, which makes this
+    the live case rather than a hypothetical: the scope demands them, so the
+    export writes a header and no rows instead of rows the figure never drew.
+    """
+    from well_viewer.features.spatial.cell_scope_compute import cell_scope
     from well_viewer.features.spatial.collect import (
         CENTROID_COL_COL, CENTROID_ROW_COL,
     )
+
+    ctx = two_wells._ctx
+    state = ctx.state.feature_slice("spatial")
+    if state is None:
+        pytest.skip("spatial is not in this build")
+    state.frames = [{"well": "A01"}]
+    state.active_well = "A01"
+    state.timepoint = 0.0
+
+    scope = cell_scope(ctx)
+    assert scope is not None
     assert CENTROID_ROW_COL in scope.required_columns
     assert CENTROID_COL_COL in scope.required_columns
+
+    frame, _block = run_export(ctx, qtbot, monkeypatch, tmp_path, cell_scope,
+                               name="spatial_no_centroids.csv")
+    assert frame.empty, (
+        "a well with no centroid columns must contribute no rows, not rows the "
+        "spatial statistics were never computed over")
 
 
 # ── the export's own behaviour ───────────────────────────────────────────────
@@ -530,3 +559,209 @@ def test_an_export_with_no_wells_refuses_rather_than_writing_the_plate(
     export_cell_data_from(ctx, cell_scope)
     assert warned, "an empty selection must say so"
     assert not out.exists()
+
+
+# ── the replicate-set branch ─────────────────────────────────────────────────
+
+@pytest.mark.slow
+def test_a_replicate_sets_bar_recomputes_as_a_mean_of_per_well_means(
+        two_wells, qtbot, monkeypatch, tmp_path):
+    """The other formula family, which no other test in this file reaches.
+
+    With replicate sets defined, Bar and Line never touch ``_aggregate_arrays``:
+    they go through ``compute_rep_stats`` → ``stats_compute._reduce_reps``, and
+    a set's bar is the mean of its **wells' means** with a cross-well ``ddof=1``
+    SD. A file that could only reproduce the pooled-cell statistic would be
+    wrong for every grouped plot in the app, and the scopes' own
+    "group by well_label to reproduce it" note would be a promise nothing kept.
+    """
+    from well_viewer.features.barplot.cell_scope_compute import cell_scope
+    from well_viewer.features.barplot.renderer import redraw_bars
+
+    ctx = two_wells._ctx
+    ctx.state.selection.selections = [
+        {"name": "pair", "wells": ["A01", "A02"], "hidden": False}]
+    redraw_bars(ctx)
+
+    fig = ctx.widgets.get_or_none("_bar_card").figure
+    xs = list(ctx.runtime.barplot.xs or [])
+    keys = list(ctx.runtime.barplot.xs_keys or [])
+    assert keys == ["pair"], f"expected one grouped bar, got {keys}"
+
+    frame, block = run_export(ctx, qtbot, monkeypatch, tmp_path, cell_scope,
+                              name="repset_cells.csv")
+    assert set(frame["well_label"]) == {"A01", "A02"}, (
+        "a grouped bar's file must keep the wells apart, or the mean of means "
+        "cannot be recomputed from it")
+    assert set(frame["group"]) == {"pair"}
+    assert any("mean of its wells' means" in line for line in block)
+
+    val_col = ctx.state.channel.active_val_col
+    stats = agg_family_b(frame, val_col)
+    heights = bar_heights(fig.axes[0])
+    spreads = errorbar_spreads(fig.axes[0])
+    centre = round(float(xs[0]), 6)
+    assert centre in heights
+    np.testing.assert_allclose(heights[centre][0], stats["mean"], rtol=RTOL)
+
+    # Two replicates, so the cross-well spread is defined and drawn. The value
+    # is scaled by the tab's CI factor, so compare the ratio rather than assume
+    # which of SD / SEM is showing.
+    if centre in spreads and np.isfinite(stats["spread"]) and stats["spread"]:
+        ratio = spreads[centre] / stats["spread"]
+        assert 0.1 < ratio < 10.0, (
+            f"the drawn whisker ({spreads[centre]}) is not a scaling of the "
+            f"recomputed cross-well spread ({stats['spread']})")
+
+
+# ── the tabs that had no export test, which is where the defects were ────────
+
+@pytest.mark.slow
+def test_the_aggregate_scatter_exports_its_own_axes_not_the_cells_tabs(
+        two_wells, qtbot, monkeypatch, tmp_path):
+    """The two Scatter pages are separate tabs with separate controls.
+
+    Deriving the aggregate scope from the per-cell one exported the wrong
+    channel at the wrong timepoints under a scope block naming a third thing —
+    right schema, right-looking counts, no error.
+    """
+    from well_viewer.features.scatter.cell_scope_compute import (
+        agg_cell_scope, cell_scope,
+    )
+    from well_viewer.features.scatter.controller import (
+        redraw_scatter_agg_orchestrate,
+    )
+
+    ctx = two_wells._ctx
+    agg_x = ctx.widgets.get_or_none("_scatter_agg_ch_x_cb")
+    cells_x = ctx.widgets.get_or_none("_scatter_ch_x_cb")
+    if agg_x is None or cells_x is None or agg_x.count() < 2:
+        pytest.skip("the scatter tabs have fewer than two channels")
+
+    # Put the two tabs on different channels — the whole point.
+    cells_x.setCurrentIndex(0)
+    agg_x.setCurrentIndex(1)
+    redraw_scatter_agg_orchestrate(ctx)
+
+    agg = agg_cell_scope(ctx)
+    cells = cell_scope(ctx)
+    assert agg is not None and cells is not None
+    assert agg.val_col != cells.val_col, (
+        f"the aggregate scope took the per-cell tab's column ({agg.val_col})")
+    assert agg.include_gate is True, (
+        "the aggregate tab filters through the inclusion chokepoint; only the "
+        "per-cell tab holds the gate layer off")
+    assert agg.tp_fallback is True, (
+        "its path resolves string timepoints, so a text-timepoint plate must "
+        "not export an empty file")
+
+    frame, block = run_export(ctx, qtbot, monkeypatch, tmp_path, agg_cell_scope,
+                              name="agg_cells.csv")
+    assert len(frame) > 0
+    assert any("scatter_aggregate" in line for line in block)
+    assert not any("ungated cloud" in line for line in block), (
+        "the per-cell tab's gate note must not survive onto a scope that "
+        "applies the gate layer — a file cannot say both")
+
+
+@pytest.mark.slow
+def test_spatial_exports_every_panel_the_tab_drew(
+        loaded_app, qtbot, monkeypatch, tmp_path):
+    """Not just ``active_well``, which is merely the first of the panels.
+
+    ``sp_recompute`` facets one panel per selected well up to the panel cap and
+    records them on ``st.frames``, setting ``active_well = shown[0]`` on the
+    way. Exporting that one well and saying nothing about the rest is degraded
+    output that reads as complete. The frames are set here the way the
+    controller sets them, because building the lazy Spatial canvas is not what
+    this is about — the scope's reading of them is.
+    """
+    from well_viewer.features.spatial.cell_scope_compute import cell_scope
+
+    ctx = loaded_app._ctx
+    panels = ["A01", "A02", "B01", "B02"]
+    ctx.state.selection.selected_wells = set(panels)
+    state = ctx.state.feature_slice("spatial")
+    if state is None:
+        pytest.skip("spatial is not in this build")
+    state.frames = [{"well": w} for w in panels]
+    state.active_well = panels[0]
+    state.frames_truncated = 2
+    state.timepoint = 0.0
+
+    scope = cell_scope(ctx)
+    assert scope is not None
+    exported = [w for _g, w in scope.wells]
+    assert exported == panels, (
+        f"the tab drew {panels} and the export takes {exported}")
+    assert any("exceeded the panel cap" in value for _k, value in scope.notes), (
+        "wells the panel cap dropped must be named, not silently absent")
+
+
+@pytest.mark.slow
+def test_spatial_resolves_an_unset_timepoint_the_way_the_collector_does(
+        loaded_app, monkeypatch):
+    """``timepoint = None`` means "the first available" to the collector, not
+    "every timepoint" — reading it as the latter exports a file several times
+    wider than the figure while claiming to hold all of it."""
+    from well_viewer.features.spatial.cell_scope_compute import cell_scope
+
+    ctx = loaded_app._ctx
+    ctx.state.selection.selected_wells = {"A01"}
+    state = ctx.state.feature_slice("spatial")
+    if state is None:
+        pytest.skip("spatial is not in this build")
+    state.timepoint = None
+    state.frames = [{"well": "A01"}]
+    state.active_well = "A01"
+
+    scope = cell_scope(ctx)
+    assert scope is not None
+    assert scope.timepoints == (0.0,), (
+        f"expected the first available timepoint, got {scope.timepoints}")
+
+
+# ── the writer's failure path ────────────────────────────────────────────────
+
+@pytest.mark.slow
+def test_a_failed_writer_stops_the_slicing_chain(
+        two_wells, qtbot, monkeypatch, tmp_path):
+    """A dead writer leaves the queue permanently full, and the tick that
+    handles a full queue reschedules itself. Without a terminal flag that is a
+    100 Hz loop for the life of the process, pinning every well's frame."""
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+    from well_viewer.features.distribution.cell_scope_compute import cell_scope
+    from well_viewer.features.export import worker as worker_mod
+    from well_viewer.features.export.service import export_cell_data_from
+
+    ctx = two_wells._ctx
+    out = tmp_path / "doomed.csv"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName",
+                        staticmethod(lambda *a, **k: (str(out), "")))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **k: None))
+    monkeypatch.setattr(worker_mod.CellExportWriter, "__call__",
+                        lambda self, report=None: (_ for _ in ()).throw(
+                            OSError("disk full")))
+
+    ticks = {"n": 0}
+    from PySide6 import QtCore
+    real_single_shot = QtCore.QTimer.singleShot
+
+    def _counting(msec, callback):
+        ticks["n"] += 1
+        real_single_shot(msec, callback)
+
+    monkeypatch.setattr(QtCore.QTimer, "singleShot", staticmethod(_counting))
+
+    export_cell_data_from(ctx, cell_scope)
+    qtbot.waitUntil(
+        lambda: getattr(ctx.runtime.export, "cell_cancel", None) is None,
+        timeout=20000)
+    settled = ticks["n"]
+    qtbot.wait(700)
+    assert ticks["n"] - settled <= 2, (
+        f"the slicing chain kept ticking after the writer failed: "
+        f"{ticks['n'] - settled} further ticks in 0.7 s")
+    assert not out.exists()
+    assert not list(tmp_path.glob(".*tmp"))

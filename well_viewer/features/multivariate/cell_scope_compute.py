@@ -3,18 +3,21 @@
 This tab already had a per-cell export — the feature matrix — but it is the
 matrix, not the cells: only the ticked feature columns, with NaN rows dropped
 and, for t-SNE and UMAP, a subsample. ``Save cell data…`` is the whole row for
-every cell in scope, with two markers saying what the analysis did with it.
+every cell in scope, with a marker saying what the analysis did with it.
 
 ``plot_in_matrix`` is the honest one: every ticked feature finite, which is the
 condition ``collect_feature_matrix`` drops a row on.
 
-``plot_in_projection`` is **read from the last draw rather than re-derived**,
-and that is a real limitation rather than an oversight. The subsample is a
-seeded ``default_rng(0).choice`` over the collector's row order
-(``controller.py:37-48``), so reproducing it means reproducing that order — and
-the embedding coordinates themselves are not reproducible at all; UMAP is not
-even in the pinned test stack. So a projection that has not been drawn yet has
-no marker to give, and the tab says so instead of guessing.
+**The projection subsample is recorded in the scope block, not as a marker.**
+For t-SNE and UMAP the tab draws a seeded ``default_rng(0).choice`` over the
+collector's row order (``controller.py:37-48``), so which cells were drawn is
+reproducible only by reproducing that order, and the embedding coordinates are
+not reproducible at all — UMAP is not even in the pinned test stack. A
+``plot_in_projection`` column would therefore have to be read back off the last
+draw, and a marker that can only sometimes be filled is worse than a sentence
+saying the file holds the whole matrix while the figure drew a sample of it.
+The note fires off ``sampled_note``, which is the key ``_compute_for_mode``
+actually writes (``controller.py:240``).
 """
 
 from __future__ import annotations
@@ -50,7 +53,7 @@ def cell_scope(ctx) -> CellScope | None:
 
     timepoints = tuple(float(t) for t in (st.timepoints or []))
     result = st.last_result if isinstance(st.last_result, dict) else {}
-    subsampled = bool(result.get("subsampled_from"))
+    subsampled = bool(result.get("sampled_note"))
 
     notes = [
         ("feature columns", ", ".join(feature_cols)),
@@ -60,8 +63,9 @@ def cell_scope(ctx) -> CellScope | None:
     if subsampled:
         notes.append((
             "projection subsample",
-            "the displayed projection drew a seeded subsample of the matrix; the "
-            "embedding coordinates are not reproducible from this file",
+            str(result.get("sampled_note"))
+            + " — this file holds the whole matrix, and which cells the "
+              "projection sampled is not reproducible from it",
         ))
 
     return scope_from_ctx(

@@ -971,7 +971,8 @@ def _dataset_signature(ctx) -> tuple:
     )
 
 
-def _scope_block(ctx, scope, *, wells, missing_verdicts, header_len: int) -> list[str]:
+def _scope_block(ctx, scope, *, wells, missing_verdicts, header_len: int,
+                 unreadable=()) -> list[str]:
     """The ``#`` lines above the header — what produced this file.
 
     They travel *with* the data rather than in a sidecar, because a sidecar is
@@ -1001,11 +1002,19 @@ def _scope_block(ctx, scope, *, wells, missing_verdicts, header_len: int) -> lis
     if missing_verdicts:
         lines.append("# verdict layers not computed for every well (written as 1): "
                      + ", ".join(missing_verdicts))
+    if unreadable:
+        # Otherwise a well whose rows would not load is indistinguishable from
+        # one that had no passing cells — both simply contribute nothing.
+        lines.append("# wells that could not be read (no rows in this file): "
+                     + ", ".join(unreadable))
     for key, value in scope.notes:
         lines.append(f"# {key}: {value}")
     lines.append(f"# dataset signature: {_dataset_signature(ctx)}")
     lines.append(f"# columns: {header_len}")
-    lines.append(f"# data starts on line {len(lines) + 2}")
+    # The header row, which is what a reader skipping to it wants: pandas
+    # takes ``skiprows=N - 1`` and gets its column names. Naming the first
+    # *data* row instead would cost the header.
+    lines.append(f"# table starts on line {len(lines) + 2}")
     return lines
 
 
@@ -1060,11 +1069,13 @@ def export_cell_data(ctx, scope) -> None:
         return
 
     frames = {}
+    unreadable: list[str] = []
     for _group, well in wells:
         try:
             frames[well] = get_rows(ctx, well)
         except Exception:
             swallowed(f"cell export: rows for {well!r}")
+            unreadable.append(well)
     frames_columns = [list(f.columns) for f in frames.values() if f is not None]
     if not frames_columns:
         _warn(ctx.window, "Export", "No rows to export for the current plot.")
@@ -1080,7 +1091,8 @@ def export_cell_data(ctx, scope) -> None:
         return
 
     scope_lines = _scope_block(ctx, scope, wells=wells,
-                               missing_verdicts=missing, header_len=len(header))
+                               missing_verdicts=missing, header_len=len(header),
+                               unreadable=unreadable)
 
     well_labels = _well_labels_map(ctx)
     well_paths = _well_paths_keys(ctx)
@@ -1100,6 +1112,7 @@ def export_cell_data(ctx, scope) -> None:
         ctx.runtime.export.cell_cancel = None
         ctx.runtime.export.cell_queue = None
         ctx.runtime.export.cell_bridge = None
+        ctx.runtime.export.cell_writer = None
 
     def _abort(message: str) -> None:
         cancel.set()
@@ -1117,7 +1130,11 @@ def export_cell_data(ctx, scope) -> None:
             return
         if chunks.full():
             # The writer is behind. Come back rather than blocking the GUI on
-            # ``put`` — a full queue must never stall the event loop.
+            # ``put`` — a full queue must never stall the event loop. A dead
+            # writer leaves the queue permanently full, which is why
+            # ``state["failed"]`` is checked above rather than only here: with
+            # no terminal flag this branch reschedules itself at 100 Hz for the
+            # life of the process, pinning every well's frame as it goes.
             QTimer.singleShot(10, _tick)
             return
         if state["i"] >= len(wells):
@@ -1146,11 +1163,17 @@ def export_cell_data(ctx, scope) -> None:
             _abort("the data changed while it was running "
                    "(gating, QC, crop or the dataset itself)")
             return
+        # An empty well still counts as handled, or the status line stalls
+        # short of the total for the whole run — "stuck at 92%" with nothing
+        # wrong. The writer counts what it writes; this counts what was offered.
         if len(chunk):
             chunks.put_nowait(chunk)
+        else:
+            _on_progress(state["i"], len(wells))
         QTimer.singleShot(0, _tick)
 
     def _on_done(result) -> None:
+        state["failed"] = True      # terminal either way — stop slicing
         _finish_ui()
         if not isinstance(result, dict) or result.get("cancelled"):
             return
@@ -1160,6 +1183,12 @@ def export_cell_data(ctx, scope) -> None:
             f"→ {Path(out_path).name}")
 
     def _on_failed(message: str) -> None:
+        # Stop the slicing chain first. ``_finish_ui`` only clears the handles;
+        # without the flag the chain never reaches a terminal condition, and
+        # clearing ``cell_cancel`` would let the user start a second export
+        # alongside the first one still ticking.
+        state["failed"] = True
+        cancel.set()
         _finish_ui()
         _error(ctx.window, "Export failed", str(message))
 
@@ -1168,6 +1197,7 @@ def export_cell_data(ctx, scope) -> None:
 
     ctx.runtime.export.cell_bridge = run_off_thread(
         writer, on_done=_on_done, on_failed=_on_failed, on_progress=_on_progress)
+    ctx.runtime.export.cell_writer = writer
     ctx.notify.set_status(f"Saving cell data for {len(wells)} well(s)…")
     QTimer.singleShot(0, _tick)
 
@@ -1188,8 +1218,17 @@ def cancel_cell_export(ctx) -> None:
     if chunks is not None:
         with swallow():
             chunks.put_nowait(DONE)
+    # Give the writer its own unwinding rather than letting the interpreter kill
+    # it: its ``finally`` is what removes the temp file, and a daemon thread
+    # killed at exit never runs one. One queue timeout plus a margin is enough
+    # for it to notice the sentinel and return.
+    writer = getattr(ctx.runtime.export, "cell_writer", None)
+    if writer is not None:
+        with swallow():
+            writer.finished.wait(timeout=1.0)
     ctx.runtime.export.cell_cancel = None
     ctx.runtime.export.cell_queue = None
+    ctx.runtime.export.cell_writer = None
 
 
 def export_cell_data_from(ctx, scope_fn, *, unavailable: str = "") -> None:

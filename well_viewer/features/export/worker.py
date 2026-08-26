@@ -58,6 +58,11 @@ class CellExportWriter:
         self.total_wells = int(total_wells)
         self.rows_written = 0
         self.wells_written = 0
+        #: Set once the drain has unwound, temp file included. A canceller
+        #: waits on this rather than joining a thread it has no handle on;
+        #: a daemon thread killed at interpreter exit never runs its
+        #: ``finally``, and the temp file is what that ``finally`` removes.
+        self.finished = threading.Event()
         self._tmp = self.out_path.with_name(
             f".{self.out_path.name}.{os.getpid()}.tmp")
 
@@ -107,6 +112,7 @@ class CellExportWriter:
                     self._tmp.unlink(missing_ok=True)
                 except OSError:
                     _logger.warning("could not remove export temp %s", self._tmp)
+            self.finished.set()
 
     def _align(self, frame: pd.DataFrame) -> pd.DataFrame:
         """Put *frame* onto the file's column order.

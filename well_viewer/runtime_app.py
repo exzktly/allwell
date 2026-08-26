@@ -213,6 +213,16 @@ def teardown_review_pane(app) -> None:
     # running against a pane being destroyed (the inclusion pass writes
     # ``Included`` flags onto the row cache as it goes).
     stop_runtime_workers(runtime, "cell_gating", ("worker", "auto_worker"))
+    # A per-cell export streams into a temp file beside the user's destination
+    # and only renames it at the end, so a writer killed at interpreter exit
+    # leaves that temp behind — in the folder they picked, hidden. Cancelling
+    # here lets it unwind through its own cleanup instead.
+    if ctx is not None:
+        try:
+            from well_viewer.features.export.service import cancel_cell_export
+            cancel_cell_export(ctx)
+        except Exception:
+            _logger.debug("teardown: cell-export cancel failed", exc_info=True)
     try:
         from well_viewer.core.split_view import _remove_split_focus_filter
         _remove_split_focus_filter(app._ctx)

@@ -143,9 +143,14 @@ class _AspectImage(QLabel):
         if pixmap.isNull():
             # The header parsed and the pixels did not. Say so on the card: a
             # preview that silently stays blank is indistinguishable from a
-            # figure that drew nothing.
+            # figure that drew nothing. The object name is being set long after
+            # the widget was polished, so the style has to be re-run by hand or
+            # the message arrives in the body colour rather than the muted one.
             self.setObjectName("Muted")
             self.setText("(image unavailable)")
+            style = self.style()
+            style.unpolish(self)
+            style.polish(self)
             return
         self._src = pixmap
         self._rescale()

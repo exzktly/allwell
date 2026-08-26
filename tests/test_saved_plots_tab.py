@@ -80,18 +80,11 @@ def test_the_gallery_can_be_opened_at_one_particular_card(qapp, tmp_path):
     card = ctx.runtime.saved_plots.cards["r2"]
     assert card.property("focusflash") == "true"
 
-    # The scroll itself is deferred until the page has a layout, so let the
-    # event loop run before reading where it landed. Asserting only the return
-    # value is what let the shipped version pass while always landing on the
-    # first card: `ensureWidgetVisible` on an unlaid-out scroll area silently
-    # does nothing, and has no return value to say so.
-    for _ in range(20):
-        qapp.processEvents()
-    scroll = ctx.widgets.get_or_none("_saved_plots_scroll")
-    bar = scroll.verticalScrollBar()
-    top = card.mapTo(scroll.widget(), card.rect().topLeft()).y()
-    assert bar.value() == max(bar.minimum(), min(bar.maximum(), top - 8)), (
-        "the card the user clicked should be at the top of the view")
+    # No assertion here about *where* it scrolled: this test's parent is never
+    # shown or sized, so the scroll area has no range and any such check would
+    # read 0 == 0 and pass against code that scrolls nowhere. The landing is
+    # pinned by ``test_the_gallery_scrolls_to_a_card_even_when_the_page_was_just_shown``,
+    # which shows and sizes its parent and uses decodable images.
 
     # A plot that is not in the gallery is reported, not silently ignored — the
     # caller turns that into a message rather than leaving the user on a page

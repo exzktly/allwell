@@ -412,7 +412,9 @@ if _HAVE_MPL:
                 label = (ax.get_title() or "").strip()
             except Exception:
                 label = ""
-            self._dispatch_saved_png(png_bytes, label, svg_bytes)
+            self._dispatch_saved_png(
+                png_bytes, label, svg_bytes,
+                panel_only=len(self.figure.axes) > 1)
 
         def captureVectorSvg(self) -> bytes:
             """This figure as SVG, rendered exactly the way a save renders it.
@@ -472,14 +474,21 @@ if _HAVE_MPL:
                 label = (sup.get_text() or "").strip() if sup is not None else ""
             except Exception:
                 label = ""
-            self._dispatch_saved_png(png_bytes, label, svg_bytes)
+            self._dispatch_saved_png(
+                png_bytes, label, svg_bytes, panel_only=False)
 
         def _dispatch_saved_png(self, png_bytes: bytes, label: str,
-                                svg_bytes: bytes = b"") -> None:
-            """Hand a captured PNG + its vector twin to the handler, and toast."""
+                                svg_bytes: bytes = b"", *,
+                                panel_only: bool = False) -> None:
+            """Hand a captured PNG + its vector twin to the handler, and toast.
+
+            *panel_only* says the capture is one panel of a multi-panel figure,
+            which the gallery records: a redraw renders the whole card, so a
+            record that does not know it was a panel comes back as every panel.
+            """
             try:
                 status = self._save_handler(
-                    png_bytes, label, svg_bytes) or "Saved plot"
+                    png_bytes, label, svg_bytes, panel_only) or "Saved plot"
                 failed = False
             except Exception as exc:  # surface to the user
                 status, failed = f"Save failed: {exc}", True

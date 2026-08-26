@@ -22,6 +22,7 @@ import pytest
 
 matplotlib.use("Agg")
 
+from well_viewer.features.saved_plots import _deck  # noqa: E402
 from well_viewer.features.saved_plots._deck import (  # noqa: E402
     MAX_SHAPES_PER_SLIDE, build_saved_plots_deck,
 )
@@ -329,7 +330,8 @@ def test_an_unreadable_vector_capture_falls_back_and_names_the_reason(tmp_path):
     assert "Re-save" not in text
 
 
-def test_a_figure_of_too_many_shapes_becomes_a_picture_and_says_how_many(tmp_path):
+def test_a_figure_of_too_many_shapes_becomes_a_picture_and_says_how_many(
+        tmp_path, monkeypatch):
     """Past the cap a deck does not open at all, so the cap is not optional.
 
     The message names the count, because "too complex" gives the user nothing to
@@ -339,16 +341,21 @@ def test_a_figure_of_too_many_shapes_becomes_a_picture_and_says_how_many(tmp_pat
     import numpy as np
     from widgets.fig_clipboard import render_figure_svg
 
+    # The cap is lowered for this test rather than the figure being built past
+    # the real one: the contract is what happens on the far side of the
+    # threshold, not where the threshold sits — and rendering and parsing a
+    # third of a million points made this one test 89% of the file's runtime,
+    # paid on every fast-lane run and every CI job.
+    monkeypatch.setattr(_deck, "MAX_SHAPES_PER_SLIDE", 300)
     rng = np.random.default_rng(0)
     fig = Figure(figsize=(4, 3))
     ax = fig.add_subplot()
-    n = MAX_SHAPES_PER_SLIDE + 500
-    ax.scatter(rng.random(n), rng.random(n), s=1)
+    ax.scatter(rng.random(800), rng.random(800), s=1)
     svg = tmp_path / "big.svg"
-    # ``max_paths=None`` on purpose: the capture refuses a figure this size, so
-    # this is the backstop case — an oversized SVG that reached the store some
-    # other way (an older version wrote it, or the artist-count estimate ran
-    # low). The deck must still refuse it rather than emit an unopenable slide.
+    # ``max_paths=None`` on purpose: this is the backstop case — an oversized SVG
+    # that reached the store some other way (an older build wrote it, or the
+    # artist-count estimate ran low). The deck must refuse it rather than emit a
+    # slide that will not open.
     svg.write_bytes(render_figure_svg(fig, max_paths=None))
     png = tmp_path / "a.png"
     png.write_bytes(_png_bytes())
@@ -359,7 +366,7 @@ def test_a_figure_of_too_many_shapes_becomes_a_picture_and_says_how_many(tmp_pat
     assert (result.vector, result.raster) == (0, 1)
     text = _slide_text(out, 2)
     assert "separate shapes" in text
-    assert f"{MAX_SHAPES_PER_SLIDE:,}" in text
+    assert "300" in text
 
 
 def test_a_heat_map_carries_its_raster_block_into_the_deck(tmp_path):
@@ -671,38 +678,42 @@ def test_a_dense_figure_keeps_everything_but_its_point_cloud_editable(tmp_path):
 
 
 def test_an_ordinary_scatter_stays_fully_vector(tmp_path):
-    """A per-cell scatter of a whole plate must not be quietly downgraded.
-
-    Twenty thousand cells is an ordinary figure in this app, and the cap exists
-    for decks that will not open, not for decks that are merely large.
-    """
+    """A per-cell scatter of the size people actually restyle must not be
+    quietly downgraded to a picture."""
     import numpy as np
     from matplotlib.figure import Figure
 
-    from widgets.fig_clipboard import MAX_VECTOR_PATHS, render_figure_svg
+    from widgets.fig_clipboard import render_figure_svg
 
-    assert MAX_VECTOR_PATHS >= 100_000, (
-        "an ordinary per-cell scatter must stay fully vector")
     rng = np.random.default_rng(0)
     fig = Figure(figsize=(4, 3))
     ax = fig.add_subplot()
-    ax.scatter(rng.random(20000), rng.random(20000), s=1)
+    ax.scatter(rng.random(8000), rng.random(8000), s=1)
 
     drawing = parse_svg(render_figure_svg(fig))
     assert not [s for s in drawing.shapes if isinstance(s, ImageShape)]
-    assert len([s for s in drawing.shapes if isinstance(s, PathShape)]) > 19000
+    assert len([s for s in drawing.shapes if isinstance(s, PathShape)]) > 7900
 
 
-def test_an_ordinary_figure_is_captured_normally(tmp_path):
-    from matplotlib.figure import Figure
+def test_the_capture_threshold_sits_where_a_deck_still_opens():
+    """Both bounds, because both directions have already gone wrong.
 
-    from widgets.fig_clipboard import figure_path_count, render_figure_svg
+    Too low and an ordinary figure loses its cloud for nothing — 4,000 was the
+    first value and it silently refused a twenty-thousand-cell scatter outright.
+    Too high and the deck cannot be opened: measured end to end, 40,000 shapes
+    converts in 46 s, 100,000 in over two and a half minutes, and 249,000 was
+    killed out of memory at 13.9 GB. The second value was 250,000, set from the
+    *build* time — which is linear, and is not what the user waits for.
 
-    fig = Figure(figsize=(4, 3))
-    ax = fig.add_subplot()
-    ax.bar([0, 1, 2], [3, 5, 2])
-    assert figure_path_count(fig) < 100
-    assert render_figure_svg(fig).startswith(b"<?xml")
+    This is a unit test standing in for a measurement it cannot make, so it pins
+    the range the measurement supports rather than the number itself.
+    """
+    from widgets.fig_clipboard import MAX_VECTOR_PATHS
+
+    assert MAX_VECTOR_PATHS >= 10_000, (
+        "an ordinary per-cell scatter must stay fully vector")
+    assert MAX_VECTOR_PATHS <= 50_000, (
+        "past this a deck takes minutes to open, or does not open at all")
 
 
 def test_the_capture_never_stores_what_the_deck_would_refuse():
@@ -1045,6 +1056,13 @@ def test_a_tab_with_no_figure_is_left_as_a_picture(qapp, tmp_path):
 
     ctx = _stub_ctx(tmp_path)
     store = SavedPlotsStore()
+    # A card for a *different* tab, so ``cards_by_tab`` is non-empty and the
+    # Image Table record actually falls through the per-record "no card" skip.
+    # Without it the function returned at the empty-map guard and this test
+    # passed against a deleted skip branch.
+    card, _ = _card_that_draws_what_it_is_told(ctx)
+    assert ctx.runtime.saved_plots.cards_by_tab
+
     rec = SavedPlot(id="grid", created_at="2026-01-01T00:00:00",
                     tab="Image Table", title="Grid", png_filename="grid.png",
                     params={})
@@ -1229,3 +1247,169 @@ def test_a_repair_that_cannot_be_undone_never_starts(qapp, tmp_path,
     assert replayed == [], "nothing may be replayed without a way back"
     assert rec.svg_filename == ""
     assert ctx.said and "could not be saved and restored" in ctx.said[0]
+
+
+def test_a_rasterized_data_layer_is_never_reported_as_fully_editable(tmp_path):
+    """The figure is editable and its data is not, and the slide must say so.
+
+    An embedded image is what a heat map legitimately contains, so nothing about
+    the picture itself distinguishes "this figure includes a raster block" from
+    "this figure's data became a raster block". Without a marker the deck read
+    the second as the first and reported the whole thing as editable — the
+    cardinal rule, broken by the fix for a different defect.
+    """
+    import numpy as np
+    from matplotlib.figure import Figure
+
+    from widgets.fig_clipboard import rasterized_layer_count, render_figure_svg
+
+    rng = np.random.default_rng(0)
+    fig = Figure(figsize=(4, 3))
+    ax = fig.add_subplot()
+    ax.scatter(rng.random(2000), rng.random(2000), s=1)
+    ax.set_title("Cells")
+    svg = tmp_path / "dense.svg"
+    svg.write_bytes(render_figure_svg(fig, max_paths=500))
+    assert rasterized_layer_count(svg.read_bytes()) == 1
+
+    out = tmp_path / "deck.pptx"
+    result = build_saved_plots_deck([_rec("1")], lambda r: svg, lambda r: None,
+                                    out)
+
+    assert result.vector == 1 and result.rasterized == 1
+    assert "all editable" not in result.summary()
+    assert "picture for the data layer" in result.summary()
+    text = _slide_text(out, 2)
+    assert "too dense to redraw mark by mark" in text
+    assert "Cells" in text, "the rest of the figure is still editable text"
+
+
+def test_a_figure_with_nothing_rasterized_carries_no_marker(tmp_path):
+    """A capture with no marker is one whose every mark is a shape."""
+    from widgets.fig_clipboard import rasterized_layer_count
+
+    svg = tmp_path / "plain.svg"
+    svg.write_bytes(_bar_svg())
+    assert rasterized_layer_count(svg.read_bytes()) == 0
+
+    out = tmp_path / "deck.pptx"
+    result = build_saved_plots_deck([_rec("1")], lambda r: svg, lambda r: None,
+                                    out)
+    assert result.rasterized == 0
+    assert result.summary().endswith("all editable")
+
+
+def test_two_shortfalls_on_one_slide_do_not_print_on_top_of_each_other(tmp_path):
+    """A slide can have more than one thing to say, and used to say neither.
+
+    Both notes were written at the same fixed height, so the slide with the most
+    to report was the one that reported none of it legibly — the shortfall hidden
+    by the very line meant to describe it, in geometry rather than in prose.
+    """
+    import numpy as np
+    from matplotlib.figure import Figure
+
+    from widgets.fig_clipboard import render_figure_svg
+
+    # Dense enough to rasterize, and hatched so a construct is also dropped.
+    rng = np.random.default_rng(0)
+    fig = Figure(figsize=(4, 3))
+    ax = fig.add_subplot()
+    ax.scatter(rng.random(2000), rng.random(2000), s=1)
+    ax.bar([0.2, 0.6], [0.4, 0.7], width=0.1, hatch="//", color="white",
+           edgecolor="k")
+    svg = tmp_path / "both.svg"
+    svg.write_bytes(render_figure_svg(fig, max_paths=500))
+    out = tmp_path / "deck.pptx"
+
+    result = build_saved_plots_deck([_rec("1")], lambda r: svg, lambda r: None,
+                                    out, regenerated={"1"})
+    assert result.rasterized == 1 and result.redrawn == 1
+
+    slide = _slide_xml(out, 2)
+    notes = [sp for sp in slide.iter(f"{_P}sp")
+             if (sp.find(f".//{_P}cNvPr") is not None
+                 and "Export note" in (sp.find(f".//{_P}cNvPr").get("name") or ""))]
+    assert len(notes) >= 2, "this slide has more than one shortfall to report"
+    tops = [int(x.get("y")) for n in notes for x in n.iter(f"{_A}off")]
+    assert len(set(tops)) == len(tops), "two notes were written at the same height"
+
+
+@pytest.mark.qt
+def test_a_single_panel_record_is_not_regenerated_as_the_whole_figure(
+        qapp, tmp_path, monkeypatch):
+    """A redraw renders the whole card, and a panel record is one panel of it.
+
+    Regenerating one would put every panel on the slide under the panel's title
+    and beside the panel's parameters — a different figure, not a worse one. A
+    picture of the right plot beats shapes of the wrong one.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    card, replay = _card_that_draws_what_it_is_told(ctx)
+    monkeypatch.setattr(C, "restore_saved_plot", replay)
+    monkeypatch.setattr(C, "_gating_recompute_now", lambda c: True)
+
+    panel = SavedPlot(id="panel", created_at="2026-01-01T00:00:00",
+                      tab="Bar Plots", title="Panel one",
+                      png_filename="panel.png", params={}, panel_only=True)
+    whole = SavedPlot(id="whole", created_at="2026-01-01T00:00:00",
+                      tab="Bar Plots", title="Everything",
+                      png_filename="whole.png", params={})
+    for rec in (panel, whole):
+        assert store.add(ctx, rec, _png_bytes())
+
+    assert C.regenerate_missing_vectors(ctx, store, [panel, whole]) == {"whole"}
+    assert panel.svg_filename == "", "a panel record must stay a picture"
+    assert whole.svg_filename, "a whole-figure record is repaired as usual"
+
+
+def test_a_panel_record_round_trips_through_persistence(tmp_path):
+    """The flag has to survive the JSON, or the next export substitutes again."""
+    from well_viewer.features.saved_plots.state import SavedPlot
+
+    rec = SavedPlot(id="p", created_at="", tab="Bar Plots", title="t",
+                    png_filename="p.png", params={}, panel_only=True)
+    assert SavedPlot.from_dict(rec.to_dict()).panel_only is True
+    # A record written before the flag existed reads as a whole-figure save,
+    # which is what the great majority of them are.
+    old = {k: v for k, v in rec.to_dict().items() if k != "panel_only"}
+    assert SavedPlot.from_dict(old).panel_only is False
+
+
+@pytest.mark.qt
+def test_a_capture_that_could_not_be_written_still_makes_this_deck_editable(
+        qapp, tmp_path, monkeypatch):
+    """The file on disk is the repair; the bytes are what this export needs.
+
+    A failed write — a full disk, a read-only folder — used to throw away both,
+    so the export fell back to a picture for a figure it had already rendered.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    card, replay = _card_that_draws_what_it_is_told(ctx)
+    monkeypatch.setattr(C, "restore_saved_plot", replay)
+    monkeypatch.setattr(C, "_gating_recompute_now", lambda c: True)
+
+    rec = SavedPlot(id="p1", created_at="2026-01-01T00:00:00", tab="Bar Plots",
+                    title="Plot", png_filename="p1.png", params={})
+    assert store.add(ctx, rec, _png_bytes())
+    monkeypatch.setattr(store, "attach_vector",
+                        lambda *a, **k: False)     # the write fails
+
+    assert C.regenerate_missing_vectors(ctx, store, [rec]) == {"p1"}
+    assert rec.svg_filename == "", "nothing was persisted, so nothing is claimed"
+    assert store.held_vector(rec).startswith(b"<?xml")
+
+    out = tmp_path / "deck.pptx"
+    result = build_saved_plots_deck(
+        [rec], lambda r: store.vector_path(ctx, r) or store.held_vector(r),
+        lambda r: store.image_path(ctx, r), out, regenerated={"p1"})
+    assert (result.vector, result.raster) == (1, 0)
+    assert "figure for p1" in _slide_text(out, 2)

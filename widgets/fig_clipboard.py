@@ -68,18 +68,27 @@ def _render_figure(fig, fmt, savefig_kwargs, rc_overrides) -> bytes:
 #: The most drawable primitives a figure may hold before its **dense layers** are
 #: rasterized rather than emitted as individual shapes.
 #:
-#: Set high on purpose. An editable figure is the whole point of the PowerPoint
-#: export, so the bar for giving any of it up is a deck that will not open rather
-#: than a deck that is merely large. Measured on this repository's own scatter
-#: figures, cost is linear with no cliff: 20,000 cells is a 2.1 MB capture and a
-#: two-second deck, 100,000 is 10.6 MB and ten seconds. A per-cell scatter of a
-#: whole plate therefore stays fully vector, which is what a user restyling one
-#: for a figure panel needs.
+#: Set from how long the resulting deck takes to *open*, which is the only number
+#: that decides it. Measured end to end (LibreOffice Impress converting the deck
+#: this repository's own export produces, on a 4-core container):
 #:
-#: Past this the figure is still not refused — only its densest collections are
-#: rasterized (see :func:`render_figure_svg`), so the axes, ticks, labels, title
-#: and legend stay editable and only the point cloud becomes a picture.
-MAX_VECTOR_PATHS = 250_000
+#:   10,000 shapes →   8 s
+#:   20,000        →  17 s
+#:   40,000        →  46 s
+#:  100,000        → 2 min 39 s
+#:  249,000        → killed, out of memory at 13.9 GB
+#:
+#: Superlinear, with a hard wall. An earlier version of this constant was set to
+#: 250,000 from the *build* time instead — which is linear, and is not what the
+#: user waits for — and produced decks that cannot be opened at all.
+#:
+#: Passing it costs very little, which is why a conservative number is right:
+#: the figure is not refused, only its densest collections are rasterized (see
+#: :func:`render_figure_svg`), so a scatter of any size still exports with its
+#: axes, ticks, labels, title and legend as editable shapes. The cap decides
+#: only when the *point cloud* stops being individual shapes, and a cloud of
+#: twenty-five thousand marks is not something anyone restyles mark by mark.
+MAX_VECTOR_PATHS = 25_000
 
 #: Resolution for any layer that had to be rasterized. High enough that the
 #: raster half of a mixed figure does not read as blurry beside the vector half
@@ -172,17 +181,48 @@ def render_figure_svg(fig, *, max_paths: int | None = MAX_VECTOR_PATHS,
     failure.
     """
     kw = {"bbox_inches": "tight"}
-    kw.setdefault("dpi", RASTERIZED_LAYER_DPI)
     kw.update(savefig_kwargs)
     if max_paths is None or figure_path_count(fig) <= max_paths:
+        # No layer was given up, so no marker: an SVG with no marker is one whose
+        # every mark is a shape.
         return _render_figure(fig, "svg", kw, {"svg.fonttype": "none"})
+    kw.setdefault("dpi", RASTERIZED_LAYER_DPI)
     with _dense_layers_rasterized(fig, max_paths) as touched:
         rendered = _render_figure(fig, "svg", kw, {"svg.fonttype": "none"})
     if touched and rendered:
-        _logger.info(
-            "saved_plots: %d dense layer(s) rasterized to keep the rest of the "
-            "figure editable", len(touched))
+        _logger.info("%d dense layer(s) rasterized to keep the rest of the "
+                     "figure editable", len(touched))
+        # Recorded **in the file**, not only in this log line. The consumer reads
+        # an embedded image as an ordinary picture inside an otherwise editable
+        # figure — which is exactly what a heat map legitimately is — so without
+        # a marker it cannot tell "this figure contains a picture" from "this
+        # figure's data became a picture", and reported a rasterized point cloud
+        # as fully editable.
+        rendered = _mark_rasterized(rendered, len(touched))
     return rendered
+
+
+#: Written into a capture whose dense layers were rasterized, so the consumer can
+#: say so. An XML comment: invisible to every renderer, preserved by every parser,
+#: and impossible to confuse with figure content.
+RASTERIZED_MARKER = "allwell:rasterized-layers="
+
+
+def _mark_rasterized(svg: bytes, layers: int) -> bytes:
+    """Record in the SVG itself that *layers* dense layers became images."""
+    marker = f"<!-- {RASTERIZED_MARKER}{layers} -->".encode()
+    head = svg.find(b"<svg")
+    if head < 0:
+        return svg
+    return svg[:head] + marker + svg[head:]
+
+
+def rasterized_layer_count(svg: bytes) -> int:
+    """How many dense layers were rasterized when *svg* was captured, or 0."""
+    import re
+
+    match = re.search(RASTERIZED_MARKER.encode() + rb"(\d+)", svg or b"")
+    return int(match.group(1)) if match else 0
 
 
 def _macos_pasteboard_write(pdf_bytes: bytes, svg_bytes: bytes,

@@ -253,6 +253,14 @@ def scroll_to_saved_plot(ctx, plot_id: str) -> bool:
     scroll = ctx.widgets.get_or_none("_saved_plots_scroll")
     if card is None or scroll is None:
         return False
+    try:
+        # Touching the card is what proves its C++ object is still alive. The
+        # gallery may have been rebuilt between the lookup and here, and a
+        # function whose whole job is to say whether the jump can land must not
+        # answer True for a card that no longer exists.
+        card.isVisible()
+    except RuntimeError:
+        return False
     _scroll_when_laid_out(scroll, card)
     _flash(card)
     return True

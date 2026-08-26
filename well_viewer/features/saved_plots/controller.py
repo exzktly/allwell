@@ -62,8 +62,8 @@ def wire_save_to_gallery(ctx, card, tab_name: str) -> None:
     if card is None or not hasattr(card, "set_save_handler"):
         return
     card.set_save_handler(
-        lambda png, label, svg=b"": save_plot_from_card(
-            ctx, tab_name, png, label, svg)
+        lambda png, label, svg=b"", panel=False: save_plot_from_card(
+            ctx, tab_name, png, label, svg, panel_only=panel)
     )
     by_tab = ctx.runtime.saved_plots.cards_by_tab
     if by_tab is None:
@@ -73,7 +73,8 @@ def wire_save_to_gallery(ctx, card, tab_name: str) -> None:
 
 
 def save_plot_from_card(ctx, tab: str, png_bytes: bytes, panel_label: str,
-                        svg_bytes: bytes = b"") -> str:
+                        svg_bytes: bytes = b"", *,
+                        panel_only: bool = False) -> str:
     """Persist the captured panel + its params; refresh the gallery.
 
     *svg_bytes* is the same render in vector, captured by the card at the same
@@ -99,6 +100,7 @@ def save_plot_from_card(ctx, tab: str, png_bytes: bytes, panel_label: str,
         title=title,
         png_filename=f"{pid}.png",
         svg_filename=f"{pid}.svg" if svg_bytes else "",
+        panel_only=bool(panel_only),
         params=params,
         thresholds=thresholds,
         summary=build_summary(tab, params, thresholds),
@@ -458,7 +460,7 @@ def export_deck_pptx(ctx) -> None:
         regenerated = regenerate_missing_vectors(ctx, store, records)
         result = build_saved_plots_deck(
             records,
-            lambda r: store.vector_path(ctx, r),
+            lambda r: store.vector_path(ctx, r) or store.held_vector(r),
             lambda r: store.image_path(ctx, r),
             dest,
             dataset_name=_dataset_name(ctx),
@@ -576,8 +578,17 @@ def regenerate_missing_vectors(ctx, store, records) -> set[str]:
 
     regenerated: set[str] = set()
     skipped_tabs: set[str] = set()
+    skipped_panels = 0
     try:
         for rec in missing:
+            if rec.panel_only:
+                # The record is one panel of a multi-panel figure and a redraw
+                # renders the whole card, so regenerating it would put a
+                # different figure on the slide — every panel, under this
+                # panel's title, beside this panel's parameters. A picture of
+                # the right plot beats shapes of the wrong one.
+                skipped_panels += 1
+                continue
             card = _card_for_tab(ctx, cards_by_tab, rec.tab)
             if card is None or not hasattr(card, "captureVectorSvg"):
                 skipped_tabs.add(rec.tab or "?")
@@ -588,6 +599,9 @@ def regenerate_missing_vectors(ctx, store, records) -> set[str]:
             store.persist(ctx)      # one write for the batch, not one per record
     finally:
         live.restore(ctx)
+    if skipped_panels:
+        _logger.info("saved_plots: %d single-panel record(s) left as pictures; "
+                     "a redraw would render the whole figure", skipped_panels)
     if skipped_tabs:
         # Named, because the slide's advice ("re-save it") is right for a tab
         # that draws no chart and useless for one that simply was not open.
@@ -640,7 +654,14 @@ def _regenerate_one(ctx, store, rec, card) -> bool:
         if _gating_recompute_now(ctx):
             _reapply_target_tab(ctx, rec.params.get("active_centre_tab") or rec.tab)
         svg = card.captureVectorSvg()
-        kept = bool(svg) and store.attach_vector(ctx, rec, svg, persist=False)
+        if svg:
+            # Keeping the record's capture on disk is the *repair*; making this
+            # export editable only needs the bytes. A failed write used to throw
+            # both away, so a full disk cost the user an editable deck as well as
+            # the repair.
+            kept = store.attach_vector(ctx, rec, svg, persist=False)
+            if not kept:
+                kept = store.hold_vector(ctx, rec, svg)
     return kept
 
 

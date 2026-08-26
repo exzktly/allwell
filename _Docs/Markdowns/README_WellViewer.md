@@ -3066,11 +3066,13 @@ rather than a single panel.
   is assembled from your microscopy images rather than drawn as a chart, so there
   is no chart to redraw; it stays a picture at full quality, with a line under it
   saying so.
-- **Very large figures stay editable too.** A per-cell scatter of a whole plate
-  exports as shapes like anything else — the deck is simply bigger. Only past
-  about a quarter of a million points does the export give anything up, and even
-  then it gives up the least it can: the point cloud becomes a single image and
-  the axes, tick labels, title and legend stay editable.
+- **Very large figures stay editable too.** A per-cell scatter exports as shapes
+  like anything else, up to about twenty-five thousand points. Past that the
+  export gives up the least it can: the *point cloud* becomes a single image
+  while the axes, tick labels, title and legend stay editable, so you can still
+  restyle everything anyone restyles. The limit is set by how long the deck takes
+  to open — a slide of a hundred thousand separate shapes takes minutes, and a
+  quarter of a million will not open at all.
 - **A figure can be editable and still be missing a detail.** A **hatch** has no
   PowerPoint equivalent this export can produce, so hatched bars arrive as plain
   outlines. When that or anything like it happens, the slide carries a line under

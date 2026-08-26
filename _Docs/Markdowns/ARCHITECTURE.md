@@ -1784,9 +1784,14 @@ keeps the line, and the axes, ticks, labels, title and legend stay editable
 either way. Refusing the whole figure is what shipped first, and it defeated the
 format for exactly the per-cell plots that most need restyling.
 
-The threshold is set high (250,000) because cost here is linear with no cliff —
-20,000 cells is a 2.1 MB capture and a two-second deck, 100,000 is 10.6 MB and
-ten seconds — so an ordinary per-cell scatter stays fully vector. A test holds
+The threshold is set from how long the resulting deck takes to **open**, which is
+the only number that decides it — an earlier version was set from the build time,
+which is linear and is not what the user waits for, and produced decks that could
+not be opened at all. Opening is superlinear with a hard wall: 10,000 shapes in
+8 s, 20,000 in 17 s, 40,000 in 46 s, 100,000 in over two and a half minutes, and
+249,000 killed out of memory at 13.9 GB. Passing the threshold costs little,
+because the figure is never refused — only its point cloud stops being individual
+shapes — so the conservative number is the right one. A test holds
 `MAX_VECTOR_PATHS` at or below `MAX_SHAPES_PER_SLIDE`, which is the tie between
 two numbers that cannot share a constant: the capture lives in `widgets/` and
 must not import a feature. `copy_figure_to_clipboard` is deliberately uncapped —

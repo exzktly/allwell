@@ -22,6 +22,7 @@ import theme
 from well_viewer.core.sidebar_view import build_sidebar
 from well_viewer.core.status_view import build_bottom
 from well_viewer.core.ui_helpers import build_hline_separator
+from well_viewer.domain.dataset_name import dataset_display_name
 
 
 #: The left panel's width, shared by all three modes — Review's own rail,
@@ -93,19 +94,11 @@ def refresh_dataset_button(win) -> None:
         btn.setText("No dataset — Open")
         btn.setToolTip("No dataset loaded. Choose a folder to review.")
         return
-    from pathlib import Path
-    data_dir = Path(path)
-    # The standard Analyze-pipeline layout loads ``<dataset_root>/out`` as
-    # ``data_dir`` -- ``data_dir.name`` is then always the literal "out",
-    # useless for telling datasets apart. Climb one level for that layout
-    # specifically (detected structurally, the same way ``load_path`` itself
-    # decides whether a folder is an in/out split), and leave a genuinely
-    # flat dataset -- one whose own top-level folder happens to be named
-    # "out" -- showing its own name.
-    if data_dir.name == "out" and (data_dir.parent / "in").is_dir():
-        name = data_dir.parent.name or path
-    else:
-        name = data_dir.name or path
+    # ``dataset_display_name`` holds the rule: the standard Analyze-pipeline
+    # layout loads ``<dataset_root>/out`` as ``data_dir``, so the folder's own
+    # name is the literal "out" on every such dataset and is useless for telling
+    # them apart.
+    name = dataset_display_name(path) or path
     metrics = btn.fontMetrics()
     # Reserve the icon, the caret and the button's own padding before eliding.
     room = max(btn.width() - 64, 80)

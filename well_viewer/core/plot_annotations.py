@@ -231,17 +231,28 @@ def annotate_value(ax, x: float, value, spread=None, *, fmt: str = "",
     if not math.isfinite(y):
         return
     above = (v >= 0) if not inside else (v < 0)
-    if color is None:
+    # A label with no colour of its own is chrome and takes the plot's ink; one
+    # given a colour is wearing its trace's, which is data. Only the first is
+    # tagged to follow a theme flip — repainting the second would substitute
+    # the theme's ink for a value the plot is using to mean something. The
+    # distinction matters because a capture flips the card to publication
+    # *without* redrawing, so an untagged ink label reaches the file in the
+    # screen theme's near-white.
+    ink = color is None
+    if ink:
         from well_viewer.core.plot_style import tokens_for
         color = tokens_for(ax)[1]
     off = _LABEL_OFFSET_PT if offset_pt is None else float(offset_pt)
-    ax.annotate(
+    label = ax.annotate(
         text, (x, y), textcoords="offset points",
         xytext=(0, off if above else -off),
         ha="center", va="bottom" if above else "top",
         fontsize=_LABEL_FONT_PT, color=color, zorder=6,
         annotation_clip=False,
     )
+    if ink:
+        from well_viewer.core.plot_style import follows_theme
+        follows_theme(label)
 
 
 def annotate_series(ax, xs, values, spreads=None, *, fmt: str = "",

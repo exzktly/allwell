@@ -137,13 +137,13 @@ def _empty_msg(ax) -> None:
     # Themed muted token, not a hard-coded "gray": this message has to stay
     # legible in Screen and Publication mode alike, and every other on-axes
     # message in Review already reads its colour from the theme.
-    from well_viewer.core.plot_style import tokens_for
+    from well_viewer.core.plot_style import follows_theme, tokens_for
     _bg, _title_fg, _muted_fg, _grid, _spine = tokens_for(ax)
-    ax.text(
+    follows_theme(ax.text(
         0.5, 0.5, NO_DATA_MSG,
         ha="center", va="center", transform=ax.transAxes,
         fontsize=10, color=_muted_fg,
-    )
+    ), muted=True)
     ax.set_axis_off()
 
 

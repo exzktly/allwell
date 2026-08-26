@@ -421,6 +421,38 @@ def test_the_fraction_panel_is_not_capped_where_a_label_would_be_clipped():
         "the label on a bar at fraction 1.0 is drawn above the panel")
 
 
+# ── theme ink ────────────────────────────────────────────────────────────────
+
+def test_a_bar_label_repaints_with_the_theme():
+    """It is chrome. A capture flips the card to publication *without*
+    redrawing, so an untagged ink label reaches the file still wearing the
+    screen theme's near-white — the defect the significance brackets were
+    reported for."""
+    from widgets.plot_card import THEME_INK_ATTR
+
+    axm, _, _ = _render_bars([_item()], (True, ""))
+    (label,) = axm.texts
+    assert getattr(label, THEME_INK_ATTR, None) is not None, (
+        "a value label coloured from tokens_for is not tagged to follow a "
+        "theme flip")
+
+
+def test_a_line_label_keeps_its_trace_s_colour():
+    """It is data. Repainting it would substitute the theme's ink for the one
+    thing telling the reader which trace the number belongs to — the rule
+    ``follows_theme``'s own docstring states, applied to the case where this
+    module's two callers disagree."""
+    from widgets.plot_card import THEME_INK_ATTR
+
+    axm, _, _, _ = _render_line(True)
+    assert axm.texts, "no labels drawn"
+    for label in axm.texts:
+        assert getattr(label, THEME_INK_ATTR, None) is None, (
+            f"{label.get_text()!r} would be repainted into the theme's ink, "
+            "losing the colour that says which trace it is")
+        assert label.get_color() == "#4488cc"
+
+
 # ── persistence ──────────────────────────────────────────────────────────────
 
 @pytest.mark.qt

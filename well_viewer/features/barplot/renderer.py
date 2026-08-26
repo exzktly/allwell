@@ -29,6 +29,7 @@ from well_viewer.data.data_loading import (
 from well_viewer.core.plot_style import (
     apply_ax_style,
     apply_export_style_to_current,
+    follows_theme,
     mark_time_rescale,
     tokens_for,
 )
@@ -82,10 +83,12 @@ def _annotate_cluster_footers(items, axes, fontsize=8) -> None:
         _muted_fg = tokens_for(ax)[2]
         _fs = fontsize(ax) if callable(fontsize) else fontsize
         for gk, cx in _cluster_centers(items, xs):
-            ax.annotate(gk, xy=(cx, 0), xycoords=("data", "axes fraction"),
-                        xytext=(0, -32), textcoords="offset points",
-                        ha="center", va="top", fontsize=_fs, fontweight="bold",
-                        color=_muted_fg, annotation_clip=False)
+            follows_theme(
+                ax.annotate(gk, xy=(cx, 0), xycoords=("data", "axes fraction"),
+                            xytext=(0, -32), textcoords="offset points",
+                            ha="center", va="top", fontsize=_fs,
+                            fontweight="bold", color=_muted_fg,
+                            annotation_clip=False), muted=True)
 
 
 def _set_frac_ylim(ctx, ax_frac, *, normalised: bool = True) -> None:
@@ -190,9 +193,10 @@ def draw_violin(
     try:
         from scipy.stats import gaussian_kde
     except ImportError:
-        ax_mean.text(0.5, 0.5, "scipy required for violin plot",
-                     transform=ax_mean.transAxes, ha="center", va="center",
-                     color=tokens_for(ax_mean)[2], fontsize=9)
+        follows_theme(
+            ax_mean.text(0.5, 0.5, "scipy required for violin plot",
+                         transform=ax_mean.transAxes, ha="center", va="center",
+                         color=tokens_for(ax_mean)[2], fontsize=9), muted=True)
         return
 
     # Properties → Colours. Resolved here rather than by each caller because
@@ -616,10 +620,10 @@ def _no_significance(ctx, ax, reason: str) -> None:
     """
     if ax is None:
         return
-    note = ax.text(
+    note = follows_theme(ax.text(
         0.01, 0.98, f"Significance: {reason}", transform=ax.transAxes,
         ha="left", va="top", fontsize=7, color=tokens_for(ax)[2],
-        zorder=6, clip_on=False)
+        zorder=6, clip_on=False), muted=True)
     setattr(note, SIGNIFICANCE_NOTE_TAG, True)
 
 
@@ -912,9 +916,14 @@ def _draw_one_run(ctx, items, pairwise, *, ax_mean, ax_frac, target_ts) -> None:
         # Line2D in ``ax.lines``; tag this bracket so it's skipped and keeps its
         # flat solid shape (otherwise it renders as a row of circles).
         bracket_line._aw_no_style_override = True
-        ax.text((xa + xb) / 2.0, y + h, _significance_marker(p_show),
-                ha="center", va="bottom", fontsize=8, color=fg,
-                zorder=6, clip_on=False)
+        # ``fg`` is the *screen* ink while the card is in screen mode, and a
+        # capture flips the card to publication without redrawing — so an
+        # untagged bracket went onto white paper still near-white.
+        follows_theme(bracket_line)
+        follows_theme(ax.text(
+            (xa + xb) / 2.0, y + h, _significance_marker(p_show),
+            ha="center", va="bottom", fontsize=8, color=fg,
+            zorder=6, clip_on=False))
     # Grow the y-limit so the top bracket clears the panel (keeps the floor).
     # When the user set their own ceiling this is already that number, so the
     # export-style pass re-applying it a moment later is a no-op rather than a
@@ -1204,12 +1213,12 @@ def draw_bar_empty_state(ctx, ax_mean, ax_frac, message: str, *, ax_n=None,
         # behind it. ``message_on_first_only`` writes the note once rather than
         # once per panel — the stutter that made this state unreadable before.
         if message and not (message_on_first_only and i):
-            ax.text(
+            follows_theme(ax.text(
                 0.5, 0.5, message,
                 transform=ax.transAxes,
                 ha="center", va="center",
                 color=_muted_fg, fontsize=10,
-            )
+            ), muted=True)
         ax.set_axis_off()
     ctx.runtime.barplot.canvas.draw_idle()
 

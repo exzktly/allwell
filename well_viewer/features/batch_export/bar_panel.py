@@ -46,6 +46,7 @@ from well_viewer.domain.selections_model import (
     well_display_label as _well_display_label,
     replicate_display_label as _replicate_display_label,
 )
+from well_viewer.domain.bar_colors import mono_bar_color as _mono_bar_color
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -592,6 +593,11 @@ class BarBatchExportPanel(BatchExportPanel):
             disabled_well_color=_CLR_DISABLED_WELL,
             err_bar_color=_CLR_ERR_BAR,
             n_axis_integer=not bool(self._ctx.state.plot.use_fov_replicates),
+            # Properties → Colours, the same mode the on-tab bars draw. This
+            # call passes ``ctx=None`` deliberately (it does not want the
+            # tab's live error-bar / threshold-line state), so the mode is
+            # resolved here and handed over explicitly.
+            bar_color=_mono_bar_color(self._ctx.state.plot),
         )
         # This figure is built here rather than by the on-tab renderer, so the
         # marker that renderer adds has to be added here too: the tick labels and

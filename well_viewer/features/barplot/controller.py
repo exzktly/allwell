@@ -152,6 +152,7 @@ def render_bar_items(
     ax_n=None,
     fc_active: bool = False,
     n_axis_integer: bool | None = None,
+    bar_color: str | None = None,
     ctx=None,
 ) -> None:
     """Draw mean / fraction / events-above-threshold bar panels.
@@ -161,6 +162,15 @@ def render_bar_items(
     the item, so the renderer doesn't second-guess what to draw. ``use_groups``
     only governs the bar-width preset — grouped mode draws slightly wider
     bars to differentiate visually from the per-well view.
+
+    *bar_color* is the Properties → Colours mode resolved by the caller
+    (``domain.bar_colors.mono_bar_color``): a colour string paints every bar
+    that one ink, ``None`` keeps each item's own plate-rank colour. Passed in
+    rather than read off ``ctx`` here because the Batch Export panel renders
+    these panels with ``ctx=None`` on purpose — it does not want this
+    function's other ctx-derived behaviour — and a mode the tab honours and
+    the batch figures silently dropped is exactly the kind of divergence the
+    two surfaces exist to avoid.
     """
     n = len(items)
     # Drop cluster headers that would only duplicate a single bar's own tick
@@ -197,7 +207,10 @@ def render_bar_items(
     bar_w = min(0.65 if use_groups else 0.6, 5.0 / max(n, 1))
     for i, item in enumerate(items):
         x = xs[i] if i < len(xs) else i
-        color = item.color
+        # The placeholder / undefined-spread marks below deliberately keep
+        # their own colours: the mode restyles the data ink, not the marks
+        # that say a value is missing.
+        color = bar_color if bar_color is not None else item.color
         # Mean panel.
         if item.has_mean and not math.isnan(item.mean):
             ax_mean.bar(x, item.mean, width=bar_w, color=color, alpha=0.85,
@@ -304,113 +317,17 @@ def render_bar_items(
 
 # ── Drag-and-drop reordering ─────────────────────────────────────────────────
 #
-# Lightweight helpers that drive the bar drag interaction. The view (matplotlib
-# canvas + axes) is owned by ``WellViewerApp``; these helpers only mutate
-# ``ctx.runtime.barplot.drag_state`` / ``ctx.state.plot.bar_order`` and trigger a redraw.
-
-def bar_event_xdata(ctx, event) -> float | None:
-    """Return data-x for a matplotlib MouseEvent over any bar axis."""
-    ax = getattr(event, "inaxes", None)
-    if ax is not ctx.widgets.get_or_none("_ax_bar_mean") and ax is not ctx.widgets.get_or_none("_ax_bar_frac") and ax is not ctx.widgets.get_or_none("_ax_bar_n"):
-        return None
-    xdata = getattr(event, "xdata", None)
-    if xdata is None:
-        return None
-    return float(xdata)
-
-
-# ``bar_idx_at_x`` / ``bar_drag_xs`` / ``bar_guide_x`` / ``bar_err_settings``
-# moved to ``barplot/collect.py`` (Qt-free) and re-exported above.
-
-
-def bar_reset_order(ctx) -> None:
-    ctx.state.plot.bar_order = None
-    ctx.runtime.barplot.reset_order_btn.setProperty("variant", "toggle_muted")
-    ctx.runtime.barplot.reset_order_btn.style().unpolish(ctx.runtime.barplot.reset_order_btn)
-    ctx.runtime.barplot.reset_order_btn.style().polish(ctx.runtime.barplot.reset_order_btn)
-    from well_viewer.features.barplot.renderer import redraw_bars
-    redraw_bars(ctx)
-
-
-def on_bar_drag_press(ctx, event) -> None:
-    """Begin drag — record which bar was pressed."""
-    if getattr(event, "button", None) != 1:
-        return
-    xdata = bar_event_xdata(ctx, event)
-    if xdata is None:
-        return
-    keys = ctx.runtime.barplot.current_keys()
-    n = len(keys)
-    if n < 2:
-        return
-    idx = bar_idx_at_x(xdata, n, bar_drag_xs(ctx, keys))
-    ctx.runtime.barplot.drag_state.update(active=True, src_idx=idx, cur_idx=idx)
-
-
-def on_bar_drag_motion(ctx, event, *, accent_color: str) -> None:
-    """Update drop-target indicator while dragging."""
-    ds = ctx.runtime.barplot.drag_state
-    if not ds["active"]:
-        return
-    xdata = bar_event_xdata(ctx, event)
-    if xdata is None:
-        return
-    keys = ctx.runtime.barplot.current_keys()
-    n = len(keys)
-    if n < 2:
-        return
-    xs = bar_drag_xs(ctx, keys)
-    tgt = bar_idx_at_x(xdata, n, xs)
-    if tgt == ds["cur_idx"]:
-        return
-    ds["cur_idx"] = tgt
-
-    guide_x = bar_guide_x(xs, tgt, ds["src_idx"], n)
-    for ax in (ctx.widgets.get_or_none("_ax_bar_mean"), ctx.widgets.get_or_none("_ax_bar_frac"), ctx.widgets.get_or_none("_ax_bar_n")):
-        if ax is None:
-            continue
-        for ln in list(ax.lines):
-            if getattr(ln, "_bar_drag_guide", False):
-                ln.remove()
-        ln = ax.axvline(guide_x, color=accent_color, lw=1.5, ls="--",
-                        alpha=0.8, zorder=10)
-        ln._bar_drag_guide = True
-    ctx.runtime.barplot.canvas.draw_idle()
-
-
-def on_bar_drag_release(ctx, event) -> None:
-    """Finalise drop — reorder and redraw."""
-    ds = ctx.runtime.barplot.drag_state
-    if not ds["active"]:
-        return
-    ds["active"] = False
-
-    for ax in (ctx.widgets.get_or_none("_ax_bar_mean"), ctx.widgets.get_or_none("_ax_bar_frac"), ctx.widgets.get_or_none("_ax_bar_n")):
-        if ax is None:
-            continue
-        for ln in list(ax.lines):
-            if getattr(ln, "_bar_drag_guide", False):
-                ln.remove()
-
-    src = ds["src_idx"]
-    tgt = ds["cur_idx"]
-    if src == tgt:
-        ctx.runtime.barplot.canvas.draw_idle()
-        return
-
-    keys = ctx.runtime.barplot.current_keys()
-    if not (0 <= src < len(keys) and 0 <= tgt < len(keys)):
-        ctx.runtime.barplot.canvas.draw_idle()
-        return
-
-    item = keys.pop(src)
-    keys.insert(tgt, item)
-    ctx.state.plot.bar_order = keys
-    ctx.runtime.barplot.reset_order_btn.setProperty("variant", "toggle_accent")
-    ctx.runtime.barplot.reset_order_btn.style().unpolish(ctx.runtime.barplot.reset_order_btn)
-    ctx.runtime.barplot.reset_order_btn.style().polish(ctx.runtime.barplot.reset_order_btn)
-    from well_viewer.features.barplot.renderer import redraw_bars
-    redraw_bars(ctx)
+# The five handlers live in ``barplot/_drag_reorder.py`` and are re-exported
+# here: ``runtime_app`` and ``barplot/tab_view.py`` both reach them through this
+# module, and the split was made to hold a line budget, not to move the seam
+# every caller already uses.
+from well_viewer.features.barplot._drag_reorder import (  # noqa: E402,F401
+    bar_event_xdata,
+    bar_reset_order,
+    on_bar_drag_motion,
+    on_bar_drag_press,
+    on_bar_drag_release,
+)
 
 
 def update_bar_tp_menu(ctx) -> None:

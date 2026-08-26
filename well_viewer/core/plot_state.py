@@ -85,6 +85,14 @@ class PlotState:
     # beeswarm path).
     bar_err_kind: str = "sem"
     bar_show_mode: str = "mean_spread"
+    # ``bar_color_mode``: what the bar / violin / beeswarm fills are coloured
+    # by — "plate" (the default: each column takes the plate-picker colour of
+    # its well or replicate group, so the plate is the legend) or "grey" (one
+    # neutral ink for every column, for figures where the colours carry no
+    # information the labels do not already carry). Applies to every display
+    # mode of the Bar plot and to the Batch Export bar figures, which render
+    # the same panels.
+    bar_color_mode: str = "plate"
     # Draw significance brackets (from the Statistics tab's pairwise results)
     # between bars on the Bar plot. Off by default; toggled from the bar
     # Display popover. Only rendered when the plot is in grouped/pooled mode and

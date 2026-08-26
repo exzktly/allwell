@@ -165,6 +165,31 @@ class Colors:
     gate_curve_b      = "#FF8A65"   # …and control well B
     hist_fill         = "#4C78A8"   # Multivariate per-feature histograms
     selection_default = "#888888"   # a saved selection with no colour of its own
+    # Bar plots drawn in the "Grey" colour mode (Properties → Colours). One
+    # neutral ink for every bar, for figures where the plate-rank colours are
+    # decoration rather than information. A single mid grey rather than a
+    # screen/publication pair because bar fill is *data* ink and follows
+    # ``trace`` — ``Colors.trace`` and ``CPub.trace`` are the same tuple, so a
+    # bar must not change colour when the card flips to publication mode.
+    #
+    # One value therefore has to read on two very different grounds, and the
+    # bars are drawn at ``alpha=0.85``, so the number that matters is the
+    # *composited* one. Measured (WCAG contrast of the drawn pixel against the
+    # ground it sits on): 3.38:1 on the publication white ``CPub.bg``, 3.20:1
+    # on the dark card fill ``plot_bg``. Both clear the 3:1 floor for
+    # non-text — narrowly, because moving either way trades one ground for the
+    # other, and the publication side is the one this mode mostly exists for.
+    # The first choice here was a lighter #8A9099, which measures 2.61:1 on
+    # white once the alpha is applied under a comment claiming it read on both.
+    # ``tests/test_bar_color_mode.py`` pins the pair, so a future palette edit
+    # that fails one ground fails a test rather than a reader.
+    #
+    # Deliberately NOT listed in any ``THEMES`` bundle. The single-token
+    # argument above rests on bar fill being theme-independent the way
+    # ``WELL_COLORS_TUPLE`` is; a bundle that overrode this one would restore
+    # exactly the screen/publication divergence the token exists to avoid,
+    # silently, since nothing downstream would notice.
+    plot_mono = "#727880"
 
     # ── Contrast inks for "always opaque against any background" use ─────
     # Widgets that paint white-on-dark or black-on-light edges should use

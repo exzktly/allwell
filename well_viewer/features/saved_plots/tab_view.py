@@ -60,30 +60,119 @@ _SCROLL_SETTLE_TRIES = 8
 
 
 class _AspectImage(QLabel):
-    """A QLabel that scales its source pixmap to fill the available width while
-    preserving aspect ratio (so a saved figure reads like the real plot)."""
+    """A saved figure's preview: sized from the file header, decoded when painted.
 
-    def __init__(self, pixmap: QPixmap, parent=None) -> None:
+    The preview fills the card's width and keeps the figure's aspect ratio, so a
+    saved plot reads like the real thing. What it does *not* do is decode the
+    file to find that out.
+
+    A saved plot's PNG is a 300 dpi capture — routinely 1800x1200 — and decoding
+    one costs about 18 ms. The gallery builds a card per saved plot but shows two
+    or three of them at a time, so decoding at build time spent that on every
+    card in the list, most of them far below the viewport, and spent it again on
+    every repopulate: opening the tab, saving a plot, deleting one, renaming one,
+    reordering one. Twenty saved plots was some 0.4 s of decoding, nearly all of
+    it for images nobody was looking at.
+
+    Reading the header instead costs 0.02 ms and yields the one thing the layout
+    needs, which is the aspect ratio. Qt does not paint a widget that is scrolled
+    out of view, so ``paintEvent`` is the visibility signal we already have: the
+    pixels are decoded when the card first comes into view, once, and never at
+    all for a card the user never scrolls to.
+    """
+
+    def __init__(self, image_path, ratio: float, parent=None) -> None:
         super().__init__(parent)
-        self._src = pixmap
+        self._path = image_path
+        #: Height as a fraction of width, from the header. Drives the reserved
+        #: height, so the card is the right size before any decode happens.
+        self._ratio = ratio
+        self._src: QPixmap | None = None
+        #: Set once the decode has been attempted, so a file that fails to
+        #: decode is reported once rather than retried on every repaint.
+        self._decoded = False
+        #: Width the current scaled pixmap was built for; -1 until there is one.
+        self._scaled_for = -1
         self.setAlignment(Qt.AlignCenter)
-        # Expand horizontally; height is driven by the scaled pixmap.
+        # Expand horizontally; height is driven by the aspect ratio.
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self.setMinimumWidth(_CARD_MIN_W)
-        self._apply()
+        self._reserve_height()
+
+    @classmethod
+    def for_path(cls, image_path, parent=None) -> "_AspectImage | None":
+        """A preview for *image_path*, or None when there is no readable image.
+
+        Returning None rather than an empty preview keeps "this record's file is
+        missing or unreadable" distinguishable from "this plot drew nothing" —
+        the caller puts a named placeholder on the card instead.
+        """
+        ratio = _aspect_ratio_of(image_path)
+        if ratio is None:
+            return None
+        return cls(image_path, ratio, parent)
 
     def resizeEvent(self, event) -> None:  # Qt override
-        self._apply()
+        self._reserve_height()
+        self._rescale()
         super().resizeEvent(event)
 
-    def _apply(self) -> None:
-        if self._src.isNull():
+    def paintEvent(self, event) -> None:  # Qt override
+        # First paint means the card has actually come into view. Decode now.
+        if not self._decoded:
+            self._decode()
+        super().paintEvent(event)
+
+    def _reserve_height(self) -> None:
+        h = max(1, round(max(1, self.width()) * self._ratio))
+        if self.height() != h:
+            self.setFixedHeight(h)
+
+    def _rescale(self) -> None:
+        if self._src is None:
             return
         w = max(1, self.width())
-        scaled = self._src.scaledToWidth(w, Qt.SmoothTransformation)
-        self.setPixmap(scaled)
-        if self.height() != scaled.height():
-            self.setFixedHeight(scaled.height())
+        if self._scaled_for == w:
+            return
+        self._scaled_for = w
+        self.setPixmap(self._src.scaledToWidth(w, Qt.SmoothTransformation))
+
+    def _decode(self) -> None:
+        self._decoded = True
+        pixmap = QPixmap(str(self._path))
+        if pixmap.isNull():
+            # The header parsed and the pixels did not. Say so on the card: a
+            # preview that silently stays blank is indistinguishable from a
+            # figure that drew nothing. The object name is being set long after
+            # the widget was polished, so the style has to be re-run by hand or
+            # the message arrives in the body colour rather than the muted one.
+            self.setObjectName("Muted")
+            self.setText("(image unavailable)")
+            style = self.style()
+            style.unpolish(self)
+            style.polish(self)
+            return
+        self._src = pixmap
+        self._rescale()
+
+
+def _aspect_ratio_of(image_path) -> float | None:
+    """Height over width for *image_path*, read from the header alone.
+
+    None when the path is missing, unreadable, or does not declare a usable
+    size — which is the caller's cue to draw a placeholder rather than a preview.
+    """
+    from PySide6.QtGui import QImageReader
+
+    if image_path is None:
+        return None
+    reader = QImageReader(str(image_path))
+    if not reader.canRead():
+        return None
+    size = reader.size()
+    if not size.isValid() or size.isEmpty():
+        return None
+    return size.height() / size.width()
 
 
 def build_saved_plots_tab(ctx, parent: QWidget) -> None:
@@ -140,7 +229,7 @@ def build_saved_plots_tab(ctx, parent: QWidget) -> None:
     populate_saved_plots_grid(ctx)
 
 
-def _build_export_button(ctx, band) -> QPushButton:
+def _build_export_button(ctx, band) -> QWidget:
     """The gallery's Export control — one button, two destinations.
 
     A menu rather than two buttons because the choice is between *formats of the
@@ -148,26 +237,30 @@ def _build_export_button(ctx, band) -> QPushButton:
     order, to one file. The wording says what the user gets rather than naming the
     file type twice, since "editable in PowerPoint" is the whole reason to pick
     the second one over the first.
-    """
-    from PySide6.QtWidgets import QMenu
 
-    button = QPushButton("Export…", band)
-    button.setToolTip("Export every saved plot to a single file.")
-    menu = QMenu(button)
-    pdf_action = menu.addAction("PDF report…")
-    pdf_action.setToolTip(
-        "One page per saved plot, each showing the figure as it was captured.")
-    pdf_action.triggered.connect(lambda _=False: C.export_report_pdf(ctx))
-    pptx_action = menu.addAction("PowerPoint deck (editable figures)…")
-    pptx_action.setToolTip(
-        "One slide per saved plot, redrawn as PowerPoint shapes — bars, lines "
-        "and labels you can restyle in PowerPoint itself.")
-    pptx_action.triggered.connect(lambda _=False: C.export_deck_pptx(ctx))
-    # The menu is parented to the button, but ``setMenu`` is what makes the
-    # button show it: without it the actions exist and nothing can reach them,
-    # which is the failure this file already carries a note about elsewhere —
-    # a control that is offered is not a control that works.
-    button.setMenu(menu)
+    Built through ``make_action_menu_button``, which is what every other
+    click-and-close menu in the app uses — including the plot cards' own Save
+    menu, the one that feeds this gallery. Hand-rolling it as a ``QPushButton``
+    with a ``QMenu``, as this did, opts out of that: the theme styles the caret
+    for ``QToolButton`` only, so the button fell through to Qt's own
+    ``QPushButton::menu-indicator``, an unstyled arrow drawn hard against the
+    right edge and sitting low, below the text's centre line. The helper puts the
+    caret in the label instead and hides the native indicator, so this control
+    reads like every other menu in the window.
+    """
+    from well_viewer.core.ui_helpers import add_menu_action, make_action_menu_button
+
+    button, menu = make_action_menu_button(
+        "Export", band, tooltip="Export every saved plot to a single file.")
+    add_menu_action(
+        menu, "PDF report\u2026", lambda: C.export_report_pdf(ctx),
+        tooltip="One page per saved plot, each showing the figure as it was "
+                "captured.")
+    add_menu_action(
+        menu, "PowerPoint deck (editable figures)\u2026",
+        lambda: C.export_deck_pptx(ctx),
+        tooltip="One slide per saved plot, redrawn as PowerPoint shapes \u2014 "
+                "bars, lines and labels you can restyle in PowerPoint itself.")
     return button
 
 
@@ -286,10 +379,10 @@ def _scroll_when_laid_out(scroll, card) -> None:
                          min(bar.maximum(), top - _SCROLL_TOP_MARGIN))
             bar.setValue(target)
             # Keep going until the target stops moving. The cards size themselves
-            # from their pixmaps (``_AspectImage`` sets its height in
-            # ``resizeEvent``), so the list's height is still changing for a few
-            # passes after the page is shown and a scroll computed on the first
-            # one lands short of where the card ends up.
+            # from their previews' aspect ratios (``_AspectImage`` sets its height
+            # in ``resizeEvent``), so the list's height is still changing for a
+            # few passes after the page is shown and a scroll computed on the
+            # first one lands short of where the card ends up.
             if remaining > 0 and target != previous:
                 QTimer.singleShot(0, lambda: _attempt(remaining - 1, target))
 
@@ -336,11 +429,12 @@ def _build_saved_card(ctx, store, rec, *, is_first: bool = True,
     header.addWidget(badge)
     v.addLayout(header)
 
-    # Full-width figure (scales with the tab).
-    img_path = store.image_path(ctx, rec)
-    pm = QPixmap(str(img_path)) if (img_path is not None and img_path.exists()) else QPixmap()
-    if not pm.isNull():
-        v.addWidget(_AspectImage(pm, card))
+    # Full-width figure (scales with the tab). The preview sizes itself from the
+    # file header here and decodes its pixels the first time it is painted, so a
+    # gallery of twenty plots does not decode twenty 300 dpi captures to show two.
+    preview = _AspectImage.for_path(store.image_path(ctx, rec), card)
+    if preview is not None:
+        v.addWidget(preview)
     else:
         missing = QLabel("(image unavailable)", card)
         missing.setObjectName("Muted")

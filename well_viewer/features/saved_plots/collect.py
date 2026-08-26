@@ -117,35 +117,82 @@ def _capture_selections(ctx) -> list | None:
 
 
 def _capture_stats_config(ctx) -> dict | None:
-    """Config to re-run the current stats test on Restore (or None if there's
-    nothing to reproduce). Derives the run context from the live ``pairwise``
-    results (test / val_col / target_t / statistic) so it matches exactly what
-    produced the on-screen brackets; the threshold is resolved from that val_col.
+    """Config to re-run the saved plot's stats tests on Restore (or None if
+    there's nothing to reproduce).
+
+    **Every stored comparison, not just the most recent one.** The Statistics
+    tab keeps its runs keyed by ``(val_col, target_t, stat)`` precisely so that
+    testing a second channel — or a second statistic, or a second timepoint —
+    adds a comparison rather than replacing the first, and a Bar plot draws
+    whichever of them describe the bars in front of it. ``stats.pairwise`` is a
+    derived view of that store meaning "the last run recorded", so capturing it
+    saved one comparison out of however many the figure was drawing; a plot of
+    GFP bars saved after a CY5 test had been run came back from Restore with the
+    CY5 config, which matches no bar on it, and therefore with no brackets at
+    all.
+
+    The run context (test / val_col / target_t / statistic) is derived from the
+    stored records themselves rather than from the live sidebar, so it matches
+    exactly what produced the on-screen brackets; each run's threshold is
+    resolved from its own val_col. ``groups`` and ``use_fov`` are shared: one
+    set of comparison groups is tested, and the FOV-replicate mode governs the
+    replicate unit for all of them.
     """
     st = getattr(ctx.state, "stats", None)
-    pairwise = list(getattr(st, "pairwise", []) or []) if st else []
     groups = [g for g in (getattr(st, "groups", []) or []) if getattr(g, "wells", None)]
-    if not pairwise or len(groups) < 2:
+    contexts = _stored_run_contexts(st)
+    if not contexts or len(groups) < 2:
         return None
-    run_ctx = pairwise[0]  # test/val_col/target_t/stat are constant across the run
-    val_col = str(run_ctx.get("val_col", "") or "")
     try:
-        threshold = float(_threshold_for_val_col(ctx, val_col))
         grp_data = _serialize_stats_groups(groups)
+        runs = [_stats_run_block(ctx, record) for record in contexts]
     except Exception:
         # Don't lose the saved plot's stats config silently (audit E10).
         logger.exception("saved plot: failed to capture stats config; not saved")
         return None
-    return {
+    cfg: dict[str, Any] = {
         "groups": grp_data,
-        "test": str(run_ctx.get("test", "") or ""),
-        "target_t": run_ctx.get("target_t"),
-        "val_col": val_col,
-        "statistic": str(run_ctx.get("stat", "mean") or "mean"),
-        "threshold": threshold,
-        # The FOV-replicate mode governs the test's replicate unit; capture it so
+        "runs": runs,
+        # The FOV-replicate mode governs each test's replicate unit; capture it so
         # a restored plot re-runs with the same n and redraws identical brackets.
         "use_fov": bool(ctx.state.plot.use_fov_replicates),
+    }
+    # The most recent run also sits at the top level, which is where a record
+    # written before the block held several runs kept its only one. That keeps
+    # one shape for every reader of a single run's context — ``build_summary``,
+    # the tests, an operator reading the JSON — rather than two.
+    cfg.update(runs[-1])
+    return cfg
+
+
+def _stored_run_contexts(st) -> list[dict]:
+    """One representative record per stored comparison run, in the order run.
+
+    A run's records all share its context, so the first of each is enough to
+    re-run it. Falls back to ``pairwise`` for a state object that carries no
+    ``runs`` store at all, so a hand-built fixture still captures its one run.
+    """
+    if st is None:
+        return []
+    stored = getattr(st, "runs", None)
+    if isinstance(stored, dict):
+        return [records[0] for records in stored.values()
+                if records and isinstance(records[0], dict)]
+    pairwise = list(getattr(st, "pairwise", []) or [])
+    return [pairwise[0]] if pairwise and isinstance(pairwise[0], dict) else []
+
+
+def _stats_run_block(ctx, record: dict) -> dict:
+    """One stored run's re-runnable context, threshold resolved from its own
+    value column (a per-channel cut, so two runs on two channels do not share
+    one)."""
+    val_col = str(record.get("val_col", "") or "")
+    return {
+        "test": str(record.get("test", "") or ""),
+        "target_t": record.get("target_t"),
+        "val_col": val_col,
+        "statistic": str(record.get("stat", "mean") or "mean"),
+        "threshold": float(_threshold_for_val_col(ctx, val_col)),
     }
 
 

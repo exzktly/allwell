@@ -182,3 +182,107 @@ def _real_png() -> bytes:
     mpimg.imsave(buf, (np.linspace(0, 1, 60 * 80 * 3).reshape(60, 80, 3) * 255)
                  .astype("uint8"), format="png")
     return buf.getvalue()
+
+
+def _previews(ctx) -> list:
+    """Every card's figure preview, in gallery order."""
+    from well_viewer.features.saved_plots.tab_view import _AspectImage
+
+    return [card.findChild(_AspectImage)
+            for card in ctx.runtime.saved_plots.cards.values()]
+
+
+def test_building_the_gallery_decodes_no_figures(qapp, tmp_path):
+    """A saved plot's PNG is a 300 dpi capture and costs ~18 ms to decode. The
+    gallery builds a card per saved plot and shows two or three of them, so
+    decoding at build time spent that on every card in the list — most of them
+    far below the viewport — and spent it again on every repopulate: opening the
+    tab, saving, deleting, renaming, reordering.
+
+    The assertion is on the decode, not on a duration: a timing threshold on a
+    shared container is a flake, and what actually regressed is whether the
+    pixels are read before anyone can see them.
+    """
+    app = _app(tmp_path)
+    parent = QWidget()          # never shown → no card is ever painted
+    ctx = SimpleNamespace(app=app, state=app._app_state,
+                          widgets=WidgetRegistry(app), runtime=AppRuntime(app))
+    build_saved_plots_tab(ctx, parent)
+    store = get_store(ctx)
+    for pid in ("a", "b", "c", "d", "e", "f"):
+        rec = _rec()
+        rec.id, rec.png_filename = pid, f"{pid}.png"
+        store.add(ctx, rec, _real_png())
+    populate_saved_plots_grid(ctx)
+
+    previews = _previews(ctx)
+    assert len(previews) == 6 and all(p is not None for p in previews)
+    assert [p._decoded for p in previews] == [False] * 6
+
+
+def _standalone_preview(tmp_path, data: bytes, name: str = "fig.png"):
+    """A preview with no parent, so a test can size it.
+
+    Inside a card the preview is laid out by the card, and a ``resize`` there is
+    overwritten by the next layout pass — a test that sized one in place would
+    be asserting against whatever width the layout happened to give it.
+    """
+    from well_viewer.features.saved_plots.tab_view import _AspectImage
+
+    path = tmp_path / name
+    path.write_bytes(data)
+    return _AspectImage.for_path(path)
+
+
+def test_a_card_reserves_its_height_before_the_decode(qapp, tmp_path):
+    """The height has to be right before the pixels are read, or the list's
+    geometry — and the scroll that lands on one card — would be computed against
+    placeholder sizes. The file header carries the aspect ratio and costs about
+    a thousandth of a decode.
+    """
+    preview = _standalone_preview(tmp_path, _real_png())
+    assert preview is not None
+    assert preview._decoded is False
+    assert preview._ratio == pytest.approx(60 / 80)   # _real_png is 80x60
+    # Shown before the resize: Qt holds back a resize event for a hidden widget
+    # until it is shown, so a test that resized one in the dark would assert
+    # against a height nothing had recomputed.
+    preview.show()
+    preview.resize(400, preview.height())
+    qapp.processEvents()
+    assert preview.height() == 300                    # 400 * 60/80
+
+
+def test_the_figure_is_decoded_once_the_card_is_painted(qapp, tmp_path):
+    """Deferring the decode is only correct if it still happens. A preview that
+    stayed blank when the card came into view would be the same bug the deferral
+    is meant to avoid, wearing the opposite sign."""
+    preview = _standalone_preview(tmp_path, _real_png())
+    preview.resize(400, 300)
+    preview.grab()                                    # forces a real paintEvent
+    assert preview._decoded is True
+    assert not preview.pixmap().isNull()
+    assert preview.pixmap().width() == 400
+
+
+def test_an_undecodable_figure_says_so_rather_than_going_blank(qapp, tmp_path):
+    """A file whose header parses and whose pixels do not must name itself on
+    the card: a preview that silently stays empty is indistinguishable from a
+    figure that drew nothing."""
+    whole = _real_png()
+    preview = _standalone_preview(tmp_path, whole[:len(whole) // 2], "half.png")
+    assert preview is not None, "the header alone should still give a size"
+    preview.resize(400, 300)
+    preview.grab()
+    assert preview._decoded is True
+    assert preview.pixmap().isNull()
+    assert preview.text() == "(image unavailable)"
+
+
+def test_a_record_whose_file_is_gone_gets_a_placeholder_not_a_preview(qapp, tmp_path):
+    """No readable image at all → no preview widget, so the card can draw its
+    named placeholder instead of an empty box."""
+    from well_viewer.features.saved_plots.tab_view import _AspectImage
+
+    assert _AspectImage.for_path(tmp_path / "not-there.png") is None
+    assert _AspectImage.for_path(None) is None

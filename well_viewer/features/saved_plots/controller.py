@@ -236,22 +236,42 @@ def _restore_selections(ctx, sels, solo_wells=None) -> None:
 
 
 def _restore_stats(ctx, cfg) -> None:
-    """Re-run the saved stats config to regenerate ``stats.pairwise`` + groups.
+    """Re-run the saved stats config to regenerate the comparison store + groups.
 
-    Deterministic re-run (same config + data → same brackets). No-op for saved
+    Every comparison the record carries, not just one. A saved plot stores one
+    block per run the Statistics tab had recorded (``cfg["runs"]``), because a
+    Bar plot draws brackets from every stored run that describes its bars — a
+    Mean comparison and a Fraction comparison of the same groups, or two
+    channels, are all on screen at once. A record written before the block held
+    several runs carries its single run at the top level instead, and is read
+    here as a one-run list.
+
+    Deterministic re-run (same config + data -> same brackets). No-op for saved
     plots without a ``stats`` block (backward compatible) or on any error."""
     if not isinstance(cfg, dict):
         return
+    wanted = 0
+    computed: list[list] = []
     try:
         groups = _deserialize_stats_groups(ctx, cfg.get("groups"))
-        target_t = cfg.get("target_t")
-        pairwise = _compute_pairwise(
-            ctx, groups=groups,
-            target_t=(float(target_t) if target_t is not None else None),
-            val_col=cfg.get("val_col"), statistic=cfg.get("statistic", "mean"),
-            threshold=cfg.get("threshold"), test=cfg.get("test", ""),
-            use_fov=bool(cfg.get("use_fov", True)),
-        )
+        blocks = cfg.get("runs")
+        if not isinstance(blocks, list) or not blocks:
+            blocks = [cfg]  # a record saved before the block held several runs
+        blocks = [b for b in blocks if isinstance(b, dict)]
+        wanted = len(blocks)
+        use_fov = bool(cfg.get("use_fov", True))
+        for block in blocks:
+            target_t = block.get("target_t")
+            records = _compute_pairwise(
+                ctx, groups=groups,
+                target_t=(float(target_t) if target_t is not None else None),
+                val_col=block.get("val_col"),
+                statistic=block.get("statistic", "mean"),
+                threshold=block.get("threshold"), test=block.get("test", ""),
+                use_fov=use_fov,
+            )
+            if records:
+                computed.append(records)
         # Same gate as the bar renderer's. Saved Plots and Statistics are
         # separately removable, so a build with one and not the other reaches
         # here — and this sits inside a broad ``except`` that logs at DEBUG, so
@@ -260,7 +280,13 @@ def _restore_stats(ctx, cfg) -> None:
         stats_state = ctx.state.feature_slice("stats")
         if stats_state is not None:
             stats_state.groups = groups
-            stats_state.pairwise = pairwise
+            # Replace the live store wholesale rather than assigning
+            # ``pairwise``, which records exactly one run: the record's runs are
+            # what this plot was drawn with, and any comparison sitting in the
+            # store from earlier in the session is not.
+            stats_state.runs.clear()
+            for records in computed:
+                stats_state.record_run(records)
             # Writing the state is not showing it. The Statistics sidebar's
             # group list and its plate are painted by explicit refresh calls —
             # every other route that changes ``stats.groups`` (add, delete,
@@ -276,6 +302,27 @@ def _restore_stats(ctx, cfg) -> None:
             _refresh_stats_group_views(ctx)
     except Exception:
         _logger.debug("saved_plots: stats re-run failed", exc_info=True)
+    _report_unreproduced_stats(ctx, wanted, len(computed))
+
+
+def _report_unreproduced_stats(ctx, wanted: int, produced: int) -> None:
+    """Say so when a restore could not reproduce every saved comparison.
+
+    A test whose data is no longer there returns no records, and the plot then
+    comes back with fewer brackets than it was saved with — or none. Silent,
+    that is indistinguishable from a plot that never had them, which is the one
+    thing the user cannot tell from the figure itself.
+    """
+    if produced >= wanted:
+        return
+    missing = wanted - produced
+    comparisons = "comparison" if wanted == 1 else "comparisons"
+    them = "it" if missing == 1 else "them"
+    with swallow("saved_plots: unreproduced-stats report"):
+        ctx.notify.set_status(
+            f"Restored the plot, but {missing} of its {wanted} saved "
+            f"{comparisons} could not be re-run — the data behind {them} is no "
+            f"longer available, so {them} draws no significance brackets.")
 
 
 def _refresh_stats_group_views(ctx) -> None:
@@ -360,6 +407,75 @@ def export_saved_plot(ctx, plot_id: str) -> None:
             Path(dest).write_bytes(src.read_bytes())
     except Exception:
         _logger.debug("saved_plots: export failed for %r", plot_id, exc_info=True)
+
+
+# ── progress ─────────────────────────────────────────────────────────────────
+#
+# An export blocks the GUI thread: it replays old plots onto their tabs, renders
+# each figure to vector, parses every capture and writes a zip, all between the
+# file dialog closing and the file appearing. Without a bar that is a frozen
+# window and no account of why — and the redraw phase navigates the app while it
+# runs, so the user watches their own tabs change with nothing saying what is
+# happening.
+
+def _progress_bar(ctx):
+    """The shell's progress bar, or ``None`` when there is no shell.
+
+    Reached through the widget registry rather than off ``ctx.window`` so a
+    headless caller — the tests, a profile without the status row — simply gets
+    no bar instead of an AttributeError.
+    """
+    widgets = getattr(ctx, "widgets", None)
+    return widgets.get_or_none("_progress_bar") if widgets is not None else None
+
+
+def _show_progress(ctx, total: int) -> None:
+    bar = _progress_bar(ctx)
+    if bar is None:
+        return
+    bar.setRange(0, max(1, int(total)))
+    bar.setValue(0)
+    bar.show()
+    _pump()
+
+
+def _step_progress(ctx, done: int, total: int, msg: str = "") -> None:
+    bar = _progress_bar(ctx)
+    if bar is not None:
+        if bar.maximum() != max(1, int(total)):
+            bar.setRange(0, max(1, int(total)))
+        bar.setValue(int(done))
+    if msg:
+        with swallow("saved_plots: progress message"):
+            ctx.notify.set_status(msg)
+    _pump()
+
+
+def _hide_progress(ctx) -> None:
+    """Called on **every** exit path, including failure. A bar left running
+    after an export died is its own false statement about what is happening."""
+    bar = _progress_bar(ctx)
+    if bar is None:
+        return
+    bar.setValue(0)
+    bar.hide()
+    _pump()
+
+
+def _pump() -> None:
+    """Repaint mid-export, without letting the user act on a half-done state.
+
+    The work runs on the GUI thread, so nothing redraws unless the event loop is
+    turned by hand. User input is excluded deliberately: the redraw phase moves
+    the app from tab to tab and rewrites the live selection as it goes, and a
+    click landing in the middle of that would act on a view that is about to be
+    replaced — and then be undone by the restore at the end.
+    """
+    with swallow("saved_plots: progress repaint"):
+        from PySide6.QtCore import QEventLoop
+        from PySide6.QtWidgets import QApplication
+
+        QApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
 
 
 def gallery_order(store) -> list:
@@ -457,16 +573,39 @@ def export_deck_pptx(ctx) -> None:
         if not dest:
             return
         records = gallery_order(store)
-        regenerated = regenerate_missing_vectors(ctx, store, records)
-        result = build_saved_plots_deck(
-            records,
-            lambda r: store.vector_path(ctx, r) or store.held_vector(r),
-            lambda r: store.image_path(ctx, r),
-            dest,
-            dataset_name=_dataset_name(ctx),
-            summary_for=lambda r: r.summary,
-            regenerated=regenerated,
-        )
+        # One bar across both phases, because the user is waiting for one thing.
+        # The redraw phase is the slow half and the one that visibly moves the
+        # app from tab to tab, so it gets its own steps rather than being folded
+        # into a single "working…" that sits still for most of the export.
+        redraws = sum(1 for r in records if not r.svg_filename)
+        total = redraws + len(records) + 1
+        _show_progress(ctx, total)
+        try:
+            regenerated = regenerate_missing_vectors(
+                ctx, store, records,
+                on_progress=lambda done, title: _step_progress(
+                    ctx, done, total,
+                    f"Redrawing “{title}” so it can export as editable shapes "
+                    f"({done} of {redraws})…"))
+            result = build_saved_plots_deck(
+                records,
+                lambda r: store.vector_path(ctx, r) or store.held_vector(r),
+                lambda r: store.image_path(ctx, r),
+                dest,
+                dataset_name=_dataset_name(ctx),
+                summary_for=lambda r: r.summary,
+                regenerated=regenerated,
+                on_progress=lambda done, slides, title: _step_progress(
+                    ctx, redraws + done, total,
+                    (f"Building slide {done + 1} of {slides - 1}…" if title
+                     else f"Writing {Path(dest).name}…")),
+            )
+            # Land on the full count before the bar goes away. Without it the
+            # last thing the user sees is a bar stopped short of the end, which
+            # reads as an export that gave up rather than one that finished.
+            _step_progress(ctx, total, total)
+        finally:
+            _hide_progress(ctx)
         if result.unsupported:
             _logger.info("saved_plots: deck export met %s",
                          ", ".join(result.unsupported))
@@ -538,7 +677,8 @@ class _LiveState:
             view_state.restore(ctx, dict(self.view))
 
 
-def regenerate_missing_vectors(ctx, store, records) -> set[str]:
+def regenerate_missing_vectors(ctx, store, records, *,
+                               on_progress=None) -> set[str]:
     """Redraw plots that have no vector capture, so the deck can make them editable.
 
     A plot filed before the app began capturing vector is a PNG and nothing
@@ -548,6 +688,10 @@ def regenerate_missing_vectors(ctx, store, records) -> set[str]:
     keeps it. The redraw is a one-off repair: the capture is stored on the
     record, so every later export of that plot is editable without paying for it
     again.
+
+    *on_progress* is called ``(done, title)`` as each plot is dealt with, so the
+    caller can move a bar: this phase replays plots onto their tabs and renders
+    each figure, which is seconds apiece and visibly moves the app around.
 
     Returns the ids it regenerated, which the deck marks on their slides,
     because a redrawn figure is drawn from today's data rather than from the
@@ -579,17 +723,32 @@ def regenerate_missing_vectors(ctx, store, records) -> set[str]:
     regenerated: set[str] = set()
     skipped_tabs: set[str] = set()
     skipped_panels = 0
+    done = 0
+
+    def _report(rec) -> None:
+        """Advance the caller's count. Every exit from the loop body calls this,
+        including the skips: a record left alone still took a turn, and a bar
+        that only moved on success would sit still through a gallery of plots
+        that are all being skipped."""
+        nonlocal done
+        done += 1
+        if on_progress is not None:
+            with swallow("saved_plots: regeneration progress"):
+                on_progress(done, rec.title or rec.tab or "plot")
     try:
         for rec in missing:
             card = _card_for_tab(ctx, cards_by_tab, rec.tab)
             if card is None or not hasattr(card, "captureVectorSvg"):
                 skipped_tabs.add(rec.tab or "?")
+                _report(rec)
                 continue
             if not _redraw_keeps_the_scope(ctx, store, rec, card):
                 skipped_panels += 1
+                _report(rec)
                 continue
             if _regenerate_one(ctx, store, rec, card):
                 regenerated.add(rec.id)
+            _report(rec)
         if regenerated:
             store.persist(ctx)      # one write for the batch, not one per record
     finally:

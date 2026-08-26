@@ -3035,6 +3035,14 @@ rather than a single panel.
     listed and coloured on the group-editor plate exactly as if you had defined
     them, so you can see what the restored brackets were computed from and edit
     it from there.
+  - **Every comparison you had run is saved, not just the last one.** The
+    Statistics tab keeps comparisons side by side — a second channel, a second
+    statistic, a second timepoint each add one rather than replacing what was
+    there — and a saved plot carries all of them, so a figure drawn with
+    brackets from two tests comes back with both. If the data behind one of them
+    is no longer available, the status line says how many of the saved
+    comparisons could not be re-run, rather than leaving you a figure with fewer
+    brackets than you saved and no reason given.
   - A plot saved before its tab began recording its own settings can only
     restore the settings shared across tabs — channel, metric, wells, gating.
     The status line says so by name when it happens, because a silent partial
@@ -3049,7 +3057,7 @@ rather than a single panel.
 - **Clear all** asks first, and only clears if you say yes. If the
   confirmation cannot be shown at all, nothing is cleared — an answer that could
   not be obtained is not consent.
-- **Export…** — send the whole gallery, in the order the cards are arranged
+- **Export ▾** — send the whole gallery, in the order the cards are arranged
   here, to a single file. Two formats:
   - **PDF report** — a cover page plus one full-quality page per plot, each with
     its parameter summary. The figure on the page is the picture that was
@@ -3063,6 +3071,12 @@ rather than a single panel.
     deck is a normal `.pptx` that opens anywhere, and no add-in is needed.
 
   The Image Table grid can be saved to the gallery and exported either way.
+
+  Both exports show a progress bar in the status row while they run, naming what
+  they are doing — redrawing an older plot, building a slide, writing the file.
+  A deck of plots that all need redrawing takes a few seconds each and moves
+  between tabs as it goes; that is the repair happening, and the page you were
+  on comes back at the end.
 - **A plot saved from one panel stays that panel.** If you saved a single panel
   of a multi-panel figure, the export leaves it as a picture rather than
   redrawing it, because a redraw would give you every panel of that figure under

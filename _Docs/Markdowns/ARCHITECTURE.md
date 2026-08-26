@@ -1626,6 +1626,31 @@ parameters and must leave the user looking at the tab that figure came from.
 Sending it to Home instead would apply the whole restored view to a tab nobody
 is on, which on screen is indistinguishable from a restore that did nothing.
 
+**A saved plot carries every comparison the Statistics tab had run, not one.**
+The comparison store is keyed by `(val_col, target_t, stat)` (§ the Statistics
+tab) precisely so that testing a second channel — or a second statistic, or a
+second timepoint — adds a comparison rather than replacing the first, and a Bar
+plot draws whichever of the stored runs describe the bars in front of it.
+`collect._capture_stats_config` therefore walks `stats.runs` and writes one
+re-runnable block per stored run into `params["stats"]["runs"]`, each with its
+own threshold resolved from its own value column, since the ON cutoff is a
+per-channel cut. `stats.pairwise` is a *derived* view of that store meaning "the
+last run recorded", so capturing it saved one comparison out of however many the
+figure was drawing: a plot of GFP bars saved after a CY5 test had been run came
+back from Restore carrying the CY5 config, which matches no bar on it, and
+therefore with no brackets at all. The most recent run also sits at the top
+level of the block, which is where a record written before the block held
+several runs kept its only one — one shape for every reader of a single run's
+context, and the read path treats such a record as a one-run list.
+
+`_restore_stats` re-runs each block and rebuilds the store from them, replacing
+its contents rather than assigning `pairwise` (which records exactly one run):
+the record's runs are what the plot was drawn with, and a comparison left in the
+store from earlier in the session is not. A block whose data is no longer there
+returns no records, so the restored plot comes back with fewer brackets than it
+was saved with — `_report_unreproduced_stats` says so in the status line, because
+from the figure alone that is indistinguishable from a plot that never had them.
+
 **Restoring a plot's statistics repaints the group list, not just the state.**
 `_restore_stats` re-runs the saved test and writes `stats.groups` /
 `stats.pairwise`, and it now calls `stats_refresh_group_list` /
@@ -1656,7 +1681,13 @@ who is told nothing re-clicks Restore instead).
 #### Exporting the gallery (`features/saved_plots/_report.py`, `_deck.py`)
 
 The gallery goes out whole, in one of two formats, from a single Export menu on
-the page's control band. Both walk the records in **gallery order** —
+the page's control band, built by `core.ui_helpers.make_action_menu_button` —
+the one path in the app for a click-and-close menu, and the one the theme's
+caret rule is written for. That rule styles `QToolButton[hasMenu]`, so a
+`QPushButton` carrying a `QMenu` falls through to Qt's own
+`QPushButton::menu-indicator`: an unstyled arrow hard against the right edge and
+below the text's centre line. The helper puts the caret in the label and hides
+the native indicator, which is why every menu in the window reads the same. Both walk the records in **gallery order** —
 `controller.gallery_order`, which is `reversed(store.records)` — because the
 gallery shows newest first and the ▲/▼ buttons curate that sequence; an export
 that walked the records as stored came out in exactly the reverse of the order
@@ -1748,6 +1779,23 @@ break. One of those does not spoil a label: it makes the whole slide part
 unparseable, so PowerPoint offers to repair the file while the export reports
 success. `_drawingml.xml_text` / `xml_attr` drop them and every user-reachable
 string goes through one or the other.
+
+**The export shows a progress bar across both of its phases.** It blocks the
+GUI thread from the moment the file dialog closes: it replays old plots onto
+their tabs, renders each figure to vector, parses every capture and writes a
+zip. `export_deck_pptx` sizes the bar as `redraws + plots + 1` and steps it
+through both — `regenerate_missing_vectors` takes an `on_progress(done, title)`
+and `build_saved_plots_deck` an `on_progress(done, total, label)`, the latter a
+plain callable so `_deck` stays Qt-free and testable without an application.
+Every path out of the redraw loop reports, skips included: a bar that only moved
+on a successful redraw sits still through a gallery that is all being skipped,
+which looks exactly like a hang. The bar is hidden in a `finally`, because one
+left running after a failed export is its own false statement.
+
+`_pump` turns the event loop by hand — nothing repaints otherwise — with
+`ExcludeUserInputEvents`: the redraw phase moves the app from tab to tab and
+rewrites the live selection as it goes, so a click landing mid-export would act
+on a view that is about to be replaced and then undone by the restore.
 
 **A plot with no vector capture is redrawn rather than written off.** A record
 filed before the app captured vector is a PNG and nothing else, and no amount of
@@ -1869,12 +1917,30 @@ event loop is a scroll to the top of a list that has not been laid out. That is
 what shipped, and it always landed on the first card while reporting success,
 because `QScrollArea.ensureWidgetVisible` returns nothing to say otherwise.
 `_scroll_when_laid_out` re-aims once per event-loop pass until the target stops
-moving (the cards size themselves from their pixmaps, so the list's height is
-still changing for a few passes), bounded by `_SCROLL_SETTLE_TRIES`. It sets the
+moving (the cards size themselves from their previews' aspect ratios, so the
+list's height is still changing for a few passes), bounded by
+`_SCROLL_SETTLE_TRIES`. It sets the
 scroll bar to the card's own top rather than calling `ensureWidgetVisible`,
 because a saved figure is routinely taller than the viewport and "make it
 visible" then means scrolling until its *bottom* shows — the user arrives at the
 foot of the plot they clicked.
+
+**A gallery card is sized from the file header and decoded when it is
+painted.** `tab_view._AspectImage` reads the PNG's declared size with
+`QImageReader.size()` — about 0.02 ms, no pixels — and reserves its height from
+that aspect ratio, then decodes the image in its first `paintEvent`. Qt does not
+paint a widget scrolled out of view, so the paint *is* the visibility signal:
+the pixels are read when a card comes into view, once, and never for a card the
+user never scrolls to. Decoding at build time instead cost about 18 ms per
+saved plot — a 300 dpi capture is routinely 1800×1200 — on every repopulate,
+which is opening the tab, saving a plot, deleting one, renaming one, reordering
+one; twenty saved plots was some 0.4 s of decoding to show two or three of them.
+(`QPixmap(path)` reads from Qt's own file cache when the same path is loaded
+twice, so a measurement that decodes one file repeatedly reports the cache and
+not the decode.) A file whose header parses and whose pixels do not leaves the
+preview labelled `(image unavailable)` rather than blank; a file that cannot be
+read at all yields no preview widget, and the card draws the same named
+placeholder in its place.
 
 Thumbnails are decoded **at thumbnail size and cached**, through
 `QImageReader.setScaledSize` rather than by loading the file and scaling

@@ -759,29 +759,35 @@ def stats_on_test_change(ctx) -> None:
 
 
 def invalidate_stats_run(ctx) -> None:
-    """Drop the stored comparison and let the Bar plot know.
+    """Changing the test configuration no longer discards past comparisons.
 
-    Split out of :func:`stats_on_test_change` so the Property combo can reach it
-    too. That combo does not route through the test-change handler — it goes to
-    :func:`on_stats_property_change`, which propagates the metric to global
-    state — and calling the handler from there would re-enter the Property combo
-    it is refreshing. What both need is this half: the previous run described a
-    different measure, so it is gone.
+    It used to, and had to: ``StatsState`` held a single run, so a stored
+    comparison that no longer matched the tab's selectors was a comparison
+    nobody could account for — an empty results panel beside a plot still
+    carrying its asterisks. Clearing it was the only way to keep the two halves
+    honest.
 
-    The repaint is conditional on there having *been* a run and on the
-    significance toggle being on, so an ordinary combo touch does not fire a bar
-    redraw for no visible change. Bus-only, no feature import from this
-    controller (G5/§5.9), the same way ``run_stats`` nudges the plot.
+    ``StatsState.runs`` is keyed by ``(val_col, target_t, stat)``, which changes
+    the answer. A run stored under GFP/t=24/mean is a true comparison of GFP at
+    t=24 whatever the Statistics tab's selectors have since been moved to, and
+    the Bar plot only ever draws it over bars of that column and timepoint. It
+    is not orphaned by the tab moving on; it is simply not the run the tab is
+    about to produce.
+
+    Clearing here would also make the feature impossible. Running a second
+    comparison *requires* changing a selector, so a handler that emptied the
+    store on every change would delete the first run on the way to the second,
+    and no two comparisons could ever coexist.
+
+    The results *text* still clears — that panel shows one run, and the run it
+    shows is the one the current configuration produced. That is
+    :func:`stats_on_test_change`'s job, and it is unaffected.
+
+    Kept as a named no-op rather than deleted so both call sites keep saying
+    what they mean at the point they say it, and so this reasoning sits where
+    the next person looks for it.
     """
-    stats_state = ctx.state.feature_slice("stats")
-    had_results = bool(getattr(stats_state, "pairwise", None)) if stats_state else False
-    if stats_state is not None:
-        stats_state.pairwise = []
-    if had_results and ctx.state.plot.show_significance:
-        try:
-            ctx.bus.plot_options_changed.emit(ctx.state.plot)
-        except Exception:
-            swallowed()
+    return None
 
 
 def _stats_write_result(ctx, text: str) -> None:

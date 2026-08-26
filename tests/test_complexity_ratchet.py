@@ -140,7 +140,6 @@ ALLOWLIST = {
     # DONE: draw_per_cell_bar_mode dropped below the threshold once the "Pooled"
     # toggle unified the two rset base-column branches (the old pool_rset_cells
     # and pool_reps branches merged into one). Removed from the allowlist.
-    "well_viewer/features/barplot/renderer.py::draw_significance_brackets",
     "well_viewer/features/batch_export/bar_panel.py::BarBatchExportPanel._run_batch",
     # Was CC 40 (right at the line); the audit-E9 decode-failure counting +
     # bias WARN (mandatory correctness surfacing, mirroring the pipeline-side

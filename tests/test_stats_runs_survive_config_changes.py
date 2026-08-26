@@ -1,24 +1,24 @@
-"""A stored comparison lives exactly as long as it describes the Statistics tab.
+"""A stored comparison survives the Statistics tab moving on.
 
-Two halves of one rule, both of which were broken and both of which surface on
-the Bar plot's significance brackets:
+``StatsState.runs`` is keyed by ``(val_col, target_t, stat)``, so a run stored
+under GFP/t=24/mean is a true comparison of GFP at t=24 whatever the tab's
+selectors have since been moved to, and the Bar plot only ever draws it over
+bars of that column and timepoint.
 
-**Changing the test must invalidate the run.** ``stats_on_test_change`` cleared
-the result *text* and left ``StatsState.pairwise`` in place. The Bar renderer's
-context gate compares that stored run against the **bars**, not against the
-Statistics tab, so an invalidated run kept drawing its asterisks for as long as
-the bar plot happened to show the column it was run on. In Split View the two
-are on screen together: an empty result panel beside a plot carrying asterisks
-attributed to it.
+That inverts what this file used to assert. With a single stored run, a
+comparison that no longer matched the tab's selectors was one nobody could
+account for — an empty results panel beside a plot still carrying its asterisks
+— and clearing it on every config change was the only way to keep the two halves
+honest. Keyed, clearing would make the feature impossible: running a *second*
+comparison requires changing a selector, so a handler that emptied the store on
+every change would delete the first run on the way to the second.
 
-**A repopulate is not a change.** ``stats_update_tp_menu`` reset the Timepoint
-combo to the earliest entry every time it ran — and it runs on a channel switch
-and on every arrival at the Statistics tab. The user's chosen timepoint reverted
-without a word, the next test ran at a timepoint they had not picked, and the
-brackets, gated on the tested timepoint matching the bars, drew nothing.
+What still clears is the results *text*. That panel shows one run, and the run
+it shows is the one the current configuration produced.
 
-Fast lane: real ``QComboBox`` widgets (so the signal semantics are the app's,
-not a stand-in's) over a stub state.
+The repopulate rules below are unchanged and still load-bearing: a programmatic
+reseed of the Timepoint combo must not be mistaken for the user editing the
+test, and must not silently move the tested timepoint.
 """
 
 from __future__ import annotations
@@ -82,41 +82,79 @@ def _ctx(widgets, *, show_significance=True, pairwise=None):
 
 # ── changing the test invalidates the run ───────────────────────────────────
 
-def test_changing_the_test_clears_the_stored_comparison(qtbot):
+def test_changing_the_test_keeps_the_stored_comparison(qtbot):
+    """The inversion. A run under one context is not invalidated by the tab
+    being pointed at another — it is simply not the run the tab is about to
+    produce."""
     txt = QPlainTextEdit(); qtbot.addWidget(txt)
     txt.setPlainText("old results")
     ctx, _emitted = _ctx({"_stats_result_text": txt})
 
     stats_on_test_change(ctx)
 
-    assert ctx.state.stats.pairwise == [], (
-        "the results text was cleared but the structured run survived to keep "
-        "drawing brackets")
+    assert ctx.state.stats.pairwise == RUN, (
+        "the stored comparison was discarded; a second comparison can then "
+        "never coexist with the first, because running one means changing a "
+        "selector")
+
+
+def test_changing_the_test_still_clears_the_results_text(qtbot):
+    """The half that does clear. The panel shows one run — the one the current
+    configuration produced — so it must not keep showing the previous one."""
+    txt = QPlainTextEdit(); qtbot.addWidget(txt)
+    txt.setPlainText("old results")
+    ctx, _emitted = _ctx({"_stats_result_text": txt})
+
+    stats_on_test_change(ctx)
+
     assert txt.toPlainText() == ""
 
 
-def test_changing_the_test_repaints_the_bar_plot(qtbot):
-    """Clearing the records is not enough on its own: in Split View the Bar
-    plot is already on screen, so without a redraw the stale asterisks stay
-    painted until something else happens to touch the figure."""
+def test_changing_the_test_does_not_repaint_the_bar_plot(qtbot):
+    """Nothing the Bar plot draws has changed, so nothing asks it to redraw.
+    A repaint on every combo touch would be cost with no visible result."""
     ctx, emitted = _ctx({})
     stats_on_test_change(ctx)
-    assert emitted, "nothing asked the Bar plot to drop the stale brackets"
-
-
-def test_no_repaint_when_significance_is_off(qtbot):
-    """A redraw on every combo touch, for a figure drawing no brackets, is cost
-    with nothing to show for it."""
-    ctx, emitted = _ctx({}, show_significance=False)
-    stats_on_test_change(ctx)
-    assert ctx.state.stats.pairwise == []
     assert emitted == []
 
 
-def test_no_repaint_when_there_was_nothing_to_invalidate(qtbot):
-    ctx, emitted = _ctx({}, pairwise=[])
-    stats_on_test_change(ctx)
-    assert emitted == []
+def test_two_comparisons_coexist(qtbot):
+    """The point of the whole change, at the level of the store."""
+    ctx, _emitted = _ctx({})
+    second = [{**RUN[0], "val_col": "cy5_mean_intensity"}]
+    ctx.state.stats.record_run(second)
+
+    assert len(ctx.state.stats.runs) == 2
+    assert ctx.state.stats.runs_matching("gfp_mean_intensity", [24.0])
+    assert ctx.state.stats.runs_matching("cy5_mean_intensity", [24.0])
+
+
+def test_a_rounded_timepoint_re_runs_the_same_comparison(qtbot):
+    """A combo formats timepoints with ``:.4g``, so the timepoint that comes
+    back out of the widget is a few parts in 1e5 off the float that went in.
+    Under exact-match replacement the second run of one comparison keyed as a
+    *different* comparison — and since the lookup matches within tolerance,
+    both then matched and every bracket was drawn twice."""
+    ctx, _emitted = _ctx({})
+    ctx.state.stats.runs.clear()
+    ctx.state.stats.record_run([{**RUN[0], "target_t": 2 / 3}])
+    # The same timepoint, after a round trip through the combo's text.
+    ctx.state.stats.record_run([{**RUN[0], "target_t": float(f"{2 / 3:.4g}")}])
+
+    assert len(ctx.state.stats.runs) == 1
+    assert len(ctx.state.stats.runs_matching("gfp_mean_intensity", [2 / 3])) == 1
+
+
+def test_two_timepoints_apart_are_still_two_comparisons(qtbot):
+    """The counterpart: collapsing on tolerance must not collapse timepoints a
+    plate can actually tell apart."""
+    ctx, _emitted = _ctx({})
+    ctx.state.stats.runs.clear()
+    ctx.state.stats.record_run([{**RUN[0], "target_t": 24.0}])
+    ctx.state.stats.record_run([{**RUN[0], "target_t": 48.0}])
+
+    assert len(ctx.state.stats.runs) == 2
+    assert len(ctx.state.stats.runs_matching("gfp_mean_intensity", [24.0])) == 1
 
 
 # ── a repopulate is not a change ────────────────────────────────────────────
@@ -284,14 +322,14 @@ def _built_panel(qtbot, monkeypatch, timepoints=(0.0, 24.0, 48.0)):
     ("_stats_test_cb", "Mann-Whitney U"),
     ("_stats_property_cb", "Total Intensity"),
 ])
-def test_moving_a_scope_control_invalidates_the_run(qtbot, monkeypatch,
-                                                    widget, value):
+def test_moving_a_scope_control_keeps_the_stored_run(qtbot, monkeypatch,
+                                                     widget, value):
     """Each control that decides what gets tested, driven as a user drives it.
 
-    The Timepoint case is the one that was broken — it had no handler — but the
-    others are here because a shared handler is exactly the kind of thing a
-    later edit disconnects one arm of, and none of them had a test that pressed
-    the widget.
+    They still all reach their handler — that wiring is what the Timepoint combo
+    was missing entirely — but the handler no longer empties the store. Pressing
+    these is how you set up a *second* comparison, so a handler that cleared
+    would delete the first one on the way.
     """
     ctx, _emitted = _built_panel(qtbot, monkeypatch)
     cb = ctx.widgets.get(widget)
@@ -300,16 +338,16 @@ def test_moving_a_scope_control_invalidates_the_run(qtbot, monkeypatch,
     cb.setCurrentText(value)
 
     assert cb.currentText() == value, "the fixture did not move the control"
-    assert ctx.state.stats.pairwise == [], (
-        f"moving {widget} changed what would be tested but left the previous "
-        f"run in place to keep drawing brackets")
+    assert ctx.state.stats.pairwise == RUN, (
+        f"moving {widget} discarded the previous comparison; setting up a "
+        f"second one would destroy the first")
 
 
-def test_moving_a_scope_control_repaints_the_bar_plot(qtbot, monkeypatch):
+def test_moving_a_scope_control_does_not_repaint_the_bar_plot(qtbot, monkeypatch):
     ctx, emitted = _built_panel(qtbot, monkeypatch)
     ctx.state.stats.pairwise = list(RUN)
     ctx.widgets.get("_stats_tp_cb").setCurrentText("48")
-    assert emitted, "the brackets were invalidated but nothing repainted"
+    assert emitted == []
 
 
 def test_building_the_panel_does_not_invalidate_anything(qtbot, monkeypatch):

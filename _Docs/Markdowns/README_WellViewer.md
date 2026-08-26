@@ -1503,7 +1503,11 @@ the next.
   is edited.
 - **Split View** — the **Split** toggle in the top bar puts two *different*
   centre tabs side-by-side, both live (e.g. Scatter Plot beside Cell Browser).
-  Click into a pane to focus it. **Both panes' sidebar sections are on screen
+  Click into a pane to focus it. There is still only **one well picker**, and it
+  belongs to the focused pane: the unfocused section shows its own controls
+  without a second picker, and gives up its share of the rail's height so there
+  is no gap where its picker would have been. **Both panes' sidebar sections are
+  on screen
   at once** — split Plots against Statistics and the Statistics group-definition
   editor sits under the well picker straight away, without focusing that pane
   first — and both panes refresh on a selection or channel change.
@@ -1831,6 +1835,14 @@ of individual cells. This is the default Plotting sub-tab.
     replicate sets or individual wells — a group holding a single well brackets
     that well's own bar.
 
+    **Comparisons accumulate rather than replace each other.** Each run is
+    stored under the channel, timepoint and statistic it was run on, so testing
+    a second channel does not discard the first, and a Mean test and a Fraction
+    test of the same bars appear together on their two panels. Re-running one
+    configuration replaces that one; the others stay. Changing the Statistics
+    tab's selectors sets up the *next* test and leaves the stored ones alone —
+    the results panel clears, because it shows one run at a time.
+
     Brackets are drawn only while the comparison still describes what the bars
     show. The Statistics tab carries its own **Channel**, **Property** and
     **Timepoint** selectors, separate from the Plotting band's, so a test run on
@@ -1863,11 +1875,10 @@ of individual cells. This is the default Plotting sub-tab.
     at all, the panel says so instead of annotating nothing.
 
     Changing any of the Statistics tab's test settings — **Channel**,
-    **Property**, **Statistic**, **Test** or **Timepoint** — clears the last
-    run, and the brackets go with it. That keeps the two halves honest: an empty
-    results panel beside a plot still carrying asterisks attributed to it would
-    be claiming a comparison that no longer exists. Run the test again once the
-    settings say what you want.
+    **Property**, **Statistic**, **Test** or **Timepoint** — clears the results
+    panel, which shows one run at a time. It does **not** discard the
+    comparisons already stored: each of those still describes its own channel
+    and timepoint, and still draws over the bars it was computed from.
   - **Reset Order** — restore the default order after you **drag bars to
     reorder** them.
   - The shared [Fold-change](#fold-change-normalization) dropdowns, applied in

@@ -328,16 +328,39 @@ def test_the_saved_plots_report_follows_gallery_order():
 
 # ── 8. the corrections a review of this branch required ──────────────────────
 
+def _reachable_source(path: pathlib.Path, entry: str) -> str:
+    """Unparsed source of *entry* and every module-level function it reaches.
+
+    Pinning one function by name is a scan surface that a later extraction
+    silently empties: the invariants below moved into a helper and the guard
+    went on reading the entry point, which by then held a two-line loop. The
+    call graph is what the pass actually is, so that is what gets scanned.
+    """
+    tree = ast.parse(path.read_text())
+    by_name = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    assert entry in by_name, f"{entry} is not a module-level function in {path.name}"
+    seen: set[str] = set()
+    todo = [entry]
+    while todo:
+        name = todo.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        for node in ast.walk(by_name[name]):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                if node.func.id in by_name:
+                    todo.append(node.func.id)
+    return "\n".join(ast.unparse(by_name[n]) for n in sorted(seen))
+
+
 def test_the_bracket_y_limit_still_sees_every_timepoint_s_bars():
     """Restricting the *positions* to the tested timepoint is the fix;
     restricting the bar *heights* with them shrank the axis to that timepoint
     and clipped the other timepoints' bars off the figure."""
-    src = (REPO_ROOT / "well_viewer" / "features" / "barplot" / "renderer.py").read_text()
-    tree = ast.parse(src)
-    fn = next(n for n in ast.walk(tree)
-              if isinstance(n, ast.FunctionDef)
-              and n.name == "draw_significance_brackets")
-    body = ast.unparse(fn)
+    body = _reachable_source(
+        REPO_ROOT / "well_viewer" / "features" / "barplot" / "renderer.py",
+        "draw_significance_brackets",
+    )
     assert "x_by_key = {it.key: x for it, x in tested}" in body
     # The height scan runs over every item, not over ``tested``.
     assert "for it in items:" in body

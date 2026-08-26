@@ -440,3 +440,106 @@ def test_the_empty_store_note_does_not_deny_that_a_test_ran():
     assert status == [], (
         "this is the exact message that outlived its condition on the "
         "persistent status bar — it belongs on the figure only")
+
+
+# ── several comparisons at once ─────────────────────────────────────────────
+#
+# ``StatsState.runs`` is keyed by ``(val_col, target_t, stat)``, so the store
+# holds one run per configuration instead of one run in total. The renderer's
+# context check became a lookup over the same three fields it used to compare
+# against, and these are the behaviours that only became possible with it.
+
+def _store(app, *runs):
+    """Record several runs into the app's real ``StatsState``."""
+    app._app_state.stats.runs.clear()
+    for records in runs:
+        app._app_state.stats.record_run(records)
+
+
+def _run(val_col="gfp_mean_intensity", target_t=24.0, stat="mean",
+         a="CTRL", b="DRUG", p=0.001):
+    return [{"a": a, "b": b, "p": p, "p_adj": p, "stat": stat,
+             "val_col": val_col, "target_t": target_t}]
+
+
+def _draw_with(app, *, target_ts=(24.0,)):
+    ax_mean, ax_frac = _axes()
+    app._ctx.notify = SimpleNamespace(set_status=lambda *_a, **_k: None)
+    draw_significance_brackets(app._ctx, _bars(), ax_mean=ax_mean,
+                               ax_frac=ax_frac, target_ts=list(target_ts))
+    stars = {"mean": [t.get_text() for t in ax_mean.texts
+                      if t.get_text() in ("*", "**", "***", "ns")],
+             "frac": [t.get_text() for t in ax_frac.texts
+                      if t.get_text() in ("*", "**", "***", "ns")]}
+    notes = [t.get_text() for a in (ax_mean, ax_frac) for t in a.texts
+             if getattr(t, SIGNIFICANCE_NOTE_TAG, False)]
+    plt.close("all")
+    return stars, notes
+
+
+def test_a_mean_and_a_fraction_comparison_draw_on_the_same_figure():
+    """The case a single stored run could not express at all: two tests of the
+    same bars, on the two panels they each belong to. Running the second used to
+    destroy the first."""
+    app = _app([], active_val_col="gfp_mean_intensity")
+    _store(app, _run(stat="mean"), _run(stat="fraction"))
+
+    stars, notes = _draw_with(app)
+
+    assert stars["mean"], "the Mean comparison is missing"
+    assert stars["frac"], "the Fraction comparison is missing"
+    assert notes == []
+
+
+def test_a_second_channel_s_comparison_does_not_replace_the_first():
+    """Store two channels; each set of bars gets its own, and neither is lost."""
+    app = _app([], active_val_col="gfp_mean_intensity")
+    _store(app, _run(val_col="gfp_mean_intensity"),
+           _run(val_col="cy5_mean_intensity"))
+
+    gfp_stars, gfp_notes = _draw_with(app)
+    assert gfp_stars["mean"] and gfp_notes == []
+
+    app._app_state.channel.active_val_col = "cy5_mean_intensity"
+    cy5_stars, cy5_notes = _draw_with(app)
+    assert cy5_stars["mean"] and cy5_notes == []
+
+    assert len(app._app_state.stats.runs) == 2, "one run replaced the other"
+
+
+def test_a_comparison_is_still_kept_off_bars_it_was_not_computed_from():
+    """The lookup declines exactly what the gate declined. A stored CY5 run must
+    not be drawn over GFP bars just because it is the only one there."""
+    app = _app([], active_val_col="gfp_mean_intensity")
+    _store(app, _run(val_col="cy5_mean_intensity"))
+
+    stars, notes = _draw_with(app)
+
+    assert stars["mean"] == [] and stars["frac"] == []
+    assert len(notes) == 1
+    assert "CY5 Mean Intensity" in notes[0] and "GFP Mean Intensity" in notes[0]
+
+
+def test_the_note_names_the_timepoints_that_are_stored():
+    """Right column, wrong timepoint — the note offers what the store has rather
+    than only what the bars show."""
+    app = _app([], active_val_col="gfp_mean_intensity")
+    _store(app, _run(target_t=24.0), _run(target_t=48.0))
+
+    stars, notes = _draw_with(app, target_ts=(72.0,))
+
+    assert stars["mean"] == []
+    assert len(notes) == 1
+    assert "24" in notes[0] and "48" in notes[0] and "72" in notes[0]
+
+
+def test_re_running_one_configuration_replaces_only_that_run():
+    app = _app([], active_val_col="gfp_mean_intensity")
+    _store(app, _run(val_col="gfp_mean_intensity", p=0.04),
+           _run(val_col="cy5_mean_intensity"))
+    app._app_state.stats.record_run(
+        _run(val_col="gfp_mean_intensity", p=0.0001))
+
+    assert len(app._app_state.stats.runs) == 2
+    stars, _notes = _draw_with(app)
+    assert stars["mean"] == ["***"], "the re-run's own result was not the one drawn"

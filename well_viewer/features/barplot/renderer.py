@@ -610,33 +610,39 @@ def _no_significance(ctx, ax, reason: str) -> None:
 
 def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
                                target_ts=None) -> None:
-    """Draw significance brackets from the Statistics tab's pairwise results (N7).
+    """Draw the stored comparisons that belong over these bars (N7).
 
-    Only acts when the user enabled "Significance" (``PlotState.show_significance``)
-    and a test has been run (``StatsState.pairwise`` populated). The brackets are
-    drawn on the panel matching the **measure that was tested**: a "Fraction
-    above threshold" test brackets the On-fraction panel (using each bar's
-    fraction height); every other statistic (mean / mean-all / median) brackets
-    the Mean panel.
+    Only acts when the user enabled "Significance"
+    (``PlotState.show_significance``). Each run is drawn on the panel matching
+    the **measure that was tested**: a "Fraction above threshold" test brackets
+    the On-fraction panel (using each bar's fraction height); every other
+    statistic (mean / mean-all / median) brackets the Mean panel.
 
-    The results are also **context-gated**: they only render when the bar plot is
-    showing the same value column (channel + metric) and timepoint the test was
-    run on — otherwise a comparison computed for one channel would be drawn over
-    a different channel's bars. A bracket is drawn for every compared pair whose
-    both groups map to a bar — by replicate-set name, else by well membership;
-    pairs that don't line up with the current bars are skipped. The BH-adjusted p
-    drives the asterisk where available. No-op in per-cell mode (this is only
-    called from the aggregate bar path).
+    **A lookup, not a gate.** ``StatsState.runs`` is keyed by
+    ``(val_col, target_t, stat)``, so this asks the store for every run whose
+    context fits the bars currently drawn and draws all of them. When there was
+    one stored run the same three fields could only be *compared* — draw it or
+    draw nothing — and running a comparison on a second channel destroyed the
+    first. Now a Mean comparison and a Fraction comparison of the same bars are
+    on screen together, and switching the plot to another channel shows that
+    channel's own comparison instead of showing none.
 
-    **Every one of those gates reports itself** through :func:`_no_significance`.
-    The gates are all deliberate — the Statistics tab carries its own Channel,
-    Property and Timepoint selectors, independent of the Plotting band's, so the
-    two sides drift apart in ordinary use and a comparison drawn over the wrong
-    bars would be worse than none. What was not deliberate is that they were
-    silent: with the toggle reading "On", a plot without asterisks said nothing
-    about which of them had fired, so the feature read as unreliable rather than
-    as conditional. Only the user switching the toggle off draws nothing and says
-    nothing, because there the absence is what they asked for.
+    A bracket is drawn for every compared pair whose both groups map to a bar —
+    by replicate-set name, else by well membership; pairs that don't line up
+    with the current bars are skipped. The BH-adjusted p drives the asterisk
+    where available. No-op in per-cell mode (this is only called from the
+    aggregate bar path).
+
+    **Every way of drawing nothing reports itself** through
+    :func:`_no_significance`. Declining is often right — the Statistics tab
+    carries its own Channel, Property and Timepoint selectors, independent of
+    the Plotting band's, so the two sides drift apart in ordinary use and a
+    comparison drawn over the wrong bars would be worse than none. What was not
+    deliberate is that it used to be silent: with the toggle reading "On", a
+    plot without asterisks said nothing about why, so the feature read as
+    unreliable rather than as conditional. Only the user switching the toggle
+    off draws nothing and says nothing, because there the absence is what they
+    asked for.
     """
     if not getattr(ctx.state.plot, "show_significance", False):
         return
@@ -652,76 +658,73 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
         _no_significance(ctx, ax_mean,
                          "the Statistics feature is not in this build.")
         return
-    pairwise = list(getattr(stats_state, "pairwise", []) or [])
-    if not pairwise:
-        # Careful with the wording. "No test has been run" is the common case
-        # and was the first thing this said, but it is not the only way the
-        # store ends up empty: ``stats.compute_pairwise`` returns ``[]`` after a
-        # run too — fewer than two groups with wells, any group with under two
-        # replicate values, a misconfigured KS test, scipy missing, or every
-        # pair coming back with an error. In several of those the Statistics
-        # tab has already printed a result explaining itself, so a note here
-        # flatly denying a test happened would contradict the panel beside it
-        # and send the user to re-run something that had run.
-        #
-        # So this says what is actually known — the store is empty — and points
-        # at the place that knows why.
+    cur_val_col = str(getattr(ctx.state.channel, "active_val_col", "") or "")
+    matching = stats_state.runs_matching(cur_val_col, target_ts)
+    if not matching:
+        _explain_no_matching_run(ctx, ax_mean, stats_state, cur_val_col, target_ts)
+        return
+    # Every run whose context fits these bars, not just one. Two runs differing
+    # only in statistic are a Mean comparison and a Fraction comparison of the
+    # same bars, and each belongs on its own panel — so both are drawn.
+    for _records in matching:
+        _draw_one_run(ctx, items, _records, ax_mean=ax_mean, ax_frac=ax_frac,
+                      target_ts=target_ts)
+
+
+def _explain_no_matching_run(ctx, ax_mean, stats_state, cur_val_col,
+                             target_ts) -> None:
+    """Say why the store held nothing drawable over these bars.
+
+    Three different situations, and the user's next move differs in each: run a
+    test, move a channel selector, or move a timepoint. Naming which one is the
+    whole point of the note.
+    """
+    runs = getattr(stats_state, "runs", None) or {}
+    if not runs:
+        # "No test has been run" is the common reason and not the only one:
+        # ``stats.compute_pairwise`` returns ``[]`` after a run too — under two
+        # groups with wells, a group with under two replicate values, a
+        # misconfigured KS test, scipy missing, or every pair erroring. In
+        # several of those the Statistics tab has already printed the reason, so
+        # a note denying a test happened would contradict the panel beside it.
         _no_significance(ctx, ax_mean,
                          "no comparison is stored — run a test on the "
                          "Statistics tab, or read its results panel if you "
                          "already did.")
         return
-    rec0 = pairwise[0]
-    # Context gate: don't overlay a test computed for a different channel/metric
-    # (or timepoint) than the bars currently show. Legacy entries without the
-    # context keys are not gated (drawn as before).
-    rec_val_col = rec0.get("val_col")
-    if rec_val_col is not None:
-        cur_val_col = str(getattr(ctx.state.channel, "active_val_col", "") or "")
-        if str(rec_val_col) != cur_val_col:
-            _no_significance(
-                ctx, ax_mean,
-                f"the test was run on {_val_col_label(rec_val_col)}; "
-                f"these bars show {_val_col_label(cur_val_col)}.")
-            return
-    rec_tp = rec0.get("target_t")
-    if rec_tp is not None and target_ts:
-        try:
-            if not any(tp_close(float(t), float(rec_tp)) for t in target_ts):
-                # Named through the Properties → Time correction, so the note
-                # reads in the same units as the tick labels beside it rather
-                # than in the hours the filenames happen to carry.
-                _rs = _time_rescale_for(ctx.state.plot)
-                _shown = ", ".join(_rescale_tp(t, _rs) for t in target_ts)
-                _no_significance(
-                    ctx, ax_mean,
-                    f"the test was run at t={_rescale_tp(rec_tp, _rs)}; "
-                    f"these bars show t={_shown}.")
-                return
-        except (TypeError, ValueError):
-            pass
-    # Route to the panel for the tested measure. All entries in one run share the
-    # same statistic, so the first entry decides the target panel + value field.
-    stat = str(rec0.get("stat", "mean"))
-    if stat == "fraction":
-        ax, val_attr, spread_attr, has_attr = ax_frac, "frac", "frac_spread", "has_frac"
-    else:
-        ax, val_attr, spread_attr, has_attr = ax_mean, "mean", "spread", "has_mean"
-    if ax is None:
-        # The tested measure's panel isn't on this figure. Note it on the Mean
-        # panel when that is the one still present, so the message has somewhere
-        # to land even though its own panel does not.
+    same_col = [k for k in runs if k is not None and k[0] == cur_val_col]
+    if not same_col:
+        others = sorted({_val_col_label(k[0]) for k in runs if k is not None})
         _no_significance(
             ctx, ax_mean,
-            "the panel this test belongs on is not on this figure.")
+            f"the stored comparison{'s are' if len(others) != 1 else ' is'} on "
+            f"{', '.join(others) or 'another measure'}; these bars show "
+            f"{_val_col_label(cur_val_col)}.")
         return
-    keys = list(getattr(ctx.runtime.barplot, "xs_keys", []) or [])
-    xs = list(getattr(ctx.runtime.barplot, "xs", []) or [])
-    if not keys or len(keys) != len(xs):
-        _no_significance(ctx, ax,
-                         "the bar positions for this layout aren't available.")
-        return
+    # Right column, wrong timepoint. Named through the Properties → Time
+    # correction so the note reads in the units of the ticks beside it.
+    _rs = _time_rescale_for(ctx.state.plot)
+    _have = ", ".join(sorted({_rescale_tp(k[1], _rs) for k in same_col}))
+    _shown = ", ".join(_rescale_tp(t, _rs) for t in (target_ts or []))
+    _no_significance(
+        ctx, ax_mean,
+        f"the stored comparison{'s' if len(same_col) != 1 else ''} for "
+        f"{_val_col_label(cur_val_col)} {'are' if len(same_col) != 1 else 'is'} "
+        f"at t={_have}; these bars show t={_shown}.")
 
+
+def _match_pairs_to_bars(ctx, items, pairwise, *, xs, rec_tp, val_attr,
+                         spread_attr, has_attr):
+    """Resolve one run's compared pairs onto the bars actually drawn.
+
+    Returns ``(x_by_key, top_by_key, matched)`` — where each bar sits, how
+    tall it is including its spread, and the ``(p, key_a, key_b)`` triples
+    that have a bar at both ends.
+
+    Extracted from the drawing so that function stays under the complexity
+    ratchet after the store became keyed, and because "which compared pair
+    goes over which bar" is a question with no matplotlib in it.
+    """
     # ``keys``/``xs`` are parallel to ``items``. In multi-timepoint mode one key
     # appears once per timepoint, so a dict built by key alone keeps only the
     # last position — and the bracket for a test run at t=0 was drawn over the
@@ -796,6 +799,38 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
         if ka and kb and ka != kb and ka in top_by_key and kb in top_by_key:
             matched.append((float(r.get("p_adj", r.get("p", 1.0))), ka, kb))
 
+    return x_by_key, top_by_key, matched
+
+
+def _draw_one_run(ctx, items, pairwise, *, ax_mean, ax_frac, target_ts) -> None:
+    """Draw the brackets for one stored run on the panel its statistic names."""
+    rec0 = pairwise[0]
+    rec_tp = rec0.get("target_t")
+    # Route to the panel for the tested measure. All entries in one run share the
+    # same statistic, so the first entry decides the target panel + value field.
+    stat = str(rec0.get("stat", "mean"))
+    if stat == "fraction":
+        ax, val_attr, spread_attr, has_attr = ax_frac, "frac", "frac_spread", "has_frac"
+    else:
+        ax, val_attr, spread_attr, has_attr = ax_mean, "mean", "spread", "has_mean"
+    if ax is None:
+        # The tested measure's panel isn't on this figure. Note it on the Mean
+        # panel when that is the one still present, so the message has somewhere
+        # to land even though its own panel does not.
+        _no_significance(
+            ctx, ax_mean,
+            "the panel this test belongs on is not on this figure.")
+        return
+    keys = list(getattr(ctx.runtime.barplot, "xs_keys", []) or [])
+    xs = list(getattr(ctx.runtime.barplot, "xs", []) or [])
+    if not keys or len(keys) != len(xs):
+        _no_significance(ctx, ax,
+                         "the bar positions for this layout aren't available.")
+        return
+
+    x_by_key, top_by_key, matched = _match_pairs_to_bars(
+        ctx, items, pairwise, xs=xs, rec_tp=rec_tp, val_attr=val_attr,
+        spread_attr=spread_attr, has_attr=has_attr)
     if not matched:
         # Significance is on and a test has run, but no comparison lines up with
         # the current bars (e.g. per-well bars, or groups spanning several bars).

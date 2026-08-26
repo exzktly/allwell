@@ -24,6 +24,7 @@ from __future__ import annotations
 import ast
 
 from tests._repo_scan import REPO_ROOT, python_sources
+from tests._repo_scan import parse_source
 
 #: The renderer, and the aliases the call sites import it under. Aliases are
 #: listed rather than resolved because an ``import ... as`` is how the batch
@@ -95,7 +96,7 @@ def test_every_bar_render_call_states_the_colour_mode():
         if relpath == _DEFINITION:
             continue
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            tree = parse_source(path)
         except (OSError, SyntaxError):
             continue
         for lineno in _calls_missing_bar_color(tree):
@@ -123,7 +124,7 @@ def test_the_guard_can_see_both_known_call_sites():
         if relpath == _DEFINITION:
             continue
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            tree = parse_source(path)
         except (OSError, SyntaxError):
             continue
         for node in ast.walk(tree):
@@ -161,7 +162,7 @@ def _is_apply_call(value: ast.AST) -> bool:
 
 
 def test_each_per_cell_renderer_applies_the_colour_mode():
-    tree = ast.parse((REPO_ROOT / _RENDERER_MODULE).read_text(encoding="utf-8"))
+    tree = parse_source((REPO_ROOT / _RENDERER_MODULE))
     by_name = {
         node.name: node for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef)

@@ -19,6 +19,7 @@ import types
 from unittest import mock
 
 import pytest
+from tests._repo_scan import parse_source
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -712,7 +713,7 @@ def test_every_caller_that_forgets_a_limit_goes_through_one_helper():
         for path in sorted(root.rglob("*.py")):
             if path.name == "plot_style.py":
                 continue
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            tree = parse_source(path)
             # Module-level name -> the literal strings it holds, so a pop whose
             # argument is a loop variable over such a name is seen too.
             rosters: dict[str, set[str]] = {}

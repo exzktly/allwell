@@ -18,6 +18,7 @@ from __future__ import annotations
 import ast
 import warnings
 from pathlib import Path
+from tests._repo_scan import parse_source
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RUNTIME_APP = REPO_ROOT / "well_viewer" / "runtime_app.py"
@@ -137,7 +138,7 @@ def _enforce(ok: bool, message: str) -> None:
 
 def _distinct_self_attrs(path: Path) -> set[str]:
     """Distinct ``self._*`` names that are assignment targets in *path*."""
-    tree = ast.parse(path.read_text())
+    tree = parse_source(path)
     names: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
@@ -191,7 +192,7 @@ def test_state_package_import_contract():
     )
     offenders: list[str] = []
     for py in sorted(p for p in STATE_FILES if p.exists()):
-        tree = ast.parse(py.read_text())
+        tree = parse_source(py)
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 modules = [alias.name for alias in node.names]
@@ -225,7 +226,7 @@ def _getattr_hasattr_calls(path: Path) -> int:
     was uncertain. Dependency injection (Phases 6-10) makes presence
     guaranteed, so each migrated domain deletes its probes.
     """
-    tree = ast.parse(path.read_text())
+    tree = parse_source(path)
     return sum(
         1 for node in ast.walk(tree)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
@@ -239,7 +240,7 @@ def _persistence_wrapper_methods(path: Path) -> int:
     Each merely forwards to a ``well_viewer.persistence.<domain>`` function;
     Phase 4 folds all of them into one ``PersistenceRegistry``.
     """
-    tree = ast.parse(path.read_text())
+    tree = parse_source(path)
     return sum(
         1 for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef)
@@ -259,7 +260,7 @@ def _ctx_app_unwraps(directory: Path) -> int:
         return 0
     total = 0
     for py in sorted(directory.rglob("*.py")):
-        tree = ast.parse(py.read_text())
+        tree = parse_source(py)
         for node in ast.walk(tree):
             if (isinstance(node, ast.Assign) and len(node.targets) == 1
                     and isinstance(node.targets[0], ast.Name)
@@ -311,7 +312,7 @@ def _raw_self_delegators(path: Path) -> list[str]:
     ``return fn(self, ...)`` — i.e. a one-line delegator that forwards the raw
     god-object (``self``) rather than the narrowed ``self._ctx``. A ``self._ctx``
     forwarder passes an ``ast.Attribute`` first arg and is correctly excluded."""
-    tree = ast.parse(path.read_text())
+    tree = parse_source(path)
     out: list[str] = []
     for cls in tree.body:
         if not isinstance(cls, ast.ClassDef):
@@ -343,7 +344,7 @@ def _app_first_free_funcs(*dirs: Path) -> list[str]:
         for py in sorted(d.rglob("*.py")):
             if "__pycache__" in py.parts:
                 continue
-            tree = ast.parse(py.read_text(), filename=str(py))
+            tree = parse_source(py)
             for node in tree.body:
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     a = node.args.args
@@ -398,7 +399,7 @@ def _core_feature_imports() -> list[str]:
     so this is the function-local residual — terminal condition #3's frontier."""
     out: list[str] = []
     for py in sorted(CORE_DIR.rglob("*.py")):
-        for node in ast.walk(ast.parse(py.read_text())):
+        for node in ast.walk(parse_source(py)):
             mod = None
             if isinstance(node, ast.ImportFrom):
                 mod = node.module
@@ -439,7 +440,7 @@ def _persistence_app_entry_points() -> list[str]:
              "save_notes", "autosave_to_pipeline_info"}
     out: list[str] = []
     for py in sorted(PERSIST_DIR.glob("*.py")):
-        for node in ast.parse(py.read_text()).body:
+        for node in parse_source(py).body:
             if (isinstance(node, ast.FunctionDef) and node.name in names
                     and node.args.args and node.args.args[0].arg == "app"):
                 out.append(f"{py.name}:{node.name}")

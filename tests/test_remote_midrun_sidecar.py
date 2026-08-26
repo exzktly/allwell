@@ -33,6 +33,7 @@ import pytest
 
 from services.remote_config import RemoteHost
 from services.remote_runner import Fetcher, LocalInputMode, OutputFilter
+from tests._repo_scan import parse_source
 
 
 @pytest.fixture
@@ -222,7 +223,7 @@ def test_every_production_fetcher_polls_for_the_sidecar():
     """The flip side of the default being off: the two call sites that launch
     a real run must both turn it on, and so must any third one."""
     src = Path(__file__).resolve().parent.parent / "services" / "remote_runner.py"
-    tree = ast.parse(src.read_text(), filename=str(src))
+    tree = parse_source(src)
     missing: list[int] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):

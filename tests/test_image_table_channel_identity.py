@@ -39,6 +39,7 @@ from well_viewer.features.image_browser.image_table import (  # noqa: E402
     controller as C,
     image_compose as IC,
 )
+from tests._repo_scan import parse_source
 
 OVERLAY = IC.OVERLAY_CHAN
 
@@ -131,7 +132,7 @@ def test_every_render_mode_lookup_names_the_channel_it_is_for():
 
     offenders = []
     for path in sorted(_IMAGE_TABLE_DIR.glob("*.py")):
-        tree = ast.parse(path.read_text())
+        tree = parse_source(path)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue

@@ -14,6 +14,7 @@ module, and asserts each is in the manifest.
 
 import ast
 from pathlib import Path
+from tests._repo_scan import parse_source
 
 try:  # tomllib is stdlib on 3.11+; fall back to tomli on 3.10.
     import tomllib
@@ -46,7 +47,7 @@ def test_remote_manifest_covers_pipeline_root_imports():
 
     manifest = set(_REQUIRED_REMOTE_FILES)
     root_modules = _repo_root_modules()
-    tree = ast.parse(PIPELINE.read_text(), filename=str(PIPELINE))
+    tree = parse_source(PIPELINE)
 
     needed = {
         f"{name}.py"

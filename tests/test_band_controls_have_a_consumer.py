@@ -26,6 +26,7 @@ import ast
 import pytest
 
 from tests._repo_scan import REPO_ROOT, python_sources, rel
+from tests._repo_scan import parse_source
 
 #: The helper's own module. It defines ``make_band_controls`` and embeds it from
 #: the legacy ``attach_plot_toolbar`` bridge on behalf of whichever caller asked
@@ -101,7 +102,7 @@ def _scan():
     readers: set[str] = set()
     for path in python_sources():
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            tree = parse_source(path)
         except SyntaxError:  # pragma: no cover - a parse failure is another guard's job
             continue
         package = _package_of(path)
@@ -158,7 +159,7 @@ def test_the_exemption_still_describes_a_real_call():
     for entry in sorted(EXEMPT):
         path = REPO_ROOT / entry
         assert path.is_file(), f"{entry} is exempt but does not exist."
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        tree = parse_source(path)
         assert _calls_helper(tree), (
             f"{entry} is exempt from the band-control rule but no longer calls "
             f"{_HELPER}. Remove the exemption."
@@ -173,7 +174,7 @@ def test_the_distribution_tab_does_not_mount_the_band_control():
     is not on that tab.
     """
     path = REPO_ROOT / "well_viewer/features/distribution/tab_view.py"
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+    tree = parse_source(path)
     assert not _calls_helper(tree), (
         "The Distribution tab mounts the shared SEM/SD band control again. Its "
         "renderer draws per-group histograms / KDEs / violins and never reduces "

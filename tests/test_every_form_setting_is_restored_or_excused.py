@@ -23,6 +23,7 @@ import ast
 from pathlib import Path
 
 import pytest
+from tests._repo_scan import parse_source
 
 pytest.importorskip("PySide6")
 
@@ -60,7 +61,7 @@ NOT_RESTORED_BY_PINFO = {
 
 def _collected_keys() -> dict[str, str]:
     """Every keyword `_collect_run_options` builds, mapped to its expression."""
-    tree = ast.parse((_ROOT / "analyze_tab_form.py").read_text())
+    tree = parse_source((_ROOT / "analyze_tab_form.py"))
     fn = next((n for n in ast.walk(tree)
                if isinstance(n, ast.FunctionDef)
                and n.name == "_collect_run_options"), None)

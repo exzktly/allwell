@@ -36,6 +36,12 @@ from services.remote_runner import (
     repo_root,
     stage_local_zips,
 )
+from tests._repo_scan import parse_source
+
+# Every test here drives real `RemoteRunner` / `Fetcher` code against a host
+# that does not exist. Answer the ssh and rsync primitives directly rather than
+# spawning them to find that out (tests/conftest.py::offline_transport).
+pytestmark = pytest.mark.usefixtures("offline_transport")
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
@@ -2071,7 +2077,7 @@ def test_required_remote_files_cover_pipeline_root_module_imports():
     import ast
     from services.remote_runner import repo_root
     root = repo_root()
-    tree = ast.parse((root / "process_microscopy.py").read_text(encoding="utf-8"))
+    tree = parse_source((root / "process_microscopy.py"))
     imported_roots: set[str] = set()
     for node in ast.walk(tree):
         names: list[str] = []
@@ -2512,6 +2518,18 @@ def test_verify_and_cleanup_skips_when_local_missing(runner_with_run, monkeypatc
     monkeypatch.setattr(
         RemoteRunner, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: None,
+    )
+    # `_retry_missing_wells` runs against a host that does not exist: it lists
+    # the well's CSVs over ssh and re-pulls what verify found missing, which is
+    # three rsync attempts and 14 s of backoff to establish what these two
+    # lines say outright (tests/conftest.py::_no_real_network_tools).
+    monkeypatch.setattr(
+        "services.remote_runner.subprocess.run",
+        lambda *a, **kw: MagicMock(returncode=255, stdout=b"", stderr=b""),
+    )
+    monkeypatch.setattr(
+        "services.remote_runner._rsync_with_retry",
+        lambda cmd, **kw: MagicMock(returncode=255, stdout="", stderr=""),
     )
     logs: list[str] = []
     ok = runner.verify_and_cleanup(ok=True, cleanup_mode="all", log_fn=logs.append)
@@ -3088,6 +3106,18 @@ def test_verify_and_cleanup_defaults_to_none(host, tmp_path, monkeypatch):
     monkeypatch.setattr(
         RemoteRunner, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: None,
+    )
+    # `_retry_missing_wells` runs against a host that does not exist: it lists
+    # the well's CSVs over ssh and re-pulls what verify found missing, which is
+    # three rsync attempts and 14 s of backoff to establish what these two
+    # lines say outright (tests/conftest.py::_no_real_network_tools).
+    monkeypatch.setattr(
+        "services.remote_runner.subprocess.run",
+        lambda *a, **kw: MagicMock(returncode=255, stdout=b"", stderr=b""),
+    )
+    monkeypatch.setattr(
+        "services.remote_runner._rsync_with_retry",
+        lambda cmd, **kw: MagicMock(returncode=255, stdout="", stderr=""),
     )
 
     # Default call (no cleanup_mode arg)

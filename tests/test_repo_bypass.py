@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from tests._repo_scan import parse_source
 
 ROOT = Path(__file__).resolve().parent.parent / "well_viewer"
 
@@ -49,7 +50,7 @@ def _single_well_cache_reads():
     for path in sorted(ROOT.rglob("*.py")):
         if "__pycache__" in path.parts or path in _OWNERS or path in _ALLOWLIST:
             continue
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         for node in ast.walk(tree):
             # dataset.cache.get(label)
             if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)

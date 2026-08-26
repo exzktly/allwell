@@ -26,6 +26,7 @@ pytest.importorskip("numpy")
 import numpy as np  # noqa: E402
 
 from well_viewer.domain.numeric import is_number, is_numeric  # noqa: E402
+from tests._repo_scan import parse_source
 
 
 @pytest.mark.parametrize("value", [
@@ -90,7 +91,7 @@ def test_no_data_path_module_still_asks_which_class_produced_the_number():
     offenders = []
     for rel in swept:
         path = root / rel
-        tree = ast.parse(path.read_text(), filename=rel)
+        tree = parse_source(path)
         for node in ast.walk(tree):
             if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                     and node.func.id == "isinstance" and len(node.args) == 2):

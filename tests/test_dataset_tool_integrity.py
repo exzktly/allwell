@@ -25,6 +25,7 @@ from PySide6.QtCore import QObject, Signal  # noqa: E402
 from datasets.job_queue.controller import QueueBridge  # noqa: E402
 from services.job_queue import JobSpec, JobState  # noqa: E402
 from tests._repo_scan import python_sources, rel  # noqa: E402
+from tests._repo_scan import parse_source
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -161,7 +162,7 @@ def _truncating_json_writes(path: pathlib.Path) -> list[str]:
     No caller in this repo does that, and a guard that claims more than it
     decides is worse than one that says what it misses.
     """
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+    tree = parse_source(path)
     hits: list[str] = []
     for scope in _scopes(tree):
         hits.extend(_truncating_writes_in(scope))
@@ -625,7 +626,7 @@ def test_every_tool_reports_a_launch_it_abandoned(tool):
     is right there in front of them.
     """
     path = REPO_ROOT / "datasets" / tool / "controller.py"
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+    tree = parse_source(path)
     launchers = [n for n in ast.walk(tree)
                  if isinstance(n, ast.FunctionDef) and n.name in ("_launch", "_run")]
     assert launchers, f"{tool} has no _launch/_run to check"

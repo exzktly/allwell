@@ -40,6 +40,7 @@ from PySide6.QtWidgets import QApplication
 from tests._repo_scan import REPO_ROOT, python_sources, rel
 from tests.conftest import MockApp, make_agg
 from well_viewer.core.app_state import _FEATURE_STATE_OWNERS as OWNERS
+from tests._repo_scan import parse_source
 
 
 @pytest.fixture(scope="module")
@@ -115,7 +116,7 @@ def test_no_code_outside_a_feature_reaches_its_slice_by_attribute():
     # feature reaching its *own* slice is fine: if it is disabled, its modules
     # do not run at all.
     home: dict = {}
-    reg = ast.parse((REPO_ROOT / "well_viewer/features/registry.py").read_text())
+    reg = parse_source((REPO_ROOT / "well_viewer/features/registry.py"))
     for node in ast.walk(reg):
         if not (isinstance(node, ast.Assign) and len(node.targets) == 1):
             continue
@@ -152,7 +153,7 @@ def test_no_code_outside_a_feature_reaches_its_slice_by_attribute():
     for path in python_sources():
         where = rel(path)
         try:
-            tree = ast.parse(path.read_text(), where)
+            tree = parse_source(path)
         except SyntaxError:  # pragma: no cover - a file we cannot parse
             continue
         for node in ast.walk(tree):

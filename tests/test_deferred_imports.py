@@ -25,6 +25,7 @@ deferred import — those are part of the budget below.
 
 import ast
 from pathlib import Path
+from tests._repo_scan import parse_source
 
 ROOT = Path(__file__).resolve().parent.parent / "well_viewer"
 FEATURE_PREFIX = "well_viewer.features"
@@ -160,7 +161,7 @@ def _collect():
     for path in sorted(ROOT.rglob("*.py")):
         if "__pycache__" in path.parts or path in _EXCLUDED:
             continue
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         for lineno, module in _deferred_feature_imports(tree):
             hits.append(f"{path.relative_to(ROOT.parent)}:{lineno} -> {module}")
     return hits

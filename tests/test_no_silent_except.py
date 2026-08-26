@@ -14,6 +14,7 @@ positives on handlers that log, re-raise, or do real recovery work.
 
 import ast
 from pathlib import Path
+from tests._repo_scan import parse_source
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WELL_VIEWER = REPO_ROOT / "well_viewer"
@@ -67,7 +68,7 @@ def _silent_body(handler: ast.ExceptHandler) -> bool:
 def _offenders(paths):
     out = []
     for path in paths:
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         for node in ast.walk(tree):
             if isinstance(node, ast.ExceptHandler) and _is_broad(node) and _silent_body(node):
                 kind = type(node.body[0]).__name__.lower()
@@ -177,7 +178,7 @@ def _silent_sites():
     found = []
     for path in python_sources():
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            tree = parse_source(path)
         except SyntaxError:  # pragma: no cover - the tree parses
             continue
         stack: list[str] = []

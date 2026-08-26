@@ -27,6 +27,7 @@ from __future__ import annotations
 import ast
 
 from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_source
 
 #: Modules allowed to import the total. Every entry writes a CSV; none of them
 #: draws. Allowlisting the *site* rather than the file is the point — a broad
@@ -64,7 +65,7 @@ def _offenders() -> list[str]:
         if name in ALLOWED or name.endswith("stats_compute.py"):
             continue
         try:
-            tree = ast.parse(path.read_text())
+            tree = parse_source(path)
         except SyntaxError:  # pragma: no cover - a file we cannot parse
             continue
         if _imports_the_total(tree):
@@ -99,7 +100,7 @@ def test_the_allowlist_has_no_stale_entries():
         if path is None:
             stale.append(f"{name} (no such file)")
             continue
-        if not _imports_the_total(ast.parse(path.read_text())):
+        if not _imports_the_total(parse_source(path)):
             stale.append(f"{name} (does not import it)")
     assert not stale, (
         "these allowlist entries no longer describe a real import:\n"

@@ -24,6 +24,7 @@ import ast
 from pathlib import Path
 
 import pytest
+from tests._repo_scan import parse_source
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ROOTS = [
@@ -99,7 +100,7 @@ def _offenders():
     qss = theme.qss()
     out = []
     for path in _py_files():
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         local = _string_literals(tree)
         for selector, name in sorted(set(_hooks(tree))):
             if name in UNSTYLED_NAMES:
@@ -127,7 +128,7 @@ def test_unstyled_allowlist_only_shrinks():
     """Every allowlisted name must still be in use — no stale entries."""
     in_use = set()
     for path in _py_files():
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         in_use.update(name for _selector, name in _hooks(tree))
     stale = sorted(UNSTYLED_NAMES - in_use)
     assert not stale, (

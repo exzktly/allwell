@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from tests._repo_scan import parse_source
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 THRESHOLD = 40
@@ -85,7 +86,7 @@ def _functions_over_threshold() -> dict[str, int]:
 
     for p, rel in _iter_source_files():
         try:
-            tree = ast.parse(p.read_text())
+            tree = parse_source(p)
         except SyntaxError:
             continue
         V(rel).visit(tree)

@@ -7845,8 +7845,10 @@ The app has two complementary theme surfaces:
    redesign. `Colors`, `Typography`, `Spacing`, `Radii`, `Metrics` (control
    padding — themeable for density), plus a `qss()` builder that produces the
    full application stylesheet. The `widgets/` package and most of the app shell
-   read from `theme.Colors.*`; the default (`blue`) palette is the class
-   values here. This is the single source of the app chrome QSS. `theme.py`
+   read from `theme.Colors.*`; the `blue` palette is the class values here,
+   and is the baseline every theme is applied onto and restored to — the app
+   itself starts on `grey`. This is the single source of the app chrome QSS.
+   `theme.py`
    *also* holds the **theme registry** (`THEMES` / `apply_theme` /
    `select_theme_from_env`) — see "Selecting a theme" below.
 2. **`ui/theme/`** — a legacy remnant, down to exactly two colours with no
@@ -7937,18 +7939,30 @@ at construction, applying a theme up-front re-skins the whole app with **no
 per-widget rewiring**.
 
 - `theme.THEMES` maps a name → sparse override bundle. Built-ins:
-  `blue` (the default; the class values are its palette) and
-  `grey` (a **colour-only** variant — neutral charcoal-grey chrome, azure
-  accent, near-black plot canvas). The version pill reads the `Colors.brand` /
-  `Colors.brand_fg` tokens and is transparent with white text in both themes.
-  Both share the flat, tight control feel: the `Radii`/`Metrics` defaults
-  (small radii + crisp `control_border` + compact padding) are app-wide, so the
-  `grey` bundle overrides only `Colors`. (Its look was designed against
-  real Nikon NIS-Elements AR screenshots.)
+  `grey` (**the default the app starts on** — a colour-only variant: neutral
+  charcoal-grey chrome, restrained azure accent, near-black plot canvas, its
+  look designed against real Nikon NIS-Elements AR screenshots) and `blue`
+  (the **baseline**: an empty bundle, because the class values *are* its
+  palette). The version pill reads the `Colors.brand` / `Colors.brand_fg`
+  tokens and is transparent with white text in both. Both share the flat, tight
+  control feel: the `Radii`/`Metrics` defaults (small radii + crisp
+  `control_border` + compact padding) are app-wide, so the `grey` bundle
+  overrides only `Colors`.
+
+  **`blue` earns its entry by being the way back.** `apply_theme` restores every
+  themeable attribute to the value captured off the class at import and then
+  applies the named bundle, so applying `blue` *is* the reset. A registry
+  without it cannot return to the palette the classes hold. Both keys are
+  therefore spelled as string literals rather than as `DEFAULT_THEME`: written
+  `{DEFAULT_THEME: {}, "grey": _GREY}`, pointing that constant at `grey` writes
+  the same key twice in one dict literal, the second wins silently, and the
+  registry loses `blue` altogether. `tests/test_theme_registry.py` holds both
+  halves of that.
 - `theme.apply_theme(name)` resets every themeable attribute to its captured
   default, applies the bundle, and fires post-apply hooks
   (`register_theme_hook`). `select_theme_from_env()` reads the **`ALLWELL_THEME`**
-  env var (falling back to `blue` on unset/unknown). `allwell.main()`
+  env var (falling back to `DEFAULT_THEME` — `grey` — on unset/unknown).
+  `allwell.main()`
   calls it once, before building `AllWellApp`; `--theme <name>` overrides the env
   var. `tests/visual/render_views.py` honours it too, so
   `ALLWELL_THEME=grey … render_views.py` audits any theme.
@@ -7957,7 +7971,8 @@ per-widget rewiring**.
   marker); `all_well_launcher._apply_baked_theme` reads it and `setdefault`s the
   env var, so the shipped exe starts on that theme while a runtime `ALLWELL_THEME`
   / `--theme` still overrides. The `.spec` validates the name against
-  `theme.available_themes()` and skips baking an unknown one (build stays `blue`).
+  `theme.available_themes()` and skips baking an unknown one (the build then
+  starts on `DEFAULT_THEME` like any other).
 - **Startup-only, by design.** There is no in-app live switch — a runtime swap
   would need every cached inline QSS rebuilt on `QEvent.StyleChange` (see the
   per-instance-QSS note below), which hit a ~20 s repaint cascade. Selection is
@@ -9078,9 +9093,12 @@ you're in before you type the command.
 - **Pure-logic / unit tests** (Qt-free: `pipeline/*`, `domain/*`,
   `spatial_compute`, `multivariate_compute`, layout math, …). Fast, cheap,
   safe to run in bulk. This is the CI "fast lane" — run it with
-  **`scripts/test.sh`** (~1,770 tests, ~55s). CI invokes that same script, so a
-  local run and the CI run cannot drift in flags or config; hand-rolling
-  `pytest tests/ -m "not slow"` skips the `--timeout=90` CI applies.
+  **`scripts/test.sh`** (~6,840 tests of ~7,280 collected, ~3.5 min on a quiet
+  container). CI invokes that same script, so a local run and the CI run cannot
+  drift in flags or config; hand-rolling `pytest tests/ -m "not slow"` skips the
+  `--timeout=90` CI applies. Re-count rather than trusting the figure when it
+  matters: `python -m pytest tests -m "not slow" -q --collect-only | tail -1`
+  prints the split in a few seconds.
 - **Full-app tests** (anything using the `viewer_app` / `loaded_app` /
   `loaded_app_shape` / `image_table_app` fixtures — ~70 files). Each one
   constructs a **real `WellViewerApp`** under the offscreen QPA. `conftest.py`'s
@@ -9111,9 +9129,12 @@ that keep an `_app` back-reference (coordinators, `LabelGrid`,
 That web of Qt-C++ ↔ Python references **is not reclaimed within the process**:
 `close()` + `deleteLater()` + `gc.collect()` do **not** free it — measured, the
 `WellViewerApp` instance and its widgets survive teardown, so `app.allWidgets()`
-climbs ~1,800 per test and RSS grows ~40 MB per test, monotonically. pytest runs
-every test in **one process**, and the container has **no swap**, so a big slow
-run:
+climbs ~1,800 per test and RSS grows ~40 MB per test, monotonically. Nor can it
+be forced: deleting the app's top-level widgets from a teardown fixture
+segfaults the interpreter *after* the tests themselves have passed, which is
+why `conftest.py`'s widget reaper (below) exempts anything marked `slow`.
+pytest runs every test in **one process**, and the container has **no swap**, so
+a big slow run:
 - **hangs** — the ever-growing live-widget count makes each later test's Qt work
   progressively slower, until the suite crawls; and/or
 - **gets OOM-killed** — RSS climbs unbounded until the orchestrator kills the
@@ -9157,19 +9178,65 @@ fixture (it doesn't help).
    writes no report, so too tight a ceiling reports green tests as a failure.
 
 6. **Install the application stylesheet once per module, never per test.**
-   `QApplication.setStyleSheet` re-polishes every live widget in the process, and
-   because rule 1's leak means that set only grows, a single call late in the fast
-   lane costs tens of seconds. A function-scoped fixture that installs
-   `theme.qss()` therefore multiplies that cost by the file's case count — enough
-   on its own to triple the lane's wall time. Files that need the real sheet
+   `QApplication.setStyleSheet` re-polishes every live widget in the process, so
+   a function-scoped fixture that installs `theme.qss()` multiplies that cost by
+   the file's case count. Files that need the real sheet
    (`test_theme_roles_render.py`, `test_control_band_widget.py`,
    `test_disabled_controls_look_disabled.py`, `test_analyze_narrow_sidebar_fit.py`,
    `test_analyze_help_section.py`) install it from a `scope="module"` fixture and
    pay for it once. Applying the sheet to a single host widget instead
    (`test_control_row_spacing.py`) is cheaper again, and is the right shape
    whenever the assertion does not need it applied app-wide. `--durations=N` is
-   how this shows up: the cost lands in `setup`, not in the test body, and the
-   same file run on its own is fast because almost nothing is alive yet.
+   how a violation shows up: the cost lands in `setup`, not in the test body.
+
+7. **A fast-lane test does not keep the widgets it builds.** An autouse fixture,
+   `conftest.py::_reap_widgets_the_test_created`, deletes the top-level widgets
+   a test leaves behind, and it is the single largest thing standing between
+   this lane and the state described in rule 1. Nothing in Qt reclaims a
+   parentless `QWidget`: the application owns it, so it stays registered, stays
+   matched against every rule of the stylesheet, and stays alive for the rest of
+   the process. Measured across the forty `tests/test_a*.py` files alone, before
+   the fixture existed: **93,446 live widgets, 2,425 of them top-level**, and
+   one `QApplication.setStyleSheet` over that population took **70 seconds**.
+   Reaping brings the same call back to 0.2 s.
+
+   Only what the *test* built is reaped. The snapshot is taken when the fixture
+   is set up, and pytest instantiates higher-scoped fixtures first, so a
+   module-, class- or session-scoped widget is already in the snapshot and is
+   never a candidate — the naive version deleted an `AnalyzeTab` shared by seven
+   tests out from under the second one. Deletion is immediate
+   (`shiboken6.delete`) rather than deferred: `deleteLater` posts an event only
+   an event loop delivers, and this lane runs almost entirely without one.
+   Anything marked `slow` is exempt, for the reason rule 1 gives.
+
+8. **A guard parses the tree through `tests/_repo_scan.py`, never for itself.**
+   `parse_source(path)` returns a per-process cached tree, and
+   `parsed_sources()` pairs every application source with its own. Parsing the
+   tree is 2.8 s — 479 files, 767k nodes — and roughly sixty guards in the lane
+   want all of it; each parsing its own copy was about 150 s of the run. The
+   cache is keyed on the source *text*, not the path or its stat, so a file
+   rewritten in place (which is what `test_guards_bite.py` does between cases)
+   is re-parsed rather than answered stale. **The trees are shared: read them,
+   never mutate one.** `ast.parse` on a string a test builds is untouched by
+   this and stays. `test_the_fast_lane_stays_fast.py` holds the rule.
+
+9. **No test spawns `ssh`, `rsync`, `scp` or `sftp`.** The autouse
+   `_no_real_network_tools` fixture hooks `subprocess.Popen.__init__` and raises
+   on those four; a bare `rsync --version` (how `resolve_rsync_binary` finds a
+   usable binary) is exempt, and every other binary is untouched. Sixteen
+   fast-lane tests reached them, all at host aliases that exist nowhere, because
+   the remote layer's seams nest: a test patching `Fetcher._rsync` still let
+   `_pull_settings_marker`, `_list_remote_glob` and `_retry_missing_wells`
+   through to the real thing. Four cost 14.0 s apiece — `_rsync_with_retry`
+   reads the failure as a flaky network and makes three attempts 2 + 4 + 8 s
+   apart. The `offline_transport` fixture answers those primitives as an
+   unreachable host; `tests/test_remote_runner.py` and
+   `tests/test_remote_transit_volume.py` take it module-wide with
+   `pytestmark = pytest.mark.usefixtures("offline_transport")`. The error names
+   the seam to patch. Note that `_retry_missing_wells` lists a well's CSVs with
+   its own inline `subprocess.run(ssh … bash -s)` rather than through
+   `DatasetCache._ssh_script` — a fourth spelling of "list files on the remote",
+   and the one a test is most likely to miss.
 
 **The slow lane runs on demand, not on PRs and not on a schedule** —
 `.github/workflows/slow-lane.yml`, six sharded runners, dispatched by hand from

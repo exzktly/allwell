@@ -17,6 +17,7 @@ from __future__ import annotations
 import ast
 import builtins
 from pathlib import Path
+from tests._repo_scan import parse_source
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -94,7 +95,7 @@ def test_extracted_modules_have_no_undefined_globals():
     offenders: list[str] = []
     for rel in EXTRACTED:
         path = REPO / rel
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         module_bound = _module_bound(tree)
         for fn in [n for n in tree.body
                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:

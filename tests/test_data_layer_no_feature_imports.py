@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from tests._repo_scan import parse_source
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "well_viewer" / "data"
 FORBIDDEN_PREFIX = "well_viewer.features"
@@ -43,7 +44,7 @@ def test_data_layer_has_no_feature_imports():
     for path in sorted(DATA_DIR.rglob("*.py")):
         if "__pycache__" in path.parts:
             continue
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         for lineno, target in _feature_imports(tree):
             offenders.append(f"{path.relative_to(DATA_DIR.parent.parent)}:{lineno} -> {target}")
     assert not offenders, (

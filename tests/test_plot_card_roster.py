@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_source
 
 
 def test_the_shell_imports_the_roster_rather_than_restating_it():
@@ -30,7 +31,7 @@ def test_the_shell_imports_the_roster_rather_than_restating_it():
     for path in python_sources():
         if path.name.startswith("plot_card_actions"):
             continue
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         for node in ast.walk(tree):
             if not isinstance(node, (ast.Tuple, ast.List, ast.Set)):
                 continue

@@ -23,6 +23,7 @@ import pathlib
 import re
 
 from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_source
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 REGISTRY = REPO_ROOT / "well_viewer" / "features" / "registry.py"
@@ -50,7 +51,7 @@ def test_every_feature_slice_lookup_names_a_registered_slice():
     for path in python_sources():
         if path == REGISTRY:
             continue
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        tree = parse_source(path)
         # Module-level names bound to a string literal, so a call whose argument
         # is ``_NAME`` rather than ``"bar"`` is still resolved. A first draft
         # read only ``ast.Constant`` arguments and was evaded by one

@@ -23,6 +23,7 @@ from __future__ import annotations
 import ast
 
 from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_source
 
 _STATIC_PICKERS = {
     "getSaveFileName",
@@ -82,7 +83,7 @@ def test_no_unparented_file_dialog():
     offenders: list[str] = []
     for path in python_sources():
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            tree = parse_source(path)
         except SyntaxError:
             continue
         offenders.extend(_offenders(tree, rel(path)))

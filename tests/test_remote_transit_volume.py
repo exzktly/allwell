@@ -37,6 +37,11 @@ from services.remote_runner import (
     sweep_stale_scratch,
 )
 
+# Every test here drives real `RemoteRunner` / `Fetcher` code against a host
+# that does not exist. Answer the ssh and rsync primitives directly rather than
+# spawning them to find that out (tests/conftest.py::offline_transport).
+pytestmark = pytest.mark.usefixtures("offline_transport")
+
 
 @pytest.fixture
 def host() -> RemoteHost:

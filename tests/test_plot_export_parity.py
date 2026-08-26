@@ -14,6 +14,7 @@ import ast
 import pathlib
 
 import pytest
+from tests._repo_scan import parse_source
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -336,7 +337,7 @@ def _reachable_source(path: pathlib.Path, entry: str) -> str:
     went on reading the entry point, which by then held a two-line loop. The
     call graph is what the pass actually is, so that is what gets scanned.
     """
-    tree = ast.parse(path.read_text())
+    tree = parse_source(path)
     by_name = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
     assert entry in by_name, f"{entry} is not a module-level function in {path.name}"
     seen: set[str] = set()

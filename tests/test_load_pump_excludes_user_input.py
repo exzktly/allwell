@@ -26,6 +26,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import QEventLoop  # noqa: E402
 
 from well_viewer.core import load_controller, ui_helpers  # noqa: E402
+from tests._repo_scan import parse_source
 
 
 class _RecordingApplication:
@@ -91,7 +92,7 @@ def test_no_bare_processevents_anywhere_in_the_load_controller():
     import pathlib
 
     path = pathlib.Path(load_controller.__file__)
-    tree = ast.parse(path.read_text(), filename=str(path))
+    tree = parse_source(path)
     bare = []
     for node in ast.walk(tree):
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)

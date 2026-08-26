@@ -19,6 +19,7 @@ import ast
 import pathlib
 
 import pytest
+from tests._repo_scan import parse_source
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -29,7 +30,7 @@ _ACCENT_FAMILY = {"accent", "accent_hover", "accent_pressed", "accent_dim"}
 
 def _theme_overrides() -> dict[str, set[str]]:
     """Every `_<NAME> = {"Colors": {...}}` override table in `theme.py`."""
-    tree = ast.parse((REPO_ROOT / "theme.py").read_text(encoding="utf-8"))
+    tree = parse_source((REPO_ROOT / "theme.py"))
     out: dict[str, set[str]] = {}
     for node in tree.body:
         if not isinstance(node, ast.Assign) or len(node.targets) != 1:

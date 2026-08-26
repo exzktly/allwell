@@ -28,7 +28,7 @@ def _all_imports(tree: ast.Module):
 
 
 def _parse(path: Path) -> ast.Module:
-    return ast.parse(path.read_text(), filename=str(path))
+    return parse_source(path)
 
 
 def _walk_py(root: Path):
@@ -194,6 +194,7 @@ def test_nothing_imports_wellviewerapp_at_runtime():
 # were invisible to both.
 
 from tests._repo_scan import python_sources  # noqa: E402
+from tests._repo_scan import parse_source
 
 # Support libs under features/ that are always present (not removable rail tabs):
 # importing THEM at module scope is fine. Everything else under features/ is a

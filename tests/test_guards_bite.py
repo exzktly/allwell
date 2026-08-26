@@ -28,6 +28,7 @@ from pathlib import Path
 import shutil
 
 import pytest
+from tests._repo_scan import parse_source
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -2540,7 +2541,7 @@ def _save_menu_offenders(paths):
 
     out = []
     for path in paths:
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         for node in ast.walk(tree):
             if not (isinstance(node, ast.Call)
                     and getattr(node.func, "id", "") == "make_action_menu_button"
@@ -2594,7 +2595,7 @@ def _card_key_offenders(paths):
 
     out = []
     for path in paths:
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         for node in ast.walk(tree):
             if not (isinstance(node, ast.Call)
                     and getattr(node.func, "id", "") == "build_plot_save_menu"):

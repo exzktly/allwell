@@ -1382,7 +1382,17 @@ import logging as _logging
 
 _LOG = _logging.getLogger(__name__)
 
-DEFAULT_THEME = "blue"
+#: The theme the app starts in when nothing names one. ``grey`` is the
+#: shipped default; ``blue`` remains available via ``ALLWELL_THEME=blue`` or
+#: ``--theme blue``.
+#:
+#: Note what this does *not* change: the token classes above still hold blue's
+#: values, because that is what makes them the restore baseline
+#: :func:`apply_theme` resets to (``_THEME_DEFAULTS`` captures them at import).
+#: Nothing here applies a theme on its own — the app applies one at startup via
+#: :func:`select_theme_from_env`, and a caller that reads ``Colors.*`` without
+#: having applied one is reading blue.
+DEFAULT_THEME = "grey"
 
 # Classes a theme bundle may override, by name.
 _THEMEABLE_CLASSES = {"Colors": Colors, "Metrics": Metrics, "Radii": Radii}
@@ -1426,11 +1436,19 @@ _GREY = {
     },
 }
 
-# name → override bundle. ``blue`` is the built-in default (no overrides; the
-# class values above are its palette). ``grey`` is a colour-only variant sharing
-# blue's Radii/Metrics.
+# name → override bundle. ``blue`` is the *baseline* palette — no overrides,
+# because the class values above are it. ``grey`` is a colour-only variant
+# sharing blue's Radii/Metrics, and is what ``DEFAULT_THEME`` names, so the app
+# starts grey unless told otherwise.
+#
+# Spelled with a literal ``"blue"`` rather than ``DEFAULT_THEME``. It read
+# ``DEFAULT_THEME: {}`` while that constant was ``"blue"`` and the two happened
+# to coincide; pointing the constant at ``grey`` would then have written the key
+# ``grey`` twice in one literal, and the second entry wins silently — leaving a
+# registry with no ``blue`` in it at all, ``apply_theme("blue")`` raising
+# KeyError, and nothing to restore the baseline from.
 THEMES = {
-    DEFAULT_THEME: {},
+    "blue": {},
     "grey": _GREY,
 }
 
@@ -1496,9 +1514,9 @@ def select_theme_from_env(default: str = DEFAULT_THEME,
                           var: str = "ALLWELL_THEME") -> str:
     """Apply the theme named by the ``ALLWELL_THEME`` env var (dev-facing).
 
-    Falls back to ``default`` when the var is unset/blank or names an unknown
-    theme (logged). Returns the applied theme name. Call once at startup, before
-    building any widgets.
+    Falls back to ``default`` — :data:`DEFAULT_THEME`, i.e. ``grey`` — when the
+    var is unset/blank or names an unknown theme (logged). Returns the applied
+    theme name. Call once at startup, before building any widgets.
     """
     name = (_os.environ.get(var) or "").strip() or default
     if name not in THEMES:

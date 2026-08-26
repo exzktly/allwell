@@ -65,15 +65,35 @@ for a bare `python -m pytest`.
 The suite has two lanes and **running the wrong one hangs the run and OOM-kills
 the container**:
 
-- **Fast lane** (~4,100 tests of ~4,460 collected, across ~490 files):
+- **Fast lane** (~6,840 tests of ~7,280 collected, across ~690 files):
   `scripts/test.sh`. Pure-logic, guardrail, and per-feature tests. CI invokes
   this same script, so local and CI runs cannot drift in flags or config —
   don't hand-roll a `pytest` command.
-- **Full-app tests** (~370 tests in ~85 files): anything using the `viewer_app`
+- **Full-app tests** (~440 tests): anything using the `viewer_app`
   / `loaded_app` / `loaded_app_shape` / `image_table_app` fixtures, auto-marked
   `slow` by `conftest.py`. Each builds a real `WellViewerApp` (~1,800 QObjects)
   whose Qt↔Python reference web is **never reclaimed in-process** — RSS climbs
-  ~40 MB per test, monotonically.
+  ~40 MB per test, monotonically. It cannot be forced, either: deleting the
+  app's widgets from a teardown fixture segfaults the interpreter after the
+  tests have passed, which is why the fast lane's widget reaper exempts
+  anything marked `slow`.
+
+Three things keep the fast lane fast, all of them in the harness rather than in
+any test, and all of them easy to undo without a single test going red.
+`tests/test_the_fast_lane_stays_fast.py` is what notices; ARCHITECTURE.md §10.4
+rules 7–9 explain each.
+
+1. **A test does not keep the widgets it builds.** An autouse fixture deletes
+   the top-level widgets it leaves behind. Without it the process carried
+   93,446 live widgets by the end of the `test_a*.py` files alone, and each
+   `QApplication.setStyleSheet` walked all of them — 70 s for one call.
+2. **The source tree is parsed once and shared.** Go through
+   `tests/_repo_scan.parse_source`, never `ast.parse(path.read_text())`.
+   Parsing the tree is 2.8 s and sixty-odd guards want all of it. The trees are
+   shared, so read them and never mutate one.
+3. **No test spawns `ssh` / `rsync` / `scp` / `sftp`.** Use the
+   `offline_transport` fixture. The remote layer's seams nest, so patching
+   `Fetcher._rsync` still lets three other paths through to the real binary.
 
 **How long it actually takes**, so a run that is merely slow is not mistaken for
 one that is wedged:
@@ -81,9 +101,17 @@ one that is wedged:
 | | Measured |
 |---|---|
 | Fast lane, local, quiet container | ~3.5 min |
-| Fast lane, local, while other work runs in the same container | up to ~11 min — same suite, 3× the wall clock; contention, not the tests |
-| Fast lane, CI job end to end | 9–11 min across observed runs, including checkout and installing the test stack. The job cap is 15 min (`ci.yml`) |
+| Fast lane, local, under contention from other work in the same container | roughly 2–3× that |
+| Fast lane, CI job end to end | add ~2 min for checkout and installing the test stack. The job cap is 15 min (`ci.yml`) |
 | One slow-lane file of ~15 full-app tests | ~3.5 min, i.e. ~14 s per app construction |
+
+Treat a lane that has crept well past that as a harness regression, not as a
+suite that has honestly grown. It read as contention once before — the same
+~3.5 min figure sat in this table while the lane actually took 10 min 47 s, and
+two thirds of that was three costs no test's own logic accounted for. Run
+`scripts/test.sh --durations=40` and read where it went; a cost that lands in
+`setup`, or the same number appearing against several unrelated tests, is the
+shape of a harness problem.
 
 Re-count rather than trusting these when it matters: `python -m pytest tests -m
 "not slow" -q --collect-only | tail -1` prints the split in about two seconds.

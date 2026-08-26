@@ -2714,3 +2714,36 @@ def test_bar_colour_guard_clears_an_unrelated_call(tmp_path, monkeypatch):
     good = _write(tmp_path, "good_unrelated.py",
                   "render_line_items(ax=a, items=xs)\n")
     assert _run_scan(monkeypatch, _BAR_MODE_GUARD, _BAR_MODE_TEST, [good]) is None
+
+
+@pytest.mark.parametrize("shape", [
+    # The keyword is present and the mode is still dropped. A presence check
+    # waves this through, and an adversarial review found it did: every batch
+    # bar PNG for a plate reverts to plate colours while the screen stays grey,
+    # with the whole suite green.
+    "_render_bar_items(ax_mean=a, items=xs, bar_color=None)\n",
+    # Decided statically — a literal is a call site that never read the state.
+    '_render_bar_items(ax_mean=a, items=xs, bar_color="#727880")\n',
+    "_render_bar_items(ax_mean=a, items=xs, bar_color=SOME_CONSTANT)\n",
+])
+def test_bar_colour_guard_catches_a_keyword_that_does_not_resolve_the_mode(
+        tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_bar_value.py", shape)
+    exc = _run_scan(monkeypatch, _BAR_MODE_GUARD, _BAR_MODE_TEST, [bad])
+    assert exc is not None and "bad_bar_value.py" in str(exc)
+
+
+@pytest.mark.parametrize("shape", [
+    "_render_bar_items(ax_mean=a, items=xs, "
+    "bar_color=mono_bar_color(ctx.state.plot))\n",
+    # The alias the Batch Export panel imports it under.
+    "_render_bar_items(ax_mean=a, items=xs, "
+    "bar_color=_mono_bar_color(self._ctx.state.plot))\n",
+    # Reached as an attribute on the module.
+    "_render_bar_items(ax_mean=a, items=xs, "
+    "bar_color=bar_colors.mono_bar_color(ctx.state.plot))\n",
+])
+def test_bar_colour_guard_clears_a_keyword_that_resolves_the_mode(
+        tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, "good_bar_value.py", shape)
+    assert _run_scan(monkeypatch, _BAR_MODE_GUARD, _BAR_MODE_TEST, [good]) is None

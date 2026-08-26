@@ -89,6 +89,80 @@ def test_the_mono_ink_is_a_theme_token_not_a_literal():
     assert to_hex(theme.Colors.plot_mono)
 
 
+# ── the grey has to read on two very different grounds ──────────────────────
+#: The alpha ``render_bar_items`` and the per-cell renderers draw bar fills at.
+#: The composited pixel is what a reader sees, so it is what gets measured —
+#: the raw token clears thresholds the drawn bar does not.
+_BAR_ALPHA = 0.85
+#: WCAG's contrast floor for non-text. A bar is a solid shape, not type.
+_NON_TEXT_FLOOR = 3.0
+
+
+def _relative_luminance(rgb) -> float:
+    def _channel(value: float) -> float:
+        v = value / 255.0
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    r, g, b = rgb
+    return 0.2126 * _channel(r) + 0.7152 * _channel(g) + 0.0722 * _channel(b)
+
+
+def _rgb(hex_colour: str):
+    h = hex_colour.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _contrast(a, b) -> float:
+    la, lb = _relative_luminance(a), _relative_luminance(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _over(colour: str, ground: str, alpha: float = _BAR_ALPHA):
+    c, g = _rgb(colour), _rgb(ground)
+    return tuple(alpha * c[i] + (1 - alpha) * g[i] for i in range(3))
+
+
+@pytest.mark.parametrize("ground_name,ground", [
+    ("publication white (CPub.bg)", theme.CPub.bg),
+    ("dark card fill (Colors.plot_bg)", theme.Colors.plot_bg),
+])
+def test_the_mono_ink_reads_against_both_grounds_once_the_alpha_is_applied(
+        ground_name, ground):
+    """One token has to serve a white page and a near-black card, and the bars
+    are drawn at 0.85 alpha — so the number that matters is the *composited*
+    one, not the token's.
+
+    The first grey chosen here (#8A9099) measured 3.22:1 raw and **2.61:1**
+    drawn on white, under a comment asserting it read on both grounds. That is
+    the §7.5 #7 failure: a property stated without measuring it. This test is
+    the measurement, kept beside the claim.
+    """
+    drawn = _over(theme.Colors.plot_mono, ground)
+    ratio = _contrast(drawn, _rgb(ground))
+    assert ratio >= _NON_TEXT_FLOOR, (
+        f"{theme.Colors.plot_mono} at alpha {_BAR_ALPHA} draws as "
+        f"{tuple(round(c) for c in drawn)} on {ground_name} ({ground}) — "
+        f"contrast {ratio:.2f}:1, below the {_NON_TEXT_FLOOR}:1 non-text floor. "
+        "Publication is the ground this mode mostly exists for; moving the "
+        "token trades one ground against the other, so check both."
+    )
+
+
+def test_the_mono_ink_is_not_overridden_by_any_theme_bundle():
+    """The single-token design rests on bar fill being theme-independent, the
+    way ``WELL_COLORS_TUPLE`` is. A bundle overriding it would silently restore
+    the screen/publication divergence the token exists to avoid — and would
+    also move it out from under the contrast test above."""
+    offenders = [
+        f"{name}.{cls_key}"
+        for name, bundle in theme.THEMES.items()
+        for cls_key, attrs in bundle.items()
+        if "plot_mono" in attrs
+    ]
+    assert not offenders, (
+        "theme bundle(s) override Colors.plot_mono: " + ", ".join(offenders))
+
+
 # ── the boundary: the colour of the patch that was actually drawn ───────────
 def _items() -> list[BarItem]:
     """One measured column and one whose value could not be computed, so both

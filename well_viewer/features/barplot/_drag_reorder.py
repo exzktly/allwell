@@ -1,18 +1,23 @@
 """Drag-to-reorder for the Bar plot's columns.
 
-Five small handlers wired to the bar canvas's matplotlib mouse events by
-``barplot/tab_view.py``: press records which column was grabbed, motion draws
-the dashed drop guide across all three panels, release commits the new order to
-``PlotState.bar_order`` and redraws. ``bar_reset_order`` is the Reset Order
-button beside them.
+Five small functions behind the bar canvas's drag interaction. Three are wired
+to matplotlib mouse events by ``barplot/tab_view.py``: press records which column
+was grabbed, motion draws the dashed drop guide across all three panels, release
+commits the new order to ``PlotState.bar_order`` and redraws. ``bar_reset_order``
+is the Reset Order button beside them, on an ordinary ``clicked`` connection, and
+``bar_event_xdata`` is the shared helper that turns a mouse event over any of the
+three panels into a data-x.
 
 Split out of ``barplot/controller.py``, which holds the redraw orchestration and
 the tab's other controls, to keep that module under its line budget. This is a
 clean seam rather than a convenient one: nothing here draws a bar or decides a
-value — the handlers only read the recorded bar positions, mutate
-``ctx.runtime.barplot.drag_state`` and ``ctx.state.plot.bar_order``, and ask for
-a redraw. The view (canvas + axes) stays owned by the shell; these reach it only
-through the widget registry.
+value. The handlers read the recorded bar positions, mutate
+``ctx.runtime.barplot.drag_state`` and ``ctx.state.plot.bar_order``, restyle the
+Reset Order button to show whether a custom order is live, and ask for a redraw.
+The view stays owned by the shell and is reached through the typed seams: the
+three axes through the widget registry (``ctx.widgets.get_or_none``), the canvas
+and the Reset Order button through the feature runtime namespace
+(``ctx.runtime.barplot``).
 
 The pure half of the interaction — ``bar_idx_at_x`` / ``bar_drag_xs`` /
 ``bar_guide_x``, the arithmetic that turns a data-x into a column index and a
@@ -39,9 +44,6 @@ def bar_event_xdata(ctx, event) -> float | None:
         return None
     return float(xdata)
 
-
-# ``bar_idx_at_x`` / ``bar_drag_xs`` / ``bar_guide_x`` / ``bar_err_settings``
-# moved to ``barplot/collect.py`` (Qt-free) and re-exported above.
 
 
 def bar_reset_order(ctx) -> None:

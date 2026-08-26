@@ -34,10 +34,13 @@ BAR_COLOR_MODES = ("plate", "grey")
 def bar_color_mode(plot) -> str:
     """The effective mode for *plot* (a ``PlotState``), defaulting to ``"plate"``.
 
-    Anything unrecognised — a hand-edited persistence file, an older state
-    object without the field — reads as ``"plate"``, so an unknown value
-    degrades to the colours the app has always drawn rather than to a blank
-    or arbitrary one.
+    Anything unrecognised reads as ``"plate"``, so an unknown value degrades to
+    the colours the app has always drawn rather than to a blank or arbitrary
+    one. The cases that reach here are a state object from an older build with
+    no such field, and a direct attribute set; the on-disk route is guarded a
+    layer up as well, since ``view_state._apply_bar`` validates against
+    :data:`BAR_COLOR_MODES` before assigning, so an edited ``persistence.json``
+    is dropped rather than stored.
     """
     mode = str(getattr(plot, "bar_color_mode", "plate") or "plate")
     return mode if mode in BAR_COLOR_MODES else "plate"

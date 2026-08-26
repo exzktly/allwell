@@ -42,6 +42,22 @@ def rel(path) -> str:
     return path.relative_to(REPO_ROOT).as_posix()
 
 
+def _resolves_the_mode(value: ast.AST) -> bool:
+    """True when *value* is a call to the mode resolver, under any alias.
+
+    ``mono_bar_color`` is imported as ``_mono_bar_color`` by the Batch Export
+    panel, so the suffix is matched rather than the exact name — and only a
+    ``Call`` counts, because a literal (``None``, a colour string) is a call
+    site that decided the mode statically and therefore did not read the state.
+    """
+    if not isinstance(value, ast.Call):
+        return False
+    fn = value.func
+    name = fn.id if isinstance(fn, ast.Name) else (
+        fn.attr if isinstance(fn, ast.Attribute) else "")
+    return name.endswith("mono_bar_color")
+
+
 def _calls_missing_bar_color(tree: ast.AST) -> list[int]:
     out: list[int] = []
     for node in ast.walk(tree):
@@ -52,7 +68,17 @@ def _calls_missing_bar_color(tree: ast.AST) -> list[int]:
             fn.attr if isinstance(fn, ast.Attribute) else None)
         if name not in _CALL_NAMES:
             continue
-        if any(kw.arg == "bar_color" for kw in node.keywords):
+        bar_color = next((kw for kw in node.keywords if kw.arg == "bar_color"), None)
+        if bar_color is not None:
+            # The keyword being *present* is not the rule. ``bar_color=None``
+            # satisfies a presence check and silently reverts that surface to
+            # plate colours while the other stays grey — the exact divergence
+            # this guard exists to prevent, wearing the guard's own uniform. So
+            # the value must be a call to the resolver, whatever alias the call
+            # site imports it under.
+            if _resolves_the_mode(bar_color.value):
+                continue
+            out.append(node.lineno)
             continue
         # ``**kwargs`` forwarding (kw.arg is None) is a pass-through, not a
         # call site that decides the mode — the decision was made upstream.
@@ -125,6 +151,15 @@ _PER_CELL_RENDERERS = ("draw_violin", "draw_beeswarm", "draw_per_well_n_bars")
 _RENDERER_MODULE = "well_viewer/features/barplot/renderer.py"
 
 
+def _is_apply_call(value: ast.AST) -> bool:
+    if not isinstance(value, ast.Call):
+        return False
+    fn = value.func
+    name = fn.id if isinstance(fn, ast.Name) else (
+        fn.attr if isinstance(fn, ast.Attribute) else "")
+    return name == "apply_bar_color_mode"
+
+
 def test_each_per_cell_renderer_applies_the_colour_mode():
     tree = ast.parse((REPO_ROOT / _RENDERER_MODULE).read_text(encoding="utf-8"))
     by_name = {
@@ -135,16 +170,24 @@ def test_each_per_cell_renderer_applies_the_colour_mode():
     for name in _PER_CELL_RENDERERS:
         fn = by_name.get(name)
         assert fn is not None, f"{name} is gone from {_RENDERER_MODULE} — update this guard"
+        # The *binding*, not the call. ``apply_bar_color_mode`` returns a new
+        # list and mutates nothing, so a bare expression statement calling it
+        # is dead code that a "does the call appear?" check waves through —
+        # and ruff does not flag it either, because a call expression is not an
+        # unused value. That mutation (dropping ``colors = ``) leaves Violin,
+        # Beeswarm and the events panel in plate colours beside a grey Mean
+        # panel, with the whole suite green. CLAUDE.md §7.5 #2.
         applies = any(
-            isinstance(n, ast.Call)
-            and isinstance(n.func, ast.Name)
-            and n.func.id == "apply_bar_color_mode"
+            isinstance(n, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "colors" for t in n.targets)
+            and _is_apply_call(n.value)
             for n in ast.walk(fn)
         )
         if not applies:
             missing.append(f"{name} (line {fn.lineno})")
     assert not missing, (
         "Bar per-cell renderer(s) that never apply the Properties → Colours "
-        "mode. Grey mode would restyle the panels beside them and leave these "
-        "in plate colours, on the same figure:\n  " + "\n  ".join(missing)
+        "mode back onto ``colors``. Grey mode would restyle the panels beside "
+        "them and leave these in plate colours, on the same figure:\n  "
+        + "\n  ".join(missing)
     )

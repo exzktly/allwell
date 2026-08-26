@@ -2389,7 +2389,7 @@ The relevant modules:
 | `data/cache_projectors.py` | Registry of the inclusion-verdict projectors, plus `project_verdict_column` — the one cache walk they all perform (resolve the target wells, skip empty / missing frames, hand the verdict the frame *and its well label*, write the int column, drop the column outright when the verdict raises, and return the labels it had to drop). **A verdict that could not be recomputed leaves no column rather than the previous parameters' answer.** Every consumer guards its read with `if "<col>" in df.columns` and fails open, so an absent verdict is the one state the stack already handles honestly, whereas leaving the stale int column attached kept filtering those wells by thresholds nobody could see any more. The returned failure list is not decoration: `features/qc.recompute_qc_all` and `features/crop.recompute_crop_all` hand it to `core/notifications.report_verdict_failures`, a module-level function beside `NotificationService` so the two callers cannot drift into two sentences for one situation. It writes the wells to the status line, raises the same text as a toast, *and* returns the message, because the status line is a single slot and every crop action writes its own outcome line one or two calls later — those five lines append the returned text so the warning survives the very actions most likely to produce it, while the toast is the surface the next line of the same handler cannot erase. The label is passed because a verdict can be scoped to particular wells (the crop's `FrameScope`) and a cached frame need not carry a well column — this walk is the only place that knows which well each frame belongs to. `features/qc` and `features/crop` register here and share that walk; the registry is what lets `data_loading.get_rows` apply them without the data layer importing `features/`, and the shared walk lives here for the same reason — neither feature may depend on the other. |
 | `domain/viewer_state.py` | `read_pipeline_info` + the `make_schema_extractor(sep, fov_idx, tp_idx)` factory used everywhere the app needs a `(fov, tp)` from a filename. It returns the channel-token lists both separately *and* inside the curated `pipeline_info` dict (`fluor_tokens`, `smfish_tokens`), so a consumer holding only that dict can answer "which channels did this run have?" without re-reading the file. An unreadable or unparseable sidecar yields an empty dict, which is how a caller tells "no sidecar" apart from "a sidecar naming no such channel". |
 | `domain/plate_layout.py` | `PLATE_ROWS`, `PLATE_COLS`, the 96-colour well palette (one colour per plate position — a shorter, submultiple-of-12 palette repeats colours down each column). |
-| `domain/bar_colors.py` | The Bar plot's colour mode, and the single place that turns it into a colour. `bar_color_mode` reads `PlotState.bar_color_mode`, defaulting anything unrecognised to `"plate"` so a hand-edited persistence file degrades to the colours the app has always drawn rather than to an unknown colour string matplotlib raises on. `mono_bar_color` returns the mono ink or `None`; `apply_bar_color_mode` maps a whole `colors` list, always returning a new list of the same length so a caller can zip it against the wells it was built beside without branching on the mode. Deliberately excludes the shortfall marks: the dashed placeholder a missing measurement draws and the undefined-spread tick keep their own colours, because a colour mode is a statement about data ink and greying an absent bar to match a present one is the substitution §7 exists to prevent. |
+| `domain/bar_colors.py` | The Bar plot's colour mode, and the single place that turns it into a colour. `bar_color_mode` reads `PlotState.bar_color_mode`, defaulting anything unrecognised to `"plate"` — a state object from an older build that has no such field, or a direct attribute set, degrades to the colours the app has always drawn rather than to an unknown colour string matplotlib raises on. The on-disk path is guarded a layer up as well: `_apply_bar` validates against `BAR_COLOR_MODES` before assigning, so an edited `persistence.json` is dropped rather than stored. `mono_bar_color` returns the mono ink or `None`; `apply_bar_color_mode` maps a whole `colors` list, always returning a new list of the same length so a caller can zip it against the wells it was built beside without branching on the mode. Deliberately excludes the shortfall marks: the dashed placeholder a missing measurement draws and the undefined-spread tick keep their own colours, because a colour mode is a statement about data ink and greying an absent bar to match a present one is the substitution §7 of `CLAUDE.md` exists to prevent. |
 | `domain/selections_model.py` | Saved-selections schema v2: shape, validators, the v1→v2 migration. The on-disk contract is documented in the module's own docstring. |
 | `domain/sample_definitions.py` | Read / write the `sample_definitions` block inside `pipeline_info.json`. |
 | `domain/batch_models.py` | `BarGroup` + `ReplicateSet` — plain dataclasses used by every plot tab + batch export. |
@@ -2689,29 +2689,58 @@ auto-scaling.
 offers the Bar plot two modes — *Plate*, where each column takes the plate-picker
 colour of the well or replicate group behind it so the plate doubles as the
 legend, and *Grey*, where every column is one neutral ink (`theme.Colors.plot_mono`)
-for a figure whose columns are already named on the axis. It is the one control
-in this panel that does **not** go through `figure_prefs` and `_bind_getter_setter`:
-the colour is chosen per column while the bars and violins are built, so the
-restyle pass that walks finished artists cannot reach it. The segment writes
+for a figure whose columns are already named on the axis. Like the *Statistics*
+segments, the threshold-line overlay and the two time-axis correction steppers,
+it does not go through `figure_prefs` / `_bind_getter_setter`: the colour is
+chosen per column while the bars and violins are built, so the restyle pass that
+walks finished artists cannot reach it. The segment writes
 `PlotState.bar_color_mode` and calls `_redraw_bound_figure`, and the mode is
 persisted with the rest of the bar view state (`_snapshot_bar` / `_apply_bar`).
 
 The section is bar-figure-gated (`_is_bar_fig`, beside `_is_heatmap_fig` and the
 scatter predicates) for the same reason the Density and Cell values sections are
 gated: the mode changes nothing on a line, scatter or heat-map figure, and a
-control that does nothing is the defect §7.6 is about, wearing the opposite face.
+control that does nothing is the defect §7.6 of `CLAUDE.md` is about, wearing the
+opposite face.
 
-Both surfaces that draw these panels honour it. The four draw paths — the bar
-loop in `barplot/controller.render_bar_items`, and `draw_violin` /
-`draw_beeswarm` / `draw_per_well_n_bars` — each resolve the mode themselves,
-which the three per-cell renderers do from their own `ctx`. `render_bar_items`
-cannot: the Batch Export bar panel calls it with `ctx=None` on purpose, because
-it does not want that function's other ctx-derived behaviour, so the mode
-arrives as an explicit `bar_color` argument that each caller states.
-`tests/test_bar_render_callers_pass_color_mode.py` holds both halves of that —
-every call site names the keyword, and each per-cell renderer applies the mode —
-because the failure is silent: a batch PNG in plate colours beside an on-screen
-figure in grey, both drawn from the same setting.
+**Segments backed by `PlotState` are re-seeded on every panel open.** That family
+has a hazard the pref-backed controls do not: the sidebar is built once per
+figure and cached for the life of the process — it is only ever *hidden* on a tab
+change — so each segment reads its state exactly once, while `view_state`
+`_apply_bar` writes the same fields on every dataset load and `restore_defaults`
+writes them again on a reset. *Error bars* and *Across* are covered already,
+because the plot cards write `use_sem` / `use_fov_replicates` too and the two
+were seen drifting, so both carry observers on `ctx.runtime.sem` /
+`ctx.runtime.fov`. *Show* and *Bar colours* have no other UI writer and therefore
+no observer, so `launch_export_editor` calls `_resync_plot_state_segments`
+alongside `_refresh_line_order_lists` on every open. This is not cosmetic:
+re-selecting the option a `SegmentedControl` already believes is current emits
+nothing, so a segment left showing the previous dataset's mode makes the click
+that would correct it a no-op until the user picks the other option first. The
+re-seed blocks signals — the widget is catching up with the state, not a user
+changing it — and moves the collapsed section's summary label with it.
+
+Both surfaces that draw these panels honour the mode, and they reach it two
+different ways. Three of the four draw paths resolve it themselves from their own
+`ctx`: `draw_violin`, `draw_beeswarm` and `draw_per_well_n_bars`, each one line.
+The fourth, the bar loop in `barplot/controller.render_bar_items`, cannot — the
+Batch Export bar panel calls it with `ctx=None` on purpose, because it does not
+want that function's other ctx-derived behaviour — so there the mode arrives as
+an explicit `bar_color` argument that each caller states.
+
+`tests/test_bar_render_callers_pass_color_mode.py` holds the mechanical half of
+that, and both of its rules are about a check that looks like it is working and
+is not. A call site must pass `bar_color=` **with a call to the resolver**, not
+merely the keyword: `bar_color=None` satisfies a presence check and silently
+reverts that surface to plate colours. A per-cell renderer must **bind** the
+result (`colors = apply_bar_color_mode(...)`), not merely call it: the function
+returns a new list and mutates nothing, so a bare expression statement is dead
+code, and ruff does not flag it because a call is not an unused value. Both
+shapes were found by dropping them into the tree and watching the whole suite
+stay green. `tests/test_bar_color_mode_per_cell.py` is the behavioural half —
+it drives the three per-cell renderers against a stubbed row-fetch and asserts
+on the colours of the artists they actually produce, so the renderers are not
+guarded by syntax alone.
 
 **Every registered figure needs a key.** `figure_pref_key` falls back to
 `f"fig:{id(fig)}"` for a figure it does not recognise, and that is a memory

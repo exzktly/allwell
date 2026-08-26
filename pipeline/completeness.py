@@ -41,7 +41,7 @@ from pipeline.incremental_keys import (
     read_done_fov_keys_from_zip,
 )
 
-#: The four states a well can be in, in the order a plate legend reads them.
+#: The five states a well can be in, in the order a plate legend reads them.
 #: Every surface that paints or labels well health imports this rather than
 #: writing its own copy — ``tests/test_no_second_completeness_predicate.py``
 #: fails on a second literal roster anywhere in the repo.

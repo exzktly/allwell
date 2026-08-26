@@ -365,6 +365,21 @@ cannot recognise as wells is still accepted and handed to the pipeline; the line
 says that nothing well-named was recognised, so a run that then finds no images
 has said why before it started.
 
+**A plate is read as archives or as folders, never as both.** If any `<WELL>.zip`
+is present the run reads the archives and does not look inside the per-well
+folders sitting beside them. A well that has a folder of images and *no* archive
+of its own would therefore be left out of the run entirely — so rather than
+analyse part of a plate and report success, the run refuses before it starts,
+naming each such well and its files. Fold those images into the matching archive,
+or move the archives aside so the whole plate runs in folder mode.
+
+A folder whose archive *does* exist is a different case and never stops the run:
+the archive is what gets read, and any file in the folder the archive does not
+carry is reported in the log as left on disk and not analysed. That is the
+ordinary state after Analyze folds a well's loose TIFs into its archive for you,
+since the fold deliberately leaves behind what is not an input image — an OME
+companion XML, an acquisition log, a stray `.DS_Store`.
+
 If your plate arrived as a **single packed OME-TIFF** (one `.ome.tif` holding
 every well, channel, Z-plane and timepoint), Analyze can't process it directly —
 convert it to a dataset folder first in the **Datasets tab → Convert OME-TIFF**
@@ -1006,9 +1021,15 @@ and by `remote_fetch_report.txt` in the output folder.
 the end of every run, holding one entry per well: how many
 `(field, timepoint)` groups its input held, how many its measurements CSV
 covers, how many the CSV and the output archive cover between them, which are
-missing, and whether that adds up to complete, partial, or images-with-no-
-measurements. It is written *after* the last well, which is why its presence
-means something on its own — the rest of `pipeline_info.json` is written before
+missing, and which of five states that adds up to: **complete** (every group
+accounted for, with both the measurements CSV and the output archive on disk),
+**partial** (some groups missing), **measurements with no output archive** (the
+numbers are whole, the archive they came from is gone), **images with no
+measurements** (the mirror case), and **no output at all**. The first and the
+last need nothing from you — one is finished, the other is a well the plate never
+produced — and the three in between are the shortfalls Home and **Validate &
+Repair** ask you to chase. It is written *after* the last well, which is why
+its presence means something on its own — the rest of `pipeline_info.json` is written before
 the first image is read, so a run that died in its first seconds still leaves
 that file behind looking perfectly normal.
 
@@ -1106,10 +1127,10 @@ What is on it:
 - **The plate.** One dot per well, coloured by what the run actually produced:
   complete (green), partial (amber, with an arc showing how much of it landed),
   failures recorded (red), images with no measurements behind them (blue — the
-  same colour the Datasets tools use to flag an odd well), staged but never
-  processed (grey). Those colours are the ones every other well map in the app
-  uses for the same things, so a colour you have learnt once reads the same
-  here. A well the record says nothing about — because no completeness check has
+  same colour the Datasets tools use to flag an odd well), measurements whose
+  output archive is gone (cyan), staged but never processed (grey). Those
+  colours are the ones every other well map in the app uses for the same
+  things, so a colour you have learnt once reads the same here. A well the record says nothing about — because no completeness check has
   been run, or because it produced nothing at all — is left plain, uncoloured:
   the legend beside the plate has a hollow swatch and a count for it, and the
   well's tooltip says which of the two it is. Every colour on the plate has a
@@ -1118,6 +1139,14 @@ What is on it:
   not navigate, so you can pick several. Hovering one says what its numbers are.
   There is no All / Invert / Clear row here, unlike the plate in the rail: those
   act on what gets plotted, and nothing on this page plots.
+
+  The cyan state is the one worth learning, because nothing about the numbers
+  looks wrong: the well's measurements are whole, but the `<well>_out.zip` they
+  were derived from is no longer on disk. The masks and corrected frames went
+  with it, so those rows cannot be reviewed as images, re-gated or
+  re-thresholded. It gets a colour of its own rather than reading as complete
+  precisely because a plate of them would otherwise summarise as a finished
+  plate. Re-running that well restores it.
 - **Notes.** The project notes, and the only place they are edited. Type and
   click away; it saves on its own. Whatever the numbers will not tell you in six months
   belongs here — which plate had the incubator alarm, which columns were
@@ -1352,21 +1381,10 @@ show stay in the group.
 #### Well Labels
 
 Give wells / groups human-readable names; these show in every plot legend
-instead of the raw well token. On screen the Line Graphs legend names the first
-twelve traces and ends with a row saying how many it did not list — a legend
-with one entry per well of a full plate overruns the panel it is meant to
-annotate, and drawing it was slower than drawing all of the data. Every trace is
-still plotted. The same applies to the cumulative-distribution panel, which is
-drawn from a sample of each well's cells on screen; the cell count printed beside
-each curve is always the well's real one.
-
-**Exporting repaints the figure at full detail first**, so a saved image, a
-copied vector, a plot filed in Saved Plots and a batch export all name every
-trace and draw every cell — from Line Graphs' own Export menu as well as from the
-Batch Export tab. The two screen shortcuts are for the panel on your monitor, not
-for the file. You may notice the plot flicker as it redraws during an export;
-that is the full-detail repaint and it goes back to the screen version
-afterwards. **Add Prefix** and **Add Suffix** apply to the
+instead of the raw well token. A label set here is what every legend names,
+[Line Graphs](#line-graphs)' included — where the on-screen legend stops after
+twelve traces and says how many it left out. **Add Prefix** and **Add Suffix**
+apply to the
 wells currently selected on the plate beside the tab.
 
 Labels are stored with the dataset, and editing one on a load that holds only
@@ -1855,7 +1873,7 @@ of individual cells. This is the default Plotting sub-tab.
     (violin) or every individual cell (beeswarm). **Smooth** is active only
     when Violin is on and tunes the KDE bandwidth.
   - **Significance** (On / Off) — draw pairwise significance brackets from the
-    comparisons the [Statistics](#statistics) tab last ran. A bracket appears
+    comparisons the [Statistics](#statistics) tab has run. A bracket appears
     over the two bars its comparison was computed from, whether those bars are
     replicate sets or individual wells — a group holding a single well brackets
     that well's own bar.
@@ -1868,14 +1886,24 @@ of individual cells. This is the default Plotting sub-tab.
     tab's selectors sets up the *next* test and leaves the stored ones alone —
     the results panel clears, because it shows one run at a time.
 
-    Brackets are drawn only while the comparison still describes what the bars
+    A bracket is drawn only where a stored comparison describes what the bars
     show. The Statistics tab carries its own **Channel**, **Property** and
-    **Timepoint** selectors, separate from the Plotting band's, so a test run on
-    one column can easily end up being looked at over another's bars — and a
+    **Timepoint** selectors, separate from the Plotting band's, so what you are
+    looking at and what you last tested drift apart in ordinary use — and a
     comparison drawn over data it wasn't computed from would be worse than no
-    comparison at all. So the brackets are withheld when the test was run on a
-    different channel or metric than the bars show, at a different timepoint,
-    or when a compared group doesn't line up with any single bar.
+    comparison at all. So the panel asks the store for the runs whose channel,
+    metric and timepoint fit the bars in front of it, rather than checking
+    whichever run happened to be the most recent: switching the plot to another
+    channel shows that channel's own comparison, not none.
+
+    Nothing is drawn when that lookup comes back empty — no comparison stored on
+    this channel (the note names the measures the store does hold), none at this
+    timepoint (it names the timepoints it has), or none at all. Nor when a
+    comparison is found but cannot be placed: a group spread across several bars
+    has no single bar to sit over, and the note suggests pooling replicates so
+    each compared group is one bar. A Fraction test looked at on a figure with no
+    Fraction panel, and a build with the Statistics feature left out, say so in
+    the same way.
 
     **Violin**, **Beeswarm** and Properties → Statistics → **Show: All points**
     draw per-cell points instead of bars, so there is no bar for a bracket to
@@ -1885,9 +1913,9 @@ of individual cells. This is the default Plotting sub-tab.
     same plot.
 
     **Whenever they are withheld, the panel says why**, in small type in its
-    top-left corner — naming the tested channel and the drawn one, the tested
-    timepoint and the drawn one, or the per-cell mode that is on, so you can see
-    which control to move. It is on the figure rather than in the status line so that it cannot outlive the thing it describes — it is redrawn with the plot, so if the note is there the reason is true right now. The note is part of the
+    top-left corner — naming the measures the store holds against the one the
+    bars show, the timepoints it has against the one drawn, or the per-cell mode
+    that is on, so you can see which control to move. It is on the figure rather than in the status line so that it cannot outlive the thing it describes — it is redrawn with the plot, so if the note is there the reason is true right now. The note is part of the
     figure, so a copied or exported plot carries it too: a plot with no
     asterisks never leaves you guessing whether a comparison was withheld or
     simply never run. With **Significance** off, nothing is drawn and nothing is
@@ -1936,6 +1964,22 @@ still exported (see below).
 - **Optimal use** — turn on FOV spread when you have several fields per well
   and want the error band to reflect field-to-field variability; normalize vs
   **t0** to collapse every curve to a shared start of 1.0 for shape comparison.
+- **What the screen draws, and what a file gets.** Two shortcuts keep a
+  full-plate selection responsive, and both are screen-only. Each panel's legend
+  names the first twelve traces and ends with a row saying how many it did not
+  list — a legend with one entry per well of a 96-well plate overruns the panel
+  it is meant to annotate, and drawing it costs more than drawing all of the
+  data. Every trace is still plotted, and hiding one is still the way to read a
+  crowded plot. The CDF panel is drawn from a sample of each well's cells rather
+  than all of them; the count printed beside each curve is always the well's real
+  one, never the sample's.
+
+  **Exporting repaints the figure at full detail first**, so a saved image, a
+  copied vector, a plot filed in Saved Plots and a batch export all name every
+  trace and draw every cell — from this tab's own **Save ▾** menu as much as from
+  the Batch Export tab. You may notice the plot flicker as it redraws during an
+  export; that is the full-detail repaint, and the screen version comes back
+  afterwards.
 - **When a spread can't be computed** — a bar or band with only one replicate
   has no spread to show. That is *not* zero, and the app no longer draws it as
   though it were: the bar carries a small **`n/a`** marker, and the exported CSV

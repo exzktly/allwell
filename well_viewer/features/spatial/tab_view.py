@@ -54,7 +54,7 @@ _LEVEL_TOOLTIP = (
     "(distance to centroid, distance to hull edge, boundary/interior flag).\n"
     "• Summary — one scalar per (well, timepoint) frame across the "
     "current well selection. Gross cross-condition comparison, not a "
-    "single-frame view. Export CSV writes one row per (well, timepoint)."
+    "single-frame view. Save summary data… writes one row per (well, timepoint)."
 )
 
 _VIZ_LABELS = {
@@ -106,7 +106,7 @@ _VIZ_TOOLTIPS = {
         "colony count, mean colony size, packing density, ICC, …) walked "
         "across the current well selection and every loaded timepoint. Pick "
         "Heatmap for a wells × timepoints matrix or Line plot for one series "
-        "per well. Export CSV writes one long-format row per (well, timepoint) "
+        "per well. Save summary data… writes one long-format row per (well, timepoint) "
         "with every summary column at once.",
 }
 

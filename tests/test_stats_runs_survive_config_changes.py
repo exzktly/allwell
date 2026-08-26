@@ -129,6 +129,34 @@ def test_two_comparisons_coexist(qtbot):
     assert ctx.state.stats.runs_matching("cy5_mean_intensity", [24.0])
 
 
+def test_a_rounded_timepoint_re_runs_the_same_comparison(qtbot):
+    """A combo formats timepoints with ``:.4g``, so the timepoint that comes
+    back out of the widget is a few parts in 1e5 off the float that went in.
+    Under exact-match replacement the second run of one comparison keyed as a
+    *different* comparison — and since the lookup matches within tolerance,
+    both then matched and every bracket was drawn twice."""
+    ctx, _emitted = _ctx({})
+    ctx.state.stats.runs.clear()
+    ctx.state.stats.record_run([{**RUN[0], "target_t": 2 / 3}])
+    # The same timepoint, after a round trip through the combo's text.
+    ctx.state.stats.record_run([{**RUN[0], "target_t": float(f"{2 / 3:.4g}")}])
+
+    assert len(ctx.state.stats.runs) == 1
+    assert len(ctx.state.stats.runs_matching("gfp_mean_intensity", [2 / 3])) == 1
+
+
+def test_two_timepoints_apart_are_still_two_comparisons(qtbot):
+    """The counterpart: collapsing on tolerance must not collapse timepoints a
+    plate can actually tell apart."""
+    ctx, _emitted = _ctx({})
+    ctx.state.stats.runs.clear()
+    ctx.state.stats.record_run([{**RUN[0], "target_t": 24.0}])
+    ctx.state.stats.record_run([{**RUN[0], "target_t": 48.0}])
+
+    assert len(ctx.state.stats.runs) == 2
+    assert len(ctx.state.stats.runs_matching("gfp_mean_intensity", [24.0])) == 1
+
+
 # ── a repopulate is not a change ────────────────────────────────────────────
 
 def _tp_menu_ctx(qtbot, monkeypatch, timepoints, *, current=None):

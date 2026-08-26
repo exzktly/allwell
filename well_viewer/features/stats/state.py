@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from well_viewer.domain.batch_models import BarGroup
+from well_viewer.domain.tp_match import tp_close
 
 
 @dataclass
@@ -91,7 +92,11 @@ class StatsState:
 
         Re-running the same configuration replaces that key's records rather
         than accumulating them — a second run of one comparison is a correction,
-        not a second comparison.
+        not a second comparison. "The same configuration" is decided with the
+        tolerance the lookup uses, not with float equality: a timepoint that
+        round-trips through a combo's ``:.4g`` comes back a few parts in 1e5
+        off, so an exact-match replacement would leave both spellings stored,
+        both matching, and the figure carrying every bracket twice.
 
         Records with no context (older saved plots, hand-built fixtures) cannot
         be keyed and are kept under ``None``: dropping them would silently lose
@@ -104,9 +109,21 @@ class StatsState:
         # Re-inserting moves the key to the end, which is what makes "the last
         # value" mean "the most recent run" rather than "the earliest one that
         # has since been re-run".
-        self.runs.pop(key, None)
+        for stale in [k for k in self.runs if self._same_run(k, key)]:
+            self.runs.pop(stale, None)
         self.runs[key] = records
         return key
+
+    @staticmethod
+    def _same_run(a: tuple | None, b: tuple | None) -> bool:
+        """Whether two keys name the one configuration, timepoints included."""
+        if a is None or b is None:
+            return a is b
+        if a[0] != b[0] or a[2] != b[2]:
+            return False
+        if a[1] is None or b[1] is None:
+            return a[1] is b[1]
+        return tp_close(a[1], b[1])
 
     def runs_matching(self, val_col: str, target_ts=None) -> list:
         """Every stored run drawable over bars of *val_col* at *target_ts*.
@@ -122,7 +139,7 @@ class StatsState:
         wanted = []
         for t in (target_ts or []):
             try:
-                wanted.append(round(float(t), 6))
+                wanted.append(float(t))
             except (TypeError, ValueError):
                 continue
         out = []
@@ -134,7 +151,7 @@ class StatsState:
             if col != want_col:
                 continue
             if tp is not None and wanted and not any(
-                    abs(tp - w) <= 1e-6 for w in wanted):
+                    tp_close(tp, w) for w in wanted):
                 continue
             out.append(records)
         return out

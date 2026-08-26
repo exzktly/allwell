@@ -222,3 +222,28 @@ def stop_runtime_workers(runtime, slice_name: str, attrs, *, wait_ms: int = 250)
         except Exception:
             log.debug("teardown: could not clear %s.%s",
                       slice_name, attr, exc_info=True)
+
+
+def stop_runtime_callable(runtime, slice_name: str, attr: str) -> None:
+    """Call a stopper a feature parked on its runtime slice, if it left one.
+
+    The sibling of :func:`stop_runtime_workers` for a background job that is
+    not a ``QThread`` — the per-cell export's writer runs on a plain daemon
+    thread, and stopping it means setting an event *and* putting a sentinel on
+    a queue, which only the feature knows how to do. So the feature registers a
+    stopper while it runs and teardown calls it through the runtime, which is
+    what keeps core from naming a feature to reach it.
+
+    Absent stopper, absent slice and a raising stopper are all non-events: a
+    build without the feature simply finds nothing to call, and a teardown step
+    that fails must not stop the ones after it.
+    """
+    slice_ = getattr(runtime, slice_name, None) if runtime is not None else None
+    stop = getattr(slice_, attr, None) if slice_ is not None else None
+    if stop is None:
+        return
+    try:
+        stop()
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "teardown: %s.%s stopper failed", slice_name, attr, exc_info=True)

@@ -178,7 +178,7 @@ from well_viewer.core.tab_controller import on_central_pane_changed, build_centr
 from well_viewer.core.ui_helpers import apply_theme, mute_color, norm_timepoint, toast, show_progress, step_progress, toggle_log
 from well_viewer.core.centre_view import drain_pending_centre_builders
 from well_viewer.core.plot_toggles import toggle_sem, toggle_fov_replicates, refresh_fov_btn_state
-from well_viewer.core.worker_bridge import stop_runtime_workers
+from well_viewer.core.worker_bridge import stop_runtime_callable, stop_runtime_workers
 
 
 def teardown_review_pane(app) -> None:
@@ -213,16 +213,9 @@ def teardown_review_pane(app) -> None:
     # running against a pane being destroyed (the inclusion pass writes
     # ``Included`` flags onto the row cache as it goes).
     stop_runtime_workers(runtime, "cell_gating", ("worker", "auto_worker"))
-    # A per-cell export streams into a temp file beside the user's destination
-    # and only renames it at the end, so a writer killed at interpreter exit
-    # leaves that temp behind — in the folder they picked, hidden. Cancelling
-    # here lets it unwind through its own cleanup instead.
-    if ctx is not None:
-        try:
-            from well_viewer.features.export.service import cancel_cell_export
-            cancel_cell_export(ctx)
-        except Exception:
-            _logger.debug("teardown: cell-export cancel failed", exc_info=True)
+    # A per-cell export renames its temp file only at the end, so a writer
+    # killed at exit leaves that temp hidden in the user's own folder.
+    stop_runtime_callable(runtime, "export", "cell_stop")
     try:
         from well_viewer.core.split_view import _remove_split_focus_filter
         _remove_split_focus_filter(app._ctx)

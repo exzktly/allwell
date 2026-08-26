@@ -1113,6 +1113,7 @@ def export_cell_data(ctx, scope) -> None:
         ctx.runtime.export.cell_queue = None
         ctx.runtime.export.cell_bridge = None
         ctx.runtime.export.cell_writer = None
+        ctx.runtime.export.cell_stop = None
 
     def _abort(message: str) -> None:
         cancel.set()
@@ -1198,6 +1199,10 @@ def export_cell_data(ctx, scope) -> None:
     ctx.runtime.export.cell_bridge = run_off_thread(
         writer, on_done=_on_done, on_failed=_on_failed, on_progress=_on_progress)
     ctx.runtime.export.cell_writer = writer
+    # The Review pane's teardown reaches the cancel through this rather than by
+    # importing the service — core must not name a feature, and a stopper the
+    # feature registers while it runs is the seam that keeps it from having to.
+    ctx.runtime.export.cell_stop = lambda: cancel_cell_export(ctx)
     ctx.notify.set_status(f"Saving cell data for {len(wells)} well(s)…")
     QTimer.singleShot(0, _tick)
 
@@ -1229,6 +1234,7 @@ def cancel_cell_export(ctx) -> None:
     ctx.runtime.export.cell_cancel = None
     ctx.runtime.export.cell_queue = None
     ctx.runtime.export.cell_writer = None
+    ctx.runtime.export.cell_stop = None
 
 
 def export_cell_data_from(ctx, scope_fn, *, unavailable: str = "") -> None:

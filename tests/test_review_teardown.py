@@ -43,12 +43,18 @@ def test_teardown_cancels_a_running_cell_export():
 
     from well_viewer.features.export.worker import DONE
 
+    from well_viewer.features.export.service import cancel_cell_export
+
     ev = threading.Event()
     chunks: queue.Queue = queue.Queue(maxsize=2)
     rt = AppRuntime()
+    ctx = types.SimpleNamespace(runtime=rt)
     rt.export.cell_cancel = ev
     rt.export.cell_queue = chunks
-    app = types.SimpleNamespace(_ctx=types.SimpleNamespace(runtime=rt))
+    # Registered by ``export_cell_data`` while a run is in flight; teardown
+    # reaches it through the runtime rather than importing the feature.
+    rt.export.cell_stop = lambda: cancel_cell_export(ctx)
+    app = types.SimpleNamespace(_ctx=ctx)
 
     teardown_review_pane(app)
 

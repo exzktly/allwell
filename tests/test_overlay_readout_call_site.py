@@ -24,13 +24,14 @@ from __future__ import annotations
 import ast
 
 from tests._repo_scan import REPO_ROOT
+from tests._repo_scan import parse_source
 
 _MODULE = (REPO_ROOT / "well_viewer" / "features" / "image_browser"
            / "image_table" / "controller.py")
 
 
 def _calls() -> list[ast.Call]:
-    tree = ast.parse(_MODULE.read_text(encoding="utf-8"))
+    tree = parse_source(_MODULE)
     return [
         n for n in ast.walk(tree)
         if isinstance(n, ast.Call)

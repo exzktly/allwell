@@ -17,6 +17,7 @@ import ast
 import pathlib
 
 import pytest
+from tests._repo_scan import parse_source
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 FEATURES = REPO_ROOT / "well_viewer" / "features"
@@ -46,7 +47,7 @@ def _callee(call) -> str:
 
 @pytest.mark.parametrize("relative", PLOT_TAB_VIEWS)
 def test_every_plot_tab_builds_its_save_menu_through_the_builder(relative):
-    tree = ast.parse((FEATURES / relative).read_text())
+    tree = parse_source((FEATURES / relative))
     assert _calls(tree, "build_plot_save_menu"), (
         f"{relative} does not call build_plot_save_menu. Assembling the menu by "
         "hand is how the eight tabs drifted apart, and how one of them would "
@@ -56,7 +57,7 @@ def test_every_plot_tab_builds_its_save_menu_through_the_builder(relative):
 
 @pytest.mark.parametrize("relative", PLOT_TAB_VIEWS)
 def test_every_plot_tab_offers_the_raw_cells(relative):
-    tree = ast.parse((FEATURES / relative).read_text())
+    tree = parse_source((FEATURES / relative))
     for call in _calls(tree, "build_plot_save_menu"):
         names = {kw.arg for kw in call.keywords}
         assert "cells_cb" in names, (
@@ -74,7 +75,7 @@ def test_no_plot_tab_still_hand_rolls_an_export_menu(relative):
     so ``make_action_menu_button("Save", …)`` renders identically to
     ``"Save ▾"`` and a scan for the caret alone would be trivially evaded.
     """
-    tree = ast.parse((FEATURES / relative).read_text())
+    tree = parse_source((FEATURES / relative))
     for call in _calls(tree, "make_action_menu_button"):
         if not call.args:
             continue
@@ -101,7 +102,7 @@ def test_no_plot_tab_still_describes_the_retired_export_button(relative):
 
     So this reads every string constant in the tab, not just the labelled ones.
     """
-    tree = ast.parse((FEATURES / relative).read_text())
+    tree = parse_source((FEATURES / relative))
     offenders = [
         node.value for node in ast.walk(tree)
         if isinstance(node, ast.Constant) and isinstance(node.value, str)
@@ -133,7 +134,7 @@ def test_the_menu_reads_as_one_vocabulary():
     """One verb, and no leftover "Export" inside a menu the button calls Save."""
     from well_viewer.core import ui_helpers
 
-    tree = ast.parse(pathlib.Path(ui_helpers.__file__).read_text())
+    tree = parse_source(pathlib.Path(ui_helpers.__file__))
     builder = next(n for n in ast.walk(tree)
                    if isinstance(n, ast.FunctionDef)
                    and n.name == "build_plot_save_menu")

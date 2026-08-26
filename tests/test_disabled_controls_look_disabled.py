@@ -116,13 +116,12 @@ def _stylesheet():
     applied, and every case here reads it the same way.
 
     Module-scoped because ``QApplication.setStyleSheet`` re-polishes every live
-    widget in the process, and the fast lane keeps every widget any earlier test
-    built (ARCHITECTURE.md §10.4 — the Qt/Python reference web is never
-    reclaimed in-process). Late in the run one call costs tens of seconds, so
-    installing the sheet per test rather than per module multiplied that by the
-    case count. Every other file that installs the app sheet
-    (``test_theme_roles_render.py``, ``test_control_band_widget.py``) scopes it
-    the same way, for the same reason.
+    widget in the process. That set no longer grows without bound — an autouse
+    fixture reaps the top-level widgets each test leaves behind
+    (ARCHITECTURE.md §10.4) — so the call now costs a fraction of a second
+    rather than the tens of seconds it did when the lane kept everything it had
+    ever built. Once per module is still the right scope: the cost is real, and
+    every case here wants the same sheet.
     """
     QApplication.instance().setStyleSheet(theme.qss())
 

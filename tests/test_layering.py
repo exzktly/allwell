@@ -15,6 +15,7 @@ sanctioned escape hatch for a genuine, isolated cycle break.
 
 import ast
 from pathlib import Path
+from tests._repo_scan import parse_source
 
 ROOT = Path(__file__).resolve().parent.parent / "well_viewer"
 GUARDED_LAYERS = ("domain", "data", "persistence")
@@ -46,7 +47,7 @@ def test_foundational_layers_do_not_import_features():
         for path in sorted((ROOT / layer).rglob("*.py")):
             if "__pycache__" in path.parts:
                 continue
-            tree = ast.parse(path.read_text(), filename=str(path))
+            tree = parse_source(path)
             for node in _module_level_imports(tree):
                 if _imports_feature(node):
                     target = (

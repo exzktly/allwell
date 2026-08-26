@@ -18,13 +18,14 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from tests._repo_scan import parse_source
 
 _HEATMAP_DIR = Path(__file__).resolve().parents[1] / "well_viewer" / "features" / "heatmap"
 
 
 def _module_ast(name: str) -> ast.Module:
     path = _HEATMAP_DIR / name
-    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return parse_source(path)
 
 
 def _function(tree: ast.Module, name: str) -> ast.FunctionDef:

@@ -38,6 +38,7 @@ from __future__ import annotations
 import ast
 
 from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_source
 
 # Every application source file, from the one shared definition. A guard that
 # names its own roots goes blind exactly where another can see: this one named
@@ -123,7 +124,7 @@ def test_no_unnamed_divider_frames():
         rel_path = rel(path)
         if rel_path in ALLOWLIST:
             continue
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
 
         # A receiver is "named" if it is named anywhere in the same enclosing
         # function (or at module level) — the two calls are usually adjacent but

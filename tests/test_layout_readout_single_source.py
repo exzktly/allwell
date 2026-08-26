@@ -26,6 +26,7 @@ from __future__ import annotations
 import ast
 
 from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_source
 
 #: The label under the Analyze input field, whose text is the layout verdict.
 LAYOUT_LABEL = "_layout_lbl"
@@ -75,7 +76,7 @@ def test_the_layout_readout_is_not_written_in_the_gui():
     offenders: list[str] = []
     for path in python_sources():
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            tree = parse_source(path)
         except (OSError, SyntaxError):
             continue
         for call in _layout_label_writes(tree):

@@ -29,6 +29,7 @@ from __future__ import annotations
 import ast
 
 from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_source
 
 
 #: The raw per-channel accessors. Reaching one of these directly decides for
@@ -134,7 +135,7 @@ def _references() -> list[tuple[str, str, int]]:
     out: list[tuple[str, str, int]] = []
     for path in python_sources():
         try:
-            tree = ast.parse(path.read_text())
+            tree = parse_source(path)
         except SyntaxError:            # pragma: no cover - not our concern here
             continue
         path_str = rel(path)
@@ -177,7 +178,7 @@ def test_guarded_names_are_real():
     defined: set[str] = set()
     for path in python_sources():
         try:
-            tree = ast.parse(path.read_text())
+            tree = parse_source(path)
         except SyntaxError:            # pragma: no cover - not our concern here
             continue
         for node in ast.walk(tree):

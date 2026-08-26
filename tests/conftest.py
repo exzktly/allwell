@@ -504,6 +504,227 @@ def loaded_app_multifov(viewer_app, mini_dataset_multifov):
     return viewer_app
 
 
+# ── No real network tools ────────────────────────────────────────────────────
+
+#: Binaries that reach another host. A fast-lane test that spawns one either
+#: hangs on a connect timeout or sits through the transfer layer's retry
+#: backoff, and on a machine with the binary present it is a test going to the
+#: network. Sixteen fast-lane tests did, against host aliases (``h``,
+#: ``test-host``) that exist nowhere. Four of them cost 14.0 s apiece:
+#: ``_rsync_with_retry`` treats the spawn failing as transient and makes three
+#: attempts with 2 + 4 + 8 s of ``time.sleep`` between them, so the price is
+#: the same whether the host is unreachable or ``rsync`` is not installed.
+_NETWORK_BINARIES = frozenset({"rsync", "ssh", "scp", "sftp"})
+
+
+class NetworkToolInTest(BaseException):
+    """A test spawned a real network binary. See ``_no_real_network_tools``.
+
+    Derived from ``BaseException`` rather than ``Exception`` on purpose. The
+    transfer layer is built to survive a flaky network, so it catches broadly
+    and retries: ``_rsync_with_retry`` swallows ``OSError`` and loops, and
+    ``pull_small_file`` answers ``False`` for every failure by design. A guard
+    the code under test is engineered to absorb reports nothing and changes
+    nothing, which is worse than no guard at all.
+    """
+
+
+@pytest.fixture(autouse=True)
+def _no_real_network_tools(monkeypatch):
+    """Fail a test that shells out to ``rsync`` / ``ssh`` / ``scp`` / ``sftp``.
+
+    The remote layer's tests drive real code paths with the transport mocked
+    at one seam or another, and it is easy to leave a second seam open: the
+    settings-marker pull and the CSV listing are both a level below the
+    ``Fetcher._rsync`` / ``_rsync_glob`` methods the tests patch, so they went
+    to the real binaries. That is slow, and it is a test reaching the network
+    from CI — patch the seam the code actually uses instead.
+
+    Hooked at ``Popen.__init__`` rather than on ``subprocess.run``, because
+    ``run``, ``check_output`` and ``check_call`` all construct a ``Popen``, and
+    a module that did ``from subprocess import run`` would slip past a patch on
+    the attribute. Spawning anything else — the interpreter itself, a shell —
+    is untouched.
+    """
+    import subprocess
+
+    original = subprocess.Popen.__init__
+
+    def guarded(self, args, *rest, **kwargs):
+        argv = args
+        if isinstance(argv, (str, bytes, os.PathLike)):
+            argv = [argv]
+        name = os.path.basename(os.fsdecode(argv[0])) if argv else ""
+        # `rsync --version` is how `resolve_rsync_binary` finds a usable
+        # binary. It is local, it is instant, and it reaches nobody.
+        probe = [os.fsdecode(a) for a in argv[1:]] == ["--version"]
+        if name in _NETWORK_BINARIES and not probe:
+            raise NetworkToolInTest(
+                f"this test spawned {name!r}, which reaches another host. It "
+                "will hang on a connect timeout or sit through the transfer "
+                "layer's retry backoff, and in CI it is a test going to the "
+                "network. Patch the seam the code under test calls — "
+                "`Fetcher._pull_settings_marker`, `Fetcher._list_remote_glob`, "
+                "`services.remote_transport.pull_small_file` — rather than "
+                "letting the call reach the binary "
+                "(see tests/conftest.py::_no_real_network_tools). "
+                f"argv: {list(argv)!r}")
+        return original(self, args, *rest, **kwargs)
+
+    monkeypatch.setattr(subprocess.Popen, "__init__", guarded)
+
+
+@pytest.fixture
+def offline_transport(monkeypatch):
+    """Answer the remote layer's ssh/rsync primitives as an unreachable host.
+
+    The remote tests drive real ``RemoteRunner`` / ``Fetcher`` code with the
+    transport patched one seam at a time, and the seams below the patched one
+    went to the binaries: ``_verify_local_manifest`` lists the remote's
+    completed wells over ssh, and ``_fetch_one`` pulls a settings marker with
+    rsync. Sixteen fast-lane tests reached the network that way, and the four
+    that reached ``rsync`` paid the transfer layer's 2 + 4 + 8 s retry backoff
+    for it — 56 s of the lane.
+
+    What they got from those calls was a failure, because there is no host
+    called ``h`` or ``test-host``; this states that answer instead of
+    discovering it. A test that needs a *successful* remote answer patches the
+    same seam itself, and its patch wins over this one.
+
+    Modules opt in with ``pytestmark = pytest.mark.usefixtures(...)`` rather
+    than this being autouse, so a test that means to exercise the real binary
+    against a real host still can.
+    """
+    import subprocess
+
+    from services import remote_runner, remote_transport
+
+    def unreachable_script(self, script: str, *, check: bool):
+        cmd = ["ssh", "<offline in tests>"]
+        if check:
+            raise subprocess.CalledProcessError(255, cmd, "", _OFFLINE_STDERR)
+        return subprocess.CompletedProcess(cmd, 255, "", _OFFLINE_STDERR)
+
+    monkeypatch.setattr(remote_runner.DatasetCache, "_ssh_script",
+                        unreachable_script)
+    # The Fetcher's CSV listing runs its own ssh rather than going through
+    # `DatasetCache`, so patching the one above does not cover it. A `None`
+    # total is the documented "the size is unknown, so draw no dial" answer —
+    # the same thing a failed listing produces.
+    monkeypatch.setattr(remote_runner.Fetcher, "_list_remote_glob",
+                        lambda self, src_glob: (src_glob.split(":", 1)[0], [], None))
+
+    # `pull_small_file` answers False for every failure by design — that is
+    # already the documented shape of "the file did not come back".
+    monkeypatch.setattr(remote_transport, "pull_small_file",
+                        lambda *a, **k: False)
+    # `remote_runner` imports the name, so it holds its own reference and the
+    # patch above does not reach the Fetcher's call. Both are set: the one the
+    # caller under test actually reads, and the definition, so a module that
+    # starts importing it later is covered too.
+    monkeypatch.setattr(remote_runner, "pull_small_file",
+                        lambda *a, **k: False)
+
+
+#: What ssh prints when the alias does not resolve. The tests that used to
+#: spawn it really did get this.
+_OFFLINE_STDERR = "ssh: Could not resolve hostname: Name or service not known"
+
+
+# ── Widget reaping ───────────────────────────────────────────────────────────
+
+def _cpp_id(widget) -> int | None:
+    """Address of a widget's C++ object, or ``None`` if it has already gone.
+
+    Identity has to come from the C++ side. A ``QWidget`` whose C++ half has
+    been deleted still has a live Python wrapper, and calling anything on that
+    wrapper — including ``id()``'s neighbours like ``==`` — is what raises
+    ``RuntimeError: Internal C++ object already deleted``. The address is
+    stable for the object's lifetime and is safe to read while it lives.
+    """
+    import shiboken6
+
+    if not shiboken6.isValid(widget):
+        return None
+    return shiboken6.getCppPointer(widget)[0]
+
+
+@pytest.fixture(autouse=True)
+def _reap_widgets_the_test_created(request):
+    """Delete the top-level widgets a test leaves behind, when the test ends.
+
+    Nothing in Qt reclaims them. A ``QWidget`` with no parent is owned by the
+    application, and the fast lane runs in one process, so every widget every
+    test has ever built is still alive, still registered with the
+    ``QApplication``, and still matched against the style sheet. Measured on
+    the forty ``tests/test_a*.py`` files alone: 93,446 live widgets by the end
+    of them, 2,425 of those top-level.
+
+    That number is not merely untidy, it is the lane's largest single cost.
+    ``QApplication.setStyleSheet`` re-polishes every live widget in the
+    process, so the five files that install the app sheet paid for the whole
+    accumulated population each time they did it — 73 s, 63 s, 35 s, 35 s and
+    9 s of setup, for fixtures that cost between 0.03 s and 0.93 s when their
+    files are run on their own. Reaping brings the same call back to 0.2 s and
+    takes about five minutes off the lane.
+
+    **Only widgets the test itself created are reaped.** The snapshot is taken
+    when this fixture is set up, which — because pytest instantiates
+    higher-scoped fixtures first — is after any session-, module- or
+    class-scoped fixture has built its widgets. Those survive, as they must:
+    a module-scoped ``AnalyzeTab`` shared by seven tests is deleted out from
+    under the second one otherwise, and the failure reads
+    ``RuntimeError: Internal C++ object (QScrollArea) already deleted`` from a
+    line that never touched it.
+
+    The deletion is immediate (``shiboken6.delete``) rather than deferred
+    (``QWidget.deleteLater``). ``deleteLater`` posts an event that only an
+    event loop delivers, and the lane runs almost entirely without one, so the
+    widgets would simply queue up instead — which is the state this fixture
+    exists to end.
+
+    This runs for every test, including the pure-logic ones: without PySide6
+    installed, or before any test has needed a ``QApplication``, it does
+    nothing at all.
+    """
+    if request.node.get_closest_marker("slow") is not None:
+        # Never the full-app tests. Their `WellViewerApp` is the object web
+        # §10.4 describes — ~1,800 QObjects wired to each other by
+        # signal→bound-method connections, closures holding `app`, and children
+        # keeping an `_app` back-reference — and deleting its top-levels out
+        # from under all of that segfaults the interpreter during teardown,
+        # after the tests themselves have passed. The lane those run in is
+        # short-lived processes precisely because the leak cannot be undone
+        # in-process; this fixture is for the fast lane's standalone widgets.
+        yield
+        return
+
+    try:
+        from PySide6.QtWidgets import QApplication
+    except ImportError:      # pragma: no cover - no Qt in this environment
+        yield
+        return
+
+    app = QApplication.instance()
+    before = frozenset() if app is None else frozenset(
+        addr for addr in (_cpp_id(w) for w in app.topLevelWidgets())
+        if addr is not None)
+
+    yield
+
+    import shiboken6
+
+    # Re-read the instance: a test may have been the one to create it.
+    app = QApplication.instance()
+    if app is None:
+        return
+    for widget in list(app.topLevelWidgets()):
+        addr = _cpp_id(widget)
+        if addr is None or addr in before:
+            continue
+        shiboken6.delete(widget)
+
+
 def pytest_collection_modifyitems(config, items):
     """Auto-mark full-app Qt tests ``slow``.
 

@@ -24,6 +24,7 @@ from __future__ import annotations
 import ast
 
 from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_source
 
 #: The two fields. Named as strings because that is how the scan sees them.
 FIELDS = ("time_scale", "time_offset")
@@ -51,7 +52,7 @@ def _offenders() -> list[str]:
         if name in ALLOWED:
             continue
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            tree = parse_source(path)
         except (SyntaxError, UnicodeDecodeError):  # pragma: no cover - not ours
             continue
         for node in ast.walk(tree):

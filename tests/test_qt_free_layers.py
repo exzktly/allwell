@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from tests._repo_scan import parse_source
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 QT_ROOTS = {"PySide6", "PyQt5", "PyQt6", "shiboken6"}
@@ -84,7 +85,7 @@ def test_qt_free_layers_import_no_qt():
             rel = path.relative_to(REPO_ROOT).as_posix()
             if rel in ALLOWLIST:
                 continue
-            for node, top in _imports(ast.parse(path.read_text(), filename=str(path))):
+            for node, top in _imports(parse_source(path)):
                 if top in FORBIDDEN:
                     offenders.append(f"{rel}:{node.lineno} imports {top}  ({why})")
     assert not offenders, (
@@ -104,7 +105,7 @@ def test_the_allowlist_is_live():
         if not path.exists():
             stale.append(f"{rel} (no such file)")
             continue
-        tops = {top for _, top in _imports(ast.parse(path.read_text()))}
+        tops = {top for _, top in _imports(parse_source(path))}
         if not (tops & FORBIDDEN):
             stale.append(f"{rel} (imports no Qt any more — drop it from ALLOWLIST)")
     assert not stale, "stale Qt-free allowlist entries:\n  " + "\n  ".join(stale)
@@ -159,7 +160,7 @@ def _qt_path_from(start: str) -> list[str] | None:
         if f is None:
             continue
         try:
-            tree = ast.parse(f.read_text(), filename=str(f))
+            tree = parse_source(f)
         except SyntaxError:
             continue
         for imported in sorted(_module_scope_imports(tree)):

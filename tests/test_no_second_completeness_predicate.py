@@ -25,6 +25,7 @@ import ast
 
 from pipeline.completeness import HEALTH_STATES
 from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_source
 
 #: Below this many of the four names, a collection is something else — the
 #: `("complete", "Complete")` pairs a legend builds, or one state mentioned
@@ -38,7 +39,7 @@ def test_no_module_restates_the_dataset_health_roster():
         # The definition itself, and nothing else, is allowed to spell them out.
         if path.parts[-2:] == ("pipeline", "completeness.py"):
             continue
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         for node in ast.walk(tree):
             if not isinstance(node, (ast.Tuple, ast.List, ast.Set)):
                 continue

@@ -30,6 +30,7 @@ import pytest
 
 from tests._repo_scan import python_sources, rel
 from util.well_token import canonical_well_label, is_valid_well_name
+from tests._repo_scan import parse_source
 
 
 @pytest.mark.parametrize("raw, expected", [
@@ -120,7 +121,7 @@ def test_no_module_keeps_its_own_whole_token_well_regex():
     for path in python_sources():
         if path.name == "well_token.py":
             continue
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         # `re.match` anchors the start itself, so a pattern anchored only at the
         # END is a whole-token judge there — not the sanctioned trailing
         # extractor, which is what `re.search(r"…$")` is. Collect those calls

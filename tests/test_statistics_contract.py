@@ -31,6 +31,7 @@ from well_viewer.domain.fold_change import (
     scale_bar_value,
 )
 from well_viewer.domain.stats_compute import _reduce_reps
+from tests._repo_scan import parse_source
 
 # ``_as_finite`` and ``active_fluor_gates`` are imported inside the tests that
 # use them, not at module scope. Copied into a worktree of the base branch to
@@ -342,7 +343,7 @@ def _gate_filter_offenders(root: pathlib.Path) -> list[str]:
     """
     offenders: list[str] = []
     for path in sorted(root.rglob("*.py")):
-        tree = ast.parse(path.read_text())
+        tree = parse_source(path)
         for node in ast.walk(tree):
             if not isinstance(node, ast.For):
                 continue

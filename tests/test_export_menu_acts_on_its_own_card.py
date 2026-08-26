@@ -28,6 +28,7 @@ import inspect
 import pathlib
 
 import pytest
+from tests._repo_scan import parse_source
 
 _ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -49,14 +50,14 @@ _TAB_VIEWS = [
 
 
 def _builder_body() -> ast.FunctionDef:
-    tree = ast.parse((_ROOT / _BUILDER).read_text(), filename=_BUILDER)
+    tree = parse_source((_ROOT / _BUILDER))
     return next(n for n in ast.walk(tree)
                 if isinstance(n, ast.FunctionDef)
                 and n.name == "build_plot_save_menu")
 
 
 def _save_menu_calls(rel: str) -> list[ast.Call]:
-    tree = ast.parse((_ROOT / rel).read_text(), filename=rel)
+    tree = parse_source((_ROOT / rel))
     return [n for n in ast.walk(tree)
             if isinstance(n, ast.Call)
             and getattr(n.func, "id", "") == "build_plot_save_menu"]
@@ -107,7 +108,7 @@ def test_every_plot_tab_names_its_own_card(rel):
 @pytest.mark.parametrize("rel", _TAB_VIEWS)
 def test_no_tab_still_wires_a_card_action_by_hand(rel):
     """A tab reaching past the builder is how the three could disagree again."""
-    tree = ast.parse((_ROOT / rel).read_text(), filename=rel)
+    tree = parse_source((_ROOT / rel))
     stray = sorted({node.func.id for node in ast.walk(tree)
                     if isinstance(node, ast.Call)
                     and isinstance(node.func, ast.Name)

@@ -31,6 +31,7 @@ from __future__ import annotations
 import ast
 import re
 from tests._repo_scan import python_sources, rel as _rel
+from tests._repo_scan import parse_source
 
 
 _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -192,7 +193,7 @@ def _hex_offenders() -> list[str]:
             continue
         rel = _rel(path)
         whole_literals_exempt = rel in COLOUR_ALLOWLIST
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         docs = _docstring_nodes(tree)
         for node in ast.walk(tree):
             if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
@@ -228,7 +229,7 @@ def test_the_embedded_hex_allowlist_is_live():
         if path.name in _TOKEN_HOMES:
             continue
         rel = _rel(path)
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         docs = _docstring_nodes(tree)
         for node in ast.walk(tree):
             if (isinstance(node, ast.Constant) and isinstance(node.value, str)
@@ -247,7 +248,7 @@ def test_no_inline_pixel_sizes():
         if path.name in _TOKEN_HOMES:
             continue
         rel = _rel(path)
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         for node in ast.walk(tree):
             if (not isinstance(node, ast.Call)
                     or not isinstance(node.func, ast.Attribute)
@@ -278,7 +279,7 @@ def test_the_expression_allowlist_is_live():
     live = set()
     for path in python_sources():
         rel_path = _rel(path)
-        tree = _ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         for node in _ast.walk(tree):
             if (isinstance(node, _ast.Call) and isinstance(node.func, _ast.Attribute)
                     and node.func.attr in PIXEL_SETTERS):

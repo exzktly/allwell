@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from tests._repo_scan import parse_source
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATASETS = REPO_ROOT / "datasets"
@@ -48,7 +49,7 @@ def test_no_tool_imports_another_tool():
         for path in sorted(pkg.rglob("*.py")):
             if "__pycache__" in path.parts:
                 continue
-            tree = ast.parse(path.read_text(), filename=str(path))
+            tree = parse_source(path)
             for node in ast.walk(tree):
                 if isinstance(node, ast.ImportFrom):
                     mods = [node.module or ""]

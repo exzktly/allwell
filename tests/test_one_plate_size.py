@@ -22,6 +22,7 @@ import pytest
 
 from pipeline import completeness
 from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_source
 
 #: The functions entitled to read the raw recorded count — the one that turns
 #: it into the plate's size, and the one that assembles the totals in the first
@@ -78,7 +79,7 @@ def test_no_surface_builds_a_denominator_from_the_recorded_count():
         if where.startswith("tests/"):
             continue
         try:
-            tree = ast.parse(path.read_text(), filename=str(path))
+            tree = parse_source(path)
         except SyntaxError:                     # pragma: no cover - not our file
             continue
         exempt: set[int] = set()

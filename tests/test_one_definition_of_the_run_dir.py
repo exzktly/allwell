@@ -25,6 +25,7 @@ from __future__ import annotations
 import ast
 
 from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_source
 
 #: Where the one definition lives. Everything else must call it.
 _FUNNEL = ("remote_run_dir", "remote_run_paths")
@@ -127,7 +128,7 @@ def test_only_the_funnel_spells_the_run_directory():
     """
     offenders, found_funnel = [], False
     for path in python_sources():
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         allowed = set()
         for fn in ast.walk(tree):
             if isinstance(fn, ast.FunctionDef) and fn.name in _FUNNEL:

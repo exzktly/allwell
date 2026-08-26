@@ -18,6 +18,7 @@ import pathlib
 
 import pandas as pd
 import pytest
+from tests._repo_scan import parse_source
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -77,7 +78,7 @@ def test_every_path_that_builds_a_frame_records_a_verdict():
     for rel in ("well_viewer/data/data_loading.py",
                 "well_viewer/core/load_controller.py"):
         path = REPO_ROOT / rel
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        tree = parse_source(path)
         for node in ast.walk(tree):
             # `<something>.cache[<key>] = <frame>`
             if not isinstance(node, ast.Assign):

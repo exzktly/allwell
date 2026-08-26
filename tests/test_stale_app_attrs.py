@@ -32,6 +32,7 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
+from tests._repo_scan import parse_source
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TESTS = Path(__file__).resolve().parent
@@ -91,7 +92,7 @@ def test_tests_do_not_name_removed_app_attributes():
     known = _app_source_tokens()
     violations = []
     for path in sorted(TESTS.rglob("*.py")):
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         for fn in ast.walk(tree):
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue

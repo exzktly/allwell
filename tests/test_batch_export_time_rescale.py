@@ -23,6 +23,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from tests._repo_scan import parse_source
 
 BATCH = Path(__file__).resolve().parent.parent / "well_viewer" / "features" / "batch_export"
 
@@ -37,7 +38,7 @@ SCALERS = ("format_scaled", "_rescale_tp", "apply_time_rescale",
 
 
 def _fn(path: Path, name: str) -> ast.FunctionDef:
-    tree = ast.parse((BATCH / path).read_text(), filename=str(path))
+    tree = parse_source((BATCH / path))
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name == name:
             return node

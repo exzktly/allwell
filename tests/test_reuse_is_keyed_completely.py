@@ -39,6 +39,7 @@ import pytest
 
 from services import run_journal as J
 from util.settings_digest import KEYED_ON
+from tests._repo_scan import parse_source
 
 #: Every "reuse earlier work" decision in the app, the keys it compares, and why
 #: each key is required. One entry per decision; the reason is not a comment, it
@@ -434,7 +435,7 @@ def test_every_keying_call_folds_in_the_host_extras():
     from pathlib import Path
 
     source_path = Path(__file__).parent.parent / "services" / "remote_runner.py"
-    tree = ast.parse(source_path.read_text(), filename=str(source_path))
+    tree = parse_source(source_path)
 
     def _is_extras_call(node) -> bool:
         return (isinstance(node, ast.Call)

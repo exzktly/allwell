@@ -21,6 +21,7 @@ from __future__ import annotations
 import ast
 
 from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_source
 
 #: Producers of a ``FoldChangeState``. A tuple target on any of them is the bug.
 #: ``_fc_state`` is the Batch Export panels' own accessor, and it is here
@@ -65,7 +66,7 @@ def _offenders() -> list[str]:
     out: list[str] = []
     for path in python_sources():
         try:
-            tree = ast.parse(path.read_text())
+            tree = parse_source(path)
         except SyntaxError:  # pragma: no cover - a file we cannot parse
             continue
         out.extend(offenders_in(tree, rel(path)))

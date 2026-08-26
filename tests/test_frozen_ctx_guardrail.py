@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from tests._repo_scan import parse_source
 
 _PKG = Path(__file__).resolve().parent.parent / "well_viewer"
 _TESTS = Path(__file__).resolve().parent
@@ -73,7 +74,7 @@ def test_no_frozen_ctx_underscore_access():
     (for setattr) crashes."""
     violations = []
     for path in _py_files():
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         for node in ast.walk(tree):
             # ctx._x   (direct underscore attribute on the ctx name)
             if (isinstance(node, ast.Attribute) and _is_ctx_name(node.value)
@@ -102,7 +103,7 @@ def _collect_free_func_first_params():
     called with an explicit first arg."""
     ctx_first, non_ctx_first = set(), set()
     for path in _py_files():
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         for node in tree.body:  # module top level only → free functions
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 args = node.args.args
@@ -217,7 +218,7 @@ def test_no_ctx_function_called_with_raw_app_or_self():
 
     violations = []
     for path in _call_site_files():
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         in_tests = path.is_relative_to(_TESTS)
         for lineno, fn_name, arg in _bad_ctx_calls(
                 tree, unambiguous, only_real_app=in_tests):

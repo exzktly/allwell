@@ -18,12 +18,13 @@ import ast
 import pathlib
 
 from well_viewer.core import debug_flags  # noqa: E402
+from tests._repo_scan import parse_source
 
 _ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 def _module_bools(path: pathlib.Path) -> dict[str, bool]:
-    tree = ast.parse(path.read_text(), filename=str(path))
+    tree = parse_source(path)
     out: dict[str, bool] = {}
     for node in tree.body:
         targets, value = [], None

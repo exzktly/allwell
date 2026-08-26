@@ -22,6 +22,7 @@ from __future__ import annotations
 import ast
 
 from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_source
 
 #: The seam itself is the one place allowed to make the call.
 _ALLOWED = {"widgets/menu_exec.py"}
@@ -34,7 +35,7 @@ def _offenders() -> list[str]:
         if where in _ALLOWED:
             continue
         try:
-            tree = ast.parse(path.read_text(), where)
+            tree = parse_source(path)
         except SyntaxError:  # pragma: no cover - a file we cannot parse
             continue
         for node in ast.walk(tree):

@@ -26,6 +26,7 @@ inherited the row.
 
 import ast
 from pathlib import Path
+from tests._repo_scan import parse_source
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -63,7 +64,7 @@ ADOPTED = (
 
 
 def _tree(rel: str) -> ast.AST:
-    return ast.parse((REPO_ROOT / rel).read_text(encoding="utf-8"))
+    return parse_source((REPO_ROOT / rel))
 
 
 def _calls(tree: ast.AST) -> list[ast.Call]:

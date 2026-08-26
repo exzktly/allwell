@@ -41,6 +41,7 @@ import ast
 import pytest
 
 from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_source
 
 #: Names that, when subscript-assigned or mutated in place, are treated as a
 #: cached measurement frame. These are the conventional spellings across the
@@ -205,7 +206,7 @@ def _discovered_writers() -> dict[str, set[str]]:
     out: dict[str, set[str]] = {}
     for path in python_sources():
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            tree = parse_source(path)
         except (SyntaxError, UnicodeDecodeError):  # pragma: no cover
             continue
         cols = _frame_writes(tree)

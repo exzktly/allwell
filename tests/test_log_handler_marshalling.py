@@ -38,6 +38,7 @@ from __future__ import annotations
 import ast
 
 from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_source
 
 #: Attribute/function names that create or arm a Qt timer.
 _TIMER_CALLS = frozenset({"singleShot", "startTimer", "QTimer"})
@@ -85,7 +86,7 @@ def test_no_timer_inside_a_logging_handler_emit():
     offenders: list[str] = []
     for path in python_sources():
         rel_path = rel(path)
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = parse_source(path)
         # Handler classes are not always at module scope — the shell defines
         # ``_RingHandler`` inside the method that installs it — so walk the
         # whole tree rather than reading ``tree.body``.

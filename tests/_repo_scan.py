@@ -17,6 +17,8 @@ that is not a script, a test, or a build artifact.
 
 from __future__ import annotations
 
+import ast
+from functools import lru_cache
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -72,3 +74,54 @@ def python_sources(*, roots: tuple[str, ...] = PACKAGE_ROOTS,
 
 def rel(path: Path) -> str:
     return path.relative_to(REPO_ROOT).as_posix()
+
+
+# ── Parsing ──────────────────────────────────────────────────────────────────
+#
+# Parsing the tree costs about 2.8 s (479 files, 7 MB, 767k nodes), and roughly
+# sixty guards in the fast lane each want the whole of it. Parsed once per
+# process rather than once per guard, that is three minutes of the lane's wall
+# clock — it was the second-largest cost in it, behind the widgets every test
+# used to leave behind.
+#
+# The cache is keyed on the source *text*, not on the path or its stat.
+# Reading the whole tree costs 0.026 s against 2.8 s to parse it, so re-reading
+# every time is close to free — and it is the only key that cannot go stale.
+# `tests/test_guards_bite.py` rewrites a synthetic file in place between cases;
+# a path+mtime+size key answers those from the previous parse whenever the
+# filesystem's timestamp granularity is coarser than the gap between the two
+# writes and the sizes happen to match, and a guard silently measuring the file
+# it was handed one case ago is exactly the "green for the wrong reason" this
+# module's guards exist to prevent.
+#
+# The trees are SHARED. Read them; never mutate one. No guard does today —
+# nothing in `tests/` assigns to a node, transforms a tree, or hangs a
+# `.parent` off it — and `tests/test_guards_bite.py` keeps the cache honest
+# about handing back the same object.
+
+
+@lru_cache(maxsize=None)
+def _parse_text(source: str, filename: str) -> ast.Module:
+    return ast.parse(source, filename=filename)
+
+
+def parse_source(path: Path | str) -> ast.Module:
+    """The parsed module at ``path``, from a per-process cache.
+
+    Use this instead of ``ast.parse(path.read_text())`` anywhere a guard walks
+    a file that belongs to the repository. Sources the test *builds* — the
+    synthetic violations in ``test_guards_bite.py``, a snippet in a docstring —
+    are one-offs with nothing to share, and go on calling ``ast.parse``
+    directly.
+    """
+    path = Path(path)
+    return _parse_text(path.read_text(encoding="utf-8"), str(path))
+
+
+def parsed_sources(*, roots: tuple[str, ...] = PACKAGE_ROOTS,
+                   include_root_modules: bool = True,
+                   ) -> list[tuple[Path, ast.Module]]:
+    """Every application source file paired with its parsed tree."""
+    return [(p, parse_source(p))
+            for p in python_sources(roots=roots,
+                                    include_root_modules=include_root_modules)]

@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 )
 
 from well_viewer.features.batch_export.base_panel import BatchExportPanel  # noqa: E402
+from tests._repo_scan import parse_source
 
 
 @pytest.fixture(scope="module")
@@ -130,7 +131,7 @@ def test_no_per_job_closure_reads_a_live_combo():
     offenders = []
     for name in ("base_panel.py", "bar_panel.py"):
         path = Path("well_viewer/features/batch_export") / name
-        tree = ast.parse(path.read_text())
+        tree = parse_source(path)
         for outer in ast.walk(tree):
             if not isinstance(outer, ast.FunctionDef):
                 continue

@@ -364,9 +364,20 @@ if _HAVE_MPL:
         def set_save_handler(self, handler) -> None:
             """Enable the hover "save to Saved Plots" button.
 
-            *handler* is called as ``handler(png_bytes: bytes, panel_label: str)
-            -> str`` when the button is clicked and should return a short status
-            string (shown as a toast). Passing ``None`` disables the button."""
+            *handler* is called as ``handler(png_bytes: bytes, panel_label: str,
+            svg_bytes: bytes) -> str`` when the button is clicked and should
+            return a short status string (shown as a toast). Passing ``None``
+            disables the button.
+
+            The SVG is the same render as the PNG, in vector: it is what lets a
+            saved plot be exported later as editable PowerPoint shapes rather
+            than as a picture of itself. It is captured here, at the moment the
+            user saves, because that is the only moment the live figure exists —
+            a gallery record holds parameters, not a figure, so nothing
+            downstream could reconstruct it. ``b""`` when the vector render
+            failed, which the caller stores as "no vector capture" rather than
+            treating as a failed save.
+            """
             self._save_handler = handler
 
         def _on_save_axis_clicked(self) -> None:
@@ -376,7 +387,7 @@ if _HAVE_MPL:
             import io
 
             from widgets.fig_clipboard import (
-                axis_tight_bbox_inches, hidden_sibling_axes,
+                axis_tight_bbox_inches, hidden_sibling_axes, render_figure_svg,
             )
             # Render the hovered panel in publication mode (the canonical export
             # look), mirroring the Copy path, then revert.
@@ -392,13 +403,16 @@ if _HAVE_MPL:
                     self.figure.savefig(
                         buf, format="png", bbox_inches=bbox, dpi=300,
                         facecolor=self.figure.get_facecolor())
+                    svg_bytes = render_figure_svg(
+                        self.figure, bbox_inches=bbox,
+                        facecolor=self.figure.get_facecolor())
                 png_bytes = buf.getvalue()
             label = ""
             try:
                 label = (ax.get_title() or "").strip()
             except Exception:
                 label = ""
-            self._dispatch_saved_png(png_bytes, label)
+            self._dispatch_saved_png(png_bytes, label, svg_bytes)
 
         def saveFigureToGallery(self) -> None:
             """External toolbar/menu entry point for the same whole-figure
@@ -415,13 +429,19 @@ if _HAVE_MPL:
                 return
             import io
 
+            from widgets.fig_clipboard import render_figure_svg
+
             # Render the entire figure in publication mode (the canonical export
             # look), mirroring the per-panel save path, then revert.
             png_bytes = b""
+            svg_bytes = b""
             with self._publication_capture():
                 buf = io.BytesIO()
                 self.figure.savefig(
                     buf, format="png", bbox_inches="tight", dpi=300,
+                    facecolor=self.figure.get_facecolor())
+                svg_bytes = render_figure_svg(
+                    self.figure, bbox_inches="tight",
                     facecolor=self.figure.get_facecolor())
                 png_bytes = buf.getvalue()
             label = ""
@@ -430,12 +450,14 @@ if _HAVE_MPL:
                 label = (sup.get_text() or "").strip() if sup is not None else ""
             except Exception:
                 label = ""
-            self._dispatch_saved_png(png_bytes, label)
+            self._dispatch_saved_png(png_bytes, label, svg_bytes)
 
-        def _dispatch_saved_png(self, png_bytes: bytes, label: str) -> None:
-            """Hand a captured PNG to the save handler and toast the result."""
+        def _dispatch_saved_png(self, png_bytes: bytes, label: str,
+                                svg_bytes: bytes = b"") -> None:
+            """Hand a captured PNG + its vector twin to the handler, and toast."""
             try:
-                status = self._save_handler(png_bytes, label) or "Saved plot"
+                status = self._save_handler(
+                    png_bytes, label, svg_bytes) or "Saved plot"
                 failed = False
             except Exception as exc:  # surface to the user
                 status, failed = f"Save failed: {exc}", True

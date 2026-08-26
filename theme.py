@@ -399,6 +399,13 @@ QFrame#Panel, QFrame[panel="true"] {{
     border: 1px solid {c.border_subtle};
     border-radius: {r.md}px;
 }}
+/* A panel the app has just navigated the user to. Set for a moment after a
+   jump-to-this-card action, so the eye lands on the right card in a gallery of
+   near-identical ones — the arrival is otherwise silent and the reader has to
+   re-find by title what the click already picked out. */
+QFrame#Panel[focusflash="true"] {{
+    border: 1px solid {c.accent};
+}}
 QFrame#Rail, QFrame[rail="true"] {{
     background-color: {c.rail};
     border: none;

@@ -61,6 +61,23 @@ def _render_figure(fig, fmt, savefig_kwargs, rc_overrides) -> bytes:
         return b""
 
 
+def render_figure_svg(fig, **savefig_kwargs) -> bytes:
+    """Render *fig* to SVG bytes, with text left as text.
+
+    ``svg.fonttype="none"`` is the whole point: Matplotlib's default writes every
+    glyph as an outlined path, which is faithful but dead — a title exported that
+    way cannot be retyped in PowerPoint or Illustrator, only redrawn. With it
+    off, each label stays a ``<text>`` element and survives into whatever reads
+    the SVG next.
+
+    Returns ``b""`` if the figure could not be rendered, so a caller capturing
+    vector alongside a raster never loses the raster to a vector failure.
+    """
+    kw = {"bbox_inches": "tight"}
+    kw.update(savefig_kwargs)
+    return _render_figure(fig, "svg", kw, {"svg.fonttype": "none"})
+
+
 def _macos_pasteboard_write(pdf_bytes: bytes, svg_bytes: bytes,
                             png_bytes: bytes) -> bool:
     """Write the figure to the macOS pasteboard under the UTIs Illustrator

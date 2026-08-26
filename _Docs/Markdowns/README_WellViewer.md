@@ -1175,6 +1175,12 @@ What is on it:
 - **Your work here.** Replicate sets, plot groups, labelled wells, smFISH
   thresholds, ratios, notes — with what you have not started yet reading "None
   yet", because that is a real answer rather than a missing one.
+- **Saved plots.** Thumbnails of the figures you have captured from this
+  dataset, newest first. Click one to open it full size in
+  [Saved Plots](#saved-plots) — you land on that plot's own card, not at the top
+  of the gallery. Only the most recent are shown; the line above the strip says
+  how many there are in total. Before you have saved anything the block says so
+  and points at how to save one.
 
 Above all of it, one line saying what most needs doing next, and a button that
 does it.
@@ -1634,7 +1640,10 @@ row, holding five actions:
   The same capture is also reachable by hovering a plot panel's top-right
   corner and clicking the floating **save** button, which saves just that one
   panel rather than the whole figure — handy on a multi-panel tab (Bar Plot,
-  Line Graphs) when you only want one of the stacked subplots.
+  Line Graphs) when you only want one of the stacked subplots. Either way the
+  figure is captured twice — once as a high-resolution image, once as vector —
+  which is what later lets the gallery export it to PowerPoint as shapes you can
+  edit rather than as a picture.
 - **Properties** — opens a slide-out sidebar that styles the active figure:
   axis label / tick / title sizes, grid on/off + alpha + linestyle, legend,
   line / marker widths, axis limits + log-scale, layout engine, and an
@@ -3002,11 +3011,36 @@ rather than a single panel.
 - **Clear all** asks first, and only clears if you say yes. If the
   confirmation cannot be shown at all, nothing is cleared — an answer that could
   not be obtained is not consent.
-- **Export all** — write the whole gallery as a multi-page **PDF report** (a
-  cover page plus one full-quality page per plot with its parameters). The
-  Image Table grid can be saved here too.
-- **Optimal use** — capture each figure as you finalize it, then export the
-  gallery as one PDF to hand off alongside your analysis.
+- **Export…** — send the whole gallery, in the order the cards are arranged
+  here, to a single file. Two formats:
+  - **PDF report** — a cover page plus one full-quality page per plot, each with
+    its parameter summary. The figure on the page is the picture that was
+    captured.
+  - **PowerPoint deck (editable figures)** — a cover slide plus one slide per
+    plot, with each figure **redrawn as PowerPoint shapes**. Click a bar and you
+    select that bar; its fill, its outline and its size are PowerPoint's to
+    change. Axis labels, tick labels and titles are real text boxes you can
+    retype. The whole figure is grouped, so it moves and resizes as one piece
+    until you double-click into it. Nothing is linked back to All-Well — the
+    deck is a normal `.pptx` that opens anywhere, and no add-in is needed.
+
+  The Image Table grid can be saved to the gallery and exported either way.
+- **When a slide says "placed here as a picture."** A figure can only be redrawn
+  as shapes if the plot was saved with a vector capture alongside its image.
+  Plots saved by an older version of All-Well have none, and neither does an
+  **Image Table** grid, which is assembled from your microscopy images rather
+  than drawn as a chart. Those plots still appear in the deck at full quality —
+  as a picture, with a line under the figure saying so and why. For an older
+  saved plot the fix is to open it with **Restore settings** and save it again;
+  the new card carries a vector capture.
+- **Very large figures are placed as pictures too.** A scatter of a hundred
+  thousand cells would become a hundred thousand PowerPoint shapes, and a deck
+  like that will not open. Past the limit the slide places the picture and says
+  how many shapes the figure would have needed, so you know to plot fewer points
+  if you want it editable.
+- **Optimal use** — capture each figure as you finalize it. Export the gallery as
+  one PDF to hand off alongside your analysis, or as a PowerPoint deck when the
+  figures still need restyling for a talk or a thesis.
 
 ### Batch export
 

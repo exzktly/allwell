@@ -235,6 +235,7 @@ def build_home_overview(ctx, parent: QWidget) -> None:
     body.addWidget(reg.register("_home_tiles", _tile_strip(page)))
     body.addLayout(_build_health_and_receipt(ctx, page, reg))
     body.addWidget(_build_your_work(ctx, page, reg))
+    body.addWidget(_build_saved_plots(ctx, page, reg))
     body.addStretch(1)
 
     from .controller import hide_rail_body, refresh_home
@@ -444,6 +445,79 @@ def _build_your_work(ctx, page: QWidget, reg) -> QWidget:
     card, layout = _card(page, "Your work here")
     layout.addWidget(reg.register("_home_work", _rows_host(card)))
     return card
+
+
+# ── saved plots ─────────────────────────────────────────────────────────────
+
+#: The thumbnail tile's width in pixels, and the height its caption is given.
+#: A tile is sized rather than let float because the strip is a grid of them and
+#: an unsized tile takes its width from the longest plot title in the gallery,
+#: which reflows the whole page whenever a plot is renamed.
+_THUMB_W = 168
+_THUMB_H = 118
+_THUMB_CAPTION_H = 32
+
+
+def _build_saved_plots(ctx, page: QWidget, reg) -> QWidget:
+    """The strip of saved-plot thumbnails, and the route from one to the gallery.
+
+    Home already counts what the user has declared about a plate; this shows what
+    they have *made* from it. Clicking a thumbnail opens the Saved Plots gallery
+    at that plot rather than at the top of the list, which is the difference
+    between the strip being a shortcut and being a picture of a shortcut.
+
+    The card is built even in a profile without Saved Plots — building it and
+    hiding it keeps the page's block order fixed for every build — and the
+    controller hides it when the feature is absent or the gallery is empty.
+    """
+    card, layout = _card(page, "Saved plots")
+    layout.addWidget(reg.register("_home_saved_plots_note", _muted(card, "")))
+    host = reg.register("_home_saved_plots", QWidget(card))
+    grid = QGridLayout(host)
+    grid.setContentsMargins(0, 0, 0, 0)
+    grid.setHorizontalSpacing(theme.Spacing.md)
+    grid.setVerticalSpacing(theme.Spacing.md)
+    layout.addWidget(host)
+    return reg.register("_home_saved_plots_card", card)
+
+
+def build_saved_plot_tile(ctx, parent: QWidget, entry: dict) -> QWidget:
+    """One clickable thumbnail: the figure, its title, and where it came from.
+
+    A button rather than a styled label, so the tile is reachable by keyboard and
+    announces itself as something that can be pressed — a bare pixmap that
+    happens to respond to clicks is the affordance this page's own notes warn
+    about elsewhere.
+    """
+    from PySide6.QtGui import QIcon, QPixmap
+    from PySide6.QtCore import QSize
+
+    tile = QPushButton(parent)
+    tile.setObjectName("HomeThumbTile")
+    tile.setFixedSize(_THUMB_W, _THUMB_H + _THUMB_CAPTION_H)
+    tile.setCursor(Qt.PointingHandCursor)
+    tile.setText(entry["title"])
+    tile.setToolTip(
+        f"{entry['title']} — saved from {entry['tab'] or 'a plot'}"
+        f"\nOpen this plot in Saved Plots.")
+
+    image = entry.get("image")
+    pixmap = QPixmap(str(image)) if image is not None else QPixmap()
+    if pixmap.isNull():
+        # The record exists and its image does not. Saying so on the tile keeps
+        # a missing file distinguishable from a plot that drew nothing, which is
+        # the whole point of the record carrying a filename at all.
+        tile.setText(f"{entry['title']}\n(image unavailable)")
+    else:
+        icon_size = QSize(_THUMB_W - theme.Spacing.md, _THUMB_H)
+        tile.setIcon(QIcon(pixmap.scaled(
+            icon_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
+        tile.setIconSize(icon_size)
+
+    from .controller import open_saved_plot
+    tile.clicked.connect(
+        lambda _=False, _id=entry["id"]: open_saved_plot(ctx, _id))
+    return tile
 
 
 # ── rendering helpers used by the controller ────────────────────────────────

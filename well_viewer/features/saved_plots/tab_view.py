@@ -4,6 +4,12 @@ Each card shows the captured panel image at full tab width, its (renameable)
 title + originating-tab badge + timestamp, a collapsible parameter summary
 (hidden by default), and Restore / Export / Rename / Delete actions.
 
+The page-level Export control offers the whole gallery in either of two formats:
+a PDF report, which shows each plot as the picture it was captured as, and a
+PowerPoint deck, which redraws each plot as PowerPoint shapes the user can
+restyle. Both walk the gallery in the order shown here, which is the order the
+▲/▼ buttons curate.
+
 The empty-state is driven by the saved-plot count (not dataset presence), so a
 freshly-saved plot shows immediately on first open of the tab.
 """
@@ -26,7 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from widgets.page_body import build_page_body
-from well_viewer.core.safe import swallowed
+from well_viewer.core.safe import swallow, swallowed
 from well_viewer.core.ui_helpers import clear_layout
 from well_viewer.features.saved_plots import controller as C
 from well_viewer.features.saved_plots.state import get_store
@@ -37,6 +43,12 @@ from well_viewer.features.saved_plots.state import get_store
 _DOWN_BTN_W = 32
 _CARD_MIN_W = 1
 _UP_BTN_W = 32
+
+#: How long a card stays outlined after the gallery jumps to it, in milliseconds.
+#: Long enough to be seen by someone whose eyes were on the thumbnail they
+#: clicked, short enough that the outline is never mistaken for a selection the
+#: gallery is holding.
+_FOCUS_FLASH_MS = 1600
 
 
 class _AspectImage(QLabel):
@@ -81,10 +93,8 @@ def build_saved_plots_tab(ctx, parent: QWidget) -> None:
 
     count_lbl = reg.register("_saved_plots_count_lbl", QLabel("", band))
     band.add_scope("", count_lbl)
-    report_btn = QPushButton("Export report…", band)
-    report_btn.setToolTip("Export all saved plots as a multi-page PDF report.")
-    report_btn.clicked.connect(lambda: C.export_report_pdf(ctx))
-    band.add_action(report_btn)
+    band.add_action(reg.register("_saved_plots_export_btn",
+                                 _build_export_button(ctx, band)))
     clear_btn = QPushButton("Clear all", band)
     clear_btn.setProperty("variant", "secondary")
     clear_btn.clicked.connect(lambda: _confirm_clear(ctx))
@@ -110,6 +120,7 @@ def build_saved_plots_tab(ctx, parent: QWidget) -> None:
     scroll.setWidget(list_host)
     stack.addWidget(scroll)  # index 1
 
+    reg.register("_saved_plots_scroll", scroll)
     reg.register("_saved_plots_stack", stack)
     reg.register("_saved_plots_list", col)
     reg.register("_saved_plots_list_host", list_host)
@@ -121,8 +132,39 @@ def build_saved_plots_tab(ctx, parent: QWidget) -> None:
     populate_saved_plots_grid(ctx)
 
 
+def _build_export_button(ctx, band) -> QPushButton:
+    """The gallery's Export control — one button, two destinations.
+
+    A menu rather than two buttons because the choice is between *formats of the
+    same export*, not between two actions: both send every saved plot, in gallery
+    order, to one file. The wording says what the user gets rather than naming the
+    file type twice, since "editable in PowerPoint" is the whole reason to pick
+    the second one over the first.
+    """
+    from PySide6.QtWidgets import QMenu
+
+    button = QPushButton("Export…", band)
+    button.setToolTip("Export every saved plot to a single file.")
+    menu = QMenu(button)
+    pdf_action = menu.addAction("PDF report…")
+    pdf_action.setToolTip(
+        "One page per saved plot, each showing the figure as it was captured.")
+    pdf_action.triggered.connect(lambda _=False: C.export_report_pdf(ctx))
+    pptx_action = menu.addAction("PowerPoint deck (editable figures)…")
+    pptx_action.setToolTip(
+        "One slide per saved plot, redrawn as PowerPoint shapes — bars, lines "
+        "and labels you can restyle in PowerPoint itself.")
+    pptx_action.triggered.connect(lambda _=False: C.export_deck_pptx(ctx))
+    # The menu is parented to the button, but ``setMenu`` is what makes the
+    # button show it: without it the actions exist and nothing can reach them,
+    # which is the failure this file already carries a note about elsewhere —
+    # a control that is offered is not a control that works.
+    button.setMenu(menu)
+    return button
+
+
 def _confirm_clear(ctx) -> None:
-    """Ask before deleting every saved plot for this dataset, and its PNGs.
+    """Ask before deleting every saved plot for this dataset, and its images.
 
     An answer that could not be obtained is not consent. This used to fall
     through to clearing when the dialog raised — the rationale being a headless
@@ -156,7 +198,7 @@ def populate_saved_plots_grid(ctx) -> None:
     clear_layout(col)
     store = get_store(ctx)
     store.ensure_loaded(ctx)
-    records = list(reversed(store.records))  # newest first
+    records = C.gallery_order(store)  # newest first
 
     lbl = ctx.widgets.get_or_none("_saved_plots_count_lbl")
     if lbl is not None:
@@ -168,9 +210,59 @@ def populate_saved_plots_grid(ctx) -> None:
         stack.setCurrentIndex(1 if records else 0)
 
     total = len(records)
+    # Cards indexed by plot id so another page can send the user to one of them.
+    # Rebuilt here rather than accumulated: ``clear_layout`` above has already
+    # destroyed the previous set of C++ objects, and an index that outlived them
+    # would hand out handles to deleted widgets.
+    cards: dict[str, QWidget] = {}
     for i, rec in enumerate(records):
-        col.addWidget(_build_saved_card(
-            ctx, store, rec, is_first=(i == 0), is_last=(i == total - 1)))
+        card = _build_saved_card(ctx, store, rec, is_first=(i == 0),
+                                 is_last=(i == total - 1))
+        cards[rec.id] = card
+        col.addWidget(card)
+    ctx.runtime.saved_plots.cards = cards
+
+
+def scroll_to_saved_plot(ctx, plot_id: str) -> bool:
+    """Bring the gallery card for *plot_id* into view and outline it briefly.
+
+    Returns False when the gallery holds no card for that id — the tab has not
+    been built yet, or the plot was deleted between the click and this call. The
+    caller reports that rather than leaving the user on a page that looks like it
+    ignored them.
+    """
+    cards = ctx.runtime.saved_plots.cards or {}
+    card = cards.get(plot_id)
+    scroll = ctx.widgets.get_or_none("_saved_plots_scroll")
+    if card is None or scroll is None:
+        return False
+    try:
+        scroll.ensureWidgetVisible(card)
+        _flash(card)
+    except RuntimeError:
+        # The gallery was rebuilt between the lookup and here, so the card's C++
+        # object is gone. Nothing to scroll to, and nothing broken.
+        return False
+    return True
+
+
+def _flash(card: QWidget) -> None:
+    """Outline *card* for a moment, then put it back the way it was."""
+    from PySide6.QtCore import QTimer
+
+    def _set(on: bool) -> None:
+        # The timer outlives the gallery: a repopulate between the flash and its
+        # clear leaves this closure holding a deleted C++ object, and touching
+        # it raises. The card is already gone, which is the outcome the clear
+        # wanted, so there is nothing to do about it beyond not crashing.
+        with swallow("saved_plots: focus flash"):
+            card.setProperty("focusflash", "true" if on else "false")
+            style = card.style()
+            style.unpolish(card)
+            style.polish(card)
+
+    _set(True)
+    QTimer.singleShot(_FOCUS_FLASH_MS, lambda: _set(False))
 
 
 def _build_saved_card(ctx, store, rec, *, is_first: bool = True,

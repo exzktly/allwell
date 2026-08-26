@@ -25,8 +25,8 @@ from well_viewer.core.selection_controller import (
 from . import collect as hc
 from .plate_panel import paint_plate, well_tooltip
 from .tab_view import (
-    IMPORT_KEY, definition_subtabs, format_value, legend_label,
-    legend_swatch_style,
+    IMPORT_KEY, build_saved_plot_tile, definition_subtabs, format_value,
+    legend_label, legend_swatch_style,
 )
 
 # Cell Gating's controller is reached for two refreshes the sub-tab handler and
@@ -38,6 +38,11 @@ _cell_gating_sync_scatter_gates = lazy(
 _cell_gating_load_cell_areas = lazy(
     "well_viewer.features.home.cell_gating.controller",
     "cell_gating_load_cell_areas")
+# Saved Plots is removable and lives on another page, so Home reaches its
+# "open this plot" entry point through a proxy — resolved on first click, and
+# only in a build that ships the feature.
+_focus_saved_plot = lazy("well_viewer.features.saved_plots.controller",
+                         "focus_saved_plot")
 
 _logger = logging.getLogger("well_viewer")
 
@@ -377,6 +382,7 @@ def refresh_home(ctx) -> None:
     _paint_rows(ctx, "_home_health", hc.health_rows(ctx), kind="health")
     _paint_rows(ctx, "_home_receipt", hc.run_parameters(ctx), kind="receipt")
     _paint_rows(ctx, "_home_work", hc.your_work(ctx), kind="work")
+    _paint_saved_plots(ctx)
     slice_ = ctx.state.feature_slice("home")
     if slice_ is not None:
         slice_.last_rendered_for = str(
@@ -515,6 +521,67 @@ def _channel_widget(parent: QWidget, chips) -> QWidget:
     row.addStretch(1)
     column.addLayout(row)
     return card
+
+
+#: How many thumbnails fit on one row of the strip. Fixed rather than computed
+#: from the card's width so the grid does not reflow while the page is being
+#: painted, which is when its width is still zero.
+_THUMBS_PER_ROW = 6
+
+
+def _paint_saved_plots(ctx) -> None:
+    """Fill the saved-plot strip, or hide the card when there is nothing to show.
+
+    Hidden rather than shown empty in two different situations, which the note
+    keeps apart: a build without the Saved Plots feature has no such thing to
+    report, and a build with it and an empty gallery has nothing saved *yet*.
+    The first is not a state the user can act on, so the card goes away
+    entirely; the second is, so it says so and points at how.
+    """
+    card = _widget(ctx, "_home_saved_plots_card")
+    host = _widget(ctx, "_home_saved_plots")
+    note = _widget(ctx, "_home_saved_plots_note")
+    if card is None or host is None or note is None:
+        return
+    strip = hc.saved_plots_strip(ctx)
+    if not strip["available"]:
+        card.setVisible(False)
+        return
+    card.setVisible(True)
+    _clear(host)
+    total = strip["total"]
+    shown = strip["shown"]
+    if not shown:
+        note.setText("No plots saved from this dataset yet — hover a plot's "
+                     "top-right corner and click Save to put one here.")
+        return
+    hidden = total - len(shown)
+    note.setText(
+        f"{total} saved plot{'' if total == 1 else 's'}"
+        + (f" — the {len(shown)} most recent are shown; open Saved Plots for "
+           f"the other {hidden}." if hidden else ". Click one to open it."))
+    grid = host.layout()
+    for index, entry in enumerate(shown):
+        grid.addWidget(build_saved_plot_tile(ctx, host, entry),
+                       index // _THUMBS_PER_ROW, index % _THUMBS_PER_ROW)
+
+
+def open_saved_plot(ctx, plot_id: str) -> None:
+    """Send the user from a Home thumbnail to that plot in the gallery.
+
+    Reached through the feature registry rather than by importing Saved Plots:
+    the feature is removable, and Home must build in a profile that ships without
+    it. Anything that stops the jump working is said out loud — arriving at the
+    top of an unrelated page with no explanation is the shape this exact kind of
+    cross-page link fails in.
+    """
+    if ctx.features.get("Saved Plots") is None:
+        return
+    with swallow("home: open saved plot"):
+        if not _focus_saved_plot(ctx, plot_id):
+            ctx.notify.set_status(
+                "That saved plot could not be opened — it may have been "
+                "deleted. Open Saved Plots to see what is there.")
 
 
 def _paint_rows(ctx, widget_name: str, rows, *, kind: str) -> None:

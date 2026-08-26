@@ -1649,6 +1649,44 @@ def _cell_gating_on_progress(ctx, current: int, total: int) -> None:
     bar.setValue(current)
 
 
+def cell_gating_recompute_now(ctx) -> bool:
+    """Run the gating pass **synchronously**, on the calling thread.
+
+    The normal path is a ``QThread`` whose completion is delivered by a queued
+    signal, which is right for a user editing a threshold and wrong for a caller
+    that must read the result before it returns. The Saved Plots export is that
+    caller: it replays a saved plot's gating and captures the figure a line
+    later, and with the async path that capture reads the *previous* pass's
+    ``Included`` flags — so the figure is drawn under a gating that is neither
+    the plot's nor the user's, and nothing on it says so.
+
+    Any worker already in flight is cancelled first, so the pass this runs is the
+    one whose result survives. Returns False when the recompute could not run, so
+    a caller that depends on it can decline rather than capture the wrong thing.
+    """
+    prev = ctx.runtime.cell_gating.worker
+    if prev is not None and prev.isRunning():
+        prev.cancel()
+        # A literal, deliberately: ``test_state_lifecycle`` proves this bound is
+        # small by reading it out of the syntax tree, and a named constant is an
+        # ``ast.Name`` it cannot evaluate. Same 50 ms and same reasoning as the
+        # restart in ``cell_gating_start_gating_worker`` — ``cancel()`` is the
+        # mechanism, the wait is a courtesy to let the thread reach a checkpoint.
+        prev.wait(50)
+    worker = GatingWorker(ctx)
+    try:
+        worker._run_inner()
+    except Exception:
+        logger.exception("gating: synchronous recompute failed")
+        return False
+    # The same three things ``_cell_gating_on_finished`` does, minus the progress
+    # bar it never showed: the pass has rewritten Included / Gate_Pass / Gate_On
+    # on every cached frame, so any statistic computed from them is stale.
+    invalidate_stats_cache(ctx)
+    cell_gating_refresh_included_count(ctx)
+    return True
+
+
 def _cell_gating_on_finished(ctx) -> None:
     bar = ctx.widgets.get_or_none("_progress_bar")
     if bar is not None:

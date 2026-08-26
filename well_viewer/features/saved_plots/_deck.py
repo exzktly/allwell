@@ -35,6 +35,7 @@ from well_viewer.features.saved_plots._pptx import (
     SLIDE_HEIGHT_EMU, SLIDE_WIDTH_EMU, PptxBuilder, Slide,
 )
 from well_viewer.features.saved_plots._svg_shapes import SvgParseError, parse_svg
+from widgets.fig_clipboard import rasterized_layer_count
 
 _logger = logging.getLogger("well_viewer")
 
@@ -57,18 +58,24 @@ _PARAMS_W = 3.5
 _GUTTER = 0.25
 
 #: The most shapes one slide may carry before the figure is placed as a picture
-#: instead. A scatter of a hundred thousand cells is a hundred thousand
-#: PowerPoint shapes, and a deck like that does not open — it is not slow, it
-#: hangs. The cap is generous for a plot anyone would put in a talk (the bar and
-#: scatter figures this was built against land between forty and a few hundred)
-#: and the slide says outright when it bites, so a picture is never mistaken for
-#: a figure that simply had nothing editable in it.
-MAX_SHAPES_PER_SLIDE = 4000
+#: instead — a backstop, not a quality setting. ``fig_clipboard.MAX_VECTOR_PATHS``
+#: bounds the capture itself by rasterizing dense layers well below this, so a
+#: figure reaching this number got here some other way: an SVG written by an
+#: older build, or one edited by hand in the dataset folder.
+#:
+#: Set where a deck still opens rather than where it merely builds: 40,000 shapes
+#: converts in 46 seconds, 100,000 in over two and a half minutes, and 249,000
+#: was killed out of memory. Past it the slide takes the picture and names the
+#: count, because "too complex" gives the user nothing to act on while
+#: "180,000 shapes" tells them what to change.
+MAX_SHAPES_PER_SLIDE = 50_000
 
 _TITLE_PT = 22.0
 _META_PT = 11.0
 _PARAMS_PT = 8.5
 _NOTE_PT = 9.5
+#: Height of one note line, and the step between stacked notes.
+_NOTE_H = 0.28
 
 
 @dataclass
@@ -84,6 +91,14 @@ class DeckResult:
     slides: int = 0
     vector: int = 0
     raster: int = 0
+    #: Plots whose figure is editable but whose data layer had to be rasterized.
+    #: A subset of ``vector``, counted apart for the same reason ``redrawn`` is:
+    #: they carry a caveat the others do not.
+    rasterized: int = 0
+    #: Plots whose editable figure was redrawn from saved parameters rather than
+    #: captured at save time. A subset of ``vector`` — they are fully editable —
+    #: counted apart because they carry a caveat the others do not.
+    redrawn: int = 0
     #: Plots whose slide carries no figure at all — neither capture could be
     #: read. Counted separately and not folded into ``raster``, because it is a
     #: third outcome: the slide exists and names the plot, and the figure is
@@ -114,12 +129,22 @@ class DeckResult:
             if self.missing:
                 parts.append(f"{self.missing} with no figure")
             text += " — " + ", ".join(parts)
-        elif not self.unsupported:
+        elif not (self.unsupported or self.rasterized):
+            # "all editable" is a claim about every mark in every figure, so it
+            # cannot be said over a lost construct or a data layer that became a
+            # picture. Both were reported *after* it and read as qualifications
+            # of a sentence that had already overstated the case.
             text += ", all editable"
         # Never behind an early return: a deck can be entirely editable and
         # still have lost a hatch or an arc out of one of its figures, and
         # "all editable" said over the top of that is the shortfall being
         # hidden by the very line meant to describe it.
+        if self.redrawn:
+            text += (f"; {self.redrawn} redrawn from saved settings"
+                     " (older plots, now editable)")
+        if self.rasterized:
+            text += (f"; {self.rasterized} with a picture for the data layer"
+                     " (too dense to redraw mark by mark)")
         if self.unsupported:
             text += f" (not translated: {', '.join(self.unsupported)})"
         return text
@@ -240,16 +265,25 @@ def _slide_chrome(slide: Slide, rec, *, summary: str) -> float:
 def _note(slide: Slide, text: str, *, figure_w: float) -> None:
     """A line under the figure saying what the slide is not.
 
-    Only ever written for a shortfall — a plot placed as a picture, or one whose
-    vector capture could not be read. A slide that carries editable shapes says
-    nothing, because there is nothing to warn about.
+    Only ever written for a shortfall — a plot placed as a picture, a figure
+    redrawn rather than captured, a construct that could not be translated. A
+    slide carrying none of those says nothing.
+
+    **Stacked**, because a slide can have more than one: a regenerated figure
+    that also lost a hatch earns two. Both used to be written at the same fixed
+    y and printed on top of each other, so the slide with the most to say was the
+    one that said none of it — the shortfall hidden by the very line meant to
+    describe it, in geometry rather than in prose.
     """
+    index = slide.note_count
+    slide.note_count += 1
+    bottom = _SLIDE_H - _MARGIN - _NOTE_H * (index + 1)
     slide.add(text_box_xml(
         text, slide.ids,
-        x=inches_to_emu(_MARGIN), y=inches_to_emu(_SLIDE_H - _MARGIN - 0.28),
-        cx=inches_to_emu(figure_w), cy=inches_to_emu(0.28),
+        x=inches_to_emu(_MARGIN), y=inches_to_emu(bottom),
+        cx=inches_to_emu(figure_w), cy=inches_to_emu(_NOTE_H),
         size_pt=_NOTE_PT, color=_hex(theme.CPub.text_faint),
-        name="Export note"))
+        name=f"Export note {index + 1}"))
 
 
 def _place_vector(slide: Slide, svg_bytes: bytes, *, figure_w: float,
@@ -274,6 +308,15 @@ def _place_vector(slide: Slide, svg_bytes: bytes, *, figure_w: float,
     # constructs a drawn one would have, and discarding its findings meant the
     # one plot most likely to be complicated reported nothing.
     result.note_unsupported(drawing.unsupported)
+    layers = rasterized_layer_count(svg_bytes)
+    if layers:
+        # The figure is editable and its data layer is not. Said on the slide,
+        # because an embedded image is what a heat map legitimately contains and
+        # nothing else distinguishes the two.
+        result.rasterized += 1
+        _note(slide, "The data layer of this figure was too dense to redraw mark "
+                     "by mark, so it is a picture; the axes, labels, title and "
+                     "legend are editable shapes.", figure_w=figure_w)
     if len(drawing.shapes) > MAX_SHAPES_PER_SLIDE:
         return (f"This figure is {len(drawing.shapes):,} separate shapes — past "
                 f"the {MAX_SHAPES_PER_SLIDE:,} a slide can carry and stay "
@@ -314,7 +357,16 @@ def _place_raster(slide: Slide, png: bytes, *, figure_w: float) -> bool:
     return True
 
 
-def _read(path) -> bytes:
+def _read(source) -> bytes:
+    """The bytes behind a capture, which may be a path or the bytes themselves.
+
+    A capture rendered this session but not writable to disk is held in memory
+    (``SavedPlotsStore.hold_vector``), and it is worth just as much to this
+    export as one that reached the dataset folder.
+    """
+    if isinstance(source, (bytes, bytearray)):
+        return bytes(source)
+    path = source
     if path is None:
         return b""
     try:
@@ -332,6 +384,7 @@ def build_saved_plots_deck(
     *,
     dataset_name: str = "",
     summary_for: Callable[[object], str] | None = None,
+    regenerated: set | None = None,
 ) -> DeckResult:
     """Write a ``.pptx`` with a cover slide and one slide per saved plot.
 
@@ -341,9 +394,17 @@ def build_saved_plots_deck(
     and parameters and states that the figure is missing, which is the one
     outcome a silent export would have made indistinguishable from a blank plot.
 
+    *regenerated* names the plots whose vector capture was **redrawn from their
+    saved parameters** rather than captured when the user saved them — the repair
+    the export performs for a record filed before the app captured vector. Those
+    slides say so, because a redrawn figure is drawn from today's data and
+    today's gating and can differ from the image that was saved, in a direction
+    nothing else on the slide would reveal.
+
     Returns a :class:`DeckResult` — raises only on I/O failure writing the file.
     """
     recs = list(records)
+    regenerated = regenerated or set()
     summary_for = summary_for or (lambda r: getattr(r, "summary", "") or "")
     builder = PptxBuilder(title="Saved Plots")
     result = DeckResult()
@@ -358,6 +419,13 @@ def build_saved_plots_deck(
                                    result=result)
             if not reason:
                 result.vector += 1
+                if getattr(rec, "id", None) in regenerated:
+                    result.redrawn += 1
+                    _note(slide, "This figure was redrawn from the plot's saved "
+                                 "settings, because it was filed before All-Well "
+                                 "captured vector. It is editable, and it reflects "
+                                 "the current data rather than the image that was "
+                                 "saved.", figure_w=figure_w)
                 continue
         else:
             reason = ("This plot was saved without a vector capture, so it is "

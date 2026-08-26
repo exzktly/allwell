@@ -412,7 +412,31 @@ if _HAVE_MPL:
                 label = (ax.get_title() or "").strip()
             except Exception:
                 label = ""
-            self._dispatch_saved_png(png_bytes, label, svg_bytes)
+            self._dispatch_saved_png(
+                png_bytes, label, svg_bytes,
+                panel_only=len(self.figure.axes) > 1)
+
+        def captureVectorSvg(self) -> bytes:
+            """This figure as SVG, rendered exactly the way a save renders it.
+
+            Public because the Saved Plots export calls it to give a gallery
+            record that has no vector capture one — a plot filed before the app
+            captured vector is a PNG and nothing else, and re-drawing it is the
+            only way it can ever become editable. Going through the same
+            publication-mode capture as :meth:`_on_save_figure_clicked` is the
+            point: a figure regenerated for the deck must look like the figure
+            that would have been captured had it been saved today, not like the
+            screen-mode version.
+
+            ``b""`` when the render fails, which the caller treats as "this one
+            stays a picture" rather than as an error.
+            """
+            from widgets.fig_clipboard import render_figure_svg
+
+            with self._publication_capture():
+                return render_figure_svg(
+                    self.figure, bbox_inches="tight",
+                    facecolor=self.figure.get_facecolor())
 
         def saveFigureToGallery(self) -> None:
             """External toolbar/menu entry point for the same whole-figure
@@ -450,14 +474,21 @@ if _HAVE_MPL:
                 label = (sup.get_text() or "").strip() if sup is not None else ""
             except Exception:
                 label = ""
-            self._dispatch_saved_png(png_bytes, label, svg_bytes)
+            self._dispatch_saved_png(
+                png_bytes, label, svg_bytes, panel_only=False)
 
         def _dispatch_saved_png(self, png_bytes: bytes, label: str,
-                                svg_bytes: bytes = b"") -> None:
-            """Hand a captured PNG + its vector twin to the handler, and toast."""
+                                svg_bytes: bytes = b"", *,
+                                panel_only: bool = False) -> None:
+            """Hand a captured PNG + its vector twin to the handler, and toast.
+
+            *panel_only* says the capture is one panel of a multi-panel figure,
+            which the gallery records: a redraw renders the whole card, so a
+            record that does not know it was a panel comes back as every panel.
+            """
             try:
                 status = self._save_handler(
-                    png_bytes, label, svg_bytes) or "Saved plot"
+                    png_bytes, label, svg_bytes, panel_only) or "Saved plot"
                 failed = False
             except Exception as exc:  # surface to the user
                 status, failed = f"Save failed: {exc}", True

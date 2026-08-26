@@ -13,7 +13,7 @@ def test_save_button_hidden_until_handler_set(qapp):
     card.figure.add_subplot(1, 1, 1)
     # No handler → save button is not among the hover buttons.
     assert card._save_btn not in card._hover_buttons()
-    card.set_save_handler(lambda png, label, svg: "ok")
+    card.set_save_handler(lambda png, label, svg, panel: "ok")
     # Single-axis figure still offers the save button (unlike copy).
     assert card._save_btn in card._hover_buttons()
 
@@ -24,10 +24,11 @@ def test_save_click_invokes_handler_with_png_bytes(qapp):
     ax.plot([0, 1, 2], [0, 1, 4])
     captured = {}
 
-    def handler(png_bytes, label, svg_bytes):
+    def handler(png_bytes, label, svg_bytes, panel_only):
         captured["png"] = png_bytes
         captured["label"] = label
         captured["svg"] = svg_bytes
+        captured["panel_only"] = panel_only
         return "Saved"
 
     card.set_save_handler(handler)
@@ -52,7 +53,7 @@ def test_save_figure_button_multi_axis_only(qapp):
     card.figure.add_subplot(2, 1, 2).plot([0, 1], [1, 0])
     # No handler → neither save button is offered.
     assert card._save_fig_btn not in card._hover_buttons()
-    card.set_save_handler(lambda png, label, svg: "ok")
+    card.set_save_handler(lambda png, label, svg, panel: "ok")
     # Multi-axis + handler → both the per-panel and whole-figure buttons show.
     btns = card._hover_buttons()
     assert card._save_btn in btns
@@ -62,7 +63,7 @@ def test_save_figure_button_multi_axis_only(qapp):
     # per-panel save).
     single = PlotCard(figsize=(3, 2))
     single.figure.add_subplot(1, 1, 1).plot([0, 1], [0, 1])
-    single.set_save_handler(lambda png, label, svg: "ok")
+    single.set_save_handler(lambda png, label, svg, panel: "ok")
     assert single._save_btn in single._hover_buttons()
     assert single._save_fig_btn not in single._hover_buttons()
 
@@ -76,10 +77,11 @@ def test_save_figure_click_captures_whole_figure(qapp):
     card.figure.suptitle("Whole set")
     captured = {}
 
-    def handler(png_bytes, label, svg_bytes):
+    def handler(png_bytes, label, svg_bytes, panel_only):
         captured["png"] = png_bytes
         captured["label"] = label
         captured["svg"] = svg_bytes
+        captured["panel_only"] = panel_only
         return "Saved"
 
     card.set_save_handler(handler)
@@ -87,6 +89,9 @@ def test_save_figure_click_captures_whole_figure(qapp):
 
     assert captured.get("png", b"").startswith(b"\x89PNG")
     assert captured.get("label") == "Whole set"
+    # A whole-figure save is never a panel record, so a later redraw may render
+    # the whole card without substituting a different figure.
+    assert captured.get("panel_only") is False
     # Both panels are in the vector capture, not just the one that happened to
     # be hovered — the whole-figure save is the path a multi-panel Bar tab uses.
     assert b"<svg" in captured.get("svg", b"")

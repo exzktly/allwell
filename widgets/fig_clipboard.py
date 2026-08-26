@@ -15,9 +15,13 @@ they are safe to import from anywhere.
 
 from __future__ import annotations
 
+import logging
 import sys
 from contextlib import contextmanager
-from util.aw_safe import swallowed
+
+from util.aw_safe import swallow, swallowed
+
+_logger = logging.getLogger("well_viewer")
 
 
 @contextmanager
@@ -61,18 +65,35 @@ def _render_figure(fig, fmt, savefig_kwargs, rc_overrides) -> bytes:
         return b""
 
 
-#: The most drawable primitives a figure may hold before it is not worth
-#: capturing as vector. A figure past this becomes more PowerPoint shapes than a
-#: deck can open, so the consumer would place it as a picture anyway — and the
-#: capture itself is the expensive half: 300,000 points is a four-second render
-#: on the UI thread and a 32 MB file written beside a 0.17 MB PNG, all of it
-#: discarded later. Checked before rendering, from the artist counts, which costs
-#: nothing and does not scale with the data.
+#: The most drawable primitives a figure may hold before its **dense layers** are
+#: rasterized rather than emitted as individual shapes.
 #:
-#: ``tests/test_saved_plots_pptx_export.py`` holds this at or below the deck's
-#: own ``MAX_SHAPES_PER_SLIDE``, so a capture that is stored is never one the
-#: deck will refuse.
-MAX_VECTOR_PATHS = 4000
+#: Set from how long the resulting deck takes to *open*, which is the only number
+#: that decides it. Measured end to end (LibreOffice Impress converting the deck
+#: this repository's own export produces, on a 4-core container):
+#:
+#:   10,000 shapes →   8 s
+#:   20,000        →  17 s
+#:   40,000        →  46 s
+#:  100,000        → 2 min 39 s
+#:  249,000        → killed, out of memory at 13.9 GB
+#:
+#: Superlinear, with a hard wall. An earlier version of this constant was set to
+#: 250,000 from the *build* time instead — which is linear, and is not what the
+#: user waits for — and produced decks that cannot be opened at all.
+#:
+#: Passing it costs very little, which is why a conservative number is right:
+#: the figure is not refused, only its densest collections are rasterized (see
+#: :func:`render_figure_svg`), so a scatter of any size still exports with its
+#: axes, ticks, labels, title and legend as editable shapes. The cap decides
+#: only when the *point cloud* stops being individual shapes, and a cloud of
+#: twenty-five thousand marks is not something anyone restyles mark by mark.
+MAX_VECTOR_PATHS = 25_000
+
+#: Resolution for any layer that had to be rasterized. High enough that the
+#: raster half of a mixed figure does not read as blurry beside the vector half
+#: when a slide is projected.
+RASTERIZED_LAYER_DPI = 300
 
 
 def figure_path_count(fig) -> int:
@@ -97,6 +118,47 @@ def figure_path_count(fig) -> int:
     return total
 
 
+@contextmanager
+def _dense_layers_rasterized(fig, max_paths: int):
+    """Mark the figure's densest collections rasterized for the duration.
+
+    Biggest first, stopping as soon as the remaining primitive count is under
+    *max_paths*, so a figure gives up the least it can: a scatter of fifty
+    thousand cells beside a fitted line loses the cloud and keeps the line.
+    Matplotlib renders a rasterized artist into an embedded image and leaves
+    everything else — axes, spines, ticks, labels, title, legend — as vector.
+
+    Every artist's previous state is restored on the way out, because the figure
+    is the live one on screen and this must not change how it draws there.
+    """
+    collections = []
+    for ax in getattr(fig, "axes", ()):
+        for collection in getattr(ax, "collections", ()):
+            weight = 0
+            try:
+                weight = len(collection.get_offsets())
+            except Exception:
+                swallowed("rasterize: collection offsets")
+            collections.append((max(len(collection.get_paths()), weight),
+                                collection))
+    collections.sort(key=lambda item: item[0], reverse=True)
+
+    remaining = figure_path_count(fig)
+    touched = []
+    for weight, collection in collections:
+        if remaining <= max_paths:
+            break
+        touched.append((collection, collection.get_rasterized()))
+        collection.set_rasterized(True)
+        remaining -= weight
+    try:
+        yield touched
+    finally:
+        for collection, was in touched:
+            with swallow("rasterize: restore"):
+                collection.set_rasterized(was)
+
+
 def render_figure_svg(fig, *, max_paths: int | None = MAX_VECTOR_PATHS,
                       **savefig_kwargs) -> bytes:
     """Render *fig* to SVG bytes, with text left as text.
@@ -107,18 +169,60 @@ def render_figure_svg(fig, *, max_paths: int | None = MAX_VECTOR_PATHS,
     off, each label stays a ``<text>`` element and survives into whatever reads
     the SVG next.
 
-    Returns ``b""`` if the figure could not be rendered, so a caller capturing
-    vector alongside a raster never loses the raster to a vector failure — and
-    also when the figure holds more than *max_paths* primitives, for the reason
-    on that constant. Pass ``max_paths=None`` to render regardless, which is
-    what a caller wanting vector for its own sake (rather than for the deck)
-    should do.
+    A figure holding more than *max_paths* primitives has its densest layers
+    rasterized rather than being refused: the point cloud becomes one embedded
+    image and the rest of the figure stays editable. Pass ``max_paths=None`` to
+    render everything as vector regardless, which is what a caller wanting
+    vector for its own sake (rather than for a slide deck) should do —
+    :func:`copy_figure_to_clipboard` is that caller.
+
+    Returns ``b""`` only if the figure could not be rendered at all, so a caller
+    capturing vector alongside a raster never loses the raster to a vector
+    failure.
     """
-    if max_paths is not None and figure_path_count(fig) > max_paths:
-        return b""
     kw = {"bbox_inches": "tight"}
     kw.update(savefig_kwargs)
-    return _render_figure(fig, "svg", kw, {"svg.fonttype": "none"})
+    if max_paths is None or figure_path_count(fig) <= max_paths:
+        # No layer was given up, so no marker: an SVG with no marker is one whose
+        # every mark is a shape.
+        return _render_figure(fig, "svg", kw, {"svg.fonttype": "none"})
+    kw.setdefault("dpi", RASTERIZED_LAYER_DPI)
+    with _dense_layers_rasterized(fig, max_paths) as touched:
+        rendered = _render_figure(fig, "svg", kw, {"svg.fonttype": "none"})
+    if touched and rendered:
+        _logger.info("%d dense layer(s) rasterized to keep the rest of the "
+                     "figure editable", len(touched))
+        # Recorded **in the file**, not only in this log line. The consumer reads
+        # an embedded image as an ordinary picture inside an otherwise editable
+        # figure — which is exactly what a heat map legitimately is — so without
+        # a marker it cannot tell "this figure contains a picture" from "this
+        # figure's data became a picture", and reported a rasterized point cloud
+        # as fully editable.
+        rendered = _mark_rasterized(rendered, len(touched))
+    return rendered
+
+
+#: Written into a capture whose dense layers were rasterized, so the consumer can
+#: say so. An XML comment: invisible to every renderer, preserved by every parser,
+#: and impossible to confuse with figure content.
+RASTERIZED_MARKER = "allwell:rasterized-layers="
+
+
+def _mark_rasterized(svg: bytes, layers: int) -> bytes:
+    """Record in the SVG itself that *layers* dense layers became images."""
+    marker = f"<!-- {RASTERIZED_MARKER}{layers} -->".encode()
+    head = svg.find(b"<svg")
+    if head < 0:
+        return svg
+    return svg[:head] + marker + svg[head:]
+
+
+def rasterized_layer_count(svg: bytes) -> int:
+    """How many dense layers were rasterized when *svg* was captured, or 0."""
+    import re
+
+    match = re.search(RASTERIZED_MARKER.encode() + rb"(\d+)", svg or b"")
+    return int(match.group(1)) if match else 0
 
 
 def _macos_pasteboard_write(pdf_bytes: bytes, svg_bytes: bytes,

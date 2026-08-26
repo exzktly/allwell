@@ -22,6 +22,7 @@ import pytest
 
 matplotlib.use("Agg")
 
+from well_viewer.features.saved_plots import _deck  # noqa: E402
 from well_viewer.features.saved_plots._deck import (  # noqa: E402
     MAX_SHAPES_PER_SLIDE, build_saved_plots_deck,
 )
@@ -329,7 +330,8 @@ def test_an_unreadable_vector_capture_falls_back_and_names_the_reason(tmp_path):
     assert "Re-save" not in text
 
 
-def test_a_figure_of_too_many_shapes_becomes_a_picture_and_says_how_many(tmp_path):
+def test_a_figure_of_too_many_shapes_becomes_a_picture_and_says_how_many(
+        tmp_path, monkeypatch):
     """Past the cap a deck does not open at all, so the cap is not optional.
 
     The message names the count, because "too complex" gives the user nothing to
@@ -339,16 +341,21 @@ def test_a_figure_of_too_many_shapes_becomes_a_picture_and_says_how_many(tmp_pat
     import numpy as np
     from widgets.fig_clipboard import render_figure_svg
 
+    # The cap is lowered for this test rather than the figure being built past
+    # the real one: the contract is what happens on the far side of the
+    # threshold, not where the threshold sits — and rendering and parsing a
+    # third of a million points made this one test 89% of the file's runtime,
+    # paid on every fast-lane run and every CI job.
+    monkeypatch.setattr(_deck, "MAX_SHAPES_PER_SLIDE", 300)
     rng = np.random.default_rng(0)
     fig = Figure(figsize=(4, 3))
     ax = fig.add_subplot()
-    n = MAX_SHAPES_PER_SLIDE + 500
-    ax.scatter(rng.random(n), rng.random(n), s=1)
+    ax.scatter(rng.random(800), rng.random(800), s=1)
     svg = tmp_path / "big.svg"
-    # ``max_paths=None`` on purpose: the capture refuses a figure this size, so
-    # this is the backstop case — an oversized SVG that reached the store some
-    # other way (an older version wrote it, or the artist-count estimate ran
-    # low). The deck must still refuse it rather than emit an unopenable slide.
+    # ``max_paths=None`` on purpose: this is the backstop case — an oversized SVG
+    # that reached the store some other way (an older build wrote it, or the
+    # artist-count estimate ran low). The deck must refuse it rather than emit a
+    # slide that will not open.
     svg.write_bytes(render_figure_svg(fig, max_paths=None))
     png = tmp_path / "a.png"
     png.write_bytes(_png_bytes())
@@ -359,7 +366,7 @@ def test_a_figure_of_too_many_shapes_becomes_a_picture_and_says_how_many(tmp_pat
     assert (result.vector, result.raster) == (0, 1)
     text = _slide_text(out, 2)
     assert "separate shapes" in text
-    assert f"{MAX_SHAPES_PER_SLIDE:,}" in text
+    assert "300" in text
 
 
 def test_a_heat_map_carries_its_raster_block_into_the_deck(tmp_path):
@@ -437,19 +444,40 @@ def _png_bytes() -> bytes:
 # ── the app's own sequence ───────────────────────────────────────────────────
 
 def _stub_ctx(tmp_path):
-    """The slice of ``ctx`` the store, the capture and the export read.
+    """A ctx carrying the app's **real** state object.
 
-    Deliberately not the full app: the thing under test here is the order in
-    which four real modules touch one record, and building an eighteen-hundred
-    object window to watch that would put the test in the slow lane for nothing.
+    Not a namespace of the fields that happen to be read: the export snapshots
+    the live state and puts it back, and that snapshot walks selection, channel,
+    plot, cell-gating and every feature's view-state hook. A stub shaped from
+    the outside lets a restore that never ran look like one that did — and it did
+    exactly that, which is how "put the user back" shipped both untested and,
+    in production, silently skippable.
+
+    ``AppState()`` constructs standalone and costs nothing, so there is no reason
+    to approximate it.
     """
     from well_viewer.core.app_runtime import AppRuntime
+    from well_viewer.core.app_state import AppState
+    from well_viewer.core.widget_registry import WidgetRegistry
+    from well_viewer.features.registry import (
+        attach_feature_state, build_feature_registry,
+    )
 
-    dataset = SimpleNamespace(data_dir=tmp_path, persistence_doc=None,
-                              well_paths={}, well_labels={})
-    state = SimpleNamespace(dataset=dataset)
+    state = AppState()
+    # Attach the feature-owned slices, as app construction does. Without them
+    # ``view_state.snapshot`` raises on the first slice it reaches — which is
+    # the condition the export now declines on, so a stub missing them would
+    # test the refusal path and nothing else.
+    attach_feature_state(state)
+    state.dataset.data_dir = tmp_path
+    state.dataset.persistence_doc = None
     app = SimpleNamespace(_app_state=state)
-    ctx = SimpleNamespace(app=app, state=state, runtime=AppRuntime(app))
+    said: list[str] = []
+    ctx = SimpleNamespace(app=app, state=state, runtime=AppRuntime(app),
+                          widgets=WidgetRegistry(app), window=None,
+                          features=build_feature_registry(),
+                          notify=SimpleNamespace(set_status=said.append))
+    ctx.said = said
     app._ctx = ctx
     return ctx
 
@@ -603,44 +631,89 @@ def test_the_export_menu_reaches_both_exporters(qapp, monkeypatch):
 
 # ── the capture, and what it refuses ─────────────────────────────────────────
 
-def test_a_figure_past_the_cap_is_not_captured_at_all(tmp_path):
-    """The expensive half is the render, so the cap has to come before it.
+def test_a_dense_figure_keeps_everything_but_its_point_cloud_editable(tmp_path):
+    """Past the cap the figure is *not* refused — only its densest layer is.
 
-    A 300,000-point scatter is a four-second SVG render on the UI thread and a
-    32 MB file written beside a 0.17 MB PNG — and the deck then discards it,
-    because it is past the shape cap. Refusing after paying for it is the worst
-    of both, so the decision is made from the artist counts, which cost nothing.
+    Refusing outright is what shipped, and it defeated the format for exactly
+    the per-cell plots that most need restyling: the plot saved with no vector
+    capture at all, and the deck then placed a picture and told the user to
+    re-save a plot that would fail the same way again. Now the point cloud
+    becomes one embedded image and the axes, ticks, labels, title and legend
+    stay editable — the Illustrator workflow this export exists to replace.
+
+    Driven with an explicit low ``max_paths`` rather than by building a figure
+    past the real one: the contract under test is what happens on the far side
+    of the threshold, not where the threshold sits.
     """
     import numpy as np
     from matplotlib.figure import Figure
 
-    from widgets.fig_clipboard import (
-        MAX_VECTOR_PATHS, figure_path_count, render_figure_svg,
-    )
+    from widgets.fig_clipboard import figure_path_count, render_figure_svg
 
     rng = np.random.default_rng(0)
     fig = Figure(figsize=(4, 3))
     ax = fig.add_subplot()
-    ax.scatter(rng.random(MAX_VECTOR_PATHS + 1000),
-               rng.random(MAX_VECTOR_PATHS + 1000), s=1)
+    cloud = ax.scatter(rng.random(2000), rng.random(2000), s=1, label="cells")
+    ax.plot([0, 1], [0, 1], "r-", label="identity")
+    ax.set_title("Cells per well")
+    ax.set_xlabel("GFP")
+    ax.legend()
+    assert figure_path_count(fig) > 500
 
-    assert figure_path_count(fig) > MAX_VECTOR_PATHS
-    assert render_figure_svg(fig) == b""
-    # ...and the same figure still renders when a caller wants vector for its
-    # own sake rather than for the deck. Copy-as-SVG is that caller.
-    assert render_figure_svg(fig, max_paths=None).startswith(b"<?xml")
+    svg = render_figure_svg(fig, max_paths=500)
+    assert svg.startswith(b"<?xml"), "the figure must still be captured"
+
+    drawing = parse_svg(svg)
+    texts = [t.text for t in drawing.shapes if isinstance(t, TextShape)]
+    assert "Cells per well" in texts and "GFP" in texts and "cells" in texts
+    assert [s for s in drawing.shapes if isinstance(s, ImageShape)], (
+        "the dense layer should have become one embedded image")
+    # The cloud is a picture; everything else is still shapes.
+    assert len([s for s in drawing.shapes if isinstance(s, PathShape)]) > 5
+
+    # And the live figure is left exactly as it was found — this runs against the
+    # figure on screen, so a rasterized flag left behind would change how the
+    # user's own plot draws for the rest of the session.
+    assert cloud.get_rasterized() is False
 
 
-def test_an_ordinary_figure_is_captured_normally(tmp_path):
+def test_an_ordinary_scatter_stays_fully_vector(tmp_path):
+    """A per-cell scatter of the size people actually restyle must not be
+    quietly downgraded to a picture."""
+    import numpy as np
     from matplotlib.figure import Figure
 
-    from widgets.fig_clipboard import figure_path_count, render_figure_svg
+    from widgets.fig_clipboard import render_figure_svg
 
+    rng = np.random.default_rng(0)
     fig = Figure(figsize=(4, 3))
     ax = fig.add_subplot()
-    ax.bar([0, 1, 2], [3, 5, 2])
-    assert figure_path_count(fig) < 100
-    assert render_figure_svg(fig).startswith(b"<?xml")
+    ax.scatter(rng.random(8000), rng.random(8000), s=1)
+
+    drawing = parse_svg(render_figure_svg(fig))
+    assert not [s for s in drawing.shapes if isinstance(s, ImageShape)]
+    assert len([s for s in drawing.shapes if isinstance(s, PathShape)]) > 7900
+
+
+def test_the_capture_threshold_sits_where_a_deck_still_opens():
+    """Both bounds, because both directions have already gone wrong.
+
+    Too low and an ordinary figure loses its cloud for nothing — 4,000 was the
+    first value and it silently refused a twenty-thousand-cell scatter outright.
+    Too high and the deck cannot be opened: measured end to end, 40,000 shapes
+    converts in 46 s, 100,000 in over two and a half minutes, and 249,000 was
+    killed out of memory at 13.9 GB. The second value was 250,000, set from the
+    *build* time — which is linear, and is not what the user waits for.
+
+    This is a unit test standing in for a measurement it cannot make, so it pins
+    the range the measurement supports rather than the number itself.
+    """
+    from widgets.fig_clipboard import MAX_VECTOR_PATHS
+
+    assert MAX_VECTOR_PATHS >= 10_000, (
+        "an ordinary per-cell scatter must stay fully vector")
+    assert MAX_VECTOR_PATHS <= 50_000, (
+        "past this a deck takes minutes to open, or does not open at all")
 
 
 def test_the_capture_never_stores_what_the_deck_would_refuse():
@@ -897,3 +970,446 @@ def test_the_app_properties_follow_the_schema_order(tmp_path):
         app = ET.fromstring(zf.read("docProps/app.xml"))
     tags = [child.tag.split("}")[-1] for child in app]
     assert tags.index("Slides") < tags.index("Application")
+
+
+# ── repairing a plot filed before the app captured vector ────────────────────
+
+@pytest.mark.qt
+def test_a_png_only_plot_is_redrawn_so_the_deck_can_make_it_editable(
+        qapp, tmp_path, monkeypatch):
+    """The repair the export performs for an older record.
+
+    A plot filed before the app captured vector is a PNG and nothing else, and
+    no amount of reading it produces shapes. What the record does carry is the
+    parameters that drew it, so the export replays those onto the tab, captures
+    the live figure, and keeps the result on the record — the redraw is a one-off
+    repair, not a cost paid on every export.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+    from widgets.plot_card import PlotCard
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+
+    card = PlotCard(figsize=(4, 3))
+    ax = card.figure.add_subplot(1, 1, 1)
+    ax.bar([0, 1, 2, 3], [3, 5, 2, 4])
+    ax.set_title("Mean intensity per group")
+    C.wire_save_to_gallery(ctx, card, "Bar Plots")
+    # Replaying the parameters is the app's job and has its own tests; what this
+    # one is about is that the redraw happens, is captured, and is kept.
+    monkeypatch.setattr(C, "restore_saved_plot", lambda ctx_, pid: None)
+
+    rec = SavedPlot(id="old1", created_at="2026-01-01T00:00:00", tab="Bar Plots",
+                    title="Filed last week", png_filename="old1.png", params={})
+    assert store.add(ctx, rec, _png_bytes())
+    assert rec.svg_filename == "", "the record starts with no vector capture"
+
+    redrawn = C.regenerate_missing_vectors(ctx, store, [rec])
+
+    assert redrawn == {"old1"}
+    assert rec.svg_filename, "the redraw should have been kept on the record"
+    assert (tmp_path / "saved_plots" / rec.svg_filename).exists()
+
+    out = tmp_path / "deck.pptx"
+    result = build_saved_plots_deck(
+        [rec], lambda r: store.vector_path(ctx, r),
+        lambda r: store.image_path(ctx, r), out, regenerated=redrawn)
+
+    assert (result.vector, result.raster) == (1, 0)
+    assert result.redrawn == 1
+    text = _slide_text(out, 2)
+    assert "Mean intensity per group" in text          # editable, as shapes
+    # ...and the slide says the figure was redrawn rather than captured, because
+    # it reflects today's data rather than the image that was saved.
+    assert "redrawn from the plot's saved settings" in text
+    assert "redrawn from saved settings" in result.summary()
+
+
+@pytest.mark.qt
+def test_a_plot_that_already_has_vector_is_never_redrawn(qapp, tmp_path):
+    """The capture taken when the user saved is the better record of what they
+    saw, so it is never replaced by a later redraw."""
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    rec = SavedPlot(id="new1", created_at="2026-01-01T00:00:00", tab="Bar Plots",
+                    title="Saved today", png_filename="new1.png",
+                    svg_filename="new1.svg", params={})
+    assert store.add(ctx, rec, _png_bytes(), _bar_svg())
+    original = (tmp_path / "saved_plots" / "new1.svg").read_bytes()
+
+    assert C.regenerate_missing_vectors(ctx, store, [rec]) == set()
+    assert (tmp_path / "saved_plots" / "new1.svg").read_bytes() == original
+    assert store.attach_vector(ctx, rec, b"<svg/>") is False
+
+
+@pytest.mark.qt
+def test_a_tab_with_no_figure_is_left_as_a_picture(qapp, tmp_path):
+    """The Image Table composes its snapshot from microscopy frames rather than
+    drawing a chart, so it has never had vector and cannot acquire it here."""
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    # A card for a *different* tab, so ``cards_by_tab`` is non-empty and the
+    # Image Table record actually falls through the per-record "no card" skip.
+    # Without it the function returned at the empty-map guard and this test
+    # passed against a deleted skip branch.
+    card, _ = _card_that_draws_what_it_is_told(ctx)
+    assert ctx.runtime.saved_plots.cards_by_tab
+
+    rec = SavedPlot(id="grid", created_at="2026-01-01T00:00:00",
+                    tab="Image Table", title="Grid", png_filename="grid.png",
+                    params={})
+    assert store.add(ctx, rec, _png_bytes())
+
+    assert C.regenerate_missing_vectors(ctx, store, [rec]) == set()
+    assert rec.svg_filename == ""
+
+
+# ── what the redraw must actually guarantee ──────────────────────────────────
+#
+# The feature shipped with one test that monkeypatched `restore_saved_plot` to a
+# no-op, so it proved the plumbing — bytes captured, file written, note on the
+# slide — and nothing about the record. Deleting the replay entirely left all 44
+# tests green. Everything below is about the part that monkeypatch removed.
+
+def _card_that_draws_what_it_is_told(ctx):
+    """A real PlotCard plus a stand-in restore that redraws it per record.
+
+    The stand-in is the point: it makes "which record was replayed" visible in
+    the captured bytes, so the assertions can be about identity and ordering
+    rather than about the mechanism.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from widgets.plot_card import PlotCard
+
+    card = PlotCard(figsize=(4, 3))
+    ax = card.figure.add_subplot(1, 1, 1)
+
+    def _replay(_ctx, plot_id):
+        ax.clear()
+        ax.bar([0, 1], [3, 5])
+        ax.set_title(f"figure for {plot_id}")
+
+    C.wire_save_to_gallery(ctx, card, "Bar Plots")
+    return card, _replay
+
+
+@pytest.mark.qt
+def test_each_record_is_captured_from_its_own_redrawn_figure(qapp, tmp_path,
+                                                             monkeypatch):
+    """Record N's stored capture must be record N's figure.
+
+    Two things fail this and neither is exotic: capturing before the replay runs
+    (every record gets whatever was on screen), and capturing after the *next*
+    record's replay (every record gets its successor's figure). Both put a real
+    figure on a slide under the wrong plot's title and parameters, which is the
+    failure this repository cares most about — wrong output that looks right.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    card, replay = _card_that_draws_what_it_is_told(ctx)
+    monkeypatch.setattr(C, "restore_saved_plot", replay)
+
+    records = []
+    for pid in ("p1", "p2", "p3"):
+        rec = SavedPlot(id=pid, created_at="2026-01-01T00:00:00", tab="Bar Plots",
+                        title=f"Plot {pid}", png_filename=f"{pid}.png", params={})
+        assert store.add(ctx, rec, _png_bytes())
+        records.append(rec)
+
+    assert C.regenerate_missing_vectors(ctx, store, records) == {"p1", "p2", "p3"}
+
+    for rec in records:
+        stored = (tmp_path / "saved_plots" / rec.svg_filename).read_text()
+        assert f"figure for {rec.id}" in stored, (
+            f"{rec.id} was captured from another record's figure")
+        for other in records:
+            if other is not rec:
+                assert f"figure for {other.id}" not in stored
+
+
+@pytest.mark.qt
+def test_the_gating_pass_finishes_before_the_figure_is_captured(qapp, tmp_path,
+                                                               monkeypatch):
+    """`restore_saved_plot` applies gating by kicking a worker thread.
+
+    Capturing on the next line reads the *previous* pass's Included flags, so the
+    figure is drawn under a gating that is neither the record's nor the user's —
+    and the slide says it "reflects the current data". The recompute has to
+    finish on this thread, between the replay and the capture, or the number on
+    the slide is wrong with a confident caption.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    card, replay = _card_that_draws_what_it_is_told(ctx)
+    order = []
+    monkeypatch.setattr(C, "restore_saved_plot",
+                        lambda c, pid: (order.append("replay"), replay(c, pid))[1])
+    monkeypatch.setattr(C, "_gating_recompute_now",
+                        lambda c: (order.append("gating"), True)[1])
+    real_capture = type(card).captureVectorSvg
+    monkeypatch.setattr(type(card), "captureVectorSvg",
+                        lambda self: (order.append("capture"),
+                                      real_capture(self))[1])
+
+    rec = SavedPlot(id="p1", created_at="2026-01-01T00:00:00", tab="Bar Plots",
+                    title="Plot", png_filename="p1.png", params={})
+    assert store.add(ctx, rec, _png_bytes())
+    assert C.regenerate_missing_vectors(ctx, store, [rec]) == {"p1"}
+
+    assert order == ["replay", "gating", "capture"], (
+        "the gating pass must settle between the replay and the capture")
+
+
+@pytest.mark.qt
+def test_the_export_puts_the_user_s_own_work_back(qapp, tmp_path, monkeypatch):
+    """Replaying a record replaces the user's replicate sets, gating and stats.
+
+    `view_state.snapshot` captures none of the three, so restoring only what it
+    knows about left them replaced by the last regenerated plot's — permanently,
+    and with the clobbered gating reaching `pipeline_info.json` on the user's
+    next gate edit. An export is not a navigation and must not cost them work.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    card, _ = _card_that_draws_what_it_is_told(ctx)
+
+    mine = [{"id": "sel-mine", "name": "my replicates", "wells": ["A01", "A02"]}]
+    ctx.state.selection.selections = [dict(s) for s in mine]
+    ctx.state.selection.current_selection_id = "sel-mine"
+    ctx.state.cell_gating.fluor_gates["gfp"] = 123.0
+
+    def _replay_that_clobbers(_ctx, plot_id):
+        # What the real restore does: replace, wholesale.
+        _ctx.state.selection.selections = [{"id": "sel-theirs",
+                                            "name": "the plot's", "wells": []}]
+        _ctx.state.selection.current_selection_id = "sel-theirs"
+        _ctx.state.cell_gating.fluor_gates.clear()
+        _ctx.state.cell_gating.fluor_gates["rfp"] = 999.0
+
+    monkeypatch.setattr(C, "restore_saved_plot", _replay_that_clobbers)
+    monkeypatch.setattr(C, "_gating_recompute_now", lambda c: True)
+
+    rec = SavedPlot(id="p1", created_at="2026-01-01T00:00:00", tab="Bar Plots",
+                    title="Plot", png_filename="p1.png", params={})
+    assert store.add(ctx, rec, _png_bytes())
+    C.regenerate_missing_vectors(ctx, store, [rec])
+
+    assert [s["id"] for s in ctx.state.selection.selections] == ["sel-mine"]
+    assert ctx.state.selection.current_selection_id == "sel-mine"
+    assert ctx.state.cell_gating.fluor_gates.get("gfp") == 123.0
+    assert "rfp" not in ctx.state.cell_gating.fluor_gates
+
+
+@pytest.mark.qt
+def test_a_repair_that_cannot_be_undone_never_starts(qapp, tmp_path,
+                                                     monkeypatch):
+    """If the live state cannot be snapshotted, nothing is replayed.
+
+    The old code let the snapshot fail into `None` and skipped the restore in
+    silence, so a session whose state could not be saved was the one session
+    that got its state replaced. Declining is the only safe answer, and it is
+    said out loud rather than left as a deck that is quietly less editable.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    card, replay = _card_that_draws_what_it_is_told(ctx)
+    replayed = []
+    monkeypatch.setattr(C, "restore_saved_plot",
+                        lambda c, pid: replayed.append(pid))
+    monkeypatch.setattr(C.view_state, "snapshot",
+                        lambda c: (_ for _ in ()).throw(RuntimeError("no")))
+
+    rec = SavedPlot(id="p1", created_at="2026-01-01T00:00:00", tab="Bar Plots",
+                    title="Plot", png_filename="p1.png", params={})
+    assert store.add(ctx, rec, _png_bytes())
+
+    assert C.regenerate_missing_vectors(ctx, store, [rec]) == set()
+    assert replayed == [], "nothing may be replayed without a way back"
+    assert rec.svg_filename == ""
+    assert ctx.said and "could not be saved and restored" in ctx.said[0]
+
+
+def test_a_rasterized_data_layer_is_never_reported_as_fully_editable(tmp_path):
+    """The figure is editable and its data is not, and the slide must say so.
+
+    An embedded image is what a heat map legitimately contains, so nothing about
+    the picture itself distinguishes "this figure includes a raster block" from
+    "this figure's data became a raster block". Without a marker the deck read
+    the second as the first and reported the whole thing as editable — the
+    cardinal rule, broken by the fix for a different defect.
+    """
+    import numpy as np
+    from matplotlib.figure import Figure
+
+    from widgets.fig_clipboard import rasterized_layer_count, render_figure_svg
+
+    rng = np.random.default_rng(0)
+    fig = Figure(figsize=(4, 3))
+    ax = fig.add_subplot()
+    ax.scatter(rng.random(2000), rng.random(2000), s=1)
+    ax.set_title("Cells")
+    svg = tmp_path / "dense.svg"
+    svg.write_bytes(render_figure_svg(fig, max_paths=500))
+    assert rasterized_layer_count(svg.read_bytes()) == 1
+
+    out = tmp_path / "deck.pptx"
+    result = build_saved_plots_deck([_rec("1")], lambda r: svg, lambda r: None,
+                                    out)
+
+    assert result.vector == 1 and result.rasterized == 1
+    assert "all editable" not in result.summary()
+    assert "picture for the data layer" in result.summary()
+    text = _slide_text(out, 2)
+    assert "too dense to redraw mark by mark" in text
+    assert "Cells" in text, "the rest of the figure is still editable text"
+
+
+def test_a_figure_with_nothing_rasterized_carries_no_marker(tmp_path):
+    """A capture with no marker is one whose every mark is a shape."""
+    from widgets.fig_clipboard import rasterized_layer_count
+
+    svg = tmp_path / "plain.svg"
+    svg.write_bytes(_bar_svg())
+    assert rasterized_layer_count(svg.read_bytes()) == 0
+
+    out = tmp_path / "deck.pptx"
+    result = build_saved_plots_deck([_rec("1")], lambda r: svg, lambda r: None,
+                                    out)
+    assert result.rasterized == 0
+    assert result.summary().endswith("all editable")
+
+
+def test_two_shortfalls_on_one_slide_do_not_print_on_top_of_each_other(tmp_path):
+    """A slide can have more than one thing to say, and used to say neither.
+
+    Both notes were written at the same fixed height, so the slide with the most
+    to report was the one that reported none of it legibly — the shortfall hidden
+    by the very line meant to describe it, in geometry rather than in prose.
+    """
+    import numpy as np
+    from matplotlib.figure import Figure
+
+    from widgets.fig_clipboard import render_figure_svg
+
+    # Dense enough to rasterize, and hatched so a construct is also dropped.
+    rng = np.random.default_rng(0)
+    fig = Figure(figsize=(4, 3))
+    ax = fig.add_subplot()
+    ax.scatter(rng.random(2000), rng.random(2000), s=1)
+    ax.bar([0.2, 0.6], [0.4, 0.7], width=0.1, hatch="//", color="white",
+           edgecolor="k")
+    svg = tmp_path / "both.svg"
+    svg.write_bytes(render_figure_svg(fig, max_paths=500))
+    out = tmp_path / "deck.pptx"
+
+    result = build_saved_plots_deck([_rec("1")], lambda r: svg, lambda r: None,
+                                    out, regenerated={"1"})
+    assert result.rasterized == 1 and result.redrawn == 1
+
+    slide = _slide_xml(out, 2)
+    notes = [sp for sp in slide.iter(f"{_P}sp")
+             if (sp.find(f".//{_P}cNvPr") is not None
+                 and "Export note" in (sp.find(f".//{_P}cNvPr").get("name") or ""))]
+    assert len(notes) >= 2, "this slide has more than one shortfall to report"
+    tops = [int(x.get("y")) for n in notes for x in n.iter(f"{_A}off")]
+    assert len(set(tops)) == len(tops), "two notes were written at the same height"
+
+
+@pytest.mark.qt
+def test_a_single_panel_record_is_not_regenerated_as_the_whole_figure(
+        qapp, tmp_path, monkeypatch):
+    """A redraw renders the whole card, and a panel record is one panel of it.
+
+    Regenerating one would put every panel on the slide under the panel's title
+    and beside the panel's parameters — a different figure, not a worse one. A
+    picture of the right plot beats shapes of the wrong one.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    card, replay = _card_that_draws_what_it_is_told(ctx)
+    monkeypatch.setattr(C, "restore_saved_plot", replay)
+    monkeypatch.setattr(C, "_gating_recompute_now", lambda c: True)
+
+    panel = SavedPlot(id="panel", created_at="2026-01-01T00:00:00",
+                      tab="Bar Plots", title="Panel one",
+                      png_filename="panel.png", params={}, panel_only=True)
+    whole = SavedPlot(id="whole", created_at="2026-01-01T00:00:00",
+                      tab="Bar Plots", title="Everything",
+                      png_filename="whole.png", params={})
+    for rec in (panel, whole):
+        assert store.add(ctx, rec, _png_bytes())
+
+    assert C.regenerate_missing_vectors(ctx, store, [panel, whole]) == {"whole"}
+    assert panel.svg_filename == "", "a panel record must stay a picture"
+    assert whole.svg_filename, "a whole-figure record is repaired as usual"
+
+
+def test_a_panel_record_round_trips_through_persistence(tmp_path):
+    """The flag has to survive the JSON, or the next export substitutes again."""
+    from well_viewer.features.saved_plots.state import SavedPlot
+
+    rec = SavedPlot(id="p", created_at="", tab="Bar Plots", title="t",
+                    png_filename="p.png", params={}, panel_only=True)
+    assert SavedPlot.from_dict(rec.to_dict()).panel_only is True
+    # A record written before the flag existed reads as a whole-figure save,
+    # which is what the great majority of them are.
+    old = {k: v for k, v in rec.to_dict().items() if k != "panel_only"}
+    assert SavedPlot.from_dict(old).panel_only is False
+
+
+@pytest.mark.qt
+def test_a_capture_that_could_not_be_written_still_makes_this_deck_editable(
+        qapp, tmp_path, monkeypatch):
+    """The file on disk is the repair; the bytes are what this export needs.
+
+    A failed write — a full disk, a read-only folder — used to throw away both,
+    so the export fell back to a picture for a figure it had already rendered.
+    """
+    from well_viewer.features.saved_plots import controller as C
+    from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore
+
+    ctx = _stub_ctx(tmp_path)
+    store = SavedPlotsStore()
+    card, replay = _card_that_draws_what_it_is_told(ctx)
+    monkeypatch.setattr(C, "restore_saved_plot", replay)
+    monkeypatch.setattr(C, "_gating_recompute_now", lambda c: True)
+
+    rec = SavedPlot(id="p1", created_at="2026-01-01T00:00:00", tab="Bar Plots",
+                    title="Plot", png_filename="p1.png", params={})
+    assert store.add(ctx, rec, _png_bytes())
+    monkeypatch.setattr(store, "attach_vector",
+                        lambda *a, **k: False)     # the write fails
+
+    assert C.regenerate_missing_vectors(ctx, store, [rec]) == {"p1"}
+    assert rec.svg_filename == "", "nothing was persisted, so nothing is claimed"
+    assert store.held_vector(rec).startswith(b"<?xml")
+
+    out = tmp_path / "deck.pptx"
+    result = build_saved_plots_deck(
+        [rec], lambda r: store.vector_path(ctx, r) or store.held_vector(r),
+        lambda r: store.image_path(ctx, r), out, regenerated={"p1"})
+    assert (result.vector, result.raster) == (1, 0)
+    assert "figure for p1" in _slide_text(out, 2)

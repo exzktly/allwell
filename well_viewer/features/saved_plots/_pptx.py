@@ -154,6 +154,10 @@ class Slide:
     def __init__(self) -> None:
         self.ids = ShapeIds()
         self.body: list[str] = []
+        #: How many shortfall notes this slide already carries. The deck stacks
+        #: them rather than writing each at the same fixed height, so a slide
+        #: with two things to say says both.
+        self.note_count = 0
         #: ``(relationship_id, png_bytes)`` for every raster block on this slide.
         self.images: list[tuple[str, bytes]] = []
 

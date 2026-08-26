@@ -1749,16 +1749,53 @@ unparseable, so PowerPoint offers to repair the file while the export reports
 success. `_drawingml.xml_text` / `xml_attr` drop them and every user-reachable
 string goes through one or the other.
 
-**The vector capture is capped before it is taken, not after.**
+**A plot with no vector capture is redrawn rather than written off.** A record
+filed before the app captured vector is a PNG and nothing else, and no amount of
+reading it produces shapes — but it carries the parameters that drew it, and the
+app can draw them again. `controller.regenerate_missing_vectors` runs before the
+deck is built: for each such record it replays the parameters onto the tab
+(`restore_saved_plot`), captures the live figure through
+`PlotCard.captureVectorSvg` — the same publication-mode render a save uses — and
+keeps the result on the record via `store.attach_vector`. The repair is therefore
+a one-off: every later export of that plot is editable without paying for it
+again. An existing capture is never overwritten, because the one taken when the
+user saved is the better record of what they saw.
+
+The tab-to-card map comes from `wire_save_to_gallery`, which is the one place in
+the app where a tab's name and its live card meet; a tab added tomorrow is
+covered by wiring itself up rather than by a roster someone has to remember.
+A tab with no card — the Image Table, which composes microscopy frames rather
+than drawing a chart — is skipped and stays a picture.
+
+**Those slides say the figure was redrawn**, and `DeckResult.redrawn` counts
+them. A redrawn figure is drawn from *today's* data and today's gating, and the
+gating recompute is asynchronous, so it can differ from the image the user saved
+in a direction nothing else on the slide would reveal. The user's own view is
+snapshotted before the loop and restored after it: an export is not a
+navigation.
+
+**The vector capture is bounded by rasterizing dense layers, not by refusing.**
 `fig_clipboard.MAX_VECTOR_PATHS` is checked against `figure_path_count` — artist
 counts, so constant-time in the data — before `render_figure_svg` renders
-anything. A 300,000-point scatter is otherwise a four-second render on the UI
-thread and a 32 MB file written beside a 0.17 MB PNG, all of it discarded at
-export because it is past the shape cap. A test holds `MAX_VECTOR_PATHS` at or
-below `MAX_SHAPES_PER_SLIDE`, which is the tie between two numbers that cannot
-share a constant: the capture lives in `widgets/` and must not import a feature.
-`copy_figure_to_clipboard` is deliberately uncapped — that caller wants vector
-for its own sake rather than for a deck.
+anything. Past it the figure is **not** refused: `_dense_layers_rasterized` marks
+the biggest collections rasterized, biggest first and only as far as it must, so
+a scatter of a hundred thousand cells beside a fitted line loses the cloud and
+keeps the line, and the axes, ticks, labels, title and legend stay editable
+either way. Refusing the whole figure is what shipped first, and it defeated the
+format for exactly the per-cell plots that most need restyling.
+
+The threshold is set from how long the resulting deck takes to **open**, which is
+the only number that decides it — an earlier version was set from the build time,
+which is linear and is not what the user waits for, and produced decks that could
+not be opened at all. Opening is superlinear with a hard wall: 10,000 shapes in
+8 s, 20,000 in 17 s, 40,000 in 46 s, 100,000 in over two and a half minutes, and
+249,000 killed out of memory at 13.9 GB. Passing the threshold costs little,
+because the figure is never refused — only its point cloud stops being individual
+shapes — so the conservative number is the right one. A test holds
+`MAX_VECTOR_PATHS` at or below `MAX_SHAPES_PER_SLIDE`, which is the tie between
+two numbers that cannot share a constant: the capture lives in `widgets/` and
+must not import a feature. `copy_figure_to_clipboard` is deliberately uncapped —
+that caller wants vector for its own sake rather than for a deck.
 
 **`_deck.MAX_SHAPES_PER_SLIDE` is a hard cap, not a quality setting.** A scatter
 of a hundred thousand cells is a hundred thousand PowerPoint shapes and a deck
@@ -1800,6 +1837,20 @@ card into view and outline it for a moment (`QFrame#Panel[focusflash="true"]`).
 Landing at the top of the list is, from the page, indistinguishable from the link
 not working, so `focus_saved_plot` returns False when it could not reach the card
 and Home turns that into a status message.
+
+**The scroll is deferred, and aims at the card's top.** The caller has just
+switched to this page, so the page has no geometry: the scroll area's range is
+still zero and every card sits at y=0, and a scroll issued in that turn of the
+event loop is a scroll to the top of a list that has not been laid out. That is
+what shipped, and it always landed on the first card while reporting success,
+because `QScrollArea.ensureWidgetVisible` returns nothing to say otherwise.
+`_scroll_when_laid_out` re-aims once per event-loop pass until the target stops
+moving (the cards size themselves from their pixmaps, so the list's height is
+still changing for a few passes), bounded by `_SCROLL_SETTLE_TRIES`. It sets the
+scroll bar to the card's own top rather than calling `ensureWidgetVisible`,
+because a saved figure is routinely taller than the viewport and "make it
+visible" then means scrolling until its *bottom* shows — the user arrives at the
+foot of the plot they clicked.
 
 Thumbnails are decoded **at thumbnail size**, through
 `QImageReader.setScaledSize` rather than by loading the file and scaling

@@ -43,6 +43,14 @@ class SavedPlot:
     png_filename: str          # basename under the images dir
     params: dict               # view_state.snapshot(app) — drives Restore
     svg_filename: str = ""     # vector twin of the PNG; "" when none was captured
+    #: True when the record is **one panel** of a multi-panel figure (the hover
+    #: save), False when it is the whole figure. A redraw renders the whole card,
+    #: so without this a panel record came back as every panel, shown under the
+    #: panel's title beside the panel's parameters — a different figure, not a
+    #: worse one. Absent on records written before this was tracked, which read
+    #: as False; those are whole-figure saves far more often than not, and the
+    #: redraw states on the slide that it is a redraw either way.
+    panel_only: bool = False
     thresholds: dict = field(default_factory=dict)
     summary: str = ""          # human-readable parameter summary
 
@@ -58,6 +66,7 @@ class SavedPlot:
             title=str(d.get("title", "")),
             png_filename=str(d.get("png_filename", "")),
             svg_filename=str(d.get("svg_filename", "") or ""),
+            panel_only=bool(d.get("panel_only", False)),
             params=dict(d.get("params", {}) or {}),
             thresholds=dict(d.get("thresholds", {}) or {}),
             summary=str(d.get("summary", "")),
@@ -71,6 +80,9 @@ class SavedPlotsStore:
     def __init__(self) -> None:
         self.records: list[SavedPlot] = []
         self._loaded_dir: Path | None = None
+        #: Captures rendered this session that could not be written to disk,
+        #: keyed by record id. Never persisted — see ``hold_vector``.
+        self._held: dict[str, bytes] = {}
 
     # ── disk paths ────────────────────────────────────────────────────────
     @staticmethod
@@ -156,6 +168,61 @@ class SavedPlotsStore:
         self.records.append(rec)
         self._persist(ctx)
         return True
+
+    def persist(self, ctx) -> None:
+        """Write the section out. Public so a batch caller can write once.
+
+        ``attach_vector`` per record would otherwise read and rewrite the whole
+        of ``persistence.json`` — which also holds view state and Batch Export
+        config — once per plot, so repairing a gallery of forty old plots is
+        forty full read/write cycles of a file none of them is the only writer
+        of.
+        """
+        self._persist(ctx)
+
+    def attach_vector(self, ctx, rec: SavedPlot, svg_bytes: bytes,
+                      *, persist: bool = True) -> bool:
+        """Give an existing record a vector capture it did not have.
+
+        Written to disk beside its PNG and persisted, so a plot regenerated once
+        for an export is editable in every export after it — the redraw is a
+        one-off repair of an old record, not a cost paid on every deck.
+
+        Refuses to overwrite a capture the record already has: that one was taken
+        from the live figure at the moment the user saved it, which is a better
+        record of what they saw than anything redrawn later.
+        """
+        idir = self.images_dir(ctx)
+        if idir is None or not svg_bytes or rec.svg_filename:
+            return False
+        name = f"{rec.id}.svg"
+        try:
+            idir.mkdir(parents=True, exist_ok=True)
+            (idir / name).write_bytes(svg_bytes)
+        except OSError as exc:
+            _logger.warning("saved_plots: failed to write vector capture: %s", exc)
+            return False
+        rec.svg_filename = name
+        if persist:
+            self._persist(ctx)
+        return True
+
+    def hold_vector(self, ctx, rec: SavedPlot, svg_bytes: bytes) -> bool:
+        """Keep a capture for this session only, when it could not be written.
+
+        The repair is the file on disk; this is the consolation prize when the
+        write fails — a full disk, a read-only folder — and it is worth having,
+        because the bytes are already rendered and they are what makes *this*
+        export editable. Nothing is persisted, so the next session redraws again.
+        """
+        if not svg_bytes:
+            return False
+        self._held[rec.id] = svg_bytes
+        return True
+
+    def held_vector(self, rec: SavedPlot) -> bytes:
+        """The session-only capture for *rec*, or ``b""``."""
+        return self._held.get(rec.id, b"")
 
     def _discard_files(self, ctx, rec: SavedPlot) -> None:
         """Remove every file a record owns — the snapshot and its vector twin.

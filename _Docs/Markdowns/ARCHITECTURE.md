@@ -2636,6 +2636,28 @@ Cross-cutting controllers (in `well_viewer/core/`):
 | `core/status_view.py` | The status/log footer, and `_GUILogHandler`, which routes `well_viewer` log records into the drawer's `QTextEdit`. It is attached at DEBUG and gated on nothing, so it sees every record the app produces — including the `well_viewer.swallowed` breadcrumbs written from inside `except` blocks on worker threads — and `emit` is therefore entered off the GUI thread as a matter of course. It crosses that boundary through a `core.worker_bridge.GuiLogRelay`, never a timer; §10.1 has the mechanism and why the distinction is not cosmetic. Two further rules keep it from outliving its widget badly. **It never logs from its own failure path.** A failed append is caught as `RuntimeError` and handled silently — deliberately *not* `swallowed()`, whose DEBUG record would propagate straight back to the logger this handler is attached to, fail in the same place, and log again; a redraw's `processEvents()` drains that queue forever, which is a hang, not a slow run. **A handler whose widget is gone detaches itself** from every logger holding it, because nothing removes it on teardown — in a process that builds more than one window (the test suite) the dead handlers otherwise stay subscribed and every record fans out to widgets that cannot receive it. The document is capped at `_LOG_MAX_BLOCKS`, so the drawer is a bounded tail rather than an unbounded archive. |
 | `core/ui_helpers.py` | Cross-cutting widget helpers (combo population, button factories, theme application). |
 
+**An artist drawn in the plot's ink is tagged to follow the theme.**
+`PlotCard.setPlotTheme` repaints the parts of an Axes matplotlib names — the
+facecolor, spines, ticks, axis labels, the title, the legend — and a free
+`ax.text` / `ax.annotate` / `ax.plot` is not one of those. That matters because
+a capture does not redraw: `_publication_capture` flips the card to publication
+and suppresses `plotThemeChanged` on purpose, so one Save click does not run two
+full recomputes. An annotation coloured from `tokens_for` at draw time therefore
+kept the *screen* theme's near-white ink and went onto white paper — the
+significance brackets were reported that way, `#E6E9EF` on `#FFFFFF`, roughly
+1.1:1.
+
+`plot_style.follows_theme(artist, muted=…)` is the tag (`_aw_theme_ink`, defined
+in `widgets/plot_card.py` because the repaint that honours it is
+`setPlotTheme`'s), and `repaint_theme_ink` applies it over each axes and over the
+figure — a footnote written with `fig.text` belongs to no axes. Data colours are
+never tagged: repainting one would substitute the theme's ink for a value the
+plot is using to mean something, which is why the rule is an opt-in tag rather
+than a match on the outgoing colour. It is the mirror of `_aw_no_style_override`
+above — that one takes an artist *out* of a styling pass, this one puts it *in*.
+`tests/test_theme_ink_artists_are_tagged.py` fails on any free artist coloured
+from `tokens_for` without it.
+
 Per-feature controllers / renderers (under `well_viewer/features/`):
 
 | Feature package | Role |

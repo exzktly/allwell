@@ -84,6 +84,14 @@ def tokens_for(ax) -> tuple:
         return theme.CPub.bg, theme.Colors.text_primary, theme.CPub.text, theme.CPub.grid, theme.CPub.spine
 
 
+# Re-exported so a renderer takes its ink and its "this is ink" marker from one
+# import. ``follows_theme`` lives in ``widgets`` because the repaint that honours
+# it is ``PlotCard.setPlotTheme``'s, and ``widgets`` carries no app coupling.
+from widgets.plot_card import follows_theme  # noqa: E402  (re-export)
+
+__all__ = [*globals().get("__all__", []), "follows_theme"]
+
+
 # Internal alias (was the original name).
 _tokens_for = tokens_for
 

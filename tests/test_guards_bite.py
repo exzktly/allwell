@@ -2796,3 +2796,74 @@ def test_dataset_name_guard_clears_an_unrelated_name_read(tmp_path, monkeypatch)
                   "label = record.name\nother = Path(csv_path).name\n")
     assert _run_scan(monkeypatch, _DATASET_NAME_GUARD, _DATASET_NAME_TEST,
                      [good]) is None
+
+
+# ── artists drawn in the plot's ink follow a theme change ────────────────────
+
+_THEME_INK_GUARD = "tests.test_theme_ink_artists_are_tagged"
+_THEME_INK_TEST = "test_every_ink_coloured_artist_follows_the_theme"
+
+
+@pytest.mark.parametrize("shape", [
+    # The ink taken by subscript and handed straight to a text.
+    'def d(ax):\n    ax.text(0, 0, "x", color=tokens_for(ax)[1])\n',
+    # Through a local, which is how the significance brackets had it.
+    'def d(ax):\n    fg = tokens_for(ax)[1]\n'
+    '    ax.text(0, 0, "x", color=fg)\n',
+    # Through a tuple unpack, which is how the Distribution tab had it.
+    'def d(ax):\n    _bg, _t, muted, _g, _s = tokens_for(ax)\n'
+    '    ax.text(0, 0, "x", color=muted)\n',
+    # An annotate rather than a text.
+    'def d(ax):\n    fg = tokens_for(ax)[1]\n'
+    '    ax.annotate("x", xy=(0, 0), color=fg)\n',
+    # A line — the bracket itself.
+    'def d(ax):\n    fg = tokens_for(ax)[1]\n'
+    '    ax.plot([0, 1], [0, 1], color=fg)\n',
+    # A figure-level footnote.
+    'def d(fig, ax):\n    _b, _t, muted, _g, _s = tokens_for(ax)\n'
+    '    fig.text(0.5, 0, "x", color=muted)\n',
+])
+def test_theme_ink_guard_catches_an_untagged_ink_artist(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_theme_ink.py", shape)
+    exc = _run_scan(monkeypatch, _THEME_INK_GUARD, _THEME_INK_TEST, [bad])
+    assert exc is not None and "bad_theme_ink.py" in str(exc)
+
+
+@pytest.mark.parametrize("shape", [
+    # Wrapped at the call.
+    'def d(ax):\n    fg = tokens_for(ax)[1]\n'
+    '    follows_theme(ax.text(0, 0, "x", color=fg))\n',
+    # Tagged through the name it was bound to. An `ax.plot` returns a list, so
+    # there is no artist to wrap until it has been unpacked — and a guard that
+    # saw only the wrapped spelling flagged the very bracket the rule is for.
+    'def d(ax):\n    fg = tokens_for(ax)[1]\n'
+    '    (line,) = ax.plot([0, 1], [0, 1], color=fg)\n'
+    '    follows_theme(line)\n',
+    # The muted role.
+    'def d(ax):\n    _b, _t, muted, _g, _s = tokens_for(ax)\n'
+    '    follows_theme(ax.text(0, 0, "x", color=muted), muted=True)\n',
+])
+def test_theme_ink_guard_clears_a_tagged_artist(tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, "good_theme_ink.py", shape)
+    assert _run_scan(monkeypatch, _THEME_INK_GUARD, _THEME_INK_TEST,
+                     [good]) is None
+
+
+def test_theme_ink_guard_clears_a_data_colour(tmp_path, monkeypatch):
+    """A data colour must never be tagged — repainting one would substitute the
+    theme's ink for a value the plot is using to mean something."""
+    good = _write(tmp_path, "good_data_colour.py",
+                  'def d(ax, colour):\n'
+                  '    ax.plot([0, 1], [0, 1], color=colour)\n'
+                  '    ax.text(0, 0, "x", color="#4C9AFF")\n')
+    assert _run_scan(monkeypatch, _THEME_INK_GUARD, _THEME_INK_TEST,
+                     [good]) is None
+
+
+def test_theme_ink_guard_clears_a_title(tmp_path, monkeypatch):
+    """``set_title`` is a named part of an Axes and ``setPlotTheme`` already
+    repaints it; requiring a tag there would be noise."""
+    good = _write(tmp_path, "good_title.py",
+                  'def d(ax):\n    ax.set_title("t", color=tokens_for(ax)[1])\n')
+    assert _run_scan(monkeypatch, _THEME_INK_GUARD, _THEME_INK_TEST,
+                     [good]) is None

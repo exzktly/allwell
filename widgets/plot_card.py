@@ -84,6 +84,53 @@ def plot_tokens(mode: str):
     return (c.plot_bg, c.text_primary, c.text_muted, c.plot_grid, c.plot_spine)
 
 
+#: Marks an artist as drawn in the plot's *ink* rather than in a data colour,
+#: so a theme flip repaints it. Its value is which token to use: ``"fg"`` for
+#: the primary ink, ``"muted"`` for the secondary.
+#:
+#: Matplotlib gives no structural way to tell chrome from data. Spines, ticks,
+#: axis labels, the title and the legend are all named parts of an Axes and are
+#: restyled by name; a free ``ax.text`` or ``ax.plot`` is not, so an annotation
+#: drawn in the screen theme's near-white ink kept that colour when the card
+#: flipped to publication for a capture — and the capture is exactly where it
+#: lands on white paper. The significance brackets were reported that way:
+#: ``#E6E9EF`` on ``#FFFFFF``, about 1.1:1, "almost impossible to see".
+#:
+#: The tag is what makes the distinction the library does not.
+THEME_INK_ATTR = "_aw_theme_ink"
+
+
+def follows_theme(artist, *, muted: bool = False):
+    """Mark *artist* as drawn in the plot's ink; return it.
+
+    Wrap any free ``ax.text`` / ``ax.annotate`` / ``ax.plot`` whose colour came
+    from :func:`plot_tokens` (or ``core.plot_style.tokens_for``), so flipping
+    the card's theme repaints it along with the rest of the chrome. Pass
+    ``muted=True`` when the colour was the secondary ink.
+
+    Data colours are never tagged: repainting one would substitute the theme's
+    ink for a value the plot is using to mean something.
+    """
+    setattr(artist, THEME_INK_ATTR, "muted" if muted else "fg")
+    return artist
+
+
+def repaint_theme_ink(host, fg: str, muted: str) -> None:
+    """Repaint every tagged artist on *host* in the new theme's ink.
+
+    *host* is an Axes or a Figure — both carry ``lines`` and ``texts``, and a
+    footnote written with ``fig.text`` belongs to neither axes.
+    """
+    for artist in (*host.lines, *host.texts):
+        role = getattr(artist, THEME_INK_ATTR, None)
+        if role is None:
+            continue
+        try:
+            artist.set_color(muted if role == "muted" else fg)
+        except Exception:
+            swallowed()
+
+
 # Back-compat aliases for the previously-private names.
 _plot_palette = plot_palette
 _plot_tokens = plot_tokens
@@ -806,12 +853,22 @@ if _HAVE_MPL:
                 # broke that invariant on Screen↔Pub toggle. Just style
                 # the chrome; the next redraw repaints lines with the
                 # correct rank colour.
+                # Free artists the app drew in the plot's ink — an
+                # annotation, a note, a significance bracket. They are not
+                # named parts of an Axes, so nothing above reaches them, and
+                # they kept the outgoing theme's ink straight into the capture.
+                _, ink_fg, ink_muted, _, _ = _plot_tokens(mode)
+                repaint_theme_ink(ax, ink_fg, ink_muted)
                 leg = ax.get_legend()
                 if leg is not None:
                     fg = _plot_tokens(mode)[1]
                     leg.get_frame().set_facecolor(bg)
                     for txt in leg.get_texts():
                         txt.set_color(fg)
+            # Figure-level ink — a footnote written with ``fig.text`` belongs
+            # to no axes, so the per-axes pass above never reaches it.
+            _, _fig_fg, _fig_muted, _, _ = _plot_tokens(mode)
+            repaint_theme_ink(self.figure, _fig_fg, _fig_muted)
             self.setStyleSheet(self._build_qss())
             self._sync_theme_ui()
             self.draw()

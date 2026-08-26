@@ -115,7 +115,12 @@ REMOTE_RUNNER_BUDGET = 7326
 # down to the new size.
 IMAGE_TABLE_CONTROLLER_BUDGET = 1333
 SCATTER_CONTROLLER_BUDGET = 875
-BARPLOT_CONTROLLER_BUDGET = 687
+# The drag-to-reorder handlers (press / motion / release, the Reset Order
+# button, and the event-to-data-x helper) moved into
+# ``barplot/_drag_reorder.py``. A clean seam: nothing there draws a bar or
+# decides a value, and the controller re-exports the names so every caller is
+# unchanged. Genuine extraction — ratchet down to the new size.
+BARPLOT_CONTROLLER_BUDGET = 604
 # 963 -> 980: A8 ctx-seam. review_csv/tab_view stopped naming ctx.app (4 -> 0) by
 # calling refresh_review_csv[_rows] / on_review_csv_row_double_click with ctx; those
 # three fns gained thin ctx-adapter wrappers here that delegate to their unchanged

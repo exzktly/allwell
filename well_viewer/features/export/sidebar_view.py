@@ -342,6 +342,40 @@ class ExportStyleSidebar(QWidget):
             fmt_edit.editingFinished.connect(self._on_cell_format_changed)
             add_row(s_cells, "Value format", fmt_edit)
 
+        # ── Bar plot: what the columns are coloured by ──────────────────────
+        # "Plate" is the historical behaviour — each column takes the colour
+        # its well or replicate group carries on the plate picker, so the
+        # plate doubles as the legend. "Grey" paints every column one neutral
+        # ink, for a figure whose columns are already named on the axis and
+        # whose colours would only compete with the data. Bar-figure-gated
+        # like the Density / Gates / Cell values sections above: the setting
+        # changes nothing on any other plot, so it does not appear on one.
+        if self._is_bar_fig():
+            from widgets.plot_card import _make_segmented as _seg_color
+            from well_viewer.domain.bar_colors import bar_color_mode as _bar_color_mode
+            s_colors = section("Colours", expanded=True)
+            _color_init = _bar_color_mode(self._app._app_state.plot)
+            color_sc = _seg_color(
+                [("Plate", "plate"), ("Grey", "grey")], current=_color_init,
+            )
+            if color_sc is not None:
+                _color_preview = QLabel("Plate" if _color_init == "plate" else "Grey")
+                _color_preview.setObjectName("Muted")
+                s_colors.setValueWidget(_color_preview)
+
+                def _on_color_mode_change(*_a) -> None:
+                    v = str(color_sc.currentData() or "plate")
+                    self._app._app_state.plot.bar_color_mode = v
+                    _color_preview.setText("Plate" if v == "plate" else "Grey")
+                    # A full redraw, not a restyle: the colour is chosen per
+                    # column while the bars / violins are built, and the
+                    # auto-wire restyle path never revisits an existing
+                    # artist's facecolor.
+                    self._redraw_bound_figure()
+
+                color_sc.currentChanged.connect(_on_color_mode_change)
+                add_stacked(s_colors, "Bar colours", color_sc)
+
         # File format selector intentionally omitted — the Save As… dialog
         # offers PDF / SVG / EPS / PNG via the file filter, so picking the
         # format up front was redundant. The "format" pref (read by
@@ -1257,6 +1291,10 @@ class ExportStyleSidebar(QWidget):
     def _is_heatmap_fig(self) -> bool:
         """True only for the Heat Map figure (the cell-value format applies there)."""
         return getattr(self._app, "_heatmap_fig", None) is self._fig
+
+    def _is_bar_fig(self) -> bool:
+        """True only for the Bar plot figure (the colour mode applies there)."""
+        return getattr(self._app, "_bar_fig", None) is self._fig
 
     def _on_cell_format_changed(self) -> None:
         """Persist the Heat Map cell format, then redraw.

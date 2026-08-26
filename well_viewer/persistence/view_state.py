@@ -15,6 +15,7 @@ for no user benefit.
 from __future__ import annotations
 
 from well_viewer.domain.control_ref import ControlRef
+from well_viewer.domain.bar_colors import BAR_COLOR_MODES
 
 import logging
 from typing import Any
@@ -294,6 +295,8 @@ def _snapshot_bar(ctx) -> dict:
             out["bar_err_kind"] = str(plot.bar_err_kind)
         if hasattr(plot, "bar_show_mode"):
             out["bar_show_mode"] = str(plot.bar_show_mode)
+        if hasattr(plot, "bar_color_mode"):
+            out["bar_color_mode"] = str(plot.bar_color_mode)
         # The user's drag-to-reorder bar layout. ``ordered_bar_keys``
         # falls back to the canonical order when the saved list doesn't
         # cover the current dataset's keys, so an empty / stale list is
@@ -902,6 +905,8 @@ def _apply_bar(ctx, state: dict) -> None:
             plot.bar_err_kind = str(state["bar_err_kind"])
         if str(state.get("bar_show_mode")) in ("mean", "mean_spread", "all_pts"):
             plot.bar_show_mode = str(state["bar_show_mode"])
+        if str(state.get("bar_color_mode")) in BAR_COLOR_MODES:
+            plot.bar_color_mode = str(state["bar_color_mode"])
         if "bar_order" in state and isinstance(state["bar_order"], list):
             plot.bar_order = [str(k) for k in state["bar_order"]]
 

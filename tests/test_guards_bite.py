@@ -2620,3 +2620,48 @@ def test_card_key_guard_clears(tmp_path):
     good = _write(tmp_path, "good_cardkey.py", SAVE_MENU_CLEAN["builder"])
     assert not _card_key_offenders([good]), (
         "the card-key guard fired on a correctly-built menu")
+
+
+# ── the bar colour mode ─────────────────────────────────────────────────────
+
+_BAR_MODE_GUARD = "tests.test_bar_render_callers_pass_color_mode"
+_BAR_MODE_TEST = "test_every_bar_render_call_states_the_colour_mode"
+
+
+@pytest.mark.parametrize("shape", [
+    # The plain call — one surface honouring the mode, the other dropping it.
+    "_render_bar_items(ax_mean=a, ax_frac=b, items=xs, threshold=1.0)\n",
+    # Spelled through the alias the Batch Export panel actually imports it
+    # under. An earlier draft matched only the bare name and was blind to
+    # exactly the call site the rule exists for.
+    "_bar_render_items(ax_mean=a, ax_frac=b, items=xs)\n",
+    # Reached as an attribute on the module rather than imported by name.
+    "controller.render_bar_items(ax_mean=a, ax_frac=b, items=xs)\n",
+])
+def test_bar_colour_guard_catches_a_call_that_drops_the_mode(
+        tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_bar_call.py", shape)
+    exc = _run_scan(monkeypatch, _BAR_MODE_GUARD, _BAR_MODE_TEST, [bad])
+    assert exc is not None and "bad_bar_call.py" in str(exc)
+
+
+def test_bar_colour_guard_clears_a_call_that_states_the_mode(tmp_path, monkeypatch):
+    good = _write(tmp_path, "good_bar_call.py",
+                  "_render_bar_items(ax_mean=a, ax_frac=b, items=xs,\n"
+                  "                  bar_color=mono_bar_color(ctx.state.plot))\n")
+    assert _run_scan(monkeypatch, _BAR_MODE_GUARD, _BAR_MODE_TEST, [good]) is None
+
+
+def test_bar_colour_guard_clears_a_kwargs_passthrough(tmp_path, monkeypatch):
+    """A wrapper forwarding ``**kw`` did not make the decision — its own caller
+    did. Flagging it would push the keyword onto a function that has no ``ctx``
+    to resolve it from."""
+    good = _write(tmp_path, "good_bar_passthrough.py",
+                  "def wrap(**kw):\n    return render_bar_items(**kw)\n")
+    assert _run_scan(monkeypatch, _BAR_MODE_GUARD, _BAR_MODE_TEST, [good]) is None
+
+
+def test_bar_colour_guard_clears_an_unrelated_call(tmp_path, monkeypatch):
+    good = _write(tmp_path, "good_unrelated.py",
+                  "render_line_items(ax=a, items=xs)\n")
+    assert _run_scan(monkeypatch, _BAR_MODE_GUARD, _BAR_MODE_TEST, [good]) is None

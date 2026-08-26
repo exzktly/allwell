@@ -165,6 +165,14 @@ class Colors:
     gate_curve_b      = "#FF8A65"   # …and control well B
     hist_fill         = "#4C78A8"   # Multivariate per-feature histograms
     selection_default = "#888888"   # a saved selection with no colour of its own
+    # Bar plots drawn in the "Grey" colour mode (Properties → Colours). One
+    # neutral ink for every bar, for figures where the plate-rank colours are
+    # decoration rather than information. A single mid grey rather than a
+    # screen/publication pair because bar fill is *data* ink and follows
+    # ``trace`` — ``Colors.trace`` and ``CPub.trace`` are the same tuple, so a
+    # bar must not change colour when the card flips to publication mode. Mid
+    # enough to read against both the dark card fill and the print-white page.
+    plot_mono = "#8A9099"
 
     # ── Contrast inks for "always opaque against any background" use ─────
     # Widgets that paint white-on-dark or black-on-light edges should use

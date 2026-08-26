@@ -3035,9 +3035,14 @@ rather than a single panel.
   the new card carries a vector capture.
 - **Very large figures are placed as pictures too.** A scatter of a hundred
   thousand cells would become a hundred thousand PowerPoint shapes, and a deck
-  like that will not open. Past the limit the slide places the picture and says
-  how many shapes the figure would have needed, so you know to plot fewer points
-  if you want it editable.
+  like that will not open. Past the limit no vector capture is taken at all — the
+  plot saves as usual and exports as a picture — so a very dense figure costs
+  nothing extra to save and does not fill the dataset folder.
+- **A figure can be editable and still be missing a detail.** A **hatch** has no
+  PowerPoint equivalent this export can produce, so hatched bars arrive as plain
+  outlines. When that or anything like it happens, the slide carries a line under
+  the figure naming exactly what could not be redrawn, and the status line
+  repeats it. Everything else on that slide is still editable.
 - **Optimal use** — capture each figure as you finalize it. Export the gallery as
   one PDF to hand off alongside your analysis, or as a PowerPoint deck when the
   figures still need restyling for a talk or a thesis.

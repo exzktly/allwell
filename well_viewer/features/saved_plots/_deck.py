@@ -84,6 +84,12 @@ class DeckResult:
     slides: int = 0
     vector: int = 0
     raster: int = 0
+    #: Plots whose slide carries no figure at all — neither capture could be
+    #: read. Counted separately and not folded into ``raster``, because it is a
+    #: third outcome: the slide exists and names the plot, and the figure is
+    #: gone. Left uncounted (which it was) a deck that dropped a figure
+    #: reported itself as fully editable.
+    missing: int = 0
     unsupported: list[str] = field(default_factory=list)
 
     def note_unsupported(self, items: Iterable[str]) -> None:
@@ -92,14 +98,30 @@ class DeckResult:
                 self.unsupported.append(item)
 
     def summary(self) -> str:
-        """A one-line status, naming a raster fallback whenever there was one."""
-        plots = self.vector + self.raster
+        """A one-line status naming every outcome that occurred.
+
+        Counts only. The advice belongs on the slide, where the cause is known:
+        "re-save it" is right for a plot that never had a vector capture and
+        useless for one past the shape cap or for an Image Table grid, and the
+        status line cannot tell which of the three it is looking at.
+        """
+        plots = self.vector + self.raster + self.missing
         text = f"{plots} plot{'' if plots == 1 else 's'}"
-        if self.raster:
-            text += (f" — {self.vector} editable, {self.raster} as a picture"
-                     " (re-save those plots to make them editable)")
-        else:
+        if self.raster or self.missing:
+            parts = [f"{self.vector} editable"]
+            if self.raster:
+                parts.append(f"{self.raster} as a picture")
+            if self.missing:
+                parts.append(f"{self.missing} with no figure")
+            text += " — " + ", ".join(parts)
+        elif not self.unsupported:
             text += ", all editable"
+        # Never behind an early return: a deck can be entirely editable and
+        # still have lost a hatch or an arc out of one of its figures, and
+        # "all editable" said over the top of that is the shortfall being
+        # hidden by the very line meant to describe it.
+        if self.unsupported:
+            text += f" (not translated: {', '.join(self.unsupported)})"
         return text
 
 
@@ -248,16 +270,25 @@ def _place_vector(slide: Slide, svg_bytes: bytes, *, figure_w: float,
     if not drawing.shapes:
         return ("The vector capture for this plot held nothing to draw, so it "
                 "is placed here as a picture.")
+    # Recorded before the cap decides anything: a capped figure met the same
+    # constructs a drawn one would have, and discarding its findings meant the
+    # one plot most likely to be complicated reported nothing.
+    result.note_unsupported(drawing.unsupported)
     if len(drawing.shapes) > MAX_SHAPES_PER_SLIDE:
         return (f"This figure is {len(drawing.shapes):,} separate shapes — past "
                 f"the {MAX_SHAPES_PER_SLIDE:,} a slide can carry and stay "
                 "usable — so it is placed here as a picture.")
-    result.note_unsupported(drawing.unsupported)
     placement = Placement.fit(
         drawing,
         x=inches_to_emu(_MARGIN), y=inches_to_emu(_BODY_TOP),
         cx=inches_to_emu(figure_w), cy=inches_to_emu(_BODY_H))
     slide.add(drawing_group_xml(drawing, placement, slide.ids, slide.add_image))
+    if drawing.unsupported:
+        # The figure is on the slide and part of it is not. Said here rather
+        # than only in a log line, because the log is not what gets presented.
+        _note(slide, "Part of this figure could not be redrawn as shapes and is "
+                     "missing from it: " + ", ".join(drawing.unsupported) + ".",
+              figure_w=figure_w)
     return ""
 
 
@@ -337,6 +368,7 @@ def build_saved_plots_deck(
             result.raster += 1
             _note(slide, reason, figure_w=figure_w)
             continue
+        result.missing += 1
         _note(slide, "The saved image for this plot could not be read, so the "
                      "figure is missing from this slide.", figure_w=figure_w)
 

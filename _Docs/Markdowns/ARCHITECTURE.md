@@ -1680,7 +1680,7 @@ Four modules, in the order the data moves through them:
 
 | Module | Does |
 | --- | --- |
-| `_svg_shapes.py` | Reads a Matplotlib SVG into a flat, ordered list of `PathShape` / `TextShape` / `ImageShape` in absolute user-space points. Applies the transform stack, inherits styles down the tree, expands `<use>` references into real geometry, and clips to rectangular `<clipPath>`s. Not a general SVG reader — it handles the subset Matplotlib emits and records anything else in `Drawing.unsupported`. |
+| `_svg_shapes.py` | Reads a Matplotlib SVG into a flat, ordered list of `PathShape` / `TextShape` / `ImageShape` in absolute user-space points. Applies the transform stack, inherits styles down the tree, expands `<use>` references into real geometry, splits mathtext back into positioned runs, and clips to rectangular `<clipPath>`s. Not a general SVG reader — it handles the subset Matplotlib emits and records anything else in `Drawing.unsupported`. |
 | `_drawingml.py` | Turns those shapes into DrawingML. The only module that knows about EMUs (12,700 per point) and hundredths-of-a-point font sizes. `Placement.fit` letterboxes a figure into a target box on the slide. |
 | `_pptx.py` | Writes the Open Packaging container — the zip of XML parts, their relationships, one slide master, one blank layout, one theme. No `python-pptx`: the parts a deck of plain slides needs are small and fixed, so the export adds nothing to the runtime stack. |
 | `_deck.py` | Lays out the slide (title, source-tab badge, timestamp, parameter column) and decides how each plot reaches it. |
@@ -1706,6 +1706,59 @@ on disk. `DeckResult` counts `vector` and `raster` separately and
 `DeckResult.summary()` names the split in the status line. A deck where some
 figures are editable and some are not is otherwise indistinguishable from one
 where all of them are — until someone tries to click a bar in front of a room.
+
+**A clip cuts a fill and an outline differently.** A shape that is both filled
+and stroked and crosses its clip rectangle needs two geometries: the fill closes
+along the clip edge, the outline simply stops there. Closing both — one rule for
+the whole shape — draws an edge the figure never had, so a bar running off the
+top of its axes acquires a cap exactly at the axis limit and reads as a bar whose
+value *is* the limit. That is a wrong number on the slide, produced by the
+exporter. `PathShape.stroke_subpaths` carries the second geometry, set only when
+a clip actually split the two, and `_custom_geometry` emits both into one
+`custGeom` as separate `a:path` entries — one `fill="norm" stroke="0"`, one
+`fill="none" stroke="1"` — so the bar stays a single object the user selects and
+recolours.
+
+**Mathtext is several runs, not one label.** Matplotlib writes `$\mu$m` as
+several `<tspan>`s grouped *by font rather than by reading order*, each carrying
+its own list of per-glyph x positions, so an italic span can hold the μ at one
+end of the label and an α sixty points along with the upright run between them in
+space and after them in the document. `_emit_tspan` splits each span back into
+runs at the gaps between glyph positions (`_positioned_runs`, breaking at
+`_RUN_BREAK_EMS` times the font size — no glyph in a proportional face is close
+to twice its point size wide) and emits each at its own coordinates. µm,
+superscripts and Greek are ordinary in microscopy axis labels; concatenating the
+element's text gave neither what the figure said nor where it said it.
+
+**Everything the reader could not translate reaches the artifact.**
+`Drawing.unsupported` names each construct once — a pattern fill (which is how
+Matplotlib writes a **hatch**, and which otherwise resolves to "no paint" and is
+indistinguishable from `fill: none`), an elliptical arc, an `<line>` element, a
+non-rectangular clip path approximated by its bounding box. A figure that lost
+one is drawn, and the slide carries a line under it saying what is missing;
+`DeckResult.summary()` repeats the list in the status line, and never behind the
+"all editable" branch — a deck can be entirely vector and still have lost a hatch
+out of one of its figures. The findings are collected *before* the shape cap
+decides anything, so a capped figure's are not discarded.
+
+**Text is sanitised, not merely escaped.** `escape` rewrites `&`, `<` and `>` and
+leaves the characters XML 1.0 forbids outright — and a plot title is free text a
+user types or pastes, with a paste out of Word carrying `\x0b` for a soft line
+break. One of those does not spoil a label: it makes the whole slide part
+unparseable, so PowerPoint offers to repair the file while the export reports
+success. `_drawingml.xml_text` / `xml_attr` drop them and every user-reachable
+string goes through one or the other.
+
+**The vector capture is capped before it is taken, not after.**
+`fig_clipboard.MAX_VECTOR_PATHS` is checked against `figure_path_count` — artist
+counts, so constant-time in the data — before `render_figure_svg` renders
+anything. A 300,000-point scatter is otherwise a four-second render on the UI
+thread and a 32 MB file written beside a 0.17 MB PNG, all of it discarded at
+export because it is past the shape cap. A test holds `MAX_VECTOR_PATHS` at or
+below `MAX_SHAPES_PER_SLIDE`, which is the tie between two numbers that cannot
+share a constant: the capture lives in `widgets/` and must not import a feature.
+`copy_figure_to_clipboard` is deliberately uncapped — that caller wants vector
+for its own sake rather than for a deck.
 
 **`_deck.MAX_SHAPES_PER_SLIDE` is a hard cap, not a quality setting.** A scatter
 of a hundred thousand cells is a hundred thousand PowerPoint shapes and a deck
@@ -1747,6 +1800,17 @@ card into view and outline it for a moment (`QFrame#Panel[focusflash="true"]`).
 Landing at the top of the list is, from the page, indistinguishable from the link
 not working, so `focus_saved_plot` returns False when it could not reach the card
 and Home turns that into a status message.
+
+Thumbnails are decoded **at thumbnail size**, through
+`QImageReader.setScaledSize` rather than by loading the file and scaling
+afterwards (`home/tab_view._thumbnail`). A saved plot's PNG is a 300 dpi capture,
+routinely 1500×960, and Home draws twelve of them at 152 px on every
+`refresh_home`, on the UI thread; decoding the full frame first does all that work
+and throws it away. The tile itself is a `QPushButton` holding the picture and the
+caption as **child labels in a vertical layout** — a button's own `icon` and
+`text` are laid out side by side, which on a tile this narrow puts the picture in
+the left half and runs the title off the right edge. The labels are transparent to
+the mouse, so a click anywhere on the tile still reaches the button.
 
 `populate_saved_plots_grid` rebuilds `ctx.runtime.saved_plots.cards` on every
 repaint rather than accumulating it: `clear_layout` has already destroyed the

@@ -281,3 +281,54 @@ def test_a_click_anywhere_on_the_tile_reaches_the_button(qapp, tmp_path):
     for label in _labels(tile):
         assert label.testAttribute(Qt.WA_TransparentForMouseEvents), (
             f"{label.objectName() or 'a label'} would swallow the tile's click")
+
+
+@pytest.mark.qt
+def test_a_thumbnail_is_decoded_at_thumbnail_size(qapp, tmp_path, monkeypatch):
+    """Home draws twelve 300 dpi captures at 152 px, on the UI thread.
+
+    A saved plot's PNG is routinely 1500×960; loading the file and scaling
+    afterwards decodes all of that and throws it away, twelve times, on every
+    ``refresh_home``. ``QImageReader.setScaledSize`` scales during decode, so
+    the full-size image never exists. Asserted on the size the reader was asked
+    for, because the resulting pixmap looks the same either way — which is why
+    the expensive version went unnoticed.
+    """
+    from PySide6.QtGui import QImageReader
+    from PySide6.QtWidgets import QWidget
+
+    from well_viewer.features.home import tab_view
+
+    asked = []
+    real_set = QImageReader.setScaledSize
+
+    def _record(self, size):
+        asked.append((size.width(), size.height()))
+        return real_set(self, size)
+
+    monkeypatch.setattr(QImageReader, "setScaledSize", _record)
+
+    big = tmp_path / "big.png"
+    _write_png(big, 1500, 960)
+    entry = {"id": "p0", "title": "Big", "tab": "Bar Plots", "created_at": "",
+             "image": big}
+    parent = QWidget()
+    tile = tab_view.build_saved_plot_tile(_ctx(tmp_path), parent, entry)
+
+    assert asked, "the reader should have been asked to scale during decode"
+    width, height = asked[0]
+    assert width <= tab_view._THUMB_W and height <= tab_view._THUMB_H
+    # Aspect ratio preserved, so a wide figure is not squashed into the box.
+    assert width / height == pytest.approx(1500 / 960, rel=0.02)
+    assert _picture(tile) is not None
+
+
+def _write_png(path, width: int, height: int) -> None:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.image as mpimg
+    import numpy as np
+
+    mpimg.imsave(str(path),
+                 (np.linspace(0, 1, height * width * 3)
+                  .reshape(height, width, 3) * 255).astype("uint8"))

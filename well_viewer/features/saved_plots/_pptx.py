@@ -164,8 +164,12 @@ class Slide:
     def add_image(self, png: bytes) -> str:
         """Register a PNG and return the relationship id the slide will use.
 
-        Identical bytes are registered once: a deck of eight heat maps drawn
-        from one colour bar would otherwise carry eight copies of it.
+        Identical bytes are registered once **within this slide** — a figure
+        carrying the same colour bar twice stores it once. Dedup does not reach
+        across slides: each slide owns its own relationships, so eight heat-map
+        slides drawn from one colour bar do carry eight copies of it. Said
+        plainly here because the earlier wording claimed the cross-slide version,
+        which no test checked and the code never did.
         """
         if not png:
             return ""
@@ -273,8 +277,11 @@ class PptxBuilder:
             'officeDocument/2006/extended-properties" '
             'xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/'
             'docPropsVTypes">'
-            "<Application>All-Well</Application>"
+            # The schema's sequence puts Slides before Application. PowerPoint
+            # tolerates the other order, but a part that does not validate is a
+            # part a stricter reader may reject, and the order costs nothing.
             f"<Slides>{len(self.slides)}</Slides>"
+            "<Application>All-Well</Application>"
             "</Properties>"
         )
 

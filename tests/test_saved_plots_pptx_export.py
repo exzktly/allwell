@@ -261,12 +261,25 @@ def test_a_plot_without_a_vector_capture_says_so_on_its_own_slide(tmp_path):
     assert "as a picture" in result.summary()
 
 
-def test_a_plot_with_neither_capture_says_the_figure_is_missing(tmp_path):
+def test_a_deck_that_lost_a_figure_never_reports_itself_complete(tmp_path):
+    """A plot whose slide carries no figure is a third outcome, and it counts.
+
+    This test previously asserted ``(vector, raster) == (0, 0)`` and called that
+    correct — which pinned the defect rather than guarding against it. With
+    neither counter incremented, ``summary()`` divided zero by nothing and said
+    "0 plots, all editable" for a deck that had just dropped a figure, and a
+    mixed deck under-reported its own size. The behaviour under test is not the
+    pair of counters; it is that the status line can never describe a deck as
+    fully editable when it is not.
+    """
     out = tmp_path / "deck.pptx"
     result = build_saved_plots_deck(
         [_rec("1")], lambda r: None, lambda r: None, out)
 
+    assert result.missing == 1
     assert (result.vector, result.raster) == (0, 0)
+    assert "all editable" not in result.summary()
+    assert "1 plot" in result.summary() and "no figure" in result.summary()
     assert result.slides == 2
     text = _slide_text(out, 2)
     assert "could not be read" in text
@@ -274,6 +287,28 @@ def test_a_plot_with_neither_capture_says_the_figure_is_missing(tmp_path):
     # dropped the record entirely would leave the reader counting plots to
     # notice one had gone.
     assert "Plot 1" in text and "Tab: Bar Plots" in text
+
+
+def test_a_mixed_deck_counts_every_plot_it_was_given(tmp_path):
+    """Three plots in, three plots reported — one of each outcome."""
+    svg = tmp_path / "a.svg"
+    svg.write_bytes(_bar_svg())
+    png = tmp_path / "a.png"
+    png.write_bytes(_png_bytes())
+    svgs = {"1": svg, "2": None, "3": None}
+    pngs = {"1": None, "2": png, "3": None}
+    out = tmp_path / "deck.pptx"
+
+    result = build_saved_plots_deck(
+        [_rec("1"), _rec("2"), _rec("3")],
+        lambda r: svgs[r.id], lambda r: pngs[r.id], out)
+
+    assert (result.vector, result.raster, result.missing) == (1, 1, 1)
+    assert result.summary().startswith("3 plots")
+    # The status line states counts and leaves the advice on the slides, where
+    # the cause is known: "re-save it" is right for a plot that never had a
+    # capture and useless for one past the shape cap.
+    assert "re-save" not in result.summary().lower()
 
 
 def test_an_unreadable_vector_capture_falls_back_and_names_the_reason(tmp_path):
@@ -310,7 +345,11 @@ def test_a_figure_of_too_many_shapes_becomes_a_picture_and_says_how_many(tmp_pat
     n = MAX_SHAPES_PER_SLIDE + 500
     ax.scatter(rng.random(n), rng.random(n), s=1)
     svg = tmp_path / "big.svg"
-    svg.write_bytes(render_figure_svg(fig))
+    # ``max_paths=None`` on purpose: the capture refuses a figure this size, so
+    # this is the backstop case — an oversized SVG that reached the store some
+    # other way (an older version wrote it, or the artist-count estimate ran
+    # low). The deck must still refuse it rather than emit an unopenable slide.
+    svg.write_bytes(render_figure_svg(fig, max_paths=None))
     png = tmp_path / "a.png"
     png.write_bytes(_png_bytes())
     out = tmp_path / "deck.pptx"
@@ -559,3 +598,302 @@ def test_the_export_menu_reaches_both_exporters(qapp, monkeypatch):
     for action in menu.actions():
         action.trigger()
     assert called == ["pdf", "pptx"]
+
+
+
+# ── the capture, and what it refuses ─────────────────────────────────────────
+
+def test_a_figure_past_the_cap_is_not_captured_at_all(tmp_path):
+    """The expensive half is the render, so the cap has to come before it.
+
+    A 300,000-point scatter is a four-second SVG render on the UI thread and a
+    32 MB file written beside a 0.17 MB PNG — and the deck then discards it,
+    because it is past the shape cap. Refusing after paying for it is the worst
+    of both, so the decision is made from the artist counts, which cost nothing.
+    """
+    import numpy as np
+    from matplotlib.figure import Figure
+
+    from widgets.fig_clipboard import (
+        MAX_VECTOR_PATHS, figure_path_count, render_figure_svg,
+    )
+
+    rng = np.random.default_rng(0)
+    fig = Figure(figsize=(4, 3))
+    ax = fig.add_subplot()
+    ax.scatter(rng.random(MAX_VECTOR_PATHS + 1000),
+               rng.random(MAX_VECTOR_PATHS + 1000), s=1)
+
+    assert figure_path_count(fig) > MAX_VECTOR_PATHS
+    assert render_figure_svg(fig) == b""
+    # ...and the same figure still renders when a caller wants vector for its
+    # own sake rather than for the deck. Copy-as-SVG is that caller.
+    assert render_figure_svg(fig, max_paths=None).startswith(b"<?xml")
+
+
+def test_an_ordinary_figure_is_captured_normally(tmp_path):
+    from matplotlib.figure import Figure
+
+    from widgets.fig_clipboard import figure_path_count, render_figure_svg
+
+    fig = Figure(figsize=(4, 3))
+    ax = fig.add_subplot()
+    ax.bar([0, 1, 2], [3, 5, 2])
+    assert figure_path_count(fig) < 100
+    assert render_figure_svg(fig).startswith(b"<?xml")
+
+
+def test_the_capture_never_stores_what_the_deck_would_refuse():
+    """Two numbers, one rule. They live in different layers — the capture is in
+    ``widgets/`` and must not import a feature — so the tie between them is this
+    assertion rather than a shared constant."""
+    from widgets.fig_clipboard import MAX_VECTOR_PATHS
+
+    assert MAX_VECTOR_PATHS <= MAX_SHAPES_PER_SLIDE
+
+
+
+# ── figures that are not tidy ────────────────────────────────────────────────
+#
+# Every fixture above is a clean hand-built figure: no hatch, no mathtext, no
+# non-default dash, no patch that leaves its axes. A corpus like that validates
+# the happy path and encodes whatever assumption the bug is made of — four
+# separate defects lived in exactly the gap it left. These are the messy cases.
+
+def _clipped_bar_svg() -> bytes:
+    """A filled *and* stroked bar that runs off the top of its axes."""
+    from matplotlib.figure import Figure
+
+    from widgets.fig_clipboard import render_figure_svg
+
+    fig = Figure(figsize=(4, 3))
+    ax = fig.add_subplot()
+    ax.bar([0, 1, 2], [3, 9, 2], edgecolor="black", linewidth=2)
+    ax.set_ylim(0, 5)
+    return render_figure_svg(fig)
+
+
+def test_a_clipped_bar_does_not_gain_an_edge_along_the_axes(tmp_path):
+    """The defect this exists for put a wrong number on the slide.
+
+    A bar of value 9 on a ``ylim`` of 5 is clipped at the axes top. Closing that
+    clipped outline as a polygon — right for the fill, wrong for the stroke —
+    draws a solid cap exactly at 5, so the bar reads as a bar whose value *is*
+    5. Matplotlib draws no such edge: the bar simply runs off the top.
+    """
+    drawing = parse_svg(_clipped_bar_svg())
+    # The bars are the ``patch_`` paths inside the axes; ``patch_1``/``patch_2``
+    # are the figure and axes backgrounds, which carry no stroke.
+    bars = [s for s in drawing.shapes
+            if isinstance(s, PathShape) and s.name.startswith("patch_")
+            and s.fill is not None and s.stroke is not None]
+    assert len(bars) == 3
+
+    split = [b for b in bars if b.stroke_subpaths is not None]
+    assert len(split) == 1, "exactly the bar that leaves the axes is split"
+    clipped = split[0]
+
+    # The outline is open runs, not a closed polygon — no cap along the clip.
+    assert not any(seg[0] == "Z" for sub in clipped.stroked() for seg in sub)
+    # ...while the fill is still closed, so the bar is still a filled bar.
+    assert any(seg[0] == "Z" for sub in clipped.subpaths for seg in sub)
+    # The bars that stay inside their axes are untouched by any of this.
+    for bar in bars:
+        if bar is not clipped:
+            assert bar.stroke_subpaths is None
+            assert any(seg[0] == "Z" for sub in bar.stroked() for seg in sub)
+
+
+def test_the_clipped_bar_reaches_the_slide_as_one_shape(tmp_path):
+    """Split geometry must not split the *object*: a user still selects one bar.
+
+    The two geometries go into one ``custGeom`` as separate ``a:path`` entries,
+    one filled and unstroked, one stroked and unfilled.
+    """
+    svg = tmp_path / "clipped.svg"
+    svg.write_bytes(_clipped_bar_svg())
+    out = tmp_path / "deck.pptx"
+    result = build_saved_plots_deck([_rec("1")], lambda r: svg, lambda r: None,
+                                    out)
+    assert result.vector == 1
+
+    slide = _slide_xml(out, 2)
+    split_shapes = [
+        sp for sp in slide.iter(f"{_P}sp")
+        if len({(p.get("fill"), p.get("stroke")) for p in sp.iter(f"{_A}path")}) > 1
+    ]
+    assert len(split_shapes) == 1
+    modes = {(p.get("fill"), p.get("stroke"))
+             for p in split_shapes[0].iter(f"{_A}path")}
+    assert modes == {("norm", "0"), ("none", "1")}
+
+
+def test_a_hatched_fill_is_reported_rather_than_dropped(tmp_path):
+    """``fill: url(#…)`` has no solid colour, so it reads as "no fill".
+
+    That is the same answer as ``fill: none`` and means something else entirely:
+    hatched bars come out as empty outlines, and a figure whose only distinction
+    between conditions is the hatch loses all of it.
+    """
+    from matplotlib.figure import Figure
+
+    from widgets.fig_clipboard import render_figure_svg
+
+    fig = Figure(figsize=(3, 2))
+    ax = fig.add_subplot()
+    ax.bar([0, 1], [3, 5], hatch="//", color="white", edgecolor="k")
+    drawing = parse_svg(render_figure_svg(fig))
+
+    assert any("hatch" in item for item in drawing.unsupported)
+
+    svg = tmp_path / "hatched.svg"
+    svg.write_bytes(render_figure_svg(fig))
+    out = tmp_path / "deck.pptx"
+    result = build_saved_plots_deck([_rec("1")], lambda r: svg, lambda r: None,
+                                    out)
+    # The figure is on the slide and the slide says what is missing from it.
+    assert result.vector == 1
+    assert "could not be redrawn" in _slide_text(out, 2)
+    assert any("hatch" in item for item in result.unsupported)
+    # And the status line says it too. A deck can be entirely vector and still
+    # have lost something out of one of its figures, so "all editable" must not
+    # be said over the top of that.
+    assert "all editable" not in result.summary()
+    assert "hatch" in result.summary()
+
+
+def test_a_mathtext_label_keeps_its_reading_order(tmp_path):
+    """Matplotlib groups mathtext ``<tspan>``s by font, not by reading order.
+
+    Each carries its own per-glyph positions, so an italic span can hold the μ
+    at one end of the label and an α sixty points further along, with the
+    upright run sitting between them in space and after them in the document.
+    Concatenating the element's text gives neither what the figure says nor
+    where it says it — and µm and Greek are ordinary in microscopy axis labels.
+    """
+    from matplotlib.figure import Figure
+
+    from widgets.fig_clipboard import render_figure_svg
+
+    fig = Figure(figsize=(4, 3))
+    ax = fig.add_subplot()
+    ax.set_xlabel(r"$\mu$m intensity $\alpha_i$")
+    drawing = parse_svg(render_figure_svg(fig))
+
+    label_runs = [s for s in drawing.shapes if isinstance(s, TextShape)
+                  and any(ch in s.text for ch in "μα") or
+                  (isinstance(s, TextShape) and "intensity" in s.text)]
+    by_position = sorted(label_runs, key=lambda s: (round(s.y), s.x))
+    reading_order = [r.text.strip() for r in by_position]
+
+    assert "μ" in reading_order and "α" in reading_order
+    # μ comes before "m intensity", which comes before α — the order on screen.
+    assert reading_order.index("μ") < reading_order.index("α")
+    assert any("intensity" in t for t in reading_order)
+    mu_at = reading_order.index("μ")
+    text_at = next(i for i, t in enumerate(reading_order) if "intensity" in t)
+    assert mu_at < text_at < reading_order.index("α")
+    # No run carries the SVG's pretty-print indentation.
+    for run in by_position:
+        assert run.text == run.text.strip() or run.text.strip()
+        assert "\n" not in run.text
+
+    # The subscript is smaller and sits lower than the character it follows.
+    subscripts = [s for s in drawing.shapes if isinstance(s, TextShape)
+                  and s.text.strip() == "i" and s.size_pt < 9]
+    assert subscripts, "the subscript should survive as its own smaller run"
+
+
+def test_each_dash_pattern_survives_as_a_different_dash(tmp_path):
+    """Three line styles must not become three identical curves.
+
+    A figure that encodes its series in line style stops being readable when
+    every pattern is written as ``prstDash val="dash"`` — and the legend keys
+    become identical too, so nothing on the slide says which series is which.
+    """
+    from matplotlib.figure import Figure
+
+    from widgets.fig_clipboard import render_figure_svg
+
+    fig = Figure(figsize=(4, 3))
+    ax = fig.add_subplot()
+    for style in ("--", ":", "-."):
+        ax.plot([0, 1, 2], [1, 2, 3], linestyle=style, linewidth=2)
+    svg = tmp_path / "dashed.svg"
+    svg.write_bytes(render_figure_svg(fig))
+    out = tmp_path / "deck.pptx"
+    build_saved_plots_deck([_rec("1")], lambda r: svg, lambda r: None, out)
+
+    presets = {d.get("val") for d in _slide_xml(out, 2).iter(f"{_A}prstDash")}
+    assert len(presets) == 3, f"three line styles collapsed to {presets}"
+
+
+def test_a_control_character_in_a_title_cannot_break_the_deck(tmp_path):
+    """A title is free text, and a paste out of Word carries ``\x0b``.
+
+    ``escape`` rewrites ``&``, ``<`` and ``>`` and leaves control characters
+    alone, so one of them makes the whole slide part unparseable — not one bad
+    label, an unopenable slide. LibreOffice renders it blank and PowerPoint
+    offers to repair the file, while the export reports success either way.
+    """
+    svg = tmp_path / "a.svg"
+    svg.write_bytes(_bar_svg())
+    out = tmp_path / "deck.pptx"
+
+    build_saved_plots_deck(
+        [_rec("1", title="Plot \x0b one \x00 two", tab="Bar \x0c Plots")],
+        lambda r: svg, lambda r: None, out,
+        dataset_name="plate\x1f7", summary_for=lambda r: "Wells\x08: A01")
+
+    slide = _slide_xml(out, 2)          # raises if the part does not parse
+    text = " ".join(t.text or "" for t in slide.iter(f"{_A}t"))
+    assert "Plot" in text and "one" in text and "two" in text
+    with zipfile.ZipFile(out) as zf:
+        for name in zf.namelist():
+            if name.endswith((".xml", ".rels")):
+                ET.fromstring(zf.read(name))
+
+
+def test_the_characters_xml_does_allow_are_kept(tmp_path):
+    """Only the illegal ones go. An ampersand, a quote and an emoji are fine."""
+    svg = tmp_path / "a.svg"
+    svg.write_bytes(_bar_svg())
+    out = tmp_path / "deck.pptx"
+    title = 'A & B <control> "quoted" \U0001f600'
+
+    build_saved_plots_deck([_rec("1", title=title)], lambda r: svg,
+                           lambda r: None, out)
+
+    assert title in _slide_text(out, 2)
+
+
+def test_a_viewbox_scales_the_clip_rectangle_with_the_geometry():
+    """A clip rectangle has to live in the same space as what it clips.
+
+    Matplotlib's viewBox always matches its width/height, so this is latent
+    there — but the reader advertises that it handles the case, and the ``.svg``
+    files sit in the dataset folder where they can be edited by hand.
+    """
+    svg = (b'<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" '
+           b'viewBox="0 0 100 100">'
+           b'<defs><clipPath id="c">'
+           b'<rect x="10" y="10" width="80" height="80"/></clipPath></defs>'
+           b'<g clip-path="url(#c)">'
+           b'<path d="M 20 20 L 80 20 L 80 80 L 20 80 Z" style="fill:#ff0000"/>'
+           b"</g></svg>")
+    drawing = parse_svg(svg)
+    bounds = subpath_bounds(drawing.shapes[0].subpaths)
+    # The square is wholly inside the clip once both are in the same space, so
+    # it survives whole at twice its written size.
+    assert bounds == pytest.approx((40.0, 40.0, 160.0, 160.0))
+
+
+def test_the_app_properties_follow_the_schema_order(tmp_path):
+    """``Slides`` before ``Application``, as the extended-properties sequence
+    has it. PowerPoint tolerates the other order; a stricter reader need not."""
+    out = tmp_path / "deck.pptx"
+    build_saved_plots_deck([], lambda r: None, lambda r: None, out)
+    with zipfile.ZipFile(out) as zf:
+        app = ET.fromstring(zf.read("docProps/app.xml"))
+    tags = [child.tag.split("}")[-1] for child in app]
+    assert tags.index("Slides") < tags.index("Application")

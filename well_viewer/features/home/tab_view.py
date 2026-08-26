@@ -20,7 +20,8 @@ profile strips is never imported.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea,
     QTabWidget, QVBoxLayout, QWidget,
@@ -481,6 +482,34 @@ def _build_saved_plots(ctx, page: QWidget, reg) -> QWidget:
     return reg.register("_home_saved_plots_card", card)
 
 
+def _thumbnail(image_path) -> QPixmap | None:
+    """Decode *image_path* straight to thumbnail size, or ``None`` if it is gone.
+
+    Through ``QImageReader.setScaledSize`` rather than by loading the file and
+    scaling it after: a saved plot's PNG is a 300 dpi capture — routinely
+    1500×960 and a quarter of a megabyte — and Home draws twelve of them at
+    152 px on every refresh, on the UI thread. Decoding the full frame first
+    does all that work and throws it away. The reader scales during decode, so
+    the full-size image never exists.
+    """
+    from PySide6.QtGui import QImageReader
+
+    if image_path is None:
+        return None
+    reader = QImageReader(str(image_path))
+    source = reader.size()
+    if not reader.canRead() or not source.isValid() or source.isEmpty():
+        return None
+    box_w = _THUMB_W - 2 * theme.Spacing.xs
+    scale = min(box_w / source.width(), _THUMB_H / source.height())
+    reader.setScaledSize(QSize(max(1, round(source.width() * scale)),
+                               max(1, round(source.height() * scale))))
+    image = reader.read()
+    if image.isNull():
+        return None
+    return QPixmap.fromImage(image)
+
+
 def build_saved_plot_tile(ctx, parent: QWidget, entry: dict) -> QWidget:
     """One clickable thumbnail: the figure, and its title underneath.
 
@@ -497,8 +526,6 @@ def build_saved_plot_tile(ctx, parent: QWidget, entry: dict) -> QWidget:
     transparent to the mouse so a click anywhere on the tile still reaches the
     button.
     """
-    from PySide6.QtGui import QPixmap
-
     tile = QPushButton(parent)
     tile.setObjectName("HomeThumbTile")
     tile.setFixedSize(_THUMB_W, _THUMB_H + _THUMB_CAPTION_H)
@@ -516,18 +543,15 @@ def build_saved_plot_tile(ctx, parent: QWidget, entry: dict) -> QWidget:
     picture.setAlignment(Qt.AlignCenter)
     picture.setFixedHeight(_THUMB_H)
     picture.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-    image = entry.get("image")
-    pixmap = QPixmap(str(image)) if image is not None else QPixmap()
-    if pixmap.isNull():
+    pixmap = _thumbnail(entry.get("image"))
+    if pixmap is None:
         # The record exists and its image does not. Saying so on the tile keeps
         # a missing file distinguishable from a plot that drew nothing, which is
         # the whole point of the record carrying a filename at all.
         picture.setObjectName("Muted")
         picture.setText("(image unavailable)")
     else:
-        picture.setPixmap(pixmap.scaled(
-            _THUMB_W - 2 * theme.Spacing.xs, _THUMB_H,
-            Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        picture.setPixmap(pixmap)
     column.addWidget(picture)
 
     caption = QLabel(tile)

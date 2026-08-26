@@ -31,6 +31,10 @@ from xml.etree import ElementTree as ET
 _SVG_NS = "http://www.w3.org/2000/svg"
 _XLINK_NS = "http://www.w3.org/1999/xlink"
 
+#: What a pattern paint is called when it is reported. Named once so the reader
+#: and its tests cannot drift on the wording.
+_PATTERN_FILL = "pattern fill (hatch)"
+
 #: Cubic segments are flattened to this many line segments when a path has to be
 #: clipped. Only clipped paths are flattened — everything inside its clip
 #: rectangle keeps its curves, so a marker that is fully on-axes stays a curve in
@@ -75,12 +79,37 @@ Subpath = list[tuple]
 
 @dataclass
 class PathShape:
-    """Filled and/or stroked geometry."""
+    """Filled and/or stroked geometry.
+
+    ``subpaths`` is what gets filled. ``stroke_subpaths`` is what gets stroked,
+    and it is set **only** when clipping made the two differ — which happens for
+    any shape that is both filled and stroked and crosses its clip rectangle.
+    Closing such a shape as a polygon is right for the fill and wrong for the
+    outline: it draws an edge along the clip boundary that the figure never had,
+    so a bar running off the top of its axes acquires a cap exactly at the axis
+    limit and reads as a bar whose value *is* the limit. The two geometries land
+    in one PowerPoint shape as separate ``a:path`` entries, so the bar stays one
+    object the user can select and recolour.
+    """
 
     subpaths: list[Subpath]
     fill: Paint | None = None
     stroke: Stroke | None = None
     name: str = "path"
+    stroke_subpaths: list[Subpath] | None = None
+
+    def stroked(self) -> list[Subpath]:
+        """The geometry the outline follows — the fill's, unless a clip split
+        them."""
+        if self.stroke is None:
+            return []
+        return self.subpaths if self.stroke_subpaths is None else self.stroke_subpaths
+
+    def every_subpath(self) -> list[Subpath]:
+        """Both geometries, for anything that needs the shape's full extent."""
+        if self.stroke_subpaths is None:
+            return self.subpaths
+        return [*self.subpaths, *self.stroke_subpaths]
 
 
 @dataclass
@@ -329,9 +358,23 @@ def _first_family(value: str) -> str:
     return "Arial"
 
 
-def _paint_from(decls: dict, key: str, inherited: dict) -> Paint | None:
-    """The fill or stroke paint named by *key*, or ``None`` for no paint."""
+def _paint_from(decls: dict, key: str, inherited: dict,
+                unsupported: list | None = None) -> Paint | None:
+    """The fill or stroke paint named by *key*, or ``None`` for no paint.
+
+    A ``url(#…)`` reference — Matplotlib writes a **hatch** that way, as a
+    ``<pattern>`` in ``<defs>`` — has no solid colour to resolve to, so it also
+    returns ``None``. That is the same answer as ``fill: none`` and means
+    something entirely different: hatched bars come out as empty outlines, and a
+    figure whose only distinction between conditions is the hatch loses all of
+    it. The two cases are told apart here and the pattern one is recorded, so
+    the deck can say what it dropped.
+    """
     raw = decls.get(key, inherited.get(key))
+    if (raw or "").strip().lower().startswith("url("):
+        if unsupported is not None and _PATTERN_FILL not in unsupported:
+            unsupported.append(_PATTERN_FILL)
+        return None
     if raw is None:
         # SVG 1.1's initial values for these two properties, in the spec's own
         # spelling — ``_parse_color`` resolves the keyword. Written as the
@@ -357,8 +400,9 @@ def _float_or(value, default: float) -> float:
         return default
 
 
-def _stroke_from(decls: dict, inherited: dict, scale: float) -> Stroke | None:
-    paint = _paint_from(decls, "stroke", inherited)
+def _stroke_from(decls: dict, inherited: dict, scale: float,
+                 unsupported: list | None = None) -> Stroke | None:
+    paint = _paint_from(decls, "stroke", inherited, unsupported)
     if paint is None:
         return None
     width = _float_or(decls.get("stroke-width", inherited.get("stroke-width")), 1.0)
@@ -823,6 +867,27 @@ class _Walker:
             if rect is not None:
                 self.clips[node_id] = rect
 
+    @staticmethod
+    def _clip_in_user_space(rect: tuple, matrix: tuple) -> tuple:
+        """A clip rectangle mapped through *matrix*.
+
+        Clip rectangles are indexed as written, but the geometry they clip has
+        already been transformed, so the two have to be brought into one space
+        before they can be compared. Matplotlib's root matrix is the identity —
+        its ``viewBox`` always matches its ``width``/``height`` — so this is
+        latent there; it stops being latent for any hand-edited SVG in the
+        dataset folder, and the reader claims to handle a differing viewBox.
+
+        Every matrix that reaches here is axis-aligned (Matplotlib emits only
+        translation, scale and a y-flip at this level), so mapping the two
+        corners and re-ordering them is exact rather than an approximation.
+        """
+        if matrix == _IDENTITY:
+            return rect
+        x0, y0 = _apply(matrix, (rect[0], rect[1]))
+        x1, y1 = _apply(matrix, (rect[2], rect[3]))
+        return (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+
     def _clip_rect(self, clip_path) -> tuple | None:
         """The bounding rectangle of a ``<clipPath>``.
 
@@ -847,14 +912,15 @@ class _Walker:
                     return bounds
         return None
 
-    def _clip_for(self, elem, inherited_clip):
+    def _clip_for(self, elem, inherited_clip, matrix):
         ref = (elem.get("clip-path") or "").strip()
         match = re.match(r"url\(#([^)]+)\)", ref)
         if match is None:
             return inherited_clip
-        rect = self.clips.get(match.group(1))
-        if rect is None:
+        raw = self.clips.get(match.group(1))
+        if raw is None:
             return inherited_clip
+        rect = self._clip_in_user_space(raw, matrix)
         if inherited_clip is None:
             return rect
         return (max(rect[0], inherited_clip[0]), max(rect[1], inherited_clip[1]),
@@ -867,7 +933,7 @@ class _Walker:
             return
         decls = _expand_font_shorthand(_declarations(elem))
         matrix = _mat_mul(matrix, _parse_transform(elem.get("transform")))
-        clip = self._clip_for(elem, clip)
+        clip = self._clip_for(elem, clip, matrix)
         name = elem.get("id") or name
         if tag in ("g", "svg", "a"):
             merged = {**inherited, **decls}
@@ -906,17 +972,32 @@ class _Walker:
                    name: str) -> None:
         if not subpaths:
             return
-        fill = _paint_from(decls, "fill", merged)
-        stroke = _stroke_from(decls, merged, _mean_scale(matrix))
+        fill = _paint_from(decls, "fill", merged, self.unsupported)
+        stroke = _stroke_from(decls, merged, _mean_scale(matrix),
+                              self.unsupported)
         if fill is None and stroke is None:
             return
         moved = transform_subpaths(subpaths, matrix)
-        if clip is not None:
-            moved = clip_subpaths(moved, clip, filled=fill is not None)
-            if not moved:
-                return
-        self.shapes.append(PathShape(subpaths=moved, fill=fill, stroke=stroke,
-                                     name=name))
+        if clip is None:
+            self.shapes.append(PathShape(subpaths=moved, fill=fill,
+                                         stroke=stroke, name=name))
+            return
+        # A clip cuts a fill and an outline differently: the fill closes along
+        # the clip edge, the outline just stops there. Ask for each separately
+        # rather than picking one rule for the whole shape.
+        filled = clip_subpaths(moved, clip, filled=True) if fill is not None else []
+        stroked = clip_subpaths(moved, clip, filled=False) if stroke is not None else []
+        if not filled and not stroked:
+            return
+        if fill is None:
+            self.shapes.append(PathShape(subpaths=stroked, fill=None,
+                                         stroke=stroke, name=name))
+            return
+        # ``stroke_subpaths`` stays None when nothing was cut, so an unclipped
+        # shape carries one geometry and one ``a:path`` exactly as before.
+        split = None if (stroke is None or stroked == filled) else stroked
+        self.shapes.append(PathShape(subpaths=filled, fill=fill, stroke=stroke,
+                                     name=name, stroke_subpaths=split))
 
     def _emit_use(self, elem, merged: dict, matrix, clip, name: str) -> None:
         """Expand a ``<use>`` of a ``<defs>`` path into real geometry.
@@ -938,6 +1019,25 @@ class _Walker:
                         _mat_mul(matrix, offset), clip, name)
 
     def _emit_text(self, elem, merged: dict, matrix, name: str) -> None:
+        """Emit the text run(s) this ``<text>`` element carries.
+
+        A plain label is one run. **Mathtext is not**: Matplotlib renders
+        ``$\\mu$m`` as several ``<tspan>``s grouped *by font rather than by
+        reading order*, each carrying its own list of per-glyph x positions — so
+        an italic tspan can hold the μ at x=0 and an α sixty points further
+        along, with the upright "m intensity" tspan sitting between them in
+        space but after them in the document. Concatenating the element's text
+        gives "μα" followed by "m intensity", which is neither what the figure
+        says nor where it says it, and µm and Greek are routine in
+        fluorescence-microscopy axis labels rather than exotic input.
+
+        So each tspan is split back into positioned runs and emitted separately.
+        """
+        spans = [child for child in elem if _tag(child) == "tspan"]
+        if spans:
+            for span in spans:
+                self._emit_tspan(span, elem, merged, matrix, name)
+            return
         text = "".join(elem.itertext())
         if not text.strip():
             return
@@ -959,7 +1059,53 @@ class _Walker:
             style=(merged.get("font-style") or "normal").lower(),
             anchor=(merged.get("text-anchor") or "start").lower(),
             rotation_deg=rotation,
-            fill=_paint_from(_declarations(elem), "fill", merged),
+            fill=_paint_from(_declarations(elem), "fill", merged,
+                             self.unsupported),
+            name=name,
+        ))
+
+    def _emit_tspan(self, span, parent, merged: dict, matrix, name: str) -> None:
+        """One ``<tspan>``, split into runs at the gaps between its glyphs.
+
+        A tspan's ``x`` is a *list*, one entry per character. Consecutive
+        entries differ by a glyph advance; a jump much larger than that is the
+        span resuming somewhere else on the line, which is where a run ends. The
+        threshold is a multiple of the font size because that is the scale an
+        advance is measured in — no glyph in a proportional face is close to
+        twice its point size wide.
+        """
+        text = "".join(span.itertext())
+        if not text:
+            return
+        decls = _expand_font_shorthand({**merged, **_declarations(span)})
+        size = _float_or(decls.get("font-size"), 10.0)
+        xs = _numbers(span.get("x") or parent.get("x") or "0")
+        ys = _numbers(span.get("y") or parent.get("y") or "0")
+        base_y = ys[0] if ys else 0.0
+        if not xs:
+            xs = [0.0]
+        for run_text, run_x in _positioned_runs(text, xs, size):
+            self._append_text(run_text, run_x, base_y, decls, span, matrix,
+                              # A run's position is absolute, so it anchors at
+                              # its start whatever the element's own text-anchor
+                              # said — that anchor described the whole label,
+                              # which no longer exists as one piece.
+                              anchor="start", name=name)
+
+    def _append_text(self, text: str, x: float, y: float, decls: dict, elem,
+                     matrix, *, anchor: str, name: str) -> None:
+        anchor_pt = _apply(matrix, (x, y))
+        rotation = math.degrees(math.atan2(matrix[1], matrix[0]))
+        size = _float_or(decls.get("font-size"), 10.0) * _mean_scale(matrix)
+        weight = (decls.get("font-weight") or "normal").lower()
+        self.shapes.append(TextShape(
+            text=text, x=anchor_pt[0], y=anchor_pt[1], size_pt=size,
+            family=_first_family(decls.get("font-family") or ""),
+            weight="bold" if weight in ("bold", "bolder") or _is_bold_number(weight)
+            else "normal",
+            style=(decls.get("font-style") or "normal").lower(),
+            anchor=anchor, rotation_deg=rotation,
+            fill=_paint_from(_declarations(elem), "fill", decls, self.unsupported),
             name=name,
         ))
 
@@ -994,6 +1140,38 @@ class _Walker:
             height=max(1e-6, max(ys) - min(ys)),
             flip_h=local[0] < 0, flip_v=local[3] < 0, name=name,
         ))
+
+
+#: How far apart two glyph positions may be, as a multiple of the font size,
+#: before they are treated as separate runs rather than as consecutive
+#: characters. No glyph in a proportional face is close to twice its point size
+#: wide, so a larger gap means the span resumed somewhere else on the line.
+_RUN_BREAK_EMS = 1.8
+
+
+def _positioned_runs(text: str, xs: list[float], size: float) -> list[tuple]:
+    """Split *text* into ``(run, x)`` pairs at the gaps in its glyph positions.
+
+    A single x for the whole string (the ordinary case) yields one run, so a
+    plain label is untouched.
+    """
+    if len(xs) <= 1:
+        return [(text, xs[0] if xs else 0.0)]
+    limit = max(1.0, size) * _RUN_BREAK_EMS
+    runs: list[tuple] = []
+    chars: list[str] = []
+    start = xs[0]
+    previous = xs[0]
+    for index, char in enumerate(text):
+        here = xs[index] if index < len(xs) else previous
+        if chars and (here - previous > limit or here < previous):
+            runs.append(("".join(chars), start))
+            chars, start = [], here
+        chars.append(char)
+        previous = here
+    if chars:
+        runs.append(("".join(chars), start))
+    return [(run, x) for run, x in runs if run.strip()]
 
 
 def _is_bold_number(weight: str) -> bool:

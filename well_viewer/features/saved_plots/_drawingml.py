@@ -56,6 +56,80 @@ _JOIN = {"miter": '<a:miter lim="800000"/>', "round": "<a:round/>",
          "bevel": "<a:bevel/>"}
 _CAP = {"butt": "flat", "round": "rnd", "square": "sq"}
 
+#: DrawingML's dash presets, as ``(dash, gap)`` in multiples of the line width —
+#: the same way SVG's ``stroke-dasharray`` is conventionally written. A parsed
+#: pattern is matched to the nearest of these. Writing every pattern as ``dash``
+#: (which is what this did) collapses dashed, dotted and dash-dot into three
+#: identical curves and three identical legend keys, so a figure that encodes its
+#: series in line style stops being readable — silently, since each line is
+#: individually plausible.
+_DASH_PRESETS = (
+    ("sysDot", (1.0, 1.0)),
+    ("dot", (1.0, 3.0)),
+    ("sysDash", (3.0, 1.0)),
+    ("dash", (4.0, 3.0)),
+    ("lgDash", (8.0, 3.0)),
+)
+
+#: Patterns of four or more values alternate two dash lengths, which is what
+#: dash-dot is. Matched by length before the two-value presets are consulted.
+_DASH_DOT_PRESETS = (
+    ("dashDot", 4),
+    ("lgDashDot", 4),
+    ("lgDashDotDot", 6),
+)
+
+
+def dash_preset(dashes: tuple, width_pt: float) -> str:
+    """The closest DrawingML dash preset to a parsed ``stroke-dasharray``.
+
+    Matched in units of the line width, because that is how both SVG's presets
+    and DrawingML's are defined; a 1 pt dotted line and a 4 pt dotted line have
+    very different absolute patterns and the same shape.
+    """
+    if not dashes:
+        return ""
+    unit = width_pt if width_pt > 0 else 1.0
+    scaled = [d / unit for d in dashes]
+    if len(scaled) >= 4:
+        return "lgDashDotDot" if len(scaled) >= 6 else "dashDot"
+    if len(scaled) == 1:
+        scaled = [scaled[0], scaled[0]]
+    dash, gap = scaled[0], scaled[1]
+    best = min(_DASH_PRESETS,
+               key=lambda item: abs(item[1][0] - dash) + abs(item[1][1] - gap))
+    return best[0]
+
+
+#: Characters XML 1.0 forbids outright. ``escape`` does not remove them — it
+#: only rewrites ``&``, ``<`` and ``>`` — so a title carrying one produces a
+#: slide part that will not parse. Plot titles are free text the user types or
+#: pastes, and a paste out of Word carries ``\x0b`` for a soft line break, so
+#: this is an ordinary input rather than a hostile one.
+_ILLEGAL_XML = frozenset(
+    chr(c) for c in [*range(0x00, 0x09), 0x0B, 0x0C, *range(0x0E, 0x20),
+                     *range(0xD800, 0xE000), 0xFFFE, 0xFFFF])
+
+
+def xml_text(value: str) -> str:
+    """*value*, escaped and stripped of characters XML cannot carry.
+
+    Dropping them rather than substituting a glyph: they are invisible control codes
+    with no printable meaning, and putting a placeholder in a plot title would
+    change what the slide says. A tab, newline or carriage return is legal and
+    survives.
+
+    Without this a single stray control character does not corrupt one label —
+    it makes the whole slide part unparseable, so PowerPoint offers to repair
+    the file and the exporter reports success either way.
+    """
+    return escape("".join(c for c in (value or "") if c not in _ILLEGAL_XML))
+
+
+def xml_attr(value: str) -> str:
+    """The same, quoted for use as an XML attribute value."""
+    return quoteattr("".join(c for c in (value or "") if c not in _ILLEGAL_XML))
+
 
 def points_to_emu(value: float) -> int:
     return int(round(value * EMU_PER_POINT))
@@ -137,7 +211,8 @@ def _line_xml(stroke: Stroke | None, placement: Placement) -> str:
         return "<a:ln><a:noFill/></a:ln>"
     width = max(0, placement.emu_len(stroke.width_pt))
     cap = _CAP.get(stroke.linecap, "flat")
-    dash = '<a:prstDash val="dash"/>' if stroke.dashes else ""
+    preset = dash_preset(stroke.dashes, stroke.width_pt)
+    dash = f'<a:prstDash val="{preset}"/>' if preset else ""
     join = _JOIN.get(stroke.linejoin, "<a:round/>")
     return (f'<a:ln w="{width}" cap="{cap}">'
             f"<a:solidFill>{_color_xml(stroke.paint)}</a:solidFill>"
@@ -155,7 +230,10 @@ def _custom_geometry(shape: PathShape, placement: Placement) -> tuple[str, tuple
     the frame and resizing the shape in PowerPoint scales it the way the user
     expects.
     """
-    bounds = subpath_bounds(shape.subpaths) or (0.0, 0.0, 0.0, 0.0)
+    # The frame has to cover both geometries: a clipped bar's outline can end
+    # short of its fill, and sizing the frame from the fill alone would squeeze
+    # the outline into it.
+    bounds = subpath_bounds(shape.every_subpath()) or (0.0, 0.0, 0.0, 0.0)
     x = placement.emu_x(bounds[0])
     y = placement.emu_y(bounds[1])
     cx = max(_MIN_EXTENT_EMU, placement.emu_x(bounds[2]) - x)
@@ -165,25 +243,36 @@ def _custom_geometry(shape: PathShape, placement: Placement) -> tuple[str, tuple
         return (f'<a:pt x="{placement.emu_x(point[0]) - x}" '
                 f'y="{placement.emu_y(point[1]) - y}"/>')
 
+    def _emit(subpaths, *, fill_mode: str, stroke_flag: str) -> list[str]:
+        out = []
+        for sub in subpaths:
+            body = []
+            for seg in sub:
+                if seg[0] == "M":
+                    body.append(f"<a:moveTo>{_pt(seg[1])}</a:moveTo>")
+                elif seg[0] == "L":
+                    body.append(f"<a:lnTo>{_pt(seg[1])}</a:lnTo>")
+                elif seg[0] == "C":
+                    body.append("<a:cubicBezTo>"
+                                + "".join(_pt(p) for p in seg[1:])
+                                + "</a:cubicBezTo>")
+                elif seg[0] == "Z":
+                    body.append("<a:close/>")
+            if body:
+                out.append(f'<a:path w="{cx}" h="{cy}" fill="{fill_mode}" '
+                           f'stroke="{stroke_flag}">' + "".join(body)
+                           + "</a:path>")
+        return out
+
     fill_mode = "norm" if shape.fill is not None else "none"
-    stroke_flag = "1" if shape.stroke is not None else "0"
-    paths = []
-    for sub in shape.subpaths:
-        body = []
-        for seg in sub:
-            if seg[0] == "M":
-                body.append(f"<a:moveTo>{_pt(seg[1])}</a:moveTo>")
-            elif seg[0] == "L":
-                body.append(f"<a:lnTo>{_pt(seg[1])}</a:lnTo>")
-            elif seg[0] == "C":
-                body.append("<a:cubicBezTo>"
-                            + "".join(_pt(p) for p in seg[1:])
-                            + "</a:cubicBezTo>")
-            elif seg[0] == "Z":
-                body.append("<a:close/>")
-        if body:
-            paths.append(f'<a:path w="{cx}" h="{cy}" fill="{fill_mode}" '
-                         f'stroke="{stroke_flag}">' + "".join(body) + "</a:path>")
+    split = shape.stroke_subpaths is not None
+    # When a clip split the two, the filled geometry carries no outline and the
+    # stroked geometry carries no fill — so the bar is filled to where the axes
+    # end and outlined only where the figure actually drew an edge.
+    paths = _emit(shape.subpaths, fill_mode=fill_mode,
+                  stroke_flag="0" if split or shape.stroke is None else "1")
+    if split:
+        paths += _emit(shape.stroke_subpaths, fill_mode="none", stroke_flag="1")
     geometry = ("<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/>"
                 f'<a:rect l="0" t="0" r="{cx}" b="{cy}"/>'
                 "<a:pathLst>" + "".join(paths) + "</a:pathLst></a:custGeom>")
@@ -196,7 +285,7 @@ def _path_shape_xml(shape: PathShape, placement: Placement, ids: ShapeIds) -> st
         return ""
     return (
         "<p:sp><p:nvSpPr>"
-        f'<p:cNvPr id="{ids.take()}" name={quoteattr(shape.name or "path")}/>'
+        f'<p:cNvPr id="{ids.take()}" name={xml_attr(shape.name or "path")}/>'
         "<p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>"
         f'<a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm>'
         f"{geometry}{_fill_xml(shape.fill)}{_line_xml(shape.stroke, placement)}"
@@ -257,10 +346,10 @@ def _text_shape_xml(shape: TextShape, placement: Placement, ids: ShapeIds) -> st
     fill = _fill_xml(shape.fill) if shape.fill is not None else _fill_xml(
         Paint(rgb="000000"))
     rotation = f' rot="{rot}"' if rot else ""
-    family = quoteattr(shape.family or "Arial")
+    family = xml_attr(shape.family or "Arial")
     return (
         "<p:sp><p:nvSpPr>"
-        f'<p:cNvPr id="{ids.take()}" name={quoteattr(shape.name or "text")}/>'
+        f'<p:cNvPr id="{ids.take()}" name={xml_attr(shape.name or "text")}/>'
         '<p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>'
         f'<a:xfrm{rotation}><a:off x="{x}" y="{y}"/>'
         f'<a:ext cx="{cx}" cy="{cy}"/></a:xfrm>'
@@ -270,7 +359,7 @@ def _text_shape_xml(shape: TextShape, placement: Placement, ids: ShapeIds) -> st
         f'<a:p><a:pPr algn="{align}"/><a:r>'
         f'<a:rPr lang="en-US" sz="{size}"{bold}{italic} dirty="0">{fill}'
         f"<a:latin typeface={family}/><a:cs typeface={family}/></a:rPr>"
-        f"<a:t>{escape(shape.text)}</a:t></a:r></a:p></p:txBody></p:sp>"
+        f"<a:t>{xml_text(shape.text)}</a:t></a:r></a:p></p:txBody></p:sp>"
     )
 
 
@@ -289,7 +378,7 @@ def _image_shape_xml(shape: ImageShape, placement: Placement, ids: ShapeIds,
         flips += ' flipV="1"'
     return (
         "<p:pic><p:nvPicPr>"
-        f'<p:cNvPr id="{ids.take()}" name={quoteattr(shape.name or "image")}/>'
+        f'<p:cNvPr id="{ids.take()}" name={xml_attr(shape.name or "image")}/>'
         "<p:cNvPicPr/><p:nvPr/></p:nvPicPr>"
         f'<p:blipFill><a:blip r:embed="{rel_id}"/>'
         "<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>"
@@ -329,7 +418,7 @@ def drawing_group_xml(drawing: Drawing, placement: Placement, ids: ShapeIds,
     cy = max(_MIN_EXTENT_EMU, placement.emu_len(drawing.height_pt))
     return (
         "<p:grpSp><p:nvGrpSpPr>"
-        f'<p:cNvPr id="{ids.take()}" name={quoteattr(name)}/>'
+        f'<p:cNvPr id="{ids.take()}" name={xml_attr(name)}/>'
         "<p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr>"
         f'<a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/>'
         f'<a:chOff x="{x}" y="{y}"/><a:chExt cx="{cx}" cy="{cy}"/></a:xfrm>'
@@ -338,9 +427,8 @@ def drawing_group_xml(drawing: Drawing, placement: Placement, ids: ShapeIds,
 
 
 def text_box_xml(text: str, ids: ShapeIds, *, x: int, y: int, cx: int, cy: int,
-                 size_pt: float = 18.0, bold: bool = False,
-                 color: str = "1A1A1A", align: str = "l",
-                 family: str = "Arial", name: str = "Text",
+                 color: str, size_pt: float = 18.0, bold: bool = False,
+                 align: str = "l", family: str = "Arial", name: str = "Text",
                  monospace: bool = False) -> str:
     """A plain editable text box — slide titles, captions, the cover block.
 
@@ -357,14 +445,14 @@ def text_box_xml(text: str, ids: ShapeIds, *, x: int, y: int, cx: int, cy: int,
                 f'<a:p><a:pPr algn="{align}"/><a:r>'
                 f'<a:rPr lang="en-US" sz="{size}"{weight} dirty="0">'
                 f'<a:solidFill><a:srgbClr val="{color}"/></a:solidFill>'
-                f"<a:latin typeface={quoteattr(face)}/></a:rPr>"
-                f"<a:t>{escape(line)}</a:t></a:r></a:p>")
+                f"<a:latin typeface={xml_attr(face)}/></a:rPr>"
+                f"<a:t>{xml_text(line)}</a:t></a:r></a:p>")
         else:
             runs.append(f'<a:p><a:pPr algn="{align}"/><a:endParaRPr '
                         f'lang="en-US" sz="{size}"/></a:p>')
     return (
         "<p:sp><p:nvSpPr>"
-        f'<p:cNvPr id="{ids.take()}" name={quoteattr(name)}/>'
+        f'<p:cNvPr id="{ids.take()}" name={xml_attr(name)}/>'
         '<p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>'
         f'<a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm>'
         '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>'

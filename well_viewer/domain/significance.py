@@ -2,11 +2,10 @@
 
 One module because two surfaces state the same result and must state it the
 same way: the Statistics tab prints a text report of every comparison, and the
-Bar plot draws a bracket over the pair of bars that were compared. Those two
-had a private asterisk ladder each — ``_sig_marker`` in the Statistics
-controller and ``_significance_marker`` in the bar renderer — identical today
-and free to drift tomorrow, which is exactly the shape of a number that reads
-one way on the panel and another way in the report beside it.
+Bar plot draws a bracket over the pair of bars that were compared. Both the
+asterisk ladder and the spelling of the number itself live here, so a p that
+reads ``0.0312`` on the panel cannot read ``0.03125`` in the report beside it,
+and a threshold cannot be nudged on one surface alone.
 
 Pure: stdlib only, no Qt, no matplotlib, no app state. Everything here takes a
 p-value and returns a string.
@@ -15,9 +14,17 @@ p-value and returns a string.
 sufficiently extreme test underflows the double to exactly ``0.0``. Formatting
 that with ``%g`` yields ``"0"``, which claims the impossible — a probability of
 zero — where the truth is that the number is smaller than a float can hold. It
-is written ``p < 1e-300`` instead, which is both true and visibly a bound
+is written ``p < 5e-324`` instead, which is both true and visibly a bound
 rather than a measurement. That is CLAUDE.md §7's computed-as-zero rule applied
 to the one quantity in the app where a printed zero is always a lie.
+
+The bound is the smallest positive double, and **only an exact zero takes it**.
+An earlier threshold of ``1e-300`` was chosen on the belief that the automatic
+format stopped resolving below it; measured, ``%.3g`` renders the whole
+subnormal range (``1e-310`` → ``1e-310``, ``5e-324`` → ``4.94e-324``), so that
+threshold demoted real, representable p-values to a weaker statement — the
+mirror image of the conflation this module exists to prevent, and no better for
+being cautious in the other direction.
 """
 
 from __future__ import annotations
@@ -38,11 +45,11 @@ SIGNIFICANCE_LABEL_MODE_NAMES = {
     "both": "Stars + p-value",
 }
 
-#: Below this, a p-value is printed as a bound rather than as a number. It is
-#: the smallest magnitude the automatic format still renders with a significant
-#: digit; anything under it has underflowed or is close enough to underflow
-#: that the digits are no longer meaningful.
-_P_FLOOR = 1e-300
+#: The smallest positive double. A p-value of exactly ``0.0`` is a test whose
+#: result underflowed past this, so it is printed as a bound against it rather
+#: than as a zero. Nothing above it is ever demoted — see the module docstring
+#: on why a rounder threshold was the wrong instinct.
+_P_MIN_POSITIVE = 5e-324
 
 
 def significance_stars(p: float) -> str:
@@ -83,9 +90,13 @@ def format_p_value(p: float) -> str:
     An empty string for anything unprintable (``None``, NaN, an infinity) rather
     than a placeholder, so a caller can tell "no p-value" from a p-value that
     happens to be large. See the module docstring for why a zero comes back as
-    ``< 1e-300`` and not as ``0`` — the returned text carries its own relation
-    in that case, which is why :func:`significance_label` looks for it rather
-    than always writing an ``=``.
+    ``< 5e-324`` and not as ``0`` — the returned text carries its own relation
+    in that case, which is why :func:`p_phrase` looks for it rather than always
+    writing an ``=``.
+
+    The bound is taken **only** for a value at or below zero. Every positive
+    double, subnormals included, is a number the test actually produced and is
+    printed as one.
     """
     try:
         pv = float(p)
@@ -93,9 +104,30 @@ def format_p_value(p: float) -> str:
         return ""
     if not math.isfinite(pv):
         return ""
-    if pv < _P_FLOOR:
-        return f"< {_P_FLOOR:g}"
+    if pv <= 0.0:
+        return f"< {_P_MIN_POSITIVE:.0e}"
     return f"{pv:.3g}"
+
+
+def p_phrase(p: float, *, adjusted: bool = False) -> str:
+    """``"p = 0.0312"`` / ``"p_BH < 5e-324"`` — the number with its name.
+
+    The one assembly both surfaces use, so the report and the brackets cannot
+    end up naming or spacing the same quantity differently. Empty when there is
+    no printable p-value, which is what lets a caller decide for itself whether
+    to fall back or to say nothing.
+
+    *adjusted* selects the name. ``p`` and ``p_BH`` are different claims about
+    the same pair — with three or more groups the raw p is the one that
+    overstates the result — so the quantity is never printed anonymously.
+    """
+    text = format_p_value(p)
+    if not text:
+        return ""
+    name = "p_BH" if adjusted else "p"
+    # ``<`` already carries its own relation, so it takes no ``=``: the
+    # underflow case reads ``p < 5e-324`` rather than ``p = < 5e-324``.
+    return f"{name} {text}" if text.startswith("<") else f"{name} = {text}"
 
 
 def significance_label(p: float, mode: str = "stars", *,
@@ -121,13 +153,9 @@ def significance_label(p: float, mode: str = "stars", *,
     stars = significance_stars(p)
     if str(mode) not in ("p", "both"):
         return stars
-    text = format_p_value(p)
-    if not text:
+    body = p_phrase(p, adjusted=adjusted)
+    if not body:
         return stars
-    name = "p_BH" if adjusted else "p"
-    # ``<`` already carries its own relation, so it takes no ``=``: the floor
-    # case reads ``p < 1e-300`` rather than ``p = <1e-300``.
-    body = f"{name} {text}" if text.startswith("<") else f"{name} = {text}"
     if str(mode) == "p":
         return body
     return f"{stars} ({body})"

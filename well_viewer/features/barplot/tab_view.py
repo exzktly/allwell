@@ -198,6 +198,12 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     sig_btn.setProperty("variant", "toggle")
     sig_btn.setCheckable(True)
     sig_btn.setChecked(bool(ctx.state.plot.show_significance))
+    # The caption is seeded from the same state as the check, not left at the
+    # constructor's "Off". A tab body builds lazily, so it is routinely built
+    # after a restore has already turned the brackets on, and a button reading
+    # "Off" over a figure carrying brackets says the opposite of what is true.
+    sig_btn.setText(
+        f"Significance: {'On' if ctx.state.plot.show_significance else 'Off'}")
     sig_btn.setToolTip(
         "Draw significance brackets between group bars from the Statistics tab's "
         "pairwise tests. Run a test in Statistics first; brackets appear for the "

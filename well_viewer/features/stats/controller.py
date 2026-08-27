@@ -13,7 +13,7 @@ from well_viewer.data.data_loading import (
     is_ratio_key,
     resolve_value_series,
 )
-from well_viewer.domain.significance import significance_stars
+from well_viewer.domain.significance import p_phrase, significance_stars
 from well_viewer.domain.stats_compute import group_replicate_stats
 from well_viewer.domain.tp_match import tp_close_mask
 
@@ -344,17 +344,27 @@ def _format_group_summary_lines(group_vals: list[tuple[str, list[float]]]) -> li
 
 
 def _format_pairwise_lines(pair_results, adjusted: dict, show_adjusted: bool) -> list[str]:
-    """Pairwise test results + BH-adjusted p-values (audit A5). Pure."""
+    """Pairwise test results + BH-adjusted p-values (audit A5). Pure.
+
+    Both p-values go through :func:`~well_viewer.domain.significance.p_phrase`,
+    which is the same assembly the Bar plot's brackets print. Sharing the ladder
+    and spelling the number two ways would have left half the divergence in
+    place: this line used ``:.4g`` while a bracket used ``%.3g``, so one run
+    read ``p = 0.03125`` here and ``p = 0.0312`` on the panel beside it — and,
+    worse, an underflowed p printed as a flat ``p = 0``, the one thing the
+    shared module exists to make impossible.
+    """
     lines: list[str] = []
     for idx, (name_a, name_b, stat_name, stat_value, p, err) in enumerate(pair_results):
         lines.append(f"── {name_a}  vs  {name_b} ──")
         if err is not None:
             lines.append(f"  Error: {err}")
         elif p is not None and stat_value is not None:
-            line = f"  {stat_name} = {stat_value:.4f}   p = {p:.4g}   {_sig_marker(p)}"
+            line = (f"  {stat_name} = {stat_value:.4f}   "
+                    f"{p_phrase(p)}   {_sig_marker(p)}")
             if show_adjusted and idx in adjusted:
                 ap = adjusted[idx]
-                line += f"   |   p_BH = {ap:.4g}   {_sig_marker(ap)}"
+                line += f"   |   {p_phrase(ap, adjusted=True)}   {_sig_marker(ap)}"
             lines.append(line)
         lines.append("")
     if show_adjusted:

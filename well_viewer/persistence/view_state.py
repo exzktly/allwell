@@ -125,6 +125,12 @@ def snapshot(ctx) -> dict:
         "use_fov_replicates": bool(ctx.state.plot.use_fov_replicates),
         "show_threshold_line": bool(ctx.state.plot.show_threshold_line),
         "show_significance": bool(ctx.state.plot.show_significance),
+        # What the brackets say — stars, the p-value, or both. Captured beside
+        # the toggle that draws them for the same reason the value-label format
+        # is captured beside its toggle: a saved plot whose brackets quoted
+        # their p-values must not come back showing bare asterisks.
+        "significance_label_mode": str(
+            ctx.state.plot.significance_label_mode or "stars"),
         # The value-label overlay, both halves. Captured for the same reason
         # the threshold marker is: a saved plot whose bars carried their
         # numbers must not come back bare, and one whose numbers were pinned to
@@ -538,6 +544,24 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> list[str]:
             failed.append("significance marks")
             swallowed()
 
+    if "significance_label_mode" in state:
+        # Restored through the known set rather than as a free string: this file
+        # can be hand-edited and can be written by a later version, and a mode
+        # this build does not draw would leave the brackets blank. An
+        # unrecognised value falls back to the stars, which is what every build
+        # draws.
+        try:
+            from well_viewer.domain.significance import SIGNIFICANCE_LABEL_MODES
+            _mode = str(state["significance_label_mode"] or "stars")
+            ctx.state.plot.significance_label_mode = (
+                _mode if _mode in SIGNIFICANCE_LABEL_MODES else "stars")
+        except Exception:
+            failed.append("significance label mode")
+            swallowed()
+
+    if "show_significance" in state or "significance_label_mode" in state:
+        _sync_significance_controls(ctx)
+
     if "time_scale" in state:
         # Through ``coerce_factor`` rather than ``float()``: a hand-edited or
         # truncated file could hold a zero or a negative, which would collapse or
@@ -863,6 +887,45 @@ def _set_combo_if_valid(ctx, attr: str, value: str) -> None:
                 return
     except Exception:
         swallowed()  # was: pass (silent except)
+
+
+def _sync_significance_controls(ctx) -> None:
+    """Put the Bar tab's Significance toggle and Label picker back in step.
+
+    Restoring writes ``PlotState``; the figure reads it on the next redraw and
+    is correct immediately. The two widgets do not — nothing else calls
+    ``setChecked`` or ``setEnabled`` on them but the toggle's own click handler
+    — so without this a restored view drew p-value brackets above a popover
+    whose picker read ``Label: Stars (*)`` and was **greyed out**, because the
+    picker is enable-gated on a toggle that still showed "Off". The gating is
+    what made this worse than a stale caption: the control the user would go to
+    was the one they could not use, and the only way back was to click a toggle
+    that already reflected the state they wanted.
+
+    The picker's signal is blocked while it moves. ``currentIndexChanged`` would
+    otherwise fire during a restore and call ``redraw_bars`` mid-restore, on a
+    tab whose other state is half-applied.
+
+    A tab that has not been built yet registers no widgets, so both lookups come
+    back ``None`` and this does nothing — which is right: that tab reads the
+    restored state when it builds.
+    """
+    on = bool(ctx.state.plot.show_significance)
+    btn = ctx.widgets.get_or_none("_bar_significance_btn")
+    if btn is not None:
+        with swallow("view_state: could not sync the Significance toggle"):
+            btn.setChecked(on)
+            btn.setText(f"Significance: {'On' if on else 'Off'}")
+    cb = ctx.widgets.get_or_none("_bar_significance_label_cb")
+    if cb is not None:
+        with swallow("view_state: could not sync the Label picker"):
+            idx = cb.findData(str(ctx.state.plot.significance_label_mode or "stars"))
+            blocked = cb.blockSignals(True)
+            try:
+                cb.setCurrentIndex(max(0, idx))
+            finally:
+                cb.blockSignals(blocked)
+            cb.setEnabled(on)
 
 
 def _apply_bar(ctx, state: dict) -> None:

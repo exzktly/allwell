@@ -33,6 +33,7 @@ from well_viewer.core.plot_style import (
     mark_time_rescale,
     tokens_for,
 )
+from well_viewer.domain.significance import significance_label
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.core.safe import swallowed
 
@@ -540,15 +541,64 @@ def _points_to_data_y(ax, points: float) -> float:
     return abs(y1 - y0) * 0.08
 
 
-def _significance_marker(p: float) -> str:
-    """Asterisk code for a p-value (matches the Statistics-tab text output)."""
-    if p < 0.001:
-        return "***"
-    if p < 0.01:
-        return "**"
-    if p < 0.05:
-        return "*"
-    return "ns"
+#: Point size for the text over a bracket. The asterisk ladder is a couple of
+#: glyphs and reads at the panel's own weight; a label carrying a p-value is a
+#: whole expression, and on a plate of six groups there is one per bracket, so
+#: it is set a step smaller to stay out of the bars' way. Both sizes are fixed
+#: here for the same reason the value labels' is — the Properties sidebar's
+#: font-size controls do not reach free text.
+_BRACKET_STARS_PT = 8
+_BRACKET_P_VALUE_PT = 7
+
+
+def _significance_label_mode(ctx) -> str:
+    """Which of the three bracket labels the user asked for.
+
+    Read through ``getattr`` so a renderer driven with a hand-built state — a
+    unit test calling ``draw_significance_brackets`` directly — falls back to
+    the stars rather than raising. Those callers predate the setting, and the
+    stars are what they have always drawn.
+    """
+    return str(getattr(getattr(ctx.state, "plot", None),
+                       "significance_label_mode", "stars") or "stars")
+
+
+def _bracket_font_pt(mode: str) -> int:
+    """Point size for a bracket's text in *mode*."""
+    return _BRACKET_P_VALUE_PT if mode in ("p", "both") else _BRACKET_STARS_PT
+
+
+def _levels_are_far_enough_apart(ax, step: float, span: float,
+                                 size_pt: float) -> bool:
+    """Whether consecutive bracket levels can hold a line of *size_pt* text.
+
+    The brackets stack at ``step`` data units apart and the axis is then set to
+    exactly the span they occupy, so what a reader gets is a fixed panel divided
+    into one row per comparison: ``step / span`` of the panel's height each. A
+    number needs a whole line of that; an asterisk does not, which is why this
+    question only arises now.
+
+    Measured on the app's own bar figure (6.2 × 11.0 in at 100 dpi, three
+    stacked panels, so the Mean panel is 249 px tall), comparing every pair of
+    N groups: six groups give 10.6 px a level against a 7 pt line, and nothing
+    collides; seven give 8.4 px and 17 of the 21 labels are printed through the
+    line above them. The threshold below — the text's own point size in pixels
+    — splits those two cases exactly, and every larger N with them.
+
+    Returns ``True`` when it cannot measure. A figure that has never been drawn
+    reports a degenerate bbox, and refusing the numbers on that basis would
+    withhold what the user asked for over a missing transform rather than over
+    a real shortage of room.
+    """
+    try:
+        h_px = float(ax.get_window_extent().height)
+        dpi = float(ax.figure.dpi)
+        if h_px <= 0 or dpi <= 0 or span <= 0:
+            return True
+        return (step / span) * h_px >= size_pt * dpi / 72.0
+    except (AttributeError, ValueError, ZeroDivisionError):
+        swallowed("barplot: no usable transform for the bracket label fit")
+        return True
 
 
 #: Marks the "why there are no brackets" note, so a later pass — or a test —
@@ -591,7 +641,14 @@ def _per_cell_mode_name(ctx) -> str:
 
 
 def _no_significance(ctx, ax, reason: str) -> None:
-    """Say on the figure why the Significance toggle produced no brackets.
+    """Say on the figure why the Significance toggle produced less than was asked.
+
+    Almost always that means no brackets at all, which is what the rest of this
+    docstring is about. The one case that is not a decline is the label: when a
+    run has too many comparisons for its p-values to be legible, the brackets
+    are drawn with stars instead and the shortfall is reported here, because a
+    panel showing a different label than the one the user picked is a silent
+    substitution however many brackets it carries.
 
     Every way this renderer can decline to draw used to be a bare ``return``.
     Six of them, and only one said anything — so with "Significance: On" showing
@@ -737,8 +794,11 @@ def _match_pairs_to_bars(ctx, items, pairwise, *, xs, rec_tp, val_attr,
     """Resolve one run's compared pairs onto the bars actually drawn.
 
     Returns ``(x_by_key, top_by_key, matched)`` — where each bar sits, how
-    tall it is including its spread, and the ``(p, key_a, key_b)`` triples
-    that have a bar at both ends.
+    tall it is including its spread, and the ``(p, key_a, key_b, adjusted)``
+    tuples that have a bar at both ends. ``adjusted`` says whether the ``p``
+    beside it is the Benjamini-Hochberg adjusted value, which the label has to
+    know: printed as a number it is quoted by name, and ``p`` and ``p_BH`` are
+    different claims about the same pair.
 
     Extracted from the drawing so that function stays under the complexity
     ratchet after the store became keyed, and because "which compared pair
@@ -811,14 +871,34 @@ def _match_pairs_to_bars(ctx, items, pairwise, *, xs, rec_tp, val_attr,
             return wells_to_key.get(fw)
         return None
 
-    matched = []  # (p_show, key_a, key_b)
+    matched = []  # (p_show, key_a, key_b, adjusted)
     for r in pairwise:
         ka = _bar_key_for(r.get("a"), r.get("a_wells"))
         kb = _bar_key_for(r.get("b"), r.get("b_wells"))
         if ka and kb and ka != kb and ka in top_by_key and kb in top_by_key:
-            matched.append((float(r.get("p_adj", r.get("p", 1.0))), ka, kb))
+            matched.append((float(r.get("p_adj", r.get("p", 1.0))), ka, kb,
+                            _p_is_adjusted(r, pairwise)))
 
     return x_by_key, top_by_key, matched
+
+
+def _p_is_adjusted(record, pairwise) -> bool:
+    """Whether *record*'s drawn p is the BH-adjusted one rather than the raw p.
+
+    ``compute_pairwise`` stamps ``p_adj_applied`` on every record it writes, so
+    the answer is stored rather than guessed for every run this app produces —
+    including a restored saved plot, which re-runs ``compute_pairwise`` rather
+    than persisting records. The fallback covers records built by hand, which in
+    practice means test fixtures, and there the count is the answer:
+    ``_bh_adjust`` adjusts nothing unless there are at least two comparisons to
+    adjust across, and a run's records are exactly its comparisons that produced
+    a p-value. Guessing from ``p_adj != p`` would have been the wrong test —
+    a single adjusted p can equal its raw value, and one comparison's *unadjusted*
+    p is stored under ``p_adj`` too.
+    """
+    if "p_adj_applied" in record:
+        return bool(record.get("p_adj_applied"))
+    return "p_adj" in record and len(pairwise) > 1
 
 
 def _draw_one_run(ctx, items, pairwise, *, ax_mean, ax_frac, target_ts) -> None:
@@ -901,8 +981,32 @@ def _draw_one_run(ctx, items, pairwise, *, ax_mean, ax_frac, target_ts) -> None:
             return
         step = headroom / (len(matched) + 1)
         top = float(ceiling)
+    # What the brackets say, and whether this panel has the room to say it.
+    # Resolved once for the run rather than per bracket: the mode is a single
+    # setting, and the fit is a property of the stack as a whole.
+    #
+    # A numeric label is a whole line of text where an asterisk is a glyph, so
+    # past a certain number of comparisons the rows the stack divides the panel
+    # into are shorter than the text that goes in them, and the labels print
+    # through each other. Falling back to the stars keeps every bracket and
+    # every verdict — what is dropped is the precision, which is exactly what
+    # would have been unreadable — and the panel says so, because a figure that
+    # silently shows a different label than the one that was asked for is the
+    # substitution CLAUDE.md §7 forbids. Widening the step cannot help: ``top``
+    # is derived from it and ``set_ylim`` below rescales the growth straight
+    # back out, which is measured, not assumed.
+    _mode = _significance_label_mode(ctx)
+    _size = _bracket_font_pt(_mode)
+    if _mode in ("p", "both") and not _levels_are_far_enough_apart(
+            ax, step, top - y0, _size):
+        _no_significance(
+            ctx, ax,
+            f"{len(matched)} comparisons leave too little room to print the "
+            "p-values, so the brackets show stars — compare fewer groups, or "
+            "raise this panel's height, to read the numbers.")
+        _mode, _size = "stars", _BRACKET_STARS_PT
     fg = tokens_for(ax)[1]
-    for level, (p_show, ka, kb) in enumerate(matched):
+    for level, (p_show, ka, kb, p_adjusted) in enumerate(matched):
         xa, xb = x_by_key[ka], x_by_key[kb]
         if xa > xb:
             xa, xb = xb, xa
@@ -921,8 +1025,9 @@ def _draw_one_run(ctx, items, pairwise, *, ax_mean, ax_frac, target_ts) -> None:
         # untagged bracket went onto white paper still near-white.
         follows_theme(bracket_line)
         follows_theme(ax.text(
-            (xa + xb) / 2.0, y + h, _significance_marker(p_show),
-            ha="center", va="bottom", fontsize=8, color=fg,
+            (xa + xb) / 2.0, y + h,
+            significance_label(p_show, _mode, adjusted=p_adjusted),
+            ha="center", va="bottom", fontsize=_size, color=fg,
             zorder=6, clip_on=False))
     # Grow the y-limit so the top bracket clears the panel (keeps the floor).
     # When the user set their own ceiling this is already that number, so the
@@ -940,7 +1045,7 @@ def _draw_one_run(ctx, items, pairwise, *, ax_mean, ax_frac, target_ts) -> None:
         f"significance drew {len(matched)}/{len(pairwise)} bracket(s) on "
         f"{'frac' if stat == 'fraction' else 'mean'} at y={base:.4g}..{top:.4g} "
         f"(ceiling={'auto' if ceiling is None else ceiling}) keys="
-        + repr([m[1:] for m in matched])
+        + repr([m[1:3] for m in matched])
     )
 
 

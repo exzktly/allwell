@@ -198,19 +198,64 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     sig_btn.setProperty("variant", "toggle")
     sig_btn.setCheckable(True)
     sig_btn.setChecked(bool(ctx.state.plot.show_significance))
+    # The caption is seeded from the same state as the check, not left at the
+    # constructor's "Off". A tab body builds lazily, so it is routinely built
+    # after a restore has already turned the brackets on, and a button reading
+    # "Off" over a figure carrying brackets says the opposite of what is true.
+    sig_btn.setText(
+        f"Significance: {'On' if ctx.state.plot.show_significance else 'Off'}")
     sig_btn.setToolTip(
         "Draw significance brackets between group bars from the Statistics tab's "
         "pairwise tests. Run a test in Statistics first; brackets appear for the "
         "compared groups that match the current bars (grouped / pooled mode).")
+
+    # What each bracket says. Beside the toggle that draws them rather than in
+    # the Properties sidebar with the value labels: this is the one surface in
+    # the app that draws a bracket, and the question "stars or the number?"
+    # only arises once the brackets are on — which is the control directly
+    # above it.
+    from widgets.labeled_combo import LabeledComboBox as _LabeledComboBox
+    from well_viewer.domain.significance import (
+        SIGNIFICANCE_LABEL_MODE_NAMES, SIGNIFICANCE_LABEL_MODES,
+    )
+    sig_label_cb = reg.register(
+        "_bar_significance_label_cb", _LabeledComboBox("Label", bar_ctrl))
+    for _mode in SIGNIFICANCE_LABEL_MODES:
+        sig_label_cb.addItem(SIGNIFICANCE_LABEL_MODE_NAMES[_mode], _mode)
+    _cur = str(ctx.state.plot.significance_label_mode or "stars")
+    sig_label_cb.setCurrentIndex(
+        max(0, sig_label_cb.findData(_cur)))
+    sig_label_cb.setToolTip(
+        "What the text over each significance bracket says — the asterisk "
+        "ladder, the p-value itself, or both. A p-value that the Statistics "
+        "tab adjusted for multiple comparisons is printed as 'p_BH', the same "
+        "name that tab's report gives it.")
+
+    def _on_significance_label_mode(_i=0):
+        _cb = ctx.widgets.get_or_none("_bar_significance_label_cb")
+        ctx.state.plot.significance_label_mode = str(_cb.currentData() or "stars")
+        # Nothing to redraw when no bracket is on the figure — the mode only
+        # decides what a bracket says, and the toggle below re-reads it.
+        if ctx.state.plot.show_significance:
+            redraw_bars(ctx)
+    sig_label_cb.currentIndexChanged.connect(_on_significance_label_mode)
+    # Usable only while the brackets are drawn, matching how the Smooth slider
+    # above follows Violin: a live control that changes nothing on screen reads
+    # as broken.
+    sig_label_cb.setEnabled(bool(ctx.state.plot.show_significance))
 
     def _toggle_bar_significance(_=False):
         _sig = ctx.widgets.get_or_none("_bar_significance_btn")
         on = bool(_sig.isChecked())
         ctx.state.plot.show_significance = on
         _sig.setText(f"Significance: {'On' if on else 'Off'}")
+        _lbl = ctx.widgets.get_or_none("_bar_significance_label_cb")
+        if _lbl is not None:
+            _lbl.setEnabled(on)
         redraw_bars(ctx)
     sig_btn.clicked.connect(_toggle_bar_significance)
     _disp_lay.addWidget(sig_btn)
+    _disp_lay.addWidget(sig_label_cb)
 
     # Error band (SEM/SD + Spread) joins the same Display popover (C1) instead
     # of a separate card-controls row.

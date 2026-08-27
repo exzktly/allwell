@@ -8,20 +8,25 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from well_viewer.features.barplot.renderer import (
-    _significance_marker,
-    draw_significance_brackets,
-)
+from well_viewer.domain.significance import significance_stars
+from well_viewer.features.barplot.renderer import draw_significance_brackets
 
 
 def test_significance_marker_thresholds():
-    assert _significance_marker(0.0005) == "***"
-    assert _significance_marker(0.005) == "**"
-    assert _significance_marker(0.03) == "*"
-    assert _significance_marker(0.2) == "ns"
+    """The asterisk ladder the brackets draw.
+
+    It lives in ``domain/significance.py`` now, shared with the Statistics tab's
+    text report — the renderer had its own copy of these four thresholds and the
+    report had another, so the panel and the text beside it could have disagreed
+    about whether a result was significant.
+    """
+    assert significance_stars(0.0005) == "***"
+    assert significance_stars(0.005) == "**"
+    assert significance_stars(0.03) == "*"
+    assert significance_stars(0.2) == "ns"
     # Boundary values fall to the less-significant bucket (strict <).
-    assert _significance_marker(0.05) == "ns"
-    assert _significance_marker(0.01) == "*"
+    assert significance_stars(0.05) == "ns"
+    assert significance_stars(0.01) == "*"
 
 
 def _bars():

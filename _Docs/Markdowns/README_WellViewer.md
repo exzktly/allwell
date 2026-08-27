@@ -2037,6 +2037,37 @@ of individual cells. This is the default Plotting sub-tab.
     panel, which shows one run at a time. It does **not** discard the
     comparisons already stored: each of those still describes its own channel
     and timepoint, and still draws over the bars it was computed from.
+  - **Label** — what the text over each significance bracket says. *Stars (\*)*
+    is the familiar asterisk code (`***` below 0.001, `**` below 0.01, `*` below
+    0.05, `ns` otherwise) and is the default; *p-value* prints the number
+    itself, to three significant figures; *Stars + p-value* prints both, as
+    `* (p = 0.0312)`. The picker is usable once **Significance** is on, since
+    that is when there is a bracket for it to change.
+
+    The stars are conventional on a figure, but they are buckets: `***` covers
+    everything below 0.001, so a p of 9e-4 and a p of 3e-40 draw identically.
+    Print the number when a reader needs to tell those apart, or when a journal
+    asks for exact p-values. The Statistics tab's own results panel prints the
+    same number in the same spelling, so the figure and the text agree.
+
+    Two things the label will not do. A p-value the Statistics tab adjusted for
+    multiple comparisons is printed as **`p_BH`**, the same name that tab's
+    report gives it — the raw `p` and the adjusted one are different claims
+    about the same pair, and with three or more groups the raw one overstates
+    the result. And a p-value that came back as a flat zero, meaning the test
+    underflowed what a floating-point number can hold, is printed as
+    **`p < 5e-324`** rather than as `p = 0`: a probability of zero is not
+    something a test can measure, and the honest statement is a bound. Every
+    p-value the number system *can* hold is printed as itself, however small.
+
+    **Numbers need room, and past a point a panel runs out.** Each bracket sits
+    on its own level above the bars, so the panel is divided into one row per
+    comparison — fine for an asterisk, which is a single glyph, and not fine for
+    a whole expression once there are enough rows. Above roughly six compared
+    groups the brackets keep their p-values only if the panel is tall enough;
+    where it is not, they fall back to stars and the panel says so in its
+    top-left corner. Nothing is dropped but the precision, and you are told it
+    was — compare fewer groups, or make the plot taller, to read the numbers.
   - **Reset Order** — restore the default order after you **drag bars to
     reorder** them.
   - The shared [Fold-change](#fold-change-normalization) dropdowns, applied in

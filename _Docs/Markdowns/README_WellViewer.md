@@ -1982,6 +1982,26 @@ of individual cells. This is the default Plotting sub-tab.
     over the two bars its comparison was computed from, whether those bars are
     replicate sets or individual wells — a group holding a single well brackets
     that well's own bar.
+  - **Label** — what the text over each bracket says. *Stars (\*)* is the
+    familiar asterisk code (`***` below 0.001, `**` below 0.01, `*` below 0.05,
+    `ns` otherwise) and is the default; *p-value* prints the number itself, to
+    three significant figures; *Stars + p-value* prints both, as `* (p = 0.0312)`.
+    The picker is usable once **Significance** is on, since that is when there
+    is a bracket for it to change.
+
+    The stars are conventional on a figure, but they are buckets: `***` covers
+    everything below 0.001, so a p of 9e-4 and a p of 3e-40 draw identically.
+    Print the number when a reader needs to tell those apart, or when a journal
+    asks for exact p-values.
+
+    Two things the label will not do. A p-value the Statistics tab adjusted for
+    multiple comparisons is printed as **`p_BH`**, the same name that tab's
+    report gives it — the raw `p` and the adjusted one are different claims
+    about the same pair, and with three or more groups the raw one overstates
+    the result. And a p-value so small that it has run out of floating-point
+    exponent is printed as **`p < 1e-300`**, not as `p = 0`: a probability of
+    zero is not something a test can measure, and the honest statement is a
+    bound.
 
     **Comparisons accumulate rather than replace each other.** Each run is
     stored under the channel, timepoint and statistic it was run on, so testing

@@ -13,6 +13,7 @@ from well_viewer.data.data_loading import (
     is_ratio_key,
     resolve_value_series,
 )
+from well_viewer.domain.significance import significance_stars
 from well_viewer.domain.stats_compute import group_replicate_stats
 from well_viewer.domain.tp_match import tp_close_mask
 
@@ -261,6 +262,14 @@ def compute_pairwise(ctx, *, groups, target_t, val_col, statistic, threshold, te
             "b_wells": group_wells.get(name_b, []),
             "p": float(p),
             "p_adj": float(adjusted.get(idx, p)),
+            # Whether ``p_adj`` above is an *adjusted* number or simply a copy
+            # of the raw p. ``_bh_adjust`` returns an empty map when there is
+            # only one comparison to make, and the record still needs a
+            # ``p_adj`` for every reader that draws it — so the two cases are
+            # indistinguishable from the values alone. The Bar plot's brackets
+            # quote the number by name when they print it, and calling a raw p
+            # ``p_BH`` would attribute a correction that was never applied.
+            "p_adj_applied": bool(idx in adjusted),
             "test": test,
             "stat": str(statistic),
             "val_col": str(val_col),
@@ -270,8 +279,14 @@ def compute_pairwise(ctx, *, groups, target_t, val_col, statistic, threshold, te
 
 
 def _sig_marker(p: float) -> str:
-    """Significance stars for a p-value (audit A5): ``***``/``**``/``*``/``ns``."""
-    return "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "ns"
+    """Significance stars for a p-value (audit A5): ``***``/``**``/``*``/``ns``.
+
+    The ladder itself lives in ``domain/significance.py``, shared with the Bar
+    plot's brackets: this report and that figure state the same comparison, and
+    two private copies of the thresholds are two chances for the panel and the
+    text beside it to disagree about whether a result was significant.
+    """
+    return significance_stars(p)
 
 
 def _resolve_sample_units(is_ks: bool, use_fov: bool) -> str:

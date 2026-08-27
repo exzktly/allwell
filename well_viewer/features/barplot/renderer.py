@@ -33,6 +33,7 @@ from well_viewer.core.plot_style import (
     mark_time_rescale,
     tokens_for,
 )
+from well_viewer.domain.significance import significance_label
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.core.safe import swallowed
 
@@ -540,15 +541,30 @@ def _points_to_data_y(ax, points: float) -> float:
     return abs(y1 - y0) * 0.08
 
 
-def _significance_marker(p: float) -> str:
-    """Asterisk code for a p-value (matches the Statistics-tab text output)."""
-    if p < 0.001:
-        return "***"
-    if p < 0.01:
-        return "**"
-    if p < 0.05:
-        return "*"
-    return "ns"
+#: Point size for the text over a bracket. The asterisk ladder is a couple of
+#: glyphs and reads at the panel's own weight; a label carrying a p-value is a
+#: whole expression, and on a plate of six groups there is one per bracket, so
+#: it is set a step smaller to stay out of the bars' way. Both sizes are fixed
+#: here for the same reason the value labels' is — the Properties sidebar's
+#: font-size controls do not reach free text.
+_BRACKET_STARS_PT = 8
+_BRACKET_P_VALUE_PT = 7
+
+
+def _bracket_label(ctx, p: float, *, adjusted: bool) -> tuple[str, int]:
+    """The text over one bracket and the point size to draw it at.
+
+    The mode comes from ``PlotState.significance_label_mode`` through
+    ``getattr``: a renderer called with a hand-built state (the batch-export bar
+    path, a unit test driving this function directly) must fall back to the
+    stars rather than raise, since those callers predate the setting and the
+    stars are what they have always drawn.
+    """
+    mode = str(getattr(getattr(ctx.state, "plot", None),
+                       "significance_label_mode", "stars") or "stars")
+    text = significance_label(p, mode, adjusted=adjusted)
+    size = _BRACKET_STARS_PT if mode not in ("p", "both") else _BRACKET_P_VALUE_PT
+    return text, size
 
 
 #: Marks the "why there are no brackets" note, so a later pass — or a test —
@@ -737,8 +753,11 @@ def _match_pairs_to_bars(ctx, items, pairwise, *, xs, rec_tp, val_attr,
     """Resolve one run's compared pairs onto the bars actually drawn.
 
     Returns ``(x_by_key, top_by_key, matched)`` — where each bar sits, how
-    tall it is including its spread, and the ``(p, key_a, key_b)`` triples
-    that have a bar at both ends.
+    tall it is including its spread, and the ``(p, key_a, key_b, adjusted)``
+    tuples that have a bar at both ends. ``adjusted`` says whether the ``p``
+    beside it is the Benjamini-Hochberg adjusted value, which the label has to
+    know: printed as a number it is quoted by name, and ``p`` and ``p_BH`` are
+    different claims about the same pair.
 
     Extracted from the drawing so that function stays under the complexity
     ratchet after the store became keyed, and because "which compared pair
@@ -811,14 +830,33 @@ def _match_pairs_to_bars(ctx, items, pairwise, *, xs, rec_tp, val_attr,
             return wells_to_key.get(fw)
         return None
 
-    matched = []  # (p_show, key_a, key_b)
+    matched = []  # (p_show, key_a, key_b, adjusted)
     for r in pairwise:
         ka = _bar_key_for(r.get("a"), r.get("a_wells"))
         kb = _bar_key_for(r.get("b"), r.get("b_wells"))
         if ka and kb and ka != kb and ka in top_by_key and kb in top_by_key:
-            matched.append((float(r.get("p_adj", r.get("p", 1.0))), ka, kb))
+            matched.append((float(r.get("p_adj", r.get("p", 1.0))), ka, kb,
+                            _p_is_adjusted(r, pairwise)))
 
     return x_by_key, top_by_key, matched
+
+
+def _p_is_adjusted(record, pairwise) -> bool:
+    """Whether *record*'s drawn p is the BH-adjusted one rather than the raw p.
+
+    ``compute_pairwise`` stamps ``p_adj_applied`` on every record it writes, so
+    for a run produced by this app the answer is stored rather than guessed.
+    Older records — a saved plot written before the flag existed, a hand-built
+    fixture — carry only ``p_adj``, and there the count is the answer:
+    ``_bh_adjust`` adjusts nothing unless there are at least two comparisons to
+    adjust across, and a run's records are exactly its comparisons that produced
+    a p-value. Guessing from ``p_adj != p`` would have been the wrong test —
+    a single adjusted p can equal its raw value, and one comparison's *unadjusted*
+    p is stored under ``p_adj`` too.
+    """
+    if "p_adj_applied" in record:
+        return bool(record.get("p_adj_applied"))
+    return "p_adj" in record and len(pairwise) > 1
 
 
 def _draw_one_run(ctx, items, pairwise, *, ax_mean, ax_frac, target_ts) -> None:
@@ -902,7 +940,7 @@ def _draw_one_run(ctx, items, pairwise, *, ax_mean, ax_frac, target_ts) -> None:
         step = headroom / (len(matched) + 1)
         top = float(ceiling)
     fg = tokens_for(ax)[1]
-    for level, (p_show, ka, kb) in enumerate(matched):
+    for level, (p_show, ka, kb, p_adjusted) in enumerate(matched):
         xa, xb = x_by_key[ka], x_by_key[kb]
         if xa > xb:
             xa, xb = xb, xa
@@ -920,9 +958,10 @@ def _draw_one_run(ctx, items, pairwise, *, ax_mean, ax_frac, target_ts) -> None:
         # capture flips the card to publication without redrawing — so an
         # untagged bracket went onto white paper still near-white.
         follows_theme(bracket_line)
+        _text, _size = _bracket_label(ctx, p_show, adjusted=p_adjusted)
         follows_theme(ax.text(
-            (xa + xb) / 2.0, y + h, _significance_marker(p_show),
-            ha="center", va="bottom", fontsize=8, color=fg,
+            (xa + xb) / 2.0, y + h, _text,
+            ha="center", va="bottom", fontsize=_size, color=fg,
             zorder=6, clip_on=False))
     # Grow the y-limit so the top bracket clears the panel (keeps the floor).
     # When the user set their own ceiling this is already that number, so the
@@ -940,7 +979,7 @@ def _draw_one_run(ctx, items, pairwise, *, ax_mean, ax_frac, target_ts) -> None:
         f"significance drew {len(matched)}/{len(pairwise)} bracket(s) on "
         f"{'frac' if stat == 'fraction' else 'mean'} at y={base:.4g}..{top:.4g} "
         f"(ceiling={'auto' if ceiling is None else ceiling}) keys="
-        + repr([m[1:] for m in matched])
+        + repr([m[1:3] for m in matched])
     )
 
 

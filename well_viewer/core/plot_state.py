@@ -113,6 +113,15 @@ class PlotState:
     # Display popover. Only rendered when the plot is in grouped/pooled mode and
     # the bar keys match the compared group names. (N7)
     show_significance: bool = False
+    # What the text over each bracket says — "stars" (the asterisk ladder
+    # alone), "p" (the p-value itself) or "both". Stars by default, which is the
+    # convention for a figure and the only thing the brackets ever said; the
+    # other two are for a reader who wants the number rather than the bucket it
+    # falls in. Chosen beside the Significance toggle in the bar Display
+    # popover. The wording of each is ``domain/significance.py``'s to decide —
+    # including that an adjusted p is labelled ``p_BH``, because the renderer
+    # draws the BH-adjusted value whenever the run has one.
+    significance_label_mode: str = "stars"
 
     # Shared "focus timepoint" across the plotting tabs (N5). The single
     # cross-tab timepoint the single-timepoint tabs (Heat Map slider,

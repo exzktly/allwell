@@ -1695,6 +1695,43 @@ bars are unchanged as well.
 The mode is saved with the rest of the view state, so a dataset reopens in the
 mode you left it in.
 
+#### Line colours — Plate or Grey
+
+The Line Graphs tab has the same **Colours** section, with the same two modes,
+and **Plate** means the same thing: each trace keeps the colour its well or
+replicate group carries on the plate picker.
+
+**Grey** means something different here, because a line has no tick label under
+it. Painting every trace the one grey the bars use would leave a panel of
+identical curves with nothing but a legend to unpick, which is worse than the
+colours it replaced. So grey mode gives each trace **two** things to be
+recognised by: its own shade of grey, and its own marker — a circle, a square, a
+triangle, a diamond, an inverted triangle, a plus, and then the same six again
+hollow. Both change from one trace to the next, so no two of the twelve traces
+the legend names look alike. Past twelve the shades and markers start again,
+which is also the point where the on-screen legend stops naming traces one by
+one and tells you how many it has left out.
+
+The marker is the trace's identity rather than the panel's, so the same shape
+appears on the Value, Fraction and Events panels: a curve you have found in one
+panel is the same shape in the next. The CDF panel gets the marker too, spaced
+along the curve rather than drawn at every point — it is the only panel with no
+error band, so without a marker its grey curves would be the one place the mode
+made things harder to read. In Plate mode the CDF stays a plain line, as it
+always has, because there the colour already names it.
+
+There are only four shades because a trace has to stay legible on a white page
+*and* on the dark plot card, and the greys that manage both sit in a narrow
+band — so the shades repeat every fourth trace while the markers run to twelve,
+and it is the marker that tells any two traces apart for certain. Shape costs
+nothing in contrast, which is why it carries the weight. The legend shows each
+trace's marker beside its name, which is what makes the figure readable without
+colour at all.
+
+The **Batch Export** line figures follow the switch too, so a plate exported in
+bulk is drawn the same way as the figure you set it on, and the mode is saved
+with the rest of the view state.
+
 #### Value labels — printing the numbers on the plot
 
 Under **Properties → Overlays** is a **Show value labels** switch. Turn it on

@@ -191,6 +191,43 @@ class Colors:
     # silently, since nothing downstream would notice.
     plot_mono = "#727880"
 
+    # The Line-graph "Grey" mode's shade ramp (Properties → Colours). Four
+    # greys rather than the one ``plot_mono`` the bars take, because bars are
+    # already told apart by their tick labels and traces are not: collapsing
+    # every line onto one ink would leave a panel of curves with nothing but a
+    # legend to separate them.
+    #
+    # Four, and not more, is a measurement rather than a taste. A trace has to
+    # read on both grounds — the publication white ``CPub.bg`` and the dark
+    # card ``plot_bg``, in every bundle — and the greys clearing 3:1 on both
+    # occupy only ``#686868``…``#949494``. Adjacent shades much closer than the
+    # 0x10 step used here stop being distinguishable, so the band holds four
+    # and the *marker* carries the identity past that (see
+    # ``domain/line_colors.py``). Measured WCAG contrast, each shade against
+    # white / ``#131A24`` / the darkest bundle ground ``#0A0C10``:
+    #
+    #   #686868 → 5.57 / 3.14 / 3.51
+    #   #767676 → 4.54 / 3.85 / 4.31
+    #   #848484 → 3.74 / 4.68 / 5.23
+    #   #929292 → 3.11 / 5.62 / 6.29
+    #
+    # Evenly spaced (14 levels apart) rather than eyeballed: an uneven ramp
+    # spends its narrow band unevenly, and the pair of shades that ends up
+    # closest is the pair a reader cannot separate — one shade with an extra
+    # entry, and a ``grey_trace_style`` count that is then a lie.
+    #
+    # ``tests/test_line_color_mode.py`` pins both the contrast floors and the
+    # spacing, so a palette edit that pushes a shade off one ground, or squeezes
+    # two together, fails a test rather than a reader. Theme-independent for the
+    # same reason ``plot_mono`` is: a trace is data ink and must not change
+    # colour when the card flips to publication.
+    plot_grey_ramp = (
+        "#686868",
+        "#767676",
+        "#848484",
+        "#929292",
+    )
+
     # ── Contrast inks for "always opaque against any background" use ─────
     # Widgets that paint white-on-dark or black-on-light edges should use
     # these instead of hardcoded ``#FFFFFF`` / ``#000000``. They remain

@@ -2093,6 +2093,9 @@ class BatchExportPanel(QWidget):
             LABEL_FRAC_CAP as _LABEL_FRAC_CAP,
             value_label_settings,
         )
+        from well_viewer.domain.line_colors import (
+            line_color_mode as _line_color_mode,
+        )
         from well_viewer.core.plot_style import apply_time_rescale
         from well_viewer.domain.time_rescale import axis_label as _time_axis_label
         from well_viewer.domain.time_rescale import rescale_for as _time_rescale_for
@@ -2139,6 +2142,11 @@ class BatchExportPanel(QWidget):
             # half-applied option hides: an exported PNG without the labels
             # the user put on the plot looks like a complete figure.
             value_labels=_value_labels, value_label_format=_value_label_fmt,
+            # Properties → Colours, resolved from the same state the on-tab
+            # figure resolves it from. The batch twin of an on-tab figure is
+            # where a half-applied mode hides: an export in plate colours
+            # beside a screen figure in greys, drawn from one setting.
+            color_mode=_line_color_mode(self._ctx.state.plot),
         )
         return fig
 

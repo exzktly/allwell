@@ -82,16 +82,23 @@ def _stub_app():
     app._toggle_fov_replicates = lambda: None
     app._scatter_gate_draw_mode = False
     app._scatter_gate_selector = None
+    # What the handler tells the user when the redraw does not run. Recorded
+    # rather than discarded: the message is half the control's contract, and
+    # the half that was wrong.
+    app._statuses = []
+    app._set_status = app._statuses.append
     return app
 
 
-def _build_sidebar(qtbot, monkeypatch, *, is_bar: bool):
+def _build_sidebar(qtbot, monkeypatch, *, is_bar: bool = False,
+                   is_line: bool = False, redraw_ok: bool = True):
     """The built sidebar, plus the list of redraws it asked for.
 
     ``_redraw_bound_figure`` is the only route from this control to the screen,
     so it is recorded rather than stubbed away — a segment that updates the
     state and never asks for a redraw leaves the figure in the old colours
-    until something unrelated repaints it."""
+    until something unrelated repaints it. The stub returns *redraw_ok*, which
+    is the value the real one returns and the value the handler branches on."""
     from matplotlib.figure import Figure
 
     from well_viewer.features.export.sidebar_view import ExportStyleSidebar
@@ -101,10 +108,17 @@ def _build_sidebar(qtbot, monkeypatch, *, is_bar: bool):
     app = _stub_app()
     if is_bar:
         app._bar_fig = fig
+    if is_line:
+        app._line_fig = fig
     redraws: list[int] = []
+
+    def _record(self):
+        redraws.append(1)
+        return redraw_ok
     monkeypatch.setattr(ExportStyleSidebar, "_redraw_bound_figure",
-                        lambda self: redraws.append(1), raising=False)
-    sb = ExportStyleSidebar(app, None, fig, None, default_name="bar")
+                        _record, raising=False)
+    sb = ExportStyleSidebar(app, None, fig, None,
+                            default_name="line" if is_line else "bar")
     qtbot.addWidget(sb)
     return app, sb, redraws
 
@@ -187,10 +201,87 @@ def test_the_section_opens_on_whatever_mode_is_already_set(qtbot, monkeypatch):
     assert _colour_segment(sb).currentData() == "grey"
 
 
-def test_a_non_bar_figure_is_not_offered_a_control_that_would_do_nothing(
+def test_a_figure_the_mode_does_not_reach_is_not_offered_a_control(
         qtbot, monkeypatch):
-    _app, sb, _r = _build_sidebar(qtbot, monkeypatch, is_bar=False)
+    """Scatter, Distribution and the Heat Map draw neither bars nor traces, so
+    a Colours row on their Properties would be a control that does nothing —
+    the same defect as a control that is offered and broken, wearing the
+    opposite face."""
+    _app, sb, _r = _build_sidebar(qtbot, monkeypatch)
     assert _colour_segment(sb) is None
+
+
+# ── the Line tab's own mode ─────────────────────────────────────────────────
+
+def test_the_line_figure_offers_both_modes(qtbot, monkeypatch):
+    _app, sb, _r = _build_sidebar(qtbot, monkeypatch, is_line=True)
+    seg = _colour_segment(sb)
+    assert seg is not None, "no Colours segment on the line figure's Properties"
+    assert [seg.segmentText(i) for i in range(seg.count())] == ["Plate", "Grey"]
+
+
+def test_picking_grey_on_the_line_figure_writes_the_line_field(qtbot, monkeypatch):
+    """Its **own** field. One ``_color_seg`` attribute now holds whichever of
+    the two tabs' segments the panel was built for, so a handler still writing
+    ``bar_color_mode`` would grey the Bar tab from the Line tab's control and
+    leave the traces coloured."""
+    from well_viewer.domain.line_colors import line_color_mode
+
+    app, sb, redraws = _build_sidebar(qtbot, monkeypatch, is_line=True)
+    _colour_segment(sb).setCurrentByData("grey")
+    assert app._app_state.plot.line_color_mode == "grey"
+    assert app._app_state.plot.bar_color_mode == "plate", (
+        "the Line control wrote the Bar tab's field")
+    assert line_color_mode(app._app_state.plot) == "grey"
+    assert redraws, "the mode changed but nothing asked for a redraw"
+
+
+def test_the_line_segment_is_re_seeded_from_the_line_field(qtbot, monkeypatch):
+    """The re-seed reads whichever field this panel's segment writes. Reading
+    the bar field on a line panel would move the widget with signals blocked —
+    it then shows a mode the figure is not drawn in, and the click that should
+    fix it is swallowed as a no-op, which is the exact bug the re-seed exists
+    for."""
+    app, sb, _r = _build_sidebar(qtbot, monkeypatch, is_line=True)
+    app._app_state.plot.line_color_mode = "grey"
+    app._app_state.plot.bar_color_mode = "plate"
+    sb._resync_plot_state_segments()
+    assert _colour_segment(sb).currentData() == "grey"
+
+
+def test_a_successful_redraw_does_not_report_a_failure(qtbot, monkeypatch):
+    """``_redraw_bound_figure`` returned ``None`` on every path while the
+    handler tested its truthiness, so a redraw that worked told the user it had
+    not: "…but the plot could not be redrawn — switch tabs and back". A message
+    that is wrong whenever things work is worse than none, because the one time
+    it is right reads the same as all the others."""
+    app, sb, redraws = _build_sidebar(qtbot, monkeypatch, is_bar=True,
+                                      redraw_ok=True)
+    _colour_segment(sb).setCurrentByData("grey")
+    assert redraws, "no redraw was attempted"
+    assert app._statuses == [], f"a working redraw reported a failure: {app._statuses}"
+
+
+def test_a_failed_redraw_still_says_so(qtbot, monkeypatch):
+    """The other direction, which is the whole point of the message."""
+    app, sb, _r = _build_sidebar(qtbot, monkeypatch, is_bar=True, redraw_ok=False)
+    _colour_segment(sb).setCurrentByData("grey")
+    assert any("could not be redrawn" in m for m in app._statuses), app._statuses
+
+
+def test_the_real_redraw_reports_whether_it_ran(qtbot, monkeypatch):
+    """The stub above returns a bool because the real one does. Pinned here so
+    the two cannot drift — a stub that is more honest than the code it stands
+    in for tests nothing."""
+    from well_viewer.features.export.sidebar_view import ExportStyleSidebar
+
+    fig_app, sb, _r = _build_sidebar(qtbot, monkeypatch, is_bar=True)
+    monkeypatch.undo()
+    calls: list[str] = []
+    monkeypatch.setattr("well_viewer.features.export.sidebar_view.redraw_bars",
+                        lambda _ctx: calls.append("bars"))
+    assert ExportStyleSidebar._redraw_bound_figure(sb) is True
+    assert calls == ["bars"]
 
 
 def test_reselecting_the_current_segment_emits_nothing(qtbot, monkeypatch):

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from well_viewer.domain.control_ref import ControlRef
 from well_viewer.domain.bar_colors import BAR_COLOR_MODES
+from well_viewer.domain.line_colors import LINE_COLOR_MODES
 
 import logging
 from typing import Any
@@ -137,6 +138,12 @@ def snapshot(ctx) -> dict:
         # a format must not come back in a different one.
         "show_value_labels": bool(ctx.state.plot.show_value_labels),
         "value_label_format": str(ctx.state.plot.value_label_format or ""),
+        # The Line-graph colour mode. In the top-level plot block rather than a
+        # per-tab one because the Line tab has no such block — its draw order is
+        # captured here too — unlike the Bar mode, which rides in the bar block
+        # beside the rest of that tab's settings. Validated against
+        # LINE_COLOR_MODES on the way back in.
+        "line_color_mode": str(ctx.state.plot.line_color_mode),
         # The time-axis label correction, both halves. Captured because it
         # changes what every time axis in a restored view reads, and a saved
         # plot whose axis said 4, 8, 12 must not come back saying 1, 2, 3 with
@@ -521,6 +528,13 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> list[str]:
             ctx.state.plot.show_threshold_line = bool(state["show_threshold_line"])
         except Exception:
             failed.append("threshold line")
+            swallowed()
+
+    if str(state.get("line_color_mode")) in LINE_COLOR_MODES:
+        try:
+            ctx.state.plot.line_color_mode = str(state["line_color_mode"])
+        except Exception:
+            failed.append("line colours")
             swallowed()
 
     if "show_value_labels" in state:

@@ -506,27 +506,34 @@ def _paint_series(axes: LineAxes, series, *, fov_active: bool,
     def _mark(panel_marker: str) -> dict:
         if style.marker is None:
             return {"marker": panel_marker}
-        return {
+        kw = {
             "marker": style.marker,
             "markerfacecolor": style.face,
             "markeredgecolor": style.color,
         }
+        if style.linestyle is not None:
+            kw["linestyle"] = style.linestyle
+        return kw
 
     def _tag(artist_list):
         """Mark a trace whose marker encodes which trace it is.
 
-        Both flags, and both are needed: the export-style pass overrides the
-        marker *shape* from the Properties pref unless ``_aw_marker_is_data``
-        says otherwise, and it re-pins the face to the line colour unless
-        ``_aw_marker_face_is_data`` does. Without the second, every open marker
-        in grey mode came back filled the moment the pass ran — which is every
-        redraw — and half the cycle stopped distinguishing anything.
+        Three flags, and all three are needed, because the export-style pass
+        overrides three separate things from the Properties prefs: the marker
+        *shape* unless ``_aw_marker_is_data`` says otherwise, the marker *face*
+        unless ``_aw_marker_face_is_data`` does, and the *dash pattern* unless
+        ``_aw_linestyle_is_data`` does. Each was measured going wrong before its
+        flag existed — without the face one every open marker came back filled
+        the moment the pass ran, which is every redraw, and half the cycle
+        stopped distinguishing anything.
         """
         if style.marker is None:
             return
         for artist in artist_list:
             artist._aw_marker_is_data = True
             artist._aw_marker_face_is_data = True
+            if style.linestyle is not None:
+                artist._aw_linestyle_is_data = True
     agg_times = [p.t for p in series.points if p.has_mean]
     agg_means = [p.mean for p in series.points if p.has_mean]
     agg_errs = [p.spread for p in series.points if p.has_mean]
@@ -622,6 +629,11 @@ def _paint_series(axes: LineAxes, series, *, fov_active: bool,
         _cdf_marks = {} if style.marker is None else {
             **_mark(style.marker), "markersize": 4, "markevery": 0.15,
         }
+        # The CDF is a step-like curve read for where it crosses, so it keeps a
+        # solid line: a dashed one there reads as a gap in the distribution
+        # rather than as an identity, and the marker already carries the
+        # identity on this panel.
+        _cdf_marks.pop("linestyle", None)
         _tag(ax_cdf.plot(
             x, ranks / n,
             color=color, lw=1.8, label=cdf_label, zorder=3, **_cdf_marks,

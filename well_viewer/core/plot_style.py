@@ -142,6 +142,67 @@ def apply_ax_style(ax, title: str, ylabel: str) -> None:
     ax.grid(True, color=grid, linewidth=0.7, linestyle="-")
 
 
+#: Visual properties a legend's swatch copies from the trace it stands for.
+#: Width, dash, marker shape and size, and both marker colours — everything the
+#: Properties sidebar's Line and Marker rows can change. Colour is deliberately
+#: absent: the swatch already carries the trace's colour from when the legend
+#: was built, and re-copying it would be the one property that a *theme* flip,
+#: rather than a pref, is entitled to move.
+_LEGEND_COPIED_PROPS = (
+    "linewidth", "linestyle", "marker", "markersize",
+    "markerfacecolor", "markeredgecolor", "markeredgewidth",
+)
+
+
+def sync_legend_handles(ax) -> None:
+    """Make each legend swatch look like the trace it names.
+
+    matplotlib builds a legend from *copies* of the artists, taken when the
+    legend is created. Everything the export-style pass then does to the data
+    lines — width, dash, marker shape, size, fill — lands on the originals and
+    on nothing else, so raising the line width to 6 drew six-point traces
+    beside a legend still showing the two-point ones it was born with. Measured
+    on all four: width, style, marker and marker size were each dropped.
+
+    The swatch is **copied from its own trace** rather than restyled from the
+    prefs a second time. That is what makes it right in both colour modes
+    without knowing about either: in plate mode the trace carries the pref, so
+    the swatch gets the pref; in grey mode the trace carries the dash and
+    marker that identify it, so the swatch gets those — and a legend that
+    re-derived from the prefs would show twelve identical swatches beside
+    twelve distinguishable traces, which is worse than the bug being fixed.
+
+    Paired by **label**, not by position: ``_capped_legend`` truncates a long
+    legend and appends a "+N more" entry that names no trace, so an index-wise
+    pairing would shift every swatch by one the moment a plate-wide selection
+    overflowed. An entry with no matching line is left exactly as it is.
+    """
+    leg = ax.get_legend()
+    if leg is None:
+        return
+    sources = {}
+    for line in ax.lines:
+        label = str(line.get_label())
+        if label and not label.startswith("_") and label not in sources:
+            sources[label] = line
+    handles = getattr(leg, "legend_handles", None)
+    if handles is None:  # matplotlib < 3.7 spelling
+        handles = getattr(leg, "legendHandles", [])
+    for handle, text in zip(handles, leg.get_texts()):
+        source = sources.get(str(text.get_text()))
+        if source is None:
+            continue
+        for prop in _LEGEND_COPIED_PROPS:
+            getter = getattr(source, f"get_{prop}", None)
+            setter = getattr(handle, f"set_{prop}", None)
+            if getter is None or setter is None:
+                continue
+            try:
+                setter(getter())
+            except (TypeError, ValueError):
+                swallowed("plot_style: a legend swatch refused a trace property")
+
+
 def style_legend(leg, ax) -> None:
     """Recolour a legend's entry + title text to the axes' primary foreground.
 
@@ -754,7 +815,13 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
                     cur_mk not in ("None", "none", "", None)
                 )
             )
-            if line_style and line_style != "keep" and not scatter_only:
+            # ``_aw_linestyle_is_data``: the Line tab's grey mode encodes a
+            # trace in its dash pattern, alongside the marker shape and face
+            # below. Stamping one pref pattern over every trace collapses that
+            # third cue on every redraw while the legend goes on showing four
+            # different dashes.
+            if (line_style and line_style != "keep" and not scatter_only
+                    and not getattr(ln, "_aw_linestyle_is_data", False)):
                 ln.set_linestyle(line_style if line_style != "none" else "None")
             if marker_style and marker_style != "keep":
                 # ``_aw_marker_is_data``: renderers that encode a variable in the
@@ -969,6 +1036,10 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
                 txt.set_fontsize(float(prefs.get("legend_font_size", 9)))
                 txt.set_color(_title_fg)
                 txt.set_fontfamily(_plot_font_family())
+            # Last, so the swatches copy the traces *after* this pass has
+            # finished restyling them. Run earlier and the legend would faithfully
+            # reproduce the widths the lines had a moment ago.
+            sync_legend_handles(ax)
 
         fixed_pos = getattr(ax, "_fixed_axes_position", None)
         if fixed_pos is not None:

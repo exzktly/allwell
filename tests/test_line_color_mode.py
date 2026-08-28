@@ -43,6 +43,7 @@ from well_viewer.domain.line_colors import (  # noqa: E402
     LINE_COLOR_MODES,
     LINE_MARKERS,
     LINE_MARKER_SHAPES,
+    LINE_STYLES,
     LineTraceStyle,
     grey_trace_style,
     line_color_mode,
@@ -93,6 +94,35 @@ def test_the_mode_list_and_the_defaults_agree():
     assert LINE_COLOR_MODES == ("plate", "grey")
 
 
+def test_neighbouring_traces_differ_in_dash_as_well():
+    """The third cue. Shape and shade both cost something — shape needs a
+    marker drawn, shade needs contrast — while a dash pattern costs nothing and
+    survives being printed in grey."""
+    styles = [grey_trace_style(i) for i in range(4)]
+    assert len({s.linestyle for s in styles}) == 4, (
+        f"four consecutive traces share a dash: {[s.linestyle for s in styles]}")
+    assert set(LINE_STYLES) == {s.linestyle for s in styles}
+
+
+def test_no_two_cues_advance_in_lockstep():
+    """Counts chosen coprime so a shade and a dash never track each other — two
+    cues that always changed together would be one cue wearing two coats, and
+    the figure would look more distinguishable than it is."""
+    import math
+
+    ramp = len(theme.Colors.plot_grey_ramp)
+    assert math.gcd(ramp, len(LINE_STYLES)) == 1, (
+        f"{ramp} shades and {len(LINE_STYLES)} dashes share a factor")
+    assert math.gcd(ramp, len(LINE_MARKERS)) == 1, (
+        f"{ramp} shades and {len(LINE_MARKERS)} markers share a factor")
+
+
+def test_plate_mode_states_no_dash():
+    """A dash in plate mode would be a distinction standing for nothing: the
+    colour is already the identity, and every trace has always been solid."""
+    assert trace_style(PlotState(), 3, _PLATE).linestyle is None
+
+
 def test_neighbouring_traces_differ_in_shade_as_well_as_marker():
     """The user asked for a different shade per line, and the first draft did
     not give one: cycling the marker fastest and the shade only on a wrap bought
@@ -112,7 +142,7 @@ def test_the_pair_is_unique_across_the_legend_the_screen_names():
     from well_viewer.features.lineplot.controller import SCREEN_LEGEND_ENTRIES
 
     n = len(LINE_MARKERS)
-    seen = {(s.color, s.marker, s.filled)
+    seen = {(s.color, s.marker, s.filled, s.linestyle)
             for s in (grey_trace_style(i) for i in range(n))}
     assert len(seen) == n, f"only {len(seen)} distinct styles in {n} traces"
     assert n >= SCREEN_LEGEND_ENTRIES, (
@@ -170,15 +200,46 @@ def _contrast(a: str, b: str) -> float:
     return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
 
 
+_GROUNDS = ("#FFFFFF", "#131A24", "#0A0C10")
+
+
 @pytest.mark.parametrize("shade", tuple(theme.Colors.plot_grey_ramp))
-@pytest.mark.parametrize("ground", ("#FFFFFF", "#131A24", "#0A0C10"))
-def test_every_shade_reads_on_every_ground(shade, ground):
+def test_every_shade_clears_the_floor_on_some_ground(shade):
     """A trace is data ink on a figure that goes to paper *and* stays on a dark
-    card, and the same hex has to do both. The floor is the 3:1 WCAG minimum
-    for non-text. This is the test that turns a palette edit into a red run
-    rather than into a reader squinting."""
-    assert _contrast(shade, ground) >= 3.0, (
+    card, and the same hex has to do both — but not equally well, and requiring
+    3:1 on *both* is what capped the ramp at a span too narrow to read.
+
+    The two grounds fail at opposite ends, so the rule that buys real
+    separation is this one: every shade clears the 3:1 non-text floor on at
+    least one ground, and the shade that softens on white is the one the dark
+    card renders strongest."""
+    best = max(_contrast(shade, g) for g in _GROUNDS)
+    assert best >= 3.0, (
+        f"{shade} clears 3:1 on no ground at all — "
+        + ", ".join(f"{g}={_contrast(shade, g):.2f}" for g in _GROUNDS))
+
+
+@pytest.mark.parametrize("shade", tuple(theme.Colors.plot_grey_ramp))
+@pytest.mark.parametrize("ground", _GROUNDS)
+def test_no_shade_disappears_on_any_ground(shade, ground):
+    """The other half of the trade, and the one that stops "span more of the
+    grey space" turning into a trace nobody can see. 2.3:1 is well above the
+    ~1.5 at which a two-point line stops being locatable, and the ends that sit
+    near it are strong on the opposite ground."""
+    assert _contrast(shade, ground) >= 2.3, (
         f"{shade} measures {_contrast(shade, ground):.2f}:1 on {ground}")
+
+
+def test_the_ramp_spans_more_than_a_both_grounds_rule_would_allow():
+    """The measurement behind widening it. Greys clearing 3:1 on *both* grounds
+    occupy #686868…#949494 — 44 levels — so a fifth shade inside that band
+    takes the step from 14 down to 11 and makes the ramp harder to read, not
+    easier. This pins that the ramp escaped that box, since the box is where a
+    future well-meaning edit would put it back."""
+    levels = [int(s[1:3], 16) for s in theme.Colors.plot_grey_ramp]
+    assert max(levels) - min(levels) > 0x94 - 0x68, (
+        "the ramp is back inside the both-grounds band, where a fifth shade "
+        "is closer together than four were")
 
 
 def test_the_shades_stay_apart_from_each_other():
@@ -187,7 +248,7 @@ def test_the_shades_stay_apart_from_each_other():
     ramp = tuple(theme.Colors.plot_grey_ramp)
     levels = [int(s[1:3], 16) for s in ramp]
     gaps = [b - a for a, b in zip(levels, levels[1:])]
-    assert all(g >= 12 for g in gaps), f"shades too close: {ramp} (gaps {gaps})"
+    assert all(g >= 16 for g in gaps), f"shades too close: {ramp} (gaps {gaps})"
     assert max(gaps) - min(gaps) <= 2, (
         f"the ramp spends its narrow band unevenly: {ramp} (gaps {gaps}) — "
         "the closest pair is the one a reader cannot separate")
@@ -323,16 +384,46 @@ def test_the_markers_survive_the_export_style_pass(pref_marker):
     )
 
     fig, (axm, _f, _n, _c) = _render("grey", n=12)
-    before = [(ln.get_marker(), str(ln.get_markerfacecolor()))
-              for ln in _traces(axm)]
+
+    def _cues():
+        return [(ln.get_marker(), str(ln.get_markerfacecolor()),
+                 ln.get_linestyle()) for ln in _traces(axm)]
+
+    before = _cues()
     prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
     prefs["marker_style"] = pref_marker
+    # A pref that would flatten the dash cue too, since the pass stamps that
+    # from its own row and the third opt-out is what stops it.
+    prefs["line_style"] = "-"
     apply_export_style_prefs(fig, prefs)
-    after = [(ln.get_marker(), str(ln.get_markerfacecolor()))
-             for ln in _traces(axm)]
+    after = _cues()
     assert after == before, (
-        f"marker_style={pref_marker!r} rewrote the trace markers: {after}")
+        f"marker_style={pref_marker!r} rewrote the trace cues: {after}")
     assert len(set(after)) == len(after), "traces stopped being distinguishable"
+
+
+def test_the_line_width_pref_still_reaches_a_grey_figure():
+    """The opt-outs are scoped to the three cues that carry identity. Width
+    carries none, so the Properties row must still govern it — a fix for the
+    dash that also froze the width would disable a control nobody asked about."""
+    from well_viewer.core.plot_style import (
+        DEFAULT_EXPORT_STYLE_PREFS,
+        apply_export_style_prefs,
+    )
+
+    fig, (axm, _f, _n, _c) = _render("grey", n=6)
+    prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
+    prefs["line_width"] = 5.0
+    apply_export_style_prefs(fig, prefs)
+    assert {ln.get_linewidth() for ln in _traces(axm)} == {5.0}
+
+
+def test_the_cdf_curve_stays_solid_in_grey_mode():
+    """It is read for where it crosses, so a dash there reads as a gap in the
+    distribution rather than as an identity — and the marker already names the
+    curve on that panel."""
+    _fig, (_m, _f, _n, axc) = _render("grey", n=6)
+    assert {ln.get_linestyle() for ln in _traces(axc)} == {"-"}
 
 
 def test_the_pref_still_reaches_a_plate_mode_figure():

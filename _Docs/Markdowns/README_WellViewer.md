@@ -1797,16 +1797,24 @@ timepoints on your plate really are, and correct the numbers printed on every
 time axis to match. They are there for plates whose filenames don't encode the
 real acquisition schedule.
 
-**Interval per timepoint** states how far apart the timepoints are, and
-multiplies the printed numbers. A run numbered `T01 … T12` but imaged every four
-hours is read by the pipeline as 1, 2, 3 … hours, and setting the interval to
-`4` makes the axes read 4, 8, 12 … instead. `1` — the default — turns it off.
+**Interval per timepoint** states how far apart the timepoints are, in hours,
+and it **opens at this dataset's own spacing** — measured from the hours the
+pipeline read out of the filenames. A plate imaged every four hours reads `4`
+before you touch anything; a run numbered `T01 … T12`, whose filenames give the
+pipeline 1, 2, 3 … hours, reads `1`.
 
-The value is a multiplier on the hours the pipeline parsed out of the filenames,
-which is the interval itself only while those filenames number the timepoints
-1, 2, 3 …. On a plate whose names already carry real hours it acts as a
-correction factor instead — a run whose names say 4, 8, 12 with the interval set
-to `4` draws 16, 32, 48.
+Type a different number and the time axes are relabelled to that interval. For
+the `T01 … T12` run imaged every four hours, setting `4` makes the axes read
+4, 8, 12 … Typing the number that is already true is a no-op: on a plate whose
+filenames already carry real hours, setting `4` leaves the axis alone rather
+than multiplying it to 0, 16, 32.
+
+Some plates have no single interval — timepoints at 0, 4, 8 and then 24, say,
+with a final overnight point. There is nothing to state for those, so the row
+falls back to being a plain multiplier on the filename hours (`1` = off) and the
+section summary says the spacing is uneven, rather than showing one gap as
+though it described all of them. A plate with a single timepoint has no spacing
+either, and falls back the same way without being called uneven.
 
 **Offset** states where the first image sits, and adds a fixed amount to every
 printed number. It is applied *after* the interval, so the axis reads

@@ -48,6 +48,11 @@ rename_gate = _lazy("well_viewer.features.scatter.gating", "rename_gate")
 set_gate_draw_mode = _lazy("well_viewer.features.scatter.gating", "set_gate_draw_mode")
 from well_viewer.data.metric_labels import gate_axes_label
 from well_viewer.core.safe import swallow, swallowed
+from well_viewer.domain.time_rescale import (
+    displayed_interval as _displayed_interval,
+    factor_for_interval as _factor_for_interval,
+    rescale_for as _rescale_for,
+)
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -777,35 +782,85 @@ class ExportStyleSidebar(QWidget):
             changed, so editing either control redraws a summary that describes
             both — a preview showing only the half last touched would say "Off"
             on an axis that is still being shifted.
+
+            The interval half reads as an interval when the plate has one, so
+            the summary agrees with the row beneath it. On a plate whose
+            spacing is uneven there is no interval to state and the row is a
+            multiplier again, so the summary says "uneven" rather than printing
+            a number that is true of no pair of ticks.
             """
             plot = self._app._app_state.plot
             factor = float(getattr(plot, "time_scale", 1.0))
             offset = float(getattr(plot, "time_offset", 0.0))
+            timepoints = self._dataset_timepoints()
+            shown = _displayed_interval(timepoints, _rescale_for(plot))
             bits = []
-            if factor != 1.0:
+            if shown is not None:
+                bits.append(f"{shown:g}h/tp")
+            elif factor != 1.0:
                 bits.append(f"×{factor:g}")
             if offset != 0.0:
                 bits.append(f"{'−' if offset < 0 else '+'}{abs(offset):g}")
-            return " ".join(bits) if bits else "Off"
+            # "uneven" is said only when it is *true*: gaps that disagree. A
+            # plate with one timepoint has no gap at all, and calling that
+            # uneven names a defect in a dataset that has none — the first
+            # version did exactly that, and only driving the control on a
+            # one-timepoint plate showed it.
+            if shown is None and len(timepoints) >= 2:
+                bits.append("(uneven)")
+            text = " ".join(b for b in bits if b)
+            return text or "Off"
 
-        time_scale = _Stepper(minimum=0.001, maximum=1000.0, single_step=0.5,
-                              value=float(getattr(
-                                  self._app._app_state.plot, "time_scale", 1.0)),
-                              decimals=3)
+        # Opens at the plate's **own** interval, not at the multiplier's neutral
+        # 1. The field is labelled "Interval per timepoint" and it now holds
+        # one: the measured spacing between this dataset's timepoints, put
+        # through whatever correction is in force. On a plate imaged at 0, 4, 8,
+        # 12 it reads 4, where it used to read 1 — a number that described the
+        # identity map rather than the data, which is what was reported.
+        #
+        # ``PlotState.time_scale`` goes on storing the *multiplier*, and
+        # ``factor_for_interval`` is the conversion. Nothing downstream learns a
+        # second spelling of the correction, and a settings file written by an
+        # older build still means what it said.
+        #
+        # The consequence worth stating: typing 4 on a plate that already
+        # carries real hours now leaves the axis alone, where before it drew
+        # 0, 16, 32. On the T01…T12 plates this feature was built for the
+        # measured interval is 1, so a typed number is its own multiplier and
+        # the behaviour is unchanged.
+        _tp_interval = _displayed_interval(
+            self._dataset_timepoints(),
+            _rescale_for(self._app._app_state.plot))
+        time_scale = _Stepper(
+            minimum=0.001, maximum=100000.0, single_step=0.5,
+            value=float(_tp_interval if _tp_interval is not None
+                        else getattr(self._app._app_state.plot, "time_scale", 1.0)),
+            decimals=3)
+        self._time_scale_stepper = time_scale
         time_scale.setToolTip(
-            "How far apart the timepoints really are. For a plate whose "
-            "filenames are numbered T01…T12 but which was imaged every 4 hours, "
-            "set 4 and the axis reads 4, 8, 12 …\n\n"
-            "The value is a multiplier on the hours the pipeline read out of "
-            "the filenames, so it is the interval itself only while those "
-            "filenames number the timepoints 1, 2, 3 … For a plate whose names "
-            "already carry real hours, this is a correction factor. 1 = off.\n\n"
+            "How far apart the timepoints really are, in hours.\n\n"
+            "Opens at this dataset's own spacing, measured from the hours the "
+            "pipeline read out of the filenames — so a plate imaged every four "
+            "hours reads 4 before you touch anything. Type a different number "
+            "and the time axes are relabelled to that interval: a run numbered "
+            "T01…T12 but imaged every 4 hours reads 4, 8, 12 … once you set 4.\n\n"
+            "When a plate's timepoints are unevenly spaced there is no single "
+            "interval, so the row falls back to a plain multiplier on the "
+            "filename hours (1 = off) and the section summary says so.\n\n"
             "Labels only — the timepoint menus, the Statistics tab and every "
             "exported CSV keep the hours read from the filenames, so a rescaled "
             "axis names the correction to say why the numbers differ.")
 
         def _on_time_scale(value: float) -> None:
-            self._app._app_state.plot.time_scale = float(value)
+            # A typed interval becomes the stored multiplier here, and only
+            # here. With no measurable interval ``factor_for_interval`` returns
+            # the value unchanged, which is the old multiplier behaviour — so
+            # the uneven-spacing plate keeps working rather than dividing by a
+            # number that does not exist.
+            self._app._app_state.plot.time_scale = _factor_for_interval(
+                self._dataset_timepoints(), value,
+                fallback=float(getattr(self._app._app_state.plot,
+                                       "time_scale", 1.0)))
             _time_preview.setText(_time_preview_text())
             try:
                 self._redraw_active_plot()
@@ -1379,6 +1434,52 @@ class ExportStyleSidebar(QWidget):
 
     # ── Reorder ──────────────────────────────────────────────────────────────
 
+    def _dataset_timepoints(self) -> list:
+        """This dataset's timepoint hours, or an empty list.
+
+        Read defensively and afresh on every call rather than captured when the
+        panel is built: the sidebar is built once per figure and cached for the
+        life of the process, so a captured list would describe whichever plate
+        happened to be open first. That is the same staleness the segment
+        re-seed exists for, one control over.
+        """
+        state = getattr(self._app, "_app_state", None)
+        dataset = getattr(state, "dataset", None)
+        return list(getattr(dataset, "all_timepoints_cache", None) or [])
+
+    def _resync_time_interval(self) -> None:
+        """Re-seed the interval row from the current dataset.
+
+        The row shows a number measured from the plate, and the panel outlives
+        the plate. Without this, opening Properties on a plate imaged every four
+        hours after having opened it on an hourly one shows the hourly figure —
+        and worse than a stale label, the number is then wrong about the data it
+        claims to describe, which is the whole defect this row was changed to
+        fix.
+
+        Signals are blocked around the write: this is the widget catching up
+        with the dataset, not the user setting an interval, and letting it fire
+        would convert the *old* plate's number into a factor against the new
+        plate's spacing.
+        """
+        stepper = getattr(self, "_time_scale_stepper", None)
+        if stepper is None:
+            return
+        plot = getattr(self._app._app_state, "plot", None)
+        if plot is None:
+            return
+        shown = _displayed_interval(self._dataset_timepoints(),
+                                    _rescale_for(plot))
+        want = float(shown if shown is not None
+                     else getattr(plot, "time_scale", 1.0))
+        if abs(float(stepper.value()) - want) < 1e-9:
+            return
+        stepper.blockSignals(True)
+        try:
+            stepper.setValue(want)
+        finally:
+            stepper.blockSignals(False)
+
     def _is_line_fig(self) -> bool:
         return getattr(self._app, "_line_fig", None) is self._fig
 
@@ -1625,6 +1726,7 @@ class ExportStyleSidebar(QWidget):
         with the state, not a user changing it, and letting it fire would run
         the handler and redraw on every panel open.
         """
+        self._resync_time_interval()
         plot = getattr(self._app._app_state, "plot", None)
         if plot is None:
             return

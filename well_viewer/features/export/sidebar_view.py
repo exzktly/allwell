@@ -354,24 +354,49 @@ class ExportStyleSidebar(QWidget):
             fmt_edit.editingFinished.connect(self._on_cell_format_changed)
             add_row(s_cells, "Value format", fmt_edit)
 
-        # ── Bar plot: what the columns are coloured by ──────────────────────
-        # "Plate" is the historical behaviour — each column takes the colour
-        # its well or replicate group carries on the plate picker, so the
-        # plate doubles as the legend. "Grey" paints every column one neutral
-        # ink, for a figure whose columns are already named on the axis and
-        # whose colours would only compete with the data. Bar-figure-gated
-        # like the Density / Gates / Cell values sections above: the setting
-        # changes nothing on any other plot, so it does not appear on one.
+        # ── What the plot's data ink is coloured by ─────────────────────────
+        # "Plate" is the historical behaviour on both tabs — each column or
+        # trace takes the colour its well or replicate group carries on the
+        # plate picker, so the plate doubles as the legend. "Grey" is for a
+        # figure whose columns are already named on the axis, or whose traces
+        # are named in the legend, and whose colours would only compete with
+        # the data.
+        #
+        # What grey *means* differs between the two, and the difference is the
+        # reason each tab has its own state field rather than sharing one. A
+        # bar is named by the tick label under it, so every bar can take the
+        # same ink and lose nothing. A trace is not, so the Line tab's grey
+        # mode gives each trace its own shade **and** its own marker — see
+        # ``domain/line_colors.py``. One control, two rules, and neither tab
+        # shows the other's: the setting changes nothing on any other plot,
+        # like the Density / Gates / Cell values sections above.
+        _color_target = None
         if self._is_bar_fig():
+            from well_viewer.domain.bar_colors import bar_color_mode as _mode_of
+            _color_target = ("bar_color_mode", "Bar colours", _mode_of)
+        elif self._is_line_fig():
+            from well_viewer.domain.line_colors import line_color_mode as _mode_of
+            _color_target = ("line_color_mode", "Line colours", _mode_of)
+        if _color_target is not None:
             from widgets.plot_card import _make_segmented as _seg_color
-            from well_viewer.domain.bar_colors import bar_color_mode as _bar_color_mode
+            _color_field, _color_label, _color_resolver = _color_target
             s_colors = section("Colours", expanded=True)
-            _color_init = _bar_color_mode(self._app._app_state.plot)
+            _color_init = _color_resolver(self._app._app_state.plot)
             color_sc = _seg_color(
                 [("Plate", "plate"), ("Grey", "grey")], current=_color_init,
             )
             if color_sc is not None:
                 self._color_seg = color_sc
+                # Which field this segment writes. The re-seed below reads it
+                # rather than assuming the bar one: one attribute now holds
+                # whichever of the two tabs' segments this panel was built for,
+                # and re-seeding a Line segment from ``bar_color_mode`` would
+                # move it with signals blocked — the widget then shows a mode
+                # the figure is not drawn in, and clicking the mode the user
+                # actually wants emits nothing because the control already
+                # believes it is current. That is the exact failure this
+                # function's own docstring was written about.
+                self._color_seg_field = _color_field
                 _color_preview = QLabel(_SEGMENT_LABELS[_color_init])
                 _color_preview.setObjectName("Muted")
                 self._color_seg_preview = _color_preview
@@ -379,12 +404,12 @@ class ExportStyleSidebar(QWidget):
 
                 def _on_color_mode_change(*_a) -> None:
                     v = str(color_sc.currentData() or "plate")
-                    self._app._app_state.plot.bar_color_mode = v
+                    setattr(self._app._app_state.plot, _color_field, v)
                     _color_preview.setText(_SEGMENT_LABELS[v])
-                    # A full redraw, not a restyle: the colour is chosen per
-                    # column while the bars / violins are built, and the
-                    # auto-wire restyle path never revisits an existing
-                    # artist's facecolor.
+                    # A full redraw, not a restyle: the colour and the marker
+                    # are chosen per column / per trace while the artists are
+                    # built, and the auto-wire restyle path never revisits an
+                    # existing artist's facecolor.
                     #
                     # The redraw is this control's *only* visible effect, so a
                     # swallowed failure would leave the segment and its summary
@@ -393,13 +418,13 @@ class ExportStyleSidebar(QWidget):
                     if not self._redraw_bound_figure():
                         with swallow():
                             self._app._set_status(
-                                f"Bar colours set to {_SEGMENT_LABELS[v]}, but the "
-                                "plot could not be redrawn — switch tabs and back "
-                                "to refresh it."
+                                f"{_color_label} set to {_SEGMENT_LABELS[v]}, but "
+                                "the plot could not be redrawn — switch tabs and "
+                                "back to refresh it."
                             )
 
                 color_sc.currentChanged.connect(_on_color_mode_change)
-                add_stacked(s_colors, "Bar colours", color_sc)
+                add_stacked(s_colors, _color_label, color_sc)
 
         # File format selector intentionally omitted — the Save As… dialog
         # offers PDF / SVG / EPS / PNG via the file filter, so picking the
@@ -1534,35 +1559,45 @@ class ExportStyleSidebar(QWidget):
             swallowed()  # was: pass (silent except)
         self._redraw_bound_figure()
 
-    def _redraw_bound_figure(self) -> None:
+    def _redraw_bound_figure(self) -> bool:
         """Trigger the redraw entry point that matches the bound figure.
 
         Dispatch is by figure identity — the imported redraw function is
         the source of truth, not a string method name on app.
+
+        Returns whether the redraw ran. It has to: a caller that reports the
+        failure to the user reads this value, and while every branch returned
+        ``None`` that report fired on every *success*. The Bar colour control
+        set the mode, redrew the figure correctly, and then told the user
+        "the plot could not be redrawn — switch tabs and back to refresh it."
+        A message that is wrong whenever things work is worse than no message,
+        because the one time it is right reads the same as all the others.
         """
         app = self._app
         try:
             if getattr(app, "_line_fig", None) is self._fig:
                 app._redraw()
-                return
+                return True
             if getattr(app, "_bar_fig", None) is self._fig:
                 redraw_bars(app._ctx)
-                return
+                return True
             if getattr(app, "_scatter_fig", None) is self._fig:
                 redraw_scatter_orchestrate(app._ctx)
-                return
+                return True
             if getattr(app, "_scatter_agg_fig", None) is self._fig:
                 redraw_scatter_agg_orchestrate(app._ctx)
-                return
+                return True
             if getattr(app, "_distribution_fig", None) is self._fig:
                 redraw_distribution(app._ctx)
-                return
+                return True
             if getattr(app, "_heatmap_fig", None) is self._fig:
                 redraw_heatmap(app._ctx)
-                return
+                return True
             app._redraw()
+            return True
         except Exception:
             swallowed()  # was: pass (silent except)
+            return False
 
     def _resync_plot_state_segments(self) -> None:
         """Re-seed the segments that write straight to ``PlotState``.
@@ -1572,7 +1607,12 @@ class ExportStyleSidebar(QWidget):
         cards write those same flags and the two were seen drifting. *Show* and
         *Bar colours* have no such observer: nothing else in the UI writes them,
         so the only other writer is ``persistence.view_state``, which sets them
-        on a dataset load (``_apply_bar``) and on a reset (``restore_defaults``).
+        on a dataset load (``_apply_bar`` for the bar mode, the top-level plot
+        block for the line one) and on a reset (``restore_defaults``).
+
+        ``_color_seg`` is whichever of the two Colours segments this panel was
+        built for, so the field it re-seeds from is recorded when it is built
+        rather than assumed here.
 
         This panel is built once per figure and cached for the life of the
         process, so without a re-seed here the widget keeps showing the previous
@@ -1589,7 +1629,8 @@ class ExportStyleSidebar(QWidget):
         if plot is None:
             return
         for attr, field, default in (
-            ("_color_seg", "bar_color_mode", "plate"),
+            ("_color_seg", getattr(self, "_color_seg_field", "bar_color_mode"),
+             "plate"),
             ("_show_seg", "bar_show_mode", "mean_spread"),
         ):
             seg = getattr(self, attr, None)

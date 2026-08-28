@@ -20,6 +20,11 @@ from well_viewer.domain.selections_model import (
     well_display_label,
 )
 from well_viewer.domain.viewer_state import parse_rc
+from well_viewer.domain.line_colors import (
+    LineTraceStyle,
+    line_color_mode,
+    trace_style_for_mode,
+)
 from well_viewer.domain.plot_order import apply_order as _apply_order
 from well_viewer.domain.fold_change_series_cache import (
     ControlSeriesCache as _ControlSeriesCache,
@@ -461,7 +466,8 @@ def _decimated(values, budget: int | None):
 def _paint_series(axes: LineAxes, series, *, fov_active: bool,
                   cdf_point_budget: int | None = None,
                   value_labels: bool = False,
-                  value_label_format: str = "") -> tuple[bool, bool, bool]:
+                  value_label_format: str = "",
+                  style: LineTraceStyle | None = None) -> tuple[bool, bool, bool]:
     """Draw one collected line series onto the mean / fraction / N / CDF axes
     (audit A5). Returns ``(painted_ts, painted_cdf, painted_n)`` — the caller
     ORs these across series to decide legend/empty handling. Pure side effect on
@@ -474,21 +480,61 @@ def _paint_series(axes: LineAxes, series, *, fov_active: bool,
     (Properties → Overlays), in the trace's own colour so a panel of several
     series stays readable. The CDF panel takes none: its points are one per
     cell, not a mean of anything, and there is nothing there to state a spread
-    for."""
+    for.
+
+    *style* is the trace's resolved colour and marker (Properties → Colours,
+    via ``domain/line_colors.trace_style``). ``None`` means the plate mode,
+    where the colour is the series' own and each panel keeps the marker that
+    identifies *it* — a circle, a square, a triangle. In grey mode the marker
+    identifies the **trace** instead and is therefore the same shape on all
+    four panels, so a reader matching a curve from the Value panel to the
+    Fraction panel is matching the marker."""
     ax_mean = axes.mean
     ax_frac = axes.frac
     ax_n = axes.n
     ax_cdf = axes.cdf
     any_ts = any_cdf = any_n = False
-    color = series.color
+    if style is None:
+        style = LineTraceStyle(color=series.color)
+    color = style.color
+    # ``_mark`` fills in the per-trace marker when the colour mode set one and
+    # otherwise leaves the panel's own. Passing the face and edge explicitly in
+    # both modes keeps a filled marker filled once the export-style pass has
+    # run over it — that pass pins both to the line colour, so a marker whose
+    # openness is data has to say so (``_aw_marker_face_is_data``) as well as
+    # one whose shape is.
+    def _mark(panel_marker: str) -> dict:
+        if style.marker is None:
+            return {"marker": panel_marker}
+        return {
+            "marker": style.marker,
+            "markerfacecolor": style.face,
+            "markeredgecolor": style.color,
+        }
+
+    def _tag(artist_list):
+        """Mark a trace whose marker encodes which trace it is.
+
+        Both flags, and both are needed: the export-style pass overrides the
+        marker *shape* from the Properties pref unless ``_aw_marker_is_data``
+        says otherwise, and it re-pins the face to the line colour unless
+        ``_aw_marker_face_is_data`` does. Without the second, every open marker
+        in grey mode came back filled the moment the pass ran — which is every
+        redraw — and half the cycle stopped distinguishing anything.
+        """
+        if style.marker is None:
+            return
+        for artist in artist_list:
+            artist._aw_marker_is_data = True
+            artist._aw_marker_face_is_data = True
     agg_times = [p.t for p in series.points if p.has_mean]
     agg_means = [p.mean for p in series.points if p.has_mean]
     agg_errs = [p.spread for p in series.points if p.has_mean]
     if agg_times:
-        ax_mean.plot(
+        _tag(ax_mean.plot(
             agg_times, agg_means, color=color, lw=2,
-            marker="o", markersize=4, label=series.display, zorder=3,
-        )
+            markersize=4, label=series.display, zorder=3, **_mark("o"),
+        ))
         ax_mean.fill_between(
             agg_times,
             [m - e for m, e in zip(agg_means, agg_errs)],
@@ -501,10 +547,10 @@ def _paint_series(axes: LineAxes, series, *, fov_active: bool,
         vf = [(p.t, p.frac, p.frac_spread) for p in series.points if p.has_frac]
         if vf:
             vt2, vf2, vfe = zip(*vf)
-            ax_frac.plot(
+            _tag(ax_frac.plot(
                 vt2, vf2, color=color, lw=2,
-                marker="s", markersize=3, label=series.display, zorder=3,
-            )
+                markersize=3, label=series.display, zorder=3, **_mark("s"),
+            ))
             if any(e > 0 for e in vfe):
                 # FOV / replicate spread present (e.g. "FOV errors" mode):
                 # draw a ±error band around the fraction line, matching the
@@ -540,10 +586,10 @@ def _paint_series(axes: LineAxes, series, *, fov_active: bool,
                   for p in series.points if p.has_mean]
         if vn:
             vnt, vnv, vne = zip(*vn)
-            ax_n.plot(
+            _tag(ax_n.plot(
                 vnt, vnv, color=color, lw=2,
-                marker="^", markersize=3, label=series.display, zorder=3,
-            )
+                markersize=3, label=series.display, zorder=3, **_mark("^"),
+            ))
             if any(e > 0 for e in vne):
                 lo = [max(0.0, v - e) for v, e in zip(vnv, vne)]
                 hi = [v + e for v, e in zip(vnv, vne)]
@@ -565,10 +611,21 @@ def _paint_series(axes: LineAxes, series, *, fov_active: bool,
         n = fluor_s.size
         cdf_label = f"{series.display} (n={n:,})"
         x, ranks = _decimated(fluor_s, cdf_point_budget)
-        ax_cdf.plot(
+        # The CDF is the one panel with no error band and thousands of points,
+        # so in grey mode it is also the one panel a shade alone cannot
+        # identify: ten wells would be ten grey curves. It takes the trace's
+        # marker too, spaced along the curve rather than at every vertex —
+        # ``markevery`` as a fraction places them at even *screen* intervals,
+        # so a curve that is nearly vertical over most of its range still gets
+        # its marks spread out. In plate mode it stays a bare line, exactly as
+        # before, because there the colour already names it.
+        _cdf_marks = {} if style.marker is None else {
+            **_mark(style.marker), "markersize": 4, "markevery": 0.15,
+        }
+        _tag(ax_cdf.plot(
             x, ranks / n,
-            color=color, lw=1.8, label=cdf_label, zorder=3,
-        )
+            color=color, lw=1.8, label=cdf_label, zorder=3, **_cdf_marks,
+        ))
         any_cdf = True
     return any_ts, any_cdf, any_n
 
@@ -720,6 +777,7 @@ def render_line_series(
     legend_max: int | None = None,
     value_labels: bool = False,
     value_label_format: str = "",
+    color_mode: str = "plate",
 ) -> tuple[bool, bool, bool]:
     """Paint every :class:`LineSeries` onto *axes* then finalize the panels.
 
@@ -732,13 +790,23 @@ def render_line_series(
     When ``cdf_xrange`` is ``None`` the CDF x-limits are derived from the plotted
     values (batch behaviour); the tab passes its own ``_cdf_xmin/xmax_edit``
     range. Returns ``(any_ts, any_cdf, any_n)``.
+
+    *color_mode* is Properties → Colours (``"plate"`` or ``"grey"``), resolved
+    by the caller and passed rather than read off a ``ctx`` because this
+    function has none — the batch line figure calls it with its own state, and
+    a mode the tab honoured and the export dropped is the divergence this
+    single renderer exists to prevent. The **position** in *series_list* is what
+    picks a trace's shade and marker, so the drag-reorder the user applied to
+    the legend is the order the markers follow.
     """
     any_ts = any_cdf = any_n = False
-    for series in series_list:
+    for index, series in enumerate(series_list):
         ts, cdf, n = _paint_series(axes, series, fov_active=fov_active,
                                    cdf_point_budget=cdf_point_budget,
                                    value_labels=value_labels,
-                                   value_label_format=value_label_format)
+                                   value_label_format=value_label_format,
+                                   style=trace_style_for_mode(
+                                       color_mode, index, series.color))
         any_ts = any_ts or ts
         any_cdf = any_cdf or cdf
         any_n = any_n or n
@@ -1010,6 +1078,9 @@ def redraw_line_plots(
         # and the labels themselves cannot disagree about whether they are on.
         value_labels=_value_labels,
         value_label_format=_value_label_fmt,
+        # Properties → Colours. Resolved from the same state the Batch Export
+        # line figure resolves it from, so the two cannot disagree.
+        color_mode=line_color_mode(ctx.state.plot),
     )
 
     ctx.notify.set_status(line_status_text(

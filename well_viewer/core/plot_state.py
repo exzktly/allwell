@@ -108,6 +108,15 @@ class PlotState:
     # mode of the Bar plot and to the Batch Export bar figures, which render
     # the same panels.
     bar_color_mode: str = "plate"
+    # ``line_color_mode``: the Line Graphs tab's twin of the above — "plate"
+    # (each trace keeps its well or replicate-group colour) or "grey". The grey
+    # mode is *not* the bar one applied to lines: a bar is named by the tick
+    # label under it, so one ink for all of them loses nothing, while a trace
+    # has no such label. So grey mode gives each trace a shade from
+    # ``theme.Colors.plot_grey_ramp`` **and** its own marker shape and fill.
+    # Resolved through ``domain/line_colors.py``; read by the Line tab and the
+    # Batch Export line figures, which render the same panels.
+    line_color_mode: str = "plate"
     # Draw significance brackets (from the Statistics tab's pairwise results)
     # between bars on the Bar plot. Off by default; toggled from the bar
     # Display popover. Only rendered when the plot is in grouped/pooled mode and

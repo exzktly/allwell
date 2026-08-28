@@ -773,6 +773,19 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
                 # the existing edge was 'none' too, producing a fully
                 # invisible marker. Pin the edge to the line colour in
                 # both modes so the ring is always visible.
+                #
+                # ``_aw_marker_face_is_data`` is the face's twin of the shape
+                # opt-out above, and it is a separate flag because the two are
+                # separate claims: the aggregate scatter encodes a well in the
+                # *shape* and is happy for the user to make every point hollow,
+                # while the Line tab's grey mode encodes a trace in the shape
+                # **and** the fill — half its cycle is the same six shapes
+                # open. Re-pinning the face here turned every open marker
+                # filled on the next redraw, which is every redraw, so six of
+                # the twelve traces stopped being distinguishable while the
+                # legend went on advertising them.
+                if getattr(ln, "_aw_marker_face_is_data", False):
+                    continue
                 ln_colour = ln.get_color()
                 if marker_open:
                     ln.set_markerfacecolor("none")

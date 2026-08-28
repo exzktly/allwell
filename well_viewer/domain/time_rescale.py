@@ -57,9 +57,12 @@ __all__ = [
     "coerce_factor",
     "coerce_offset",
     "describe",
+    "displayed_interval",
+    "factor_for_interval",
     "figure_timepoint_label",
     "format_scaled",
     "is_active",
+    "observed_interval",
     "rescale_for",
     "scaled",
 ]
@@ -168,6 +171,95 @@ def rescale_for(plot_state) -> TimeRescale:
         factor=getattr(plot_state, "time_scale", DEFAULT_FACTOR),
         offset=getattr(plot_state, "time_offset", DEFAULT_OFFSET),
     )
+
+
+def observed_interval(timepoints) -> float | None:
+    """The spacing between *timepoints*, or ``None`` when there is not one.
+
+    The plate's own answer to "how far apart are these?", read off the hours the
+    pipeline parsed out of the filenames. It is what makes the sidebar's
+    "Interval per timepoint" row able to state a number that is true of the
+    dataset instead of the multiplier's neutral ``1`` — a plate imaged at 0, 4,
+    8, 12 has an interval of four hours, and a control that opens at one on that
+    plate is not describing anything.
+
+    ``None`` rather than a guess in the three cases where no single interval
+    exists:
+
+    * fewer than two timepoints, so there is no gap to measure;
+    * a timepoint that is not a finite number, because dropping it and
+      measuring across the hole reports a gap the plate does not have — a
+      four-hourly plate with one unparseable point would come back as eight;
+    * a gap of zero, which means duplicates rather than a cadence;
+    * gaps that disagree — 0, 4, 8, 24 is a plate with a final overnight point,
+      and calling that "every 4 hours" would state as measured a number that
+      describes three of its four gaps. The caller falls back to showing the
+      multiplier and says why, which is the honest reading of a plate that has
+      no interval.
+
+    The tolerance is relative, because the hours arrive from filename parsing
+    and float arithmetic: 0, 3.9999999, 8 is a plate imaged every four hours,
+    not an irregular one.
+    """
+    try:
+        values = sorted(float(t) for t in (timepoints or []))
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(v) for v in values):
+        return None
+    if len(values) < 2:
+        return None
+    gaps = [b - a for a, b in zip(values, values[1:])]
+    first = gaps[0]
+    if first <= 0:
+        return None
+    if not all(math.isclose(g, first, rel_tol=1e-6, abs_tol=1e-9) for g in gaps):
+        return None
+    return first
+
+
+def displayed_interval(timepoints, rescale) -> float | None:
+    """What one step of the time axis *prints* as, or ``None`` with no interval.
+
+    The measured spacing put through the correction currently in force, so the
+    number the sidebar shows is the number a reader would get by subtracting two
+    adjacent ticks. With the factor at its default this is the plate's own
+    interval, which is the whole point: the control opens describing the data
+    rather than describing the identity map.
+
+    The offset does not appear, and must not: it shifts every label by the same
+    amount, so it cancels between two adjacent ticks and changes no interval.
+    """
+    base = observed_interval(timepoints)
+    if base is None:
+        return None
+    return base * as_rescale(rescale).factor
+
+
+def factor_for_interval(timepoints, wanted, *,
+                        fallback: float = DEFAULT_FACTOR) -> float:
+    """The stored multiplier that makes the axis print *wanted* per timepoint.
+
+    The inverse of :func:`displayed_interval`, and the reason the sidebar can
+    take an interval from the user while ``PlotState`` goes on storing a factor:
+    nothing downstream has to learn a second spelling of the correction, and a
+    saved settings file written by an older build still means what it said.
+
+    Falls back when the plate has no measurable interval to divide by, or when
+    *wanted* is not a positive number — :func:`coerce_factor` rejects the same
+    values for the same reason, and a control that silently accepted a zero
+    would collapse the axis with nothing on screen saying why.
+    """
+    base = observed_interval(timepoints)
+    if base is None:
+        return coerce_factor(wanted, fallback)
+    try:
+        target = float(wanted)
+    except (TypeError, ValueError):
+        return float(fallback)
+    if not math.isfinite(target) or target <= 0.0:
+        return float(fallback)
+    return coerce_factor(target / base, fallback)
 
 
 def is_active(rescale) -> bool:

@@ -7,25 +7,33 @@ trace has no tick label. Give every line the same grey and the panel becomes a
 tangle with only a legend to unpick it, which is worse than the plate colours
 the mode was meant to replace.
 
-So this mode identifies a trace two ways at once:
+So this mode identifies a trace three ways at once:
 
-* a **shade** from :data:`theme.Colors.plot_grey_ramp`, and
-* a **marker** — shape and fill — from :data:`LINE_MARKERS` below.
+* a **shade** from :data:`theme.Colors.plot_grey_ramp`,
+* a **dash pattern** from :data:`LINE_STYLES`, and
+* a **marker** — shape and fill — from :data:`LINE_MARKERS`.
 
-**Both advance on every trace.** The first draft cycled the marker fastest and
-moved the shade only when the markers wrapped, which names 48 traces before a
-pair repeats — and looked wrong the moment it was drawn, because a realistic
-selection of nine traces then came out in nine identical greys. The extra
-period bought nothing a reader could see: the on-screen legend names at most
-``SCREEN_LEGEND_ENTRIES`` (12) traces individually, so 12 is the number that
-has to be distinct, and past it the legend has already stopped naming them.
-Advancing both gives every trace a shade different from its neighbours' and a
-unique (shade, marker) pair through exactly those 12.
+**All three advance on every trace**, so neighbouring traces differ in all
+three and no two of the twelve the legend names look alike. An earlier draft
+cycled the marker fastest and moved the shade only when the markers wrapped,
+which names more traces before a pair repeats — and looked wrong the moment it
+was drawn, because a realistic selection of nine traces came out in nine
+identical greys. The extra period bought nothing a reader could see: the
+on-screen legend names at most ``SCREEN_LEGEND_ENTRIES`` (12) traces
+individually, so 12 is the number that has to be distinct.
 
-The shade band is narrow because every shade has to read on both the
-publication white and the dark card (the arithmetic is written out beside the
-token), which is why there are four of them and twelve markers: marker shape
-costs nothing in contrast and stays legible at a 3-point marker.
+The three counts are 5, 4 and 12, and the first two are chosen coprime with
+each other and with 12 so no pair of cues ever locks in step — a shade and a
+dash that advanced together would be one cue wearing two coats. Their least
+common multiple is 60, and the marker alone is unique across the first 12, so
+the triple is distinct for every trace the legend names and for four more
+cycles after that.
+
+The shade is the fast, approximate cue; the dash and the marker are the ones a
+reader can rely on, and neither costs anything in contrast. That division is
+why the ramp can span as widely as it does — the arithmetic is written out
+beside the token, and the short version is that the two grounds fail at
+opposite ends, so no shade is ever weak on both.
 
 Both surfaces that draw these panels read it — the Line Graphs tab and the
 Batch Export line figure, which render through the same
@@ -68,6 +76,16 @@ LINE_MARKERS = tuple(
     for shape in LINE_MARKER_SHAPES
 )
 
+#: Dash patterns for the grey mode, in cycle order. Four, which is coprime with
+#: the five shades and divides the twelve markers — so the dash and the shade
+#: never advance in lockstep, while the dash repeats four times across one
+#: marker cycle rather than aliasing onto it.
+#:
+#: These are the patterns that stay apart at the 1.8–2 point lines these panels
+#: draw. A denser dash (``(0, (3, 1))`` and the like) reads as solid at this
+#: weight, and there is nothing to gain by adding one that does.
+LINE_STYLES = ("-", "--", "-.", ":")
+
 
 @dataclass(frozen=True)
 class LineTraceStyle:
@@ -85,6 +103,10 @@ class LineTraceStyle:
     color: str
     marker: str | None = None
     filled: bool = True
+    #: The dash pattern, or ``None`` to keep whatever the panel already draws.
+    #: ``None`` is the plate mode, where every trace is solid and the colour is
+    #: the identity; a dash there would be a distinction standing for nothing.
+    linestyle: str | None = None
 
     @property
     def face(self) -> str:
@@ -115,8 +137,8 @@ def line_color_mode(plot) -> str:
 def grey_trace_style(index: int) -> LineTraceStyle:
     """The grey mode's style for the *index*-th trace of a plot.
 
-    Shade and marker both advance with the index, so neighbouring traces differ
-    in both and the pair is unique for the first
+    Shade, dash and marker all advance with the index, so neighbouring traces
+    differ in all three and the triple is unique for the first
     ``len(LINE_MARKERS)`` — twelve — traces. That is the number the screen
     legend names individually, so it is the number that has to be distinct;
     past it both cycle, and the legend is already reporting how many it has
@@ -130,7 +152,9 @@ def grey_trace_style(index: int) -> LineTraceStyle:
     ramp = tuple(theme.Colors.plot_grey_ramp)
     shape, filled = LINE_MARKERS[index % len(LINE_MARKERS)]
     shade = ramp[index % len(ramp)]
-    return LineTraceStyle(color=shade, marker=shape, filled=filled)
+    dash = LINE_STYLES[index % len(LINE_STYLES)]
+    return LineTraceStyle(color=shade, marker=shape, filled=filled,
+                          linestyle=dash)
 
 
 def trace_style_for_mode(mode: str, index: int,

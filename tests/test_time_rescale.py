@@ -334,3 +334,98 @@ def test_rescale_for_reads_both_halves_off_the_state():
 def test_rescale_for_survives_a_state_object_that_has_neither():
     """It runs from tick formatters and from tests holding a bare stand-in."""
     assert tr.rescale_for(object()) == tr.OFF
+
+
+# ── the interval the control states ─────────────────────────────────────────
+#
+# The row is labelled "Interval per timepoint" and used to show the multiplier's
+# neutral 1 on every plate, including one imaged every four hours. These pin the
+# arithmetic that lets it state the plate's own spacing instead — and, as much,
+# the cases where there is no spacing to state, because a number invented for
+# those would be the reported bug with a different value.
+
+def test_a_regular_plate_reports_its_own_spacing():
+    assert tr.observed_interval([0, 4, 8, 12]) == 4.0
+    assert tr.observed_interval([1, 2, 3, 4]) == 1.0
+    assert tr.observed_interval([0, 0.5, 1.0]) == 0.5
+
+
+def test_the_order_of_the_timepoints_does_not_matter():
+    """They arrive from a set in ``rebuild_timepoints`` and are sorted there,
+    but a caller handing over an unsorted list must not get a negative gap."""
+    assert tr.observed_interval([8, 0, 12, 4]) == 4.0
+
+
+@pytest.mark.parametrize("timepoints,why", [
+    ([], "nothing to measure"),
+    ([4.0], "one point has no gap"),
+    ([0, 4, 8, 24], "the gaps disagree"),
+    ([0, 0, 4], "a zero gap is duplicates, not a cadence"),
+    ([0, float("nan"), 8], "a non-finite point"),
+    (None, "no list at all"),
+])
+def test_a_plate_with_no_single_interval_says_so(timepoints, why):
+    """``None``, never a guess. A mean or a modal gap would always produce a
+    number, and on a plate whose last point is overnight that number describes
+    no pair of ticks on the axis — degraded output indistinguishable from good,
+    which is the rule this repository is built around."""
+    assert tr.observed_interval(timepoints) is None, why
+
+
+def test_a_float_wobble_is_still_a_regular_plate():
+    """The hours come from filename parsing and float arithmetic, so exact
+    equality would call an ordinary four-hourly plate irregular."""
+    assert tr.observed_interval([0, 3.9999999, 8.0]) == pytest.approx(4.0)
+
+
+def test_the_interval_shown_is_the_one_the_axis_prints():
+    """What the control states has to be what a reader gets by subtracting two
+    adjacent ticks — otherwise the row is describing a different figure."""
+    rescale = tr.TimeRescale(factor=2.0)
+    assert tr.displayed_interval([0, 4, 8], rescale) == 8.0
+    ticks = [tr.scaled(t, rescale) for t in (0, 4, 8)]
+    assert ticks[1] - ticks[0] == 8.0
+
+
+def test_the_offset_does_not_change_the_interval():
+    """It shifts every label by the same amount, so it cancels between two
+    adjacent ticks. A row that folded it in would move when the user typed an
+    offset, which changes no spacing at all."""
+    shifted = tr.TimeRescale(factor=2.0, offset=-6.0)
+    assert tr.displayed_interval([0, 4, 8], shifted) == 8.0
+
+
+def test_typing_an_interval_becomes_the_multiplier_that_prints_it():
+    """The round trip the sidebar relies on: the user says how far apart the
+    timepoints are, ``PlotState`` goes on storing a factor, and the axis prints
+    what was asked for."""
+    for timepoints, wanted in (([1, 2, 3], 4.0), ([0, 4, 8], 8.0),
+                               ([0, 6, 12], 2.0)):
+        factor = tr.factor_for_interval(timepoints, wanted)
+        assert tr.displayed_interval(timepoints, tr.TimeRescale(factor=factor)) == (
+            pytest.approx(wanted))
+
+
+def test_typing_the_measured_interval_leaves_the_axis_alone():
+    """The case the old behaviour got wrong: on a plate already carrying real
+    hours, typing 4 used to multiply by four and draw 0, 16, 32. Typing what is
+    already true must be a no-op."""
+    factor = tr.factor_for_interval([0, 4, 8, 12], 4.0)
+    assert factor == pytest.approx(tr.DEFAULT_FACTOR)
+    assert not tr.is_active(tr.TimeRescale(factor=factor))
+
+
+def test_a_plate_with_no_interval_reads_a_typed_number_as_the_multiplier():
+    """The fallback is the behaviour the control has always had, so the plate
+    that cannot state an interval keeps working rather than dividing by a
+    number that does not exist."""
+    assert tr.factor_for_interval([0, 4, 8, 24], 8.0) == 8.0
+    assert tr.factor_for_interval([], 8.0) == 8.0
+
+
+@pytest.mark.parametrize("bad", [0, -1, float("nan"), float("inf"), "x", None])
+def test_a_factor_that_would_collapse_the_axis_is_refused(bad):
+    """``coerce_factor``'s rule, reached through the interval door: a zero or
+    negative interval collapses or mirrors the axis, and a control that took one
+    would leave the user looking at a plot that cannot be right."""
+    assert tr.factor_for_interval([0, 4, 8], bad, fallback=3.0) == 3.0

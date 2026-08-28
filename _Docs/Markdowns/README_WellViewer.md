@@ -1664,7 +1664,10 @@ row, holding five actions:
   a whole figure set a consistent look. On the Bar Plots tab (a Value /
   Fraction / Events panel stack) axis limits are stored **per panel**, so a
   limit set on the Fraction or Events panel sticks instead of that panel
-  auto-scaling. Settings persist across redraws.
+  auto-scaling. Settings persist across redraws. The **legend keeps up**: change
+  the line width, dash, marker shape or marker size and the little sample beside
+  each legend entry is redrawn to match, so the key never describes a figure you
+  are no longer looking at.
 
 #### Bar colours — Plate or Grey
 
@@ -1704,13 +1707,20 @@ replicate group carries on the plate picker.
 **Grey** means something different here, because a line has no tick label under
 it. Painting every trace the one grey the bars use would leave a panel of
 identical curves with nothing but a legend to unpick, which is worse than the
-colours it replaced. So grey mode gives each trace **two** things to be
-recognised by: its own shade of grey, and its own marker — a circle, a square, a
-triangle, a diamond, an inverted triangle, a plus, and then the same six again
-hollow. Both change from one trace to the next, so no two of the twelve traces
-the legend names look alike. Past twelve the shades and markers start again,
-which is also the point where the on-screen legend stops naming traces one by
-one and tells you how many it has left out.
+colours it replaced. So grey mode gives each trace **three** things to be
+recognised by:
+
+- its own **shade** of grey, from a five-step ramp running dark to light;
+- its own **dash pattern** — solid, dashed, dash-dot, dotted;
+- its own **marker** — a circle, a square, a triangle, a diamond, an inverted
+  triangle, a plus, and then the same six again hollow.
+
+All three change from one trace to the next, and the three counts are chosen so
+that no two of them ever advance in step — a shade and a dash that always moved
+together would be one cue wearing two coats. No two of the twelve traces the
+legend names look alike. Past twelve the cycle starts again, which is also the
+point where the on-screen legend stops naming traces one by one and tells you
+how many it has left out.
 
 The marker is the trace's identity rather than the panel's, so the same shape
 appears on the Value, Fraction and Events panels: a curve you have found in one
@@ -1720,13 +1730,14 @@ error band, so without a marker its grey curves would be the one place the mode
 made things harder to read. In Plate mode the CDF stays a plain line, as it
 always has, because there the colour already names it.
 
-There are only four shades because a trace has to stay legible on a white page
-*and* on the dark plot card, and the greys that manage both sit in a narrow
-band — so the shades repeat every fourth trace while the markers run to twelve,
-and it is the marker that tells any two traces apart for certain. Shape costs
-nothing in contrast, which is why it carries the weight. The legend shows each
-trace's marker beside its name, which is what makes the figure readable without
-colour at all.
+The ramp spans as much of the grey range as it can while every shade stays
+visible on both a white page and the dark plot card. The two backgrounds make
+opposite ends hard — the darkest shade is strongest on paper and weakest on the
+card, the lightest the other way round — so the shade is the quick,
+approximate cue, and the dash and the marker are the ones to rely on when two
+traces sit close together. Neither of those costs anything in contrast. The
+legend shows each trace's dash and marker beside its name, which is what makes
+the figure readable without colour at all.
 
 The **Batch Export** line figures follow the switch too, so a plate exported in
 bulk is drawn the same way as the figure you set it on, and the mode is saved
@@ -1797,16 +1808,24 @@ timepoints on your plate really are, and correct the numbers printed on every
 time axis to match. They are there for plates whose filenames don't encode the
 real acquisition schedule.
 
-**Interval per timepoint** states how far apart the timepoints are, and
-multiplies the printed numbers. A run numbered `T01 … T12` but imaged every four
-hours is read by the pipeline as 1, 2, 3 … hours, and setting the interval to
-`4` makes the axes read 4, 8, 12 … instead. `1` — the default — turns it off.
+**Interval per timepoint** states how far apart the timepoints are, in hours,
+and it **opens at this dataset's own spacing** — measured from the hours the
+pipeline read out of the filenames. A plate imaged every four hours reads `4`
+before you touch anything; a run numbered `T01 … T12`, whose filenames give the
+pipeline 1, 2, 3 … hours, reads `1`.
 
-The value is a multiplier on the hours the pipeline parsed out of the filenames,
-which is the interval itself only while those filenames number the timepoints
-1, 2, 3 …. On a plate whose names already carry real hours it acts as a
-correction factor instead — a run whose names say 4, 8, 12 with the interval set
-to `4` draws 16, 32, 48.
+Type a different number and the time axes are relabelled to that interval. For
+the `T01 … T12` run imaged every four hours, setting `4` makes the axes read
+4, 8, 12 … Typing the number that is already true is a no-op: on a plate whose
+filenames already carry real hours, setting `4` leaves the axis alone rather
+than multiplying it to 0, 16, 32.
+
+Some plates have no single interval — timepoints at 0, 4, 8 and then 24, say,
+with a final overnight point. There is nothing to state for those, so the row
+falls back to being a plain multiplier on the filename hours (`1` = off) and the
+section summary says the spacing is uneven, rather than showing one gap as
+though it described all of them. A plate with a single timepoint has no spacing
+either, and falls back the same way without being called uneven.
 
 **Offset** states where the first image sits, and adds a fixed amount to every
 printed number. It is applied *after* the interval, so the axis reads

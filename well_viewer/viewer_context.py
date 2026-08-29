@@ -122,6 +122,14 @@ class ViewerContext:
                 self.state.repo = WellRepository(self)
             except (AttributeError, TypeError):
                 pass
+        # The image-access facade (B5) rides along on the same reasoning: it is
+        # the pixel counterpart of ``repo``, reached as ``ctx.state.images``.
+        if self.state is not None and getattr(self.state, "images", None) is None:
+            from well_viewer.data.image_repository import ImageRepository
+            try:
+                self.state.images = ImageRepository(self)
+            except (AttributeError, TypeError):
+                pass
 
     # ── Named app/window-service accessors (A8, design "C") ──────────────────
     # Minimal, closed set — see the module docstring and the freeze test. Each

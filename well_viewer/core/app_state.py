@@ -82,6 +82,10 @@ class AppState:
     # keep core/app_state free of a data-layer import at runtime. None until the
     # app wires it (pure-logic tests that never open a dataset leave it None).
     repo: object = None
+    # Image-access facade (ImageRepository) — discovery, resolution and decode
+    # for pixels, the counterpart to ``repo`` for rows. Attached the same way, at
+    # app construction, and typed as ``object`` for the same reason.
+    images: object = None
 
     def feature_slice(self, name: str):
         """Return the feature-owned slice *name*, or ``None`` when its feature is

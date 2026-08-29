@@ -438,20 +438,14 @@ def load_directory(ctx, d: Path, label=None) -> None:
         app, "_invalidate_review_image_frame_cache"
     ):
         app._invalidate_review_image_frame_cache()
-    # Drop every cached ZipFile handle on dataset swap so the new
-    # dataset's per-well zips aren't read through a previous
-    # dataset's handle (or, worse, a handle pointing at a since-
-    # deleted file).
+    # Drop the image caches on a dataset swap: every cached ZipFile handle, so
+    # the new dataset's per-well zips aren't read through a previous dataset's
+    # handle (or, worse, one pointing at a since-deleted file), and the app-wide
+    # decoded-array LRU, whose pixels belong to the previous dataset. One call
+    # for both, so neither can be dropped without the other.
     try:
-        from well_viewer.data.zipfile_cache import invalidate as _invalidate_zip_cache
-        _invalidate_zip_cache()
-    except Exception:
-        swallowed()  # was: pass (silent except)
-    # Drop the app-wide decoded-array LRU too — its cached pixels belong to the
-    # previous dataset (keyed by resolved image identity + mtime).
-    try:
-        from well_viewer.data.image_discovery import invalidate_decode_cache
-        invalidate_decode_cache()
+        from well_viewer.data.image_repository import ImageRepository
+        ImageRepository.invalidate()
     except Exception:
         swallowed()  # was: pass (silent except)
     # Clear the prior dataset's gate / override / cell-gating state before the

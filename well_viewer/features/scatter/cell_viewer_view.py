@@ -496,7 +496,6 @@ class ScatterCellViewer(QWidget):
                 find_out_well_zips_in_dir,
                 find_plain_well_zips_in_dir,
                 find_well_zips_in_dir,
-                open_imgref_as_array,
             )
 
             pipeline_info = self.ctx.state.dataset.pipeline_info
@@ -542,7 +541,8 @@ class ScatterCellViewer(QWidget):
                         )
                         chosen = self._pick_member_for_fov(matches, target_fov)
                         ref = ImgRef(zip_path=zip_path, zip_member=chosen)
-                        arr = open_imgref_as_array(ref=ref, greyscale=(image_type != "overlay"))
+                        arr = self.ctx.state.images.array(
+                            ref, greyscale=(image_type != "overlay"))
                         self._debug(f"loaded {image_type} from zip: {zip_path}::{chosen}")
                         return arr, f"{zip_path}::{chosen}"
 
@@ -560,7 +560,8 @@ class ScatterCellViewer(QWidget):
                     chosen = self._pick_member_for_fov([str(p) for p in paths], target_fov)
                     img_path = _Path(chosen)
                     ref = ImgRef(disk_path=img_path)
-                    arr = open_imgref_as_array(ref=ref, greyscale=(image_type != "overlay"))
+                    arr = self.ctx.state.images.array(
+                        ref, greyscale=(image_type != "overlay"))
                     self._debug(f"loaded {image_type} from disk: {img_path}")
                     return arr, str(img_path)
 
@@ -739,7 +740,6 @@ class ScatterCellViewer(QWidget):
                 ImgRef,
                 find_plain_well_zips_in_dir,
                 find_well_zips_in_dir,
-                open_imgref_as_array,
             )
 
             if not self._cell_bounds:
@@ -792,8 +792,8 @@ class ScatterCellViewer(QWidget):
                             f"{zip_path.name} match basename — {matches!r}"
                         )
                         chosen = self._pick_member_for_fov(matches, target_fov)
-                        arr = open_imgref_as_array(
-                            ref=ImgRef(zip_path=zip_path, zip_member=chosen),
+                        arr = self.ctx.state.images.array(
+                            ImgRef(zip_path=zip_path, zip_member=chosen),
                             greyscale=True,
                         )
                         if arr is not None:
@@ -814,7 +814,8 @@ class ScatterCellViewer(QWidget):
                     )
                     chosen = self._pick_member_for_fov([str(p) for p in paths], target_fov)
                     img_path = _Path(chosen)
-                    arr = open_imgref_as_array(ref=ImgRef(disk_path=img_path), greyscale=True)
+                    arr = self.ctx.state.images.array(
+                        ImgRef(disk_path=img_path), greyscale=True)
                     if arr is not None:
                         self._debug(f"loaded nuclear image from disk: {img_path}")
                         y_min, x_min, y_max, x_max = self._cell_bounds
@@ -836,7 +837,6 @@ class ScatterCellViewer(QWidget):
                 ImgRef,
                 find_plain_well_zips_in_dir,
                 find_well_zips_in_dir,
-                open_imgref_as_array,
             )
 
             pipeline_info = self.ctx.state.dataset.pipeline_info
@@ -907,7 +907,7 @@ class ScatterCellViewer(QWidget):
                         chosen = self._pick_member_for_fov(channel_matches, target_fov)
                         ref = ImgRef(zip_path=zip_path, zip_member=chosen)
                         self._debug(f"channel={channel_token}: loaded from zip {zip_path}::{chosen}")
-                        return open_imgref_as_array(ref=ref, greyscale=True)
+                        return self.ctx.state.images.array(ref, greyscale=True)
 
             search_dirs = [d for d in (in_dir, data_dir) if d and d.is_dir()]
             self._debug(f"channel={channel_token}: disk search dirs={[str(d) for d in search_dirs]!r}")
@@ -935,7 +935,8 @@ class ScatterCellViewer(QWidget):
                     chosen = self._pick_member_for_fov([str(p) for p in channel_paths], target_fov)
                     img_path = _Path(chosen)
                     self._debug(f"channel={channel_token}: loaded from disk {img_path}")
-                    return open_imgref_as_array(ref=ImgRef(disk_path=img_path), greyscale=True)
+                    return self.ctx.state.images.array(
+                        ImgRef(disk_path=img_path), greyscale=True)
 
             self._debug(f"channel={channel_token}: not found candidates={target_names!r}")
             return None

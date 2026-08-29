@@ -105,8 +105,8 @@ def _load_arrays_from_refs(refs, *, limit: int, tp=None):
 
     When *tp* is given, only frames whose timepoint normalizes to the same key
     are decoded (per-timepoint empty-well field); otherwise all frames pool."""
-    from well_viewer.data.image_discovery import open_imgref_as_array
     from well_viewer.data.image_identity import normalize_tp
+    from well_viewer.data.image_repository import ImageRepository
     want = normalize_tp(tp) if tp is not None else None
     out = []
     for k, ref in list((refs or {}).items()):
@@ -114,7 +114,7 @@ def _load_arrays_from_refs(refs, *, limit: int, tp=None):
             ref_tp = k[1] if isinstance(k, tuple) and len(k) > 1 else k
             if normalize_tp(ref_tp) != want:
                 continue
-        arr = open_imgref_as_array(ref, greyscale=True)
+        arr = ImageRepository.array(ref, greyscale=True)
         if arr is not None:
             out.append(_np.asarray(arr, dtype=_np.float32))
         if len(out) >= limit:
@@ -166,15 +166,10 @@ def flatfield_field_for(ctx, channel: str, fluor_arr, tp=None) -> np.ndarray | N
             wells = _split_background_wells(_flatfield_qc(ctx, "background_well", ""))
             if wells:
                 ctx.notify.set_status("Computing flat-field (empty well) for preview…")
-                from well_viewer.data.image_discovery import find_well_images_and_masks
-                ds = ctx.state.dataset
                 refs_by_well = []
                 for w in wells:
-                    fluor, _ov, _mk, _th = find_well_images_and_masks(
-                        ds.data_dir, w, fluor_token=channel,
-                        in_dir=ds.in_dir, _fov_tp_extractor=ds.fov_tp_extractor,
-                        _pipeline_info=ds.pipeline_info,
-                    )
+                    fluor, _ov, _mk, _th = ctx.state.images.images_for_well(
+                        w, channel)
                     if fluor:
                         refs_by_well.append(fluor)
                 # Prefer frames at the displayed timepoint; pool across wells.

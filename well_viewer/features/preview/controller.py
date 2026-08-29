@@ -1,22 +1,18 @@
 """Preview-related helpers extracted from well_viewer3 for incremental migration.
 
-The zip-member discovery + image-decode helpers (``classify_member``,
-``read_member_bytes``, ``scan_zip_members``, ``open_imgref_as_array``) are pure
-data/IO and now live in :mod:`well_viewer.data.zip_members` so the data layer can
-use them without importing up into this feature. They are re-exported here for
-backward compatibility with existing call sites.
+The zip-member discovery + image-decode helpers are pure data/IO and live in
+:mod:`well_viewer.data.zip_members` so the data layer can use them without
+importing up into this feature. Only ``read_member_bytes`` is still re-exported
+here, for the one call site that reaches it this way (the smFISH worker); the
+four names that were re-exported beside it — ``_NullContext``,
+``classify_member``, ``scan_zip_members`` and ``open_imgref_as_array`` — had no
+caller left, and a re-export nobody imports is dead wiring that reads as live.
 """
 
 from __future__ import annotations
 
-# Re-exported for backward compatibility — implementations live in the data layer.
-from well_viewer.data.zip_members import (  # noqa: F401
-    _NullContext,
-    classify_member,
-    open_imgref_as_array,
-    read_member_bytes,
-    scan_zip_members,
-)
+# Re-exported for the smFISH worker — the implementation is in the data layer.
+from well_viewer.data.zip_members import read_member_bytes  # noqa: F401
 # Acyclic: preview_view imports review_image.renderer (not preview.controller),
 # so this can sit at module scope rather than being deferred inside the shim.
 from well_viewer.features.preview.preview_view import (

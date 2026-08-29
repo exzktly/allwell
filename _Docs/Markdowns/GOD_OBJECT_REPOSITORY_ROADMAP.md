@@ -458,14 +458,46 @@ B4b (load-path convergence) has not been started.**
 > a real `_ctx` helper (like `test_split_view`'s) instead of self-refs; (3) add the
 > `PERSIST_APP_PARAM_BUDGET` ratchet last.
 
-### B5 · Image repository facade *(optional, later, isolated)*
-Unify the de-facto image repository (`find_well_images_and_masks` discovery →
-`resolve_channel_frame_refs` precedence → `open_imgref_as_array` decode, backed by
-`ZipFileCache`/`GLOBAL_CACHE` + `_DecodedArrayCache`) behind
-`data/image_repository.py`. `ImgRef` (value object) + `image_identity.py` (identity
-SSOT) unchanged. Orthogonal to the row path; do only if the row repository proves
-the pattern. Guard: facade tests + a ratchet on direct `GLOBAL_CACHE` /
-`_DecodedArrayCache` reach-ins outside the facade.
+### B5 · Image repository facade ✅ *(landed)*
+**Landed.** `data/image_repository.py` — `ImageRepository`, reached as
+`ctx.state.images` and attached in `ViewerContext.__post_init__` beside
+`ctx.state.repo`. `images_for_well(well, channel)` is the discovery step,
+reading the four `ctx.state.dataset` fields (`data_dir`, `in_dir`,
+`fov_tp_extractor`, `pipeline_info`) that every call site used to assemble
+identically; `array(ref, greyscale=)` is the memoized decode, a staticmethod
+because a resolved `ImgRef` names its file completely and the Playground's
+worker thread decodes without a context; `invalidate()` drops both image caches
+together, which is what a dataset swap needs.
+
+Two findings changed the scope the original sketch assumed, and both are worth
+recording:
+
+- **The caches were already encapsulated.** Nothing outside `data/zipfile_cache.py`
+  and `data/image_discovery.py` names `GLOBAL_CACHE`, `_DECODE_CACHE` or
+  `_DecodedArrayCache`, and both are already invalidated on dataset load. So the
+  proposed reach-in ratchet is a lock on a property that already held, not a
+  repair — `tests/test_image_cache_encapsulation.py` says so in its own
+  docstring, because a guard that would pass against the base branch is a
+  hypothesis unless it is labelled as one.
+- **The three grid features' inventory caches must not be unified.** Image Table
+  and Playground keep theirs for the session; Cell Browser's worker keeps one
+  *per page*, deliberately, because it reads on a background thread and a
+  dataset swap mid-read must not leave it serving refs into a replaced archive.
+  Folding them into one cache owned by the facade would have given the worker
+  the session lifetime — a correctness change wearing a refactor's clothes. The
+  facade therefore owns no inventory cache, and does not wrap
+  `frame_load.load_frame_array` / `load_mask_array` at all: those take the
+  caller's cache explicitly and one path calls them with `ctx=None`.
+
+Guards: `tests/test_image_repository.py` (facade unit tests, asserted on the
+outbound calls), `tests/test_image_repo_bypass.py`
+(`IMAGE_REPO_BYPASS_BUDGET == 0`, down-only, with the `_not_slack` twin) and
+`tests/test_image_cache_encapsulation.py`. Converted call sites: the review-image
+renderer and collector, the Playground's flat-field worker, the scatter cell
+viewer (six decodes across three lookups) and `load_controller`'s two hand-rolled
+invalidations. Four dead re-exports in `features/preview/controller.py` went with
+them — `_NullContext`, `classify_member`, `scan_zip_members` and
+`open_imgref_as_array` had no caller left.
 
 ---
 
@@ -571,7 +603,7 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 | B3 · route cache readers | ☑ | `REPO_BYPASS_BUDGET == 0` (−spatial) | 2026-07-11 |
 | B4a · persistence → ctx | ☑ | `PERSIST_APP_PARAM_BUDGET == 0` | 2026-07-11 |
 | B4b · load-path convergence | ☑ | `WellRepository.load_well` exists, `load_controller` calls no `app._load_well_csv`, curation is a registered projector | 2026-08-29 |
-| B5 · image repo facade *(optional)* | ☐ | image-facade ratchet == 0 | — |
+| B5 · image repo facade *(optional)* | ☑ | `IMAGE_REPO_BYPASS_BUDGET == 0`; facade tests green | 2026-08-29 |
 
 **Terminal-goal status (2026-08-29): conditions 1–5 all hold and are
 guard-proven.** Workstream A is complete (`_ALLOWED == {"window"}`,
@@ -591,11 +623,35 @@ that used to live in `core/` are gone — the row-cache projectors and the
 support services are wired inside `build_feature_registry`, and
 `register_default_scopes` now takes the registry rather than building one.
 
-**One phase remains open, and it is the optional one:** **B5** (image repository
-facade — there is no `data/image_repository.py` and no facade ratchet). Nothing
-depends on it, and the roadmap's terminal goal does not include it.
+**Every phase of both workstreams is now closed**, including the optional B5
+(`data/image_repository.py`, `IMAGE_REPO_BYPASS_BUDGET == 0`). Nothing is
+outstanding.
+
+The document stays rather than being deleted, which is worth justifying against
+CLAUDE.md section 6.1's rule that a tracker is deleted by the pull request
+closing its last row. That rule is about a *remediation tracker* — the temporary
+exception section 5 grants for a body of work too large to hold in one session's
+head. This is one of the three permanent documents section 5 names, and it is
+permanent for a reason that still holds: every budget it quotes is asserted by
+`tests/test_guardrails.py`, so it is where a reader finds out what
+`CORE_FEATURE_IMPORT_BUDGET == 0` or `REPO_BYPASS_BUDGET == 0` is *for*, and why
+lowering a ratchet is the only direction allowed. Its job from here is to
+describe a finished teardown and hold the reasoning behind the guards that keep
+it finished — not to claim work is owed, which nothing below does.
 
 **Changelog** (newest first):
+
+- 2026-08-29 — **B5 COMPLETE — the image facade, and two scope corrections.**
+  `data/image_repository.py` gives pixels the door rows already had: discovery
+  with the dataset fields read once rather than assembled at each call site, the
+  memoized decode, and one invalidation that drops both image caches. Converted
+  the review-image renderer and collector, the Playground's flat-field worker,
+  the scatter cell viewer and `load_controller`; deleted four dead re-exports in
+  `features/preview/controller.py`. The two corrections to the original sketch —
+  the caches were already encapsulated, so that ratchet locks in rather than
+  repairs; and the three grid inventory caches must stay separate because Cell
+  Browser's is per-page for thread-safety — are written up in the B5 section.
+  **With this the roadmap is complete.**
 
 - 2026-08-29 — **B4b COMPLETE — one load path, and the divergence it was hiding.**
   The eager bulk load now goes through `ctx.state.repo.load_well(key, path)`, which

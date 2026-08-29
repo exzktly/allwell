@@ -157,9 +157,12 @@ class ShapeIds:
 class Placement:
     """Where on the slide a drawing goes, and how much it is scaled to get there.
 
-    Built by :meth:`fit`, which scales a figure to fill a target box without
-    distorting it and centres what is left over — the same letterboxing rule the
-    PDF report's image axis follows, so the two exports frame a figure alike.
+    Two ways to build one. :meth:`fit` scales a figure to fill a target box
+    without distorting it and centres what is left over — the same letterboxing
+    rule the PDF report's image axis follows, so the two exports frame a figure
+    alike. :meth:`anchor` scales the figure's *plotting area* into the box
+    instead and lets the labels around it fall where they fall, which is what
+    puts every slide's axes in one place.
     """
 
     def __init__(self, origin_x: int, origin_y: int, scale: float) -> None:
@@ -176,6 +179,28 @@ class Placement:
         used_h = height * scale
         return cls(origin_x=int(round(x + (cx - used_w) / 2.0)),
                    origin_y=int(round(y + (cy - used_h) / 2.0)),
+                   scale=scale)
+
+    @classmethod
+    def anchor(cls, axes_rect_pt, *, x: int, y: int, cx: int, cy: int) -> Placement:
+        """Place a figure by its **plotting area** rather than by its page.
+
+        *axes_rect_pt* is ``(x0, y0, x1, y1)`` in the drawing's own points. It is
+        scaled — without distortion — to fill the box, and centred in whichever
+        direction it does not fill; everything else in the figure follows it and
+        lands outside the box. Handed the same box for every slide, this is what
+        puts two figures' axes in the same place and at the same size, whatever
+        the crop around each of them measured.
+        """
+        x0, y0, x1, y1 = axes_rect_pt
+        width = points_to_emu(x1 - x0) or 1
+        height = points_to_emu(y1 - y0) or 1
+        scale = min(cx / width, cy / height)
+        used_w = width * scale
+        used_h = height * scale
+        origin_x = x + (cx - used_w) / 2.0 - x0 * EMU_PER_POINT * scale
+        origin_y = y + (cy - used_h) / 2.0 - y0 * EMU_PER_POINT * scale
+        return cls(origin_x=int(round(origin_x)), origin_y=int(round(origin_y)),
                    scale=scale)
 
     def emu_x(self, point_x: float) -> int:

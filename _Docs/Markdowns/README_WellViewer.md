@@ -3222,6 +3222,19 @@ rather than a single panel.
   A deck of plots that all need redrawing takes a few seconds each and moves
   between tabs as it goes; that is the repair happening, and the page you were
   on comes back at the end.
+- **Every slide puts its plot in the same place.** Two figures drawn at the same
+  size arrive on their slides with their plotting areas at the same position and
+  the same size, whatever their axis labels, titles and legends measure — so you
+  can pull several slides into one and build a composite figure without nudging
+  each panel into line by hand. The tick labels and legends around the plotting
+  area still take whatever room they need; it is the axes themselves that are
+  pinned. The deck sizes that shared position from the plots it contains, so the
+  one figure with a legend beside it does not push its legend off the slide.
+
+  Plots saved before this existed do not record where their axes sit, so they
+  cannot be lined up with the rest; those slides are fitted to the slide as
+  before, and each says so under the figure. Re-save the plot in All-Well to have
+  it match. A plot placed as a picture (see below) cannot be aligned either.
 - **A plot saved from one panel stays that panel.** If you saved a single panel
   of a multi-panel figure, the export leaves it as a picture rather than
   redrawing it, because a redraw would give you every panel of that figure under

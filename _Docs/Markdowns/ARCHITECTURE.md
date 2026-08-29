@@ -1715,6 +1715,7 @@ Four modules, in the order the data moves through them:
 | `_svg_shapes.py` | Reads a Matplotlib SVG into a flat, ordered list of `PathShape` / `TextShape` / `ImageShape` in absolute user-space points. Applies the transform stack, inherits styles down the tree, expands `<use>` references into real geometry, splits mathtext back into positioned runs, and clips to rectangular `<clipPath>`s. Not a general SVG reader — it handles the subset Matplotlib emits and records anything else in `Drawing.unsupported`. |
 | `_drawingml.py` | Turns those shapes into DrawingML. The only module that knows about EMUs (12,700 per point) and hundredths-of-a-point font sizes. `Placement.fit` letterboxes a figure into a target box on the slide. |
 | `_pptx.py` | Writes the Open Packaging container — the zip of XML parts, their relationships, one slide master, one blank layout, one theme. No `python-pptx`: the parts a deck of plain slides needs are small and fixed, so the export adds nothing to the runtime stack. |
+| `_align.py` | Turns the recorded plotting areas of a whole gallery into the one anchor box every slide places its figure's axes in. Pure arithmetic. |
 | `_deck.py` | Lays out the slide (title, source-tab badge, timestamp, parameter column) and decides how each plot reaches it. |
 
 **Vector capture is taken at save time, not at export time.** A gallery record
@@ -1726,6 +1727,57 @@ publication-mode capture: the 300 dpi PNG it always did, and an SVG through
 `<text>` rather than outlined paths. Both land in `<data_dir>/saved_plots/`, as
 `<id>.png` and `<id>.svg`, and `SavedPlot.svg_filename` is empty when there is no
 vector twin.
+
+**A figure is placed by its plotting area, not by its page.** A saved capture is
+cropped to its own ink, so the page a bar chart produces grows with its tick
+labels, its title and its legend while the axes inside it do not move. Scaling
+each of those pages to fill the slide — the obvious rule, and what
+`Placement.fit` does — therefore gives two plots authored at the same figure size
+axes of different sizes in different places: measured on a 13⅓ × 7½ deck, three
+`figsize=(6, 4)` plots differing only in label lengths landed as axes 7.45, 7.10
+and 5.73 inches wide at three different origins. Slides like that cannot be laid
+beside one another into a composite figure, which is a large part of why anyone
+wants editable shapes rather than pictures.
+
+So each capture records where its plotting area sits on its own page —
+`fig_clipboard.figure_axes_fraction`, written into the SVG as the
+`AXES_RECT_MARKER` comment, the union of every *visible* axes' rectangle as
+fractions of the page. Fractions rather than points because the consumer already
+knows the page it parsed and a fraction cannot disagree with it. That marker is
+only exact if the page is known, which is why `render_figure_svg` resolves
+`bbox_inches="tight"` into the explicit `Bbox` it stands for
+(`figure_crop_bbox`) before rendering: Matplotlib computes that rectangle inside
+`print_figure` and throws it away, and recomputing it afterwards lands a point or
+two off — enough to misplace a figure once it is scaled onto a slide. Handed an
+explicit `Bbox`, Matplotlib honours it exactly, so the page really is the
+rectangle the capture measured against.
+
+`_align.plan_anchor` then turns the whole gallery's markers into **one anchor
+box**, and `Placement.anchor` scales each figure so its axes fills that box and
+centres it there; everything outside the axes hangs off the box into the space
+around it. The box is planned from the deck rather than fixed because the room
+decorations need is not knowable in advance — a legend outside the axes wants a
+third of the figure's width, and a fixed allowance generous enough for that would
+waste the same third on every plot without one. Taking the largest margin any
+plot asks for, as a proportion of *that plot's own axes*, gives the biggest box
+that still leaves every figure's decorations inside the body of its slide. It is
+planned against the **narrowest** figure area any slide will offer, too, since a
+plot with no parameter summary is given the full slide width and an anchor sized
+to that would push a neighbouring slide's figure under its parameter column. The
+planning pass reads only the markers, never the shapes: a regular expression over
+the bytes, where parsing a capture into shapes is the expensive half of the whole
+export.
+
+No figure comes out smaller than filling the slide alone would have drawn it: a
+gallery of one has its own margins as the maxima and resolves to the same scale
+the letterbox chose, differing only in centring the plotting area rather than the
+page in whatever slack is left over. A capture with no marker — one filed before
+this, or a figure with no axes at all — cannot be aligned, so it is letterboxed
+as before and the slide says so under the figure; a figure that *nearly* lines up
+is the shortfall a reader cannot see. Where no plot in the deck records one there
+is no alignment to fall short of and no slide says anything. A plot placed as a
+picture is not aligned either — a PNG carries no axes rectangle — and its slide
+already states that it is a picture.
 
 **A plot without a vector capture is placed as a picture, and the slide says so.**
 Three things produce that: a record saved before the app captured vector, a

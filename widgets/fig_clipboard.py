@@ -18,8 +18,13 @@ from __future__ import annotations
 import logging
 import sys
 from contextlib import contextmanager
+from typing import TYPE_CHECKING
 
 from util.aw_safe import swallow, swallowed
+
+if TYPE_CHECKING:                                # matplotlib is imported lazily
+    from matplotlib.backend_bases import RendererBase
+    from matplotlib.transforms import BboxBase
 
 _logger = logging.getLogger("well_viewer")
 
@@ -182,13 +187,24 @@ def render_figure_svg(fig, *, max_paths: int | None = MAX_VECTOR_PATHS,
     """
     kw = {"bbox_inches": "tight"}
     kw.update(savefig_kwargs)
+    # Resolve a "tight" crop into the explicit rectangle it stands for, before
+    # anything is rendered. The crop decides where the axes sit on the page, and
+    # a consumer that has to *guess* the crop cannot know that: recomputing it
+    # here after the fact lands within a point or two of Matplotlib's own, and a
+    # point or two is a visibly misplaced figure once it is scaled onto a slide.
+    # Asked for an explicit Bbox, Matplotlib honours it exactly, so from here on
+    # the page really is the rectangle this function chose.
+    kw["bbox_inches"] = crop = _resolved_crop(fig, kw.get("bbox_inches"))
+    axes_frac = figure_axes_fraction(fig, crop)
     if max_paths is None or figure_path_count(fig) <= max_paths:
         # No layer was given up, so no marker: an SVG with no marker is one whose
         # every mark is a shape.
-        return _render_figure(fig, "svg", kw, {"svg.fonttype": "none"})
+        return _mark_axes_rect(
+            _render_figure(fig, "svg", kw, {"svg.fonttype": "none"}), axes_frac)
     kw.setdefault("dpi", RASTERIZED_LAYER_DPI)
     with _dense_layers_rasterized(fig, max_paths) as touched:
         rendered = _render_figure(fig, "svg", kw, {"svg.fonttype": "none"})
+    rendered = _mark_axes_rect(rendered, axes_frac)
     if touched and rendered:
         _logger.info("%d dense layer(s) rasterized to keep the rest of the "
                      "figure editable", len(touched))
@@ -208,13 +224,17 @@ def render_figure_svg(fig, *, max_paths: int | None = MAX_VECTOR_PATHS,
 RASTERIZED_MARKER = "allwell:rasterized-layers="
 
 
-def _mark_rasterized(svg: bytes, layers: int) -> bytes:
-    """Record in the SVG itself that *layers* dense layers became images."""
-    marker = f"<!-- {RASTERIZED_MARKER}{layers} -->".encode()
+def _insert_marker(svg: bytes, marker: str) -> bytes:
+    """Put an XML comment in front of the ``<svg>`` element."""
     head = svg.find(b"<svg")
     if head < 0:
         return svg
-    return svg[:head] + marker + svg[head:]
+    return svg[:head] + f"<!-- {marker} -->".encode() + svg[head:]
+
+
+def _mark_rasterized(svg: bytes, layers: int) -> bytes:
+    """Record in the SVG itself that *layers* dense layers became images."""
+    return _insert_marker(svg, f"{RASTERIZED_MARKER}{layers}")
 
 
 def rasterized_layer_count(svg: bytes) -> int:
@@ -223,6 +243,183 @@ def rasterized_layer_count(svg: bytes) -> int:
 
     match = re.search(RASTERIZED_MARKER.encode() + rb"(\d+)", svg or b"")
     return int(match.group(1)) if match else 0
+
+
+#: Written into a capture to record where the figure's plotting area sits on the
+#: page it was rendered onto. Four numbers — ``x0,y0,x1,y1`` as fractions of the
+#: page's width and height, with *y* measured downward from the top the way SVG
+#: measures it — so a consumer scaling the page onto a slide can put the *axes*
+#: somewhere chosen rather than wherever the crop happened to leave them.
+#:
+#: Fractions rather than points because the consumer already knows the page size
+#: it parsed, and a fraction cannot disagree with it: a marker in absolute units
+#: written against one page and read against another (a ``viewBox`` that scales,
+#: a re-crop) would be silently wrong rather than obviously absent.
+AXES_RECT_MARKER = "allwell:axes-frac="
+
+
+def _mark_axes_rect(svg: bytes, frac) -> bytes:
+    """Record where the plotting area sits, when it could be established."""
+    if not svg or frac is None:
+        return svg
+    return _insert_marker(
+        svg, AXES_RECT_MARKER + ",".join(f"{v:.6f}" for v in frac))
+
+
+def axes_fraction_from_svg(svg: bytes) -> tuple[float, float, float, float] | None:
+    """Where the plotting area sits on *svg*'s page, or ``None``.
+
+    ``None`` for every capture written before this was recorded, and for one
+    whose figure had no visible axes to anchor on — both are "this figure cannot
+    be aligned with the others", which the caller states rather than papering
+    over with a guess.
+    """
+    import re
+
+    match = re.search(AXES_RECT_MARKER.encode() + rb"([-\d.,eE+]+)", svg or b"")
+    if not match:
+        return None
+    try:
+        values = [float(part) for part in match.group(1).split(b",")]
+    except ValueError:
+        return None
+    if len(values) != 4:
+        return None
+    x0, y0, x1, y1 = values
+    if not (x1 > x0 and y1 > y0):
+        return None
+    return (x0, y0, x1, y1)
+
+
+def _measuring_renderer(fig) -> RendererBase | None:
+    """A laid-out renderer to measure *fig* against, or ``None``.
+
+    A figure on screen carries a canvas that can hand one over; a bare
+    ``Figure`` built for an export does not, and asks the figure itself. Neither
+    is guaranteed across the Matplotlib versions this app supports, and a
+    measurement that cannot be taken is not an error here — it means one capture
+    records no plotting area and the deck says so, which is the outcome the
+    export is already built to state.
+    """
+    with swallow("figure measure: layout"):
+        fig.draw_without_rendering()
+    for getter in (getattr(fig.canvas, "get_renderer", None),
+                   getattr(fig, "_get_renderer", None)):
+        if getter is None:
+            continue
+        try:
+            renderer = getter()
+        except Exception:
+            swallowed("figure measure: renderer")
+            continue
+        if renderer is not None:
+            return renderer
+    return None
+
+
+def _resolved_crop(fig, bbox_inches):
+    """The crop rectangle a render will actually use, as an explicit ``Bbox``.
+
+    ``"tight"`` is resolved here rather than left to ``savefig`` so this module
+    knows the page it is about to produce; ``None`` means the whole canvas, which
+    is a rectangle too. Anything already explicit is handed straight back, and a
+    ``"tight"`` that could not be resolved is handed back as it came — the render
+    is then exactly what it always was, minus the marker.
+    """
+    from matplotlib.transforms import Bbox, BboxBase
+
+    if isinstance(bbox_inches, BboxBase):
+        return bbox_inches
+    if bbox_inches is None:
+        width, height = fig.get_size_inches()
+        return Bbox.from_bounds(0.0, 0.0, float(width), float(height))
+    return figure_crop_bbox(fig) or bbox_inches
+
+
+def figure_crop_bbox(fig, *, pad_in: float | None = None) -> BboxBase | None:
+    """The rectangle ``savefig(bbox_inches="tight")`` would crop to, in inches.
+
+    Matplotlib computes this inside ``print_figure`` and then throws it away, so
+    a caller that needs to know where anything ended up on the page has no way to
+    ask. Asking for it here and passing it back in as an explicit ``Bbox`` costs
+    one extra ``get_tightbbox`` and makes the page a known quantity.
+
+    The extents come from a renderer built here rather than the one the output
+    backend will build, so this can differ from Matplotlib's own tight crop by a
+    point or so where the two measure a font differently. That is a hair more or
+    less whitespace and nothing else — every artist keeps its position on the
+    page, because the page is then *defined* as this rectangle.
+
+    ``None`` when the figure could not be measured.
+    """
+    import matplotlib as _mpl
+
+    renderer = _measuring_renderer(fig)
+    if renderer is None:
+        return None
+    if pad_in is None:
+        pad_in = float(_mpl.rcParams.get("savefig.pad_inches", 0.1) or 0.0)
+    try:
+        return fig.get_tightbbox(renderer).padded(pad_in)
+    except Exception:
+        swallowed("figure crop: tight bbox")
+        return None
+
+
+def figure_axes_fraction(
+        fig, crop=None) -> tuple[float, float, float, float] | None:
+    """Where *fig*'s plotting area sits inside the page *crop* produces.
+
+    Returns ``(x0, y0, x1, y1)`` as fractions of the page's width and height,
+    with *y* downward from the top, or ``None`` when there is no visible axes to
+    measure — a figure holding only text has no plotting area, and inventing one
+    from its ink would align the deck on something that is not a plot.
+
+    The union covers **every** visible axes, a colourbar and an inset included:
+    the rectangle this describes is the region a reader would call the plot, and
+    a colourbar left outside it would be treated as a margin and overlap the next
+    figure when the slides are tiled. Hidden axes are excluded because a
+    single-panel capture hides its siblings (:func:`hidden_sibling_axes`) and the
+    page it crops to holds only the one panel.
+    """
+    from matplotlib.transforms import Bbox, BboxBase
+
+    renderer = _measuring_renderer(fig)
+    if renderer is None or not isinstance(crop, (BboxBase, type(None))):
+        return None
+    if crop is None:
+        width, height = fig.get_size_inches()
+        crop = Bbox.from_bounds(0.0, 0.0, float(width), float(height))
+    page_w = float(crop.x1 - crop.x0)
+    page_h = float(crop.y1 - crop.y0)
+    if page_w <= 0 or page_h <= 0:
+        return None
+    dpi = float(fig.dpi) or 1.0
+    xs: list[float] = []
+    ys: list[float] = []
+    for ax in getattr(fig, "axes", ()):
+        if not ax.get_visible():
+            continue
+        try:
+            extent = ax.get_window_extent(renderer)
+        except Exception:
+            swallowed("axes fraction: window extent")
+            continue
+        xs += [extent.x0 / dpi, extent.x1 / dpi]
+        ys += [extent.y0 / dpi, extent.y1 / dpi]
+    if not xs or not ys:
+        return None
+
+    def _clamp(value: float) -> float:
+        return min(1.0, max(0.0, value))
+
+    x0 = _clamp((min(xs) - crop.x0) / page_w)
+    x1 = _clamp((max(xs) - crop.x0) / page_w)
+    y0 = _clamp((crop.y1 - max(ys)) / page_h)
+    y1 = _clamp((crop.y1 - min(ys)) / page_h)
+    if not (x1 > x0 and y1 > y0):
+        return None
+    return (x0, y0, x1, y1)
 
 
 def _macos_pasteboard_write(pdf_bytes: bytes, svg_bytes: bytes,

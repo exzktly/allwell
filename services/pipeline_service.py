@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from services.subprocess_text import TEXT_UTF8
+
 HERE = Path(__file__).resolve().parent.parent
 PIPELINE_SCRIPT = HERE / "process_microscopy.py"
 
@@ -287,7 +289,6 @@ def spawn_pipeline(args: list[str]) -> subprocess.Popen:
         args,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        text=True,
         # A pipeline's stdout is not guaranteed to be UTF-8: a filename can
         # carry any byte the filesystem allows, and it is echoed back in log
         # lines. Without `errors` a single such byte raises UnicodeDecodeError
@@ -295,8 +296,7 @@ def spawn_pipeline(args: list[str]) -> subprocess.Popen:
         # a process the reader started with `start_new_session=True` — its own
         # session leader, so nothing else will reap it — running against the
         # user's plate while the GUI reports the run never started.
-        encoding="utf-8",
-        errors="replace",
+        **TEXT_UTF8,
         bufsize=1,
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
         **kwargs,

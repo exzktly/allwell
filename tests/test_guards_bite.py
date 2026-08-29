@@ -2867,3 +2867,66 @@ def test_theme_ink_guard_clears_a_title(tmp_path, monkeypatch):
                   'def d(ax):\n    ax.set_title("t", color=tokens_for(ax)[1])\n')
     assert _run_scan(monkeypatch, _THEME_INK_GUARD, _THEME_INK_TEST,
                      [good]) is None
+
+
+# ── text-mode subprocess decoding ───────────────────────────────────────────
+
+_DECODE_GUARD = "tests.test_subprocess_text_decoding"
+_DECODE_TEST = "test_text_mode_subprocesses_declare_utf8"
+
+TEXT_DECODE_VIOLATIONS = {
+    # The plain shape: text mode with no codec named.
+    "keyword": 'import subprocess\n\n'
+               'def probe(cmd):\n'
+               '    return subprocess.run(cmd, capture_output=True, text=True)\n',
+    # The older spelling of the same flag.
+    "universal_newlines": 'import subprocess\n\n'
+                          'def probe(cmd):\n'
+                          '    return subprocess.run(cmd, universal_newlines=True)\n',
+    # Popen, which is where the damage lands: the decode error is raised out of
+    # a reader thread's iterator rather than at the call.
+    "popen": 'import subprocess\n\n'
+             'def stream(cmd):\n'
+             '    return subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)\n',
+    # The Analyze spawn helpers build their kwargs as a dict first, so the flag
+    # is a string key one indirection away from the call.
+    "kwargs_dict": 'import subprocess\n\n'
+                   'def stream(cmd):\n'
+                   '    kwargs = {"stdout": subprocess.PIPE, "text": True}\n'
+                   '    return subprocess.Popen(cmd, **kwargs)\n',
+}
+
+
+@pytest.mark.parametrize("shape", sorted(TEXT_DECODE_VIOLATIONS))
+def test_text_decode_guard_catches_a_locale_decode(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_decode.py", TEXT_DECODE_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, _DECODE_GUARD, _DECODE_TEST, [bad])
+    assert exc is not None, f"the {shape} locale-decode violation went uncaught"
+    assert "bad_decode.py" in str(exc)
+
+
+@pytest.mark.parametrize("shape", [
+    # The shared spelling, splatted into the call.
+    'import subprocess\n\n'
+    'from services.subprocess_text import TEXT_UTF8\n\n'
+    'def probe(cmd):\n'
+    '    return subprocess.run(cmd, capture_output=True, **TEXT_UTF8)\n',
+    # Spelled out, which is what scripts/_bootstrap_lib.py must do (stdlib-only).
+    'import subprocess\n\n'
+    'def probe(cmd):\n'
+    '    return subprocess.run(cmd, text=True, encoding="utf-8", errors="replace")\n',
+    # The same, one indirection away in a kwargs dict.
+    'import subprocess\n\n'
+    'from services.subprocess_text import TEXT_UTF8\n\n'
+    'def stream(cmd):\n'
+    '    kwargs = {"stdout": subprocess.PIPE, **TEXT_UTF8}\n'
+    '    return subprocess.Popen(cmd, **kwargs)\n',
+    # Binary mode, decoded explicitly afterwards — not a text-mode call at all.
+    'import subprocess\n\n'
+    'def probe(cmd):\n'
+    '    out = subprocess.run(cmd, capture_output=True).stdout\n'
+    '    return out.decode("utf-8", errors="replace")\n',
+])
+def test_text_decode_guard_clears_a_named_codec(tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, "good_decode.py", shape)
+    assert _run_scan(monkeypatch, _DECODE_GUARD, _DECODE_TEST, [good]) is None

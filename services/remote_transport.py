@@ -35,6 +35,7 @@ from services.remote_config import (
     to_rsync_path,
 )
 from util.aw_safe import swallow
+from services.subprocess_text import TEXT_UTF8
 
 def _fmt_bytes(n: float) -> str:
     """Bytes at a unit a human reads without counting zeros.
@@ -97,7 +98,7 @@ def _rsync_version() -> tuple[int, int]:
     try:
         result = subprocess.run(
             [resolve_rsync_binary(), "--version"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, timeout=5, **TEXT_UTF8,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return (0, 0)
@@ -416,13 +417,13 @@ def _rsync_run_cancellable(
     and fail on big zips / slow links)."""
     if stop_event is None:
         return subprocess.run(
-            cmd, capture_output=capture_output, text=True,
-            timeout=timeout, cwd=cwd,
+            cmd, capture_output=capture_output,
+            timeout=timeout, cwd=cwd, **TEXT_UTF8,
         )
     stdout_pipe = subprocess.PIPE if capture_output else None
     stderr_pipe = subprocess.PIPE if capture_output else None
     proc = subprocess.Popen(
-        cmd, stdout=stdout_pipe, stderr=stderr_pipe, text=True, cwd=cwd,
+        cmd, stdout=stdout_pipe, stderr=stderr_pipe, cwd=cwd, **TEXT_UTF8,
     )
     deadline = None if timeout is None else time.monotonic() + timeout
     rc: int | None = None

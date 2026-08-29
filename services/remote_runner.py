@@ -50,6 +50,7 @@ from enum import Enum
 from pathlib import Path, PurePosixPath
 from collections.abc import Callable, Iterable
 
+from services.subprocess_text import TEXT_UTF8
 from services.remote_config import (
     DEFAULT_CONDA_ENV,
     DEFAULT_REMOTE_PYTHON,
@@ -3185,8 +3186,8 @@ class DatasetCache:
         ]
         try:
             return subprocess.run(
-                cmd, capture_output=True, text=True, check=check,
-                timeout=timeout_s,
+                cmd, capture_output=True, check=check,
+                timeout=timeout_s, **TEXT_UTF8,
             )
         except subprocess.CalledProcessError as exc:
             if check:
@@ -4157,13 +4158,11 @@ class _BatchedRemoteProcess:
             ssh_argv,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
             # The remote (Linux) pipeline logs UTF-8 — including the em-dash in
             # "Well X — done." Decode as UTF-8 so those markers survive on a
             # cp1252 Windows client; otherwise the dashboard's per-well Process
             # tracking never matches.
-            encoding="utf-8",
-            errors="replace",
+            **TEXT_UTF8,
             bufsize=1,
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
             start_new_session=(os.name == "posix"),
@@ -6188,14 +6187,12 @@ class RemoteRunner:
                 ssh_argv,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                text=True,
                 # Decode the remote (Linux, UTF-8) pipeline output as UTF-8 so
                 # the em-dash in per-well markers ("Well X — done.") isn't
                 # mojibake'd on a cp1252 Windows client — otherwise the
                 # dashboard's Process stage stays stuck at 0/N while ASCII-only
                 # markers (threshold) reach N/N.
-                encoding="utf-8",
-                errors="replace",
+                **TEXT_UTF8,
                 bufsize=1,
                 env={**os.environ, "PYTHONUNBUFFERED": "1"},
                 start_new_session=(os.name == "posix"),
@@ -7022,7 +7019,7 @@ class RemoteRunner:
         try:
             result = subprocess.run(
                 self.host.ssh_argv(allocate_tty=False) + [cmd],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True, timeout=10, **TEXT_UTF8,
             )
         except (subprocess.TimeoutExpired, OSError) as exc:
             # A failed teardown ssh must not be silent — an orphaned SLURM
@@ -7120,7 +7117,7 @@ class RemoteRunner:
         try:
             result = subprocess.run(
                 self.host.ssh_argv(allocate_tty=False) + [script],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True, timeout=15, **TEXT_UTF8,
             )
         except (subprocess.TimeoutExpired, OSError) as exc:
             log(f"[remote] WARN scheduler: could not check for a leftover "

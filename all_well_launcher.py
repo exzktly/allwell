@@ -180,6 +180,16 @@ def _dispatch() -> None:
         # required-files manifest is bundled) and route argv past the sentinel
         # into its ``main()`` (which parse_args() the rest: alias [--force]).
         sys.argv = [sys.argv[0]] + sys.argv[2:]
+        # A frozen windowed (console=False) build leaves sys.stdout / sys.stderr
+        # set to None even though the parent handed us a live pipe on fd 1/2.
+        # The bootstrap writes to sys.stdout directly (say(), the tee), so
+        # without this repair its very first message raises AttributeError on
+        # None and the Remotes dialog's log stays empty for a subprocess that
+        # died before it did anything. process_microscopy and WellPlateZipper
+        # call the same helper from their own main(); this entry point reaches
+        # its module through importlib, so the repair belongs here.
+        from util.frozen_io import ensure_std_streams
+        ensure_std_streams()
         import importlib.util
         _bpath = _BUNDLE_DIR / "scripts" / "_bootstrap_lib.py"
         _spec = importlib.util.spec_from_file_location("_bootstrap_lib", _bpath)

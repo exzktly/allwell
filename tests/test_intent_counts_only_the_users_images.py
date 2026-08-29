@@ -381,17 +381,49 @@ def test_a_redundant_folder_beside_its_archive_still_runs(tmp_path):
 
 # ── the zipper is reaped whatever ends the read of its output ───────────────
 
-def test_the_zipper_stream_replaces_undecodable_bytes():
+def test_the_zipper_stream_replaces_undecodable_bytes(tmp_path, monkeypatch):
     """The zipper echoes every filename it groups, and a filename can carry
-    any byte the filesystem allows."""
-    import inspect
+    any byte the filesystem allows.
+
+    Asserted at the boundary — the kwargs that actually reach Popen. Reading
+    the function's source for the two keywords passed as long as they were
+    spelled there, and stopped the day the spelling moved into
+    ``services.subprocess_text.TEXT_UTF8`` while the behaviour was unchanged.
+    """
+    import subprocess
 
     from services import input_resolution_service
 
-    src = inspect.getsource(input_resolution_service.run_zipper)
-    assert 'errors="replace"' in src and 'encoding="utf-8"' in src, (
+    seen: dict = {}
+
+    class _FakeProc:
+        stdout: list = []
+        returncode = 0
+        pid = 4242
+
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    def _fake_popen(args, **kwargs):
+        seen.update(kwargs)
+        return _FakeProc()
+
+    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+    input_resolution_service.run_zipper(
+        tmp_path / "tifs", tmp_path / "in",
+        filename_schema="well:field:z:c", filename_sep="_",
+    )
+
+    assert seen.get("errors") == "replace", (
         "the zipper's output is decoded strictly, so one byte from a filename "
         "raises out of the reader and the process is never reaped")
+    assert seen.get("encoding") == "utf-8", (
+        "the zipper's output is decoded with the client's locale — the ANSI "
+        "codepage on Windows — rather than the UTF-8 it is written in")
+    assert seen.get("text") is True
 
 
 def test_the_zipper_is_reaped_even_when_the_read_stops_early():

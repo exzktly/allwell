@@ -1094,8 +1094,33 @@ def _import_attr(module: str, name: str):
     return getattr(importlib.import_module(module), name)
 
 
+def _lazy_projector(module: str, name: str, **fixed):
+    """A cache projector that resolves ``module.name`` on its first call.
+
+    The same laziness every hook here has, and for the same reason: building
+    the registry must not pull a feature module in. Registering the resolved
+    functions instead cost the build 15ms -> 6.6s in a process that had not
+    already imported the data layer, because reaching ``apply_qc_to_cache``
+    means importing pandas through ``data_loading``. The app never noticed —
+    ``runtime_app`` imports that layer at module scope anyway — but a caller
+    that only wants to read the descriptors paid it, and the module docstring
+    promises they do not.
+
+    *fixed* is bound into every call, which is how the curation projector says
+    it is projecting onto a frame that has just been built.
+    """
+    def _project(ctx, label=None):
+        return _import_attr(module, name)(ctx, label, **fixed)
+
+    # Named for the function it stands in for, so a traceback, a log line and
+    # ``tests/test_one_load_path.py``'s roster check all read as before.
+    _project.__name__ = name
+    _project.__qualname__ = name
+    return _project
+
+
 def _register_cache_projectors() -> None:
-    """Register the QC and crop row-cache projectors.
+    """Register the curation, QC and crop row-cache projectors.
 
     The projection of the inclusion-verdict columns onto a freshly loaded frame
     is wired here, with the rest of the feature wiring, because this module is
@@ -1107,20 +1132,29 @@ def _register_cache_projectors() -> None:
     crop — though nothing depends on it: the three write different columns, and
     QC and crop never touch the ``Included`` that curation owns.
 
+    **The curation projector is bound with ``note_change=False``.** It is
+    writing onto a frame ``load_and_project`` created a moment ago, which
+    cannot have a memoized aggregate of its own, while a bump strands the
+    entries every *other* well already has — see
+    ``data/curation.apply_curation_to_cache``. It is the same reasoning
+    ``cache_projectors.project_verdict_column`` states for QC and crop, which
+    is why those two need nothing said here.
+
     Idempotent: it clears first, so building several registries in one test
     session cannot stack duplicates.
     """
     from well_viewer.data.cache_projectors import (
         clear_cache_projectors, register_cache_projector,
     )
-    from well_viewer.data.curation import apply_curation_to_cache
-    from well_viewer.features.qc.controller import apply_qc_to_cache
-    from well_viewer.features.crop.controller import apply_crop_to_cache
 
     clear_cache_projectors()
-    register_cache_projector(apply_curation_to_cache)
-    register_cache_projector(apply_qc_to_cache)
-    register_cache_projector(apply_crop_to_cache)
+    register_cache_projector(_lazy_projector(
+        "well_viewer.data.curation", "apply_curation_to_cache",
+        note_change=False))
+    register_cache_projector(_lazy_projector(
+        "well_viewer.features.qc.controller", "apply_qc_to_cache"))
+    register_cache_projector(_lazy_projector(
+        "well_viewer.features.crop.controller", "apply_crop_to_cache"))
 
 
 def attach_feature_state(state, registry: FeatureRegistry | None = None) -> None:

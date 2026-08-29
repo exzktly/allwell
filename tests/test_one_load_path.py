@@ -69,8 +69,11 @@ def ctx(tmp_path):
     return obj
 
 
-def _included(ctx, label="A01"):
-    return list(ctx.state.dataset.cache[label]["Included"])
+def _included(frame_or_ctx, label="A01"):
+    """The ``Included`` column, from a frame or from a ctx's cached well."""
+    if hasattr(frame_or_ctx, "state"):
+        return list(frame_or_ctx.state.dataset.cache[label]["Included"])
+    return list(frame_or_ctx["Included"])
 
 
 # ── the defect this phase closes ──────────────────────────────────────────
@@ -143,6 +146,35 @@ def test_load_well_records_the_fov_verdict(ctx):
     to report."""
     ctx.state.repo.load_well("A01")
     assert "A01" in ctx.state.dataset.fov_integrity
+
+
+def test_a_fresh_load_does_not_strand_the_other_wells_aggregates(ctx, tmp_path):
+    """``rows_version`` is part of the ``aggregate_well`` memo key, so bumping it
+    while walking a plate discards what the walk has already computed.
+
+    The projector writes onto a frame ``load_and_project`` built a moment ago,
+    which can have no memo of its own — so there is nothing to invalidate and
+    everything to lose. QC and crop never bump for the same reason; curation
+    cannot simply stop, because the dataset loader's bulk call depends on it,
+    so the projector path turns it off and the direct callers keep it.
+    """
+    ctx.state.dataset.well_paths["B02"] = _write_well(tmp_path, label="B02")
+    ctx.runtime.review.included_overrides.update({
+        ("A01", "1", "0", "2"): "0",
+        ("B02", "1", "0", "1"): "0",
+    })
+
+    before = ctx.state.dataset.rows_version
+    assert _included(ctx.state.repo.load_well("A01")) == [1, 0, 1]
+    assert _included(ctx.state.repo.load_well("B02")) == [0, 1, 1]
+    assert ctx.state.dataset.rows_version == before, (
+        "a fresh load bumped rows_version, which strands every aggregate "
+        "computed for the wells read before it")
+
+    # The direct call still bumps: its callers — the dataset loader above all —
+    # project onto frames that are already cached and do not invalidate after.
+    apply_curation_to_cache(ctx)
+    assert ctx.state.dataset.rows_version > before
 
 
 def test_curation_is_a_registered_projector_not_a_caller_s_errand():

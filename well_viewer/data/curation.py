@@ -41,7 +41,8 @@ def _coerce_included(val: object) -> int:
         return 1 if str(val).strip() == "1" else 0
 
 
-def apply_curation_to_cache(ctx, label: str | None = None) -> None:
+def apply_curation_to_cache(ctx, label: str | None = None, *,
+                            note_change: bool = True) -> None:
     """Project the override map onto cached ``row["Included"]``.
 
     With *label* given, only that well — the form the projector registry calls
@@ -54,6 +55,17 @@ def apply_curation_to_cache(ctx, label: str | None = None) -> None:
     hold. It re-enters ``get_rows`` when the registry calls it as a projector,
     which terminates — ``get_rows`` stores the frame in the cache *before* it
     runs the projectors, so the inner call is a hit.
+
+    *note_change* is what the registered-projector path turns off. Writing onto
+    a frame that ``load_and_project`` built a moment ago cannot invalidate a
+    memoized aggregate of that well — there is none yet — while bumping
+    ``rows_version`` does strand the entries every *other* well already has,
+    because that counter is part of the ``aggregate_well`` cache key. A plate
+    re-read one well at a time after a cache clear would then discard the
+    running total once per well. QC and crop avoid the same trap by never
+    bumping at all (``cache_projectors.project_verdict_column`` says why); this
+    projection cannot take that route, because its other callers — the dataset
+    loader above all — do not invalidate afterwards and depend on the bump.
 
     A no-op when the map is empty, which is also why it never *un-writes* a 0:
     clearing curation goes through ``persistence.reset_scopes.clear_curation``,
@@ -90,5 +102,7 @@ def apply_curation_to_cache(ctx, label: str | None = None) -> None:
         # Manual curation just changed which cells this well contributes, so a
         # memoized aggregation of it is stale. The bump lives here rather than
         # in the callers because there are several of them and one — the dataset
-        # loader — does not invalidate afterwards.
-        ctx.state.dataset.note_rows_changed()
+        # loader — does not invalidate afterwards. The exception is the fresh
+        # frame the projector path hands over; see *note_change* above.
+        if note_change:
+            ctx.state.dataset.note_rows_changed()

@@ -393,6 +393,35 @@ def _activate_default_plot(ctx) -> None:
 # the feature renderer (terminal-goal cond. 3). Lazy: ``() -> ((ctx) -> None)``.
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _svc_heatmap_build_layout_sidebar():
+    from well_viewer.features.heatmap.sidebar_view import (
+        build_heatmap_layout_sidebar,
+    )
+    return build_heatmap_layout_sidebar
+
+
+def _svc_heatmap_refresh_layout_sidebar():
+    from well_viewer.features.heatmap.sidebar_view import (
+        refresh_heatmap_layout_sidebar,
+    )
+    return refresh_heatmap_layout_sidebar
+
+
+def _svc_heatmap_well_dropped():
+    from well_viewer.features.heatmap.sidebar_view import _on_drop_event
+    return _on_drop_event
+
+
+def _svc_groups_build_replicate_panel():
+    from well_viewer.features.home.groups.panel_view import build_replicate_panel
+    return build_replicate_panel
+
+
+def _svc_preview_build_picker():
+    from well_viewer.features.preview.preview_view import build_preview_picker
+    return build_preview_picker
+
+
 def _svc_cell_gating_load_cell_areas():
     from well_viewer.features.home.cell_gating.controller import (
         cell_gating_load_cell_areas,
@@ -843,6 +872,10 @@ def _features() -> list[FeatureDescriptor]:
                 StateSpec("image_table", _state_image_table, subtab="Image Table"),
                 StateSpec("playground", _state_playground, subtab="Playground"),
             ),
+            # The preview picker is a sidebar the image tabs share, built with
+            # the shell rather than with a tab body, so the shell reaches it by
+            # name instead of importing it.
+            services={"preview.build_picker": _svc_preview_build_picker},
         ),
         FeatureDescriptor(
             name="smFISH", group="Images", build=_build_smfish, lazy_only=True,
@@ -905,6 +938,12 @@ def _features() -> list[FeatureDescriptor]:
             redraw=_redraw_heatmap,
             view_state_io=_heatmap_view_state_io,
             states=(StateSpec("heatmap", _state_heatmap),),
+            services={
+                "heatmap.build_layout_sidebar": _svc_heatmap_build_layout_sidebar,
+                "heatmap.refresh_layout_sidebar":
+                    _svc_heatmap_refresh_layout_sidebar,
+                "heatmap.well_dropped": _svc_heatmap_well_dropped,
+            },
         ),
 
         # ── Image Browser sub-leaves (dispatch hooks only) ─────────────────
@@ -968,6 +1007,8 @@ def _features() -> list[FeatureDescriptor]:
                           services={
                               "groups.panel_refresh": _svc_groups_panel_refresh,
                               "groups.map_refresh": _svc_groups_map_refresh,
+                              "groups.build_replicate_panel":
+                                  _svc_groups_build_replicate_panel,
                           }),
         FeatureDescriptor(name="Well Labels", parent="Home",
                           build=_build_well_labels, removable=False,
@@ -1019,8 +1060,67 @@ def build_feature_registry(profile=None) -> FeatureRegistry:
         kept = tuple(s for s in d.states if not s.subtab or s.subtab in admitted)
         return d if kept == d.states else replace(d, states=kept)
 
-    return FeatureRegistry(_admit_states(d) for d in _features()
-                           if profile.includes(d))
+    registry = FeatureRegistry(_admit_states(d) for d in _features()
+                               if profile.includes(d))
+    for key, factory in _SUPPORT_SERVICES.items():
+        registry.register_service(key, factory, owner=key.split(".", 1)[0])
+    _register_cache_projectors()
+    return registry
+
+
+#: Services offered by the **support libraries** — QC, crop, the export-style
+#: panel. They own no tab, so they carry no descriptor and no profile may drop
+#: them; QC in particular is the always-applied inclusion layer. They are
+#: registered here rather than in ``core/`` for the same reason the descriptor
+#: services are: this module is the only one allowed to name a feature.
+_SUPPORT_SERVICES = {
+    "qc.recompute_all": lambda: _import_attr(
+        "well_viewer.features.qc.controller", "recompute_qc_all"),
+    "qc.refresh_gate_widgets": lambda: _import_attr(
+        "well_viewer.features.qc.tab_view", "qc_gate_refresh_widgets"),
+    "crop.project_cache": lambda: _import_attr(
+        "well_viewer.features.crop.controller", "apply_crop_to_cache"),
+    "export_style.open_panel": lambda: _import_attr(
+        "well_viewer.features.export.style", "open_export_style_panel"),
+    "export_style.copy_figure": lambda: _import_attr(
+        "well_viewer.features.export.style", "copy_figure_to_clipboard"),
+}
+
+
+def _import_attr(module: str, name: str):
+    """Resolve ``module.name`` on call — the lazy-factory contract every
+    service and hook here follows, so declaring one imports nothing."""
+    import importlib
+    return getattr(importlib.import_module(module), name)
+
+
+def _register_cache_projectors() -> None:
+    """Register the QC and crop row-cache projectors.
+
+    The projection of the inclusion-verdict columns onto a freshly loaded frame
+    is wired here, with the rest of the feature wiring, because this module is
+    the one allowed to import a feature. ``data/cache_projectors`` holds the
+    list and ``data/data_loading.load_and_project`` runs it, neither of them
+    naming a feature.
+
+    Order matches the dataset loader's own sequence — curation, then QC, then
+    crop — though nothing depends on it: the three write different columns, and
+    QC and crop never touch the ``Included`` that curation owns.
+
+    Idempotent: it clears first, so building several registries in one test
+    session cannot stack duplicates.
+    """
+    from well_viewer.data.cache_projectors import (
+        clear_cache_projectors, register_cache_projector,
+    )
+    from well_viewer.data.curation import apply_curation_to_cache
+    from well_viewer.features.qc.controller import apply_qc_to_cache
+    from well_viewer.features.crop.controller import apply_crop_to_cache
+
+    clear_cache_projectors()
+    register_cache_projector(apply_curation_to_cache)
+    register_cache_projector(apply_qc_to_cache)
+    register_cache_projector(apply_crop_to_cache)
 
 
 def attach_feature_state(state, registry: FeatureRegistry | None = None) -> None:

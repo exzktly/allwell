@@ -7,7 +7,7 @@ This guard is stricter for ``data/``: it bans feature imports **at any level**
 (module *or* function-local), because the whole point of the cache-projector
 inversion (roadmap B1) is that ``data/data_loading.get_rows`` no longer reaches
 up into ``features/qc`` + ``features/crop`` — the projectors are registered from
-``core/projector_registry`` instead. A function-local feature import would
+``features/registry`` instead. A function-local feature import would
 silently re-couple the layer, so it must fail CI.
 """
 
@@ -50,6 +50,6 @@ def test_data_layer_has_no_feature_imports():
     assert not offenders, (
         "well_viewer/data/ must not import well_viewer.features at ANY level "
         "(the cache-projector inversion, roadmap B1). Register the behaviour "
-        "from core (see core/projector_registry) instead of importing the "
+        "from features/registry instead of importing the "
         "feature here:\n  " + "\n  ".join(offenders)
     )

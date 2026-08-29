@@ -10,9 +10,8 @@ So instead of importing them, ``get_rows`` iterates the projectors registered
 here. A projector is any ``(ctx, label) -> None`` callable that mutates
 ``ctx.state.dataset.cache[label]`` in place. The defaults (QC, then Crop) are
 registered at app construction by
-``core/projector_registry.register_default_projectors`` — the same
-"core wires the feature callback at startup so the lower layer imports no
-feature" pattern as ``core/scope_registry.register_default_scopes``.
+``features/registry.build_feature_registry`` — the one module allowed to name a
+feature, which wires the callback at startup so the lower layer imports none.
 
 Deliberately Qt-free and feature-free — it only holds callables and the one
 shared walk (:func:`project_verdict_column`) that every projector performs.

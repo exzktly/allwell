@@ -285,7 +285,31 @@ smFISH), so `load_controller` names **no** feature and imports none a profile ex
 > current function-local imports are already contract-compliant. Revisit after A3
 > makes the surrounding calls `ctx`-native.
 
-### B1b · Terminal condition 3 — the function-local `core/` → `features/` residual
+### B1b · Terminal condition 3 — the `core/` → `features/` residual ✅ *(closed)*
+
+**Landed.** All thirty sites below are converted and `CORE_FEATURE_IMPORT_BUDGET`
+is **0**. The mechanism is the feature-service lookup: `FeatureDescriptor.services`
+declares named callables (lazy factories, exactly as `redraw` is), core reaches
+them as `ctx.features.call(key, …)` / `.query(key, …, default=…)`, and the
+support libraries that carry no descriptor — QC, crop, the export-style panel —
+register into the same lookup via `FeatureRegistry.register_service`.
+`tests/test_feature_services_partition.py` relates the declared and called sets
+in both directions, so a typo'd or orphaned key fails rather than no-opping.
+
+Two categories turned out not to need the mechanism at all, which is worth
+recording because the deferral note assumed otherwise:
+
+- The **query** sites were pure state arithmetic wearing a feature's name.
+  `_cell_gating_resolve_key` and `cell_gating_get_fluor_gate` read the typed
+  `CellGatingState` slice and nothing else, so they moved to
+  `domain/gating_state.py`; core reads the domain, and the tab keeps both names
+  as delegates.
+- The **ordered** post-load projections needed no ordered-hook phase. The
+  ordering constraint was never about *where the import lived* — the loader
+  still runs QC and crop at exactly the points in its sequence that it did
+  before, interleaved with `persistence.load`. Only the name moved to a
+  service. The deferral had conflated "this call is ordering-critical" with
+  "this call must move to a hook", and only the second was ever hard.
 
 Thirty sites, enumerated from the AST rather than from a grep, each keyed by
 module, function and symbol because line numbers move as the work proceeds. The
@@ -319,8 +343,8 @@ Categories, which are also the mechanisms:
 
 | # | Module (`well_viewer/core/`) | Function | Imported symbol(s) | Category | Status | Note |
 |---|---|---|---|---|---|---|
-| 1 | `channel_state_controller.py` | `refresh_heatmap_aggregation_options` | `heatmap.controller: METRIC_MEAN, METRIC_FRACTION` | const | ☐ | Aggregation labels, not behaviour — move to a neutral module as `WELL_MIME` was. |
-| 2 | `channel_state_controller.py` | `refresh_heatmap_aggregation_options` | `heatmap.controller: METRIC_MEAN_ALL` | const | ☐ | Same constant set, second site in the same function. |
+| 1 | `channel_state_controller.py` | `refresh_heatmap_aggregation_options` | `heatmap.controller: METRIC_MEAN, METRIC_FRACTION` | const | ☑ | Aggregation labels, not behaviour — move to a neutral module as `WELL_MIME` was. |
+| 2 | `channel_state_controller.py` | `refresh_heatmap_aggregation_options` | `heatmap.controller: METRIC_MEAN_ALL` | const | ☑ | Same constant set, second site in the same function. |
 | 3 | `channel_state_controller.py` | `_recalculate_threshold` | `home.cell_gating.controller: cell_gating_load_cell_areas, cell_gating_load_threshold_count_on, cell_gating_load_threshold_frac_on` | service | ☑ | Void loads into the gating tab after a threshold recompute. |
 | 4 | `channel_state_controller.py` | `set_ratio_metrics` | `home.cell_gating.controller: cell_gating_load_cell_areas` | service | ☑ | Same service, second caller. |
 | 5 | `channel_state_controller.py` | `set_active_image_channel` | `image_browser.review_image.renderer: refresh_review_image_ctx` | service | ☑ | Re-render the review image for the new channel. |
@@ -329,26 +353,26 @@ Categories, which are also the mechanisms:
 | 8 | `channel_state_controller.py` | `_gating_row_key` | `home.cell_gating.controller: _cell_gating_resolve_key` | query→domain | ☑ | Pure state arithmetic: moved to `domain/gating_state.resolve_gate_key`, so core reads it from the domain and no service is needed. |
 | 9 | `channel_state_controller.py` | `get_fluor_gate` | `home.cell_gating.controller: cell_gating_get_fluor_gate` | query→domain | ☑ | Pure state arithmetic: moved to `domain/gating_state.fluor_gate_for`; unset reads as 0.0 (gate off), as before. |
 | 10 | `channel_state_controller.py` | `ensure_cell_gating_tab_built` | `home.cell_gating.tab_view: build_cell_gating_subtab` | build | ☑ | Lazy sub-tab construction. |
-| 11 | `load_controller.py` | `load_directory` | `qc.controller: recompute_qc_all` | ordered | ☐ | Post-load projection, ordered against `persistence.load`. |
-| 12 | `load_controller.py` | `load_directory` | `qc.tab_view: qc_gate_refresh_widgets` | service | ☐ | Widget sync after the QC hydrate. |
-| 13 | `load_controller.py` | `load_directory` | `crop.controller: apply_crop_to_cache` | ordered | ☐ | Post-load projection, ordered against `persistence.load`. |
+| 11 | `load_controller.py` | `load_directory` | `qc.controller: recompute_qc_all` | ordered→service | ☑ | The ordering is kept exactly where it was, in the loader's own sequence; only the *name* moved to a service, so no ordered-hook design was needed. |
+| 12 | `load_controller.py` | `load_directory` | `qc.tab_view: qc_gate_refresh_widgets` | service | ☑ | Widget sync after the QC hydrate. |
+| 13 | `load_controller.py` | `load_directory` | `crop.controller: apply_crop_to_cache` | ordered→service | ☑ | The ordering is kept exactly where it was, in the loader's own sequence; only the *name* moved to a service, so no ordered-hook design was needed. |
 | 14 | `load_controller.py` | `load_directory` | `home.labels.tab_view: label_grid_refresh` | service | ☑ | Post-load refresh of the labels grid. |
-| 15 | `load_controller.py` | `load_directory` | `heatmap.sidebar_view: refresh_heatmap_layout_sidebar` | service | ☐ | Post-load refresh of the heatmap sidebar. |
+| 15 | `load_controller.py` | `load_directory` | `heatmap.sidebar_view: refresh_heatmap_layout_sidebar` | service | ☑ | Post-load refresh of the heatmap sidebar. |
 | 16 | `load_controller.py` | `_kick_off_gating_after_load` | `home.cell_gating.controller: cell_gating_refresh_included_count, cell_gating_start_gating_worker` | service | ☑ | Starts the gating pass once the dataset is up. |
-| 17 | `selection_controller.py` | `on_sidebar_plate_well_dropped` | `heatmap.sidebar_view: _on_drop_event` | service | ☐ | Drop handling delegated to the sidebar that owns the plate. |
+| 17 | `selection_controller.py` | `on_sidebar_plate_well_dropped` | `heatmap.sidebar_view: _on_drop_event` | service | ☑ | Drop handling delegated to the sidebar that owns the plate. |
 | 18 | `selection_controller.py` | `labels_apply_affix` | `home.labels.tab_view: label_grid_refresh` | service | ☑ | Same refresh service as the loader's. |
 | 19 | `selection_controller.py` | `groups_centre_refresh` | `home.labels.tab_view: label_grid_refresh` | service | ☑ | Same refresh service, third caller. |
 | 20 | `selection_controller.py` | `groups_centre_refresh` | `home.groups.selections_view: rep_panel_refresh` | service | ☑ | Replicate panel refresh. |
 | 21 | `selection_controller.py` | `groups_centre_refresh` | `home.groups.controller: rep_refresh_map` | service | ☑ | Replicate map refresh. |
 | 22 | `selection_controller.py` | `labels_clear_all` | `home.labels.tab_view: label_grid_refresh` | service | ☑ | Same refresh service, fourth caller. |
-| 23 | `centre_view.py` | `build_centre` | `home.groups.panel_view: build_replicate_panel` | build | ☐ | Centre-page builder. |
-| 24 | `centre_view.py` | `build_centre` | `preview.preview_view: build_preview_picker` | build | ☐ | Centre-page builder. |
-| 25 | `sidebar_view.py` | `build_sidebar` | `heatmap.sidebar_view: build_heatmap_layout_sidebar` | build | ☐ | Sidebar builder. |
-| 26 | `figure_saver.py` | `open_style_panel` | `export.style: open_export_style_panel` | service | ☐ | `FigureService` reaching the export-style feature. |
-| 27 | `plot_card_actions.py` | `copy_active_card_as_svg` | `export.style: copy_figure_to_clipboard` | service | ☐ | Same feature, clipboard path. |
-| 28 | `projector_registry.py` | `register_default_projectors` | `qc.controller: apply_qc_to_cache` | bootstrap | ☐ | The documented B1 decoupling seam — core wires the feature callback. |
-| 29 | `projector_registry.py` | `register_default_projectors` | `crop.controller: apply_crop_to_cache` | bootstrap | ☐ | Same seam. |
-| 30 | `scope_registry.py` | `register_default_scopes` | `registry: build_feature_registry` | bootstrap | ☐ | Imports the registry module itself, not a feature — fallback when no registry was handed in. |
+| 23 | `centre_view.py` | `build_centre` | `home.groups.panel_view: build_replicate_panel` | build | ☑ | Centre-page builder. |
+| 24 | `centre_view.py` | `build_centre` | `preview.preview_view: build_preview_picker` | build | ☑ | Centre-page builder. |
+| 25 | `sidebar_view.py` | `build_sidebar` | `heatmap.sidebar_view: build_heatmap_layout_sidebar` | build | ☑ | Sidebar builder. |
+| 26 | `figure_saver.py` | `open_style_panel` | `export.style: open_export_style_panel` | service | ☑ | `FigureService` reaching the export-style feature. |
+| 27 | `plot_card_actions.py` | `copy_active_card_as_svg` | `export.style: copy_figure_to_clipboard` | service | ☑ | Same feature, clipboard path. |
+| 28 | `projector_registry.py` | `register_default_projectors` | `qc.controller: apply_qc_to_cache` | bootstrap | ☑ | The documented B1 decoupling seam — core wires the feature callback. |
+| 29 | `projector_registry.py` | `register_default_projectors` | `crop.controller: apply_crop_to_cache` | bootstrap | ☑ | Same seam. |
+| 30 | `scope_registry.py` | `register_default_scopes` | `registry: build_feature_registry` | bootstrap | ☑ | Imports the registry module itself, not a feature — fallback when no registry was handed in. |
 
 ### B2 · `WellRepository` facade over `DatasetState` + `get_rows` ✅ *(interface seam, no behavior change)*
 **Landed.** `data/well_repository.py` — Qt-free `WellRepository` exposing
@@ -542,53 +566,34 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 | A4 · `__init__` reach-throughs | ☑ | `RAW_SELF_DELEGATOR_BUDGET == 0` | 2026-07-11 — the 4 `__init__` runtime wirings stay (pure-logic barplot/stats **test-injection seam**), but their backing methods are **not** raw-`self` delegators, so A2's `== 0` holds; no god-object forwarder remains. |
 | A5 · service-accessor extraction | ☑ | `_ALLOWED == {"window"}` | 2026-07-11 (`3f0aa01`..`8904663`) — persistence/features→held fields; set_status/toast→`ctx.notify`; save_figure_dialog/open_export_style_panel→`ctx.figures`; rebuild_all/refresh_sidebar_map→`ctx.coordinator` |
 | B1 · cache-projector inversion | ☑ | `test_data_layer_no_feature_imports` green | 2026-07-11 |
-| B1b · load_controller decouple | ⊘ | *deferred — see note; part of terminal cond. #3 (full `core/` decouple), a separate ordered-hook design epic* | — |
+| B1b · `core/` feature decouple | ☑ | `CORE_FEATURE_IMPORT_BUDGET == 0`; all 30 tracker rows closed | 2026-08-29 |
 | B2 · `WellRepository` facade | ☑ | facade test + `REPO_BYPASS_BUDGET`=1 seeded | 2026-07-11 |
 | B3 · route cache readers | ☑ | `REPO_BYPASS_BUDGET == 0` (−spatial) | 2026-07-11 |
 | B4a · persistence → ctx | ☑ | `PERSIST_APP_PARAM_BUDGET == 0` | 2026-07-11 |
 | B4b · load-path convergence | ☑ | `WellRepository.load_well` exists, `load_controller` calls no `app._load_well_csv`, curation is a registered projector | 2026-08-29 |
 | B5 · image repo facade *(optional)* | ☐ | image-facade ratchet == 0 | — |
 
-**Terminal-goal status (reconciled against the tree, 2026-08-29):** conditions **1, 2, 4
-and 5 hold** and are guard-proven green; **Workstream A (god-object teardown) is
-COMPLETE** — `_ALLOWED == {"window"}`, `RAW_SELF_DELEGATOR_BUDGET == 0`,
-`APP_FIRST_FUNC_BUDGET == 0`. Condition **6** (full suite green) is decided per-run by CI
-rather than by this document. Condition **3** (zero `features.*` imports across **all of
-`core/`**, module *and* function-local) is the one terminal condition still open.
+**Terminal-goal status (2026-08-29): conditions 1–5 all hold and are
+guard-proven.** Workstream A is complete (`_ALLOWED == {"window"}`,
+`RAW_SELF_DELEGATOR_BUDGET == 0`, `APP_FIRST_FUNC_BUDGET == 0`); the repository
+work is complete through B4 (`REPO_BYPASS_BUDGET == 0`,
+`PERSIST_APP_PARAM_BUDGET == 0`, one load path); and **condition 3 now holds
+too — `CORE_FEATURE_IMPORT_BUDGET == 0`.** `well_viewer/core/` and
+`well_viewer/data/` import no feature at any nesting, module-scope or
+function-local, and `features/registry.py` is the sole importer it was always
+declared to be. Condition **6** (full suite green) is decided per-run by CI
+rather than by this document.
 
-It is **metered and ratcheted**: `CORE_FEATURE_IMPORT_BUDGET` in
-`tests/test_guardrails.py` (down-only, with the `_not_slack` twin). **That guard is the
-authority for the count — this section quotes it and can go stale; the guard cannot.**
-Module-scope core→feature imports are already banned at 0
-(`test_architecture_contracts`); the residual is entirely **function-local**, the
-sanctioned escape hatch. At the last reconciliation the budget stood at **30**,
-distributed as:
+What closed condition 3 was the feature-service lookup (see the B1b section):
+descriptors declare named callables, core calls them by name, and the support
+libraries that own no tab register into the same lookup. The two wiring modules
+that used to live in `core/` are gone — the row-cache projectors and the
+support services are wired inside `build_feature_registry`, and
+`register_default_scopes` now takes the registry rather than building one.
 
-| Module in `core/` | Function-local `features.*` imports |
-|---|---|
-| `channel_state_controller.py` | 10 |
-| `load_controller.py` | 6 |
-| `selection_controller.py` | 6 |
-| `centre_view.py` | 2 |
-| `projector_registry.py` | 2 |
-| `figure_saver.py` | 1 |
-| `plot_card_actions.py` | 1 |
-| `scope_registry.py` | 1 |
-| `sidebar_view.py` | 1 |
-
-These are the interleaved post-load projections + render/event dispatches that need an
-ordered post-load / redraw hook design to invert (roadmap phase B1b, a deferred epic).
-Two subclasses resist the void fan-out hook and need a service-lookup registry first:
-**query-style** cross-feature calls that return a value (`cell_gating_get_fluor_gate`,
-`_cell_gating_resolve_key`) and the **documented decoupling seams** (`projector_registry`
-QC/Crop, `scope_registry` registry-construction) which are themselves the sanctioned
-data/domain→feature bridges. This is the remaining frontier for full vertical-slice purity;
-the ratchet ensures it only shrinks.
-
-**One phase outside the terminal conditions is still open:** **B5** (image
-repository facade, marked optional — there is no `data/image_repository.py` and no
-facade ratchet). **B1b** remains ⊘ deferred and is the mechanism condition 3 is
-waiting on.
+**One phase remains open, and it is the optional one:** **B5** (image repository
+facade — there is no `data/image_repository.py` and no facade ratchet). Nothing
+depends on it, and the roadmap's terminal goal does not include it.
 
 **Changelog** (newest first):
 

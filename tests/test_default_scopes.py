@@ -51,3 +51,34 @@ def test_default_scope_redraw_threads_app_to_ctx(monkeypatch):
         scope.redraw(fake_app)  # the coalescer invokes with the APP handle
 
     assert seen == [sentinel_ctx, sentinel_ctx, sentinel_ctx]
+
+
+def test_a_feature_scope_registers_only_when_a_registry_is_offered():
+    """The feature-contributed scopes come from the registry the caller hands
+    over — this module never builds one, because building one would mean
+    importing ``features.registry`` from ``core/``.
+
+    So the bar scope appears when the registry is passed and not otherwise, and
+    the second half is the point: a caller with no registry has no feature
+    scopes to register, and an empty run is the honest answer rather than a
+    transient registry standing in for the app\'s.
+    """
+    import pytest
+
+    pytest.importorskip("PySide6")
+    from well_viewer.core.scope_registry import register_default_scopes
+    from well_viewer.domain import fold_change_scopes
+    from well_viewer.features.registry import build_feature_registry
+
+    fold_change_scopes._REGISTERED_SCOPES.clear()
+    register_default_scopes()
+    assert fold_change_scopes.get_scope("bar") is None
+
+    fold_change_scopes._REGISTERED_SCOPES.clear()
+    register_default_scopes(features=build_feature_registry())
+    assert fold_change_scopes.get_scope("bar") is not None
+
+    # And through the window handle, which is how the app itself calls it.
+    fold_change_scopes._REGISTERED_SCOPES.clear()
+    register_default_scopes(SimpleNamespace(_features=build_feature_registry()))
+    assert fold_change_scopes.get_scope("bar") is not None

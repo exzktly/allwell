@@ -34,6 +34,9 @@ from well_viewer.data.data_loading import (
     normalize_channel_tokens,
 )
 from well_viewer.domain.gating_state import fluor_gate_for, resolve_gate_key
+from well_viewer.domain.heatmap_metrics import (
+    METRIC_MEAN_ALL, METRICS_NEEDING_CUTOFF,
+)
 from well_viewer.domain.metric_registry import channel_supports_smfish
 from well_viewer.domain.ratio_models import (
     RatioMetric, is_ratio_key, ratio_name_from_key)
@@ -808,15 +811,12 @@ def refresh_heatmap_aggregation_options(ctx) -> None:
     cb = ctx.widgets.get_or_none("_heatmap_metric_cb")
     if cb is None:
         return
-    from well_viewer.features.heatmap.controller import (
-        METRIC_MEAN, METRIC_FRACTION,
-    )
     from well_viewer.domain.metric_registry import metric_has_own_cutoff
     thresholdable = metric_has_own_cutoff(ctx.state.channel.active_metric)
     model = cb.model()
     if model is None:
         return
-    for label in (METRIC_MEAN, METRIC_FRACTION):
+    for label in METRICS_NEEDING_CUTOFF:
         idx = cb.findText(label)
         if idx < 0:
             continue
@@ -827,8 +827,7 @@ def refresh_heatmap_aggregation_options(ctx) -> None:
     # back to "Mean (all cells)" so the heatmap stays valid.
     if not thresholdable:
         current = str(cb.currentText() or "")
-        if current in (METRIC_MEAN, METRIC_FRACTION):
-            from well_viewer.features.heatmap.controller import METRIC_MEAN_ALL
+        if current in METRICS_NEEDING_CUTOFF:
             alt = cb.findText(METRIC_MEAN_ALL)
             if alt >= 0:
                 blocked = cb.blockSignals(True)

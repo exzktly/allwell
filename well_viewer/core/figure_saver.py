@@ -34,5 +34,5 @@ class FigureService:
 
     def open_style_panel(self, plot_key: str) -> None:
         """Toggle the figure-properties (export-style) side panel for *plot_key*."""
-        from well_viewer.features.export.style import open_export_style_panel
-        open_export_style_panel(self._ctx.window, plot_key)
+        self._ctx.features.call(
+            "export_style.open_panel", self._ctx.window, plot_key)

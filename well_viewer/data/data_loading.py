@@ -427,7 +427,8 @@ def load_and_project(ctx, label: str, path: Path | None = None) -> pd.DataFrame:
     import — the data layer stays feature-free (the inversion enforced by
     ``tests/test_data_layer_no_feature_imports.py``). The defaults (curation,
     then QC, then crop) are registered at app construction by
-    ``core/projector_registry.register_default_projectors``.
+    ``features/registry.build_feature_registry``, which is the one module
+    allowed to name a feature.
     """
     dataset = ctx.state.dataset
     if path is not None:

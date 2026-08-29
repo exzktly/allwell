@@ -188,6 +188,26 @@ class FeatureRegistry:
         self._ordered.append(descriptor)
         self._by_name[descriptor.name] = descriptor
 
+    def register_service(self, key: str, factory: Callable, owner: str) -> None:
+        """Register a service that belongs to no descriptor.
+
+        For the **support libraries** — QC, crop, the export-style panel — which
+        are always present, own no tab and therefore carry no descriptor, but
+        which ``core/`` still has to reach. They go in the same lookup as the
+        descriptor-declared services so there is one answer to "what can core
+        call by name", and so the partition guard sees them.
+
+        *owner* names the library, for the duplicate-key message.
+        """
+        prior = self._service_owner.get(key)
+        if prior is not None:
+            raise ValueError(
+                f"duplicate feature service {key!r}: declared by both "
+                f"{prior!r} and {owner!r}."
+            )
+        self._services[key] = factory
+        self._service_owner[key] = owner
+
     def service(self, key: str) -> Callable | None:
         """The callable registered under *key*, or ``None`` if no present
         feature offers it.

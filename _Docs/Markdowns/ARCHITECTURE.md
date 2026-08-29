@@ -2219,7 +2219,32 @@ everything core used to hard-code:
   grid back to fresh-tab defaults when a saved one was just restored earlier in
   the same load;
 - `per_well_selection` / `single_well_selection` — selection-behaviour flags
-  that replaced the hard-coded tab-name sets in `selection_controller`.
+  that replaced the hard-coded tab-name sets in `selection_controller`;
+- `services` — named callables the feature offers to core, keyed
+  `"<area>.<verb>"` (`"labels.grid_refresh"`, `"cell_gating.start_worker"`,
+  `"heatmap.build_layout_sidebar"`), each a lazy factory exactly as `redraw` is.
+  This is the seam for what a fan-out hook cannot express: a refresh aimed at
+  **one** named feature rather than broadcast to all of them, a widget builder,
+  and a **query** — a call that returns a value, which an `fn(ctx) -> None` hook
+  has nowhere to put. Core calls them as `ctx.features.call(key, …)` (void, and
+  the return says whether anything ran) or `ctx.features.query(key, …,
+  default=…)`, where the default is what the app believes when the feature that
+  would have answered is not in this build. The **support libraries** — QC,
+  crop, the export-style panel — own no tab and so carry no descriptor; they
+  register into the same lookup through `FeatureRegistry.register_service`, from
+  the same `features/registry.py`, so there is one answer to "what can core call
+  by name". Two features declaring one key is rejected at registration: a key is
+  how core addresses one feature, and two claimants would mean the call reaches
+  whichever loaded first.
+
+  A string key fails differently from an import, and silently — a typo, a
+  one-sided rename, or a feature that stops declaring a service leaves `call`
+  returning `False` and the refresh simply never happening. So
+  `tests/test_feature_services_partition.py` relates the two sides in both
+  directions: every key called from the tree must be declared, and every
+  declared service must be called. The first half catches the typo; the second
+  catches the service left behind by a rewritten call site, which would
+  otherwise sit there looking like live wiring.
 
 `parent` links a sub-leaf to its composite container (Plotting / Image Browser /
 Home); `registry.sub_leaves(parent)` enumerates a container's
@@ -2230,6 +2255,26 @@ and dropping a leaf is a one-line/manifest edit.
 `centre_view`, `tab_controller`, `selection_controller`, `channel_state_controller`,
 and `scope_registry` all read it. Every hook callable imports its feature lazily,
 so building the registry pulls no heavy deps.
+
+Building it is also what wires the two lower layers that need a feature callback
+but may not import one: the **row-cache projectors** (`data/cache_projectors`,
+run by `data_loading.load_and_project` — curation, then QC, then crop) and the
+support services above. Both live in `build_feature_registry` because it is the
+one place allowed to name a feature; `core/` holds no wiring module for either.
+`core/scope_registry.register_default_scopes` completes the picture from the
+other end: it takes the registry the caller hands it (the window's, or one
+passed directly) and never builds one, because a caller with no registry to
+offer has no feature scopes to register — an empty run is the honest answer, not
+a transient registry standing in for the app's.
+
+**`well_viewer/core/` and `well_viewer/data/` therefore import no feature at
+all** — not at module scope, and not function-locally either. That is the
+roadmap's terminal condition 3, and `CORE_FEATURE_IMPORT_BUDGET == 0` in
+`tests/test_guardrails.py` holds it there. The practical difference is that a
+subset build's call sites now no-op *by contract*: before, a site like
+`channel_state_controller.refresh_heatmap_aggregation_options` survived the thin
+profile only because its widget-presence check happened to return before the
+import, which is an accident of layout rather than a decision.
 
 **To remove a feature, comment out its line in `FEATURES`.** Its rail entry,
 dispatch, state slice, fold-change scope, and persistence drop out together, with

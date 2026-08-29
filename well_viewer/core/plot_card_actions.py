@@ -139,8 +139,6 @@ def copy_active_card_as_svg(ctx, card_attr: str | None = None) -> None:
     pastes true editable vector; elsewhere a Qt clipboard payload is used (see
     ``copy_figure_to_clipboard``). The figure is captured in publication mode.
     """
-    from well_viewer.features.export.style import copy_figure_to_clipboard
-
     card, _ = _active_card(ctx, card_attr)
     if card is None:
         return
@@ -155,7 +153,11 @@ def copy_active_card_as_svg(ctx, card_attr: str | None = None) -> None:
         try:
             if hasattr(card, "setPlotTheme") and prev_theme != "publication":
                 card.setPlotTheme("publication")
-            status = copy_figure_to_clipboard(fig)
+            # A build without the export-style library says so rather than
+            # reporting a copy that never happened.
+            status = ctx.features.query(
+                "export_style.copy_figure", fig,
+                default="Copying a figure is not available in this build.")
         finally:
             if (hasattr(card, "setPlotTheme")
                     and getattr(card, "_plot_theme", "screen") != prev_theme):

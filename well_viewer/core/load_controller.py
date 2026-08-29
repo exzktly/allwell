@@ -535,10 +535,9 @@ def load_directory(ctx, d: Path, label=None) -> None:
         # post-load redraw actually reflects the just-hydrated thresholds. Bare
         # apply only wrote the column, leaving any cache built earlier in the
         # load sequence stale — the gate loaded into the fields but didn't take.
-        from well_viewer.features.qc.controller import recompute_qc_all
-        recompute_qc_all(ctx)
-        from well_viewer.features.qc.tab_view import qc_gate_refresh_widgets
-        qc_gate_refresh_widgets(app)  # sync the Cell Gating QC gate row if built
+        ctx.features.call("qc.recompute_all", ctx)
+        # Sync the Cell Gating QC gate row if it has been built.
+        ctx.features.call("qc.refresh_gate_widgets", app)
     except Exception:
         swallowed()  # was: pass (silent except)
     # Hydrate the crop region and the frames it is scoped to
@@ -546,8 +545,7 @@ def load_directory(ctx, d: Path, label=None) -> None:
     # already-cached rows. Safe no-op when unset.
     try:
         app._persistence.load("crop_region")
-        from well_viewer.features.crop.controller import apply_crop_to_cache
-        apply_crop_to_cache(ctx)
+        ctx.features.call("crop.project_cache", ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
     # Hydrate user-defined line-plot draw order (line_order.json).
@@ -614,10 +612,7 @@ def load_directory(ctx, d: Path, label=None) -> None:
         logging.getLogger("well_viewer").exception("view_state load failed")
     if hasattr(app, "_heatmap_sidebar_table"):
         try:
-            from well_viewer.features.heatmap.sidebar_view import (
-                refresh_heatmap_layout_sidebar,
-            )
-            refresh_heatmap_layout_sidebar(ctx)
+            ctx.features.call("heatmap.refresh_layout_sidebar", ctx)
         except Exception:
             swallowed()  # was: pass (silent except)
     display = label or str(d)

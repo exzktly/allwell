@@ -29,10 +29,10 @@ import pandas as pd
 import pytest
 
 from well_viewer.core.dataset_state import DatasetState
-from well_viewer.core.projector_registry import register_default_projectors
 from well_viewer.data.curation import apply_curation_to_cache
 from well_viewer.data.data_loading import get_rows
 from well_viewer.data.well_repository import WellRepository
+from well_viewer.features.registry import build_feature_registry
 
 
 def _write_well(tmp_path, label="A01", rows=3):
@@ -63,7 +63,9 @@ def ctx(tmp_path):
         runtime=SimpleNamespace(review=SimpleNamespace(included_overrides={})),
     )
     obj.state.repo = WellRepository(obj)
-    register_default_projectors()
+    # Building the registry is what registers the projectors: the wiring lives
+    # with the one module allowed to name a feature.
+    build_feature_registry()
     return obj
 
 
@@ -153,7 +155,7 @@ def test_curation_is_a_registered_projector_not_a_caller_s_errand():
     """
     from well_viewer.data.cache_projectors import iter_cache_projectors
 
-    register_default_projectors()
+    build_feature_registry()
     registered = {fn.__name__ for fn in iter_cache_projectors()}
 
     assert "apply_curation_to_cache" in registered

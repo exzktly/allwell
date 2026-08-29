@@ -492,8 +492,7 @@ def on_sidebar_plate_well_dropped(ctx, well_id: str, token: str) -> None:
     if not token:
         return
     try:
-        from well_viewer.features.heatmap.sidebar_view import _on_drop_event
-        _on_drop_event(ctx, "palette", None, token)
+        ctx.features.call("heatmap.well_dropped", ctx, "palette", None, token)
     except Exception:
         import logging
         logging.getLogger(__name__).exception("Heat map well drop handling failed")

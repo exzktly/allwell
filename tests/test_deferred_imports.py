@@ -126,7 +126,7 @@ FEATURE_PREFIX = "well_viewer.features"
 # importing anything. `export/service.py` also stopped deferring its two
 # intra-package imports (`cell_scope_compute`, `worker`), which were never a
 # cycle to begin with.
-MAX_DEFERRED_FEATURE_IMPORTS = 87
+MAX_DEFERRED_FEATURE_IMPORTS = 72
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

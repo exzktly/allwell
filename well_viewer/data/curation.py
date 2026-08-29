@@ -10,7 +10,7 @@ carries the decision from the one to the other.
 **Why this lives in the data layer rather than under the Review Image feature.**
 It is a cache projector, in the same sense as QC's ``QC_Pass`` and the crop's
 ``Crop_Pass``: a verdict written onto a freshly-built frame so the chokepoint
-sees a complete row. Registering it beside them (``core/projector_registry``)
+sees a complete row. Registering it beside them (``features/registry``)
 means the roster of things applied to a new frame is a single list, and a frame
 rebuilt after a cache clear carries the same three layers as one built during the
 dataset load. While this projection was owned by the feature it was applied only

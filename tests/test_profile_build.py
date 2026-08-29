@@ -157,6 +157,45 @@ def test_bundle_name_full_and_empty_profiles_add_no_suffix():
     assert bundle_name("8.8.8", "  full  ") == "AllWell-8.8.8"
 
 
+def test_no_doc_or_script_promises_a_versionless_bundle_folder():
+    """The build instructions must name the folder ``bundle_name`` produces.
+
+    The output folder carried a bare ``dist/AllWell`` until it became
+    versioned, and one build instruction went on saying so afterwards — a
+    reader following it looks in a directory that no build has produced since,
+    and has no way to tell that from a build that failed. So no instruction may
+    name ``dist/AllWell`` (either slash) without the version that follows it.
+    """
+    import re
+
+    repo_root = Path(__file__).resolve().parent.parent
+    documents = [
+        repo_root / "_Docs" / "requirements.txt",
+        repo_root / "_Docs" / "Markdowns" / "README_WellViewer.md",
+        repo_root / "_Docs" / "Markdowns" / "ARCHITECTURE.md",
+        repo_root / "scripts" / "build_executable.sh",
+        repo_root / "scripts" / "build_executable.ps1",
+        repo_root / "_Docs" / "_Installation" / "build_all_well.sh",
+        repo_root / "CLAUDE.md",
+    ]
+    # ``dist/AllWell`` followed by anything but the ``-`` that starts the
+    # version. ``dist/AllWell-<version>``, ``-8.8.8`` and ``-*`` all clear.
+    versionless = re.compile(r"dist[/\\]AllWell(?![-\w])")
+
+    bad: list[str] = []
+    for doc in documents:
+        if not doc.is_file():
+            continue
+        for number, line in enumerate(
+                doc.read_text(encoding="utf-8").splitlines(), start=1):
+            if versionless.search(line):
+                bad.append(f"{doc.relative_to(repo_root).as_posix()}:{number}: {line.strip()}")
+
+    assert not bad, (
+        "these name a bundle folder no build produces — bundle_name() puts the "
+        "version (and any profile) in it:\n  " + "\n  ".join(bad))
+
+
 def test_trim_readme_full_app_is_unchanged():
     # features=None → the full app → return the text verbatim.
     assert trim_readme_for_profile(_SAMPLE_README, None) == _SAMPLE_README

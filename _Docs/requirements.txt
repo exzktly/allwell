@@ -27,7 +27,8 @@
 #   Always pass --clean. PyInstaller caches build/ and dist/ between runs
 #   and will silently reuse stale TOCs that miss spec changes; --clean
 #   wipes the cache and forces a fresh Analysis. The output lands at
-#   ``dist/AllWell.app``.
+#   ``dist/AllWell-<version>.app``, where <version> is the string in
+#   version.py (a feature-subset build adds the profile name too).
 #
 # IMPORTANT:
 #   - setuptools must stay at <70. Modern setuptools (v70+) removed
@@ -69,7 +70,12 @@
 #
 # To produce a frozen Windows bundle (optional; only for distribution):
 #
-#   powershell scripts\build_executable.ps1 -Clean   # produces dist\AllWell\
+#   powershell -ExecutionPolicy Bypass -File scripts\build_executable.ps1 -Clean
+#   # produces dist\AllWell-<version>\AllWell.exe, where <version> is the
+#   # string in version.py. -ExecutionPolicy Bypass is scoped to that one
+#   # process; a stock Windows install refuses to run an unsigned .ps1
+#   # otherwise, and the Miniforge Prompt is cmd.exe, which cannot run one
+#   # at all.
 #
 # Notes:
 #   - The mamba step pulls in `vs2015_runtime` from conda-forge so the

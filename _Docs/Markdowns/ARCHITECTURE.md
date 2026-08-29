@@ -9362,7 +9362,26 @@ the wiring cover the same set.
   `ALLWELL_THEME` / `ALLWELL_WITH_TRACKING` environment switches. Output is
   `dist\AllWell-<version>\AllWell.exe`; the spec's `BUNDLE` step is a macOS-only
   no-op, so no `.app` is produced. Both scripts resolve the bundle folder they
-  report through `bundle_name()` (§5.3) instead of a hardcoded path.
+  report through `bundle_name()` (§5.3) instead of a hardcoded path, and
+  `tests/test_profile_build.py` fails on any instruction that names an output
+  folder under `dist/` with no version in it — no build has produced one since
+  the name became versioned, and a reader following such an instruction cannot
+  tell an empty directory from a build that failed.
+
+  The documented invocation is
+  `powershell -ExecutionPolicy Bypass -File scripts\build_executable.ps1 -Clean`,
+  and both halves of that prefix earn their place. The environment-setup steps
+  put the user in the Miniforge Prompt, which is `cmd.exe` and cannot run a
+  `.ps1` at all; and a stock Windows install refuses to run an unsigned local
+  script, so PowerShell without the switch answers "running scripts is disabled
+  on this system". `-ExecutionPolicy Bypass` is scoped to that one process.
+
+  `build_executable.sh` is the Git Bash entry point on Windows as well as the
+  macOS / Linux one, so it resolves its interpreter (`python3`, then `python`)
+  rather than assuming `python3`: a Windows conda environment ships
+  `python.exe` with no `python3.exe`, and the bundle-name lookup that used the
+  bare name came back empty there — reporting failure after a build that had
+  succeeded.
 - **Feature-subset binary:** `ALLWELL_PROFILE=<name> scripts/build_executable.sh`
   builds a binary containing only that profile's features, with excluded
   features' source and unique heavy deps dropped from the bundle and the profile

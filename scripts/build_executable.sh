@@ -67,7 +67,27 @@ pyinstaller "$SPEC_FILE" --noconfirm --log-level "${ALLWELL_LOG_LEVEL:-INFO}"
 # (scripts/profile_build.bundle_name) what to look for. Globbing dist/AllWell-*
 # would also match the bundles of earlier versions left behind by a build without
 # --clean, and report one of those as "complete".
-_bundle_name="$(python3 -c "import os, sys; sys.path[:0] = ['.', 'scripts']; from profile_build import bundle_name; from version import __version__; print(bundle_name(__version__, os.environ.get('ALLWELL_PROFILE', '')))" || true)"
+#
+# Resolve the interpreter rather than hardcoding `python3`. This script is the
+# Git Bash entry point on Windows as well as the macOS / Linux one, and a
+# Windows conda environment ships `python.exe` with no `python3.exe` beside it
+# — so `python3` there is either missing or, worse, the Microsoft Store alias
+# for a completely different interpreter. Either way the name came back empty
+# and the script reported failure *after* a build that had actually succeeded.
+_python=""
+for _candidate in python3 python; do
+    if command -v "$_candidate" >/dev/null 2>&1; then
+        _python="$_candidate"
+        break
+    fi
+done
+if [[ -z "$_python" ]]; then
+    echo "ERROR: PyInstaller succeeded but no Python interpreter is on PATH to" >&2
+    echo "       resolve the expected bundle name. Check dist/ by hand." >&2
+    exit 1
+fi
+
+_bundle_name="$("$_python" -c "import os, sys; sys.path[:0] = ['.', 'scripts']; from profile_build import bundle_name; from version import __version__; print(bundle_name(__version__, os.environ.get('ALLWELL_PROFILE', '')))" || true)"
 if [[ -z "$_bundle_name" ]]; then
     echo "ERROR: PyInstaller succeeded but the expected bundle name could not be resolved" >&2
     echo "       from version.py / scripts/profile_build.py. Check dist/ by hand." >&2

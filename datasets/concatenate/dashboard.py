@@ -201,22 +201,10 @@ class ConcatDashboard(PlateProgress):
                 bar.setRange(0, max(1, total)); bar.setValue(merged)
                 cnt.setText(f"{merged}/{total}")
 
-    def _build_legend(self) -> None:
-        self._clear(self._legend_lay)
-        head = QLabel("Wells", self._legend_host)
-        head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
-        self._legend_lay.addWidget(head)
-        items = [
+    def _legend_items(self):
+        return "Wells", [
             (theme.Colors.text_muted, "pending"),
             (theme.Colors.warn, "merging"),
             (theme.Colors.success, "merged"),
             (theme.Colors.accent, "merged — no CSV on one side"),
         ]
-        for color, txt in items:
-            row_w = QWidget(self._legend_host)
-            r = QHBoxLayout(row_w); r.setContentsMargins(0, 0, 0, 0); r.setSpacing(7)
-            r.addWidget(status_dot(color))
-            t = QLabel(txt, row_w); t.setStyleSheet(f"color:{theme.Colors.text_primary};")
-            r.addWidget(t); r.addStretch(1)
-            self._legend_lay.addWidget(row_w)
-        self._legend_lay.addStretch(1)

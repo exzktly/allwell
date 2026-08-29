@@ -123,20 +123,11 @@ class ImportLooseDashboard(PlateProgress):
             "done": theme.Colors.success,
         }[state]
 
-    def _build_legend(self) -> None:
-        self._clear(self._legend_lay)
-        head = QLabel("Legend", self._legend_host)
-        head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
-        self._legend_lay.addWidget(head)
-        for state, label in (("pending", "pending"), ("writing", "zipping"), ("done", "zipped")):
-            row_w = QWidget(self._legend_host)
-            r = QHBoxLayout(row_w)
-            r.setContentsMargins(0, 0, 0, 0)
-            r.setSpacing(7)
-            r.addWidget(status_dot(self._state_color(state)))
-            t = QLabel(label, row_w)
-            t.setStyleSheet(f"color:{theme.Colors.text_primary};")
-            r.addWidget(t)
-            r.addStretch(1)
-            self._legend_lay.addWidget(row_w)
-        self._legend_lay.addStretch(1)
+    def _legend_items(self):
+        # Through _state_color, so the legend and the plate cannot disagree
+        # about what a state looks like.
+        return "Legend", [
+            (self._state_color(state), label)
+            for state, label in (("pending", "pending"), ("writing", "zipping"),
+                                 ("done", "zipped"))
+        ]

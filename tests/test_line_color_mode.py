@@ -1,23 +1,25 @@
-"""Properties → Colours on the Line tab: plate colours, or greys plus markers.
+"""Properties → Colours on the Line tab: plate colours, or greys told apart
+three ways.
 
 The Bar tab's grey mode collapses every column onto one ink, and copying that
 rule here would have been the mistake this file mostly guards against. A bar is
 named by the tick label under it; a trace is not. Ten identical grey curves is
 not a cleaner figure than ten coloured ones, it is an unreadable one — so grey
-mode here identifies a trace by a **shade** and a **marker** together, and the
-tests below pin both halves and the arithmetic that says how many of each there
-can be.
+mode here identifies a trace by a **shade**, a **dash pattern** and a
+**marker** at once, and the tests below pin all three together with the
+arithmetic that says how many of each there can be and why no two of them
+advance in step.
 
 Three things the assertions are careful about:
 
-* They sit at the **boundary** (§7.4 #1) — the colour, marker and face that
-  reached the drawn ``Line2D``, not what a resolver computed. A helper can be
-  right while nothing reaches the screen.
+* They sit at the **boundary** (§7.4 #1) — the colour, dash, marker and face
+  that reached the drawn ``Line2D``, not what a resolver computed. A helper can
+  be right while nothing reaches the screen.
 * They check what survives ``apply_export_style_prefs``, which runs on **every**
-  redraw and pins marker shape and face from the Properties prefs. Two per-artist
-  opt-outs stop it; without the second, half the marker cycle came back filled
-  and six traces stopped being distinguishable while the legend went on naming
-  twelve.
+  redraw and pins marker shape, marker face and dash from the Properties prefs.
+  Three per-artist opt-outs stop it, one per cue; without the face one, half the
+  marker cycle came back filled and six traces stopped being distinguishable
+  while the legend went on naming twelve.
 * Both surfaces that draw these panels — the tab and the Batch Export line
   figure — answer the question the same way (§7.5 #5).
 
@@ -135,7 +137,7 @@ def test_neighbouring_traces_differ_in_shade_as_well_as_marker():
     assert len({s.marker for s in styles}) == 4
 
 
-def test_the_pair_is_unique_across_the_legend_the_screen_names():
+def test_the_style_is_unique_across_the_legend_the_screen_names():
     """Twelve is the number that has to be distinct: it is
     ``SCREEN_LEGEND_ENTRIES``, the point past which the legend stops naming
     traces individually and says how many it left out."""

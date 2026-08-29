@@ -8,11 +8,18 @@ slot, the 8x12 well plate map (each well drawn as a progress dial while it
 is being worked on), and a legend. Extracted so the two dashboards' layout/plate/legend wiring
 can't drift apart from each other the way it had before this module existed.
 
+The legend is drawn here too, not just hosted here. Every dashboard's legend
+is the same picture — a heading over one coloured dot per state, each with its
+label — so :meth:`PlateProgress._build_legend` renders it and the subclass says
+only *what is in it*, through :meth:`PlateProgress._legend_items`. Five
+subclasses had written those eighteen lines out separately before that.
+
 A subclass sets its own instance state, then calls ``super().__init__(title)``;
 the base builds every widget above and finishes by invoking the subclass's own
-``_build_rail()`` / ``_build_legend()`` (which must exist by then) to populate
-the left slot and the legend — the same "build state, then build chrome, then
-populate" order :class:`RunDashboard` used before this extraction.
+``_build_rail()`` (which must exist by then) and, unless it passed
+``show_legend=False``, its ``_legend_items()`` — the same "build state, then
+build chrome, then populate" order :class:`RunDashboard` used before this
+extraction.
 """
 
 from __future__ import annotations
@@ -43,6 +50,10 @@ _PLATE_STACK_GAP_PX = 6
 # (ARCHITECTURE §8: never hardcode a pixel size at a call site).
 _LEGEND_HOST_W = 190
 _RAIL_HOST_W = 238
+#: Gap between a legend row's dot and its label. The same 7 px the stage rows
+#: use, and off the 4-px scale for the same reason: these are dense fixed-width
+#: rows whose legibility, not the scale, decides the number.
+_LEGEND_ROW_SPACING_PX = 7
 
 
 def canon_well(well_id: str) -> str:
@@ -440,6 +451,37 @@ class PlateProgress(QWidget):
                 w.setParent(None)        # un-render immediately
                 w.deleteLater()
 
+    def _build_legend(self) -> None:
+        """Draw the legend: a heading, then one dot-and-label row per item.
+
+        Every dashboard's legend is the same picture — which colour means
+        which state — and differs only in the heading and the list. So the
+        subclass supplies the list through :meth:`_legend_items` and this
+        draws it, rather than each subclass writing the same eighteen lines
+        with its own words in the middle.
+
+        It clears first because it is called again on every ``reset``: a run
+        that redraws its legend must replace the rows, not stack a second set
+        under them.
+        """
+        title, items = self._legend_items()
+        self._clear(self._legend_lay)
+        head = QLabel(title, self._legend_host)
+        head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
+        self._legend_lay.addWidget(head)
+        for color, text in items:
+            row = QWidget(self._legend_host)
+            r = QHBoxLayout(row)
+            r.setContentsMargins(0, 0, 0, 0)
+            r.setSpacing(_LEGEND_ROW_SPACING_PX)
+            r.addWidget(status_dot(color))
+            label = QLabel(text, row)
+            label.setStyleSheet(f"color:{theme.Colors.text_primary};")
+            r.addWidget(label)
+            r.addStretch(1)
+            self._legend_lay.addWidget(row)
+        self._legend_lay.addStretch(1)
+
     def _on_toggle(self) -> None:
         show = self._toggle.isChecked()
         self._body.setVisible(show)
@@ -449,7 +491,14 @@ class PlateProgress(QWidget):
     def _build_rail(self) -> None:
         raise NotImplementedError
 
-    def _build_legend(self) -> None:
+    def _legend_items(self) -> tuple[str, list[tuple[str, str]]]:
+        """The legend's heading and its ``(colour, label)`` rows.
+
+        Still a hook that raises rather than a default of no rows: a subclass
+        that asks for a legend and forgets to say what is in it should fail at
+        construction, not draw an empty column. One that wants no legend passes
+        ``show_legend=False`` instead, and is never asked.
+        """
         raise NotImplementedError
 
     def _well_tooltip(self, well_id: str) -> str:

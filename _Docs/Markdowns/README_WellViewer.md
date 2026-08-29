@@ -261,17 +261,34 @@ python allwell.py --data_dir C:\path\to\results
 ```
 
 To produce a distributable Windows bundle (optional — only if you want
-`AllWell.exe` for users who don't have the env):
+`AllWell.exe` for users who don't have the env), run this from the same
+Miniforge Prompt you have been using:
 
 ```powershell
-.\scripts\build_executable.ps1 -Clean
+powershell -ExecutionPolicy Bypass -File scripts\build_executable.ps1 -Clean
 ```
+
+Two things about that line, both of which bite if you shorten it. The
+Miniforge Prompt is `cmd.exe`, which cannot run a `.ps1` at all, so the
+build step — unlike every command above it — needs PowerShell started
+explicitly. And a stock Windows install refuses to run an unsigned local
+script, so without `-ExecutionPolicy Bypass` PowerShell answers *"running
+scripts is disabled on this system"* and stops. The switch applies to that
+one process and changes nothing machine-wide. From a PowerShell prompt
+where you have already relaxed the policy yourself, `.\scripts\build_executable.ps1 -Clean`
+is equivalent.
+
+Always pass `-Clean`. PyInstaller caches `build\` and `dist\` between
+runs, and a stale cache is the usual reason a rebuilt bundle still carries
+the previous version's behaviour.
 
 The output is `dist\AllWell-<version>\AllWell.exe`, where `<version>` is
 the string in `version.py` (a feature-subset build built with
 `$env:ALLWELL_PROFILE` appends the profile name too). The spec's macOS
 `.app` `BUNDLE` step is a no-op off macOS, so no `AllWell.app` is
-produced.
+produced. Ship the whole `dist\AllWell-<version>\` folder, not just the
+`.exe` — it is a onedir bundle and the executable does not run without the
+`_internal\` tree beside it.
 
 ---
 

@@ -61,13 +61,23 @@ REMOTE_PYTHON = "~/miniforge3/envs/allwell/bin/python"
 
 
 def say(msg: str) -> None:
+    # ``sys.stdout`` can be None. A frozen windowed (console=False) PyInstaller
+    # build nulls it, and this module runs inside exactly that process: the
+    # Remotes dialog spawns the bundle with the ``--run-bootstrap`` sentinel and
+    # reads the pipe it attached to fd 1. The launcher repairs the streams
+    # before loading this module, but reaching for ``.isatty()`` on the bare
+    # attribute is what turns a missing repair into an AttributeError on the
+    # first message, so check before writing rather than after.
+    out = sys.stdout
+    if out is None:
+        return
     # ANSI cyan label, no colour on Windows cmd (which doesn't render
     # ANSI without `os.system("")` warming it up). Keep it simple.
-    if sys.stdout.isatty() and os.name != "nt":
-        sys.stdout.write(f"\033[1;36m[bootstrap]\033[0m {msg}\n")
+    if os.name != "nt" and out.isatty():
+        out.write(f"\033[1;36m[bootstrap]\033[0m {msg}\n")
     else:
-        sys.stdout.write(f"[bootstrap] {msg}\n")
-    sys.stdout.flush()
+        out.write(f"[bootstrap] {msg}\n")
+    out.flush()
 
 
 # ── v5.2.11: debug log file ────────────────────────────────────────────────
@@ -110,6 +120,13 @@ class _TeeStream:
     after each call by writing ``result.stdout`` / ``result.stderr``
     to the log too. Capture=False (streaming) sites have been
     converted to capture=True so their output is also in the log.
+
+    ``primary`` may be None — a frozen windowed build nulls the standard
+    streams, and while the launcher repairs ``sys.stdout`` / ``sys.stderr``
+    before this module loads, it cannot repair a stream that was never
+    handed to us. A None primary degrades to log-file-only rather than
+    raising out of every write, which would take the whole bootstrap down
+    for the sake of output nobody can see anyway.
     """
 
     def __init__(self, primary, log_file) -> None:
@@ -117,17 +134,21 @@ class _TeeStream:
         self._log = log_file
 
     def write(self, data: str) -> int:
-        self._primary.write(data)
+        if self._primary is not None:
+            self._primary.write(data)
+            _quietly("tee flush", self._primary.flush)
         _quietly("tee write", self._log.write, data)
-        _quietly("tee flush", self._primary.flush)
         _quietly("tee flush", self._log.flush)
         return len(data)
 
     def flush(self) -> None:
-        _quietly("tee flush", self._primary.flush)
+        if self._primary is not None:
+            _quietly("tee flush", self._primary.flush)
         _quietly("tee flush", self._log.flush)
 
     def fileno(self) -> int:
+        if self._primary is None:
+            raise OSError("bootstrap tee has no primary stream to report an fd for")
         return self._primary.fileno()
 
     def isatty(self) -> bool:
@@ -922,7 +943,16 @@ def measure_bandwidth(alias: str, *, ssh_key_path: str = "") -> float:
             rsync_argv,
             check=True,
             capture_output=True,
+            # rsync's messages carry the remote path, which is UTF-8; a
+            # bare ``text=True`` decodes it with the client's locale, so on
+            # a cp1252 Windows box a CalledProcessError's stderr either
+            # mojibakes or raises. This module stays stdlib-only (it is
+            # loaded by file path out of the frozen bundle), so it spells
+            # out what ``services.subprocess_text.TEXT_UTF8`` holds for the
+            # rest of the app rather than importing it.
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         elapsed = max(time.monotonic() - start, 1e-6)
     finally:
@@ -1054,8 +1084,15 @@ def main(argv: list[str] | None = None) -> int:
     global _LOG_FILE
     log_path, _LOG_FILE = _open_log_file()
     if _LOG_FILE is not None:
-        sys.stdout = _TeeStream(sys.__stdout__, _LOG_FILE)
-        sys.stderr = _TeeStream(sys.__stderr__, _LOG_FILE)
+        # Tee the *live* streams, not ``sys.__stdout__`` / ``sys.__stderr__``.
+        # A frozen windowed build nulls the dunder pair and never restores it,
+        # so teeing those wrapped None and every subsequent write — say(), the
+        # probe results, the ssh stderr — raised AttributeError instead of
+        # reaching the parent's pipe. util.frozen_io.ensure_std_streams (called
+        # by the launcher's --run-bootstrap dispatch) repairs sys.stdout /
+        # sys.stderr only, which is the pair that matters here.
+        sys.stdout = _TeeStream(sys.stdout, _LOG_FILE)
+        sys.stderr = _TeeStream(sys.stderr, _LOG_FILE)
         say(f"Debug log: {log_path}")
         _log_to_file(
             f"=== bootstrap started at {time.strftime('%Y-%m-%d %H:%M:%S')} "

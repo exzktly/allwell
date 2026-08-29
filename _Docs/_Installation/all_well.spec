@@ -50,8 +50,12 @@ _parent = _here.parent.parent        # repository root (two levels up)
 # Single source of truth for the app version (repo-root version.py). Loaded by
 # exec so the .spec doesn't depend on the repo root being importable at build
 # time. Bump version.py on a release; the bundle version tracks it automatically.
+# Read with an explicit codec: both this file and the profile manifests below
+# contain UTF-8 punctuation, and ``read_text()`` with no encoding decodes with
+# the build machine's locale — the ANSI codepage on Windows, which mojibakes
+# those bytes and raises outright on any the codepage has no character for.
 _ver_ns: dict = {}
-exec((_parent / "version.py").read_text(), _ver_ns)
+exec((_parent / "version.py").read_text(encoding="utf-8"), _ver_ns)
 APP_VERSION = _ver_ns["__version__"]
 
 # ---------------------------------------------------------------------------
@@ -92,7 +96,8 @@ _excluded_deps: list = []           # import-name heavy deps unique to excluded 
 _profile_active = bool(_PROFILE) and _PROFILE.lower() != "full"
 
 if _profile_active:
-    _prof = tomllib.loads((_parent / "profiles" / f"{_PROFILE}.toml").read_text())
+    _prof = tomllib.loads(
+        (_parent / "profiles" / f"{_PROFILE}.toml").read_text(encoding="utf-8"))
     _catalog = load_catalog(_parent / "profiles" / "full.toml")
     _ex = compute_exclusions(_catalog, _prof.get("features"),
                              _prof.get("subtabs") or {})

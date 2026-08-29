@@ -21,14 +21,42 @@ import inspect
 import textwrap
 
 
-def test_the_pipeline_stream_replaces_undecodable_bytes():
+def test_the_pipeline_stream_replaces_undecodable_bytes(monkeypatch):
+    """Asserted at the boundary — the kwargs that actually reach Popen.
+
+    Reading the function's source for the two keywords passed as long as they
+    were spelled there, and stopped the day the spelling moved into
+    ``services.subprocess_text.TEXT_UTF8`` while the behaviour was unchanged.
+    What matters is the decoder the child's pipe is opened with, so spy on the
+    call and read it.
+    """
+    import subprocess
+
     from services import pipeline_service
 
-    src = inspect.getsource(pipeline_service.spawn_pipeline)
-    assert 'errors="replace"' in src, (
+    seen: dict = {}
+
+    def _fake_popen(args, **kwargs):
+        seen.update(kwargs)
+        raise _Spawned()
+
+    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+    try:
+        pipeline_service.spawn_pipeline(["python", "-c", "pass"])
+    except _Spawned:
+        pass
+
+    assert seen.get("errors") == "replace", (
         "the pipeline's stdout is decoded strictly, so one byte from a "
         "filename the filesystem allowed raises out of the reader")
-    assert 'encoding="utf-8"' in src
+    assert seen.get("encoding") == "utf-8", (
+        "the pipeline's stdout is decoded with the client's locale — the ANSI "
+        "codepage on Windows — rather than the UTF-8 it is written in")
+    assert seen.get("text") is True
+
+
+class _Spawned(Exception):
+    """Raised by the Popen spy once it has recorded the kwargs."""
 
 
 def test_a_replacing_decoder_really_does_not_raise():

@@ -680,28 +680,6 @@ def hide_plot_dock(dock: QWidget) -> None:
         dock.setVisible(False)
 
 
-def send_plot_to_batch_export(win, mode: str) -> None:
-    """S5: jump from a plot card to Batch Export with the matching chart-type.
-
-    The batch panels read the live plot spec (channel / property / threshold /
-    SEM / fold-change) straight off ``win._app_state``, so "capturing the
-    current plot" reduces to navigating to the Batch Export tab and selecting
-    the matching mode. Navigating builds the tab (so ``_batch_export_set_mode``
-    exists) before we set it. Lives in this core helper — not in the
-    batch_export feature — so the plot tab views can import it at module scope
-    without a feature-to-feature cycle; it touches only ``win`` attributes.
-    """
-    nb = getattr(win, "_notebook", None)
-    if nb is not None:
-        nb.setCurrentByName("Batch Export")
-    setter = win._ctx.runtime.batch_export.set_mode
-    if callable(setter):
-        setter(mode)
-    label = {"line": "Line", "bar": "Bar", "scatter_cells": "Scatter (cells)",
-             "scatter_agg": "Scatter (aggregate)"}.get(mode, mode)
-    win._set_status(f"Batch Export → {label}: using the current plot settings.")
-
-
 def _with_caret(text: str) -> str:
     """Append the drop-down caret unless the caller already wrote one.
 

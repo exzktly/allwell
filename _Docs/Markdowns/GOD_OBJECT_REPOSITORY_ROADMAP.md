@@ -285,6 +285,71 @@ smFISH), so `load_controller` names **no** feature and imports none a profile ex
 > current function-local imports are already contract-compliant. Revisit after A3
 > makes the surrounding calls `ctx`-native.
 
+### B1b · Terminal condition 3 — the function-local `core/` → `features/` residual
+
+Thirty sites, enumerated from the AST rather than from a grep, each keyed by
+module, function and symbol because line numbers move as the work proceeds. The
+count is metered by `CORE_FEATURE_IMPORT_BUDGET` in `tests/test_guardrails.py`,
+**which is the authority** — the table below is how the work is planned and
+tracked, and the header count is derived from its own rows, never typed.
+
+Statuses: ☐ not started · ◐ in progress · ☑ done (the import is gone and the
+ratchet has come down) · ⊘ declined (with the reason in the row).
+
+Categories, which are also the mechanisms:
+
+- **const** — the import is a constant, not behaviour. Move it to a neutral
+  module, as `WELL_MIME` moved to `core/dnd`.
+- **service** — a void call into a feature. Goes through the feature-service
+  lookup: the feature declares a named callable on its descriptor, and core
+  calls it by name through `ctx.features`, so a profile without the feature
+  simply has nothing registered.
+- **query** — a call that *returns a value*. The same lookup, but the call site
+  must say what the answer is when the feature is absent; a void fan-out cannot
+  express it, which is why these were called out as needing this mechanism.
+- **build** — a widget builder. Same lookup; the builder is the service.
+- **ordered** — a post-load projection pinned to a point in a strictly ordered
+  sequence interleaved with `persistence.load` steps. These are the reason B1b
+  was deferred: the `on_dataset_loaded` hook fires at a single point and cannot
+  express the ordering.
+- **bootstrap** — the wiring modules whose whole job is to hand a feature
+  callback to a lower layer. Removing the import means moving the wiring into
+  `features/registry.py` (the sanctioned sole importer) or naming the site in an
+  allowlist with its justification and a liveness check.
+
+| # | Module (`well_viewer/core/`) | Function | Imported symbol(s) | Category | Status | Note |
+|---|---|---|---|---|---|---|
+| 1 | `channel_state_controller.py` | `refresh_heatmap_aggregation_options` | `heatmap.controller: METRIC_MEAN, METRIC_FRACTION` | const | ☐ | Aggregation labels, not behaviour — move to a neutral module as `WELL_MIME` was. |
+| 2 | `channel_state_controller.py` | `refresh_heatmap_aggregation_options` | `heatmap.controller: METRIC_MEAN_ALL` | const | ☐ | Same constant set, second site in the same function. |
+| 3 | `channel_state_controller.py` | `_recalculate_threshold` | `home.cell_gating.controller: cell_gating_load_cell_areas, cell_gating_load_threshold_count_on, cell_gating_load_threshold_frac_on` | service | ☐ | Void loads into the gating tab after a threshold recompute. |
+| 4 | `channel_state_controller.py` | `set_ratio_metrics` | `home.cell_gating.controller: cell_gating_load_cell_areas` | service | ☐ | Same service, second caller. |
+| 5 | `channel_state_controller.py` | `set_active_image_channel` | `image_browser.review_image.renderer: refresh_review_image_ctx` | service | ☐ | Re-render the review image for the new channel. |
+| 6 | `channel_state_controller.py` | `set_active_image_channel` | `image_browser.review_image.renderer: update_preview_ctx` | service | ☐ | Same event, sibling renderer. |
+| 7 | `channel_state_controller.py` | `_write_gating_edit` | `home.cell_gating.controller: _cell_gating_resolve_key, cell_gating_on_threshold_count_on_change, cell_gating_on_threshold_frac_on_change` | query+service | ☐ | Resolves a key (returns a value), then dispatches the edit. |
+| 8 | `channel_state_controller.py` | `_gating_row_key` | `home.cell_gating.controller: _cell_gating_resolve_key` | query | ☐ | Returns a value; a void fan-out hook cannot express it. |
+| 9 | `channel_state_controller.py` | `get_fluor_gate` | `home.cell_gating.controller: cell_gating_get_fluor_gate` | query | ☐ | Returns a value; needs a default for a profile without the tab. |
+| 10 | `channel_state_controller.py` | `ensure_cell_gating_tab_built` | `home.cell_gating.tab_view: build_cell_gating_subtab` | build | ☐ | Lazy sub-tab construction. |
+| 11 | `load_controller.py` | `load_directory` | `qc.controller: recompute_qc_all` | ordered | ☐ | Post-load projection, ordered against `persistence.load`. |
+| 12 | `load_controller.py` | `load_directory` | `qc.tab_view: qc_gate_refresh_widgets` | service | ☐ | Widget sync after the QC hydrate. |
+| 13 | `load_controller.py` | `load_directory` | `crop.controller: apply_crop_to_cache` | ordered | ☐ | Post-load projection, ordered against `persistence.load`. |
+| 14 | `load_controller.py` | `load_directory` | `home.labels.tab_view: label_grid_refresh` | service | ☐ | Post-load refresh of the labels grid. |
+| 15 | `load_controller.py` | `load_directory` | `heatmap.sidebar_view: refresh_heatmap_layout_sidebar` | service | ☐ | Post-load refresh of the heatmap sidebar. |
+| 16 | `load_controller.py` | `_kick_off_gating_after_load` | `home.cell_gating.controller: cell_gating_refresh_included_count, cell_gating_start_gating_worker` | service | ☐ | Starts the gating pass once the dataset is up. |
+| 17 | `selection_controller.py` | `on_sidebar_plate_well_dropped` | `heatmap.sidebar_view: _on_drop_event` | service | ☐ | Drop handling delegated to the sidebar that owns the plate. |
+| 18 | `selection_controller.py` | `labels_apply_affix` | `home.labels.tab_view: label_grid_refresh` | service | ☐ | Same refresh service as the loader's. |
+| 19 | `selection_controller.py` | `groups_centre_refresh` | `home.labels.tab_view: label_grid_refresh` | service | ☐ | Same refresh service, third caller. |
+| 20 | `selection_controller.py` | `groups_centre_refresh` | `home.groups.selections_view: rep_panel_refresh` | service | ☐ | Replicate panel refresh. |
+| 21 | `selection_controller.py` | `groups_centre_refresh` | `home.groups.controller: rep_refresh_map` | service | ☐ | Replicate map refresh. |
+| 22 | `selection_controller.py` | `labels_clear_all` | `home.labels.tab_view: label_grid_refresh` | service | ☐ | Same refresh service, fourth caller. |
+| 23 | `centre_view.py` | `build_centre` | `home.groups.panel_view: build_replicate_panel` | build | ☐ | Centre-page builder. |
+| 24 | `centre_view.py` | `build_centre` | `preview.preview_view: build_preview_picker` | build | ☐ | Centre-page builder. |
+| 25 | `sidebar_view.py` | `build_sidebar` | `heatmap.sidebar_view: build_heatmap_layout_sidebar` | build | ☐ | Sidebar builder. |
+| 26 | `figure_saver.py` | `open_style_panel` | `export.style: open_export_style_panel` | service | ☐ | `FigureService` reaching the export-style feature. |
+| 27 | `plot_card_actions.py` | `copy_active_card_as_svg` | `export.style: copy_figure_to_clipboard` | service | ☐ | Same feature, clipboard path. |
+| 28 | `projector_registry.py` | `register_default_projectors` | `qc.controller: apply_qc_to_cache` | bootstrap | ☐ | The documented B1 decoupling seam — core wires the feature callback. |
+| 29 | `projector_registry.py` | `register_default_projectors` | `crop.controller: apply_crop_to_cache` | bootstrap | ☐ | Same seam. |
+| 30 | `scope_registry.py` | `register_default_scopes` | `registry: build_feature_registry` | bootstrap | ☐ | Imports the registry module itself, not a feature — fallback when no registry was handed in. |
+
 ### B2 · `WellRepository` facade over `DatasetState` + `get_rows` ✅ *(interface seam, no behavior change)*
 **Landed.** `data/well_repository.py` — Qt-free `WellRepository` exposing
 `rows(label)`, `rows_or_none(label)` (cache-only), `labels()`, `all_timepoints()`,

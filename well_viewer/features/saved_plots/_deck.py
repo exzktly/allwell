@@ -28,6 +28,9 @@ from datetime import datetime
 from pathlib import Path
 
 import theme
+from well_viewer.features.saved_plots._align import (
+    AnchorBox, axes_rect_points, plan_anchor,
+)
 from well_viewer.features.saved_plots._drawingml import (
     EMU_PER_INCH, Placement, drawing_group_xml, inches_to_emu, text_box_xml,
 )
@@ -35,7 +38,7 @@ from well_viewer.features.saved_plots._pptx import (
     SLIDE_HEIGHT_EMU, SLIDE_WIDTH_EMU, PptxBuilder, Slide,
 )
 from well_viewer.features.saved_plots._svg_shapes import SvgParseError, parse_svg
-from widgets.fig_clipboard import rasterized_layer_count
+from widgets.fig_clipboard import axes_fraction_from_svg, rasterized_layer_count
 
 _logger = logging.getLogger("well_viewer")
 
@@ -216,13 +219,24 @@ def _cover_slide(builder: PptxBuilder, *, dataset_name: str, count: int) -> None
         name="Cover detail"))
 
 
+def _figure_width(summary: str) -> float:
+    """The width in inches a slide leaves for its figure.
+
+    The full slide less the parameter column when there is a summary to show and
+    the full slide when there is not — a plot with no recorded parameters should
+    not leave a third of the slide blank. Answered on its own, without a slide,
+    because the deck has to know every slide's figure width before it places the
+    first one: the anchor box they share can only be as wide as the narrowest of
+    them.
+    """
+    content_w = _SLIDE_W - 2 * _MARGIN
+    return content_w - _PARAMS_W - _GUTTER if summary else content_w
+
+
 def _slide_chrome(slide: Slide, rec, *, summary: str) -> float:
     """Title, tab badge, timestamp and the parameter column.
 
-    Returns the width in inches left for the figure, which is the full slide
-    less the parameter column when there is a summary to show and the full slide
-    when there is not — a plot with no recorded parameters should not leave a
-    third of the slide blank.
+    Returns the width in inches left for the figure — :func:`_figure_width`.
     """
     content_w = _SLIDE_W - 2 * _MARGIN
     title = (getattr(rec, "title", "") or getattr(rec, "tab", "")
@@ -250,16 +264,15 @@ def _slide_chrome(slide: Slide, rec, *, summary: str) -> float:
             cx=inches_to_emu(content_w - 3.0), cy=inches_to_emu(_META_H),
             size_pt=_META_PT, color=_hex(theme.CPub.text_muted),
             name="Saved at"))
-    if not summary:
-        return content_w
-    slide.add(text_box_xml(
-        summary, slide.ids,
-        x=inches_to_emu(_MARGIN + content_w - _PARAMS_W),
-        y=inches_to_emu(_BODY_TOP),
-        cx=inches_to_emu(_PARAMS_W), cy=inches_to_emu(_BODY_H),
-        size_pt=_PARAMS_PT, color=_hex(theme.CPub.text_muted),
-        monospace=True, name="Parameters"))
-    return content_w - _PARAMS_W - _GUTTER
+    if summary:
+        slide.add(text_box_xml(
+            summary, slide.ids,
+            x=inches_to_emu(_MARGIN + content_w - _PARAMS_W),
+            y=inches_to_emu(_BODY_TOP),
+            cx=inches_to_emu(_PARAMS_W), cy=inches_to_emu(_BODY_H),
+            size_pt=_PARAMS_PT, color=_hex(theme.CPub.text_muted),
+            monospace=True, name="Parameters"))
+    return _figure_width(summary)
 
 
 def _note(slide: Slide, text: str, *, figure_w: float) -> None:
@@ -287,13 +300,19 @@ def _note(slide: Slide, text: str, *, figure_w: float) -> None:
 
 
 def _place_vector(slide: Slide, svg_bytes: bytes, *, figure_w: float,
-                  result: DeckResult) -> str:
+                  result: DeckResult, anchor: AnchorBox | None = None) -> str:
     """Draw the figure as PowerPoint shapes.
 
     Returns ``""`` on success, or a sentence saying why the figure could not be
     drawn as shapes — which the caller puts on the slide after falling back to
     the picture, so the reason travels with the artifact and not only with a log
     line nobody will read.
+
+    *anchor* is the box every figure in this deck puts its plotting area in, so
+    the slides can be laid beside one another. A capture that does not record
+    where its plotting area is cannot be anchored: it falls back to filling the
+    body of the slide, and the slide says so, because a figure that is a little
+    off is otherwise indistinguishable from one that lines up.
     """
     try:
         drawing = parse_svg(svg_bytes)
@@ -321,10 +340,21 @@ def _place_vector(slide: Slide, svg_bytes: bytes, *, figure_w: float,
         return (f"This figure is {len(drawing.shapes):,} separate shapes — past "
                 f"the {MAX_SHAPES_PER_SLIDE:,} a slide can carry and stay "
                 "usable — so it is placed here as a picture.")
-    placement = Placement.fit(
-        drawing,
-        x=inches_to_emu(_MARGIN), y=inches_to_emu(_BODY_TOP),
-        cx=inches_to_emu(figure_w), cy=inches_to_emu(_BODY_H))
+    frac = axes_fraction_from_svg(svg_bytes)
+    if anchor is not None and frac is not None:
+        placement = Placement.anchor(
+            axes_rect_points(frac, drawing.width_pt, drawing.height_pt),
+            x=anchor.x, y=anchor.y, cx=anchor.cx, cy=anchor.cy)
+    else:
+        placement = Placement.fit(
+            drawing,
+            x=inches_to_emu(_MARGIN), y=inches_to_emu(_BODY_TOP),
+            cx=inches_to_emu(figure_w), cy=inches_to_emu(_BODY_H))
+        if anchor is not None:
+            _note(slide, "This figure's capture does not record where its axes "
+                         "sit, so it is fitted to the slide rather than lined up "
+                         "with the others. Re-save the plot in All-Well to have "
+                         "it match.", figure_w=figure_w)
     slide.add(drawing_group_xml(drawing, placement, slide.ids, slide.add_image))
     if drawing.unsupported:
         # The figure is on the slide and part of it is not. Said here rather
@@ -376,6 +406,44 @@ def _read(source) -> bytes:
         return b""
 
 
+def _plan_deck_anchor(recs, svg_path_for, summary_for) -> AnchorBox | None:
+    """The box every figure in this deck puts its plotting area in.
+
+    A pass over the captures before any slide is built, because the box is a
+    property of the whole deck: it has to be small enough that the widest legend
+    and the tallest title in the gallery still fit beside their own axes, and it
+    has to be the same on every slide or there was no point computing it. That
+    also means it is sized against the **narrowest** figure area any slide will
+    offer — a plot with no parameters to show is given the whole slide width, and
+    an anchor that used that width would push a neighbouring slide's figure under
+    its parameter column.
+
+    Only the recorded axes rectangle is read here, not the figure: a marker is a
+    regular expression over the bytes, while parsing one of these captures into
+    shapes is the expensive half of the whole export.
+
+    ``None`` when no plot in the deck records one, which leaves every figure
+    letterboxed into its slide exactly as before and says nothing about it —
+    there is no alignment to fall short of.
+    """
+    fractions = []
+    widths = []
+    for rec in recs:
+        svg_bytes = _read(svg_path_for(rec))
+        if not svg_bytes:
+            continue
+        frac = axes_fraction_from_svg(svg_bytes)
+        if frac is None:
+            continue
+        fractions.append(frac)
+        widths.append(_figure_width(summary_for(rec)))
+    if not fractions:
+        return None
+    return plan_anchor(fractions,
+                       x=inches_to_emu(_MARGIN), y=inches_to_emu(_BODY_TOP),
+                       cx=inches_to_emu(min(widths)), cy=inches_to_emu(_BODY_H))
+
+
 def build_saved_plots_deck(
     records: Iterable,
     svg_path_for: Callable[[object], object],
@@ -416,6 +484,7 @@ def build_saved_plots_deck(
     builder = PptxBuilder(title="Saved Plots")
     result = DeckResult()
 
+    anchor = _plan_deck_anchor(recs, svg_path_for, summary_for)
     _cover_slide(builder, dataset_name=dataset_name, count=len(recs))
     # One step per plot, plus the write at the end — which is not free for a
     # deck of large figures and is the step a user is most likely to be
@@ -430,7 +499,7 @@ def build_saved_plots_deck(
         svg_bytes = _read(svg_path_for(rec))
         if svg_bytes:
             reason = _place_vector(slide, svg_bytes, figure_w=figure_w,
-                                   result=result)
+                                   result=result, anchor=anchor)
             if not reason:
                 result.vector += 1
                 if getattr(rec, "id", None) in regenerated:

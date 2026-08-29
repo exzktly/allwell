@@ -114,7 +114,12 @@ REMOTE_RUNNER_BUDGET = 7326
 # re-exports the names so call sites are unchanged. Genuine extraction — ratchet
 # down to the new size.
 IMAGE_TABLE_CONTROLLER_BUDGET = 1333
-SCATTER_CONTROLLER_BUDGET = 875
+# 875 -> 831: the aggregate figure's two compact legend keys moved into
+# ``scatter/_annotations.py`` beside the value-label overlay — both are text
+# written over the points rather than anything deciding what a point is, the
+# same seam ``barplot/_annotations.py`` draws. Genuine extraction — ratchet
+# down to the new size.
+SCATTER_CONTROLLER_BUDGET = 831
 # The drag-to-reorder handlers (press / motion / release, the Reset Order
 # button, and the event-to-data-x helper) moved into
 # ``barplot/_drag_reorder.py``. A clean seam: nothing there draws a bar or

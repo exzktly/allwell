@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Callable
 from services.subprocess_kill import signal_subprocess
+from services.subprocess_text import TEXT_UTF8
 from util.aw_safe import swallow, swallowed
 from util.image_exts import is_run_input_member
 from util.retry_io import retry_io
@@ -999,13 +1000,11 @@ def run_zipper(
     popen_kwargs: dict = dict(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        text=True,
         # A filename can carry any byte the filesystem allows, and the zipper
         # echoes every one it groups. Decoding strictly means one such byte
         # raises out of the reader below — see the `finally` there for why
         # that was worse than a lost log line.
-        encoding="utf-8",
-        errors="replace",
+        **TEXT_UTF8,
         bufsize=1,
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
     )

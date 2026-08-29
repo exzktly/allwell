@@ -11,7 +11,9 @@ faceted renderer clears the interaction cache and never arms the gate selector.
 from __future__ import annotations
 
 from well_viewer.core.safe import swallowed
+from well_viewer.core.plot_annotations import value_label_settings
 from well_viewer.core.plot_style import apply_export_style_to_current
+from well_viewer.features.scatter._annotations import note_value_labels_unavailable
 from well_viewer.features.scatter.collect import gate_filter_title_suffix
 from well_viewer.features.scatter.gating import (
     paint_gates, refresh_gate_selector, render_scatter_points,
@@ -156,6 +158,11 @@ def _render_scatter_faceted(ctx, scatter_data, col_x, col_y, tps_list) -> None:
     # and a figure saved out of here must say so without the on-screen control.
     axes[-1].set_xlabel(xlabel + gate_filter_title_suffix(ctx))
     paint_gates(ctx, gate_entries, cols=(col_x, col_y))
+
+    # One note for the whole stack, on the top panel: the value-label overlay
+    # states a statistic and every panel here draws one point per cell. Saying
+    # it once per panel would be the same sentence four times over.
+    note_value_labels_unavailable(value_label_settings(ctx), axes[0])
 
     # Editing the gate on the top panel mirrors to the panels below. Click- and
     # hover-to-view-cell now work per panel: ``axes_points`` pairs each panel's

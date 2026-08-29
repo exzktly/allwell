@@ -2867,3 +2867,148 @@ def test_theme_ink_guard_clears_a_title(tmp_path, monkeypatch):
                   'def d(ax):\n    ax.set_title("t", color=tokens_for(ax)[1])\n')
     assert _run_scan(monkeypatch, _THEME_INK_GUARD, _THEME_INK_TEST,
                      [good]) is None
+
+
+# ── the scatter value-label overlay ─────────────────────────────────────────
+# Two guards hold a switch that is global: every surface drawing a scatter
+# either labels its points or says why it cannot, and none of them invents the
+# overlay state it draws from. Both shapes below are the ones the fix could
+# regress into — a call site that hardcodes the pair, and a surface quietly
+# dropped from the roster.
+
+_SCATTER_LABEL_GUARD = "tests.test_scatter_value_labels"
+_CALL_SITE_TEST = "test_the_overlay_state_is_read_from_the_plot_state_at_every_call_site"
+_ROSTER_TEST = "test_every_scatter_surface_answers_the_overlay"
+
+
+@pytest.mark.parametrize("shape", [
+    # A hardcoded pair: labels on an export whose switch is off.
+    'def draw(ax, data):\n    annotate_agg_points((True, ""), ax, data)\n',
+    # A pair read from somewhere that is not the plot state.
+    'def draw(ax, data, prefs):\n'
+    '    annotate_agg_points(prefs["labels"], ax, data)\n',
+    # No settings at all.
+    'def draw(ax, data):\n    note_value_labels_unavailable()\n',
+])
+def test_value_label_call_site_guard_catches_an_invented_setting(
+        tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_value_labels.py", shape)
+    exc = _run_scan(monkeypatch, _SCATTER_LABEL_GUARD, _CALL_SITE_TEST, [bad])
+    assert exc is not None, "a call site inventing its own overlay state went uncaught"
+    assert "bad_value_labels.py" in str(exc)
+
+
+@pytest.mark.parametrize("shape", [
+    # Bound to a local first — how both real call sites are written, because
+    # the same pair also decides the headroom and must answer once.
+    'def draw(ctx, ax, data):\n'
+    '    labels = value_label_settings(ctx)\n'
+    '    annotate_agg_points(labels, ax, data)\n',
+    # Read inline, under the alias the Batch Export panel imports it as.
+    'def draw(ctx, ax):\n'
+    '    note_value_labels_unavailable(_value_label_settings(ctx), ax)\n',
+])
+def test_value_label_call_site_guard_clears_a_pair_from_the_state(
+        tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, "good_value_labels.py", shape)
+    assert _run_scan(monkeypatch, _SCATTER_LABEL_GUARD, _CALL_SITE_TEST,
+                     [good]) is None
+
+
+def test_scatter_roster_catches_a_surface_that_ignores_the_switch(
+        tmp_path, monkeypatch):
+    _write(tmp_path, "panel.py",
+           'def _run_scatter_agg_job(self, ax, data):\n'
+           '    for d in data.values():\n'
+           '        ax.errorbar(d["x"], d["y"])\n')
+    exc = _run_rooted_scan(
+        monkeypatch, _SCATTER_LABEL_GUARD, _ROSTER_TEST, tmp_path,
+        extra={"_LABELLED_SITES": (
+            ("panel.py", "_run_scatter_agg_job", "annotate_agg_points"),)})
+    assert exc is not None, "a scatter surface drawing unlabelled points went uncaught"
+    assert "_run_scatter_agg_job" in str(exc)
+
+
+def test_scatter_roster_clears_a_surface_that_answers_it(tmp_path, monkeypatch):
+    _write(tmp_path, "panel.py",
+           'def _run_scatter_agg_job(self, ctx, ax, data):\n'
+           '    _annotate_agg_points(_value_label_settings(ctx), ax, data)\n')
+    assert _run_rooted_scan(
+        monkeypatch, _SCATTER_LABEL_GUARD, _ROSTER_TEST, tmp_path,
+        extra={"_LABELLED_SITES": (
+            ("panel.py", "_run_scatter_agg_job", "annotate_agg_points"),)}) is None
+
+
+def test_scatter_roster_rejects_a_function_that_no_longer_exists(
+        tmp_path, monkeypatch):
+    """A roster entry that has stopped describing a real site is
+    indistinguishable from one that was never needed."""
+    _write(tmp_path, "panel.py", 'def _some_other_job(self):\n    return None\n')
+    exc = _run_rooted_scan(
+        monkeypatch, _SCATTER_LABEL_GUARD, _ROSTER_TEST, tmp_path,
+        extra={"_LABELLED_SITES": (
+            ("panel.py", "_run_scatter_agg_job", "annotate_agg_points"),)})
+    assert exc is not None and "no longer exists" in str(exc)
+
+
+# ── text-mode subprocess decoding ───────────────────────────────────────────
+
+_DECODE_GUARD = "tests.test_subprocess_text_decoding"
+_DECODE_TEST = "test_text_mode_subprocesses_declare_utf8"
+
+TEXT_DECODE_VIOLATIONS = {
+    # The plain shape: text mode with no codec named.
+    "keyword": 'import subprocess\n\n'
+               'def probe(cmd):\n'
+               '    return subprocess.run(cmd, capture_output=True, text=True)\n',
+    # The older spelling of the same flag.
+    "universal_newlines": 'import subprocess\n\n'
+                          'def probe(cmd):\n'
+                          '    return subprocess.run(cmd, universal_newlines=True)\n',
+    # Popen, which is where the damage lands: the decode error is raised out of
+    # a reader thread's iterator rather than at the call.
+    "popen": 'import subprocess\n\n'
+             'def stream(cmd):\n'
+             '    return subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)\n',
+    # The Analyze spawn helpers build their kwargs as a dict first, so the flag
+    # is a string key one indirection away from the call.
+    "kwargs_dict": 'import subprocess\n\n'
+                   'def stream(cmd):\n'
+                   '    kwargs = {"stdout": subprocess.PIPE, "text": True}\n'
+                   '    return subprocess.Popen(cmd, **kwargs)\n',
+}
+
+
+@pytest.mark.parametrize("shape", sorted(TEXT_DECODE_VIOLATIONS))
+def test_text_decode_guard_catches_a_locale_decode(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_decode.py", TEXT_DECODE_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, _DECODE_GUARD, _DECODE_TEST, [bad])
+    assert exc is not None, f"the {shape} locale-decode violation went uncaught"
+    assert "bad_decode.py" in str(exc)
+
+
+@pytest.mark.parametrize("shape", [
+    # The shared spelling, splatted into the call.
+    'import subprocess\n\n'
+    'from services.subprocess_text import TEXT_UTF8\n\n'
+    'def probe(cmd):\n'
+    '    return subprocess.run(cmd, capture_output=True, **TEXT_UTF8)\n',
+    # Spelled out, which is what scripts/_bootstrap_lib.py must do (stdlib-only).
+    'import subprocess\n\n'
+    'def probe(cmd):\n'
+    '    return subprocess.run(cmd, text=True, encoding="utf-8", errors="replace")\n',
+    # The same, one indirection away in a kwargs dict.
+    'import subprocess\n\n'
+    'from services.subprocess_text import TEXT_UTF8\n\n'
+    'def stream(cmd):\n'
+    '    kwargs = {"stdout": subprocess.PIPE, **TEXT_UTF8}\n'
+    '    return subprocess.Popen(cmd, **kwargs)\n',
+    # Binary mode, decoded explicitly afterwards — not a text-mode call at all.
+    'import subprocess\n\n'
+    'def probe(cmd):\n'
+    '    out = subprocess.run(cmd, capture_output=True).stdout\n'
+    '    return out.decode("utf-8", errors="replace")\n',
+])
+def test_text_decode_guard_clears_a_named_codec(tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, "good_decode.py", shape)
+    assert _run_scan(monkeypatch, _DECODE_GUARD, _DECODE_TEST, [good]) is None

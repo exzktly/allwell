@@ -46,6 +46,7 @@ from services.remote_config import (
 from services import remote_config
 from services import ssh_key_setup
 from services.subprocess_kill import signal_subprocess
+from services.subprocess_text import TEXT_UTF8
 import theme
 
 
@@ -1290,7 +1291,13 @@ class BootstrapLogDialog(QDialog):
         kwargs: dict = {
             "stdout": subprocess.PIPE,
             "stderr": subprocess.STDOUT,
-            "text": True,
+            # The bootstrap reconfigures its own streams to UTF-8 before its
+            # first message, and the remote paths and ✓ / → markers it echoes
+            # are UTF-8 throughout. Decoding this pipe with the client's locale
+            # would mojibake those on a cp1252 Windows box and raise
+            # UnicodeDecodeError out of the reader thread on any byte the
+            # codepage has no character for.
+            **TEXT_UTF8,
             "bufsize": 1,
             "env": {**os.environ, "PYTHONUNBUFFERED": "1"},
         }

@@ -43,6 +43,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from services.subprocess_text import TEXT_UTF8
+
 # tomllib is stdlib on 3.11+; tomli is the 3.10 backport. The project pins
 # 3.10.14, so tomli is the expected provider — but we accept either so the
 # module is portable to newer interpreters as the project's Python pin
@@ -1230,7 +1232,7 @@ def query_jupyterhub_profiles(
     argv = host.ssh_argv(allocate_tty=False) + [remote_cmd]
     try:
         result = subprocess.run(
-            argv, capture_output=True, text=True, timeout=timeout,
+            argv, capture_output=True, timeout=timeout, **TEXT_UTF8,
         )
     except subprocess.TimeoutExpired:
         return (False, [], f"Timed out after {timeout:.0f}s contacting {host.ssh_alias}.")

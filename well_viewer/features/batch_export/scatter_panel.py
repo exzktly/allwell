@@ -28,6 +28,9 @@ from well_viewer.features.batch_export._common import (
     unique_export_stem,
 )
 from well_viewer.features.batch_export.base_panel import BatchExportPanel, SkippedJob
+from well_viewer.core.plot_annotations import (
+    value_label_settings as _value_label_settings,
+)
 from well_viewer.core.safe import swallowed
 # ── ctx-native god-method forms (A8 / Epic-A14 panel conversion) ─────────────
 from well_viewer.core.lazy import lazy as _lazy
@@ -37,6 +40,10 @@ from well_viewer.core.channel_state_controller import (
     ratio_label_for as _ratio_label_for,
 )
 from well_viewer.data.data_loading import get_rows as _get_rows
+# Lazy for the same reason every other scatter symbol here is: a profile
+# built without the Scatter feature must still import this panel.
+_annotate_agg_points = _lazy("well_viewer.features.scatter._annotations",
+                             "annotate_agg_points")
 _col_for_scatter_axis = _lazy("well_viewer.features.scatter.controller", "col_for_scatter_axis")
 # The Scatter tab's own point + gate renderers, reused by the batch figure — a
 # call, not an import statement, so they stay off the deferred-import budget.
@@ -760,6 +767,8 @@ class ScatterBatchExportPanel(BatchExportPanel):
         except OSError as exc:
             return f"{grp.name} scatter-aggregate CSV: {exc}"
         try:
+            _labels = _value_label_settings(self._ctx)
+
             def _draw(ax):
                 for data in scatter_data.values():
                     ax.errorbar(
@@ -770,6 +779,10 @@ class ScatterBatchExportPanel(BatchExportPanel):
                         linestyle="none", capsize=5, alpha=0.75,
                     )
                 self._apply_agg_log_scale(ax)
+                # The exported figure carries the same overlay as the tab it
+                # was set on — after the log scale, since the headroom the
+                # labels need is measured against the limits in force.
+                _annotate_agg_points(_labels, ax, scatter_data)
             _xl, _yl = self._agg_axis_labels(stat_x, stat_y)
             self._export_scatter_figure(
                 _draw,
@@ -907,6 +920,8 @@ class ScatterBatchExportPanel(BatchExportPanel):
         except OSError as exc:
             return f"{grp.name} scatter-aggregate CSV: {exc}"
         try:
+            _labels = _value_label_settings(self._ctx)
+
             def _draw(ax):
                 for data in scatter_data.values():
                     ax.errorbar(
@@ -926,6 +941,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                         linestyle="none", capsize=5, alpha=0.75,
                     )
                 self._apply_agg_log_scale(ax)
+                _annotate_agg_points(_labels, ax, scatter_data)
             _xl, _yl = self._agg_axis_labels(stat_x, stat_y)
             self._export_scatter_figure(
                 _draw,

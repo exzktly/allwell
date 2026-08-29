@@ -254,14 +254,45 @@ def test_leaving_home_and_coming_back_leaves_the_rail_links_alone(loaded_app, qa
 
 def test_a_page_with_a_rail_body_still_gets_the_space(loaded_app, qapp):
     """The other half: the trailing spacer must not compete with the frame it
-    was added to sit beside. Plotting's rail body owns the slack."""
+    was added to sit beside. Plotting's rail body owns the slack.
+
+    Measured as *who absorbs a change in height*, not as a comparison against
+    another widget. This asserted ``frame.height() > nav.height()`` for as long
+    as the nav was the shorter of the two, which made it a proxy for the real
+    contract rather than the contract itself — and the proxy expired: the nav
+    grew with the sections on it (339px at its hint here), the fixture's window
+    did not, and the frame's share fell below it while still taking every
+    available pixel. The comparison then failed on a layout that was behaving
+    exactly as this test's own docstring requires.
+
+    Growing the window is the direct question. The stretch-0 items — the dataset
+    button, the nav, the separator, the plate slot — keep their heights, the
+    trailing ``addStretch(0)`` keeps taking nothing, and the stretch-1 frame
+    takes the difference. That holds at any window size and through any change
+    to how tall the nav's list of sections happens to be.
+    """
     app = _laid_out(loaded_app, qapp)
     _goto(app, qapp, "Plotting")
     frame = app._sidebar_main_frame
+    nav = app._section_nav
+    plate = app._sidebar_plate_slot
 
     assert frame.isVisible()
-    assert frame.height() > app._section_nav.height(), (
-        "the rail's per-page frame should still take the column's spare height")
+    before = frame.height()
+    nav_before, plate_before = nav.height(), plate.height()
+
+    _GROWTH = 200
+    app.resize(_RAIL_W, _RAIL_H + _GROWTH)
+    for _ in range(15):
+        qapp.processEvents()
+
+    assert frame.height() == before + _GROWTH, (
+        f"the rail's per-page frame took {frame.height() - before}px of the "
+        f"{_GROWTH}px the column gained — the trailing spacer, or another item "
+        f"in the column, is competing with it for the slack")
+    assert (nav.height(), plate.height()) == (nav_before, plate_before), (
+        "the stretch-0 items above the frame should keep their own heights "
+        "while the frame absorbs the change")
 
 
 # ── before a dataset is open ────────────────────────────────────────────────

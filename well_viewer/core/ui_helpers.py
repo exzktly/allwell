@@ -890,16 +890,6 @@ def _themed_nav_toolbar_class():
             pm.setMask(mask)
             return QIcon(pm)
 
-        def refresh_icons(self) -> None:
-            """Rebuild action icons after a theme change."""
-            for _text, _tip, image_file, callback in self.toolitems:
-                if image_file is None:
-                    continue
-                action = self._actions.get(callback)
-                if action is None:
-                    continue
-                action.setIcon(self._icon(image_file + ".png"))
-
     _THEMED_NAV_CLS = _ThemedNavToolbar
     return _ThemedNavToolbar
 
@@ -1014,14 +1004,6 @@ def attach_plot_toolbar(
         toolbar.addWidget(make_band_controls(app._ctx, toolbar, with_fov=with_fov))
     layout.addWidget(toolbar)
     return toolbar
-
-
-def refresh_plot_toolbar_icons(widget: QWidget) -> None:
-    """Find every embedded ``PlotToolbar`` under *widget* and recolor its icons."""
-    from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
-    for tb in widget.findChildren(NavigationToolbar2QT):
-        if tb.objectName() == "PlotToolbar" and hasattr(tb, "refresh_icons"):
-            tb.refresh_icons()
 
 
 # ── Thumbnail rendering ──────────────────────────────────────────────────────

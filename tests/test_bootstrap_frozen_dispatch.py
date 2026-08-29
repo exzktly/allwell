@@ -54,3 +54,90 @@ def test_spec_bundles_the_bootstrap_module():
     _MEIPASS (where the files it syncs to the remote are bundled)."""
     spec = (REPO_ROOT / "_Docs" / "_Installation" / "all_well.spec").read_text()
     assert '"scripts" / "_bootstrap_lib.py"' in spec
+
+
+# ── the frozen windowed build's nulled standard streams ─────────────────────
+#
+# A frozen ``console=False`` build leaves ``sys.stdout`` / ``sys.stderr`` — and
+# ``sys.__stdout__`` / ``sys.__stderr__`` — set to None, even though the parent
+# attached a live pipe to fd 1/2 and is reading it. ``process_microscopy`` and
+# ``WellPlateZipper`` each repair the pair from their own ``main()`` via
+# ``util.frozen_io.ensure_std_streams``; the bootstrap is the third subprocess
+# entry point and was the one that did not, so the very first ``say()`` raised
+# ``AttributeError: 'NoneType' object has no attribute 'isatty'`` and the
+# Remotes dialog showed an empty log for a process that died before it started.
+
+
+def _bootstrap_module():
+    """Load ``scripts/_bootstrap_lib.py`` the way the launcher does."""
+    import importlib.util
+
+    path = REPO_ROOT / "scripts" / "_bootstrap_lib.py"
+    spec = importlib.util.spec_from_file_location("_bootstrap_lib_probe", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["_bootstrap_lib_probe"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_say_survives_a_nulled_stdout(monkeypatch):
+    monkeypatch.setattr(sys, "stdout", None)
+    _bootstrap_module().say("provisioning host")   # must not raise
+
+
+def test_the_tee_survives_a_nulled_primary():
+    """The log half must keep working when there is no stream to mirror to."""
+    import io
+
+    log = io.StringIO()
+    tee = _bootstrap_module()._TeeStream(None, log)
+    tee.write("provisioning\n")
+    tee.flush()
+    assert log.getvalue() == "provisioning\n"
+    assert tee.isatty() is False
+
+
+def test_the_tee_still_reaches_a_live_primary():
+    import io
+
+    primary, log = io.StringIO(), io.StringIO()
+    tee = _bootstrap_module()._TeeStream(primary, log)
+    tee.write("x\n")
+    assert primary.getvalue() == "x\n"
+    assert log.getvalue() == "x\n"
+
+
+def test_the_launcher_repairs_the_streams_before_loading_the_module():
+    """Without this the repair never runs for the bootstrap: it is reached
+    through importlib, not through a ``main()`` of its own that could call
+    ``ensure_std_streams`` the way the pipeline and zipper entry points do."""
+    src = (REPO_ROOT / "all_well_launcher.py").read_text(encoding="utf-8")
+    branch = src.split('"--run-bootstrap"', 1)[1]
+    assert "ensure_std_streams" in branch.split("def ", 1)[0], (
+        "all_well_launcher's --run-bootstrap branch must call "
+        "util.frozen_io.ensure_std_streams before loading _bootstrap_lib"
+    )
+
+
+def test_the_tee_wraps_the_repaired_streams_not_the_dunder_pair():
+    """``ensure_std_streams`` repairs ``sys.stdout`` / ``sys.stderr``; it does
+    not touch ``sys.__stdout__`` / ``sys.__stderr__``, which stay None for the
+    life of a frozen windowed process. Teeing the dunder pair therefore wraps
+    None and every later write raises."""
+    import ast
+
+    src = (REPO_ROOT / "scripts" / "_bootstrap_lib.py").read_text(encoding="utf-8")
+    primaries = [
+        ast.unparse(node.args[0])
+        for node in ast.walk(ast.parse(src))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_TeeStream"
+        and node.args
+    ]
+    assert primaries, "no _TeeStream construction found"
+    assert set(primaries) == {"sys.stdout", "sys.stderr"}, (
+        f"the bootstrap log tee wraps {sorted(set(primaries))}; a frozen "
+        "windowed build nulls sys.__stdout__ / sys.__stderr__ permanently, so "
+        "it must wrap the live (repaired) sys.stdout / sys.stderr instead"
+    )

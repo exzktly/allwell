@@ -17,9 +17,11 @@ progress events as the bar, via :meth:`reset`, :meth:`set_well_stage`,
 :meth:`set_active_stage`, and the headline/eta/status setters.
 
 Built on :class:`~widgets.plate_progress.PlateProgress`, which owns the
-header/headline/overall-bar/plate+legend chrome shared with
-:class:`~datasets.concatenate.dashboard.ConcatDashboard`; this class supplies
-only the stage rail and Analyze's remote/local well-colour rules.
+header/headline/overall-bar/plate chrome shared with
+:class:`~datasets.concatenate.dashboard.ConcatDashboard` and draws the legend
+from the rows a subclass names; this class supplies only the stage rail,
+Analyze's remote/local well-colour rules, and the legend rows those rules
+imply.
 """
 
 from __future__ import annotations
@@ -451,11 +453,10 @@ class RunDashboard(PlateProgress):
             dot.setStyleSheet(f"background:{color}; border-radius:5px;")
             nm.setStyleSheet(f"color:{theme.Colors.text_primary};" + ("font-weight:700;" if active else ""))
 
-    def _build_legend(self) -> None:
-        self._clear(self._legend_lay)
-        head = QLabel("Wells", self._legend_host)
-        head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
-        self._legend_lay.addWidget(head)
+    def _legend_items(self):
+        """The only legend here whose rows are decided at run time: a remote
+        run gains an Upload stage and renames the two that follow it, since
+        "processed" happens on the server and "complete" means fetched back."""
         items = [(theme.Colors.text_muted, "pending")]
         if self._remote:
             items.append((theme.Colors.accent2, "uploaded"))
@@ -463,15 +464,7 @@ class RunDashboard(PlateProgress):
         items.append((theme.Colors.accent, "on server" if self._remote else "processed"))
         items.append((theme.Colors.success, "downloaded" if self._remote else "complete"))
         items.append((theme.Colors.danger, "failed"))
-        for color, txt in items:
-            row_w = QWidget(self._legend_host)
-            r = QHBoxLayout(row_w); r.setContentsMargins(0, 0, 0, 0)
-            r.setSpacing(_STAGE_ROW_SPACING_PX)
-            r.addWidget(status_dot(color))
-            t = QLabel(txt, row_w); t.setStyleSheet(f"color:{theme.Colors.text_primary};")
-            r.addWidget(t); r.addStretch(1)
-            self._legend_lay.addWidget(row_w)
-        self._legend_lay.addStretch(1)
+        return "Wells", items
 
     def _detail(self, w: str) -> str:
         """The numbers behind a well's dial, for its hover text.

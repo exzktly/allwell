@@ -27,8 +27,9 @@ import numpy as _np
 
 from well_viewer.core.safe import swallowed
 from well_viewer.features.crop.region import normalize_region
+from well_viewer.data.curation import apply_curation_to_cache
 from well_viewer.features.image_browser.review_image.collect import (
-    apply_review_overrides_to_cache, collect_region_delete_targets,
+    collect_region_delete_targets,
 )
 from well_viewer.features.image_browser.review_image.renderer import (
     refresh_review_image_ctx, render_review_image_display,
@@ -48,7 +49,7 @@ def override_key(well: str, fov: object, tp: object, nid: object) -> tuple | Non
 
     The **well** is deliberately left exactly as the app spells it. Every reader
     keys off the dataset's own label — ``collect.review_effective_included``
-    looks up ``(label, …)`` and ``apply_review_overrides_to_cache`` skips
+    looks up ``(label, …)`` and ``curation.apply_curation_to_cache`` skips
     anything not in ``dataset.well_paths`` — and those labels are
     ``extract_well_token(stem) or stem`` (``core/load_controller.py``), so a CSV
     whose stem is not a well position keeps its raw stem. Canonicalising the
@@ -94,7 +95,7 @@ def commit_included_overrides(ctx, items) -> int:
     if not written:
         return 0
     for well in wells:
-        apply_review_overrides_to_cache(ctx, well)
+        apply_curation_to_cache(ctx, well)
     try:
         invalidate_stats_cache(ctx)
     except Exception:

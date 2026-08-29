@@ -715,6 +715,28 @@ def cell_keys_for_dataframe(
     )
 
 
+def cell_key_tuples_for_dataframe(df) -> pd.Series | None:
+    """``(fov, tp, nid)`` per row of *df*, or ``None`` when *df* carries no
+    usable identifier columns.
+
+    :func:`cell_keys_for_dataframe` without the well token, for the lookups that
+    are already scoped to one well and key their maps on the 3-tuple: the manual
+    curation projector (``data/curation.py``) and Review Image's own row lookups.
+    Both sides go through the one normalisation chain here rather than each
+    formatting a key its own way, which is what used to let the override side
+    (``:g`` float format) and the smFISH writer side (bare strip) disagree about
+    the same cell.
+    """
+    import pandas as pd
+
+    if df is None or df.empty:
+        return None
+    keys = cell_keys_for_dataframe(df)
+    if keys.empty:
+        return None
+    return pd.Series([(k.fov, k.tp, k.nid) for k in keys], index=df.index)
+
+
 # ── Back-compat helpers ──────────────────────────────────────────────────
 
 

@@ -26,6 +26,7 @@ from well_viewer.features.image_browser.review_image.callbacks import (  # noqa:
     apply_box_delete, commit_included_overrides, override_key,
 )
 from well_viewer.core.channel_state_controller import set_active_image_channel
+from well_viewer.data.curation import apply_curation_to_cache
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 from well_viewer.core.ui_helpers import norm_timepoint
 # The FOV / timepoint sort orders and the row fetch live in collect.py now.
@@ -44,7 +45,6 @@ from well_viewer.features.image_browser.review_image.collect import (  # noqa: F
     _load_arrays_from_refs,
     _split_background_wells,
     any_review_rows,
-    apply_review_overrides_to_cache,
     flatfield_field_for,
     review_build_include_map,
     review_build_threshold_map,
@@ -606,7 +606,7 @@ def set_review_cell_included(ctx, fov: str, tp: str, nid: str, included: str) ->
     # Project the override onto the cached row immediately so other tabs
     # (Bar/Line/Distribution/Stats/Heatmap) honor it without waiting for
     # the next gating recompute, then invalidate the stats cache.
-    apply_review_overrides_to_cache(ctx, ctx.state.preview.selected_well)
+    apply_curation_to_cache(ctx, ctx.state.preview.selected_well)
     try:
         invalidate_stats_cache(ctx)
     except Exception:

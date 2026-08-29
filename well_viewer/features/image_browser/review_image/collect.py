@@ -46,20 +46,14 @@ def review_row_keys_series(ctx, df: pd.DataFrame) -> pd.Series | None:
     Returns a ``Series`` of ``(fov, tp, nid)`` tuples aligned with
     ``df.index``, or ``None`` if no usable identifier columns are present.
 
-    Built on :func:`image_identity.cell_keys_for_dataframe` so this side
-    of the lookup uses the same well/fov/tp/nid normalisation chain the
-    smFISH writer and ``cell_overrides`` use — no more drift between the
-    review-image overrides side (used to use ``:g`` float format) and the
-    smFISH writer side (used to strip only)."""
-    if df is None or df.empty:
-        return None
-    from well_viewer.data.image_identity import cell_keys_for_dataframe
-    keys = cell_keys_for_dataframe(df)
-    if keys.empty:
-        return None
-    # Strip the well token — historical callers want a 3-tuple
-    # (fov, tp, nid) keyed off the active well selection separately.
-    return pd.Series([(k.fov, k.tp, k.nid) for k in keys], index=df.index)
+    The tab-side name for :func:`image_identity.cell_key_tuples_for_dataframe`,
+    which is the one implementation: this side of the lookup uses the same
+    well/fov/tp/nid normalisation chain the smFISH writer, ``cell_overrides``
+    and the curation projector use — no more drift between the review-image
+    overrides side (used to use ``:g`` float format) and the smFISH writer side
+    (used to strip only). ``ctx`` is unused and kept for the call shape."""
+    from well_viewer.data.image_identity import cell_key_tuples_for_dataframe
+    return cell_key_tuples_for_dataframe(df)
 
 
 def review_resolve_image_refs(ctx, *, fov_raw: str, tp_raw: str):
@@ -446,52 +440,11 @@ def review_build_threshold_map(
     return above_by_nid
 
 
-def apply_review_overrides_to_cache(ctx, label: str | None = None) -> None:
-    """Project overrides onto cached row['Included'] so non-Review tabs see them.
-
-    The override dict is the source of truth; this projects values onto the
-    cached rows so every controller using row_is_included(row) automatically
-    respects user toggles. Called after gating recomputes (which rewrite
-    row['Included'] from thresholds), after patch-file load, and on toggle.
-    """
-    from well_viewer.data.data_loading import get_rows
-    overrides = ctx.runtime.review.included_overrides
-    if not overrides:
-        return
-    by_label: dict[str, dict[tuple[str, str, str], str]] = {}
-    for (lbl, fov, tp, nid), val in overrides.items():
-        if label is not None and lbl != label:
-            continue
-        by_label.setdefault(lbl, {})[(fov, tp, nid)] = val
-    for lbl, lookup in by_label.items():
-        if lbl not in ctx.state.dataset.well_paths:
-            continue
-        try:
-            df = get_rows(ctx, lbl)
-        except Exception:
-            swallowed()  # silent except
-            continue
-        if df is None or df.empty:
-            continue
-        keys = review_row_keys_series(ctx, df)
-        if keys is None:
-            continue
-        override_map = pd.Series(lookup)
-        override_for_row = keys.map(override_map)
-        mask = override_for_row.notna()
-        if not mask.any():
-            continue
-        def _coerce(val: object) -> int:
-            try:
-                return int(float(str(val).strip() or "1"))
-            except (TypeError, ValueError):
-                return 1 if str(val).strip() == "1" else 0
-        df.loc[mask, "Included"] = override_for_row[mask].map(_coerce).astype(int)
-        # Manual curation just changed which cells this well contributes, so a
-        # memoized aggregation of it is stale. The bump lives here rather than
-        # in the callers because there are four of them and one — the dataset
-        # loader — does not invalidate afterwards.
-        ctx.state.dataset.note_rows_changed()
+# The projection of those overrides onto the row cache is NOT here: it is
+# ``well_viewer.data.curation.apply_curation_to_cache``. It moved to the data
+# layer to be registered beside the QC and crop projectors, so a well the row
+# cache drops and reloads comes back curated instead of silently uncurated. This
+# module still owns the *reads* of the override map that the tab itself does.
 
 
 def review_row_keys(ctx, row: dict) -> tuple[str, str, str]:

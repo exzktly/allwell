@@ -46,7 +46,7 @@ the ratchets and boot tests answer it.
 | B2 | `WellRepository` exists; `REPO_BYPASS_BUDGET` seeded | facade unit test green; ratchet present |
 | B3 | Direct-cache readers routed (spatial allowlisted) | `REPO_BYPASS_BUDGET == 0` (minus allowlist) |
 | B4a | `PersistenceRegistry` `ctx`-native | `PERSIST_APP_PARAM_BUDGET == 0`; app_smoke round-trip green |
-| B4b | One load path — eager bulk load goes through the repository | `WellRepository.load_well` exists and `load_controller` calls no `app._load_well_csv`; app_smoke lazy/eager parity green |
+| B4b | One load path — eager bulk load goes through the repository | `WellRepository.load_well` exists and `load_controller` calls no `app._load_well_csv`; `tests/test_one_load_path.py` + app_smoke green |
 | B5 *(optional)* | Image repo facade owns all decode/cache | image-facade ratchet == 0; facade tests green |
 
 ### Autonomous execution protocol
@@ -318,16 +318,20 @@ smFISH), so `load_controller` names **no** feature and imports none a profile ex
 This phase has two independent halves. **B4a (persistence → `ctx`) has landed;
 B4b (load-path convergence) has not been started.**
 
-- **B4b — open.** The eager bulk path in `load_controller.py` still builds frames
-  itself: `frame = app._load_well_csv(p)` followed by a direct
-  `dataset.cache[key] = frame` and a hand-rolled `record_fov_verdict` call, with a
-  bulk `recompute_qc_all(ctx)` afterwards. It should become
-  `repo.load_well(key, path)` = `load_well_csv` + the **registered projectors from
-  B1**, unifying lazy and eager so QC/Crop projection runs through one code path.
-  Keep the post-loop `recompute_qc_all` (it also invalidates the stats cache +
-  bumps `override_version`). Note that `WellRepository` is a **read** facade today
-  — `rows` / `rows_or_none` / `labels` / `all_timepoints` / `all_fovs` /
-  `has_data` / `dataset` — so this phase adds the first write entry point to it.
+- **B4b — landed.** The eager bulk path built its frames itself
+  (`app._load_well_csv`, a direct `dataset.cache[key] = frame`, its own
+  `record_fov_verdict`) while a cache miss went through `get_rows`. Both now go
+  through `data_loading.load_and_project`, reached from the loader as
+  `ctx.state.repo.load_well(key, path)` — the repository's first write entry
+  point. The divergence this closed was not hypothetical: the loader applied
+  manual per-cell curation as well as QC and crop, while the lazy path ran only
+  the two registered projectors, so a well the row cache dropped and reloaded
+  came back with the user's exclusions gone from `Included` and the override map
+  still holding them. `data/curation.py` now owns that projection and is
+  registered beside QC and crop, so the roster of what a fresh frame gets is one
+  list. The post-load hydration sequence is unchanged and still ordered: the
+  wells are read before `persistence.load` has the settings, so the bulk
+  re-projections after it stay where they are.
 - **B4a — landed.** Make `PersistenceRegistry` take `ctx`/`state`, not `app`. Bodies mostly already
   deref `app._app_state`(==`ctx.state`); follow the direction `_doc.py` /
   `cell_gating.py` already set. Convert the ~10 clean domains to `save(ctx)/load(ctx)`
@@ -393,7 +397,7 @@ A2 (self-delegators) ⇄ A3 (app-first clusters; on_selection_changed = last hoo
 A4 (__init__ reach-throughs)   B3 (route cache readers)
         │                         │
         ▼                         ▼
-A5 (accessor extraction) ◄──── B4a (persistence→ctx) ; B4b (load converge, open)
+A5 (accessor extraction) ◄──── B4a (persistence→ctx) ; B4b (load converge)
         │
         ▼
 A5 `window` = terminal state ; B5 (image repo) optional/last
@@ -477,7 +481,7 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 | B2 · `WellRepository` facade | ☑ | facade test + `REPO_BYPASS_BUDGET`=1 seeded | 2026-07-11 |
 | B3 · route cache readers | ☑ | `REPO_BYPASS_BUDGET == 0` (−spatial) | 2026-07-11 |
 | B4a · persistence → ctx | ☑ | `PERSIST_APP_PARAM_BUDGET == 0` | 2026-07-11 |
-| B4b · load-path convergence | ☐ | eager bulk load routed through `repo.load_well` | — |
+| B4b · load-path convergence | ☑ | `WellRepository.load_well` exists, `load_controller` calls no `app._load_well_csv`, curation is a registered projector | 2026-08-29 |
 | B5 · image repo facade *(optional)* | ☐ | image-facade ratchet == 0 | — |
 
 **Terminal-goal status (reconciled against the tree, 2026-08-29):** conditions **1, 2, 4
@@ -492,13 +496,13 @@ It is **metered and ratcheted**: `CORE_FEATURE_IMPORT_BUDGET` in
 authority for the count — this section quotes it and can go stale; the guard cannot.**
 Module-scope core→feature imports are already banned at 0
 (`test_architecture_contracts`); the residual is entirely **function-local**, the
-sanctioned escape hatch. At the last reconciliation the budget stood at **31**,
+sanctioned escape hatch. At the last reconciliation the budget stood at **30**,
 distributed as:
 
 | Module in `core/` | Function-local `features.*` imports |
 |---|---|
 | `channel_state_controller.py` | 10 |
-| `load_controller.py` | 7 |
+| `load_controller.py` | 6 |
 | `selection_controller.py` | 6 |
 | `centre_view.py` | 2 |
 | `projector_registry.py` | 2 |
@@ -516,13 +520,44 @@ QC/Crop, `scope_registry` registry-construction) which are themselves the sancti
 data/domain→feature bridges. This is the remaining frontier for full vertical-slice purity;
 the ratchet ensures it only shrinks.
 
-**Two phases outside the terminal conditions are also still open:** **B4b**
-(load-path convergence — the eager bulk path still calls `app._load_well_csv`, and
-`WellRepository` has no `load_well`) and **B5** (image repository facade, marked
-optional — there is no `data/image_repository.py` and no facade ratchet). **B1b** remains
-⊘ deferred and is the mechanism condition 3 is waiting on.
+**One phase outside the terminal conditions is still open:** **B5** (image
+repository facade, marked optional — there is no `data/image_repository.py` and no
+facade ratchet). **B1b** remains ⊘ deferred and is the mechanism condition 3 is
+waiting on.
 
 **Changelog** (newest first):
+
+- 2026-08-29 — **B4b COMPLETE — one load path, and the divergence it was hiding.**
+  The eager bulk load now goes through `ctx.state.repo.load_well(key, path)`, which
+  delegates to the new `data_loading.load_and_project` — the single way a frame enters
+  the row cache, for the loader's cold pass and a lazy cache miss alike. It registers
+  the CSV path, reads it, runs every registered projector and records the FOV verdict,
+  so neither path can acquire a step the other lacks.
+  - **The paths had already diverged, and it was reachable.** The loader applied manual
+    per-cell curation on top of QC and crop; `get_rows` ran only the two registered
+    projectors. `persistence/reset_scopes.py` (reset QC parameters) and
+    `core/channel_state_controller.py` (stale-cache recovery) both drop the row cache
+    without clearing `runtime.review.included_overrides`, so wells came back from disk
+    with the user's exclusions gone from `Included` while the override map still held
+    them — excluded cells silently back in every plot, export and statistic. Reproduced
+    before the fix, and `tests/test_one_load_path.py` fails without it.
+  - **`data/curation.py`** now owns that projection (moved out of
+    `features/image_browser/review_image/collect.py`) and is registered beside QC and
+    crop, so the projector roster is the whole list of what a fresh frame gets rather
+    than three things the loader happens to remember. The move also freed Cell Gating
+    from its lazy hop into Image Browser and took the loader's feature import with it:
+    `CORE_FEATURE_IMPORT_BUDGET` 31 → **30**.
+  - `well_viewer/data/image_identity.py` gained `cell_key_tuples_for_dataframe`, the one
+    implementation of the `(fov, tp, nid)` row key both the projector and Review Image's
+    own lookups use; `collect.review_row_keys_series` is now the tab-side name for it.
+  - `runtime_app._load_well_csv` is deleted — a pass-through with one caller, which was
+    that loop.
+  - Guard housekeeping: `tests/test_row_cache_writers.py`'s roster moves with the sites
+    (`data/curation.py::Included`, `data/data_loading.py::__replaces_frame__`; the
+    `load_controller` and `review_image/collect.py` entries are gone). The cache write is
+    newly *visible* to that scan — the loader spelled it through a local name the
+    detector could not attribute to the row cache, and `load_and_project` spells it
+    `dataset.cache[label]`.
 
 - 2026-08-29 — **Reconciled the roadmap against the tree (no product code).** Every
   phase status in the progress log was re-checked by reading the code and running the

@@ -43,10 +43,10 @@ from well_viewer.core.channel_state_controller import (
     refresh_thresh_frac_quick_edit,
     seg_channel_token_of,
 )
-from well_viewer.core.lazy import lazy as _lazy
 from well_viewer.core.plot_orchestrator import redraw_app
 from well_viewer.core.safe import swallowed
 from well_viewer.core.selection_controller import invalidate_stats_cache
+from well_viewer.data.curation import apply_curation_to_cache
 from well_viewer.data.data_loading import get_rows
 from well_viewer.domain.gating_state import (
     default_thresh_count_on, default_thresh_frac_on,
@@ -81,11 +81,9 @@ _CH_LBL_W = 160
 _GATE_EDIT_W = 90
 _THRESH_EDIT_W = 90
 
-# Lazy so Cell Gating imports without Image Browser present (keeps both
-# deletable); resolves on first call.
-apply_review_overrides_to_cache = _lazy(
-    "well_viewer.features.image_browser.review_image.controller",
-    "apply_review_overrides_to_cache")
+# Plain import: the curation projector lives in the data layer, so re-asserting
+# the user's per-cell edits after a gating pass no longer reaches across into
+# Image Browser and no longer needs the lazy hop that kept both deletable.
 
 logger = logging.getLogger("well_viewer.gating_worker")
 
@@ -212,7 +210,7 @@ class GatingWorker(QThread):
             # so per-cell curation in the Segmentation tab is not clobbered by
             # threshold-based recomputes.
             try:
-                apply_review_overrides_to_cache(self._ctx)
+                apply_curation_to_cache(self._ctx)
             except Exception:
                 swallowed()  # was: pass (silent except)
             # CRITICAL: Only invalidate stats cache, NOT _refresh_review_csv_rows.

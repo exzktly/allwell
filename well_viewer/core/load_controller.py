@@ -24,6 +24,7 @@ from well_viewer.core.ui_helpers import (
     step_progress as _step_progress,
 )
 from well_viewer.core.safe import swallowed
+from well_viewer.data.curation import apply_curation_to_cache
 
 
 # ── "Opening dataset…" responsiveness guard ─────────────────────────────────
@@ -480,15 +481,12 @@ def load_directory(ctx, d: Path, label=None) -> None:
     for i, p in enumerate(csvs, 1):
         tok = app._extract_well_token(p.stem)
         key = tok if tok else p.stem
-        app._app_state.dataset.well_paths[key] = p
-        frame = app._load_well_csv(p)
-        app._app_state.dataset.cache[key] = frame
-        # This path builds the frame itself rather than going through
-        # ``get_rows``, so it has to record the FOV verdict itself too —
-        # otherwise ``dataset.fov_integrity`` stays empty for the session and
-        # ``_report_unusable_fov_labels`` below has nothing to report.
-        from well_viewer.data.data_loading import record_fov_verdict
-        record_fov_verdict(ctx, key, frame)
+        # The repository's load is the same one a lazy read reaches on a cache
+        # miss: it registers the path, reads the CSV, runs every registered
+        # projector and records the FOV verdict. This pass used to do those four
+        # things itself, which is how the eager and lazy paths came to disagree
+        # about which layers a cached frame carries.
+        ctx.state.repo.load_well(key, p)
         _step_progress(ctx, i, f"Loading {i}/{n}: {p.name}",
                        allow_user_input=False)
         _opening_set_phase(ctx, f"Loading {i}/{n}: {p.name}", value=i)
@@ -524,10 +522,7 @@ def load_directory(ctx, d: Path, label=None) -> None:
     # when no patch file exists.
     try:
         app._persistence.load("cell_overrides")
-        from well_viewer.features.image_browser.review_image.controller import (
-            apply_review_overrides_to_cache,
-        )
-        apply_review_overrides_to_cache(ctx)
+        apply_curation_to_cache(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
     # Hydrate QC-layer thresholds (qc_params.json, else seed from pipeline_info)

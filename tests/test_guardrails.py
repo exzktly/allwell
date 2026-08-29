@@ -122,8 +122,10 @@ APP_FIRST_FUNC_SLACK = 15               # A3: playground 135→120, stats 120→
 # residual so it can only shrink. Seeded at today's count; WELL_MIME moved to
 # ``core/dnd`` took it 34→33; deleting the dead ``ui_helpers.on_theme_change``
 # (which held the last function-local imports of ``features.grouping.tab_view``
-# and ``features.stats.controller``) took it 33→31.
-CORE_FEATURE_IMPORT_BUDGET = 31
+# and ``features.stats.controller``) took it 33→31; moving the manual-curation
+# projector out of Review Image into ``data/curation.py`` (roadmap B4b) took the
+# loader's import of it with it, 31→30.
+CORE_FEATURE_IMPORT_BUDGET = 30
 CORE_FEATURE_IMPORT_SLACK = 0
 
 

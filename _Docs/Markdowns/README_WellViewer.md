@@ -3235,6 +3235,14 @@ rather than a single panel.
   cannot be lined up with the rest; those slides are fitted to the slide as
   before, and each says so under the figure. Re-save the plot in All-Well to have
   it match. A plot placed as a picture (see below) cannot be aligned either.
+
+  One thing does still pull two plots apart, and it is upstream of the export:
+  the Properties sidebar's **Layout › Tight** and **Layout › Constrained**
+  switches move the plotting area *inside* the figure to fit whatever the labels
+  need, so two plots of the same size genuinely end up with plotting areas of
+  different sizes and no export can reconcile them. Measured on a pair of plots
+  that line up to the pixel with both switches off, turning either on leaves them
+  about half an inch apart. Leave both off for figures you intend to tile.
 - **A plot saved from one panel stays that panel.** If you saved a single panel
   of a multi-panel figure, the export leaves it as a picture rather than
   redrawing it, because a redraw would give you every panel of that figure under

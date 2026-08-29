@@ -163,6 +163,18 @@ def test_a_capture_written_before_this_carries_no_marker():
         b"<!-- allwell:axes-frac=0.5,0.1,0.5,0.9 --><svg/>") is None
 
 
+def test_a_sliver_of_a_page_is_read_as_damage_not_as_a_plotting_area():
+    """A page is a figure's own ink, so a real plotting area is most of it.
+    Honouring a sliver would scale the figure by the reciprocal of that sliver
+    and throw it clean off the slide."""
+    assert axes_fraction_from_svg(
+        b"<!-- allwell:axes-frac=0.1,0.1,0.11,0.9 --><svg/>") is None
+    assert axes_fraction_from_svg(
+        b"<!-- allwell:axes-frac=0.1,0.1,0.9,0.11 --><svg/>") is None
+    assert axes_fraction_from_svg(
+        b"<!-- allwell:axes-frac=0.1,0.1,0.9,0.9 --><svg/>") is not None
+
+
 # ── the deck lines its figures up ────────────────────────────────────────────
 
 def test_figures_of_one_size_put_their_axes_in_one_place(tmp_path):
@@ -247,6 +259,7 @@ def test_anchoring_never_draws_a_figure_smaller_than_the_letterbox_would(tmp_pat
     svg = _capture("legend")
     drawing = parse_svg(svg)
     frac = axes_fraction_from_svg(svg)
+    assert frac is not None
     box = dict(x=inches_to_emu(_deck._MARGIN), y=inches_to_emu(_deck._BODY_TOP),
                cx=inches_to_emu(_deck._SLIDE_W - 2 * _deck._MARGIN
                                 - _deck._PARAMS_W - _deck._GUTTER),

@@ -1768,6 +1768,15 @@ planning pass reads only the markers, never the shapes: a regular expression ove
 the bytes, where parsing a capture into shapes is the expensive half of the whole
 export.
 
+What alignment cannot reach is a difference that is real in the figure. With no
+layout engine — the default — an axes keeps a fixed position in figure
+coordinates, so two plots of one `figsize` have the same plotting area in inches
+and land on their slides identically. The Properties sidebar's `layout_tight` /
+`layout_constrained` preferences make the axes position depend on the labels
+instead, and the same pair then differs by around half an inch: the plotting
+areas are genuinely different sizes by the time the capture is taken, and the
+anchor can only centre them on one another.
+
 No figure comes out smaller than filling the slide alone would have drawn it: a
 gallery of one has its own margins as the maxima and resolves to the same scale
 the letterbox chose, differing only in centring the plotting area rather than the

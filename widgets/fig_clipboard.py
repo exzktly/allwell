@@ -257,6 +257,10 @@ def rasterized_layer_count(svg: bytes) -> int:
 #: a re-crop) would be silently wrong rather than obviously absent.
 AXES_RECT_MARKER = "allwell:axes-frac="
 
+#: The smallest share of a page a recorded plotting area may claim in either
+#: direction before it is read as damage rather than as a measurement.
+_MIN_AXES_FRACTION = 0.05
+
 
 def _mark_axes_rect(svg: bytes, frac) -> bytes:
     """Record where the plotting area sits, when it could be established."""
@@ -287,6 +291,13 @@ def axes_fraction_from_svg(svg: bytes) -> tuple[float, float, float, float] | No
         return None
     x0, y0, x1, y1 = values
     if not (x1 > x0 and y1 > y0):
+        return None
+    if (x1 - x0) < _MIN_AXES_FRACTION or (y1 - y0) < _MIN_AXES_FRACTION:
+        # Not a plotting area. The page a capture is cropped to is the figure's
+        # own ink, so a real axes — or the union of a panel grid's axes — is most
+        # of it; a sliver is a marker that has been edited or corrupted in the
+        # dataset folder, and honouring it would scale the figure by the
+        # reciprocal of that sliver and throw it off the slide.
         return None
     return (x0, y0, x1, y1)
 

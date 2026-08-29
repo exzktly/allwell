@@ -160,7 +160,7 @@ stats_refresh_map = _lazy("well_viewer.features.stats.controller", "stats_refres
 from well_viewer.core.ui_helpers import refresh_plot_empty_states
 update_bar_tp_menu, bar_event_xdata, on_bar_drag_motion, toggle_swarm, toggle_violin, bar_well_display_label, rep_sets_active, collect_bar_items_for_app, refresh_bar_layout_btn_state, update_bar_tp_selection_display = _lazy_names("well_viewer.features.barplot.controller", "update_bar_tp_menu", "bar_event_xdata", "on_bar_drag_motion", "toggle_swarm", "toggle_violin", "bar_well_display_label", "rep_sets_active", "collect_bar_items_for_app", "refresh_bar_layout_btn_state", "update_bar_tp_selection_display")
 from well_viewer.core.channel_state_controller import get_fluor_gate, get_all_fluor_gates, get_thresh_frac_on, set_thresh_frac_on, refresh_thresh_frac_quick_edit, ratio_label_for, active_channel_label, set_ratio_metrics, on_plot_channel_selected, on_metric_selected_global
-from well_viewer.domain.selections_model import color_for_replicate_set, color_for_wells, replicate_display_label, replicate_sets_loaded, well_display_label
+from well_viewer.domain.selections_model import color_for_replicate_set, replicate_display_label, replicate_sets_loaded, well_display_label
 from well_viewer.core.load_controller import load_path_shim
 from well_viewer.core.plot_orchestrator import redraw_app
 from well_viewer.features.preview.controller import refresh_preview_picker_shim
@@ -168,7 +168,7 @@ review_row_keys, review_norm_fov, review_collect_timepoints, refresh_review_csv,
 set_review_image_source, refresh_review_image_source_btn, review_image_set_color, review_image_refresh_color_swatch, reset_review_image_colors, toggle_review_image_binary_mask, refresh_review_image_binary_btn, toggle_review_image_outline, refresh_review_image_outline_btn, draw_review_image, render_review_image_display, review_image_resolve_lut, review_image_auto_lut, review_image_commit_lut, review_image_zoom_step, apply_review_image_cursor, set_review_image_include_mode, invalidate_review_image_frame_cache, review_image_get_color = _lazy_names("well_viewer.features.image_browser.review_image.renderer", "set_review_image_source", "refresh_review_image_source_btn", "review_image_set_color", "review_image_refresh_color_swatch", "reset_review_image_colors", "toggle_review_image_binary_mask", "refresh_review_image_binary_btn", "toggle_review_image_outline", "refresh_review_image_outline_btn", "draw_review_image", "render_review_image_display", "review_image_resolve_lut", "review_image_auto_lut", "review_image_commit_lut", "review_image_zoom_step", "apply_review_image_cursor", "set_review_image_include_mode", "invalidate_review_image_frame_cache", "review_image_get_color")
 open_scatter_cell_viewer = _lazy("well_viewer.features.scatter.cell_viewer_view", "open_scatter_cell_viewer")
 col_for_scatter_axis, col_for_scatter_entry, scatter_axis_metric_key, refresh_scatter_metric_for_axis, refresh_scatter_agg_metric_for_axis, sync_scatter_agg_stat_combos, compose_scatter_agg_stat, update_tp_selection_display, update_scatter_tp_selection_display, on_scatter_axis_change, on_scatter_agg_axis_change = _lazy_names("well_viewer.features.scatter.controller", "col_for_scatter_axis", "col_for_scatter_entry", "scatter_axis_metric_key", "refresh_scatter_metric_for_axis", "refresh_scatter_agg_metric_for_axis", "sync_scatter_agg_stat_combos", "compose_scatter_agg_stat", "update_tp_selection_display", "update_scatter_tp_selection_display", "on_scatter_axis_change", "on_scatter_agg_axis_change")
-from well_viewer.core.selection_controller import sel_by_id, sel_add, sel_set_hidden, sel_set_composition, sel_select, groups_centre_refresh, rebuild_all, sel_color, refresh_sidebar_map_now, plate_commit_deferred, set_selected_wells, invalidate_stats_cache
+from well_viewer.core.selection_controller import sel_by_id, sel_add, sel_set_hidden, groups_centre_refresh, rebuild_all, sel_color, refresh_sidebar_map_now, plate_commit_deferred, set_selected_wells, invalidate_stats_cache
 stats_active_group, stats_collect_group_values_shim, stats_active_channel_entry, stats_active_val_col, stats_active_threshold, stats_active_statistic, stats_run_shim, stats_draw_ks_cdf_shim, on_stats_property_change = _lazy_names("well_viewer.features.stats.controller", "stats_active_group", "stats_collect_group_values_shim", "stats_active_channel_entry", "stats_active_val_col", "stats_active_threshold", "stats_active_statistic", "stats_run_shim", "stats_draw_ks_cdf_shim", "on_stats_property_change")
 from well_viewer.core import tab_controller as _tabctl
 from well_viewer.core.tab_controller import on_central_pane_changed, build_centre_shim, sync_section_nav_from_notebook, tab_history_back, tab_history_forward, current_centre_tab, sync_heatmap_well_drag_mode, toggle_sidebar, visible_centre_tabs, is_tab_visible, pane_mode
@@ -518,11 +518,6 @@ class WellViewerApp(QWidget):
         if s is not None:
             self._sel_set_hidden(sid, not bool(s.get("hidden")))
 
-    def _sel_set_composition(self, sid, wells = None, replicates = None) -> None:
-        return sel_set_composition(self._ctx, sid, wells, replicates)
-
-    def _sel_select(self, sid) -> None: return sel_select(self._ctx, sid)
-
     def _groups_centre_refresh(self) -> None: return groups_centre_refresh(self._ctx)
 
     def _rebuild_all(self, *, invalidate: bool = True) -> None:
@@ -559,8 +554,6 @@ class WellViewerApp(QWidget):
     # same colour everywhere (plate maps, line/bar/stats plots).
     def _rank_color_well(self, tok) -> str:
         return color_for_well(tok)
-
-    def _rank_color_wells(self, wells) -> str: return color_for_wells(wells)
 
     def _sel_color(self, s) -> str: return sel_color(self._ctx, s)
 

@@ -1,4 +1,4 @@
-"""Line-plot colour mode — plate-rank colours, or greys told apart by marker.
+"""Line-plot colour mode — plate-rank colours, or greys told apart three ways.
 
 The sibling of ``domain/bar_colors.py``, and deliberately not the same rule.
 The Bar plot's "Grey" mode collapses every column onto one ink because a bar is
@@ -89,7 +89,8 @@ LINE_STYLES = ("-", "--", "-.", ":")
 
 @dataclass(frozen=True)
 class LineTraceStyle:
-    """How one trace is drawn: its colour, and how its points are marked.
+    """How one trace is drawn: its colour, its dash pattern, and how its points
+    are marked.
 
     ``marker`` of ``None`` means "keep whatever marker the panel already uses"
     — that is the plate mode, where the three aggregate panels distinguish

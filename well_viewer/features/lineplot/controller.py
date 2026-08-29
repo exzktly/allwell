@@ -808,8 +808,8 @@ def render_line_series(
     function has none — the batch line figure calls it with its own state, and
     a mode the tab honoured and the export dropped is the divergence this
     single renderer exists to prevent. The **position** in *series_list* is what
-    picks a trace's shade and marker, so the drag-reorder the user applied to
-    the legend is the order the markers follow.
+    picks a trace's shade, dash and marker, so the drag-reorder the user applied
+    to the legend is the order those cues follow.
     """
     any_ts = any_cdf = any_n = False
     for index, series in enumerate(series_list):

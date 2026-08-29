@@ -1917,10 +1917,15 @@ still zero and every card sits at y=0, and a scroll issued in that turn of the
 event loop is a scroll to the top of a list that has not been laid out. That is
 what shipped, and it always landed on the first card while reporting success,
 because `QScrollArea.ensureWidgetVisible` returns nothing to say otherwise.
-`_scroll_when_laid_out` re-aims once per event-loop pass until the target stops
-moving (the cards size themselves from their previews' aspect ratios, so the
-list's height is still changing for a few passes), bounded by
-`_SCROLL_SETTLE_TRIES`. It sets the
+`_settle_scroll` re-aims on every `rangeChanged` the scroll bar emits, which is
+what the list growing into its real height looks like from outside: the cards
+size themselves from their previews' aspect ratios, so for a while after a
+repopulate the position asked for is being clamped into a range that does not
+exist yet. A chain of zero-delay timers is not a substitute — it drains faster
+than Qt lays the cards out and settles on a stable-looking wrong answer. The
+re-aiming stops after `_SCROLL_SETTLE_MS`, so a resize minutes later cannot drag
+the user back, and both its timers take the scroll bar as their context object
+so neither fires after the page has been torn down. It sets the
 scroll bar to the card's own top rather than calling `ensureWidgetVisible`,
 because a saved figure is routinely taller than the viewport and "make it
 visible" then means scrolling until its *bottom* shows — the user arrives at the
@@ -1963,6 +1968,30 @@ the mouse, so a click anywhere on the tile still reaches the button.
 repaint rather than accumulating it: `clear_layout` has already destroyed the
 previous cards' C++ objects, and an index that outlived them would hand out
 handles to deleted widgets.
+
+**A rebuild holds the viewport where the user left it.** That same
+`clear_layout` leaves the scroll area holding a list of nearly no height for a
+few event-loop passes, so Qt clamps the scroll bar into a range that has
+momentarily vanished and the value it lands on is what the user is left looking
+at — deleting a plot halfway down a gallery of twelve moved the view some 2,400
+px away from the card the Delete button was on. `_capture_scroll_anchor` runs
+before the clear and records which cards the viewport is on, as (plot id, offset
+into that card) pairs; `_restore_scroll_anchor` aims `_settle_scroll` at the
+first of them that still exists, so the surviving card comes back the same
+distance above the viewport's top edge. The candidates are ordered from the card
+at the top of the view *upwards*, because the anchor card is usually the one
+being deleted — the Delete button lives on it — and what must then hold still is
+whatever is above the gap, with the following card flowing up into it. Anchoring
+downwards instead holds the card *below* the deleted one in place, which drags
+the whole list up by a card's height: a smaller version of the same jump. Cards
+below the viewport come last, for the case where the run above has gone
+entirely; at the top of the list their offsets are large and negative, so the
+bar clamps to the top, which is where a gallery that just lost its first cards
+belongs. Only the most recent aim runs: `_settle_scroll` stamps a generation on
+`ctx.runtime.saved_plots.scroll_generation` and an older chain stops when it
+sees a newer one, so the restore started by the repopulate inside
+`focus_saved_plot` yields to the jump-to-card that follows it rather than the
+two fighting over the same scroll bar.
 
 Home reaches all of this through `core.lazy` proxies
 (`collect._saved_plots_store`, `controller._focus_saved_plot`) rather than

@@ -54,9 +54,16 @@ _FOCUS_FLASH_MS = 1600
 #: against the control band.
 _SCROLL_TOP_MARGIN = 8
 
-#: How many event-loop passes the scroll may re-aim over while the gallery's
-#: layout settles. Bounded so a layout that never converges cannot spin.
-_SCROLL_SETTLE_TRIES = 8
+#: How many surviving cards are remembered as fall-backs when the gallery is
+#: rebuilt. More than one is needed because the card the view is anchored on is
+#: very often the one the user just deleted — the Delete button lives on it.
+_ANCHOR_CANDIDATES = 4
+
+#: How long the gallery keeps re-aiming a scroll while its layout settles, in
+#: milliseconds. Long enough to cover the cards growing into their heights,
+#: short enough that a later resize cannot pull the user away from wherever
+#: they have since scrolled to.
+_SCROLL_SETTLE_MS = 500
 
 
 class _AspectImage(QLabel):
@@ -291,11 +298,21 @@ def populate_saved_plots_grid(ctx) -> None:
     """Rebuild the gallery from the current store contents and flip the
     empty-state based on how many saved plots exist.
 
+    The viewport is held where the user left it: the rebuild throws away every
+    card, so the scroll area briefly has nothing in it and Qt clamps the scroll
+    bar to a range that no longer exists. Deleting a plot halfway down a gallery
+    of twelve moved the view some two thousand pixels away from the card the
+    user had just clicked Delete on. ``_capture_scroll_anchor`` records which
+    surviving card was at the top of the viewport and how far into it the view
+    had scrolled; ``_restore_scroll_anchor`` puts it back once the rebuilt cards
+    have their heights.
+
     A8 teardown: takes ``ctx`` — the gallery widget handles read through
     ``ctx.widgets`` and the store/capture layer is ctx-native."""
     col = ctx.widgets.get_or_none("_saved_plots_list")
     if col is None:
         return
+    anchor = _capture_scroll_anchor(ctx)
     clear_layout(col)
     store = get_store(ctx)
     store.ensure_loaded(ctx)
@@ -322,6 +339,67 @@ def populate_saved_plots_grid(ctx) -> None:
         cards[rec.id] = card
         col.addWidget(card)
     ctx.runtime.saved_plots.cards = cards
+    _restore_scroll_anchor(ctx, anchor)
+
+
+def _capture_scroll_anchor(ctx) -> list[tuple[str, int]]:
+    """Where the gallery is looking, as (plot id, offset into that card) pairs.
+
+    The offset is the scroll value minus the card's top, so restoring means
+    putting that card back the same distance above the viewport's top edge —
+    which is what "stay in place" means from the screen.
+
+    The first pair is the card at the top of the viewport; the rest walk
+    *upwards* from it, because the anchor card is usually the one being deleted
+    and the next thing to hold still is whatever is above the gap. Anchoring
+    downwards instead would hold the card *below* the deleted one in place,
+    which drags everything above it up by a card's height — a jump of exactly
+    the kind this exists to prevent. Cards below the viewport come last, for the
+    case where the whole run above has gone: at the top of the list their
+    offsets are large and negative, so the scroll bar clamps to the top, which
+    is where a gallery that just lost its first cards belongs.
+
+    An empty list when there is nothing to anchor on (the tab has never been
+    populated, the gallery is empty, or the scroll area is gone), which the
+    restore reads as "leave the scroll bar alone".
+    """
+    scroll = ctx.widgets.get_or_none("_saved_plots_scroll")
+    cards = list((ctx.runtime.saved_plots.cards or {}).items())
+    if scroll is None or not cards:
+        return []
+    out: list[tuple[str, int]] = []
+    with swallow("saved_plots: capture scroll anchor"):
+        host = scroll.widget()
+        if host is None:
+            return []
+        value = scroll.verticalScrollBar().value()
+        offsets = [(plot_id, value - card.mapTo(host, card.rect().topLeft()).y(),
+                    card.height())
+                   for plot_id, card in cards]
+        # ``cards`` is in gallery order, so the first card whose bottom edge is
+        # below the viewport's top is the one the user is looking at.
+        first = next((i for i, (_, off, h) in enumerate(offsets) if off < h),
+                     len(offsets) - 1)
+        order = [first, *range(first - 1, -1, -1), *range(first + 1, len(offsets))]
+        out = [(offsets[i][0], offsets[i][1])
+               for i in order[:_ANCHOR_CANDIDATES]]
+    return out
+
+
+def _restore_scroll_anchor(ctx, anchor: list[tuple[str, int]]) -> None:
+    """Put the viewport back on the first card of *anchor* that still exists."""
+    if not anchor:
+        return
+    scroll = ctx.widgets.get_or_none("_saved_plots_scroll")
+    cards = ctx.runtime.saved_plots.cards or {}
+    if scroll is None:
+        return
+    for plot_id, offset in anchor:
+        card = cards.get(plot_id)
+        if card is None:
+            continue
+        _settle_scroll(ctx, scroll, _card_top_target(card, offset))
+        return
 
 
 def scroll_to_saved_plot(ctx, plot_id: str) -> bool:
@@ -336,8 +414,8 @@ def scroll_to_saved_plot(ctx, plot_id: str) -> bool:
     this page and the page has no geometry yet: the scroll area's range is still
     zero, every card sits at y=0, and a scroll issued now is a scroll to the top
     of a list that has not been laid out. That is not a hypothetical — it is what
-    shipped, and it always landed on the first card. ``_scroll_when_laid_out``
-    waits for the layout and then scrolls, so the return value here means "there
+    shipped, and it always landed on the first card. ``_settle_scroll`` waits for
+    the layout and then scrolls, so the return value here means "there
     is a card and it has been asked for", which is the most this function can
     honestly promise before the event loop has run.
     """
@@ -354,39 +432,91 @@ def scroll_to_saved_plot(ctx, plot_id: str) -> bool:
         card.isVisible()
     except RuntimeError:
         return False
-    _scroll_when_laid_out(scroll, card)
+    _settle_scroll(ctx, scroll, _card_top_target(card, -_SCROLL_TOP_MARGIN))
     _flash(card)
     return True
 
 
-def _scroll_when_laid_out(scroll, card) -> None:
-    """Scroll *card* to the top of *scroll*'s viewport once there is a layout."""
+def _card_top_target(card, offset: int):
+    """A target function placing *card*'s top *offset* pixels below the view.
+
+    Explicitly to the card's top, not ``ensureWidgetVisible``: a saved figure is
+    routinely taller than the viewport, and "make it visible" then means
+    scrolling until its *bottom* shows — the user arrives at the foot of the
+    plot they clicked.
+
+    Returns None once the card no longer belongs to a gallery, which is
+    ``_settle_scroll``'s cue to stop: the gallery was rebuilt under it.
+    """
+    def _target(host) -> int | None:
+        if card.parent() is None:
+            return None
+        return card.mapTo(host, card.rect().topLeft()).y() + offset
+
+    return _target
+
+
+def _settle_scroll(ctx, scroll, target_of) -> None:
+    """Scroll to ``target_of(host)``, and again each time the layout moves.
+
+    Re-aiming is the whole job. The cards size themselves from their previews'
+    aspect ratios (``_AspectImage`` sets its height in ``resizeEvent``), so for
+    a while after a repopulate — or after a page switch, where the scroll area
+    starts with no geometry at all — the list is far shorter than it will be and
+    the position asked for is clamped into a range that does not exist yet. The
+    scroll bar says when that changes: ``rangeChanged`` fires on every step of
+    the list growing into its real height, and re-applying on each one lands the
+    view where it was asked to go rather than wherever the first, clamped,
+    attempt happened to fall. A chain of zero-delay timers is not a substitute —
+    it drains faster than Qt lays the cards out, so it settles on a stable-
+    looking wrong answer.
+
+    The re-aiming stops after ``_SCROLL_SETTLE_MS``, so a resize minutes later
+    cannot drag the user back, and stops immediately when a newer request
+    supersedes this one: focusing one card (from Home's thumbnails) repopulates
+    the gallery first, so a restore-the-viewport chain is already in flight and
+    the two would otherwise fight over the same scroll bar.
+    """
     from PySide6.QtCore import QTimer
 
-    def _attempt(remaining: int, previous: int) -> None:
-        with swallow("saved_plots: scroll to card"):
-            host = scroll.widget()
-            if host is None or card.parent() is None:
-                return                      # the gallery was rebuilt under us
-            bar = scroll.verticalScrollBar()
-            # Explicitly to the card's top, not ``ensureWidgetVisible``: a saved
-            # figure is routinely taller than the viewport, and "make it visible"
-            # then means scrolling until its *bottom* shows — the user arrives at
-            # the foot of the plot they clicked. A few pixels of margin above it
-            # so the card does not sit flush against the band.
-            top = card.mapTo(host, card.rect().topLeft()).y()
-            target = max(bar.minimum(),
-                         min(bar.maximum(), top - _SCROLL_TOP_MARGIN))
-            bar.setValue(target)
-            # Keep going until the target stops moving. The cards size themselves
-            # from their previews' aspect ratios (``_AspectImage`` sets its height
-            # in ``resizeEvent``), so the list's height is still changing for a
-            # few passes after the page is shown and a scroll computed on the
-            # first one lands short of where the card ends up.
-            if remaining > 0 and target != previous:
-                QTimer.singleShot(0, lambda: _attempt(remaining - 1, target))
+    generation = (ctx.runtime.saved_plots.scroll_generation or 0) + 1
+    ctx.runtime.saved_plots.scroll_generation = generation
+    bar = scroll.verticalScrollBar()
+    live = True
 
-    QTimer.singleShot(0, lambda: _attempt(_SCROLL_SETTLE_TRIES, -1))
+    def _stop() -> None:
+        nonlocal live
+        if not live:
+            return
+        live = False
+        with swallow("saved_plots: stop settling scroll"):
+            bar.rangeChanged.disconnect(_apply)
+
+    def _apply(*_args) -> None:
+        if not live:
+            return
+        if ctx.runtime.saved_plots.scroll_generation != generation:
+            _stop()
+            return
+        with swallow("saved_plots: settle scroll"):
+            host = scroll.widget()
+            if host is None:                # the gallery was rebuilt under us
+                _stop()
+                return
+            wanted = target_of(host)
+            if wanted is None:
+                _stop()
+                return
+            bar.setValue(max(bar.minimum(), min(bar.maximum(), wanted)))
+
+    bar.rangeChanged.connect(_apply)
+    # Both timers take the scroll bar as their context object, so neither fires
+    # after the page it belongs to has been torn down. Without that, the stop
+    # timer outlives the gallery and tries to disconnect from a scroll bar whose
+    # C++ half is already gone — which Qt reports as a warning from whatever is
+    # running half a second later, rather than as anything to do with here.
+    QTimer.singleShot(0, bar, _apply)
+    QTimer.singleShot(_SCROLL_SETTLE_MS, bar, _stop)
 
 
 def _flash(card: QWidget) -> None:

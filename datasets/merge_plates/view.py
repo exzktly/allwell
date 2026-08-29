@@ -1,7 +1,9 @@
 """Qt builder for the Merge Plates page.
 
-An equation-style dataset 1 + dataset 2 = destination row (mirroring
-Concatenate's), a block-placement control for remapping dataset 2's wells
+An equation-style dataset 1 + dataset 2 = destination row (the shared
+:mod:`datasets._common.equation_row`, which Concatenate draws from too, with
+this page's own labels and destination rule), a block-placement control for
+remapping dataset 2's wells
 onto free positions, and the usual Analyze-style status view (a live per-well
 :class:`~datasets.merge_plates.dashboard.MergePlatesDashboard`, raw log
 demoted to a collapsible checkbox).
@@ -32,8 +34,8 @@ import theme
 from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
 from util.well_token import canonical_well_label
 from widgets._support import set_variant
-from widgets.path_field import PathField, folder_picker
 from datasets._common.dataset_paths import preview_wells
+from datasets._common.equation_row import build_equation_row
 from datasets.merge_plates.dashboard import MergePlatesDashboard
 from datasets.merge_plates.merge_plates_compute import (
     MergePlatesError,
@@ -44,8 +46,6 @@ from datasets.merge_plates.merge_plates_compute import (
 from datasets._common.dataset_fields import is_dataset, is_free_destination
 from datasets._common.dataset_fields import promote_open_button
 
-# The `+` / `=` glyph column in the equation row.
-_EQUATION_OP_W = 20
 # Well-token field for the remap origin (e.g. `A01`).
 _ORIGIN_EDIT_W = 60
 
@@ -150,41 +150,14 @@ class MergePlatesPage(LogPanelMixin, QWidget):
         outer.addStretch(1)
 
     def _build_equation_row(self, outer: QVBoxLayout) -> None:
-        row = QWidget(self)
-        hl = QHBoxLayout(row)
-        hl.setContentsMargins(0, 0, 0, 0)
-        hl.setSpacing(theme.Spacing.sm)
-
-        self._ds1_field = PathField(
-            "Dataset 1", pick=folder_picker("Select dataset 1 folder"), validator=_is_dataset)
-        self._ds2_field = PathField(
-            "Dataset 2", pick=folder_picker("Select dataset 2 folder"), validator=_is_dataset)
-        self._dest_field = PathField(
-            "Destination", pick=folder_picker("Select destination folder"), validator=_is_destination)
-
-        def _operator(text: str) -> QLabel:
-            lbl = QLabel(text, row)
-            lbl.setObjectName("Heading")
-            lbl.setContentsMargins(0, theme.Spacing.lg, 0, 0)
-            lbl.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
-            lbl.setFixedWidth(_EQUATION_OP_W)
-            return lbl
-
-        hl.addWidget(self._ds1_field, 1)
-        hl.addWidget(_operator("+"))
-        hl.addWidget(self._ds2_field, 1)
-        hl.addWidget(_operator("="))
-        hl.addWidget(self._dest_field, 1)
-        outer.addWidget(row)
-
-        self._cross_hint = QLabel("", self)
-        self._cross_hint.setObjectName("Danger")
-        self._cross_hint.setWordWrap(True)
-        self._cross_hint.setVisible(False)
-        outer.addWidget(self._cross_hint)
-
-        for field in (self._ds1_field, self._ds2_field, self._dest_field):
-            field.changed.connect(self._on_input_changed)
+        eq = build_equation_row(
+            self, outer,
+            ds1_label="Dataset 1", ds2_label="Dataset 2",
+            is_dataset=_is_dataset, is_destination=_is_destination,
+            on_changed=self._on_input_changed,
+        )
+        self._ds1_field, self._ds2_field = eq.ds1, eq.ds2
+        self._dest_field, self._cross_hint = eq.dest, eq.cross_hint
 
     def _build_remap_row(self, outer: QVBoxLayout) -> None:
         row = QWidget(self)

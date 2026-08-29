@@ -134,7 +134,7 @@ allwell/
 │   ├── _common/                ← what more than one tool needs: dataset_paths,
 │   │                              containers, zip_passthrough, member_names,
 │   │                              concurrency, log_panel, tool_controller,
-│   │                              dataset_fields
+│   │                              dataset_fields, equation_row
 │   ├── concatenate/            ← Concatenate datasets (compute/apply/worker/view/controller/dashboard)
 │   ├── merge_plates/           ← Merge two plates into one, remapping wells
 │   ├── subset/                 ← Subset / Split a dataset by well, FOV or timepoint
@@ -5947,6 +5947,7 @@ deletable:
 | `datasets/_common/member_names.py` | `rewrite_member_field` — the schema-safe, field-agnostic zip-member filename rewriter (extension check, field-count check, channel-scoped role suffix preserved) that Concatenate's timepoint shift and Merge plates' well remap both wrap with their own validity predicate — plus `is_os_junk_member`, the shared answer to "is this member operating-system debris rather than data?" (`.DS_Store`, `Thumbs.db`, `desktop.ini`, `__MACOSX/`, AppleDouble `._` sidecars, the Spotlight and Trash directories). It is deliberately a *named set*, not "anything that isn't an image": a `notes.txt` a user put in an archive on purpose is real content, and a caller that refuses to reconcile two conflicting copies of a real file should keep refusing. Concatenate is its only caller — see §6b's Verification note for what carrying that debris through a merge used to do. |
 | `datasets/_common/tool_controller.py` | `DatasetToolController` — the worker lifecycle every tool controller shares (`jobFinished`, `stop`, `is_busy`, `shutdown`), with the two things that differ between tools as knobs: `_shutdown_label`, and a `_request_worker_stop` hook. The hook exists for one tool. Import Loose's worker spends the run blocked inside the zipper subprocess's stdout read loop and never polls `isInterruptionRequested()`, so Qt's cooperative flag is a no-op there and `request_stop` — which also signals the tracked child — is what actually stops it; a base that hard-coded `requestInterruption()` would have left an orphan process on app close, and `shutdown` swallows the failure it would then hit. `DestinationToolController` adds the run-and-confirm-restart cluster the three copy-into-a-destination tools share (Subset, Merge Plates, Concatenate), with `_destination_has_marker` supplied per tool because a folder holding *this* tool's interrupted attempt is a resume and another tool's leftovers are not. Deliberately **not** on either base: `_on_queue_requested`, `_on_finished` and `_on_succeeded`, which measured six, five and two distinct shapes across the six controllers — pulling them up would trade plain methods for a base full of flags. |
 | `datasets/_common/dataset_fields.py` | `is_dataset` / `is_free_destination` / `promote_open_button` — the destination-field validators and the success-state button swap the pages share. `is_free_destination` takes its two predicates as arguments for the same marker reason as above. Cross-field rules ("the destination must differ from both sources") stay on the page, since they read fields the helper cannot see. Sharing the *wording* is part of the point: a user moving between Subset and Merge Plates should not be told the same thing two different ways. |
+| `datasets/_common/equation_row.py` | `build_equation_row` / `EquationRow` — the `dataset 1 + dataset 2 = destination` row, for the two tools that take two datasets and write a third. Merge Plates and Concatenate had built it twice in twenty statements each, differing only in two field labels and the name of the slot the fields report to, down to a byte-identical nested operator-glyph helper and a second copy of that column's width. What stays at the call site is what genuinely differs: the two dataset labels — Concatenate names its inputs "base" and "appended" because the operation is ordered, Merge Plates does not because its is not — and each page's own destination validator, which is bound to that tool's own in-progress marker and must **not** be shared. The builder returns the four widgets rather than assigning them, so each page keeps its own `_ds1_field` / `_ds2_field` / `_dest_field` / `_cross_hint` names, which its validation, its run spec and its reset all read. |
 | `datasets/_common/concurrency.py` | `pick_workers(workers, n_units)` — the shared worker-thread-count heuristic (0 = auto, capped at 8 and at the CPU count, mirroring `pipeline.ome_explode._pick_workers`) every tool below uses for its per-well `ThreadPoolExecutor`. |
 
 **Every copy tool refuses a dataset that spells one well two ways.** Subset,
@@ -5981,8 +5982,9 @@ Findings one, where it reads as belonging to the findings and wipes a log that
 is usually hidden. Per-page differences are parameters: section title, status
 `objectName`, placeholder wording, and the toggle tooltip.
 
-`datasets/_common/` otherwise holds only logic (containers, dataset paths,
-member names, zip passthrough) — including `dataset_paths.split_stem_well`,
+Besides that mixin and `equation_row.py`, `datasets/_common/` holds only logic
+(containers, dataset paths, member names, zip passthrough) — including
+`dataset_paths.split_stem_well`,
 the pane's single reader of a trailing well token on a longer stem
 (`measurements_b10` → `("measurements", "B10")`). That is not
 `util.well_token.canonical_well_label`, which judges a whole token; it is

@@ -1,7 +1,8 @@
 """Qt builder for the Concatenate Datasets page (the main viewer area).
 
 One equation-style input row — dataset 1 (the base / earlier timepoints) +
-dataset 2 (the one appended after) = a fresh destination — over an
+dataset 2 (the one appended after) = a fresh destination, built by the shared
+:mod:`datasets._common.equation_row` that Merge Plates draws from too — over an
 Analyze-style status view: a live per-well :class:`~datasets.concatenate.dashboard.ConcatDashboard`
 with the raw text log demoted to a collapsible "Show raw log" checkbox (the
 same furniture as ``analyze_tab_log.py``'s ``_build_log``/``_on_toggle_raw_log``,
@@ -31,8 +32,8 @@ from PySide6.QtWidgets import (
 
 import theme
 from widgets._support import set_variant
-from widgets.path_field import PathField, folder_picker
 from datasets._common.dataset_paths import preview_wells
+from datasets._common.equation_row import build_equation_row
 from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
 from datasets.concatenate.concatenate_compute import (
     destination_has_unrecognized_content,
@@ -42,8 +43,6 @@ from datasets.concatenate.dashboard import ConcatDashboard
 from datasets._common.dataset_fields import is_dataset, is_free_destination
 from datasets._common.dataset_fields import promote_open_button
 
-# The `+` / `=` glyph column in the equation row.
-_EQUATION_OP_W = 20
 
 
 
@@ -150,44 +149,14 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         outer.addStretch(1)
 
     def _build_equation_row(self, outer: QVBoxLayout) -> None:
-        row = QWidget(self)
-        hl = QHBoxLayout(row)
-        hl.setContentsMargins(0, 0, 0, 0)
-        hl.setSpacing(theme.Spacing.sm)
-
-        self._ds1_field = PathField(
-            "Dataset 1 (base)", pick=folder_picker("Select dataset 1 folder"),
-            validator=_is_dataset)
-        self._ds2_field = PathField(
-            "Dataset 2 (appended)", pick=folder_picker("Select dataset 2 folder"),
-            validator=_is_dataset)
-        self._dest_field = PathField(
-            "Destination", pick=folder_picker("Select destination folder"),
-            validator=_is_destination)
-
-        def _operator(text: str) -> QLabel:
-            lbl = QLabel(text, row)
-            lbl.setObjectName("Heading")
-            lbl.setContentsMargins(0, theme.Spacing.lg, 0, 0)
-            lbl.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
-            lbl.setFixedWidth(_EQUATION_OP_W)
-            return lbl
-
-        hl.addWidget(self._ds1_field, 1)
-        hl.addWidget(_operator("+"))
-        hl.addWidget(self._ds2_field, 1)
-        hl.addWidget(_operator("="))
-        hl.addWidget(self._dest_field, 1)
-        outer.addWidget(row)
-
-        self._cross_hint = QLabel("", self)
-        self._cross_hint.setObjectName("Danger")
-        self._cross_hint.setWordWrap(True)
-        self._cross_hint.setVisible(False)
-        outer.addWidget(self._cross_hint)
-
-        for field in (self._ds1_field, self._ds2_field, self._dest_field):
-            field.changed.connect(self._on_field_changed)
+        eq = build_equation_row(
+            self, outer,
+            ds1_label="Dataset 1 (base)", ds2_label="Dataset 2 (appended)",
+            is_dataset=_is_dataset, is_destination=_is_destination,
+            on_changed=self._on_field_changed,
+        )
+        self._ds1_field, self._ds2_field = eq.ds1, eq.ds2
+        self._dest_field, self._cross_hint = eq.dest, eq.cross_hint
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
         self.build_log_header(

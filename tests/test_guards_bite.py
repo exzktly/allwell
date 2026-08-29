@@ -2869,6 +2869,88 @@ def test_theme_ink_guard_clears_a_title(tmp_path, monkeypatch):
                      [good]) is None
 
 
+# ── the scatter value-label overlay ─────────────────────────────────────────
+# Two guards hold a switch that is global: every surface drawing a scatter
+# either labels its points or says why it cannot, and none of them invents the
+# overlay state it draws from. Both shapes below are the ones the fix could
+# regress into — a call site that hardcodes the pair, and a surface quietly
+# dropped from the roster.
+
+_SCATTER_LABEL_GUARD = "tests.test_scatter_value_labels"
+_CALL_SITE_TEST = "test_the_overlay_state_is_read_from_the_plot_state_at_every_call_site"
+_ROSTER_TEST = "test_every_scatter_surface_answers_the_overlay"
+
+
+@pytest.mark.parametrize("shape", [
+    # A hardcoded pair: labels on an export whose switch is off.
+    'def draw(ax, data):\n    annotate_agg_points((True, ""), ax, data)\n',
+    # A pair read from somewhere that is not the plot state.
+    'def draw(ax, data, prefs):\n'
+    '    annotate_agg_points(prefs["labels"], ax, data)\n',
+    # No settings at all.
+    'def draw(ax, data):\n    note_value_labels_unavailable()\n',
+])
+def test_value_label_call_site_guard_catches_an_invented_setting(
+        tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_value_labels.py", shape)
+    exc = _run_scan(monkeypatch, _SCATTER_LABEL_GUARD, _CALL_SITE_TEST, [bad])
+    assert exc is not None, "a call site inventing its own overlay state went uncaught"
+    assert "bad_value_labels.py" in str(exc)
+
+
+@pytest.mark.parametrize("shape", [
+    # Bound to a local first — how both real call sites are written, because
+    # the same pair also decides the headroom and must answer once.
+    'def draw(ctx, ax, data):\n'
+    '    labels = value_label_settings(ctx)\n'
+    '    annotate_agg_points(labels, ax, data)\n',
+    # Read inline, under the alias the Batch Export panel imports it as.
+    'def draw(ctx, ax):\n'
+    '    note_value_labels_unavailable(_value_label_settings(ctx), ax)\n',
+])
+def test_value_label_call_site_guard_clears_a_pair_from_the_state(
+        tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, "good_value_labels.py", shape)
+    assert _run_scan(monkeypatch, _SCATTER_LABEL_GUARD, _CALL_SITE_TEST,
+                     [good]) is None
+
+
+def test_scatter_roster_catches_a_surface_that_ignores_the_switch(
+        tmp_path, monkeypatch):
+    _write(tmp_path, "panel.py",
+           'def _run_scatter_agg_job(self, ax, data):\n'
+           '    for d in data.values():\n'
+           '        ax.errorbar(d["x"], d["y"])\n')
+    exc = _run_rooted_scan(
+        monkeypatch, _SCATTER_LABEL_GUARD, _ROSTER_TEST, tmp_path,
+        extra={"_LABELLED_SITES": (
+            ("panel.py", "_run_scatter_agg_job", "annotate_agg_points"),)})
+    assert exc is not None, "a scatter surface drawing unlabelled points went uncaught"
+    assert "_run_scatter_agg_job" in str(exc)
+
+
+def test_scatter_roster_clears_a_surface_that_answers_it(tmp_path, monkeypatch):
+    _write(tmp_path, "panel.py",
+           'def _run_scatter_agg_job(self, ctx, ax, data):\n'
+           '    _annotate_agg_points(_value_label_settings(ctx), ax, data)\n')
+    assert _run_rooted_scan(
+        monkeypatch, _SCATTER_LABEL_GUARD, _ROSTER_TEST, tmp_path,
+        extra={"_LABELLED_SITES": (
+            ("panel.py", "_run_scatter_agg_job", "annotate_agg_points"),)}) is None
+
+
+def test_scatter_roster_rejects_a_function_that_no_longer_exists(
+        tmp_path, monkeypatch):
+    """A roster entry that has stopped describing a real site is
+    indistinguishable from one that was never needed."""
+    _write(tmp_path, "panel.py", 'def _some_other_job(self):\n    return None\n')
+    exc = _run_rooted_scan(
+        monkeypatch, _SCATTER_LABEL_GUARD, _ROSTER_TEST, tmp_path,
+        extra={"_LABELLED_SITES": (
+            ("panel.py", "_run_scatter_agg_job", "annotate_agg_points"),)})
+    assert exc is not None and "no longer exists" in str(exc)
+
+
 # ── text-mode subprocess decoding ───────────────────────────────────────────
 
 _DECODE_GUARD = "tests.test_subprocess_text_decoding"

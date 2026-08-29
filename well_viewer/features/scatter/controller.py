@@ -35,6 +35,12 @@ from well_viewer.features.scatter.gating import (
     render_scatter_points,
 )
 
+from well_viewer.core.plot_annotations import value_label_settings
+from well_viewer.features.scatter._annotations import (
+    annotate_agg_points,
+    draw_scatter_agg_legends,
+    note_value_labels_unavailable,
+)
 from well_viewer.features.scatter._layout import _render_scatter_faceted, _setup_scatter_axes, _style_scatter_ax, log1p_axis_suffix
 
 
@@ -194,6 +200,13 @@ def redraw_scatter(
     # points. Gate coords are data-space, so they track log scale / limits.
     paint_gates(ctx, [(ax_scatter, scatter_data, tps_list, _muted_fg, True)], cols=(col_x, col_y))
 
+    # The value-label overlay is global and this view has no statistic to
+    # state — one point here is one cell. Saying so on the figure is the
+    # difference between a documented exception and an overlay that reads as
+    # broken; see ``_annotations`` for why it is a figure note and not a
+    # status-bar message.
+    note_value_labels_unavailable(value_label_settings(ctx), ax_scatter)
+
     # Redraw canvas
     ctx.runtime.scatter.interaction_cache = {
         "points": interaction_points,
@@ -228,63 +241,6 @@ def _finite_positive(v) -> bool:
     except (TypeError, ValueError):
         return False
     return 0.0 < f < float("inf")  # finite & positive (NaN/inf compare False)
-
-
-def _draw_scatter_agg_legends(ax_agg, scatter_data, marker_fg) -> None:
-    """Build the aggregate scatter's two compact legends from proxy handles.
-
-    The aggregate encodes **well/group identity as marker shape** and
-    **timepoint as colour**, so a per-point legend explodes to
-    N_wells × N_timepoints rows. Instead draw two small keys:
-
-    - a **wells** legend — one entry per well/group, its marker in a neutral
-      colour (``marker_fg``), labelled with the Sample-Definition display name;
-    - a **timepoint** colour key — one filled dot per timepoint in its viridis
-      colour, labelled ``t=Xh``.
-
-    Single-entry keys are skipped (one group, or one timepoint) so a redundant
-    one-row box never appears.
-    """
-    from matplotlib.lines import Line2D
-    from matplotlib.legend import Legend
-
-    wells: dict[str, str] = {}      # group_label -> marker
-    tps: dict[float, object] = {}   # timepoint  -> colour
-    for data in scatter_data.values():
-        glabel = data.get('group_label') or data.get('label', '')
-        if glabel not in wells:
-            wells[glabel] = data.get('marker', 'o')
-        tp = data.get('timepoint')
-        if tp is not None and tp not in tps:
-            tps[tp] = data.get('color', (0, 0, 0, 1))
-
-    # Both keys are built as *standalone* ``Legend`` artists via ``add_artist``
-    # (not ``ax.legend``), which leaves ``ax.legend_`` unset. That is deliberate:
-    # ``apply_export_style_to_current`` repositions ``ax.get_legend()`` to the
-    # ``legend_loc`` pref ("best"), which would otherwise drop the timepoint key
-    # on top of the wells key. Keeping them off ``legend_`` pins their corners.
-    def _add(handles, loc, title) -> None:
-        leg = Legend(ax_agg, handles, [h.get_label() for h in handles],
-                     loc=loc, fontsize=8, title=title)
-        leg.get_frame().set_facecolor("none")
-        leg.get_frame().set_alpha(0.0)
-        ax_agg.add_artist(leg)
-        style_legend(leg, ax_agg)
-
-    if len(wells) > 1:
-        _add(
-            [Line2D([], [], linestyle='none', marker=mk, markersize=8,
-                    color=marker_fg, label=glabel)
-             for glabel, mk in wells.items()],
-            'upper left', "Well / group",
-        )
-    if len(tps) > 1:
-        _add(
-            [Line2D([], [], linestyle='none', marker='o', markersize=8,
-                    color=color, label=f"t={tp}h")
-             for tp, color in sorted(tps.items())],
-            'lower right', "Timepoint",
-        )
 
 
 def redraw_scatter_agg(
@@ -407,7 +363,13 @@ def redraw_scatter_agg(
             color=_title_fg,
         )
         ax_agg.grid(True, alpha=0.3, color=_grid)
-        _draw_scatter_agg_legends(ax_agg, scatter_data, _title_fg)
+        draw_scatter_agg_legends(ax_agg, scatter_data, _title_fg)
+        # Every point here is a mean ± spread on both axes, which is exactly
+        # what the Properties → Overlays switch states. Drawn after the axis
+        # formatting so the headroom it adds is measured against the limits
+        # the points settled on, and before ``apply_export_style_to_current``
+        # so a y-limit the user pinned still wins.
+        annotate_agg_points(value_label_settings(ctx), ax_agg, scatter_data)
 
     # Redraw canvas
     try:

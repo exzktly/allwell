@@ -321,26 +321,26 @@ Categories, which are also the mechanisms:
 |---|---|---|---|---|---|---|
 | 1 | `channel_state_controller.py` | `refresh_heatmap_aggregation_options` | `heatmap.controller: METRIC_MEAN, METRIC_FRACTION` | const | ☐ | Aggregation labels, not behaviour — move to a neutral module as `WELL_MIME` was. |
 | 2 | `channel_state_controller.py` | `refresh_heatmap_aggregation_options` | `heatmap.controller: METRIC_MEAN_ALL` | const | ☐ | Same constant set, second site in the same function. |
-| 3 | `channel_state_controller.py` | `_recalculate_threshold` | `home.cell_gating.controller: cell_gating_load_cell_areas, cell_gating_load_threshold_count_on, cell_gating_load_threshold_frac_on` | service | ☐ | Void loads into the gating tab after a threshold recompute. |
-| 4 | `channel_state_controller.py` | `set_ratio_metrics` | `home.cell_gating.controller: cell_gating_load_cell_areas` | service | ☐ | Same service, second caller. |
-| 5 | `channel_state_controller.py` | `set_active_image_channel` | `image_browser.review_image.renderer: refresh_review_image_ctx` | service | ☐ | Re-render the review image for the new channel. |
-| 6 | `channel_state_controller.py` | `set_active_image_channel` | `image_browser.review_image.renderer: update_preview_ctx` | service | ☐ | Same event, sibling renderer. |
-| 7 | `channel_state_controller.py` | `_write_gating_edit` | `home.cell_gating.controller: _cell_gating_resolve_key, cell_gating_on_threshold_count_on_change, cell_gating_on_threshold_frac_on_change` | query+service | ☐ | Resolves a key (returns a value), then dispatches the edit. |
-| 8 | `channel_state_controller.py` | `_gating_row_key` | `home.cell_gating.controller: _cell_gating_resolve_key` | query | ☐ | Returns a value; a void fan-out hook cannot express it. |
-| 9 | `channel_state_controller.py` | `get_fluor_gate` | `home.cell_gating.controller: cell_gating_get_fluor_gate` | query | ☐ | Returns a value; needs a default for a profile without the tab. |
-| 10 | `channel_state_controller.py` | `ensure_cell_gating_tab_built` | `home.cell_gating.tab_view: build_cell_gating_subtab` | build | ☐ | Lazy sub-tab construction. |
+| 3 | `channel_state_controller.py` | `_recalculate_threshold` | `home.cell_gating.controller: cell_gating_load_cell_areas, cell_gating_load_threshold_count_on, cell_gating_load_threshold_frac_on` | service | ☑ | Void loads into the gating tab after a threshold recompute. |
+| 4 | `channel_state_controller.py` | `set_ratio_metrics` | `home.cell_gating.controller: cell_gating_load_cell_areas` | service | ☑ | Same service, second caller. |
+| 5 | `channel_state_controller.py` | `set_active_image_channel` | `image_browser.review_image.renderer: refresh_review_image_ctx` | service | ☑ | Re-render the review image for the new channel. |
+| 6 | `channel_state_controller.py` | `set_active_image_channel` | `image_browser.review_image.renderer: update_preview_ctx` | service | ☑ | Same event, sibling renderer. |
+| 7 | `channel_state_controller.py` | `_write_gating_edit` | `home.cell_gating.controller: _cell_gating_resolve_key, cell_gating_on_threshold_count_on_change, cell_gating_on_threshold_frac_on_change` | query+service | ☑ | Resolves a key (returns a value), then dispatches the edit. |
+| 8 | `channel_state_controller.py` | `_gating_row_key` | `home.cell_gating.controller: _cell_gating_resolve_key` | query→domain | ☑ | Pure state arithmetic: moved to `domain/gating_state.resolve_gate_key`, so core reads it from the domain and no service is needed. |
+| 9 | `channel_state_controller.py` | `get_fluor_gate` | `home.cell_gating.controller: cell_gating_get_fluor_gate` | query→domain | ☑ | Pure state arithmetic: moved to `domain/gating_state.fluor_gate_for`; unset reads as 0.0 (gate off), as before. |
+| 10 | `channel_state_controller.py` | `ensure_cell_gating_tab_built` | `home.cell_gating.tab_view: build_cell_gating_subtab` | build | ☑ | Lazy sub-tab construction. |
 | 11 | `load_controller.py` | `load_directory` | `qc.controller: recompute_qc_all` | ordered | ☐ | Post-load projection, ordered against `persistence.load`. |
 | 12 | `load_controller.py` | `load_directory` | `qc.tab_view: qc_gate_refresh_widgets` | service | ☐ | Widget sync after the QC hydrate. |
 | 13 | `load_controller.py` | `load_directory` | `crop.controller: apply_crop_to_cache` | ordered | ☐ | Post-load projection, ordered against `persistence.load`. |
-| 14 | `load_controller.py` | `load_directory` | `home.labels.tab_view: label_grid_refresh` | service | ☐ | Post-load refresh of the labels grid. |
+| 14 | `load_controller.py` | `load_directory` | `home.labels.tab_view: label_grid_refresh` | service | ☑ | Post-load refresh of the labels grid. |
 | 15 | `load_controller.py` | `load_directory` | `heatmap.sidebar_view: refresh_heatmap_layout_sidebar` | service | ☐ | Post-load refresh of the heatmap sidebar. |
-| 16 | `load_controller.py` | `_kick_off_gating_after_load` | `home.cell_gating.controller: cell_gating_refresh_included_count, cell_gating_start_gating_worker` | service | ☐ | Starts the gating pass once the dataset is up. |
+| 16 | `load_controller.py` | `_kick_off_gating_after_load` | `home.cell_gating.controller: cell_gating_refresh_included_count, cell_gating_start_gating_worker` | service | ☑ | Starts the gating pass once the dataset is up. |
 | 17 | `selection_controller.py` | `on_sidebar_plate_well_dropped` | `heatmap.sidebar_view: _on_drop_event` | service | ☐ | Drop handling delegated to the sidebar that owns the plate. |
-| 18 | `selection_controller.py` | `labels_apply_affix` | `home.labels.tab_view: label_grid_refresh` | service | ☐ | Same refresh service as the loader's. |
-| 19 | `selection_controller.py` | `groups_centre_refresh` | `home.labels.tab_view: label_grid_refresh` | service | ☐ | Same refresh service, third caller. |
-| 20 | `selection_controller.py` | `groups_centre_refresh` | `home.groups.selections_view: rep_panel_refresh` | service | ☐ | Replicate panel refresh. |
-| 21 | `selection_controller.py` | `groups_centre_refresh` | `home.groups.controller: rep_refresh_map` | service | ☐ | Replicate map refresh. |
-| 22 | `selection_controller.py` | `labels_clear_all` | `home.labels.tab_view: label_grid_refresh` | service | ☐ | Same refresh service, fourth caller. |
+| 18 | `selection_controller.py` | `labels_apply_affix` | `home.labels.tab_view: label_grid_refresh` | service | ☑ | Same refresh service as the loader's. |
+| 19 | `selection_controller.py` | `groups_centre_refresh` | `home.labels.tab_view: label_grid_refresh` | service | ☑ | Same refresh service, third caller. |
+| 20 | `selection_controller.py` | `groups_centre_refresh` | `home.groups.selections_view: rep_panel_refresh` | service | ☑ | Replicate panel refresh. |
+| 21 | `selection_controller.py` | `groups_centre_refresh` | `home.groups.controller: rep_refresh_map` | service | ☑ | Replicate map refresh. |
+| 22 | `selection_controller.py` | `labels_clear_all` | `home.labels.tab_view: label_grid_refresh` | service | ☑ | Same refresh service, fourth caller. |
 | 23 | `centre_view.py` | `build_centre` | `home.groups.panel_view: build_replicate_panel` | build | ☐ | Centre-page builder. |
 | 24 | `centre_view.py` | `build_centre` | `preview.preview_view: build_preview_picker` | build | ☐ | Centre-page builder. |
 | 25 | `sidebar_view.py` | `build_sidebar` | `heatmap.sidebar_view: build_heatmap_layout_sidebar` | build | ☐ | Sidebar builder. |

@@ -49,7 +49,8 @@ from well_viewer.core.selection_controller import invalidate_stats_cache
 from well_viewer.data.curation import apply_curation_to_cache
 from well_viewer.data.data_loading import get_rows
 from well_viewer.domain.gating_state import (
-    default_thresh_count_on, default_thresh_frac_on,
+    default_thresh_count_on, default_thresh_frac_on, fluor_gate_for,
+    resolve_gate_key,
 )
 from well_viewer.domain.metric_registry import channel_supports_smfish
 from well_viewer.domain.selections_model import active_replicate_sets
@@ -414,35 +415,18 @@ def _cell_gating_resolve_key(ctx, channel: str) -> str:
     the default (0.0 = gate off), and the Cell Gating tab's fluorescence gate
     silently did nothing on those plots.
 
-    A8 teardown: pure ``ctx.state.cell_gating`` (post-R6), so it takes ``ctx``."""
-    cg = ctx.state.cell_gating
-    # Both maps are keyed alike and are populated together, but either can be
-    # the only one filled in (a gate edited before a threshold, a partial
-    # persisted block), so consult the union rather than one of them. Read them
-    # defensively: this resolver is reached from the review-image and plotting
-    # leaves, whose unit tests stand the slice up as a minimal namespace
-    # carrying only the map that leaf needs.
-    known = list(getattr(cg, "thresh_frac_on", None) or ())
-    known += list(getattr(cg, "fluor_gates", None) or ())
-    known += list(getattr(cg, "thresh_count_on", None) or ())
-    if channel in known:
-        return channel
-    candidate = f"ratio:{channel}"
-    if candidate in known:
-        return candidate
-    folded = str(channel).strip().lower()
-    ratio_folded = f"ratio:{folded}"
-    for key in known:
-        if str(key).strip().lower() in (folded, ratio_folded):
-            return key
-    return channel
+    The rule itself is :func:`domain.gating_state.resolve_gate_key`, which takes
+    the slice rather than the context — it is pure state arithmetic, and keeping
+    it in the domain is what lets ``core/`` resolve a gate key without importing
+    this tab. This is the tab-side name for it."""
+    return resolve_gate_key(ctx.state.cell_gating, channel)
 
 
 def cell_gating_get_fluor_gate(ctx, channel: str) -> float:
-    """FluorGating threshold for *channel* from the typed slice (0.0 = off)."""
-    key = _cell_gating_resolve_key(ctx, channel)
-    val = ctx.state.cell_gating.fluor_gates.get(key)
-    return 0.0 if val is None else float(val)
+    """FluorGating threshold for *channel* from the typed slice (0.0 = off).
+
+    The tab-side name for :func:`domain.gating_state.fluor_gate_for`."""
+    return fluor_gate_for(ctx.state.cell_gating, channel)
 
 
 def cell_gating_get_thresh_frac_on(ctx, channel: str) -> float:

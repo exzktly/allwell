@@ -184,9 +184,16 @@ class _FakeApp:
         from well_viewer.core.widget_registry import WidgetRegistry
         # A8/D-thresh: refresh_thresh_frac_quick_edit resolves the steppers +
         # status chips via ctx.widgets, so the double needs a real registry.
+        # And the write fires the Cell Gating change handler through the
+        # feature-service lookup rather than an import, so the double needs the
+        # real feature registry too — a stub without one would make the write
+        # silently stop short of the handler, which is the half these tests are
+        # about.
+        from well_viewer.features.registry import build_feature_registry
         self._ctx = SimpleNamespace(
             state=self._app_state, app=self, bus=self._event_bus,
             runtime=AppRuntime(self), widgets=WidgetRegistry(self),
+            features=build_feature_registry(),
         )
 
     def _redraw(self) -> None:

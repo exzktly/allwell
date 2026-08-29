@@ -39,7 +39,12 @@ def ctx_with_gates(monkeypatch):
                 ),
             ),
         )
-        return types.SimpleNamespace(window=app)
+        # The kick-off reaches Cell Gating through the feature-service lookup,
+        # so the stub carries the real registry; the spy below still catches the
+        # call because the service factory imports the name when it is invoked.
+        from well_viewer.features.registry import build_feature_registry
+        return types.SimpleNamespace(window=app,
+                                     features=build_feature_registry())
 
     return _build
 

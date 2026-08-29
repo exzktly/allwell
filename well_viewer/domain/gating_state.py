@@ -282,6 +282,60 @@ def read_gating_params(out_dir: Path) -> dict[str, Any] | None:
 FLUOR_GATE_OFF = 0.0
 
 
+def resolve_gate_key(cell_gating, channel: str) -> str:
+    """Map a channel arg onto the key the Cell Gating rows are stored under.
+
+    Real fluor channels (``"gfp"``, ``"mcherry"``) are stored under their bare
+    name; ratios under their full key (``"ratio:<name>"``). Callers pass either
+    the bare ratio name (``ctx.state.channel.active_channel`` after a ratio
+    switch) or the full ``ratio:`` key, so this resolves to whichever form the
+    typed slice actually holds and the user's edit is honoured either way.
+
+    Matching is case-insensitive. The rows are keyed by the normalised channel
+    token (``"gfp"``), but several callers hand the channel over as their
+    dropdown *displays* it — the scatter tab derives ``ch_x_base`` from the
+    upper-cased axis label, for one. A case-sensitive lookup missed, returned
+    the default (0.0 = gate off), and the Cell Gating tab's fluorescence gate
+    silently did nothing on those plots.
+
+    Takes the ``CellGatingState`` slice rather than the context: this is pure
+    state arithmetic, which is why it lives in ``domain/`` rather than in the
+    tab that happens to edit those rows. Core reads gates through here and so
+    names no feature.
+    """
+    # Both maps are keyed alike and are populated together, but either can be
+    # the only one filled in (a gate edited before a threshold, a partial
+    # persisted block), so consult the union rather than one of them. Read them
+    # defensively: this resolver is reached from the review-image and plotting
+    # leaves, whose unit tests stand the slice up as a minimal namespace
+    # carrying only the map that leaf needs.
+    known = list(getattr(cell_gating, "thresh_frac_on", None) or ())
+    known += list(getattr(cell_gating, "fluor_gates", None) or ())
+    known += list(getattr(cell_gating, "thresh_count_on", None) or ())
+    if channel in known:
+        return channel
+    candidate = f"ratio:{channel}"
+    if candidate in known:
+        return candidate
+    folded = str(channel).strip().lower()
+    ratio_folded = f"ratio:{folded}"
+    for key in known:
+        if str(key).strip().lower() in (folded, ratio_folded):
+            return key
+    return channel
+
+
+def fluor_gate_for(cell_gating, channel: str) -> float:
+    """The FluorGating threshold for *channel*, ``0.0`` meaning the gate is off.
+
+    An unset channel reads as off — the same value the old tab-not-built guard
+    returned — so the answer does not depend on whether the lazily-built Cell
+    Gating tab has been constructed.
+    """
+    val = cell_gating.fluor_gates.get(resolve_gate_key(cell_gating, channel))
+    return 0.0 if val is None else float(val)
+
+
 def active_fluor_gates(fluor_gates) -> dict[str, float]:
     """The subset of *fluor_gates* that is actually gating anything.
 

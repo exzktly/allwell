@@ -393,6 +393,89 @@ def _activate_default_plot(ctx) -> None:
 # the feature renderer (terminal-goal cond. 3). Lazy: ``() -> ((ctx) -> None)``.
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _svc_cell_gating_load_cell_areas():
+    from well_viewer.features.home.cell_gating.controller import (
+        cell_gating_load_cell_areas,
+    )
+    return cell_gating_load_cell_areas
+
+
+def _svc_cell_gating_load_threshold_count_on():
+    from well_viewer.features.home.cell_gating.controller import (
+        cell_gating_load_threshold_count_on,
+    )
+    return cell_gating_load_threshold_count_on
+
+
+def _svc_cell_gating_load_threshold_frac_on():
+    from well_viewer.features.home.cell_gating.controller import (
+        cell_gating_load_threshold_frac_on,
+    )
+    return cell_gating_load_threshold_frac_on
+
+
+def _svc_cell_gating_build_subtab():
+    from well_viewer.features.home.cell_gating.tab_view import build_cell_gating_subtab
+    return build_cell_gating_subtab
+
+
+def _svc_cell_gating_refresh_included_count():
+    from well_viewer.features.home.cell_gating.controller import (
+        cell_gating_refresh_included_count,
+    )
+    return cell_gating_refresh_included_count
+
+
+def _svc_cell_gating_start_worker():
+    from well_viewer.features.home.cell_gating.controller import (
+        cell_gating_start_gating_worker,
+    )
+    return cell_gating_start_gating_worker
+
+
+def _svc_review_image_refresh():
+    from well_viewer.features.image_browser.review_image.renderer import (
+        refresh_review_image_ctx,
+    )
+    return refresh_review_image_ctx
+
+
+def _svc_review_image_update_preview():
+    from well_viewer.features.image_browser.review_image.renderer import (
+        update_preview_ctx,
+    )
+    return update_preview_ctx
+
+
+def _svc_cell_gating_threshold_count_on_changed():
+    from well_viewer.features.home.cell_gating.controller import (
+        cell_gating_on_threshold_count_on_change,
+    )
+    return cell_gating_on_threshold_count_on_change
+
+
+def _svc_cell_gating_threshold_frac_on_changed():
+    from well_viewer.features.home.cell_gating.controller import (
+        cell_gating_on_threshold_frac_on_change,
+    )
+    return cell_gating_on_threshold_frac_on_change
+
+
+def _svc_labels_grid_refresh():
+    from well_viewer.features.home.labels.tab_view import label_grid_refresh
+    return label_grid_refresh
+
+
+def _svc_groups_panel_refresh():
+    from well_viewer.features.home.groups.selections_view import rep_panel_refresh
+    return rep_panel_refresh
+
+
+def _svc_groups_map_refresh():
+    from well_viewer.features.home.groups.controller import rep_refresh_map
+    return rep_refresh_map
+
+
 def _redraw_bar_plots():
     from well_viewer.features.barplot.renderer import redraw_bars
     return redraw_bars
@@ -830,7 +913,12 @@ def _features() -> list[FeatureDescriptor]:
         # line says. `thin` still lists it, which is now a no-op it can keep or
         # drop freely.
         FeatureDescriptor(name="Segmentation", parent="Image Browser",
-                          on_activate=_activate_segmentation, removable=False),
+                          on_activate=_activate_segmentation, removable=False,
+                          services={
+                              "review_image.refresh": _svc_review_image_refresh,
+                              "review_image.update_preview":
+                                  _svc_review_image_update_preview,
+                          }),
         FeatureDescriptor(name="Image Table", parent="Image Browser",
                           on_activate=_activate_image_table,
                           on_dataset_loaded=_loaded_image_table,
@@ -855,13 +943,38 @@ def _features() -> list[FeatureDescriptor]:
         # never asks whether they are present — see ``removable``.
         FeatureDescriptor(name="Cell Gating", parent="Home",
                           build=_build_cell_gating, removable=False,
-                          reads_well_selection=True),
+                          reads_well_selection=True,
+                          services={
+                              "cell_gating.threshold_count_on_changed":
+                                  _svc_cell_gating_threshold_count_on_changed,
+                              "cell_gating.threshold_frac_on_changed":
+                                  _svc_cell_gating_threshold_frac_on_changed,
+                              "cell_gating.load_cell_areas":
+                                  _svc_cell_gating_load_cell_areas,
+                              "cell_gating.load_threshold_count_on":
+                                  _svc_cell_gating_load_threshold_count_on,
+                              "cell_gating.load_threshold_frac_on":
+                                  _svc_cell_gating_load_threshold_frac_on,
+                              "cell_gating.build_subtab":
+                                  _svc_cell_gating_build_subtab,
+                              "cell_gating.refresh_included_count":
+                                  _svc_cell_gating_refresh_included_count,
+                              "cell_gating.start_worker":
+                                  _svc_cell_gating_start_worker,
+                          }),
         FeatureDescriptor(name="Groups", parent="Home",
                           build=_build_groups, removable=False,
-                          reads_well_selection=True, subtab_inset=True),
+                          reads_well_selection=True, subtab_inset=True,
+                          services={
+                              "groups.panel_refresh": _svc_groups_panel_refresh,
+                              "groups.map_refresh": _svc_groups_map_refresh,
+                          }),
         FeatureDescriptor(name="Well Labels", parent="Home",
                           build=_build_well_labels, removable=False,
-                          reads_well_selection=True, subtab_inset=True),
+                          reads_well_selection=True, subtab_inset=True,
+                          services={
+                              "labels.grid_refresh": _svc_labels_grid_refresh,
+                          }),
         FeatureDescriptor(name="Ratios", parent="Home", build=_build_ratios),
         FeatureDescriptor(name="Pipeline Info", parent="Home",
                           build=_build_pipeline_info),

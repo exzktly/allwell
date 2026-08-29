@@ -33,6 +33,7 @@ from well_viewer.data.data_loading import (
     merge_fluor_channels,
     normalize_channel_tokens,
 )
+from well_viewer.domain.gating_state import fluor_gate_for, resolve_gate_key
 from well_viewer.domain.metric_registry import channel_supports_smfish
 from well_viewer.domain.ratio_models import (
     RatioMetric, is_ratio_key, ratio_name_from_key)
@@ -225,12 +226,7 @@ def _recalculate_threshold(ctx) -> None:
     from well_viewer.persistence.cell_gating import load_from_pipeline_info
     load_from_pipeline_info(ctx)
     if ctx.runtime.cell_gating.fluor_gate_edits is not None:
-        from well_viewer.features.home.cell_gating.controller import (
-            cell_gating_load_cell_areas,
-            cell_gating_load_threshold_count_on,
-            cell_gating_load_threshold_frac_on,
-        )
-        cell_gating_load_cell_areas(ctx)
+        ctx.features.call("cell_gating.load_cell_areas", ctx)
         # cell_gating_load_cell_areas rebuilds the per-channel fluor-gate rows
         # for the freshly-detected channels as fresh (default 0.0) edits, which
         # discards the values the load above just wrote. Re-apply the persisted
@@ -243,8 +239,8 @@ def _recalculate_threshold(ctx) -> None:
         # survives the rebuild is copied back into the typed slice by the next
         # ``_cell_gating_sync_gate_state`` and then persisted, which destroys the
         # saved ThreshCountOn.
-        cell_gating_load_threshold_frac_on(ctx)
-        cell_gating_load_threshold_count_on(ctx)
+        ctx.features.call("cell_gating.load_threshold_frac_on", ctx)
+        ctx.features.call("cell_gating.load_threshold_count_on", ctx)
 
 
 # ── Active channel switching ────────────────────────────────────────────────
@@ -571,8 +567,7 @@ def set_active_image_channel(ctx, channel: str, *, preserve_review_view: bool = 
         if preserve_review_view and _review_image is not None:
             _review_image.preserve_view_on_refresh = True
             if _preview is not None and _preview.selected_well:
-                from well_viewer.features.image_browser.review_image.renderer import refresh_review_image_ctx
-                refresh_review_image_ctx(ctx)
+                ctx.features.call("review_image.refresh", ctx)
         if channel_switch_debug:
             _logger.debug(
                 "[RI-CHSW step 3] no-op channel switch; active remains=%r preserve_review_view=%s",
@@ -603,8 +598,8 @@ def set_active_image_channel(ctx, channel: str, *, preserve_review_view: bool = 
                 "[RI-CHSW step 3->4] reloading preview for selected_well=%r",
                 _preview.selected_well,
             )
-        from well_viewer.features.image_browser.review_image.renderer import update_preview_ctx
-        update_preview_ctx(ctx, _preview.selected_well)
+        ctx.features.call("review_image.update_preview", ctx,
+                          _preview.selected_well)
     if channel_switch_debug:
         _logger.debug(
             "[RI-CHSW step 3] set_active_image_channel updated before=%r after=%r",
@@ -927,8 +922,7 @@ def set_ratio_metrics(ctx, ratios: Iterable[RatioMetric]) -> None:
     # the ratio rows into the table whenever the ratio set changes.
     if ctx.widgets.has("_cell_gating_fluor_gate_edits"):
         try:
-            from well_viewer.features.home.cell_gating.controller import cell_gating_load_cell_areas
-            cell_gating_load_cell_areas(ctx)
+            ctx.features.call("cell_gating.load_cell_areas", ctx)
         except Exception:
             swallowed()  # was: pass (silent except)
     # Ratio additions become virtual channel entries in every plot-tab
@@ -1023,13 +1017,12 @@ def seg_channel_token_of(ctx) -> str:
 def _gating_row_key(ctx, channel: str) -> str:
     """The Cell Gating row key *channel* is stored under.
 
-    The one import of the feature-side resolver, shared by every cutoff accessor
-    here — ``well_viewer/core`` carries a hard-capped budget of feature imports
-    (``tests/test_guardrails.py::test_core_feature_import_budget``), so the
-    accessors route through this rather than importing it apiece.
+The rule is ``domain.gating_state.resolve_gate_key``, which reads the typed
+    slice and knows nothing about the tab that edits it — so the cutoff
+    accessors here resolve a gate key without ``core/`` naming the Cell Gating
+    feature at all.
     """
-    from well_viewer.features.home.cell_gating.controller import _cell_gating_resolve_key
-    return _cell_gating_resolve_key(ctx, channel)
+    return resolve_gate_key(ctx.state.cell_gating, channel)
 
 
 def get_thresh_frac_on(ctx, channel: str | None = None) -> float:
@@ -1142,8 +1135,7 @@ def ensure_cell_gating_tab_built(ctx) -> bool:
             ctx.runtime.cell_gating.subtab_frame = frames.get("Cell Gating")
         if ctx.runtime.cell_gating.subtab_frame is None:
             return False
-        from well_viewer.features.home.cell_gating.tab_view import build_cell_gating_subtab
-        build_cell_gating_subtab(ctx)
+        ctx.features.call("cell_gating.build_subtab", ctx)
     return ctx.runtime.cell_gating.fluor_gate_edits is not None
 
 
@@ -1194,18 +1186,14 @@ def set_thresh_count_on(ctx, value, channel: str | None = None) -> None:
 def _write_gating_edit(ctx, channel: str, value, *, count: bool) -> None:
     """Push *value* through the Cell Gating edit for *channel* and fire its handler.
 
-    The single feature import behind both cutoff setters — ``well_viewer/core``
-    carries a hard-capped budget of feature imports, so the two share one
-    statement rather than repeating it.
+    The edit widget is the Cell Gating tab's, so pushing a value into it has to
+    tell that tab to act on it. That happens through the feature-service lookup
+    rather than an import: a build without the tab has no edits to find and
+    returns above, and a build with it gets its handler run.
     """
-    from well_viewer.features.home.cell_gating.controller import (
-        _cell_gating_resolve_key,
-        cell_gating_on_threshold_count_on_change,
-        cell_gating_on_threshold_frac_on_change,
-    )
     runtime = ctx.runtime.cell_gating
     edits = (runtime.thresh_count_edits if count else runtime.thresh_frac_edits) or {}
-    edit = edits.get(_cell_gating_resolve_key(ctx, channel))
+    edit = edits.get(resolve_gate_key(ctx.state.cell_gating, channel))
     if edit is None:
         return
     blocked = edit.blockSignals(True)
@@ -1213,10 +1201,9 @@ def _write_gating_edit(ctx, channel: str, value, *, count: bool) -> None:
         edit.setText(str(float(value)))
     finally:
         edit.blockSignals(blocked)
-    if count:
-        cell_gating_on_threshold_count_on_change(ctx)
-    else:
-        cell_gating_on_threshold_frac_on_change(ctx)
+    ctx.features.call(
+        "cell_gating.threshold_count_on_changed" if count
+        else "cell_gating.threshold_frac_on_changed", ctx)
 
 
 def set_on_cutoff(ctx, value, channel: str | None = None) -> None:
@@ -1343,8 +1330,7 @@ def get_fluor_gate(ctx, channel: str) -> float:
     ``ctx``. The slice defaults an unset channel to 0.0 (gate off) — the same
     value the old tab-not-built guard returned — independent of whether the
     lazily-built Cell Gating tab exists."""
-    from well_viewer.features.home.cell_gating.controller import cell_gating_get_fluor_gate
-    return cell_gating_get_fluor_gate(ctx, channel)
+    return fluor_gate_for(ctx.state.cell_gating, channel)
 
 
 

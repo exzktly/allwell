@@ -125,7 +125,7 @@ APP_FIRST_FUNC_SLACK = 15               # A3: playground 135→120, stats 120→
 # and ``features.stats.controller``) took it 33→31; moving the manual-curation
 # projector out of Review Image into ``data/curation.py`` (roadmap B4b) took the
 # loader's import of it with it, 31→30.
-CORE_FEATURE_IMPORT_BUDGET = 30
+CORE_FEATURE_IMPORT_BUDGET = 15
 CORE_FEATURE_IMPORT_SLACK = 0
 
 

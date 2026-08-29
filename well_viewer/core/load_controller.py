@@ -561,8 +561,7 @@ def load_directory(ctx, d: Path, label=None) -> None:
         _preview.selected_well = None
     if hasattr(app, "_sidebar_preview_plate"):
         app._refresh_preview_picker()
-    from well_viewer.features.home.labels.tab_view import label_grid_refresh
-    label_grid_refresh(ctx)
+    ctx.features.call("labels.grid_refresh", ctx)
     # Refresh Home's definition tabs so any newly loaded labels / groups
     # appear without requiring a tab switch.
     if hasattr(app, "_groups_centre_refresh"):
@@ -694,16 +693,8 @@ def _kick_off_gating_after_load(ctx) -> None:
     # has a per-channel edit to inspect).
     use_scatter = app._app_state.cell_gating.use_scatter_gates
     use_thresh = app._app_state.cell_gating.use_scatter_thresh
-    # One import for both names, deliberately: the core→feature import ratchet
-    # (``test_guardrails.test_core_feature_import_budget``) counts import
-    # *statements* under ``core/``, and it only moves down. Two statements for
-    # one module would have raised it.
-    from well_viewer.features.home.cell_gating.controller import (
-        cell_gating_refresh_included_count,
-        cell_gating_start_gating_worker,
-    )
     if has_non_default_gate or use_scatter or use_thresh:
-        cell_gating_start_gating_worker(ctx)
+        ctx.features.call("cell_gating.start_worker", ctx)
         return
     # No worker, so nothing else repaints the tab's "Included for analysis"
     # line and its funnel — and this is the commonest path, since a dataset
@@ -712,7 +703,7 @@ def _kick_off_gating_after_load(ctx) -> None:
     # number, for the wrong plate, with nothing to distinguish it from the
     # right one. ``cell_gating_refresh_included_count`` recomputes from the row
     # cache and no-ops when the label has not been built yet.
-    cell_gating_refresh_included_count(ctx)
+    ctx.features.call("cell_gating.refresh_included_count", ctx)
 
 
 def _looks_like_well_measurement_csv(path: Path) -> bool:

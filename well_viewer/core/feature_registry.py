@@ -24,8 +24,8 @@ not eagerly pull heavy feature deps (TF / skimage / matplotlib-QtAgg).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from collections.abc import Callable
+from dataclasses import dataclass, field
+from collections.abc import Callable, Mapping
 
 
 @dataclass(frozen=True)
@@ -110,6 +110,21 @@ class FeatureDescriptor:
     # ``(snapshot, apply)`` pair: ``snapshot(ctx) -> dict`` (stored under the
     # descriptor name in the ``tabs`` block) and ``apply(ctx, state) -> None``.
     view_state_io: Callable | None = None
+    # Named callables this feature offers to ``core/``, keyed ``"<area>.<verb>"``
+    # (e.g. ``"labels.grid_refresh"``). Each value is a **lazy factory** —
+    # ``() -> callable`` — exactly like ``redraw``, so declaring a service does
+    # not import the feature module until something calls it.
+    #
+    # This is the seam for the calls a fan-out hook cannot express: a refresh
+    # aimed at one named feature rather than broadcast to all of them, a builder,
+    # and above all a **query** — a call that returns a value, which a
+    # ``fn(ctx) -> None`` hook has nowhere to put. Core reaches them through
+    # ``ctx.features.call`` / ``.query`` and so names no feature module. A
+    # profile that drops the feature drops its services with it, which is what
+    # makes the call sites survive a subset build: today they survive only
+    # because a widget-presence check happens to return first, which is an
+    # accident of layout rather than a contract.
+    services: Mapping[str, Callable] = field(default_factory=dict)
     # Selection-behaviour flags (replace the hard-coded tab-name string sets).
     per_well_selection: bool = False     # was membership in _PER_WELL_TABS
     single_well_selection: bool = False  # was the smFISH single-well check
@@ -151,14 +166,88 @@ class FeatureRegistry:
     def __init__(self, descriptors=()) -> None:
         self._ordered: list[FeatureDescriptor] = []
         self._by_name: dict[str, FeatureDescriptor] = {}
+        self._services: dict[str, Callable] = {}
+        self._service_owner: dict[str, str] = {}
         for d in descriptors:
             self.add(d)
 
     def add(self, descriptor: FeatureDescriptor) -> None:
         if descriptor.name in self._by_name:
             raise ValueError(f"duplicate feature descriptor: {descriptor.name!r}")
+        for key, factory in descriptor.services.items():
+            owner = self._service_owner.get(key)
+            if owner is not None:
+                raise ValueError(
+                    f"duplicate feature service {key!r}: declared by both "
+                    f"{owner!r} and {descriptor.name!r}. A service key is how "
+                    f"core addresses one feature, so two claimants means the "
+                    f"call site reaches whichever loaded first."
+                )
+            self._services[key] = factory
+            self._service_owner[key] = descriptor.name
         self._ordered.append(descriptor)
         self._by_name[descriptor.name] = descriptor
+
+    def register_service(self, key: str, factory: Callable, owner: str) -> None:
+        """Register a service that belongs to no descriptor.
+
+        For the **support libraries** — QC, crop, the export-style panel — which
+        are always present, own no tab and therefore carry no descriptor, but
+        which ``core/`` still has to reach. They go in the same lookup as the
+        descriptor-declared services so there is one answer to "what can core
+        call by name", and so the partition guard sees them.
+
+        *owner* names the library, for the duplicate-key message.
+        """
+        prior = self._service_owner.get(key)
+        if prior is not None:
+            raise ValueError(
+                f"duplicate feature service {key!r}: declared by both "
+                f"{prior!r} and {owner!r}."
+            )
+        self._services[key] = factory
+        self._service_owner[key] = owner
+
+    def service(self, key: str) -> Callable | None:
+        """The callable registered under *key*, or ``None`` if no present
+        feature offers it.
+
+        ``None`` is the answer for a profile that dropped the feature, so every
+        caller has to decide what absence means rather than discovering it as an
+        ``ImportError`` from a stripped tree.
+        """
+        factory = self._services.get(key)
+        return None if factory is None else factory()
+
+    def service_keys(self) -> list[str]:
+        """Every registered service key, in declaration order."""
+        return list(self._services)
+
+    def call(self, key: str, *args, **kwargs) -> bool:
+        """Invoke the void service *key*, if a present feature offers it.
+
+        Returns whether it ran. The return value exists so a caller that needs
+        to *know* — rather than one refreshing a widget that may not be built —
+        can say so; ignoring it is the right thing for a refresh whose feature is
+        legitimately absent.
+        """
+        fn = self.service(key)
+        if fn is None:
+            return False
+        fn(*args, **kwargs)
+        return True
+
+    def query(self, key: str, *args, default=None, **kwargs):
+        """Invoke the service *key* for its **value**, or return *default*.
+
+        The form for a call whose answer core needs. *default* is required
+        reading at the call site: it is what the app believes when the feature
+        that would have answered is not in this build.
+        """
+        fn = self.service(key)
+        if fn is None:
+            return default
+        return fn(*args, **kwargs)
 
     def get(self, name: str) -> FeatureDescriptor | None:
         return self._by_name.get(name)

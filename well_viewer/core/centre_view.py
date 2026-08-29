@@ -221,10 +221,10 @@ def build_centre(win, parent: QWidget) -> None:
     # Sidebars referenced by data-load + tab-switch logic must exist
     # immediately even though the centre tab bodies that depend on them
     # are deferred.
-    from well_viewer.features.home.groups.panel_view import build_replicate_panel
-    from well_viewer.features.preview.preview_view import build_preview_picker
-    build_replicate_panel(win._ctx, win._sidebar_sample_frame)
-    build_preview_picker(win, win._sidebar_preview_frame)
+    win._ctx.features.call("groups.build_replicate_panel",
+                           win._ctx, win._sidebar_sample_frame)
+    win._ctx.features.call("preview.build_picker",
+                           win, win._sidebar_preview_frame)
 
     # Stable name -> tab QWidget map for builder closures to reach into.
     # Populated in two phases: plot sub-tab frames are inserted here before

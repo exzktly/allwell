@@ -47,17 +47,19 @@ from well_viewer.core.timepoint_sync import current_focus_tp, nearest_index
 from well_viewer.domain.tp_match import tp_close
 
 
-METRIC_MEAN = "Mean above threshold"
-METRIC_MEAN_ALL = "Mean (all cells)"
-METRIC_FRACTION = "Fraction above threshold"
-METRIC_COUNT = "Cell count"
-METRIC_RATIO = "Ratio value"  # legacy; not exposed in METRIC_OPTIONS — ratios are picked via the channel dropdown.
-
-# "Mean above threshold" applies the per-channel ThreshFracOn cut (only
-# meaningful for MFI-based columns); "Mean (all cells)" pools every cell
-# that passes cell-area + FluorGating without the per-channel threshold
-# filter, which is the right default when the active Property isn't MFI.
-METRIC_OPTIONS = [METRIC_MEAN, METRIC_MEAN_ALL, METRIC_FRACTION, METRIC_COUNT]
+# The labels themselves live in ``domain/heatmap_metrics`` — they are
+# vocabulary shared with ``core/channel_state_controller``, which enables and
+# disables rows of this combo as the active Property changes, and core must be
+# able to name them without importing this feature. Re-exported here so the
+# feature's own callers are unchanged.
+from well_viewer.domain.heatmap_metrics import (  # noqa: F401
+    METRIC_COUNT,
+    METRIC_FRACTION,
+    METRIC_MEAN,
+    METRIC_MEAN_ALL,
+    METRIC_OPTIONS,
+    METRIC_RATIO,
+)
 
 # Selection-rectangle outline. Deliberately its own colour, not
 # ``theme.Colors.danger`` — ``danger`` already marks the drag-reorder

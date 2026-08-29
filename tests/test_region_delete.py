@@ -306,7 +306,7 @@ def apply_ctx(monkeypatch):
     )
 
     for name in ("refresh_review_image_ctx", "render_review_image_display",
-                 "apply_review_overrides_to_cache"):
+                 "apply_curation_to_cache"):
         monkeypatch.setattr(cbs, name, lambda *a, **k: None)
     monkeypatch.setattr(
         "well_viewer.core.selection_controller.invalidate_stats_cache",

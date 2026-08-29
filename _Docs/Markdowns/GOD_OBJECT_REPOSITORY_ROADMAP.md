@@ -6,7 +6,7 @@
 >
 > **Baseline:** `main` — the build-time-feature-profiles work merged to `main`
 > via PR #639, so this roadmap now builds directly on `main`. Last revised:
-> 2026-07-11.
+> 2026-08-29 (reconciled against the tree: see the top changelog entry).
 > **Companion:** `_Docs/Markdowns/ARCHITECTURE.md` (the structural map this plan
 > extends).
 
@@ -45,7 +45,8 @@ the ratchets and boot tests answer it.
 | B1b | `load_controller` names no feature | `test_data_layer_no_feature_imports` extended to `core/` green |
 | B2 | `WellRepository` exists; `REPO_BYPASS_BUDGET` seeded | facade unit test green; ratchet present |
 | B3 | Direct-cache readers routed (spatial allowlisted) | `REPO_BYPASS_BUDGET == 0` (minus allowlist) |
-| B4 | One load path; `PersistenceRegistry` `ctx`-native | `PERSIST_APP_PARAM_BUDGET == 0`; app_smoke round-trip green |
+| B4a | `PersistenceRegistry` `ctx`-native | `PERSIST_APP_PARAM_BUDGET == 0`; app_smoke round-trip green |
+| B4b | One load path — eager bulk load goes through the repository | `WellRepository.load_well` exists and `load_controller` calls no `app._load_well_csv`; `tests/test_one_load_path.py` + app_smoke green |
 | B5 *(optional)* | Image repo facade owns all decode/cache | image-facade ratchet == 0; facade tests green |
 
 ### Autonomous execution protocol
@@ -79,9 +80,10 @@ not reinvent what it already gives:
   `on_activate`/`on_channel_changed`/`on_dataset_loaded` are all `ctx`-native. The
   **one hold-out is `on_selection_changed`, still `app`-first** (`registry.py:399+`).
 - **Persistence view-state decoupling is ~80% done.** `persistence/view_state.py`
-  shrank ~274 lines; Image Table now owns its snapshot/restore in
-  `features/image_browser/image_table/view_state_io.py` behind the `view_state_io`
-  hook, and the *entire* live view-state pipeline (`snapshot(ctx)`/`restore(ctx)`/
+  shrank ~274 lines; Image Table
+  (`features/image_browser/image_table/view_state_io.py`) and Heatmap
+  (`features/heatmap/view_state_io.py`) own their snapshot/restore behind the
+  `view_state_io` hook, and the *entire* live view-state pipeline (`snapshot(ctx)`/`restore(ctx)`/
   `apply_pending_tab_state(ctx)`) is already `ctx`-native. Only the outer
   `save_to_data_dir(app)`/`load_from_data_dir(app)`/`reset(app)` boundary still
   takes `app`, and Bar/Distribution/Scatter view-state blocks are still inline in
@@ -283,6 +285,95 @@ smFISH), so `load_controller` names **no** feature and imports none a profile ex
 > current function-local imports are already contract-compliant. Revisit after A3
 > makes the surrounding calls `ctx`-native.
 
+### B1b · Terminal condition 3 — the `core/` → `features/` residual ✅ *(closed)*
+
+**Landed.** All thirty sites below are converted and `CORE_FEATURE_IMPORT_BUDGET`
+is **0**. The mechanism is the feature-service lookup: `FeatureDescriptor.services`
+declares named callables (lazy factories, exactly as `redraw` is), core reaches
+them as `ctx.features.call(key, …)` / `.query(key, …, default=…)`, and the
+support libraries that carry no descriptor — QC, crop, the export-style panel —
+register into the same lookup via `FeatureRegistry.register_service`.
+`tests/test_feature_services_partition.py` relates the declared and called sets
+in both directions, so a typo'd or orphaned key fails rather than no-opping.
+
+Two categories turned out not to need the mechanism at all, which is worth
+recording because the deferral note assumed otherwise:
+
+- The **query** sites were pure state arithmetic wearing a feature's name.
+  `_cell_gating_resolve_key` and `cell_gating_get_fluor_gate` read the typed
+  `CellGatingState` slice and nothing else, so they moved to
+  `domain/gating_state.py`; core reads the domain, and the tab keeps both names
+  as delegates.
+- The **ordered** post-load projections needed no ordered-hook phase. The
+  ordering constraint was never about *where the import lived* — the loader
+  still runs QC and crop at exactly the points in its sequence that it did
+  before, interleaved with `persistence.load`. Only the name moved to a
+  service. The deferral had conflated "this call is ordering-critical" with
+  "this call must move to a hook", and only the second was ever hard.
+
+Thirty sites, enumerated from the AST rather than from a grep, each keyed by
+module, function and symbol because line numbers move as the work proceeds. The
+count is metered by `CORE_FEATURE_IMPORT_BUDGET` in `tests/test_guardrails.py`,
+**which is the authority** — the table below is how the work is planned and
+tracked, and the header count is derived from its own rows, never typed.
+
+Statuses: ☐ not started · ◐ in progress · ☑ done (the import is gone and the
+ratchet has come down) · ⊘ declined (with the reason in the row).
+
+Categories, which are also the mechanisms:
+
+- **const** — the import is a constant, not behaviour. Move it to a neutral
+  module, as `WELL_MIME` moved to `core/dnd`.
+- **service** — a void call into a feature. Goes through the feature-service
+  lookup: the feature declares a named callable on its descriptor, and core
+  calls it by name through `ctx.features`, so a profile without the feature
+  simply has nothing registered.
+- **query** — a call that *returns a value*. The same lookup, but the call site
+  must say what the answer is when the feature is absent; a void fan-out cannot
+  express it, which is why these were called out as needing this mechanism.
+- **build** — a widget builder. Same lookup; the builder is the service.
+- **ordered** — a post-load projection pinned to a point in a strictly ordered
+  sequence interleaved with `persistence.load` steps. These are the reason B1b
+  was deferred: the `on_dataset_loaded` hook fires at a single point and cannot
+  express the ordering.
+- **bootstrap** — the wiring modules whose whole job is to hand a feature
+  callback to a lower layer. Removing the import means moving the wiring into
+  `features/registry.py` (the sanctioned sole importer) or naming the site in an
+  allowlist with its justification and a liveness check.
+
+| # | Module (`well_viewer/core/`) | Function | Imported symbol(s) | Category | Status | Note |
+|---|---|---|---|---|---|---|
+| 1 | `channel_state_controller.py` | `refresh_heatmap_aggregation_options` | `heatmap.controller: METRIC_MEAN, METRIC_FRACTION` | const | ☑ | Aggregation labels, not behaviour — move to a neutral module as `WELL_MIME` was. |
+| 2 | `channel_state_controller.py` | `refresh_heatmap_aggregation_options` | `heatmap.controller: METRIC_MEAN_ALL` | const | ☑ | Same constant set, second site in the same function. |
+| 3 | `channel_state_controller.py` | `_recalculate_threshold` | `home.cell_gating.controller: cell_gating_load_cell_areas, cell_gating_load_threshold_count_on, cell_gating_load_threshold_frac_on` | service | ☑ | Void loads into the gating tab after a threshold recompute. |
+| 4 | `channel_state_controller.py` | `set_ratio_metrics` | `home.cell_gating.controller: cell_gating_load_cell_areas` | service | ☑ | Same service, second caller. |
+| 5 | `channel_state_controller.py` | `set_active_image_channel` | `image_browser.review_image.renderer: refresh_review_image_ctx` | service | ☑ | Re-render the review image for the new channel. |
+| 6 | `channel_state_controller.py` | `set_active_image_channel` | `image_browser.review_image.renderer: update_preview_ctx` | service | ☑ | Same event, sibling renderer. |
+| 7 | `channel_state_controller.py` | `_write_gating_edit` | `home.cell_gating.controller: _cell_gating_resolve_key, cell_gating_on_threshold_count_on_change, cell_gating_on_threshold_frac_on_change` | query+service | ☑ | Resolves a key (returns a value), then dispatches the edit. |
+| 8 | `channel_state_controller.py` | `_gating_row_key` | `home.cell_gating.controller: _cell_gating_resolve_key` | query→domain | ☑ | Pure state arithmetic: moved to `domain/gating_state.resolve_gate_key`, so core reads it from the domain and no service is needed. |
+| 9 | `channel_state_controller.py` | `get_fluor_gate` | `home.cell_gating.controller: cell_gating_get_fluor_gate` | query→domain | ☑ | Pure state arithmetic: moved to `domain/gating_state.fluor_gate_for`; unset reads as 0.0 (gate off), as before. |
+| 10 | `channel_state_controller.py` | `ensure_cell_gating_tab_built` | `home.cell_gating.tab_view: build_cell_gating_subtab` | build | ☑ | Lazy sub-tab construction. |
+| 11 | `load_controller.py` | `load_directory` | `qc.controller: recompute_qc_all` | ordered→service | ☑ | The ordering is kept exactly where it was, in the loader's own sequence; only the *name* moved to a service, so no ordered-hook design was needed. |
+| 12 | `load_controller.py` | `load_directory` | `qc.tab_view: qc_gate_refresh_widgets` | service | ☑ | Widget sync after the QC hydrate. |
+| 13 | `load_controller.py` | `load_directory` | `crop.controller: apply_crop_to_cache` | ordered→service | ☑ | The ordering is kept exactly where it was, in the loader's own sequence; only the *name* moved to a service, so no ordered-hook design was needed. |
+| 14 | `load_controller.py` | `load_directory` | `home.labels.tab_view: label_grid_refresh` | service | ☑ | Post-load refresh of the labels grid. |
+| 15 | `load_controller.py` | `load_directory` | `heatmap.sidebar_view: refresh_heatmap_layout_sidebar` | service | ☑ | Post-load refresh of the heatmap sidebar. |
+| 16 | `load_controller.py` | `_kick_off_gating_after_load` | `home.cell_gating.controller: cell_gating_refresh_included_count, cell_gating_start_gating_worker` | service | ☑ | Starts the gating pass once the dataset is up. |
+| 17 | `selection_controller.py` | `on_sidebar_plate_well_dropped` | `heatmap.sidebar_view: _on_drop_event` | service | ☑ | Drop handling delegated to the sidebar that owns the plate. |
+| 18 | `selection_controller.py` | `labels_apply_affix` | `home.labels.tab_view: label_grid_refresh` | service | ☑ | Same refresh service as the loader's. |
+| 19 | `selection_controller.py` | `groups_centre_refresh` | `home.labels.tab_view: label_grid_refresh` | service | ☑ | Same refresh service, third caller. |
+| 20 | `selection_controller.py` | `groups_centre_refresh` | `home.groups.selections_view: rep_panel_refresh` | service | ☑ | Replicate panel refresh. |
+| 21 | `selection_controller.py` | `groups_centre_refresh` | `home.groups.controller: rep_refresh_map` | service | ☑ | Replicate map refresh. |
+| 22 | `selection_controller.py` | `labels_clear_all` | `home.labels.tab_view: label_grid_refresh` | service | ☑ | Same refresh service, fourth caller. |
+| 23 | `centre_view.py` | `build_centre` | `home.groups.panel_view: build_replicate_panel` | build | ☑ | Centre-page builder. |
+| 24 | `centre_view.py` | `build_centre` | `preview.preview_view: build_preview_picker` | build | ☑ | Centre-page builder. |
+| 25 | `sidebar_view.py` | `build_sidebar` | `heatmap.sidebar_view: build_heatmap_layout_sidebar` | build | ☑ | Sidebar builder. |
+| 26 | `figure_saver.py` | `open_style_panel` | `export.style: open_export_style_panel` | service | ☑ | `FigureService` reaching the export-style feature. |
+| 27 | `plot_card_actions.py` | `copy_active_card_as_svg` | `export.style: copy_figure_to_clipboard` | service | ☑ | Same feature, clipboard path. |
+| 28 | `projector_registry.py` | `register_default_projectors` | `qc.controller: apply_qc_to_cache` | bootstrap | ☑ | The documented B1 decoupling seam — core wires the feature callback. |
+| 29 | `projector_registry.py` | `register_default_projectors` | `crop.controller: apply_crop_to_cache` | bootstrap | ☑ | Same seam. |
+| 30 | `scope_registry.py` | `register_default_scopes` | `registry: build_feature_registry` | bootstrap | ☑ | Imports the registry module itself, not a feature — fallback when no registry was handed in. |
+
 ### B2 · `WellRepository` facade over `DatasetState` + `get_rows` ✅ *(interface seam, no behavior change)*
 **Landed.** `data/well_repository.py` — Qt-free `WellRepository` exposing
 `rows(label)`, `rows_or_none(label)` (cache-only), `labels()`, `all_timepoints()`,
@@ -312,25 +403,43 @@ smFISH), so `load_controller` names **no** feature and imports none a profile ex
 - Guard: `REPO_BYPASS_BUDGET` down; spatial on explicit allowlist.
 
 ### B4 · Converge the two load paths + persistence `app`→`ctx` *(medium-high, needs B2)*
-- Eager bulk path `load_controller.py:257` (`app._load_well_csv` + bulk
-  `recompute_qc_all`) becomes `repo.load_well(key, path)` = `load_well_csv` + the
-  **registered projectors from B1**, unifying lazy and eager so QC/Crop projection
-  runs through one code path. Keep the post-loop `recompute_qc_all` (it also
-  invalidates the stats cache + bumps `override_version`).
-- Make `PersistenceRegistry` take `ctx`/`state`, not `app`. Bodies mostly already
+
+This phase has two independent halves. **B4a (persistence → `ctx`) has landed;
+B4b (load-path convergence) has not been started.**
+
+- **B4b — landed.** The eager bulk path built its frames itself
+  (`app._load_well_csv`, a direct `dataset.cache[key] = frame`, its own
+  `record_fov_verdict`) while a cache miss went through `get_rows`. Both now go
+  through `data_loading.load_and_project`, reached from the loader as
+  `ctx.state.repo.load_well(key, path)` — the repository's first write entry
+  point. The divergence this closed was not hypothetical: the loader applied
+  manual per-cell curation as well as QC and crop, while the lazy path ran only
+  the two registered projectors, so a well the row cache dropped and reloaded
+  came back with the user's exclusions gone from `Included` and the override map
+  still holding them. `data/curation.py` now owns that projection and is
+  registered beside QC and crop, so the roster of what a fresh frame gets is one
+  list. The post-load hydration sequence is unchanged and still ordered: the
+  wells are read before `persistence.load` has the settings, so the bulk
+  re-projections after it stay where they are.
+- **B4a — landed.** Make `PersistenceRegistry` take `ctx`/`state`, not `app`. Bodies mostly already
   deref `app._app_state`(==`ctx.state`); follow the direction `_doc.py` /
   `cell_gating.py` already set. Convert the ~10 clean domains to `save(ctx)/load(ctx)`
   first; leave the callback-coupled `sample_definitions.py` (`app._set_status`,
   `_groups_centre_refresh`, `_plot_groups_refresh`, `_invalidate_stats_cache`,
   `_redraw`) and `view_state.reset` until their god-methods are `ctx`-native
   (WS-A A3/A5). **This directly enables A5's trivial `persistence` accessor.**
-- **view_state is already ~80% done on the baseline** — do not redo it. Internals are
-  fully `ctx`-native and Image Table owns its snapshot/restore behind the
-  `view_state_io` hook. Remaining, narrow work: (a) move the still-inline
-  Bar/Distribution/Scatter blocks in `view_state.py` (`_snapshot_bar`, `_apply_scatter`,
-  …) behind the **same `view_state_io` hook** (one descriptor factory per feature —
-  reuse, don't invent); (b) convert the three outer boundary functions
-  `save_to_data_dir(app)`/`load_from_data_dir(app)`/`reset(app)` to `ctx`.
+- **view_state was already ~80% done on the baseline** — do not redo it. Internals are
+  fully `ctx`-native, and Image Table (`features/image_browser/image_table/view_state_io.py`)
+  and Heatmap (`features/heatmap/view_state_io.py`) own their snapshot/restore behind the
+  `view_state_io` hook. Of the two remaining narrow items, (b) has landed and (a) has not:
+  - **(a) — still open.** Move the inline Bar/Distribution/Scatter blocks in
+    `view_state.py` (`_snapshot_bar`, `_snapshot_distribution`, `_snapshot_scatter`,
+    `_apply_bar`, `_apply_distribution`, `_apply_scatter`) behind the **same
+    `view_state_io` hook** (one descriptor factory per feature — reuse, don't invent).
+    Nothing meters this, so it is invisible to the ratchets: it is tracked only here.
+  - **(b) — landed.** The three outer boundary functions
+    `save_to_data_dir(app)`/`load_from_data_dir(app)`/`reset(app)` now take `ctx`
+    (`PERSIST_APP_PARAM_BUDGET == 0`).
 - Guard: existing `RUNTIME_APP_PERSIST_WRAPPER_BUDGET = 0` holds; add
   `PERSIST_APP_PARAM_BUDGET` counting `save_to_data_dir(app)` signatures (seed ~12).
 
@@ -349,14 +458,46 @@ smFISH), so `load_controller` names **no** feature and imports none a profile ex
 > a real `_ctx` helper (like `test_split_view`'s) instead of self-refs; (3) add the
 > `PERSIST_APP_PARAM_BUDGET` ratchet last.
 
-### B5 · Image repository facade *(optional, later, isolated)*
-Unify the de-facto image repository (`find_well_images_and_masks` discovery →
-`resolve_channel_frame_refs` precedence → `open_imgref_as_array` decode, backed by
-`ZipFileCache`/`GLOBAL_CACHE` + `_DecodedArrayCache`) behind
-`data/image_repository.py`. `ImgRef` (value object) + `image_identity.py` (identity
-SSOT) unchanged. Orthogonal to the row path; do only if the row repository proves
-the pattern. Guard: facade tests + a ratchet on direct `GLOBAL_CACHE` /
-`_DecodedArrayCache` reach-ins outside the facade.
+### B5 · Image repository facade ✅ *(landed)*
+**Landed.** `data/image_repository.py` — `ImageRepository`, reached as
+`ctx.state.images` and attached in `ViewerContext.__post_init__` beside
+`ctx.state.repo`. `images_for_well(well, channel)` is the discovery step,
+reading the four `ctx.state.dataset` fields (`data_dir`, `in_dir`,
+`fov_tp_extractor`, `pipeline_info`) that every call site used to assemble
+identically; `array(ref, greyscale=)` is the memoized decode, a staticmethod
+because a resolved `ImgRef` names its file completely and the Playground's
+worker thread decodes without a context; `invalidate()` drops both image caches
+together, which is what a dataset swap needs.
+
+Two findings changed the scope the original sketch assumed, and both are worth
+recording:
+
+- **The caches were already encapsulated.** Nothing outside `data/zipfile_cache.py`
+  and `data/image_discovery.py` names `GLOBAL_CACHE`, `_DECODE_CACHE` or
+  `_DecodedArrayCache`, and both are already invalidated on dataset load. So the
+  proposed reach-in ratchet is a lock on a property that already held, not a
+  repair — `tests/test_image_cache_encapsulation.py` says so in its own
+  docstring, because a guard that would pass against the base branch is a
+  hypothesis unless it is labelled as one.
+- **The three grid features' inventory caches must not be unified.** Image Table
+  and Playground keep theirs for the session; Cell Browser's worker keeps one
+  *per page*, deliberately, because it reads on a background thread and a
+  dataset swap mid-read must not leave it serving refs into a replaced archive.
+  Folding them into one cache owned by the facade would have given the worker
+  the session lifetime — a correctness change wearing a refactor's clothes. The
+  facade therefore owns no inventory cache, and does not wrap
+  `frame_load.load_frame_array` / `load_mask_array` at all: those take the
+  caller's cache explicitly and one path calls them with `ctx=None`.
+
+Guards: `tests/test_image_repository.py` (facade unit tests, asserted on the
+outbound calls), `tests/test_image_repo_bypass.py`
+(`IMAGE_REPO_BYPASS_BUDGET == 0`, down-only, with the `_not_slack` twin) and
+`tests/test_image_cache_encapsulation.py`. Converted call sites: the review-image
+renderer and collector, the Playground's flat-field worker, the scatter cell
+viewer (six decodes across three lookups) and `load_controller`'s two hand-rolled
+invalidations. Four dead re-exports in `features/preview/controller.py` went with
+them — `_NullContext`, `classify_member`, `scan_zip_members` and
+`open_imgref_as_array` had no caller left.
 
 ---
 
@@ -377,7 +518,7 @@ A2 (self-delegators) ⇄ A3 (app-first clusters; on_selection_changed = last hoo
 A4 (__init__ reach-throughs)   B3 (route cache readers)
         │                         │
         ▼                         ▼
-A5 (accessor extraction) ◄──── B4 (load converge + persistence→ctx; view_state ~80% pre-done)
+A5 (accessor extraction) ◄──── B4a (persistence→ctx) ; B4b (load converge)
         │
         ▼
 A5 `window` = terminal state ; B5 (image repo) optional/last
@@ -410,18 +551,30 @@ A5 `window` = terminal state ; B5 (image repo) optional/last
   eager parity, QC/Crop projection, persistence hydration).
 
 ## Critical files
-- `well_viewer/core/feature_registry.py` — `FeatureDescriptor` + `with_hook`; add the
-  `cache_projector` field (B1). **This registry is the reuse seam for B1/B1b/A3.**
-- `well_viewer/features/registry.py` — descriptor hook factories; `on_selection_changed`
-  (last app-first hook, A3), QC/Crop `cache_projector` factories (B1)
-- `well_viewer/data/data_loading.py` — `get_rows` layer inversion via `with_hook` (B1)
-- `well_viewer/core/load_controller.py` — residual feature imports → `on_dataset_loaded`
-  hooks (B1b); load-path convergence (B4)
-- `well_viewer/persistence/view_state.py` + `features/*/view_state_io.py` — Bar/Dist/
-  Scatter blocks → `view_state_io` hook; `save/load/reset(app)`→`ctx` (B4)
-- `well_viewer/viewer_context.py` — the 9 accessors to extract (A5)
-- `well_viewer/runtime_app.py` — delegators (A2), `__init__` reach-throughs (A4),
-  widget attrs (A1)
+- `well_viewer/core/feature_registry.py` — `FeatureDescriptor` + `with_hook`. **This
+  registry is the reuse seam for B1b and any future fan-out hook.** B1 did *not* add a
+  `cache_projector` descriptor field: QC and Crop have no `FeatureDescriptor`, so it used
+  the standalone projector registry instead (see the B1 section).
+- `well_viewer/features/registry.py` — descriptor hook factories. Every hook is
+  `ctx`-native now, `on_selection_changed` included (A3, landed); a new fan-out for B1b
+  would be added here.
+- `well_viewer/data/data_loading.py` — `get_rows`, whose layer inversion is landed (B1):
+  it iterates `iter_cache_projectors()` and imports no feature.
+- `well_viewer/data/cache_projectors.py` + `well_viewer/core/projector_registry.py` — the
+  B1 seam itself; `projector_registry` holds 2 of the 31 remaining function-local
+  core→feature imports, by design.
+- `well_viewer/core/load_controller.py` — the largest remaining cluster: 7 function-local
+  feature imports → `on_dataset_loaded` hooks (B1b), and the eager bulk load path
+  (`app._load_well_csv`) → `repo.load_well` (B4b).
+- `well_viewer/data/well_repository.py` — read facade today; B4b adds `load_well` to it.
+- `well_viewer/persistence/view_state.py` + `features/*/view_state_io.py` — the inline
+  Bar/Distribution/Scatter blocks still to move behind the `view_state_io` hook (B4a
+  sub-item (a), open). `save/load/reset` already take `ctx`.
+- `well_viewer/viewer_context.py` — A5 is complete: `window` is the only accessor left,
+  and the other 8 services are held fields (`persistence`, `features`, `notify`,
+  `figures`, `coordinator`). A new accessor here is a regression.
+- `well_viewer/runtime_app.py` — A1/A2/A4 are complete: no raw-`self` delegators, no
+  widget placeholder attrs. Watch the line + attr budgets when touching it.
 - `tests/test_guardrails.py` + `tests/test_ctx_service_accessors.py` — where every new
   ratchet + accessor-freeze edit lands; `tests/test_feature_profile.py` — the
   boot-under-subset-profile guard idiom to extend for B1/B1b
@@ -445,29 +598,126 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 | A4 · `__init__` reach-throughs | ☑ | `RAW_SELF_DELEGATOR_BUDGET == 0` | 2026-07-11 — the 4 `__init__` runtime wirings stay (pure-logic barplot/stats **test-injection seam**), but their backing methods are **not** raw-`self` delegators, so A2's `== 0` holds; no god-object forwarder remains. |
 | A5 · service-accessor extraction | ☑ | `_ALLOWED == {"window"}` | 2026-07-11 (`3f0aa01`..`8904663`) — persistence/features→held fields; set_status/toast→`ctx.notify`; save_figure_dialog/open_export_style_panel→`ctx.figures`; rebuild_all/refresh_sidebar_map→`ctx.coordinator` |
 | B1 · cache-projector inversion | ☑ | `test_data_layer_no_feature_imports` green | 2026-07-11 |
-| B1b · load_controller decouple | ⊘ | *deferred — see note; part of terminal cond. #3 (full `core/` decouple), a separate ordered-hook design epic* | — |
+| B1b · `core/` feature decouple | ☑ | `CORE_FEATURE_IMPORT_BUDGET == 0`; all 30 tracker rows closed | 2026-08-29 |
 | B2 · `WellRepository` facade | ☑ | facade test + `REPO_BYPASS_BUDGET`=1 seeded | 2026-07-11 |
 | B3 · route cache readers | ☑ | `REPO_BYPASS_BUDGET == 0` (−spatial) | 2026-07-11 |
-| B4 · persistence → ctx | ☑ | `PERSIST_APP_PARAM_BUDGET == 0` | 2026-07-11 (load-converge sub-item still open) |
-| B5 · image repo facade *(optional)* | ☐ | image-facade ratchet == 0 | — |
+| B4a · persistence → ctx | ☑ | `PERSIST_APP_PARAM_BUDGET == 0` | 2026-07-11 |
+| B4b · load-path convergence | ☑ | `WellRepository.load_well` exists, `load_controller` calls no `app._load_well_csv`, curation is a registered projector | 2026-08-29 |
+| B5 · image repo facade *(optional)* | ☑ | `IMAGE_REPO_BYPASS_BUDGET == 0`; facade tests green | 2026-08-29 |
 
-**Terminal-goal status (2026-07-12):** conditions **1, 2, 4, 5 hold** and are guard-proven
-green; **Workstream A (god-object teardown) is COMPLETE** — `_ALLOWED == {"window"}`,
-`RAW_SELF_DELEGATOR_BUDGET == 0`, `APP_FIRST_FUNC_BUDGET == 0`. Condition **3** (zero
-`features.*` imports across **all of `core/`**, module *and* function-local) is the sole
-open item — now **metered and ratcheted**: `CORE_FEATURE_IMPORT_BUDGET == 33` in
-`tests/test_guardrails.py` (down-only, with the `_not_slack` twin). Module-scope
-core→feature imports are already banned at 0 (`test_architecture_contracts`); the 33 are
-**function-local** — the interleaved post-load projections + render/event dispatches that
-need an ordered post-load / redraw hook design to invert (roadmap phase B1b, a deferred
-epic). Two subclasses resist the void fan-out hook and need a service-lookup registry
-first: **query-style** cross-feature calls that return a value (`cell_gating_get_fluor_gate`,
-`_cell_gating_resolve_key`) and the **documented decoupling seams** (`projector_registry`
-QC/Crop, `scope_registry` registry-construction) which are themselves the sanctioned
-data/domain→feature bridges. This is the remaining frontier for full vertical-slice purity;
-the ratchet ensures it only shrinks.
+**Terminal-goal status (2026-08-29): conditions 1–5 all hold and are
+guard-proven.** Workstream A is complete (`_ALLOWED == {"window"}`,
+`RAW_SELF_DELEGATOR_BUDGET == 0`, `APP_FIRST_FUNC_BUDGET == 0`); the repository
+work is complete through B4 (`REPO_BYPASS_BUDGET == 0`,
+`PERSIST_APP_PARAM_BUDGET == 0`, one load path); and **condition 3 now holds
+too — `CORE_FEATURE_IMPORT_BUDGET == 0`.** `well_viewer/core/` and
+`well_viewer/data/` import no feature at any nesting, module-scope or
+function-local, and `features/registry.py` is the sole importer it was always
+declared to be. Condition **6** (full suite green) is decided per-run by CI
+rather than by this document.
+
+What closed condition 3 was the feature-service lookup (see the B1b section):
+descriptors declare named callables, core calls them by name, and the support
+libraries that own no tab register into the same lookup. The two wiring modules
+that used to live in `core/` are gone — the row-cache projectors and the
+support services are wired inside `build_feature_registry`, and
+`register_default_scopes` now takes the registry rather than building one.
+
+**Every phase of both workstreams is now closed**, including the optional B5
+(`data/image_repository.py`, `IMAGE_REPO_BYPASS_BUDGET == 0`). Nothing is
+outstanding.
+
+The document stays rather than being deleted, which is worth justifying against
+CLAUDE.md section 6.1's rule that a tracker is deleted by the pull request
+closing its last row. That rule is about a *remediation tracker* — the temporary
+exception section 5 grants for a body of work too large to hold in one session's
+head. This is one of the three permanent documents section 5 names, and it is
+permanent for a reason that still holds: every budget it quotes is asserted by
+`tests/test_guardrails.py`, so it is where a reader finds out what
+`CORE_FEATURE_IMPORT_BUDGET == 0` or `REPO_BYPASS_BUDGET == 0` is *for*, and why
+lowering a ratchet is the only direction allowed. Its job from here is to
+describe a finished teardown and hold the reasoning behind the guards that keep
+it finished — not to claim work is owed, which nothing below does.
 
 **Changelog** (newest first):
+
+- 2026-08-29 — **B5 COMPLETE — the image facade, and two scope corrections.**
+  `data/image_repository.py` gives pixels the door rows already had: discovery
+  with the dataset fields read once rather than assembled at each call site, the
+  memoized decode, and one invalidation that drops both image caches. Converted
+  the review-image renderer and collector, the Playground's flat-field worker,
+  the scatter cell viewer and `load_controller`; deleted four dead re-exports in
+  `features/preview/controller.py`. The two corrections to the original sketch —
+  the caches were already encapsulated, so that ratchet locks in rather than
+  repairs; and the three grid inventory caches must stay separate because Cell
+  Browser's is per-page for thread-safety — are written up in the B5 section.
+  **With this the roadmap is complete.**
+
+- 2026-08-29 — **B4b COMPLETE — one load path, and the divergence it was hiding.**
+  The eager bulk load now goes through `ctx.state.repo.load_well(key, path)`, which
+  delegates to the new `data_loading.load_and_project` — the single way a frame enters
+  the row cache, for the loader's cold pass and a lazy cache miss alike. It registers
+  the CSV path, reads it, runs every registered projector and records the FOV verdict,
+  so neither path can acquire a step the other lacks.
+  - **The paths had already diverged, and it was reachable.** The loader applied manual
+    per-cell curation on top of QC and crop; `get_rows` ran only the two registered
+    projectors. `persistence/reset_scopes.py` (reset QC parameters) and
+    `core/channel_state_controller.py` (stale-cache recovery) both drop the row cache
+    without clearing `runtime.review.included_overrides`, so wells came back from disk
+    with the user's exclusions gone from `Included` while the override map still held
+    them — excluded cells silently back in every plot, export and statistic. Reproduced
+    before the fix, and `tests/test_one_load_path.py` fails without it.
+  - **`data/curation.py`** now owns that projection (moved out of
+    `features/image_browser/review_image/collect.py`) and is registered beside QC and
+    crop, so the projector roster is the whole list of what a fresh frame gets rather
+    than three things the loader happens to remember. The move also freed Cell Gating
+    from its lazy hop into Image Browser and took the loader's feature import with it:
+    `CORE_FEATURE_IMPORT_BUDGET` 31 → **30**.
+  - `well_viewer/data/image_identity.py` gained `cell_key_tuples_for_dataframe`, the one
+    implementation of the `(fov, tp, nid)` row key both the projector and Review Image's
+    own lookups use; `collect.review_row_keys_series` is now the tab-side name for it.
+  - `runtime_app._load_well_csv` is deleted — a pass-through with one caller, which was
+    that loop.
+  - Guard housekeeping: `tests/test_row_cache_writers.py`'s roster moves with the sites
+    (`data/curation.py::Included`, `data/data_loading.py::__replaces_frame__`; the
+    `load_controller` and `review_image/collect.py` entries are gone). The cache write is
+    newly *visible* to that scan — the loader spelled it through a local name the
+    detector could not attribute to the row cache, and `load_and_project` spells it
+    `dataset.cache[label]`.
+
+- 2026-08-29 — **Reconciled the roadmap against the tree (no product code).** Every
+  phase status in the progress log was re-checked by reading the code and running the
+  Def-of-Done guards (`test_guardrails`, `test_ctx_service_accessors`, `test_repo_bypass`,
+  `test_ctx_app_burndown`, `test_data_layer_no_feature_imports` — 20 passed). No phase
+  claimed done turned out undone, and the drift was one-directional: the roadmap
+  *understated* progress. Corrections made here:
+  - **Core→feature imports: the doc said 33, the guard says 31.**
+    `CORE_FEATURE_IMPORT_BUDGET` reached 31 when the dead `ui_helpers.on_theme_change`
+    (which held the last function-local imports of `features.grouping.tab_view` and
+    `features.stats.controller`) was deleted. That step is recorded in the guard's own
+    comment but never reached this file, and the repository's visible history begins at a
+    squashed import commit, so it carries no date here. The terminal-status section now
+    quotes the number with a per-module breakdown **and** says outright that the guard,
+    not this file, is the authority for the count.
+  - **B4 was ticked ☑ on its persistence half alone.** Split into **B4a** (persistence →
+    `ctx`, done) and **B4b** (load-path convergence, **not started**): the eager bulk path
+    still calls `app._load_well_csv` and writes `dataset.cache` directly, and
+    `WellRepository` is still read-only, so B4b will add the first write entry point to it.
+    The old `load_controller.py:257` anchor had drifted and is described by behaviour now
+    rather than by line number.
+  - **B4a's view_state sub-item (a) is open**, and nothing meters it: the
+    Bar/Distribution/Scatter snapshot/apply blocks are still inline in `view_state.py`.
+    Recorded explicitly, since only this file tracks it. Heatmap has joined Image Table in
+    owning a `view_state_io.py`, which the baseline section now says.
+  - **Stale "Critical files" instructions removed.** The list still told a future agent to
+    add a `cache_projector` field to `feature_registry.py` (B1 deliberately used a
+    standalone projector registry instead), still called `on_selection_changed` the last
+    app-first hook (migrated), and still described `viewer_context.py` as holding 9
+    accessors to extract (one left, by design). Each entry now states what is true now and
+    which open phase, if any, will touch it.
+  - **B5 confirmed not started** — no `data/image_repository.py`, no facade ratchet — and
+    **B1b confirmed still ⊘ deferred**, which is the mechanism terminal condition 3 waits
+    on.
 
 - 2026-07-12 — **Cond. 3 metered + first conversion (34 → 33 core→feature imports).**
   - Added the **`CORE_FEATURE_IMPORT_BUDGET`** ratchet (seed **33**, down-only + `_not_slack`

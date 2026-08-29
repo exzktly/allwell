@@ -22,7 +22,7 @@ It is derived here instead, from the syntax tree, over the scan surface in
   file's roster entry. Do not read this shape as guarded.
 
 A grep for the first shape alone is what produced the original writer list, and
-it missed ``apply_review_overrides_to_cache``'s ``df.loc[mask, "Included"] = ...``
+it missed ``curation.apply_curation_to_cache``'s ``df.loc[mask, "Included"] = ...``
 — the manual per-cell curation projection, reached from four call sites, one of
 which does not invalidate afterwards.
 
@@ -102,20 +102,25 @@ _KNOWN_WRITERS: dict[str, str] = {
         "different syntactic shape, so a scan looking only for column writes "
         "walks past it."
     ),
-    "well_viewer/core/load_controller.py::__replaces_frame__": (
-        "Dataset load seeds the cache well by well. Bumping on a fresh insert "
-        "would be wrong — it would churn the key once per well during the cold "
-        "pass and invalidate each previous well's entry — so the bump belongs "
-        "on replacement of a label the cache already holds, not on first "
-        "insert."
+    "well_viewer/data/data_loading.py::__replaces_frame__": (
+        "load_and_project seeds the cache well by well — the single path a "
+        "frame enters the row cache by, for the lazy read and the dataset "
+        "loader's bulk pass alike. Bumping on a fresh insert would be wrong — "
+        "it would churn the key once per well during the cold pass and "
+        "invalidate each previous well's entry — so the bump belongs on "
+        "replacement of a label the cache already holds, not on first insert. "
+        "The loader used to hold this write itself, spelled through a local "
+        "name the scan could not attribute to the row cache; writing it as "
+        "``dataset.cache[label]`` in one place is what put it in view here."
     ),
-    "well_viewer/features/image_browser/review_image/collect.py::Included": (
-        "apply_review_overrides_to_cache projects manual per-cell curation onto "
-        "the cached frame via df.loc. This is the site a grep for 'df[' missed. "
+    "well_viewer/data/curation.py::Included": (
+        "apply_curation_to_cache projects manual per-cell curation onto the "
+        "cached frame via df.loc. This is the site a grep for 'df[' missed. "
         "Reached from review_image/controller.py, review_image/callbacks.py, "
-        "home/cell_gating/controller.py and core/load_controller.py — and the "
-        "load_controller path does NOT invalidate afterwards, which is exactly "
-        "why the bump must live in this function rather than in its callers."
+        "home/cell_gating/controller.py and core/load_controller.py, and as a "
+        "registered cache projector on every fresh load — and the loader path "
+        "does NOT invalidate afterwards, which is exactly why the bump must "
+        "live in this function rather than in its callers."
     ),
 }
 
@@ -272,13 +277,13 @@ def _repo_has(path: str) -> bool:
 def test_the_scan_finds_the_site_a_grep_missed():
     """The guard is only worth having if it sees the indexer form.
 
-    ``apply_review_overrides_to_cache`` writes through ``df.loc[mask, "Included"]``.
+    ``curation.apply_curation_to_cache`` writes through ``df.loc[mask, "Included"]``.
     A search for ``df["Included"] =`` does not match it, and the original
     hand-built writer list did not contain it. If this stops being found, the
     scan has regressed to what a grep could already do.
     """
     discovered = _discovered_writers()
-    key = "well_viewer/features/image_browser/review_image/collect.py"
+    key = "well_viewer/data/curation.py"
     assert key in discovered, "the df.loc writer is no longer being found"
     assert "Included" in discovered[key]
 

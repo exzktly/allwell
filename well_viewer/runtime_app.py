@@ -128,9 +128,6 @@ from well_viewer.domain.selections_model import color_for_well
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values  # noqa: F401
 
 
-from well_viewer.data.data_loading import (
-    load_well_csv,
-)
 from well_viewer.domain.ratio_models import RatioMetric
 
 
@@ -586,9 +583,6 @@ class WellViewerApp(QWidget):
 
     def _read_pipeline_info(self, path: Path):
         return _read_pipeline_info_shared(path, logger=_logger, check_parent=True)
-
-    def _load_well_csv(self, path: Path):
-        return load_well_csv(path)
 
     def _extract_well_token(self, label: str):
         return _extract_well_token(label)

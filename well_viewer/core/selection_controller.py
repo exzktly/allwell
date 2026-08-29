@@ -492,8 +492,7 @@ def on_sidebar_plate_well_dropped(ctx, well_id: str, token: str) -> None:
     if not token:
         return
     try:
-        from well_viewer.features.heatmap.sidebar_view import _on_drop_event
-        _on_drop_event(ctx, "palette", None, token)
+        ctx.features.call("heatmap.well_dropped", ctx, "palette", None, token)
     except Exception:
         import logging
         logging.getLogger(__name__).exception("Heat map well drop handling failed")
@@ -563,7 +562,6 @@ def labels_apply_affix(ctx, *, where: str) -> None:
     """
     from well_viewer.core.ui_helpers import ask_name_dialog
     from well_viewer.domain.viewer_state import parse_rc
-    from well_viewer.features.home.labels.tab_view import label_grid_refresh
 
     grid = ctx.widgets.get_or_none("_lbl_grid")
     grid_sel: list[str] = []
@@ -602,7 +600,7 @@ def labels_apply_affix(ctx, *, where: str) -> None:
             labels.pop(tok, None)
 
     invalidate_stats_cache(ctx)
-    label_grid_refresh(ctx)
+    ctx.features.call("labels.grid_refresh", ctx)
     _schedule_sample_def_autosave(ctx)
     ctx.notify.set_status(
         f"Added {where} '{text}' to {len(selected)} well label{plural}."
@@ -881,12 +879,9 @@ def groups_centre_refresh(ctx) -> None:
             swallowed()  # was: pass (silent except)
 
     if tab_visible:
-        from well_viewer.features.home.labels.tab_view import label_grid_refresh
-        from well_viewer.features.home.groups.selections_view import rep_panel_refresh
-        rep_panel_refresh(ctx)
-        label_grid_refresh(ctx)
-    from well_viewer.features.home.groups.controller import rep_refresh_map
-    rep_refresh_map(ctx)
+        ctx.features.call("groups.panel_refresh", ctx)
+        ctx.features.call("labels.grid_refresh", ctx)
+    ctx.features.call("groups.map_refresh", ctx)
     update_active_group_label(ctx)
 
 
@@ -1326,9 +1321,8 @@ def plate_commit_deferred(ctx) -> None:
 
 def labels_clear_all(ctx) -> None:
     if ctx.state.dataset.well_labels:
-        from well_viewer.features.home.labels.tab_view import label_grid_refresh
         ctx.state.dataset.well_labels.clear()
-        label_grid_refresh(ctx)
+        ctx.features.call("labels.grid_refresh", ctx)
         invalidate_stats_cache(ctx)
         _schedule_sample_def_autosave(ctx)
 

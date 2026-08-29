@@ -124,11 +124,10 @@ def build_sidebar(win, parent: QWidget) -> None:
 
     # Heat-map layout configurator (sidebar variant). Hidden by default;
     # ``_on_tab_change`` reveals it when the Heat Map tab is active.
-    from well_viewer.features.heatmap.sidebar_view import (
-        build_heatmap_layout_sidebar,
-    )
-    heatmap_frame = build_heatmap_layout_sidebar(win._ctx, parent)
-    heatmap_frame.setVisible(False)
+    heatmap_frame = win._ctx.features.query(
+        "heatmap.build_layout_sidebar", win._ctx, parent, default=None)
+    if heatmap_frame is not None:
+        heatmap_frame.setVisible(False)
 
     # Absorb leftover vertical space so the well picker stays pinned to the
     # top of the sidebar even when the sidebar is taller than its contents.

@@ -72,7 +72,6 @@ def update_preview_ctx(ctx, well_label: str | None) -> None:
 def _update_preview_impl(ctx, well_label: str | None) -> None:
     # Local imports keep this module standalone-importable without paying
     # the cost of dragging in runtime_app at module load time.
-    from well_viewer.data.image_discovery import find_well_images_and_masks
     from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 
     widgets = ctx.widgets
@@ -121,14 +120,8 @@ def _update_preview_impl(ctx, well_label: str | None) -> None:
                 "[RI-CHSW step 4] update_preview start well=%r active_channel=%r",
                 well_label, active_image_channel,
             )
-        fluor, overlay, mask, tophat_fluor = find_well_images_and_masks(
-            state.dataset.data_dir,
-            well_label,
-            fluor_token=active_image_channel,
-            in_dir=state.dataset.in_dir,
-            _fov_tp_extractor=state.dataset.fov_tp_extractor,
-            _pipeline_info=state.dataset.pipeline_info,
-        )
+        fluor, overlay, mask, tophat_fluor = state.images.images_for_well(
+            well_label, active_image_channel)
     except Exception as _exc:
         _logger.exception("Unexpected error searching images for %r: %s", well_label, _exc)
         fluor, overlay, mask, tophat_fluor = {}, {}, {}, {}
@@ -279,7 +272,6 @@ def _resolve_review_fov_tp(ctx, widgets, status, _set_combo_values, *, well, cha
 
 
 def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: bool, image_load_debug: bool) -> None:
-    from well_viewer.data.image_discovery import open_imgref_as_array
     from well_viewer.core.channel_state_controller import (
         get_all_fluor_gates, on_cutoff_for_column,
     )
@@ -344,8 +336,8 @@ def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: 
         center = cached["center"]
         boundary = cached["boundary"]
     else:
-        fluor_raw = open_imgref_as_array(fluor_ref, greyscale=True)
-        mask_raw = open_imgref_as_array(mask_ref, greyscale=True)
+        fluor_raw = state.images.array(fluor_ref, greyscale=True)
+        mask_raw = state.images.array(mask_ref, greyscale=True)
         if fluor_raw is None or mask_raw is None:
             if status is not None:
                 status.setText("Could not render review image (image decode failed).")

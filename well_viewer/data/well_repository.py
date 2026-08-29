@@ -7,7 +7,10 @@ delegates to the existing ``data_loading`` functions or the ``DatasetState``
 aggregate root.
 
 ``DatasetState`` is the aggregate root (paths + row cache + derived timepoint /
-FOV lists + ``pipeline_info``); the repository is the read/query port over it.
+FOV lists + ``pipeline_info``); the repository is the read/query port over it,
+plus the one write entry point — :meth:`WellRepository.load_well`, which the
+dataset loader's bulk pass uses so its wells enter the cache by the same route a
+lazy read builds them.
 Because the lazy-load path (``get_rows``) runs the registered cache projectors,
 which read the wider ``ctx.state`` (QC params, crop region), the repository holds
 the ``ViewerContext`` and threads it to ``get_rows`` — it is *not* merely a
@@ -20,18 +23,22 @@ the frozen service-accessor surface.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pandas as pd
 
-from well_viewer.data.data_loading import get_all_timepoints, get_rows
+from well_viewer.data.data_loading import (
+    get_all_timepoints, get_rows, load_and_project,
+)
 
 if TYPE_CHECKING:  # pragma: no cover
     from well_viewer.core.dataset_state import DatasetState
 
 
 class WellRepository:
-    """Read/query port over the currently-open dataset's per-well rows."""
+    """Read/query port over the currently-open dataset's per-well rows, plus the
+    load entry point that puts them there."""
 
     def __init__(self, ctx) -> None:
         self._ctx = ctx
@@ -40,6 +47,18 @@ class WellRepository:
     def dataset(self) -> DatasetState:
         """The underlying ``DatasetState`` aggregate root."""
         return self._ctx.state.dataset
+
+    def load_well(self, label: str, path: Path | None = None) -> pd.DataFrame:
+        """Read *label*'s CSV into the row cache, projected and recorded.
+
+        The eager entry point, for a caller that knows it wants the well now —
+        the dataset loader's bulk pass over a freshly opened plate. Delegates to
+        :func:`data_loading.load_and_project`, which is also what :meth:`rows`
+        reaches on a cache miss, so eager and lazy loads cannot drift apart in
+        which layers they apply. *path* registers the CSV location at the same
+        time, which is what a first pass over a new dataset needs.
+        """
+        return load_and_project(self._ctx, label, path)
 
     def rows(self, label: str) -> pd.DataFrame:
         """The measurement frame for well *label*, loading + projecting lazily

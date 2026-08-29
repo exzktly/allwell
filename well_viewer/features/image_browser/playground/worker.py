@@ -45,8 +45,8 @@ def build_reference_fields(ctx, well: str, chan_lower: str, *,
     """
     import process_microscopy as pm
     from pipeline.flatfield import estimate_basic_flatfield, normalize_flatfield
-    from well_viewer.data.image_discovery import open_imgref_as_array
     from well_viewer.data.frame_load import load_well_channel
+    from well_viewer.data.image_repository import ImageRepository
 
     # The data layer's loader, not the Image Table's wrapper around it. The
     # wrapper only binds that tab's pass-scoped ``scan_misses``, which this
@@ -58,7 +58,7 @@ def build_reference_fields(ctx, well: str, chan_lower: str, *,
     frames: list = []
     for i, ref in enumerate(sample, start=1):
         try:
-            arr = open_imgref_as_array(ref, greyscale=True)
+            arr = ImageRepository.array(ref, greyscale=True)
         except Exception:
             arr = None
         if arr is not None:

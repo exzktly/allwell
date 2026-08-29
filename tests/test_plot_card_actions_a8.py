@@ -39,8 +39,13 @@ class _FakeRegistry:
 def _ctx(cards, app, figures=None):
     # A real ViewerContext so the named service accessors (notify) delegate to the
     # fake app; ``figures`` can be injected to observe the FigureService seam (A5).
+    # The real feature registry too: copying a figure reaches the export-style
+    # library through the feature-service lookup, so a ctx without one would make
+    # the copy return its "not available in this build" default instead.
+    from well_viewer.features.registry import build_feature_registry
     return ViewerContext(_window=app, state=None, bus=None,
-                         widgets=_FakeRegistry(cards), figures=figures)
+                         widgets=_FakeRegistry(cards), figures=figures,
+                         features=build_feature_registry())
 
 
 def test_active_card_picks_first_visible_in_priority_order():

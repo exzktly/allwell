@@ -12,7 +12,7 @@ Called once from ``core/bus_wiring.wire_event_bus``.
 from __future__ import annotations
 
 
-def register_default_scopes(win=None) -> None:
+def register_default_scopes(win=None, features=None) -> None:
     """Register the fold-change redraw scopes.
 
     The *feature-owned* scopes (currently just ``bar``) are sourced from the
@@ -20,6 +20,12 @@ def register_default_scopes(win=None) -> None:
     removed from ``features.registry.FEATURES`` drops its scope automatically and
     this module imports no feature. The remaining scopes (line / distribution /
     heat map) use the core ``redraw_app`` default and stay inline.
+
+    The registry comes from *win* (the app's own) or is passed as *features*; it
+    is never built here. Building it would mean importing
+    ``features.registry``, and a caller that has no registry to offer has no
+    feature scopes to register either — an empty run is the honest answer, not a
+    transient registry conjured to stand in for the app's.
 
     Idempotent — re-registering replaces the prior descriptor, so calling this
     twice (e.g. in tests) is safe.
@@ -29,14 +35,10 @@ def register_default_scopes(win=None) -> None:
     )
     from well_viewer.core.plot_orchestrator import redraw_app
 
-    # Feature-contributed scopes (e.g. bar). Resolve from the win's registry
-    # when available; otherwise build a transient one so direct callers (tests)
-    # still get the feature scopes registered.
-    feats = getattr(win, "_features", None) if win is not None else None
-    if feats is None:
-        from well_viewer.features.registry import build_feature_registry
-        feats = build_feature_registry()
-    for _desc in feats.all():
+    feats = features
+    if feats is None and win is not None:
+        feats = getattr(win, "_features", None)
+    for _desc in (feats.all() if feats is not None else ()):
         if _desc.fold_change_scope_factory is not None:
             register_fold_change_scope(_desc.fold_change_scope_factory())
 

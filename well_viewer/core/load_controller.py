@@ -24,6 +24,7 @@ from well_viewer.core.ui_helpers import (
     step_progress as _step_progress,
 )
 from well_viewer.core.safe import swallowed
+from well_viewer.data.curation import apply_curation_to_cache
 
 
 # ── "Opening dataset…" responsiveness guard ─────────────────────────────────
@@ -437,20 +438,14 @@ def load_directory(ctx, d: Path, label=None) -> None:
         app, "_invalidate_review_image_frame_cache"
     ):
         app._invalidate_review_image_frame_cache()
-    # Drop every cached ZipFile handle on dataset swap so the new
-    # dataset's per-well zips aren't read through a previous
-    # dataset's handle (or, worse, a handle pointing at a since-
-    # deleted file).
+    # Drop the image caches on a dataset swap: every cached ZipFile handle, so
+    # the new dataset's per-well zips aren't read through a previous dataset's
+    # handle (or, worse, one pointing at a since-deleted file), and the app-wide
+    # decoded-array LRU, whose pixels belong to the previous dataset. One call
+    # for both, so neither can be dropped without the other.
     try:
-        from well_viewer.data.zipfile_cache import invalidate as _invalidate_zip_cache
-        _invalidate_zip_cache()
-    except Exception:
-        swallowed()  # was: pass (silent except)
-    # Drop the app-wide decoded-array LRU too — its cached pixels belong to the
-    # previous dataset (keyed by resolved image identity + mtime).
-    try:
-        from well_viewer.data.image_discovery import invalidate_decode_cache
-        invalidate_decode_cache()
+        from well_viewer.data.image_repository import ImageRepository
+        ImageRepository.invalidate()
     except Exception:
         swallowed()  # was: pass (silent except)
     # Clear the prior dataset's gate / override / cell-gating state before the
@@ -480,15 +475,12 @@ def load_directory(ctx, d: Path, label=None) -> None:
     for i, p in enumerate(csvs, 1):
         tok = app._extract_well_token(p.stem)
         key = tok if tok else p.stem
-        app._app_state.dataset.well_paths[key] = p
-        frame = app._load_well_csv(p)
-        app._app_state.dataset.cache[key] = frame
-        # This path builds the frame itself rather than going through
-        # ``get_rows``, so it has to record the FOV verdict itself too —
-        # otherwise ``dataset.fov_integrity`` stays empty for the session and
-        # ``_report_unusable_fov_labels`` below has nothing to report.
-        from well_viewer.data.data_loading import record_fov_verdict
-        record_fov_verdict(ctx, key, frame)
+        # The repository's load is the same one a lazy read reaches on a cache
+        # miss: it registers the path, reads the CSV, runs every registered
+        # projector and records the FOV verdict. This pass used to do those four
+        # things itself, which is how the eager and lazy paths came to disagree
+        # about which layers a cached frame carries.
+        ctx.state.repo.load_well(key, p)
         _step_progress(ctx, i, f"Loading {i}/{n}: {p.name}",
                        allow_user_input=False)
         _opening_set_phase(ctx, f"Loading {i}/{n}: {p.name}", value=i)
@@ -524,10 +516,7 @@ def load_directory(ctx, d: Path, label=None) -> None:
     # when no patch file exists.
     try:
         app._persistence.load("cell_overrides")
-        from well_viewer.features.image_browser.review_image.controller import (
-            apply_review_overrides_to_cache,
-        )
-        apply_review_overrides_to_cache(ctx)
+        apply_curation_to_cache(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
     # Hydrate QC-layer thresholds (qc_params.json, else seed from pipeline_info)
@@ -540,10 +529,9 @@ def load_directory(ctx, d: Path, label=None) -> None:
         # post-load redraw actually reflects the just-hydrated thresholds. Bare
         # apply only wrote the column, leaving any cache built earlier in the
         # load sequence stale — the gate loaded into the fields but didn't take.
-        from well_viewer.features.qc.controller import recompute_qc_all
-        recompute_qc_all(ctx)
-        from well_viewer.features.qc.tab_view import qc_gate_refresh_widgets
-        qc_gate_refresh_widgets(app)  # sync the Cell Gating QC gate row if built
+        ctx.features.call("qc.recompute_all", ctx)
+        # Sync the Cell Gating QC gate row if it has been built.
+        ctx.features.call("qc.refresh_gate_widgets", app)
     except Exception:
         swallowed()  # was: pass (silent except)
     # Hydrate the crop region and the frames it is scoped to
@@ -551,8 +539,7 @@ def load_directory(ctx, d: Path, label=None) -> None:
     # already-cached rows. Safe no-op when unset.
     try:
         app._persistence.load("crop_region")
-        from well_viewer.features.crop.controller import apply_crop_to_cache
-        apply_crop_to_cache(ctx)
+        ctx.features.call("crop.project_cache", ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
     # Hydrate user-defined line-plot draw order (line_order.json).
@@ -566,8 +553,7 @@ def load_directory(ctx, d: Path, label=None) -> None:
         _preview.selected_well = None
     if hasattr(app, "_sidebar_preview_plate"):
         app._refresh_preview_picker()
-    from well_viewer.features.home.labels.tab_view import label_grid_refresh
-    label_grid_refresh(ctx)
+    ctx.features.call("labels.grid_refresh", ctx)
     # Refresh Home's definition tabs so any newly loaded labels / groups
     # appear without requiring a tab switch.
     if hasattr(app, "_groups_centre_refresh"):
@@ -620,10 +606,7 @@ def load_directory(ctx, d: Path, label=None) -> None:
         logging.getLogger("well_viewer").exception("view_state load failed")
     if hasattr(app, "_heatmap_sidebar_table"):
         try:
-            from well_viewer.features.heatmap.sidebar_view import (
-                refresh_heatmap_layout_sidebar,
-            )
-            refresh_heatmap_layout_sidebar(ctx)
+            ctx.features.call("heatmap.refresh_layout_sidebar", ctx)
         except Exception:
             swallowed()  # was: pass (silent except)
     display = label or str(d)
@@ -699,16 +682,8 @@ def _kick_off_gating_after_load(ctx) -> None:
     # has a per-channel edit to inspect).
     use_scatter = app._app_state.cell_gating.use_scatter_gates
     use_thresh = app._app_state.cell_gating.use_scatter_thresh
-    # One import for both names, deliberately: the core→feature import ratchet
-    # (``test_guardrails.test_core_feature_import_budget``) counts import
-    # *statements* under ``core/``, and it only moves down. Two statements for
-    # one module would have raised it.
-    from well_viewer.features.home.cell_gating.controller import (
-        cell_gating_refresh_included_count,
-        cell_gating_start_gating_worker,
-    )
     if has_non_default_gate or use_scatter or use_thresh:
-        cell_gating_start_gating_worker(ctx)
+        ctx.features.call("cell_gating.start_worker", ctx)
         return
     # No worker, so nothing else repaints the tab's "Included for analysis"
     # line and its funnel — and this is the commonest path, since a dataset
@@ -717,7 +692,7 @@ def _kick_off_gating_after_load(ctx) -> None:
     # number, for the wrong plate, with nothing to distinguish it from the
     # right one. ``cell_gating_refresh_included_count`` recomputes from the row
     # cache and no-ops when the label has not been built yet.
-    cell_gating_refresh_included_count(ctx)
+    ctx.features.call("cell_gating.refresh_included_count", ctx)
 
 
 def _looks_like_well_measurement_csv(path: Path) -> bool:

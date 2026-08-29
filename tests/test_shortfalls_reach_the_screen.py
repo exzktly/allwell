@@ -210,6 +210,11 @@ def test_a_well_whose_scan_read_nothing_says_so_instead_of_the_previous_well(
         ),
         widgets=widgets,
     )
+    # The renderer reaches discovery through ``ctx.state.images``; the facade
+    # resolves ``find_well_images_and_masks`` when it is called, so the
+    # monkeypatched raiser above is still what runs.
+    from well_viewer.data.image_repository import ImageRepository
+    ctx.state.images = ImageRepository(ctx)
     R._update_preview_impl(ctx, "B02")
 
     assert "No images could be read for B02." in status.last

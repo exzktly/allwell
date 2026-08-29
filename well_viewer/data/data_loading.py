@@ -392,25 +392,54 @@ def get_rows(ctx, label: str) -> pd.DataFrame:
     chokepoint (:func:`df_included_mask`) sees a consistent row.
 
     A8 residuals-ledger R1: the ctx-native row-fetch data service. Cache + paths
-    come from ``ctx.state.dataset``. The QC/Crop projection is applied via the
-    **cache-projector registry** (``data/cache_projectors.py``) rather than a
-    function-local ``features/`` import — the data layer stays feature-free (the
-    inversion enforced by ``tests/test_data_layer_no_feature_imports.py``). The
-    default projectors (QC, then Crop) are registered at app construction by
-    ``core/projector_registry.register_default_projectors``. ``WellViewerApp._get_rows``
-    delegates here, so every caller — this module's ``get_all_timepoints``,
-    ``stats_compute``, and the feature ``collect`` modules — can fetch rows from
-    ``ctx`` without naming the god-object.
+    come from ``ctx.state.dataset``. ``WellViewerApp._get_rows`` delegates here,
+    so every caller — this module's ``get_all_timepoints``, ``stats_compute``,
+    and the feature ``collect`` modules — can fetch rows from ``ctx`` without
+    naming the god-object.
+
+    The load itself is :func:`load_and_project`, which the dataset loader's bulk
+    pass also calls: one path in, so a lazily reloaded well carries exactly the
+    layers a freshly opened dataset's well does.
     """
     cache = ctx.state.dataset.cache
     if label not in cache:
-        cache[label] = load_well_csv(ctx.state.dataset.well_paths[label])
-        # Project QC_Pass / Crop_Pass (etc.) onto freshly-built frames via the
-        # registered projectors — no features/ import in the data layer.
-        for _project in iter_cache_projectors():
-            _project(ctx, label)
-        record_fov_verdict(ctx, label, cache[label])
+        load_and_project(ctx, label)
     return cache[label]
+
+
+def load_and_project(ctx, label: str, path: Path | None = None) -> pd.DataFrame:
+    """Read well *label* from disk into the row cache, projected and recorded.
+
+    **The single way a frame enters the row cache.** Both the lazy path
+    (:func:`get_rows`, on a cache miss) and the dataset loader's eager bulk pass
+    (through ``WellRepository.load_well``) come through here, so neither can
+    acquire a step the other lacks. They diverged once: the loader applied manual
+    curation as well as QC and crop, while a lazily reloaded well got only the
+    two registered projectors — so a well the cache dropped came back with the
+    user's per-cell exclusions silently gone.
+
+    *path* registers the well's CSV before reading it, which is what the loader's
+    first pass over a new dataset needs; omitted, the path already in
+    ``dataset.well_paths`` is used.
+
+    The verdict columns are applied via the **cache-projector registry**
+    (``data/cache_projectors.py``) rather than a function-local ``features/``
+    import — the data layer stays feature-free (the inversion enforced by
+    ``tests/test_data_layer_no_feature_imports.py``). The defaults (curation,
+    then QC, then crop) are registered at app construction by
+    ``features/registry.build_feature_registry``, which is the one module
+    allowed to name a feature.
+    """
+    dataset = ctx.state.dataset
+    if path is not None:
+        dataset.well_paths[label] = path
+    dataset.cache[label] = load_well_csv(dataset.well_paths[label])
+    for _project in iter_cache_projectors():
+        _project(ctx, label)
+    # The loader used to have to record this itself, having built the frame
+    # outside this function; the verdict now travels with the load.
+    record_fov_verdict(ctx, label, dataset.cache[label])
+    return dataset.cache[label]
 
 
 def record_fov_verdict(ctx, label: str, df) -> None:

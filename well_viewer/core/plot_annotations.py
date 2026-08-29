@@ -6,10 +6,13 @@ so every surface reads one answer: ``show_value_labels`` (the toggle) and
 ``value_label_format`` (a printf format for the numbers; empty picks one from
 the magnitude, the same bargain the Heat Map's cell-value format strikes).
 
-The module is shared rather than per-feature because the Bar and Line renderers
-draw the same statistic and must print it the same way: a label reading
-``12.3 ± 1.4`` beside one reading ``12.34 ± 1.44`` for the same well is the kind
-of divergence the two surfaces exist to avoid. It holds no matplotlib import —
+The module is shared rather than per-feature because the Bar, Line and
+aggregate-Scatter renderers draw the same statistic and must print it the same
+way: a label reading ``12.3 ± 1.4`` beside one reading ``12.34 ± 1.44`` for the
+same well is the kind of divergence those surfaces exist to avoid. A scatter
+point is the one that states *two* numbers — both of its axes carry a measured
+statistic — which is what ``format_point_label`` and ``annotate_point`` are for;
+everything about how each number is written is the same rules below. It holds no matplotlib import —
 it only calls methods on an axes handed to it — and no Qt.
 
 Two rules the formatting keeps, both of them about not stating more or less
@@ -231,6 +234,17 @@ def annotate_value(ax, x: float, value, spread=None, *, fmt: str = "",
     if not math.isfinite(y):
         return
     above = (v >= 0) if not inside else (v < 0)
+    _place_label(ax, x, y, text, above=above, color=color, offset_pt=offset_pt)
+
+
+def _place_label(ax, x: float, y: float, text: str, *, above: bool,
+                 color=None, offset_pt: float | None = None) -> None:
+    """Put *text* on *ax* at ``(x, y)``, offset *above* or below in ink.
+
+    The one place a value label is actually drawn, shared by the bar / line
+    labels and the scatter's per-point ones so a change to the type size, the
+    offset or the theme tagging cannot reach one surface and miss another.
+    """
     # A label with no colour of its own is chrome and takes the plot's ink; one
     # given a colour is wearing its trace's, which is data. Only the first is
     # tagged to follow a theme flip — repainting the second would substitute
@@ -253,6 +267,57 @@ def annotate_value(ax, x: float, value, spread=None, *, fmt: str = "",
     if ink:
         from well_viewer.core.plot_style import follows_theme
         follows_theme(label)
+
+
+def format_point_label(x, y, x_spread=None, y_spread=None, *,
+                       fmt: str = "") -> str:
+    """``"(1200 ± 85, 0.420 ± 0.050)"`` for one scatter point, or ``""``.
+
+    Both coordinates are stated because on a scatter both of them are the
+    plotted statistic — unlike a bar or a line marker, where the x is a
+    category or a time and only the y was measured. Labelling the y alone
+    would drop half of what the point says.
+
+    Each half goes through :func:`format_value_label`, so every rule that holds
+    for a bar's label holds here too: a spread that was never computed prints
+    no ±, and each number is formatted from its own magnitude unless the user
+    typed a format. A point whose coordinate is unprintable yields no label at
+    all rather than half of one, since a lone number beside a marker on two
+    measured axes does not say which axis it belongs to.
+    """
+    xs = format_value_label(x, x_spread, fmt=fmt)
+    ys = format_value_label(y, y_spread, fmt=fmt)
+    if not xs or not ys:
+        return ""
+    return f"({xs}, {ys})"
+
+
+def annotate_point(ax, x, y, *, x_spread=None, y_spread=None, fmt: str = "",
+                   color=None) -> None:
+    """Label one scatter point with both of its coordinates.
+
+    The text sits above the point — clear of the y error cap when one was
+    drawn, exactly as a bar's label clears its whisker — and below it for a
+    point at a negative y, so a label is never drawn back through the data it
+    describes.
+    """
+    text = format_point_label(x, y, x_spread, y_spread, fmt=fmt)
+    if not text:
+        return
+    try:
+        vx, vy = float(x), float(y)
+    except (TypeError, ValueError):
+        return
+    if not (math.isfinite(vx) and math.isfinite(vy)):
+        return
+    anchor = vy
+    try:
+        s = float(y_spread) if y_spread is not None else float("nan")
+        if math.isfinite(s) and s > 0:
+            anchor = vy + s if vy >= 0 else vy - s
+    except (TypeError, ValueError):
+        anchor = vy
+    _place_label(ax, vx, anchor, text, above=(vy >= 0), color=color)
 
 
 def annotate_series(ax, xs, values, spreads=None, *, fmt: str = "",

@@ -710,19 +710,24 @@ class ExportStyleSidebar(QWidget):
         add_row(s_over, "", thr_tog)
 
         # Value labels: the "12.34 ± 1.20" text above each bar / marker. Drives
-        # PlotState.show_value_labels + .value_label_format, read by the Bar and
-        # Line renderers (and their Batch Export twins) through
-        # ``core.plot_annotations``. Global rather than per-figure, like the
-        # threshold marker beside it: it states the plotted statistic, which is
-        # the same statistic on whichever tab is showing it.
+        # PlotState.show_value_labels + .value_label_format, read by the Bar,
+        # Line and Scatter-aggregate renderers (and their Batch Export twins)
+        # through ``core.plot_annotations``. Global rather than per-figure, like
+        # the threshold marker beside it: it states the plotted statistic, which
+        # is the same statistic on whichever tab is showing it. The per-cell
+        # Scatter view has no statistic under a point and says so on the figure
+        # rather than drawing nothing.
         val_tog = ToggleSwitch("Show value labels")
         val_tog.setChecked(bool(getattr(
             self._app._app_state.plot, "show_value_labels", False)))
         val_tog.setToolTip(
-            "Print each point's value beside it on the Bar and Line plots — "
-            "the mean, and ± the spread whenever an error bar is drawn for it. "
-            "A bar whose spread could not be computed is labelled with its mean "
-            "alone (the 'n/a' mark already says the spread is missing).")
+            "Print each point's value beside it on the Bar, Line and "
+            "Scatter → Aggregate plots — the mean, and ± the spread whenever "
+            "an error bar is drawn for it; an aggregate scatter point states "
+            "both of its coordinates. A bar whose spread could not be computed "
+            "is labelled with its mean alone (the 'n/a' mark already says the "
+            "spread is missing). The per-cell scatter takes none: one point "
+            "there is one cell, not a statistic.")
 
         def _on_value_labels_toggle(on: bool) -> None:
             self._app._app_state.plot.show_value_labels = bool(on)

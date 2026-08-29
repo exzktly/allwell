@@ -1752,15 +1752,28 @@ without going back to the CSV.
 
 It applies to the **Bar Plots** tab (all three panels: Value, Fraction and
 Events-above-threshold, in the grouped and per-well layouts, and the
-Events panel of the Violin / Beeswarm views) and to the **Line Graphs** tab's
-three time panels. The CDF panel takes none: its points are one per cell rather
-than a mean of anything, so there is no spread to state and one label per cell
-would bury the curve. The **Batch Export** bar and line figures follow the
-switch too, so a plate exported in bulk is labelled like the figure you set the
-switch on. One caveat on the bar figures: the batch ones have always drawn a
-plain SEM whisker regardless of Properties → Statistics, so with *95 % CI* or
-*Error bars: None* selected their labels state that SEM — each figure's label
-matches its own whisker, but the exported figure and the tab will disagree.
+Events panel of the Violin / Beeswarm views), to the **Line Graphs** tab's
+three time panels, and to the **Scatter Plot** tab's **Aggregate** view. The CDF
+panel takes none: its points are one per cell rather than a mean of anything, so
+there is no spread to state and one label per cell would bury the curve. The
+**Batch Export** bar, line and scatter-aggregate figures follow the switch too,
+so a plate exported in bulk is labelled like the figure you set the switch on.
+One caveat on the bar figures: the batch ones have always drawn a plain SEM
+whisker regardless of Properties → Statistics, so with *95 % CI* or *Error bars:
+None* selected their labels state that SEM — each figure's label matches its own
+whisker, but the exported figure and the tab will disagree.
+
+On the aggregate scatter a label states **both** of the point's coordinates —
+`(1200 ± 85, 0.420 ± 0.050)` — because both axes there carry a measured
+statistic, unlike a bar or a line marker where only the height was measured.
+Each label is drawn in its own point's colour, so on a plate with several wells
+and timepoints you can tell which number belongs to which marker.
+
+The Scatter tab's **per-cell** view takes no labels at all: one point there is a
+single segmented cell, not a mean of anything, and a plate's worth of cells is
+tens of thousands of points. With the switch on, that view prints a short note
+in its top-left corner saying so, rather than leaving you to wonder whether the
+switch is working.
 
 **A label always states the spread the panel beside it draws, and never any
 other.** On the Bar Plots tab that means the Properties → Statistics controls

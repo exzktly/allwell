@@ -1504,6 +1504,31 @@ which: as many points as parameters leaves nothing to estimate an error from
 (dose more, and it appears), whereas parameters that are not separable at these
 doses will not be fixed by more of the same ones.
 
+#### Fold change on a response curve
+
+The band's **Fold change** popover is the same one the Bar and Line tabs carry,
+over the same shared setting — a control picked on one is picked on all three,
+and the y-axis label says what it was normalised by so a normalised number is
+never sitting under a raw label.
+
+**vs t0 needs more than one timepoint drawn.** With one, every point is its own
+baseline and the whole figure would be a flat line at 1.0, so the tab declines
+it and says so under the axes rather than either obeying it or ignoring it
+quietly.
+
+Where a control could not be resolved — it names nothing loaded, or it has no
+sample at a timepoint — the affected points are named under the axes rather
+than dropped, because a curve that stops at its third dose looks exactly like a
+plate that was never dosed higher. A point whose error bar could not be
+propagated is counted too: no bar at all, rather than a zero-length one, which
+would read as perfect agreement between replicates.
+
+**There is no per-well mode here.** A dose is a property of a condition, so one
+point per well at the same x would be a scatter of replicates rather than a
+curve. If you have turned pooling off for the Bar tab, this tab still pools and
+says so on the figure — the two pages would otherwise disagree with nothing on
+either to explain why.
+
 #### Groups
 
 Name a set of wells as replicates; every plot, the Statistics tab, and Batch

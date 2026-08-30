@@ -160,12 +160,25 @@ def line_member_keys(ctx) -> list[str]:
         selected, list(ctx.state.plot.line_order_wells or []), key=lambda x: x)
 
 
+def response_member_keys(ctx) -> list[str]:
+    """The members Response Curves draws, which are always replicate sets.
+
+    No fallback to the selected wells, unlike the bar and line lists. A point
+    on a response curve is a member at a dose, and a loose well has no dose
+    until it is in something the plate annotates; the tab says so in its empty
+    state rather than drawing a curve through wells nobody grouped.
+    """
+    return [rset.name for rset in plot_replicate_sets(ctx)]
+
+
 def plotted_member_keys(ctx, scope: str) -> list[str]:
-    """Dispatch on the fold-change scope name (``"bar"`` / ``"line"``)."""
+    """Dispatch on the fold-change scope name (``"bar"`` / ``"line"`` / ``"response"``)."""
     if scope == "bar":
         return bar_member_keys(ctx)
     if scope == "line":
         return line_member_keys(ctx)
+    if scope == "response":
+        return response_member_keys(ctx)
     return []
 
 
@@ -196,13 +209,28 @@ def member_wells(ctx, scope: str) -> dict[str, list[str]]:
     return out
 
 
+#: The scopes whose keys are replicate-set names whenever any set is active.
+#: Named rather than tested with ``scope == "line"``: that spelling answered
+#: *False* for every scope it had not heard of, so a third pooled tab would
+#: have had its controls resolved against well tokens — silently, since a key
+#: that resolves to no well simply loses its denominator.
+_ALWAYS_POOLED_SCOPES = frozenset({"line", "response"})
+
+
 def _keys_are_replicate_sets(ctx, scope: str) -> bool:
-    """Whether *scope*'s keys name replicate sets rather than wells."""
+    """Whether *scope*'s keys name replicate sets rather than wells.
+
+    Bar is the only scope that can flip: ``bar_pool_replicates`` turns its bars
+    into wells. Line and Response always pool — Response because a dose is a
+    property of a condition, and an un-pooled response curve would draw one
+    point per well at the same x, which is a scatter of replicates rather than
+    a curve.
+    """
     if not plot_replicate_sets(ctx):
         return False
     if scope == "bar":
         return bool(getattr(ctx.state.plot, "bar_pool_replicates", True))
-    return scope == "line"
+    return scope in _ALWAYS_POOLED_SCOPES
 
 
 def member_replicate_sets(ctx) -> dict[str, str]:

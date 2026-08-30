@@ -195,7 +195,7 @@ def redraw_response(ctx) -> None:
     draw_response(ctx, ax, data,
                   log_x=resolved_log_x(ctx, ax.figure, data),
                   title=_figure_title(ctx, data),
-                  ylabel=_y_label(ctx),
+                  ylabel=_y_label(ctx, data),
                   variable_chosen=bool(selected_variable_id(ctx)),
                   timepoints_chosen=bool(timepoints_for(ctx)),
                   fits=response_fits(ctx, data))
@@ -345,11 +345,20 @@ def fit_model_labels() -> list[tuple[str, str]]:
     return [(FIT_LABELS[model], model) for model in FIT_MODELS]
 
 
-def _y_label(ctx) -> str:
-    """What the measurement axis is, from the channel and property in the band."""
+def _y_label(ctx, data=None) -> str:
+    """The measurement axis, and the normalisation applied to it.
+
+    The suffix is not decoration. A normalised value on an axis labelled with
+    the raw measurement is a number that does not mean what the axis says it
+    means, which is the one thing a figure must never do — and this tab shares
+    its fold-change state with the Bar and Line tabs, so the axis can become
+    normalised without anything on this page being touched.
+    """
     channel = str(getattr(ctx.state.channel, "active_channel", "") or "").upper()
     metric = str(getattr(ctx.state.channel, "active_metric", "") or "")
-    return " ".join(part for part in (channel, metric.replace("_", " ")) if part)
+    label = " ".join(part for part in (channel, metric.replace("_", " ")) if part)
+    suffix = getattr(data, "normalised", "") if data is not None else ""
+    return f"{label} {suffix}".strip() if suffix else label
 
 
 def _figure_title(ctx, data) -> str:

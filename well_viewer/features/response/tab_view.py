@@ -13,6 +13,9 @@ from PySide6.QtWidgets import (
     QFrame, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
+from well_viewer.core.fold_change_controls_view import (
+    install_fold_change_controls,
+)
 from well_viewer.core.ui_helpers import (
     build_plot_save_menu, install_canvas_wheel_scroll, make_band_controls,
     make_popover_button, make_properties_button, plotting_band_slot,
@@ -64,6 +67,17 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     band.add_action(display_btn)
 
     band.add_action(_build_fit_popover(ctx, band))
+
+    # The same control set the Bar and Line tabs carry, over the same shared
+    # state — a control picked here is picked there. Its own scope, so a redraw
+    # requested while this leaf is on screen reaches this figure rather than
+    # being deferred as though the tab were hidden.
+    fc_button, fc_panel, fc_layout = make_popover_button("Fold change ▾", band)
+    fc_button.setToolTip(
+        "Fold-change normalization (vs a control well/set or a baseline "
+        "timepoint). vs t0 needs more than one timepoint drawn.")
+    install_fold_change_controls(ctx, fc_panel, fc_layout, scope="response")
+    band.add_action(fc_button)
 
     export_btn, _menu, _act = build_plot_save_menu(
         ctx, band, card_key="_response_card", data_label="Save plot data…",

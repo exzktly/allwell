@@ -797,6 +797,18 @@ def _fold_change_scope_bar():
     )
 
 
+def _fold_change_scope_response():
+    from well_viewer.domain.fold_change_scopes import FoldChangeScope
+    from well_viewer.features.response.controller import redraw_response
+    return FoldChangeScope(
+        name="response",
+        ctrl_combo_attr="_fc_ctrl_combo_response",
+        baseline_combo_attr="_fc_baseline_combo_response",
+        redraw=lambda a: redraw_response(a._ctx),
+        tab_names=("Response Curves",),
+    )
+
+
 def _saved_plots_card_decorator():
     """The Saved Plots plot-card decorator (lazy). Plot tabs apply this via
     ``ui_helpers.apply_plot_card_decorators`` so they never import saved_plots —
@@ -930,7 +942,8 @@ def _features() -> list[FeatureDescriptor]:
                           redraw=_redraw_line_graphs),
         FeatureDescriptor(name="Response Curves", parent="Plotting",
                           build=_build_response, redraw=_redraw_response,
-                          states=(StateSpec("response", _state_response),)),
+                          states=(StateSpec("response", _state_response),),
+                          fold_change_scope_factory=_fold_change_scope_response),
         FeatureDescriptor(
             name="Scatter Plot", parent="Plotting", build=_build_scatter,
             on_activate=_activate_scatter,

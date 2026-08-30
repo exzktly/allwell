@@ -87,11 +87,22 @@ def tab(qtbot, monkeypatch):
             dataset=SimpleNamespace(well_paths={}),
             selection=SimpleNamespace(selections=[], selected_wells=set(),
                                       variables=sv.VariableSet()),
+            # The fold-change fields are the real ``PlotState``'s, spelled out
+            # rather than omitted: this tab normalises through the shared path,
+            # and a stub missing them would make the collector raise on a plate
+            # that works perfectly in the app.
+            # ``test_response_stub_matches_plot_state`` is what keeps this list
+            # honest as the real state grows.
             plot=SimpleNamespace(group_by_variable="", bar_pool_replicates=True,
                                  use_sem=True, focus_timepoint=24.0,
-                                 line_order_rsets=[], line_order_wells=[]),
+                                 line_order_rsets=[], line_order_wells=[],
+                                 fc_vs_control_on=False, fc_control=None,
+                                 fc_vs_t0_on=False, fc_control_mode="single",
+                                 fc_control_map={}, fc_control_render="self",
+                                 fc_baseline_tp="", fc_op_ctrl="ratio",
+                                 fc_op_t0="ratio", fc_order="ctrl_first"),
             channel=SimpleNamespace(active_val_col="gfp_mean_intensity",
-                                    active_channel="gfp"),
+                                    active_channel="gfp", fluor_channels=()),
             feature_slice=slices.get,
             # The real slice, not a stub: ``figure_prefs`` seeds it lazily and
             # distinguishes "never set" from "set to off", which is the whole
@@ -683,3 +694,92 @@ def test_the_fit_settings_are_one_set_for_the_whole_figure(tab, fit_ui):
     assert set(fits) == {24.0, 48.0}
     assert {f.bottom for f in fits.values()} == {0.0}
     assert {f.model for f in fits.values()} == {"4pl"}
+
+
+# ── fold change ─────────────────────────────────────────────────────────────
+
+def test_the_fold_change_popover_is_built_and_registers_this_tabs_combos(
+        tab, qtbot):
+    """Built through the real installer, so the scope's widget names are the
+    ones the cross-tab sync actually looks for.
+
+    ``_sync_widgets_to_state`` finds each scope's combos by
+    ``_fc_ctrl_combo_<scope>`` / ``_fc_baseline_combo_<scope>``. A scope
+    registered under one name whose installer registers another is a control
+    that changes nothing on the other tabs — offered, connected, and inert.
+    """
+    from widgets.control_band import ControlBand
+
+    from well_viewer.features.response import tab_view as rtv
+
+    band = ControlBand()
+    qtbot.addWidget(band)
+    tab.ctx.window = band
+    layout = band.layout()
+    rtv.build_response_tab  # the popover is built inside it; exercise directly
+    from well_viewer.core.fold_change_controls_view import (
+        install_fold_change_controls,
+    )
+    from PySide6.QtWidgets import QVBoxLayout, QWidget
+    panel = QWidget(band)
+    qtbot.addWidget(panel)
+    install_fold_change_controls(tab.ctx, panel, QVBoxLayout(panel),
+                                 scope="response")
+
+    assert tab.w("_fc_ctrl_combo_response") is not None
+    assert tab.w("_fc_baseline_combo_response") is not None
+    assert layout is not None
+
+
+def test_the_response_scope_is_the_features_own(tab):
+    """Registered through the feature descriptor, so removing the feature drops
+    the scope with it — the one-line-removable property the repo enforces."""
+    from well_viewer.features.registry import build_feature_registry
+
+    descriptor = build_feature_registry().get("Response Curves")
+    assert descriptor is not None
+    assert descriptor.fold_change_scope_factory is not None
+    scope = descriptor.fold_change_scope_factory()
+    assert scope.name == "response"
+    assert scope.tab_names == ("Response Curves",)
+    assert scope.ctrl_combo_attr == "_fc_ctrl_combo_response"
+
+
+def test_a_normalised_axis_says_so_in_its_label(tab):
+    """A normalised value under a raw axis label is a number that does not mean
+    what the axis says it means — and the state is shared, so this axis can
+    change without anything on this page being touched."""
+    variable = _variable()
+    _load(tab, variable, {"A01": "v0"}, [("a", ["A01"])],
+          timepoints=(0.0, 24.0))
+    tab.ctx.state.plot.fc_vs_t0_on = True
+    slice_ = tab.ctx.state.feature_slice("response")
+    slice_.tp_selections = {"0": True, "24": True}
+
+    rctl.redraw_response(tab.ctx)
+
+    label = rctl._y_label(tab.ctx, rctl.response_data(tab.ctx))
+    assert label != rctl._y_label(tab.ctx)
+    assert "GFP" in label
+
+
+def test_declining_vs_t0_reaches_the_figure_not_only_the_data(tab):
+    variable = _variable()
+    _load(tab, variable, {"A01": "v0"}, [("a", ["A01"])])
+    tab.ctx.state.plot.fc_vs_t0_on = True
+
+    rctl.redraw_response(tab.ctx)
+
+    captions = " | ".join(t.get_text() for t in tab.ax.texts)
+    assert "vs t0" in captions, captions
+
+
+def test_the_pooling_notice_reaches_the_figure(tab):
+    variable = _variable()
+    _load(tab, variable, {"A01": "v0", "A02": "v0"}, [("both", ["A01", "A02"])])
+    tab.ctx.state.plot.bar_pool_replicates = False
+
+    rctl.redraw_response(tab.ctx)
+
+    captions = " | ".join(t.get_text() for t in tab.ax.texts)
+    assert "pooled" in captions, captions

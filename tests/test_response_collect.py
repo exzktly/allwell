@@ -41,9 +41,14 @@ def _ctx(*, wells, variable=None, assignments=None, selections=(), means=None):
                                       selected_wells=set(), variables=vset),
             plot=SimpleNamespace(group_by_variable="", bar_pool_replicates=True,
                                  use_sem=True, line_order_rsets=[],
-                                 line_order_wells=[]),
+                                 line_order_wells=[],
+                                 fc_vs_control_on=False, fc_control=None,
+                                 fc_vs_t0_on=False, fc_control_mode="single",
+                                 fc_control_map={}, fc_control_render="self",
+                                 fc_baseline_tp="", fc_op_ctrl="ratio",
+                                 fc_op_t0="ratio", fc_order="ctrl_first"),
             channel=SimpleNamespace(active_val_col="gfp_mean_intensity",
-                                    active_channel="gfp"),
+                                    active_channel="gfp", fluor_channels=()),
         ),
         runtime=SimpleNamespace(barplot=SimpleNamespace(
             current_keys=lambda: [s.get("name") for s in selections])),
@@ -475,3 +480,122 @@ def test_the_empty_state_still_lists_which_groups_were_dropped():
 
     texts = " | ".join(t.get_text() for t in ax.texts)
     assert "Ctrl" in texts, texts
+
+
+# ── the fixture's plot state matches the real one ───────────────────────────
+
+def test_the_stub_plot_state_carries_every_field_the_collector_reads():
+    """A stub missing a field is a test that passes on code the app cannot run.
+
+    The collector normalises through the shared fold-change path, which reads
+    ten ``fc_*`` fields off ``ctx.state.plot``. A ``SimpleNamespace`` without
+    them raises ``AttributeError`` — that much these tests would catch — but the
+    reverse is the danger: a *tolerant* read added to make the stub work would
+    swallow the same absence in the app, and fold change would silently stop
+    applying on a real plate. So the stub is required to match, and this is
+    what notices when the real state grows a field.
+    """
+    from well_viewer.core.plot_state import PlotState
+
+    real = PlotState()
+    stub = _ctx(wells=["A01"]).state.plot
+    missing = [name for name in vars(real)
+               if name.startswith("fc_") and name != "fc_dirty_scopes"
+               and not hasattr(stub, name)]
+    assert not missing, (
+        f"the collect fixture's plot stub lacks {missing} — add them there "
+        f"rather than making the collector's read tolerant")
+
+
+# ── fold change ─────────────────────────────────────────────────────────────
+
+def test_vs_t0_is_declined_on_one_timepoint_and_says_so(stub_stats):
+    """With one timepoint every point is its own baseline: a flat line at 1.0.
+
+    Declining it silently would be worse than drawing the flat line, because
+    the toggle the user can see is on.
+    """
+    ctx = _ctx(wells=["A01", "A02"],
+               variable=_dose(("1", 1.0), ("10", 10.0)),
+               assignments={"dose": {"A01": "d0", "A02": "d1"}},
+               selections=_groups(("low", ["A01"]), ("high", ["A02"])))
+    ctx.state.plot.fc_vs_t0_on = True
+
+    data = rc.collect_response(ctx, "dose", [24.0])
+
+    assert data.t0_declined, "the declined axis was not recorded"
+    assert [p.y for p in data.curves[0].points] == [10.0, 10.0], (
+        "vs t0 was applied anyway and flattened the curve")
+    assert "vs t0" in rc.omission_caption(data)
+
+
+def test_vs_t0_is_applied_once_two_timepoints_are_drawn(stub_stats):
+    """Each member divided by its own earliest drawn point."""
+    ctx = _ctx(wells=["A01", "A02"],
+               variable=_dose(("1", 1.0), ("10", 10.0)),
+               assignments={"dose": {"A01": "d0", "A02": "d1"}},
+               selections=_groups(("low", ["A01"]), ("high", ["A02"])))
+    ctx.state.plot.fc_vs_t0_on = True
+    stub_stats[("low", 0.0)] = 5.0
+    stub_stats[("low", 24.0)] = 15.0
+    stub_stats[("high", 0.0)] = 4.0
+    stub_stats[("high", 24.0)] = 8.0
+
+    data = rc.collect_response(ctx, "dose", [0.0, 24.0])
+
+    assert not data.t0_declined
+    at_zero = {p.member: p.y for p in data.curves[0].points}
+    at_24 = {p.member: p.y for p in data.curves[1].points}
+    assert at_zero == {"low": 1.0, "high": 1.0}
+    assert at_24["low"] == pytest.approx(3.0)
+    assert at_24["high"] == pytest.approx(2.0)
+
+
+def test_a_normalised_figure_says_what_it_was_normalised_by(stub_stats):
+    """A normalised value under a raw axis label is a number that does not mean
+    what the axis says it means."""
+    ctx = _ctx(wells=["A01", "A02"],
+               variable=_dose(("1", 1.0), ("10", 10.0)),
+               assignments={"dose": {"A01": "d0", "A02": "d1"}},
+               selections=_groups(("low", ["A01"]), ("high", ["A02"])))
+    ctx.state.plot.fc_vs_t0_on = True
+
+    data = rc.collect_response(ctx, "dose", [0.0, 24.0])
+
+    assert data.normalised, "the axis carried no fold-change suffix"
+
+
+def test_raw_values_carry_no_suffix(stub_stats):
+    ctx = _ctx(wells=["A01"], variable=_dose(("1", 1.0)),
+               assignments={"dose": {"A01": "d0"}},
+               selections=_groups(("a", ["A01"])))
+    assert rc.collect_response(ctx, "dose", [24.0]).normalised == ""
+
+
+# ── this tab has no un-pooled mode ──────────────────────────────────────────
+
+def test_pooling_off_is_said_rather_than_obeyed(stub_stats):
+    """A dose is a property of a condition; one point per well at the same x is
+    a scatter of replicates rather than a curve.
+
+    The Bar tab a click away *is* drawing one bar per well with the same switch
+    off, so the two disagree — and neither would explain why.
+    """
+    ctx = _ctx(wells=["A01", "A02"], variable=_dose(("1", 1.0)),
+               assignments={"dose": {"A01": "d0", "A02": "d0"}},
+               selections=_groups(("both", ["A01", "A02"])))
+    ctx.state.plot.bar_pool_replicates = False
+
+    data = rc.collect_response(ctx, "dose", [24.0])
+
+    assert len(data.curves[0].points) == 1, "it drew a point per well"
+    assert data.curves[0].points[0].n == 2
+    assert "pooled" in data.pooled_notice
+    assert "pooled" in rc.omission_caption(data)
+
+
+def test_pooling_on_says_nothing(stub_stats):
+    ctx = _ctx(wells=["A01"], variable=_dose(("1", 1.0)),
+               assignments={"dose": {"A01": "d0"}},
+               selections=_groups(("a", ["A01"])))
+    assert rc.collect_response(ctx, "dose", [24.0]).pooled_notice == ""

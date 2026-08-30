@@ -69,6 +69,33 @@ class ResponseData:
     #: deliberate entry rather than a gap, and a caption that lumps them in
     #: reads as an error report about a plate that is fine.
     non_numeric: list[str] = field(default_factory=list)
+    #: The fold-change suffix the y axis carries (``"÷ control"``), or ``""``.
+    #: Read from the shared state rather than stored per tab: fold change is one
+    #: setting across the plotting pages, and a Response curve labelled raw
+    #: while the Bar tab beside it is normalised would be the same number
+    #: meaning two things on one screen.
+    normalised: str = ""
+    #: ``(member, timepoint)`` for a point the control could not be resolved
+    #: for. Named rather than dropped: a curve missing its top dose because the
+    #: vehicle had no sample at that timepoint looks exactly like a curve that
+    #: was never dosed that high.
+    control_gaps: list[tuple[str, float]] = field(default_factory=list)
+    #: How many drawn points have an **undefined** spread — a normalisation
+    #: whose denominator had no error to propagate. Counted rather than shown
+    #: as zero, because an error bar of zero length reads as a measurement of
+    #: perfect agreement.
+    undefined_spread: int = 0
+    #: Set when the plate-wide "pool replicates" switch is off. This tab has
+    #: no un-pooled mode: a dose is a property of a condition, and one point
+    #: per well at the same x is a scatter of replicates rather than a curve.
+    #: Said on the figure rather than obeyed silently, because the Bar tab a
+    #: click away *is* drawing one bar per well and the two would disagree with
+    #: nothing on either to explain it.
+    pooled_notice: str = ""
+    #: Set when the shared ``vs t0`` axis was asked for and could not be
+    #: applied here: with one timepoint drawn, every point is its own baseline
+    #: and the whole figure would be a flat line at 1.0.
+    t0_declined: str = ""
     #: How many members were given an x. Recorded rather than inferred, because
     #: "no member had a dose" and "every member had a dose but none was measured
     #: at the chosen timepoint" both arrive here as zero points, and they have
@@ -96,6 +123,19 @@ def omission_caption(data: ResponseData) -> str:
     if data.non_numeric:
         names = ", ".join(data.non_numeric[:3])
         parts.append(f"{len(data.non_numeric)} off-scale: {names}")
+    if data.control_gaps:
+        names = ", ".join(f"{m} t={t:g}" for m, t in data.control_gaps[:3])
+        more = (f" and {len(data.control_gaps) - 3} more"
+                if len(data.control_gaps) > 3 else "")
+        parts.append(f"{len(data.control_gaps)} without a control "
+                     f"({names}{more})")
+    if data.undefined_spread:
+        parts.append(f"{data.undefined_spread} point(s) with no error bar: "
+                     f"the control had no spread to propagate")
+    if data.t0_declined:
+        parts.append(data.t0_declined)
+    if data.pooled_notice:
+        parts.append(data.pooled_notice)
     return " · ".join(parts)
 
 
@@ -192,6 +232,8 @@ def collect_response(ctx, variable_id: str, timepoints) -> ResponseData:
         return ResponseData()
 
     data = ResponseData(variable_name=variable.name, unit=variable.unit)
+    if not bool(getattr(ctx.state.plot, "bar_pool_replicates", True)):
+        data.pooled_notice = "replicates pooled — this tab has no per-well mode"
     well_paths = ctx.state.dataset.well_paths or {}
     threshold = on_cutoff_for_column(
         ctx, ctx.state.channel.active_val_col,
@@ -220,19 +262,108 @@ def collect_response(ctx, variable_id: str, timepoints) -> ResponseData:
     data.placed = len(placed)
 
     placed.sort(key=lambda row: row[1])
-    for target_t in [float(t) for t in (timepoints or [])]:
-        points = []
-        for rset, x, label in placed:
+    targets = [float(t) for t in (timepoints or [])]
+    normalise = _member_normaliser(ctx, data, targets, threshold, use_sem)
+
+    # A member at a time, not a timepoint at a time. ``vs t0`` divides a
+    # member's whole series by its own baseline, so the series has to exist
+    # before it can be normalised — collecting timepoint-by-timepoint would
+    # hand the normaliser one point at a time and every point would be its own
+    # baseline.
+    by_timepoint: dict[float, list] = {t: [] for t in targets}
+    for rset, x, label in placed:
+        raw = []
+        for target_t in targets:
             mean, err, _frac, _frac_err = compute_rep_stats(
                 ctx, rset, target_t, threshold, use_sem)
-            if mean is None:
+            if not _is_number(mean):
                 # No sample at this timepoint. Not a zero — a member that was
                 # not measured then — so it leaves a gap in the curve rather
                 # than a point on the floor.
                 continue
-            n = sum(1 for w in rset.wells if w in well_paths)
-            points.append(ResponsePoint(member=rset.name, x=x, y=float(mean),
-                                        err=float(err or 0.0), n=n, label=label))
-        data.curves.append(ResponseCurve(timepoint=target_t,
-                                         points=tuple(points)))
+            raw.append((target_t, float(mean), float(err or 0.0),
+                        0.0, 0, 0, 0.0, 0.0, 0.0))
+        n = sum(1 for w in rset.wells if w in well_paths)
+        for point in normalise(raw, rset.name):
+            target_t, mean, err = point[0], point[1], point[2]
+            if not _is_number(mean):
+                # Normalisation blanked it: the control resolved to nothing, or
+                # had no sample at this timepoint. Named, because a curve that
+                # simply stops at its third dose looks like a plate that was
+                # never dosed higher.
+                data.control_gaps.append((rset.name, float(target_t)))
+                continue
+            if not _is_number(err):
+                data.undefined_spread += 1
+            by_timepoint[float(target_t)].append(ResponsePoint(
+                member=rset.name, x=x, y=float(mean),
+                err=float(err) if _is_number(err) else float("nan"),
+                n=n, label=label))
+
+    data.curves = [ResponseCurve(timepoint=t, points=tuple(by_timepoint[t]))
+                   for t in targets]
     return data
+
+
+def _is_number(value) -> bool:
+    """A real, finite float. ``None`` and ``NaN`` are both "not computed"."""
+    import math
+    return isinstance(value, (int, float)) and math.isfinite(float(value))
+
+
+def _member_normaliser(ctx, data: ResponseData, targets, threshold, use_sem):
+    """A ``(points, member_name) -> points`` closure over the shared state.
+
+    **The same code path the Line tab normalises through**, not a second
+    implementation of the arithmetic. `fold_change`'s helpers have been
+    diverged once before by a caller that reimplemented "the same" division
+    with one extra `isinstance` check, which turned a ``numpy.float32`` spread
+    into no error bar at all — in the most numerically sensitive module in the
+    app. Building AggPoint-shaped tuples and handing them to
+    ``normalize_member_pts`` costs nine zeros per point and removes that whole
+    class of divergence.
+
+    ``vs t0`` is declined, not applied, when fewer than two timepoints are
+    drawn: with one, every point is its own baseline and the figure is a flat
+    line at 1.0. Declining it is recorded on the data so the figure can say so
+    — silently ignoring a toggle the user can see is on would be worse than
+    drawing the flat line.
+    """
+    from dataclasses import replace
+
+    from well_viewer.core.channel_state_controller import get_all_fluor_gates
+    from well_viewer.domain import fold_change as fc_module
+    from well_viewer.domain.fold_change_pairing import (
+        control_denominators, normalize_member_pts,
+    )
+    from well_viewer.domain.fold_change_series_cache import ControlSeriesCache
+    from well_viewer.domain import plot_members as members
+
+    fc = fc_module.fold_change_state(ctx)
+    if fc.vs_t0_on and len(targets) < 2:
+        data.t0_declined = (
+            "vs t0 needs two timepoints — drawn raw at this one")
+        fc = replace(fc, vs_t0_on=False)
+    if not fc.active:
+        return lambda points, _name: points
+
+    data.normalised = fc_module.fold_change_suffix_for(ctx, "response")
+    cache = ControlSeriesCache(
+        ctx, threshold=threshold, val_col=ctx.state.channel.active_val_col,
+        use_sem=use_sem, per_fov_spread=False,
+        fluor_gates=get_all_fluor_gates(ctx))
+    denominators = control_denominators(
+        ctx, cache, fc,
+        members.plotted_member_keys(ctx, "response") if fc.per_member else (),
+        scope_wells=members.member_wells(ctx, "response"),
+        member_rsets=members.member_replicate_sets(ctx))
+    keywords = dict(
+        fc=fc, n_per_fov=False,
+        baseline_tp=fc_module.parse_baseline_tp(ctx),
+        op_ctrl=fc_module.parse_fc_op_ctrl(ctx),
+        op_t0=fc_module.parse_fc_op_t0(ctx))
+
+    def _normalise(points, name):
+        return normalize_member_pts(points, denominators, name, **keywords)
+
+    return _normalise

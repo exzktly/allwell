@@ -72,16 +72,14 @@ def value_label(variable, value_id) -> str:
     return value.label if value is not None else UNASSIGNED_LABEL
 
 
-def member_inks(ctx, scope: str, variable_id: str) -> dict:
-    """``member key -> colour``, or ``{}`` when no variable is chosen.
+def inks_for(variable, values_by_key) -> dict:
+    """``member key -> colour``, from values already resolved.
 
-    ``{}`` rather than a dict of defaults, so a caller can tell "colour by this
-    variable" from "colour the way you always did" without comparing every
-    entry against the colour it would otherwise have had.
+    The ink rule with no ctx and no scope in it, so the plotting tabs and Batch
+    Export share one definition of what a value looks like while each resolves
+    its own members. A batch figure whose colours differed from the tab's would
+    be two answers to "what colour is HeLa" on one screen.
     """
-    from well_viewer.domain.plot_members import member_variable_values
-
-    variable = _variable(ctx, variable_id)
     if variable is None:
         return {}
     palette = value_colors(variable)
@@ -89,12 +87,34 @@ def member_inks(ctx, scope: str, variable_id: str) -> dict:
         key: (UNASSIGNED_COLOR if value_id is None
               else MIXED_COLOR if value_id == MIXED
               else palette.get(value_id, UNASSIGNED_COLOR))
-        for key, value_id in member_variable_values(
-            ctx, scope, variable_id).items()
+        for key, value_id in (values_by_key or {}).items()
     }
 
 
-def member_bands(ctx, scope: str, variable_id: str) -> dict:
+def bands_for(variable, values_by_key) -> dict:
+    """``member key -> band label``, from values already resolved."""
+    if variable is None:
+        return {}
+    return {key: value_label(variable, value_id)
+            for key, value_id in (values_by_key or {}).items()}
+
+
+def member_inks(ctx, scope: str, variable_id: str, wells_by_key=None) -> dict:
+    """``member key -> colour``, or ``{}`` when no variable is chosen.
+
+    ``{}`` rather than a dict of defaults, so a caller can tell "colour by this
+    variable" from "colour the way you always did" without comparing every
+    entry against the colour it would otherwise have had.
+
+    *wells_by_key* overrides the key space. Batch Export passes a ``BarGroup``'s
+    own members, whose keys are the group's and not the tab's — the same
+    override its fold-change path already makes, and for the same reason.
+    """
+    return inks_for(_variable(ctx, variable_id),
+                    _values(ctx, scope, variable_id, wells_by_key))
+
+
+def member_bands(ctx, scope: str, variable_id: str, wells_by_key=None) -> dict:
     """``member key -> band label``, or ``{}`` when no variable is chosen.
 
     The label, not the id: it is drawn as a cluster header, and a reader needs
@@ -102,14 +122,21 @@ def member_bands(ctx, scope: str, variable_id: str) -> dict:
     same reason they get their own inks — a band headed with nothing looks like
     a header that failed to draw.
     """
-    from well_viewer.domain.plot_members import member_variable_values
+    return bands_for(_variable(ctx, variable_id),
+                     _values(ctx, scope, variable_id, wells_by_key))
 
-    variable = _variable(ctx, variable_id)
-    if variable is None:
-        return {}
-    return {key: value_label(variable, value_id)
-            for key, value_id in member_variable_values(
-                ctx, scope, variable_id).items()}
+
+def _values(ctx, scope: str, variable_id: str, wells_by_key) -> dict:
+    """The resolved values, over the caller's key space or the scope's."""
+    from well_viewer.domain.plot_members import (
+        member_variable_values, variable_values_for,
+    )
+
+    if wells_by_key is None:
+        return member_variable_values(ctx, scope, variable_id)
+    return variable_values_for(
+        getattr(getattr(ctx, "state", None), "selection", None)
+        and ctx.state.selection.variables, variable_id, wells_by_key)
 
 
 def band_order(ctx, variable_id: str) -> list:

@@ -506,22 +506,125 @@ def test_a_ctx_without_a_bar_slice_still_decorates():
     assert len({i.color for i in items}) == 2
 
 
-def test_batch_export_bar_figures_are_deliberately_undecorated():
-    """Batch Export collects through ``collect_bar_items_for_group``, whose
-    member keys are a ``BarGroup``'s and not ``member_wells(ctx, "bar")``'s.
+def _batch_items(ctx, group, *, pool_replicates=True):
+    """One batch group's bars, through the real batch collector."""
+    from well_viewer.features.barplot.collect import (
+        FC_STATE_OFF, collect_bar_items_for_group,
+    )
+    return collect_bar_items_for_group(
+        ctx, group, 0.0, val_col="gfp_mean_intensity", threshold=0.0,
+        use_sem=True, per_fov_spread=False, fc_state=FC_STATE_OFF,
+        pool_replicates=pool_replicates)
 
-    Decorating it against a key space that may not match would colour some bars
-    and not others, which is the half-swept outcome that is worse than none —
-    so the batch figures keep the plate colours the app has always drawn, and
-    workplan row 51 carries the rest. This test is what stops that becoming an
-    accident: it fails the day someone decorates that path without resolving
-    the keys, which is the moment to check they match.
+
+def _group(name="G", members=(), solo=()):
+    from well_viewer.domain.batch_models import BarGroup, ReplicateSet
+
+    return BarGroup(name,
+                    members=[ReplicateSet(n, list(w)) for n, w in members],
+                    solo_wells=list(solo))
+
+
+def test_batch_export_bar_figures_are_decorated_too():
+    """A batch figure that ignored the control would disagree with the tab it
+    mirrors, on a plate the user set up once.
+
+    Asserted against the **variable's own palette**, not against "the colours
+    differ". The batch collector already gives each member a different ink from
+    its own palette, so a distinctness check passes with the decoration deleted
+    — which is exactly what the first version of this test did, and a mutation
+    removing the whole call left all of it green.
     """
-    import inspect
+    variable = _line()
+    # The values are assigned **against** the member order on purpose. The batch
+    # collector inks its members from the same ``WELL_COLORS`` in member order,
+    # so with CTRL holding the first value the decorated and undecorated inks
+    # are byte-identical and nothing can tell them apart — which is how three
+    # mutations, including deleting the decoration outright, left the first
+    # version of these tests green.
+    ctx = _ctx(variable=variable, colour_by=variable.id,
+               assignments={"A01": "C1", "A02": "C1",
+                            "B01": "C0", "B02": "C0"})
+    group = _group(members=[("CTRL", ["A01", "A02"]), ("TREAT", ["B01", "B02"])])
+    palette = vs.value_colors(variable)
 
-    from well_viewer.features.barplot import collect
+    by_key = {i.key: i.color for i in _batch_items(ctx, group)}
 
-    source = inspect.getsource(collect.collect_bar_items_for_group)
-    assert "decorate_bar_items" not in source, (
-        "the batch path was decorated — confirm its member keys match "
-        "member_wells(ctx, 'bar') and update row 51 before removing this")
+    assert by_key == {"CTRL": palette["C1"], "TREAT": palette["C0"]}, by_key
+
+
+def test_the_batch_keys_are_the_groups_own_not_the_tabs():
+    """The reason the key space is passed rather than looked up.
+
+    This group's members are named `CTRL` and `TREAT`; the tab's members here
+    are the *wells*, because no selections are defined. Matching the batch
+    items against the tab's key space would colour nothing at all — silently,
+    since a key that resolves to no member simply keeps the colour it had.
+    """
+    from well_viewer.domain.variable_series import member_inks
+
+    variable = _line()
+    ctx = _ctx(selections=[], variable=variable, colour_by=variable.id,
+               assignments={"A01": "C1", "A02": "C1",
+                            "B01": "C0", "B02": "C0"})
+    group = _group(members=[("CTRL", ["A01", "A02"]), ("TREAT", ["B01", "B02"])])
+
+    from well_viewer.domain.variable_series import member_inks
+
+    tab_keys = set(member_inks(ctx, "bar", variable.id))
+    assert "CTRL" not in tab_keys, (
+        "the fixture no longer distinguishes the two key spaces")
+
+    palette = vs.value_colors(variable)
+    by_key = {i.key: i.color for i in _batch_items(ctx, group)}
+
+    assert by_key == {"CTRL": palette["C1"], "TREAT": palette["C0"]}, (
+        "the batch bars were matched against the tab's keys, so they kept "
+        f"whatever ink the batch palette gave them: {by_key}")
+
+
+def test_the_batch_and_the_tab_agree_on_what_a_value_looks_like():
+    """One definition of "what colour is HeLa", not two."""
+
+    variable = _line()
+    ctx = _ctx(variable=variable, colour_by=variable.id,
+               assignments={"A01": "C1", "A02": "C1",
+                            "B01": "C0", "B02": "C0"})
+    group = _group(members=[("CTRL", ["A01", "A02"]), ("TREAT", ["B01", "B02"])])
+
+    palette = vs.value_colors(variable)
+    tab = {i.key: i.color for i in _items(ctx)}
+    batch = {i.key: i.color for i in _batch_items(ctx, group)}
+
+    assert tab == batch, (tab, batch)
+    # Against the palette too, so the pair cannot agree by both being wrong.
+    assert set(batch.values()) == {palette["C0"], palette["C1"]}
+
+
+def test_the_batch_expanded_mode_is_keyed_on_wells_and_still_decorated():
+    """With pooling off the batch keys become well tokens. The map is built
+    from the same ``members`` list either way, so it follows the flip."""
+    variable = _line()
+    ctx = _ctx(variable=variable, colour_by=variable.id,
+               assignments={"A01": "C1", "A02": "C1",
+                            "B01": "C0", "B02": "C0"})
+    group = _group(members=[("CTRL", ["A01", "A02"]), ("TREAT", ["B01", "B02"])])
+
+    palette = vs.value_colors(variable)
+    by_key = {i.key: i.color for i in
+              _batch_items(ctx, group, pool_replicates=False)}
+
+    assert set(by_key) == {"A01", "A02", "B01", "B02"}
+    assert by_key == {"A01": palette["C1"], "A02": palette["C1"],
+                      "B01": palette["C0"], "B02": palette["C0"]}, by_key
+
+
+def test_a_batch_solo_well_is_decorated_by_its_own_value():
+    variable = _line()
+    ctx = _ctx(variable=variable, colour_by=variable.id,
+               assignments={"A01": "C1", "B01": "C0"})
+    group = _group(solo=["A01", "B01"])
+    palette = vs.value_colors(variable)
+
+    by_key = {i.key: i.color for i in _batch_items(ctx, group)}
+    assert by_key == {"A01": palette["C1"], "B01": palette["C0"]}, by_key

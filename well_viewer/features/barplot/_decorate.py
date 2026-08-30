@@ -27,8 +27,15 @@ from well_viewer.domain.variable_series import (
 _TRAILING_BANDS = (MIXED_LABEL, UNASSIGNED_LABEL)
 
 
-def decorate_bar_items(ctx, items):
+def decorate_bar_items(ctx, items, *, wells_by_key=None):
     """``(items, notice)`` — re-inked, re-banded, and what that cost.
+
+    *wells_by_key* is the caller's own member key space, or ``None`` for the
+    plotting tabs' (``member_wells(ctx, "bar")``). Batch Export passes a
+    ``BarGroup``'s members, whose keys are the group's and not the tab's — the
+    same override its fold-change path already makes. Without it the batch
+    figures would be matched against keys that are not theirs, colouring some
+    bars and not others, which is worse than colouring none.
 
     *notice* is ``""`` or the sentence the figure has to carry. Splitting by a
     variable **replaces** the band a bar already had, and the bar tab already
@@ -44,7 +51,7 @@ def decorate_bar_items(ctx, items):
         return items, ""
 
     if colour_id:
-        inks = member_inks(ctx, "bar", colour_id)
+        inks = member_inks(ctx, "bar", colour_id, wells_by_key)
         for item in items:
             # A key the map does not cover keeps the colour it was built with.
             # Re-inking it to the neutral would say "this member has no value",
@@ -56,7 +63,7 @@ def decorate_bar_items(ctx, items):
 
     notice = ""
     if split_id:
-        bands = member_bands(ctx, "bar", split_id)
+        bands = member_bands(ctx, "bar", split_id, wells_by_key)
         if bands:
             notice = _displacement_notice(items, bands)
             for item in items:
@@ -81,7 +88,7 @@ def _record(ctx, notice: str) -> None:
         slice_.split_notice = notice
 
 
-def bar_legend_entries(ctx, items):
+def bar_legend_entries(ctx, items, *, wells_by_key=None):
     """``(label, colour)`` for the Colour-by legend, or ``[]``.
 
     Empty when nothing is coloured by a variable — the plate-colour mode needs
@@ -91,7 +98,7 @@ def bar_legend_entries(ctx, items):
     colour_id = _setting(ctx, "colour_by_variable")
     if not colour_id:
         return []
-    labels = member_bands(ctx, "bar", colour_id)
+    labels = member_bands(ctx, "bar", colour_id, wells_by_key)
     return legend_entries(ctx, colour_id,
                           {labels[item.key] for item in items
                            if item.key in labels})

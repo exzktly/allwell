@@ -1008,6 +1008,16 @@ def collect_bar_items_for_group(
             for items_for_tp, _tp in per_tp:
                 if ki < len(items_for_tp):
                     items.append(items_for_tp[ki])
+    # Colour by / Split by, over **this group's** key space rather than the
+    # tab's. The two differ — a batch member is a `BarGroup`'s replicate set or
+    # solo well, and in expanded mode a well of one — which is why the map is
+    # passed rather than looked up, exactly as the fold-change resolver above
+    # already does with ``scope_wells``. Matching against the tab's keys instead
+    # would colour the members whose names happened to coincide and leave the
+    # rest, which is the half-decorated figure that is worse than none.
+    items, _notice = decorate_bar_items(
+        ctx, items,
+        wells_by_key={key: wells for (key, _d, wells, _r, _c) in members})
     return items
 
 

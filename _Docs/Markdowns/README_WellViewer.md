@@ -1658,6 +1658,10 @@ The bar tab already uses bands for timepoints and for wells, so if **Split by**
 replaces a layout you had, it says so on the figure rather than quietly taking
 your headers away.
 
+**Batch Export draws them the same way.** A plate exported group by group gets
+the same inks and the same bands as the tab on screen, so a figure you check
+once is the figure that lands in the folder.
+
 Variables are saved with the dataset, alongside your groups and well labels.
 **Reset analysis** clears them under their own heading, separately from sample
 definitions, so redoing your groups does not cost you a plate of doses.

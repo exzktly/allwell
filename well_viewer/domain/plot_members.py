@@ -300,6 +300,25 @@ def variable_replicate_sets(ctx, variable_id: str):
     return out
 
 
+def variable_values_for(vset, variable_id: str, wells_by_key) -> dict:
+    """``member key -> value id / MIXED / None``, from an explicit key space.
+
+    The rule, separated from the question of *which* members are drawn. Two
+    surfaces ask it over different key spaces — the plotting tabs over
+    ``member_wells(ctx, scope)``, Batch Export over a ``BarGroup``'s own
+    members, whose keys are the group's and not the tab's — and the one thing
+    that must not differ between them is what a member's value *is*. Sharing
+    the rule and letting each provide its own key space is what keeps a batch
+    figure and the tab it mirrors from disagreeing about a well.
+    """
+    from well_viewer.domain.sample_variables import roll_up
+
+    if vset is None or not variable_id or vset.by_id(variable_id) is None:
+        return {}
+    return {key: roll_up(vset, variable_id, wells) if wells else None
+            for key, wells in (wells_by_key or {}).items()}
+
+
 def member_variable_values(ctx, scope: str, variable_id: str) -> dict:
     """``member key -> value id``, or ``MIXED``, or ``None``, for one scope.
 
@@ -318,13 +337,9 @@ def member_variable_values(ctx, scope: str, variable_id: str) -> dict:
     things with one ink, and one of them ("you filled these inconsistently") is
     a mistake the user can fix while the other is not.
     """
-    from well_viewer.domain.sample_variables import roll_up
-
-    vset = getattr(ctx.state.selection, "variables", None)
-    if vset is None or not variable_id or vset.by_id(variable_id) is None:
-        return {}
-    return {key: roll_up(vset, variable_id, wells) if wells else None
-            for key, wells in member_wells(ctx, scope).items()}
+    return variable_values_for(
+        getattr(ctx.state.selection, "variables", None), variable_id,
+        member_wells(ctx, scope))
 
 
 def wells_without_variable(ctx, variable_id: str) -> list[str]:

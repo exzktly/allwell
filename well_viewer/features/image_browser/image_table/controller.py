@@ -76,11 +76,12 @@ from well_viewer.features.image_browser.image_table.image_compose import (  # no
     cell_identity_label,
     cell_chrome_kwargs,
     composite_additive_rgb,
-    draw_cell_chrome,
+    apply_cell_chrome,
     is_raw_fallback,
     mark_uncorrected,
     overlay_cell_rgb,
     partial_scan_report,
+    scale_bar_refusal_report,
     reset_scan_misses,
     resolve_chrome_plan,
     UNCORRECTED_TOOLTIP,
@@ -808,8 +809,7 @@ def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay
         arr = _load_array(ctx, cache, well, overlay_chans[0], tp, fov,
                           use_tophat=_row_display_opts(ctx, r, overlay_chans[0])[0])
         rgb = overlay_cell_rgb(ctx, cache, cell, r, crop_tool, overlay_chans)
-        if rgb is not None and chrome_kwargs:
-            rgb = draw_cell_chrome(rgb, **chrome_kwargs)
+        rgb = apply_cell_chrome(ctx, rgb, chrome_kwargs, cell)
         # A blend built from an uncorrected member IS an uncorrected image, and it
         # is the one kind of cell whose channel is not on the grid to be read off
         # the axis. Without the member list the mark could never resolve, so the
@@ -860,8 +860,7 @@ def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay
     # badge — and apply a different contrast from the export's, so one cell in a
     # grid silently lost its chrome and disagreed with its own exported copy.
     rgb = cell_display_rgb(ctx, cache, cell, r, crop_tool, arr)
-    if rgb is not None and chrome_kwargs:
-        rgb = draw_cell_chrome(rgb, **chrome_kwargs)
+    rgb = apply_cell_chrome(ctx, rgb, chrome_kwargs, cell)
     # After the chrome, so the mark is not painted over by a scale bar or an
     # identity label sharing the cell.
     rgb = mark_uncorrected(ctx, cell, rgb)
@@ -943,6 +942,63 @@ def _compute_auto_luts(ctx, cells, cache, crop_tool) -> None:
                 cur[0] = min(cur[0], lo)
                 cur[1] = max(cur[1], hi)
     st.auto_lut_by_channel = {k: (v[0], v[1]) for k, v in pooled.items()}
+
+
+def generate_status_message(ctx, cells, rendered, unrendered, failed,
+                            overlay_chans) -> str:
+    """The Generate status line: how much was drawn, and every way it fell short.
+
+    Extracted from :func:`image_table_generate` because composing this sentence
+    is one job and the function it sat in is against the complexity ratchet.
+    Every clause here reports a shortfall the cell count above it does not
+    cover — a grid that draws is not the same as a grid that drew what was
+    asked for.
+    """
+    n = len(rendered) - unrendered
+    msg = f"Image Table: generated {n} of {len(rendered)} cell(s)."
+    if unrendered:
+        msg += f" {unrendered} could not be drawn"
+        msg += f" ({failed} raised)." if failed else " — see the log."
+    # Cells served the raw frame because the corrected (top-hat) set doesn't
+    # cover them. They DO draw, so the count above says nothing about them — and
+    # a grid silently mixing corrected and raw frames is exactly the kind of
+    # degraded output that reads as a finished one.
+    #
+    # Counted over the CELLS, not over the loader's record. The record is keyed by
+    # the channel actually opened, so an overlay cell blending three fallen-back
+    # channels put three entries in it and a ratio cell two — a number larger than
+    # the grid, describing loads the user cannot point at, next to a badge drawn
+    # once per cell. This counts exactly the cells that carry the mark.
+    n_raw = sum(1 for row in cells for cell in row
+                if is_raw_fallback(ctx, cell, overlay_chans))
+    if n_raw:
+        msg += f" {n_raw} shown uncorrected (no corrected image)."
+    # Inventories that were TRUNCATED rather than empty. Every cell this pass
+    # drew from one is a real image, so nothing above counts them and the grid
+    # reads as complete — it is short by however many frames the scan never
+    # reached. This is the one place that can say so without reading the log.
+    partial_wells, partial_reasons = partial_scan_report(ctx)
+    if partial_wells:
+        msg += (
+            f" WARNING: the image list for {len(partial_wells)} well"
+            f"{'' if len(partial_wells) == 1 else 's'} "
+            f"({', '.join(partial_wells)}) is INCOMPLETE, so this grid is "
+            "missing frames the dataset holds — "
+            f"{'; '.join(partial_reasons) or 'a scan stopped short'}."
+        )
+    # A scale bar longer than the cell is refused rather than drawn short, so a
+    # refused cell is indistinguishable from one the user never asked a bar for.
+    # This is the only thing that says otherwise, and it names the remedy: the
+    # bar length and the crop are the two things under the user's control.
+    bar_refused = scale_bar_refusal_report(ctx)
+    if bar_refused:
+        msg += (
+            f" The scale bar is longer than the cells in {len(bar_refused)} well"
+            f"{'' if len(bar_refused) == 1 else 's'} ({', '.join(bar_refused)}) "
+            "can hold, so those cells carry none — shorten Bar length µm or "
+            "widen the crop."
+        )
+    return msg
 
 
 def image_table_generate(ctx) -> None:
@@ -1126,40 +1182,9 @@ def image_table_generate(ctx) -> None:
     # Count the cells that actually show a picture — not the ones whose source
     # array loaded. A cell that loaded its image but could not render the view
     # it was asked for (no mask for a threshold cell) is a hole in the grid, and
-    # the status line is the only place that says so without reading the log.
+    ctx.notify.set_status(generate_status_message(
+        ctx, cells, rendered, unrendered, failed, overlay_chans))
     n = len(rendered) - unrendered
-    msg = f"Image Table: generated {n} of {len(rendered)} cell(s)."
-    if unrendered:
-        msg += f" {unrendered} could not be drawn"
-        msg += f" ({failed} raised)." if failed else " — see the log."
-    # Cells served the raw frame because the corrected (top-hat) set doesn't
-    # cover them. They DO draw, so the count above says nothing about them — and
-    # a grid silently mixing corrected and raw frames is exactly the kind of
-    # degraded output that reads as a finished one.
-    #
-    # Counted over the CELLS, not over the loader's record. The record is keyed by
-    # the channel actually opened, so an overlay cell blending three fallen-back
-    # channels put three entries in it and a ratio cell two — a number larger than
-    # the grid, describing loads the user cannot point at, next to a badge drawn
-    # once per cell. This counts exactly the cells that carry the mark.
-    n_raw = sum(1 for row in cells for cell in row
-                if is_raw_fallback(ctx, cell, overlay_chans))
-    if n_raw:
-        msg += f" {n_raw} shown uncorrected (no corrected image)."
-    # Inventories that were TRUNCATED rather than empty. Every cell this pass
-    # drew from one is a real image, so nothing above counts them and the grid
-    # reads as complete — it is short by however many frames the scan never
-    # reached. This is the one place that can say so without reading the log.
-    partial_wells, partial_reasons = partial_scan_report(ctx)
-    if partial_wells:
-        msg += (
-            f" WARNING: the image list for {len(partial_wells)} well"
-            f"{'' if len(partial_wells) == 1 else 's'} "
-            f"({', '.join(partial_wells)}) is INCOMPLETE, so this grid is "
-            "missing frames the dataset holds — "
-            f"{'; '.join(partial_reasons) or 'a scan stopped short'}."
-        )
-    ctx.notify.set_status(msg)
     if n == 0 and rendered:
         # Zero hits across the whole grid means key drift somewhere — log
         # both the (tp, fov) values the user picked and a sample of the

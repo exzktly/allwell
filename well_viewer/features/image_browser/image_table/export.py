@@ -34,10 +34,11 @@ from well_viewer.features.image_browser.image_table.image_compose import (
     _row_display_opts,
     cell_chrome_kwargs,
     cell_display_rgb,
-    draw_cell_chrome,
+    apply_cell_chrome,
     mark_uncorrected,
     overlay_cell_rgb,
     partial_scan_report,
+    scale_bar_refusal_report,
     reset_scan_misses,
     resolve_chrome_plan,
 )
@@ -459,8 +460,7 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None):
             # gallery downscale, so the bar and text scale with the pixels.
             if rgb is not None:
                 ck = cell_chrome_kwargs(ctx, r, c, cell, chrome_plan, overlay_chans)
-                if ck:
-                    rgb = draw_cell_chrome(rgb, **ck)
+                rgb = apply_cell_chrome(ctx, rgb, ck, cell)
                 # A figure that dropped the uncorrected mark would leave the app
                 # carrying exactly the ambiguity the live grid no longer has.
                 # ``overlay_chans`` because an overlay cell's own token names no
@@ -543,7 +543,16 @@ def image_table_export(ctx) -> None:
             f"  WARNING: the image list for {', '.join(partial_wells)} is "
             "INCOMPLETE — frames the dataset holds are missing from this file."
         ) if partial_wells else ""
-        ctx.notify.set_status(f"Image table saved → {Path(out).name}{short}")
+        # Same reason, for the bar: a figure whose cells were too narrow for it
+        # carries no bar and nothing in the file says the scale was ever asked
+        # for. The saved file outlives this line, so it has to be said now.
+        refused = scale_bar_refusal_report(ctx)
+        no_bar = (
+            f"  No scale bar on {', '.join(refused)} — the bar is longer than "
+            "those cells can hold; shorten Bar length µm or widen the crop."
+        ) if refused else ""
+        ctx.notify.set_status(
+            f"Image table saved → {Path(out).name}{short}{no_bar}")
     except Exception as exc:
         QMessageBox.critical(ctx.window, "Export failed", str(exc))
 

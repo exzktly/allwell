@@ -108,9 +108,9 @@ review"; it is open until the gate closes.
 
 | # | Workstream | Item | Status | Note |
 |---|---|---|---|---|
-| 1 | A | `draw_cell_chrome` refuses an oversized scale bar instead of clamping | ☐ |  |
-| 2 | A | The refusal is reported per pass, not silently | ☐ |  |
-| 3 | A | Guard: a bar wider than its cell is never drawn short | ☐ |  |
+| 1 | A | `draw_cell_chrome` refuses an oversized scale bar instead of clamping | ☑ | `bar_fits` decides; `draw_cell_chrome` refuses. Measured on `origin/main`: a 50 µm bar drew 37.7 µm in a 60 px cell. |
+| 2 | A | The refusal is reported per pass, not silently | ☑ | Per-pass `state.image_table.scale_bar_refusals`, beside the three records it mirrors. Both status lines name the wells and the remedy. |
+| 3 | A | Guard: a bar wider than its cell is never drawn short | ☑ | `tests/test_scale_bar_is_never_drawn_short.py`, 13 pure-lane cases. The pre-existing render test is `slow` and never ran in the fast lane. |
 | 4 | A | Review gate: the refusal path, and no second wording for it | ☐ | |
 | 5 | B | Fast lane emits coverage; slow lane emits coverage | ☐ |  |
 | 6 | B | `coverage combine` across both lanes | ☐ |  |

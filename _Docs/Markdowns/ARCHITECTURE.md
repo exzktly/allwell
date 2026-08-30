@@ -360,6 +360,10 @@ well_viewer/
 │   │   │                  image_compose also burns the optional
 │   │   │                  scale bar + per-cell identity label into the source RGB
 │   │   │                  (draw_cell_chrome) so live grid and export match;
+│   │   │                  a bar longer than the cell is REFUSED rather than clamped
+│   │   │                  (bar_fits), and apply_cell_chrome records the cells that
+│   │   │                  lost one so the status line and the saved figure both
+│   │   │                  say so rather than the bar being drawn short;
 │   │   │                  scale bar on by default, editable thickness, auto-contrast
 │   │   │                  colour. A sidebar well-selection change / Select
 │   │   │                  All / Clear reruns the layout via builder_view.schedule_

@@ -64,6 +64,12 @@ class ResponseData:
     #: deliberate entry rather than a gap, and a caption that lumps them in
     #: reads as an error report about a plate that is fine.
     non_numeric: list[str] = field(default_factory=list)
+    #: How many members were given an x. Recorded rather than inferred, because
+    #: "no member had a dose" and "every member had a dose but none was measured
+    #: at the chosen timepoint" both arrive here as zero points, and they have
+    #: nothing to do with each other: the first is fixed on the Variables tab,
+    #: the second by picking a different timepoint.
+    placed: int = 0
 
     def has_points(self) -> bool:
         return any(c.points for c in self.curves)
@@ -86,6 +92,46 @@ def omission_caption(data: ResponseData) -> str:
         names = ", ".join(data.non_numeric[:3])
         parts.append(f"{len(data.non_numeric)} off-scale: {names}")
     return " · ".join(parts)
+
+
+def empty_reason(data: ResponseData, *, variable_chosen: bool = True,
+                 timepoints_chosen: bool = True) -> str:
+    """Why this figure has nothing on it, and what to do about it. ``""`` if it has.
+
+    Empty axes are the worst possible answer to any of the causes below. They
+    look identical to a plate that genuinely measured nothing, they look
+    identical to a broken tab, and none of them tells a user which of the six
+    quite different mistakes they made — a variable not picked, a timepoint not
+    ticked, values not filled, values filled inconsistently, values that are not
+    numbers, or a timepoint at which nothing was measured. Each has its own fix
+    and its own sentence, and each names the place the fix is made.
+    """
+    if data.has_points():
+        return ""
+    if not variable_chosen:
+        return "Pick a Number variable under X to plot against."
+    name = data.variable_name or "that variable"
+    if not timepoints_chosen:
+        return "No timepoints selected — tick at least one under Timepoints."
+    if data.placed:
+        return (f"Nothing was measured at the selected timepoints. "
+                f"{data.placed} group(s) have a {name} value; pick a timepoint "
+                f"they were imaged at.")
+    if not data.omitted and not data.non_numeric:
+        return ("No groups to plot — select wells on the plate, or define "
+                "replicate groups on Home.")
+    if data.non_numeric and not data.omitted:
+        return (f"No group's {name} is a number — every value is off-scale. "
+                f"Give the values numbers on Home → Variables.")
+    reasons = {reason for _member, reason in data.omitted}
+    if reasons == {NO_VALUE}:
+        return (f"No group has a {name} value — fill it onto the plate on "
+                f"Home → Variables.")
+    if reasons == {MIXED_VALUE}:
+        return (f"Every group's wells disagree about {name}, and one group "
+                f"cannot hold two values. Check the fill on Home → Variables.")
+    return (f"No group could be placed on {name} — the caption below says why "
+            f"for each. Fix them on Home → Variables.")
 
 
 def collect_response(ctx, variable_id: str, timepoints) -> ResponseData:
@@ -143,6 +189,7 @@ def collect_response(ctx, variable_id: str, timepoints) -> ResponseData:
             data.non_numeric.append(rset.name)
             continue
         placed.append((rset, float(value.number), value.label))
+    data.placed = len(placed)
 
     placed.sort(key=lambda row: row[1])
     for target_t in [float(t) for t in (timepoints or [])]:

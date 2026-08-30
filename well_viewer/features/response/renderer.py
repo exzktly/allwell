@@ -9,20 +9,17 @@ from __future__ import annotations
 
 import logging
 
-from well_viewer.features.response.collect import omission_caption
+from well_viewer.features.response.collect import empty_reason, omission_caption
 from well_viewer.features.response.response_compute import (
     spans_enough_decades, zero_position,
 )
 
 _logger = logging.getLogger("well_viewer")
 
-#: Where the off-scale column of non-numeric members is drawn on a **linear**
-#: axis, as a fraction of the data's span to the left of the lowest point.
-_LINEAR_OFFSET_FRACTION = 0.12
-
-
 def draw_response(ctx, ax, data, *, log_x: bool | None = None,
-                  title: str = "", ylabel: str = "") -> None:
+                  title: str = "", ylabel: str = "",
+                  variable_chosen: bool = True,
+                  timepoints_chosen: bool = True) -> None:
     """Paint *data* onto *ax*.
 
     *log_x* ``None`` asks the data — on once the positive values span two
@@ -33,8 +30,21 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
     **The caption is drawn whenever there is one**, including on an otherwise
     perfect-looking plot. It is the only place a saved figure carries what it
     left out; the status line does not travel with the file.
+
+    **A figure with nothing on it says why.** Bare axes are indistinguishable
+    from a broken tab, and they are the same answer to six different mistakes;
+    ``collect.empty_reason`` picks the sentence and this draws it in place of
+    the axes rather than beside them.
     """
     ax.clear()
+    reason = empty_reason(data, variable_chosen=variable_chosen,
+                          timepoints_chosen=timepoints_chosen)
+    if reason:
+        _draw_empty_state(ax, reason, omission_caption(data))
+        ax._aw_force_xlog = False
+        from well_viewer.core.plot_style import apply_ax_style
+        apply_ax_style(ax, title, "")
+        return
     positives = [p.x for c in data.curves for p in c.points if p.x > 0]
     use_log = spans_enough_decades(positives) if log_x is None else bool(log_x)
     # Where a zero (or negative) dose is drawn on a log axis. One decade below
@@ -69,6 +79,11 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
         ax.set_xscale("log")
         _tick_the_doses(ax, positives,
                         off_scale_x if drew_off_scale else None)
+    # ``_aw_force_xlog`` pins it, the way the scatter tab pins its own log/log:
+    # ``apply_export_style_prefs`` re-reads the shared ``x_log`` on every
+    # restyle and would otherwise reset an axis whose scale this tab chose from
+    # the data, taking the off-scale column's ticks with it.
+    ax._aw_force_xlog = bool(use_log and positives)
 
     unit = f" ({data.unit})" if data.unit else ""
     ax.set_xlabel(f"{data.variable_name}{unit}" if data.variable_name else "")
@@ -85,6 +100,27 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
 
     from well_viewer.core.plot_style import apply_ax_style
     apply_ax_style(ax, title, ylabel)
+
+
+def _draw_empty_state(ax, reason: str, caption: str) -> None:
+    """The reason, centred, with the axes furniture taken away.
+
+    The ticks and spines go because an empty pair of axes with a sentence
+    floating in it reads as a plot that failed to draw; without them it reads
+    as a message, which is what it is. The omission caption still goes
+    underneath when there is one — it lists *which* groups were dropped, which
+    the one-line reason above deliberately does not.
+    """
+    ax.text(0.5, 0.5, reason, transform=ax.transAxes, ha="center", va="center",
+            fontsize="medium", wrap=True)
+    if caption:
+        ax.text(0.5, 0.30, caption, transform=ax.transAxes, ha="center",
+                va="top", fontsize="small", wrap=True)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    ax.set_xlabel("")
 
 
 def _tick_the_doses(ax, positives, off_scale_x: float | None) -> None:

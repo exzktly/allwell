@@ -638,6 +638,24 @@ def figure_prefs(ctx, fig):
     return _FigurePrefs(global_prefs, axis)
 
 
+def figure_pref_is_set(ctx, fig, key: str) -> bool:
+    """Whether *key* has actually been chosen for *fig*, rather than defaulted.
+
+    :func:`figure_prefs` deliberately reads an unset axis key as its neutral
+    default, which is right for drawing — but it makes "the user turned this
+    off" and "the user never touched it" identical, and a caller whose default
+    is *not* the neutral one cannot tell them apart. §7's rule about undefined
+    versus computed, applied to a preference.
+
+    The Response tab is the caller: its x axis defaults to logarithmic when the
+    doses span two decades, so it has to ask the data on an untouched toggle and
+    obey the user on a set one. Reading ``False`` for both would mean the toggle
+    could never be honoured in the off position.
+    """
+    store = _ensure_axis_prefs_store(ctx)
+    return key in (store.get(figure_pref_key(ctx, fig)) or {})
+
+
 def axis_scoped_value(prefs, idx, key, default=None):
     """Per-axis value for a Properties "Axis #" style key, for callers *outside*
     :func:`apply_export_style_prefs` (the bar renderer's group-label footers).

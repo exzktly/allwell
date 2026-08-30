@@ -322,3 +322,156 @@ def test_the_caption_is_drawn_on_the_axes():
 
     texts = [t.get_text() for t in ax.texts]
     assert any("omitted" in s and "Ctrl" in s for s in texts), texts
+
+
+# ── the empty state ─────────────────────────────────────────────────────────
+#
+# Bare axes are the same answer to six different mistakes, and they read as a
+# broken tab rather than as a plate that has not been filled in yet. Each cause
+# below has its own fix, so each has its own sentence naming the place that fix
+# is made — and each is asserted to be *distinct*, because a single generic
+# "nothing to plot" would pass a test that only checked a sentence was drawn.
+
+def _reason(data, **kwargs):
+    return rc.empty_reason(data, **kwargs)
+
+
+def test_no_variable_chosen_says_to_choose_one():
+    assert "under X" in _reason(rc.ResponseData(), variable_chosen=False)
+
+
+def test_no_timepoint_ticked_says_so_rather_than_blaming_the_variables():
+    """Every group has a dose; the user simply turned the timepoints off."""
+    data = rc.ResponseData(variable_name="Dose", placed=3)
+    assert "Timepoints" in _reason(data, timepoints_chosen=False)
+
+
+def test_placed_groups_with_no_measurement_blame_the_timepoint():
+    """Three groups have a dose and none was imaged then — not a fill problem.
+
+    This is the case that has no other witness: ``omitted`` and ``non_numeric``
+    are both empty, so without ``placed`` it is indistinguishable from a plate
+    with no groups at all, whose fix is somewhere else entirely.
+    """
+    reason = _reason(rc.ResponseData(variable_name="Dose", placed=3))
+    assert "measured" in reason and "timepoint" in reason
+    assert "Variables" not in reason, "it blamed the fill for a timepoint gap"
+
+
+def test_the_collector_records_how_many_groups_it_placed(stub_stats):
+    """Driven through ``collect_response``, because ``placed`` is a *collector*
+    field and a test that constructs ``ResponseData(placed=3)`` by hand proves
+    only that ``empty_reason`` can read one.
+
+    Both groups here have a perfectly good dose and neither was measured at the
+    requested timepoint. Without the count the collector returns exactly what an
+    empty plate returns, and the tab sends the user to fix a fill that is fine.
+    """
+    ctx = _ctx(wells=["A01", "A02"],
+               variable=_dose(("1", 1.0), ("10", 10.0)),
+               assignments={"dose": {"A01": "d0", "A02": "d1"}},
+               selections=_groups(("low", ["A01"]), ("high", ["A02"])))
+    stub_stats[("low", 48.0)] = None
+    stub_stats[("high", 48.0)] = None
+
+    data = rc.collect_response(ctx, "dose", [48.0])
+
+    assert data.curves[0].points == ()
+    assert data.placed == 2, "the placed groups were not counted"
+    reason = _reason(data)
+    assert "measured" in reason and "Variables" not in reason, reason
+
+
+def test_a_plate_with_nothing_filled_places_nothing(stub_stats):
+    """The other side of the count: it is not simply "number of groups"."""
+    ctx = _ctx(wells=["A01"], variable=_dose(("1", 1.0)),
+               assignments={"dose": {}},
+               selections=_groups(("a", ["A01"])))
+    data = rc.collect_response(ctx, "dose", [24.0])
+    assert data.placed == 0
+
+
+def test_no_groups_at_all_says_to_make_some():
+    reason = _reason(rc.ResponseData(variable_name="Dose"))
+    assert "No groups to plot" in reason
+
+
+def test_nothing_filled_names_the_variables_tab():
+    data = rc.ResponseData(variable_name="Dose",
+                           omitted=[("a", rc.NO_VALUE), ("b", rc.NO_VALUE)])
+    reason = _reason(data)
+    assert "No group has a Dose value" in reason
+    assert "Home → Variables" in reason
+
+
+def test_wells_that_disagree_get_their_own_sentence():
+    data = rc.ResponseData(variable_name="Dose",
+                           omitted=[("a", rc.MIXED_VALUE)])
+    assert "disagree" in _reason(data)
+
+
+def test_values_that_are_not_numbers_get_their_own_sentence():
+    data = rc.ResponseData(variable_name="Dose", non_numeric=["vehicle", "DMSO"])
+    reason = _reason(data)
+    assert "not a number" in reason or "is a number" in reason
+    assert "off-scale" in reason
+
+
+def test_a_mixture_of_causes_points_at_the_caption():
+    data = rc.ResponseData(variable_name="Dose",
+                           omitted=[("a", rc.NO_VALUE), ("b", rc.MIXED_VALUE)])
+    assert "caption" in _reason(data)
+
+
+def test_every_cause_reads_differently():
+    """A generic sentence would satisfy each test above on its own."""
+    causes = [
+        _reason(rc.ResponseData(), variable_chosen=False),
+        _reason(rc.ResponseData(variable_name="Dose", placed=3),
+                timepoints_chosen=False),
+        _reason(rc.ResponseData(variable_name="Dose", placed=3)),
+        _reason(rc.ResponseData(variable_name="Dose")),
+        _reason(rc.ResponseData(variable_name="Dose",
+                                omitted=[("a", rc.NO_VALUE)])),
+        _reason(rc.ResponseData(variable_name="Dose",
+                                omitted=[("a", rc.MIXED_VALUE)])),
+        _reason(rc.ResponseData(variable_name="Dose", non_numeric=["vehicle"])),
+        _reason(rc.ResponseData(variable_name="Dose",
+                                omitted=[("a", rc.NO_VALUE),
+                                         ("b", rc.MIXED_VALUE)])),
+    ]
+    assert all(causes), "a cause produced no sentence at all"
+    assert len(set(causes)) == len(causes), causes
+
+
+def test_a_figure_with_points_has_no_empty_state():
+    assert _reason(_curve((1.0, 5.0))) == ""
+
+
+def test_the_reason_is_drawn_in_place_of_the_axes():
+    """Not beside them: axis furniture around a sentence reads as a failed draw."""
+    from well_viewer.features.response.renderer import draw_response
+
+    data = rc.ResponseData(variable_name="Dose",
+                           omitted=[("Ctrl", rc.NO_VALUE)])
+    ax = _axes()
+    draw_response(None, ax, data)
+
+    texts = [t.get_text() for t in ax.texts]
+    assert any("No group has a Dose value" in s for s in texts), texts
+    assert list(ax.get_xticks()) == [], "the empty state kept its ticks"
+    assert not any(s.get_visible() for s in ax.spines.values()), \
+        "the empty state kept its frame"
+
+
+def test_the_empty_state_still_lists_which_groups_were_dropped():
+    """The reason names the fix; the caption names the members. Both, not one."""
+    from well_viewer.features.response.renderer import draw_response
+
+    data = rc.ResponseData(variable_name="Dose",
+                           omitted=[("Ctrl", rc.NO_VALUE)])
+    ax = _axes()
+    draw_response(None, ax, data)
+
+    texts = " | ".join(t.get_text() for t in ax.texts)
+    assert "Ctrl" in texts, texts

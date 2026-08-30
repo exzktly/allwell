@@ -178,6 +178,7 @@ _state_preview = _lazy_state("well_viewer.features.image_browser.review_image.st
 _state_image_table = _lazy_state("well_viewer.features.image_browser.image_table.state", "ImageTableState")
 _state_playground = _lazy_state("well_viewer.features.image_browser.playground.state", "PlaygroundState")
 _state_home = _lazy_state("well_viewer.features.home.state", "HomeState")
+_state_response = _lazy_state("well_viewer.features.response.state", "ResponseState")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -928,7 +929,8 @@ def _features() -> list[FeatureDescriptor]:
                           on_activate=_activate_default_plot,
                           redraw=_redraw_line_graphs),
         FeatureDescriptor(name="Response Curves", parent="Plotting",
-                          build=_build_response, redraw=_redraw_response),
+                          build=_build_response, redraw=_redraw_response,
+                          states=(StateSpec("response", _state_response),)),
         FeatureDescriptor(
             name="Scatter Plot", parent="Plotting", build=_build_scatter,
             on_activate=_activate_scatter,

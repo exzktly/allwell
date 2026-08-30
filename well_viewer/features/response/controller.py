@@ -14,7 +14,7 @@ from well_viewer.core.csv_export import write_csv_rows
 from well_viewer.core.safe import swallow
 from well_viewer.domain.sample_variables import NUMBER
 from well_viewer.features.response.collect import (
-    ResponseData, collect_response, omission_caption,
+    ResponseData, collect_response, empty_reason, omission_caption,
 )
 from well_viewer.features.response.renderer import draw_response
 
@@ -74,27 +74,103 @@ def refresh_x_combo(ctx) -> None:
     combo.blockSignals(False)
 
 
-def timepoints_for(ctx) -> list[float]:
-    """Which timepoints to draw — the shared focus one, **read without writing**.
+def _tp_state(ctx) -> dict:
+    slice_ = ctx.state.feature_slice("response")
+    return slice_.tp_selections if slice_ is not None else {}
 
-    Writing ``focus_timepoint`` from here would move Heat Map and Distribution
-    to whatever this tab happened to open on. Defaulting to *all* timepoints
-    instead would open a twelve-timepoint plate as twelve overlapping curves per
-    condition, which is not a plot anyone can read.
-    """
-    focus = getattr(ctx.state.plot, "focus_timepoint", None)
-    if focus is not None:
-        return [float(focus)]
+
+def available_timepoints(ctx) -> list[float]:
+    """Every timepoint the open dataset holds, ascending."""
     with swallow("read the dataset's timepoints for the response curve"):
         from well_viewer.data.data_loading import get_all_timepoints
-        allt = get_all_timepoints(ctx)
-        if allt:
-            return [float(allt[0])]
-    return [0.0]
+        return [float(t) for t in (get_all_timepoints(ctx) or [])]
+    return []
+
+
+def sync_timepoint_menu(ctx) -> None:
+    """Seed the picker from the dataset, keeping what the user already chose.
+
+    **Seeded from the shared ``focus_timepoint``, and never writing it.** That
+    field is cross-tab; writing it here would move Heat Map and Distribution to
+    whatever this tab happened to open on. Seeding with *one* timepoint and not
+    all of them is the other half: a twelve-timepoint plate opened as twelve
+    overlapping curves per condition is not a plot anyone can read, and a user
+    who wants that can ask for it.
+
+    An already-populated selection with everything off is left alone — that is
+    a state the user chose, and re-seeding it would override them every redraw.
+    """
+    slice_ = ctx.state.feature_slice("response")
+    if slice_ is None:
+        return
+    available = {f"{t:g}" for t in available_timepoints(ctx)}
+    existing = dict(slice_.tp_selections)
+    if existing:
+        # Drop timepoints this dataset does not have, keep the rest as they are.
+        slice_.tp_selections = {k: v for k, v in existing.items()
+                                if k in available}
+        if slice_.tp_selections:
+            return
+    if not available:
+        slice_.tp_selections = {}
+        return
+    focus = getattr(ctx.state.plot, "focus_timepoint", None)
+    seed = f"{float(focus):g}" if focus is not None else sorted(available, key=float)[0]
+    if seed not in available:
+        seed = sorted(available, key=float)[0]
+    slice_.tp_selections = {tp: (tp == seed) for tp in sorted(available, key=float)}
+
+
+def timepoints_for(ctx) -> list[float]:
+    """The timepoints to draw, ascending. Empty means the user turned them off."""
+    return sorted(float(tp) for tp, on in _tp_state(ctx).items() if on)
+
+
+def open_timepoint_selector(ctx) -> None:
+    """The Bar tab's checkbox menu, over this tab's own selection."""
+    from PySide6.QtWidgets import QCheckBox, QMenu, QWidgetAction
+
+    button = _widget(ctx, "_response_tp_button")
+    if button is None:
+        return
+    sync_timepoint_menu(ctx)
+    menu = QMenu(button)
+    for tp_str in sorted(_tp_state(ctx).keys(), key=float):
+        box = QCheckBox(tp_str, menu)
+        box.setChecked(bool(_tp_state(ctx).get(tp_str)))
+
+        def _handler(checked: bool, tp=tp_str) -> None:
+            _tp_state(ctx)[tp] = bool(checked)
+            update_timepoint_button(ctx)
+            redraw_response(ctx)
+
+        box.toggled.connect(_handler)
+        action = QWidgetAction(menu)
+        action.setDefaultWidget(box)
+        menu.addAction(action)
+    if not menu.actions():
+        menu.addAction("No timepoints in this dataset").setEnabled(False)
+    menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
+
+
+def update_timepoint_button(ctx) -> None:
+    """The button carries its own readout, as the Bar tab's does."""
+    button = _widget(ctx, "_response_tp_button")
+    if button is None:
+        return
+    n = len(timepoints_for(ctx))
+    button.setText(f"Timepoints: {n} selected")
 
 
 def response_data(ctx):
-    """The curves for the current X and timepoints."""
+    """The curves for the current X and timepoints.
+
+    Seeds the timepoint selection itself rather than relying on a redraw having
+    run first: the CSV export goes through here too, and an export that produced
+    no rows because the figure happened not to have been drawn yet would be an
+    empty file with no explanation.
+    """
+    sync_timepoint_menu(ctx)
     variable_id = selected_variable_id(ctx)
     if not variable_id:
         return ResponseData()
@@ -109,10 +185,14 @@ def redraw_response(ctx) -> None:
         return
     refresh_x_combo(ctx)
     data = response_data(ctx)
+    update_timepoint_button(ctx)
 
     draw_response(ctx, ax, data,
+                  log_x=resolved_log_x(ctx, ax.figure, data),
                   title=_figure_title(ctx, data),
-                  ylabel=_y_label(ctx))
+                  ylabel=_y_label(ctx),
+                  variable_chosen=bool(selected_variable_id(ctx)),
+                  timepoints_chosen=bool(timepoints_for(ctx)))
 
     from well_viewer.core.plot_style import apply_export_style_to_current
     apply_export_style_to_current(ctx, ax.figure, canvas)
@@ -130,12 +210,23 @@ def _announce(ctx, data) -> None:
     Three places, as the plan asks: the caption travels with a saved figure, the
     CSV row survives being opened in Excel, and the status line is what the user
     reading the screen right now actually sees.
+
+    An empty figure reports its *reason* rather than its omissions: the reason
+    names the fix, and a user looking at nothing needs that more than a list of
+    which groups were dropped — which the figure itself is carrying anyway.
     """
-    caption = omission_caption(data)
-    if not caption:
+    message = _empty_reason(ctx, data) or omission_caption(data)
+    if not message:
         return
     with swallow("report what the response curve left out"):
-        ctx.notify.set_status(caption)
+        ctx.notify.set_status(message)
+
+
+def _empty_reason(ctx, data) -> str:
+    """This tab's empty-state sentence for *data*, with the controls' state."""
+    return empty_reason(data,
+                        variable_chosen=bool(selected_variable_id(ctx)),
+                        timepoints_chosen=bool(timepoints_for(ctx)))
 
 
 def export_response_csv(ctx) -> None:
@@ -147,14 +238,14 @@ def export_response_csv(ctx) -> None:
     rows and believes the total.
     """
     data = response_data(ctx)
-    if not data.curves and not data.omitted and not data.non_numeric:
+    if not data.has_points() and not data.omitted and not data.non_numeric:
         # Refused rather than written empty. A CSV with a header and no rows is
-        # indistinguishable from a plate that genuinely had nothing to say, and
-        # the commonest way to get here is that no X is picked yet — which is a
-        # thing the user can fix in one click if they are told.
+        # indistinguishable from a plate that genuinely had nothing to say, so
+        # the refusal carries the figure's own reason — the same sentence, which
+        # names the fix rather than the lack.
         with swallow("report that there is nothing to export"):
             ctx.notify.set_status(
-                "Nothing to export — pick a Number variable under X first.")
+                f"Nothing to export. {_empty_reason(ctx, data)}".strip())
         return
     header = ["member", "timepoint", "x", "x_label", "y", "err", "n", "reason"]
     rows = [
@@ -194,3 +285,28 @@ def _figure_title(ctx, data) -> str:
     if shortfall:
         parts.append(shortfall)
     return " — ".join(parts)
+
+
+def resolved_log_x(ctx, fig, data) -> bool:
+    """Whether to draw x logarithmically: the user's choice, else the data's.
+
+    ``x_log`` is the existing Properties toggle, stored per figure — so a
+    reader can tell "the user turned it off" from "the user never touched it",
+    and only the second is the tab's to decide. **Unset asks the data**: on once
+    the positive doses span two decades, which is the point at which a linear
+    axis puts three quarters of the points in its leftmost tenth. Defaulting to
+    linear instead would mean every dose series opens unreadable and every user
+    fixes it by hand before they can see anything.
+
+    Set either way, the user's answer stands. A tab that overrode a toggle from
+    the data on every redraw would be a control that does not stay where it is
+    put.
+    """
+    from well_viewer.core.plot_style import figure_pref_is_set, figure_prefs
+    from well_viewer.features.response.response_compute import spans_enough_decades
+
+    with swallow("read this figure's x_log preference"):
+        if figure_pref_is_set(ctx, fig, "x_log"):
+            return bool(figure_prefs(ctx, fig).get("x_log"))
+    return spans_enough_decades(
+        [p.x for c in data.curves for p in c.points if p.x > 0])

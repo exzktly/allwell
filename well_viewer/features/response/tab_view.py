@@ -9,7 +9,9 @@ the one-line-removable property ``tests/test_feature_removal.py`` enforces.
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QFrame, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFrame, QPushButton, QScrollArea, QVBoxLayout, QWidget,
+)
 
 from well_viewer.core.ui_helpers import (
     build_plot_save_menu, install_canvas_wheel_scroll, make_band_controls,
@@ -19,7 +21,8 @@ from well_viewer.core.ui_helpers import (
 # module, so there is no cycle to work around — and a deferred feature import
 # that is not breaking a cycle is one the budget guard counts for nothing.
 from well_viewer.features.response.controller import (
-    export_response_csv, on_x_variable_changed, redraw_response,
+    export_response_csv, on_x_variable_changed, open_timepoint_selector,
+    redraw_response, update_timepoint_button,
 )
 
 #: The figure. One axes, wide rather than tall — a dose–response is read across.
@@ -45,6 +48,14 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     x_combo = reg.register("_response_x_cb", LabeledComboBox("X"))
     x_combo.currentIndexChanged.connect(lambda *_: on_x_variable_changed(ctx))
     band.add_scope("", x_combo)
+
+    # The Bar tab's picker, over this tab's own selection. Self-describing —
+    # the button's own text carries the count, so it needs no caption beside it.
+    tp_button = reg.register("_response_tp_button",
+                             QPushButton("Timepoints: 0 selected"))
+    tp_button.setProperty("variant", "secondary")
+    tp_button.clicked.connect(lambda _=False: open_timepoint_selector(ctx))
+    band.add_scope("", tp_button)
 
     display_btn, display_panel, display_lay = make_popover_button("Display ▾", band)
     display_btn.setToolTip("Error bars (SEM/SD) and per-FOV spread")
@@ -89,6 +100,7 @@ def build_response_tab(ctx, parent: QWidget) -> None:
         ),
     ), 1)
 
+    update_timepoint_button(ctx)
     redraw_response(ctx)
 
 

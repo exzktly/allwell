@@ -1239,61 +1239,6 @@ it is only arriving with a new dataset that starts on Home, since that is the
 moment there is most to tell you. Restoring a saved plot from **Saved Plots**
 does not come here: it takes you to the tab that plot came from.
 
-#### Variables — what you changed across the plate
-
-A **variable** is anything you varied: cell line, dose, the timepoint you
-treated at. You name it, list its values in order, and then fill those values
-onto the wells.
-
-It is not a group, and that is the point of having it. Two cell lines at six
-doses is twelve conditions; without variables you would paint twelve group names
-by hand to plot them apart. With them you say "Cell line: HeLa, U2OS" and
-"Dose: 0, 0.1, 0.3, 1, 3, 10" once, and the plots can group, colour and split by
-either.
-
-On **Home → Variables**, **+ Variable** adds one. Give it a name, pick its
-type, and type its values into the box at the bottom — commas work, so
-`0, 0.1, 0.3, 1, 3, 10` adds six in one go. Double-click a value to correct it:
-that is a rename, so every well already holding it follows, and fixing `1uM` to
-`1 µM` after you have filled the plate costs nothing. The arrows beside the list
-set the order, which is the order a fill walks and the direction a dose axis
-runs, so it is worth getting right.
-
-**Text or Number.** Number is what lets a variable be a plot's x axis, and it is
-the only type that takes a unit. You can switch at any time and your values are
-re-read, not retyped. A value that is not a number — a `vehicle` row in a dose
-series — is kept, and the tab tells you which ones they are: they still group
-and colour, they just have no place on a numeric axis.
-
-The list also tells you when a variable is not ready — one with no values cannot
-be filled onto anything.
-
-**Filling the plate.** Under the definition is a plate of this dataset's wells
-and one row of controls: *Fill along [Rows or Columns] · repeat each [N] ·
-Apply fill*. Six doses along the columns repeating each twice fills a 12-column
-plate; two cell lines along the rows repeating each four fills the eight rows.
-Any block design is one click.
-
-For anything the fill does not cover, select wells on the plate — drag across
-them, or click a row letter or column number — and click one of the value chips
-above it. Same two steps as **Well Labels**' select-then-Add-Prefix. **Clear**
-unassigns the selection.
-
-Each value gets its own colour on the plate. A well that belongs to the dataset
-but has no value for the variable you are looking at is **ringed**, and the line
-underneath names those wells and counts them — an empty socket means something
-different, that the well is not in the dataset at all. Getting to "All 96 wells
-have a Dose." is the thing to aim for, because a plot grouped by a variable
-leaves out any group containing an unassigned well, and tells you how many.
-
-Wells are never given a value they were not assigned. If you add a well to a
-group after filling, it stays unassigned and says so; nothing is inherited from
-its neighbours.
-
-Variables are saved with the dataset, alongside your groups and well labels.
-**Reset analysis** clears them under their own heading, separately from sample
-definitions, so redoing your groups does not cost you a plate of doses.
-
 #### Telling the app what your wells mean
 
 The rest of Home's tabs are where you *declare* things, rather than read them:
@@ -1477,6 +1422,79 @@ you opened a folder that holds only some of the plate's wells, the picker can
 only paint those — but the group's other members are still part of it. Adding
 or removing a well changes only what you clicked; the members the plate cannot
 show stay in the group.
+
+#### Variables
+
+A **variable** is anything you varied: cell line, dose, the timepoint you
+treated at. You name it, list its values in order, and then fill those values
+onto the wells.
+
+It is not a group, and that is the point of having it. Two cell lines at six
+doses is twelve conditions; without variables you would paint twelve group names
+by hand to plot them apart. With them you say "Cell line: HeLa, U2OS" and
+"Dose: 0, 0.1, 0.3, 1, 3, 10" once, and the plots can group, colour and split by
+either.
+
+On **Home → Variables**, **+ Variable** adds one. Give it a name, pick its
+type, and type its values into the box at the bottom — commas work, so
+`0, 0.1, 0.3, 1, 3, 10` adds six in one go. Double-click a value to correct it:
+that is a rename, so every well already holding it follows, and fixing `1uM` to
+`1 µM` after you have filled the plate costs nothing. The arrows beside the list
+set the order, which is the order a fill walks and the direction a dose axis
+runs, so it is worth getting right.
+
+**Text or Number.** Number is what lets a variable be a plot's x axis, and it is
+the only type that takes a unit. You can switch at any time and your values are
+re-read, not retyped. A value that is not a number — a `vehicle` row in a dose
+series — is kept, and the tab tells you which ones they are: they still group
+and colour, they just have no place on a numeric axis.
+
+The list also tells you when a variable is not ready — one with no values cannot
+be filled onto anything.
+
+**Filling the plate.** Under the definition is a plate of this dataset's wells
+and one row of controls: *Fill along [Rows or Columns] · repeat each [N] ·
+Apply fill*. Six doses along the columns repeating each twice fills a 12-column
+plate; two cell lines along the rows repeating each four fills the eight rows.
+Any block design is one click.
+
+For anything the fill does not cover, select wells on the plate — drag across
+them, or click a row letter or column number — and click one of the value chips
+above it. Same two steps as **Well Labels**' select-then-Add-Prefix. **Clear**
+unassigns the selection.
+
+Each value gets its own colour on the plate. A well that belongs to the dataset
+but has no value for the variable you are looking at is **ringed**, and the line
+underneath names those wells and counts them — an empty socket means something
+different, that the well is not in the dataset at all. Getting to "All 96 wells
+have a Dose." is the thing to aim for, because a plot grouped by a variable
+leaves out any group containing an unassigned well, and tells you how many.
+
+**Seeing two variables at once.** *Also show* draws a second variable on top of
+the first as a short glyph — `0` / `10` for a dose, `H` / `U` for HeLa and U2OS
+— with a key beside it. Colour for one factor, a letter for the other, so a
+two-factor plate reads in one look instead of by switching back and forth.
+
+Hovering a well gives you the whole row: `A01 — shCtrl · Cell line: HeLa ·
+Dose: 1 µM`. A variable the well has no value for shows as `Dose: —` rather than
+being left out, so you can tell "nothing was assigned" from "there is no such
+variable".
+
+**By group.** If you have replicate groups defined, a list under the plate shows
+what each one resolves to. A group whose wells all agree shows that value. One
+whose wells disagree reads *Mixed*. One containing even a single well with no
+value reads *no value*, and names the wells that are short.
+
+That last case is the one to know about. Wells are never given a value they were
+not assigned: if you add a well to a group after filling, it stays unassigned and
+the group stops having a value. Nothing is inherited from its neighbours and
+nothing is guessed from the majority, because a bar built that way would carry a
+dose those wells were never given and would look exactly like a correct one.
+Assign the well, and the group resolves again.
+
+Variables are saved with the dataset, alongside your groups and well labels.
+**Reset analysis** clears them under their own heading, separately from sample
+definitions, so redoing your groups does not cost you a plate of doses.
 
 #### Well Labels
 

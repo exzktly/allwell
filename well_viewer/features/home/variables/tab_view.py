@@ -257,6 +257,22 @@ def _build_plate(ctx, parent: QWidget, reg) -> QWidget:
     chip_row.setSpacing(theme.Spacing.xs)
     column.addWidget(chips)
 
+    # A second variable, drawn as a glyph on top of the first one's colour, so a
+    # two-factor design can be read in one look instead of by switching back and
+    # forth. A combo rather than the planned pair of chips: with three or more
+    # variables a chip would have to mean "colour" or "glyph" depending on which
+    # one the rail has selected, which is two meanings on one control.
+    overlay_row = QHBoxLayout()
+    overlay_row.setContentsMargins(0, 0, 0, 0)
+    overlay_row.setSpacing(theme.Spacing.sm)
+    overlay_row.addWidget(QLabel("Also show", host))
+    overlay = reg.register("_var_overlay", QComboBox(host))
+    overlay_row.addWidget(overlay)
+    legend = reg.register("_var_overlay_legend", QLabel("", host))
+    legend.setObjectName("Muted")
+    overlay_row.addWidget(legend, 1)
+    column.addLayout(overlay_row)
+
     plate = reg.register("_var_plate", WellPlateSelector(host))
     # "editor" rather than "rail": the rail role is exempt from the size caps
     # because Review's rail picker is that pane's primary interaction surface,
@@ -270,6 +286,12 @@ def _build_plate(ctx, parent: QWidget, reg) -> QWidget:
     readout.setObjectName("Muted")
     readout.setWordWrap(True)
     column.addWidget(readout)
+
+    column.addWidget(reg.register("_var_groups_title",
+                                  _section_label(host, "By group")))
+    groups = reg.register("_var_groups", QListWidget(host))
+    groups.setSelectionMode(QListWidget.NoSelection)
+    column.addWidget(groups)
     column.addStretch(1)
     return host
 

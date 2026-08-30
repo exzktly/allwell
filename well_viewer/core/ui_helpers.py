@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 import theme
 from well_viewer.core import empty_state_copy
+from well_viewer.core.safe import swallow
 from well_viewer.data.image_identity import normalize_tp
 from well_viewer.core.safe import swallowed
 
@@ -21,21 +22,54 @@ from well_viewer.core.safe import swallowed
 def well_plate_tooltip_provider(ctx) -> Callable[[str], str]:
     """Tooltip-provider closure for ``WellPlateSelector.setWellTooltipProvider``.
 
-    Returns ``"<well_id> — <label>"`` for wells the user has named in
-    Home → Well Labels, falling back to the bare well id otherwise. The
-    closure reads ``ctx.state.dataset.well_labels`` on every hover
-    so a label edit reflects immediately without re-wiring the provider.
+    Returns ``"<well_id> — <label> · Cell line: HeLa · Dose: 1 µM"`` — the well's
+    own name from Home → Well Labels, then one clause per **sample variable**
+    that annotates it. Falls back to the bare well id when it has neither.
+
+    Every clause is read on each hover rather than baked in when the provider is
+    wired, so a label edit or a value assignment shows up without the host
+    re-registering anything.
+
+    **A variable the well has no value for is named, not omitted.** "Dose: —"
+    says the well was never given one; leaving the clause out is
+    indistinguishable from a plate where no such variable exists, and the whole
+    point of the ring beside it is that an unassigned well is a fact the user
+    needs to see rather than a gap they have to infer.
+
+    Every read is guarded, because this closure runs on a mouse hover: a state
+    shape it did not expect must cost the extra clause, never the tooltip.
     """
     def _tooltip(well_id: str) -> str:
+        parts = []
         try:
             labels = getattr(ctx.state.dataset, "well_labels", None) or {}
             name = labels.get(well_id)
         except Exception:
             name = None
         if name and str(name).strip() and str(name).strip() != well_id:
-            return f"{well_id} — {str(name).strip()}"
-        return well_id
+            parts.append(f"{well_id} — {str(name).strip()}")
+        else:
+            parts.append(well_id)
+        parts.extend(_variable_clauses(ctx, well_id))
+        return " · ".join(parts)
     return _tooltip
+
+
+def _variable_clauses(ctx, well_id: str) -> list[str]:
+    """``["Cell line: HeLa", "Dose: —"]`` for *well_id*. Empty when none apply."""
+    vset = None
+    variables = ()
+    with swallow("read the sample variables for a well tooltip"):
+        vset = getattr(ctx.state.selection, "variables", None)
+        variables = list(getattr(vset, "variables", ()) or ())
+    out = []
+    for variable in variables:
+        shown = ""
+        with swallow(f"read {variable.name} for {well_id}"):
+            value_id = vset.value_id_for(variable.id, well_id)
+            shown = variable.display_label(value_id) if value_id else ""
+        out.append(f"{variable.name}: {shown or '—'}")
+    return out
 
 def parse_float_edit(edit, fallback=None, *, allow_auto: bool = False):
     """Parse a ``QLineEdit``'s text as ``float``; return *fallback* on blank,

@@ -137,7 +137,9 @@ def refresh_variables(ctx) -> None:
         note.setText(_note_for(variable))
 
     _paint_chips(ctx, variable)
+    _paint_overlay_combo(ctx, variable)
     _paint_plate(ctx, variable)
+    _paint_groups(ctx, variable)
 
 
 def _variable_item(variable):
@@ -200,6 +202,8 @@ def wire_variables(ctx) -> None:
         lambda item: rename_value(ctx, item))
 
     _widget(ctx, "_var_fill_apply").clicked.connect(lambda: apply_fill(ctx))
+    _widget(ctx, "_var_overlay").currentIndexChanged.connect(
+        lambda *_: refresh_variables(ctx))
 
 
 def add_variable(ctx) -> None:
@@ -396,6 +400,11 @@ def _paint_plate(ctx, variable) -> None:
     if readout is not None:
         readout.setText(_readout_for(variable, wells, missing))
 
+    _paint_overlay(ctx, variable)
+
+    from well_viewer.core.ui_helpers import well_plate_tooltip_provider
+    plate.setWellTooltipProvider(well_plate_tooltip_provider(ctx))
+
 
 def _readout_for(variable, wells, missing) -> str:
     """What the plate is showing, in words, including what it is short of."""
@@ -453,3 +462,129 @@ def apply_fill(ctx) -> None:
     wells = wells_in_fill_order(dataset_wells(ctx), axis.currentData())
     _commit(ctx, sv.fill(_vset(ctx), variable_id, wells,
                          repeat=repeat.value()))
+
+
+# ── a second variable, as a glyph ───────────────────────────────────────────
+
+#: A short glyph per value position for the overlay variable. Letters and digits
+#: rather than symbols: a well is a few pixels of ink and a user reading
+#: "H" / "U" against HeLa / U2OS needs no key, while a triangle against a circle
+#: needs one they have to keep in their head.
+def _overlay_glyph(variable, value_id) -> str:
+    value = variable.value_by_id(value_id) if value_id else None
+    if value is None:
+        return ""
+    label = value.label.strip()
+    if not label:
+        return ""
+    # A number keeps its own digits where they fit, because "10" *is* the
+    # shortest true label for a 10 µM dose and an initial letter would be a code
+    # the user has to learn. Anything longer is cut to its first character.
+    return label if (variable.is_numeric() and len(label) <= 2) else label[0].upper()
+
+
+def overlay_variable_id(ctx) -> str | None:
+    combo = _widget(ctx, "_var_overlay")
+    return combo.currentData() if combo is not None else None
+
+
+def _paint_overlay_combo(ctx, variable) -> None:
+    """List the *other* variables, keeping the user's pick where it still exists."""
+    combo = _widget(ctx, "_var_overlay")
+    if combo is None:
+        return
+    others = [v for v in _vset(ctx).variables if v.id != variable.id]
+    keep = combo.currentData()
+    combo.blockSignals(True)
+    combo.clear()
+    combo.addItem("Nothing", None)
+    for other in others:
+        combo.addItem(other.name, other.id)
+    index = combo.findData(keep)
+    combo.setCurrentIndex(index if index >= 0 else 0)
+    combo.blockSignals(False)
+    # Hidden entirely with nothing to offer, rather than shown holding only
+    # "Nothing" — a control whose every option is a no-op is a control that
+    # invites a click and answers with silence.
+    combo.setEnabled(bool(others))
+
+
+def _paint_overlay(ctx, variable) -> None:
+    """Draw the overlay variable's glyphs, and say what they mean."""
+    plate = _widget(ctx, "_var_plate")
+    legend = _widget(ctx, "_var_overlay_legend")
+    if plate is None:
+        return
+    plate.clearWellMarkers()
+
+    vset = _vset(ctx)
+    other = vset.by_id(overlay_variable_id(ctx) or "")
+    if other is None:
+        if legend is not None:
+            legend.setText("")
+        return
+
+    for well in dataset_wells(ctx):
+        glyph = _overlay_glyph(other, vset.value_id_for(other.id, well))
+        if glyph:
+            plate.setWellMarker(well, glyph)
+
+    if legend is not None:
+        pairs = ", ".join(f"{_overlay_glyph(other, v.id)} = {v.label}"
+                          for v in other.values if _overlay_glyph(other, v.id))
+        legend.setText(f"{other.name}: {pairs}" if pairs else "")
+
+
+# ── group roll-up ───────────────────────────────────────────────────────────
+
+def _paint_groups(ctx, variable) -> None:
+    """One row per saved group, showing the value its wells agree on.
+
+    **A group never lends a value to a well, and a well never takes one.** A
+    group whose wells disagree reads ``Mixed (2)``; a group holding a well with
+    no value reads ``no value`` and names how many are short. Neither is
+    resolved to the group's first well or its commonest value, because a plotted
+    member built that way would carry a dose the wells were never given, in a
+    bar indistinguishable from a correct one.
+
+    That is the state the user reaches by adding a well to a group *after*
+    filling — which is ordinary, and is why this list exists rather than the
+    tab trusting the plate alone.
+    """
+    from PySide6.QtWidgets import QListWidgetItem
+
+    listing = _widget(ctx, "_var_groups")
+    title = _widget(ctx, "_var_groups_title")
+    if listing is None:
+        return
+    selections = list(getattr(ctx.state.selection, "selections", None) or [])
+    known = set(dataset_wells(ctx))
+    rows = []
+    vset = _vset(ctx)
+    for selection in selections:
+        wells = [w for w in (selection.get("wells") or []) if w in known]
+        if not wells:
+            continue
+        rows.append((selection.get("name") or "(unnamed)",
+                     _group_summary(vset, variable, wells)))
+
+    listing.clear()
+    for name, summary in rows:
+        listing.addItem(QListWidgetItem(f"{name} — {summary}"))
+    for widget in (listing, title):
+        if widget is not None:
+            # No groups is not an empty list to stare at: this tab works
+            # perfectly well without any, which is most of its point.
+            widget.setVisible(bool(rows))
+
+
+def _group_summary(vset, variable, wells) -> str:
+    value_id = sv.roll_up(vset, variable.id, wells)
+    if value_id is sv.MIXED:
+        distinct = {vset.value_id_for(variable.id, w) for w in wells}
+        return f"Mixed ({len(distinct)} values across {len(wells)} wells)"
+    if value_id is None:
+        short = sv.unassigned_wells(vset, variable.id, wells)
+        return (f"no value — {len(short)} of {len(wells)} wells unassigned "
+                f"({', '.join(short[:4])}{'…' if len(short) > 4 else ''})")
+    return f"{variable.display_label(value_id)} ({len(wells)} wells)"

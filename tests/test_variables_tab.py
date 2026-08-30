@@ -530,3 +530,201 @@ def test_a_fully_assigned_plate_is_told_it_has_no_rings(tab, monkeypatch):
     seen = _plate_calls(tab, monkeypatch)
     tab.w("_var_fill_apply").click()
     assert seen["rings"] == []
+
+
+# ── a second variable, as a glyph ───────────────────────────────────────────
+
+def _two_variables(tab):
+    """`Dose` (0, 1) filled along rows, and `Cell line` (HeLa, U2OS)."""
+    dose = _dose_tab(tab)
+    tab.w("_var_fill_apply").click()
+
+    tab.w("_var_add").click()
+    tab.w("_var_name").setText("Cell line")
+    tab.w("_var_name").editingFinished.emit()
+    tab.w("_var_value_entry").setText("HeLa, U2OS")
+    tab.w("_var_value_add").click()
+    line = _vset(tab).variables[1].id
+    axis = tab.w("_var_fill_axis")
+    axis.setCurrentIndex(axis.findData("col"))
+    tab.w("_var_fill_repeat").setValue(4)
+    tab.w("_var_fill_apply").click()
+    return dose, line
+
+
+def _markers(tab, monkeypatch):
+    plate = tab.w("_var_plate")
+    seen = {}
+    monkeypatch.setattr(plate, "setWellMarker",
+                        lambda well, glyph: seen.__setitem__(well, glyph))
+    return seen
+
+
+def test_the_overlay_combo_lists_the_other_variables_only(tab):
+    _two_variables(tab)
+    combo = tab.w("_var_overlay")
+    assert [combo.itemText(i) for i in range(combo.count())] == ["Nothing", "Dose"]
+
+
+def test_with_one_variable_the_overlay_is_disabled(tab):
+    """A control whose every option is a no-op invites a click and answers with
+    silence."""
+    _dose_tab(tab)
+    assert tab.w("_var_overlay").isEnabled() is False
+
+
+def test_choosing_an_overlay_puts_a_glyph_on_every_annotated_well(tab, monkeypatch):
+    """Two factors readable in one look, rather than by switching back and forth."""
+    _two_variables(tab)
+    combo = tab.w("_var_overlay")
+    dose_id = _vset(tab).variables[0].id
+
+    seen = _markers(tab, monkeypatch)
+    combo.setCurrentIndex(combo.findData(dose_id))
+
+    assert set(seen) == set(tab.wells), "not every well got a glyph"
+    assert set(seen.values()) == {"0", "1"}, (
+        "a numeric variable's short labels were not used as their own glyphs"
+    )
+
+
+def test_a_text_overlay_uses_the_values_initial(tab, monkeypatch):
+    _two_variables(tab)
+    # Select Dose in the rail so Cell line is the overlay.
+    tab.w("_var_list").setCurrentRow(0)
+    combo = tab.w("_var_overlay")
+    line_id = _vset(tab).variables[1].id
+
+    seen = _markers(tab, monkeypatch)
+    combo.setCurrentIndex(combo.findData(line_id))
+    assert set(seen.values()) == {"H", "U"}
+
+
+def test_the_overlay_legend_says_what_the_glyphs_mean(tab):
+    _two_variables(tab)
+    tab.w("_var_list").setCurrentRow(0)
+    combo = tab.w("_var_overlay")
+    combo.setCurrentIndex(combo.findData(_vset(tab).variables[1].id))
+
+    legend = tab.w("_var_overlay_legend").text()
+    assert "H = HeLa" in legend and "U = U2OS" in legend
+
+
+def test_choosing_nothing_clears_the_glyphs(tab, monkeypatch):
+    """A glyph left behind from a variable no longer shown annotates the plate
+    with a fact nothing on screen explains."""
+    _two_variables(tab)
+    tab.w("_var_list").setCurrentRow(0)
+    combo = tab.w("_var_overlay")
+    combo.setCurrentIndex(combo.findData(_vset(tab).variables[1].id))
+    assert tab.w("_var_overlay_legend").text() != "", (
+        "the overlay was never on, so turning it off proves nothing"
+    )
+
+    plate = tab.w("_var_plate")
+    cleared = []
+    monkeypatch.setattr(plate, "clearWellMarkers", lambda: cleared.append(1))
+    monkeypatch.setattr(plate, "setWellMarker", lambda *a: None)
+
+    combo.setCurrentIndex(0)
+    assert cleared, "the markers were never cleared"
+    assert tab.w("_var_overlay_legend").text() == ""
+
+
+# ── the tooltip ─────────────────────────────────────────────────────────────
+
+def test_the_tooltip_gives_the_whole_row_for_a_well(tab):
+    from well_viewer.core.ui_helpers import well_plate_tooltip_provider
+
+    _two_variables(tab)
+    tab.ctx.state.dataset.well_labels = {"A01": "shCtrl"}
+    tip = well_plate_tooltip_provider(tab.ctx)("A01")
+
+    assert tip.startswith("A01 — shCtrl")
+    assert "Dose: 0" in tip and "Cell line: HeLa" in tip
+
+
+def test_the_tooltip_names_a_variable_the_well_has_no_value_for(tab):
+    """Omitting the clause is indistinguishable from a plate where no such
+    variable exists — and an unassigned well is a fact the user needs to see."""
+    from well_viewer.core.ui_helpers import well_plate_tooltip_provider
+
+    _dose_tab(tab)
+    tab.ctx.state.dataset.well_labels = {}
+    assert "Dose: —" in well_plate_tooltip_provider(tab.ctx)("A01")
+
+
+def test_a_plate_with_no_variables_keeps_the_tooltip_it_always_had(tab):
+    from well_viewer.core.ui_helpers import well_plate_tooltip_provider
+
+    tab.ctx.state.dataset.well_labels = {"A01": "shCtrl"}
+    assert well_plate_tooltip_provider(tab.ctx)("A01") == "A01 — shCtrl"
+
+
+# ── group roll-up: the rule that must not be softened ───────────────────────
+
+def _with_groups(tab, groups):
+    tab.ctx.state.selection.selections = [
+        {"id": f"g{i}", "name": name, "wells": wells}
+        for i, (name, wells) in enumerate(groups)
+    ]
+
+
+def _group_rows(tab):
+    listing = tab.w("_var_groups")
+    return [listing.item(i).text() for i in range(listing.count())]
+
+
+def test_a_group_whose_wells_agree_shows_that_value(tab):
+    _dose_tab(tab)
+    _with_groups(tab, [("ctrl", ["A01", "A02"])])
+    tab.w("_var_plate").selectedWells = ["A01", "A02"]
+    _chips(tab)[0].click()
+
+    assert _group_rows(tab) == ["ctrl — 0 (2 wells)"]
+
+
+def test_a_group_whose_wells_disagree_reads_mixed(tab):
+    _dose_tab(tab)
+    _with_groups(tab, [("ctrl", ["A01", "A02"])])
+    tab.w("_var_plate").selectedWells = ["A01"]
+    _chips(tab)[0].click()
+    tab.w("_var_plate").selectedWells = ["A02"]
+    _chips(tab)[1].click()
+
+    assert "Mixed (2 values across 2 wells)" in _group_rows(tab)[0]
+
+
+def test_a_group_holding_one_unassigned_well_has_no_value_and_says_which(tab):
+    """The rule this whole feature is built around.
+
+    A well added to a group after the fill does not inherit a value from its
+    neighbours. Seven wells saying 1 µM and one saying nothing is not a 1 µM
+    group — a member built from it would carry a dose those wells were never
+    given, in a bar indistinguishable from a correct one.
+    """
+    _dose_tab(tab)
+    _with_groups(tab, [("ctrl", ["A01", "A02", "A03"])])
+    tab.w("_var_plate").selectedWells = ["A01", "A02"]
+    _chips(tab)[0].click()
+
+    row = _group_rows(tab)[0]
+    assert "no value" in row, f"the group resolved to a value it was not given: {row}"
+    assert "1 of 3 wells unassigned" in row
+    assert "A03" in row, "the short well is counted but not named"
+
+
+def test_a_group_of_wells_this_dataset_does_not_hold_is_not_listed(tab):
+    """A group saved against a fuller plate, opened on a subset. Its wells are
+    not here, so it has nothing to roll up and a row reading "no value" would
+    report a shortfall that is not one."""
+    _dose_tab(tab)
+    _with_groups(tab, [("elsewhere", ["H11", "H12"])])
+    assert _group_rows(tab) == []
+
+
+def test_the_group_list_is_hidden_when_there_are_none(tab):
+    """This tab's whole point is that you need no groups at all."""
+    _dose_tab(tab)
+    assert tab.w("_var_groups").isHidden() is True
+    assert tab.w("_var_groups_title").isHidden() is True

@@ -206,8 +206,9 @@ def redraw_response(ctx) -> None:
     update_timepoint_button(ctx)
     log_x = resolved_log_x(ctx, ax.figure, data)
     if log_x and not _log_x_was_asked_for(ctx, ax.figure):
-        data.scale_notice = ("x drawn logarithmic from the doses — "
-                             "set it in Properties to override")
+        data.scale_notice = (
+            f"{data.variable_name or 'x'} drawn logarithmic from the values "
+            f"in use — set it in Properties to override")
 
     draw_response(ctx, ax, data,
                   log_x=log_x,

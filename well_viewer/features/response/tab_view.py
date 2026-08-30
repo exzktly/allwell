@@ -135,7 +135,7 @@ def _build_fit_popover(ctx, band):
     from widgets.labeled_combo import LabeledComboBox
 
     button, panel, layout = make_popover_button("Fit ▾", band)
-    button.setToolTip("Fit a dose–response curve and report its EC50")
+    button.setToolTip("Fit a response curve and report its half-maximal value")
 
     model, top, bottom = fit_settings(ctx)
     combo = ctx.widgets.register("_response_fit_cb", LabeledComboBox("Model"))

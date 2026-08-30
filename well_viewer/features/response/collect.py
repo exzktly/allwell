@@ -208,7 +208,8 @@ def fit_curves(data: ResponseData, model: str, *, fixed_top: float | None = None
     return {
         curve.timepoint: fit_response(
             [p.x for p in curve.points], [p.y for p in curve.points],
-            model=model, fixed_top=fixed_top, fixed_bottom=fixed_bottom)
+            model=model, fixed_top=fixed_top, fixed_bottom=fixed_bottom,
+            x_name=(data.variable_name or "x"))
         for curve in data.curves
     }
 

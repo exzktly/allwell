@@ -599,3 +599,22 @@ def test_pooling_on_says_nothing(stub_stats):
                assignments={"dose": {"A01": "d0"}},
                selections=_groups(("a", ["A01"])))
     assert rc.collect_response(ctx, "dose", [24.0]).pooled_notice == ""
+
+
+def test_the_fit_is_told_what_the_user_called_the_x_axis(stub_stats):
+    """Driven through ``fit_curves``, because the collector is the only thing
+    that knows the variable's name and a fitter told nothing calls it ``x``."""
+    variable = sv.Variable(id="temp", name="Temperature", kind=sv.NUMBER,
+                           unit="°C",
+                           values=tuple(sv.VariableValue(f"t{i}", f"{v:g}", v)
+                                        for i, v in enumerate((4.0, 25.0))))
+    ctx = _ctx(wells=["A01", "A02"], variable=variable,
+               assignments={"temp": {"A01": "t0", "A02": "t1"}},
+               selections=_groups(("cold", ["A01"]), ("warm", ["A02"])))
+    data = rc.collect_response(ctx, "temp", [24.0])
+
+    fits = rc.fit_curves(data, rcompute.FIT_4PL)
+
+    reason = fits[24.0].reason
+    assert "Temperature" in reason, reason
+    assert "dose" not in reason.lower(), reason

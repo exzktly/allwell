@@ -274,3 +274,50 @@ def test_the_legend_clause_carries_the_unit_and_the_interval():
     noisy = [y + (2.0 if i % 2 else -2.0) for i, y in enumerate(ys)]
     text = rc.ec50_text(rc.fit_response(xs, noisy, model=rc.FIT_4PL), "µM")
     assert text.startswith("EC50 ") and "µM" in text and "–" in text
+
+
+# ── the refusals name the user's own variable ───────────────────────────────
+#
+# This is not a dose-response tab. It plots a measurement against any number
+# someone varied — seeding density, MOI, pre-treatment time, temperature — and
+# a caption telling a user who varied temperature that "no dose changed the
+# measurement" is describing a plot they did not make. The plan's own naming
+# rule: no control says "dose" or "concentration" unless the user typed it.
+
+@pytest.mark.parametrize("x_name", ["Dose", "Seeding density", "Temperature"])
+def test_a_flat_series_names_the_variable_the_user_varied(x_name):
+    reason = rc.fit_response(DOSES, [50.0] * len(DOSES), model=rc.FIT_4PL,
+                             x_name=x_name).reason
+    assert x_name in reason, reason
+    assert "dose" not in reason.lower() or x_name.lower() == "dose", reason
+
+
+def test_every_refusal_carries_the_variables_name():
+    """All four, not the one that happened to be checked."""
+    name = "Temperature"
+    below = [0.001, 0.003, 0.01, 0.03, 0.1]
+    reasons = [
+        rc.fit_response(DOSES, [50.0] * len(DOSES), model=rc.FIT_4PL,
+                        x_name=name).reason,
+        rc.fit_response([1.0, 10.0], [1.0, 9.0], model=rc.FIT_4PL,
+                        x_name=name).reason,
+        rc.fit_response(below, [_truth(x) for x in below], model=rc.FIT_4PL,
+                        x_name=name).reason,
+    ]
+    for reason in reasons:
+        assert name in reason, reason
+        assert "dose" not in reason.lower(), reason
+
+
+def test_the_no_ci_clause_names_it_too():
+    xs = [0.1, 1.0, 10.0]
+    fit = rc.fit_response(xs, [_truth(x) for x in xs], model=rc.FIT_4PL,
+                          fixed_top=95.0, fixed_bottom=5.0, x_name="MOI")
+    assert "MOI" in fit.ci_reason, fit.ci_reason
+    assert "dose" not in fit.ci_reason.lower()
+
+
+def test_the_default_is_neutral_rather_than_a_dose():
+    """A caller with no name says ``x``, not ``dose``."""
+    reason = rc.fit_response([1.0, 10.0], [1.0, 9.0], model=rc.FIT_4PL).reason
+    assert "dose" not in reason.lower(), reason

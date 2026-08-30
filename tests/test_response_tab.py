@@ -972,8 +972,11 @@ def test_a_log_axis_the_tab_chose_says_it_chose_it(tab):
     rctl.redraw_response(tab.ctx)
 
     captions = " | ".join(t.get_text() for t in tab.ax.texts)
-    assert "logarithmic from the doses" in captions, captions
+    assert "Dose drawn logarithmic" in captions, captions
     assert "Properties" in captions
+    # Named for the user's own variable, not for a dose: this tab plots a
+    # measurement against any number someone varied.
+    assert "doses" not in captions, captions
 
 
 def test_a_log_axis_the_user_asked_for_says_nothing(tab):
@@ -985,7 +988,7 @@ def test_a_log_axis_the_user_asked_for_says_nothing(tab):
     rctl.redraw_response(tab.ctx)
 
     captions = " | ".join(t.get_text() for t in tab.ax.texts)
-    assert "logarithmic from the doses" not in captions, captions
+    assert "drawn logarithmic" not in captions, captions
 
 
 def test_a_linear_axis_says_nothing(tab):

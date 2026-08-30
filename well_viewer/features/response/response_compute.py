@@ -140,7 +140,7 @@ class FitResult:
     ec50_ci: tuple[float, float] | None = None
     #: Why there is no interval, when :attr:`ec50_ci` is ``None`` on a fit that
     #: otherwise succeeded. Carried rather than guessed at the call site: "you
-    #: have as many doses as parameters" and "the covariance came back
+    #: have as many points as parameters" and "the covariance came back
     #: singular" are different statements about the data, and a legend that
     #: printed the first for the second would name a cause nobody checked.
     ci_reason: str = ""
@@ -171,7 +171,8 @@ def curve_y(fit: FitResult, xs) -> Any | None:
 
 
 def fit_response(xs, ys, *, model: str, fixed_top: float | None = None,
-                 fixed_bottom: float | None = None) -> FitResult:
+                 fixed_bottom: float | None = None,
+                 x_name: str = "x") -> FitResult:
     """Fit *ys* against *xs* in log10 space, or refuse and say why.
 
     Only positive *xs* are fitted: a zero dose has no place on a log axis, and
@@ -187,6 +188,14 @@ def fit_response(xs, ys, *, model: str, fixed_top: float | None = None,
 
     Every refusal returns ``ok=False`` with a :attr:`FitResult.reason`. There is
     no path here that returns a number it does not stand behind.
+
+    *x_name* is what the refusals call the thing on the x axis. It is the
+    variable's own name because this tab is not a dose–response tab: it plots a
+    measurement against **any** number the user varied — seeding density, MOI,
+    pre-treatment time — and telling someone who varied temperature that "no
+    dose changed the measurement" is a label describing a plot they did not
+    make. The fitter has no idea what it is fitting, which is why the word is
+    passed in rather than chosen here.
     """
     import numpy as np
 
@@ -209,8 +218,8 @@ def fit_response(xs, ys, *, model: str, fixed_top: float | None = None,
 
     if len(distinct) < len(free):
         return _replace(base, reason=(
-            f"{len(distinct)} distinct dose(s), and this model needs "
-            f"{len(free)} to be determined at all."))
+            f"only {len(distinct)} distinct {x_name} value(s), and this "
+            f"model needs {len(free)} to be determined at all."))
 
     y_span = float(np.ptp(y)) or 1.0
     lo_log, hi_log = float(distinct[0]), float(distinct[-1])
@@ -261,8 +270,8 @@ def fit_response(xs, ys, *, model: str, fixed_top: float | None = None,
         # prints in the legend as a dose, which is the worst kind of wrong —
         # a confident answer to a question the data did not ask.
         return _replace(base, reason=(
-            "the response is flat: no dose changed the measurement, so there "
-            "is no half-maximal one."))
+            f"the response is flat: changing {x_name} did not change the "
+            f"measurement, so there is no half-maximal value."))
     at_bound = [
         name for name, value, lo, hi in zip(free, popt, bounds_lo, bounds_hi)
         if min(abs(value - lo), abs(value - hi)) <= _BOUND_TOLERANCE * max(abs(hi - lo), 1.0)
@@ -272,16 +281,17 @@ def fit_response(xs, ys, *, model: str, fixed_top: float | None = None,
         # optimiser saying "further, and I cannot tell you how much further".
         # Reporting the bound as the answer would be a number nobody measured.
         return _replace(base, reason=(
-            f"{', '.join(at_bound)} ran to the edge of its range — the doses "
-            f"tested do not determine it."))
+            f"{', '.join(at_bound)} ran to the edge of its range — the "
+            f"{x_name} values tested do not determine it."))
 
     log_ec50 = values["log_ec50"]
     if not (lo_log <= log_ec50 <= hi_log):
         return _replace(base, reason=(
-            "the curve has not plateaued: the fitted EC50 lies outside the "
-            "doses tested."))
+            f"the curve has not plateaued: the fitted EC50 lies outside the "
+            f"{x_name} values tested."))
 
-    interval, ci_reason = _ec50_interval(log_ec50, pcov, free, len(pairs))
+    interval, ci_reason = _ec50_interval(log_ec50, pcov, free, len(pairs),
+                                         x_name)
     return _replace(
         base, ok=True, bottom=bottom, top=top,
         log_ec50=log_ec50, hill=values["hill"],
@@ -289,7 +299,8 @@ def fit_response(xs, ys, *, model: str, fixed_top: float | None = None,
         ec50_ci=interval, ci_reason=ci_reason)
 
 
-def _ec50_interval(log_ec50: float, pcov, free, n_points: int):
+def _ec50_interval(log_ec50: float, pcov, free, n_points: int,
+                   x_name: str = "x"):
     """``(interval, why_not)`` — the 95% interval, or ``None`` and the reason.
 
     ``None`` rather than a zero-width interval: an exactly-determined fit — as
@@ -298,9 +309,9 @@ def _ec50_interval(log_ec50: float, pcov, free, n_points: int):
 
     The reason comes back with it because the two ways to get here are
     different facts about the experiment. Too few points is a design problem
-    the user can fix by dosing more. A covariance that came back singular or
-    infinite means the parameters are not separable at these doses, which more
-    of the same doses will not fix.
+    the user can fix by testing more levels of the variable. A covariance that
+    came back singular or infinite means the parameters are not separable at
+    the levels tested, which more of the same ones will not fix.
     """
     import numpy as np
 
@@ -312,7 +323,8 @@ def _ec50_interval(log_ec50: float, pcov, free, n_points: int):
     index = free.index("log_ec50")
     variance = float(np.asarray(pcov)[index][index])
     if not np.isfinite(variance) or variance <= 0:
-        return None, "no CI: the parameters are not separable at these doses"
+        return None, (f"no CI: the parameters are not separable at these "
+                      f"{x_name} values")
     from scipy.stats import t as t_dist
     half = float(t_dist.ppf(0.975, dof)) * float(np.sqrt(variance))
     return (float(10.0 ** (log_ec50 - half)),

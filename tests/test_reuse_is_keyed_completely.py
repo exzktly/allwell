@@ -69,6 +69,26 @@ REUSE_CONTRACTS = {
     # a second copy would be a second definition of what makes two runs
     # interchangeable, and the reason each key is in it is written there.
     "settings_record.well_settings_allow_reuse": dict(KEYED_ON),
+    "parquet_cache.read_cached": {
+        "st_size": (
+            "the CSV's byte count. The pipeline rewrites these files — an "
+            "incremental run merges new rows into an existing well — and a "
+            "cache that survived that serves the old plate's numbers under the "
+            "new plate's name"),
+        "st_mtime_ns": (
+            "the other half of 'this file changed'. Size alone misses a "
+            "rewrite that happens to land on the same byte count, which a "
+            "re-run producing the same row count with different values does"),
+        "PARSER_VERSION": (
+            "the thing being reused is not the CSV, it is load_well_csv's "
+            "*output* — a function of the file AND of _STRING_COLS, "
+            "_CATEGORY_MAX_UNIQUE_SHARE, the per-channel column rename, the "
+            "FOV normalisation, the Included default and the shape_circularity "
+            "back-fill. Every one of those has changed at least once. Without "
+            "it, adding a derived column means an untouched CSV keeps serving "
+            "the frame from before the change: the column is simply absent, "
+            "the dropdown offering it does not appear, and nothing says so"),
+    },
 }
 
 #: What ``argv_digest`` has to cover, and why each item is not optional.
@@ -112,6 +132,7 @@ def test_every_reuse_decision_is_registered():
     """A decision missing from the roster is one nobody checked the keys of."""
     assert "run_journal.stored_remote_address" in REUSE_CONTRACTS
     assert "settings_record.well_settings_allow_reuse" in REUSE_CONTRACTS
+    assert "parquet_cache.read_cached" in REUSE_CONTRACTS
 
 
 def test_the_roster_names_every_key_the_decision_actually_takes():
@@ -619,3 +640,73 @@ def test_the_launcher_does_not_reach_the_digest():
         "the same configuration hashes differently depending on how the "
         f"pipeline was launched, so re-attach dies on any change to it: "
         f"{digests}")
+
+
+# ── the per-well frame cache ────────────────────────────────────────────────
+#
+# Same discipline as the two above, and for the same reason: an entry in the
+# roster generates no test by itself. Each key here is mutated alone and the
+# read must decline.
+
+_CACHE_KEY = "parquet_cache.read_cached"
+
+
+def _cached_plate(tmp_path):
+    """A well whose frame has been parsed once and cached."""
+    import csv as _csv
+
+    from well_viewer.data.data_loading import read_well_frame
+
+    path = tmp_path / "measurements_A01.csv"
+    with path.open("w", newline="") as fh:
+        writer = _csv.writer(fh)
+        writer.writerow(["well", "fov", "timepoint_hours", "area_px"])
+        for i in range(50):
+            writer.writerow(["A01", "1", 0.0, 100.0 + i])
+    read_well_frame(path)
+    return path
+
+
+def test_a_matching_key_reuses_the_cached_frame(tmp_path):
+    """The baseline. Without it, a read that declined unconditionally would
+    pass every mutation below while reusing nothing — which is exactly what a
+    review of this cache found, one line and the whole lane still green."""
+    pytest.importorskip("pyarrow")
+    from well_viewer.data import parquet_cache as pc
+
+    plate = _cached_plate(tmp_path)
+    assert pc.read_cached(plate) is not None
+
+
+def test_a_changed_size_declines(tmp_path):
+    pytest.importorskip("pyarrow")
+    from well_viewer.data import parquet_cache as pc
+
+    plate = _cached_plate(tmp_path)
+    with plate.open("a") as fh:
+        fh.write("A01,1,0.0,999.0\n")
+    assert pc.read_cached(plate) is None, REUSE_CONTRACTS[_CACHE_KEY]["st_size"]
+
+
+def test_a_changed_mtime_at_the_same_size_declines(tmp_path):
+    """A re-run that produces the same row count with different values."""
+    pytest.importorskip("pyarrow")
+    from well_viewer.data import parquet_cache as pc
+
+    plate = _cached_plate(tmp_path)
+    body = plate.read_text().replace("100.0", "900.0")
+    assert len(body) == len(plate.read_text()), "the fixture changed the size"
+    plate.write_text(body)
+    assert pc.read_cached(plate) is None, (
+        REUSE_CONTRACTS[_CACHE_KEY]["st_mtime_ns"])
+
+
+def test_a_changed_parser_version_declines(tmp_path, monkeypatch):
+    """The half no file-stat can see: the same bytes parsing to a new frame."""
+    pytest.importorskip("pyarrow")
+    from well_viewer.data import parquet_cache as pc
+
+    plate = _cached_plate(tmp_path)
+    monkeypatch.setattr(pc, "PARSER_VERSION", pc.PARSER_VERSION + 1)
+    assert pc.read_cached(plate) is None, (
+        REUSE_CONTRACTS[_CACHE_KEY]["PARSER_VERSION"])

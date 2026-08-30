@@ -152,12 +152,21 @@ umap-learn==0.5.5
 # requirements-remote.txt: the cache is a Review-side read, the pipeline writes
 # CSVs and never reads one back.
 #
-# It is the one dependency here with a real bundle cost — roughly 100 MB in a
-# build already past 900 MB. The trade is stated rather than assumed: five
-# minutes of parsing per plate open, every open, against a tenth of the
-# installer. Verified not to perturb the binding caps above (numpy stays at
-# 1.24.4, pandas at 2.2.3).
-pyarrow>=14.0
+# It is the one dependency here with a real cost, and the number is measured
+# rather than recalled: the cp311 manylinux wheel is 48 MB compressed and
+# 155 MB unpacked (159 MB as installed on this machine). PyInstaller strips and
+# recompresses, so the .app grows by less than that — by how much has NOT been
+# measured, and the unpacked size is the honest upper bound to quote. The trade
+# is stated rather than assumed: five minutes of parsing per plate open, every
+# open, against that.
+#
+# Pinned like every other line in this file rather than left as a range. It was
+# `>=14.0`, which resolves to whatever is newest on the day and makes the
+# "verified not to perturb the caps" note below true only of the version that
+# happened to be installed when it was written. pyarrow 22.0.0's wheel declares
+# no `Requires-Dist` at all, so it cannot move numpy or pandas; verified
+# installed alongside numpy 1.24.4 and pandas 2.2.3 with the fast lane green.
+pyarrow==22.0.0
 
 # ── macOS native clipboard (Copy SVG) ────────────────────────────────────────
 # Qt's QMimeData cannot register a payload under a raw macOS UTI, so Copy SVG

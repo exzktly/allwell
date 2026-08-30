@@ -392,7 +392,7 @@ def read_well_frame(path: Path) -> pd.DataFrame:
     **The one door onto a well's rows**, so the cache cannot be consulted on one
     path and skipped on another. On a miss the CSV is parsed by
     :func:`load_well_csv` exactly as before and the result is cached for next
-    time; on a hit the parse is skipped, which measured 42 ms against 3,232 ms on
+    time; on a hit the parse is skipped, which measured 51 ms against 3,068 ms on
     a 120,000-row well.
 
     The frame cached here is the CSV's own parse, **before** any verdict column
@@ -400,14 +400,23 @@ def read_well_frame(path: Path) -> pd.DataFrame:
     incidental to where this function sits: it is why the write belongs here,
     one call above :func:`load_and_project`'s projector loop, rather than
     anywhere the frame has already been through it.
+
+    The fingerprint is taken **before** the parse and handed to the write, which
+    declines if the file has moved on since. Stamping the file's state after a
+    three-second read would record the new file's identity against the old
+    file's rows whenever something rewrote the CSV in between, and that cache is
+    then wrong on every read afterwards with nothing to notice it by.
     """
-    from well_viewer.data.parquet_cache import read_cached, write_cache
+    from well_viewer.data.parquet_cache import (
+        read_cached, source_fingerprint, write_cache,
+    )
 
     cached = read_cached(path)
     if cached is not None:
         return cached
+    before = source_fingerprint(path)
     frame = load_well_csv(path)
-    write_cache(path, frame)
+    write_cache(path, frame, before)
     return frame
 
 

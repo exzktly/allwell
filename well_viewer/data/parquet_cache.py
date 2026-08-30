@@ -35,13 +35,16 @@ that the CSV path's allocations are gone; what the Arrow path costs instead has
 not been measured here.
 
 **The cache is written from the frame the CSV parsed to, never from a projected
-one.** ``load_and_project`` writes ``QC_Pass`` / ``Crop_Pass`` / ``Included``
+one.** ``load_and_project`` writes ``QC_Pass`` / ``Crop_Pass`` / ``Gate_Pass``
 into the cached frame *after* the read, from parameters the user can change at
 any time. Caching a projected frame would bake one session's QC verdict onto
 disk and serve it to the next session under different thresholds — a wrong
-number with no way to notice. ``tests/test_parquet_cache_is_not_projected.py``
+number with no way to notice.
+``tests/test_parquet_cache.py::test_the_cache_is_written_before_any_verdict_is_projected``
 holds that as a guard, because it is the one mistake here that produces silently
-wrong analysis rather than a crash.
+wrong analysis rather than a crash. ``Included`` is deliberately not in that
+list: ``load_well_csv`` itself adds it (defaulting to 1 when the CSV has no such
+column), so it belongs to the parse and is cached with the rest of it.
 
 **pyarrow is optional at runtime.** Every entry point answers "no" when it is
 absent, so an install without it — the pipeline-only one, or a partial
@@ -60,6 +63,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import pandas as pd
 
+from well_viewer.core.safe import swallow
+
 _logger = logging.getLogger("well_viewer.parquet_cache")
 
 #: Where a well's cached frame lives, relative to its CSV. A subdirectory, and
@@ -76,8 +81,36 @@ CACHE_DIRNAME = ".aw_parquet"
 #: Parquet key-value metadata key holding the source CSV's fingerprint.
 _FINGERPRINT_KEY = b"aw_source_fingerprint"
 
+#: Bumped whenever :func:`data_loading.load_well_csv` would produce a different
+#: frame from the same bytes.
+#:
+#: **The thing being reused is not the CSV — it is the parse.** The file's size
+#: and mtime describe the input; they say nothing about the function that turned
+#: it into a frame, and that function is not stable. It decides which columns are
+#: text (``_STRING_COLS``), which become categories
+#: (``_CATEGORY_MAX_UNIQUE_SHARE``), how per-channel measurement columns are
+#: renamed, how empty and ``-1`` FOVs are normalised, that ``Included`` defaults
+#: to 1, and it back-fills ``shape_circularity`` for datasets written before that
+#: column existed. Every one of those has changed at least once.
+#:
+#: Without this component, adding a derived column to ``load_well_csv`` means an
+#: untouched CSV keeps serving the frame from before it — the column simply is
+#: not there, the dropdown that offers it does not appear, and a plot keyed on it
+#: draws nothing. No error, no log line: §7's degraded output that is
+#: indistinguishable from good output, arrived at by omission.
+#:
+#: ``tests/test_parquet_cache.py::test_a_changed_parser_invalidates_every_cache``
+#: is what makes this a rule rather than a note: it pins the number against a
+#: hash of ``load_well_csv``'s own source and the constants it reads, so editing
+#: the parser without bumping this fails.
+PARSER_VERSION = 1
+
 #: Set once a missing engine has been reported, so a 96-well load says it once.
 _engine_warned = False
+
+#: Exception type names already reported by :func:`write_cache`, so a plate whose
+#: output volume is read-only says so once rather than once per well per open.
+_write_warned: set[str] = set()
 
 
 def _pyarrow() -> ModuleType | None:
@@ -96,8 +129,8 @@ def _pyarrow() -> ModuleType | None:
             _engine_warned = True
             _logger.info(
                 "pyarrow is not installed, so per-well frames are parsed from "
-                "CSV on every load. Installing it makes that read roughly 77x "
-                "faster; nothing else changes."
+                "CSV on every load. Installing it makes that read roughly 60x "
+                "faster on a large well; nothing else changes."
             )
         return None
 
@@ -109,17 +142,30 @@ def cache_path(csv_path: Path) -> Path:
 
 
 def source_fingerprint(csv_path: Path) -> str | None:
-    """``"<size>:<mtime_ns>"`` for *csv_path*, or ``None`` when it cannot be read.
+    """``"<size>:<mtime_ns>:v<PARSER_VERSION>"``, or ``None`` if it cannot be read.
 
     Size and modification time rather than a content hash: the file is tens of
     megabytes and this runs once per well per load, while the thing being
     guarded against is the pipeline rewriting the CSV — which changes both.
+    :data:`PARSER_VERSION` covers the other half of the reuse decision, which is
+    that the same bytes do not always parse to the same frame.
+
+    **One blind spot, named rather than papered over.** A filesystem whose mtime
+    resolution is one second — HFS+, and several common SMB and NFS mount
+    configurations, which is exactly where a shared microscopy plate tends to
+    live — can record a rewrite that lands inside the same second, with the same
+    byte count, as no change at all. It is not reachable on ext4 or APFS
+    (measured: 2,000 back-to-back rewrites produced 2,000 distinct
+    ``st_mtime_ns``, the smallest positive gap being 65 µs). Where it is
+    reachable, :func:`write_cache`'s re-stat closes the window this app can
+    actually open — a rewrite *during* a parse — and what remains is a rewrite
+    that both starts and finishes between two reads inside one second.
     """
     try:
         st = os.stat(csv_path)
     except OSError:
         return None
-    return f"{st.st_size}:{st.st_mtime_ns}"
+    return f"{st.st_size}:{st.st_mtime_ns}:v{PARSER_VERSION}"
 
 
 def read_cached(csv_path: Path) -> pd.DataFrame | None:
@@ -164,26 +210,51 @@ def read_cached(csv_path: Path) -> pd.DataFrame | None:
         return None
 
 
-def write_cache(csv_path: Path, frame) -> bool:
+def write_cache(csv_path: Path, frame, fingerprint: str | None = None) -> bool:
     """Cache *frame* for *csv_path*. Returns whether it landed.
 
     *frame* must be the CSV's own parse — see this module's docstring.
 
+    **Pass the fingerprint taken before the parse.** Reading a 120,000-row well
+    takes three seconds, and stamping the file's state as it is *afterwards*
+    records the new file's identity against the old file's rows if anything
+    rewrote the CSV in between — an Analyze run or a remote fetch writing into
+    an ``out/`` that Review is part-way through loading, which on a 96-well cold
+    load is a window minutes wide. The cache then looks fresh and is wrong on
+    every subsequent read, for ever: §7's cardinal case, reached without a bug
+    anywhere in the parse.
+
+    So the caller stats first and hands the answer here, and this re-stats and
+    **declines** when the two disagree — a cache not written costs one parse
+    next time, where a cache written wrongly costs the user's numbers. Omitting
+    the argument keeps the old behaviour and is only right when the frame did
+    not come from a read of this file.
+
     Written through a staging file in the destination directory and an
     ``os.replace``, the way every other file this app rewrites is: a half-written
     cache read as a frame would be a plate whose numbers are missing rows, and a
-    crash mid-write must leave the previous cache or none.
+    crash mid-write must leave the previous cache or none. The staging name
+    carries the pid so two processes cannot collide on it; a process killed
+    between the write and the replace leaves one behind, which the next
+    successful write for that well removes.
 
-    A failure is logged once and returns False. A read-only output volume is an
-    ordinary state — the run journal already treats it as one — and it must cost
-    the user a slower load, never their dataset.
+    A failure is logged once per session per reason, and returns False. A
+    read-only output volume is an ordinary state — the run journal already treats
+    it as one — and it must cost the user a slower load, never their dataset.
     """
     pq = _pyarrow()
     if pq is None:
         return False
-    fingerprint = source_fingerprint(csv_path)
-    if fingerprint is None:
+    current = source_fingerprint(csv_path)
+    if current is None:
         return False
+    if fingerprint is not None and fingerprint != current:
+        _logger.info(
+            "%s changed while it was being parsed, so the parsed frame is not "
+            "cached — it describes the previous contents. The next load will "
+            "read the new file.", csv_path.name)
+        return False
+    fingerprint = current
     path = cache_path(csv_path)
     tmp = path.with_name(f"__aw_tmp_{path.name}.pid{os.getpid()}")
     try:
@@ -207,11 +278,68 @@ def write_cache(csv_path: Path, frame) -> bool:
         os.replace(tmp, path)
         return True
     except Exception as exc:  # noqa: BLE001 - a cache that cannot be written is not fatal
-        _logger.warning("could not cache %s as Parquet (%s); the CSV is still "
-                        "the source and will be parsed on every load",
-                        csv_path.name, exc)
-        try:
+        # Once per session per reason, not once per well. A read-only output
+        # volume fails identically for all 96 wells of a plate, on every open;
+        # 96 identical WARNINGs in the log drawer is how a real message gets
+        # missed, and the sentence is the same one every time.
+        reason = type(exc).__name__
+        if reason not in _write_warned:
+            _write_warned.add(reason)
+            _logger.warning("could not cache %s as Parquet (%s); the CSV is "
+                            "still the source and will be parsed on every "
+                            "load. Further failures of this kind are not "
+                            "repeated.", csv_path.name, exc)
+        with swallow("remove the abandoned Parquet staging file"):
             tmp.unlink()
-        except OSError:
-            pass
         return False
+
+
+def prune(csv_dir) -> int:
+    """Drop cache files with nothing left to cache, under *csv_dir*. Returns how many.
+
+    The cache costs real disk — on a plate-shaped well of 20,000 rows the
+    Parquet is 66% of the CSV's size, so a 96-well plate of that shape adds
+    about 400 MB beside 600 MB of CSVs. That is the price of the feature and is
+    stated rather than swept away; what is *not* acceptable is the part nobody
+    can reclaim.
+
+    Two kinds of file have no owner and are removed here:
+
+    * a ``<well>.parquet`` whose ``<well>.csv`` is gone — the well was renamed
+      or deleted, and nothing will ever read or overwrite that entry again;
+    * a ``__aw_tmp_*`` staging file, left by a process killed between the write
+      and the ``os.replace``. Every one of them is dead by definition: a live
+      write holds its own name and replaces it within milliseconds, and a
+      *different* live process's staging file carries that process's pid, so
+      the worst case of removing one is that a write in flight fails and falls
+      back to parsing the CSV. That is the cache's ordinary failure, not a
+      user-visible one.
+
+    Deliberately **not** an eviction policy. Nothing here removes a cache whose
+    CSV is still present, however old, because "old" is not a property this can
+    read: a plate opened once a year is exactly the one whose five-minute parse
+    the cache exists to save.
+
+    Every failure is skipped rather than raised — this runs on the load path and
+    a directory it cannot tidy must never cost the user their dataset.
+    """
+    directory = Path(csv_dir) / CACHE_DIRNAME
+    removed = 0
+    if not directory.is_dir():
+        return 0
+    with swallow(f"prune the Parquet cache under {directory}"):
+        for entry in directory.iterdir():
+            if not entry.is_file():
+                continue
+            orphan = (entry.name.startswith("__aw_tmp_")
+                      or (entry.suffix == ".parquet"
+                          and not (Path(csv_dir) / f"{entry.stem}.csv").exists()))
+            if not orphan:
+                continue
+            with swallow(f"remove the orphaned cache file {entry.name}"):
+                entry.unlink()
+                removed += 1
+    if removed:
+        _logger.info("removed %d orphaned Parquet cache file(s) from %s",
+                     removed, directory)
+    return removed

@@ -47,3 +47,16 @@ tifffile==2023.9.26
 scipy>=1.9,<1.14
 scikit-image>=0.20,<0.25
 imageio>=2.30
+
+# The Parquet engine behind the per-well frame cache. Present here for two
+# reasons that are not the same. It is what the cache runs on, so without it
+# `tests/test_parquet_cache.py`'s module-level `importorskip` skips the WHOLE
+# file in CI — including the two guards in it that need no engine at all: the
+# one-door AST check, and the check that no verdict column reaches the cache.
+# A guard that silently does not run is worse than no guard, because it is
+# reported as one. And it is a GUI-side dependency (`_Docs/requirements.txt`),
+# deliberately absent from `_Docs/requirements-remote.txt` — the pipeline writes
+# these CSVs and never reads them back — so nothing else here pulls it in.
+#
+# Pinned like the rest of this file, and to the same version the app declares.
+pyarrow==22.0.0

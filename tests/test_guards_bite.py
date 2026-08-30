@@ -3012,3 +3012,50 @@ def test_text_decode_guard_catches_a_locale_decode(tmp_path, monkeypatch, shape)
 def test_text_decode_guard_clears_a_named_codec(tmp_path, monkeypatch, shape):
     good = _write(tmp_path, "good_decode.py", shape)
     assert _run_scan(monkeypatch, _DECODE_GUARD, _DECODE_TEST, [good]) is None
+
+
+# ── the one door onto a well's rows ─────────────────────────────────────────
+#
+# Three spellings, because the first version of this guard matched on the call
+# name alone and the aliased import walked straight through it — the same shape
+# as the aliased `QFrame` above, which is why CLAUDE.md §7.5 names it.
+
+def _door_offenders(tmp_path, name, body):
+    from tests.test_parquet_cache import load_well_csv_call_sites
+
+    path = _write(tmp_path, name, body)
+    return load_well_csv_call_sites([(path, parse_source(path))])
+
+
+@pytest.mark.parametrize("shape", [
+    "from well_viewer.data.data_loading import load_well_csv\n"
+    "def f(p):\n    return load_well_csv(p)\n",
+
+    "from well_viewer.data import data_loading as dl\n"
+    "def f(p):\n    return dl.load_well_csv(p)\n",
+
+    "from well_viewer.data.data_loading import load_well_csv as _read\n"
+    "def f(p):\n    return _read(p)\n",
+])
+def test_the_door_guard_catches_every_spelling_of_the_bypass(tmp_path, shape):
+    assert _door_offenders(tmp_path, "bad_door.py", shape), (
+        "a call site that skips the Parquet cache went unseen; it parses the "
+        "CSV on every load and, worse, could cache an already-projected frame"
+    )
+
+
+def test_the_door_guard_clears_the_sanctioned_call(tmp_path):
+    """Going through the door is what the rule asks for, and an unrelated
+    function whose name merely ends the same way is not a violation."""
+    good = ("from well_viewer.data.data_loading import read_well_frame\n"
+            "def f(p):\n    return read_well_frame(p)\n"
+            "def g(p):\n    return maybe_load_well_csv_later(p)\n")
+    assert _door_offenders(tmp_path, "good_door.py", good) == []
+
+
+def test_the_door_guard_does_not_fire_on_an_unused_alias(tmp_path):
+    """An import with no call is a lint problem, not a bypass — and a guard
+    that reported it would be reporting something ruff already owns."""
+    body = ("from well_viewer.data.data_loading import load_well_csv as _read\n"
+            "def f(p):\n    return p\n")
+    assert _door_offenders(tmp_path, "unused_alias.py", body) == []

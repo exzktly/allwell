@@ -55,8 +55,24 @@ def _text() -> str:
     return _TRACKER.read_text(encoding="utf-8")
 
 
+def _tracker_table() -> str:
+    """Just the tracker table, not every table in the document.
+
+    The workstream sections below it carry tables of their own — a triage of
+    modules, a comparison of options — and a scan over the whole file reads
+    their rows as tracker rows, which fails the parse check on a document that
+    is perfectly well formed. Scoping to the block between the tracker's own
+    header and the rule that closes it is what keeps this checking the tracker
+    rather than the prose.
+    """
+    text = _text()
+    start = text.index("| # | Workstream |")
+    return text[start:text.index("\n---\n", start)]
+
+
 def _rows() -> list[tuple[int, str, str, str]]:
-    return [(int(n), ws, item, status) for n, ws, item, status in _ROW.findall(_text())]
+    return [(int(n), ws, item, status)
+            for n, ws, item, status in _ROW.findall(_tracker_table())]
 
 
 def test_the_tracker_exists_and_has_rows():
@@ -75,7 +91,7 @@ def test_every_table_line_parses_as_a_row():
     line.
     """
     body = [
-        line for line in _text().splitlines()
+        line for line in _tracker_table().splitlines()
         if line.lstrip().startswith("|")
         and not line.lstrip().startswith("|---")
         and not line.lstrip().startswith("| # |")

@@ -27,23 +27,14 @@ import pytest
 # quadratic in cluster size. Colony detection runs inline on the GUI thread: a
 # confluent well of 16,000 cells took 10.69 s per redraw, and 1.06 s after.
 #
-# The removed operation is *set construction volume* — how many elements are
-# passed to ``set(...)`` in total. Counting it needs the module's own ``set``
-# name, which Python resolves through module globals before builtins.
+# The removed operation is the *set construction* the rebuild performed: the
+# fixed version builds one frontier set per call to ``_dbscan``, however large
+# the cluster grows, while the quadratic version builds one per core point
+# expanded. Counting calls needs the module's own ``set`` name, which Python
+# resolves through module globals before builtins.
 
 
-class _CountingSet(set):
-    """A ``set`` that records how many elements were handed to its constructor."""
-
-    volume = 0
-
-    def __init__(self, iterable=()):
-        items = list(iterable)
-        type(self).volume += len(items)
-        super().__init__(items)
-
-
-def _dbscan_set_volume(n_points: int, monkeypatch) -> int:
+def _dbscan_set_calls(n_points: int) -> int:
     from well_viewer.domain import spatial_compute as sc
 
     # One dense blob, so the whole input is a single cluster and the frontier
@@ -51,22 +42,30 @@ def _dbscan_set_volume(n_points: int, monkeypatch) -> int:
     rng = np.random.default_rng(0)
     pts = rng.normal(scale=1.0, size=(n_points, 2))
 
-    _CountingSet.volume = 0
-    monkeypatch.setattr(sc, "set", _CountingSet, raising=False)
-    sc._dbscan(pts, eps=5.0, min_samples=3)
-    monkeypatch.undo()
-    return _CountingSet.volume
+    calls = {"n": 0}
+
+    def counting(iterable=()):
+        calls["n"] += 1
+        return set(iterable)
+
+    # A scoped context rather than ``monkeypatch.undo()``: undo discards the
+    # whole record, so it would silently revert any unrelated patch a caller
+    # made earlier in the same test.
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(sc, "set", counting, raising=False)
+        sc._dbscan(pts, eps=5.0, min_samples=3)
+    return calls["n"]
 
 
-def test_dbscan_frontier_does_not_grow_quadratically(monkeypatch):
-    small = _dbscan_set_volume(200, monkeypatch)
-    large = _dbscan_set_volume(400, monkeypatch)
+def test_dbscan_frontier_does_not_grow_quadratically():
+    small = _dbscan_set_calls(200)
+    large = _dbscan_set_calls(400)
     assert small > 0, "the counter saw nothing — the patch missed its target"
-    assert large <= small * 3, (
-        f"doubling the cluster multiplied set-construction volume by "
-        f"{large / small:.1f}x ({small} -> {large}). The frontier is being "
-        "rebuilt per core point again, which is quadratic in cluster size and "
-        "froze Review on a confluent well."
+    assert small == 1 and large == 1, (
+        f"``_dbscan`` built {small} frontier sets at 200 points and {large} at "
+        "400. It builds exactly one per call however large the cluster grows; "
+        "one per core point expanded is the quadratic rebuild that froze "
+        "Review on a confluent well."
     )
 
 
@@ -94,7 +93,8 @@ class _CountingCell:
         return isinstance(other, _CountingCell) and self.value == other.value
 
 
-def _first_visit_comparisons(n_cells: int) -> int:
+def _first_visit_comparisons(n_cells: int) -> tuple[int, int]:
+    """Return ``(comparisons, len(result))`` for a run of *n_cells* distinct cells."""
     from datasets.ome_import.stage_layout import _first_visits
 
     # Every cell distinct, so a list scan reads the whole prefix every time and
@@ -102,16 +102,27 @@ def _first_visit_comparisons(n_cells: int) -> int:
     # distinct values rarely collide.
     cells = [_CountingCell(i) for i in range(n_cells)]
     _CountingCell.comparisons = 0
-    _first_visits(cells)
-    return _CountingCell.comparisons
+    out = _first_visits(cells)
+    return _CountingCell.comparisons, len(out)
 
 
 def test_first_visits_does_not_compare_against_every_earlier_cell():
-    small = _first_visit_comparisons(300)
-    large = _first_visit_comparisons(600)
+    n_small, n_large = 300, 600
+    small, kept_small = _first_visit_comparisons(n_small)
+    large, kept_large = _first_visit_comparisons(n_large)
+    # Without this the check is vacuous: a ``_first_visits`` that returns an
+    # empty list makes no comparisons at all and would pass every bound below.
+    assert (kept_small, kept_large) == (n_small, n_large), (
+        f"``_first_visits`` kept {kept_small} of {n_small} and {kept_large} of "
+        f"{n_large} distinct cells. Every input here is distinct, so it must "
+        "return all of them — the comparison counts below measure nothing "
+        "until it does."
+    )
     # A set answers almost every membership test from the hash alone, so the
-    # honest linear expectation here is "close to zero", not "doubles".
-    assert large <= max(small * 3, 4 * 600), (
+    # honest linear expectation here is "close to zero", not "doubles". The
+    # ceiling is derived from the input rather than written as a literal, so it
+    # keeps meaning the same thing if the sizes above change.
+    assert large <= max(small * 3, 4 * n_large), (
         f"doubling the input took element comparisons from {small} to {large}. "
         "A list-prefix scan is back, and it cost five seconds per keystroke on "
         "a plate timelapse."

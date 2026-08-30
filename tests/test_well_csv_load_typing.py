@@ -8,10 +8,11 @@ A plate of 537,393 cells × 37 columns died on load with
 `(n_columns, n_rows)` object is what pandas allocates when a whole file is read
 with ``dtype=str``: one consolidated block for every column at once, filled with
 a Python string per cell — including for the 31 columns that are numbers and
-were about to be converted back. Measured on a file of that exact shape, peak
-RSS was 1749 MiB before the change and 1073 MiB after. Chunking the old read was
-tried first and measured **worse** (1780 MiB), because the coerced chunks stay
-alive until the concat.
+were about to be converted back. ``load_well_csv``'s own docstring carries the
+peak-RSS figures for the two read shapes, and ARCHITECTURE.md repeats them;
+they are not restated a third time here. Chunking the old read was tried first
+and measured **worse** (1780 MiB), because the coerced chunks stay alive until
+the concat.
 
 So the risk this file exists to hold is not the memory — it is that typing the
 read quietly changes a *value*. Every case below is a differential against the

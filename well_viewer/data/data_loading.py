@@ -154,8 +154,11 @@ def load_well_csv(path: Path) -> pd.DataFrame:
     converted back. On a 537,393-row × 37-column file that is a 152 MiB pointer
     array plus roughly 16.6 million short strings, and it is where a plate that
     size died with ``Unable to allocate 152 MiB for an array with shape
-    (37, 537393) and dtype object``. Measured on a file of exactly that shape:
-    1749 MiB peak before, 1073 MiB after.
+    (37, 537393) and dtype object``. Measured on a file of exactly that shape,
+    each read in its own process: 1729 MiB peak before, 867 MiB after. The
+    separate processes are the point — ``ru_maxrss`` is a high-water mark that
+    never falls, so measuring both reads in one process reports the first
+    strategy's peak as the second one's.
 
     Chunking the old read does **not** help — the coerced chunks stay alive
     until the concat — which is why this types the read instead.

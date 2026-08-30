@@ -118,10 +118,10 @@ review"; it is open until the gate closes.
 | 8 | B | Differential coverage on the PR diff, advisory at first | ☑ | `scripts/coverage.sh --diff`, local and advisory. Not a PR gate: the slow lane does not run on PRs, so genuinely-covered code would read uncovered, and a per-PR run costs 3x the lane. `coverage.yml` states what turning it on would cost. |
 | 9 | B | One-off zero-coverage inventory, triaged into rows here | ◐ | Fast lane: 11 modules, 1,860 statements, no executed lines. Statically triaged — **every one has a live application importer, so none is dead code**, and most sit behind lazily-built tabs (heatmap, playground, home/groups, cell_browser) the slow lane constructs. Combined run still owed before any of them is called unreached. |
 | 10 | B | Review gate: the lanes combine, and no threshold masquerades as a gate | ☐ | |
-| 11 | C | Complexity assertions for the four fixed hot paths | ☑ | `tests/test_hot_paths_stay_linear.py`. Counts the operation each fix removed, at two input sizes — deterministic and machine-independent. Four mutations watched failing, each on its own check. |
+| 11 | C | Complexity assertions for the four fixed hot paths | ☑ | `tests/test_hot_paths_stay_linear.py`. Counts the operation each fix removed, at two input sizes — deterministic and machine-independent. Four mutations watched failing, each on its own check. Hardened by the gate: the first-visits check asserts every distinct cell came back (it passed against a `_first_visits` returning nothing), and the DBSCAN check counts `set()` **calls** — one per `_dbscan` call against 200 and 400 for the rebuild — rather than element volume, which separated the two by only 1.33x above the threshold. |
 | 12 | C | `pytest-benchmark` lane with in-repo baselines | ⊘ | Declined: it would be a second lane nobody runs, which is this repo's largest existing gap rather than a fix for one. Reason in full in §C. |
-| 13 | C | Peak-memory ceiling on the CSV load path | ☑ | `tests/test_the_load_path_stays_small.py`. `tracemalloc` separates the typed read from the `dtype=str` one by 1.8x, so the ratio ceiling is meaningful. Both mutations watched failing. |
-| 14 | C | Review gate: the assertions pin behaviour, not the machine | ☐ | |
+| 13 | C | Peak-memory ceiling on the CSV load path | ☑ | `tests/test_the_load_path_stays_small.py`. `tracemalloc` separates the typed read from the `dtype=str` one by 1.8x, so the ratio ceiling is meaningful. Both mutations watched failing. Hardened by the gate: the fixture's `filename` column now varies (384 distinct in 15,000 rows) so it can see `_CATEGORY_MAX_UNIQUE_SHARE` at all, and a third test asserts the other side of that constant — an all-distinct column stays object. Both mutations watched failing; lowering the constant to 0.001 left the file green before. |
+| 14 | C | Review gate: the assertions pin behaviour, not the machine | ☑ | Ran on `d3c9da3`. Six findings, all closed: a vacuous first-visits check (HIGH), a memory fixture blind to the threshold it guards, `_CountingSet` as over-construction, a blanket `monkeypatch.undo()`, a fourth conflicting copy of the load measurement, and ARCHITECTURE not naming the new guards. The measurement conflict resolved to 1729/867 — `git log c7c8675` records 1749/1073 as the discarded in-process reading, since `ru_maxrss` never falls. §C2's "gap this leaves" paragraph amended on the reviewer's two points: a complexity regression hidden inside one library call, and the self-normalising ratio timing the plan never mentioned. Verdict on over-architecture: not, once `_CountingSet` went. |
 | 15 | D | Parquet cache writer + fingerprint invalidation | ☐ |  |
 | 16 | D | `WellRepository.rows()` reads Parquet | ☐ |  |
 | 17 | D | Column projection plumbed from the aggregation call sites | ☐ |  |
@@ -350,10 +350,32 @@ strip, the string-per-cell read — is a *countable* change in what the code doe
 not a change in how fast the machine is. Counting them is exact, identical on
 every machine, and runs in the fast lane for free.
 
-The gap this leaves is honest and worth stating: a pure constant-factor
-slowdown that changes no operation count and no allocation would pass both
-files. Nothing in this repository's history is that shape, and if one appears
-the answer is to find what it made more of and count that.
+The gap this leaves is honest and worth stating, and it is wider than "a pure
+constant factor". Two shapes get through:
+
+A constant-factor slowdown that changes no operation count and no allocation
+passes both files. Nothing in this repository's history is that shape, and if
+one appears the answer is to find what it made more of and count that.
+
+Worse, **a complexity regression is invisible to counting whenever the
+complexity lives inside a single library call.** Both `_dbscan` and
+`nearest_neighbour_distance` build a `cKDTree`; replacing that with
+`scipy.spatial.distance.cdist` or a broadcast `np.linalg.norm` reads as a
+simplification, keeps every Python-level count identical — the frontier check
+still sees one `set()` call — and is O(n²) in time and memory. The memory guard
+is scoped to `load_well_csv` and sees none of it. The same shape covers a
+`df.apply(axis=1)` replacing a vectorised pandas expression, which in this
+codebase is the likeliest performance regression there is.
+
+**The middle option was not considered and should have been.** Between an
+absolute wall-clock band and operation counting sits a self-normalising timing
+check: time the same operation at *n* and *2n* in one process and assert the
+*ratio*, which cancels machine speed and contention and is exactly the
+two-input-size shape C1 already builds. It is passed over here, not overlooked
+— a ratio is still a wall-clock measurement, and on a shared runner the two
+halves can be scheduled differently enough that the ratio itself moves. It is
+the right thing to reach for if a regression of either shape above ever lands,
+and it would go in a lane of its own rather than into the fast lane.
 
 **C3 — Memory has its own gauge.** `tracemalloc` peak around `load_well_csv` for
 a fixed synthetic plate, asserted against a ceiling with headroom. This is the

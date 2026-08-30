@@ -7,8 +7,9 @@ object block of every column at once and fill it with a Python string per cell,
 including for the columns that are numbers and are about to be converted back.
 On a 537,393-row x 37-column plate that is a 152 MiB pointer array plus roughly
 16.6 million short strings, and it is where such a plate died with ``Unable to
-allocate 152 MiB``. Measured on a file of that shape: 1729 MiB peak for the
-string read against 867 MiB for the typed one.
+allocate 152 MiB``. ARCHITECTURE.md carries the peak-RSS figures for the two
+read shapes; they are not restated here, because a measurement written down in
+three places is a measurement that will disagree with itself in two of them.
 
 And ``_categorize_text_columns`` converts a text column whose distinct values
 are under half its rows, which on a real plate takes the frame from 327 MiB to
@@ -43,11 +44,17 @@ _TEXT_COLS = ["experiment", "channel", "well", "fov", "timepoint", "filename"]
 
 @pytest.fixture(scope="module")
 def plate_csv(tmp_path_factory):
-    """A plate-shaped CSV: 37 columns, six of them text, one distinct value each.
+    """A plate-shaped CSV: 37 columns, six of them text, five of them repeating.
 
-    One distinct value per text column is what a real plate looks like — the
-    profiling that produced the categorical conversion found ``experiment`` and
-    ``channel`` holding one value apiece and costing 30 MiB each.
+    Five of the text columns hold one distinct value — what a real plate looks
+    like, and what the profiling behind the categorical conversion found:
+    ``experiment`` and ``channel`` holding one value apiece and costing 30 MiB
+    each. ``filename`` is the exception on a real plate and the exception here,
+    varying across fields and timepoints: 384 distinct values in 15,000 rows, a
+    share of 0.026. That is the column that makes the fixture able to see
+    ``_CATEGORY_MAX_UNIQUE_SHARE`` at all — with one value in every column, the
+    threshold could be lowered by three orders of magnitude and both tests here
+    would stay green.
     """
     path = tmp_path_factory.mktemp("plate") / "measurements_A01.csv"
     numeric = [f"m{i}" for i in range(37 - len(_TEXT_COLS))]
@@ -56,7 +63,8 @@ def plate_csv(tmp_path_factory):
         writer.writerow(_TEXT_COLS + numeric)
         for row in range(ROWS):
             writer.writerow(
-                ["exp1", "GFP", "A01", "1", "24h", "plate_A01_f1_24h.tif"]
+                ["exp1", "GFP", "A01", "1", "24h",
+                 f"plate_A01_f{row % 16}_{row % 24}h.tif"]
                 + [f"{(row * 7919 % 100000) / 100:.3f}" for _ in numeric]
             )
     return path
@@ -102,4 +110,38 @@ def test_the_text_columns_come_back_as_categories(plate_csv):
         f"{plain} came back as object rather than category. Each one costs a "
         "Python string per row in the row cache, for every well of every open "
         "dataset."
+    )
+
+
+def test_a_text_column_that_does_not_repeat_is_left_alone():
+    """The other side of ``_CATEGORY_MAX_UNIQUE_SHARE``, which no fixture reaches.
+
+    A category is a dictionary plus an integer code per row. When almost every
+    value is distinct the dictionary is the same size as the column and the
+    codes are pure overhead, so the conversion is refused above half. Nothing
+    else in this file crosses that line — the plate fixture's most varied text
+    column sits at a share of 0.026 — so this asserts it directly, on the
+    smallest frame that can show it.
+    """
+    pd = pytest.importorskip("pandas")
+    from well_viewer.data.data_loading import (
+        _CATEGORY_MAX_UNIQUE_SHARE,
+        _categorize_text_columns,
+    )
+
+    n = 100
+    frame = pd.DataFrame({
+        "well": ["A01"] * n,
+        "filename": [f"img_{i}.tif" for i in range(n)],
+    })
+    assert frame["filename"].nunique() / n > _CATEGORY_MAX_UNIQUE_SHARE
+    _categorize_text_columns(frame)
+
+    assert str(frame["well"].dtype) == "category", (
+        "a text column with one distinct value in 100 rows was left as object"
+    )
+    assert str(frame["filename"].dtype) == "object", (
+        "a text column whose values are all distinct was converted to a "
+        "category. The category dictionary is then as large as the column "
+        "itself and every row carries an integer code on top of it."
     )

@@ -27,6 +27,7 @@ addopts = "-v"
 markers = [
     "qt: test constructs Qt objects; needs the offscreen platform",
     "slow: heavy test (e.g. real StarDist model load + inference); deselect with -m \"not slow\"",
+    "wells: the dataset a fixture builds — {well_token: path}; unmarked tests get a default plate",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",

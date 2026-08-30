@@ -21,6 +21,7 @@ from PySide6.QtCore import Qt
 
 from well_viewer.core.safe import swallow
 from well_viewer.domain import sample_variables as sv
+from well_viewer.domain.plate_layout import wells_in_fill_order
 
 _logger = logging.getLogger("well_viewer")
 
@@ -135,6 +136,9 @@ def refresh_variables(ctx) -> None:
     if note is not None:
         note.setText(_note_for(variable))
 
+    _paint_chips(ctx, variable)
+    _paint_plate(ctx, variable)
+
 
 def _variable_item(variable):
     from PySide6.QtWidgets import QListWidgetItem
@@ -194,6 +198,8 @@ def wire_variables(ctx) -> None:
     _widget(ctx, "_var_value_down").clicked.connect(lambda: move_value(ctx, +1))
     _widget(ctx, "_var_values").itemChanged.connect(
         lambda item: rename_value(ctx, item))
+
+    _widget(ctx, "_var_fill_apply").clicked.connect(lambda: apply_fill(ctx))
 
 
 def add_variable(ctx) -> None:
@@ -293,3 +299,157 @@ def _select_variable(ctx, variable_id: str) -> None:
         if listing.item(row).data(Qt.UserRole) == variable_id:
             listing.setCurrentRow(row)
             return
+
+
+# ── the plate ───────────────────────────────────────────────────────────────
+
+def dataset_wells(ctx) -> list[str]:
+    """The wells this dataset holds, which is what a fill covers.
+
+    Not all 96: a plate imaged in half is half a plate, and cycling values over
+    the empty slots would put every value one place out from the well it was
+    meant for, invisibly, because there is nothing on screen where the absent
+    well would be.
+    """
+    return sorted(getattr(ctx.state.dataset, "well_paths", {}) or {})
+
+
+def _value_colour(index: int) -> str:
+    """A stable colour per value position.
+
+    Read off the plate palette by *position in the value list*, not by id, so
+    the same dose is the same colour on every plate and reordering the values
+    reorders the colours with them — which is what makes the legend and the
+    plate agree without either being told about the other.
+    """
+    from well_viewer.domain.plate_layout import WELL_COLORS
+
+    return WELL_COLORS[(index * 7) % len(WELL_COLORS)]
+
+
+def _paint_chips(ctx, variable) -> None:
+    """One chip per value, plus a Clear. Select wells, then click a chip."""
+    from PySide6.QtWidgets import QPushButton
+
+    from .tab_view import value_chip
+
+    host = _widget(ctx, "_var_chips")
+    if host is None:
+        return
+    layout = host.layout()
+    while layout.count():
+        item = layout.takeAt(0)
+        widget = item.widget()
+        if widget is not None:
+            widget.setParent(None)
+
+    for index, value in enumerate(variable.values):
+        chip = value_chip(variable.display_label(value.id), value.id, host,
+                          swatch=_value_colour(index))
+        chip.clicked.connect(
+            lambda _checked=False, _v=value.id: assign_selected(ctx, _v))
+        layout.addWidget(chip)
+
+    if variable.values:
+        clear = QPushButton("Clear", host)
+        clear.setObjectName("HomeAction")
+        clear.clicked.connect(lambda: assign_selected(ctx, None))
+        layout.addWidget(clear)
+    layout.addStretch(1)
+
+
+def _paint_plate(ctx, variable) -> None:
+    """Colour, ring and read back the plate for the selected variable.
+
+    Three independent layers, none of them colour alone: the fill says which
+    value, a **ring** says a well in this dataset has no value for this
+    variable, and the line underneath counts them. The ring is not the empty
+    socket — that already means "not in the dataset", and a well that exists but
+    is unannotated is a different fact with a different fix.
+    """
+    plate = _widget(ctx, "_var_plate")
+    if plate is None:
+        return
+    wells = dataset_wells(ctx)
+    vset = _vset(ctx)
+
+    plate.setEnabledWells(wells)
+    plate.clearWellColors()
+    plate.clearWellRings()
+    plate.setColoredWellsLit(True)
+
+    colours = {value.id: _value_colour(i)
+               for i, value in enumerate(variable.values)}
+    for well in wells:
+        value_id = vset.value_id_for(variable.id, well)
+        if value_id in colours:
+            plate.setWellColor(well, colours[value_id])
+
+    missing = sv.unassigned_wells(vset, variable.id, wells)
+    plate.setWellRings(missing)
+
+    scope = _widget(ctx, "_var_fill_scope")
+    if scope is not None:
+        scope.setText(f"over the {len(wells)} well(s) in this dataset")
+
+    readout = _widget(ctx, "_var_readout")
+    if readout is not None:
+        readout.setText(_readout_for(variable, wells, missing))
+
+
+def _readout_for(variable, wells, missing) -> str:
+    """What the plate is showing, in words, including what it is short of."""
+    if not wells:
+        return "No dataset is open, so there are no wells to fill."
+    if not variable.values:
+        return f"{variable.name} has no values yet, so there is nothing to fill."
+    if missing:
+        shown = ", ".join(missing[:8])
+        more = f" and {len(missing) - 8} more" if len(missing) > 8 else ""
+        return (
+            f"{len(missing)} of {len(wells)} well(s) have no {variable.name} — "
+            f"{shown}{more}. They are ringed. A plot grouped by {variable.name} "
+            "leaves out any member that includes one, and says how many."
+        )
+    return f"All {len(wells)} well(s) have a {variable.name}."
+
+
+# ── assignment ──────────────────────────────────────────────────────────────
+
+def assign_selected(ctx, value_id: str | None) -> None:
+    """Give the plate's selected wells *value_id*, or clear them.
+
+    Nothing happens with no selection, and it says so rather than silently
+    doing nothing — a chip that appears inert is indistinguishable from one
+    that is broken.
+    """
+    variable_id = selected_variable_id(ctx)
+    plate = _widget(ctx, "_var_plate")
+    if not variable_id or plate is None:
+        return
+    wells = list(plate.selectedWells or [])
+    if not wells:
+        readout = _widget(ctx, "_var_readout")
+        if readout is not None:
+            readout.setText(
+                "Select wells on the plate first — drag across them, or click a "
+                "row letter or column number — then click a value.")
+        return
+    _commit(ctx, sv.assign(_vset(ctx), variable_id, wells, value_id))
+
+
+def apply_fill(ctx) -> None:
+    """Cycle the selected variable's values over the dataset's wells.
+
+    The ordering is ``plate_layout.wells_in_fill_order`` and the cycling is
+    ``sample_variables.fill``: one module knows the geometry, the other knows
+    the values, and neither holds a second definition of the other's job.
+    """
+    variable_id = selected_variable_id(ctx)
+    axis = _widget(ctx, "_var_fill_axis")
+    repeat = _widget(ctx, "_var_fill_repeat")
+    if not variable_id or axis is None or repeat is None:
+        return
+    wells = wells_in_fill_order(dataset_wells(ctx), axis.currentData())
+    _commit(ctx, sv.fill(_vset(ctx), variable_id, wells,
+                         repeat=repeat.value()))

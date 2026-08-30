@@ -531,6 +531,24 @@ QPushButton#HomeThumbTile:hover {{
 QPushButton#HomeThumbTile:pressed {{
     background-color: {c.hover};
 }}
+/* A value chip on Home -> Variables: click one to give it to the wells
+   selected on the plate. Reads as a token rather than a command button — the
+   plate is what the user is acting on, and a row of full-weight buttons above
+   it would compete with it. Its left edge carries the value's own plate colour,
+   set per chip because that is the only part that varies. */
+QPushButton#VariableValueChip {{
+    background-color: {c.panel_elevated};
+    border: 1px solid {c.border};
+    border-left: 3px solid {c.border};
+    border-radius: {r.sm}px;
+    color: {c.text_primary};
+    font-size: {t.small_size}px;
+    padding: {s.xs}px {s.sm}px;
+}}
+QPushButton#VariableValueChip:hover {{
+    background-color: {c.hover};
+    border-color: {c.border_strong};
+}}
 /* Home's recent-dataset rows — one definition, shared with EmptyState's
    entries; see ``link_row_qss``. */
 {_link_row_home}

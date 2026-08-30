@@ -22,10 +22,11 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QPushButton, QVBoxLayout, QWidget,
+    QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
 import theme
+from well_viewer.domain.plate_layout import FILL_ALONG_COLS, FILL_ALONG_ROWS
 from well_viewer.domain.sample_variables import NUMBER, TEXT
 
 #: The definition columns' widths. Named rather than written inline: the left
@@ -58,7 +59,15 @@ def build_variables_subtab(ctx, frame: QWidget) -> None:
     outer.setSpacing(theme.Spacing.lg)
 
     outer.addWidget(_build_variable_rail(ctx, frame, reg))
-    outer.addWidget(_build_definition(ctx, frame, reg), 1)
+
+    right = QWidget(frame)
+    column = QVBoxLayout(right)
+    column.setContentsMargins(0, 0, 0, 0)
+    column.setSpacing(theme.Spacing.md)
+    column.addWidget(_build_definition(ctx, right, reg))
+    column.addWidget(_build_fill_row(ctx, right, reg))
+    column.addWidget(_build_plate(ctx, right, reg), 1)
+    outer.addWidget(right, 1)
 
     from .controller import refresh_variables, wire_variables
     wire_variables(ctx)
@@ -73,8 +82,10 @@ def _build_variable_rail(ctx, parent: QWidget, reg) -> QWidget:
     column.setSpacing(theme.Spacing.sm)
 
     column.addWidget(_section_label(host, "Variables"))
+    # No object name: the widget is reached through the registry, and the
+    # app-wide QListWidget rule already paints it. A hook that resolves to
+    # nothing is a hook that does nothing.
     listing = reg.register("_var_list", QListWidget(host))
-    listing.setObjectName("VariableList")
     listing.setFixedWidth(_LIST_W)
     column.addWidget(listing, 1)
 
@@ -129,7 +140,6 @@ def _build_definition(ctx, parent: QWidget, reg) -> QWidget:
     values_row = QHBoxLayout()
     values_row.setSpacing(theme.Spacing.sm)
     values = reg.register("_var_values", QListWidget(body))
-    values.setObjectName("VariableValueList")
     values.setEditTriggers(QListWidget.DoubleClicked | QListWidget.EditKeyPressed)
     values_row.addWidget(values, 1)
 
@@ -182,3 +192,110 @@ def value_item(label: str, value_id: str) -> QListWidgetItem:
     item.setData(Qt.UserRole, value_id)
     item.setFlags(item.flags() | Qt.ItemIsEditable)
     return item
+
+
+def _build_fill_row(ctx, parent: QWidget, reg) -> QWidget:
+    """``Fill [Dose] along [Columns] · repeat each [2] · [Apply Fill]``.
+
+    Modelled on Quick Replicates' own row, which is the control this page
+    already teaches. Any block, row or column design is one click: six doses
+    along the columns repeating each twice fills a 12-column plate, and two cell
+    lines along the rows repeating each four fills the 8 rows.
+
+    The variable being filled is the one selected in the rail rather than a
+    fourth combo — the definition of it is on screen directly above, and a fill
+    that could target a variable the user is not looking at is a fill that lands
+    somewhere they will not check.
+    """
+    host = reg.register("_var_fill_row", QWidget(parent))
+    row = QHBoxLayout(host)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(theme.Spacing.sm)
+
+    row.addWidget(QLabel("Fill along", host))
+    axis = reg.register("_var_fill_axis", QComboBox(host))
+    for token, label in ((FILL_ALONG_ROWS, "Rows"), (FILL_ALONG_COLS, "Columns")):
+        axis.addItem(label, token)
+    row.addWidget(axis)
+
+    row.addWidget(QLabel("repeat each", host))
+    repeat = reg.register("_var_fill_repeat", QSpinBox(host))
+    repeat.setRange(1, 96)
+    repeat.setValue(1)
+    row.addWidget(repeat)
+
+    apply_button = reg.register("_var_fill_apply", QPushButton("Apply fill", host))
+    apply_button.setObjectName("HomeAction")
+    row.addWidget(apply_button)
+
+    scope = reg.register("_var_fill_scope", QLabel("", host))
+    scope.setObjectName("Muted")
+    row.addWidget(scope, 1)
+    return host
+
+
+def _build_plate(ctx, parent: QWidget, reg) -> QWidget:
+    """The tab's **own** plate, and the line that reads it back.
+
+    Its own rather than the rail's, and that is not a preference. Groups guards
+    its commit on the current sub-tab being "Groups" precisely because a second
+    meaning on the rail plate silently rewrites memberships — two plates meaning
+    different things is a hazard this codebase has already recorded. A plate
+    here means "which wells hold which value", and it means only that.
+    """
+    from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
+    from widgets.well_plate_selector import WellPlateSelector
+
+    host = QWidget(parent)
+    column = QVBoxLayout(host)
+    column.setContentsMargins(0, 0, 0, 0)
+    column.setSpacing(theme.Spacing.sm)
+
+    chips = reg.register("_var_chips", QWidget(host))
+    chip_row = QHBoxLayout(chips)
+    chip_row.setContentsMargins(0, 0, 0, 0)
+    chip_row.setSpacing(theme.Spacing.xs)
+    column.addWidget(chips)
+
+    plate = reg.register("_var_plate", WellPlateSelector(host))
+    # "editor" rather than "rail": the rail role is exempt from the size caps
+    # because Review's rail picker is that pane's primary interaction surface,
+    # and this plate is one control among several on a page that also holds a
+    # definition form.
+    apply_plate_geometry(plate, role="editor")
+    plate.setSelectionModel("set")
+    column.addWidget(plate, 0, PLATE_ALIGNMENT)
+
+    readout = reg.register("_var_readout", QLabel("", host))
+    readout.setObjectName("Muted")
+    readout.setWordWrap(True)
+    column.addWidget(readout)
+    column.addStretch(1)
+    return host
+
+
+def value_chip(label: str, value_id: str, parent: QWidget, *,
+               swatch: str = "") -> QPushButton:
+    """One assignable value, as a button carrying its id.
+
+    Select wells, then click a chip — two steps, and the same shape as Well
+    Labels' "select cells, then Add Prefix" which this page already teaches.
+
+    Deliberately not the plate's ``"paint"`` model: paint latches an add/remove
+    polarity on press, so dragging back over an assigned well *clears* it, and a
+    chip would still be needed to say which value is being painted. Two steps
+    that always mean the same thing beat one that sometimes means the opposite.
+    """
+    button = QPushButton(label, parent)
+    button.setObjectName("VariableValueChip")
+    button.setCheckable(False)
+    button.setCursor(Qt.PointingHandCursor)
+    button.setProperty("aw_value_id", value_id)
+    if swatch:
+        # Only the swatch is set here, because only the swatch varies per value.
+        # Everything else about a chip is one rule in ``theme.qss`` — a widget
+        # stylesheet merges with the app's rather than replacing it, so setting
+        # the whole look here would be a second definition that drifts.
+        button.setStyleSheet(
+            f"QPushButton#VariableValueChip {{ border-left: 3px solid {swatch}; }}")
+    return button

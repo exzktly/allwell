@@ -1268,6 +1268,28 @@ and colour, they just have no place on a numeric axis.
 The list also tells you when a variable is not ready — one with no values cannot
 be filled onto anything.
 
+**Filling the plate.** Under the definition is a plate of this dataset's wells
+and one row of controls: *Fill along [Rows or Columns] · repeat each [N] ·
+Apply fill*. Six doses along the columns repeating each twice fills a 12-column
+plate; two cell lines along the rows repeating each four fills the eight rows.
+Any block design is one click.
+
+For anything the fill does not cover, select wells on the plate — drag across
+them, or click a row letter or column number — and click one of the value chips
+above it. Same two steps as **Well Labels**' select-then-Add-Prefix. **Clear**
+unassigns the selection.
+
+Each value gets its own colour on the plate. A well that belongs to the dataset
+but has no value for the variable you are looking at is **ringed**, and the line
+underneath names those wells and counts them — an empty socket means something
+different, that the well is not in the dataset at all. Getting to "All 96 wells
+have a Dose." is the thing to aim for, because a plot grouped by a variable
+leaves out any group containing an unassigned well, and tells you how many.
+
+Wells are never given a value they were not assigned. If you add a well to a
+group after filling, it stays unassigned and says so; nothing is inherited from
+its neighbours.
+
 Variables are saved with the dataset, alongside your groups and well labels.
 **Reset analysis** clears them under their own heading, separately from sample
 definitions, so redoing your groups does not cost you a plate of doses.

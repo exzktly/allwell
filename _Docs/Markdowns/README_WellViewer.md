@@ -40,7 +40,7 @@ to add features, how to debug, and build / environment troubleshooting), see
 3. [Quick start](#quick-start)
 4. [Analyze mode — running the pipeline](#analyze-mode--running-the-pipeline)
 5. [Review mode — exploring results](#review-mode--exploring-results)
-   - [Home](#home) (Overview · Cell Gating · Groups · Well Labels · Ratios · Pipeline Info)
+   - [Home](#home) (Overview · Cell Gating · Groups · Variables · Well Labels · Ratios · Pipeline Info)
    - [The Review window at a glance](#the-review-window-at-a-glance)
    - [Controls shared by every tab](#controls-shared-by-every-tab)
    - Plotting: [Bar Plots](#bar-plots) · [Line Graphs](#line-graphs) · [Scatter Plot](#scatter-plot) · [Distribution](#distribution) · [Heat Map](#heat-map)
@@ -1238,6 +1238,39 @@ when you last quit. Everything else about that session is restored as before —
 it is only arriving with a new dataset that starts on Home, since that is the
 moment there is most to tell you. Restoring a saved plot from **Saved Plots**
 does not come here: it takes you to the tab that plot came from.
+
+#### Variables — what you changed across the plate
+
+A **variable** is anything you varied: cell line, dose, the timepoint you
+treated at. You name it, list its values in order, and then fill those values
+onto the wells.
+
+It is not a group, and that is the point of having it. Two cell lines at six
+doses is twelve conditions; without variables you would paint twelve group names
+by hand to plot them apart. With them you say "Cell line: HeLa, U2OS" and
+"Dose: 0, 0.1, 0.3, 1, 3, 10" once, and the plots can group, colour and split by
+either.
+
+On **Home → Variables**, **+ Variable** adds one. Give it a name, pick its
+type, and type its values into the box at the bottom — commas work, so
+`0, 0.1, 0.3, 1, 3, 10` adds six in one go. Double-click a value to correct it:
+that is a rename, so every well already holding it follows, and fixing `1uM` to
+`1 µM` after you have filled the plate costs nothing. The arrows beside the list
+set the order, which is the order a fill walks and the direction a dose axis
+runs, so it is worth getting right.
+
+**Text or Number.** Number is what lets a variable be a plot's x axis, and it is
+the only type that takes a unit. You can switch at any time and your values are
+re-read, not retyped. A value that is not a number — a `vehicle` row in a dose
+series — is kept, and the tab tells you which ones they are: they still group
+and colour, they just have no place on a numeric axis.
+
+The list also tells you when a variable is not ready — one with no values cannot
+be filled onto anything.
+
+Variables are saved with the dataset, alongside your groups and well labels.
+**Reset analysis** clears them under their own heading, separately from sample
+definitions, so redoing your groups does not cost you a plate of doses.
 
 #### Telling the app what your wells mean
 

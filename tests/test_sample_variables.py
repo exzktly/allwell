@@ -404,3 +404,132 @@ def test_the_domain_is_registered_so_a_load_actually_hydrates_it():
         "load_controller never asks the registry to load this domain, so the "
         "variable set is empty on every dataset the user opens"
     )
+
+
+# ── the definition editor's semantics ───────────────────────────────────────
+#
+# In the domain module rather than in the widgets, so every rule below is driven
+# by a test rather than by clicking. §7.6: a control that is offered is not a
+# control that works, and the way to keep the two together is to put the
+# semantics where a fast-lane test can reach them.
+
+@pytest.mark.parametrize("label, expected", [
+    ("1", 1.0), ("0", 0.0), ("0.5", 0.5), ("  10  ", 10.0),
+    ("1 µM", 1.0), ("10%", 10.0), ("1e-3", 0.001), ("-2", -2.0),
+    ("0,5", 0.5),                       # a comma decimal, as typed in much of Europe
+    ("vehicle", None), ("", None), ("µM 1", None), ("n/a", None),
+])
+def test_a_dose_is_read_the_way_it_gets_typed(label, expected):
+    assert sv.parse_number(label) == expected
+
+
+def test_an_unreadable_label_is_not_read_as_zero():
+    """Zero is a dose. A vehicle row read as 0.0 is plotted at the origin as
+    though it were a measured concentration — a fabricated number on a real
+    measurement, which is the one thing this module must never do."""
+    assert sv.parse_number("vehicle") is None
+    assert sv.parse_number("0") == 0.0
+
+
+def test_a_second_variable_of_the_same_name_is_renamed_not_refused():
+    """Two `Dose` variables make ``by_name`` ambiguous and "Group by: Dose"
+    meaningless, and the user cannot tell the chips apart. Renaming keeps the
+    user's word; refusing mid-thought does not."""
+    vset, _ = sv.new_variable(sv.VariableSet(), "Dose")
+    vset, second = sv.new_variable(vset, "Dose")
+    assert vset.by_id(second).name == "Dose 2"
+    assert vset.by_name("Dose").id != second
+
+
+def test_renaming_a_variable_keeps_its_id_so_nothing_is_disturbed(plate):
+    after = sv.rename_variable(plate, "dose", "Concentration")
+    assert after.by_id("dose").name == "Concentration"
+    assert after.assignments["dose"] == plate.assignments["dose"]
+
+
+def test_renaming_a_value_rewrites_every_well_holding_it(plate):
+    """The whole reason values carry ids: correcting `1uM` to `1 µM` after a
+    plate is filled is a rename, not a re-fill."""
+    value_id = plate.by_id("dose").values[1].id
+    after = sv.rename_value(plate, "dose", value_id, "1 µM")
+
+    assert after.by_id("dose").value_by_id(value_id).label == "1 µM"
+    assert after.value_id_for("dose", "A03") == value_id, "a well was re-pointed"
+    assert after.by_id("dose").value_by_id(value_id).number == 1.0
+
+
+def test_a_value_that_duplicates_an_existing_label_is_not_added(plate):
+    """Two `1` rows split one dose into two series holding half the wells each,
+    and neither is visibly wrong."""
+    before = len(plate.by_id("dose").values)
+    after = sv.add_value(plate, "dose", "1")
+    assert len(after.by_id("dose").values) == before
+    assert len(sv.add_value(plate, "dose", " 1 ").by_id("dose").values) == before
+
+
+def test_renaming_a_value_onto_another_values_label_is_refused(plate):
+    values = plate.by_id("dose").values
+    after = sv.rename_value(plate, "dose", values[0].id, values[1].label)
+    assert after.by_id("dose").value_by_id(values[0].id).label == values[0].label
+
+
+def test_switching_a_text_variable_to_number_reparses_its_values():
+    """A list typed before the kind was switched becomes usable as an axis
+    without being retyped."""
+    vset, vid = sv.new_variable(sv.VariableSet(), "Dose")
+    for label in ("0", "vehicle", "10"):
+        vset = sv.add_value(vset, vid, label)
+    assert all(v.number is None for v in vset.by_id(vid).values)
+
+    vset = sv.set_kind(vset, vid, sv.NUMBER, unit="µM")
+    numbers = [v.number for v in vset.by_id(vid).values]
+    assert numbers == [0.0, None, 10.0], (
+        "the unreadable label was dropped or read as a number"
+    )
+    assert vset.by_id(vid).unit == "µM"
+
+
+def test_switching_a_number_variable_to_text_drops_the_unit(plate):
+    """`HeLa µM` is not a label anyone meant."""
+    after = sv.set_kind(plate, "dose", sv.TEXT)
+    assert after.by_id("dose").unit == ""
+    assert all(v.number is None for v in after.by_id("dose").values)
+    assert len(after.by_id("dose").values) == len(plate.by_id("dose").values)
+
+
+def test_a_text_variable_cannot_be_given_a_unit(plate):
+    assert sv.set_unit(plate, "line", "µM").by_id("line").unit == ""
+
+
+def test_moving_a_value_clamps_rather_than_wraps(plate):
+    """A value that jumped from the top of the list to the bottom because a
+    button was pressed once too often is a reorder nobody asked for."""
+    first = plate.by_id("dose").values[0].id
+    assert [v.id for v in sv.move_value(plate, "dose", first, -1)
+            .by_id("dose").values] == [v.id for v in plate.by_id("dose").values]
+
+    moved = sv.move_value(plate, "dose", first, +1)
+    assert [v.id for v in moved.by_id("dose").values][1] == first
+
+
+def test_removing_a_value_through_the_editor_unassigns_its_wells(plate):
+    value_id = plate.by_id("dose").values[0].id
+    after = sv.remove_value(plate, "dose", value_id)
+    assert after.by_id("dose").value_by_id(value_id) is None
+    assert sv.unassigned_wells(after, "dose", ["A01", "A03"]) == ["A01"]
+    assert sv.orphaned_wells(after, "dose") == []
+
+
+def test_every_editing_call_leaves_the_set_it_was_given_alone(plate):
+    """Pure functions, so an editor can build a candidate and discard it."""
+    import copy
+
+    before = copy.deepcopy(plate)
+    value_id = plate.by_id("dose").values[0].id
+    sv.rename_variable(plate, "dose", "X")
+    sv.set_kind(plate, "dose", sv.TEXT)
+    sv.add_value(plate, "dose", "99")
+    sv.rename_value(plate, "dose", value_id, "99")
+    sv.move_value(plate, "dose", value_id, 1)
+    sv.remove_value(plate, "dose", value_id)
+    assert plate == before

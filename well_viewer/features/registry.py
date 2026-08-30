@@ -123,6 +123,8 @@ _build_groups = _lazy_build("well_viewer.features.home.groups.tab_view",
                             "build_replicate_groups_centre")
 _build_well_labels = _lazy_build("well_viewer.features.home.labels.tab_view",
                                  "build_label_grid")
+_build_variables = _lazy_build("well_viewer.features.home.variables.tab_view",
+                               "build_variables_subtab")
 _build_pipeline_info = _lazy_build("well_viewer.features.home.pipeline_info.tab_view",
                                    "build_pipeline_info_subtab")
 
@@ -1010,6 +1012,9 @@ def _features() -> list[FeatureDescriptor]:
                               "groups.build_replicate_panel":
                                   _svc_groups_build_replicate_panel,
                           }),
+        FeatureDescriptor(name="Variables", parent="Home",
+                          build=_build_variables, removable=True,
+                          reads_well_selection=False, subtab_inset=True),
         FeatureDescriptor(name="Well Labels", parent="Home",
                           build=_build_well_labels, removable=False,
                           reads_well_selection=True, subtab_inset=True,

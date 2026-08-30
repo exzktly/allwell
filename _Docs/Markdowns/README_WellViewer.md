@@ -1492,6 +1492,20 @@ nothing is guessed from the majority, because a bar built that way would carry a
 dose those wells were never given and would look exactly like a correct one.
 Assign the well, and the group resolves again.
 
+**Plotting by a variable.** Once a variable is defined, a **Group by** control
+appears in the band at the top of the plotting pages, next to Channel and
+Property. Set it to `Dose` and every plot — bars, lines, statistics, heat map,
+the exports — draws one member per dose instead of one per replicate group. You
+do not need to have defined any groups at all.
+
+It applies everywhere at once, deliberately: a Bar tab grouped by dose beside a
+Statistics tab still grouped by your replicate sets would be two descriptions of
+one plate with nothing saying which you were looking at.
+
+Wells with no value for that variable are not plotted, and the status line says
+how many and which. If nothing at all is assigned, the plots fall back to your
+own groups rather than going blank — the Variables tab is where you fix that.
+
 Variables are saved with the dataset, alongside your groups and well labels.
 **Reset analysis** clears them under their own heading, separately from sample
 definitions, so redoing your groups does not cost you a plate of doses.

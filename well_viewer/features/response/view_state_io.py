@@ -15,6 +15,13 @@ from __future__ import annotations
 
 from typing import Any
 
+# Module scope, not function-local: ``controller`` imports nothing from here —
+# the registry reaches this module lazily — so there is no cycle to work around,
+# and a deferred feature import that is not breaking a cycle is one the budget
+# guard counts for nothing.
+from well_viewer.features.response.controller import (
+    refresh_x_combo, update_timepoint_button,
+)
 from well_viewer.features.response.response_compute import FIT_MODELS, FIT_NONE
 
 
@@ -87,10 +94,6 @@ def _sync_controls(ctx, slice_, x_variable_id) -> None:
     a restore draws a figure from half the state — which then looks like the
     restore itself was wrong.
     """
-    from well_viewer.features.response.controller import (
-        refresh_x_combo, update_timepoint_button,
-    )
-
     combo = ctx.widgets.get_or_none("_response_x_cb")
     if combo is not None and x_variable_id:
         refresh_x_combo(ctx)

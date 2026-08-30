@@ -40,6 +40,16 @@ filterwarnings = [
 # nothing imports is absent from the report unless coverage is told to look for
 # it on disk.
 source = ["."]
+# Paths stored relative to this file's directory, not absolute. Coverage
+# defaults to absolute, which is invisible until the day two machines' data are
+# combined -- and the slow lane is hours of work, so it is the obvious thing to
+# run elsewhere. A remote checkout at a different path produces a data file
+# whose every entry is a *different file* from the local one; ``coverage
+# combine`` then succeeds, reports roughly twice as many modules as the repo
+# has, and the zero-coverage inventory it feeds is wrong in the direction that
+# invents dead code. Relative paths make a data file portable between any two
+# checkouts of the same tree.
+relative_files = true
 # Both lanes run as many short processes — the slow lane by design (one or two
 # files each, because a full-app test's Qt objects are never reclaimed in
 # process), the fast lane whenever it is sharded. Parallel mode writes one data

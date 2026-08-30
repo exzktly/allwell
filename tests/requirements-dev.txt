@@ -29,6 +29,10 @@ pytest-qt>=4.2
 pytest-mock>=3.10
 pytest-timeout>=2.1
 pytest-cov>=4.0
+# Differential coverage: which lines THIS diff adds that no test executes.
+# A percentage over ~500 files is a number to game; the diff is the question
+# a reviewer actually has.
+diff-cover>=9.0
 
 # ── Runtime stack — pinned to match the shipped app ──────────────────────────
 PySide6==6.7.3

@@ -113,10 +113,10 @@ review"; it is open until the gate closes.
 | 3 | A | Guard: a bar wider than its cell is never drawn short | ☑ | `tests/test_scale_bar_is_never_drawn_short.py`, 21 pure-lane cases covering the draw, the record AND the sentence. Three mutations watched failing, each on its own check. |
 | 4 | A | Every artifact surface reports a truncated inventory, not just the bar | ☐ | Found by A's review gate. `_build_export_figure` has four callers; `partial_scan_report` reaches one. Pre-existing, and now the odd one out since the bar clause reaches all four. |
 | 5 | A | Review gate: the refusal path, and no second wording for it | ☑ | Ran on `c2a1c78`. Seven findings: a broken slow-lane test, an untested report, two wordings, a degenerate-shape hole, a clear-site asymmetry, an extraction leftover, a nit. All fixed except the inherited one, which is row 4. Verdict on over-architecture: not over-architected. |
-| 6 | B | Fast lane emits coverage; slow lane emits coverage | ☐ |  |
-| 7 | B | `coverage combine` across both lanes | ☐ |  |
-| 8 | B | Differential coverage on the PR diff, advisory at first | ☐ |  |
-| 9 | B | One-off zero-coverage inventory, triaged into rows here | ☐ |  |
+| 6 | B | Fast lane emits coverage; slow lane emits coverage | ☑ | `ALLWELL_COVERAGE=1` in front of either lane's script. Parallel mode in `[tool.coverage.run]`; both scripts read the one variable. |
+| 7 | B | `coverage combine` across both lanes | ☑ | `scripts/coverage.sh` — combine, `--zero`, `--diff`, `--html`. Proven end to end on the real fast lane: 7,262 tests, 73,839 statements, 63.9%. |
+| 8 | B | Differential coverage on the PR diff, advisory at first | ☑ | `scripts/coverage.sh --diff`, local and advisory. Not a PR gate: the slow lane does not run on PRs, so genuinely-covered code would read uncovered, and a per-PR run costs 3x the lane. `coverage.yml` states what turning it on would cost. |
+| 9 | B | One-off zero-coverage inventory, triaged into rows here | ◐ | Fast lane done: 11 modules, 1,860 statements, no executed lines. NOT actionable yet — most are `widgets/` the slow lane exercises, and acting on fast-lane-only data would delete live code. Slow lane under coverage running. |
 | 10 | B | Review gate: the lanes combine, and no threshold masquerades as a gate | ☐ | |
 | 11 | C | Complexity assertions for the four fixed hot paths | ☐ |  |
 | 12 | C | `pytest-benchmark` lane with in-repo baselines | ☐ |  |
@@ -233,27 +233,32 @@ reaches.
 number to game, and this codebase's real risk is not thin coverage but *absent*
 coverage in specific places. Three moves, in order:
 
-**B1 — Measure both lanes and combine them.** `scripts/test.sh` gains
-`--cov=. --cov-report=` behind an opt-in flag (an env var, so the default local
-run stays as fast as it is), and `scripts/test_slow.sh` does the same per batch.
-The slow lane's shards each produce a `.coverage.<shard>`; `coverage combine`
-merges them with the fast lane's.
+**B1 — Measure both lanes and combine them.** `ALLWELL_COVERAGE=1` in front of
+either lane's script; `scripts/coverage.sh` combines and reports. Parallel mode
+is on in `[tool.coverage.run]`, which is what lets the slow lane's many short
+processes each write their own data file instead of overwriting one another.
+
+**Measured, and it decides the CI design.** The fast lane takes **11 min 06 s**
+under coverage against ~3.5 min without — three times the cost of the check that
+gates every push, against a job capped at 15 minutes. So coverage does not go in
+the gating job. `.github/workflows/coverage.yml` runs it on demand and monthly
+on `main`, and states in its own header what adding `pull_request:` would cost,
+so the trade is visible rather than discovered.
 
 This step is load-bearing and easy to get wrong: measuring the fast lane alone
 reports every full-app-only module as dead, and acting on that list would delete
 live code. Do not produce a report until both lanes are in it.
 
-**B2 — Differential coverage on the diff.** The standing CI check is not "is the
-repo 80% covered" but "did this PR add lines no test executes". `diff-cover`
-against `origin/main` is the smallest thing that does this. It answers the
-question a reviewer actually has, and it cannot be satisfied by writing tests for
-unrelated code.
+**B2 — Differential coverage on the diff.** Not "is the repo 80% covered" but
+"did this branch add lines no test executes". `scripts/coverage.sh --diff` runs
+`diff-cover` against `origin/main`, locally and free.
 
-Because the slow lane does not run on PRs (§10.4), differential coverage on a PR
-sees fast-lane data only — so a PR whose code is genuinely covered by a full-app
-test will read as uncovered. Two honest options: run it as advisory (report, do
-not fail), or teach it to consult the last combined report from a slow-lane run
-on `main`. Start advisory; a check that cries wolf is worse than none.
+It is **advisory and local rather than a PR gate**, for two reasons that
+compound. The slow lane does not run on PRs, so a PR whose code is genuinely
+covered by a full-app test reads as uncovered — a check that cries wolf gets
+muted. And per-PR coverage costs a second full lane run at three times the
+normal price. Turning it into a CI check is one line in `coverage.yml` once
+those two are addressed.
 
 **B3 — The one-off inventory.** Produce, once, the list of application modules
 with zero coverage from either lane. That list is the actual finding here. Every

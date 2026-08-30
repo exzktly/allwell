@@ -14,6 +14,7 @@
 #   ALLWELL_COVERAGE=1 scripts/test_slow.sh      # minutes to hours; see §10.4
 #   scripts/coverage.sh                          # combine + summarise
 #   scripts/coverage.sh --zero                   # the modules no test reaches
+#   scripts/coverage.sh --diff                   # lines THIS branch adds that no test runs
 #   scripts/coverage.sh --html                   # browsable report in htmlcov/
 #
 # Run order does not matter: parallel mode writes one data file per process and
@@ -26,8 +27,9 @@ MODE="summary"
 case "${1:-}" in
     --zero) MODE="zero" ;;
     --html) MODE="html" ;;
+    --diff) MODE="diff" ;;
     "") ;;
-    *) echo "usage: $0 [--zero|--html]" >&2; exit 2 ;;
+    *) echo "usage: $0 [--zero|--diff|--html]" >&2; exit 2 ;;
 esac
 
 shopt -s nullglob
@@ -73,6 +75,15 @@ else:
     print("\nTriage each into: a test that should exist, dead code, or "
           "genuinely unreachable (and say which, in a comment).")
 PY
+        ;;
+    diff)
+        # The question a reviewer actually has: which lines does this branch add
+        # that no test executes. Advisory — it prints and does not fail, because
+        # the fast lane alone cannot see a line covered only by a full-app test
+        # and a check that cries wolf gets muted.
+        python -m coverage xml -q -o coverage.xml
+        python -m diff_cover.diff_cover_tool coverage.xml \
+            --compare-branch=origin/main --fail-under=0
         ;;
     summary)
         python -m coverage report --sort=cover | tail -40

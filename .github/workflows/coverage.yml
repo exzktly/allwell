@@ -1,0 +1,64 @@
+name: Coverage
+
+# Deliberately NOT on pull_request.
+#
+# Coverage roughly quadruples the fast lane (see the measured figure in
+# ARCHITECTURE.md §10.4), and ci.yml's test job is the gate for every push with a
+# 15-minute cap. Running it per PR would either double the billed minutes or push
+# the gating job past its ceiling, and CLAUDE.md §2 is explicit that a CI run
+# costs real money.
+#
+# So this runs on demand and monthly on main. What a reviewer wants per PR —
+# "which lines does this branch add that no test runs" — is a local command,
+# `scripts/coverage.sh --diff`, which costs nothing.
+#
+# To turn per-PR reporting on later, add `pull_request:` below. It is one line,
+# and the cost is stated above so the trade is visible rather than discovered.
+on:
+  workflow_dispatch:
+  schedule:
+    # 04:00 UTC on the 1st. Monthly, because what this answers — which modules no
+    # test reaches — changes on the scale of features, not commits.
+    - cron: "0 4 1 * *"
+
+jobs:
+  coverage:
+    name: fast lane under coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # diff-cover needs history to compare against main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Qt system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r tests/requirements-dev.txt
+      - name: Fast lane under coverage
+        env:
+          QT_QPA_PLATFORM: offscreen
+          ALLWELL_COVERAGE: "1"
+        # The lane's own teardown SIGSEGV is tolerated the same way ci.yml
+        # tolerates it; what matters here is that the data file was written.
+        run: ALLWELL_COVERAGE=1 scripts/test.sh || true
+      - name: Combine and report
+        run: |
+          scripts/coverage.sh
+          echo "::group::Modules no test reaches"
+          scripts/coverage.sh --zero
+          echo "::endgroup::"
+      - name: Upload coverage data
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            .coverage
+            htmlcov/
+          if-no-files-found: warn

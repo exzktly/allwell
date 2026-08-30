@@ -9471,7 +9471,7 @@ you're in before you type the command.
 - **Pure-logic / unit tests** (Qt-free: `pipeline/*`, `domain/*`,
   `spatial_compute`, `multivariate_compute`, layout math, …). Fast, cheap,
   safe to run in bulk. This is the CI "fast lane" — run it with
-  **`scripts/test.sh`** (~6,840 tests of ~7,280 collected, ~3.5 min on a quiet
+  **`scripts/test.sh`** (~7,260 tests of ~7,710 collected, ~3.5 min on a quiet
   container). CI invokes that same script, so a local run and the CI run cannot
   drift in flags or config; hand-rolling `pytest tests/ -m "not slow"` skips the
   `--timeout=90` CI applies. Re-count rather than trusting the figure when it
@@ -9482,6 +9482,26 @@ you're in before you type the command.
   constructs a **real `WellViewerApp`** under the offscreen QPA. `conftest.py`'s
   `pytest_collection_modifyitems` auto-marks these `slow`, precisely so the fast
   lane skips them.
+
+**Coverage is opt-in, and it is not a gate.** `ALLWELL_COVERAGE=1` in front of
+either lane's script measures it; `scripts/coverage.sh` combines both lanes'
+data and reports, `--zero` lists the modules no test reaches, `--diff` names the
+lines the current branch adds that no test executes. Two properties are
+deliberate. It is **off by default**, because measured on this container the
+fast lane takes **11 min 06 s under coverage against ~3.5 min without** — three
+times the cost of the check that gates every push, against a CI job capped at 15
+minutes. And it is **never a percentage threshold**: over ~500 source files a
+percentage is a number to game, while the question worth asking is which
+application modules no test reaches at all. `.github/workflows/coverage.yml`
+runs it on demand and monthly on `main` rather than per pull request, and says in
+its own header what turning the per-PR trigger on would cost.
+
+**Both lanes must be in the measurement before it is read.** The fast lane alone
+reports every full-app-only module as dead — eleven modules, some 1,860
+statements, most of them `widgets/` the slow lane exercises — and acting on that
+list would delete live code. `coverage combine` merges the two; parallel mode is
+on in the config precisely so the slow lane's many short processes each write
+their own data file rather than overwriting one another.
 
 **Before pushing, `scripts/preflight.sh`** runs ruff, the fast lane, and a
 working-tree check in one pass (`--quick` skips the fast lane). The tree check is

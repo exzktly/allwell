@@ -15,7 +15,10 @@ application. The stack's wiring into a real window is in ``test_home_page.py``.
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
+
+from PySide6.QtTest import QTest
 
 from widgets.empty_state import EmptyState
 
@@ -251,3 +254,177 @@ def test_a_flat_csv_folder_is_handed_over_as_itself():
     ctx.state.dataset.data_dir = Path("/data/loose_csvs")
     ctx.state.dataset.in_dir = None
     assert dataset_root(ctx) == "/data/loose_csvs"
+
+
+# ── the recent-datasets list on the placeholder ─────────────────────────────
+#
+# The one moment this list matters most is launch with nothing loaded, which is
+# exactly the moment Home's body is hidden behind the shared placeholder. So the
+# rows live on the placeholder itself rather than Home growing a no-dataset
+# state of its own — the shared wording and the shared moment of the swap are
+# what ``core/empty_state_copy.py`` exists to protect.
+
+
+class _Settings:
+    """``QSettings``' two methods, over a dict, so no test writes to the machine."""
+
+    def __init__(self, initial=None):
+        self._d = dict(initial or {})
+
+    def value(self, key, default=None):
+        return self._d.get(key, default)
+
+    def setValue(self, key, value):  # noqa: N802 - Qt's spelling
+        self._d[key] = value
+
+
+def _ctx_with_recents(paths, *, data_dir=None, loaded=None):
+    """A context carrying a settings stub already holding *paths*."""
+    from well_viewer.core.recent_datasets import record_open
+
+    settings = _Settings()
+    for i, path in enumerate(paths):
+        record_open(settings, str(path), Path(path).name, float(i))
+    ctx, calls = _ctx()
+    ctx.window._qsettings = lambda: settings
+    ctx.window._load_path = loaded or (lambda p: calls.append(p))
+    ctx.state.dataset.data_dir = data_dir
+    return ctx, calls
+
+
+def test_the_placeholder_offers_the_datasets_that_are_there(qtbot, tmp_path):
+    from well_viewer.features.home.controller import _recent_entry_rows
+
+    a, b = tmp_path / "plate_a", tmp_path / "plate_b"
+    a.mkdir()
+    b.mkdir()
+    ctx, _ = _ctx_with_recents([a, b])
+
+    rows = _recent_entry_rows(ctx, 5)
+    assert [r[0] for r in rows] == ["plate_b", "plate_a"], "newest is not first"
+    assert all(r[3] for r in rows), "a folder that exists came back disabled"
+
+
+def test_a_dataset_whose_drive_is_gone_is_shown_and_disabled(tmp_path):
+    """Not hidden. Dropping the row tells the user their history was lost, when
+    what happened is that a drive is unplugged — and the row must come back by
+    itself when it is plugged in again."""
+    from well_viewer.features.home.controller import _recent_entry_rows
+
+    here = tmp_path / "mounted"
+    here.mkdir()
+    gone = tmp_path / "unmounted"
+    ctx, _ = _ctx_with_recents([here, gone])
+
+    rows = _recent_entry_rows(ctx, 5)
+    assert [r[0] for r in rows] == ["unmounted", "mounted"], (
+        "the unreachable folder was dropped from the list"
+    )
+    assert rows[0][3] is False and rows[1][3] is True
+    assert "not reachable" in rows[0][4], "the disabled row says nothing about why"
+    assert rows[0][2] is None, "an unreachable row still carries a click handler"
+
+
+def test_the_open_dataset_is_not_offered_back_to_itself(tmp_path):
+    """The card sits inside the dataset it would offer to reopen, and the
+    in/out layout is where a naive string comparison misses: the list stores the
+    folder Review was pointed at, and ``data_dir`` is the ``out`` inside it."""
+    from well_viewer.features.home.controller import _recent_entry_rows
+
+    root = tmp_path / "plate_a"
+    (root / "out").mkdir(parents=True)
+    other = tmp_path / "plate_b"
+    other.mkdir()
+    ctx, _ = _ctx_with_recents([root, other], data_dir=root / "out")
+
+    rows = _recent_entry_rows(ctx, 5, exclude=ctx.state.dataset.data_dir)
+    assert [r[0] for r in rows] == ["plate_b"]
+
+
+def test_clicking_a_recent_row_opens_it_by_the_browsed_route(qtbot, tmp_path):
+    """Asserted at the boundary: what reaches ``_load_path``, not what the row
+    computed. A row that renders correctly and calls nothing is the failure this
+    guards — §7.6, a control that exists is not a control that works."""
+    from well_viewer.features.home.controller import _recent_entry_rows
+
+    root = tmp_path / "plate_a"
+    root.mkdir()
+    opened = []
+    ctx, _ = _ctx_with_recents([root], loaded=lambda p: opened.append(p))
+
+    empty = EmptyState("Load a directory.")
+    qtbot.addWidget(empty)
+    empty.setEntries(_recent_entry_rows(ctx, 5))
+
+    button = empty._entries_layout.itemAt(0).widget()
+    assert button.text().startswith("plate_a")
+    button.click()
+    # ``open_recent`` defers by 50 ms, the same deferral the folder picker uses.
+    qtbot.waitUntil(lambda: bool(opened), timeout=2000)
+    assert opened == [root]
+
+
+def test_a_disabled_row_does_nothing_when_clicked(qtbot, tmp_path):
+    from well_viewer.features.home.controller import _recent_entry_rows
+
+    opened = []
+    ctx, _ = _ctx_with_recents([tmp_path / "gone"], loaded=lambda p: opened.append(p))
+    empty = EmptyState("Load a directory.")
+    qtbot.addWidget(empty)
+    empty.setEntries(_recent_entry_rows(ctx, 5))
+
+    # Without this the check is vacuous: a row that was dropped rather than
+    # disabled leaves nothing to click, and "nothing was opened" is then true
+    # for the wrong reason.
+    assert empty._entries_layout.count() == 1, (
+        "the unreachable folder left no row at all, so this proves nothing "
+        "about what clicking a disabled one does"
+    )
+    button = empty._entries_layout.itemAt(0).widget()
+    assert button.isEnabled() is False
+    button.click()
+    QTest.qWait(120)
+    assert opened == []
+
+
+def test_a_placeholder_has_no_entries_until_it_is_given_some(qtbot):
+    empty = EmptyState("Load a directory.")
+    qtbot.addWidget(empty)
+    assert empty._entries.isVisible() is False
+    assert empty._entries_layout.count() == 0
+
+
+def test_setting_entries_twice_replaces_rather_than_appends(qtbot):
+    fired = []
+    empty = EmptyState("Load a directory.")
+    qtbot.addWidget(empty)
+    empty.setEntries([("one", "", lambda: fired.append("one"), True, "")])
+    empty.setEntries([("two", "", lambda: fired.append("two"), True, "")])
+
+    assert empty._entries_layout.count() == 1
+    empty._entries_layout.itemAt(0).widget().click()
+    assert fired == ["two"], "the replaced row is still connected"
+
+
+def test_an_empty_sequence_takes_the_column_away(qtbot):
+    empty = EmptyState("Load a directory.")
+    qtbot.addWidget(empty)
+    empty.show()
+    empty.setEntries([("one", "", lambda: None, True, "")])
+    assert empty._entries.isVisible() is True
+    empty.setEntries([])
+    assert empty._entries.isVisible() is False
+    assert empty._entries_layout.count() == 0
+
+
+def test_a_settings_backend_that_raises_costs_the_list_and_nothing_else():
+    """The dataset is already loaded and on screen by the time this runs."""
+    from well_viewer.features.home.controller import recent_datasets
+
+    class _Broken:
+        def value(self, key, default=None):
+            raise OSError("settings file is unreadable")
+
+    ctx, _ = _ctx()
+    ctx.window._qsettings = lambda: _Broken()
+    assert recent_datasets(ctx) == []

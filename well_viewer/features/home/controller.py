@@ -25,8 +25,8 @@ from well_viewer.core.selection_controller import (
 from . import collect as hc
 from .plate_panel import paint_plate, well_tooltip
 from .tab_view import (
-    IMPORT_KEY, build_saved_plot_tile, definition_subtabs, format_value,
-    legend_label, legend_swatch_style,
+    IMPORT_KEY, build_recent_tile, build_saved_plot_tile, definition_subtabs,
+    format_value, legend_label, legend_swatch_style,
 )
 
 # Cell Gating's controller is reached for two refreshes the sub-tab handler and
@@ -383,6 +383,8 @@ def refresh_home(ctx) -> None:
     _paint_rows(ctx, "_home_receipt", hc.run_parameters(ctx), kind="receipt")
     _paint_rows(ctx, "_home_work", hc.your_work(ctx), kind="work")
     _paint_saved_plots(ctx)
+    _paint_recents(ctx)
+    paint_recents_placeholder(ctx)
     slice_ = ctx.state.feature_slice("home")
     if slice_ is not None:
         slice_.last_rendered_for = str(
@@ -527,6 +529,46 @@ def _channel_widget(parent: QWidget, chips) -> QWidget:
 #: from the card's width so the grid does not reflow while the page is being
 #: painted, which is when its width is still zero.
 _THUMBS_PER_ROW = 6
+
+
+#: Rows on the Overview card. More than the placeholder shows, because here the
+#: user is already in a dataset and browsing sideways rather than picking one to
+#: start on — but still short of the store's cap, so the card cannot grow into
+#: the page's dominant block.
+RECENTS_ON_CARD = 8
+
+
+def _paint_recents(ctx) -> None:
+    """Fill the recent-datasets card, or hide it when there is no history yet.
+
+    Hidden rather than shown empty: "you have opened no datasets" is a sentence
+    only ever read by someone who has, at that moment, a dataset open — which
+    makes it a contradiction on the page it appears on. The first launch's
+    version of this list lives on the placeholder instead, where it is true.
+
+    The dataset currently open is dropped from the rows. It is the subject of
+    every other block on this page, and offering to open it again is offering to
+    do nothing.
+    """
+    card = _widget(ctx, "_home_recents_card")
+    host = _widget(ctx, "_home_recents")
+    note = _widget(ctx, "_home_recents_note")
+    if card is None or host is None or note is None:
+        return
+    rows = _recent_entry_rows(ctx, RECENTS_ON_CARD,
+                              exclude=getattr(ctx.state.dataset, "data_dir", None))
+    card.setVisible(bool(rows))
+    if not rows:
+        return
+    _clear(host)
+    unreachable = sum(1 for row in rows if not row[3])
+    note.setText(
+        "Click one to open it."
+        + (f" {unreachable} of these cannot be reached right now — hover for "
+           "why." if unreachable else ""))
+    layout = host.layout()
+    for row in rows:
+        layout.addWidget(build_recent_tile(ctx, host, row))
 
 
 def _paint_saved_plots(ctx) -> None:
@@ -721,6 +763,117 @@ def show_home_subtab(ctx, name: str) -> None:
         if sub.tabText(i) == name:
             sub.setCurrentIndex(i)
             return
+
+
+#: Ten entries is the store's cap; the placeholder shows fewer, because a
+#: launch screen offering ten folders is a file manager and the user came here
+#: to get back to the one or two they are actually working on.
+RECENTS_ON_PLACEHOLDER = 5
+
+
+def recent_datasets(ctx) -> list:
+    """The remembered datasets, newest first, as :class:`RecentDataset` records.
+
+    Reads ``QSettings`` through the shell's own handle rather than constructing
+    a second one, so this cannot drift from where the window geometry and the
+    remote profiles are kept. An unreadable setting is an empty list — see
+    ``core.recent_datasets.decode`` — so this never raises into a page build.
+
+    **Nothing here touches the filesystem.** Whether a remembered folder still
+    exists is asked at the moment the rows are drawn, by the view, because the
+    commonest reason one has vanished is an external drive that is not mounted
+    and a stat against an absent network mount can block for seconds. A page
+    build that walked five of those would hang the launch it is meant to speed
+    up.
+    """
+    from well_viewer.core.recent_datasets import load
+
+    settings = getattr(ctx.window, "_qsettings", None)
+    if not callable(settings):
+        return []
+    with swallow("read the recent-datasets list"):
+        return load(settings())
+    return []
+
+
+def _is_the_open_dataset(entry_path, data_dir) -> bool:
+    """Whether *entry_path* is the dataset ``data_dir`` was loaded from.
+
+    Not a string comparison: what the list stores is the folder Review was
+    *pointed at*, while ``data_dir`` is the folder it ended up reading — and for
+    the standard in/out layout those differ by one level, because ``load_path``
+    descends into ``out``. Comparing them directly would leave the open dataset
+    on its own page's "open something else" list, which is the one row on it
+    that can do nothing.
+    """
+    if not data_dir:
+        return False
+    here = Path(data_dir)
+    entry = Path(entry_path)
+    return entry == here or (here.name == "out" and entry == here.parent)
+
+
+def _recent_entry_rows(ctx, limit: int, *, exclude=None) -> list:
+    """``(label, sublabel, on_click, enabled, tooltip)`` for the placeholder.
+
+    **A folder that is not there is shown, disabled, with the reason.** Hiding
+    it would tell the user their history had been lost, when what actually
+    happened is that a drive is unplugged — and the row coming back by itself
+    when the drive returns is the behaviour that makes the list trustworthy.
+
+    *exclude* drops the dataset already open, for the card that sits inside it.
+    """
+    rows = []
+    entries = [e for e in recent_datasets(ctx)
+               if not _is_the_open_dataset(e.path, exclude)]
+    for entry in entries[:limit]:
+        path = Path(entry.path)
+        exists = False
+        with swallow(f"check whether {path} is still reachable"):
+            exists = path.is_dir()
+        rows.append((
+            entry.name or path.name or entry.path,
+            str(path.parent) if path.parent != path else "",
+            (lambda _p=path: open_recent(ctx, _p)) if exists else None,
+            exists,
+            str(path) if exists else
+            f"{path} is not reachable right now — the folder has moved or its "
+            "drive is not mounted. It stays on this list until you open "
+            "something else ten times.",
+        ))
+    return rows
+
+
+def paint_recents_placeholder(ctx) -> None:
+    """Put the recents on Home's no-dataset placeholder.
+
+    The one moment this list matters most is launch, with nothing loaded — and
+    that is precisely the moment Home's body is hidden behind the shared
+    placeholder. So the placeholder carries them, through ``EmptyState``'s own
+    entries API, rather than Home growing a no-dataset state of its own: the
+    shared wording and the shared moment of the swap are what
+    ``core/empty_state_copy.py`` exists to protect, and one page opting out of
+    them re-introduces exactly the drift that module ended.
+    """
+    stack = _widget(ctx, "_home_empty_stack")
+    placeholder = getattr(stack, "_empty_placeholder", None) if stack else None
+    if placeholder is None or not hasattr(placeholder, "setEntries"):
+        return
+    placeholder.setEntries(_recent_entry_rows(ctx, RECENTS_ON_PLACEHOLDER))
+
+
+def open_recent(ctx, path) -> None:
+    """Open a remembered dataset, by the route a browsed one takes.
+
+    ``_load_path`` and the same deferral the folder picker uses, so a recent
+    open and a browsed open cannot diverge — the deferral is what lets the
+    window repaint before a load that may take seconds, and a direct call here
+    would make the two paths feel different for no reason anyone could name.
+    """
+    load = getattr(ctx.window, "_load_path", None)
+    if not callable(load):
+        return
+    QTimer.singleShot(50, lambda: load(Path(path)))
 
 
 def _open_dataset(ctx) -> None:

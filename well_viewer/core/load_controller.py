@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 import csv
 import logging
+import time
 from pathlib import Path
 
 from PySide6.QtWidgets import QMessageBox
@@ -23,8 +24,9 @@ from well_viewer.core.ui_helpers import (
     show_progress as _show_progress,
     step_progress as _step_progress,
 )
-from well_viewer.core.safe import swallowed
+from well_viewer.core.safe import swallow, swallowed
 from well_viewer.data.curation import apply_curation_to_cache
+from well_viewer.domain.dataset_name import dataset_display_name
 
 
 # ── "Opening dataset…" responsiveness guard ─────────────────────────────────
@@ -150,6 +152,44 @@ def load_path(ctx, path: Path) -> None:
             app._load_directory(path)
     finally:
         _close_opening_dialog(ctx)
+    _remember_if_it_loaded(ctx, path)
+
+
+def _remember_if_it_loaded(ctx, path: Path) -> None:
+    """Add *path* to the recent-datasets list, if the load actually found wells.
+
+    **On success only, and success means wells.** A folder that opened without
+    raising and yielded nothing readable — the wrong directory, an ``out/`` the
+    pipeline never wrote to — is not a dataset the user wants offered back to
+    them on the next launch, and offering it would make the list a record of
+    the user's mistakes rather than of their work. ``well_paths`` is the test
+    because it is what every other part of Review treats as "there is a dataset
+    here".
+
+    The path stored is the one Review was *pointed at*, not the ``out`` half it
+    may have descended into, so reopening from the list takes the same branch
+    through :func:`load_path` that the original open took. The name stored is
+    ``dataset_display_name``'s answer for the folder actually loaded, which is
+    the one that knows to say the root's name rather than the literal "out".
+
+    Failing to remember must never cost the user the dataset they just opened,
+    which is already loaded and on screen by the time this runs — so a settings
+    backend that will not write is logged and dropped.
+    """
+    dataset = ctx.state.dataset
+    if not dataset.well_paths:
+        return
+    # One listdir, on a path already open, at the one moment the set of wells is
+    # known to be current: a cache entry whose CSV has been renamed or deleted
+    # can never be read or overwritten again, so nothing else would ever reclaim
+    # it. Failures are the pruner's own to swallow.
+    from well_viewer.data.parquet_cache import prune
+    prune(Path(dataset.data_dir or path))
+    with swallow("record the dataset in the recent-datasets list"):
+        from well_viewer.core.recent_datasets import record_open
+        loaded = dataset.data_dir or path
+        record_open(ctx.window._qsettings(), path,
+                    dataset_display_name(loaded), time.time())
 
 
 def _reset_gating_state(ctx) -> None:

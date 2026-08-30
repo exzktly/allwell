@@ -11,6 +11,10 @@ API
 * ``setAction(label, on_click)`` / ``clearAction()`` — an optional button that
   takes the hint's place. Absent unless asked for, so a site that only describes
   its emptiness looks exactly as it did.
+* ``setEntries(entries)`` / ``clearEntries()`` — an optional column of secondary
+  links *below* the action, each an ``(label, sublabel, on_click, enabled,
+  tooltip)``. For a placeholder whose way out is not only "do this" but "or go
+  back to one of these". Also absent unless asked for.
 """
 
 from __future__ import annotations
@@ -82,6 +86,20 @@ class EmptyState(QWidget):
         self._action_slot = None
         outer.addSpacing(theme.Spacing.md)
         outer.addWidget(self._action, 0, Qt.AlignHCenter)
+        # A column of secondary links under the action, empty and hidden until a
+        # site sets one. Centred on the same axis as the button rather than
+        # stretched, so the page keeps reading as one centred stack; the rows
+        # inside it are left-aligned against each other, because a list of names
+        # of different lengths centred individually has no edge for the eye to
+        # run down.
+        self._entries = QWidget(self)
+        self._entries.setObjectName("EmptyStateEntries")
+        self._entries_layout = QVBoxLayout(self._entries)
+        self._entries_layout.setContentsMargins(0, 0, 0, 0)
+        self._entries_layout.setSpacing(theme.Spacing.xs)
+        self._entries.setVisible(False)
+        outer.addSpacing(theme.Spacing.md)
+        outer.addWidget(self._entries, 0, Qt.AlignHCenter)
         outer.addStretch(1)
         # Belt-and-suspenders against the same 1-line-sizeHint quirk: reserve a
         # two-line minimum for each wrap label, sized to that label's OWN font
@@ -128,6 +146,59 @@ class EmptyState(QWidget):
             self._action_slot = _slot
         self._action.setVisible(bool(label))
         self._sync_hint_visibility()
+
+    def setEntries(self, entries) -> None:
+        """Show a column of secondary links below the action, replacing any set before.
+
+        *entries* is a sequence of ``(label, sublabel, on_click)`` or
+        ``(label, sublabel, on_click, enabled, tooltip)``. An entry with
+        ``enabled=False`` is still **drawn** — greyed, with *tooltip* saying
+        why — because the commonest reason a site disables one of these is a
+        path on a drive that is not mounted, and dropping the row instead would
+        tell the user their history had been lost rather than that their disk is
+        elsewhere.
+
+        Passing an empty sequence is :meth:`clearEntries`.
+        """
+        self.clearEntries()
+        rows = list(entries or ())
+        for row in rows:
+            label, sublabel, on_click = row[0], row[1], row[2]
+            enabled = row[3] if len(row) > 3 else True
+            tooltip = row[4] if len(row) > 4 else ""
+            self._entries_layout.addWidget(
+                self._make_entry(label, sublabel, on_click, enabled, tooltip))
+        self._entries.setVisible(bool(rows))
+
+    def clearEntries(self) -> None:
+        while self._entries_layout.count():
+            item = self._entries_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+        self._entries.setVisible(False)
+
+    def _make_entry(self, label: str, sublabel: str, on_click,
+                    enabled: bool, tooltip: str) -> QPushButton:
+        """One row of :meth:`setEntries`.
+
+        A ``QPushButton`` rather than a label with a mouse handler, so it is
+        reachable by keyboard and announced as a button, and so the disabled
+        state is the platform's rather than a colour this file chose.
+        """
+        button = QPushButton(self._entries)
+        button.setObjectName("EmptyStateEntry")
+        button.setText(f"{label}\n{sublabel}" if sublabel else label)
+        button.setEnabled(bool(enabled))
+        button.setCursor(Qt.PointingHandCursor if enabled else Qt.ArrowCursor)
+        if tooltip:
+            button.setToolTip(tooltip)
+        if callable(on_click) and enabled:
+            def _slot(_checked=False, _fn=on_click):
+                _fn()
+            button.clicked.connect(_slot)
+        return button
 
     def clearAction(self) -> None:
         if self._action_slot is not None:
@@ -212,6 +283,26 @@ class EmptyState(QWidget):
         QPushButton#EmptyStateAction:hover {{
             background: {c.hover};
             border-color: {c.border_strong};
+        }}
+        /* The secondary links. Borderless and left-aligned so a column of them
+           reads as a list rather than as a row of competing buttons; the action
+           above keeps its border and stays the one obvious thing to press. */
+        QWidget#EmptyStateEntries {{ background: transparent; }}
+        QPushButton#EmptyStateEntry {{
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: {theme.Radii.sm}px;
+            color: {c.text_primary};
+            font-size: {t.small_size}px;
+            padding: {theme.Spacing.xs}px {theme.Spacing.sm}px;
+            text-align: left;
+        }}
+        QPushButton#EmptyStateEntry:hover {{
+            background: {c.hover};
+            border-color: {c.border};
+        }}
+        QPushButton#EmptyStateEntry:disabled {{
+            color: {c.text_muted};
         }}
         """
 

@@ -1133,6 +1133,19 @@ left off rather than sending you across the window to press the other one. There
 is one folder picker behind both. Nothing else on the page is drawn until a
 dataset is open, because there would be nothing in it to read.
 
+**Under that button are the datasets you opened recently**, newest first, so
+getting back to yesterday's plate does not mean navigating to it again. Clicking
+one opens it exactly as the folder picker would. A dataset whose folder is not
+reachable right now — an external drive that is not plugged in is the usual
+reason — is still listed, greyed out, with the reason if you hover it; it comes
+back by itself when the drive does. The list is kept per user on this machine,
+not in any dataset folder, so copying a dataset to a colleague does not hand
+them your history of other plates. A folder that opened but turned out to hold
+no wells is not added.
+
+Once a dataset is open the same list appears as a **Recent datasets** card at the
+bottom of Overview, minus the one you are already in.
+
 **It reports; it does not measure.** Working out how much of each well's input
 its output covers means opening an archive and reading a whole CSV for every
 well — far too slow for a page you pass through constantly, and a cached answer

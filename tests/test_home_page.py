@@ -526,3 +526,66 @@ def test_the_help_drawer_lands_on_the_current_tab_not_the_top_of_the_chapter(
     # and correctly falls through to the Home chapter.
     _goto_subtab(loaded_app, qtbot, "Overview")
     assert resolve(None, loaded_app) == help_topics.SECTION_BY_PAGE["Home"]
+
+
+# ── the recent-datasets card, on a page built for real ──────────────────────
+
+def test_the_recents_card_opens_the_dataset_it_names(loaded_app, tmp_path,
+                                                     monkeypatch):
+    """The one thing only a real app can show: that the card is built, painted
+    from the store, and wired to the load path.
+
+    Everything else about this list — capping, dedupe, what a missing folder
+    does, what reaches ``_load_path`` — is asserted without an application in
+    ``test_recent_datasets.py`` and ``test_home_empty_state.py``. This is the
+    seam those cannot see: that ``_build_recents`` ran, that ``refresh_home``
+    reached ``_paint_recents``, and that a button on the real page carries the
+    handler. A control that is offered and does nothing is the failure this
+    file exists for.
+    """
+    from well_viewer.core.recent_datasets import record_open
+    from well_viewer.features.home.controller import refresh_home
+
+    other = tmp_path / "another_plate"
+    other.mkdir()
+
+    class _Settings:
+        def __init__(self):
+            self._d = {}
+
+        def value(self, key, default=None):
+            return self._d.get(key, default)
+
+        def setValue(self, key, value):  # noqa: N802 - Qt's spelling
+            self._d[key] = value
+
+    settings = _Settings()
+    record_open(settings, str(other), "another_plate", 1.0)
+    monkeypatch.setattr(loaded_app, "_qsettings", lambda: settings,
+                        raising=False)
+
+    opened = []
+    monkeypatch.setattr(loaded_app, "_load_path", opened.append, raising=False)
+
+    ctx = loaded_app._ctx
+    refresh_home(ctx)
+
+    card = ctx.widgets.get("_home_recents_card")
+    host = ctx.widgets.get("_home_recents")
+    assert card is not None and host is not None, "the card was never built"
+    assert card.isVisible() or card.isVisibleTo(card.parent()), (
+        "the card is hidden although there is a dataset to offer"
+    )
+    assert host.layout().count() == 1, (
+        f"{host.layout().count()} rows for one remembered dataset"
+    )
+
+    button = host.layout().itemAt(0).widget()
+    assert "another_plate" in button.text()
+    button.click()
+    from PySide6.QtTest import QTest
+    QTest.qWait(200)
+    assert opened == [other], (
+        "clicking the row did not reach _load_path, so the card is a picture "
+        "of a shortcut rather than a shortcut"
+    )

@@ -459,3 +459,227 @@ def test_turning_every_timepoint_off_says_so_rather_than_blaming_the_fill(tab):
     texts = " | ".join(t.get_text() for t in tab.ax.texts)
     assert "Timepoints" in texts, texts
     assert "Variables" not in texts, texts
+
+
+# ── the fit ─────────────────────────────────────────────────────────────────
+#
+# Built through ``tab_view._build_fit_popover`` and driven by setting the combo
+# and the line edits, not by calling the controller. §7.6 is the reason: the
+# per-sample control editor shipped unopenable past a lane of ~4,950 tests
+# because every test of it entered one step past the closure that was broken.
+# Asserting a model is *offered* is not asserting that choosing it fits
+# anything.
+
+@pytest.fixture
+def fit_ui(tab, qtbot):
+    """The real Fit popover, wired to the real controller."""
+    from widgets.control_band import ControlBand
+
+    from well_viewer.features.response import tab_view as rtv
+
+    band = ControlBand()
+    qtbot.addWidget(band)
+    tab.ctx.window = band          # ``_build_fit_popover`` parents into the band
+    button = rtv._build_fit_popover(tab.ctx, band.slot("response"))
+    return SimpleNamespace(button=button,
+                           combo=tab.w("_response_fit_cb"),
+                           top=tab.w("_response_fit_top"),
+                           bottom=tab.w("_response_fit_bottom"))
+
+
+def _dose_plate(tab, *, ec50=1.0, bottom=5.0, top=95.0, flat=False):
+    """A plate whose eight groups sit on a known 4PL curve."""
+    import math
+
+    doses = [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0]
+    variable = _variable(pairs=tuple((f"{d:g}", d) for d in doses))
+    wells = [f"A{i + 1:02d}" for i in range(len(doses))]
+    values = {}
+    for i, (well, dose) in enumerate(zip(wells, doses)):
+        values[well] = f"v{i}"
+    _load(tab, variable, values,
+          [(f"{d:g}", [w]) for d, w in zip(doses, wells)])
+
+    def _y(dose):
+        if flat:
+            return 50.0
+        return bottom + (top - bottom) / (
+            1 + 10 ** ((math.log10(ec50) - math.log10(dose)) * 1.0))
+
+    by_name = {f"{d:g}": _y(d) for d in doses}
+    import well_viewer.domain.stats_compute as sc
+    tab.monkeypatch.setattr(
+        sc, "compute_rep_stats",
+        lambda ctx, rset, t, thr, sem: (by_name[rset.name], 1.0, 0.5, 0.1))
+    return doses
+
+
+def test_choosing_a_model_in_the_popover_draws_a_fitted_line(tab, fit_ui):
+    """Pressed through the combo, so the signal that shipped unconnected once
+    is the thing under test."""
+    _dose_plate(tab, ec50=2.5)
+    rctl.redraw_response(tab.ctx)
+    before = len(tab.ax.lines)
+
+    index = fit_ui.combo.findData("4pl")
+    assert index >= 0, "the 4PL model was not offered"
+    fit_ui.combo.setCurrentIndex(index)
+
+    assert len(tab.ax.lines) > before, "choosing 4PL drew nothing new"
+    assert tab.ctx.state.feature_slice("response").fit_model == "4pl"
+
+
+def _legend_labels(ax):
+    """The legend's entries, or a named failure rather than an AttributeError.
+
+    A missing legend is one of the ways the EC50 goes missing — it is where the
+    number is written — so the absence has to read as a failed assertion about
+    the figure, not as a crash inside the test's own plumbing (§7.5 #1).
+    """
+    legend = ax.get_legend()
+    assert legend is not None, "the figure drew no legend, so no EC50 with it"
+    return [t.get_text() for t in legend.get_texts()]
+
+
+def test_the_ec50_reaches_the_legend(tab, fit_ui):
+    _dose_plate(tab, ec50=2.5)
+    fit_ui.combo.setCurrentIndex(fit_ui.combo.findData("4pl"))
+
+    labels = _legend_labels(tab.ax)
+    assert any("EC50" in s for s in labels), labels
+    assert any("2.5" in s for s in labels), labels
+
+
+def test_a_flat_plate_puts_a_dash_in_the_legend_and_the_reason_underneath(
+        tab, fit_ui):
+    """Never the optimiser's last iterate. This is the defect that shipped
+    once: a flat series printed EC50 0.548 µM from eight measurements that
+    showed no response at all."""
+    _dose_plate(tab, flat=True)
+    fit_ui.combo.setCurrentIndex(fit_ui.combo.findData("4pl"))
+
+    labels = _legend_labels(tab.ax)
+    assert any("EC50 — (no fit)" in s for s in labels), labels
+    captions = [t.get_text() for t in tab.ax.texts]
+    assert any("flat" in s for s in captions), captions
+
+
+def test_a_refused_fit_draws_no_line(tab, fit_ui):
+    """A dashed line through the points would assert a shape nothing supports."""
+    _dose_plate(tab, flat=True)
+    rctl.redraw_response(tab.ctx)
+    before = len(tab.ax.lines)
+
+    fit_ui.combo.setCurrentIndex(fit_ui.combo.findData("4pl"))
+
+    assert len(tab.ax.lines) == before, "a curve was drawn for a refused fit"
+
+
+def test_pinning_a_plateau_in_the_popover_changes_the_fit(tab, fit_ui):
+    """The line edit, not ``set_fit_bound``: the editingFinished wiring is the
+    half that can ship dead."""
+    _dose_plate(tab, ec50=1.0, top=95.0)
+    fit_ui.combo.setCurrentIndex(fit_ui.combo.findData("4pl"))
+
+    fit_ui.top.setText("200")
+    fit_ui.top.editingFinished.emit()
+
+    assert tab.ctx.state.feature_slice("response").fit_top == 200.0
+    data = rctl.response_data(tab.ctx)
+    assert rctl.response_fits(tab.ctx, data)[24.0].top == 200.0
+
+
+def test_clearing_a_plateau_frees_it_again(tab, fit_ui):
+    _dose_plate(tab)
+    fit_ui.combo.setCurrentIndex(fit_ui.combo.findData("4pl"))
+    fit_ui.top.setText("200")
+    fit_ui.top.editingFinished.emit()
+
+    fit_ui.top.setText("")
+    fit_ui.top.editingFinished.emit()
+
+    assert tab.ctx.state.feature_slice("response").fit_top is None
+
+
+def test_an_unreadable_plateau_frees_the_parameter_and_says_so(tab, fit_ui):
+    """Keeping the last good value would fit a curve to a number the user did
+    not type, with nothing on screen to say the field was ignored."""
+    _dose_plate(tab)
+    fit_ui.combo.setCurrentIndex(fit_ui.combo.findData("4pl"))
+    fit_ui.top.setText("100")
+    fit_ui.top.editingFinished.emit()
+    tab.statuses.clear()
+
+    fit_ui.top.setText("1OO")
+    fit_ui.top.editingFinished.emit()
+
+    assert tab.ctx.state.feature_slice("response").fit_top is None
+    assert any("not a number" in s for s in tab.statuses), tab.statuses
+
+
+def test_turning_the_fit_back_off_removes_the_line_and_the_ec50(tab, fit_ui):
+    _dose_plate(tab, ec50=2.5)
+    fit_ui.combo.setCurrentIndex(fit_ui.combo.findData("4pl"))
+    with_fit = len(tab.ax.lines)
+
+    fit_ui.combo.setCurrentIndex(fit_ui.combo.findData("none"))
+
+    assert len(tab.ax.lines) < with_fit
+    legend = tab.ax.get_legend()
+    labels = [] if legend is None else [t.get_text() for t in legend.get_texts()]
+    assert not any("EC50" in s for s in labels), labels
+
+
+def test_the_csv_carries_the_ec50_and_the_reason_it_has_none(tab, fit_ui,
+                                                             monkeypatch):
+    """A spreadsheet of fits that are all successful is the same silent
+    substitution as a figure that draws five of eight groups."""
+    written = {}
+    monkeypatch.setattr(rctl, "write_csv_rows",
+                        lambda ctx, name, header, rows: written.update(
+                            header=header, rows=rows))
+    _dose_plate(tab, ec50=2.5)
+    fit_ui.combo.setCurrentIndex(fit_ui.combo.findData("4pl"))
+
+    rctl.export_response_csv(tab.ctx)
+
+    fit_rows = [r for r in written["rows"] if r[0].startswith("fit")]
+    assert len(fit_rows) == 1, written["rows"]
+    assert float(fit_rows[0][2]) == pytest.approx(2.5, rel=1e-2)
+    assert "EC50" in fit_rows[0][3]
+
+
+def test_the_csv_row_for_a_refused_fit_carries_the_reason_and_no_number(
+        tab, fit_ui, monkeypatch):
+    written = {}
+    monkeypatch.setattr(rctl, "write_csv_rows",
+                        lambda ctx, name, header, rows: written.update(rows=rows))
+    _dose_plate(tab, flat=True)
+    fit_ui.combo.setCurrentIndex(fit_ui.combo.findData("4pl"))
+
+    rctl.export_response_csv(tab.ctx)
+
+    row = next(r for r in written["rows"] if r[0].startswith("fit"))
+    assert row[2] == "", f"a refused fit wrote an EC50: {row}"
+    assert "flat" in row[-1], row
+
+
+def test_the_fit_settings_are_one_set_for_the_whole_figure(tab, fit_ui):
+    """Two timepoints fitted with independently floating tops give two EC50s
+    that cannot be compared, and comparing them is the only reason to draw
+    both."""
+    _dose_plate(tab, ec50=2.5)
+    tab.monkeypatch.setattr(
+        "well_viewer.data.data_loading.get_all_timepoints",
+        lambda _ctx: [24.0, 48.0])
+    slice_ = tab.ctx.state.feature_slice("response")
+    slice_.tp_selections = {"24": True, "48": True}
+    fit_ui.combo.setCurrentIndex(fit_ui.combo.findData("4pl"))
+    fit_ui.bottom.setText("0")
+    fit_ui.bottom.editingFinished.emit()
+
+    fits = rctl.response_fits(tab.ctx, rctl.response_data(tab.ctx))
+
+    assert set(fits) == {24.0, 48.0}
+    assert {f.bottom for f in fits.values()} == {0.0}
+    assert {f.model for f in fits.values()} == {"4pl"}

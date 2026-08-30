@@ -134,6 +134,32 @@ def empty_reason(data: ResponseData, *, variable_chosen: bool = True,
             f"for each. Fix them on Home → Variables.")
 
 
+def fit_curves(data: ResponseData, model: str, *, fixed_top: float | None = None,
+               fixed_bottom: float | None = None) -> dict:
+    """``{timepoint: FitResult}`` — one fit per curve, all on the same terms.
+
+    **The model and the pinned plateaus are shared across every curve**, which
+    is the whole point of drawing more than one: two timepoints fitted with
+    independently floating tops produce two EC50s that cannot be compared, and
+    comparing them is the only reason to overlay them.
+
+    A curve that cannot be fitted still gets an entry. An absent key and a
+    refused fit look identical to a caller that used ``.get()``, and the
+    refusals are the half that has to reach the legend.
+    """
+    from well_viewer.features.response.response_compute import (
+        FIT_NONE, fit_response,
+    )
+    if model == FIT_NONE:
+        return {}
+    return {
+        curve.timepoint: fit_response(
+            [p.x for p in curve.points], [p.y for p in curve.points],
+            model=model, fixed_top=fixed_top, fixed_bottom=fixed_bottom)
+        for curve in data.curves
+    }
+
+
 def collect_response(ctx, variable_id: str, timepoints) -> ResponseData:
     """Build every curve for *variable_id* at *timepoints*.
 

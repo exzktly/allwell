@@ -1431,6 +1431,12 @@ its vehicle control look complete, and nudging it to some small positive number
 states a concentration you never administered. It goes in its own column to the
 left of a dotted break, ticked `0`, and it is left out of any fit.
 
+**Which timepoints are drawn is this tab's own choice.** It opens on the one
+timepoint the rest of the app is focused on, because a twelve-timepoint plate
+opened as twelve overlapping curves per condition is not a plot anyone can
+read. Add more from the **Timepoints** button, whose own label carries the
+count. Changing them here does not move the Heat Map or the Distribution tab.
+
 **What could not be plotted is named on the figure.** A group whose wells hold
 two different doses, and a group containing a well with no dose at all, are two
 different mistakes with two different fixes, so they are counted separately in a
@@ -1438,6 +1444,65 @@ caption under the axes — not only on the status line, which does not travel wi
 a saved figure. The exported CSV carries a row for each of them too, with an
 empty x and the reason, because a spreadsheet is exactly where someone counts
 rows and believes the total.
+
+**A figure with nothing on it says why.** Empty axes are the same answer to six
+quite different situations, so instead the tab writes which one it is, and where
+to fix it: no Number variable picked, no timepoint ticked, no group filled in
+yet, groups whose wells disagree, values that are not numbers, or a timepoint at
+which nothing was measured. The last two of those look identical on a blank
+plot and have nothing to do with each other.
+
+#### Fitting a curve
+
+**Fit** in the band offers two models, and neither is on by default — a fitted
+line through points is an assertion about the shape of the response, and it
+should be yours rather than something you find already drawn.
+
+- **4PL**, the four-parameter logistic: bottom, top, EC50 and slope all fitted.
+- **Hill (bottom = 0)**, the same curve with its floor pinned at zero. The right
+  model when your assay's zero is a real zero — a background-subtracted
+  readout — and letting the bottom float would buy a better-looking fit by
+  inventing a floor the experiment says is not there. It also needs one fewer
+  dose than the 4PL, because a pinned parameter is not a fitted one.
+
+Leave **Top** and **Bottom** blank to fit them, or type a number to pin a
+plateau you already know — 100 on a normalised assay, 0 on a subtracted one.
+Whatever you set applies to **every curve on the figure**: two timepoints fitted
+with independently floating tops produce two EC50s that cannot be compared, and
+comparing them is the only reason to draw both at once.
+
+The curve is fitted against **log₁₀ of your x**, whatever scale the axis is
+showing. Decade-spaced doses fitted in linear x weight the top dose almost
+exclusively — the residual at 10 µM is a hundred times the residual at 0.1 µM
+for the same proportional error — so a linear fit is effectively ignoring the
+bottom half of the curve, which is the half that decides the EC50.
+
+The EC50 appears in the legend entry for its own curve, with a 95% interval that
+is **asymmetric**: it is symmetric about log₁₀(EC50), so the upper arm is longer,
+which is the truth about a dose estimated on a log axis. A single ± would claim
+a lower bound the fit does not support. The same numbers go into **Save plot
+data…**.
+
+**When the data will not support a fit, you get an em dash and a reason** —
+never a number. `EC50 — (no fit)` appears in the legend and the reason under the
+axes, and no line is drawn. The five reasons are:
+
+- **too few distinct doses** — the caption says how many the model needs.
+  Replicates at the same dose do not count; three wells at 1 µM are one dose.
+- **the response is flat** — nothing changed, so there is no half-maximal
+  anything. Worth knowing that a flat line fits a 4PL *perfectly*, with the top
+  equal to the bottom, at which point the EC50 is whatever the fitter started
+  from. That number is not shown.
+- **a parameter ran to the edge of its range** — usually the top or bottom
+  plateau, meaning your doses never reached it.
+- **the EC50 lies outside the doses you tested** — extrapolation, not
+  measurement.
+- **the fit did not converge.**
+
+An interval can also be missing from a fit that otherwise worked, and it says
+which: as many points as parameters leaves nothing to estimate an error from
+(dose more, and it appears), whereas parameters that are not separable at these
+doses will not be fixed by more of the same ones.
 
 #### Groups
 

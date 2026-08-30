@@ -21,8 +21,9 @@ from well_viewer.core.ui_helpers import (
 # module, so there is no cycle to work around — and a deferred feature import
 # that is not breaking a cycle is one the budget guard counts for nothing.
 from well_viewer.features.response.controller import (
-    export_response_csv, on_x_variable_changed, open_timepoint_selector,
-    redraw_response, update_timepoint_button,
+    export_response_csv, fit_model_labels, fit_settings, on_x_variable_changed,
+    open_timepoint_selector, redraw_response, set_fit_bound, set_fit_model,
+    update_timepoint_button,
 )
 
 #: The figure. One axes, wide rather than tall — a dose–response is read across.
@@ -61,6 +62,8 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     display_btn.setToolTip("Error bars (SEM/SD) and per-FOV spread")
     display_lay.addWidget(make_band_controls(ctx, display_panel, with_fov=True))
     band.add_action(display_btn)
+
+    band.add_action(_build_fit_popover(ctx, band))
 
     export_btn, _menu, _act = build_plot_save_menu(
         ctx, band, card_key="_response_card", data_label="Save plot data…",
@@ -102,6 +105,49 @@ def build_response_tab(ctx, parent: QWidget) -> None:
 
     update_timepoint_button(ctx)
     redraw_response(ctx)
+
+
+def _build_fit_popover(ctx, band):
+    """Model, and the two plateaus that can be pinned. One set for the figure.
+
+    Shared across the curves rather than offered per curve: two timepoints
+    fitted with independently floating tops give two EC50s that cannot be
+    compared, and comparing them is the only reason to overlay them.
+
+    An action rather than scope: it does not change what the figure is *of*.
+    """
+    from PySide6.QtWidgets import QLabel, QLineEdit
+
+    from widgets.labeled_combo import LabeledComboBox
+
+    button, panel, layout = make_popover_button("Fit ▾", band)
+    button.setToolTip("Fit a dose–response curve and report its EC50")
+
+    model, top, bottom = fit_settings(ctx)
+    combo = ctx.widgets.register("_response_fit_cb", LabeledComboBox("Model"))
+    for label, model_id in fit_model_labels():
+        combo.addItem(label, model_id)
+    index = combo.findData(model)
+    combo.setCurrentIndex(index if index >= 0 else 0)
+    combo.currentIndexChanged.connect(
+        lambda *_: set_fit_model(ctx, combo.currentData() or ""))
+    layout.addWidget(combo)
+
+    hint = QLabel("Leave a plateau blank to fit it.", panel)
+    hint.setObjectName("Muted")
+    hint.setWordWrap(True)
+    layout.addWidget(hint)
+
+    for which, value in (("top", top), ("bottom", bottom)):
+        edit = ctx.widgets.register(f"_response_fit_{which}",
+                                    QLineEdit(panel))
+        edit.setPlaceholderText(f"{which.title()} — free")
+        edit.setText("" if value is None else f"{value:g}")
+        edit.editingFinished.connect(
+            lambda w=which, e=edit: set_fit_bound(ctx, w, e.text()))
+        layout.addWidget(edit)
+
+    return button
 
 
 def _export_response_data(ctx) -> None:

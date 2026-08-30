@@ -14,9 +14,12 @@ from well_viewer.core.csv_export import write_csv_rows
 from well_viewer.core.safe import swallow
 from well_viewer.domain.sample_variables import NUMBER
 from well_viewer.features.response.collect import (
-    ResponseData, collect_response, empty_reason, omission_caption,
+    ResponseData, collect_response, empty_reason, fit_curves, omission_caption,
 )
 from well_viewer.features.response.renderer import draw_response
+from well_viewer.features.response.response_compute import (
+    FIT_LABELS, FIT_MODELS, FIT_NONE, ec50_text,
+)
 
 _logger = logging.getLogger("well_viewer")
 
@@ -192,7 +195,8 @@ def redraw_response(ctx) -> None:
                   title=_figure_title(ctx, data),
                   ylabel=_y_label(ctx),
                   variable_chosen=bool(selected_variable_id(ctx)),
-                  timepoints_chosen=bool(timepoints_for(ctx)))
+                  timepoints_chosen=bool(timepoints_for(ctx)),
+                  fits=response_fits(ctx, data))
 
     from well_viewer.core.plot_style import apply_export_style_to_current
     apply_export_style_to_current(ctx, ax.figure, canvas)
@@ -257,7 +261,86 @@ def export_response_csv(ctx) -> None:
              for member, reason in data.omitted]
     rows += [[member, "", "", "", "", "", "", "value is not a number"]
              for member in data.non_numeric]
+    rows += _fit_rows(ctx, data)
     write_csv_rows(ctx, "response_curve", header, rows)
+
+
+def _fit_rows(ctx, data) -> list[list[str]]:
+    """One row per fitted curve, in the columns the point rows already use.
+
+    The EC50 goes in ``x`` because that is what it is — a dose on the same
+    axis — and its interval and the model go in ``x_label``, so a reader
+    sorting the file by x finds the EC50 among the doses it sits between.
+
+    A refused fit still gets a row, carrying its reason. Dropping it would
+    leave a spreadsheet whose fits are all successful, which is the same silent
+    substitution as a figure that draws five of eight groups.
+    """
+    rows = []
+    for timepoint, fit in sorted(response_fits(ctx, data).items()):
+        ec50 = f"{fit.ec50:g}" if fit.ok and fit.ec50 is not None else ""
+        rows.append([f"fit ({fit.model})", f"{timepoint:g}", ec50,
+                     ec50_text(fit, data.unit), "", "", "",
+                     fit.reason])
+    return rows
+
+
+# ── the fit ─────────────────────────────────────────────────────────────────
+
+def fit_settings(ctx) -> tuple[str, float | None, float | None]:
+    """``(model, fixed_top, fixed_bottom)`` from this tab's slice."""
+    slice_ = ctx.state.feature_slice("response")
+    if slice_ is None:
+        return FIT_NONE, None, None
+    model = str(getattr(slice_, "fit_model", FIT_NONE) or FIT_NONE)
+    if model not in FIT_MODELS:
+        model = FIT_NONE
+    return model, getattr(slice_, "fit_top", None), getattr(slice_, "fit_bottom", None)
+
+
+def response_fits(ctx, data) -> dict:
+    """``{timepoint: FitResult}`` for the figure as the popover has it set."""
+    model, top, bottom = fit_settings(ctx)
+    return fit_curves(data, model, fixed_top=top, fixed_bottom=bottom)
+
+
+def set_fit_model(ctx, model: str) -> None:
+    slice_ = ctx.state.feature_slice("response")
+    if slice_ is None:
+        return
+    slice_.fit_model = model if model in FIT_MODELS else FIT_NONE
+    redraw_response(ctx)
+
+
+def set_fit_bound(ctx, which: str, text: str) -> None:
+    """Pin ``top`` or ``bottom`` to *text*, or free it when *text* is blank.
+
+    A field that cannot be parsed frees the parameter and says so, rather than
+    keeping the last good value: a user who typed ``1OO`` and got a curve fitted
+    to a top of 100 would have no way to tell that the figure was not answering
+    the question they asked.
+    """
+    slice_ = ctx.state.feature_slice("response")
+    if slice_ is None:
+        return
+    attribute = "fit_top" if which == "top" else "fit_bottom"
+    text = (text or "").strip()
+    if not text:
+        setattr(slice_, attribute, None)
+    else:
+        try:
+            setattr(slice_, attribute, float(text))
+        except ValueError:
+            setattr(slice_, attribute, None)
+            with swallow("report an unreadable fit bound"):
+                ctx.notify.set_status(
+                    f"{which.title()} is not a number — left free.")
+    redraw_response(ctx)
+
+
+def fit_model_labels() -> list[tuple[str, str]]:
+    """``(label, model_id)`` in offer order, for the popover's combo."""
+    return [(FIT_LABELS[model], model) for model in FIT_MODELS]
 
 
 def _y_label(ctx) -> str:

@@ -11,7 +11,7 @@ import logging
 
 from well_viewer.features.response.collect import empty_reason, omission_caption
 from well_viewer.features.response.response_compute import (
-    spans_enough_decades, zero_position,
+    curve_y, ec50_text, spans_enough_decades, zero_position,
 )
 
 _logger = logging.getLogger("well_viewer")
@@ -19,7 +19,8 @@ _logger = logging.getLogger("well_viewer")
 def draw_response(ctx, ax, data, *, log_x: bool | None = None,
                   title: str = "", ylabel: str = "",
                   variable_chosen: bool = True,
-                  timepoints_chosen: bool = True) -> None:
+                  timepoints_chosen: bool = True,
+                  fits: dict | None = None) -> None:
     """Paint *data* onto *ax*.
 
     *log_x* ``None`` asks the data — on once the positive values span two
@@ -35,6 +36,12 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
     from a broken tab, and they are the same answer to six different mistakes;
     ``collect.empty_reason`` picks the sentence and this draws it in place of
     the axes rather than beside them.
+
+    *fits* is ``{timepoint: FitResult}``. A fit that did not converge draws **no
+    line at all** and puts ``EC50 — (no fit)`` in its legend entry: a dashed
+    line through the points, or the optimiser's last iterate printed as a
+    number, would both assert a shape the data did not support. Why each one
+    was refused goes under the axes, where it travels with a saved figure.
     """
     ax.clear()
     reason = empty_reason(data, variable_chosen=variable_chosen,
@@ -61,11 +68,21 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
             continue
         on_axis = [p for p in curve.points if not (use_log and p.x <= 0)]
         off = [p for p in curve.points if use_log and p.x <= 0]
+        fit = (fits or {}).get(curve.timepoint)
         label = f"t={curve.timepoint:g}"
+        if fit is not None:
+            # The EC50 rides in the legend entry rather than in a box of its
+            # own, so that two overlaid timepoints cannot get their numbers
+            # swapped by a reader: the number sits against the swatch of the
+            # curve it came from.
+            label = f"{label} · {ec50_text(fit, data.unit)}"
         if on_axis:
-            ax.errorbar([p.x for p in on_axis], [p.y for p in on_axis],
-                        yerr=[p.err for p in on_axis],
-                        marker="o", capsize=3, label=label)
+            line = ax.errorbar([p.x for p in on_axis], [p.y for p in on_axis],
+                               yerr=[p.err for p in on_axis],
+                               marker="o", capsize=3, label=label)
+            if fit is not None and fit.ok:
+                _draw_fit_line(ax, fit, [p.x for p in on_axis], use_log,
+                               _errorbar_colour(line))
         if off and off_scale_x is not None:
             # Same colour as its own curve would be too clever: this point is
             # deliberately not on the curve, and joining it with a line would
@@ -87,10 +104,14 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
 
     unit = f" ({data.unit})" if data.unit else ""
     ax.set_xlabel(f"{data.variable_name}{unit}" if data.variable_name else "")
-    if len([c for c in data.curves if c.points]) > 1:
+    # Also when there is only one curve, because a single curve's legend entry
+    # is where its EC50 is written: suppressing it would drop the number the
+    # fit exists to produce.
+    if len([c for c in data.curves if c.points]) > 1 or fits:
         ax.legend(fontsize="small")
 
-    caption = omission_caption(data)
+    caption = " · ".join(
+        part for part in (omission_caption(data), _fit_caption(fits)) if part)
     if caption:
         # Under the axes rather than in the title: it is a note about the
         # figure's completeness, not what the figure is of, and a reader
@@ -100,6 +121,57 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
 
     from well_viewer.core.plot_style import apply_ax_style
     apply_ax_style(ax, title, ylabel)
+
+
+def _errorbar_colour(container):
+    """The colour matplotlib gave an ``errorbar``, so the fit can match it.
+
+    Read back rather than chosen: taking the next colour from the cycle would
+    paint the fit in the *following* curve's colour, which on a two-timepoint
+    figure means each fitted line is drawn in the other timepoint's shade.
+    """
+    with_lines = getattr(container, "lines", None) or ()
+    if with_lines and getattr(with_lines[0], "get_color", None):
+        return with_lines[0].get_color()
+    return None
+
+
+def _draw_fit_line(ax, fit, xs, use_log: bool, colour) -> None:
+    """A smooth fitted curve across the doses, and no further.
+
+    Bounded by the doses tested rather than by the axes: a line running out to
+    the edge of the view asserts a response at concentrations nobody gave, and
+    the off-scale column at the left would have the curve passing through the
+    axis break as though the vehicle were a dose.
+    """
+    import numpy as np
+
+    lo, hi = min(xs), max(xs)
+    if lo <= 0 or hi <= lo:
+        return
+    grid = (np.logspace(np.log10(lo), np.log10(hi), 200) if use_log
+            else np.linspace(lo, hi, 200))
+    ys = curve_y(fit, grid)
+    if ys is None:
+        return
+    ax.plot(grid, ys, linestyle="-", linewidth=1.4, alpha=0.9, color=colour,
+            zorder=1)
+
+
+def _fit_caption(fits: dict | None) -> str:
+    """Why each refused fit was refused, for under the axes.
+
+    In the caption as well as the legend because the legend has room for
+    ``(no fit)`` and not for the sentence, and "no fit" without a reason is the
+    thing that sends a user to re-run a plate.
+    """
+    refused = [(t, f.reason) for t, f in sorted((fits or {}).items())
+               if not f.ok and f.reason]
+    if not refused:
+        return ""
+    if len(refused) == 1:
+        return f"No fit at t={refused[0][0]:g}: {refused[0][1]}"
+    return " ".join(f"No fit at t={t:g}: {reason}" for t, reason in refused)
 
 
 def _draw_empty_state(ax, reason: str, caption: str) -> None:

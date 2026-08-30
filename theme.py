@@ -432,6 +432,49 @@ def _icon_path(name: str) -> str:
     return os.path.join(base, "assets", "icons", name).replace(os.sep, "/")
 
 
+def link_row_qss(object_name: str) -> str:
+    """The rules for a row in a column of secondary links, for *object_name*.
+
+    Two places draw this row — Home's Recent datasets card and the column of
+    entries an ``EmptyState`` can carry — and they must look identical, because
+    on Home they *are* the same list shown in the two states of one page. They
+    cannot share an object name (a button on a card is not part of an empty
+    state, and the name is what a reader greps), and they cannot share a
+    stylesheet host either: ``EmptyState`` sets its own, so that its placeholder
+    renders the same wherever it is embedded. So they share this instead. Two
+    copies of four rules is how the same control ends up looking like two
+    controls after one of them is adjusted.
+
+    A list, not a row of tiles: borderless until hovered, left-aligned so the
+    names form an edge the eye can run down, full width so the whole row is the
+    target rather than the text in it. A disabled row is a folder that is not
+    reachable right now and stays legible — the point of showing it at all is
+    that the user can see their history is intact and a drive is missing.
+    """
+    c, t, r, s = Colors, Typography, Radii, Spacing
+    return f"""
+QPushButton#{object_name} {{
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: {r.sm}px;
+    color: {c.text_primary};
+    font-size: {t.small_size}px;
+    padding: {s.xs}px {s.sm}px;
+    text-align: left;
+}}
+QPushButton#{object_name}:hover {{
+    background-color: {c.hover};
+    border-color: {c.border};
+}}
+QPushButton#{object_name}:pressed {{
+    background-color: {c.panel_elevated};
+}}
+QPushButton#{object_name}:disabled {{
+    color: {c.text_muted};
+}}
+"""
+
+
 def qss() -> str:
     """Return the application-wide base stylesheet.
 
@@ -443,6 +486,7 @@ def qss() -> str:
     _chev = _icon_path("chevron-down.svg")
     _chev_up = _icon_path("chevron-up.svg")
     _check = _icon_path("check.svg")
+    _link_row_home = link_row_qss("HomeRecentTile")
     return f"""
 * {{
     font-family: {t.family};
@@ -487,6 +531,9 @@ QPushButton#HomeThumbTile:hover {{
 QPushButton#HomeThumbTile:pressed {{
     background-color: {c.hover};
 }}
+/* Home's recent-dataset rows — one definition, shared with EmptyState's
+   entries; see ``link_row_qss``. */
+{_link_row_home}
 /* A panel the app has just navigated the user to. Set for a moment after a
    jump-to-this-card action, so the eye lands on the right card in a gallery of
    near-identical ones — the arrival is otherwise silent and the reader has to

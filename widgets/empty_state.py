@@ -284,26 +284,10 @@ class EmptyState(QWidget):
             background: {c.hover};
             border-color: {c.border_strong};
         }}
-        /* The secondary links. Borderless and left-aligned so a column of them
-           reads as a list rather than as a row of competing buttons; the action
-           above keeps its border and stays the one obvious thing to press. */
+        /* The secondary links — one definition, shared with Home's Recent
+           datasets card; see theme.link_row_qss. */
         QWidget#EmptyStateEntries {{ background: transparent; }}
-        QPushButton#EmptyStateEntry {{
-            background: transparent;
-            border: 1px solid transparent;
-            border-radius: {theme.Radii.sm}px;
-            color: {c.text_primary};
-            font-size: {t.small_size}px;
-            padding: {theme.Spacing.xs}px {theme.Spacing.sm}px;
-            text-align: left;
-        }}
-        QPushButton#EmptyStateEntry:hover {{
-            background: {c.hover};
-            border-color: {c.border};
-        }}
-        QPushButton#EmptyStateEntry:disabled {{
-            color: {c.text_muted};
-        }}
+        {theme.link_row_qss("EmptyStateEntry")}
         """
 
 

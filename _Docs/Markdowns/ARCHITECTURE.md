@@ -1250,6 +1250,20 @@ precisely the moment Home's body is hidden behind this placeholder. Giving Home
 its own version would take it out of the shared wording and the shared moment of
 the swap, which is the drift `core/empty_state_copy.py` exists to end.
 
+The rows are styled from one definition, `theme.link_row_qss(object_name)`,
+because Home's Recent datasets card and this placeholder draw the same list in
+the two states of one page. They cannot share an object name (a button on a card
+is not part of an empty state, and the name is what a reader greps) and cannot
+share a stylesheet host either, since `EmptyState` sets its own so that its
+placeholder renders the same wherever it is embedded — so they share the
+generator instead. A helper returning QSS for interpolation into another
+f-string must emit **single** braces: f-string substitution inserts its value
+verbatim and does not process it again, so the doubled braces the helper's own
+body appears to call for reach Qt intact, and Qt discards an unparseable sheet
+without raising — it writes "Could not parse stylesheet" to stderr and paints
+everything unstyled. `tests/test_theme_roles_render.py` holds both halves: no
+stylesheet handed to Qt carries `{{`, and the two hosts' rules stay identical.
+
 A row whose folder is not reachable is **drawn, disabled, with the reason on its
 tooltip** rather than dropped. Hiding it says the user's history was lost when
 what happened is that a drive is unplugged, and the row reappearing by itself

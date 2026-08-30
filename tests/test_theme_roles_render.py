@@ -93,3 +93,72 @@ def test_primary_reads_as_accent_on_both_button_classes(styled_app):
             f"{cls.__name__} with variant='primary' is not accent-filled "
             f"(got {_bg(b)}); primaries must work on both button classes."
         )
+
+
+# ── a stylesheet that reaches Qt as f-string source ─────────────────────────
+
+def _stylesheet_sources():
+    """Every stylesheet this app hands to Qt, with the name to blame.
+
+    ``theme.qss()`` plus the widgets that set their own — a widget with a local
+    sheet is not covered by the app-wide one, which is the whole reason it has
+    one, so checking only ``qss()`` would miss exactly the sheets nothing else
+    looks at.
+    """
+    import theme as _theme
+    from widgets.empty_state import EmptyState
+
+    yield "theme.qss()", _theme.qss()
+    yield "theme.link_row_qss()", _theme.link_row_qss("Probe")
+    yield "EmptyState._build_qss()", EmptyState("probe")._build_qss()
+
+
+@pytest.mark.parametrize("name", ["theme.qss()", "theme.link_row_qss()",
+                                  "EmptyState._build_qss()"])
+def test_no_stylesheet_reaches_qt_with_doubled_braces(qapp, name):
+    """``{{`` in the output means an f-string escape survived into the QSS.
+
+    Qt does not raise on a stylesheet it cannot parse — it writes "Could not
+    parse stylesheet" to stderr and paints the widget unstyled, which under the
+    offscreen platform nobody is watching. So the whole sheet silently does
+    nothing, and every selector test still passes because they read the
+    *source* text rather than the paint.
+
+    The live case: a helper that returns QSS for interpolation into another
+    f-string needs single braces, because f-string substitution inserts its
+    value verbatim and does not process it again. Written with the doubled
+    braces the helper's own body seems to call for, both stylesheets that used
+    it came out unparseable.
+    """
+    sheets = dict(_stylesheet_sources())
+    text = sheets[name]
+    bad = [line for line in text.splitlines() if "{{" in line or "}}" in line]
+    assert not bad, (
+        f"{name} carries f-string escapes into the stylesheet Qt is given, so "
+        f"Qt discards the whole sheet and paints unstyled:\n  "
+        + "\n  ".join(bad[:8])
+    )
+
+
+def test_the_two_link_row_hosts_are_styled_identically(qapp):
+    """One list shown in two states of one page must not drift into two looks.
+
+    Home's Recent datasets card and ``EmptyState``'s entries draw the same rows.
+    They cannot share an object name and cannot share a stylesheet host, so they
+    share ``theme.link_row_qss`` — and this is what notices if one of them stops
+    doing so.
+    """
+    import theme as _theme
+
+    home = _theme.link_row_qss("HomeRecentTile")
+    entry = _theme.link_row_qss("EmptyStateEntry")
+    assert (home.replace("HomeRecentTile", "X")
+            == entry.replace("EmptyStateEntry", "X"))
+    assert home in _theme.qss(), (
+        "Home's card no longer takes its rows from link_row_qss, so the two "
+        "lists can now be adjusted apart"
+    )
+    from widgets.empty_state import EmptyState
+    assert entry in EmptyState("probe")._build_qss(), (
+        "EmptyState's entries no longer take their rows from link_row_qss"
+    )

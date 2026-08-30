@@ -143,13 +143,13 @@ def member_color(ctx, scope: str, member: str) -> str:
     every group — so every row's chip came out identical, and identical to no
     bar on the plate. The row is meant to be findable in the figure.
     """
+    from well_viewer.domain.plot_members import plot_replicate_sets
     from well_viewer.domain.selections_model import (
-        active_replicate_sets, color_for_replicate_set, color_for_well,
+        color_for_replicate_set, color_for_well,
     )
 
     if _members._keys_are_replicate_sets(ctx, scope):
-        well_paths = ctx.state.dataset.well_paths or {}
-        for rset in active_replicate_sets(ctx.state.selection.selections, well_paths):
+        for rset in plot_replicate_sets(ctx):
             if rset.name == member:
                 return color_for_replicate_set(rset, ctx.state.selection.selections)
     return color_for_well(member)

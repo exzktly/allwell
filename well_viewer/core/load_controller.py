@@ -24,7 +24,7 @@ from well_viewer.core.ui_helpers import (
     show_progress as _show_progress,
     step_progress as _step_progress,
 )
-from well_viewer.core.safe import swallowed
+from well_viewer.core.safe import swallow, swallowed
 from well_viewer.data.curation import apply_curation_to_cache
 from well_viewer.domain.dataset_name import dataset_display_name
 
@@ -648,6 +648,13 @@ def load_directory(ctx, d: Path, label=None) -> None:
     # otherwise keep drawing the previous plate's doses over this plate's
     # numbers, with the page's own masthead naming the new dataset.
     app._persistence.load("sample_variables")
+    # The band's Group by combo lists them, and is hidden when a plate declares
+    # none. Refreshed here rather than on first use because the band is built
+    # once at startup and a stale combo would offer the previous plate's
+    # variables against this plate's wells.
+    with swallow("refresh the Group by control for the new dataset"):
+        from well_viewer.core.group_by_controller import refresh_group_by_combo
+        refresh_group_by_combo(ctx)
     # Eagerly hydrate Cell Gating thresholds from ``pipeline_info.json`` so the
     # very first plot draw (line / bar / batch export) has the user's
     # per-channel and per-ratio ThreshFracOn values available. The Cell Gating

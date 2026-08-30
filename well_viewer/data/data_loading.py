@@ -1107,11 +1107,10 @@ def plot_group_well_lists(ctx, fallback_to_all: bool = True) -> list[tuple[str, 
     back: a pooled frame's ``well`` column is parsed from the image filename and
     need not equal the token the app keys wells by.
     """
-    from well_viewer.domain.selections_model import active_replicate_sets
+    from well_viewer.domain.plot_members import plot_replicate_sets
 
     well_paths = ctx.state.dataset.well_paths or {}
-    selections = ctx.state.selection.selections
-    rep_sets = list(active_replicate_sets(selections, well_paths))
+    rep_sets = list(plot_replicate_sets(ctx))
     selected = set(ctx.state.selection.selected_wells or set())
 
     out: list[tuple[str, list[str], Any]] = []

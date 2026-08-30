@@ -27,8 +27,9 @@ from well_viewer.core.lazy import lazy as _lazy
 from well_viewer.data.data_loading import df_included_mask, resolve_value_series, get_rows
 from well_viewer.domain.stats_compute import group_replicate_stats, _reduce_reps
 from well_viewer.domain.metric_registry import column_gating_exempt
+from well_viewer.domain.plot_members import plot_replicate_sets
 from well_viewer.domain.selections_model import (
-    active_replicate_sets, color_for_replicate_set, color_for_well,
+    color_for_replicate_set, color_for_well,
     replicate_display_label, well_display_label,
 )
 from well_viewer.domain.plot_order import apply_order
@@ -265,8 +266,7 @@ def collect_scatter_data(
         return x[mask], y[mask], tp[mask], metadata, pre_gate
 
     # Use active replicate sets if defined, otherwise fall back to selected wells
-    active_rsets = active_replicate_sets(
-        ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    active_rsets = plot_replicate_sets(ctx)
 
     if active_rsets:
         active_rsets = apply_order(
@@ -467,8 +467,7 @@ def collect_scatter_agg_data(
     label_to_key = ctx.state.channel.label_to_channel_key
 
     # Get active replicates or selected wells
-    active_rsets = active_replicate_sets(
-        ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    active_rsets = plot_replicate_sets(ctx)
 
     # Each entry is ``(identity, display_label, wells)``. ``identity`` is the raw
     # rep-set name / well token used as the click/CSV/export key; ``display_label``

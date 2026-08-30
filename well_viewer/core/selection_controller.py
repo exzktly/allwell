@@ -149,7 +149,7 @@ def _announce_selection(ctx) -> None:
     back to every well when nothing is picked must not make the status line claim
     those wells were selected.
     """
-    from well_viewer.domain.selections_model import active_replicate_sets
+    from well_viewer.domain.plot_members import plot_replicate_sets
 
     sel = ctx.state.selection
     well_paths = ctx.state.dataset.well_paths or {}
@@ -160,7 +160,7 @@ def _announce_selection(ctx) -> None:
     # A visible replicate set is a selection expressed a different way, and the
     # plots draw it. Saying "No wells selected" while they do is the same
     # contradiction, one level up, that this branch set out to remove.
-    n_sets = len(list(active_replicate_sets(sel.selections, well_paths)))
+    n_sets = len(list(plot_replicate_sets(ctx)))
     if n_sets:
         ctx.notify.set_status(f"{n_sets} group{'s' if n_sets != 1 else ''} shown")
     else:
@@ -937,7 +937,8 @@ def has_plottable_selection(ctx) -> bool:
     also yields solo wells and defaults to falling back to every loaded well, so
     it answers "what should I draw?" rather than "is there anything to draw?".
     """
-    from well_viewer.domain.selections_model import active_replicate_sets
+
+    from well_viewer.domain.plot_members import plot_replicate_sets
 
     sel = ctx.state.selection
     well_paths = ctx.state.dataset.well_paths or {}
@@ -949,7 +950,7 @@ def has_plottable_selection(ctx) -> bool:
     # which lands after this has already decided what to show.
     if any(w in well_paths for w in sel.selected_wells):
         return True
-    return bool(list(active_replicate_sets(sel.selections, well_paths)))
+    return bool(list(plot_replicate_sets(ctx)))
 
 
 def enforce_well_exclusivity(ctx) -> None:

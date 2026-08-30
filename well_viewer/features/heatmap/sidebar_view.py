@@ -486,10 +486,9 @@ def _autopopulate_cells(ctx) -> list[list[str]]:
     * **plain mode** — each individually selected well becomes its own cell, in
       plate order.
     """
-    from well_viewer.domain.selections_model import active_replicate_sets
+    from well_viewer.domain.plot_members import plot_replicate_sets
 
-    rep_sets = active_replicate_sets(ctx.state.selection.selections,
-                                     ctx.state.dataset.well_paths)
+    rep_sets = plot_replicate_sets(ctx)
     if rep_sets:
         loaded = ctx.state.dataset.well_paths
         cells = [[w for w in (getattr(rs, "wells", None) or []) if w in loaded]

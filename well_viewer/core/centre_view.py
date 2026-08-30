@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
     QLabel, QStackedWidget, QVBoxLayout, QWidget,
 )
 from well_viewer.core.tab_controller import on_tab_change
-from well_viewer.core.safe import swallowed
+from well_viewer.core.safe import swallow, swallowed
 import theme
 from well_viewer.core.plot_card_actions import PLOT_CARD_ATTRS
 
@@ -393,6 +393,37 @@ def build_centre(win, parent: QWidget) -> None:
 
         win._plotting_metric_cb.currentIndexChanged.connect(_on_global_metric)
         win._plotting_metric_grp = band.add_scope("", win._plotting_metric_cb)
+
+        # Group the plot's members by a sample variable instead of by the user's
+        # replicate sets. In the scope zone because that is exactly what it does
+        # — it scopes what a member *is* — and beside Channel and Property
+        # because all three change what every tab draws rather than how one tab
+        # draws it.
+        #
+        # Hidden entirely until a variable is defined. The band's stated rule is
+        # that it only ever carries controls that do something, and a "Group by"
+        # offering nothing but "Wells / groups" is a control whose every option
+        # is the status quo.
+        win._plotting_groupby_cb = win._ctx.widgets.register(
+            "_plotting_groupby_cb", _QComboBox("Group by"))
+        win._plotting_groupby_cb.setStyleSheet(
+            f"QComboBox {{ background-color: {_C.panel_elevated}; "
+            f"color: {_C.text_secondary}; "
+            f"border: 1px solid {_C.border_subtle}; "
+            f"border-radius: {_R.pill}px; padding: 2px 22px 2px 10px; "
+            f"font-size: {_T.caption_size}px; font-weight: 500; }}"
+            f"QComboBox:hover {{ color: {_C.text_primary}; }}"
+        )
+
+        def _on_group_by(_idx: int) -> None:
+            from well_viewer.core.group_by_controller import set_group_by_variable
+            with swallow("apply the Group by variable"):
+                set_group_by_variable(
+                    win._ctx, win._plotting_groupby_cb.currentData() or "")
+
+        win._plotting_groupby_cb.currentIndexChanged.connect(_on_group_by)
+        win._plotting_groupby_grp = band.add_scope("", win._plotting_groupby_cb)
+        win._plotting_groupby_grp.setVisible(False)
 
         # Quick-edit for the active channel's ThreshFracOn (the per-channel
         # ON/OFF intensity threshold that drives the fraction-above- and

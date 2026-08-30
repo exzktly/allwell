@@ -230,7 +230,7 @@ def _per_cell_redraw(qtbot, monkeypatch, **bar_flags):
     monkeypatch.setattr(r, "refresh_bar_layout_btn_state", lambda _c: None)
     monkeypatch.setattr(r, "on_cutoff_for_column",
                         lambda *_a, **_k: 0.0)
-    monkeypatch.setattr(r, "active_replicate_sets", lambda *_a, **_k: [])
+    monkeypatch.setattr(r, "plot_replicate_sets", lambda *_a, **_k: [])
     # Deferred import inside ``redraw_bars``, so it is patched at its home.
     import well_viewer.core.selection_controller as _sel
     monkeypatch.setattr(_sel, "has_plottable_selection", lambda _c: True)
@@ -303,7 +303,7 @@ def test_a_per_cell_mode_says_nothing_when_the_toggle_is_off(qtbot, monkeypatch)
     monkeypatch.setattr(r, "resolve_bar_timepoints", lambda _c: [(24.0, "24")])
     monkeypatch.setattr(r, "refresh_bar_layout_btn_state", lambda _c: None)
     monkeypatch.setattr(r, "on_cutoff_for_column", lambda *_a, **_k: 0.0)
-    monkeypatch.setattr(r, "active_replicate_sets", lambda *_a, **_k: [])
+    monkeypatch.setattr(r, "plot_replicate_sets", lambda *_a, **_k: [])
     import well_viewer.core.selection_controller as _sel
     monkeypatch.setattr(_sel, "has_plottable_selection", lambda _c: True)
     app._ax_bar_mean, app._ax_bar_frac, app._ax_bar_n = ax_mean, ax_frac, ax_n

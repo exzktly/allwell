@@ -36,6 +36,18 @@ class PlotState:
 
     use_sem: bool = True
     use_fov_replicates: bool = False
+
+    # Group the plot's members by a sample variable instead of by the user's
+    # replicate sets: one member per value of ``group_by_variable``, pooling the
+    # wells that hold it. Empty means "use the replicate sets", which is every
+    # plot's behaviour when no variable is chosen and was the only behaviour
+    # before variables existed.
+    #
+    # Cross-tab and not per-feature because every collector that pools wells
+    # reads it through ``selections_model.active_replicate_sets``, which is the
+    # one place the substitution happens — a per-tab copy would let the Bar tab
+    # and the Statistics tab describe the same plate two ways.
+    group_by_variable: str = ""
     legend_visible: dict[str, bool] = field(default_factory=_default_legend)
     # Show the ON/OFF threshold marker overlaid on plots (the vertical line /
     # shaded band at ThreshFracOn on the Distribution, line-plot CDF, and smFISH

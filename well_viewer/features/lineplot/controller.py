@@ -15,8 +15,9 @@ from well_viewer.domain.stats_compute import aggregate_well_cached, cdf_values_c
 from well_viewer.domain.stats_compute import compute_rep_n_above_stats
 from well_viewer.domain.stats_compute import compute_rep_n_above_total
 from well_viewer.domain.stats_compute import replicate_unit
+from well_viewer.domain.plot_members import plot_replicate_sets
 from well_viewer.domain.selections_model import (
-    active_replicate_sets, color_for_replicate_set, color_for_well,
+    color_for_replicate_set, color_for_well,
     well_display_label,
 )
 from well_viewer.domain.viewer_state import parse_rc
@@ -251,7 +252,7 @@ def collect_line_series(
         val_col = ctx.state.channel.active_val_col
 
     fluor_gates = get_all_fluor_gates(ctx)
-    active_rsets = active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    active_rsets = plot_replicate_sets(ctx)
     rep_per_fov = ctx.state.plot.use_fov_replicates if active_rsets else False
     per_fov_spread = ctx.state.plot.use_fov_replicates if not active_rsets else False
 
@@ -970,7 +971,7 @@ def redraw_line_plots(
         _n_title = events_total_title(_metric_key)
         _n_ylabel = "N(above)"
     apply_ax_style(ax_n, f"{_n_title}{_fc_suffix}", _n_ylabel + _fc_suffix)
-    active_rsets = active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    active_rsets = plot_replicate_sets(ctx)
     cdf_lbl = (f"{_ch} {metric_label} CDF (all wells per replicate set)" if active_rsets else f"{_ch} {metric_label} CDF (all selected wells)")
     apply_ax_style(ax_cdf, cdf_lbl, "Cumulative fraction")
     # Every time panel carries its own timepoints + x-label (the panels are

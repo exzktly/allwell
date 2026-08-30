@@ -45,6 +45,12 @@ def _commit(ctx, vset: sv.VariableSet) -> None:
     ctx.state.selection.variables = vset
     with swallow("schedule the sample-variables autosave"):
         ctx.persistence.schedule_save("sample_variables")
+    # The plotting band's Group by combo lists these, so defining, renaming or
+    # deleting one has to reach it — otherwise the band keeps offering a
+    # variable that no longer exists, or fails to offer the one just created.
+    with swallow("refresh the Group by control"):
+        from well_viewer.core.group_by_controller import refresh_group_by_combo
+        refresh_group_by_combo(ctx)
     refresh_variables(ctx)
 
 

@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 from well_viewer.domain.numeric import is_number
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.domain.viewer_state import parse_rc
-from well_viewer.domain.selections_model import active_replicate_sets
+from well_viewer.domain.plot_members import plot_replicate_sets
 from well_viewer.domain import fold_change_pairing as _pairing
 from well_viewer.domain import fold_change_series_cache as _fc_cache
 from well_viewer.domain import plot_members as _members
@@ -375,9 +375,7 @@ def export_plot_data(ctx) -> None:
         # rep-set members (deduped, order preserved) plus a replicate_set
         # column so the grouping isn't lost.
         seen: set = set()
-        rep_sets = active_replicate_sets(
-            ctx.state.selection.selections, ctx.state.dataset.well_paths
-        )
+        rep_sets = plot_replicate_sets(ctx)
         for rset in (rep_sets or []):
             for w in rset.wells:
                 if w in ctx.state.dataset.well_paths and w not in seen:

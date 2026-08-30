@@ -10,7 +10,9 @@ re-export these names.
 
 from __future__ import annotations
 
-from well_viewer.domain.selections_model import (color_for_replicate_set, color_for_well, replicate_display_label, well_display_label, active_replicate_sets)
+from well_viewer.domain.plot_members import plot_replicate_sets
+
+from well_viewer.domain.selections_model import (color_for_replicate_set, color_for_well, replicate_display_label, well_display_label)
 from well_viewer.core.channel_state_controller import get_all_fluor_gates, on_cutoff_for_column
 from well_viewer.data.data_loading import get_rows
 from well_viewer.domain.text_columns import fov_text
@@ -318,7 +320,7 @@ def collect_bar_items(
     threshold = on_cutoff_for_column(
         ctx, ctx.state.channel.active_val_col,
         channel=ctx.state.channel.active_channel)
-    active_rsets = active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    active_rsets = plot_replicate_sets(ctx)
     pool_reps = bool(getattr(ctx.state.plot, "bar_pool_replicates", True))
     # ``use_groups`` here drives the renderer's bar-width preset (wider for
     # grouped mode); it stays True only when wells are actually being
@@ -1008,7 +1010,7 @@ def _pooled_wells_for_fov_mode(ctx) -> list[str]:
     "Aggregate FOV" mode already collapses well identity). When no rsets are
     active, the user's plate selection is pooled.
     """
-    active_rsets = active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    active_rsets = plot_replicate_sets(ctx)
     out: list[str] = []
     seen: set = set()
     if active_rsets:

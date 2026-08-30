@@ -10,7 +10,8 @@ from well_viewer.features.barplot._annotations import (
 )
 from well_viewer.features.barplot._axis_fit import fit_bar_panels
 from well_viewer.domain.numeric import is_number
-from well_viewer.domain.selections_model import well_display_label, active_replicate_sets
+from well_viewer.domain.plot_members import plot_replicate_sets
+from well_viewer.domain.selections_model import well_display_label
 from well_viewer.domain.viewer_state import parse_rc
 from widgets import menu_exec
 
@@ -67,7 +68,7 @@ from well_viewer.features.barplot.collect import (  # noqa: F401
 
 def ordered_bar_keys(ctx) -> list:
     """Return ordered bar keys for current mode, respecting custom drag order."""
-    active_rsets = active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    active_rsets = plot_replicate_sets(ctx)
     if active_rsets:
         keys = [r.name for r in active_rsets]
     elif ctx.state.selection.selections:
@@ -408,9 +409,7 @@ def rep_sets_active(ctx) -> list[ReplicateSet]:
 
     A8 teardown: takes ``ctx`` — delegates to the pure domain enumerator over
     ``ctx.state`` (no god-object)."""
-    from well_viewer.domain.selections_model import active_replicate_sets
-    return active_replicate_sets(
-        ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    return plot_replicate_sets(ctx)
 
 
 
@@ -548,7 +547,7 @@ def refresh_bar_layout_btn_state(ctx) -> None:
     plot = ctx.state.plot
     group_btn = getattr(ctx.runtime.barplot, "group_mode_btn", None)
     pool_btn = getattr(ctx.runtime.barplot, "pool_reps_btn", None)
-    has_rsets = bool(active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths))
+    has_rsets = bool(plot_replicate_sets(ctx))
     if group_btn is not None:
         # Two-way mode selector: label names the current mode, highlight tracks
         # the non-default "timepoint" mode so label and highlight never conflict.

@@ -118,9 +118,9 @@ review"; it is open until the gate closes.
 | 8 | B | Differential coverage on the PR diff, advisory at first | ☑ | `scripts/coverage.sh --diff`, local and advisory. Not a PR gate: the slow lane does not run on PRs, so genuinely-covered code would read uncovered, and a per-PR run costs 3x the lane. `coverage.yml` states what turning it on would cost. |
 | 9 | B | One-off zero-coverage inventory, triaged into rows here | ◐ | Fast lane done: 11 modules, 1,860 statements, no executed lines. NOT actionable yet — most are `widgets/` the slow lane exercises, and acting on fast-lane-only data would delete live code. Slow lane under coverage running. |
 | 10 | B | Review gate: the lanes combine, and no threshold masquerades as a gate | ☐ | |
-| 11 | C | Complexity assertions for the four fixed hot paths | ☐ |  |
-| 12 | C | `pytest-benchmark` lane with in-repo baselines | ☐ |  |
-| 13 | C | Peak-memory ceiling on the CSV load path | ☐ |  |
+| 11 | C | Complexity assertions for the four fixed hot paths | ☑ | `tests/test_hot_paths_stay_linear.py`. Counts the operation each fix removed, at two input sizes — deterministic and machine-independent. Four mutations watched failing, each on its own check. |
+| 12 | C | `pytest-benchmark` lane with in-repo baselines | ⊘ | Declined: it would be a second lane nobody runs, which is this repo's largest existing gap rather than a fix for one. Reason in full in §C. |
+| 13 | C | Peak-memory ceiling on the CSV load path | ☑ | `tests/test_the_load_path_stays_small.py`. `tracemalloc` separates the typed read from the `dtype=str` one by 1.8x, so the ratio ceiling is meaningful. Both mutations watched failing. |
 | 14 | C | Review gate: the assertions pin behaviour, not the machine | ☐ | |
 | 15 | D | Parquet cache writer + fingerprint invalidation | ☐ |  |
 | 16 | D | `WellRepository.rows()` reads Parquet | ☐ |  |
@@ -307,12 +307,32 @@ loudly on precisely the regression that happened. The four to cover:
 The last one is the model for the others: what regressed was not time but
 *whether an expensive branch is entered*, and that is directly assertable.
 
-**C2 — A benchmark lane with in-repo baselines.** `pytest-benchmark`, its own
-script (`scripts/bench.sh`), baselines committed as JSON, failing on a regression
-beyond a wide band — 1.5×, not 1.1×. CI wall-clock is noisy and a tight band
-produces flakes that get muted, which is worse than no check. A wide band still
-catches every regression this repo has actually had, all of which were multiples.
-Not on PRs; run deliberately, like the slow lane.
+**C2 — A benchmark lane with in-repo baselines. Declined (`⊘`).**
+
+The proposal was `pytest-benchmark` with committed baselines, run deliberately
+rather than on PRs. Building it surfaced the argument against, and it is the
+repo's own: **a lane that only runs when someone remembers is the largest gap
+already on this list.** §10.4 records that the slow lane's cron was removed and
+that nothing now notices a full-app test going red except a person choosing to
+look. A benchmark lane on the same footing would be a second one — and unlike
+the slow lane it would have no correctness signal to make anyone open it.
+
+It would also be the flakier kind of check. CI here is one Ubuntu runner shared
+with everything else; a wall-clock band tight enough to catch a 1.5x regression
+is loose enough to miss most real ones and tight enough to fire on contention,
+and a check that fires on the weather gets muted.
+
+What replaced it is C1 and C3, and the substitution is not a downgrade for the
+regressions this repo has actually had. Every one of them — the quadratic
+frontier, the list-prefix scan, the pass-per-nucleus, the unconditional string
+strip, the string-per-cell read — is a *countable* change in what the code does,
+not a change in how fast the machine is. Counting them is exact, identical on
+every machine, and runs in the fast lane for free.
+
+The gap this leaves is honest and worth stating: a pure constant-factor
+slowdown that changes no operation count and no allocation would pass both
+files. Nothing in this repository's history is that shape, and if one appears
+the answer is to find what it made more of and count that.
 
 **C3 — Memory has its own gauge.** `tracemalloc` peak around `load_well_csv` for
 a fixed synthetic plate, asserted against a ceiling with headroom. This is the

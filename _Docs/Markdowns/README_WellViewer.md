@@ -1636,9 +1636,27 @@ It applies everywhere at once, deliberately: a Bar tab grouped by dose beside a
 Statistics tab still grouped by your replicate sets would be two descriptions of
 one plate with nothing saying which you were looking at.
 
-Wells with no value for that variable are not plotted, and the status line says
-how many and which. If nothing at all is assigned, the plots fall back to your
-own groups rather than going blank — the Variables tab is where you fix that.
+Wells with no value for that variable are not plotted, and the figure's own
+title says how many and which — on the figure rather than the status line, so a
+saved copy carries it and so the sentence goes away the moment you fix it. If
+nothing at all is assigned, the plots fall back to your own groups rather than
+going blank; the Variables tab is where you fix that.
+
+**Colour by and Split by**, in the band's **Decorate** popover beside it, use a
+*second* variable to say how the bars look rather than what they are. Neither
+moves a single number: with two cell lines at six doses, set **Group by** to
+`Dose` and **Colour by** to `Cell line` and you get the same twelve bars in two
+colours, with a legend naming the two lines. **Split by** the same variable and
+those bars are laid out in two labelled bands instead of one run.
+
+Because they only decorate, nothing is dropped: a group whose wells hold two
+different values gets its own ink and its own band called `—mixed—`, and one
+containing a well you have not filled in yet gets `no value`. Those are
+different mistakes with different fixes, so they are never the same colour.
+
+The bar tab already uses bands for timepoints and for wells, so if **Split by**
+replaces a layout you had, it says so on the figure rather than quietly taking
+your headers away.
 
 Variables are saved with the dataset, alongside your groups and well labels.
 **Reset analysis** clears them under their own heading, separately from sample

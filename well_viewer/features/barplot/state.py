@@ -32,6 +32,16 @@ class BarPlotState:
 
     tp_selections: dict[str, bool] = field(default_factory=dict)
 
+    #: What the last decoration pass had to give up, or ``""``. Written by
+    #: ``_decorate.decorate_bar_items`` and drawn on the figure by the renderer.
+    #:
+    #: Carried rather than recomputed: the notice is about the bands the split
+    #: *replaced*, and by the time the renderer runs those are gone. It lives on
+    #: the figure and not on the status line for the reason the significance
+    #: note does — the persistent bar keeps a sentence after the redraw that
+    #: resolved it, and a note on the axes is cleared by that same redraw.
+    split_notice: str = ""
+
     # Per-cell overlay mode (A8 state migration: moved off the god-object
     # ``app._bar_swarm`` / ``app._bar_violin`` attributes). Mutually exclusive —
     # the controller's toggles clear the other. Bar-tab-local (only the bar

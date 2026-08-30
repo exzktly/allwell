@@ -5,8 +5,8 @@ from __future__ import annotations
 from well_viewer.core.plot_annotations import value_label_settings
 from well_viewer.features.barplot._annotations import (
     annotate_bar_values,
-    annotate_cluster_headers as _annotate_cluster_headers,
     mark_undefined_spread as _mark_undefined_spread,
+    annotate_decorations as _annotate_decorations,
 )
 from well_viewer.features.barplot._axis_fit import fit_bar_panels
 from well_viewer.domain.numeric import is_number
@@ -257,8 +257,7 @@ def render_bar_items(
         ax.set_xlim(xlim_lo, xlim_hi)
         # Mark categorical x-axis so downstream styling does not reset tick formatters.
         setattr(ax, "_categorical_xaxis", True)
-    if has_clusters:
-        _annotate_cluster_headers(items, xs, ax_mean)
+    _annotate_decorations(ctx, items, xs, ax_mean, headers=has_clusters)
     # Value labels (Properties → Overlays). Drawn before the y-fit below so the
     # fit can widen the headroom that keeps them inside the panel.
     _labels = value_labels if value_labels is not None else value_label_settings(ctx)

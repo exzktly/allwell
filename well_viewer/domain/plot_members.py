@@ -300,6 +300,33 @@ def variable_replicate_sets(ctx, variable_id: str):
     return out
 
 
+def member_variable_values(ctx, scope: str, variable_id: str) -> dict:
+    """``member key -> value id``, or ``MIXED``, or ``None``, for one scope.
+
+    The single answer to "what is this member, in terms of this variable" — the
+    question *Colour by* and *Split by* both ask, and the one a renderer must
+    not answer for itself. It is built on :func:`member_wells`, so the key space
+    is whatever that scope actually draws: replicate-set names where the scope
+    pools, well tokens where it does not, and the two are never guessed at from
+    the key's spelling (``A01`` is both a well and a set someone named ``A01``).
+
+    Three outcomes, not two, because :func:`sample_variables.roll_up` has three
+    and collapsing them here would undo the reason it has them. ``MIXED`` is a
+    member whose wells disagree — a real state, reached by adding a well to a
+    group after filling — and ``None`` is a member holding a well with no value
+    at all. A caller that painted both the same colour would say two different
+    things with one ink, and one of them ("you filled these inconsistently") is
+    a mistake the user can fix while the other is not.
+    """
+    from well_viewer.domain.sample_variables import roll_up
+
+    vset = getattr(ctx.state.selection, "variables", None)
+    if vset is None or not variable_id or vset.by_id(variable_id) is None:
+        return {}
+    return {key: roll_up(vset, variable_id, wells) if wells else None
+            for key, wells in member_wells(ctx, scope).items()}
+
+
 def wells_without_variable(ctx, variable_id: str) -> list[str]:
     """The dataset's wells that :func:`variable_replicate_sets` leaves out."""
     from well_viewer.domain.sample_variables import unassigned_wells

@@ -21,6 +21,21 @@ _logger = logging.getLogger("well_viewer")
 #: What the combo calls "do not group by a variable".
 NO_VARIABLE_LABEL = "Wells / groups"
 
+#: What the two popover combos call "do not do this".
+NO_COLOUR_LABEL = "Plate colours"
+NO_SPLIT_LABEL = "One band"
+
+#: ``(state field, widget name, "no" label)`` for the two decoration controls.
+#: A roster rather than two hand-written blocks: they differ only in those three
+#: strings, and the version that had two blocks grew a difference in the third
+#: — one of them cleared its state when its variable was deleted and the other
+#: did not, so a deleted variable stayed live in the plot with nothing offering
+#: it in the combo.
+DECORATION_CONTROLS = (
+    ("colour_by_variable", "_plotting_colourby_cb", NO_COLOUR_LABEL),
+    ("split_by_variable", "_plotting_splitby_cb", NO_SPLIT_LABEL),
+)
+
 
 def _combo(ctx):
     return ctx.widgets.get_or_none("_plotting_groupby_cb")
@@ -64,6 +79,65 @@ def refresh_group_by_combo(ctx) -> None:
     group = ctx.widgets.get_or_none("_plotting_groupby_grp")
     if group is not None:
         group.setVisible(bool(variables))
+    refresh_decoration_combos(ctx)
+
+
+def refresh_decoration_combos(ctx) -> None:
+    """Fill *Colour by* and *Split by*, and hide the popover with no variables.
+
+    Both list every variable, including the one *Group by* holds. Colouring a
+    dose series by dose is redundant rather than wrong, and splitting by the
+    variable already grouped on gives one member per band — a legible, if
+    pointless, figure. Refusing the combination would be this module deciding
+    what a user may look at; there is nothing incorrect to prevent.
+    """
+    for field, name, no_label in DECORATION_CONTROLS:
+        combo = ctx.widgets.get_or_none(name)
+        if combo is None:
+            continue
+        vset = getattr(ctx.state.selection, "variables", None)
+        variables = list(getattr(vset, "variables", ()) or ())
+        keep = str(getattr(ctx.state.plot, field, "") or "")
+
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(no_label, "")
+        for variable in variables:
+            combo.addItem(variable.name, variable.id)
+        index = combo.findData(keep)
+        combo.setCurrentIndex(index if index >= 0 else 0)
+        combo.blockSignals(False)
+
+        if index < 0 and keep:
+            # The variable is gone. Cleared here as well as in the combo, or the
+            # next redraw decorates by a variable nothing offers.
+            setattr(ctx.state.plot, field, "")
+
+    button = ctx.widgets.get_or_none("_plotting_decorate_btn")
+    if button is not None:
+        vset = getattr(ctx.state.selection, "variables", None)
+        button.setVisible(bool(getattr(vset, "variables", ()) or ()))
+
+
+def set_decoration_variable(ctx, field: str, variable_id: str) -> None:
+    """Apply *Colour by* or *Split by* and redraw every tab.
+
+    Through the bus for the same reason *Group by* is: these are cross-tab
+    settings, and a direct redraw would leave the other tabs coloured the
+    previous way until they were touched.
+
+    No shortfall sentence, and that is the difference between these and
+    *Group by*: grouping by a variable **drops** every well with no value for
+    it, while colouring or splitting by one keeps them and gives them their own
+    named ink and their own named band. Nothing is left out, so there is
+    nothing to report — and a sentence saying so anyway would train the reader
+    to ignore the one that matters.
+    """
+    if field not in {name for name, _widget, _label in DECORATION_CONTROLS}:
+        return
+    setattr(ctx.state.plot, field, str(variable_id or ""))
+    with swallow("request a redraw after a plot decoration change"):
+        ctx.bus.plot_options_changed.emit(ctx.state.plot)
 
 
 def set_group_by_variable(ctx, variable_id: str) -> None:
@@ -108,9 +182,17 @@ def group_by_shortfall(ctx) -> str:
 
 
 def _announce(ctx) -> None:
+    """Log the shortfall; the figure is what shows it.
+
+    **Not on the status line.** ``notify.set_status`` writes the *persistent*
+    bar, and a redraw that has nothing to report has no reason to write
+    anything — so the sentence outlived its condition: fill in the missing
+    wells, the figure's title clears, and the bar goes on naming them,
+    contradicting the plot above it with no redraw able to correct it. The same
+    defect the bar tab's significance note was moved off the status line for.
+    ``group_by_shortfall`` reaches the figure title, which travels with a saved
+    file and is cleared by the redraw that resolves it.
+    """
     message = group_by_shortfall(ctx)
-    if not message:
-        return
-    with swallow("report the Group by shortfall"):
-        ctx.notify.set_status(message)
-    _logger.info("%s", message)
+    if message:
+        _logger.info("%s", message)

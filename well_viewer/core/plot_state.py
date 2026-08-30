@@ -49,6 +49,19 @@ class PlotState:
     # per-tab copy would let the Bar tab and the Statistics tab describe the
     # same plate two ways.
     group_by_variable: str = ""
+
+    # Ink and layout, from a second and third variable. These do **not** change
+    # what a member is — ``group_by_variable`` alone decides that — so they can
+    # name a different variable without moving a single number: a plate of two
+    # cell lines at six doses is grouped by Dose, coloured by Cell line, and
+    # split into two labelled bands by the same, and every bar in it is the
+    # same bar it was before any of the three were set.
+    #
+    # Kept beside ``group_by_variable`` and cross-tab for its reason: a reader
+    # comparing the Bar tab with the Statistics tab must not find one coloured
+    # by cell line and the other by dose.
+    colour_by_variable: str = ""
+    split_by_variable: str = ""
     legend_visible: dict[str, bool] = field(default_factory=_default_legend)
     # Show the ON/OFF threshold marker overlaid on plots (the vertical line /
     # shaded band at ThreshFracOn on the Distribution, line-plot CDF, and smFISH

@@ -23,6 +23,10 @@ import math
 from collections import Counter
 from dataclasses import dataclass
 
+# Module scope, not function-local: ``_decorate`` imports nothing from here,
+# so there is no cycle to work around — and a deferred feature import that is
+# not breaking a cycle is one the budget guard counts for nothing.
+from well_viewer.features.barplot._decorate import decorate_bar_items
 from well_viewer.domain.batch_models import BarGroup, ReplicateSet
 from well_viewer.domain import fold_change as _fc
 from well_viewer.domain.fold_change_series_cache import (
@@ -742,6 +746,11 @@ def collect_bar_items(
             for items_for_tp, _tp in per_tp:
                 if ki < len(items_for_tp):
                     items.append(items_for_tp[ki])
+    # Colour by / Split by, once over the finished list rather than in each of
+    # the four construction branches above. A sweep that edited the branches
+    # would be a sweep with a branch left out, and a figure where some bars
+    # honour the control and some do not is worse than one where none does.
+    items, _notice = decorate_bar_items(ctx, items)
     return use_groups, items, band_lbl
 
 

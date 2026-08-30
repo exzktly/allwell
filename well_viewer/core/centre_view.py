@@ -32,6 +32,9 @@ from PySide6.QtWidgets import (
     QLabel, QStackedWidget, QVBoxLayout, QWidget,
 )
 from well_viewer.core.tab_controller import on_tab_change
+from well_viewer.core.group_by_controller import (
+    DECORATION_CONTROLS as _DECORATION_CONTROLS,
+)
 from well_viewer.core.safe import swallow, swallowed
 import theme
 from well_viewer.core.plot_card_actions import PLOT_CARD_ATTRS
@@ -424,6 +427,36 @@ def build_centre(win, parent: QWidget) -> None:
         win._plotting_groupby_cb.currentIndexChanged.connect(_on_group_by)
         win._plotting_groupby_grp = band.add_scope("", win._plotting_groupby_cb)
         win._plotting_groupby_grp.setVisible(False)
+
+        # Colour by / Split by, in a popover rather than beside Group by. They
+        # are **decoration, not scope**: neither changes what a member is or
+        # moves a single number, so putting them in the scope zone would say
+        # they do. Group by earns its place there because it does.
+        #
+        # Hidden with the same rule and for the same reason as Group by: two
+        # combos whose only option is the status quo are two controls that do
+        # nothing.
+        from well_viewer.core.ui_helpers import make_popover_button
+
+        _dec_btn, _dec_panel, _dec_lay = make_popover_button("Decorate ▾", band)
+        _dec_btn.setToolTip("Colour and split the plot by a sample variable")
+        win._ctx.widgets.register("_plotting_decorate_btn", _dec_btn)
+        for _field, _name, _label in _DECORATION_CONTROLS:
+            _cb = win._ctx.widgets.register(_name, _QComboBox(
+                "Colour by" if _field == "colour_by_variable" else "Split by"))
+
+            def _on_decorate(_idx: int, field=_field, combo=_cb) -> None:
+                from well_viewer.core.group_by_controller import (
+                    set_decoration_variable,
+                )
+                with swallow("apply a plot decoration variable"):
+                    set_decoration_variable(win._ctx, field,
+                                            combo.currentData() or "")
+
+            _cb.currentIndexChanged.connect(_on_decorate)
+            _dec_lay.addWidget(_cb)
+        band.add_action(_dec_btn)
+        _dec_btn.setVisible(False)
 
         # Quick-edit for the active channel's ThreshFracOn (the per-channel
         # ON/OFF intensity threshold that drives the fraction-above- and

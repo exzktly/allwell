@@ -80,7 +80,7 @@ from well_viewer.features.image_browser.image_table.image_compose import (  # no
     is_raw_fallback,
     mark_uncorrected,
     overlay_cell_rgb,
-    partial_scan_report,
+    partial_scan_clause,
     scale_bar_refusal_clause,
     reset_scan_misses,
     resolve_chrome_plan,
@@ -976,15 +976,7 @@ def generate_status_message(ctx, cells, n, rendered, unrendered, failed,
     # drew from one is a real image, so nothing above counts them and the grid
     # reads as complete — it is short by however many frames the scan never
     # reached. This is the one place that can say so without reading the log.
-    partial_wells, partial_reasons = partial_scan_report(ctx)
-    if partial_wells:
-        msg += (
-            f" WARNING: the image list for {len(partial_wells)} well"
-            f"{'' if len(partial_wells) == 1 else 's'} "
-            f"({', '.join(partial_wells)}) is INCOMPLETE, so this grid is "
-            "missing frames the dataset holds — "
-            f"{'; '.join(partial_reasons) or 'a scan stopped short'}."
-        )
+    msg += partial_scan_clause(ctx)
     # A scale bar longer than the cell is refused rather than drawn short, so a
     # refused cell is indistinguishable from one the user never asked a bar for.
     # This is the only thing that says otherwise; the sentence lives in

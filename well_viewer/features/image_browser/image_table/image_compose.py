@@ -620,6 +620,33 @@ def apply_cell_chrome(ctx, rgb, chrome_kwargs, cell):
     return draw_cell_chrome(rgb, **chrome_kwargs)
 
 
+def partial_scan_clause(ctx) -> str:
+    """The one sentence describing this pass's truncated inventories, or ``""``.
+
+    The sibling of :func:`scale_bar_refusal_clause`, and one wording for the
+    same reason. Two hand-written sentences for one fact drift: the Generate
+    line counted the wells and named the scans' reasons, while the saved-PNG
+    line listed the wells without either — so the artifact that outlives the
+    session carried *less* than the transient line, which is backwards.
+
+    Neutral about what the artifact is. "This grid" and "this file" is the
+    caller's framing; the fact is that frames the dataset holds are not in what
+    was just produced, and that is the same fact in both.
+
+    **Every surface that can produce a short artifact says it.** A grid drawn
+    from a truncated inventory is made entirely of real images, so nothing else
+    counts the gap and the result reads as complete — which is §7's rule
+    exactly: degraded output must never be indistinguishable from good output.
+    """
+    wells, reasons = partial_scan_report(ctx)
+    if not wells:
+        return ""
+    return (f" WARNING: the image list for {len(wells)} well"
+            f"{'' if len(wells) == 1 else 's'} ({', '.join(wells)}) is "
+            f"INCOMPLETE — frames the dataset holds are missing from this "
+            f"artifact: {'; '.join(reasons) or 'a scan stopped short'}.")
+
+
 def partial_scan_report(ctx) -> tuple[list[str], list[str]]:
     """``(wells, reasons)`` for the truncated inventories of the current pass.
 

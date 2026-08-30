@@ -3173,9 +3173,13 @@ channel for every well).
   still draws the frames it did get, because a partial answer beats none. But a
   short list of real images looks exactly like a well that genuinely holds that
   few, so the status line after **Generate** names the wells whose inventory was
-  cut short and why, and a PNG saved from the table repeats it: that file
-  outlives the status line and is short by however many frames were never
-  reached.
+  cut short and why — and so does **every way of getting the table out of the
+  app**: Export to File, Copy PNG, Copy SVG and Save to Saved Plots all repeat
+  it. Those artifacts outlive the status line and are short by however many
+  frames were never reached, with nothing in them to say so. It is the same
+  sentence in all five places, beside the one about a scale bar that would not
+  fit, and the two always appear together: a line naming one and staying quiet
+  about the other would read as a full account of what is wrong with the file.
 - **Action strip** — **Generate** · **Table ▾** (*Reset table layout*, back to
   defaults; *Clear rendered images*, which keeps the layout so Generate re-renders
   in one click) · **Crop view ▾** (drag a region on any image — the button reads

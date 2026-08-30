@@ -3059,3 +3059,64 @@ def test_the_door_guard_does_not_fire_on_an_unused_alias(tmp_path):
     body = ("from well_viewer.data.data_loading import load_well_csv as _read\n"
             "def f(p):\n    return p\n")
     assert _door_offenders(tmp_path, "unused_alias.py", body) == []
+
+
+# ── a short artifact says it is short ───────────────────────────────────────
+#
+# The pairing guard: every function that appends the scale-bar clause must
+# append the truncated-inventory clause too. The shape it exists for is the one
+# that shipped — four surfaces reporting a refused bar, one of them reporting a
+# short image list — because a line that names one shortfall and stays silent
+# about the other convinces the reader it is telling them what is wrong.
+
+_SHORT_ARTIFACT_GUARD = "tests.test_both_shortfalls_travel_together"
+
+_BOTH = ('def save(ctx):\n'
+         '    ctx.notify.set_status("saved" + partial_scan_clause(ctx)\n'
+         '                          + scale_bar_refusal_clause(ctx))\n')
+_BAR_ONLY = ('def save(ctx):\n'
+             '    ctx.notify.set_status("saved" + scale_bar_refusal_clause(ctx))\n')
+_PARTIAL_ONLY = ('def save(ctx):\n'
+                 '    ctx.notify.set_status("saved" + partial_scan_clause(ctx))\n')
+_NEITHER = 'def save(ctx):\n    ctx.notify.set_status("saved")\n'
+
+
+def _run_pairing_guard(monkeypatch, tmp_path, body, *, surfaces=("surface.py::save",)):
+    module = importlib.import_module(_SHORT_ARTIFACT_GUARD)
+    path = _write(tmp_path, "surface.py", body)
+    monkeypatch.setattr(module, "_MODULES", (str(path),))
+    monkeypatch.setattr(module, "_SURFACES",
+                        frozenset(f"{path}::{s.split('::')[1]}" for s in surfaces))
+    try:
+        module.test_the_two_clauses_travel_together()
+        module.test_every_export_surface_is_covered()
+    except AssertionError as exc:
+        return exc
+    return None
+
+
+def test_the_pairing_guard_catches_a_surface_reporting_only_the_bar(
+        tmp_path, monkeypatch):
+    """The shape that actually shipped: four surfaces, one clause between them."""
+    exc = _run_pairing_guard(monkeypatch, tmp_path, _BAR_ONLY)
+    assert exc is not None, "a half-reporting surface went uncaught"
+    assert "save" in str(exc)
+
+
+def test_the_pairing_guard_catches_the_mirror_image(tmp_path, monkeypatch):
+    """The other direction too. A guard that only understands one order would
+    pass the day someone drops the bar clause instead."""
+    exc = _run_pairing_guard(monkeypatch, tmp_path, _PARTIAL_ONLY)
+    assert exc is not None, "a surface reporting only the short list went uncaught"
+
+
+def test_the_pairing_guard_clears_a_surface_reporting_both(tmp_path, monkeypatch):
+    assert _run_pairing_guard(monkeypatch, tmp_path, _BOTH) is None
+
+
+def test_the_pairing_guard_notices_a_roster_entry_that_reports_nothing(
+        tmp_path, monkeypatch):
+    """A named surface that has stopped reporting is indistinguishable from one
+    that never needed to — which is how the original asymmetry survived."""
+    exc = _run_pairing_guard(monkeypatch, tmp_path, _NEITHER)
+    assert exc is not None, "a surface that reports neither clause went uncaught"

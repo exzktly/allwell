@@ -75,7 +75,8 @@ def _record(ctx, notice: str) -> None:
     whole arrangement exists to avoid, moved from the status bar onto the
     figure where it is harder to notice.
     """
-    slice_ = ctx.state.feature_slice("bar")
+    reader = getattr(getattr(ctx, "state", None), "feature_slice", None)
+    slice_ = reader("bar") if callable(reader) else None
     if slice_ is not None:
         slice_.split_notice = notice
 
@@ -97,7 +98,18 @@ def bar_legend_entries(ctx, items):
 
 
 def _setting(ctx, field: str) -> str:
-    return str(getattr(getattr(ctx.state, "plot", None), field, "") or "")
+    """One decoration setting, or ``""`` when there is no state to read it from.
+
+    ``render_bar_items`` is called with ``ctx=None`` on purpose — the Batch
+    Export panel renders these panels without one — and a caller with no ctx
+    has no plot state, so there is no setting. That is a genuine absence rather
+    than a computation that degraded, which is why it reads as "not chosen"
+    rather than being swallowed: the figure it produces is the figure the app
+    drew before these controls existed, whole and coherent, not a decorated one
+    with pieces missing.
+    """
+    state = getattr(ctx, "state", None) if ctx is not None else None
+    return str(getattr(getattr(state, "plot", None), field, "") or "")
 
 
 def _displacement_notice(items, bands) -> str:

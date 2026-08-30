@@ -254,7 +254,8 @@ def annotate_split_notice(ctx, ax) -> None:
         return
     from well_viewer.core.plot_style import follows_theme, tokens_for
 
-    slice_ = ctx.state.feature_slice("bar")
+    reader = getattr(getattr(ctx, "state", None), "feature_slice", None)
+    slice_ = reader("bar") if callable(reader) else None
     notice = str(getattr(slice_, "split_notice", "") or "")
     if not notice:
         return

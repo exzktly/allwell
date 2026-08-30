@@ -463,3 +463,65 @@ def test_the_reset_reads_the_controllers_roster_rather_than_naming_fields():
     assert "DECORATION_CONTROLS" in source
     assert "colour_by_variable" not in source, (
         "the reset names the fields itself instead of reading the roster")
+
+
+# ── the surfaces that render without a ctx ──────────────────────────────────
+
+def test_a_render_with_no_ctx_is_undecorated_rather_than_a_crash():
+    """``render_bar_items`` takes ``ctx=None`` on purpose — the Batch Export
+    panel renders these panels without one, which its own docstring says.
+
+    Twenty-six tests went red on this, all of them ``AttributeError`` inside
+    the decoration pass. A caller with no ctx has no plot state and therefore
+    no setting, and the figure it draws is the one the app drew before these
+    controls existed: whole and coherent, not a decorated one with pieces
+    missing.
+    """
+    from well_viewer.features.barplot._annotations import annotate_decorations
+    from well_viewer.features.barplot._decorate import (
+        bar_legend_entries, decorate_bar_items,
+    )
+
+    items = _items(_ctx())
+    out, notice = decorate_bar_items(None, items)
+
+    assert out == items and notice == ""
+    assert bar_legend_entries(None, items) == []
+    annotate_decorations(None, items, [], None, headers=False)
+
+
+def test_a_ctx_without_a_bar_slice_still_decorates():
+    """The notice has nowhere to go; the ink and the bands still apply.
+
+    Losing the whole decoration because one place to park a sentence is absent
+    would be the tail wagging the figure.
+    """
+    variable = _line()
+    ctx = _ctx(variable=variable, colour_by=variable.id,
+               assignments={"A01": "C0", "A02": "C0",
+                            "B01": "C1", "B02": "C1"})
+    ctx.state.feature_slice = lambda _name: None
+
+    items = _items(ctx)
+    assert len({i.color for i in items}) == 2
+
+
+def test_batch_export_bar_figures_are_deliberately_undecorated():
+    """Batch Export collects through ``collect_bar_items_for_group``, whose
+    member keys are a ``BarGroup``'s and not ``member_wells(ctx, "bar")``'s.
+
+    Decorating it against a key space that may not match would colour some bars
+    and not others, which is the half-swept outcome that is worse than none —
+    so the batch figures keep the plate colours the app has always drawn, and
+    workplan row 51 carries the rest. This test is what stops that becoming an
+    accident: it fails the day someone decorates that path without resolving
+    the keys, which is the moment to check they match.
+    """
+    import inspect
+
+    from well_viewer.features.barplot import collect
+
+    source = inspect.getsource(collect.collect_bar_items_for_group)
+    assert "decorate_bar_items" not in source, (
+        "the batch path was decorated — confirm its member keys match "
+        "member_wells(ctx, 'bar') and update row 51 before removing this")

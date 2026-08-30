@@ -116,7 +116,7 @@ review"; it is open until the gate closes.
 | 6 | B | Fast lane emits coverage; slow lane emits coverage | ☑ | `ALLWELL_COVERAGE=1` in front of either lane's script. Parallel mode in `[tool.coverage.run]`; both scripts read the one variable. |
 | 7 | B | `coverage combine` across both lanes | ☑ | `scripts/coverage.sh` — combine, `--zero`, `--diff`, `--html`. Proven end to end on the real fast lane: 7,262 tests, 73,839 statements, 63.9%. |
 | 8 | B | Differential coverage on the PR diff, advisory at first | ☑ | `scripts/coverage.sh --diff`, local and advisory. Not a PR gate: the slow lane does not run on PRs, so genuinely-covered code would read uncovered, and a per-PR run costs 3x the lane. `coverage.yml` states what turning it on would cost. |
-| 9 | B | One-off zero-coverage inventory, triaged into rows here | ◐ | Fast lane done: 11 modules, 1,860 statements, no executed lines. NOT actionable yet — most are `widgets/` the slow lane exercises, and acting on fast-lane-only data would delete live code. Slow lane under coverage running. |
+| 9 | B | One-off zero-coverage inventory, triaged into rows here | ◐ | Fast lane: 11 modules, 1,860 statements, no executed lines. Statically triaged — **every one has a live application importer, so none is dead code**, and most sit behind lazily-built tabs (heatmap, playground, home/groups, cell_browser) the slow lane constructs. Combined run still owed before any of them is called unreached. |
 | 10 | B | Review gate: the lanes combine, and no threshold masquerades as a gate | ☐ | |
 | 11 | C | Complexity assertions for the four fixed hot paths | ☑ | `tests/test_hot_paths_stay_linear.py`. Counts the operation each fix removed, at two input sizes — deterministic and machine-independent. Four mutations watched failing, each on its own check. |
 | 12 | C | `pytest-benchmark` lane with in-repo baselines | ⊘ | Declined: it would be a second lane nobody runs, which is this repo's largest existing gap rather than a fix for one. Reason in full in §C. |
@@ -261,10 +261,31 @@ normal price. Turning it into a CI check is one line in `coverage.yml` once
 those two are addressed.
 
 **B3 — The one-off inventory.** Produce, once, the list of application modules
-with zero coverage from either lane. That list is the actual finding here. Every
-entry is triaged into one of three: covered by a test that should exist, dead
-code to delete, or genuinely unreachable and worth a comment saying so. Each
-becomes a numbered row in this tracker rather than a paragraph in a report.
+with zero coverage from **either** lane, and triage each into: a test that
+should exist, dead code to delete, or genuinely unreachable and worth a comment
+saying so.
+
+**Partial, and the partial answer is already useful.** The fast lane alone names
+eleven modules and 1,860 statements with no executed lines. A static pass over
+them settles the most dangerous of the three categories immediately: **every one
+is imported by live application code**, so nothing on the list is dead, and the
+delete-it reading is off the table before anyone acts on it.
+
+| module | imported by | reached only through |
+| --- | --- | --- |
+| `core/redraw_coordinator` | `core/bus_wiring` | app construction |
+| `persistence/bar_groups` | `runtime_app`, `barplot/controller` | a user-picked file |
+| `widgets/saved_selections_list` | `home/groups/tab_view` | a lazily-built tab |
+| `widgets/lut_selector` | `heatmap/tab_view`, `playground/tab_view` | lazily-built tabs |
+| `widgets/color_swatch_row` | `cell_browser/tab_view`, `review_image/controller` | lazily-built tabs |
+| `widgets/chip_group`, `color_picker_popover`, `gradient_strip`, `search_input` | the widgets above | their hosts |
+| `widgets/kbd_hint` | `allwell.py`, `widgets/icon_button` | the shell |
+| `all_well_launcher` | the PyInstaller entry point | a frozen build |
+
+Almost all of it is behind a lazily-built tab, which is exactly what the slow
+lane constructs — so the combined figure will be materially different, and this
+list is not yet the finding. The row stays open until both lanes are in one
+measurement. This is the trap B1 names, met in practice rather than in theory.
 
 **Pair with mutation testing, scoped.** `mutmut` over `well_viewer/domain/` and
 `pipeline/` only — both are Qt-free and pure, so mutants run in the fast lane's

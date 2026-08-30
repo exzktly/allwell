@@ -122,7 +122,7 @@ def source_fingerprint(csv_path: Path) -> str | None:
     return f"{st.st_size}:{st.st_mtime_ns}"
 
 
-def read_cached(csv_path: Path, columns: list[str] | None = None) -> pd.DataFrame | None:
+def read_cached(csv_path: Path) -> pd.DataFrame | None:
     """The cached frame for *csv_path*, or ``None`` for a miss of any kind.
 
     A miss is never an error: no engine, no cache file, a fingerprint that does
@@ -131,9 +131,18 @@ def read_cached(csv_path: Path, columns: list[str] | None = None) -> pd.DataFram
     it is logged at debug because a corrupt cache repairs itself on the next
     write.
 
-    *columns* reads a subset. This is the half of the win that a plot actually
-    feels: seven of thirty-seven columns is 8 ms against 42 ms and 0.9 MB
-    against 26 MB, because Parquet is columnar and the rest is never touched.
+    **Whole frames only, deliberately.** Parquet is columnar and a subset read
+    is the larger win — six of thirty-seven columns measured 7 ms against 51 ms
+    on a 120,000-row well — but there is nowhere to put a partial frame. The row
+    cache (``ctx.state.dataset.cache``) holds one frame per well and fifty-six
+    ``get_rows`` call sites read whatever column they need from it; a projected
+    frame in there answers a later caller's column with a ``KeyError`` at best
+    and a silently-empty plot at worst, which is §7's shortfall that looks like
+    a result. No read path in the app bypasses that cache, so no caller can take
+    a subset safely today, and a ``columns`` parameter with no caller is a seam
+    for an implementation that has not arrived. It comes back when a consumer
+    exists that does not populate the row cache — the query layer a DuckDB
+    engine would need is the obvious one.
     """
     pq = _pyarrow()
     if pq is None:
@@ -148,7 +157,7 @@ def read_cached(csv_path: Path, columns: list[str] | None = None) -> pd.DataFram
         meta = pq.read_schema(path).metadata or {}
         if meta.get(_FINGERPRINT_KEY, b"").decode() != want:
             return None  # the CSV was rewritten; the cache describes the old one
-        return pq.read_table(path, columns=columns).to_pandas()
+        return pq.read_table(path).to_pandas()
     except Exception as exc:  # noqa: BLE001 - any unreadable cache is just a miss
         _logger.debug("parquet cache unreadable for %s (%s); parsing the CSV",
                       csv_path.name, exc)

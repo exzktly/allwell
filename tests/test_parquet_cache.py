@@ -146,22 +146,6 @@ def test_a_corrupt_cache_is_a_miss(plate):
     assert_frame_equal(read_well_frame(plate), load_well_csv(plate))
 
 
-def test_a_subset_read_returns_only_those_columns(plate):
-    """The half of the win a plot feels: six of thirty-seven columns."""
-    read_well_frame(plate)
-    want = ["Included", "area_px", "timepoint_hours"]
-    subset = pc.read_cached(plate, columns=want)
-    assert subset is not None and list(subset.columns) == want
-    assert_frame_equal(subset, load_well_frame_subset(plate, want))
-
-
-def load_well_frame_subset(path, columns):
-    return load_well_csv(path)[columns]
-
-
-# ── the guard: what must never reach the cache ──────────────────────────────
-
-
 def test_the_cache_is_written_before_any_verdict_is_projected(plate, monkeypatch):
     """``QC_Pass`` / ``Crop_Pass`` / ``Gate_Pass`` are recomputed per session.
 

@@ -242,3 +242,83 @@ def test_a_boolean_is_not_a_dose():
     becomes a concentration of 1."""
     assert rcompute.spans_enough_decades([True, True, True]) is False
     assert rcompute.zero_position([True]) is None
+
+
+# ── the renderer, with nothing stubbed ──────────────────────────────────────
+#
+# ``test_response_tab.py`` monkeypatches ``apply_ax_style`` so its assertions
+# are about the controller. That stub hid a real break for a while:
+# ``draw_response`` called ``apply_ax_style(ax)`` while the function takes
+# ``(ax, title, ylabel)``, so every real call raised ``TypeError`` and every
+# test passed. §7.3 #1 — a harness that fails open will happily confirm
+# anything. These call the renderer against the *real* helper.
+
+def _axes():
+    from matplotlib.figure import Figure
+
+    return Figure().add_subplot(1, 1, 1)
+
+
+def _curve(*xy):
+    points = tuple(rc.ResponsePoint(f"m{i}", x, y, 0.5, 3, f"{x:g}")
+                   for i, (x, y) in enumerate(xy))
+    return rc.ResponseData(variable_name="Dose", unit="µM",
+                           curves=[rc.ResponseCurve(24.0, points)])
+
+
+def test_the_renderer_runs_against_the_real_style_helper():
+    from well_viewer.features.response.renderer import draw_response
+
+    ax = _axes()
+    draw_response(None, ax, _curve((1.0, 5.0), (10.0, 9.0)),
+                  title="Response vs Dose", ylabel="GFP mean")
+
+    assert ax.has_data()
+    assert ax.get_title() == "Response vs Dose"
+    assert ax.get_ylabel() == "GFP mean"
+    assert ax.get_xlabel() == "Dose (µM)"
+
+
+def test_a_two_decade_series_opens_logarithmic_with_a_tick_per_dose():
+    """matplotlib's log locator ticks the decades, which on 0.1/1/10 labels the
+    points it happens to agree with and invents positions no well was given."""
+    from well_viewer.features.response.renderer import draw_response
+
+    ax = _axes()
+    draw_response(None, ax, _curve((0.1, 2.0), (1.0, 5.0), (10.0, 9.0)))
+
+    assert ax.get_xscale() == "log"
+    assert [t.get_text() for t in ax.get_xticklabels()] == ["0.1", "1", "10"]
+
+
+def test_a_zero_dose_is_drawn_off_scale_with_a_tick_reading_zero():
+    from well_viewer.features.response.renderer import draw_response
+
+    ax = _axes()
+    draw_response(None, ax, _curve((0.0, 1.0), (0.1, 2.0), (1.0, 5.0),
+                                   (10.0, 9.0)))
+
+    labels = [t.get_text() for t in ax.get_xticklabels()]
+    assert labels[0] == "0", f"the zero dose lost its tick: {labels}"
+    assert ax.get_xlim()[0] < 0.01, "the off-scale column is outside the view"
+
+
+def test_a_one_decade_series_stays_linear():
+    from well_viewer.features.response.renderer import draw_response
+
+    ax = _axes()
+    draw_response(None, ax, _curve((1.0, 5.0), (5.0, 9.0)))
+    assert ax.get_xscale() == "linear"
+
+
+def test_the_caption_is_drawn_on_the_axes():
+    """Not only on the status line: a saved figure outlives the session."""
+    from well_viewer.features.response.renderer import draw_response
+
+    data = _curve((1.0, 5.0))
+    data.omitted = [("Ctrl", rc.NO_VALUE)]
+    ax = _axes()
+    draw_response(None, ax, data)
+
+    texts = [t.get_text() for t in ax.texts]
+    assert any("omitted" in s and "Ctrl" in s for s in texts), texts

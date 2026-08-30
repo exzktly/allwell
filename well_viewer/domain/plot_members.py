@@ -224,66 +224,15 @@ def member_replicate_sets(ctx) -> dict[str, str]:
     return out
 
 
-def member_variable_values(ctx, scope: str, variable_id: str) -> dict[str, str | None]:
-    """``member key -> the value id its wells share``, for one sample variable.
-
-    Built on :func:`member_wells` so it answers for whatever key space the plot
-    is currently in — well tokens, replicate-set names, or the value labels of a
-    grouped-by-variable plot — without any caller having to know which.
-
-    **A member gets a value only when every well in it has the same one.** A
-    member whose wells disagree, or that contains a single well with no value at
-    all, maps to ``None``. It is not resolved to its first well, its commonest
-    value, or the value of the wells that do have one: a bar built that way
-    carries a dose those wells were never given and is indistinguishable from a
-    correct one.
-
-    ``None`` is a member the caller must **exclude and count**, not draw at the
-    end of the axis and not silently drop. :func:`split_members_by_variable`
-    does that split so every consumer reports the shortfall the same way.
-    """
-    from well_viewer.domain.sample_variables import MIXED, roll_up
-
-    vset = getattr(ctx.state.selection, "variables", None)
-    if vset is None or vset.by_id(variable_id) is None:
-        return {}
-    out: dict[str, str | None] = {}
-    for key, wells in member_wells(ctx, scope).items():
-        value_id = roll_up(vset, variable_id, wells) if wells else None
-        out[key] = None if value_id is MIXED else value_id
-    return out
-
-
-def split_members_by_variable(ctx, scope: str, variable_id: str):
-    """``(by_value, undefined)`` — members grouped by their value, and the rest.
-
-    *by_value* is ``{value_id: [member keys]}`` in the **variable's** value
-    order, which is the user's and is what a legend and a numeric axis read.
-    *undefined* is every member with no single value, in plot order.
-
-    Two returns rather than one dict with a ``None`` key, because the caller
-    must do two different things with them: draw the first, and *say* how many
-    are in the second. A shortfall that reaches only a log line is the failure
-    §7 names — the plot has to carry it.
-    """
-    vset = getattr(ctx.state.selection, "variables", None)
-    variable = vset.by_id(variable_id) if vset is not None else None
-    if variable is None:
-        return {}, list(plotted_member_keys(ctx, scope))
-
-    values = member_variable_values(ctx, scope, variable_id)
-    by_value: dict[str, list[str]] = {v.id: [] for v in variable.values}
-    undefined: list[str] = []
-    for key in plotted_member_keys(ctx, scope):
-        value_id = values.get(key)
-        if value_id is None:
-            undefined.append(key)
-        else:
-            by_value.setdefault(value_id, []).append(key)
-    # Values nobody holds are dropped rather than drawn empty: a declared dose
-    # that no well was given is a gap in the fill, and an empty bar at its
-    # position reads as a measured zero.
-    return {k: v for k, v in by_value.items() if v}, undefined
+# ``member_variable_values`` and ``split_members_by_variable`` lived here and
+# were removed: they answered "what value does this member hold, in whatever key
+# space the plot is in" and nothing in the application asked. They were written
+# for row 32's Colour-by and Split-into-panels, which are still owed — and a
+# seam for an implementation that has not arrived is the thing workstream D's
+# review gate had the ``columns`` parameter deleted for. The behaviour they
+# expressed is not lost: ``sample_variables.roll_up`` is where the "every well
+# must agree" rule lives and is tested there, and ``collect_response`` applies
+# it per member. Bring them back when Colour-by needs them, not before.
 
 
 def variable_replicate_sets(ctx, variable_id: str):
@@ -315,7 +264,11 @@ def variable_replicate_sets(ctx, variable_id: str):
             key=parse_rc,
         )
         if wells:
-            out.append(ReplicateSet(variable.display_label(value.id), wells))
+            # ``name_is_verbatim``: these labels are the user's own, so the
+            # auto-generated-name heuristic must not rewrite a dose of "10"
+            # into the tokens of the wells that received it.
+            out.append(ReplicateSet(variable.display_label(value.id), wells,
+                                    name_is_verbatim=True))
     return out
 
 

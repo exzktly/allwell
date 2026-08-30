@@ -148,6 +148,12 @@ def replicate_display_label(ctx, rset: Any) -> str:
     name = str(getattr(rset, "name", "") or "").strip()
     if not name:
         name = "Replicate"
+    if getattr(rset, "name_is_verbatim", False):
+        # A label the user typed. The heuristic below is for group names the
+        # app generated, and a sample-variable value that happens to read "10"
+        # is not one of those — substituting its wells put ``A01,A03`` on a dose
+        # axis. §7.1: a domain predicate applied outside its domain.
+        return name
     generic_name = bool(re.match(
         r"^(?:\d+|r\s*\d+|rep(?:licate)?\s*\d+|group\s*\d+|set\s*\d+|batch\s*\d+)$",
         name, re.I))

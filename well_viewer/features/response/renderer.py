@@ -21,7 +21,8 @@ _logger = logging.getLogger("well_viewer")
 _LINEAR_OFFSET_FRACTION = 0.12
 
 
-def draw_response(ctx, ax, data, *, log_x: bool | None = None) -> None:
+def draw_response(ctx, ax, data, *, log_x: bool | None = None,
+                  title: str = "", ylabel: str = "") -> None:
     """Paint *data* onto *ax*.
 
     *log_x* ``None`` asks the data — on once the positive values span two
@@ -33,8 +34,6 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None) -> None:
     perfect-looking plot. It is the only place a saved figure carries what it
     left out; the status line does not travel with the file.
     """
-    from well_viewer.core.plot_style import apply_ax_style
-
     ax.clear()
     positives = [p.x for c in data.curves for p in c.points if p.x > 0]
     use_log = spans_enough_decades(positives) if log_x is None else bool(log_x)
@@ -84,7 +83,8 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None) -> None:
         ax.text(0.0, -0.18, caption, transform=ax.transAxes, fontsize="small",
                 va="top", ha="left", wrap=True)
 
-    apply_ax_style(ax)
+    from well_viewer.core.plot_style import apply_ax_style
+    apply_ax_style(ax, title, ylabel)
 
 
 def _tick_the_doses(ax, positives, off_scale_x: float | None) -> None:

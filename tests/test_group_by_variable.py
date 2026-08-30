@@ -27,14 +27,11 @@ from __future__ import annotations
 import ast
 from types import SimpleNamespace
 
-import pytest
 
 from tests._repo_scan import parse_source, python_sources
 from well_viewer.domain import sample_variables as sv
 from well_viewer.domain.plot_members import (
-    member_variable_values,
     plot_replicate_sets,
-    split_members_by_variable,
     variable_replicate_sets,
     wells_without_variable,
 )
@@ -199,71 +196,19 @@ def test_a_deleted_variable_still_selected_falls_back_rather_than_emptying():
     assert [r.name for r in plot_replicate_sets(ctx)] == ["ctrl"]
 
 
-# ── member values ───────────────────────────────────────────────────────────
-
-def test_a_member_takes_a_value_only_when_all_its_wells_agree():
-    ctx = _ctx(wells=["A01", "A02", "A03"], variables=[_dose("0", "10")],
-               assignments={"dose": {"A01": "d0", "A02": "d1", "A03": "d0"}},
-               selections=[{"name": "mixed", "wells": ["A01", "A02"]},
-                           {"name": "clean", "wells": ["A03"]}])
-    values = member_variable_values(ctx, "bar", "dose")
-    assert values["clean"] == "d0"
-    assert values["mixed"] is None, (
-        "a member whose wells hold two doses was given one of them"
-    )
-
-
-def test_a_member_containing_an_unassigned_well_has_no_value():
-    """The rule the whole feature is shaped around, at the plot layer."""
-    ctx = _ctx(wells=["A01", "A02"], variables=[_dose("0")],
-               assignments={"dose": {"A01": "d0"}},
-               selections=[{"name": "ctrl", "wells": ["A01", "A02"]}])
-    assert member_variable_values(ctx, "bar", "dose")["ctrl"] is None
-
-
-def test_split_puts_the_undefined_members_in_their_own_list():
-    """Two returns rather than a ``None`` key, because the caller must draw one
-    and *say how many are in* the other."""
-    ctx = _ctx(wells=["A01", "A02", "A03"], variables=[_dose("0", "10")],
-               assignments={"dose": {"A01": "d0", "A02": "d1"}},
-               selections=[{"name": "a", "wells": ["A01"]},
-                           {"name": "b", "wells": ["A02"]},
-                           {"name": "short", "wells": ["A03"]}])
-    by_value, undefined = split_members_by_variable(ctx, "bar", "dose")
-
-    assert by_value == {"d0": ["a"], "d1": ["b"]}
-    assert undefined == ["short"]
-
-
-def test_split_orders_the_values_the_way_the_user_listed_them():
-    ctx = _ctx(wells=["A01", "A02"], variables=[_dose("10", "0")],
-               assignments={"dose": {"A01": "d0", "A02": "d1"}},
-               selections=[{"name": "a", "wells": ["A01"]},
-                           {"name": "b", "wells": ["A02"]}])
-    by_value, _ = split_members_by_variable(ctx, "bar", "dose")
-    assert list(by_value) == ["d0", "d1"]
-
-
 def test_asking_for_a_variable_that_does_not_exist_answers_nothing():
     ctx = _ctx(wells=["A01"], selections=[{"name": "a", "wells": ["A01"]}])
-    assert member_variable_values(ctx, "bar", "nope") == {}
     assert variable_replicate_sets(ctx, "nope") == []
-    by_value, undefined = split_members_by_variable(ctx, "bar", "nope")
-    assert by_value == {} and undefined == ["a"]
+    assert wells_without_variable(ctx, "nope") == []
 
 
-@pytest.mark.parametrize("scope", ["bar", "line"])
-def test_the_values_answer_in_whatever_key_space_the_plot_is_in(scope):
-    """Well tokens per-well, set names grouped — the caller need not know."""
-    ctx = _ctx(wells=["A01", "A02"], variables=[_dose("0")],
-               assignments={"dose": {"A01": "d0", "A02": "d0"}},
-               selections=[{"name": "ctrl", "wells": ["A01", "A02"]}])
-    assert set(member_variable_values(ctx, scope, "dose")) == {"ctrl"}
-
-    ctx.state.selection.selections = []
-    ctx.state.selection.selected_wells = {"A01", "A02"}
-    ctx.runtime.barplot.current_keys = lambda: ["A01", "A02"]
-    assert set(member_variable_values(ctx, scope, "dose")) == {"A01", "A02"}
+# ``member_variable_values`` / ``split_members_by_variable`` were removed with
+# their tests: nothing in the application called them, and they were seams for
+# row 32's Colour-by. The rule they expressed — a member takes a value only when
+# every one of its wells has the same one — is pinned by
+# ``test_sample_variables.py``'s roll-up tests and by
+# ``test_response_collect.py``, which drives it per member through a real
+# collector.
 
 
 # ── the band control ────────────────────────────────────────────────────────
@@ -400,3 +345,44 @@ def test_the_real_plot_state_always_carries_the_setting():
         "the fallback on every real context and no plot ever groups by a "
         "variable — silently, because the seam tolerates the absence"
     )
+
+
+def test_a_bare_number_value_keeps_its_label_on_the_axis(qtbot):
+    """``replicate_display_label`` swaps an auto-generated-looking group name
+    for its member wells — right for a group nobody named, wrong for a dose the
+    user typed. ``Group by: Dose`` on values entered before a unit was drawing
+    x ticks reading ``A01,A03``. §7.1: a domain predicate outside its domain.
+    """
+    from well_viewer.domain.selections_model import replicate_display_label
+
+    ctx = _ctx(wells=["A01", "A03"],
+               variables=[_dose("10")],
+               assignments={"dose": {"A01": "d0", "A03": "d0"}},
+               group_by="dose")
+    ctx.state.dataset.well_labels = {}
+    rset = plot_replicate_sets(ctx)[0]
+
+    assert rset.name == "10 µM"
+    assert replicate_display_label(ctx, rset) == "10 µM"
+
+    # And with no unit typed yet, which is the reachable case.
+    ctx.state.selection.variables = sv.VariableSet(
+        variables=(sv.Variable(id="dose", name="Dose", kind=sv.NUMBER, unit="",
+                               values=(sv.VariableValue("d0", "10", 10.0),)),),
+        assignments={"dose": {"A01": "d0", "A03": "d0"}})
+    bare = plot_replicate_sets(ctx)[0]
+    assert replicate_display_label(ctx, bare) == "10", (
+        "a dose of 10 was replaced by the tokens of the wells that received it"
+    )
+
+
+def test_a_users_own_group_still_gets_the_auto_name_substitution(qtbot):
+    """The heuristic is not removed, only kept out of the domain it was not
+    written for: a replicate set literally named "1" still reads as its wells."""
+    from well_viewer.domain.batch_models import ReplicateSet
+    from well_viewer.domain.selections_model import replicate_display_label
+
+    ctx = _ctx(wells=["A01", "A03"])
+    ctx.state.dataset.well_labels = {}
+    assert replicate_display_label(
+        ctx, ReplicateSet("1", ["A01", "A03"])) == "A01,A03"

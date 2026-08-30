@@ -73,7 +73,15 @@ def save_to_data_dir(ctx) -> None:
 
     path = resolve_pipeline_info_path(Path(dataset.data_dir))
     with swallow("write the variables block to pipeline_info.json"):
-        if not update_json_atomic(path, _mutate):
+        # ``create_missing`` and a non-durable write, matching
+        # ``smfish.save_threshold``. A dataset folder the pipeline never wrote a
+        # sidecar into is ordinary — an imported plate, a hand-assembled one —
+        # and without this a whole filled 96-well grid was never written at all,
+        # with only an INFO line recording it. ``durable=False`` because this is
+        # a debounced autosave on the GUI thread, which is exactly the case
+        # ``update_json_atomic``'s own docstring names for it.
+        if not update_json_atomic(path, _mutate, create_missing=True,
+                                  durable=False):
             _logger.info(
                 "variables were not written to %s — the file is missing or "
                 "could not be updated. They stay in memory for this session.",

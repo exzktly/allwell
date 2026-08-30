@@ -553,3 +553,43 @@ def test_the_roll_up_does_not_depend_on_the_order_the_wells_arrive_in(plate):
 def test_mixed_still_wins_when_every_well_has_a_value(plate):
     assert sv.roll_up(plate, "dose", ["A01", "A03"]) is sv.MIXED
     assert sv.roll_up(plate, "dose", ["A03", "A01"]) is sv.MIXED
+
+
+def test_two_variables_sharing_an_id_keep_only_the_first():
+    """The same argument the value-id dedupe is written for, one level up: two
+    variables on one id share one ``assignments`` map, ``by_id`` answers with
+    the first and ``remove_variable`` deletes both."""
+    block = {"variables": [
+        {"id": "a", "name": "First", "kind": "text", "values": []},
+        {"id": "a", "name": "Second", "kind": "text", "values": []},
+        {"id": "b", "name": "Other", "kind": "text", "values": []},
+    ]}
+    variables = sv.from_block(block).variables
+    assert [(v.id, v.name) for v in variables] == [("a", "First"), ("b", "Other")]
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_a_nan_or_infinity_is_not_accepted_as_a_number(bad):
+    """They pass ``isinstance(x, float)`` and then break every axis, fit and
+    sort they reach — a NaN heading straight for a numeric x."""
+    block = {"variables": [{"id": "a", "name": "A", "kind": "number", "values": [
+        {"id": "x", "label": "X", "number": bad}]}]}
+    assert sv.from_block(block).by_id("a").values[0].number is None
+
+
+def test_a_dataset_with_no_sidecar_still_gets_its_variables_written(tmp_path):
+    """An imported or hand-assembled plate has no ``pipeline_info.json``, which
+    is ordinary — and without ``create_missing`` a whole filled 96-well grid was
+    never written at all, with only an INFO line recording it."""
+    import json
+
+    from well_viewer.persistence import sample_variables as ps
+
+    ctx = _ctx(data_dir=tmp_path)
+    vset, vid = sv.new_variable(sv.VariableSet(), "Dose")
+    vset = sv.add_value(vset, vid, "10")
+    ctx.state.selection.variables = vset
+    ps.save_to_data_dir(ctx)
+
+    written = json.loads((tmp_path / "pipeline_info.json").read_text())
+    assert sv.from_block(written[ps.BLOCK_KEY]) == vset

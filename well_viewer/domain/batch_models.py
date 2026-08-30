@@ -5,9 +5,22 @@ from __future__ import annotations
 
 
 class ReplicateSet:
-    def __init__(self, name: str, wells: list[str] | None = None) -> None:
+    """A named pool of wells the plots draw as one member.
+
+    *name_is_verbatim* says the name is a label a **user typed**, not one the
+    app generated. It exists because ``replicate_display_label`` replaces a name
+    that looks auto-generated (``"1"``, ``"Group 2"``, ``"R3"``) with the
+    member well tokens, which is right for a group nobody bothered to name and
+    wrong for a sample-variable value: a `Dose` of ``10`` typed before its unit
+    was entered came out on the axis as ``A01,A03``. The predicate is fine; it
+    was being applied outside the domain it was written for.
+    """
+
+    def __init__(self, name: str, wells: list[str] | None = None, *,
+                 name_is_verbatim: bool = False) -> None:
         self.name: str = name
         self.wells: list[str] = list(wells or [])
+        self.name_is_verbatim: bool = bool(name_is_verbatim)
 
     def __repr__(self) -> str:
         return f"ReplicateSet({self.name!r}, {self.wells!r})"

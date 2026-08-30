@@ -220,6 +220,15 @@ def wire_variables(ctx) -> None:
 
 
 def add_variable(ctx) -> None:
+    # Named "Variable" so the id is minted from something, and renamed by the
+    # user a keystroke later — which means the id never reflects the name. That
+    # is harmless for correctness (ids are internal and scoped to one plate's
+    # block) but it does make ``group_by_variable``, which stores an id, able to
+    # survive a dataset swap onto a *different* variable that happens to share
+    # the generic id. ``refresh_group_by_combo`` clears the setting when the id
+    # resolves to nothing, and ``plot_replicate_sets`` falls back when it groups
+    # nothing, so the failure mode is a wrong-but-visible grouping rather than a
+    # silent one.
     vset, variable_id = sv.new_variable(_vset(ctx), "Variable")
     _commit(ctx, vset)
     _select_variable(ctx, variable_id)

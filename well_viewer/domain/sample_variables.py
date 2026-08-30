@@ -101,9 +101,9 @@ class Variable:
 
         An empty string rather than the raw id: an id is internal and showing
         one tells the user nothing, while a value deleted from the definition
-        while wells still pointed at it is a state :func:`prune_values` is meant
-        to have cleaned up. Callers that need to know it happened ask
-        :func:`orphaned_wells`.
+        while wells still pointed at it is a state :func:`prune_values` and
+        :func:`from_block` both clean up. :func:`orphaned_wells` is what a guard
+        asserts is empty; nothing in the app expects to display one.
         """
         value = self.value_by_id(value_id)
         if value is None:
@@ -358,6 +358,7 @@ def from_block(block) -> VariableSet:
         return VariableSet()
 
     variables: list[Variable] = []
+    seen_variable_ids: set[str] = set()
     for item in raw_variables:
         if not isinstance(item, dict):
             continue
@@ -365,6 +366,13 @@ def from_block(block) -> VariableSet:
         name = item.get("name")
         if not isinstance(variable_id, str) or not variable_id:
             continue
+        if variable_id in seen_variable_ids:
+            # The same argument the value-id dedupe below is written for, one
+            # level up: ids address variables, so two sharing one id share one
+            # ``assignments`` map, ``by_id`` answers with the first and
+            # ``remove_variable`` deletes both.
+            continue
+        seen_variable_ids.add(variable_id)
         if not isinstance(name, str) or not name.strip():
             continue
         kind = item.get("kind")
@@ -385,6 +393,11 @@ def from_block(block) -> VariableSet:
                 continue
             number = raw.get("number")
             if isinstance(number, bool) or not isinstance(number, (int, float)):
+                number = None
+            elif number != number or number in (float("inf"), float("-inf")):
+                # NaN and the infinities pass ``isinstance(x, float)`` and then
+                # break every axis, fit and sort they reach. Treated as "this
+                # label is not a number", which is what they are.
                 number = None
             seen_ids.add(value_id)
             values.append(VariableValue(id=value_id, label=label,
@@ -415,8 +428,13 @@ def from_block(block) -> VariableSet:
 
 def _new_id(prefix: str, taken) -> str:
     """A short id not in *taken*. Not a UUID: these are read in a JSON file a
-    user may open, and ``dose`` / ``dose2`` is legible where a 32-hex string is
-    noise. Uniqueness is per variable set, which is the only scope that matters.
+    user may open, and a short word is legible where a 32-hex string is noise.
+
+    In practice a *variable's* id is minted from the placeholder name the editor
+    creates with, so it reads ``variable`` / ``variable2`` rather than ``dose``;
+    a *value's* is minted from the label the user typed, so those do read
+    ``d0`` / ``10``. Uniqueness is per variable set for a variable and per
+    variable for a value, which are the only scopes anything looks one up in.
     """
     base = "".join(ch for ch in (prefix or "").lower() if ch.isalnum()) or "v"
     candidate, n = base, 1

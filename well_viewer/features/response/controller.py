@@ -110,7 +110,9 @@ def redraw_response(ctx) -> None:
     refresh_x_combo(ctx)
     data = response_data(ctx)
 
-    draw_response(ctx, ax, data)
+    draw_response(ctx, ax, data,
+                  title=_figure_title(ctx, data),
+                  ylabel=_y_label(ctx))
 
     from well_viewer.core.plot_style import apply_export_style_to_current
     apply_export_style_to_current(ctx, ax.figure, canvas)
@@ -165,3 +167,30 @@ def export_response_csv(ctx) -> None:
     rows += [[member, "", "", "", "", "", "", "value is not a number"]
              for member in data.non_numeric]
     write_csv_rows(ctx, "response_curve", header, rows)
+
+
+def _y_label(ctx) -> str:
+    """What the measurement axis is, from the channel and property in the band."""
+    channel = str(getattr(ctx.state.channel, "active_channel", "") or "").upper()
+    metric = str(getattr(ctx.state.channel, "active_metric", "") or "")
+    return " ".join(part for part in (channel, metric.replace("_", " ")) if part)
+
+
+def _figure_title(ctx, data) -> str:
+    """The figure's own title, carrying the Group-by shortfall when there is one.
+
+    **In the title, because a title survives Save.** The shortfall was reaching
+    only ``set_status``, which is a transient line the figure does not carry: a
+    reader opening the saved PNG a month later had no way to learn that eight
+    wells were left out of it. §7's rule is that the shortfall must reach the
+    *artifact*.
+    """
+    from well_viewer.core.group_by_controller import group_by_shortfall
+
+    parts = []
+    if data.variable_name:
+        parts.append(f"Response vs {data.variable_name}")
+    shortfall = group_by_shortfall(ctx)
+    if shortfall:
+        parts.append(shortfall)
+    return " — ".join(parts)

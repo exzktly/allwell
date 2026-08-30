@@ -44,9 +44,10 @@ class PlotState:
     # before variables existed.
     #
     # Cross-tab and not per-feature because every collector that pools wells
-    # reads it through ``selections_model.active_replicate_sets``, which is the
-    # one place the substitution happens — a per-tab copy would let the Bar tab
-    # and the Statistics tab describe the same plate two ways.
+    # reads it through ``plot_members.plot_replicate_sets`` (or its
+    # hidden-inclusive twin), which is where the substitution happens — a
+    # per-tab copy would let the Bar tab and the Statistics tab describe the
+    # same plate two ways.
     group_by_variable: str = ""
     legend_visible: dict[str, bool] = field(default_factory=_default_legend)
     # Show the ON/OFF threshold marker overlaid on plots (the vertical line /

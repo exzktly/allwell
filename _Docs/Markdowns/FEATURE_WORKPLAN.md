@@ -737,6 +737,24 @@ the fit's own readout, where EC50 is the term of art.
 
 ## H — Statistical tests
 
+**Deferred, by decision, not by drift.** H is not started and is not next: the
+rows below stay `☐` because that is what they are, but nobody should read that
+glyph as "the thing to pick up". Written here because a scoping decision that
+lives only in a conversation is gone after the next compaction, and the reader
+who finds six untouched rows a month from now has no way to tell a deferral from
+a body of work that was simply forgotten — which is the failure §6.1 of
+`CLAUDE.md` exists to prevent, in its cheapest form.
+
+Two things to hand whoever does start it. **The F blocker has mostly lifted**:
+rows 47 and 48 (paired / repeated-measures tests, and two-way ANOVA over two
+variables) were written when sample variables did not exist, and they now do —
+`domain/plot_members.member_variable_values` answers "which value of this
+variable does this member hold" for any scope, which is the pairing key both of
+them need. **And the dependency check is already done**: `scipy.stats.dunnett`
+exists at the pinned scipy 1.13.1, so H3 needs nothing new; `statsmodels` is
+**not** installed, so H5 needs a pip dry-run against the numpy 1.24 pin before
+its row can be estimated at all.
+
 Today the Statistics tab offers Welch and Student t-tests, Wilcoxon rank-sum,
 Mann-Whitney U, and a two-well KS test, all pairwise, all at one timepoint, with
 Benjamini-Hochberg adjustment across the pairs (`stats/controller.py:158`). The

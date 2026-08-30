@@ -9640,9 +9640,34 @@ its own header what turning the per-PR trigger on would cost.
 **Both lanes must be in the measurement before it is read.** The fast lane alone
 reports every full-app-only module as dead — eleven modules, some 1,860
 statements, most of them `widgets/` the slow lane exercises — and acting on that
-list would delete live code. `coverage combine` merges the two; parallel mode is
-on in the config precisely so the slow lane's many short processes each write
-their own data file rather than overwriting one another.
+list would delete live code. `coverage combine` merges the two, and two settings are what make that merge
+mean anything — both measured after the plausible-sounding version of each
+turned out to be false.
+
+Parallel mode alone does **not** stop the slow lane's many short processes
+overwriting one another, which this paragraph asserted for a while. pytest-cov
+combines at the *end of each session*: it consumes that session's
+`.coverage.<host>.<pid>.<rand>` files and writes `.coverage`, a name the next
+batch's combine does not pick up and then overwrites. Two sequential runs
+measured a module at 86 covered lines and then 68 — the second run's own
+figure, not the union. Across the ~54 batches the lane runs, that leaves the
+last batch's data wearing the whole lane's name, and it feeds the zero-coverage
+inventory, so the error surfaces as "no test reaches this module" about modules
+a test reaches. `scripts/test_slow.sh` gives each batch its own
+`COVERAGE_FILE`, and the combined union measures 94 lines where the two runs
+alone measured 86 and 68.
+
+`relative_files = true` is the other. Coverage stores absolute paths by
+default, which is invisible until two machines' data are combined — and the
+slow lane is hours of work, so it is the obvious thing to dispatch to CI. A
+runner's checkout at a different path yields a data file whose every entry is a
+*different file* from the local one; the combine succeeds, reports roughly
+twice as many modules as the repo has, and the inventory is wrong in the
+direction that invents dead code.
+
+`.github/workflows/slow-lane.yml` takes a `coverage` dispatch input — opt-in, so
+an ordinary "is the lane green" run is not slowed by a measurement it does not
+want — and uploads one data file per shard.
 
 **Before pushing, `scripts/preflight.sh`** runs ruff, the fast lane, and a
 working-tree check in one pass (`--quick` skips the fast lane). The tree check is

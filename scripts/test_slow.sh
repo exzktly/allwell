@@ -84,9 +84,22 @@ done
 echo "Slow lane: ${#ALL_FILES[@]} files total, ${#FILES[@]} in shard ${SHARD_INDEX}/${SHARD_TOTAL}, ${BATCH} per process."
 echo
 
-# Same opt-in flag as the fast lane. Parallel mode means each batch writes its
-# own data file, so the many short processes this lane is built from combine
-# into one measurement rather than overwriting each other.
+# Same opt-in flag as the fast lane, but this lane needs one thing the fast lane
+# does not: a data file per batch.
+#
+# Parallel mode alone is NOT enough, which was measured rather than assumed
+# after this comment claimed for a while that it was. pytest-cov combines at the
+# END of each session: it consumes that session's `.coverage.<host>.<pid>.<rand>`
+# files and writes `.coverage` — a name the NEXT batch's combine does not pick
+# up, and then overwrites. Run two pytest processes in a row and the second
+# one's data replaces the first's; measured on this repo, a module went from 86
+# covered lines to 68, the second run's own figure rather than the union. Across
+# the ~54 batches this lane runs, that leaves the last batch's data wearing the
+# whole lane's name — and it feeds the zero-coverage inventory, so the error
+# lands as "no test reaches this module" on modules a test reaches.
+#
+# Giving each batch its own COVERAGE_FILE keeps them all on disk for the final
+# `coverage combine` to merge.
 COV=()
 if [[ -n "${ALLWELL_COVERAGE:-}" ]]; then
     COV=(--cov --cov-report=)
@@ -100,6 +113,9 @@ for (( i = 0; i < ${#FILES[@]}; i += BATCH )); do
     report="${REPORT_DIR}/batch-${SHARD_INDEX}-${batch_no}.xml"
 
     echo "── batch ${batch_no}: ${chunk[*]}"
+    # One data file per batch (see the note above COV). Harmless when coverage
+    # is off: nothing reads it.
+    COVERAGE_FILE=".coverage.slow-${SHARD_INDEX}-${batch_no}" \
     timeout --kill-after=30 "$BATCH_TIMEOUT" \
         python -m pytest -m slow -q \
         --timeout=300 --timeout-method=signal \

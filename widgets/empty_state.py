@@ -31,6 +31,18 @@ from PySide6.QtWidgets import (
     QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
+
+def entry_row_text(label: str, sublabel: str) -> str:
+    """The two lines of a secondary-link row, as one button label.
+
+    Shared with Home's Recent datasets card, which draws the same rows outside
+    an ``EmptyState``. It was two formatters — a newline here and three spaces
+    there — so one list rendered as two stacked lines in the placeholder and as
+    one run-on line on the card, which is the same defect as two stylesheets for
+    one control, in the layer above.
+    """
+    return f"{label}\n{sublabel}" if sublabel else label
+
 import theme
 from widgets import icons
 
@@ -150,8 +162,10 @@ class EmptyState(QWidget):
     def setEntries(self, entries) -> None:
         """Show a column of secondary links below the action, replacing any set before.
 
-        *entries* is a sequence of ``(label, sublabel, on_click)`` or
-        ``(label, sublabel, on_click, enabled, tooltip)``. An entry with
+        *entries* is a sequence of ``(label, sublabel, on_click, enabled,
+        tooltip)``. Fixed width rather than optional tails: the short form had
+        no caller anywhere, and a variadic tuple whose meaning depends on its
+        length is harder to read than the row it encodes. An entry with
         ``enabled=False`` is still **drawn** — greyed, with *tooltip* saying
         why — because the commonest reason a site disables one of these is a
         path on a drive that is not mounted, and dropping the row instead would
@@ -162,10 +176,7 @@ class EmptyState(QWidget):
         """
         self.clearEntries()
         rows = list(entries or ())
-        for row in rows:
-            label, sublabel, on_click = row[0], row[1], row[2]
-            enabled = row[3] if len(row) > 3 else True
-            tooltip = row[4] if len(row) > 4 else ""
+        for label, sublabel, on_click, enabled, tooltip in rows:
             self._entries_layout.addWidget(
                 self._make_entry(label, sublabel, on_click, enabled, tooltip))
         self._entries.setVisible(bool(rows))
@@ -175,8 +186,13 @@ class EmptyState(QWidget):
             item = self._entries_layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                # ``setParent(None)`` alone: PySide6 hands ownership back to
+                # Python, so the row is freed when the last reference goes.
+                # Adding ``deleteLater()`` instead defers the C++ delete to the
+                # next event-loop turn, which a test that never spins one never
+                # reaches — measured at +60 live widgets over 20 refreshes,
+                # against +0 without it.
                 widget.setParent(None)
-                widget.deleteLater()
         self._entries.setVisible(False)
 
     def _make_entry(self, label: str, sublabel: str, on_click,
@@ -184,12 +200,14 @@ class EmptyState(QWidget):
         """One row of :meth:`setEntries`.
 
         A ``QPushButton`` rather than a label with a mouse handler, so it is
-        reachable by keyboard and announced as a button, and so the disabled
-        state is the platform's rather than a colour this file chose.
+        reachable by keyboard and announced as a button, and so being disabled
+        is a real widget state — reported to assistive technology and refusing
+        the click — rather than a look. Its *colour* when disabled is a theme
+        token like every other, in ``theme.link_row_qss``.
         """
         button = QPushButton(self._entries)
         button.setObjectName("EmptyStateEntry")
-        button.setText(f"{label}\n{sublabel}" if sublabel else label)
+        button.setText(entry_row_text(label, sublabel))
         button.setEnabled(bool(enabled))
         button.setCursor(Qt.PointingHandCursor if enabled else Qt.ArrowCursor)
         if tooltip:

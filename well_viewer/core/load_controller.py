@@ -24,7 +24,7 @@ from well_viewer.core.ui_helpers import (
     show_progress as _show_progress,
     step_progress as _step_progress,
 )
-from well_viewer.core.safe import swallow, swallowed
+from well_viewer.core.safe import swallowed
 from well_viewer.data.curation import apply_curation_to_cache
 from well_viewer.domain.dataset_name import dataset_display_name
 
@@ -153,6 +153,7 @@ def load_path(ctx, path: Path) -> None:
     finally:
         _close_opening_dialog(ctx)
     _remember_if_it_loaded(ctx, path)
+    _prune_frame_cache(ctx, path)
 
 
 def _remember_if_it_loaded(ctx, path: Path) -> None:
@@ -179,17 +180,42 @@ def _remember_if_it_loaded(ctx, path: Path) -> None:
     dataset = ctx.state.dataset
     if not dataset.well_paths:
         return
-    # One listdir, on a path already open, at the one moment the set of wells is
-    # known to be current: a cache entry whose CSV has been renamed or deleted
-    # can never be read or overwritten again, so nothing else would ever reclaim
-    # it. Failures are the pruner's own to swallow.
+    from well_viewer.core.app_settings import app_settings
+    from well_viewer.core.recent_datasets import record_open
+
+    loaded = dataset.data_dir or path
+    # ``app_settings()`` and not ``ctx.window._qsettings()``: ``ctx.window`` is
+    # the review widget and ``_qsettings`` belongs to the main window that
+    # contains it, with no forwarding — so that spelling read as absent in the
+    # shipped app and this list never wrote a thing.
+    try:
+        record_open(app_settings(), path, dataset_display_name(loaded),
+                    time.time())
+    except Exception:
+        # Loud, because the two ways this can fail — an unreachable settings
+        # backend and an empty history — render identically to the user, and a
+        # DEBUG line is how the whole feature stayed silently dead once before.
+        logging.getLogger("well_viewer").warning(
+            "%s was loaded but could not be added to the recent-datasets "
+            "list; the list will not offer it next launch.", path,
+            exc_info=True)
+
+
+def _prune_frame_cache(ctx, path: Path) -> None:
+    """Reclaim Parquet cache files the open dataset can no longer address.
+
+    One listdir, on a path already open, at the one moment the set of wells is
+    known to be current: a cache entry whose CSV has been renamed or deleted can
+    never be read or overwritten again, so nothing else would reclaim it.
+
+    Its own function rather than a few lines inside the recents recorder, which
+    is where it first landed — a reader deleting the recents call would have
+    silently disabled cache reclamation with it, and the recorder returns early
+    for a folder that yielded no wells, which has nothing to do with whether
+    this dataset has stale cache files.
+    """
     from well_viewer.data.parquet_cache import prune
-    prune(Path(dataset.data_dir or path))
-    with swallow("record the dataset in the recent-datasets list"):
-        from well_viewer.core.recent_datasets import record_open
-        loaded = dataset.data_dir or path
-        record_open(ctx.window._qsettings(), path,
-                    dataset_display_name(loaded), time.time())
+    prune(Path(ctx.state.dataset.data_dir or path))
 
 
 def _reset_gating_state(ctx) -> None:

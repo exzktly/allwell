@@ -33,6 +33,7 @@ import theme
 from well_viewer.core.app_shell_view import mirror_tab_widget
 from well_viewer.core.selection_controller import import_selections_from_json
 from well_viewer.core.ui_helpers import notes_schedule_save
+from widgets.empty_state import entry_row_text
 from widgets.icon_button import IconButton
 from widgets.page_body import build_page_body
 
@@ -495,12 +496,14 @@ def build_recent_tile(ctx, parent: QWidget, entry) -> QWidget:
     *entry* is ``(label, sublabel, on_click, enabled, tooltip)``, the shape
     ``EmptyState.setEntries`` takes, so the card and the placeholder are fed
     from one function in the controller and cannot disagree about which folders
-    are reachable.
+    are reachable — and its text comes from ``entry_row_text`` for the same
+    reason, one list having rendered as two stacked lines in one place and a
+    run-on line in the other.
     """
     label, sublabel, on_click, enabled, tooltip = entry
     button = QPushButton(parent)
     button.setObjectName("HomeRecentTile")
-    button.setText(f"{label}   {sublabel}" if sublabel else label)
+    button.setText(entry_row_text(label, sublabel))
     button.setEnabled(bool(enabled))
     button.setCursor(Qt.PointingHandCursor if enabled else Qt.ArrowCursor)
     if tooltip:

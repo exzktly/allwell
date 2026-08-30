@@ -14,15 +14,21 @@ that mutates the machine it runs on is not a test anyone will run twice.
 
 **The display name is stored, not re-derived.** ``dataset_display_name`` decides
 between a flat dataset's own folder name and an in/out layout's root by asking
-whether an ``in`` sibling exists, which is a filesystem call — and this list is
-read to draw a card, where the whole point is that an unmounted drive must not
-cost a stat per entry, or block the paint while one times out. Deriving it once
-at the moment the dataset actually opened is both cheaper and more truthful: it
-records what the folder was called *then*.
+whether an ``in`` sibling exists, which is a second filesystem call per entry on
+top of the reachability check the view already makes. Recording it once, at the
+moment the dataset actually opened, halves that and is the more truthful answer
+besides: it says what the folder was called *then*.
 
-**Nothing here checks whether a path still exists.** That is the view's job,
-for the same reason, and the entry is shown either way — see
-``entries_for_display``.
+Note what this does **not** buy, because the first version of this paragraph
+claimed it did: the paint still stats once per row, so an unmounted network
+mount can still block it. Halving the stats is not removing them, and if that
+blocking ever becomes real the fix is to move the check off the paint, not to
+store more.
+
+**Nothing here checks whether a path still exists.** Reachability is asked at
+the moment the rows are drawn, by ``home.controller._recent_entry_rows``, and
+the entry is shown either way — a folder that is not there is drawn disabled
+with the reason, never hidden.
 """
 
 from __future__ import annotations
@@ -135,24 +141,22 @@ def remember(entries: list[RecentDataset], path, name: str,
     The **new** entry's name and timestamp win, because a folder that has been
     renamed should be offered under the name it has now.
 
+    **The resolved path is what gets stored**, not the spelling that was typed.
+    ``--data_dir ../plate`` is a real way to open a dataset, and a relative path
+    means a different folder from a different working directory — which a
+    launched ``.app`` bundle has. Stored raw, that row is re-resolved on the
+    next launch and either draws disabled under a reason that is not true, or,
+    if some other ``../plate`` exists, draws **enabled** under the old dataset's
+    name and opens a different plate. Resolving once, here, is the same value
+    the dedupe already computed.
+
     Capped at :data:`MAX_RECENTS` from the front, so the entry just opened can
     never be the one dropped.
     """
     key = _resolved(path)
     kept = [e for e in entries if _resolved(e.path) != key]
-    fresh = RecentDataset(path=str(path), name=name, opened_at=float(opened_at))
+    fresh = RecentDataset(path=key, name=name, opened_at=float(opened_at))
     return [fresh, *kept][:MAX_RECENTS]
-
-
-def forget(entries: list[RecentDataset], path) -> list[RecentDataset]:
-    """*entries* without *path*. Pure; returns a new list.
-
-    The user-facing half of "this one is gone": a dataset the user has actually
-    deleted stays in the list forever otherwise, since nothing here consults the
-    filesystem.
-    """
-    key = _resolved(path)
-    return [e for e in entries if _resolved(e.path) != key]
 
 
 def load(settings) -> list[RecentDataset]:

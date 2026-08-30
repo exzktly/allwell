@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QTimer
@@ -557,10 +558,15 @@ def _paint_recents(ctx) -> None:
         return
     rows = _recent_entry_rows(ctx, RECENTS_ON_CARD,
                               exclude=getattr(ctx.state.dataset, "data_dir", None))
+    # Cleared before the early return, not after it: a card hidden while still
+    # holding the last dataset's rows shows them again the moment anything
+    # re-shows it, and the state that gets here is a *transition* (the history
+    # emptied, or every row filtered out) rather than the static
+    # feature-presence check the saved-plots card early-outs on.
+    _clear(host)
     card.setVisible(bool(rows))
     if not rows:
         return
-    _clear(host)
     unreachable = sum(1 for row in rows if not row[3])
     note.setText(
         "Click one to open it."
@@ -786,14 +792,19 @@ def recent_datasets(ctx) -> list:
     build that walked five of those would hang the launch it is meant to speed
     up.
     """
+    from well_viewer.core.app_settings import app_settings
     from well_viewer.core.recent_datasets import load
 
-    settings = getattr(ctx.window, "_qsettings", None)
-    if not callable(settings):
+    # A module function, not ``ctx.window._qsettings``: ``ctx.window`` is the
+    # review widget and that method belongs to the main window containing it,
+    # so the guarded ``getattr`` spelling read ``None`` in the shipped app and
+    # this list was empty on every launch while its tests passed.
+    try:
+        return load(app_settings())
+    except Exception:
+        _logger.warning("could not read the recent-datasets list; Home will "
+                        "show no history this session.", exc_info=True)
         return []
-    with swallow("read the recent-datasets list"):
-        return load(settings())
-    return []
 
 
 def _is_the_open_dataset(entry_path, data_dir) -> bool:
@@ -831,17 +842,43 @@ def _recent_entry_rows(ctx, limit: int, *, exclude=None) -> list:
         exists = False
         with swallow(f"check whether {path} is still reachable"):
             exists = path.is_dir()
+        parent = str(path.parent) if path.parent != path else ""
+        when = _opened_ago(entry.opened_at)
         rows.append((
             entry.name or path.name or entry.path,
-            str(path.parent) if path.parent != path else "",
+            parent,
             (lambda _p=path: open_recent(ctx, _p)) if exists else None,
             exists,
-            str(path) if exists else
+            f"{path}{when}" if exists else
             f"{path} is not reachable right now — the folder has moved or its "
             "drive is not mounted. It stays on this list until you open "
             "something else ten times.",
         ))
     return rows
+
+
+def _opened_ago(opened_at: float) -> str:
+    """``"\nLast opened 3 days ago"``, or ``""`` when there is no timestamp.
+
+    What tells two rows apart when someone has three plates from one experiment
+    open in rotation and the folder names differ by a digit. Coarse on purpose:
+    the useful distinction is today / this week / a while back, and a precise
+    clock time invites the reader to work out whether it was before or after
+    something else, which this cannot answer.
+    """
+    if not opened_at:
+        return ""
+    seconds = max(0.0, time.time() - float(opened_at))
+    minutes = seconds / 60
+    if minutes < 1:
+        return "\nLast opened just now"
+    if minutes < 60:
+        count, unit = int(minutes), "minute"
+    elif minutes < 60 * 24:
+        count, unit = int(minutes // 60), "hour"
+    else:
+        count, unit = int(minutes // (60 * 24)), "day"
+    return f"\nLast opened {count} {unit}{'' if count == 1 else 's'} ago"
 
 
 def paint_recents_placeholder(ctx) -> None:

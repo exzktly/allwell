@@ -561,11 +561,20 @@ def test_the_recents_card_opens_the_dataset_it_names(loaded_app, tmp_path,
 
     settings = _Settings()
     record_open(settings, str(other), "another_plate", 1.0)
-    monkeypatch.setattr(loaded_app, "_qsettings", lambda: settings,
-                        raising=False)
+    # Patched at the module the app actually reads, not onto the app object.
+    # ``raising=False`` on a real ``WellViewerApp`` is what hid this feature
+    # being dead: it created a ``_qsettings`` the class does not have and then
+    # verified the card against it. ``tests/test_no_invented_app_attributes.py``
+    # now fails on that shape.
+    from well_viewer.core import app_settings as app_settings_module
+    monkeypatch.setattr(app_settings_module, "app_settings", lambda: settings)
 
     opened = []
-    monkeypatch.setattr(loaded_app, "_load_path", opened.append, raising=False)
+    assert hasattr(loaded_app, "_load_path"), (
+        "the app has no _load_path, so patching one here would test a route "
+        "that does not exist"
+    )
+    monkeypatch.setattr(loaded_app, "_load_path", opened.append)
 
     ctx = loaded_app._ctx
     refresh_home(ctx)

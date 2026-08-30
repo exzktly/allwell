@@ -278,34 +278,42 @@ class _Settings:
         self._d[key] = value
 
 
-def _ctx_with_recents(paths, *, data_dir=None, loaded=None):
-    """A context carrying a settings stub already holding *paths*."""
+def _ctx_with_recents(monkeypatch, paths, *, data_dir=None, loaded=None):
+    """A context whose settings handle is patched **where the app reads it**.
+
+    ``well_viewer.core.app_settings.app_settings`` and not
+    ``ctx.window._qsettings``: the shipped ``ctx.window`` is the review widget
+    and has no such method, so stubbing one onto a fake window tests a seam the
+    application never uses — which is how this whole feature passed a suite
+    while writing and reading nothing.
+    """
+    from well_viewer.core import app_settings as app_settings_module
     from well_viewer.core.recent_datasets import record_open
 
     settings = _Settings()
     for i, path in enumerate(paths):
         record_open(settings, str(path), Path(path).name, float(i))
+    monkeypatch.setattr(app_settings_module, "app_settings", lambda: settings)
     ctx, calls = _ctx()
-    ctx.window._qsettings = lambda: settings
     ctx.window._load_path = loaded or (lambda p: calls.append(p))
     ctx.state.dataset.data_dir = data_dir
     return ctx, calls
 
 
-def test_the_placeholder_offers_the_datasets_that_are_there(qtbot, tmp_path):
+def test_the_placeholder_offers_the_datasets_that_are_there(qtbot, tmp_path, monkeypatch):
     from well_viewer.features.home.controller import _recent_entry_rows
 
     a, b = tmp_path / "plate_a", tmp_path / "plate_b"
     a.mkdir()
     b.mkdir()
-    ctx, _ = _ctx_with_recents([a, b])
+    ctx, _ = _ctx_with_recents(monkeypatch, [a, b])
 
     rows = _recent_entry_rows(ctx, 5)
     assert [r[0] for r in rows] == ["plate_b", "plate_a"], "newest is not first"
     assert all(r[3] for r in rows), "a folder that exists came back disabled"
 
 
-def test_a_dataset_whose_drive_is_gone_is_shown_and_disabled(tmp_path):
+def test_a_dataset_whose_drive_is_gone_is_shown_and_disabled(tmp_path, monkeypatch):
     """Not hidden. Dropping the row tells the user their history was lost, when
     what happened is that a drive is unplugged — and the row must come back by
     itself when it is plugged in again."""
@@ -314,7 +322,7 @@ def test_a_dataset_whose_drive_is_gone_is_shown_and_disabled(tmp_path):
     here = tmp_path / "mounted"
     here.mkdir()
     gone = tmp_path / "unmounted"
-    ctx, _ = _ctx_with_recents([here, gone])
+    ctx, _ = _ctx_with_recents(monkeypatch, [here, gone])
 
     rows = _recent_entry_rows(ctx, 5)
     assert [r[0] for r in rows] == ["unmounted", "mounted"], (
@@ -325,7 +333,7 @@ def test_a_dataset_whose_drive_is_gone_is_shown_and_disabled(tmp_path):
     assert rows[0][2] is None, "an unreachable row still carries a click handler"
 
 
-def test_the_open_dataset_is_not_offered_back_to_itself(tmp_path):
+def test_the_open_dataset_is_not_offered_back_to_itself(tmp_path, monkeypatch):
     """The card sits inside the dataset it would offer to reopen, and the
     in/out layout is where a naive string comparison misses: the list stores the
     folder Review was pointed at, and ``data_dir`` is the ``out`` inside it."""
@@ -335,13 +343,13 @@ def test_the_open_dataset_is_not_offered_back_to_itself(tmp_path):
     (root / "out").mkdir(parents=True)
     other = tmp_path / "plate_b"
     other.mkdir()
-    ctx, _ = _ctx_with_recents([root, other], data_dir=root / "out")
+    ctx, _ = _ctx_with_recents(monkeypatch, [root, other], data_dir=root / "out")
 
     rows = _recent_entry_rows(ctx, 5, exclude=ctx.state.dataset.data_dir)
     assert [r[0] for r in rows] == ["plate_b"]
 
 
-def test_clicking_a_recent_row_opens_it_by_the_browsed_route(qtbot, tmp_path):
+def test_clicking_a_recent_row_opens_it_by_the_browsed_route(qtbot, tmp_path, monkeypatch):
     """Asserted at the boundary: what reaches ``_load_path``, not what the row
     computed. A row that renders correctly and calls nothing is the failure this
     guards — §7.6, a control that exists is not a control that works."""
@@ -350,7 +358,7 @@ def test_clicking_a_recent_row_opens_it_by_the_browsed_route(qtbot, tmp_path):
     root = tmp_path / "plate_a"
     root.mkdir()
     opened = []
-    ctx, _ = _ctx_with_recents([root], loaded=lambda p: opened.append(p))
+    ctx, _ = _ctx_with_recents(monkeypatch, [root], loaded=lambda p: opened.append(p))
 
     empty = EmptyState("Load a directory.")
     qtbot.addWidget(empty)
@@ -364,11 +372,11 @@ def test_clicking_a_recent_row_opens_it_by_the_browsed_route(qtbot, tmp_path):
     assert opened == [root]
 
 
-def test_a_disabled_row_does_nothing_when_clicked(qtbot, tmp_path):
+def test_a_disabled_row_does_nothing_when_clicked(qtbot, tmp_path, monkeypatch):
     from well_viewer.features.home.controller import _recent_entry_rows
 
     opened = []
-    ctx, _ = _ctx_with_recents([tmp_path / "gone"], loaded=lambda p: opened.append(p))
+    ctx, _ = _ctx_with_recents(monkeypatch, [tmp_path / "gone"], loaded=lambda p: opened.append(p))
     empty = EmptyState("Load a directory.")
     qtbot.addWidget(empty)
     empty.setEntries(_recent_entry_rows(ctx, 5))
@@ -417,14 +425,156 @@ def test_an_empty_sequence_takes_the_column_away(qtbot):
     assert empty._entries_layout.count() == 0
 
 
-def test_a_settings_backend_that_raises_costs_the_list_and_nothing_else():
-    """The dataset is already loaded and on screen by the time this runs."""
+def test_a_settings_backend_that_raises_costs_the_list_and_nothing_else(
+        monkeypatch, caplog):
+    """And says so, because an empty history looks exactly the same."""
+    import logging
+
+    from well_viewer.core import app_settings as app_settings_module
     from well_viewer.features.home.controller import recent_datasets
 
     class _Broken:
         def value(self, key, default=None):
             raise OSError("settings file is unreadable")
 
+    monkeypatch.setattr(app_settings_module, "app_settings", lambda: _Broken())
     ctx, _ = _ctx()
-    ctx.window._qsettings = lambda: _Broken()
-    assert recent_datasets(ctx) == []
+    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+        assert recent_datasets(ctx) == []
+    assert any("recent-datasets" in r.message for r in caplog.records), (
+        "an unreadable settings file renders identically to having no "
+        "history, so the failure has to be said somewhere"
+    )
+
+
+def test_the_placeholder_is_actually_painted_with_the_recents(qtbot, tmp_path,
+                                                              monkeypatch):
+    """``refresh_home`` must reach ``paint_recents_placeholder``.
+
+    Nothing tested this call at all, and the placeholder is the surface the
+    whole feature exists for — "the one moment this list matters most is launch,
+    nothing loaded". Deleting the line from ``refresh_home`` left 76 tests
+    green, which is §7.7 #2 in its stated form: the single edit that removes the
+    feature entirely was invisible.
+
+    Driven through ``paint_recents_placeholder`` against a real ``EmptyState``
+    on a stub stack, rather than through a full app: what can break is the
+    controller reading the registry, finding the placeholder and handing it
+    rows, and none of that needs a window.
+    """
+    from PySide6.QtWidgets import QStackedWidget, QWidget
+
+    from well_viewer.features.home.controller import paint_recents_placeholder
+
+    root = tmp_path / "plate_a"
+    root.mkdir()
+    ctx, _ = _ctx_with_recents(monkeypatch, [root])
+
+    placeholder = EmptyState("Load a directory.")
+    stack = QStackedWidget()
+    qtbot.addWidget(stack)
+    stack.addWidget(placeholder)
+    stack.addWidget(QWidget())
+    stack._empty_placeholder = placeholder
+    ctx.widgets = SimpleNamespace(get_or_none=lambda name: (
+        stack if name == "_home_empty_stack" else None))
+
+    paint_recents_placeholder(ctx)
+
+    assert placeholder._entries_layout.count() == 1, (
+        "the placeholder was never given the recents, so the list is invisible "
+        "at exactly the moment it is for"
+    )
+    assert "plate_a" in placeholder._entries_layout.itemAt(0).widget().text()
+
+
+def test_refresh_home_paints_the_placeholder():
+    """The call itself, read off the source.
+
+    The test above proves the painter works; this proves ``refresh_home``
+    reaches it. Both are needed — a correct painter nothing calls is exactly
+    the state this feature shipped in.
+    """
+    import ast
+
+    from tests._repo_scan import parse_source
+
+    tree = parse_source(Path("well_viewer/features/home/controller.py"))
+    refresh = next(n for n in ast.walk(tree)
+                   if isinstance(n, ast.FunctionDef) and n.name == "refresh_home")
+    called = {n.func.id for n in ast.walk(refresh)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    assert "paint_recents_placeholder" in called, (
+        "refresh_home no longer paints the no-dataset placeholder's recents, "
+        "so the list is empty at launch — the one moment it exists for"
+    )
+
+
+def test_an_emptied_card_does_not_keep_the_last_datasets_rows(qtbot, monkeypatch,
+                                                              tmp_path):
+    """``_clear`` runs before the early return, not after it.
+
+    A card hidden while still holding the previous dataset's rows shows them
+    again the moment anything re-shows it. The saved-plots card gets away with
+    the same shape because its early-out is a static feature-presence check;
+    this one is a state transition — the history emptied, or every row filtered
+    out — and the two are not the same situation.
+    """
+    from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+
+    from well_viewer.features.home.controller import _paint_recents
+
+    root = tmp_path / "plate_a"
+    root.mkdir()
+    ctx, _ = _ctx_with_recents(monkeypatch, [root])
+
+    card, host, note = QWidget(), QWidget(), QLabel()
+    qtbot.addWidget(card)
+    QVBoxLayout(host)
+    widgets = {"_home_recents_card": card, "_home_recents": host,
+               "_home_recents_note": note}
+    ctx.widgets = SimpleNamespace(get_or_none=widgets.get)
+
+    _paint_recents(ctx)
+    assert host.layout().count() == 1
+
+    # The history goes away — a different user profile, a cleared setting.
+    from well_viewer.core import app_settings as app_settings_module
+    monkeypatch.setattr(app_settings_module, "app_settings", lambda: _Settings())
+    _paint_recents(ctx)
+
+    assert host.layout().count() == 0, (
+        "the hidden card still holds the previous dataset's rows, so anything "
+        "that re-shows it shows a list that is no longer true"
+    )
+
+
+def test_clearing_entries_does_not_accumulate_widgets(qtbot):
+    """``setParent(None)`` alone; ``deleteLater`` defers the C++ delete.
+
+    PySide6 hands ownership back to Python on reparent, so the row is freed
+    when the last reference goes. Adding ``deleteLater()`` instead waits for
+    the next event-loop turn, which a test that never spins one never reaches —
+    measured at +60 live widgets over 20 refreshes. That is the cost CLAUDE.md
+    §2 rule 1 exists to keep out of the lane.
+    """
+    from PySide6.QtWidgets import QApplication, QPushButton
+
+    empty = EmptyState("Load a directory.")
+    qtbot.addWidget(empty)
+    rows = [(f"p{i}", "", lambda: None, True, "") for i in range(3)]
+
+    def live():
+        return sum(1 for w in QApplication.allWidgets()
+                   if isinstance(w, QPushButton)
+                   and w.objectName() == "EmptyStateEntry")
+
+    empty.setEntries(rows)
+    baseline = live()
+    for _ in range(20):
+        empty.setEntries(rows)
+
+    assert live() == baseline, (
+        f"{live() - baseline} rows outlived their replacement without an event "
+        "loop to reclaim them"
+    )

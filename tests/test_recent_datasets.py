@@ -14,6 +14,7 @@ guarantees — and the cost of raising on it is the window failing to open.
 from __future__ import annotations
 
 import json
+import pathlib
 
 import pytest
 
@@ -70,6 +71,41 @@ def test_two_spellings_of_one_path_are_one_entry(tmp_path):
     assert len(entries) == 1, [e.path for e in entries]
 
 
+def test_a_relative_path_is_stored_resolved(tmp_path, monkeypatch):
+    """``--data_dir ../plate`` must not become a row that opens a different plate.
+
+    A relative path means a different folder from a different working
+    directory, and a launched ``.app`` bundle's CWD is not the shell's. Stored
+    raw, the row is re-resolved next launch and either draws disabled under a
+    reason that is not true, or — if some other ``../plate`` exists — draws
+    **enabled**, labelled with the old dataset's name, and opens the wrong
+    dataset. That is a silent substitution, and the resolved value is the one
+    the dedupe already computed.
+    """
+    nested = tmp_path / "wd" / "plate"
+    nested.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path / "wd")
+
+    entries = rd.remember([], "plate", "plate", 1.0)
+    assert entries[0].path == str(nested.resolve()), (
+        f"stored {entries[0].path!r} — a relative spelling, which names a "
+        "different folder from a different working directory"
+    )
+
+
+def test_a_stored_path_survives_a_change_of_working_directory(tmp_path, monkeypatch):
+    """The property the test above buys: the row still points at the same
+    folder after the app is launched from somewhere else."""
+    nested = tmp_path / "wd" / "plate"
+    nested.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path / "wd")
+    entries = rd.remember([], "plate", "plate", 1.0)
+
+    monkeypatch.chdir(tmp_path)
+    assert pathlib.Path(entries[0].path).is_dir()
+    assert pathlib.Path(entries[0].path) == nested.resolve()
+
+
 def test_the_list_is_capped_and_the_new_entry_survives_the_cap():
     entries = []
     for i in range(rd.MAX_RECENTS + 5):
@@ -79,13 +115,6 @@ def test_the_list_is_capped_and_the_new_entry_survives_the_cap():
         "the cap dropped from the front, so the dataset the user just opened "
         "is the one that did not make the list"
     )
-
-
-def test_forget_removes_by_resolved_path(tmp_path):
-    nested = tmp_path / "plate"
-    nested.mkdir()
-    entries = rd.remember([], str(nested), "plate", 1.0)
-    assert rd.forget(entries, str(tmp_path / "plate" / ".." / "plate")) == []
 
 
 # ── the settings value is untrusted ─────────────────────────────────────────
@@ -157,19 +186,36 @@ def test_load_on_a_settings_object_that_has_never_been_written():
 # ``load_path`` computed. The store can be perfect and the list still stay empty
 # if nothing ever calls it, which is the whole of what these two check.
 
-def _load_ctx(tmp_path, *, wells, data_dir):
+def _load_ctx(monkeypatch, *, wells, data_dir, settings=None):
+    """A ctx, with the settings handle patched **where the app reads it**.
+
+    ``well_viewer.core.app_settings.app_settings`` is the one door onto this
+    user's settings, and both the recorder and Home go through it. Patching
+    anything else is what let this feature ship dead: the first version of
+    these tests stubbed ``ctx.window._qsettings``, which the shipped app does
+    not have — ``ctx.window`` is the review widget and that method belongs to
+    the main window containing it — and every test passed against code that
+    never wrote or read a thing.
+
+    Note the deliberately bare ``window``: nothing in this path may reach
+    through it for a service, and a test that supplies one cannot notice when
+    the code does.
+    """
     from types import SimpleNamespace
 
-    settings = _Settings()
+    from well_viewer.core import app_settings as app_settings_module
+
+    settings = settings if settings is not None else _Settings()
+    monkeypatch.setattr(app_settings_module, "app_settings", lambda: settings)
     return SimpleNamespace(
-        window=SimpleNamespace(_qsettings=lambda: settings),
+        window=SimpleNamespace(),
         state=SimpleNamespace(
             dataset=SimpleNamespace(well_paths=wells, data_dir=data_dir),
         ),
     ), settings
 
 
-def test_a_load_that_found_wells_is_remembered(tmp_path):
+def test_a_load_that_found_wells_is_remembered(tmp_path, monkeypatch):
     from well_viewer.core.load_controller import _remember_if_it_loaded
 
     # Both halves, because that is the structure ``load_path`` requires before
@@ -180,12 +226,12 @@ def test_a_load_that_found_wells_is_remembered(tmp_path):
     root = tmp_path / "plate"
     (root / "out").mkdir(parents=True)
     (root / "in").mkdir()
-    ctx, settings = _load_ctx(tmp_path, wells={"A01": root / "out" / "a.csv"},
+    ctx, settings = _load_ctx(monkeypatch, wells={"A01": root / "out" / "a.csv"},
                               data_dir=root / "out")
     _remember_if_it_loaded(ctx, root)
 
     stored = rd.load(settings)
-    assert [e.path for e in stored] == [str(root)], (
+    assert [e.path for e in stored] == [str(root.resolve())], (
         "the path stored is not the one the user pointed Review at, so "
         "reopening from the list takes a different branch through load_path"
     )
@@ -195,7 +241,7 @@ def test_a_load_that_found_wells_is_remembered(tmp_path):
     )
 
 
-def test_a_folder_that_yielded_no_wells_is_not_remembered(tmp_path):
+def test_a_folder_that_yielded_no_wells_is_not_remembered(tmp_path, monkeypatch):
     """A wrong directory, or an out/ the pipeline never wrote to.
 
     Offering it back on the next launch would make this list a record of the
@@ -203,7 +249,7 @@ def test_a_folder_that_yielded_no_wells_is_not_remembered(tmp_path):
     """
     from well_viewer.core.load_controller import _remember_if_it_loaded
 
-    ctx, settings = _load_ctx(tmp_path, wells={}, data_dir=tmp_path / "empty")
+    ctx, settings = _load_ctx(monkeypatch, wells={}, data_dir=tmp_path / "empty")
     _remember_if_it_loaded(ctx, tmp_path / "empty")
     assert rd.load(settings) == []
 

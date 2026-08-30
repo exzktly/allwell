@@ -25,6 +25,17 @@ cd "$(dirname "$0")/.."
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}"
 export MPLBACKEND="${MPLBACKEND:-Agg}"
 
+# Coverage is opt-in (ALLWELL_COVERAGE=1), so the default run — which is the gate
+# for every push and is run many times a day — pays nothing for it. Both lanes
+# read the same variable and write parallel-mode data files that
+# scripts/coverage.sh combines; measuring one lane alone reports every
+# full-app-only module as dead, which is worse than not measuring at all.
+COV=()
+if [[ -n "${ALLWELL_COVERAGE:-}" ]]; then
+    COV=(--cov --cov-report=)
+fi
+
 exec python -m pytest -m "not slow" -q \
     --timeout=90 --timeout-method=signal \
+    "${COV[@]+"${COV[@]}"}" \
     "$@"

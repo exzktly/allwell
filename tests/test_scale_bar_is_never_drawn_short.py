@@ -22,8 +22,10 @@ from well_viewer.features.image_browser.image_table.image_compose import (
     apply_cell_chrome,
     bar_fits,
     bar_margin,
+    can_carry_bar,
     draw_cell_chrome,
     reset_scan_misses,
+    scale_bar_refusal_clause,
     scale_bar_refusal_report,
 )
 
@@ -48,6 +50,9 @@ def _drawn_length(before: np.ndarray, after: np.ndarray) -> int:
 class _State:
     def __init__(self):
         self.scale_bar_refusals: set = set()
+        self.scan_misses: set = set()
+        self.raw_fallbacks: set = set()
+        self.partial_scans: set = set()
 
 
 class _Ctx:
@@ -81,9 +86,15 @@ def test_a_bar_that_does_not_fit_is_not_drawn_at_all(width):
     )
 
 
-def test_the_fit_rule_leaves_room_for_the_margin_the_bar_is_drawn_with():
-    """``bar_fits`` and the drawing must agree about the inset, or a bar sits
-    against the edge at exactly the widths the predicate calls fine."""
+def test_the_fit_rule_reserves_a_margin_on_both_sides():
+    """Deliberately stricter than the drawing needs.
+
+    The bar is corner-anchored, so drawing it only insets the near side — a
+    ``W - margin`` bar would fit and would run to the far edge. Reserving both
+    margins keeps a bar clear of the frame at every cell size; the cost is that
+    a narrow band of lengths is refused although they would have drawn at true
+    length, which is the safe direction for a rule about a measurement.
+    """
     h = 200
     margin = bar_margin(h)
     exact = 100 - 2 * margin
@@ -134,3 +145,98 @@ def test_a_cell_with_no_chrome_is_returned_untouched():
     frame = _frame(240)
     assert apply_cell_chrome(ctx, frame, None, {"well": "A01"}) is frame
     assert apply_cell_chrome(ctx, None, {"bar_px": 10}, {"well": "A01"}) is None
+
+
+# ── the report, which is the half that makes the refusal visible ────────────
+#
+# Drawing the bar correctly and never saying a cell lost one is half a fix: a
+# refused cell is indistinguishable from one the user never asked a bar for.
+# These pin the sentence itself, because the whole clause could be deleted and
+# every test above would still pass.
+
+
+def test_a_clean_pass_says_nothing_about_scale_bars():
+    assert scale_bar_refusal_clause(_Ctx()) == ""
+
+
+def test_the_clause_names_the_wells_and_both_remedies():
+    ctx = _Ctx()
+    for well in ("B07", "A01"):
+        apply_cell_chrome(ctx, _frame(60), {"bar_px": BAR_PX},
+                          {"well": well, "chan": "GFP", "tp": "24h", "fov": "1"})
+    clause = scale_bar_refusal_clause(ctx)
+    assert "A01" in clause and "B07" in clause
+    assert "2 wells" in clause
+    # The two controls the user can actually change. A refusal that does not name
+    # them leaves the reader with a missing bar and nothing to do about it.
+    assert "Bar length" in clause and "crop" in clause
+
+
+def test_the_generate_status_line_carries_the_clause():
+    """The clause reaches the screen, not just the record.
+
+    ``generate_status_message`` is the Generate line in full; asserting on it
+    rather than on the clause is what stops the clause being computed and
+    dropped.
+    """
+    from well_viewer.features.image_browser.image_table.controller import (
+        generate_status_message,
+    )
+    ctx = _Ctx()
+    cell = {"well": "B07", "chan": "GFP", "tp": "24h", "fov": "1"}
+    apply_cell_chrome(ctx, _frame(60), {"bar_px": BAR_PX}, cell)
+    msg = generate_status_message(ctx, [[cell]], 1, {(0, 0): object()}, 0, 0, [])
+    assert "B07" in msg and "No scale bar" in msg
+
+
+def test_one_wording_serves_every_surface():
+    """The Generate line and every saved-artifact line say it the same way.
+
+    Two hand-written sentences for one fact drift, and this branch's own review
+    gate asks for exactly one.
+    """
+    import inspect
+
+    from well_viewer.features.image_browser.image_table import controller, export
+    for mod in (controller, export):
+        src = inspect.getsource(mod)
+        assert "scale_bar_refusal_clause" in src, (
+            f"{mod.__name__} must report through the shared clause"
+        )
+        assert "longer than those cells" not in src, (
+            f"{mod.__name__} spells the refusal out itself instead of using "
+            "the shared clause"
+        )
+
+
+# ── a bar can fail to appear for reasons the length test does not cover ─────
+
+
+@pytest.mark.parametrize("w,h", [(200, 3), (3, 200), (200, 200)])
+def test_a_bar_absent_for_any_reason_is_still_recorded(w, h):
+    """``bar_fits`` is not the whole question.
+
+    ``draw_cell_chrome`` also returns early for an array under 4 px on a side, so
+    a 200x3 crop passes the length test and draws nothing — the same silent hole
+    one guard along. ``can_carry_bar`` owns all of it.
+    """
+    ctx = _Ctx()
+    cell = {"well": "C03", "chan": "GFP", "tp": "0h", "fov": "1"}
+    frame = _frame(w, h)
+    out = apply_cell_chrome(ctx, frame, {"bar_px": 50}, cell)
+    drew = _drawn_length(frame, out) > 0
+    assert drew == can_carry_bar(frame, 50), "the predicate must match the draw"
+    assert drew != bool(scale_bar_refusal_report(ctx)), (
+        "a bar is either drawn or recorded as refused — never neither, and "
+        "never both"
+    )
+
+
+def test_a_refused_bar_on_a_labelled_cell_is_still_recorded():
+    """The label burns into the same array, so a before/after comparison cannot
+    tell a refused bar from a drawn one. The decision is made before the draw."""
+    ctx = _Ctx()
+    cell = {"well": "D04", "chan": "GFP", "tp": "0h", "fov": "1"}
+    apply_cell_chrome(ctx, _frame(60),
+                      {"bar_px": BAR_PX, "label_text": "D04"}, cell)
+    assert scale_bar_refusal_report(ctx) == ["D04"]

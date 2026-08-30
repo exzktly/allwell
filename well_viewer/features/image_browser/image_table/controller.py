@@ -81,7 +81,7 @@ from well_viewer.features.image_browser.image_table.image_compose import (  # no
     mark_uncorrected,
     overlay_cell_rgb,
     partial_scan_report,
-    scale_bar_refusal_report,
+    scale_bar_refusal_clause,
     reset_scan_misses,
     resolve_chrome_plan,
     UNCORRECTED_TOOLTIP,
@@ -944,7 +944,7 @@ def _compute_auto_luts(ctx, cells, cache, crop_tool) -> None:
     st.auto_lut_by_channel = {k: (v[0], v[1]) for k, v in pooled.items()}
 
 
-def generate_status_message(ctx, cells, rendered, unrendered, failed,
+def generate_status_message(ctx, cells, n, rendered, unrendered, failed,
                             overlay_chans) -> str:
     """The Generate status line: how much was drawn, and every way it fell short.
 
@@ -954,7 +954,6 @@ def generate_status_message(ctx, cells, rendered, unrendered, failed,
     cover — a grid that draws is not the same as a grid that drew what was
     asked for.
     """
-    n = len(rendered) - unrendered
     msg = f"Image Table: generated {n} of {len(rendered)} cell(s)."
     if unrendered:
         msg += f" {unrendered} could not be drawn"
@@ -988,16 +987,9 @@ def generate_status_message(ctx, cells, rendered, unrendered, failed,
         )
     # A scale bar longer than the cell is refused rather than drawn short, so a
     # refused cell is indistinguishable from one the user never asked a bar for.
-    # This is the only thing that says otherwise, and it names the remedy: the
-    # bar length and the crop are the two things under the user's control.
-    bar_refused = scale_bar_refusal_report(ctx)
-    if bar_refused:
-        msg += (
-            f" The scale bar is longer than the cells in {len(bar_refused)} well"
-            f"{'' if len(bar_refused) == 1 else 's'} ({', '.join(bar_refused)}) "
-            "can hold, so those cells carry none — shorten Bar length µm or "
-            "widen the crop."
-        )
+    # This is the only thing that says otherwise; the sentence lives in
+    # image_compose so the saved figure states it in the same words.
+    msg += scale_bar_refusal_clause(ctx)
     return msg
 
 
@@ -1180,11 +1172,12 @@ def image_table_generate(ctx) -> None:
     ctx.state.image_table.last_render = rendered
     ctx.state.image_table.image_cache = cache
     # Count the cells that actually show a picture — not the ones whose source
-    # array loaded. A cell that loaded its image but could not render the view
-    # it was asked for (no mask for a threshold cell) is a hole in the grid, and
-    ctx.notify.set_status(generate_status_message(
-        ctx, cells, rendered, unrendered, failed, overlay_chans))
+    # array loaded. A cell that loaded its image but could not render the view it
+    # was asked for (no mask for a threshold cell) is a hole in the grid, and the
+    # status line is the only place that says so without reading the log.
     n = len(rendered) - unrendered
+    ctx.notify.set_status(generate_status_message(
+        ctx, cells, n, rendered, unrendered, failed, overlay_chans))
     if n == 0 and rendered:
         # Zero hits across the whole grid means key drift somewhere — log
         # both the (tp, fov) values the user picked and a sample of the

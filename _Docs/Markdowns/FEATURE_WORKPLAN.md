@@ -109,52 +109,52 @@ review"; it is open until the gate closes.
 | # | Workstream | Item | Status | Note |
 |---|---|---|---|---|
 | 1 | A | `draw_cell_chrome` refuses an oversized scale bar instead of clamping | ☑ | `bar_fits` decides; `draw_cell_chrome` refuses. Measured on `origin/main`: a 50 µm bar drew 37.7 µm in a 60 px cell. |
-| 2 | A | The refusal is reported per pass, not silently | ☑ | Per-pass `state.image_table.scale_bar_refusals`, beside the three records it mirrors. Both status lines name the wells and the remedy. |
-| 3 | A | Guard: a bar wider than its cell is never drawn short | ☑ | `tests/test_scale_bar_is_never_drawn_short.py`, 13 pure-lane cases. The pre-existing render test is `slow` and never ran in the fast lane. |
-| 4 | A | Review gate: the refusal path, and no second wording for it | ☐ | |
-| 5 | B | Fast lane emits coverage; slow lane emits coverage | ☐ |  |
-| 6 | B | `coverage combine` across both lanes | ☐ |  |
-| 7 | B | Differential coverage on the PR diff, advisory at first | ☐ |  |
-| 8 | B | One-off zero-coverage inventory, triaged into rows here | ☐ |  |
-| 9 | B | Review gate: the lanes combine, and no threshold masquerades as a gate | ☐ | |
-| 10 | C | Complexity assertions for the four fixed hot paths | ☐ |  |
-| 11 | C | `pytest-benchmark` lane with in-repo baselines | ☐ |  |
-| 12 | C | Peak-memory ceiling on the CSV load path | ☐ |  |
-| 13 | C | Review gate: the assertions pin behaviour, not the machine | ☐ | |
-| 14 | D | Parquet cache writer + fingerprint invalidation | ☐ |  |
-| 15 | D | `WellRepository.rows()` reads Parquet | ☐ |  |
-| 16 | D | Column projection plumbed from the aggregation call sites | ☐ |  |
-| 17 | D | Guard: Parquet is never written from a projected frame | ☐ |  |
-| 18 | D | Equality harness: CSV path vs Parquet path on real plates | ☐ |  |
-| 19 | D | Review gate: one storage seam, not a second data layer | ☐ | |
-| 20 | E | `RecentDatasets` store on `QSettings` | ☐ |  |
-| 21 | E | Recents on the no-dataset placeholder (`EmptyState`) | ☐ |  |
-| 22 | E | Recents card on Home Overview | ☐ |  |
-| 23 | E | Review gate: the store is a list, not a service | ☐ | |
-| 24 | F | `variables` block: schema, accessors, migration | ☐ |  |
-| 25 | F | Variables sub-tab: define name / type / unit / values | ☐ |  |
-| 26 | F | Fill row — along rows or columns, repeat each N | ☐ |  |
-| 27 | F | Select-then-chip assignment on the tab's own plate | ☐ |  |
-| 28 | F | Plate readout: colour + glyph + unassigned ring + tooltip | ☐ |  |
-| 29 | F | Group rows roll up; `Mixed` is shown and never inherited | ☐ |  |
-| 30 | F | `member_variable_values` + collectors, in one commit | ☐ |  |
-| 31 | F | Band controls: Group by / Colour by / Split into panels | ☐ |  |
-| 32 | F | Review gate: one annotation model, no premature generality | ☐ | |
-| 33 | G | `features/response/` package + registry entry | ☐ |  |
-| 34 | G | X combo (scope zone) listing Number variables | ☐ |  |
-| 35 | G | Timepoint selection, defaulting to `focus_timepoint` | ☐ |  |
-| 36 | G | Log-x default from the data; vehicle control off-scale | ☐ |  |
-| 37 | G | Omitted groups named in the figure, the CSV and the status line | ☐ |  |
-| 38 | G | Fit popover: 4PL / Hill, fitted in log space | ☐ |  |
-| 39 | G | Non-convergence states itself and draws no curve | ☐ |  |
-| 40 | G | Review gate: a leaf tab, not a plotting framework | ☐ | |
-| 41 | H | Effect size + CI on every pairwise comparison | ☐ |  |
-| 42 | H | Omnibus gate (one-way ANOVA / Kruskal-Wallis) | ☐ |  |
-| 43 | H | Dunnett vs a named control | ☐ |  |
-| 44 | H | Paired / repeated-measures tests (blocked on F) | ☐ |  |
-| 45 | H | Two-way ANOVA over two variables (blocked on F) | ☐ |  |
-| 46 | H | Review gate: tests added, not a statistics layer | ☐ | |
-
+| 2 | A | The refusal is reported per pass, not silently | ☑ | Per-pass `state.image_table.scale_bar_refusals`; one `scale_bar_refusal_clause` said by the Generate line and all four export surfaces. First ticked on evidence that did not cover the report — the gate caught it. |
+| 3 | A | Guard: a bar wider than its cell is never drawn short | ☑ | `tests/test_scale_bar_is_never_drawn_short.py`, 21 pure-lane cases covering the draw, the record AND the sentence. Three mutations watched failing, each on its own check. |
+| 4 | A | Every artifact surface reports a truncated inventory, not just the bar | ☐ | Found by A's review gate. `_build_export_figure` has four callers; `partial_scan_report` reaches one. Pre-existing, and now the odd one out since the bar clause reaches all four. |
+| 5 | A | Review gate: the refusal path, and no second wording for it | ☑ | Ran on `c2a1c78`. Seven findings: a broken slow-lane test, an untested report, two wordings, a degenerate-shape hole, a clear-site asymmetry, an extraction leftover, a nit. All fixed except the inherited one, which is row 4. Verdict on over-architecture: not over-architected. |
+| 6 | B | Fast lane emits coverage; slow lane emits coverage | ☐ |  |
+| 7 | B | `coverage combine` across both lanes | ☐ |  |
+| 8 | B | Differential coverage on the PR diff, advisory at first | ☐ |  |
+| 9 | B | One-off zero-coverage inventory, triaged into rows here | ☐ |  |
+| 10 | B | Review gate: the lanes combine, and no threshold masquerades as a gate | ☐ | |
+| 11 | C | Complexity assertions for the four fixed hot paths | ☐ |  |
+| 12 | C | `pytest-benchmark` lane with in-repo baselines | ☐ |  |
+| 13 | C | Peak-memory ceiling on the CSV load path | ☐ |  |
+| 14 | C | Review gate: the assertions pin behaviour, not the machine | ☐ | |
+| 15 | D | Parquet cache writer + fingerprint invalidation | ☐ |  |
+| 16 | D | `WellRepository.rows()` reads Parquet | ☐ |  |
+| 17 | D | Column projection plumbed from the aggregation call sites | ☐ |  |
+| 18 | D | Guard: Parquet is never written from a projected frame | ☐ |  |
+| 19 | D | Equality harness: CSV path vs Parquet path on real plates | ☐ |  |
+| 20 | D | Review gate: one storage seam, not a second data layer | ☐ | |
+| 21 | E | `RecentDatasets` store on `QSettings` | ☐ |  |
+| 22 | E | Recents on the no-dataset placeholder (`EmptyState`) | ☐ |  |
+| 23 | E | Recents card on Home Overview | ☐ |  |
+| 24 | E | Review gate: the store is a list, not a service | ☐ | |
+| 25 | F | `variables` block: schema, accessors, migration | ☐ |  |
+| 26 | F | Variables sub-tab: define name / type / unit / values | ☐ |  |
+| 27 | F | Fill row — along rows or columns, repeat each N | ☐ |  |
+| 28 | F | Select-then-chip assignment on the tab's own plate | ☐ |  |
+| 29 | F | Plate readout: colour + glyph + unassigned ring + tooltip | ☐ |  |
+| 30 | F | Group rows roll up; `Mixed` is shown and never inherited | ☐ |  |
+| 31 | F | `member_variable_values` + collectors, in one commit | ☐ |  |
+| 32 | F | Band controls: Group by / Colour by / Split into panels | ☐ |  |
+| 33 | F | Review gate: one annotation model, no premature generality | ☐ | |
+| 34 | G | `features/response/` package + registry entry | ☐ |  |
+| 35 | G | X combo (scope zone) listing Number variables | ☐ |  |
+| 36 | G | Timepoint selection, defaulting to `focus_timepoint` | ☐ |  |
+| 37 | G | Log-x default from the data; vehicle control off-scale | ☐ |  |
+| 38 | G | Omitted groups named in the figure, the CSV and the status line | ☐ |  |
+| 39 | G | Fit popover: 4PL / Hill, fitted in log space | ☐ |  |
+| 40 | G | Non-convergence states itself and draws no curve | ☐ |  |
+| 41 | G | Review gate: a leaf tab, not a plotting framework | ☐ | |
+| 42 | H | Effect size + CI on every pairwise comparison | ☐ |  |
+| 43 | H | Omnibus gate (one-way ANOVA / Kruskal-Wallis) | ☐ |  |
+| 44 | H | Dunnett vs a named control | ☐ |  |
+| 45 | H | Paired / repeated-measures tests (blocked on F) | ☐ |  |
+| 46 | H | Two-way ANOVA over two variables (blocked on F) | ☐ |  |
+| 47 | H | Review gate: tests added, not a statistics layer | ☐ | |
 ---
 
 ## A — Scale bar: refuse rather than clamp

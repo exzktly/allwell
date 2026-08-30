@@ -550,7 +550,48 @@ def scale_bar_refusal_report(ctx) -> list[str]:
     The public reader over :func:`_scale_bar_refusals`, so the status line does
     not have to know the set's tuple shape. Empty on a pass where every bar fit.
     """
-    return sorted({str(key[0]) for key in _scale_bar_refusals(ctx) if key})
+    return sorted({str(key[0]) for key in _scale_bar_refusals(ctx)
+                   if key and key[0]})
+
+
+def can_carry_bar(rgb, bar_px: int) -> bool:
+    """Will a *bar_px* bar actually be drawn into *rgb*?
+
+    :func:`bar_fits` answers the length question; this answers the whole one, by
+    also applying the array guards :func:`draw_cell_chrome` returns early on — an
+    array that is not 3-channel, and one under 4 px on a side. A 200x3 crop
+    passes the length test and draws nothing, which is the silent hole this whole
+    change exists to close, reopened one guard along.
+
+    Comparing the array before and after is not the alternative: an identity
+    label is burned in by the same call, so a labelled cell's array changes
+    whether or not its bar was drawn.
+    """
+    if rgb is None or int(bar_px) <= 0:
+        return False
+    try:
+        if rgb.ndim != 3 or rgb.shape[2] < 3:
+            return False
+        h, w = rgb.shape[:2]
+    except (AttributeError, IndexError, ValueError):
+        return False
+    return h >= 4 and w >= 4 and bar_fits(w, h, bar_px)
+
+
+def scale_bar_refusal_clause(ctx) -> str:
+    """The one sentence describing this pass's refused scale bars, or ``""``.
+
+    One wording, not one per surface: the Generate line and the saved-figure line
+    report the same fact — these wells carry no bar, and here are the two
+    controls that would change it. Only the framing around it differs, and that
+    is the caller's sentence rather than this clause.
+    """
+    wells = scale_bar_refusal_report(ctx)
+    if not wells:
+        return ""
+    return (f" No scale bar on {len(wells)} well{'' if len(wells) == 1 else 's'} "
+            f"({', '.join(wells)}) — the bar is longer than those cells can hold; "
+            "shorten Bar length µm or widen the crop.")
 
 
 def apply_cell_chrome(ctx, rgb, chrome_kwargs, cell):
@@ -568,12 +609,14 @@ def apply_cell_chrome(ctx, rgb, chrome_kwargs, cell):
     if rgb is None or not chrome_kwargs:
         return rgb
     bar_px = int(chrome_kwargs.get("bar_px") or 0)
-    if bar_px > 0:
-        h, w = rgb.shape[:2]
-        if not bar_fits(w, h, bar_px):
-            _scale_bar_refusals(ctx).add(
-                (cell.get("well"), str(cell.get("chan") or "").lower(),
-                 cell.get("tp"), cell.get("fov")))
+    # Asked for and not drawn, for any of the reasons ``can_carry_bar`` knows —
+    # the length, the channel count, a degenerate side. Decided before the draw,
+    # because afterwards an identity label makes a refused cell look identical to
+    # a drawn one.
+    if bar_px > 0 and not can_carry_bar(rgb, bar_px):
+        _scale_bar_refusals(ctx).add(
+            (cell.get("well"), str(cell.get("chan") or "").lower(),
+             cell.get("tp"), cell.get("fov")))
     return draw_cell_chrome(rgb, **chrome_kwargs)
 
 

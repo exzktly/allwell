@@ -38,7 +38,7 @@ from well_viewer.features.image_browser.image_table.image_compose import (
     mark_uncorrected,
     overlay_cell_rgb,
     partial_scan_report,
-    scale_bar_refusal_report,
+    scale_bar_refusal_clause,
     reset_scan_misses,
     resolve_chrome_plan,
 )
@@ -545,14 +545,11 @@ def image_table_export(ctx) -> None:
         ) if partial_wells else ""
         # Same reason, for the bar: a figure whose cells were too narrow for it
         # carries no bar and nothing in the file says the scale was ever asked
-        # for. The saved file outlives this line, so it has to be said now.
-        refused = scale_bar_refusal_report(ctx)
-        no_bar = (
-            f"  No scale bar on {', '.join(refused)} — the bar is longer than "
-            "those cells can hold; shorten Bar length µm or widen the crop."
-        ) if refused else ""
+        # for. The saved file outlives this line, so it has to be said now, in
+        # the same words the Generate line uses.
         ctx.notify.set_status(
-            f"Image table saved → {Path(out).name}{short}{no_bar}")
+            f"Image table saved → {Path(out).name}{short}"
+            f"{scale_bar_refusal_clause(ctx)}")
     except Exception as exc:
         QMessageBox.critical(ctx.window, "Export failed", str(exc))
 
@@ -577,7 +574,8 @@ def image_table_copy_png(ctx) -> None:
         QMessageBox.critical(ctx.window, "Copy failed", "Could not decode rendered PNG.")
         return
     QGuiApplication.clipboard().setImage(img)
-    ctx.notify.set_status("Image table copied to clipboard (PNG).")
+    ctx.notify.set_status("Image table copied to clipboard (PNG)."
+                          + scale_bar_refusal_clause(ctx))
 
 
 def image_table_copy_svg(ctx) -> None:
@@ -601,7 +599,8 @@ def image_table_copy_svg(ctx) -> None:
     if status.startswith("Copy failed"):
         QMessageBox.critical(ctx.window, "Copy failed", "Could not render the image table.")
         return
-    ctx.notify.set_status("Image table " + status[0].lower() + status[1:])
+    ctx.notify.set_status("Image table " + status[0].lower() + status[1:]
+                          + scale_bar_refusal_clause(ctx))
 
 
 def _downsample_dpi(orig_dpi: int, w_in: float, h_in: float,
@@ -713,7 +712,7 @@ def image_table_save_to_gallery(ctx) -> None:
 
         from well_viewer.features.saved_plots.controller import save_plot_from_card
         status = save_plot_from_card(ctx, "Image Table", buf.getvalue(), label)
-        ctx.notify.set_status(status)
+        ctx.notify.set_status(status + scale_bar_refusal_clause(ctx))
     finally:
         if dlg is not None:
             try:

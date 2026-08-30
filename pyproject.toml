@@ -33,6 +33,47 @@ filterwarnings = [
     "ignore::PendingDeprecationWarning",
 ]
 
+[tool.coverage.run]
+# ``source = ["."]`` rather than a package list: the question this measurement
+# exists to answer is which application modules NO test reaches, and a module
+# nothing imports is absent from the report unless coverage is told to look for
+# it on disk.
+source = ["."]
+# Both lanes run as many short processes — the slow lane by design (one or two
+# files each, because a full-app test's Qt objects are never reclaimed in
+# process), the fast lane whenever it is sharded. Parallel mode writes one data
+# file per process for ``coverage combine`` to merge; without it each process
+# overwrites the last and the report describes whichever finished last.
+parallel = true
+# Line coverage only. The question is "does any test execute this at all"; branch
+# coverage costs runtime on a lane that is already the gate for every push, and
+# answers a finer question than the one being asked.
+branch = false
+omit = [
+    "tests/*",
+    "scripts/*",
+    "design/*",
+    "_Docs/*",
+    "*/site-packages/*",
+    "*/.venv/*",
+    # Widget demo blocks: every widgets/*.py ends in a __main__ that opens a
+    # window, which no test runs and none should.
+    "*/__main__.py",
+    # PySide6 injects these module names into the running process under the
+    # current working directory. They have no source on disk, so measuring them
+    # aborts the report with "No source for code".
+    "shibokensupport/*",
+    "signature_bootstrap.py",
+]
+
+[tool.coverage.report]
+precision = 1
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+
 [tool.ruff]
 target-version = "py310"
 line-length = 100

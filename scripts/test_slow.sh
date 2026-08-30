@@ -84,6 +84,14 @@ done
 echo "Slow lane: ${#ALL_FILES[@]} files total, ${#FILES[@]} in shard ${SHARD_INDEX}/${SHARD_TOTAL}, ${BATCH} per process."
 echo
 
+# Same opt-in flag as the fast lane. Parallel mode means each batch writes its
+# own data file, so the many short processes this lane is built from combine
+# into one measurement rather than overwriting each other.
+COV=()
+if [[ -n "${ALLWELL_COVERAGE:-}" ]]; then
+    COV=(--cov --cov-report=)
+fi
+
 failed_batches=0
 batch_no=0
 for (( i = 0; i < ${#FILES[@]}; i += BATCH )); do
@@ -96,6 +104,7 @@ for (( i = 0; i < ${#FILES[@]}; i += BATCH )); do
         python -m pytest -m slow -q \
         --timeout=300 --timeout-method=signal \
         --junitxml="$report" \
+        "${COV[@]+"${COV[@]}"}" \
         "${chunk[@]}" "$@"
     status=$?
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from well_viewer.domain.sample_variables import VariableSet
 from well_viewer.domain.selections_model import validate_repair
 
 
@@ -41,6 +42,17 @@ class SelectionState:
     current_selection_id: str | None = None
     plot_groups: list[dict] = field(default_factory=list)
     v2_writes_disabled: bool = False
+
+    # The plate's annotation axes — Cell line, Dose — and which value each well
+    # holds. Here rather than on a feature slice because three unrelated things
+    # read it (the Variables tab, the plate tooltip, the plotting band's Group
+    # by), and because it is per-dataset state that has to be cleared on a swap
+    # like everything else in this class. Values live per *well*: groups
+    # partition the plate, so a per-well value rolls up to a group
+    # unambiguously, while a group-keyed store cannot annotate an ungrouped well
+    # at all and is orphaned outright by ``bar_pool_replicates`` flipping the
+    # key space mid-plot.
+    variables: VariableSet = field(default_factory=VariableSet)
 
     # Freeform project notes (persisted in the sample_definitions block). Cached
     # here so headless save/load has the text even before the Notes widget builds.

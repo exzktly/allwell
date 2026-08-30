@@ -616,6 +616,12 @@ def load_directory(ctx, d: Path, label=None) -> None:
     # combos afterward.
     set_ratio_metrics(ctx, [])
     app._persistence.load("ratios")
+    # The plate's annotation axes. Unconditional, and its loader assigns even
+    # when the new dataset has no block — the failure mode being avoided is the
+    # one recorded three lines above for ratios: a plot grouped by `Dose` would
+    # otherwise keep drawing the previous plate's doses over this plate's
+    # numbers, with the page's own masthead naming the new dataset.
+    app._persistence.load("sample_variables")
     # Eagerly hydrate Cell Gating thresholds from ``pipeline_info.json`` so the
     # very first plot draw (line / bar / batch export) has the user's
     # per-channel and per-ratio ThreshFracOn values available. The Cell Gating

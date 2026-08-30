@@ -20,6 +20,12 @@ each of them a way a tracker has actually gone wrong before:
 * **No total is written in prose.** A hand-maintained count drifts from the rows
   within a day and is then the most confidently wrong line in the file, so the
   counts are derived here and nowhere else.
+* **Every workstream ends with its review gate, and the gate is the last row.**
+  The gate is what closes a workstream, so it is a tracked row rather than a
+  habit: a workstream that reaches its pull request with the gate still open
+  says so here, and one that never grew a gate row fails before it can be
+  worked. Placing it last is what makes "all its rows are done" and "it was
+  reviewed" the same statement.
 
 This file is deleted along with the tracker by the PR that closes its last row.
 """
@@ -40,6 +46,9 @@ _ROW = re.compile(r"^\|\s*(\d+)\s*\|\s*([A-H])\s*\|\s*(.+?)\s*\|\s*([☐◐☑�
 _SECTION = re.compile(r"^## ([A-H]) — ", re.M)
 
 _STATUSES = "☐◐☑⊘"
+
+#: Every workstream's closing row starts with this.
+_GATE_PREFIX = "Review gate:"
 
 
 def _text() -> str:
@@ -99,6 +108,41 @@ def test_the_table_and_the_sections_describe_the_same_workstreams():
         f"rows cover {sorted(row_ws)} but sections cover {sorted(section_ws)} — "
         "a section with no rows is untracked work; a row with no section is a "
         "row nobody can act on"
+    )
+
+
+def test_every_workstream_ends_with_its_review_gate():
+    rows = _rows()
+    seen: dict[str, list[tuple[int, str]]] = {}
+    for n, ws, item, _status in rows:
+        seen.setdefault(ws, []).append((n, item))
+    assert seen, "no workstreams in the tracker"
+    for ws, items in seen.items():
+        gates = [(n, it) for n, it in items if it.startswith(_GATE_PREFIX)]
+        assert len(gates) == 1, (
+            f"workstream {ws} has {len(gates)} rows starting {_GATE_PREFIX!r}; "
+            "it needs exactly one — the gate is what closes a workstream"
+        )
+        assert gates[0][0] == items[-1][0], (
+            f"workstream {ws}'s review gate is row {gates[0][0]} but its last row "
+            f"is {items[-1][0]}. The gate goes last, so that finishing every row "
+            "and being reviewed are the same statement."
+        )
+
+
+def test_a_workstream_is_a_contiguous_block_of_rows():
+    """Interleaved workstreams would put a gate in the middle of its own work."""
+    order = [ws for _n, ws, _item, _status in _rows()]
+    first_seen: list[str] = []
+    for ws in order:
+        if ws not in first_seen:
+            first_seen.append(ws)
+    rebuilt = []
+    for ws in first_seen:
+        rebuilt += [ws] * order.count(ws)
+    assert order == rebuilt, (
+        f"the workstream column is interleaved: {order}. Keep each workstream's "
+        "rows contiguous so its gate can be its last row."
     )
 
 

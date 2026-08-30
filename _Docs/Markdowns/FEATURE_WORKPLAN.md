@@ -4,24 +4,84 @@ Eight workstreams, planned together because they share sequencing and because a
 body of work this size does not survive in conversation. This file is the state
 of that work; it is not a design essay and not a changelog.
 
-## How this file is used
+## This file is live
 
-The rules are `CLAUDE.md` §6.1, restated here so a future session that opens this
-file alone still follows them:
+**This is the state of the work, not a description of it.** It is read at the
+start of a session and written during one — never reconstructed from memory at
+the end. The rules are `CLAUDE.md` §6.1, restated here so a session that opens
+this file alone still follows them, plus what that section costs when it is
+skipped: a 177-finding review was reported complete with 42 items still owed,
+because the state lived in conversation while confidence in it survived every
+compaction.
 
 1. **A row moves in the same commit as the change it describes.** Not at the end
-   of a session, not in a batch, not once CI is green.
-2. **The counts are derived, never typed.** `tests/test_workplan_is_honest.py`
-   parses the rows below; no total is written in prose anywhere in this file.
-3. **`☑` requires evidence** — the test that pins the row, watched failing
-   without the fix. "Implemented" is not `☑`.
-4. **An item that turns out not to be worth doing is `⊘`**, with the reason in
-   its own note. Never deleted: a dropped row and a forgotten row look identical.
-5. **This file is deleted by the PR that closes its last row**, and that PR's
-   body says it is gone.
+   of a session, not in a batch, not once CI is green. A commit that changes
+   behaviour and moves no row is a commit that has desynchronised this file.
+2. **A row moves before the work is described as done in any reply.** If the row
+   still says `☐`, the answer to "is it done" is no — say that instead.
+3. **Open the file before working and reconcile against the tree, not against
+   this file.** A row is evidence of what someone believed, not of what the tree
+   holds. Line numbers move; a row that names a site is checked against the site.
+4. **The counts are derived, never typed.** `tests/test_workplan_is_honest.py`
+   parses the rows; no total is written in prose anywhere in this file.
+5. **`☑` requires evidence** — the test that pins the row, watched failing
+   without the fix. "Implemented" is not `☑`. "Tests pass" is not `☑` either
+   unless one of them would have failed before.
+6. **An item that turns out not to be worth doing is `⊘`**, with the reason in
+   its own note. Never deleted: a dropped row and a forgotten row look identical
+   afterwards, which is the confusion this file exists to prevent.
+7. **A workstream is closed only through its review gate** (below), and only
+   after re-reading every one of its rows against the tree.
+8. **This file is deleted by the PR that closes its last row**, and that PR's
+   body says it is gone. A tracker left behind at zero outstanding is a stale
+   document claiming work is owed.
 
 Status glyphs: `☐` not started · `◐` in progress · `☑` done with evidence ·
 `⊘` declined, reason in the note.
+
+## Closing a workstream — the review gate
+
+Every workstream ends with one, and it is a tracked row rather than a habit, so
+skipping it is visible. It runs **before** that workstream's pull request opens,
+over the whole of its diff:
+
+```bash
+git diff origin/main...HEAD -- <the workstream's paths>
+```
+
+An expert Python reviewer reads that diff against three questions, in this
+order:
+
+**1. Does it hold the contracts?** `_Docs/Markdowns/ARCHITECTURE.md` is the map,
+and §16 lists what is enforced mechanically. The guards catch their own cases;
+the reviewer is for what they cannot see — a feature reached from `core/`, state
+put on a loose attribute instead of a typed slice, a renderer that does not end
+in `apply_export_style_to_current`, a verdict recomputed in a second place, a
+degraded result that looks like a good one. §7's rule is the one to read the
+diff against hardest: **undefined must never be written as zero, and a shortfall
+must reach the artifact rather than only the log.**
+
+**2. Does it behave as claimed?** Not "do the tests pass" — the reviewer names
+the single edit that would break the feature, and checks a test would catch it
+(§7.7). A branch that cannot be reached, a control that is offered and does
+nothing, a fix whose test never saw the bug: those are the failures this repo has
+actually shipped, and none of them fails a suite.
+
+**3. Is it over-architected?** This is the question most likely to go unasked, so
+it is asked explicitly. The repo's own risk profile is not under-engineering —
+it is a registry for two things, a base class with one caller, a seam introduced
+for a second implementation that never arrives, a dataclass wrapping one value, a
+protocol for a duck that quacks in one place. `DatasetToolController` is the
+counter-example worth holding in mind: it was extracted only once six controllers
+existed and it deliberately left `_on_queue_requested`, `_on_finished` and
+`_on_succeeded` behind, because those measured six, five and two distinct shapes.
+The reviewer names anything that would read as simpler written out longhand, and
+anything whose abstraction has exactly one user.
+
+The reviewer reports findings; it does not apply them. Each finding becomes a
+row here — fixed, or `⊘` with the reason written at the site as well as in the
+row. The gate's own row goes `☑` when its findings are all closed, which is what
+makes "the review ran" and "the review was acted on" the same fact.
 
 ## Sequencing
 
@@ -32,7 +92,7 @@ C performance pinning ────────┤
 D Parquet storage ────────────┘   (C first, so D's win is measured not asserted)
 E recent datasets ────────────    independent
 
-F sample variables ──────────┬── F is the foundation
+F sample variables ───────────┬── F is the foundation
                               ├──► G response curves
                               └──► H statistical tests (the two-factor half)
 ```
@@ -40,48 +100,60 @@ F sample variables ──────────┬── F is the foundation
 B is deliberately early: it measures everything that follows it. C before D for
 the same reason — a performance change with no baseline is a claim.
 
+Each letter ends at its review gate, which is that workstream's last row and the
+condition for opening its pull request. A workstream is not "done pending
+review"; it is open until the gate closes.
+
 ## The tracker
 
 | # | Workstream | Item | Status | Note |
 |---|---|---|---|---|
-| 1 | A | `draw_cell_chrome` refuses an oversized scale bar instead of clamping | ☐ | |
-| 2 | A | The refusal is reported per pass, not silently | ☐ | |
-| 3 | A | Guard: a bar wider than its cell is never drawn short | ☐ | |
-| 4 | B | Fast lane emits coverage; slow lane emits coverage | ☐ | |
-| 5 | B | `coverage combine` across both lanes | ☐ | |
-| 6 | B | Differential coverage on the PR diff, advisory at first | ☐ | |
-| 7 | B | One-off zero-coverage inventory, triaged into rows here | ☐ | |
-| 8 | C | Complexity assertions for the four fixed hot paths | ☐ | |
-| 9 | C | `pytest-benchmark` lane with in-repo baselines | ☐ | |
-| 10 | C | Peak-memory ceiling on the CSV load path | ☐ | |
-| 11 | D | Parquet cache writer + fingerprint invalidation | ☐ | |
-| 12 | D | `WellRepository.rows()` reads Parquet | ☐ | |
-| 13 | D | Column projection plumbed from the aggregation call sites | ☐ | |
-| 14 | D | Guard: Parquet is never written from a projected frame | ☐ | |
-| 15 | D | Equality harness: CSV path vs Parquet path on real plates | ☐ | |
-| 16 | E | `RecentDatasets` store on `QSettings` | ☐ | |
-| 17 | E | Recents on the no-dataset placeholder (`EmptyState`) | ☐ | |
-| 18 | E | Recents card on Home Overview | ☐ | |
-| 19 | F | `variables` block: schema, accessors, migration | ☐ | |
-| 20 | F | Variables sub-tab: define name / type / unit / values | ☐ | |
-| 21 | F | Fill row — along rows or columns, repeat each N | ☐ | |
-| 22 | F | Select-then-chip assignment on the tab's own plate | ☐ | |
-| 23 | F | Plate readout: colour + glyph + unassigned ring + tooltip | ☐ | |
-| 24 | F | Group rows roll up; `Mixed` is shown and never inherited | ☐ | |
-| 25 | F | `member_variable_values` + collectors, in one commit | ☐ | |
-| 26 | F | Band controls: Group by / Colour by / Split into panels | ☐ | |
-| 27 | G | `features/response/` package + registry entry | ☐ | |
-| 28 | G | X combo (scope zone) listing Number variables | ☐ | |
-| 29 | G | Timepoint selection, defaulting to `focus_timepoint` | ☐ | |
-| 30 | G | Log-x default from the data; vehicle control off-scale | ☐ | |
-| 31 | G | Omitted groups named in the figure, the CSV and the status line | ☐ | |
-| 32 | G | Fit popover: 4PL / Hill, fitted in log space | ☐ | |
-| 33 | G | Non-convergence states itself and draws no curve | ☐ | |
-| 34 | H | Effect size + CI on every pairwise comparison | ☐ | |
-| 35 | H | Omnibus gate (one-way ANOVA / Kruskal-Wallis) | ☐ | |
-| 36 | H | Dunnett vs a named control | ☐ | |
-| 37 | H | Paired / repeated-measures tests (blocked on F) | ☐ | |
-| 38 | H | Two-way ANOVA over two variables (blocked on F) | ☐ | |
+| 1 | A | `draw_cell_chrome` refuses an oversized scale bar instead of clamping | ☐ |  |
+| 2 | A | The refusal is reported per pass, not silently | ☐ |  |
+| 3 | A | Guard: a bar wider than its cell is never drawn short | ☐ |  |
+| 4 | A | Review gate: the refusal path, and no second wording for it | ☐ | |
+| 5 | B | Fast lane emits coverage; slow lane emits coverage | ☐ |  |
+| 6 | B | `coverage combine` across both lanes | ☐ |  |
+| 7 | B | Differential coverage on the PR diff, advisory at first | ☐ |  |
+| 8 | B | One-off zero-coverage inventory, triaged into rows here | ☐ |  |
+| 9 | B | Review gate: the lanes combine, and no threshold masquerades as a gate | ☐ | |
+| 10 | C | Complexity assertions for the four fixed hot paths | ☐ |  |
+| 11 | C | `pytest-benchmark` lane with in-repo baselines | ☐ |  |
+| 12 | C | Peak-memory ceiling on the CSV load path | ☐ |  |
+| 13 | C | Review gate: the assertions pin behaviour, not the machine | ☐ | |
+| 14 | D | Parquet cache writer + fingerprint invalidation | ☐ |  |
+| 15 | D | `WellRepository.rows()` reads Parquet | ☐ |  |
+| 16 | D | Column projection plumbed from the aggregation call sites | ☐ |  |
+| 17 | D | Guard: Parquet is never written from a projected frame | ☐ |  |
+| 18 | D | Equality harness: CSV path vs Parquet path on real plates | ☐ |  |
+| 19 | D | Review gate: one storage seam, not a second data layer | ☐ | |
+| 20 | E | `RecentDatasets` store on `QSettings` | ☐ |  |
+| 21 | E | Recents on the no-dataset placeholder (`EmptyState`) | ☐ |  |
+| 22 | E | Recents card on Home Overview | ☐ |  |
+| 23 | E | Review gate: the store is a list, not a service | ☐ | |
+| 24 | F | `variables` block: schema, accessors, migration | ☐ |  |
+| 25 | F | Variables sub-tab: define name / type / unit / values | ☐ |  |
+| 26 | F | Fill row — along rows or columns, repeat each N | ☐ |  |
+| 27 | F | Select-then-chip assignment on the tab's own plate | ☐ |  |
+| 28 | F | Plate readout: colour + glyph + unassigned ring + tooltip | ☐ |  |
+| 29 | F | Group rows roll up; `Mixed` is shown and never inherited | ☐ |  |
+| 30 | F | `member_variable_values` + collectors, in one commit | ☐ |  |
+| 31 | F | Band controls: Group by / Colour by / Split into panels | ☐ |  |
+| 32 | F | Review gate: one annotation model, no premature generality | ☐ | |
+| 33 | G | `features/response/` package + registry entry | ☐ |  |
+| 34 | G | X combo (scope zone) listing Number variables | ☐ |  |
+| 35 | G | Timepoint selection, defaulting to `focus_timepoint` | ☐ |  |
+| 36 | G | Log-x default from the data; vehicle control off-scale | ☐ |  |
+| 37 | G | Omitted groups named in the figure, the CSV and the status line | ☐ |  |
+| 38 | G | Fit popover: 4PL / Hill, fitted in log space | ☐ |  |
+| 39 | G | Non-convergence states itself and draws no curve | ☐ |  |
+| 40 | G | Review gate: a leaf tab, not a plotting framework | ☐ | |
+| 41 | H | Effect size + CI on every pairwise comparison | ☐ |  |
+| 42 | H | Omnibus gate (one-way ANOVA / Kruskal-Wallis) | ☐ |  |
+| 43 | H | Dunnett vs a named control | ☐ |  |
+| 44 | H | Paired / repeated-measures tests (blocked on F) | ☐ |  |
+| 45 | H | Two-way ANOVA over two variables (blocked on F) | ☐ |  |
+| 46 | H | Review gate: tests added, not a statistics layer | ☐ | |
 
 ---
 

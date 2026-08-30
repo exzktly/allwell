@@ -85,6 +85,15 @@ class ResponseData:
     #: as zero, because an error bar of zero length reads as a measurement of
     #: perfect agreement.
     undefined_spread: int = 0
+    #: Set when the log x axis was chosen from the doses rather than asked for.
+    #: The Properties panel's ``x_log`` checkbox is bound to the stored
+    #: preference, and an unset preference reads as *off* — so on every dose
+    #: series that spans two decades the axis is logarithmic while the control
+    #: says it is not. Seeding the preference to make them agree would spend the
+    #: distinction ``figure_pref_is_set`` exists for: once set, the axis can
+    #: never re-derive from a plate with different doses. Saying which it is,
+    #: and where to override it, keeps both.
+    scale_notice: str = ""
     #: Set when the plate-wide "pool replicates" switch is off. This tab has
     #: no un-pooled mode: a dose is a property of a condition, and one point
     #: per well at the same x is a scatter of replicates rather than a curve.
@@ -136,6 +145,8 @@ def omission_caption(data: ResponseData) -> str:
         parts.append(data.t0_declined)
     if data.pooled_notice:
         parts.append(data.pooled_notice)
+    if data.scale_notice:
+        parts.append(data.scale_notice)
     return " · ".join(parts)
 
 

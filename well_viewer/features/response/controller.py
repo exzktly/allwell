@@ -14,7 +14,7 @@ from well_viewer.core.csv_export import write_csv_rows
 from well_viewer.core.safe import swallow
 from well_viewer.domain.sample_variables import NUMBER
 from well_viewer.features.response.collect import (
-    ResponseData, collect_response, empty_reason, fit_curves, omission_caption,
+    ResponseData, collect_response, empty_reason, fit_curves,
 )
 from well_viewer.features.response.renderer import draw_response
 from well_viewer.features.response.response_compute import (
@@ -183,7 +183,20 @@ def response_data(ctx):
 
 
 def redraw_response(ctx) -> None:
-    """Repaint the figure. Safe before the tab is built."""
+    """Repaint the figure. Safe before the tab is built.
+
+    **The shortfall is not pushed to the status line.** ``notify.set_status``
+    writes the *persistent* status bar, and a redraw that succeeds has no reason
+    to write anything — so the sentence outlived its condition: fill in the
+    missing dose and the figure's caption clears while the bar goes on saying
+    the dose is missing, contradicting the plot above it with no redraw able to
+    correct it. It is the same defect the bar tab's significance note was moved
+    off the status line for. The caption and the empty state carry it instead,
+    and they cannot go stale: the redraw that resolves the condition is the
+    redraw that clears them. The status line is still used for the two things
+    it is right for — reporting an action the user just took, where there is no
+    figure to write on.
+    """
     ax = _widget(ctx, "_response_ax")
     canvas = _widget(ctx, "_response_canvas")
     if ax is None or canvas is None:
@@ -191,9 +204,13 @@ def redraw_response(ctx) -> None:
     refresh_x_combo(ctx)
     data = response_data(ctx)
     update_timepoint_button(ctx)
+    log_x = resolved_log_x(ctx, ax.figure, data)
+    if log_x and not _log_x_was_asked_for(ctx, ax.figure):
+        data.scale_notice = ("x drawn logarithmic from the doses — "
+                             "set it in Properties to override")
 
     draw_response(ctx, ax, data,
-                  log_x=resolved_log_x(ctx, ax.figure, data),
+                  log_x=log_x,
                   title=_figure_title(ctx, data),
                   ylabel=_y_label(ctx, data),
                   variable_chosen=bool(selected_variable_id(ctx)),
@@ -203,29 +220,10 @@ def redraw_response(ctx) -> None:
     from well_viewer.core.plot_style import apply_export_style_to_current
     apply_export_style_to_current(ctx, ax.figure, canvas)
     canvas.draw_idle()
-    _announce(ctx, data)
 
 
 def on_x_variable_changed(ctx) -> None:
     redraw_response(ctx)
-
-
-def _announce(ctx, data) -> None:
-    """Put the shortfall on the status line as well as on the axes.
-
-    Three places, as the plan asks: the caption travels with a saved figure, the
-    CSV row survives being opened in Excel, and the status line is what the user
-    reading the screen right now actually sees.
-
-    An empty figure reports its *reason* rather than its omissions: the reason
-    names the fix, and a user looking at nothing needs that more than a list of
-    which groups were dropped — which the figure itself is carrying anyway.
-    """
-    message = _empty_reason(ctx, data) or omission_caption(data)
-    if not message:
-        return
-    with swallow("report what the response curve left out"):
-        ctx.notify.set_status(message)
 
 
 def _empty_reason(ctx, data) -> str:
@@ -379,6 +377,15 @@ def _figure_title(ctx, data) -> str:
     if shortfall:
         parts.append(shortfall)
     return " — ".join(parts)
+
+
+def _log_x_was_asked_for(ctx, fig) -> bool:
+    """Whether the user has an ``x_log`` answer of their own for this figure."""
+    from well_viewer.core.plot_style import figure_pref_is_set
+
+    with swallow("read whether this figure's x_log preference is set"):
+        return figure_pref_is_set(ctx, fig, "x_log")
+    return False
 
 
 def resolved_log_x(ctx, fig, data) -> bool:

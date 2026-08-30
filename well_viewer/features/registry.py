@@ -797,6 +797,31 @@ def _fold_change_scope_bar():
     )
 
 
+def _activate_response(ctx) -> None:
+    """Show the shared sidebar and repaint, as the other plotting leaves do.
+
+    Without this the figure was whatever it was when the tab body was first
+    built. A leaf that is built while the plate is empty and shown again after
+    a dataset is loaded drew nothing, with no control on the page out of place
+    to suggest why — and the generic ``redraw_app`` fan-out reaches only
+    Distribution and Heat Map, so nothing else was going to repaint it.
+    """
+    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
+    ctx.coordinator.refresh_sidebar_map()
+    _redraw_response(ctx)
+
+
+def _sel_response(ctx) -> None:
+    """Repaint on a selection change.
+
+    A tab with no hook here falls through to the shared ``app._redraw()``,
+    which does not reach this figure — so selecting different wells left the
+    curves drawn from the previous selection, which is a plot of the wrong
+    data that looks exactly like a plot of the right data.
+    """
+    _redraw_response(ctx)
+
+
 def _fold_change_scope_response():
     from well_viewer.domain.fold_change_scopes import FoldChangeScope
     from well_viewer.features.response.controller import redraw_response
@@ -815,6 +840,19 @@ def _saved_plots_card_decorator():
     a profiled-out Saved Plots simply isn't in the registry, so nothing runs."""
     from well_viewer.features.saved_plots.controller import wire_save_to_gallery
     return wire_save_to_gallery
+
+
+def _response_view_state_io():
+    """Response Curves' (snapshot, apply) view-state pair (lazy).
+
+    The fit is the point of the page and is not recoverable from the plate, so
+    a saved plot without this block restored with no curve and no EC50 while
+    looking like a complete restore.
+    """
+    from well_viewer.features.response.view_state_io import (
+        apply_response, snapshot_response,
+    )
+    return snapshot_response, apply_response
 
 
 def _image_table_view_state_io():
@@ -942,8 +980,11 @@ def _features() -> list[FeatureDescriptor]:
                           redraw=_redraw_line_graphs),
         FeatureDescriptor(name="Response Curves", parent="Plotting",
                           build=_build_response, redraw=_redraw_response,
+                          on_activate=_activate_response,
+                          on_selection_changed=_sel_response,
                           states=(StateSpec("response", _state_response),),
-                          fold_change_scope_factory=_fold_change_scope_response),
+                          fold_change_scope_factory=_fold_change_scope_response,
+                          view_state_io=_response_view_state_io),
         FeatureDescriptor(
             name="Scatter Plot", parent="Plotting", build=_build_scatter,
             on_activate=_activate_scatter,

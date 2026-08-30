@@ -58,6 +58,14 @@ def tab(qtbot, monkeypatch):
 
     combo = LabeledComboBox("X")
     qtbot.addWidget(combo)
+    # Connected the way ``build_response_tab`` connects it. An unconnected combo
+    # makes every test that changes X a test of ``refresh_x_combo`` alone: the
+    # signal that carries the change to the figure is exactly the part this
+    # repository has shipped dead, and a fixture that leaves it out cannot see
+    # it. It is also what made the restore's ``blockSignals`` untestable — the
+    # mutation that removed it left the whole file green.
+    combo.currentIndexChanged.connect(
+        lambda *_: rctl.on_x_variable_changed(ctx))
     tp_button = QPushButton("Timepoints: 0 selected")
     qtbot.addWidget(tp_button)
     # A bare ``Figure``, not ``pyplot.subplots``: pyplot would build a Qt canvas
@@ -224,14 +232,24 @@ def test_the_picker_seeds_from_the_shared_focus_timepoint(tab):
 
 # ── what it could not draw ──────────────────────────────────────────────────
 
-def test_an_omitted_group_reaches_the_status_line(tab):
+def test_an_omitted_group_reaches_the_figure_and_not_the_status_line(tab):
+    """The status bar is persistent, and a successful redraw has no reason to
+    write to it — so a sentence pushed there outlives its condition. Fill in
+    the missing dose and the caption clears while the bar goes on reporting it,
+    contradicting the plot above with no redraw able to correct it. The caption
+    is the place: the redraw that resolves the condition clears it."""
     variable = _variable(pairs=(("1", 1.0),))
     _load(tab, variable, {"A01": "v0"},
           [("ok", ["A01"]), ("short", ["A02"])])
     rctl.redraw_response(tab.ctx)
 
-    assert any("omitted" in s for s in tab.statuses), (
-        "a group was dropped from the plot and nothing said so"
+    captions = " | ".join(t.get_text() for t in tab.ax.texts)
+    assert "omitted" in captions and "short" in captions, (
+        "a group was dropped from the plot and the figure did not say so"
+    )
+    assert tab.statuses == [], (
+        "the shortfall was pushed to the persistent status bar, where it "
+        "outlives the condition"
     )
 
 
@@ -448,7 +466,7 @@ def test_a_plate_with_no_values_draws_the_reason_not_empty_axes(tab):
 
     texts = [t.get_text() for t in tab.ax.texts]
     assert any("No group has a Dose value" in s for s in texts), texts
-    assert any("Home → Variables" in s for s in tab.statuses), tab.statuses
+    assert any("Home → Variables" in s for s in texts), texts
     assert not tab.ax.has_data(), "it drew points as well as the reason"
 
 
@@ -783,3 +801,198 @@ def test_the_pooling_notice_reaches_the_figure(tab):
 
     captions = " | ".join(t.get_text() for t in tab.ax.texts)
     assert "pooled" in captions, captions
+
+
+# ── saving and restoring the figure ─────────────────────────────────────────
+#
+# A saved plot that comes back different from the one that was saved is the
+# silent substitution §7 forbids, and this tab is the most exposed to it: the
+# fit is the point of the page and nothing about it is recoverable from the
+# plate. Restoring the *slice* is only half — the popover's widgets are seeded
+# when it is built and never read the slice again, so a restore that stopped
+# there drew a 4PL above a control reading None.
+
+def test_the_snapshot_and_the_restore_are_the_features_own(tab):
+    """Reached through the registry hook, so removing the feature drops the
+    serialization with it and ``persistence`` never names this tab."""
+    from well_viewer.features.registry import build_feature_registry
+
+    descriptor = build_feature_registry().get("Response Curves")
+    assert descriptor.view_state_io is not None
+    snapshot, apply = descriptor.view_state_io()
+    assert callable(snapshot) and callable(apply)
+
+
+def test_the_fit_survives_a_save_and_a_restore(tab, fit_ui):
+    from well_viewer.features.response import view_state_io as vsio
+
+    _dose_plate(tab, ec50=2.5)
+    fit_ui.combo.setCurrentIndex(fit_ui.combo.findData("4pl"))
+    fit_ui.top.setText("200")
+    fit_ui.top.editingFinished.emit()
+
+    state = vsio.snapshot_response(tab.ctx)
+
+    slice_ = tab.ctx.state.feature_slice("response")
+    slice_.fit_model = "none"
+    slice_.fit_top = None
+    vsio.apply_response(tab.ctx, state)
+
+    assert slice_.fit_model == "4pl"
+    assert slice_.fit_top == 200.0
+
+
+def test_the_restore_moves_the_controls_not_only_the_state(tab, fit_ui):
+    """The half that shipped broken on the bar tab: the figure drew one thing
+    and the control the user would reach for showed another."""
+    from well_viewer.features.response import view_state_io as vsio
+
+    _dose_plate(tab)
+    state = {"fit_model": "hill", "fit_bottom": 0.0, "tp_selections": {"24": True}}
+
+    vsio.apply_response(tab.ctx, state)
+
+    assert fit_ui.combo.currentData() == "hill"
+    assert fit_ui.bottom.text() == "0"
+
+
+def test_an_unpinned_plateau_is_not_stored_as_zero(tab, fit_ui):
+    """``None`` and ``0.0`` are different requests — "fit this plateau" and
+    "this plateau is zero" — and writing 0.0 for an unset bottom would turn
+    every restored 4PL into a Hill."""
+    from well_viewer.features.response import view_state_io as vsio
+
+    _dose_plate(tab)
+    fit_ui.combo.setCurrentIndex(fit_ui.combo.findData("4pl"))
+
+    state = vsio.snapshot_response(tab.ctx)
+
+    assert "fit_bottom" not in state and "fit_top" not in state
+
+
+def test_the_x_variable_is_stored_by_id_not_by_name(tab, fit_ui):
+    """A name is renamed and an index moves when another variable is added;
+    either would restore the figure against a different variable while looking
+    as though nothing had gone wrong."""
+    from well_viewer.features.response import view_state_io as vsio
+
+    _dose_plate(tab)
+    rctl.redraw_response(tab.ctx)
+    state = vsio.snapshot_response(tab.ctx)
+
+    assert state["x_variable_id"] == "dose"
+    assert "Dose" not in str(state.get("x_variable_id"))
+
+
+def test_a_hand_edited_block_frees_the_plateau_rather_than_refusing(tab, fit_ui):
+    from well_viewer.features.response import view_state_io as vsio
+
+    _dose_plate(tab)
+    vsio.apply_response(tab.ctx, {"fit_model": "4pl", "fit_top": "not a number"})
+
+    slice_ = tab.ctx.state.feature_slice("response")
+    assert slice_.fit_model == "4pl"
+    assert slice_.fit_top is None
+
+
+def test_the_restore_does_not_redraw_from_half_the_state(tab, fit_ui):
+    """Each control emits a redraw, and a figure drawn part-way through a
+    restore looks like the restore itself went wrong."""
+    from well_viewer.features.response import view_state_io as vsio
+
+    _dose_plate(tab)
+    # The combos have to be *populated and on a different value*, or the
+    # restore's ``setCurrentIndex`` is never reached and the test passes on a
+    # branch it did not run — which is how the first version of it passed
+    # against a restore with every ``blockSignals`` removed.
+    rctl.redraw_response(tab.ctx)
+    fit_ui.combo.setCurrentIndex(fit_ui.combo.findData("4pl"))
+    tab.ctx.state.selection.variables = sv.VariableSet(
+        variables=(_variable(name="Other", pairs=(("1", 1.0),)),
+                   tab.ctx.state.selection.variables.variables[0]),
+        assignments=dict(tab.ctx.state.selection.variables.assignments))
+    rctl.refresh_x_combo(tab.ctx)
+    tab.combo.setCurrentIndex(tab.combo.findData("other"))
+
+    draws = []
+    tab.monkeypatch.setattr(rctl, "redraw_response",
+                            lambda ctx: draws.append(1))
+
+    vsio.apply_response(tab.ctx, {"fit_model": "hill", "tp_selections": {"24": True},
+                                  "x_variable_id": "dose"})
+
+    assert tab.combo.currentData() == "dose", "the restore did not move the combo"
+    assert fit_ui.combo.currentData() == "hill"
+    assert draws == [], f"the restore redrew {len(draws)} time(s) mid-flight"
+
+
+# ── the tab is repainted by the events every other plot tab is ──────────────
+
+def test_the_tab_redraws_on_activation_and_on_a_selection_change():
+    """Without these the figure was whatever it was when the body was built.
+
+    The generic ``redraw_app`` fan-out reaches only Distribution and Heat Map,
+    and a tab with no ``on_selection_changed`` hook falls through to exactly
+    that — so selecting different wells left the curves drawn from the previous
+    selection, which is a plot of the wrong data that looks like a plot of the
+    right data.
+    """
+    from well_viewer.features.registry import build_feature_registry
+
+    descriptor = build_feature_registry().get("Response Curves")
+    assert descriptor.on_activate is not None, "the tab is not redrawn when shown"
+    assert descriptor.on_selection_changed is not None, (
+        "a selection change leaves the curves drawn from the old selection")
+
+
+def test_the_selection_hook_actually_repaints(tab, monkeypatch):
+    """The hook existing is not the hook working — it is a lazy import by name,
+    so a rename would leave it importing nothing and failing silently."""
+    from well_viewer.features.registry import build_feature_registry
+
+    drawn = []
+    monkeypatch.setattr(rctl, "redraw_response", lambda ctx: drawn.append(ctx))
+
+    build_feature_registry().get("Response Curves").on_selection_changed(tab.ctx)
+
+    assert drawn == [tab.ctx]
+
+
+def test_a_log_axis_the_tab_chose_says_it_chose_it(tab):
+    """The Properties ``x_log`` checkbox is bound to the stored preference, and
+    an unset preference reads as *off* — so on every dose series spanning two
+    decades the axis is logarithmic while the control says it is not.
+
+    Seeding the preference to make them agree would spend the distinction
+    ``figure_pref_is_set`` exists for: once set, the axis can never re-derive
+    from a plate with different doses. Saying which it is, and where to
+    override it, keeps both.
+    """
+    _dose_plate(tab, ec50=1.0)
+    rctl.redraw_response(tab.ctx)
+
+    captions = " | ".join(t.get_text() for t in tab.ax.texts)
+    assert "logarithmic from the doses" in captions, captions
+    assert "Properties" in captions
+
+
+def test_a_log_axis_the_user_asked_for_says_nothing(tab):
+    """Their own answer needs no explanation, and the checkbox already agrees."""
+    from well_viewer.core.plot_style import figure_prefs
+
+    _dose_plate(tab, ec50=1.0)
+    figure_prefs(tab.ctx, tab.ax.figure)["x_log"] = True
+    rctl.redraw_response(tab.ctx)
+
+    captions = " | ".join(t.get_text() for t in tab.ax.texts)
+    assert "logarithmic from the doses" not in captions, captions
+
+
+def test_a_linear_axis_says_nothing(tab):
+    variable = _variable(pairs=(("1", 1.0), ("2", 2.0)))
+    _load(tab, variable, {"A01": "v0", "A02": "v1"},
+          [("a", ["A01"]), ("b", ["A02"])])
+    rctl.redraw_response(tab.ctx)
+
+    captions = " | ".join(t.get_text() for t in tab.ax.texts)
+    assert "logarithmic" not in captions, captions

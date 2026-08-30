@@ -1504,6 +1504,16 @@ which: as many points as parameters leaves nothing to estimate an error from
 (dose more, and it appears), whereas parameters that are not separable at these
 doses will not be fixed by more of the same ones.
 
+**Saving the plot keeps the fit.** A response plot sent to the gallery comes
+back with its x variable, its timepoints, its model and any plateau you pinned —
+the fit is the point of the page and none of it can be worked out again from the
+plate.
+
+If the axis went logarithmic because your doses span two decades rather than
+because you asked, the caption says so and points at Properties. The checkbox
+there shows your own answer, and until you give one it reads "off" while the
+axis is log; setting it either way from then on stands.
+
 #### Fold change on a response curve
 
 The band's **Fold change** popover is the same one the Bar and Line tabs carry,

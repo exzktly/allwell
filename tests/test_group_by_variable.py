@@ -319,16 +319,36 @@ def test_a_fully_assigned_plate_reports_no_shortfall(qtbot):
 
 
 def test_choosing_a_variable_says_what_it_left_out(qtbot):
-    from well_viewer.core.group_by_controller import set_group_by_variable
+    """The sentence exists and names the shortfall — read from the function
+    the figure title draws, not from the status line.
+
+    It used to go to ``notify.set_status``, which writes the **persistent**
+    status bar: a redraw that has nothing to report has no reason to write
+    anything, so the sentence outlived its condition. Fill in the missing wells
+    and the figure's title clears while the bar goes on naming them,
+    contradicting the plot above it with no redraw able to correct it. That is
+    the defect the bar tab's significance note was moved off the status line
+    for, and G's review gate found the same one in the Response tab.
+
+    The title is cleared by the same redraw that resolves the condition, and it
+    travels with a saved figure, which the status line never did.
+    """
+    from well_viewer.core.group_by_controller import (
+        group_by_shortfall, set_group_by_variable,
+    )
 
     ctx, _c, _g, emitted = _band_ctx(
         qtbot, wells=["A01", "A02"], variables=[_dose("0")],
         assignments={"dose": {"A01": "d0"}})
     set_group_by_variable(ctx, "dose")
 
+    shortfall = group_by_shortfall(ctx)
+    assert "no value" in shortfall and "A02" in shortfall, shortfall
+
     statuses = [a[1] for a in emitted if a and a[0] == "status"]
-    assert any("no value" in s for s in statuses), (
-        "the dropped well reached no surface the user reads"
+    assert not any("no value" in s for s in statuses), (
+        "the shortfall was pushed to the persistent status bar, where it "
+        "outlives the condition that produced it"
     )
 
 

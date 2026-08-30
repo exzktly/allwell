@@ -533,3 +533,23 @@ def test_every_editing_call_leaves_the_set_it_was_given_alone(plate):
     sv.move_value(plate, "dose", value_id, 1)
     sv.remove_value(plate, "dose", value_id)
     assert plate == before
+
+
+def test_the_roll_up_does_not_depend_on_the_order_the_wells_arrive_in(plate):
+    """Unassigned wins over disagreement, and the whole list is read first.
+
+    Short-circuiting on the second distinct value made the answer depend on
+    where the unassigned well happened to sit: the same group read `Mixed` or
+    "no value" according to the order, and the tab printed two different
+    sentences — one of them stating a count that was wrong — for one plate.
+    """
+    wells = ["A01", "A03", "B01"]          # 0 µM, 1 µM, and one unassigned
+    for order in ([wells[0], wells[1], wells[2]],
+                  [wells[2], wells[0], wells[1]],
+                  [wells[1], wells[2], wells[0]]):
+        assert sv.roll_up(plate, "dose", order) is None, order
+
+
+def test_mixed_still_wins_when_every_well_has_a_value(plate):
+    assert sv.roll_up(plate, "dose", ["A01", "A03"]) is sv.MIXED
+    assert sv.roll_up(plate, "dose", ["A03", "A01"]) is sv.MIXED

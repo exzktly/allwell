@@ -194,10 +194,16 @@ def roll_up(vset: VariableSet, variable_id: str, wells) -> str | None:
     for well in wells:
         value_id = mapping.get(well)
         if value_id is None:
+            # Unassigned wins over disagreement, and the whole list is read
+            # before answering. Short-circuiting on the second distinct value
+            # made the answer depend on the order the wells arrived in: the
+            # same group read ``MIXED`` or ``None`` according to whether its
+            # unassigned well happened to sit before or after the second value,
+            # and the tab then printed two different sentences for one plate.
             return None
         seen.add(value_id)
-        if len(seen) > 1:
-            return MIXED
+    if len(seen) > 1:
+        return MIXED
     return next(iter(seen))
 
 

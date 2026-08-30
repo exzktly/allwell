@@ -3,3 +3,12 @@
 # boots + loads a dataset with only the surviving surface.
 name = "plotting_only"
 features = ["Plotting"]
+
+# Response Curves is deliberately absent. Its x axis is a Number *sample
+# variable*, which is declared on Home → Variables — a pane this profile does
+# not ship — so in this build the tab could only ever show its own empty state
+# pointing at a page that is not there. A feature that cannot work in a build
+# does not belong in it, the same reason Home hides its saved-plots strip in a
+# build without Saved Plots.
+[subtabs]
+Plotting = ["Bar Plots", "Line Graphs", "Scatter Plot", "Distribution", "Heat Map"]

@@ -39,9 +39,25 @@ from well_viewer.domain.plot_members import (
     wells_without_variable,
 )
 
-#: The two modules allowed to call ``active_replicate_sets`` with a ctx in hand:
-#: the one that defines the rule, and the one that implements the substitution.
-_SEAM_OWNERS = {"selections_model.py", "plot_members.py"}
+#: Both raw pooling functions. ``active_replicate_sets`` is the visible sets and
+#: ``replicate_sets_loaded`` the same list including hidden ones — a distinction
+#: that does not exist for a variable's values, which is precisely why the
+#: second one was missed: the first sweep converted every
+#: ``active_replicate_sets`` site and left four ``replicate_sets_loaded`` sites
+#: pooling by the user's groups while their neighbours regrouped. The Heat Map
+#: averaged the whole plate into every dose cell and labelled them all with the
+#: first group's name. §7.5 #5: half-swept is worse than unswept, because one
+#: figure then holds two definitions of a word and neither looks wrong.
+_RAW_POOLERS = {"active_replicate_sets", "replicate_sets_loaded"}
+
+#: The functions — not the files — allowed to call them. A file-level exemption
+#: is what let ``plot_members.member_replicate_sets`` keep the old pooling while
+#: living beside the substitution that replaced it.
+_SEAM_FUNCTIONS = {
+    "plot_replicate_sets", "plot_replicate_sets_loaded",
+    # ``selections_model`` defines them; its own module is exempt entirely.
+}
+_SEAM_MODULE = "selections_model.py"
 
 
 def _ctx(*, wells, variables=(), assignments=None, group_by="", selections=(),
@@ -86,21 +102,31 @@ def test_no_tab_reaches_past_the_seam_for_its_grouping():
     """
     offenders = []
     for path in python_sources():
-        if path.name in _SEAM_OWNERS:
+        if path.name == _SEAM_MODULE:
             continue
         tree = parse_source(path)
-        aliases = {"active_replicate_sets"}
+        aliases = set(_RAW_POOLERS)
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
                 for alias in node.names:
-                    if alias.name == "active_replicate_sets" and alias.asname:
+                    if alias.name in _RAW_POOLERS and alias.asname:
                         aliases.add(alias.asname)
+        # Which function each call sits inside, so the exemption is per
+        # function rather than per file.
+        enclosing = {}
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for inner in ast.walk(node):
+                    enclosing.setdefault(id(inner), node.name)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
             name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
-            if name in aliases:
-                offenders.append(f"{path.name}:{node.lineno}")
+            if name not in aliases:
+                continue
+            if enclosing.get(id(node)) in _SEAM_FUNCTIONS:
+                continue
+            offenders.append(f"{path.name}:{node.lineno}")
     assert not offenders, (
         "these pool wells without consulting group_by_variable, so they keep "
         "showing the user's groups after the user has regrouped by a "

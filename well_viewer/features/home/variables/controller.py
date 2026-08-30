@@ -105,6 +105,13 @@ def refresh_variables(ctx) -> None:
     if hint is not None:
         hint.setVisible(variable is None)
     if variable is None:
+        # Everything the plate and the chips were showing belonged to a
+        # variable that is no longer there — a dataset swap, a reset, or the
+        # last one deleted. Left painted, the colours, rings and sentence
+        # describe the previous plate while the masthead names the new one, and
+        # the stale chips are still connected: pressing one reaches
+        # ``assign_selected`` and does nothing at all.
+        _clear_plate(ctx)
         return
 
     name = _widget(ctx, "_var_name")
@@ -587,6 +594,9 @@ def _paint_groups(ctx, variable) -> None:
 def _group_summary(vset, variable, wells) -> str:
     value_id = sv.roll_up(vset, variable.id, wells)
     if value_id is sv.MIXED:
+        # Every well has a value here — ``roll_up`` returns ``None`` otherwise —
+        # so this set cannot contain one, and counting it as a "value" is what
+        # made this line report three across a group of two doses and one blank.
         distinct = {vset.value_id_for(variable.id, w) for w in wells}
         return f"Mixed ({len(distinct)} values across {len(wells)} wells)"
     if value_id is None:
@@ -594,3 +604,38 @@ def _group_summary(vset, variable, wells) -> str:
         return (f"no value — {len(short)} of {len(wells)} wells unassigned "
                 f"({', '.join(short[:4])}{'…' if len(short) > 4 else ''})")
     return f"{variable.display_label(value_id)} ({len(wells)} wells)"
+
+
+def _clear_plate(ctx) -> None:
+    """Blank every surface that described a variable, when there is none."""
+    from PySide6.QtWidgets import QListWidget
+
+    plate = _widget(ctx, "_var_plate")
+    if plate is not None:
+        plate.clearWellColors()
+        plate.clearWellRings()
+        plate.clearWellMarkers()
+    chips = _widget(ctx, "_var_chips")
+    if chips is not None:
+        layout = chips.layout()
+        while layout.count():
+            widget = layout.takeAt(0).widget()
+            if widget is not None:
+                widget.setParent(None)
+    for name in ("_var_readout", "_var_note", "_var_overlay_legend",
+                 "_var_fill_scope"):
+        label = _widget(ctx, name)
+        if label is not None:
+            label.setText("")
+    for name in ("_var_groups", "_var_groups_title"):
+        widget = _widget(ctx, name)
+        if widget is not None:
+            if isinstance(widget, QListWidget):
+                widget.clear()
+            widget.setVisible(False)
+    overlay = _widget(ctx, "_var_overlay")
+    if overlay is not None:
+        overlay.blockSignals(True)
+        overlay.clear()
+        overlay.setEnabled(False)
+        overlay.blockSignals(False)

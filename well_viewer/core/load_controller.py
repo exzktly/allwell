@@ -655,6 +655,13 @@ def load_directory(ctx, d: Path, label=None) -> None:
     with swallow("refresh the Group by control for the new dataset"):
         from well_viewer.core.group_by_controller import refresh_group_by_combo
         refresh_group_by_combo(ctx)
+    # And the tab itself. Replacing the state is only half of it: the plate
+    # keeps the previous dataset's colours, rings and sentence until something
+    # repaints it, so a plate of one well showed four ringed wells from the
+    # plate before — with stale value chips still connected. Through the
+    # feature service seam, so core names no feature.
+    with swallow("refresh the Variables tab for the new dataset"):
+        ctx.features.call("variables.refresh", ctx)
     # Eagerly hydrate Cell Gating thresholds from ``pipeline_info.json`` so the
     # very first plot draw (line / bar / batch export) has the user's
     # per-channel and per-ratio ThreshFracOn values available. The Cell Gating

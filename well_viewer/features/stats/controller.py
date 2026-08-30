@@ -535,7 +535,6 @@ from well_viewer.core.safe import swallowed
 from well_viewer.domain.plot_members import plot_replicate_sets
 from well_viewer.domain.selections_model import (
     color_for_replicate_set as _color_for_replicate_set,
-    replicate_sets_loaded as _replicate_sets_loaded,
 )
 
 
@@ -546,8 +545,8 @@ def _rank_color_rset(ctx, rset) -> str:
 
 def _rep_sets_loaded(ctx):
     """All rep-sets with ≥1 loaded well (incl. hidden), from typed state."""
-    return _replicate_sets_loaded(
-        ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    from well_viewer.domain.plot_members import plot_replicate_sets_loaded
+    return plot_replicate_sets_loaded(ctx)
 
 
 def _stats_groups_from_rep_sets(ctx) -> list[BarGroup]:

@@ -184,9 +184,8 @@ def _repsets_loaded(ctx) -> list:
     """Every loaded replicate set (incl. hidden) over ``ctx.state`` — the
     pool the heatmap's rep-set-average expansion walks. Derived from the
     domain resolver so no god-object / feature import is needed."""
-    from well_viewer.domain.selections_model import replicate_sets_loaded
-    return replicate_sets_loaded(ctx.state.selection.selections,
-                                 ctx.state.dataset.well_paths)
+    from well_viewer.domain.plot_members import plot_replicate_sets_loaded
+    return plot_replicate_sets_loaded(ctx)
 
 
 def _expand_repset_wells(ctx, wells: Iterable[str]) -> list[str]:

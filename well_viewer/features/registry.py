@@ -125,6 +125,10 @@ _build_well_labels = _lazy_build("well_viewer.features.home.labels.tab_view",
                                  "build_label_grid")
 _build_variables = _lazy_build("well_viewer.features.home.variables.tab_view",
                                "build_variables_subtab")
+_build_response = _lazy_build("well_viewer.features.response.tab_view",
+                              "build_response_tab")
+_redraw_response = _lazy_hook("well_viewer.features.response.controller",
+                              "redraw_response")
 _build_pipeline_info = _lazy_build("well_viewer.features.home.pipeline_info.tab_view",
                                    "build_pipeline_info_subtab")
 
@@ -490,6 +494,11 @@ def _svc_cell_gating_threshold_frac_on_changed():
         cell_gating_on_threshold_frac_on_change,
     )
     return cell_gating_on_threshold_frac_on_change
+
+
+def _svc_variables_refresh():
+    from well_viewer.features.home.variables.controller import refresh_variables
+    return refresh_variables
 
 
 def _svc_labels_grid_refresh():
@@ -918,6 +927,8 @@ def _features() -> list[FeatureDescriptor]:
         FeatureDescriptor(name="Line Graphs", parent="Plotting", build=_build_lineplot,
                           on_activate=_activate_default_plot,
                           redraw=_redraw_line_graphs),
+        FeatureDescriptor(name="Response Curves", parent="Plotting",
+                          build=_build_response, redraw=_redraw_response),
         FeatureDescriptor(
             name="Scatter Plot", parent="Plotting", build=_build_scatter,
             on_activate=_activate_scatter,
@@ -1014,7 +1025,10 @@ def _features() -> list[FeatureDescriptor]:
                           }),
         FeatureDescriptor(name="Variables", parent="Home",
                           build=_build_variables, removable=True,
-                          reads_well_selection=False, subtab_inset=True),
+                          reads_well_selection=False, subtab_inset=True,
+                          services={
+                              "variables.refresh": _svc_variables_refresh,
+                          }),
         FeatureDescriptor(name="Well Labels", parent="Home",
                           build=_build_well_labels, removable=False,
                           reads_well_selection=True, subtab_inset=True,

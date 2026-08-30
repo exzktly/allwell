@@ -29,7 +29,9 @@ same indirection ``core/scope_registry.py`` uses for redraw callables.
 from __future__ import annotations
 
 from well_viewer.domain.plot_order import apply_order
-from well_viewer.domain.selections_model import active_replicate_sets
+from well_viewer.domain.selections_model import (
+    active_replicate_sets, replicate_sets_loaded,
+)
 from well_viewer.domain.viewer_state import parse_rc
 
 
@@ -54,14 +56,7 @@ def plot_replicate_sets(ctx):
     is what keeps fifty-odd call sites and every saved per-sample control
     reference working.
     """
-    # ``ctx.state.plot`` itself may be absent — the headless export and CSV
-    # paths build a context with only the slices they read — and a missing plot
-    # slice means "no grouping was chosen", not a crash on the one function
-    # every view now goes through. ``test_group_by_variable`` pins that the real
-    # ``AppState`` always carries the field, so this tolerance cannot hide a
-    # production context that quietly stopped honouring the setting.
-    plot_state = getattr(ctx.state, "plot", None)
-    variable_id = str(getattr(plot_state, "group_by_variable", "") or "")
+    variable_id = _group_by_variable(ctx)
     if variable_id:
         sets = variable_replicate_sets(ctx, variable_id)
         if sets:
@@ -73,6 +68,39 @@ def plot_replicate_sets(ctx):
         # not an explanation.
     return active_replicate_sets(
         ctx.state.selection.selections, ctx.state.dataset.well_paths or {})
+
+
+def plot_replicate_sets_loaded(ctx):
+    """:func:`plot_replicate_sets`, but including sets the user has hidden.
+
+    The Heat Map's rep-set average and Batch Export's group roster need the
+    whole pool rather than the visible traces. **Under a variable grouping the
+    two are the same list** — a value has no hidden flag — which is exactly why
+    this must exist rather than callers reaching for ``replicate_sets_loaded``:
+    left unconverted, four sites kept pooling by the user's groups while their
+    neighbours regrouped, and the Heat Map averaged the whole plate into every
+    dose cell while labelling them all with the first group's name.
+    """
+    variable_id = _group_by_variable(ctx)
+    if variable_id:
+        sets = variable_replicate_sets(ctx, variable_id)
+        if sets:
+            return sets
+    return replicate_sets_loaded(
+        ctx.state.selection.selections, ctx.state.dataset.well_paths or {})
+
+
+def _group_by_variable(ctx) -> str:
+    """The chosen grouping variable, tolerating a context with no plot slice.
+
+    ``ctx.state.plot`` is absent on the headless export and CSV paths, which
+    build a context holding only the slices they read. A missing slice means
+    "no grouping chosen"; ``tests/test_group_by_variable.py`` pins that the real
+    ``PlotState`` always carries the field, so the tolerance cannot hide a
+    production context that silently stopped honouring it.
+    """
+    return str(getattr(getattr(ctx.state, "plot", None),
+                       "group_by_variable", "") or "")
 
 
 def bar_member_keys(ctx) -> list[str]:
@@ -185,9 +213,12 @@ def member_replicate_sets(ctx) -> dict[str, str]:
     against the sets would otherwise be silently orphaned by a toggle that has
     nothing to do with fold change.
     """
-    well_paths = ctx.state.dataset.well_paths or {}
     out: dict[str, str] = {}
-    for rset in active_replicate_sets(ctx.state.selection.selections, well_paths):
+    # Through the seam, not ``active_replicate_sets``: with a variable grouping
+    # active and pooling switched off, a well was inheriting its *user group's*
+    # control while the plot pooled by dose — two definitions of "the set this
+    # well belongs to" in one figure, and the outcome vocabulary reported OK.
+    for rset in plot_replicate_sets(ctx):
         for w in rset.wells:
             out.setdefault(w, rset.name)
     return out

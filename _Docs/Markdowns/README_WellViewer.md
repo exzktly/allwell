@@ -1405,6 +1405,40 @@ the crop region and the QC gate.
 cutoffs, then use the optimizer on the one channel that separates your
 conditions.
 
+### Response Curves
+
+Plots a measurement against a **number you varied** — concentration, seeding
+density, MOI, temperature, how long you pre-treated for. A serial dilution is
+one case of it, which is why the tab is not named for one.
+
+The x axis comes from a **Number** variable you defined on
+[Home → Variables](#variables): define it, fill it onto the plate, then pick it
+under **X** in the band. Until a Number variable exists the tab says so and
+points you there — there is nothing for it to plot.
+
+One point per group, at that group's value, with error bars across its
+replicates. Groups come from the same place every other page's groups come
+from, so this tab and the Bar tab always agree about what a member is.
+
+**The axis picks itself.** If your doses span two decades or more the x axis
+opens logarithmic, because a 0.1–10 µM series on a linear axis puts three
+quarters of its points in the leftmost tenth. Every dose gets its own tick
+rather than the decades matplotlib would otherwise label.
+
+**A zero dose is drawn, off the scale.** Log axes cannot show zero, and the two
+usual outcomes are both wrong: dropping the point makes a figure that is missing
+its vehicle control look complete, and nudging it to some small positive number
+states a concentration you never administered. It goes in its own column to the
+left of a dotted break, ticked `0`, and it is left out of any fit.
+
+**What could not be plotted is named on the figure.** A group whose wells hold
+two different doses, and a group containing a well with no dose at all, are two
+different mistakes with two different fixes, so they are counted separately in a
+caption under the axes — not only on the status line, which does not travel with
+a saved figure. The exported CSV carries a row for each of them too, with an
+empty x and the reason, because a spreadsheet is exactly where someone counts
+rows and believes the total.
+
 #### Groups
 
 Name a set of wells as replicates; every plot, the Statistics tab, and Batch

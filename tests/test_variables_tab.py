@@ -728,3 +728,101 @@ def test_the_group_list_is_hidden_when_there_are_none(tab):
     _dose_tab(tab)
     assert tab.w("_var_groups").isHidden() is True
     assert tab.w("_var_groups_title").isHidden() is True
+
+
+def test_a_group_summary_says_the_same_thing_whatever_order_its_wells_are_in(tab):
+    """Two sentences for one plate, one of them with a wrong count, was the
+    shape this fixed — a group of two doses plus a blank read `Mixed (3 values)`
+    when the blank sat last and "1 of 3 unassigned" when it sat first."""
+    from well_viewer.features.home.variables.controller import _group_summary
+
+    variable_id = _dose_tab(tab)
+    tab.w("_var_plate").selectedWells = ["A01"]
+    _chips(tab)[0].click()
+    tab.w("_var_plate").selectedWells = ["A02"]
+    _chips(tab)[1].click()
+
+    vset = _vset(tab)
+    variable = vset.by_id(variable_id)
+    first = _group_summary(vset, variable, ["A01", "A02", "A03"])
+    second = _group_summary(vset, variable, ["A03", "A01", "A02"])
+
+    assert first == second
+    assert "no value" in first and "1 of 3" in first
+
+
+# ── what happens when the variable goes away ────────────────────────────────
+#
+# The review gate found all three of these live: a dataset swap, a reset, and
+# deleting the last variable each replaced the *state* and left the *screen*
+# describing the plate before. That is the bug ``persistence/ratios.py``
+# records, one layer up — the half nobody fixed because the state half looked
+# like the whole job.
+
+def _watch_clears(tab, monkeypatch):
+    """Record the plate-clearing calls a repaint makes.
+
+    At the boundary rather than on the widget's internals: what matters is that
+    the controller *told* the plate to drop the previous variable's decoration,
+    which is the call that was missing.
+    """
+    plate = tab.w("_var_plate")
+    seen = {"colors": 0, "rings": 0, "markers": 0}
+    for name, key in (("clearWellColors", "colors"),
+                      ("clearWellRings", "rings"),
+                      ("clearWellMarkers", "markers")):
+        monkeypatch.setattr(plate, name,
+                            lambda _k=key: seen.__setitem__(_k, seen[_k] + 1))
+    return seen
+
+
+def test_removing_the_last_variable_blanks_the_plate_it_described(tab, monkeypatch):
+    """Its colours, rings, chips and sentence all belonged to it."""
+    _dose_tab(tab)
+    tab.w("_var_fill_apply").click()
+    assert tab.w("_var_chips").layout().count() > 0
+
+    seen = _watch_clears(tab, monkeypatch)
+    tab.w("_var_remove").click()
+
+    assert seen["colors"] and seen["rings"] and seen["markers"], (
+        f"the deleted variable's decoration was never cleared: {seen}"
+    )
+    assert tab.w("_var_chips").layout().count() == 0, (
+        "the deleted variable's value chips are still there, and still "
+        "connected — pressing one reaches assign_selected and does nothing"
+    )
+    assert tab.w("_var_readout").text() == ""
+
+
+def test_a_dataset_swap_repaints_rather_than_leaving_the_last_plate(tab,
+                                                                    monkeypatch):
+    """The state half was right and the screen half was not: a new plate of one
+    well kept showing four ringed wells from the plate before."""
+    from well_viewer.features.home.variables.controller import refresh_variables
+
+    _dose_tab(tab)
+    tab.w("_var_fill_apply").click()
+
+    # What ``persistence.sample_variables.load_from_data_dir`` does on a plate
+    # that declares none, followed by what the load controller now calls.
+    seen = _watch_clears(tab, monkeypatch)
+    tab.ctx.state.selection.variables = sv.VariableSet()
+    tab.ctx.state.dataset.well_paths = {"B01": "/B01.csv"}
+    refresh_variables(tab.ctx)
+
+    assert seen["colors"] and seen["rings"], f"nothing was cleared: {seen}"
+    assert tab.w("_var_chips").layout().count() == 0
+    assert tab.w("_var_readout").text() == "", (
+        "the readout still names wells from the dataset that was closed"
+    )
+
+
+def test_the_variables_tab_is_reachable_through_the_feature_service():
+    """``core/`` must not import the feature to repaint it, and the load
+    controller and the reset scope both need to. A service that is not
+    registered makes both of those silent no-ops."""
+    from well_viewer.features.registry import build_feature_registry
+
+    reg = build_feature_registry()
+    assert reg.service("variables.refresh") is not None

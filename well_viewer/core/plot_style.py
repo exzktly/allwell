@@ -522,6 +522,7 @@ _FIG_PREF_KEY_MAP = (
     ("_sp_fig", "spatial"),
     ("_mv_fig", "multivariate"),
     ("_stats_fig", "stats"),
+    ("_response_fig", "response"),
 )
 
 

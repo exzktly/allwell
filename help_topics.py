@@ -55,6 +55,7 @@ SECTION_BY_PAGE: dict[str, str] = {
     "Home": "Home",
     "Bar Plots": "Bar Plots",
     "Line Graphs": "Line Graphs",
+    "Response Curves": "Response Curves",
     "Scatter Plot": "Scatter Plot",
     "Distribution": "Distribution",
     "Heat Map": "Heat Map",

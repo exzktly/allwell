@@ -47,7 +47,7 @@ from well_viewer.features.smfish.controller import (
 from well_viewer.features.smfish.worker import apply_global_threshold_async
 from well_viewer.domain.viewer_state import make_schema_extractor, extract_well_token, parse_rc
 from well_viewer.core.channel_state_controller import recalculate_threshold
-from well_viewer.data.data_loading import load_well_csv
+from well_viewer.data.data_loading import read_well_frame
 from well_viewer.core.safe import swallowed
 
 logger = logging.getLogger("smfish_tab")
@@ -1031,7 +1031,7 @@ def _smfish_refresh_app_cache(ctx) -> None:
     replaced = False
     for label, path in ctx.state.dataset.well_paths.items():
         if label in ctx.state.dataset.cache:
-            ctx.state.dataset.cache[label] = load_well_csv(path)
+            ctx.state.dataset.cache[label] = read_well_frame(path)
             replaced = True
     if replaced:
         # A replaced frame invalidates a memoized aggregation of that well

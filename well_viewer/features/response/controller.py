@@ -18,7 +18,7 @@ from well_viewer.features.response.collect import (
 )
 from well_viewer.features.response.renderer import draw_response
 from well_viewer.features.response.response_compute import (
-    FIT_LABELS, FIT_MODELS, FIT_NONE, ec50_text,
+    FIT_LABELS, FIT_MODELS, FIT_NONE, ec50_text, spans_enough_decades,
 )
 
 _logger = logging.getLogger("well_viewer")
@@ -133,6 +133,8 @@ def open_timepoint_selector(ctx) -> None:
     """The Bar tab's checkbox menu, over this tab's own selection."""
     from PySide6.QtWidgets import QCheckBox, QMenu, QWidgetAction
 
+    from widgets import menu_exec
+
     button = _widget(ctx, "_response_tp_button")
     if button is None:
         return
@@ -153,7 +155,7 @@ def open_timepoint_selector(ctx) -> None:
         menu.addAction(action)
     if not menu.actions():
         menu.addAction("No timepoints in this dataset").setEnabled(False)
-    menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
+    menu_exec.exec_menu(menu, button.mapToGlobal(button.rect().bottomLeft()))
 
 
 def update_timepoint_button(ctx) -> None:
@@ -386,7 +388,6 @@ def resolved_log_x(ctx, fig, data) -> bool:
     put.
     """
     from well_viewer.core.plot_style import figure_pref_is_set, figure_prefs
-    from well_viewer.features.response.response_compute import spans_enough_decades
 
     with swallow("read this figure's x_log preference"):
         if figure_pref_is_set(ctx, fig, "x_log"):

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, replace as _replace
+from typing import Any
 
 #: A log x axis is offered by default once the positive values span this many
 #: decades. Two is the point at which a linear axis stops being readable: a
@@ -153,7 +154,7 @@ def _four_pl(log_x, bottom, top, log_ec50, hill):
     return bottom + (top - bottom) / (1.0 + np.power(10.0, (log_ec50 - log_x) * hill))
 
 
-def curve_y(fit: FitResult, xs):
+def curve_y(fit: FitResult, xs) -> Any | None:
     """The fitted y at each x in *xs*, or ``None`` when there is no fit.
 
     ``None`` rather than a flat line at zero: a fit that did not converge must

@@ -21,6 +21,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+# Module scope, not function-local: ``response_compute`` imports nothing from
+# here, so there is no cycle to work around — and a deferred feature import
+# that is not breaking a cycle is one the budget guard counts for nothing.
+from well_viewer.features.response.response_compute import FIT_NONE, fit_response
+
 #: Why a member could not be given an x. Each is a different mistake with a
 #: different fix, so they are distinguished rather than pooled into "no value".
 NO_VALUE = "no value"
@@ -147,9 +152,6 @@ def fit_curves(data: ResponseData, model: str, *, fixed_top: float | None = None
     refused fit look identical to a caller that used ``.get()``, and the
     refusals are the half that has to reach the legend.
     """
-    from well_viewer.features.response.response_compute import (
-        FIT_NONE, fit_response,
-    )
     if model == FIT_NONE:
         return {}
     return {

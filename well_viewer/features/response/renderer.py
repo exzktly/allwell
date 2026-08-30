@@ -123,7 +123,7 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
     apply_ax_style(ax, title, ylabel)
 
 
-def _errorbar_colour(container):
+def _errorbar_colour(container) -> str | None:
     """The colour matplotlib gave an ``errorbar``, so the fit can match it.
 
     Read back rather than chosen: taking the next colour from the cycle would

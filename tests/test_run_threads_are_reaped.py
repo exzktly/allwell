@@ -21,7 +21,6 @@ uses, and every threaded background worker a spawned run owns is in the roster.
 from __future__ import annotations
 
 import ast
-import threading
 
 import pytest
 

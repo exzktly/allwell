@@ -77,7 +77,9 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     import theme
     from well_viewer.core.ui_helpers import make_scrollable_canvas
     from well_viewer.core.ui_helpers import well_plate_tooltip_provider
-    from widgets.plate_geometry import PLATE_MAX_HEIGHT, apply_plate_geometry
+    from widgets.plate_geometry import (
+        PLATE_MAX_HEIGHT, PLATE_MIN_WIDTH, apply_plate_geometry,
+    )
     from widgets.well_plate_selector import WellPlateSelector
 
     row = parent.layout()
@@ -100,6 +102,13 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     # second Clear meaning something else beside it is the confusion this whole
     # change is about.
     apply_plate_geometry(plate, role="editor")
+    # A floor as well as a cap, which the rail plate never needed: this one
+    # shares its width with the group cards, and a box layout that cannot fit
+    # both shrinks them together. Measured on an 1100x800 window with the rail
+    # open and the pane split, that left the map 167px wide — 13px of well —
+    # while the cards beside it were a sliver. The cards are text and scroll, so
+    # they are the half that should give.
+    plate.setMinimumWidth(PLATE_MIN_WIDTH)
     row.addWidget(plate, 0, Qt.AlignTop)
     ctx.widgets.register("_stats_map_plate", plate)
 

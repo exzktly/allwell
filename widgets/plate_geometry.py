@@ -65,6 +65,16 @@ from PySide6.QtWidgets import QSizePolicy
 #: than a restatement of the rail's width.
 PLATE_MAX_WIDTH = 330
 
+#: Narrowest a plate may be squeezed to by a host that has to share its width.
+#: Only relevant to a plate laid out *beside* something else — the rail's is
+#: alone in its slot and an ``editor`` plate on a full-width page never reaches
+#: this. The grid sizes its cells to ``min(width / 12, height / 8)``, so 12
+#: columns in this width resolve to about 18 px of well; below that the app
+#: already judged a plate too small to work on, which is the argument
+#: :data:`PLATE_CANVAS_WIDTH` was introduced by. A host that would go narrower
+#: should stack rather than shrink.
+PLATE_MIN_WIDTH = 220
+
 #: Tallest a plate card may render with its action row hidden — grid, headers and
 #: the selector's own layout margins. Together with :data:`PLATE_MAX_WIDTH` this
 #: is what fixes the cell size: at the maximum width the height is the binding

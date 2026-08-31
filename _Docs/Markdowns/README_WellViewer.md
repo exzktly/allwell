@@ -1144,7 +1144,17 @@ them your history of other plates. A folder that opened but turned out to hold
 no wells is not added.
 
 Once a dataset is open the same list appears as a **Recent datasets** card at the
-bottom of Overview, minus the one you are already in.
+bottom of Overview, minus the one you are already in. It is also under the
+dataset button at the top of the left rail: that button names the plate you are
+in, and its menu now offers **Open…** followed by the last few you were in, which
+is the shortest way to swap plates without going near a folder picker.
+
+**Taking something off the list.** Hover a row on Overview's card — or on the
+start-up placeholder — and an **✕** appears at its right end. Clicking it forgets
+that dataset: it leaves the list here and stays gone at the next launch. Nothing
+happens to the folder itself, and opening it again puts it back at the top. The
+✕ works on a greyed-out row too, which is the row you are most likely to want
+gone: a plate on a drive you will not be plugging in again.
 
 **It reports; it does not measure.** Working out how much of each well's input
 its output covers means opening an archive and reading a whole CSV for every

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from pathlib import Path
 
 from PySide6.QtCore import QTimer
@@ -590,8 +589,8 @@ def _paint_recents(ctx) -> None:
     note = _widget(ctx, "_home_recents_note")
     if card is None or host is None or note is None:
         return
-    rows = _recent_entry_rows(ctx, RECENTS_ON_CARD,
-                              exclude=getattr(ctx.state.dataset, "data_dir", None))
+    rows = recent_rows(ctx, RECENTS_ON_CARD,
+                       exclude=getattr(ctx.state.dataset, "data_dir", None))
     # Cleared before the early return, not after it: a card hidden while still
     # holding the last dataset's rows shows them again the moment anything
     # re-shows it, and the state that gets here is a *transition* (the history
@@ -821,108 +820,27 @@ def show_home_subtab(ctx, name: str) -> None:
 RECENTS_ON_PLACEHOLDER = 5
 
 
-def recent_datasets(ctx) -> list:
-    """The remembered datasets, newest first, as :class:`RecentDataset` records.
+def recent_rows(ctx, limit: int, *, exclude=None) -> list:
+    """The recent-datasets rows, with Home's own answer to "and then repaint".
 
-    Reads ``QSettings`` through the shell's own handle rather than constructing
-    a second one, so this cannot drift from where the window geometry and the
-    remote profiles are kept. An unreadable setting is an empty list — see
-    ``core.recent_datasets.decode`` — so this never raises into a page build.
-
-    **Nothing here touches the filesystem.** Whether a remembered folder still
-    exists is asked at the moment the rows are drawn, by the view, because the
-    commonest reason one has vanished is an external drive that is not mounted
-    and a stat against an absent network mount can block for seconds. A page
-    build that walked five of those would hang the launch it is meant to speed
-    up.
+    The rules — which folders are reachable, what each row is called, what its
+    tooltip says — are ``core.recent_view.entry_rows``, shared with the rail
+    head's dataset menu so the three surfaces cannot drift. What Home adds is
+    the callback a removal runs afterwards: **both** of its surfaces, because
+    the card and the placeholder are the same list in the two states of one
+    page, and a row forgotten on one while the other still holds it is a list
+    that disagrees with itself the moment a dataset is opened or closed.
     """
-    from well_viewer.core.app_settings import app_settings
-    from well_viewer.core.recent_datasets import load
+    from well_viewer.core.recent_view import entry_rows
 
-    # A module function, not ``ctx.window._qsettings``: ``ctx.window`` is the
-    # review widget and that method belongs to the main window containing it,
-    # so the guarded ``getattr`` spelling read ``None`` in the shipped app and
-    # this list was empty on every launch while its tests passed.
-    try:
-        return load(app_settings())
-    except Exception:
-        _logger.warning("could not read the recent-datasets list; Home will "
-                        "show no history this session.", exc_info=True)
-        return []
+    return entry_rows(ctx, limit, exclude=exclude,
+                      on_removed=lambda: _repaint_recents(ctx))
 
 
-def _is_the_open_dataset(entry_path, data_dir) -> bool:
-    """Whether *entry_path* is the dataset ``data_dir`` was loaded from.
-
-    Not a string comparison: what the list stores is the folder Review was
-    *pointed at*, while ``data_dir`` is the folder it ended up reading — and for
-    the standard in/out layout those differ by one level, because ``load_path``
-    descends into ``out``. Comparing them directly would leave the open dataset
-    on its own page's "open something else" list, which is the one row on it
-    that can do nothing.
-    """
-    if not data_dir:
-        return False
-    here = Path(data_dir)
-    entry = Path(entry_path)
-    return entry == here or (here.name == "out" and entry == here.parent)
-
-
-def _recent_entry_rows(ctx, limit: int, *, exclude=None) -> list:
-    """``(label, sublabel, on_click, enabled, tooltip)`` for the placeholder.
-
-    **A folder that is not there is shown, disabled, with the reason.** Hiding
-    it would tell the user their history had been lost, when what actually
-    happened is that a drive is unplugged — and the row coming back by itself
-    when the drive returns is the behaviour that makes the list trustworthy.
-
-    *exclude* drops the dataset already open, for the card that sits inside it.
-    """
-    rows = []
-    entries = [e for e in recent_datasets(ctx)
-               if not _is_the_open_dataset(e.path, exclude)]
-    for entry in entries[:limit]:
-        path = Path(entry.path)
-        exists = False
-        with swallow(f"check whether {path} is still reachable"):
-            exists = path.is_dir()
-        parent = str(path.parent) if path.parent != path else ""
-        when = _opened_ago(entry.opened_at)
-        rows.append((
-            entry.name or path.name or entry.path,
-            parent,
-            (lambda _p=path: open_recent(ctx, _p)) if exists else None,
-            exists,
-            f"{path}{when}" if exists else
-            f"{path} is not reachable right now — the folder has moved or its "
-            "drive is not mounted. It stays on this list until you open "
-            "something else ten times.",
-        ))
-    return rows
-
-
-def _opened_ago(opened_at: float) -> str:
-    """``"\nLast opened 3 days ago"``, or ``""`` when there is no timestamp.
-
-    What tells two rows apart when someone has three plates from one experiment
-    open in rotation and the folder names differ by a digit. Coarse on purpose:
-    the useful distinction is today / this week / a while back, and a precise
-    clock time invites the reader to work out whether it was before or after
-    something else, which this cannot answer.
-    """
-    if not opened_at:
-        return ""
-    seconds = max(0.0, time.time() - float(opened_at))
-    minutes = seconds / 60
-    if minutes < 1:
-        return "\nLast opened just now"
-    if minutes < 60:
-        count, unit = int(minutes), "minute"
-    elif minutes < 60 * 24:
-        count, unit = int(minutes // 60), "hour"
-    else:
-        count, unit = int(minutes // (60 * 24)), "day"
-    return f"\nLast opened {count} {unit}{'' if count == 1 else 's'} ago"
+def _repaint_recents(ctx) -> None:
+    """Redraw both surfaces that show the history. See :func:`recent_rows`."""
+    _paint_recents(ctx)
+    paint_recents_placeholder(ctx)
 
 
 def paint_recents_placeholder(ctx) -> None:
@@ -940,21 +858,7 @@ def paint_recents_placeholder(ctx) -> None:
     placeholder = getattr(stack, "_empty_placeholder", None) if stack else None
     if placeholder is None or not hasattr(placeholder, "setEntries"):
         return
-    placeholder.setEntries(_recent_entry_rows(ctx, RECENTS_ON_PLACEHOLDER))
-
-
-def open_recent(ctx, path) -> None:
-    """Open a remembered dataset, by the route a browsed one takes.
-
-    ``_load_path`` and the same deferral the folder picker uses, so a recent
-    open and a browsed open cannot diverge — the deferral is what lets the
-    window repaint before a load that may take seconds, and a direct call here
-    would make the two paths feel different for no reason anyone could name.
-    """
-    load = getattr(ctx.window, "_load_path", None)
-    if not callable(load):
-        return
-    QTimer.singleShot(50, lambda: load(Path(path)))
+    placeholder.setEntries(recent_rows(ctx, RECENTS_ON_PLACEHOLDER))
 
 
 def _open_dataset(ctx) -> None:

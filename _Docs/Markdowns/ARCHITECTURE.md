@@ -1203,11 +1203,20 @@ by keeping every segment filled (§7).
 
 Directly beneath it, as the rail's own head, is the **dataset control**:
 `app_shell_view._dataset_button`, full rail width, naming the loaded folder and
-carrying `Open`. It replaces both the `SECTION` caption (the rail's items are
-self-evidently sections) and the `Open` button that sat alone at the far end of
-the topbar — the action and the thing it acts on are now in one place, and the
-loaded dataset finally has a durable on-screen identity rather than living in a
-hidden label and the OS window title. `refresh_dataset_button` is called from
+carrying `Open…` and the datasets opened recently. It replaces both the
+`SECTION` caption (the rail's items are self-evidently sections) and the `Open`
+button that sat alone at the far end of the topbar — the action and the thing it
+acts on are now in one place, and the loaded dataset finally has a durable
+on-screen identity rather than living in a hidden label and the OS window title.
+The history is under it because this is the control a user reaches for to change
+plate: offering only a folder picker there meant the way back to the plate opened
+ten minutes ago was to remember where it lived, while Home had known the answer
+the whole time. `_fill_dataset_menu` rebuilds the menu on `aboutToShow` rather
+than filling it once — every load adds to the history and Home's × takes rows off
+it, so a menu built at window construction shows the list as it stood at launch
+for the rest of the session, and nothing about that looks broken. It offers
+`RECENTS_IN_MENU` rows, fewer than the store holds, because a ten-item list under
+a folder button is a file manager with a caret. `refresh_dataset_button` is called from
 `load_controller` on every load. Long names elide in the **middle**, because
 dataset folders differ in their tail as often as their head
 (`plate3_run2_2024-06-11` against `…-12`) and a right-elided name can leave two
@@ -1276,6 +1285,17 @@ body appears to call for reach Qt intact, and Qt discards an unparseable sheet
 without raising — it writes "Could not parse stylesheet" to stderr and paints
 everything unstyled. `tests/test_theme_roles_render.py` holds both halves: no
 stylesheet handed to Qt carries `{{`, and the two hosts' rules stay identical.
+
+A row can carry a **×** that takes it off the list, revealed while the pointer is
+over the row (`widgets/removable_row`) and styled from one definition,
+`theme.row_remove_qss(object_name)`, for the same reason `link_row_qss` exists.
+Ten rows each wearing a permanent delete control read as a page about deleting
+rather than a page about opening — and the space for it is reserved in both
+states, because a control that appears by *widening* the row shifts the label at
+the one moment it must not. Hover is counted across the row and every child of
+it rather than sampled from `underMouse`: crossing from the row onto the × is a
+Leave on one and an Enter on the other, so hiding on any Leave takes the button
+away exactly as the user reaches for it.
 
 A row whose folder is not reachable is **drawn, disabled, with the reason on its
 tooltip** rather than dropped. Hiding it says the user's history was lost when
@@ -2156,16 +2176,42 @@ descended into, so reopening from the list takes the same branch through
 `load_path` the original open took. A settings backend that will not write is
 logged and dropped: the dataset is already loaded and on screen by then.
 
-It appears in two places, fed by one function (`home.controller.
-_recent_entry_rows`) so they cannot disagree about which folders are reachable.
-On Home's no-dataset placeholder it shows `RECENTS_ON_PLACEHOLDER` rows — fewer
-than the store holds, because a launch screen offering ten folders is a file
-manager. On Home's Overview it is a card of `RECENTS_ON_CARD` rows, hidden
+It appears in three places, fed by one function — `core/recent_view.entry_rows`
+— so they cannot disagree about which folders are reachable or what a row is
+called. On Home's no-dataset placeholder it shows `RECENTS_ON_PLACEHOLDER` rows
+— fewer than the store holds, because a launch screen offering ten folders is a
+file manager. On Home's Overview it is a card of `RECENTS_ON_CARD` rows, hidden
 entirely when there is no history, and with the dataset currently open filtered
 out: it is the subject of every other block on that page, and offering to reopen
 it is offering to do nothing. That filter is not a string comparison — the list
 stores the folder pointed at and `data_dir` is the `out` inside it, which differ
-by one level for the standard layout.
+by one level for the standard layout. The third is the rail head's dataset menu,
+which passes the same `exclude` for the same reason.
+
+**The display rules are in `core`, not on the Home feature.** Two of the three
+surfaces are the shell's own and `core/load_controller` already writes the list,
+so `core/recent_view` holds reading it through the shell's settings handle,
+deciding what each row says and whether it can be opened, and performing the open
+and the forget; Home reads it from there like the other two. With the rules
+inside `features/home`, the shell could only have reached them through a feature
+service seam or an import the layering forbids. Nothing is cached: the list is at
+most `MAX_RECENTS` long, the menu builds its rows when it is about to be shown,
+and a cache would need invalidating by a load, by a forget and by the other
+surface's forget — three writers for ten rows.
+
+**Forgetting a row.** `recent_datasets.forget` / `record_forget` are the pure
+and the stored halves, matched on the resolved path — the same key `remember`
+dedupes on, so a row stored under one spelling can be removed by a caller
+holding another. `recent_view.forget_recent` writes and then runs the caller's
+repaint in one call, because they are one action to the user: a row whose × leaves
+it on screen until something else redraws the page is indistinguishable from a
+button that did nothing. Home's `recent_rows` supplies a repaint that redraws
+**both** of its surfaces, since the card and the placeholder are one list in the
+two states of one page. A row can be removable while it is not openable, and that
+is deliberate — the row whose folder is gone is the one a user most wants off the
+list — so the remove callback is never gated on the row's `enabled` flag. The
+rail head's menu asks for no removal at all: a `QMenu` row is a line of text with
+nothing to reveal a second control over.
 
 Clicking a row goes through `ctx.window._load_path` with the same 50 ms deferral
 the folder picker uses, so a recent open and a browsed open cannot diverge.
@@ -8471,6 +8517,7 @@ The **Upload rail** counts wells off `[remote] ↑ …<well>.zip` lines, which u
 | `ColorSwatchRow`, `ColorPickerPopover` | The colour picker, in two layers. `ColorSwatchRow` is the constrained one — a row of curated swatches, then the recents, then a conic-gradient **Custom** tile; the Cell Browser's per-channel tint, the Review Image colour and the saved-selection recolour all open it from a button and take its `colorPicked`. The Custom tile lazily builds a `ColorPickerPopover` (an SV square, a hue strip, hex and alpha fields, and its own recents row) and anchors it at the tile. **The two signals mean different things and must not be collapsed.** `colorPicked` is live: it fires on every drag and every field edit, and a caller uses it to preview. `colorCommitted` fires once, when the choice is finished — Return in the hex field, clicking a recent, or dismissing the popover with the colour changed — and it is what writes a recent. A picker that committed on every drag would fill the recents with the colours the cursor crossed on the way. Committing is keyed on a baseline (`_committed`) that `setColor` moves, so opening the popover on a colour is not itself a choice; the corollary is that a handler which commits must not route through `setColor` first, or it resets the baseline and compares the colour against itself. The selection ring is drawn *outside* the swatch, in the margin `sizeHint` reserves for it, so it surrounds the colour rather than eating two pixels of it on each side. |
 | `lut_cmaps.lut_cmap` | Qt-free resolver that maps a LUT name to a matplotlib colormap: single-hue names (Reds/Greens/Blues/Purples/Oranges) become a **black→colour** `LinearSegmentedColormap` (so a dark background reads as "off"), Greys stays black→white, everything else is the builtin (`_r`-aware). Routed through `ui_helpers.make_fluor_thumb` / `lut_colormap_to_rgb` and `LutSelector._cmap_stops`, so thumbnails, the Image Table compose/composite/export paths, Playground, and the picker strip all flip together. |
 | `ContextBanner` (`widgets/context_banner.py`) | A strip of glyph + sentence + confirm + cancel saying a page is being used for something other than its own job — the Job Queue borrows a tool's page to set up or correct a queued job (§6b). Host-agnostic: it knows nothing about queues or jobs, and whoever shows it decides what confirming means. Deliberately not a dialog and it does not block the page beneath, since the point is that the user is editing that page. It is one `QHBoxLayout`, which is why it suits a *page* and not a rail: the Analyze pane's two folder banners (§6.5) answer the same brief in the 329-px sidebar and stack their text above their own action row instead. `EmptyState` is *not* a substitute for a one-line caption in the same situations — it is `Expanding/Expanding`, so a single sentence in one renders as a page-height bordered box. |
+| `removable_row` (`widgets/removable_row.py`) | **A list row whose remove button appears while the pointer is over it.** Built for the recent-datasets list, which two surfaces draw — Home's card and the no-dataset placeholder — and which wants the row itself to be the target with a small × on its right edge. Two decisions carry the widget. The ×'s **space is reserved in both states**: a control that appears by widening the row shifts the label at the instant the pointer arrives, so the button lives inside a fixed-width slot and only the button inside it is hidden. And **hover is counted, not sampled** — moving from the row onto the × is a Leave on one and an Enter on the other, so a handler hiding on any Leave removes the button exactly as the user reaches for it; Enter and Leave are counted across the row and every child, and the count is order-independent because Qt does not promise Enter-before-Leave across a parent/child crossing. `row_entry` and `row_remove_button` are named accessors, because a caller holding "the row at index 2" cannot otherwise tell a wrapped row from the bare widget an unremovable one returns, and a lookup spelled five ways is five places to fix. |
 | `Popover`, `Drawer`, `Toast`, `EmptyState` | Generic overlay primitives. `Drawer` slides in from `edge="right"` (default — the Help drawer) or `edge="bottom"` (a full-width panel sized by `height_hint`/`height_fraction` — the Application Log drawer, whose long lines the narrow right panel clipped). |
 | `FlowLayout` | A `QLayout` (not a widget) that reflows its children onto multiple lines instead of clipping — the standard Qt Flow Layout adapted to PySide6. Control rows that carry more widgets than fit at a narrow width (the plotting / image-review "TabCtrl" rows) use it so **Split View** halving the pane grows the row taller rather than hiding controls off the right edge. Four rules go with it. (1) A flow row skips hidden widgets when it places items, so *which* widgets are visible is an input to the layout, not merely a blanked slot — `_FlowItemVisibility` watches show/hide on every managed widget and invalidates the layout, without which a row that swaps one option group for another (the Multivariate tab's per-mode row) keeps the positions computed for the previous visible set and paints the newly-shown group on top of them. That watcher resolves the layout from its own `parent()` and keeps **no** per-instance state: its C++ object belongs to the layout, so it outlives the Python instance `__init__` ran on, and PySide builds a fresh wrapper for it once that instance is collected. Anything stashed on `self` is gone by then — a watcher that remembered its layout in an attribute raised `AttributeError` inside the Qt event loop on every subsequent show and hide, and the row stopped reflowing. (2) A label and the control it names must go in as one `flow_group` item, or the row can wrap between them. (3) A host whose row may wrap needs `sync_flow_height`, since a stacked page sizes the row from its one-line minimum and clips the second line otherwise. (4) Spacing is fixed — 14px horizontal, `theme.Spacing.xs` vertical — **not** derived from the platform style, and no call site overrides it. Deriving it asks `pixelMetric(PM_Layout*Spacing)`, which Qt documents as returning -1 on styles that implement the size-class-aware `layoutSpacing()` instead. Measured, the two styles are exact opposites: QMacStyle reports `pixelMetric = -1, layoutSpacing = 14`, Fusion reports `pixelMetric = 6, layoutSpacing = -1`. The layout clamps with `max(0, …)`, so on macOS every row that relied on the derived value packed its controls edge to edge, while CI (on Fusion) saw 6 and looked fine. The 14 is QMacStyle's own button-row spacing, adopted app-wide because it is the one number measured against a real control row — it is deliberately off the `theme.Spacing` scale. Passing `-1` still derives, but now asks both APIs and falls back to the defaults rather than to nothing. |
 | `MplToolbar` | The slim toolbar shown under every matplotlib figure (home / pan / zoom / save + coords readout). |

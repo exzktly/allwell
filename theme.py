@@ -472,6 +472,37 @@ def _icon_path(name: str) -> str:
     return os.path.join(base, "assets", "icons", name).replace(os.sep, "/")
 
 
+def row_remove_qss(object_name: str) -> str:
+    """The rules for the × that takes a row off a list, for *object_name*.
+
+    An emitter for the same reason :func:`link_row_qss` is one: Home's Recent
+    datasets card takes its styling from the application sheet while an
+    ``EmptyState`` sets its own, so the two surfaces cannot share a rule unless
+    something writes it twice.
+
+    Quiet by default and warning-coloured under the cursor. The button is
+    already revealed by hover — see ``widgets/removable_row`` — so this is the
+    second half of the same statement rather than the whole of it: what appears
+    is a muted mark, and what it will do is only said once the pointer is on the
+    mark itself.
+    """
+    c, t, r = Colors, Typography, Radii
+    return f"""
+QPushButton#{object_name} {{
+    background: transparent;
+    border: none;
+    border-radius: {r.sm}px;
+    color: {c.text_muted};
+    font-size: {t.small_size}px;
+    padding: 0px;
+}}
+QPushButton#{object_name}:hover {{
+    background-color: {c.hover};
+    color: {c.warn};
+}}
+"""
+
+
 def link_row_qss(object_name: str) -> str:
     """The rules for a row in a column of secondary links, for *object_name*.
 
@@ -527,6 +558,7 @@ def qss() -> str:
     _chev_up = _icon_path("chevron-up.svg")
     _check = _icon_path("check.svg")
     _link_row_home = link_row_qss("HomeRecentTile")
+    _row_remove_home = row_remove_qss("HomeRecentTileRemove")
     return f"""
 * {{
     font-family: {t.family};
@@ -661,9 +693,11 @@ QPushButton#VariablesLink:hover {{
 QPushButton#VariablesLink:disabled {{
     color: {c.text_muted};
 }}
-/* Home's recent-dataset rows — one definition, shared with EmptyState's
-   entries; see ``link_row_qss``. */
+/* Home's recent-dataset rows, and the × that takes one off the list — one
+   definition each, shared with EmptyState's entries; see ``link_row_qss`` and
+   ``row_remove_qss``. */
 {_link_row_home}
+{_row_remove_home}
 /* A panel the app has just navigated the user to. Set for a moment after a
    jump-to-this-card action, so the eye lands on the right card in a gallery of
    near-identical ones — the arrival is otherwise silent and the reader has to

@@ -37,7 +37,7 @@ import theme
 EDITOR_W = 268
 
 #: What the tab says when a plate has no variables yet — the payoff alone. The
-#: Sample map tab's role strip sits above this and already says what a variable
+#: Sample Map tab's role strip sits above this and already says what a variable
 #: *is*, whether or not any exist; saying it twice on one screen is how the only
 #: statement of that used to disappear the moment somebody defined one.
 EMPTY_HINT = (

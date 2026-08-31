@@ -163,6 +163,21 @@ def remember(entries: list[RecentDataset], path, name: str,
     return [fresh, *kept][:MAX_RECENTS]
 
 
+def forget(entries: list[RecentDataset], path) -> list[RecentDataset]:
+    """*entries* without *path*. Pure; returns a new list.
+
+    Matched on the resolved path, the same key :func:`remember` deduplicates
+    on — otherwise a row stored under one spelling could not be removed by a
+    caller holding another, and the button would appear to do nothing.
+
+    Removing an entry that is not there is not an error: two surfaces draw this
+    list, and the second one's copy of a row is stale the moment the first one
+    forgets it.
+    """
+    key = _resolved(path)
+    return [e for e in entries if _resolved(e.path) != key]
+
+
 def load(settings) -> list[RecentDataset]:
     """Read the stored list. *settings* is anything with ``value(key, default)``."""
     return decode(settings.value(SETTINGS_KEY, ""))
@@ -171,6 +186,17 @@ def load(settings) -> list[RecentDataset]:
 def store(settings, entries: list[RecentDataset]) -> None:
     """Write *entries*. *settings* is anything with ``setValue(key, value)``."""
     settings.setValue(SETTINGS_KEY, encode(entries))
+
+
+def record_forget(settings, path) -> list[RecentDataset]:
+    """Read, :func:`forget`, write. Returns the new list.
+
+    The counterpart to :func:`record_open`, so a caller dropping a row carries
+    no more knowledge of the storage shape than one adding it.
+    """
+    entries = forget(load(settings), path)
+    store(settings, entries)
+    return entries
 
 
 def record_open(settings, path, name: str, opened_at: float) -> list[RecentDataset]:

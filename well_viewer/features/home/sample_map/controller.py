@@ -1,4 +1,4 @@
-"""The Sample map tab's layer switch: which annotation the plate is showing.
+"""The Sample Map tab's layer switch: which annotation the plate is showing.
 
 Groups, sample variables and well labels are three ways of saying something
 about a well, and each used to have a tab of its own. Three tabs meant three

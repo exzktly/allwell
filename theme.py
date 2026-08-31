@@ -420,6 +420,14 @@ class Metrics:
     # Review pane, so the Properties sidebar and the Playground's controls do
     # not open to different widths and read as two different kinds of panel.
     dock_w       = 360
+    # Vertical and horizontal padding the item delegate takes inside a list or
+    # tree row. Tokens rather than literals in the QSS because a caller sizing a
+    # row's **index widget** has to add them back: Qt gives that widget the
+    # item rect minus this padding, so a size hint taken from the widget alone
+    # comes out short by exactly this much. The × on a Variables rail row was
+    # laid out 10 px tall inside an 18 px button and rendered as its top half.
+    list_item_pad_v = 4
+    list_item_pad_h = 6
     # Thickness of a divider hairline. One pixel is the design intent
     # everywhere; the token exists so the number is stated once rather than
     # written out at each of the dozen frames and QSS pins that use it.
@@ -462,6 +470,37 @@ def _icon_path(name: str) -> str:
 
     base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, "assets", "icons", name).replace(os.sep, "/")
+
+
+def row_remove_qss(object_name: str) -> str:
+    """The rules for the × that takes a row off a list, for *object_name*.
+
+    An emitter for the same reason :func:`link_row_qss` is one: Home's Recent
+    datasets card takes its styling from the application sheet while an
+    ``EmptyState`` sets its own, so the two surfaces cannot share a rule unless
+    something writes it twice.
+
+    Quiet by default and warning-coloured under the cursor. The button is
+    already revealed by hover — see ``widgets/removable_row`` — so this is the
+    second half of the same statement rather than the whole of it: what appears
+    is a muted mark, and what it will do is only said once the pointer is on the
+    mark itself.
+    """
+    c, t, r = Colors, Typography, Radii
+    return f"""
+QPushButton#{object_name} {{
+    background: transparent;
+    border: none;
+    border-radius: {r.sm}px;
+    color: {c.text_muted};
+    font-size: {t.small_size}px;
+    padding: 0px;
+}}
+QPushButton#{object_name}:hover {{
+    background-color: {c.hover};
+    color: {c.warn};
+}}
+"""
 
 
 def link_row_qss(object_name: str) -> str:
@@ -519,6 +558,7 @@ def qss() -> str:
     _chev_up = _icon_path("chevron-up.svg")
     _check = _icon_path("check.svg")
     _link_row_home = link_row_qss("HomeRecentTile")
+    _row_remove_home = row_remove_qss("HomeRecentTileRemove")
     return f"""
 * {{
     font-family: {t.family};
@@ -566,12 +606,18 @@ QPushButton#HomeThumbTile:pressed {{
 /* A value chip on Home -> Variables: click one to give it to the wells
    selected on the plate. Reads as a token rather than a command button — the
    plate is what the user is acting on, and a row of full-weight buttons above
-   it would compete with it. Its left edge carries the value's own plate colour,
-   set per chip because that is the only part that varies. */
+   it would compete with it.
+
+   The border is stated once, for all four sides. The chip's left edge carries
+   the value's own plate colour, and that block is set per chip in
+   ``plate_view.value_chip`` because it is the only part that varies — so this
+   rule deliberately says nothing about the left edge on its own. A separate
+   ``border-left`` here would be a second declaration of the same edge, present
+   only to be overridden, and every value chip in the app renders with the
+   override in force. */
 QPushButton#VariableValueChip {{
     background-color: {c.panel_elevated};
     border: 1px solid {c.border};
-    border-left: 3px solid {c.border};
     border-radius: {r.sm}px;
     color: {c.text_primary};
     font-size: {t.small_size}px;
@@ -647,9 +693,11 @@ QPushButton#VariablesLink:hover {{
 QPushButton#VariablesLink:disabled {{
     color: {c.text_muted};
 }}
-/* Home's recent-dataset rows — one definition, shared with EmptyState's
-   entries; see ``link_row_qss``. */
+/* Home's recent-dataset rows, and the × that takes one off the list — one
+   definition each, shared with EmptyState's entries; see ``link_row_qss`` and
+   ``row_remove_qss``. */
 {_link_row_home}
+{_row_remove_home}
 /* A panel the app has just navigated the user to. Set for a moment after a
    jump-to-this-card action, so the eye lands on the right card in a gallery of
    near-identical ones — the arrival is otherwise silent and the reader has to
@@ -847,7 +895,7 @@ QFrame#HomeNextStep {{
     border-left: 3px solid {c.border_strong};
     border-radius: {r.md}px;
 }}
-/* The two-line strip at the top of Home's Sample map tab: what this layer of
+/* The two-line strip at the top of Home's Sample Map tab: what this layer of
    the plate means, and where to go when the answer is one of the others. The
    sentence carries the page's ordinary text weight and the frame a hairline
    under it, so it reads as a statement about the tab rather than a caption on
@@ -1420,7 +1468,7 @@ QListView, QListWidget, QTreeView, QTreeWidget, QTableView, QTableWidget {{
     selection-color: {c.text_primary};
 }}
 QListView::item, QListWidget::item, QTreeView::item, QTreeWidget::item {{
-    padding: 4px 6px;
+    padding: {m.list_item_pad_v}px {m.list_item_pad_h}px;
     border-radius: {r.xs}px;
 }}
 QListView::item:hover, QListWidget::item:hover,

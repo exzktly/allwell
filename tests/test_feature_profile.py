@@ -145,7 +145,7 @@ def test_a_non_removable_subleaf_survives_a_narrowing_subtabs_list():
 
     A container that enumerates its sub-tabs from the registry hands the profile
     a lever over every leaf — including ones other code reaches without asking
-    whether they are present. Home's Sample map tab is the case: the three ways
+    whether they are present. Home's Sample Map tab is the case: the three ways
     of annotating a well are layers of it, built together from one roster, so a
     manifest able to drop it would produce a build whose Overview still reports
     groups, variables and labels with no editor for any of them.
@@ -169,7 +169,7 @@ def test_a_non_removable_subleaf_survives_a_narrowing_subtabs_list():
 
     ctx = types.SimpleNamespace(features=reg)
     home_tabs = active_subtabs(ctx)
-    for name in ("Cell Gating", "Sample map"):
+    for name in ("Cell Gating", "Sample Map"):
         assert name in home_tabs, f"Home tab {name!r} narrowed away"
     assert "Segmentation" in _active_subtabs(ctx), "Image Browser tab narrowed away"
 
@@ -238,7 +238,7 @@ def test_home_enumerates_its_tabs_from_the_registry():
     full = build_feature_registry(FULL)
     ctx = SimpleNamespace(features=full)
     assert active_subtabs(ctx) == (
-        "Overview", "Cell Gating", "Sample map", "Ratios", "Pipeline Info",
+        "Overview", "Cell Gating", "Sample Map", "Ratios", "Pipeline Info",
     )
 
     # The sanctioned manifest line keeps the two load-bearing editors and drops
@@ -246,7 +246,7 @@ def test_home_enumerates_its_tabs_from_the_registry():
     narrowed = Profile(name="p", features=frozenset({"Home"}),
                        subtabs={"Home": frozenset({"Cell Gating"})})
     ctx = SimpleNamespace(features=build_feature_registry(narrowed))
-    assert active_subtabs(ctx) == ("Overview", "Cell Gating", "Sample map")
+    assert active_subtabs(ctx) == ("Overview", "Cell Gating", "Sample Map")
 
 
 def test_every_home_tab_has_a_builder():
@@ -274,7 +274,7 @@ def test_home_subtab_behaviour_is_declared_not_listed():
     ``reads_well_selection`` said
     whether the rail plate stayed live while a Home sub-tab showed, and Home
     keeps no rail plate: the one it had edited a group's membership, never wrote
-    ``selection.selected_wells``, and is a layer of the Sample map tab now. A
+    ``selection.selected_wells``, and is a layer of the Sample Map tab now. A
     descriptor field with no reader is the same defect one level down from a
     control that does nothing.
 
@@ -285,7 +285,7 @@ def test_home_subtab_behaviour_is_declared_not_listed():
     subs = {n: reg.get(n) for n in reg.sub_leaves("Home")}
 
     inset = {n for n, d in subs.items() if d.subtab_inset}
-    assert inset == {"Sample map"}
+    assert inset == {"Sample Map"}
 
     for field in ("reads_well_selection", "owns_plate"):
         assert not any(hasattr(d, field) for d in build_feature_registry(FULL).all()), (

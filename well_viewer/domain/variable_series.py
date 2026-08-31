@@ -70,7 +70,7 @@ UNASSIGNED_COLOR = theme.Colors.text_primary
 VALUE_PICKS = (0, 49, 11, 47, 41, 22, 85, 8, 3, 89, 38, 34, 78, 57, 87, 59)
 
 
-def value_colors(variable) -> dict:
+def value_colors(variable, *, offset: int = 0) -> dict:
     """``value id -> colour``, indexed by the value's place in the variable.
 
     The plate palette, not a new one: the app already colours by well rank out
@@ -81,11 +81,58 @@ def value_colors(variable) -> dict:
     monotonically down a dose series instead of shuffling on every reload.
 
     Which entries, and why those, is :data:`VALUE_PICKS`.
+
+    *offset* is where in that order this variable starts. It exists because the
+    rule a reader actually needs is about the **plate**, not about one variable:
+    with every variable indexed from zero, `Cell line`'s two values and `Dose`'s
+    first two took the same two inks, so one blue meant `HeLa` in the chip row
+    and `0 µM` on the plate a click later. Prefer :func:`colors_for`, which
+    computes the offset from the set; this signature is the rule underneath it
+    and is what a test drives.
     """
     values = tuple(getattr(variable, "values", ()) or ())
     order = _pick_order()
-    return {value.id: order[i % len(order)]
+    return {value.id: order[(offset + i) % len(order)]
             for i, value in enumerate(values)}
+
+
+def color_offset(vset, variable_id: str) -> int:
+    """Where *variable_id*'s inks start: the values every earlier variable took.
+
+    Cumulative rather than a fixed stride per variable. A stride would put every
+    variable after the first past :data:`VALUE_PICKS` and into the unmeasured
+    tail of the palette — losing, for every variable but one, exactly the
+    dichromat separation the picks were chosen for. Cumulative keeps the
+    measured head in play for the plate as a whole: two variables of six values
+    is twelve inks, all of them still inside the sixteen.
+
+    **The cost, so it is not a surprise.** Adding or removing a value on one
+    variable moves the inks of every variable after it. That is the price of
+    "no two values on this plate share a colour", and it is the right way round:
+    a colour that silently means two things is a misreading, while a colour that
+    changes when you edit the plate is something the user watches happen.
+    """
+    variables = tuple(getattr(vset, "variables", ()) or ())
+    taken = 0
+    for variable in variables:
+        if variable.id == variable_id:
+            return taken
+        taken += len(getattr(variable, "values", ()) or ())
+    return 0
+
+
+def colors_for(vset, variable_id: str) -> dict:
+    """``value id -> colour`` for one variable **of a set**, with no reuse.
+
+    The one entry point: the tab's chips, its value rows and its plate, the
+    plots' *Colour by*, Batch Export's inks and every legend read it, so no two
+    surfaces can disagree about what colour a value is — and no two values on
+    one plate can share one.
+    """
+    variable = vset.by_id(variable_id) if vset is not None else None
+    if variable is None:
+        return {}
+    return value_colors(variable, offset=color_offset(vset, variable_id))
 
 
 def _pick_order() -> list:
@@ -175,11 +222,15 @@ def glyph_key(variable) -> str:
     return f"{name}: {pairs}" if pairs else ""
 
 
-def _inks_for(variable, values_by_key) -> dict:
+def _inks_for(variable, values_by_key, palette) -> dict:
     """``member key -> colour``, from values already resolved.
 
     The ink rule with the ctx and the scope lifted out, so the rule itself can
-    be read and tested without either. Private: the plotting tabs and Batch
+    be read and tested without either. *palette* is passed rather than derived
+    because no two values on a plate may share an ink, which is a fact about the
+    whole set — see :func:`colors_for`. Required rather than defaulted: a
+    default would be a second, colliding answer one call away from the right
+    one. Private: the plotting tabs and Batch
     Export share one definition of what a value looks like — a batch figure
     whose colours differed from the tab's would be two answers to "what colour
     is HeLa" on one screen — but they share it through :func:`member_inks`,
@@ -188,7 +239,6 @@ def _inks_for(variable, values_by_key) -> dict:
     """
     if variable is None:
         return {}
-    palette = value_colors(variable)
     return {
         key: (UNASSIGNED_COLOR if value_id is None
               else MIXED_COLOR if value_id == MIXED
@@ -221,7 +271,8 @@ def member_inks(ctx, scope: str, variable_id: str, wells_by_key=None) -> dict:
     override its fold-change path already makes, and for the same reason.
     """
     return _inks_for(_variable(ctx, variable_id),
-                     _values(ctx, scope, variable_id, wells_by_key))
+                     _values(ctx, scope, variable_id, wells_by_key),
+                     colors_for(_vset(ctx), variable_id))
 
 
 def member_bands(ctx, scope: str, variable_id: str, wells_by_key=None) -> dict:
@@ -273,7 +324,7 @@ def legend_entries(ctx, variable_id: str, used_labels) -> list:
     if variable is None:
         return []
     used = set(used_labels or ())
-    palette = value_colors(variable)
+    palette = colors_for(_vset(ctx), variable_id)
     entries = [(value.label, palette[value.id])
                for value in (variable.values or ()) if value.label in used]
     if MIXED_LABEL in used:
@@ -283,8 +334,13 @@ def legend_entries(ctx, variable_id: str, used_labels) -> list:
     return entries
 
 
+def _vset(ctx):
+    """The plate's variable set, or ``None`` on a context that carries none."""
+    return getattr(getattr(ctx.state, "selection", None), "variables", None)
+
+
 def _variable(ctx, variable_id: str) -> object | None:
-    vset = getattr(ctx.state.selection, "variables", None)
+    vset = _vset(ctx)
     if vset is None or not variable_id:
         return None
     return vset.by_id(variable_id)

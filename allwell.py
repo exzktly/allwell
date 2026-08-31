@@ -768,7 +768,7 @@ class AllWellApp(QMainWindow):
                 "the Cell Area / FluorGating / ThreshFracOn thresholds. "
                 "Hit <i>Auto-threshold all channels</i> any time to "
                 "re-derive ThreshFracOn defaults.<br>"
-                "4. Define replicate groups (Home → Sample map → Replicates) "
+                "4. Define replicate groups (Home → Sample Map → Replicates) "
                 "and explore the data on the plotting tabs (Line / Bar / "
                 "Scatter / Distribution / Heat Map).</p>"
                 "<p><b>Review tab</b> — explore an already-analyzed dataset: "
@@ -967,7 +967,7 @@ class AllWellApp(QMainWindow):
             # chapter. Ask Home which tab is showing and prefer that heading;
             # Overview has none of its own and correctly falls through to "Home".
             with swallow("help: home sub-tab"):
-                # ``current_help_subject`` answers with the Sample map tab's
+                # ``current_help_subject`` answers with the Sample Map tab's
                 # current *layer* where there is one, since each has a heading
                 # of its own under the tab's — without which the layer entries
                 # in ``SECTION_BY_PAGE`` had no reader at all.

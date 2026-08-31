@@ -72,8 +72,29 @@ its reason here and at the site.
 
 ## Reconciliation
 
-Every row above re-read against the tree, not against this table, on the commit
-that closes the last of them. Each `done` row's guard was watched failing with
-its fix removed — by mutating HEAD, since every symbol involved is new on this
-branch and `scripts/prove_guard.sh` reports `NOT PROVEN (ImportError)` against a
-base that does not have it.
+**Done.** Every row above was re-read against the tree rather than against this
+table: each named symbol was grepped for at its stated place, the old
+controller-local glyph rule was confirmed gone rather than shadowed, and no
+retired widget key (`_var_readout`) survives anywhere in `well_viewer/` or
+`tests/`.
+
+Each `done` row's guard was watched failing with its fix removed. That was done
+by mutating HEAD rather than with `scripts/prove_guard.sh`, because every symbol
+involved is new on this branch and the script correctly reports
+`NOT PROVEN (ImportError)` against a base that does not have it. The mutations
+run were: the fill dropping the selection (M3), `_commit` not stashing (M4),
+`Preview` committing (M5), the plate's `selectionChanged` left unconnected (M2),
+the refusal checks removed (M9), the value buttons always enabled (M9), the rail
+reverted to a value count (M7), `owns_plate` set to `False` (M12), the rim call
+made unreachable (M1), and the old truncating glyph rule substituted back (M8).
+Every one was caught by the rows' own guards, with an `AssertionError` naming the
+defect rather than an import or attribute error.
+
+Two guards deliberately pass under their mutation and are recorded here so a
+future reader does not read that as a gap:
+`test_the_value_colour_survives_the_rim` guards against a *wrong* fix that
+repaints the fill rather than against the original defect, and
+`test_two_cell_lines_keep_their_initials` pins the case the glyph rule change
+deliberately leaves alone.
+
+This tracker is deleted by the pull request that carries this line.

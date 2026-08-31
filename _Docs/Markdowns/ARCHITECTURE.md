@@ -117,18 +117,29 @@ allwell/
 ├── help_topics.py               ← Qt-free: which manual heading documents which page (help drawer)
 ├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
-├── analyze/tab.py               ← Analyze pane (form + run controls + live log)
-├── analyze/form.py          ← Analyze form builders + _collect_run_options (mixin)
-├── analyze/log_pane.py           ← Analyze mixin: the output pane — log view, raw-log
-│                                   toggle, run-outcome surfacing, "Last run ·" card
-├── analyze/pinfo.py         ← Analyze mixin: restore a prior run's pipeline_info into the form
-├── analyze/form_chrome.py        ← Analyze mixin: form chrome (sections, rows, entries, ⓘ markers)
-├── analyze/seg_params.py    ← Analyze mixin: per-method segmentation params + StarDist thresholds
-├── analyze/input.py             ← Analyze input mixin: run-dir resolver, OME-TIFF
-│                                   redirect, channel rows, browse-time folder scan
-├── analyze/progress.py          ← Analyze run-progress rendering mixin (ETA + progress events → dashboard)
-├── analyze/preflight.py         ← Analyze pre-run mixin: what the output folder already
-│                                   holds, and offering the settings that produced it
+├── analyze/                     ← Analyze pane: the form, the run controls, the live log.
+│   │                              Every module but `remote_dialog` is a mixin of the one
+│   │                              `AnalyzeTab`; the split answers the line budgets in
+│   │                              `tests/test_monolith_budgets.py`, not a division of
+│   │                              responsibility callers can see (§6.1)
+│   ├── tab.py                  ← the pane itself — AnalyzeTab, assembled from the mixins below
+│   ├── form.py                 ← form builders + _collect_run_options
+│   ├── form_chrome.py          ← form chrome (sections, rows, entries, ⓘ markers)
+│   ├── fields.py               ← entry-boundary numeric validation + the field tables
+│   ├── seg_params.py           ← per-method segmentation params + StarDist thresholds
+│   ├── log_pane.py             ← the output pane — log view, raw-log toggle,
+│   │                              run-outcome surfacing, "Last run ·" card
+│   ├── pinfo.py                ← restore a prior run's pipeline_info into the form
+│   ├── input.py                ← run-dir resolver, OME-TIFF redirect, channel rows,
+│   │                              browse-time folder scan
+│   ├── preflight.py            ← what the output folder already holds, and offering
+│   │                              the settings that produced it
+│   ├── progress.py             ← run-progress rendering (ETA + progress events → dashboard)
+│   ├── suspend.py              ← suspend / resume offers on the form side
+│   ├── run_spec.py             ← collect the form into a runnable spec + the run-controls row
+│   ├── job_edit.py             ← the inverse of collect_spec, for the queue's edit flow
+│   └── remote_dialog.py        ← the Remotes dialogs (form, SSH-key wizard,
+│                                  bootstrap log, manage remotes)
 ├── datasets_tab.py              ← Datasets pane (page-rail shell; see §6b)
 ├── datasets/                    ← dataset tools: Qt-free compute/apply + their feature views (§6b)
 │   ├── _common/                ← what more than one tool needs: dataset_paths,
@@ -10443,6 +10454,7 @@ The map (each rule links to the test that holds it):
 | Every repo-root module the pipeline imports is uploaded to the remote (§6.2) | `tests/test_remote_manifest.py` + `test_remote_runner.py::test_required_files_list_is_what_we_promised` |
 | `services/` stay Qt-free (CLI-reusable, §13) | `test_architecture_contracts.py::test_services_have_no_qt_imports` |
 | `widgets/` carry no app coupling (§13) | `test_architecture_contracts.py::test_widgets_do_not_import_the_app` |
+| Every top-level package of application code is in `tests/_repo_scan.py`'s `PACKAGE_ROOTS`, and every entry there names a directory that exists. A package the roster omits is invisible to every AST guard at once, and the omission makes the suite *greener* — there is nothing else that measures a guard walking past code it was never handed | `tests/test_scan_surface_is_complete.py` |
 | Controllers reach the app via the `app` arg, not by importing `WellViewerApp` (§9) | `test_architecture_contracts.py::test_nothing_imports_wellviewerapp_at_runtime` |
 | EventBus is a capped catalogue of exactly 5 signals (§9) | `test_architecture_contracts.py::test_event_bus_signal_catalogue_is_capped` |
 | Feature-module naming scheme (§3) | `test_architecture_contracts.py::test_feature_module_naming` |

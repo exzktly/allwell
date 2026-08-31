@@ -285,7 +285,16 @@ def variable_row(name: str, variable_id: str, annotated: int,
     # reader needs.
     item.setData(Qt.AccessibleTextRole, item.text())
     item.setText("")
-    item.setSizeHint(row.sizeHint())
+
+    # **Add the delegate's padding back.** Qt hands an index widget the item
+    # rect *minus* ``QListWidget::item``'s padding, so a hint taken from the row
+    # alone comes out short by exactly that much: the × is a fixed 18 px, the
+    # row asked for 18, the list gave the row 10, and the button rendered as its
+    # top half. Nothing else here needs a floor — the button's fixed size is
+    # already what makes the row's own hint tall enough.
+    hint = row.sizeHint()
+    item.setSizeHint(QSize(hint.width(),
+                           hint.height() + 2 * theme.Metrics.list_item_pad_v))
     return item, row
 
 

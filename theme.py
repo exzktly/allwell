@@ -420,6 +420,14 @@ class Metrics:
     # Review pane, so the Properties sidebar and the Playground's controls do
     # not open to different widths and read as two different kinds of panel.
     dock_w       = 360
+    # Vertical and horizontal padding the item delegate takes inside a list or
+    # tree row. Tokens rather than literals in the QSS because a caller sizing a
+    # row's **index widget** has to add them back: Qt gives that widget the
+    # item rect minus this padding, so a size hint taken from the widget alone
+    # comes out short by exactly this much. The × on a Variables rail row was
+    # laid out 10 px tall inside an 18 px button and rendered as its top half.
+    list_item_pad_v = 4
+    list_item_pad_h = 6
     # Thickness of a divider hairline. One pixel is the design intent
     # everywhere; the token exists so the number is stated once rather than
     # written out at each of the dozen frames and QSS pins that use it.
@@ -566,12 +574,18 @@ QPushButton#HomeThumbTile:pressed {{
 /* A value chip on Home -> Variables: click one to give it to the wells
    selected on the plate. Reads as a token rather than a command button — the
    plate is what the user is acting on, and a row of full-weight buttons above
-   it would compete with it. Its left edge carries the value's own plate colour,
-   set per chip because that is the only part that varies. */
+   it would compete with it.
+
+   The border is stated once, for all four sides. The chip's left edge carries
+   the value's own plate colour, and that block is set per chip in
+   ``plate_view.value_chip`` because it is the only part that varies — so this
+   rule deliberately says nothing about the left edge on its own. A separate
+   ``border-left`` here would be a second declaration of the same edge, present
+   only to be overridden, and every value chip in the app renders with the
+   override in force. */
 QPushButton#VariableValueChip {{
     background-color: {c.panel_elevated};
     border: 1px solid {c.border};
-    border-left: 3px solid {c.border};
     border-radius: {r.sm}px;
     color: {c.text_primary};
     font-size: {t.small_size}px;
@@ -1420,7 +1434,7 @@ QListView, QListWidget, QTreeView, QTreeWidget, QTableView, QTableWidget {{
     selection-color: {c.text_primary};
 }}
 QListView::item, QListWidget::item, QTreeView::item, QTreeWidget::item {{
-    padding: 4px 6px;
+    padding: {m.list_item_pad_v}px {m.list_item_pad_h}px;
     border-radius: {r.xs}px;
 }}
 QListView::item:hover, QListWidget::item:hover,

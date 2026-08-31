@@ -276,6 +276,13 @@ def _action(parent: QWidget, text: str) -> QPushButton:
     return button
 
 
+#: Width of the block of the value's ink on the left edge of a chip, in pixels.
+#: Named so the render guard in ``tests/test_variables_tab.py`` can measure the
+#: band against the number the chip was built from rather than against a literal
+#: of its own.
+SWATCH_BAND = 14
+
+
 def value_chip(label: str, value_id: str, parent: QWidget, *,
                swatch: str = "") -> QPushButton:
     """One assignable value, as a button carrying its id.
@@ -300,17 +307,21 @@ def value_chip(label: str, value_id: str, parent: QWidget, *,
         # is set here because only the swatch varies per value; everything else
         # about a chip is one rule in ``theme.qss``, and a widget stylesheet
         # merges with the app's rather than replacing it.
-        # **The whole border, not just its left edge.** Stating one property
-        # left the rest of the box's border to the app sheet and the two to
-        # interact — which is what a report of "two overlapping bars, one
-        # smaller" describes. An offscreen render here could not reproduce two
-        # bands, so the mechanism is not confirmed and this is not written as
-        # though it were; what is certain is that one complete declaration
-        # cannot produce them, and it costs nothing over one partial.
+        # **The whole border, stated here and nowhere else.** This is now the
+        # only rule in the application that declares the chip's left edge: the
+        # app sheet gives all four sides the same hairline and says nothing
+        # further about the left one, so the edge has a single declaration
+        # rather than one overriding another. Two declarations of one edge is
+        # the shape a report of "two colour bars beside each chip" would have,
+        # and no offscreen render of this widget — alone, composited into its
+        # host, or grabbed from a tab built inside a running app — has
+        # reproduced a second band, so the mechanism behind that report is not
+        # established. What is established is that one complete declaration
+        # cannot produce two, and it costs nothing over one partial.
         button.setStyleSheet(
             "QPushButton#VariableValueChip {"
             f" border: 1px solid {theme.Colors.border};"
-            f" border-left: 14px solid {swatch};"
+            f" border-left: {SWATCH_BAND}px solid {swatch};"
             f" border-radius: {theme.Radii.sm}px;"
             " }")
     return button

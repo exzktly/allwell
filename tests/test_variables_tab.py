@@ -25,6 +25,7 @@ import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget
 
+import theme
 from well_viewer.domain import sample_variables as sv
 
 
@@ -91,6 +92,37 @@ def _delete_row(tab, row: int = 0):
     button = row_delete_button(tab.w("_var_list"), row)
     assert button is not None, f"rail row {row} has no delete button"
     button.click()
+
+
+def test_the_rail_rows_delete_button_is_not_clipped(tab, qtbot):
+    """Reported: "the delete button x next to the variable name is cut off,
+    only showing its top half".
+
+    Qt hands an index widget the item rect **minus** ``QListWidget::item``'s
+    padding, and the row's size hint was taken from the widget alone — so an
+    18 px × was laid out in 10 px of height and rendered as its top half.
+
+    Asserted on the geometry the list actually gave the row, not on the size
+    hint it was set from: the hint is what was wrong, so a test reading it back
+    would agree with the bug.
+    """
+    from well_viewer.features.home.variables.editor_view import row_delete_button
+
+    tab.w("_var_add").click()
+    listing = tab.w("_var_list")
+    tab.frame.show()
+    qtbot.waitExposed(tab.frame)
+
+    button = row_delete_button(listing, 0)
+    assert button is not None, "premise: the row carries a ×"
+    widget = listing.itemWidget(listing.item(0))
+    assert widget.height() >= button.height(), (
+        f"the row is {widget.height()}px tall around a {button.height()}px "
+        "button, so the × is drawn clipped")
+    assert listing.item(0).sizeHint().height() >= (
+        button.height() + 2 * theme.Metrics.list_item_pad_v), (
+        "the item hint does not allow for the delegate's own padding, which is "
+        "what squeezes the widget inside it")
 
 
 def _labels(listing):
@@ -1589,3 +1621,54 @@ def test_the_row_x_deletes_its_own_row_not_the_selected_one(tab):
     assert remaining == [first], (
         "pressing row 1's × removed the selected row (0) instead of the row "
         f"it sits on: kept {remaining}, expected {[first]}")
+
+
+def test_a_chips_left_edge_carries_exactly_one_band_of_colour(qtbot):
+    """Reported, twice: "two color bars next to each variable chip", side by
+    side and both on the left.
+
+    Not reproduced. Five renders — the chip alone, the chip composited into its
+    ``FlowLayout`` host under three orderings of the application stylesheet, and
+    the chip row grabbed from a Variables layer built inside a running app —
+    all show one band, so the mechanism behind the report is still unknown and
+    nothing here claims to have found it.
+
+    What this pins is the property a second band would break: between the chip's
+    left edge and its background there is **one** run of colour, it is the
+    value's ink, and it is as wide as the chip was built to draw it. The chip's
+    edge now has a single declaration (the app sheet states one hairline for all
+    four sides and says nothing more about the left one), and a second
+    declaration reappearing anywhere in the cascade is what this would catch.
+    """
+    from well_viewer.features.home.variables.plate_view import (
+        SWATCH_BAND, value_chip,
+    )
+
+    ink = "#FF00AA"          # in neither the palette nor any theme token, so a
+    # band of it can only have come from the swatch that was asked for.
+    host = QWidget()
+    qtbot.addWidget(host)
+    host.setStyleSheet(theme.qss())
+    chip = value_chip("0.3", "value-1", host, swatch=ink)
+    chip.move(0, 0)
+    chip.adjustSize()
+    host.resize(chip.width(), chip.height())
+    host.show()
+    qtbot.waitExposed(host)
+
+    image = chip.grab().toImage()
+    row = image.height() // 2
+    runs: list[list] = []
+    for x in range(image.width()):
+        pixel = "#%06X" % (image.pixel(x, row) & 0xFFFFFF)
+        if runs and runs[-1][0] == pixel:
+            runs[-1][1] += 1
+        else:
+            runs.append([pixel, 1])
+
+    coloured = [run for run in runs if run[0] == ink]
+    assert coloured == [[ink, SWATCH_BAND]], (
+        f"the chip's mid-line reads {runs[:4]} — the value's ink should appear "
+        f"once, as one {SWATCH_BAND}px band, and nowhere else")
+    assert runs[0][0] == ink, (
+        f"the ink is not the chip's left edge; the edge reads {runs[0]}")

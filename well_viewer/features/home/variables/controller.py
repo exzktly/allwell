@@ -514,6 +514,36 @@ def _overlay_glyph(variable, value_id) -> str:
     return label if (variable.is_numeric() and len(label) <= 2) else label[0].upper()
 
 
+def overlay_glyphs(variable) -> dict:
+    """``value id -> glyph``, with collisions broken rather than drawn.
+
+    ``_overlay_glyph`` truncates, and truncation collides: a dose series of
+    ``0``, ``0.1``, ``0.3`` all shorten to ``0``, and ``HeLa`` beside
+    ``HEK293`` both give ``H``. Three values then paint the same mark and the
+    key reads ``0 = 0, 0 = 0.1, 0 = 0.3`` — the second factor of a two-factor
+    plate silently reading as one value where it is three, which is the failure
+    this readout exists to prevent.
+
+    Colliding glyphs get a positional digit appended, so they stay short and
+    stay distinct; the key names each one, so nothing has to be guessed. Values
+    that do not collide are untouched, which keeps the common case — ``H`` and
+    ``U`` — exactly as it was.
+    """
+    out: dict = {}
+    used: dict = {}
+    for value in getattr(variable, "values", ()) or ():
+        glyph = _overlay_glyph(variable, value.id)
+        if not glyph:
+            continue
+        if glyph in used:
+            used[glyph] += 1
+            glyph = f"{glyph}{used[glyph]}"
+        else:
+            used[glyph] = 1
+        out[value.id] = glyph
+    return out
+
+
 def overlay_variable_id(ctx) -> str | None:
     combo = _widget(ctx, "_var_overlay")
     return combo.currentData() if combo is not None else None
@@ -555,14 +585,18 @@ def _paint_overlay(ctx, variable) -> None:
             legend.setText("")
         return
 
+    # One map, read by both the plate and the key, so the two cannot disagree
+    # about what a value's mark is — and collisions broken once rather than
+    # twice.
+    glyphs = overlay_glyphs(other)
     for well in dataset_wells(ctx):
-        glyph = _overlay_glyph(other, vset.value_id_for(other.id, well))
+        glyph = glyphs.get(vset.value_id_for(other.id, well))
         if glyph:
             plate.setWellMarker(well, glyph)
 
     if legend is not None:
-        pairs = ", ".join(f"{_overlay_glyph(other, v.id)} = {v.label}"
-                          for v in other.values if _overlay_glyph(other, v.id))
+        pairs = ", ".join(f"{glyphs[v.id]} = {v.label}"
+                          for v in other.values if v.id in glyphs)
         legend.setText(f"{other.name}: {pairs}" if pairs else "")
 
 

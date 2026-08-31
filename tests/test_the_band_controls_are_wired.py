@@ -28,9 +28,9 @@ pytestmark = pytest.mark.qt
 VARIABLES = {
     "schema_version": 1,
     "variables": [
-        {"id": "dose", "name": "Dose", "type": "number", "unit": "µM",
+        {"id": "dose", "name": "Dose", "kind": "number", "unit": "µM",
          "values": [{"id": "v1", "label": "1"}, {"id": "v2", "label": "10"}]},
-        {"id": "line", "name": "Cell line", "type": "text",
+        {"id": "line", "name": "Cell line", "kind": "text",
          "values": [{"id": "h", "label": "HeLa"}, {"id": "u", "label": "U2OS"}]},
     ],
     "assignments": {},

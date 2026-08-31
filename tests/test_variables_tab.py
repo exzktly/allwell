@@ -875,3 +875,35 @@ def test_the_repeat_control_names_what_it_counts(tab):
 
     axis.setCurrentIndex(axis.findData("col"))
     assert repeat.suffix().strip() == "columns"
+
+
+def test_colliding_overlay_glyphs_are_broken_apart(tab):
+    """Truncation collides, and a collision here is the second factor of a
+    two-factor plate silently reading as one value where it is three.
+
+    ``0``, ``0.1`` and ``0.3`` all shorten to ``0``; ``HeLa`` and ``HEK293``
+    both give ``H``. Nothing detected it, so three doses painted the same mark
+    and the key read ``0 = 0, 0 = 0.1, 0 = 0.3`` — a key naming one glyph three
+    times, which is worse than no key. The fixture uses a dose series that
+    collides on purpose: with two well-separated values any implementation
+    passes.
+    """
+    import well_viewer.domain.sample_variables as sv
+    from well_viewer.features.home.variables.controller import overlay_glyphs
+
+    vset = sv.from_block({
+        "schema_version": 1,
+        "variables": [{
+            "id": "d", "name": "Dose", "kind": "number",
+            "values": [{"id": f"v{i}", "label": lbl}
+                       for i, lbl in enumerate(["0", "0.1", "0.3", "1"])],
+        }],
+        "assignments": {},
+    })
+    variable = vset.by_id("d")
+
+    glyphs = overlay_glyphs(variable)
+
+    assert len(set(glyphs.values())) == len(glyphs), glyphs
+    assert glyphs[variable.values[0].id] == "0", "an uncollided glyph was changed"
+    assert all(g for g in glyphs.values())

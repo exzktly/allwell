@@ -663,3 +663,46 @@ def test_a_batch_solo_well_is_decorated_by_its_own_value():
 
     by_key = {i.key: i.color for i in _batch_items(ctx, group)}
     assert by_key == {"A01": palette["C1"], "B01": palette["C0"]}, by_key
+
+
+def test_grey_bars_get_no_colour_by_legend(monkeypatch):
+    """A legend over bars that are not carrying the variable's inks is a key to
+    a colouring the figure does not have.
+
+    ``redraw_bars`` passes ``mono_bar_color`` for every bar in grey mode, which
+    discards the ``item.color`` ``decorate_bar_items`` just set — so the figure
+    is uniformly grey and the legend was still drawn, offering a reader swatches
+    to map onto bars that carry none. Worse than no legend, because it is
+    confidently wrong.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from well_viewer.features.barplot import _annotations as ann
+
+    drawn: list = []
+    monkeypatch.setattr(ann, "bar_legend_entries",
+                        lambda ctx, items: drawn.append(items) or [("HeLa", "#112233")])
+
+    fig, ax = plt.subplots()
+    try:
+        for mode, expect_legend in (("plate", True), ("grey", False)):
+            ax.clear()
+            drawn.clear()
+            ctx = _ctx_with_mode(mode)
+            ann.annotate_colour_legend(ctx, ax)
+            assert bool(ax.get_legend()) is expect_legend, mode
+    finally:
+        plt.close(fig)
+
+
+def _ctx_with_mode(mode):
+    from types import SimpleNamespace
+
+    from well_viewer.core.app_state import AppState
+
+    state = AppState()
+    state.plot.bar_color_mode = mode
+    state.plot.colour_by_variable = "dose"
+    return SimpleNamespace(state=state)

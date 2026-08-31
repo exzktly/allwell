@@ -68,7 +68,7 @@ def _plate(group_by="dose"):
     the notice has to name — and they are a *minority*, so a notice that named
     every well would read plausibly and still be wrong."""
     variables = [{
-        "id": "dose", "name": "Dose", "type": "number", "unit": "µM",
+        "id": "dose", "name": "Dose", "kind": "number", "unit": "µM",
         "values": [{"id": "v1", "label": "1"}, {"id": "v2", "label": "10"}],
     }]
     assignments = {"dose": {"A01": "v1", "A02": "v2"}}
@@ -104,7 +104,7 @@ def test_no_grouping_draws_no_notice():
 
 def test_a_fully_assigned_plate_draws_no_notice():
     ctx = _Ctx(
-        [{"id": "dose", "name": "Dose", "type": "number",
+        [{"id": "dose", "name": "Dose", "kind": "number",
           "values": [{"id": "v1", "label": "1"}]}],
         {"dose": {"A01": "v1", "A02": "v1"}},
         ["A01", "A02"], "dose",
@@ -142,7 +142,7 @@ def test_a_grouping_that_matched_nothing_says_that_and_not_not_plotted():
     when the variable groups nothing, so those wells *are* drawn — the previous
     sentence claimed the opposite on a figure that showed them."""
     ctx = _Ctx(
-        [{"id": "dose", "name": "Dose", "type": "number",
+        [{"id": "dose", "name": "Dose", "kind": "number",
           "values": [{"id": "v1", "label": "1"}]}],
         {},                                   # nothing assigned anywhere
         ["A01", "A02"], "dose",
@@ -181,7 +181,7 @@ def test_a_real_bar_figure_carries_the_notice(loaded_app):
     vset = _sv.from_block({
         "schema_version": 1,
         "variables": [{
-            "id": "dose", "name": "Dose", "type": "number",
+            "id": "dose", "name": "Dose", "kind": "number",
             "values": [{"id": "v1", "label": "1"}, {"id": "v2", "label": "10"}],
         }],
         "assignments": {},

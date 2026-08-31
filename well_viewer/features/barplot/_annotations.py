@@ -211,6 +211,17 @@ def annotate_decorations(ctx, items, xs, ax, *, headers: bool) -> None:
     annotate_split_notice(ctx, ax)
 
 
+def _bar_colour_mode(ctx) -> str:
+    """The Bar tab's Colours setting, or ``"plate"`` when there is no ctx.
+
+    ``"plate"`` is the default and the mode in which the decoration inks
+    actually reach the bars; ``"grey"`` replaces every bar's colour with
+    ``mono_bar_color``.
+    """
+    plot = getattr(getattr(ctx, "state", None), "plot", None)
+    return str(getattr(plot, "bar_color_mode", "plate") or "plate")
+
+
 def annotate_colour_legend(ctx, ax) -> None:
     """A swatch-and-label legend for the *Colour by* variable, or nothing.
 
@@ -229,6 +240,15 @@ def annotate_colour_legend(ctx, ax) -> None:
     from matplotlib.patches import Patch
 
     from well_viewer.core.plot_style import follows_theme
+
+    # Nothing in grey mode either, and for the same reason: the bars are not
+    # carrying the variable's inks. ``redraw_bars`` passes ``mono_bar_color``
+    # for every bar, which discards the ``item.color`` ``decorate_bar_items``
+    # just set — so a legend here would be a key to a colouring the figure does
+    # not have, printed over uniformly grey bars for a reader to map onto them.
+    # Worse than no legend, because it is confidently wrong.
+    if _bar_colour_mode(ctx) != "plate":
+        return
 
     items = list(getattr(ax, "_aw_bar_items", ()) or ())
     entries = bar_legend_entries(ctx, items)

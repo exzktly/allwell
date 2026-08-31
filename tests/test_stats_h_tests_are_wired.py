@@ -131,14 +131,18 @@ def test_the_paired_picker_says_pair_by_and_the_anova_one_says_factor(loaded_app
 
 # ── the runs themselves ─────────────────────────────────────────────────────
 
-def test_the_omnibus_reaches_the_panel_on_an_ordinary_run(loaded_app):
+def test_the_omnibus_reaches_the_panel_on_an_ordinary_run(loaded_app_multifov):
     """H2 is not behind a combo entry — it is printed above every pairwise run
-    with three or more groups, which is exactly when it is worth having."""
-    app = loaded_app
+    with three or more groups, which is exactly when it is worth having.
+
+    On the **multi-FOV** dataset with FOV mode on, so each single-well group has
+    three replicates. The plain mini dataset has four wells and one FOV each, so
+    three groups cannot each have two replicates by any route and the run is
+    declined before it ever reaches the omnibus — a fixture that could not tell
+    a working omnibus from a missing one.
+    """
+    app = loaded_app_multifov
     _open_stats(app)
-    # Three groups, and FOV mode on so each single-well group has replicates —
-    # the mini dataset has four wells, so three groups of two is not available
-    # and with FOV off the run is declined before it reaches the omnibus.
     app._app_state.plot.use_fov_replicates = True
     app._app_state.stats.groups = [
         BarGroup("A", solo_wells=["A01"]),
@@ -149,6 +153,7 @@ def test_the_omnibus_reaches_the_panel_on_an_ordinary_run(loaded_app):
     text = _run(app, "t-test (Welch, unequal var)")
 
     assert "Omnibus:" in text
+    assert "One-way ANOVA" in text
 
 
 def test_the_effect_size_reaches_the_panel_on_an_ordinary_run(loaded_app):
@@ -212,31 +217,40 @@ def test_a_paired_test_pairs_on_the_variable_the_user_declared(loaded_app):
     assert "Ctrl  vs  Drug" in text
 
 
-def test_two_way_anova_runs_over_two_declared_variables(loaded_app):
-    app = loaded_app
+def test_two_way_anova_runs_over_two_declared_variables(loaded_app_multifov):
+    """On the **multi-FOV** dataset with FOV mode on.
+
+    The plain mini dataset has four wells, and a 2x2 design over four wells puts
+    exactly one replicate in each cell — which the ANOVA correctly declines for
+    having no residual degrees of freedom. A fixture that cannot support the
+    test cannot tell a working implementation from a broken one; three FOVs a
+    well gives each cell three replicates and eight residual df.
+    """
+    app = loaded_app_multifov
     ctx = _open_stats(app)
-    app._app_state.stats.groups = [BarGroup("All", solo_wells=list(
-        app._app_state.dataset.well_paths))]
+    app._app_state.plot.use_fov_replicates = True
     _declare(app, "Dose", "number", [("d0", "0"), ("d1", "10")],
              {"A01": "d0", "A02": "d1", "B01": "d0", "B02": "d1"})
     _declare(app, "Line", "text", [("l0", "HeLa"), ("l1", "U2OS")],
              {"A01": "l0", "A02": "l0", "B01": "l1", "B02": "l1"})
-    ctx.widgets.get_or_none("_stats_test_cb").setCurrentText("Two-way ANOVA")
-    var_a = ctx.widgets.get_or_none("_stats_var_a_cb")
-    var_b = ctx.widgets.get_or_none("_stats_var_b_cb")
-    var_a.setCurrentIndex(var_a.findData("dose"))
-    var_b.setCurrentIndex(var_b.findData("line"))
-
     # Two groups so the run's own "at least 2 groups" gate is satisfied; the
     # ANOVA itself reads the wells, not the groups.
     app._app_state.stats.groups = [
         BarGroup("g1", solo_wells=["A01", "A02"]),
         BarGroup("g2", solo_wells=["B01", "B02"]),
     ]
+    ctx.widgets.get_or_none("_stats_test_cb").setCurrentText("Two-way ANOVA")
+    var_a = ctx.widgets.get_or_none("_stats_var_a_cb")
+    var_b = ctx.widgets.get_or_none("_stats_var_b_cb")
+    var_a.setCurrentIndex(var_a.findData("dose"))
+    var_b.setCurrentIndex(var_b.findData("line"))
+
     text = _run(app, "Two-way ANOVA")
 
-    assert "Two-way ANOVA" in text
-    assert "Dose" in text and "Line" in text
+    assert "Type II sums of squares" in text
+    assert "Dose x Line" in text
+    assert "Residual" in text
+    assert "not run" not in text
 
 
 def test_two_way_with_one_variable_chosen_twice_is_declined(loaded_app):
@@ -282,3 +296,21 @@ def test_an_alternative_test_stores_no_pairwise_records_of_its_own(loaded_app):
     assert {k: list(v) for k, v in after.items()} == before
     named = {r.get("test") for records in after.values() for r in records}
     assert "Dunnett (vs control group)" not in named
+
+
+def test_the_real_app_state_carries_the_slices_the_pickers_tolerate_missing():
+    """``refresh_stats_test_inputs`` runs while the panel is being built, and
+    several callers construct a context holding only the slices they read — so
+    it tolerates a missing ``stats`` or ``selection`` slice as "nothing to offer
+    yet".
+
+    That tolerance must not be able to hide a production context that has
+    quietly stopped carrying one, which is the shape ``plot_members`` guards the
+    same way. Asserted on the real ``AppState``, not on a stub.
+    """
+    from well_viewer.core.app_state import AppState
+
+    state = AppState()
+
+    assert hasattr(state, "stats") and hasattr(state.stats, "groups")
+    assert hasattr(state, "selection") and hasattr(state.selection, "variables")

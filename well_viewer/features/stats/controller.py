@@ -1049,7 +1049,7 @@ def refresh_stats_test_inputs(ctx) -> None:
         control_cb.setVisible("control" in needs)
         if "control" in needs:
             _fill_combo(control_cb, [(g.name, g.name)
-                                     for g in ctx.state.stats.groups if g.wells])
+                                     for g in _stats_groups(ctx) if g.wells])
 
     variables = _variable_choices(ctx)
     for name, need, label in (("_stats_var_a_cb", "pairing", "Pair by"),
@@ -1069,9 +1069,29 @@ def refresh_stats_test_inputs(ctx) -> None:
             widget.setVisible(False)
 
 
+def _stats_groups(ctx):
+    """The tab's comparison groups, tolerating a context with no stats slice.
+
+    Same tolerance, and the same reason, as ``plot_members._group_by_variable``:
+    this runs while the panel is being *built*, and several callers construct a
+    context holding only the slices they read. A missing slice honestly means
+    "no groups to offer yet", and a builder that needed a ``swallow`` to survive
+    it is a builder that would fail silently in production instead.
+
+    ``tests/test_stats_h_tests_are_wired`` pins that the real ``AppState``
+    always carries both slices, so the tolerance cannot hide a production
+    context that has quietly stopped providing one.
+    """
+    return list(getattr(getattr(ctx.state, "stats", None), "groups", ()) or ())
+
+
 def _variable_choices(ctx) -> list[tuple[str, str]]:
-    """``(display name, variable id)`` for every sample variable on the plate."""
-    vset = getattr(ctx.state.selection, "variables", None)
+    """``(display name, variable id)`` for every sample variable on the plate.
+
+    Tolerates a missing ``selection`` slice for the reason :func:`_stats_groups`
+    records.
+    """
+    vset = getattr(getattr(ctx.state, "selection", None), "variables", None)
     return [(v.name, v.id) for v in (getattr(vset, "variables", ()) or ())]
 
 

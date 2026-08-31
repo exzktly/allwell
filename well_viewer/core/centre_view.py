@@ -426,6 +426,22 @@ def build_centre(win, parent: QWidget) -> None:
         win._plotting_groupby_grp = band.add_scope("", win._plotting_groupby_cb)
         win._plotting_groupby_grp.setVisible(False)
 
+        # What the combo *did*, beside what it is set to. The two are different
+        # facts: a user who has painted four groups and then picks a variable
+        # has had those four stop pooling anything, in every tab at once, and
+        # the combo reading "Group by: Dose" does not say so. The sentence comes
+        # from ``group_by_controller.grouping_summary``, which asks the pooling
+        # seam what it decided rather than deciding again.
+        from PySide6.QtWidgets import QLabel as _QLabel
+        win._plotting_grouping_note = win._ctx.widgets.register(
+            "_plotting_grouping_note", _QLabel(""))
+        win._plotting_grouping_note.setObjectName("Muted")
+        win._plotting_grouping_note.setStyleSheet(
+            f"color: {_C.text_muted}; font-size: {_T.caption_size}px;")
+        win._plotting_grouping_grp = band.add_scope(
+            "", win._plotting_grouping_note)
+        win._plotting_grouping_grp.setVisible(False)
+
         # Colour by / Split by, in a popover rather than beside Group by. They
         # are **decoration, not scope**: neither changes what a member is or
         # moves a single number, so putting them in the scope zone would say

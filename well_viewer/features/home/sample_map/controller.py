@@ -132,6 +132,9 @@ def set_layer(ctx, layer: str) -> None:
         _apply_selection(ctx, layer, carried)
     _publish_selection(ctx, layer)
     refresh_layer(ctx, layer)
+    with swallow("sample map: restating what the plots pool by"):
+        from well_viewer.core.group_by_controller import refresh_grouping_readouts
+        refresh_grouping_readouts(ctx)
 
 
 def _publish_selection(ctx, layer: str) -> None:

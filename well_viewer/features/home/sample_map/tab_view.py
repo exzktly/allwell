@@ -12,7 +12,7 @@ what a layer *does* moved; what moved is that only one of them is on screen.
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 import theme
 from well_viewer.features.home.sample_map.controller import (
@@ -47,6 +47,16 @@ def build_plate_map_subtab(ctx, frame: QWidget) -> None:
     strip_column.setContentsMargins(0, 0, 0, 0)
     strip_column.setSpacing(0)
     outer.addWidget(strip_host)
+
+    # What the plots are currently pooling by, on the page where the pooling is
+    # declared. The choice is made on the plotting band and the groups are made
+    # here, so a user painting a fifth group has no way of knowing from this tab
+    # that a variable has been grouping the plots all along.
+    note = reg.register("_sample_map_grouping_note", QLabel("", frame))
+    note.setObjectName("Muted")
+    note.setWordWrap(True)
+    note.setVisible(False)
+    outer.addWidget(note)
 
     stack = reg.register(STACK_KEY, QStackedWidget(frame))
     outer.addWidget(stack, 1)

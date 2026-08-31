@@ -1433,6 +1433,15 @@ showing: **Groups**, one segment per **variable**'s editor, or **Well Labels**.
 Only one plate is on screen at a time, so the control in front of you is the
 control that acts.
 
+Under the switch, one line says what your plots are **currently pooling by** —
+*"Plots are grouped by Dose (6 values); your 4 groups are not pooling."* That is
+the consequence of the **Group by** control on the plotting band, said on the
+page where the groups and the variables are made, because picking a variable
+there stops your groups pooling anything in every tab at once and the control
+itself only says what it is set to. The same line appears beside that control.
+When a variable is chosen but matches no wells, the line says so and names what
+is being used instead, because that is what the plots actually drew.
+
 The selection travels between **Variables** and **Well Labels**, because on both
 it means the same thing — the wells you are about to act on — and it is also
 what Cell Gating's CDFs and **Add Prefix** read. It does **not** travel into

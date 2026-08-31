@@ -58,6 +58,14 @@ _SEAM_FUNCTIONS = {
     # and it pools nothing itself. It lives in ``plot_members`` beside the
     # seam for that reason.
     "wells_the_grouping_adds",
+    # ``groups_the_variable_replaced`` is its sibling and the other half of the
+    # comparison: it answers "which of the user's own groups did the
+    # substitution displace", which is what lets a readout say "your 4 groups
+    # are not pooling" and be right about both halves. It pools nothing itself,
+    # and it lives here rather than in the controller that prints the sentence
+    # for the reason §7.5 #10 gives — a controller naming the replaced pooling
+    # would hold a second definition of "the user's groups".
+    "groups_the_variable_replaced",
     # ``selections_model`` defines them; its own module is exempt entirely.
 }
 _SEAM_MODULE = "selections_model.py"

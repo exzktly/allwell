@@ -8,6 +8,11 @@ vanished the moment a user defined one; Well Labels said nothing at all. A user
 meeting three tabs that all take a well selection had no way to tell which one
 would change a number.
 
+The strip is built here and mounted by the Sample map tab, which rebuilds it
+whenever the layer changes: the sentence is about what the plate below it means
+*now*, so three strips stacked and hidden would be three answers with two of them
+waiting for a bug to show them.
+
 Two lines, from :data:`well_viewer.features.home.collect.DECLARATION_ROLES`:
 
 * **the role** — what this declaration is and what it reaches, always visible
@@ -48,24 +53,3 @@ def build_role_strip(role: DeclarationRole, parent: QWidget) -> QWidget:
     where.setWordWrap(True)
     column.addWidget(where)
     return host
-
-
-def add_role_strip(ctx, tab_name: str, parent: QWidget) -> QWidget | None:
-    """Add the strip for the tab called *tab_name*, if that tab declares one.
-
-    Returns the widget, or ``None`` for a tab with no declaration role — Cell
-    Gating, Ratios and Pipeline Info, none of which says what a well *is*. The
-    caller adds nothing in that case rather than an empty frame, so a tab
-    outside the taxonomy does not grow a blank band.
-    """
-    from well_viewer.features.home.collect import role_for_tab
-
-    role = role_for_tab(tab_name)
-    if role is None:
-        return None
-    strip = build_role_strip(role, parent)
-    ctx.widgets.register(f"_home_role_strip_{role.key}", strip)
-    layout = parent.layout()
-    if layout is not None:
-        layout.addWidget(strip)
-    return strip

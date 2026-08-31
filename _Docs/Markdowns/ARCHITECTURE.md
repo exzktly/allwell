@@ -1540,6 +1540,34 @@ one: the Home sub-tab must be Sample map **and** the current layer must be
 Groups. Both halves matter — a layer switch inside a tab nobody is looking at
 must not commit either.
 
+**And the tab says what the plots are currently pooling by.**
+`core/group_by_controller.grouping_summary` is the one sentence, painted into
+both labels named by `GROUPING_READOUTS` — one beside *Group by* on the plotting
+band, one under Sample map's layer switch. The combo names the *setting* and this
+names the *consequence*, which are different facts: a user who has painted four
+groups and then picks `Group by: Dose` has had those four stop pooling anything,
+in the Bar tab, in Statistics and in Batch Export at once, and the only thing
+that mentioned it was a shortfall clause about the wells the grouping left out.
+The choice is made on the band and the groups are made on Home, so the
+consequence has to be legible in both.
+
+It is **derived from the seam**: `plot_replicate_sets` for what will be pooled,
+`plot_members.variable_grouping_in_force` for whether the substitution really
+happened, and `plot_members.groups_the_variable_replaced` for how many of the
+user's own groups it displaced. The last two live beside the seam rather than in
+the controller for the reason §7.5 #10 gives — a controller naming the replaced
+pooling would hold a second definition of "the user's groups" — and they are
+listed by name in `test_group_by_variable`'s exemption roster. They are also
+deliberately **two** functions: a variable can be pooling while the user has no
+groups at all, so an empty displaced list is not the same fact as "no
+substitution happened", and the version that conflated them reported the
+fallback sentence over a plate that really was grouped by dose.
+
+Painted into a label rather than the status bar, for the reason `_announce`
+already records beside it: the status bar is a single persistent slot and a
+redraw with nothing to report writes nothing to it, so a sentence put there
+outlives the condition that produced it.
+
 Home owns the page — the control band (carrying **Import**, which merges a
 sample-definitions JSON and is hidden on Overview because it names nothing
 there), the `QTabWidget`, and the tab-change handler. Each tab body is a

@@ -883,6 +883,11 @@ def groups_centre_refresh(ctx) -> None:
         ctx.features.call("labels.grid_refresh", ctx)
     ctx.features.call("groups.map_refresh", ctx)
     update_active_group_label(ctx)
+    # The readouts count the user's groups, so adding or hiding one changes what
+    # they say. Core to core: the sentence is not a feature's, because the
+    # pooling decision it reports belongs to every tab at once.
+    from well_viewer.core.group_by_controller import refresh_grouping_readouts
+    refresh_grouping_readouts(ctx)
 
 
 

@@ -802,3 +802,27 @@ def test_a_plate_with_no_saved_heatmap_layouts_clears_the_previous_plate_s():
         hl.load_from_data_dir(ctx)
     assert runtime_heatmap.layouts == [], (
         "plate A's heat-map layouts survived the switch to plate B")
+
+
+def test_the_variable_band_does_not_survive_a_dataset_swap():
+    """A variable id names an identity only within the set that minted it.
+
+    Plate A's *Group by: Dose* left set is not a control offering something
+    that no longer exists — every plate has a first variable, so the id
+    resolves, and every plot silently regroups by whatever plate B's is, under
+    a band still reading the old name. The wrong implementation this has to
+    exclude is the one that clears *Group by* alone: the two decorations are on
+    a separate roster and were the half that was missed.
+    """
+    from well_viewer.core.plot_state import PlotState
+
+    st = PlotState()
+    st.group_by_variable = "variable-1111"
+    st.colour_by_variable = "variable-2222"
+    st.split_by_variable = "variable-3333"
+
+    st.reset_for_new_dataset()
+
+    assert st.group_by_variable == ""
+    assert st.colour_by_variable == ""
+    assert st.split_by_variable == ""

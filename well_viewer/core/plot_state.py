@@ -426,3 +426,18 @@ class PlotState:
         # factor is the same bug in a quieter form.
         self.time_scale = 1.0
         self.time_offset = 0.0
+
+        # **The variable band names this plate's variables by id.** A variable
+        # id is minted per set, so plate A's `Dose` and plate B's `Cell line`
+        # can hold the same one — leaving the field set does not offer a
+        # variable that no longer exists, it silently regroups every plot by a
+        # different one, under a band still reading the old name. That is the
+        # fold-change case above in a quieter form: a description of a plate
+        # that is no longer open. Cleared through the controller's own roster
+        # so a fourth control added there cannot survive the swap; the two
+        # cleared here by name are `group_by_variable`, which is not on that
+        # roster, and nothing else.
+        self.group_by_variable = ""
+        from well_viewer.core.group_by_controller import DECORATION_CONTROLS
+        for _field, _widget, _label in DECORATION_CONTROLS:
+            setattr(self, _field, "")

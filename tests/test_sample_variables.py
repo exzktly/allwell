@@ -663,3 +663,38 @@ def test_a_failed_variables_save_is_reported_loudly(tmp_path, monkeypatch, caplo
     warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert warnings, "a failed save said nothing at WARNING or above"
     assert "NOT saved" in warnings[0].getMessage()
+
+
+def test_a_variable_id_names_an_identity_rather_than_a_slot():
+    """Minting the first free ``variable`` / ``variable2`` makes an id a
+    position. Every plate's first variable then answers to the same id, so a
+    band setting carried across a dataset swap resolves to a *different*
+    variable rather than to nothing — and nothing downstream can tell the
+    difference. The same reuse happens within one plate: deleting a variable
+    frees its slot for the next one minted, and a saved reference then names
+    the new one.
+
+    The wrong implementation that still passes "the two ids differ" is the slot
+    mint itself, which is why this asserts across *independent* sets and across
+    a delete — and why the name below is the editor's placeholder, which is
+    what ``variables.controller.add_variable`` passes. A fixture supplying
+    ``"Dose"`` and ``"Cell line"`` mints two different slot ids and cannot see
+    the collision at all; that was this test's first version, and it passed
+    against the mint it was written to reject.
+    """
+    placeholder = "Variable"
+    first, a = sv.new_variable(sv.VariableSet(), placeholder)
+    _, b = sv.new_variable(sv.VariableSet(), placeholder)
+    assert a != b, "two plates' first variables share an id"
+
+    after_delete = sv.remove_variable(first, a)
+    _, c = sv.new_variable(after_delete, placeholder)
+    assert c != a, "a deleted variable's id was re-minted"
+
+
+def test_a_variable_id_stays_legible_beside_the_name_it_carries():
+    """Not a UUID: these are read in a JSON file a user may open, and the id
+    sits beside the name that explains it."""
+    _, vid = sv.new_variable(sv.VariableSet(), "Dose")
+    assert vid.startswith("variable-")
+    assert len(vid) <= len("variable-") + 8

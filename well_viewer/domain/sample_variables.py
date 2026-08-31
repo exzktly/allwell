@@ -442,11 +442,11 @@ def _new_id(prefix: str, taken) -> str:
     """A short id not in *taken*. Not a UUID: these are read in a JSON file a
     user may open, and a short word is legible where a 32-hex string is noise.
 
-    In practice a *variable's* id is minted from the placeholder name the editor
-    creates with, so it reads ``variable`` / ``variable2`` rather than ``dose``;
-    a *value's* is minted from the label the user typed, so those do read
-    ``d0`` / ``10``. Uniqueness is per variable set for a variable and per
-    variable for a value, which are the only scopes anything looks one up in.
+    A *value's* id is minted from the label the user typed, so those read
+    ``d0`` / ``10``, and uniqueness is per variable — the only scope anything
+    looks a value up in.
+
+    A *variable's* is not minted here; see :func:`_new_variable_id`.
     """
     base = "".join(ch for ch in (prefix or "").lower() if ch.isalnum()) or "v"
     candidate, n = base, 1
@@ -454,6 +454,36 @@ def _new_id(prefix: str, taken) -> str:
         n += 1
         candidate = f"{base}{n}"
     return candidate
+
+
+def _new_variable_id(taken) -> str:
+    """A variable id that names no *slot*, unique beyond this variable set.
+
+    The obvious mint — the first free ``variable`` / ``variable2`` — makes an id
+    a position rather than an identity, and the band settings that name a
+    variable are read against whatever set is loaded. Every plate's first
+    variable then answers to ``variable``, so a *Group by* carried across a
+    dataset swap does not fail to resolve: it resolves to a different variable,
+    regrouping every plot under a band still reading the old name. The same
+    reuse happens within one plate, where deleting a variable frees its slot for
+    the next one minted.
+
+    ``PlotState.reset_for_new_dataset`` clears those fields on a swap, which is
+    the live half of that defect. This is the other half: an id that cannot be
+    re-minted means a stale reference resolves to *nothing*, which every reader
+    already handles, rather than to the wrong variable, which none of them can
+    detect.
+
+    Still legible in the JSON a user may open — ``variable-4f2a`` beside a
+    ``"name": "Dose"`` — rather than a 32-hex string, which is what :func:`_new_id`
+    exists to avoid. *taken* is honoured so a hand-edited file with a collision
+    in it cannot be made worse.
+    """
+    from uuid import uuid4
+    while True:
+        candidate = f"variable-{uuid4().hex[:4]}"
+        if candidate not in taken:
+            return candidate
 
 
 def parse_number(label: str) -> float | None:
@@ -508,7 +538,7 @@ def new_variable(vset: VariableSet, name: str = "Variable", *,
     """Add an empty variable. Returns the new set and the new variable's id."""
     kind = kind if kind in KINDS else TEXT
     variable = Variable(
-        id=_new_id(name, {v.id for v in vset.variables}),
+        id=_new_variable_id({v.id for v in vset.variables}),
         name=unique_name(vset, name),
         kind=kind,
         unit=unit.strip() if kind == NUMBER else "",

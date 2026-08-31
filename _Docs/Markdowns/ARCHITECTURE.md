@@ -10267,6 +10267,7 @@ remains:
 | `ARCHITECTURE.md` | This document — the developer-oriented architectural overview. |
 | `README_WellViewer.md` | User-facing README — install, run, troubleshoot. |
 | `GOD_OBJECT_REPOSITORY_ROADMAP.md` | Living plan for the god-object teardown + repository introduction; tracks the ratchet numbers as they come down. |
+| `WELLS_AND_GROUPS_WORKPLAN.md` | The one sanctioned temporary file (`CLAUDE.md` §6.1): a remediation tracker for the work unifying how wells and groups are declared — the rail's saved selections, Home's groups, sample variables and well labels. `tests/test_workplan_is_honest.py` parses its rows; both are deleted by the pull request that closes its last row. |
 
 The on-disk shape of `pipeline_info.json::sample_definitions` (the saved
 selections schema) is described in the `well_viewer/domain/selections_model.py`

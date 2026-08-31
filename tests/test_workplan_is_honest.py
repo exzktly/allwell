@@ -1,7 +1,7 @@
-"""The feature workplan's rows are well-formed and its counts are not typed.
+"""The live workplan's rows are well-formed and its counts are not typed.
 
-``_Docs/Markdowns/FEATURE_WORKPLAN.md`` tracks a body of work too large to hold
-in one session's head. ``CLAUDE.md`` §6.1 records what that costs when it goes
+``_Docs/Markdowns/WELLS_AND_GROUPS_WORKPLAN.md`` tracks a body of work too large
+to hold in one session's head. ``CLAUDE.md`` §6.1 records what that costs when it goes
 wrong: a 177-finding review was reported complete with 42 items still owed,
 because the state of the work lived in conversation while confidence in it
 survived every compaction.
@@ -36,13 +36,13 @@ import re
 
 from tests._repo_scan import REPO_ROOT
 
-_TRACKER = REPO_ROOT / "_Docs" / "Markdowns" / "FEATURE_WORKPLAN.md"
+_TRACKER = REPO_ROOT / "_Docs" / "Markdowns" / "WELLS_AND_GROUPS_WORKPLAN.md"
 
-#: A tracker row: ``| 7 | D | item text | ☐ | note |``
+#: A tracker row: ``| 7 | B | item text | ☐ | note |``
 _ROW = re.compile(r"^\|\s*(\d+)\s*\|\s*([A-H])\s*\|\s*(.+?)\s*\|\s*([☐◐☑⊘])\s*\|",
                   re.M)
 
-#: ``## D — Parquet storage`` — the workstream sections.
+#: ``## C — One plate, one selection`` — the workstream sections.
 _SECTION = re.compile(r"^## ([A-H]) — ", re.M)
 
 _STATUSES = "☐◐☑⊘"

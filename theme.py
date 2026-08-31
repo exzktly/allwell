@@ -384,6 +384,27 @@ class Metrics:
     toolbtn_pad_h = 4  # QToolButton horizontal padding (kept compact)
     input_pad_v  = 4   # QLineEdit / QSpinBox / QComboBox vertical padding
     input_pad_h  = 8   # …horizontal padding
+    # Floor under a spin box's *text* area, so a short range still leaves room
+    # for the number in it.
+    #
+    # Measured rather than chosen: Qt sizes a QSpinBox's text area to the widest
+    # value the range can hold plus a fixed **6 px**, and that 6 px is the same
+    # whether the range is 1–9 or 0–65535. Six pixels is under half a digit, so
+    # any platform whose text renders slightly wider than the metric predicted —
+    # a different font fallback, a hinting difference, a fractional-DPI scale —
+    # clips the value, and on a two-digit box there is nothing left to read.
+    # Groups' "Replicates per group" (range 1–12) is the one that was reported.
+    #
+    # A floor rather than more padding, because padding does not help: Qt lays
+    # the up/down buttons out *inside* the box's right padding, so
+    # ``padding-right`` widens the widget and leaves the text area exactly as it
+    # was. ``min-width`` applies to the contents rect and is the only lever that
+    # grows the part the number is drawn in.
+    #
+    # 28 px takes a one- or two-digit box from 6 px of slack to 20 / 15, and
+    # costs at most 14 px of width. Boxes whose own range already asks for more
+    # than this are untouched.
+    spin_min_w   = 28
     # Width of a right-hand inspector dock. One number for every dock in the
     # Review pane, so the Properties sidebar and the Playground's controls do
     # not open to different widths and read as two different kinds of panel.
@@ -1121,6 +1142,12 @@ QSpinBox:focus, QDoubleSpinBox:focus {{
 QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {{
     color: {c.text_muted};
     background-color: {c.panel};
+}}
+/* See ``Metrics.spin_min_w``: Qt gives a spin box's text area the width of its
+   widest value plus a fixed 6 px, whichever the range, and 6 px is under half a
+   digit. */
+QSpinBox, QDoubleSpinBox {{
+    min-width: {m.spin_min_w}px;
 }}
 QSpinBox::up-button, QDoubleSpinBox::up-button,
 QSpinBox::down-button, QDoubleSpinBox::down-button {{

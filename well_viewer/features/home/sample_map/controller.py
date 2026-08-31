@@ -199,11 +199,11 @@ def set_layer(ctx, layer: str) -> None:
         from well_viewer.core.group_by_controller import refresh_grouping_readouts
         refresh_grouping_readouts(ctx)
     # Home's own chrome follows the layer too: **Import** writes selections and
-    # well labels, so it means nothing on the Variables layer.
-    sync = getattr(getattr(ctx.runtime, "home", None), "sync_sidebar", None)
-    if callable(sync):
-        with swallow("sample map: resyncing Home's chrome for the layer"):
-            sync()
+    # well labels, so it means nothing on the Variables layer. Through the
+    # services registry rather than an import, because Home's controller imports
+    # this module — the call cannot travel back the same way.
+    with swallow("sample map: resyncing Home's chrome for the layer"):
+        ctx.features.call("home.sync_sidebar", ctx)
 
 
 def _clear_active_group(ctx) -> None:

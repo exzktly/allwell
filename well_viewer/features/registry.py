@@ -498,6 +498,11 @@ def _svc_cell_gating_threshold_frac_on_changed():
     return cell_gating_on_threshold_frac_on_change
 
 
+def _svc_home_sync_sidebar():
+    from well_viewer.features.home.controller import sync_home_sidebar
+    return sync_home_sidebar
+
+
 def _svc_variables_refresh():
     from well_viewer.features.home.variables.controller import refresh_variables
     return refresh_variables
@@ -883,6 +888,11 @@ def _features() -> list[FeatureDescriptor]:
         FeatureDescriptor(
             name="Home", group="Home", build=_build_home,
             states=(StateSpec("home", _state_home),),
+            # The Sample map tab's layer switch repaints Home's chrome through
+            # this: **Import** writes selections and well labels, so it means
+            # nothing on the Variables layer, and the tab cannot import Home's
+            # controller because that controller imports the tab's.
+            services={"home.sync_sidebar": _svc_home_sync_sidebar},
             on_activate=_activate_home,
             on_dataset_loaded=_loaded_home,
             on_selection_changed=_sel_home,

@@ -9665,9 +9665,27 @@ runner's checkout at a different path yields a data file whose every entry is a
 twice as many modules as the repo has, and the inventory is wrong in the
 direction that invents dead code.
 
+**Getting both lanes into one measurement takes two dispatches.**
 `.github/workflows/slow-lane.yml` takes a `coverage` dispatch input — opt-in, so
 an ordinary "is the lane green" run is not slowed by a measurement it does not
 want — and uploads one data file per shard.
+`.github/workflows/coverage-inventory.yml` is the second half: give it that
+run's id and it runs the fast lane under coverage on its own runner, pulls the
+six shard artifacts across with `actions/download-artifact`, combines the lot,
+and prints the inventory into the job log and the run summary. It refuses to
+print anything if no shard data arrived, because the fast lane alone names
+full-app-only modules unreached and that is the one error worth refusing to
+make.
+
+Two workflows rather than one job appended to the slow lane, for two reasons.
+The slow lane is six shards of up to 75 minutes, so an inventory obtainable only
+by re-running all of it would cost hours for a list that can be rebuilt from
+artifacts already paid for. And the finding has to *travel*: artifact downloads
+redirect to Azure blob storage, which an egress policy can refuse while leaving
+the GitHub API reachable, so a result readable only by someone able to fetch a
+blob is a result some readers cannot get at. The job log is readable through the
+API, so the log is where the answer goes; the combined data file is uploaded as
+well, for anyone who can fetch it.
 
 **Before pushing, `scripts/preflight.sh`** runs ruff, the fast lane, and a
 working-tree check in one pass (`--quick` skips the fast lane). The tree check is

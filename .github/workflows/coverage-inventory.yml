@@ -1,0 +1,135 @@
+name: Coverage inventory
+
+# Which application modules does NO test reach — computed where the data is.
+#
+# The question needs BOTH lanes in one measurement. The fast lane alone reports
+# every full-app-only module as unreached, and acting on that list would delete
+# live code: eleven modules came back "zero executed lines" from a fast-lane-only
+# run and every one of them had a live application importer, most of them behind
+# a lazily-built tab that only a `viewer_app` test constructs.
+#
+# So this workflow is the second half of a two-step measurement:
+#
+#   1. Dispatch **Slow lane** with the `coverage` box ticked. Each shard uploads
+#      its per-batch data as `slow-lane-coverage-shard-<n>`.
+#   2. Dispatch **this**, with that run's id. It runs the fast lane under
+#      coverage here, pulls the six shard artifacts, combines the lot, and prints
+#      the inventory into the job log.
+#
+# **Why the finding is printed rather than the data downloaded.** Artifact
+# downloads redirect to Azure blob storage, which an egress policy can refuse
+# while leaving the GitHub API itself reachable. A measurement whose result can
+# only be read by someone able to fetch a blob is a measurement that does not
+# travel. The job log travels, so the log is where the answer goes; the combined
+# data file is uploaded as well, for anyone who *can* fetch it.
+#
+# Two steps rather than one job appended to the slow lane, because the slow lane
+# is six shards of up to 75 minutes: an inventory that could only be produced by
+# re-running all of it would cost hours for a list this workflow can rebuild from
+# artifacts already paid for.
+on:
+  workflow_dispatch:
+    inputs:
+      slow_run_id:
+        description: "Run id of a Slow lane run dispatched with coverage ticked"
+        required: true
+        type: string
+
+# Reading another run's artifacts is an Actions API call, not a contents one.
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  inventory:
+    name: zero-coverage inventory (both lanes)
+    runs-on: ubuntu-latest
+    # The fast lane is ~12 minutes under coverage; the rest is download and
+    # combine. 40 leaves room for a slow runner without cutting off a lane that
+    # is merely having a bad day.
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # PySide6 needs system GL/EGL libraries even under the offscreen QPA.
+      - name: Install Qt system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r tests/requirements-dev.txt
+      # The fast lane runs FIRST, and into a data file of its own. pytest-cov
+      # combines at the end of its session by consuming the data files that
+      # share its COVERAGE_FILE prefix, and writes the result under that name —
+      # so a lane run with the shards already on disk is one rename away from
+      # eating them. Ordering it first means it cannot, whatever the prefix.
+      #
+      # `|| true` because the fast lane exits 139 on a PySide6 teardown SIGSEGV
+      # after a green run (see scripts/test.sh). This job is a measurement and
+      # not a gate — ci.yml is the gate, and it reads the JUnit report rather
+      # than the exit code for exactly this reason.
+      - name: Fast lane under coverage
+        env:
+          QT_QPA_PLATFORM: offscreen
+          COVERAGE_FILE: .coverage.fastlane
+        run: ALLWELL_COVERAGE=1 scripts/test.sh || true
+      - name: Check the fast lane actually measured something
+        run: |
+          if [ ! -s .coverage.fastlane ]; then
+            echo "::error::The fast lane wrote no coverage data. Combining"
+            echo "::error::without it would report every fast-lane-only module"
+            echo "::error::as unreached, which is the error this whole workflow"
+            echo "::error::exists to avoid making."
+            exit 1
+          fi
+          ls -l .coverage.fastlane
+      - name: Collect the shards' coverage
+        uses: actions/download-artifact@v4
+        with:
+          pattern: slow-lane-coverage-shard-*
+          merge-multiple: true
+          run-id: ${{ inputs.slow_run_id }}
+          github-token: ${{ github.token }}
+      - name: Combine, and report the inventory
+        run: |
+          set -uo pipefail
+          echo "slow-lane data files collected:"
+          ls -1 .coverage.slow-* 2>/dev/null || echo "  (none)"
+          shards=$(ls -1 .coverage.slow-* 2>/dev/null | wc -l)
+
+          # Refused rather than printed on partial data. This list's only use is
+          # deciding which modules no test reaches, and missing slow-lane data
+          # produces false positives in exactly that direction — it names live
+          # code dead, which is the one error worth refusing to make.
+          if [ "$shards" -eq 0 ]; then
+            echo "::error::No slow-lane coverage in run ${{ inputs.slow_run_id }}."
+            echo "::error::Dispatch Slow lane with the coverage box ticked, then"
+            echo "::error::re-run this with that run's id. The fast lane alone"
+            echo "::error::names full-app-only modules unreached; that list must"
+            echo "::error::not be read."
+            exit 1
+          fi
+          echo "combining ${shards} slow-lane batch file(s) with the fast lane"
+
+          echo "::group::Combined coverage summary"
+          scripts/coverage.sh
+          echo "::endgroup::"
+
+          echo "## Modules no test reaches" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          # `coverage.sh` combines on its first call and leaves `.coverage`
+          # behind, so this second call reads the already-combined file.
+          scripts/coverage.sh --zero | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload combined coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-combined
+          path: .coverage
+          include-hidden-files: true
+          if-no-files-found: warn

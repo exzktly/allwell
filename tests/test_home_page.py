@@ -527,12 +527,24 @@ def test_the_help_drawer_lands_on_the_current_tab_not_the_top_of_the_chapter(
 
     resolve = allwell.AllWellApp._review_help_section
 
-    for tab, heading in (("Sample map", "Sample map"),
-                         ("Ratios", "Ratios"),
+    for tab, heading in (("Ratios", "Ratios"),
                          ("Pipeline Info", "Pipeline Info"),
                          ("Cell Gating", "Cell Gating")):
         _goto_subtab(loaded_app, qtbot, tab)
         assert resolve(None, loaded_app) == heading, tab
+
+    # **Sample map resolves to its current layer, not to the tab.** Each of the
+    # three has a heading of its own under the tab's, so landing on the tab
+    # would put the reader above the paragraph describing what is in front of
+    # them — and it would leave the three layer entries in ``SECTION_BY_PAGE``
+    # with no reader at all. Asserted per layer rather than once, because a
+    # version that answered "Groups" for every layer passes a single check.
+    from well_viewer.features.home.sample_map.controller import LAYERS, set_layer
+
+    _goto_subtab(loaded_app, qtbot, "Sample map")
+    for layer in LAYERS:
+        set_layer(loaded_app._ctx, layer)
+        assert resolve(None, loaded_app) == layer, layer
 
     # Overview is the report page, not a sub-leaf. It has no heading of its own
     # and correctly falls through to the Home chapter.

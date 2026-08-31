@@ -93,13 +93,16 @@ def value_label(variable, value_id) -> str:
     return label or UNASSIGNED_LABEL
 
 
-def inks_for(variable, values_by_key) -> dict:
+def _inks_for(variable, values_by_key) -> dict:
     """``member key -> colour``, from values already resolved.
 
-    The ink rule with no ctx and no scope in it, so the plotting tabs and Batch
-    Export share one definition of what a value looks like while each resolves
-    its own members. A batch figure whose colours differed from the tab's would
-    be two answers to "what colour is HeLa" on one screen.
+    The ink rule with the ctx and the scope lifted out, so the rule itself can
+    be read and tested without either. Private: the plotting tabs and Batch
+    Export share one definition of what a value looks like — a batch figure
+    whose colours differed from the tab's would be two answers to "what colour
+    is HeLa" on one screen — but they share it through :func:`member_inks`,
+    which is where the members are resolved. A caller reaching this one would
+    be bringing its own resolution, which is the disagreement, not the sharing.
     """
     if variable is None:
         return {}
@@ -112,8 +115,12 @@ def inks_for(variable, values_by_key) -> dict:
     }
 
 
-def bands_for(variable, values_by_key) -> dict:
-    """``member key -> band label``, from values already resolved."""
+def _bands_for(variable, values_by_key) -> dict:
+    """``member key -> band label``, from values already resolved.
+
+    Private for the reason :func:`_inks_for` records: :func:`member_bands` is
+    the shared answer, because it resolves the members too.
+    """
     if variable is None:
         return {}
     return {key: value_label(variable, value_id)
@@ -131,8 +138,8 @@ def member_inks(ctx, scope: str, variable_id: str, wells_by_key=None) -> dict:
     own members, whose keys are the group's and not the tab's — the same
     override its fold-change path already makes, and for the same reason.
     """
-    return inks_for(_variable(ctx, variable_id),
-                    _values(ctx, scope, variable_id, wells_by_key))
+    return _inks_for(_variable(ctx, variable_id),
+                     _values(ctx, scope, variable_id, wells_by_key))
 
 
 def member_bands(ctx, scope: str, variable_id: str, wells_by_key=None) -> dict:
@@ -143,8 +150,8 @@ def member_bands(ctx, scope: str, variable_id: str, wells_by_key=None) -> dict:
     same reason they get their own inks — a band headed with nothing looks like
     a header that failed to draw.
     """
-    return bands_for(_variable(ctx, variable_id),
-                     _values(ctx, scope, variable_id, wells_by_key))
+    return _bands_for(_variable(ctx, variable_id),
+                      _values(ctx, scope, variable_id, wells_by_key))
 
 
 def _values(ctx, scope: str, variable_id: str, wells_by_key) -> dict:

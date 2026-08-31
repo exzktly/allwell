@@ -18,6 +18,7 @@ from __future__ import annotations
 import pytest
 
 from well_viewer.domain import sample_variables as sv
+from tests import _cvd
 from well_viewer.domain import variable_series as vs
 from well_viewer.features.barplot._decorate import (
     bar_legend_entries, decorate_bar_items,
@@ -136,6 +137,58 @@ def test_the_palette_entries_are_far_enough_apart(n, floor):
 
     assert len(set(palette.values())) == n
     assert _separation(palette.values()) >= floor, sorted(palette.values())
+
+
+#: The floor a set of *n* value inks must clear under **every** view — normal
+#: and the three dichromacies — measured the way ``tests/_cvd.py`` measures.
+#: Lower as *n* grows because the space is finite; a set that fell below the
+#: last row would be a legend the reader has to guess at.
+CVD_FLOORS = ((2, 250.0), (3, 180.0), (4, 160.0), (6, 90.0), (8, 75.0),
+              (16, 45.0))
+
+
+@pytest.mark.parametrize("n,floor", CVD_FLOORS)
+@pytest.mark.parametrize("view", _cvd.VIEWS)
+def test_the_value_inks_stay_apart_for_a_dichromat_too(n, floor, view):
+    """The separation test above asks whether a trichromat can tell the inks
+    apart, which is one reader in twelve short of the question.
+
+    The palette's own head — the first n entries, which this used to take —
+    measures 116 apart at six values for a trichromat and **28** under
+    protanopia, below the 30 this file records as one colour to any reader; at
+    eight values deuteranopia collapses it to **10**. *Colour by* carries no
+    second channel saying the same thing, so those are not two values drawn
+    badly, they are two values drawn identically with nothing on screen to say
+    so. ``VALUE_PICKS`` is what the measurement chose.
+    """
+    variable = _line(pairs=tuple((f"v{i}", None) for i in range(n)))
+    inks = list(vs.value_colors(variable).values())
+
+    assert len(set(inks)) == n
+    assert _cvd.separation(inks, view) >= floor, (
+        view, sorted(inks), _cvd.separation(inks, view))
+
+
+def test_more_values_than_picks_keeps_going_rather_than_repeating_an_ink():
+    """``VALUE_PICKS`` is sixteen long and the palette is ninety-six.
+
+    Cycling the picks would repeat an ink at the seventeenth value — the exact
+    failure the picks exist to prevent, reintroduced by the mechanism meant to
+    prevent it. The order runs on through the rest of the palette instead.
+    """
+    variable = _line(pairs=tuple((f"v{i}", None) for i in range(40)))
+    inks = list(vs.value_colors(variable).values())
+
+    assert len(set(inks)) == 40, "an ink repeated inside one variable"
+
+
+def test_the_picks_are_a_roster_of_real_palette_entries():
+    """A pick past the end of the palette would be dropped silently, shortening
+    the measured set to something no test above would notice."""
+    from well_viewer.domain.plate_layout import WELL_COLORS
+
+    assert len(set(vs.VALUE_PICKS)) == len(vs.VALUE_PICKS), "a pick is repeated"
+    assert all(0 <= i < len(WELL_COLORS) for i in vs.VALUE_PICKS)
 
 
 def test_the_two_ways_of_having_no_value_are_different_inks():

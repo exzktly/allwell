@@ -235,6 +235,17 @@ def annotate_colour_legend(ctx, ax, *, wells_by_key=None) -> None:
     every value the variable defines. A legend naming six doses over a figure
     showing two is a claim about what is in front of the reader, and the reader
     counts the legend.
+
+    **Colour is the only channel here, which is a constraint on the palette
+    rather than on this legend.** A reader who cannot separate two inks cannot
+    use the key either, however it is drawn — so the answer is inks a dichromat
+    can separate, which is what ``variable_series.VALUE_PICKS`` is chosen and
+    measured for, and not a second visual channel bolted onto the legend. A
+    redundant encoding on the bars themselves (hatching, say) was not added:
+    *Split by* already gives the same fact a labelled position when a reader
+    wants one that does not depend on colour at all, and hatching every bar to
+    duplicate a distinction the palette already carries would cost every
+    figure legibility to serve a case the palette covers.
     """
     if ax is None:
         return

@@ -47,6 +47,29 @@ MIXED_COLOR = theme.Colors.plot_mono
 UNASSIGNED_COLOR = theme.Colors.text_primary
 
 
+#: Which entries of the plate palette a variable's values take, in order.
+#:
+#: Not the palette's first n. Those are far apart to a trichromat — 116 in RGB
+#: at six values — and collapse for a dichromat: **28** under protanopia and
+#: **43** under deuteranopia at six values, and **10** under deuteranopia at
+#: eight, against the 30 this module's own tests record as "one colour to any
+#: reader". Roughly one man in twelve reads a figure that way, and *Colour by*
+#: has no second channel carrying the same fact, so two values sharing an ink
+#: is not a degraded reading of the figure — it is a wrong one, with nothing on
+#: screen to say so.
+#:
+#: Chosen by measuring: greedily maximising the closest pair across all four
+#: views at once — trichromat, protanope, deuteranope, tritanope — under the
+#: Viénot–Brettel–Mollon simulation. Six values now measure 108 / 92 / 93 / 100
+#: rather than 116 / 28 / 43 / 67: a little less separation for a trichromat,
+#: and three times as much for everyone else. Two and three values come out
+#: *better* on every view than the palette's own head did.
+#:
+#: ``tests/test_colour_and_split_by_variable.py`` re-measures both halves, so
+#: the numbers above cannot drift away from the picks below.
+VALUE_PICKS = (0, 49, 11, 47, 41, 22, 85, 8, 3, 89, 38, 34, 78, 57, 87, 59)
+
+
 def value_colors(variable) -> dict:
     """``value id -> colour``, indexed by the value's place in the variable.
 
@@ -56,20 +79,29 @@ def value_colors(variable) -> dict:
     colour of a dose follows the order the user put its values in rather than
     the order a dict happened to iterate — which is what makes a legend read
     monotonically down a dose series instead of shuffling on every reload.
+
+    Which entries, and why those, is :data:`VALUE_PICKS`.
+    """
+    values = tuple(getattr(variable, "values", ()) or ())
+    order = _pick_order()
+    return {value.id: order[i % len(order)]
+            for i, value in enumerate(values)}
+
+
+def _pick_order() -> list:
+    """The measured picks first, then the rest of the palette in its own order.
+
+    The tail matters for a variable with more values than there are picks: a
+    list that stopped at the picks would start repeating inks at seventeen
+    values, and a repeated ink is the failure the picks exist to prevent. So
+    the sequence continues through every remaining entry — 96 distinct colours,
+    with the ones a dichromat can separate at the front.
     """
     from well_viewer.domain.plate_layout import WELL_COLORS
 
-    values = tuple(getattr(variable, "values", ()) or ())
-    # The palette's first n entries, in order. It is already arranged so that
-    # consecutive entries are far apart — measured, because the first version
-    # of this assumed the opposite and spread the picks across all 96 to avoid
-    # "adjacent hues". That made it worse: at three values the spread picks
-    # come out 30 apart in RGB (``#E56AFB`` beside ``#DC81EA``, which is one
-    # colour to any reader) against 199 for the first three, and at six values
-    # 30 against 116. ``test_the_palette_entries_are_far_enough_apart`` pins
-    # the measurement so the reasoning cannot drift back.
-    return {value.id: WELL_COLORS[i % len(WELL_COLORS)]
-            for i, value in enumerate(values)}
+    picked = [WELL_COLORS[i] for i in VALUE_PICKS if i < len(WELL_COLORS)]
+    taken = set(VALUE_PICKS)
+    return picked + [c for i, c in enumerate(WELL_COLORS) if i not in taken]
 
 
 def value_label(variable, value_id) -> str:

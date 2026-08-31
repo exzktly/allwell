@@ -27,6 +27,15 @@ name: Coverage inventory
 # is six shards of up to 75 minutes: an inventory that could only be produced by
 # re-running all of it would cost hours for a list this workflow can rebuild from
 # artifacts already paid for.
+#
+# **Two triggers, because not every caller can use the first one.** A dispatch
+# takes the run id as an input, which is what a person clicking Run workflow
+# wants. An assistant session cannot do that: its GitHub token carries
+# `actions: read` and not `actions: write`, so the dispatch API answers 403 and
+# the measurement would be stuck waiting for someone to click. So the run id can
+# also be written into `.github/coverage-inventory-run-id`, and a push touching
+# that one path starts the workflow — a trigger anything able to push the branch
+# can pull. The path filter is what keeps ordinary commits from starting it.
 on:
   workflow_dispatch:
     inputs:
@@ -34,6 +43,9 @@ on:
         description: "Run id of a Slow lane run dispatched with coverage ticked"
         required: true
         type: string
+  push:
+    paths:
+      - ".github/coverage-inventory-run-id"
 
 # Reading another run's artifacts is an Actions API call, not a contents one.
 permissions:
@@ -50,6 +62,26 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+      - name: Resolve the slow-lane run id
+        id: runid
+        run: |
+          set -uo pipefail
+          id="${{ inputs.slow_run_id }}"
+          if [ -z "$id" ] && [ -f .github/coverage-inventory-run-id ]; then
+            id="$(head -1 .github/coverage-inventory-run-id | tr -d '[:space:]')"
+          fi
+          # Validated rather than trusted: this value is interpolated into an
+          # artifact lookup, and a file that has picked up a stray word should
+          # fail here saying so rather than fail later looking like a run with no
+          # artifacts in it — which is the diagnosis this workflow refuses on.
+          case "$id" in
+            "" ) echo "::error::No slow-lane run id. Dispatch with slow_run_id, or"
+                 echo "::error::write the id into .github/coverage-inventory-run-id."
+                 exit 1 ;;
+            *[!0-9]* ) echo "::error::Run id '$id' is not a number."; exit 1 ;;
+          esac
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          echo "slow-lane run id: $id"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -92,7 +124,7 @@ jobs:
         with:
           pattern: slow-lane-coverage-shard-*
           merge-multiple: true
-          run-id: ${{ inputs.slow_run_id }}
+          run-id: ${{ steps.runid.outputs.id }}
           github-token: ${{ github.token }}
       - name: Combine, and report the inventory
         run: |
@@ -106,7 +138,7 @@ jobs:
           # produces false positives in exactly that direction — it names live
           # code dead, which is the one error worth refusing to make.
           if [ "$shards" -eq 0 ]; then
-            echo "::error::No slow-lane coverage in run ${{ inputs.slow_run_id }}."
+            echo "::error::No slow-lane coverage in run ${{ steps.runid.outputs.id }}."
             echo "::error::Dispatch Slow lane with the coverage box ticked, then"
             echo "::error::re-run this with that run's id. The fast lane alone"
             echo "::error::names full-app-only modules unreached; that list must"

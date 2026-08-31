@@ -9677,6 +9677,17 @@ print anything if no shard data arrived, because the fast lane alone names
 full-app-only modules unreached and that is the one error worth refusing to
 make.
 
+It takes the run id two ways, and the second one exists because not every
+caller can use the first. A dispatch takes it as an input, which is what a
+person clicking *Run workflow* wants; an assistant session cannot, because its
+GitHub token carries `actions: read` and not `actions: write`, so the dispatch
+API answers 403 and the measurement would sit waiting for someone to click. The
+id can therefore also be written into `.github/coverage-inventory-run-id`, and a
+push touching that one path starts the workflow — a trigger anything able to
+push the branch can pull. The path filter is what keeps ordinary commits from
+starting it, and the resolver validates the value is a bare number rather than
+interpolating whatever the file holds into an artifact lookup.
+
 Two workflows rather than one job appended to the slow lane, for two reasons.
 The slow lane is six shards of up to 75 minutes, so an inventory obtainable only
 by re-running all of it would cost hours for a list that can be rebuilt from

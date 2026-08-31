@@ -242,10 +242,13 @@ def fit_curves(data: ResponseData, model: str, *, fixed_top: float | None = None
 def collect_response(ctx, variable_id: str, timepoints) -> ResponseData:
     """Build every curve for *variable_id* at *timepoints*.
 
-    Members come from ``plot_members.plot_replicate_sets`` — the same seam every
-    other tab pools through — so a plate grouped by `Cell line` draws one curve
-    set per cell line against `Dose`, and this tab cannot disagree with the Bar
-    tab about what a member is.
+    Members come from ``plot_members.response_members`` — over the same
+    ``plot_replicate_sets`` seam every other tab pools through — so a plate
+    grouped by `Cell line` draws one curve set per cell line against `Dose`, and
+    this tab cannot disagree with the Bar tab about what a member is. With no
+    replicate set defined it is one member per well lit on the plate, which is
+    the fallback the Bar and Line tabs already make: a sample variable is
+    assigned per well, so a lone well carries its own dose.
 
     The x of a member is the value **all** of its wells share. A member whose
     wells disagree, or that holds a well with no value, gets no point: it is
@@ -268,7 +271,7 @@ def collect_response(ctx, variable_id: str, timepoints) -> ResponseData:
     worth.
     """
     from well_viewer.core.channel_state_controller import on_cutoff_for_column
-    from well_viewer.domain.plot_members import plot_replicate_sets
+    from well_viewer.domain.plot_members import response_members
     from well_viewer.domain.sample_variables import MIXED, roll_up
     from well_viewer.domain.stats_compute import compute_rep_stats
 
@@ -278,15 +281,22 @@ def collect_response(ctx, variable_id: str, timepoints) -> ResponseData:
         return ResponseData()
 
     data = ResponseData(variable_name=variable.name, unit=variable.unit)
-    if not bool(getattr(ctx.state.plot, "bar_pool_replicates", True)):
-        data.pooled_notice = "replicates pooled — this tab has no per-well mode"
     well_paths = ctx.state.dataset.well_paths or {}
     threshold = on_cutoff_for_column(
         ctx, ctx.state.channel.active_val_col,
         channel=ctx.state.channel.active_channel)
     use_sem = bool(getattr(ctx.state.plot, "use_sem", True))
 
-    members = list(plot_replicate_sets(ctx))
+    members = list(response_members(ctx))
+    # Only where there is something to pool. The notice exists because the Bar
+    # tab a click away *is* drawing one bar per well with this switch off, and
+    # the two figures would disagree with nothing on either to explain it. With
+    # no replicate set defined both tabs draw one member per lit well, so they
+    # agree — and a figure whose points are single wells captioned "replicates
+    # pooled" states something that did not happen.
+    if not bool(getattr(ctx.state.plot, "bar_pool_replicates", True)) and any(
+            len(getattr(rset, "wells", ()) or ()) > 1 for rset in members):
+        data.pooled_notice = "replicates pooled — this tab has no per-well mode"
     # x is resolved once per member, not once per (member, timepoint): a
     # member's dose does not depend on when it was measured, and resolving it
     # inside the loop would report the same omission once per curve.

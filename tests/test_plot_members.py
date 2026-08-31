@@ -29,7 +29,7 @@ from well_viewer.features.lineplot.controller import collect_line_series
 from tests.conftest import MockApp, make_agg
 
 
-def _ctx(*, selections=None, pool_reps=True):
+def _ctx(*, selections=None, pool_reps=True, selected=None):
     """A context whose typed state is stable across accesses.
 
     ``MockApp._app_state`` rebuilds itself on every read, so a test that sets
@@ -47,6 +47,8 @@ def _ctx(*, selections=None, pool_reps=True):
     )
     ctx = app._ctx
     ctx.state.plot.bar_pool_replicates = pool_reps
+    if selected is not None:
+        ctx.state.selection.selected_wells = set(selected)
     return ctx
 
 
@@ -272,3 +274,33 @@ def test_a_scope_nobody_registered_still_answers_empty():
     """Unknown scopes get no members rather than a guess."""
     ctx = _ctx(selections=_TWO_SETS, pool_reps=True)
     assert plotted_member_keys(ctx, "no-such-tab") == []
+
+
+# ── the response scope with nothing grouped ─────────────────────────────────
+#
+# Response used to have no fallback here, on the reasoning that a loose well
+# has no dose until it is in something the plate annotates. A sample variable
+# is assigned per *well*, so that reasoning was wrong about where the
+# annotation lives, and the tab drew nothing on a fully-annotated plate.
+
+def test_the_response_keys_fall_back_to_the_lit_wells_with_no_groups():
+    ctx = _ctx(selections=[], selected={"B01", "A02", "A01"})
+    assert plotted_member_keys(ctx, "response") == ["A01", "A02", "B01"]
+
+
+def test_an_ungrouped_response_key_resolves_to_its_own_well():
+    """``_keys_are_replicate_sets`` has to answer *wells* here.
+
+    Answering "sets" would resolve every key against a set roster that is
+    empty, so each member would come back with no wells — and a member whose
+    wells come back empty loses its fold-change denominator silently.
+    """
+    ctx = _ctx(selections=[], selected={"A01", "A02"})
+    assert member_wells(ctx, "response") == {"A01": ["A01"], "A02": ["A02"]}
+
+
+def test_a_group_still_wins_over_the_lit_wells_in_the_response_scope():
+    ctx = _ctx(selections=_TWO_SETS, selected={"A01", "A02", "B01", "B02"})
+    assert plotted_member_keys(ctx, "response") == ["CTRL", "TREAT"]
+    assert member_wells(ctx, "response") == {
+        "CTRL": ["A01", "A02"], "TREAT": ["B01", "B02"]}

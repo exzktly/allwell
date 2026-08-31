@@ -143,6 +143,26 @@ def _load(tab, variable, assignments, groups, timepoints=(24.0,)):
     tab.ctx.runtime.barplot.current_keys = lambda: [g[0] for g in groups]
 
 
+def _load_ungrouped(tab, variable, assignments, timepoints=(24.0,)):
+    """A plate with the variable filled and wells lit, and **no groups**.
+
+    The state a user is in before they have defined a single Plot Group, and
+    the one every other loader in this file skips: ``_load`` builds groups from
+    its own argument and leaves ``selected_wells`` empty, so the whole file was
+    a test of grouped plates only.
+    """
+    import well_viewer.data.data_loading as dl
+    tab.monkeypatch.setattr(dl, "get_all_timepoints",
+                            lambda _ctx: list(timepoints))
+    wells = sorted(assignments)
+    tab.ctx.state.dataset.well_paths = {w: f"/{w}.csv" for w in wells}
+    tab.ctx.state.selection.variables = sv.VariableSet(
+        variables=(variable,), assignments={variable.id: assignments})
+    tab.ctx.state.selection.selections = []
+    tab.ctx.state.selection.selected_wells = set(wells)
+    tab.ctx.runtime.barplot.current_keys = lambda: []
+
+
 # ── the X combo ─────────────────────────────────────────────────────────────
 
 def test_the_x_combo_lists_only_number_variables(tab):
@@ -1083,3 +1103,74 @@ def test_the_activation_hook_actually_repaints(tab, monkeypatch):
     build_feature_registry().get("Response Curves").on_activate(tab.ctx)
 
     assert drawn == [tab.ctx], "activating the tab repainted nothing"
+
+
+# ── a plate that is filled but not grouped ──────────────────────────────────
+
+def test_lit_wells_with_no_groups_draw_a_curve_rather_than_the_empty_state(tab):
+    """The reported defect, pressed through the real redraw.
+
+    A Number variable defined and filled, wells clicked on the plate, no Plot
+    Groups. The tab drew nothing and captioned it "No groups to plot — select
+    wells on the plate", which names as the fix the thing the user had already
+    done. Asserted from the axes rather than from the collector, because the
+    controller passing the right flags is the half a collector test cannot see.
+    """
+    variable = _variable(pairs=(("1", 1.0), ("10", 10.0)))
+    _load_ungrouped(tab, variable, {"A01": "v0", "A02": "v1"})
+    rctl.redraw_response(tab.ctx)
+
+    assert tab.ax.has_data(), (
+        "an annotated plate with wells lit drew nothing"
+    )
+    texts = [t.get_text() for t in tab.ax.texts]
+    assert not any("No groups to plot" in s for s in texts), texts
+    # The values, not merely "something was drawn": a figure with the points at
+    # the wrong doses passes ``has_data`` just as happily.
+    # ``get_lines()[0]`` is the errorbar's own data line; the rest are its
+    # caps, which repeat the same x and would let a wrong-dose figure pass a
+    # sorted-set assertion.
+    assert [float(x) for x in tab.ax.get_lines()[0].get_xdata()] == [1.0, 10.0]
+
+
+def test_the_ungrouped_csv_names_the_wells_it_drew(tab, tmp_path, monkeypatch):
+    """The export travels through the same members, keyed by well token.
+
+    A file whose ``member`` column were blank — or which listed groups that do
+    not exist — would be the figure and the spreadsheet disagreeing about what
+    was plotted.
+    """
+    written = {}
+    import well_viewer.core.csv_export as ce
+    monkeypatch.setattr(
+        ce, "write_csv_rows",
+        lambda ctx, name, header, rows: written.update(rows=rows))
+    import well_viewer.features.response.controller as mod
+    monkeypatch.setattr(mod, "write_csv_rows", ce.write_csv_rows)
+
+    variable = _variable(pairs=(("1", 1.0), ("10", 10.0)))
+    _load_ungrouped(tab, variable, {"A01": "v0", "A02": "v1"})
+    rctl.refresh_x_combo(tab.ctx)
+    rctl.export_response_csv(tab.ctx)
+
+    assert [r[0] for r in written["rows"]] == ["A01", "A02"]
+
+
+def test_an_ungrouped_figure_is_not_captioned_replicates_pooled(tab):
+    """The notice describes something that did not happen on this plate.
+
+    It exists because the Bar tab a click away *is* drawing one bar per well
+    with this switch off, and the two would disagree with nothing on either to
+    explain it. With no group defined both tabs draw one member per lit well,
+    so they agree — and a figure whose points are single wells captioned
+    "replicates pooled" asserts a pooling nothing performed.
+    """
+    variable = _variable(pairs=(("1", 1.0), ("10", 10.0)))
+    _load_ungrouped(tab, variable, {"A01": "v0", "A02": "v1"})
+    tab.ctx.state.plot.bar_pool_replicates = False
+
+    rctl.redraw_response(tab.ctx)
+
+    captions = " | ".join(t.get_text() for t in tab.ax.texts)
+    assert "pooled" not in captions, captions
+    assert tab.ax.has_data(), "the figure lost its points"

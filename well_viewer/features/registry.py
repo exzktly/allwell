@@ -817,6 +817,19 @@ def _activate_response(ctx) -> None:
     _redraw_response(ctx)
 
 
+def _channel_response(ctx) -> None:
+    """Repaint when the Channel or Property changes.
+
+    The tab had `on_activate` and `on_selection_changed` and not this one, so a
+    Property switched while Response was on screen left the previous property's
+    curves drawn — until the user left the tab and came back, which is what
+    `on_activate` was doing for them. A figure that is one control-change stale
+    is a plot of the wrong data that looks exactly like a plot of the right
+    data, which is the same reason the other two hooks exist.
+    """
+    _redraw_response(ctx)
+
+
 def _sel_response(ctx) -> None:
     """Repaint on a selection change.
 
@@ -993,6 +1006,7 @@ def _features() -> list[FeatureDescriptor]:
                           build=_build_response, redraw=_redraw_response,
                           on_activate=_activate_response,
                           on_selection_changed=_sel_response,
+                          on_channel_changed=_channel_response,
                           states=(StateSpec("response", _state_response),),
                           fold_change_scope_factory=_fold_change_scope_response,
                           view_state_io=_response_view_state_io),

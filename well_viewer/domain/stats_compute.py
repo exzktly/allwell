@@ -632,9 +632,18 @@ def compute_rep_stats(
     target_t: float,
     threshold: float,
     use_sem: bool,
+    *,
+    val_col: str | None = None,
 ) -> tuple:
     """
     Mean fluor ± SD/SEM for a single ReplicateSet at *target_t*.
+
+    *val_col* overrides the shared ``ctx.state.channel.active_val_col`` for a
+    tab that owns its own Property control rather than reading the plotting
+    band's — Response Curves, as the aggregate Scatter tab already does with
+    its own combos. ``None`` keeps the shared column, so every existing caller
+    is unchanged. The resolved column is what goes into the cache key, so a
+    tab-local choice cannot collide with the shared one in the cache.
 
     Statistics are computed across the loaded wells of the set.
     Each well contributes one mean-fluor value; SD/SEM is across those values.
@@ -647,14 +656,15 @@ def compute_rep_stats(
     replicates under active gating" identically in both well and FOV modes.
     """
     fluor_gates = get_all_fluor_gates(ctx)
+    col = val_col or ctx.state.channel.active_val_col
     cache_key = ("rep", rset.name, tuple(rset.wells), target_t, threshold, use_sem,
-                  ctx.state.channel.active_val_col, tuple(sorted(fluor_gates.items())), _gate_cache_sig(ctx), _ratio_cache_sig(ctx))
+                  col, tuple(sorted(fluor_gates.items())), _gate_cache_sig(ctx), _ratio_cache_sig(ctx))
     if cache_key in ctx.state.stats_cache.cache:
         return ctx.state.stats_cache.cache[cache_key]
 
     reps = group_replicate_stats(
         ctx, rset.wells, target_t, use_fov=False,
-        val_col=ctx.state.channel.active_val_col,
+        val_col=col,
         threshold=threshold, fluor_gates=fluor_gates,
     )
     gm, gerr = _reduce_reps(reps, "mean", use_sem)
@@ -671,8 +681,15 @@ def compute_rep_per_fov_stats(
     target_t: float,
     threshold: float,
     use_sem: bool,
+    *,
+    val_col: str | None = None,
 ) -> tuple:
     """Pool every FOV across all loaded wells of *rset* and compute stats.
+
+    *val_col* overrides the shared active column, exactly as in
+    :func:`compute_rep_stats` — the two are switched between by one caller on
+    the strength of a toggle, so a seam on one and not the other would make a
+    tab-local Property silently revert the moment Spread: FOV went on.
 
     Returns ``(mean, mean_err, frac, frac_err, n_above_pf_mean,
     n_above_pf_spread)`` where the error fields are the SD/SEM across the
@@ -681,8 +698,9 @@ def compute_rep_per_fov_stats(
     separately, so identical FOV numbers in different wells stay distinct).
     """
     fluor_gates = get_all_fluor_gates(ctx)
+    col = val_col or ctx.state.channel.active_val_col
     cache_key = ("rep_pf", rset.name, tuple(rset.wells), target_t, threshold,
-                 use_sem, ctx.state.channel.active_val_col,
+                 use_sem, col,
                  tuple(sorted(fluor_gates.items())), _gate_cache_sig(ctx), _ratio_cache_sig(ctx))
     if cache_key in ctx.state.stats_cache.cache:
         return ctx.state.stats_cache.cache[cache_key]
@@ -693,7 +711,7 @@ def compute_rep_per_fov_stats(
     # only routes here when ``replicate_unit`` is "fov" (i.e. FOV mode on).
     reps = group_replicate_stats(
         ctx, rset.wells, target_t, use_fov=True,
-        val_col=ctx.state.channel.active_val_col,
+        val_col=col,
         threshold=threshold, fluor_gates=fluor_gates,
     )
     gm, gerr = _reduce_reps(reps, "mean", use_sem)

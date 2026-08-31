@@ -428,8 +428,14 @@ def update_channel_selector(ctx) -> None:
     if shape_labels:
         plot_sections.append(("Shape Features", shape_labels))
     have_any = bool(real_labels or ratio_labels or shape_labels)
+    # ``_response_ch_cb`` is here and **deliberately not** in the
+    # sync-to-active roster in ``set_active_channel``. Response owns its
+    # channel the way the aggregate Scatter tab does, so it takes the same
+    # *entries* as every other plot combo and keeps its own *selection*; adding
+    # it above would drag the tab back onto the shared channel on every switch,
+    # which is precisely what a tab-local control exists not to do.
     for attr in ("_chan_cb_line", "_chan_cb_bar", "_chan_cb_distribution",
-                 "_chan_cb_heatmap", "_plotting_channel_cb"):
+                 "_chan_cb_heatmap", "_plotting_channel_cb", "_response_ch_cb"):
         cb = ctx.widgets.get_or_none(attr)
         if cb is not None:
             if have_any:
@@ -703,8 +709,16 @@ def set_active_metric(ctx, metric: str) -> None:
     refresh_thresh_frac_quick_edit(ctx)
     invalidate_stats_cache(ctx)
     redraw_app(ctx)
-    if ctx.widgets.get_or_none("_bar_tp_cb") is not None:
-        ctx.features.redraw(ctx, "Bar Plots")
+    # ``redraw_app`` fans out to the default-scope tabs only — Line,
+    # Distribution and Heat Map. Every other plotting leaf re-renders through
+    # its own shim, so a leaf missing from here draws the *previous* property
+    # until something else repaints it. Response reached its figure only via
+    # ``on_activate``, so switching Property while it was on screen changed
+    # nothing until the user left the tab and came back.
+    for _title, _guard in (("Bar Plots", "_bar_tp_cb"),
+                           ("Response Curves", "_response_ax")):
+        if ctx.widgets.get_or_none(_guard) is not None:
+            ctx.features.redraw(ctx, _title)
 
 
 
@@ -956,6 +970,39 @@ def on_metric_selected_global(ctx) -> None:
         metric = "mean_intensity"
     set_active_metric(ctx, metric)
 
+
+
+def col_for_scatter_axis(ctx, channel_entry: str, metric_key: str) -> str:
+    """Map a ``(channel_entry, metric_key)`` pair to a CSV column or ratio key.
+
+    **In core, not in a feature.** This is the channel vocabulary's own rule —
+    it reads ``label_to_channel_key`` and branches on ``is_ratio_key`` /
+    ``is_shape_column``, and there is nothing about a scatter in it. It lived in
+    ``features/scatter/controller`` because that tab needed it first, so the
+    Response tab reaching for it had to be a function-local feature import —
+    a cycle workaround for a cycle that does not exist, which is what the
+    deferred-import budget exists to refuse. Both tabs import it from here.
+
+    Ratio channels collapse to the ratio key regardless of metric (ratios
+    don't carry a metric suffix). Otherwise builds ``<channel>_<metric>``.
+    ``metric_key`` may be ``fraction_above_threshold`` for the agg scatter
+    — that's a synthetic key that downstream aggregation code treats as a
+    Fraction-On aggregation against the channel's mean-intensity column.
+    """
+    mapped_key = ctx.state.channel.label_to_channel_key.get(channel_entry)
+    if mapped_key and is_ratio_key(mapped_key):
+        return mapped_key
+    # Shape features are a single per-cell value (the ``shape_*`` column itself);
+    # they carry no metric suffix, like ratios.
+    if mapped_key and is_shape_column(mapped_key):
+        return mapped_key
+    if metric_key in ("fraction_above_threshold", "smfish_count"):
+        # Fraction-on uses MFI as the underlying value column; smFISH
+        # uses the dedicated count column. (.lower(): CSV cols are lower-case.)
+        if metric_key == "smfish_count":
+            return f"{channel_entry.lower()}_smfish_count"
+        return f"{channel_entry.lower()}_mean_intensity"
+    return f"{channel_entry.lower()}_{metric_key}"
 
 
 def channel_key_for_label(ctx, label: str) -> str:

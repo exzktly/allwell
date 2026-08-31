@@ -247,7 +247,7 @@ def on_home_subtab_changed(ctx, idx: int) -> None:
     elif name == "Sample map":
         # The three annotation editors are layers of this tab, so the entry
         # rules are the layer's rather than the sub-tab's. This branch used to
-        # read ``"Groups"``, which the registry stopped being able to produce
+        # read ``"Replicates"``, which the registry stopped being able to produce
         # when they merged — so entering the tab quietly stopped deselecting the
         # active group, and the first drag on the plate rewrote whichever group
         # was left over from the last visit.

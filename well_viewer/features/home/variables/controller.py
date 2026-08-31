@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QPushButton
 
 from well_viewer.core.safe import swallow
 from well_viewer.domain import sample_variables as sv
@@ -177,14 +178,25 @@ def _say(ctx, note: str) -> None:
 
 
 def _paint_rail(ctx, listing, vset, wells, keep) -> None:
-    from .editor_view import variable_item
+    from .editor_view import variable_row
 
     listing.blockSignals(True)
     listing.clear()
     for variable in vset.variables:
         annotated, total = sv.coverage(vset, variable.id, wells)
-        item = variable_item(variable.name, variable.id, annotated, total)
+        item, row = variable_row(variable.name, variable.id, annotated, total,
+                                 listing)
         listing.addItem(item)
+        listing.setItemWidget(item, row)
+        close = row.findChild(QPushButton, "VariableRowDelete")
+        if close is not None:
+            # Bound to *this row's* id, not to whatever the rail has selected.
+            # A delete that reads the selection can act on a different variable
+            # than the row the user clicked on, which is the whole reason this
+            # moved off the column-foot button.
+            close.clicked.connect(
+                lambda _checked=False, _id=variable.id:
+                remove_variable(ctx, _id))
         if variable.id == keep:
             listing.setCurrentItem(item)
     if listing.currentItem() is None and listing.count():
@@ -235,9 +247,6 @@ def _paint_definition(ctx, variable) -> None:
 
     _sync_value_buttons(ctx, variable)
     _paint_shortfall(ctx, variable)
-    remove = _widget(ctx, "_var_remove")
-    if remove is not None:
-        remove.setText(f"Delete “{variable.name}”")
 
 
 def _sync_value_buttons(ctx, variable) -> None:
@@ -328,7 +337,6 @@ def wire_variables(ctx) -> None:
 
     listing.currentItemChanged.connect(lambda *_: refresh_variables(ctx))
     _widget(ctx, "_var_add").clicked.connect(lambda: add_variable(ctx))
-    _widget(ctx, "_var_remove").clicked.connect(lambda: remove_variable(ctx))
     _widget(ctx, "_var_undo").clicked.connect(lambda: undo(ctx))
 
     _widget(ctx, "_var_name").editingFinished.connect(lambda: commit_name(ctx))
@@ -396,8 +404,14 @@ def add_variable(ctx) -> None:
         name.selectAll()
 
 
-def remove_variable(ctx) -> None:
-    """Delete the selected variable — after asking, when wells would go with it.
+def remove_variable(ctx, variable_id: str | None = None) -> None:
+    """Delete a variable — after asking, when wells would go with it.
+
+    *variable_id* names which one. ``None`` falls back to the rail's selection,
+    which is what every caller wanted while the only entry point was one button
+    at the foot of the column; the × on a row passes its own id, so the
+    variable deleted is the one whose row was clicked rather than the one that
+    happened to be selected.
 
     One click destroyed the definition *and* every well→value assignment under
     it, with no confirmation: a filled 96-well dose grid is the most expensive
@@ -410,11 +424,13 @@ def remove_variable(ctx) -> None:
     """
     from PySide6.QtWidgets import QMessageBox
 
-    variable_id = selected_variable_id(ctx)
+    variable_id = variable_id or selected_variable_id(ctx)
     if not variable_id:
         return
     vset = _vset(ctx)
     variable = vset.by_id(variable_id)
+    if variable is None:
+        return
     assigned = len(vset.assigned_wells(variable_id))
     if assigned:
         resp = QMessageBox.question(

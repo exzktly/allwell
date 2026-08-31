@@ -40,7 +40,7 @@ to add features, how to debug, and build / environment troubleshooting), see
 3. [Quick start](#quick-start)
 4. [Analyze mode — running the pipeline](#analyze-mode--running-the-pipeline)
 5. [Review mode — exploring results](#review-mode--exploring-results)
-   - [Home](#home) (Overview · Cell Gating · Sample map — Groups · Variables · Well Labels — · Ratios · Pipeline Info)
+   - [Home](#home) (Overview · Cell Gating · Sample map — Replicates · Variables · Well Labels — · Ratios · Pipeline Info)
    - [The Review window at a glance](#the-review-window-at-a-glance)
    - [Controls shared by every tab](#controls-shared-by-every-tab)
    - Plotting: [Bar Plots](#bar-plots) · [Line Graphs](#line-graphs) · [Response Curves](#response-curves) · [Scatter Plot](#scatter-plot) · [Distribution](#distribution) · [Heat Map](#heat-map)
@@ -1261,7 +1261,7 @@ wells, and none of these four is a substitute for another.
 
 | | The question it answers | What it does |
 |---|---|---|
-| **Group** (Home → Sample map → Groups) | *Which wells are replicates of one condition?* | **Pools.** Every plot, the Statistics tab and Batch Export draw one bar, trace or row per group instead of per well. A group carries a colour and a place in the plot order. |
+| **Group** (Home → Sample map → Replicates) | *Which wells are replicates of one condition?* | **Pools.** Every plot, the Statistics tab and Batch Export draw one bar, trace or row per group instead of per well. A group carries a colour and a place in the plot order. |
 | **Variable** (Home → Sample map → Variables) | *What did you change across the plate?* | **Pools, colours and splits.** A named axis with ordered values — `Dose: 0, 0.1, 1, 10` — assigned per well. Pick one as **Group by** and the plots pool by it; as **Colour by** or **Split by** and they ink or band by it. A numeric one can be a Response Curve's x axis. |
 | **Well label** (Home → Sample map → Well Labels) | *What should this well be called on a figure?* | **Display only.** The label replaces the raw well token in legends, tick labels and exported names. It pools nothing and changes no number. |
 | **Saved selection** (the rail drawer under the plate map) | *Can I get these wells back later?* | **Nothing but recall.** It lights the same wells again in one click. It is not a group, it is not a replicate set, and loading one never edits a group's membership. |
@@ -1429,11 +1429,11 @@ conditions.
 #### Sample map
 
 One tab, one plate, and a switch across the top with three segments naming what
-the plate is showing: **Groups**, **Variables** or **Well Labels**. Only one
+the plate is showing: **Replicates**, **Variables** or **Well Labels**. Only one
 plate is on screen at a time, so the control in front of you is the control that
 acts, and the line under the switch says what that layer is for.
 
-Arriving on **Groups** selects no group, so a click on the plate has no
+Arriving on **Replicates** selects no group, so a click on the plate has no
 consequence until you pick one — otherwise the first click would edit whichever
 group was still active from your last visit.
 
@@ -1449,11 +1449,11 @@ is being used instead, because that is what the plots actually drew.
 The selection travels between **Variables** and **Well Labels**, because on both
 it means the same thing — the wells you are about to act on — and it is also
 what Cell Gating's CDFs and **Add Prefix** read. It does **not** travel into
-**Groups**: there the plate is the current group's membership, and a drag on it
+**Replicates**: there the plate is the current group's membership, and a drag on it
 edits that group, so carrying a selection in would hand a group wells you never
 put in it.
 
-##### Groups
+##### Replicates
 
 Name a set of wells as replicates; every plot, the Statistics tab, and Batch
 Export can then treat them as one condition. A group **is** exactly one
@@ -1462,7 +1462,7 @@ inside a group). Build one with **+ Add** (a graphical plate picker —
 rubber-band select, row/column headers), or let **Quick Replicates** chunk the
 current selection into groups of a chosen size via the **Replicates per group**
 spinbox (default 2), walking the wells along the Rows / Columns direction. On
-the Groups plate every well is tinted by its **group's** colour, so all wells in
+the Replicates plate every well is tinted by its **group's** colour, so all wells in
 a group read as one condition and match the group's row swatch.
 
 **Editing a group on a partly-loaded plate keeps the wells you cannot see.** If
@@ -1627,7 +1627,7 @@ definitions, so redoing your groups does not cost you a plate of doses.
 
 Give a **well** a human-readable name; it shows in every plot legend instead of
 the raw well token. A label pools nothing and changes no number — it is display
-only, and it names wells rather than groups: a group is renamed on the Groups
+only, and it names wells rather than groups: a group is renamed on the Replicates
 tab by typing over its name there. A label set here is what every legend names,
 [Line Graphs](#line-graphs)' included — where the on-screen legend stops after
 twelve traces and says how many it left out. **Add Prefix** and **Add Suffix**
@@ -1638,7 +1638,7 @@ wells currently selected on the plate beside the tab.
 auto-generated — `1`, `Rep 2`, `Group 3` — figures label it with its member
 wells instead, so that an axis does not read `1, 2, 3`; and those wells are
 named by their labels. That means a label typed here can become a group's
-identity on every figure. The Groups tab says so when it applies, naming each
+identity on every figure. The Replicates page says so when it applies, naming each
 group and what a figure will call it, and typing a real name over the group's
 stops the substitution.
 
@@ -2124,7 +2124,7 @@ Fold change:  Control [— ▾]   Baseline [— ▾]
 - **Control** — pick a loaded well or replicate set to divide every bar
   / curve by its mean at the matching timepoint. `—` disables this
   axis. (The Bar Plots control combo also includes any replicate sets
-  defined on Home → Sample map → Groups.) When a group name happens to match a well
+  defined on Home → Sample map → Replicates.) When a group name happens to match a well
   token, the well's entry is shown as `A01 (well)` so the two can be told
   apart on screen. The suffix is only a label: the entry records which of
   the two you picked, so a group named `A01 (well)` is still selectable
@@ -2546,11 +2546,17 @@ well, so a well carries its value whether or not anybody grouped it. Grouping
 wells is what pools replicates into one point with an error bar across them; a
 lone well is a single measurement and is drawn without one.
 
-**What the curves measure.** The **Y** control picks between the channel's
-active Property and **Fraction above threshold** — the proportion of cells above
-the ON cutoff. The fraction is often the readout a dose response is really
-about, and it is not one of the Properties the band offers, so it lives here.
-The axis label follows what you picked, and a fit works on either.
+**What the curves measure.** This tab has its **own** Channel and Property
+controls, like the aggregate Scatter tab — and its Property list includes
+**Fraction above threshold**, the proportion of cells above the ON cutoff,
+which the shared band cannot offer. The fraction is often the readout a dose
+response is really about. The axis label follows what you picked, and a fit
+works on either.
+
+Because they are this tab's own, changing them here does not move Bar, Line,
+Distribution or Heat Map. Until you touch them they follow the channel and
+property you picked on the band, so a tab you have never configured is showing
+the same measurement as everything else.
 
 If you also turn on fold change, note that a control with **nothing** above the
 threshold has a fraction of zero, and dividing by it is undefined. The figure
@@ -2866,7 +2872,7 @@ answer a different question: **Dunnett** against one control group, a **paired
 t-test** and **Wilcoxon signed-rank**, and a **two-way ANOVA**.
 
 - **Needs** — at least two groups. On first visit the tab auto-populates from
-  the replicate sets defined on [Home → Sample map → Groups](#groups).
+  the replicate sets defined on [Home → Sample map → Replicates](#replicates).
 - **Controls** — the group editor is in the sidebar; everything else is on the
   same one-row controls band every tab uses — **Channel**, **Property**,
   **Statistic**, **Timepoint** and **Test**, then an FOV-replicate indicator
@@ -3815,7 +3821,7 @@ something you asked to discard. If one item fails (an unreadable file, say), the
 others still run and the status line names the one that did not.
 
 Smaller resets stay next to the thing they affect: **Clear all groups** on
-Home → Sample map → Groups, and **Reset crop + curation** in the Segmentation
+Home → Sample map → Replicates, and **Reset crop + curation** in the Segmentation
 tab's Edit menu, which is the same action as the Curation checkbox above.
 
 ---

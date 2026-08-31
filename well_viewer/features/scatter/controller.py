@@ -15,7 +15,9 @@ _logger = logging.getLogger(__name__)
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 from well_viewer.core.ui_helpers import multiselect_button_text
 from well_viewer.core.selection_controller import has_plottable_selection
-from well_viewer.core.channel_state_controller import populate_metric_combo, get_fluor_gate, ratio_label_for
+from well_viewer.core.channel_state_controller import (
+    col_for_scatter_axis, get_fluor_gate, populate_metric_combo, ratio_label_for,
+)
 from well_viewer.domain.ratio_models import is_ratio_key
 from pipeline.shape_features import is_shape_column
 from well_viewer.core.safe import swallowed
@@ -712,32 +714,6 @@ def col_for_scatter_entry(ctx, entry: str) -> str:
             # fall back to mean intensity for the plain channel entry.
             metric = "mean_intensity"
         return f"{entry.lower()}_{metric}"
-
-
-
-def col_for_scatter_axis(ctx, channel_entry: str, metric_key: str) -> str:
-    """Map a scatter (channel_entry, metric_key) pair to a CSV column or ratio key.
-
-    Ratio channels collapse to the ratio key regardless of metric (ratios
-    don't carry a metric suffix). Otherwise builds ``<channel>_<metric>``.
-    ``metric_key`` may be ``fraction_above_threshold`` for the agg scatter
-    — that's a synthetic key that downstream aggregation code treats as a
-    Fraction-On aggregation against the channel's mean-intensity column.
-    """
-    mapped_key = ctx.state.channel.label_to_channel_key.get(channel_entry)
-    if mapped_key and is_ratio_key(mapped_key):
-        return mapped_key
-    # Shape features are a single per-cell value (the ``shape_*`` column itself);
-    # they carry no metric suffix, like ratios.
-    if mapped_key and is_shape_column(mapped_key):
-        return mapped_key
-    if metric_key in ("fraction_above_threshold", "smfish_count"):
-        # Fraction-on uses MFI as the underlying value column; smFISH
-        # uses the dedicated count column. (.lower(): CSV cols are lower-case.)
-        if metric_key == "smfish_count":
-            return f"{channel_entry.lower()}_smfish_count"
-        return f"{channel_entry.lower()}_mean_intensity"
-    return f"{channel_entry.lower()}_{metric_key}"
 
 
 

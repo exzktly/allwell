@@ -92,11 +92,11 @@ def build_replicate_panel(ctx, parent: QWidget, *, role: str = "editor") -> None
                     return
             except Exception:
                 swallowed()  # was: pass (silent except)
-        # ``layer_is_showing``, not ``current_layer(...) == "Groups"``: the
+        # ``layer_is_showing``, not ``current_layer(...) == "Replicates"``: the
         # latter falls back to the first layer, which *is* Groups, so a context
         # that has recorded nothing would have answered yes — a guard failing
         # open on the one layer that edits.
-        if not layer_is_showing(ctx, "Groups"):
+        if not layer_is_showing(ctx, "Replicates"):
             return
         sid = ctx.state.selection.current_selection_id
         sel = sel_by_id(ctx, sid) if sid else None

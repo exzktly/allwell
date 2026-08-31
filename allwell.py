@@ -768,7 +768,7 @@ class AllWellApp(QMainWindow):
                 "the Cell Area / FluorGating / ThreshFracOn thresholds. "
                 "Hit <i>Auto-threshold all channels</i> any time to "
                 "re-derive ThreshFracOn defaults.<br>"
-                "4. Define replicate groups (Home → Groups) "
+                "4. Define replicate groups (Home → Sample map → Replicates) "
                 "and explore the data on the plotting tabs (Line / Bar / "
                 "Scatter / Distribution / Heat Map).</p>"
                 "<p><b>Review tab</b> — explore an already-analyzed dataset: "

@@ -65,7 +65,7 @@ def _ctx(wells=None, selections=(), labels=None):
         state=SimpleNamespace(
             # Home's **real** typed slice, not a namespace shaped to whatever
             # the code happens to read: the Sample map tab records which layer
-            # is showing there, and a stub without it answers "Groups" to every
+            # is showing there, and a stub without it answers "Replicates" to every
             # question and passes whatever the code does (§7.8, face one).
             feature_slice=lambda name: home if name == "home" else None,
             selection=selection,
@@ -100,7 +100,7 @@ def _strip_texts(ctx) -> list[str]:
     return _texts(host) if host is not None else []
 
 
-@pytest.mark.parametrize("layer", ["Groups", "Variables", "Well Labels"])
+@pytest.mark.parametrize("layer", ["Replicates", "Variables", "Well Labels"])
 def test_every_layer_states_its_role_and_its_sibling(layer, qtbot):
     """Through the tab's real builder and its real switch.
 

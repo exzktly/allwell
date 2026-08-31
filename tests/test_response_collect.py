@@ -68,7 +68,7 @@ def stub_stats(monkeypatch):
     """``compute_rep_stats`` and the ON cutoff, so the curve's shape is the test's."""
     means = {}
 
-    def _stats(ctx, rset, target_t, threshold, use_sem):
+    def _stats(ctx, rset, target_t, threshold, use_sem, **kw):
         value = means.get((rset.name, target_t), 10.0)
         return (None, None, None, None) if value is None else (value, 1.0, 0.5, 0.1)
 
@@ -689,7 +689,7 @@ def test_a_single_replicate_member_is_counted_as_having_no_spread(stub_stats, mo
     causes with two different fixes (another replicate, or a control), so two
     counts rather than one sentence guessing between them.
     """
-    def _stats(ctx, rset, target_t, threshold, use_sem):
+    def _stats(ctx, rset, target_t, threshold, use_sem, **kw):
         return (10.0, float("nan"), 0.5, 0.1)      # a mean, no spread
 
     import well_viewer.domain.stats_compute as sc
@@ -1206,3 +1206,90 @@ def test_subtracting_a_zero_control_is_not_reported_as_a_problem(
     data = rc.collect_response(ctx, "dose", [24.0], y_metric=rc.Y_FRACTION)
     assert data.zero_control == []
     assert data.control_gaps == [("treated", 24.0)]
+
+
+# ── the tab-local column actually reaches the producers ─────────────────────
+#
+# The whole `val_col` seam was unguarded: a reviewer reverted `collect_response`
+# to read the shared `active_val_col` and dropped `val_col=` from the stats
+# call, and every test in this file and the tab's still passed. The stubs took
+# `**kw` and threw it away, which is a stub agreeing with the caller about a
+# value neither of them looks at.
+
+def test_the_tab_local_column_is_what_the_stats_producer_reads(monkeypatch):
+    """Captured from the call, not inferred from the state it was built from."""
+    import well_viewer.domain.stats_compute as sc
+    import well_viewer.core.channel_state_controller as csc
+
+    seen = {}
+
+    def _stats(ctx, rset, target_t, threshold, use_sem, **kw):
+        seen["val_col"] = kw.get("val_col")
+        return (10.0, 1.0, 0.5, 0.05)
+
+    monkeypatch.setattr(sc, "compute_rep_stats", _stats)
+    monkeypatch.setattr(csc, "on_cutoff_for_column", lambda *a, **k: 0.0)
+    ctx = _ctx(wells=["A01"], variable=_dose(("1", 1.0)),
+               assignments={"dose": {"A01": "d0"}},
+               selections=_groups(("solo", ["A01"])))
+
+    rc.collect_response(ctx, "dose", [24.0], val_col="rfp_total_intensity")
+    assert seen["val_col"] == "rfp_total_intensity", (
+        "the tab-local column never reached compute_rep_stats")
+
+
+def test_the_per_fov_producer_gets_the_same_column(monkeypatch):
+    """A seam on one producer and not the other reverts on the FOV toggle."""
+    import well_viewer.domain.stats_compute as sc
+    import well_viewer.core.channel_state_controller as csc
+
+    seen = {}
+    monkeypatch.setattr(sc, "compute_rep_stats",
+                        lambda *a, **k: (10.0, 1.0, 0.5, 0.05))
+
+    def _fov(ctx, rset, target_t, threshold, use_sem, **kw):
+        seen["val_col"] = kw.get("val_col")
+        return (10.0, 2.0, 0.5, 0.05)
+
+    monkeypatch.setattr(sc, "compute_rep_per_fov_stats", _fov)
+    monkeypatch.setattr(csc, "on_cutoff_for_column", lambda *a, **k: 0.0)
+    ctx = _ctx(wells=["A01"], variable=_dose(("1", 1.0)),
+               assignments={"dose": {"A01": "d0"}},
+               selections=_groups(("solo", ["A01"])))
+    ctx.state.plot.use_fov_replicates = True
+
+    rc.collect_response(ctx, "dose", [24.0], val_col="rfp_total_intensity")
+    assert seen["val_col"] == "rfp_total_intensity"
+
+
+def test_the_on_cutoff_is_resolved_for_the_tab_s_own_column(monkeypatch):
+    """Not for the shared channel — that is a fraction against another cutoff.
+
+    ``on_cutoff_for_column`` skips its own column split when handed a
+    ``channel=``, so passing the shared ``active_channel`` while the column was
+    tab-local read the wrong channel's ThreshFracOn: with the tab on RFP and
+    the band on GFP, every fraction was "cells above RFP intensity, judged by
+    GFP's cutoff". A plausible curve and a wrong number.
+    """
+    import well_viewer.domain.stats_compute as sc
+    import well_viewer.core.channel_state_controller as csc
+
+    seen = {}
+
+    def _cutoff(ctx, col, channel=None, **kw):
+        seen["col"], seen["channel"] = col, channel
+        return 0.0
+
+    monkeypatch.setattr(csc, "on_cutoff_for_column", _cutoff)
+    monkeypatch.setattr(sc, "compute_rep_stats",
+                        lambda *a, **k: (10.0, 1.0, 0.5, 0.05))
+    ctx = _ctx(wells=["A01"], variable=_dose(("1", 1.0)),
+               assignments={"dose": {"A01": "d0"}},
+               selections=_groups(("solo", ["A01"])))
+    ctx.state.channel.active_channel = "gfp"
+
+    rc.collect_response(ctx, "dose", [24.0], val_col="rfp_mean_intensity")
+    assert seen["col"] == "rfp_mean_intensity"
+    assert seen["channel"] is None, (
+        f"the cutoff was pinned to the shared channel {seen['channel']!r} "
+        "instead of being derived from this tab's column")

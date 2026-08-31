@@ -577,6 +577,22 @@ QPushButton#VariableValueChip {{
     font-size: {t.small_size}px;
     padding: {s.xs}px {s.sm}px;
 }}
+/* The × that deletes a variable, on its own rail row. Quiet until the row is
+   under the cursor: it destroys a definition and every well assignment under
+   it, so it should not read as the row's primary action while the user is
+   picking which variable to look at. */
+QPushButton#VariableRowDelete {{
+    background: transparent;
+    border: none;
+    border-radius: {r.sm}px;
+    color: {c.text_muted};
+    font-size: {t.small_size}px;
+    padding: 0px;
+}}
+QPushButton#VariableRowDelete:hover {{
+    background-color: {c.hover};
+    color: {c.warn};
+}}
 QPushButton#VariableValueChip:hover {{
     background-color: {c.hover};
     border-color: {c.border_strong};

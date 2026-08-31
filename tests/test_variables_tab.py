@@ -78,8 +78,28 @@ def _vset(tab):
     return tab.ctx.state.selection.variables
 
 
+def _delete_row(tab, row: int = 0):
+    """Press the × on rail row *row* — the control that now deletes a variable.
+
+    Through the real button rather than by calling ``remove_variable``: the
+    delete moved from one button at the foot of the column onto each row, and
+    a test that calls the handler directly would pass against a row whose ×
+    was never connected — the failure this tab has shipped before.
+    """
+    from well_viewer.features.home.variables.editor_view import row_delete_button
+
+    button = row_delete_button(tab.w("_var_list"), row)
+    assert button is not None, f"rail row {row} has no delete button"
+    button.click()
+
+
 def _labels(listing):
-    return [listing.item(i).text() for i in range(listing.count())]
+    # The **painted** text, from the row widget — ``item.text()`` is blanked so
+    # the delegate does not draw it under the widget, and a test reading it
+    # would be asserting a string that never reaches the screen.
+    from well_viewer.features.home.variables.editor_view import row_label_text
+
+    return [row_label_text(listing, i) for i in range(listing.count())]
 
 
 def _rail_labels(tab):
@@ -212,7 +232,7 @@ def test_remove_takes_the_selected_value(tab):
 def test_remove_takes_the_selected_variable(tab):
     tab.w("_var_add").click()
     tab.w("_var_add").click()
-    tab.w("_var_remove").click()
+    _delete_row(tab, tab.w("_var_list").currentRow())
 
     assert len(_vset(tab).variables) == 1
 
@@ -760,7 +780,12 @@ def _with_groups(tab, groups):
 
 def _group_rows(tab):
     listing = tab.w("_var_groups")
-    return [listing.item(i).text() for i in range(listing.count())]
+    # The **painted** text, from the row widget — ``item.text()`` is blanked so
+    # the delegate does not draw it under the widget, and a test reading it
+    # would be asserting a string that never reaches the screen.
+    from well_viewer.features.home.variables.editor_view import row_label_text
+
+    return [row_label_text(listing, i) for i in range(listing.count())]
 
 
 def test_a_group_whose_wells_agree_shows_that_value(tab):
@@ -887,7 +912,7 @@ def test_removing_the_last_variable_blanks_the_plate_it_described(tab, monkeypat
     monkeypatch.setattr(QMessageBox, "question",
                         staticmethod(lambda *a, **k: QMessageBox.Yes))
     seen = _watch_clears(tab, monkeypatch)
-    tab.w("_var_remove").click()
+    _delete_row(tab, tab.w("_var_list").currentRow())
 
     assert seen["colors"] and seen["rings"] and seen["markers"], (
         f"the deleted variable's decoration was never cleared: {seen}"
@@ -1092,7 +1117,7 @@ def test_deleting_a_filled_variable_asks_first(tab, monkeypatch):
     monkeypatch.setattr(QMessageBox, "question",
                         staticmethod(lambda *a, **k: asked.append(a) or QMessageBox.No))
 
-    tab.w("_var_remove").click()
+    _delete_row(tab, tab.w("_var_list").currentRow())
 
     assert asked, "a filled variable was deleted without asking"
     assert _vset(tab).variables, "answering No deleted it anyway"
@@ -1109,7 +1134,7 @@ def test_deleting_an_unfilled_variable_asks_nothing(tab, monkeypatch):
     monkeypatch.setattr(QMessageBox, "question",
                         staticmethod(lambda *a, **k: asked.append(a) or QMessageBox.Yes))
 
-    tab.w("_var_remove").click()
+    _delete_row(tab, tab.w("_var_list").currentRow())
 
     assert not asked
     assert not _vset(tab).variables
@@ -1327,7 +1352,7 @@ def test_undo_puts_back_a_deleted_variable(tab, monkeypatch):
     tab.w("_var_fill_apply").click()
     monkeypatch.setattr(QMessageBox, "question",
                         staticmethod(lambda *a, **k: QMessageBox.Yes))
-    tab.w("_var_remove").click()
+    _delete_row(tab, tab.w("_var_list").currentRow())
     assert not _vset(tab).variables
 
     tab.w("_var_undo").click()
@@ -1538,3 +1563,29 @@ def test_the_chip_row_wraps_rather_than_running_off_the_page(tab):
     _dose_tab(tab, labels="0, 0.1, 0.3, 1, 3, 10, 30, 100, 300, 1000")
     assert isinstance(tab.w("_var_chips").layout(), FlowLayout)
     assert len(_chips(tab)) == 11          # ten values plus No value
+
+
+def test_the_row_x_deletes_its_own_row_not_the_selected_one(tab):
+    """The one property the × was introduced for, and it had no guard.
+
+    Every other delete test selects the row it then presses, so the clicked row
+    and the selected row are always the same and a × bound to the *selection*
+    passes them all — a reviewer proved it by reverting the binding and
+    watching 96 tests stay green. Here they differ on purpose.
+    """
+    from well_viewer.features.home.variables.editor_view import row_delete_button
+
+    tab.w("_var_add").click()
+    tab.w("_var_add").click()
+    listing = tab.w("_var_list")
+    assert listing.count() == 2, _rail_labels(tab)
+    first = listing.item(0).data(Qt.UserRole)
+
+    listing.setCurrentRow(0)                 # selected: row 0
+    row_delete_button(listing, 1).click()    # pressed:  row 1
+
+    kept = [v.id for v in _vset(tab).variables]
+    remaining = kept
+    assert remaining == [first], (
+        "pressing row 1's × removed the selected row (0) instead of the row "
+        f"it sits on: kept {remaining}, expected {[first]}")

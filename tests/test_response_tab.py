@@ -50,7 +50,7 @@ def tab(qtbot, monkeypatch):
 
     monkeypatch.setattr(csc, "on_cutoff_for_column", lambda *a, **k: 0.0)
     monkeypatch.setattr(sc, "compute_rep_stats",
-                        lambda ctx, rset, t, thr, sem: (10.0, 1.0, 0.5, 0.1))
+                        lambda ctx, rset, t, thr, sem, **kw: (10.0, 1.0, 0.5, 0.1))
     monkeypatch.setattr(ps, "apply_ax_style", lambda *a, **k: None)
     monkeypatch.setattr(ps, "apply_export_style_to_current", lambda *a, **k: None)
 
@@ -73,12 +73,20 @@ def tab(qtbot, monkeypatch):
     qtbot.addWidget(series_combo)
     series_combo.currentIndexChanged.connect(
         lambda *_: rctl.on_series_changed(ctx))
-    y_combo = LabeledComboBox("Y")
+    # This tab's own Channel and Property, connected the way the builder
+    # connects them. Populated with plain labels here rather than through
+    # ``populate_metric_combo``, which needs the whole ChannelState; the tests
+    # that care about the real list drive that function directly.
+    ch_combo = LabeledComboBox("Channel")
+    qtbot.addWidget(ch_combo)
+    ch_combo.addItems(["GFP", "RFP"])
+    ch_combo.currentIndexChanged.connect(
+        lambda *_: rctl.on_response_channel_changed(ctx))
+    y_combo = LabeledComboBox("Property")
     qtbot.addWidget(y_combo)
-    for _label, _metric in rctl.Y_METRIC_LABELS:
-        y_combo.addItem(_label, _metric)
+    y_combo.addItems(["Mean Intensity", rctl.FRACTION_LABEL])
     y_combo.currentIndexChanged.connect(
-        lambda *_: rctl.set_y_metric(ctx, y_combo.currentData() or ""))
+        lambda *_: rctl.on_response_metric_changed(ctx))
     tp_button = QPushButton("Timepoints: 0 selected")
     qtbot.addWidget(tp_button)
     # A bare ``Figure``, not ``pyplot.subplots``: pyplot would build a Qt canvas
@@ -92,6 +100,7 @@ def tab(qtbot, monkeypatch):
     # The tab's own timepoint selection lives on a feature slice, reached the
     # way core reaches one — a stub must answer ``feature_slice`` or the picker
     # silently has nothing to select.
+    from well_viewer.core.cell_gating_state import CellGatingState
     from well_viewer.core.export_prefs_state import ExportPrefsState
     from well_viewer.features.response.state import ResponseState
 
@@ -104,7 +113,8 @@ def tab(qtbot, monkeypatch):
                           _response_fig=fig, _response_canvas=canvas,
                           _response_tp_button=tp_button,
                           _response_series_cb=series_combo,
-                          _response_y_cb=y_combo),
+                          _response_metric_cb=y_combo,
+                          _response_ch_cb=ch_combo),
         notify=SimpleNamespace(set_status=statuses.append),
         state=SimpleNamespace(
             dataset=SimpleNamespace(well_paths={}),
@@ -128,20 +138,43 @@ def tab(qtbot, monkeypatch):
             # carries it and ``_y_label`` reads it, so a stub that omitted it
             # made the axis read "GFP" and any label assertion agree with a
             # tab that had dropped the metric entirely.
+            # ``label_to_channel_key`` and ``smfish_channels`` spelled out
+            # because ``populate_metric_combo`` reads both, and this tab now
+            # calls it for its own Property list. A stub missing them made the
+            # refresh raise on a plate that works perfectly in the app —
+            # ``test_response_stub_matches_plot_state``'s lesson, one slice
+            # over.
             channel=SimpleNamespace(active_val_col="gfp_mean_intensity",
                                     active_channel="gfp",
                                     active_metric="mean_intensity",
-                                    fluor_channels=()),
+                                    # A real label -> key map, because the
+                                    # column resolver goes through it to tell a
+                                    # ratio and a shape feature from a plain
+                                    # channel. Empty, it could not, and the
+                                    # tests below passed against a resolver
+                                    # that pasted the display label into the
+                                    # column name.
+                                    label_to_channel_key={"GFP": "gfp",
+                                                          "RFP": "rfp"},
+                                    ratio_metrics=(),
+                                    smfish_channels=(),
+                                    fluor_channels=("gfp", "rfp")),
             feature_slice=slices.get,
             # The real slice, not a stub: ``figure_prefs`` seeds it lazily and
             # distinguishes "never set" from "set to off", which is the whole
             # property the log-x tests are about.
             export_prefs=ExportPrefsState(),
+            # ``active_channel_label`` reaches the gating slice through
+            # ``fluor_gate_for``; the real ``AppState`` always carries it, and a
+            # stub without it made the label lookup raise on a path the app
+            # takes on every redraw.
+            cell_gating=CellGatingState(),
         ),
         runtime=SimpleNamespace(barplot=SimpleNamespace(current_keys=lambda: [])),
     )
     return SimpleNamespace(ctx=ctx, combo=combo, ax=ax, statuses=statuses,
                            series=series_combo, y=y_combo,
+                           channel=ch_combo,
                            monkeypatch=monkeypatch,
                            w=ctx.widgets.get_or_none)
 
@@ -673,7 +706,7 @@ def _dose_plate(tab, *, ec50=1.0, bottom=5.0, top=95.0, flat=False):
     import well_viewer.domain.stats_compute as sc
     tab.monkeypatch.setattr(
         sc, "compute_rep_stats",
-        lambda ctx, rset, t, thr, sem: (by_name[rset.name], 1.0, 0.5, 0.1))
+        lambda ctx, rset, t, thr, sem, **kw: (by_name[rset.name], 1.0, 0.5, 0.1))
     return doses
 
 
@@ -1388,14 +1421,14 @@ def test_choosing_the_fraction_in_the_combo_redraws_with_it(tab):
     tab.monkeypatch.setattr(
         __import__("well_viewer.domain.stats_compute", fromlist=["x"]),
         "compute_rep_stats",
-        lambda ctx, rset, t, thr, sem: (10.0, 1.0, 0.42, 0.03))
+        lambda ctx, rset, t, thr, sem, **kw: (10.0, 1.0, 0.42, 0.03))
     variable = _variable(pairs=(("1", 1.0), ("10", 10.0)))
     _load(tab, variable, {"A01": "v0", "A02": "v1"},
           [("lo", ["A01"]), ("hi", ["A02"])])
     rctl.redraw_response(tab.ctx)
     assert [float(y) for y in tab.ax.get_lines()[0].get_ydata()] == [10.0, 10.0]
 
-    tab.y.setCurrentIndex(tab.y.findData("fraction"))
+    tab.y.setCurrentIndex(tab.y.findText(rctl.FRACTION_LABEL))
 
     assert [float(y) for y in tab.ax.get_lines()[0].get_ydata()] == [0.42, 0.42]
 
@@ -1409,15 +1442,15 @@ def test_the_axis_label_follows_the_y_metric(tab):
     tab.monkeypatch.setattr(
         __import__("well_viewer.domain.stats_compute", fromlist=["x"]),
         "compute_rep_stats",
-        lambda ctx, rset, t, thr, sem: (10.0, 1.0, 0.42, 0.03))
+        lambda ctx, rset, t, thr, sem, **kw: (10.0, 1.0, 0.42, 0.03))
     variable = _variable(pairs=(("1", 1.0),))
     _load(tab, variable, {"A01": "v0"}, [("a", ["A01"])])
 
-    tab.y.setCurrentIndex(tab.y.findData("fraction"))
+    tab.y.setCurrentIndex(tab.y.findText(rctl.FRACTION_LABEL))
     data = rctl.response_data(tab.ctx)
     assert rctl._y_label(tab.ctx, data) == "GFP fraction above threshold"
 
-    tab.y.setCurrentIndex(tab.y.findData("mean"))
+    tab.y.setCurrentIndex(tab.y.findText("Mean Intensity"))
     data = rctl.response_data(tab.ctx)
     assert rctl._y_label(tab.ctx, data) == "GFP mean intensity"
 
@@ -1427,15 +1460,15 @@ def test_the_y_metric_survives_a_save_and_a_restore(tab):
 
     variable = _variable(pairs=(("1", 1.0),))
     _load(tab, variable, {"A01": "v0"}, [("a", ["A01"])])
-    tab.y.setCurrentIndex(tab.y.findData("fraction"))
+    tab.y.setCurrentIndex(tab.y.findText(rctl.FRACTION_LABEL))
 
     saved = io.snapshot_response(tab.ctx)
-    assert saved["y_metric"] == "fraction"
+    assert saved["metric_label"] == rctl.FRACTION_LABEL
 
-    tab.y.setCurrentIndex(tab.y.findData("mean"))
+    tab.y.setCurrentIndex(tab.y.findText("Mean Intensity"))
     io.apply_response(tab.ctx, saved)
-    assert rctl.selected_y_metric(tab.ctx) == "fraction"
-    assert tab.y.currentData() == "fraction"
+    assert rctl.response_metric_label(tab.ctx) == rctl.FRACTION_LABEL
+    assert tab.y.currentText() == rctl.FRACTION_LABEL
 
 
 def test_the_fov_toggle_reaches_the_figure(tab):
@@ -1447,10 +1480,10 @@ def test_the_fov_toggle_reaches_the_figure(tab):
     import well_viewer.domain.stats_compute as sc
     tab.monkeypatch.setattr(
         sc, "compute_rep_stats",
-        lambda ctx, rset, t, thr, sem: (10.0, float("nan"), 0.5, float("nan")))
+        lambda ctx, rset, t, thr, sem, **kw: (10.0, float("nan"), 0.5, float("nan")))
     tab.monkeypatch.setattr(
         sc, "compute_rep_per_fov_stats",
-        lambda ctx, rset, t, thr, sem: (10.0, 2.5, 0.5, 0.05))
+        lambda ctx, rset, t, thr, sem, **kw: (10.0, 2.5, 0.5, 0.05))
 
     variable = _variable(pairs=(("1", 1.0), ("10", 10.0)))
     _load(tab, variable, {"A01": "v0", "A02": "v1"},
@@ -1468,3 +1501,99 @@ def test_the_fov_toggle_reaches_the_figure(tab):
         f"the whiskers are not the per-FOV spread of 2.5 about 10.0: {lows_highs}")
     captions = " | ".join(t.get_text() for t in tab.ax.texts)
     assert "no error bar" not in captions, captions
+
+
+# ── this tab's own Channel and Property ─────────────────────────────────────
+
+def test_the_property_list_offers_the_fraction(tab):
+    """The whole reason this pair is tab-local rather than the shared band's.
+
+    The shared combo cannot carry it: its consumers resolve the column as
+    ``f"{channel}_{metric}"``, and there is no `gfp_fraction_above_threshold`
+    to read.
+    """
+    rctl.refresh_response_metric_combo(tab.ctx)
+    offered = [tab.y.itemText(i) for i in range(tab.y.count())]
+    assert rctl.FRACTION_LABEL in offered, offered
+
+
+def test_the_fraction_reads_the_channels_mean_intensity_column(tab):
+    """It is a share of cells clearing the ON cutoff *on that column*.
+
+    Asserting the column, not "a column was chosen": resolving it the obvious
+    way — the metric key pasted onto the channel — yields
+    ``gfp_fraction_above_threshold``, which no frame has, and every point would
+    come back uncomputed with nothing on the figure to say why.
+    """
+    from well_viewer.data.metric_labels import METRIC_LABEL_TO_KEY
+
+    # What makes the mean column the right answer is that this label is not a
+    # metric key at all. Pinned, because without it the explicit branch in
+    # ``response_val_col`` is redundant — ``.get(label, "mean_intensity")``
+    # already returns the mean — and a test of that branch passes against an
+    # implementation that does not have it. The day someone adds a fraction key
+    # to the roster, this fires and the branch becomes load-bearing.
+    assert rctl.FRACTION_LABEL not in METRIC_LABEL_TO_KEY
+
+    slice_ = tab.ctx.state.feature_slice("response")
+    slice_.channel = "GFP"
+    slice_.metric_label = rctl.FRACTION_LABEL
+    # The **key**, lowercased — not the display label. Composing the column
+    # from the label produced "GFP_mean_intensity", which survived only on
+    # ``resolve_value_series``'s legacy case-fold fallback and not at all for a
+    # ratio, whose label and key are entirely different strings.
+    assert rctl.response_val_col(tab.ctx) == "gfp_mean_intensity"
+
+    slice_.metric_label = "Mean Intensity"
+    assert rctl.response_val_col(tab.ctx) == "gfp_mean_intensity"
+    # A real label from ``METRIC_LABEL_TO_KEY``, not an invented one: the
+    # first version of this line said "Integrated Intensity", which is not in
+    # the roster, so the fallback correctly returned the mean column and the
+    # test was asserting against a vocabulary the app does not have.
+    slice_.metric_label = "Total Intensity"
+    assert rctl.response_val_col(tab.ctx) == "gfp_total_intensity"
+
+
+def test_an_untouched_tab_follows_the_shared_channel_and_property(tab):
+    """Falls back rather than seeding, so a tab nobody configured is not stale."""
+    slice_ = tab.ctx.state.feature_slice("response")
+    slice_.channel = ""
+    slice_.metric_label = ""
+    tab.ctx.state.channel.active_channel = "rfp"
+    tab.ctx.state.channel.active_val_col = "rfp_mean_intensity"
+    tab.ctx.state.channel.active_metric = "mean_intensity"
+
+    # The **label**, which is what the combo holds. Falling back to the raw
+    # token made a case-sensitive ``findText`` miss, so the box read GFP while
+    # the tab drew the other channel.
+    assert rctl.response_channel(tab.ctx) == "RFP"
+    assert rctl.response_metric_label(tab.ctx) == "Mean Intensity"
+
+
+def test_choosing_a_property_here_does_not_move_the_other_tabs(tab):
+    """Tab-local, as the aggregate Scatter tab's pair is.
+
+    Writing the shared ``active_metric`` would repaint Bar and Line to a
+    property the user chose on a different page — the surprise this control
+    was made tab-local to avoid.
+    """
+    before_metric = tab.ctx.state.channel.active_metric
+    before_channel = tab.ctx.state.channel.active_channel
+
+    tab.y.setCurrentIndex(tab.y.findText(rctl.FRACTION_LABEL))
+    tab.channel.setCurrentIndex(tab.channel.findText("RFP"))
+
+    assert tab.ctx.state.channel.active_metric == before_metric
+    assert tab.ctx.state.channel.active_channel == before_channel
+    assert rctl.response_metric_label(tab.ctx) == rctl.FRACTION_LABEL
+    assert rctl.response_channel(tab.ctx) == "RFP"
+
+
+def test_the_series_default_is_short_enough_not_to_stretch_the_band(tab):
+    """``LabeledComboBox`` sizes to the painted text, so a long default is width.
+
+    Pinned as a length rather than left to judgement: the band holds four
+    combos and the previous default — "None — one curve per timepoint" — made
+    this one several times the width of its neighbours.
+    """
+    assert len(rctl.NO_SERIES_LABEL) <= 12, rctl.NO_SERIES_LABEL

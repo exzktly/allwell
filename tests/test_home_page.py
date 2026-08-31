@@ -427,7 +427,7 @@ def test_a_plate_drag_edits_the_group_only_from_the_groups_layer(loaded_app, qtb
     plate = ctx.widgets.get("_rep_map_plate")
 
     _goto_subtab(loaded_app, qtbot, "Sample map")
-    set_layer(ctx, "Groups")
+    set_layer(ctx, "Replicates")
     # Entering the tab deselects whatever was active, so a plate click has no
     # consequence until the user picks a group — the order a real edit follows.
     assert ctx.state.selection.current_selection_id is None
@@ -517,7 +517,7 @@ def test_import_is_offered_on_the_layers_it_writes(loaded_app, qtbot):
     button = ctx.widgets.get("_home_import_btn")
 
     _goto_subtab(loaded_app, qtbot, "Sample map")
-    for layer in ("Groups", "Well Labels"):
+    for layer in ("Replicates", "Well Labels"):
         set_layer(ctx, layer)
         qtbot.wait(10)
         assert button.isVisibleTo(loaded_app), layer
@@ -583,7 +583,7 @@ def test_the_help_drawer_lands_on_the_current_tab_not_the_top_of_the_chapter(
     # would put the reader above the paragraph describing what is in front of
     # them — and it would leave the three layer entries in ``SECTION_BY_PAGE``
     # with no reader at all. Asserted per layer rather than once, because a
-    # version that answered "Groups" for every layer passes a single check.
+    # version that answered "Replicates" for every layer passes a single check.
     from well_viewer.features.home.sample_map.controller import LAYERS, set_layer
 
     _goto_subtab(loaded_app, qtbot, "Sample map")

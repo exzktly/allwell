@@ -50,7 +50,7 @@ def panel(qapp):
         well_paths={"A01": 1, "A02": 2}, well_labels={}, tok_to_label={},
     )
     from well_viewer.features.home.state import HomeState
-    home = HomeState(sample_map_layer="Groups")
+    home = HomeState(sample_map_layer="Replicates")
     registry = WidgetRegistry(SimpleNamespace())
     ctx = SimpleNamespace(
         widgets=registry,

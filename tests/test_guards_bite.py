@@ -124,7 +124,7 @@ def test_colour_guard_clears_a_token_read(tmp_path, monkeypatch):
 
 
 EMBEDDED_HEX_VIOLATIONS = {
-    # The two that shipped in analyze_remote_dialog.py: a hex inside a longer
+    # The two that shipped in analyze/remote_dialog.py: a hex inside a longer
     # f-string, which the whole-literal `^…$` match walked straight past.
     "fstring": ('def paint(lbl, alias):\n'
                 '    lbl.setText(f"<span style=\'color: #4caf50;\'>ok {alias}</span>")\n'),
@@ -548,7 +548,7 @@ def _help_topics_root(tmp_path: Path) -> Path:
     """A synthetic repo root holding the three files the guard reads."""
     _write(tmp_path, "_Docs/Markdowns/README_WellViewer.md", _FAKE_README)
     _write(tmp_path, "datasets_tab.py", _FAKE_DATASETS_TAB)
-    _write(tmp_path, "analyze_tab_form.py", _FAKE_ANALYZE_FORM)
+    _write(tmp_path, "analyze/form.py", _FAKE_ANALYZE_FORM)
     return tmp_path
 
 
@@ -3544,3 +3544,56 @@ def test_the_tracker_guard_catches_a_count_typed_in_prose(tmp_path, monkeypatch)
 def test_the_tracker_guard_clears_a_well_formed_tracker(
         tmp_path, monkeypatch, test_name):
     assert _run_tracker_guard(monkeypatch, tmp_path, test_name) is None
+
+
+# ── the scan surface itself ─────────────────────────────────────────────────
+#
+# The guard that notices when a package is invisible to every other guard. Its
+# own failure mode is the one it exists to catch, one level up: a scan-surface
+# check that walks past a missing root reports a clean tree and retires sixty
+# guards without a word. So it is handed synthetic roots holding the exact two
+# shapes — a package absent from the roster, and a roster entry with no package.
+
+def _scan_surface_root(tmp_path: Path, dirs: dict) -> Path:
+    """A synthetic repo root whose directories hold the given Python files."""
+    for name, files in dirs.items():
+        for fname in files:
+            _write(tmp_path, f"{name}/{fname}", "x = 1\n")
+    return tmp_path
+
+
+def test_scan_surface_guard_catches_an_unscanned_package(tmp_path, monkeypatch):
+    """The shape that shipped: `analyze/` moved in, PACKAGE_ROOTS did not."""
+    root = _scan_surface_root(tmp_path, {"listed": ["a.py"], "orphan": ["b.py"]})
+    exc = _run_rooted_scan(monkeypatch, "tests.test_scan_surface_is_complete",
+                           "test_every_application_package_is_scanned", root,
+                           extra={"PACKAGE_ROOTS": ("listed",)})
+    assert exc is not None, "a package no guard can see went uncaught"
+    assert "orphan" in str(exc)
+
+
+def test_scan_surface_guard_clears_a_fully_listed_tree(tmp_path, monkeypatch):
+    root = _scan_surface_root(tmp_path, {"listed": ["a.py"], "also": ["b.py"]})
+    assert _run_rooted_scan(monkeypatch, "tests.test_scan_surface_is_complete",
+                            "test_every_application_package_is_scanned", root,
+                            extra={"PACKAGE_ROOTS": ("listed", "also")}) is None
+
+
+def test_scan_surface_guard_ignores_a_directory_with_no_python(tmp_path, monkeypatch):
+    """`assets/` and friends are not packages and must not be demanded."""
+    root = _scan_surface_root(tmp_path, {"listed": ["a.py"]})
+    (root / "assets").mkdir()
+    (root / "assets" / "logo.png").write_bytes(b"")
+    assert _run_rooted_scan(monkeypatch, "tests.test_scan_surface_is_complete",
+                            "test_every_application_package_is_scanned", root,
+                            extra={"PACKAGE_ROOTS": ("listed",)}) is None
+
+
+def test_scan_surface_guard_catches_a_roster_entry_with_no_package(tmp_path, monkeypatch):
+    """A renamed or deleted package leaves an entry matching nothing."""
+    root = _scan_surface_root(tmp_path, {"listed": ["a.py"]})
+    exc = _run_rooted_scan(monkeypatch, "tests.test_scan_surface_is_complete",
+                           "test_every_scanned_root_still_exists", root,
+                           extra={"PACKAGE_ROOTS": ("listed", "gone")})
+    assert exc is not None, "a roster entry naming nothing went uncaught"
+    assert "gone" in str(exc)

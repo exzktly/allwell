@@ -799,38 +799,74 @@ def _isolated_run_journal_index(tmp_path, monkeypatch):
         lambda: tmp_path / "_aw_state" / "run_index.json")
 
 
-def _live_fetcher_threads():
-    """Threads still running a `Fetcher` loop, and the fetchers that own them.
+#: The background threads a spawned remote run owns, by the type that owns
+#: them: how to tell one that has been asked to stop from one that was
+#: abandoned, and how to stop it.
+#:
+#: Both entries answer the same question — "is this run's thread still
+#: reaching the network after its test ended?" — and for a long time only the
+#: first was asked. A `Fetcher` leak was swept while the `_UploadHeartbeat`
+#: started beside it, in the same `spawn`, was not, so the guard below walked
+#: past the one whose own docstring says an outliving beat "tells the remote a
+#: dead run is alive, holds the node for the full deadline, and keeps the
+#: orphan sweep from ever sweeping". Anything else this class of run starts
+#: belongs here too, rather than in a second predicate.
+_RUN_THREAD_OWNERS = {
+    # `_loop` drains the pull queue; `_sidecar_loop` re-pulls
+    # `pipeline_info.json` on a timer. Both call rsync.
+    "Fetcher": (lambda o: o._stop.is_set() and o._sidecar_done.is_set(),
+                lambda o: o.cancel()),
+    # `_run` touches the remote heartbeat file over ssh on a timer.
+    "_UploadHeartbeat": (lambda o: o._stop.is_set(),
+                         lambda o: o.stop()),
+}
 
-    A `Fetcher` runs two: `_loop`, which drains the pull queue, and
-    `_sidecar_loop`, which re-pulls `pipeline_info.json` on a timer. Both are
-    daemons, so nothing reaps them when a test ends; both call rsync. A test
-    that builds a `RemoteRunner` and never cancels it therefore leaves a
-    process-wide timer that fires inside whatever test is running fifteen
-    seconds later.
+
+def _live_run_threads():
+    """Threads a spawned remote run left beating, with how to stop each.
+
+    Every one is a daemon, so nothing reaps them when a test ends, and every
+    one reaches the network on a timer. A test that drives the real `spawn`
+    and never stops what it started therefore leaves a process-wide timer that
+    fires inside whatever test is running fifteen seconds later.
 
     The owner comes off the thread's own target, which for a bound method is
     the instance it was taken from. That is private, and it is the only way to
     get from a leaked thread back to the object that can stop it without
     production code keeping a registry for the tests' benefit.
+
+    Returns `(thread, owner, stop)` triples, so a caller stops a thread
+    without restating which method does it for which type.
     """
     out = []
     for t in threading.enumerate():
         target = getattr(t, "_target", None)
         owner = getattr(target, "__self__", None)
-        if owner is None or type(owner).__name__ != "Fetcher":
+        entry = _RUN_THREAD_OWNERS.get(type(owner).__name__) if owner else None
+        if entry is None:
             continue
-        if owner._stop.is_set() and owner._sidecar_done.is_set():
-            continue    # cancelled; it is on its way out, not abandoned
-        out.append((t, owner))
+        asked_to_stop, stop = entry
+        if asked_to_stop(owner):
+            continue    # on its way out, not abandoned
+        out.append((t, owner, stop))
     return out
 
 
-@pytest.fixture(autouse=True)
-def _no_test_leaves_a_fetcher_running():
-    """Stop any `Fetcher` a test left running, and fail the test that left it.
+def _stop_live_run_threads():
+    """Stop every run thread still beating, and report what was stopped."""
+    leaked = _live_run_threads()
+    for _thread, owner, stop in leaked:
+        stop(owner)
+    for thread, _owner, _stop in leaked:
+        thread.join(timeout=5)
+    return leaked
 
-    This is not hygiene for its own sake. Eight such fetchers leaked out of one
+
+@pytest.fixture(autouse=True)
+def _no_test_leaves_a_run_thread_running():
+    """Stop any run thread a test left beating, and fail the test that left it.
+
+    This is not hygiene for its own sake. Eight fetchers leaked out of one
     file, sixteen threads between them, and one of the sidecar pollers landed
     inside `test_remote_midrun_sidecar`'s half-second window minutes later —
     appending a pull to *that* test's call list and failing an assertion about
@@ -838,28 +874,29 @@ def _no_test_leaves_a_fetcher_running():
     differ from a local run, it presented as a test failing for no reason it
     named.
 
+    A leaked `_UploadHeartbeat` is the same failure with a worse blast radius:
+    it spawns a real `ssh` from inside an unrelated test, which the
+    `_no_real_network_tools` guard can only report as a thread-level warning,
+    since the call is not on the test's own stack.
+
     Stopping them here rather than only reporting them keeps one leak from
     cascading into every later file. The failure is raised afterwards so the
     test that leaked is the one that carries it.
     """
     yield
-    leaked = _live_fetcher_threads()
-    for _thread, owner in leaked:
-        owner.cancel()
-    for thread, _owner in leaked:
-        thread.join(timeout=5)
     # The predicate is *asked to stop*, not *finished stopping*. A thread that
     # was cancelled a microsecond ago is still alive and is not a leak, so
     # judging on liveness alone failed every test that had cleaned up
-    # correctly — the fixture teardown that cancels runs just before this one.
+    # correctly — the fixture teardown that stops them runs just before this.
+    leaked = _stop_live_run_threads()
     assert not leaked, (
-        "this test left a Fetcher running. Both of its threads call rsync on a "
-        "timer, so it goes on reaching the (faked) network inside later tests, "
-        "in a file that has no idea it exists. Cancel it — "
-        "`verify_and_cleanup`, or `runner._fetcher.cancel()` in a finalizer "
-        "(`RemoteRunner.cancel` is a different thing: it takes the ssh "
-        "process). Leaked: "
-        + ", ".join(t.name for t, _ in leaked))
+        "this test left a spawned run's thread going. Each reaches the (faked) "
+        "network on a timer, so it fires inside later tests, in a file that "
+        "has no idea it exists. Stop it — `verify_and_cleanup`, or the "
+        "`stop_fetchers` fixture, which stops both the Fetcher and the upload "
+        "heartbeat (`RemoteRunner.cancel` is a different thing: it takes the "
+        "ssh process). Leaked: "
+        + ", ".join(f"{t.name} ({type(o).__name__})" for t, o, _ in leaked))
 
 
 @pytest.fixture
@@ -885,3 +922,9 @@ def stop_fetchers():
             # `RemoteRunner.cancel` is a different thing — it takes the ssh
             # process. The `Fetcher` is what holds the threads.
             fetcher.cancel()
+    # A spawned run also starts an upload heartbeat, and it hangs off the
+    # process object rather than the runner, so there is no attribute to reach
+    # for here. It is swept the same way the autouse guard finds one — from
+    # the live thread back to its owner — so that both know one definition of
+    # what a run's threads are.
+    _stop_live_run_threads()

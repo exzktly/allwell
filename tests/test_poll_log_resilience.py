@@ -15,8 +15,8 @@ import types
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import analyze_tab as at
-from analyze_tab import AnalyzeTab
+import analyze.tab as at
+from analyze.tab import AnalyzeTab
 
 
 def _fake_tab(q: queue.Queue, *, parse):

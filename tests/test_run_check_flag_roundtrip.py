@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from analyze_job_edit import _opts_as_pinfo_keys
-from analyze_tab_log import _completeness_line
+from analyze.job_edit import _opts_as_pinfo_keys
+from analyze.log_pane import _completeness_line
 from services.pipeline_service import build_pipeline_args
 
 

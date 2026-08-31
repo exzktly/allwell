@@ -475,7 +475,7 @@ def test_every_well_state_is_written_by_some_caller(state):
     the word — a liveness test that could not fail, which is worse than none.
     Only two shapes count now: a literal handed to ``record_well`` or to the
     one-line wrapper that forwards to it, and the values of a dict literal —
-    ``analyze_progress``'s stage map, and ``ProgressTracker._RECORD_FOR_MARKER``,
+    ``analyze.progress``'s stage map, and ``ProgressTracker._RECORD_FOR_MARKER``,
     which is what a completion's third element is looked up in.
     """
     import ast
@@ -580,7 +580,7 @@ def test_a_failed_open_does_not_strip_the_record_it_could_not_replace(
 def test_a_run_records_its_own_wells_after_its_record_has_closed(out_dir):
     """The tail of every plate, and the reason this is a token and not a flag.
 
-    ``analyze_progress`` writes ``analysed`` when the ``Well X … done.`` line is
+    ``analyze.progress`` writes ``analysed`` when the ``Well X … done.`` line is
     *parsed*, on the GUI thread, in bounded slices — while ``_close_journal``
     runs in the worker thread's ``finally`` the instant the subprocess exits.
     So a run's own completion lines arrive after its record is closed, and a
@@ -633,7 +633,7 @@ def test_a_failed_open_leaves_the_previous_record_whole_and_uncontradicted(
     J.close_run(out_dir, outcome="ok")
     monkeypatch.setattr(J, "_atomic_write_json", lambda *a, **kw: False)
     # ``None``: this run has no record of its own, so its writers have no token
-    # and — per ``analyze_progress`` — do not write at all.
+    # and — per ``analyze.progress`` — do not write at all.
     assert _open(out_dir) is None
     monkeypatch.undo()
 

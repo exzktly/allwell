@@ -45,10 +45,10 @@ def test_the_run_button_hands_the_runner_the_incremental_spec(tmp_path, qtbot,
     entirely dead — left it and all 44 of its neighbours green. A source-text
     guard cannot tell a rule that is applied from one that is merely mentioned.
     """
-    import analyze_tab_form
+    import analyze.form
     from services import run_journal as J
 
-    monkeypatch.setattr(analyze_tab_form, "load_remotes", lambda: {})
+    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
     monkeypatch.setattr(J, "index_path", lambda: tmp_path / "state" / "idx.json")
 
     in_dir, out_dir = tmp_path / "in", tmp_path / "out"
@@ -57,7 +57,7 @@ def test_the_run_button_hands_the_runner_the_incremental_spec(tmp_path, qtbot,
     J.open_run(out_dir, input_dir=str(in_dir), mode="local",
                spec={"opts": {"raw": str(in_dir)}})     # left open: app killed
 
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     tab = AnalyzeTab()
     qtbot.addWidget(tab)
@@ -87,9 +87,9 @@ def test_the_queue_does_not_apply_it_twice():
     Harmless today — the function is idempotent — but two callers of one rule
     is how the two come to disagree, which is the whole subject of this audit.
     """
-    import analyze_run_spec
+    import analyze.run_spec
 
-    src = _source(analyze_run_spec.AnalyzeRunMixin.start_from_queue)
+    src = _source(analyze.run_spec.AnalyzeRunMixin.start_from_queue)
     tree = ast.parse(textwrap.dedent(src))
     calls = [n.func.attr for n in ast.walk(tree)
              if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
@@ -100,9 +100,9 @@ def test_the_queue_does_not_apply_it_twice():
 
 def test_the_predicate_reads_the_journal_as_well_as_the_suspend_record():
     """The killed case has no suspend record by definition."""
-    import analyze_suspend
+    import analyze.suspend
 
-    src = _source(analyze_suspend.AnalyzeSuspendMixin._input_has_unfinished_work)
+    src = _source(analyze.suspend.AnalyzeSuspendMixin._input_has_unfinished_work)
     assert "unfinished_runs" in src, (
         "only the suspend record is consulted, so a run the app was killed "
         "during is never offered incrementally")

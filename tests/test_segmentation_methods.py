@@ -32,7 +32,7 @@ def _set_method(tab, value: str) -> None:
 # ── dropdown + per-method parameter panel ────────────────────────────────────
 
 def test_dropdown_lists_five_methods(qapp):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     tab = AnalyzeTab()
     values = [tab._seg_method_cb.itemData(i) for i in range(tab._seg_method_cb.count())]
     assert values == ["stardist_nuclei", "stardist_seeded_watershed_cell",
@@ -43,7 +43,7 @@ def test_dropdown_lists_five_methods(qapp):
 
 
 def test_param_panel_swaps_per_method(qapp):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     tab = AnalyzeTab()
     for value in ("stardist_nuclei", "stardist_seeded_watershed_cell", "cellpose",
                   "cellpose_labelfree", "classical_threshold"):
@@ -71,7 +71,7 @@ def test_param_stack_collapses_to_current_page(qapp):
     # over all pages — otherwise the empty StarDist page reserves the tall
     # Cellpose page's height (the gap under channel tokens).
     from PySide6.QtWidgets import QSizePolicy
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     tab = AnalyzeTab()
     st = tab._seg_param_stack
     _set_method(tab, "cellpose")

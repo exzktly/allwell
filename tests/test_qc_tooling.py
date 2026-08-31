@@ -494,7 +494,7 @@ def test_analyze_qc_section_present_and_gated():
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import QApplication, QLabel
     QApplication.instance() or QApplication([])
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     tab = AnalyzeTab()
     # All QC widgets exist and the section title renders.
@@ -545,7 +545,7 @@ def test_analyze_default_background_is_robust_mesh_end_to_end(qapp):
     """Regression: the dropdown defaults to robust_mesh (sigma-clipped local
     background on a coarse grid) and that selection survives all the way to the
     CLI args — so a default run uses the configured default, not a stale one."""
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     from services.pipeline_service import build_pipeline_args
     tab = AnalyzeTab()
     assert tab._background_cb.currentText() == "robust_mesh"
@@ -616,7 +616,7 @@ def test_background_well_validation_blocks_run(tmp_path):
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import QApplication
     QApplication.instance() or QApplication([])
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     with zipfile.ZipFile(tmp_path / "H12.zip", "w") as z:
         z.writestr("H12_s0_DAPI.tif", b"x")

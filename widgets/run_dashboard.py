@@ -98,8 +98,8 @@ class RunDashboard(PlateProgress):
         self._active_stage = ""
         # Plate-wide transfer, as a fraction, while one is in flight — None
         # when there is not one. State rather than a formatted string because
-        # two different objects drive this dashboard (analyze_tab handles the
-        # runner's own events, analyze_progress the pipeline's), and a label
+        # two different objects drive this dashboard (analyze.tab handles the
+        # runner's own events, analyze.progress the pipeline's), and a label
         # that one of them writes and neither retracts is exactly how it came
         # to sit on "Transferring… 92%" for the whole compute phase.
         self._transfer: float | None = None

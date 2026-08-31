@@ -1,8 +1,8 @@
 """The Analyze sidebar states an unfinished run once, not twice.
 
 Two cards sit at the head of the sidebar and are built from the same run
-journal: the resume offer (``analyze_suspend``) and the pre-run report
-(``analyze_preflight``). With an unfinished run on the folder named in the
+journal: the resume offer (``analyze.suspend``) and the pre-run report
+(``analyze.preflight``). With an unfinished run on the folder named in the
 form, both used to lead with the same fact and both appended the journal's own
 ``tally()`` — so the sidebar said, in two bordered cards stacked one above the
 other:
@@ -67,7 +67,7 @@ def _journal(plate, *, outcome=None, wells=()):
 
 @pytest.fixture
 def tab(qtbot):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     widget = AnalyzeTab()
     qtbot.addWidget(widget)
     return widget
@@ -120,7 +120,7 @@ def test_the_report_takes_the_sentence_back_when_the_offer_goes(tab, tmp_path,
                                                                 monkeypatch):
     """Discard removes the card above. The report is then the only thing left
     that can say what the last run did, so it has to notice."""
-    import analyze_suspend
+    import analyze.suspend
 
     plate = _plate(tmp_path, "PlateC")
     _journal(plate, outcome="error", wells=[("A01", "failed")])
@@ -130,8 +130,8 @@ def test_the_report_takes_the_sentence_back_when_the_offer_goes(tab, tmp_path,
 
     # Discard asks first; answer yes without a modal (which blocks forever
     # offscreen — see tests/conftest.py's _no_modal_dialogs).
-    monkeypatch.setattr(analyze_suspend.QMessageBox, "question",
-                        lambda *a, **k: analyze_suspend.QMessageBox.Yes)
+    monkeypatch.setattr(analyze.suspend.QMessageBox, "question",
+                        lambda *a, **k: analyze.suspend.QMessageBox.Yes)
     tab._discard_suspended()
 
     assert tab._resume_banner.isHidden()

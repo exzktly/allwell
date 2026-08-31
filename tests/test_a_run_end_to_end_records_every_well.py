@@ -8,7 +8,7 @@ between them**:
 * ``PipelineRunner._run_pipeline_thread`` opens the journal, and closes it in
   its ``finally`` the instant the pipeline subprocess exits — on the **worker**
   thread;
-* ``analyze_progress``'s ``well_stage`` branch writes ``analysed`` when the
+* ``analyze.progress``'s ``well_stage`` branch writes ``analysed`` when the
   ``Well X … done.`` line is *parsed*, which happens on the **GUI** thread as
   ``AnalyzeTab._poll_log`` drains ``log_q`` in bounded 15 ms slices.
 
@@ -34,7 +34,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from analyze_tab import _POLL_BUDGET_S, _POLL_MAX_LINES        # noqa: E402
+from analyze.tab import _POLL_BUDGET_S, _POLL_MAX_LINES        # noqa: E402
 from services import run_journal as J                          # noqa: E402
 from services.pipeline_runner import PipelineRunner, ProgressTracker  # noqa: E402
 
@@ -95,7 +95,7 @@ def _run_a_plate(tmp_path, wells, *, per_well: float):
     _seen_events: list[tuple[str, object]] = []
 
     def journal_stage(well: str, stage: str, record: str) -> None:
-        # What `analyze_progress`'s `well_stage` branch does, minus the widget.
+        # What `analyze.progress`'s `well_stage` branch does, minus the widget.
         # A completion states its own record word; the stage-only events are
         # mapped, as the mixin maps them.
         state = record or {"process": "analysed", "error": "failed"}.get(stage)

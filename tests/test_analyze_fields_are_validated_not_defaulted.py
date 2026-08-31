@@ -27,15 +27,15 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from analyze_tab import _numeric_option_errors            # noqa: E402
+from analyze.tab import _numeric_option_errors            # noqa: E402
 
 
 @pytest.fixture
 def tab(qtbot, monkeypatch):
-    import analyze_tab_form
+    import analyze.form
 
-    monkeypatch.setattr(analyze_tab_form, "load_remotes", lambda: {})
-    from analyze_tab import AnalyzeTab
+    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+    from analyze.tab import AnalyzeTab
 
     t = AnalyzeTab()
     qtbot.addWidget(t)
@@ -249,7 +249,7 @@ def test_a_negative_threshold_is_refused_rather_than_read_as_the_default(tab):
 
 def test_a_stale_tile_size_does_not_block_a_cellpose_run(tab):
     """A field behind an unselected routine is not read, so it cannot refuse."""
-    from analyze_tab import _numeric_option_errors as errs_for
+    from analyze.tab import _numeric_option_errors as errs_for
 
     opts = {"segmentation_method": "cellpose", "stardist_tile_px": "-4"}
     assert errs_for(opts) == [], (

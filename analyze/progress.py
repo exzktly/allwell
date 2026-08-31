@@ -5,7 +5,7 @@ The pipeline reports progress as a stream of events parsed out of its stdout by
 events into what the user sees — the dashboard headline, the overall bar, the
 per-well plate map, and the ETA.
 
-Held as a mixin rather than added to ``analyze_tab.py`` for the same reason
+Held as a mixin rather than added to ``analyze/tab.py`` for the same reason
 ``AnalyzeSuspendMixin`` is: that file sits against its line budget, and the
 rendering of run progress is a self-contained job with one entry point
 (:meth:`AnalyzeProgressMixin._apply_progress_event`) rather than something the

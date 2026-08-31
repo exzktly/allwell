@@ -261,7 +261,7 @@ def qapp():
 
 
 def test_expected_well_count_counts_loose_in_named_in(qapp, tmp_path):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     tab = AnalyzeTab()
     in_dir = tmp_path / "in"
     _make_loose(in_dir, ("A01", "A02", "B03"))
@@ -270,7 +270,7 @@ def test_expected_well_count_counts_loose_in_named_in(qapp, tmp_path):
 
 
 def test_refresh_output_previews_loose_in_folder(qapp, tmp_path):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     tab = AnalyzeTab()
     in_dir = tmp_path / "in"
     _make_loose(in_dir, ("A01", "A02"))          # 4 files > 3 threshold

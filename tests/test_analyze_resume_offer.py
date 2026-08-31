@@ -76,7 +76,7 @@ def _journal(plate, *, outcome=None, wells=()):
 
 @pytest.fixture
 def tab(qtbot):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     widget = AnalyzeTab()
     qtbot.addWidget(widget)
     return widget
@@ -86,7 +86,7 @@ def _point_at(tab, path) -> None:
     """Point the form at *path* and let the field settle, as a user does.
 
     Setting the text is a keystroke; the banners read the folder once the field
-    stops changing (``analyze_preflight._SETTLE_MS``). Driving the settle here
+    stops changing (``analyze.preflight._SETTLE_MS``). Driving the settle here
     rather than waiting out a real 400 ms in every test runs the same code the
     timer runs — it is not a way around the debounce.
     """
@@ -183,7 +183,7 @@ def test_a_record_from_a_previous_session_is_offered_at_startup(tmp_path, qtbot)
     other = _plate(tmp_path, "PlateOther")
     _journal(other, outcome="error")
 
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     fresh = AnalyzeTab()
     qtbot.addWidget(fresh)
 

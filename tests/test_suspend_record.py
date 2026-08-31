@@ -131,7 +131,7 @@ def test_an_unwritable_home_reports_failure_rather_than_raising(monkeypatch):
 # The record carries a `spec` the caller handed in, so one unserialisable value
 # in it makes `json.dump` raise and the disk never enters into it. `_write_all`
 # caught `OSError` alone, so that `TypeError` escaped a function whose whole
-# contract is a boolean — past `analyze_suspend._suspend`'s outer handler, and
+# contract is a boolean — past `analyze.suspend._suspend`'s outer handler, and
 # *before* `PipelineRunner.suspend()` was reached. The button did nothing.
 
 def _unserialisable_run(out: str):

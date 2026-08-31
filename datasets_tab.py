@@ -170,7 +170,7 @@ class DatasetsTab(QWidget):
         # on_open_in_review/on_open_in_analyze are — duck-typed to
         # datasets.job_queue.controller.QueueableController via
         # AnalyzeRunMixin, never imported by name here (keeps this module
-        # and everything under datasets/job_queue/ free of an analyze_tab
+        # and everything under datasets/job_queue/ free of an analyze.tab
         # import).
         self._analyze_controller = analyze_controller
         # None in production (the Job Queue persists under

@@ -70,7 +70,7 @@ def _journal(out_dir, in_dir, *, closed=None, spec_opts=None, wells=()):
 
 @pytest.fixture
 def tab(qtbot):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     widget = AnalyzeTab()
     qtbot.addWidget(widget)
     return widget
@@ -80,7 +80,7 @@ def _point_at(tab, path) -> None:
     """Point the form at *path* and let the field settle, as a user does.
 
     Setting the text is a keystroke; the banners read the folder once the field
-    stops changing (``analyze_preflight._SETTLE_MS``). Driving the settle here
+    stops changing (``analyze.preflight._SETTLE_MS``). Driving the settle here
     rather than waiting out a real 400 ms in every test runs the same code the
     timer runs — it is not a way around the debounce.
     """
@@ -274,7 +274,7 @@ def test_coverage_is_counted_from_the_resolved_input_dir(plate):
     containers, counts field groups from the output alone, and reports more
     covered than the input was ever measured to hold.
     """
-    from analyze_preflight import _scan_coverage
+    from analyze.preflight import _scan_coverage
     opts = {"filename_schema": SCHEMA, "filename_sep": SEP,
             "csv_prefix": "measurements"}
     block = _scan_coverage(plate / "in", plate / "out", opts)
@@ -287,7 +287,7 @@ def test_coverage_is_counted_from_the_resolved_input_dir(plate):
 
 
 def test_the_coverage_line_states_the_measured_fraction(tab, plate):
-    from analyze_preflight import _scan_coverage
+    from analyze.preflight import _scan_coverage
     _journal(plate / "out", plate / "in")
     _point_at(tab, plate)
     tab._apply_pipeline_info({"execution_options": {
@@ -307,7 +307,7 @@ def test_an_incoherent_fraction_is_refused_rather_than_printed(tab, plate):
     ``(fov, timepoint)`` keys the input yields and the ones the output yields
     stop being the same keys, and the two counts stop being comparable.
     """
-    from analyze_preflight import _scan_coverage
+    from analyze.preflight import _scan_coverage
     _point_at(tab, plate)
     block = _scan_coverage(plate / "in", plate / "out", {
         "filename_schema": OTHER_SCHEMA, "filename_sep": SEP,
@@ -324,7 +324,7 @@ def test_an_unmeasurable_intent_claims_no_fraction(tab, plate):
     """The other half of the same rule. An input the scan could not read at
     all gives a denominator of zero, and a denominator of zero gets no
     fraction rather than a fabricated one."""
-    from analyze_preflight import _scan_coverage
+    from analyze.preflight import _scan_coverage
     _point_at(tab, plate)
     block = _scan_coverage(plate, plate / "out", {
         "filename_schema": SCHEMA, "filename_sep": SEP,
@@ -336,7 +336,7 @@ def test_an_unmeasurable_intent_claims_no_fraction(tab, plate):
 
 
 def test_a_scan_for_another_folder_is_discarded(tab, plate):
-    from analyze_preflight import _scan_coverage
+    from analyze.preflight import _scan_coverage
     _journal(plate / "out", plate / "in")
     _point_at(tab, plate)
     before = _text(tab)
@@ -353,7 +353,7 @@ def test_a_second_settle_does_not_put_a_second_walk_on_the_same_plate(
     one takes. A plate on a slow volume outlives several settles, and without a
     bound each settle would start another thread walking the same directory."""
     started: list[str] = []
-    monkeypatch.setattr("analyze_preflight.threading.Thread",
+    monkeypatch.setattr("analyze.preflight.threading.Thread",
                         lambda **kw: _FakeThread(started, kw))
     _journal(plate / "out", plate / "in")
 
@@ -378,7 +378,7 @@ def test_a_folder_chosen_mid_scan_is_walked_once_the_scan_lands(
     leave the coverage line describing the folder the user has moved away
     from, with nothing scheduled to correct it."""
     started: list[str] = []
-    monkeypatch.setattr("analyze_preflight.threading.Thread",
+    monkeypatch.setattr("analyze.preflight.threading.Thread",
                         lambda **kw: _FakeThread(started, kw))
     _journal(plate / "out", plate / "in")
     # A real second plate, not an empty pair of folders: the planner declines
@@ -404,7 +404,7 @@ def test_a_scan_that_cannot_be_started_does_not_wedge_every_later_one(
     thread never runs, so it has to come down by hand."""
     def _refuse(**kw):
         raise RuntimeError("can't start new thread")
-    monkeypatch.setattr("analyze_preflight.threading.Thread", _refuse)
+    monkeypatch.setattr("analyze.preflight.threading.Thread", _refuse)
     _journal(plate / "out", plate / "in")
 
     _point_at(tab, plate)
@@ -552,7 +552,7 @@ def test_a_dismissal_does_not_outlive_the_run_that_followed_it(tab, plate):
 def test_the_stale_coverage_line_is_dropped_after_a_run(tab, plate):
     """The folder has not changed, so nothing else would clear it — but it was
     measured against the output as it stood before the run rewrote it."""
-    from analyze_preflight import _scan_coverage
+    from analyze.preflight import _scan_coverage
     _journal(plate / "out", plate / "in", closed="ok")
     _point_at(tab, plate)
     tab._apply_pipeline_info({"execution_options": {
@@ -575,7 +575,7 @@ def test_the_stale_coverage_line_is_dropped_after_a_run(tab, plate):
 
 def _deliver_scan(tab, plate, *, partial=False):
     """Land a *real* finished coverage scan through the app's own handler."""
-    from analyze_preflight import _scan_coverage
+    from analyze.preflight import _scan_coverage
 
     tab._apply_pipeline_info({"execution_options": {
         "filename_schema": SCHEMA, "filename_sep": SEP}})

@@ -128,7 +128,7 @@ def test_open_dataset_in_analyze_prefills_the_form_and_keeps_the_callers_path(
     written after the settings are applied rather than before, where the
     sidecar's stale path would win."""
     from allwell import AllWellApp
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
     info = json.loads((tmp_path / "out" / "pipeline_info.json").read_text())
@@ -160,7 +160,7 @@ def test_incremental_checkbox_reaches_the_pipeline_command_line(qtbot, tmp_path)
     """The end of the chain: without `--incremental` the pipeline skips every
     well that already has output, so everything upstream of this assertion
     could be correct and the run would still complete nothing."""
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     from services.pipeline_service import build_pipeline_args
 
     analyze = AnalyzeTab()
@@ -203,7 +203,7 @@ def test_handoff_unfolds_the_section_holding_the_control_it_changed(qtbot, tmp_p
     configured completion run was therefore indistinguishable from landing on
     an untouched Analyze tab."""
     from allwell import AllWellApp
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
     info = json.loads((tmp_path / "out" / "pipeline_info.json").read_text())
@@ -225,7 +225,7 @@ def test_handoff_states_what_it_configured(qtbot, tmp_path):
     could not be read, that the settings did *not* travel. A user who can't
     tell those apart presses Run on whatever was in the form before."""
     from allwell import AllWellApp
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
     info = json.loads((tmp_path / "out" / "pipeline_info.json").read_text())
@@ -329,7 +329,7 @@ def test_handoff_forces_exactly_the_wells_incremental_would_skip(qtbot, tmp_path
     """End of the chain: those wells reach the pipeline command line as
     --force_wells, which is the only thing that regenerates their CSVs."""
     from allwell import AllWellApp
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     from datasets.validate import validate_compute as vc
     from services.pipeline_service import build_pipeline_args
 

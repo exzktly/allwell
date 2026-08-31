@@ -8,7 +8,7 @@ a ``kind -> QueueableController`` registry built by whoever constructs
 :class:`~datasets_tab.DatasetsTab` (each Datasets controller registers
 itself; ``allwell.py`` injects the already-built ``AnalyzeTab`` under kind
 ``"analyze"`` the same way it injects ``on_open_in_review`` /
-``on_open_in_analyze`` today) — so this module never imports ``analyze_tab``
+``on_open_in_analyze`` today) — so this module never imports ``analyze.tab``
 or ``well_viewer`` itself, only the duck-typed :class:`QueueableController`
 shape.
 """
@@ -449,7 +449,7 @@ class JobQueueController(QObject):
 
     def set_analyze_provider(self, collect_spec: Callable[[], dict]) -> None:
         """Injects ``AnalyzeTab.collect_spec`` (a bound method) so this page
-        can build an Analyze job without importing ``analyze_tab``.
+        can build an Analyze job without importing ``analyze.tab``.
 
         It goes into the same collector registry every other kind uses, so
         "+ Add job → Analyze" and an Analyze edit session both reach it by the

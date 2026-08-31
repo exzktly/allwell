@@ -1,4 +1,4 @@
-"""Analyze-pane input handling, split from ``analyze_tab.py`` for line budget.
+"""Analyze-pane input handling, split from ``analyze/tab.py`` for line budget.
 
 ``AnalyzeTab`` mixes in :class:`AnalyzeInputMixin` for three members that don't
 belong in the tab's run/log core:

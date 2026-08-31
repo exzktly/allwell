@@ -168,6 +168,58 @@ def replicate_display_label(ctx, rset: Any) -> str:
     return f"{','.join(wells[:3])} +{len(wells)-3}"
 
 
+#: How many substitutions the clause names before it counts the rest. Three
+#: because the sentence sits under a list the user is already reading; naming
+#: every one of twelve would restate the list rather than explain it.
+_RELABELLED_SHOWN = 3
+
+
+def groups_relabelled_on_figures(ctx) -> list[tuple[str, str]]:
+    """``(the group's name, what a figure calls it)`` for every substitution.
+
+    :func:`replicate_display_label` silently replaces a group's name with its
+    member well labels whenever the name matches the auto-generated pattern
+    (``1``, ``Rep 2``, ``Group 3``). That is the right default — an axis reading
+    ``1, 2, 3`` says nothing — but it means a label typed on the **Well Labels**
+    tab becomes a group's identity on every figure, decided by a rule the user
+    never saw and cannot find. Two of the three ways of annotating a well are
+    wired together in exactly this one place, and nothing said so.
+
+    Visible groups only: a hidden one is not drawn, so nothing relabels it.
+    Returns the pairs rather than a sentence so the count, the wording and the
+    order are the caller's, and so the rule is drivable without a widget.
+    """
+    out: list[tuple[str, str]] = []
+    for rset in active_replicate_sets(
+            ctx.state.selection.selections or [],
+            ctx.state.dataset.well_paths or {}):
+        drawn = replicate_display_label(ctx, rset)
+        if drawn != rset.name:
+            out.append((rset.name, drawn))
+    return out
+
+
+def relabelled_groups_clause(ctx) -> str:
+    """The sentence naming those substitutions, or ``""`` when there are none.
+
+    Empty rather than "no groups are relabelled": a reader who has not hit the
+    rule does not need to be taught it, and a line that is always present is a
+    line nobody reads on the day it matters.
+    """
+    pairs = groups_relabelled_on_figures(ctx)
+    if not pairs:
+        return ""
+    shown = ", ".join(f"\u201c{name}\u201d \u2192 \u201c{drawn}\u201d"
+                      for name, drawn in pairs[:_RELABELLED_SHOWN])
+    rest = len(pairs) - _RELABELLED_SHOWN
+    if rest > 0:
+        shown += f", and {rest} more"
+    subject = ("1 group has a name that looks" if len(pairs) == 1
+               else f"{len(pairs)} groups have names that look")
+    return (f"{subject} auto-generated, so figures label them with their wells "
+            f"instead: {shown}. Rename a group to choose its own label.")
+
+
 def active_replicate_sets(selections: Iterable[Any], well_paths: Any):
     """One ``ReplicateSet`` per visible (non-hidden) selection with ≥1 loaded
     well, in order — the traces drawn on the plots. Pure core of

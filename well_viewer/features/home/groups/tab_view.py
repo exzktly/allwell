@@ -22,6 +22,7 @@ from well_viewer.core.ui_helpers import btn_primary, btn_secondary, build_hline_
 from well_viewer.features.home.groups.controller import (
     rep_add, rep_quick_pairs_from_dropdowns,
 )
+from well_viewer.features.home.roles_view import add_role_strip
 
 
 def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
@@ -29,6 +30,7 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
 
     Hoists the legacy "below the plate" GROUPS chrome out of the sidebar.
     Contents (top → bottom):
+      - the role strip: what a group is and what it reaches
       - GROUPS header with Clear-all / + Add buttons
       - Quick Replicates row (Pair + Order dropdowns + Apply button)
       - SavedSelectionsList (composable) over ``ctx.state.selection.selections``
@@ -40,6 +42,8 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
         layout = QVBoxLayout(parent)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+
+    add_role_strip(ctx, "Groups", parent)
 
     hdr = QWidget(parent)
     hdr_l = QHBoxLayout(hdr)
@@ -128,6 +132,16 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     rep_list.setComposable(True)
     layout.addWidget(rep_list, 1)
     _wire(ctx, rep_list)
+
+    # What a figure will actually call these groups, when that is not their
+    # name. Empty and hidden until the substitution applies to something —
+    # ``selections_model.relabelled_groups_clause`` returns "" otherwise, and a
+    # line that is always on screen is one nobody reads on the day it matters.
+    relabel = ctx.widgets.register("_rep_relabel_note", QLabel("", parent))
+    relabel.setObjectName("Muted")
+    relabel.setWordWrap(True)
+    relabel.setVisible(False)
+    layout.addWidget(relabel)
 
     hint = QLabel(
         "Click a group above to make it the ACTIVE group — its row "

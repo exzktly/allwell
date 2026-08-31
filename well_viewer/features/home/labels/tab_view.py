@@ -384,6 +384,9 @@ def build_label_grid(ctx, parent: QWidget) -> None:
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+    from well_viewer.features.home.roles_view import add_role_strip
+    add_role_strip(ctx, "Well Labels", parent)
+
     # ── top help + affix toolbar ─────────────────────────────────────
     head = QWidget(parent)
     hl = QHBoxLayout(head)

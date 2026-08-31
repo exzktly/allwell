@@ -691,6 +691,16 @@ def _row_widget(parent: QWidget, row: dict, *, kind: str) -> QWidget:
 
     label = QLabel(str(row.get("label") or ""), host)
     line.addWidget(label)
+    # What this declaration *does*, beside what there is of it. A count alone
+    # puts groups, variables, labels and saved selections in one column as
+    # four interchangeable tallies, which is exactly the reading that made
+    # them hard to tell apart: two of the four change which bars exist, one
+    # changes only what a bar is called, and one changes nothing on any figure.
+    effect = str(row.get("effect") or "")
+    if effect:
+        chip = QLabel(effect, host)
+        chip.setObjectName("Muted")
+        line.addWidget(chip)
     line.addStretch(1)
     count = int(row.get("count") or 0)
     total = row.get("total")

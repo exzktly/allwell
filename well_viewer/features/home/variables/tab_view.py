@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 import theme
 from well_viewer.domain.plate_layout import FILL_ALONG_COLS, FILL_ALONG_ROWS
 from well_viewer.domain.sample_variables import NUMBER, TEXT
+from well_viewer.features.home.roles_view import add_role_strip
 
 #: The definition columns' widths. Named rather than written inline: the left
 #: list is a fixed rail so the value list beside it does not reflow every time a
@@ -35,39 +36,49 @@ from well_viewer.domain.sample_variables import NUMBER, TEXT
 _LIST_W = 200
 _UNIT_W = 90
 
-#: What the tab says when a plate has no variables yet. It names the payoff
-#: rather than the mechanism, because the mechanism is visible and the payoff is
-#: the reason to bother: a variable is not a group, and defining one saves
-#: painting a group name per condition.
+#: What the tab says when a plate has no variables yet. The role strip above it
+#: already says what a variable *is* and where to go for a group, and it says so
+#: whether or not any exist — so this is the payoff alone rather than a second
+#: copy of the definition. The two used to be one block, which meant the only
+#: statement of what a variable is disappeared the moment somebody defined one.
 EMPTY_HINT = (
-    "A variable is anything you changed across the plate — cell line, dose, "
-    "timepoint of treatment. Name it, list its values, then fill them onto the "
-    "plate.\n\nA variable is not a group: two cell lines at six doses is twelve "
-    "conditions, and you do not have to paint twelve group names to plot them "
-    "separately."
+    "Two cell lines at six doses is twelve conditions, and you do not have to "
+    "paint twelve group names to plot them separately: name the two variables "
+    "once, fill their values onto the plate, and every plot can group, colour "
+    "and split by either."
 )
 
 
 def build_variables_subtab(ctx, frame: QWidget) -> None:
     """Build the tab body into *frame*. Registered lazily, like every sub-tab."""
     reg = ctx.widgets
-    outer = frame.layout() or QHBoxLayout(frame)
+    # A column rather than the two-pane row directly: the role strip spans the
+    # whole tab, above both panes, so it reads as a statement about the tab
+    # rather than a caption on the variable list.
+    outer = frame.layout() or QVBoxLayout(frame)
     # No margins of its own: the frame is already inset by ``subtab_inset`` on
     # the descriptor, the way Groups and Well Labels are, and a second set here
     # would double it on one tab only.
     outer.setContentsMargins(0, 0, 0, 0)
-    outer.setSpacing(theme.Spacing.lg)
+    outer.setSpacing(theme.Spacing.md)
 
-    outer.addWidget(_build_variable_rail(ctx, frame, reg))
+    add_role_strip(ctx, "Variables", frame)
 
-    right = QWidget(frame)
+    panes = QWidget(frame)
+    row = QHBoxLayout(panes)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(theme.Spacing.lg)
+    row.addWidget(_build_variable_rail(ctx, panes, reg))
+
+    right = QWidget(panes)
     column = QVBoxLayout(right)
     column.setContentsMargins(0, 0, 0, 0)
     column.setSpacing(theme.Spacing.md)
     column.addWidget(_build_definition(ctx, right, reg))
     column.addWidget(_build_fill_row(ctx, right, reg))
     column.addWidget(_build_plate(ctx, right, reg), 1)
-    outer.addWidget(right, 1)
+    row.addWidget(right, 1)
+    outer.addWidget(panes, 1)
 
     from .controller import refresh_variables, wire_variables
     wire_variables(ctx)

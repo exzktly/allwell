@@ -1481,12 +1481,29 @@ above, which builds the window once.
 
 `features/home/` is the page Review opens on, and it is a notebook. **Overview**
 leads it and is everything described below: the report the app opens on. The
-tabs after it — **Cell Gating**, **Groups**, **Well Labels**, **Ratios**,
-**Pipeline Info** — are where the user *declares* what the wells mean. The two
-halves are one page because they are one subject: what this plate is, and what
-you have said about it. Splitting them across two rail entries is what put a
-Notes box on each and needed a mirroring helper to stop one writing back over
-the other.
+tabs after it — **Cell Gating**, **Groups**, **Variables**, **Well Labels**,
+**Ratios**, **Pipeline Info** — are where the user *declares* what the wells
+mean. The two halves are one page because they are one subject: what this plate
+is, and what you have said about it. Splitting them across two rail entries is
+what put a Notes box on each and needed a mirroring helper to stop one writing
+back over the other.
+
+**Three of those tabs annotate wells, and each says which question it answers.**
+Groups, Variables and Well Labels all take a well selection and all look alike,
+and the distinction that decides which one a user wants is whether it *pools*: a
+group and a variable change which bars exist, while a label changes only what a
+bar is called. `features/home/collect.DECLARATION_ROLES` is the single roster of
+the four ways to say something about a well — those three plus the rail's saved
+selections — carrying, per entry, the question it answers, the effect in two or
+three words, the sentence the tab states, and where to go when the answer is one
+of the others. Three surfaces read it: `features/home/roles_view.add_role_strip`
+puts the last two lines at the top of each definition tab, Overview's *Your work
+here* column takes the effect, and the manual's comparison table says the same
+four things in the user's vocabulary. Written out at each surface the three
+copies drifted immediately, which is why the roster is data rather than three
+paragraphs. Cell Gating, Ratios and Pipeline Info resolve to `None` through
+`role_for_tab` and take no strip: a gate is a threshold and a ratio is a derived
+channel, and neither says what a well *is*.
 
 Home owns the page — the control band (carrying **Import**, which merges a
 sample-definitions JSON and is hidden on Overview because it names nothing
@@ -1505,7 +1522,7 @@ constant through `Profile.includes_subtab`, a bare string check against the
 tabs nothing had declared; enumerating from the registry is what makes every
 name a `[subtabs]` line can reference a real descriptor.
 
-Two of the five builders do not have the `(ctx, frame)` shape and are adapted in
+Two of the six builders do not have the `(ctx, frame)` shape and are adapted in
 `features/registry.py`: Cell Gating's takes no frame (it finds its own, because
 persistence can build the tab with no frame to hand over), and the Ratios editor
 is *returned* rather than mounted. Both adapters are function-local imports
@@ -1520,7 +1537,7 @@ frame takes a gutter. Both were constants keyed by tab name, which is issue #14'
 shape in miniature — a tab added to the registry and not to the constant inherits
 whichever answer the constant happens to give it, silently. `reads_well_selection`
 is finer than `per_well_selection`: that one is resolved per *page*, and Home is
-per-well as a page while only three of its five editors ask the plate anything.
+per-well as a page while only three of its six editors ask the plate anything.
 
 `Cell Gating`, `Groups` and `Well Labels` carry `removable=False`. That is not a
 statement of preference: `centre_view.build_centre` builds the rail plate that
@@ -1530,7 +1547,7 @@ Groups tab would leave a plate editing something that is not there. `Ratios` and
 
 **Overview is built eagerly and the definition tabs are drained, one per
 event-loop tick.** Neither extreme works. Home holds the eager first-tab slot,
-so building five editors inline would put all of them on the startup path; but
+so building six editors inline would put all of them on the startup path; but
 building them on first click would change what exists after a load, and
 persistence hydration, the plot tabs' ThreshFracOn quick-edit and the
 Playground's context bar all read those widgets without opening a tab. Draining
@@ -1544,9 +1561,12 @@ The rail's plate follows the tab, in three states rather than two. It is
 different question. It is **live** on Groups, Cell Gating and Well Labels — the
 three tabs that read the well selection, respectively to compose a group, to
 draw its CDFs from the selected wells, and to apply Add Prefix / Add Suffix to
-them. It is **disabled** on Ratios and Pipeline Info, which ask nothing of it:
-leaving it live there put a plate on screen whose clicks had no consequence and
-which said nothing about that.
+them. It is **disabled** on Variables, Ratios and Pipeline Info, which ask
+nothing of it: leaving it live there put a plate on screen whose clicks had no
+consequence and which said nothing about that. Variables is the awkward member
+of that trio and the reason the state is worth reading twice — it carries a
+plate of its own, `role="editor"`, in the tab body, so that tab shows two
+plates at once with only the nearer one live.
 
 Disabling it required the widget to acquire a disabled appearance.
 `WellPlateSelector` consulted `isEnabled()` nowhere in its paint path, so

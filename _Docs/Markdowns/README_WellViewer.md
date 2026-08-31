@@ -1211,9 +1211,13 @@ What is on it:
   channels were given different values, both are shown. A reference-well
   correction with no well named is flagged: nothing was measured, so the frames
   went through uncorrected, and the images look no different for it.
-- **Your work here.** Replicate sets, saved selections, labelled wells, smFISH
-  thresholds, ratios, notes — with what you have not started yet reading "None
-  yet", because that is a real answer rather than a missing one.
+- **Your work here.** Groups, variables, saved selections, labelled wells,
+  smFISH thresholds, ratios, notes — with what you have not started yet reading
+  "None yet", because that is a real answer rather than a missing one. The four
+  ways of saying something about a well each carry what they *do* beside the
+  count — *Pools plots*, *Pools, colours, splits*, *Display only*, *Recall
+  only* — so the block says which of your declarations are changing the numbers
+  and which are only changing the labels.
 - **Saved plots.** Thumbnails of the figures you have captured from this
   dataset, newest first. Click one to open it full size in
   [Saved Plots](#saved-plots) — you land on that plot's own card, not at the top
@@ -1566,12 +1570,22 @@ definitions, so redoing your groups does not cost you a plate of doses.
 
 #### Well Labels
 
-Give wells / groups human-readable names; these show in every plot legend
-instead of the raw well token. A label set here is what every legend names,
+Give a **well** a human-readable name; it shows in every plot legend instead of
+the raw well token. A label pools nothing and changes no number — it is display
+only, and it names wells rather than groups: a group is renamed on the Groups
+tab by typing over its name there. A label set here is what every legend names,
 [Line Graphs](#line-graphs)' included — where the on-screen legend stops after
 twelve traces and says how many it left out. **Add Prefix** and **Add Suffix**
 apply to the
 wells currently selected on the plate beside the tab.
+
+**One place a label does reach a group.** When a group's name looks
+auto-generated — `1`, `Rep 2`, `Group 3` — figures label it with its member
+wells instead, so that an axis does not read `1, 2, 3`; and those wells are
+named by their labels. That means a label typed here can become a group's
+identity on every figure. The Groups tab says so when it applies, naming each
+group and what a figure will call it, and typing a real name over the group's
+stops the substitution.
 
 Labels are stored with the dataset, and editing one on a load that holds only
 part of the plate leaves the rest of the plate's labels alone. Clearing a label

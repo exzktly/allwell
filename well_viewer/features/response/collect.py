@@ -30,6 +30,11 @@ from well_viewer.features.response.response_compute import FIT_NONE, fit_respons
 #: different fix, so they are distinguished rather than pooled into "no value".
 NO_VALUE = "no value"
 MIXED_VALUE = "wells disagree"
+#: Not a member of ``omitted``: a value that will not parse as a number is a
+#: *placed* member whose x is unusable, so it rides in ``ResponseData.non_numeric``
+#: and is captioned separately. Named here anyway because the roster is what a
+#: reader consults to learn the three states apart, and one of them living
+#: somewhere else is worth saying rather than leaving as an absence.
 NOT_NUMERIC = "value is not a number"
 
 
@@ -124,11 +129,22 @@ def omission_caption(data: ResponseData) -> str:
     learn that three groups were dropped.
     """
     parts = []
-    if data.omitted:
-        names = ", ".join(m for m, _ in data.omitted[:3])
-        more = f" and {len(data.omitted) - 3} more" if len(data.omitted) > 3 else ""
-        parts.append(f"{len(data.omitted)} omitted: no {data.variable_name} "
-                     f"({names}{more})")
+    # Split by reason, not pooled. ``data.omitted`` carries ``(member, reason)``
+    # with reason in {NO_VALUE, MIXED_VALUE}, and the reason used to be
+    # discarded here — so every omission was captioned "no Dose", including the
+    # ones whose wells *disagree* about Dose. Two different mistakes with two
+    # different fixes, which is what this module's own roster comment says they
+    # are, and ``empty_reason`` already branches on them correctly. This is the
+    # caption that reaches the axes and travels with a saved figure, so it is
+    # the one that most needs to be right.
+    for reason, phrase in ((NO_VALUE, f"no {data.variable_name}"),
+                           (MIXED_VALUE, f"wells disagree about {data.variable_name}")):
+        members = [m for m, r in data.omitted if r == reason]
+        if not members:
+            continue
+        names = ", ".join(members[:3])
+        more = f" and {len(members) - 3} more" if len(members) > 3 else ""
+        parts.append(f"{len(members)} omitted: {phrase} ({names}{more})")
     if data.non_numeric:
         names = ", ".join(data.non_numeric[:3])
         parts.append(f"{len(data.non_numeric)} off-scale: {names}")
@@ -230,8 +246,17 @@ def collect_response(ctx, variable_id: str, timepoints) -> ResponseData:
 
     A value the user typed that is not a number — a `vehicle` row — is neither
     plotted at an invented x nor silently dropped. It goes in
-    :attr:`ResponseData.non_numeric` for the caller to draw off-scale, which is
-    the only honest place for a dose that is not on the scale.
+    :attr:`ResponseData.non_numeric`, and the figure's caption names those
+    members and counts them, which is the only honest place for a dose that is
+    not on the scale.
+
+    It is **not** drawn. This said "for the caller to draw off-scale", and no
+    caller does: ``renderer.draw_response`` never reads ``non_numeric``, and the
+    only off-scale drawing is the zero-dose position for numeric ``x <= 0``.
+    Naming and counting is a defensible answer — a `vehicle` has no position on
+    a dose axis at all, unlike a zero — but it is a different answer from the
+    one this described, and a docstring is worth what the branch it describes is
+    worth.
     """
     from well_viewer.core.channel_state_controller import on_cutoff_for_column
     from well_viewer.domain.plot_members import plot_replicate_sets

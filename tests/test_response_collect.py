@@ -233,13 +233,30 @@ def test_a_series_with_no_positive_dose_has_nowhere_to_put_a_zero():
     assert rcompute.zero_position([]) is None
 
 
-def test_a_curve_is_fitted_in_the_space_its_axis_is_drawn_in():
+def test_a_curve_is_fitted_in_log_space_whatever_the_axis_is_drawn_in():
     """Decade-spaced doses fitted in linear x weight the top dose almost
     exclusively — the residual at 10 µM is a hundred times the one at 0.1 µM
-    for the same proportional error, so the fitter ignores the half of the
-    curve that decides the EC50."""
-    assert rcompute.fit_space(log_x=True) == "log10"
-    assert rcompute.fit_space(log_x=False) == "linear"
+    for the same proportional error, so the fitter ignores the half of the curve
+    that decides the EC50. ``fit_response`` therefore fits in log10 always.
+
+    This replaces a test that asserted ``fit_space(log_x=True) == "log10"``.
+    That function had no application caller, its rule (fit linearly when the
+    axis is linear) was one ``fit_response`` never followed, and the assertion
+    could not fail for any implementation returning those two strings — §7.8
+    face two, guarding a decision nothing made. The behaviour is measured here
+    instead: recovering a decade-spaced EC50 to a fraction of a percent is
+    something only a log-space fit does.
+    """
+    ec50 = 0.03
+    xs = [0.001, 0.01, 0.1, 1.0, 10.0, 30.0]
+    ys = [100.0 / (1.0 + (x / ec50) ** -1.0) for x in xs]
+
+    fit = rcompute.fit_response(xs, ys, model="4pl")
+
+    assert fit.ok, fit.reason
+    assert fit.ec50 == pytest.approx(ec50, rel=0.01), (
+        "a linear-space fit cannot recover a decade-spaced EC50 this closely"
+    )
 
 
 def test_a_boolean_is_not_a_dose():
@@ -618,3 +635,29 @@ def test_the_fit_is_told_what_the_user_called_the_x_axis(stub_stats):
     reason = fits[24.0].reason
     assert "Temperature" in reason, reason
     assert "dose" not in reason.lower(), reason
+
+
+def test_the_caption_names_which_mistake_each_omission_was():
+    """"No dose here" and "these wells disagree about the dose" are different
+    mistakes with different fixes — one is a gap to fill, the other a
+    contradiction to resolve — and the module's own roster comment says they are
+    distinguished rather than pooled into "no value".
+
+    The caption pooled them anyway: it read the members out of ``omitted`` and
+    dropped the reason, so a member whose wells disagreed was captioned "no
+    Dose". ``empty_reason`` branched correctly, but it only speaks when the
+    figure is empty, while this is the sentence that reaches the axes and
+    travels with a saved file.
+    """
+    from well_viewer.features.response import collect as rc
+
+    data = rc.ResponseData(
+        variable_name="Dose",
+        omitted=[("grpA", rc.NO_VALUE), ("grpB", rc.MIXED_VALUE),
+                 ("grpC", rc.MIXED_VALUE)],
+    )
+
+    caption = rc.omission_caption(data)
+
+    assert "1 omitted: no Dose (grpA)" in caption
+    assert "2 omitted: wells disagree about Dose (grpB, grpC)" in caption

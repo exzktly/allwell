@@ -61,23 +61,23 @@ def zero_position(values, offset_decades: float = ZERO_OFFSET_DECADES) -> float 
     return 10.0 ** (math.log10(min(positives)) - float(offset_decades))
 
 
-def fit_space(log_x: bool) -> str:
-    """``"log10"`` or ``"linear"`` — the space a curve is fitted in.
-
-    **Fit where the axis is drawn.** Decade-spaced doses fitted in linear x
-    weight the top dose almost exclusively: the residual at 10 µM is a hundred
-    times the residual at 0.1 µM for the same proportional error, so the fitter
-    is effectively ignoring the bottom of the curve — which is the half that
-    decides the EC50.
-    """
-    return "log10" if log_x else "linear"
-
-
 # ── curve fitting ───────────────────────────────────────────────────────────
 #
-# Fitted in log10(x), for the reason ``fit_space`` gives: decade-spaced doses
-# fitted in linear x weight the top dose almost exclusively, so the fitter is
-# effectively ignoring the half of the curve that decides the EC50.
+# **Always in log10(x)**, whatever the axis is drawn in. Decade-spaced doses
+# fitted in linear x weight the top dose almost exclusively: the residual at
+# 10 µM is a hundred times the residual at 0.1 µM for the same proportional
+# error, so the fitter effectively ignores the bottom of the curve — the half
+# that decides the EC50.
+#
+# There used to be a ``fit_space(log_x)`` here returning ``"log10"`` or
+# ``"linear"``, and it was worse than useless: no application code called it,
+# its only exercise was a test asserting the two string literals it returned,
+# and the rule it stated — fit linearly when the axis is linear — is one
+# ``fit_response`` has never followed. A documented decision with no decider,
+# which the workplan then cited as the justification for the behaviour. §7.7 #5:
+# prose describing a branch is worth exactly what the branch is worth. The
+# reasoning was the part worth keeping, so it lives here, beside the code that
+# acts on it.
 
 #: The models offered. ``HILL`` is the four-parameter curve with its bottom
 #: pinned at zero — the right model when the assay's zero is a real zero and

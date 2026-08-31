@@ -252,15 +252,17 @@ def member_replicate_sets(ctx) -> dict[str, str]:
     return out
 
 
-# ``member_variable_values`` and ``split_members_by_variable`` lived here and
-# were removed: they answered "what value does this member hold, in whatever key
-# space the plot is in" and nothing in the application asked. They were written
-# for row 32's Colour-by and Split-into-panels, which are still owed — and a
-# seam for an implementation that has not arrived is the thing workstream D's
-# review gate had the ``columns`` parameter deleted for. The behaviour they
-# expressed is not lost: ``sample_variables.roll_up`` is where the "every well
-# must agree" rule lives and is tested there, and ``collect_response`` applies
-# it per member. Bring them back when Colour-by needs them, not before.
+# ``member_variable_values`` answers "what value does this member hold, in
+# whatever key space the plot is in". It is defined below and is live —
+# ``domain/variable_series.member_inks`` and ``member_bands`` are its callers,
+# which is Colour-by and Split-by reading it exactly as planned.
+#
+# This comment used to say it had been *removed*, alongside a
+# ``split_members_by_variable`` that was never written at all; it survived the
+# commit that brought the function back sixty lines below it. The rule it
+# defers to is unchanged and worth keeping: ``sample_variables.roll_up`` owns
+# the "every well must agree" decision and is tested there, so nothing here
+# re-derives it.
 
 
 def variable_replicate_sets(ctx, variable_id: str):

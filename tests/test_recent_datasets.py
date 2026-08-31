@@ -254,10 +254,22 @@ def test_a_folder_that_yielded_no_wells_is_not_remembered(tmp_path, monkeypatch)
     assert rd.load(settings) == []
 
 
-def test_a_settings_backend_that_will_not_write_does_not_cost_the_load(tmp_path):
-    """The dataset is loaded and on screen by the time this runs."""
+def test_a_settings_backend_that_will_not_write_does_not_cost_the_load(
+        tmp_path, monkeypatch):
+    """The dataset is loaded and on screen by the time this runs.
+
+    **Patched at ``app_settings``, not at ``ctx.window._qsettings``.** The
+    broken backend used to be handed over on a stub window, and
+    ``_remember_if_it_loaded`` does not read one — it calls the module function,
+    which is the change documented three lines above its own call site. So the
+    stub was never touched, this exercised the developer's real ``QSettings``,
+    and deleting the ``try``/``except`` it exists to test left all 27 tests in
+    this file green. §7.8's first face: the fixture agreed with the test rather
+    than with the code.
+    """
     from types import SimpleNamespace
 
+    from well_viewer.core import app_settings as app_settings_module
     from well_viewer.core.load_controller import _remember_if_it_loaded
 
     class _Broken:
@@ -267,8 +279,8 @@ def test_a_settings_backend_that_will_not_write_does_not_cost_the_load(tmp_path)
         def setValue(self, key, value):  # noqa: N802 - Qt's spelling
             raise OSError("read-only settings volume")
 
+    monkeypatch.setattr(app_settings_module, "app_settings", lambda: _Broken())
     ctx = SimpleNamespace(
-        window=SimpleNamespace(_qsettings=lambda: _Broken()),
         state=SimpleNamespace(
             dataset=SimpleNamespace(well_paths={"A01": tmp_path / "a.csv"},
                                     data_dir=tmp_path),

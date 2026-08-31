@@ -234,6 +234,21 @@ def _empty_reason(ctx, data) -> str:
                         timepoints_chosen=bool(timepoints_for(ctx)))
 
 
+def _blank_if_undefined(value) -> str:
+    """A number, or an empty cell for one that was never computed.
+
+    ``err`` is deliberately NaN for a spread that could not be defined — one
+    replicate has no spread, and §7's rule is that undefined must not be written
+    as zero. ``f"{nan:g}"`` renders the literal ``nan``, which is a third token
+    for the same idea: the rest of the app's exports blank the cell
+    (``features/export/service._num``), and two guards already pin that —
+    ``test_events_csv_columns`` and ``test_fov_label_integrity``. One exporter
+    with its own spelling is how a reader ends up believing the two mean
+    different things.
+    """
+    return "" if value is None or value != value else f"{value:g}"
+
+
 def export_response_csv(ctx) -> None:
     """Write the drawn points, **and a row per member that was left out**.
 
@@ -255,7 +270,7 @@ def export_response_csv(ctx) -> None:
     header = ["member", "timepoint", "x", "x_label", "y", "err", "n", "reason"]
     rows = [
         [p.member, f"{c.timepoint:g}", f"{p.x:g}", p.label,
-         f"{p.y:g}", f"{p.err:g}", str(p.n), ""]
+         f"{p.y:g}", _blank_if_undefined(p.err), str(p.n), ""]
         for c in data.curves for p in c.points
     ]
     rows += [[member, "", "", "", "", "", "", reason]

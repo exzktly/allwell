@@ -53,8 +53,12 @@ MAX_RECENTS = 10
 class RecentDataset:
     """One remembered dataset.
 
-    *path* is the directory Review was pointed at — the ``out`` half for an
-    in/out layout, since that is what reopening it must pass back. *name* is
+    *path* is the directory Review was pointed at — **not** the ``out`` half it
+    may have descended into, so reopening from the list takes the same branch
+    through ``load_path`` that the original open took. This said the opposite,
+    while ``load_controller._remember_if_it_loaded`` (which writes the entry)
+    and ``home.controller._is_the_open_dataset`` (which reads it) were both
+    written against what the code does. *name* is
     what to show. *opened_at* is a Unix timestamp, kept so the list can be
     ordered and a tooltip can say when, and it is the *last* open rather than
     the first.

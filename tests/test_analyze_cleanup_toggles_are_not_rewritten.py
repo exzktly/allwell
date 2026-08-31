@@ -25,10 +25,10 @@ pytest.importorskip("PySide6")
 
 @pytest.fixture
 def tab(qtbot, monkeypatch):
-    import analyze_tab_form
+    import analyze.form
 
-    monkeypatch.setattr(analyze_tab_form, "load_remotes", lambda: {})
-    from analyze_tab import AnalyzeTab
+    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+    from analyze.tab import AnalyzeTab
 
     t = AnalyzeTab()
     qtbot.addWidget(t)

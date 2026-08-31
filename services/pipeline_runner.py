@@ -1,7 +1,7 @@
 """Background runner for the microscopy pipeline subprocess.
 
 Owns the worker thread, the subprocess handle, and the log/event queue that
-the GUI polls. Decouples ``analyze_tab.py`` from threading + subprocess +
+the GUI polls. Decouples ``analyze/tab.py`` from threading + subprocess +
 log-line parsing so the tab module is a pure view + form.
 
 Event protocol (queue payloads are ``(kind, payload)`` tuples):
@@ -1052,7 +1052,7 @@ class PipelineRunner:
             os.environ.pop("ALLWELL_SCRATCH_DIR", None)
         try:
             # No compatibility fallback. The only production caller,
-            # `analyze_input._resolve_run_dirs_for_runner`, takes `proc_hook`,
+            # `analyze.input._resolve_run_dirs_for_runner`, takes `proc_hook`,
             # and the `except TypeError` that used to sit here could therefore
             # not be entered by a caller with the wrong signature — only by a
             # `TypeError` raised from *inside* the resolver, which it then

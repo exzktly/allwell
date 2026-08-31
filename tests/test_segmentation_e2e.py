@@ -239,7 +239,7 @@ def analyze_tab(qapp, monkeypatch):
     would block forever under the offscreen platform. Capturing the calls turns
     a rejected run into a readable assertion instead of a hang.
     """
-    import analyze_tab as analyze_tab_mod
+    import analyze.tab as analyze_tab_mod
 
     dialogs: list[tuple[str, str]] = []
     monkeypatch.setattr(

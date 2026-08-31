@@ -37,7 +37,7 @@ def _host(qapp, *, remote: bool = True, total: int = 40):
     """
     from PySide6.QtWidgets import QWidget
 
-    from analyze_progress import AnalyzeProgressMixin
+    from analyze.progress import AnalyzeProgressMixin
     from widgets.run_dashboard import RunDashboard
 
     class _Host(AnalyzeProgressMixin, QWidget):
@@ -218,7 +218,7 @@ def test_every_phase_says_something(qapp):
     """A phase with no sentence renders nothing and silently inherits the
     previous phase's — the exact defect this module was rewritten to remove —
     so a phase constant added without a branch must fail here."""
-    import analyze_progress as ap
+    import analyze.progress as ap
 
     phases = [v for k, v in vars(ap).items()
               if k.startswith("_PHASE_") and isinstance(v, str)]

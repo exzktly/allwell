@@ -44,12 +44,12 @@ def _remotes(*names: str) -> dict:
 @pytest.fixture
 def tab(qtbot, monkeypatch):
     """A real AnalyzeTab built with no remotes configured on disk."""
-    import analyze_tab_form
+    import analyze.form
     import services.remote_config as remote_config
 
-    monkeypatch.setattr(analyze_tab_form, "load_remotes", lambda: {})
+    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
     monkeypatch.setattr(remote_config, "load_remotes", lambda: {})
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     t = AnalyzeTab()
     qtbot.addWidget(t)
@@ -128,12 +128,12 @@ def test_the_first_configured_remote_is_still_the_opening_default(qtbot, monkeyp
     when the pane appears. What changed is that a rebuild is no longer treated
     as an opening state — see ``_reload_remotes_combo``'s docstring.
     """
-    import analyze_tab_form
+    import analyze.form
     import services.remote_config as remote_config
 
-    monkeypatch.setattr(analyze_tab_form, "load_remotes", lambda: _remotes("hpc", "box"))
+    monkeypatch.setattr(analyze.form, "load_remotes", lambda: _remotes("hpc", "box"))
     monkeypatch.setattr(remote_config, "load_remotes", lambda: _remotes("hpc", "box"))
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     t = AnalyzeTab()
     qtbot.addWidget(t)

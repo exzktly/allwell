@@ -59,8 +59,8 @@ _PROBE_POLL_MS = 120
 
 # How long one bootstrap-log drain slice may hold the GUI thread, and how many
 # lines it may carry — the same pair, for the same reason, as
-# ``analyze_tab._POLL_BUDGET_S`` / ``_POLL_MAX_LINES``. Restated rather than
-# imported: ``analyze_tab`` imports this module (lazily, from the Manage…
+# ``analyze.tab._POLL_BUDGET_S`` / ``_POLL_MAX_LINES``. Restated rather than
+# imported: ``analyze.tab`` imports this module (lazily, from the Manage…
 # button), so importing it back would close the cycle.
 _POLL_BUDGET_S = 0.015
 _POLL_MAX_LINES = 500
@@ -1277,9 +1277,15 @@ class BootstrapLogDialog(QDialog):
 
     def _spawn(self) -> None:
         from services.input_resolution_service import build_bootstrap_cmd
+        # The repository root is asked for, never derived from this module's own
+        # location: ``__file__.parent`` was the root only while this file sat at
+        # the top level, and answered ``analyze/`` the moment it moved into a
+        # package — pointing the bootstrap at a path that has never existed.
+        # ``remote_runner.repo_root`` is the one definition of it, shared with
+        # the bootstrap script's own helpers.
+        from services.remote_runner import repo_root
 
-        repo_root = Path(__file__).resolve().parent
-        bootstrap = repo_root / "scripts" / "_bootstrap_lib.py"
+        bootstrap = repo_root() / "scripts" / "_bootstrap_lib.py"
         # Source runs invoke the interpreter on the ``.py`` path, so it must
         # exist; the frozen build re-execs the .app binary via the
         # ``--run-bootstrap`` sentinel and never touches this path.
@@ -1531,7 +1537,7 @@ class ManageRemotesDialog(QDialog):
         PySide6 6.7.3 an exception escaping a slot prints a traceback and lets
         the event loop carry on, so a hand-edited ``remotes.toml`` did not crash
         the app — it made Edit…, Test and Manage… buttons that do nothing at
-        all, with the only evidence in a boot log nobody reads. ``analyze_tab``
+        all, with the only evidence in a boot log nobody reads. ``analyze.tab``
         has caught the pair around this same call for as long as the combo has
         existed; this carries that knowledge across.
         """

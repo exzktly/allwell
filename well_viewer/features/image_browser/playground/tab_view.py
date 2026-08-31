@@ -528,7 +528,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     label.mousePressEvent = _on_press
     label.mouseMoveEvent = _on_move
 
-    # Show/hide param rows by method (mirrors analyze_tab._sync_bg), and grey out
+    # Show/hide param rows by method (mirrors analyze.tab._sync_bg), and grey out
     # whatever the selected STAGE does not consult. Visibility answers "does this
     # method take this parameter"; enablement answers "does this stage read it at
     # all" — without the second one, a stage that ignores a control leaves it

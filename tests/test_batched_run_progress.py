@@ -230,7 +230,7 @@ class _AlreadySet:
 def tab():
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     QApplication.instance() or QApplication([])
     t = AnalyzeTab()

@@ -1,6 +1,6 @@
 """Audit U4, U5, U9, U10, U11, U14, U15, U16 — the Manage Remotes dialogs.
 
-Eight defects that shipped together in ``analyze_remote_dialog.py``, all of them
+Eight defects that shipped together in ``analyze/remote_dialog.py``, all of them
 in code reached from a ``clicked`` slot and none of them visible from a test
 that only asks whether a control exists:
 
@@ -84,7 +84,7 @@ def _pump(qtbot, predicate, timeout=3.0):
     PermissionError(13, "Permission denied"),
 ])
 def test_manage_remotes_opens_when_remotes_toml_cannot_be_read(qtbot, boxes, monkeypatch, raised):
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
 
     def _boom():
         raise raised
@@ -106,7 +106,7 @@ def test_manage_remotes_opens_when_remotes_toml_cannot_be_read(qtbot, boxes, mon
 
 @pytest.mark.parametrize("action", ["_on_edit", "_on_test"])
 def test_edit_and_test_report_a_broken_remotes_toml(qtbot, boxes, monkeypatch, action):
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
 
     state = {"broken": False}
 
@@ -141,7 +141,7 @@ def test_edit_and_test_report_a_broken_remotes_toml(qtbot, boxes, monkeypatch, a
 # ── U4: the Test button does not hold the GUI thread ────────────────────────
 
 def test_the_manage_remotes_test_button_does_not_block_the_gui(qtbot, boxes, monkeypatch):
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
     from services import ssh_key_setup
 
     monkeypatch.setattr(ard, "load_remotes", lambda: {"hpc": _Host()})
@@ -173,7 +173,7 @@ def test_the_manage_remotes_test_button_does_not_block_the_gui(qtbot, boxes, mon
 
 
 def test_a_failing_probe_still_re_enables_the_test_button(qtbot, boxes, monkeypatch):
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
     from services import ssh_key_setup
 
     monkeypatch.setattr(ard, "load_remotes", lambda: {"hpc": _Host()})
@@ -190,7 +190,7 @@ def test_a_failing_probe_still_re_enables_the_test_button(qtbot, boxes, monkeypa
 # ── U16: the success line names the host that was contacted ─────────────────
 
 def test_the_form_test_result_names_the_host_it_actually_probed(qtbot, monkeypatch):
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
     from services import ssh_key_setup
 
     release = queue.Queue()
@@ -220,7 +220,7 @@ def test_the_form_test_result_names_the_host_it_actually_probed(qtbot, monkeypat
 # ── U14 / U15: the add/edit form ────────────────────────────────────────────
 
 def test_result_host_reads_the_dataclass_defaults(qtbot):
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
     from services.remote_config import RemoteHost
 
     dlg = ard.RemoteFormDialog(None, host=None)
@@ -250,7 +250,7 @@ def test_the_form_spells_no_remote_host_default_as_a_literal():
         for f in ("remote_project_dir", "remote_staging_dir", "remote_python")
     }
     src = pathlib.Path(
-        pathlib.Path(__file__).resolve().parent.parent / "analyze_remote_dialog.py"
+        pathlib.Path(__file__).resolve().parent.parent / "analyze/remote_dialog.py"
     ).read_text()
     tree = ast.parse(src)
     fn = next(n for n in ast.walk(tree)
@@ -266,7 +266,7 @@ def test_the_form_spells_no_remote_host_default_as_a_literal():
 
 
 def test_a_scheduled_host_with_no_launcher_is_refused(qtbot, boxes, monkeypatch):
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
 
     written: list = []
     monkeypatch.setattr(ard, "write_remote", lambda host: written.append(host))
@@ -289,7 +289,7 @@ def test_a_scheduled_host_with_no_launcher_is_refused(qtbot, boxes, monkeypatch)
 
 def test_a_scheduled_host_with_a_launcher_still_saves(qtbot, boxes, monkeypatch):
     """The refusal must not be a blanket one."""
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
 
     written: list = []
     monkeypatch.setattr(ard, "write_remote", lambda host: written.append(host))
@@ -304,7 +304,7 @@ def test_a_scheduled_host_with_a_launcher_still_saves(qtbot, boxes, monkeypatch)
 
 
 def test_a_local_compute_host_is_not_asked_for_a_launcher(qtbot, boxes, monkeypatch):
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
 
     written: list = []
     monkeypatch.setattr(ard, "write_remote", lambda host: written.append(host))
@@ -319,7 +319,7 @@ def test_a_local_compute_host_is_not_asked_for_a_launcher(qtbot, boxes, monkeypa
 # ── U9: a replacement that could not delete the old key is not a reuse ──────
 
 def test_a_key_replace_that_cannot_unlink_says_so(qtbot, boxes, monkeypatch):
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
     from services import ssh_key_setup
 
     key = ard.Path("/tmp/definitely-not-there/allwell_hpc")
@@ -354,7 +354,7 @@ def test_a_replace_that_generated_nothing_is_not_called_a_reuse(qtbot, boxes, mo
     """``generate_keypair`` answering "no work done" straight after both halves
     were deleted cannot mean what the word "reusing" means. Whatever it does
     mean, the user does not have the fresh key they asked for."""
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
     from services import ssh_key_setup
 
     key = tmp_path / "allwell_hpc"
@@ -374,7 +374,7 @@ def test_a_replace_that_generated_nothing_is_not_called_a_reuse(qtbot, boxes, mo
 
 def test_a_key_replace_that_unlinks_cleanly_generates(qtbot, boxes, monkeypatch, tmp_path):
     """The other half: with the old key gone, the wizard proceeds."""
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
     from services import ssh_key_setup
 
     key = tmp_path / "allwell_hpc"
@@ -403,7 +403,7 @@ def _bootstrap_dialog(qtbot, monkeypatch):
     ``__init__`` arms ``_spawn`` on a zero-delay timer; replacing the method
     before construction keeps the subprocess out of the test entirely.
     """
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
 
     monkeypatch.setattr(ard.BootstrapLogDialog, "_spawn", lambda _self: None)
     dlg = ard.BootstrapLogDialog(None, alias="hpc")
@@ -424,7 +424,7 @@ def test_one_poll_slice_does_not_drain_an_unbounded_queue(qtbot, monkeypatch):
         "one poll slice drained 9000 queued lines in a single pass; during a "
         "TensorFlow install's output bursts that is how long Cancel stays "
         "unclickable")
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
     assert held < ard._POLL_BUDGET_S * 4, f"a slice held the GUI for {held:.3f}s"
 
 
@@ -468,7 +468,7 @@ def test_dropped_lines_are_reported_in_the_log(qtbot, monkeypatch):
 # so Qt takes it down with the widget.
 
 def test_a_poller_dies_with_the_widget_that_owns_it(qtbot):
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
     from PySide6.QtWidgets import QWidget
 
     owner = QWidget()
@@ -494,7 +494,7 @@ def test_closing_the_form_mid_probe_does_not_reach_a_deleted_widget(qtbot, capfd
     carry on, so the failure is a line on stderr rather than a raised error —
     which is exactly why it would otherwise go unnoticed.
     """
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
     from services import ssh_key_setup
 
     release: queue.Queue = queue.Queue()
@@ -521,14 +521,14 @@ def test_closing_the_form_mid_probe_does_not_reach_a_deleted_widget(qtbot, capfd
 # ── U11: dialogs are destroyed when they close ─────────────────────────────
 
 def test_manage_remotes_dialogs_do_not_pile_up_on_the_tab(qtbot, monkeypatch):
-    import analyze_remote_dialog as ard
-    import analyze_tab_form
+    import analyze.remote_dialog as ard
+    import analyze.form
 
-    monkeypatch.setattr(analyze_tab_form, "load_remotes", lambda: {})
+    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
     monkeypatch.setattr(ard, "load_remotes", lambda: {})
     monkeypatch.setattr(QDialog, "exec", lambda _self: QDialog.Rejected)
 
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     tab = AnalyzeTab()
     qtbot.addWidget(tab)
@@ -549,7 +549,7 @@ def test_manage_remotes_dialogs_do_not_pile_up_on_the_tab(qtbot, monkeypatch):
     ("_bootstrap_btn", "BootstrapLogDialog"),
 ])
 def test_the_child_dialogs_are_destroyed_too(qtbot, monkeypatch, button, child):
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
 
     monkeypatch.setattr(ard, "load_remotes", lambda: {"hpc": _Host()})
     monkeypatch.setattr(ard.BootstrapLogDialog, "_spawn", lambda _self: None)
@@ -582,7 +582,7 @@ def _never_answers(monkeypatch, ard, started):
 
 def test_selecting_another_remote_does_not_re_enable_test_mid_probe(
         qtbot, boxes, monkeypatch):
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
 
     monkeypatch.setattr(ard, "load_remotes", lambda: {
         "hpc": _Host(name="hpc", ssh_alias="hpc.example"),
@@ -615,7 +615,7 @@ def test_selecting_another_remote_does_not_re_enable_test_mid_probe(
 
 def test_probe_ssh_async_refuses_a_second_probe_and_says_so(qtbot, monkeypatch):
     """The refusal is at the helper, so a fourth call site cannot miss it."""
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
 
     started: list[str] = []
     _never_answers(monkeypatch, ard, started)
@@ -629,7 +629,7 @@ def test_probe_ssh_async_refuses_a_second_probe_and_says_so(qtbot, monkeypatch):
 
 
 def test_the_flag_clears_when_the_probe_answers(qtbot, monkeypatch):
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
 
     monkeypatch.setattr(ard.ssh_key_setup, "probe_ssh_connection",
                         lambda alias, key, timeout=15: (True, ""))
@@ -659,7 +659,7 @@ def test_a_refused_probe_takes_nothing_from_the_widget():
     value now means something to a fourth caller, and that the guard below can
     assert the property directly instead of asserting a path nobody walks.
     """
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
 
     owner = QWidget()
     owner.setProperty("_aw_ssh_probe_in_flight", True)   # as if one were running
@@ -677,7 +677,7 @@ def test_every_probe_call_site_reads_the_return_before_taking_its_control():
     import ast
     import inspect
 
-    import analyze_remote_dialog as ard
+    import analyze.remote_dialog as ard
 
     src = inspect.getsource(ard)
     assert "probe_ssh_async" in src and len(src) > 20_000, len(src)
@@ -699,3 +699,55 @@ def test_every_probe_call_site_reads_the_return_before_taking_its_control():
         "these call probe_ssh_async and throw the answer away, so a refused "
         f"probe leaves their control mid-flight: lines {unchecked} "
         "(relative to the module source)")
+
+
+# ── the bootstrap path is asked for, never derived from this file's location ──
+#
+# `_spawn` located `scripts/_bootstrap_lib.py` by treating its own module's
+# directory as the repository root. That held only while this file sat at the
+# top level: moving it into `analyze/` made the expression answer `analyze/`,
+# and the path it built has never existed. Nothing in the suite looked at it,
+# because every test of this dialog replaces `_spawn` outright.
+#
+# So the assertion is at the boundary (CLAUDE.md §7.4 #1): not what the
+# expression computes, but what `_spawn` actually hands to the thing that turns
+# it into a command line.
+
+def test_the_bootstrap_path_spawn_builds_is_a_file_that_exists(qtbot, monkeypatch):
+    import analyze.remote_dialog as ard
+    from services import input_resolution_service as irs
+
+    handed: list = []
+
+    class _FakeProc:
+        stdout = None
+        pid = 1
+
+        def poll(self):
+            return 0
+
+    def _record(bootstrap, alias):
+        handed.append(bootstrap)
+        return ["true"]
+
+    # `__init__` arms `_spawn` on a zero-delay timer, so it stays unfired while
+    # nothing pumps the event loop; the call below is the one that runs.
+    monkeypatch.setattr(irs, "build_bootstrap_cmd", _record)
+    monkeypatch.setattr(ard.subprocess, "Popen", lambda *a, **k: _FakeProc())
+    monkeypatch.setattr(ard.BootstrapLogDialog, "_mark_finished",
+                        lambda _self, _code: None)
+
+    dlg = ard.BootstrapLogDialog(None, alias="hpc")
+    qtbot.addWidget(dlg)
+    dlg._spawn()
+
+    assert handed, (
+        "_spawn never reached build_bootstrap_cmd — it bailed at the "
+        "'bootstrap script not found' guard, which is exactly the symptom a "
+        "wrong repository root produces")
+    bootstrap = handed[0]
+    assert bootstrap.is_file(), (
+        f"_spawn built a bootstrap path that does not exist: {bootstrap}. "
+        "The repository root must come from services.remote_runner.repo_root, "
+        "not from this module's own __file__, which moves with the file.")
+    assert bootstrap.name == "_bootstrap_lib.py"

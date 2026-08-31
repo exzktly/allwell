@@ -45,7 +45,7 @@ _REFUSAL = (
 
 @pytest.fixture
 def tab(qtbot):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     t = AnalyzeTab()
     qtbot.addWidget(t)

@@ -24,7 +24,7 @@ pytest.importorskip("PySide6")
 
 
 def test_the_forms_positives_become_the_sidecars_negatives():
-    from analyze_preflight import _as_sidecar_polarity
+    from analyze.preflight import _as_sidecar_polarity
 
     got = _as_sidecar_polarity(
         {"auto_threshold": False, "run_check": True, "nuclear_token": "DAPI"})
@@ -36,7 +36,7 @@ def test_the_forms_positives_become_the_sidecars_negatives():
 
 
 def test_both_polarities_round_trip():
-    from analyze_preflight import _as_sidecar_polarity
+    from analyze.preflight import _as_sidecar_polarity
 
     for value in (True, False):
         got = _as_sidecar_polarity({"auto_threshold": value})
@@ -46,7 +46,7 @@ def test_both_polarities_round_trip():
 def test_a_sidecar_shaped_dict_is_left_alone():
     """The other source. Translating a dict that already speaks the applier's
     language would invert it."""
-    from analyze_preflight import _as_sidecar_polarity
+    from analyze.preflight import _as_sidecar_polarity
 
     already = {"no_auto_threshold": True, "no_run_check": True}
     assert _as_sidecar_polarity(already) == already
@@ -56,7 +56,7 @@ def test_an_explicit_negative_wins_over_the_positive():
     """If both are present the applier's own key is authoritative — inventing
     a second answer for a question already answered is how the two spellings
     came to disagree in the first place."""
-    from analyze_preflight import _as_sidecar_polarity
+    from analyze.preflight import _as_sidecar_polarity
 
     got = _as_sidecar_polarity(
         {"auto_threshold": True, "no_auto_threshold": True})
@@ -78,7 +78,7 @@ def test_the_journal_branch_translates_and_the_sidecar_branch_does_not(tmp_path)
     text, because the source is what an earlier version of this test read and
     it could not tell a call from a mention.
     """
-    from analyze_preflight import _previous_settings
+    from analyze.preflight import _previous_settings
     from services import run_journal as J
 
     out = tmp_path / "out"
@@ -98,7 +98,7 @@ def test_the_journal_branch_translates_and_the_sidecar_branch_does_not(tmp_path)
 
 def test_the_coverage_line_counts_the_whole_plate():
     """The denominator and the named shortfall, at the paint seam."""
-    from analyze_preflight import AnalyzePreflightMixin
+    from analyze.preflight import AnalyzePreflightMixin
     from pipeline.completeness import build_block
 
     recorded: list[str] = []
@@ -150,7 +150,7 @@ def test_a_scan_where_every_well_failed_is_not_silent():
     nothing at all said nothing at all — indistinguishable from a plate with no
     wells in it.
     """
-    from analyze_preflight import AnalyzePreflightMixin
+    from analyze.preflight import AnalyzePreflightMixin
     from pipeline.completeness import build_block
 
     recorded: list[str] = []

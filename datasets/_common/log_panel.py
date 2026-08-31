@@ -74,7 +74,7 @@ class LogPanelMixin:
 
         # The dashboard below IS the summary view; the verbose text log is off
         # by default and revealed on demand. Analyze builds the same furniture
-        # (analyze_tab_log.py::_build_log / _on_toggle_raw_log) but starts its
+        # (analyze/log_pane.py::_build_log / _on_toggle_raw_log) but starts its
         # log open, and the difference is deliberate: a tool page here reports
         # a short, bounded job whose dashboard genuinely is the whole story,
         # where an Analyze run takes hours and says several things — why it

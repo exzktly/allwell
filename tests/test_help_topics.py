@@ -47,7 +47,7 @@ def _analyze_section_titles() -> list[str]:
     Read from the source rather than by constructing the form: the titles are
     the map's keys, and a new section added without a topic has to fail here.
     """
-    src = (REPO_ROOT / "analyze_tab_form.py").read_text(encoding="utf-8")
+    src = (REPO_ROOT / "analyze/form.py").read_text(encoding="utf-8")
     titles: list[str] = []
     for node in ast.walk(ast.parse(src)):
         if not isinstance(node, ast.Call):
@@ -132,7 +132,7 @@ def test_every_datasets_tool_has_a_topic():
 
 def test_every_analyze_section_has_a_topic():
     titles = _analyze_section_titles()
-    assert titles, "found no _section() calls in analyze_tab_form.py — parser drifted"
+    assert titles, "found no _section() calls in analyze/form.py — parser drifted"
     missing = [t for t in titles if t not in help_topics.ANALYZE_SECTION_HELP]
     assert not missing, (
         "Analyze form sections with no entry in help_topics.ANALYZE_SECTION_HELP; "

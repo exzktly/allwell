@@ -25,10 +25,10 @@ pytest.importorskip("PySide6")
 
 @pytest.fixture
 def tab(qtbot, monkeypatch, tmp_path):
-    import analyze_tab_form
+    import analyze.form
 
-    monkeypatch.setattr(analyze_tab_form, "load_remotes", lambda: {})
-    from analyze_tab import AnalyzeTab
+    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+    from analyze.tab import AnalyzeTab
 
     t = AnalyzeTab()
     qtbot.addWidget(t)
@@ -65,9 +65,9 @@ def test_pressing_suspend_asks_the_run_to_wind_down(tab, tmp_path, monkeypatch):
 def test_a_record_that_cannot_be_written_still_winds_the_run_down(
         tab, monkeypatch):
     """The reported shape: the write fails and the run must still stop."""
-    import analyze_suspend
+    import analyze.suspend
 
-    monkeypatch.setattr(analyze_suspend, "save",
+    monkeypatch.setattr(analyze.suspend, "save",
                         lambda run: (_ for _ in ()).throw(OSError("disk gone")))
     tab._suspend_btn.click()
     assert tab._runner.suspended, (

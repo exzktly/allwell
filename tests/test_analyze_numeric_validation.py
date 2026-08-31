@@ -12,7 +12,7 @@ a run, so refusing to start over it would be a false refusal.
 """
 from __future__ import annotations
 
-from analyze_tab import _numeric_option_errors
+from analyze.tab import _numeric_option_errors
 
 
 def _ok_opts(**over):

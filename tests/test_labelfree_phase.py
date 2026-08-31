@@ -33,7 +33,7 @@ def test_analyze_form_fits_narrow_sidebar(qapp):
     checkboxes are now WrapCheckBox, so the form's minimum width fits the
     sidebar."""
     from PySide6.QtWidgets import QScrollArea
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     from well_viewer.core.app_shell_view import RAIL_W
     from widgets.wrap_checkbox import WrapCheckBox
 
@@ -57,7 +57,7 @@ def test_qc_debris_toggle_hides_its_labels(qapp):
     / 'Min solidity (0-1)' stranded/centered with no fields when debris was off —
     the toggle must target the parent rows (like _bg_radius_rows et al.)."""
     from PySide6.QtWidgets import QLabel
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     tab = AnalyzeTab()
     labels = [l for l in tab.findChildren(QLabel)
@@ -146,7 +146,7 @@ def test_build_pipeline_args_labelfree_preset():
 # ── per-channel Phase checkbox + label-free validation ───────────────────────
 
 def test_analyze_phase_checkbox(qapp):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     tab = AnalyzeTab()
     values = [tab._seg_method_cb.itemData(i) for i in range(tab._seg_method_cb.count())]
     assert "cellpose_labelfree" in values
@@ -194,7 +194,7 @@ def test_phase_channel_cannot_also_be_the_segmentation_channel(qapp):
     brightfield image. The run completed and wrote a full-looking set of CSVs,
     so nothing about the output said the segmentation input was wrong.
     """
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     tab = AnalyzeTab()
     while len(tab._fluor_rows) < 2:
         tab._fluor_add_row("GFP")
@@ -222,7 +222,7 @@ def test_phase_channel_cannot_also_be_the_segmentation_channel(qapp):
 
 
 def test_phase_channel_cannot_also_be_the_cytoplasm_channel(qapp):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     tab = AnalyzeTab()
     while len(tab._fluor_rows) < 2:
         tab._fluor_add_row("GFP")
@@ -242,7 +242,7 @@ def test_set_fluor_rows_restores_a_lowercased_phase_token(qapp):
     """The sidecar records ``phase_token`` lower-cased while the channel list
     keeps the filenames' casing, and a phase token can arrive naming a channel
     that is not in the list at all. Neither may lose the designation."""
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     tab = AnalyzeTab()
 
     tab._set_fluor_rows(["GFP", "DIC"], smfish=[], phase="dic")

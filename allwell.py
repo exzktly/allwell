@@ -5,7 +5,7 @@ Composition root for the All-Well application (PySide6).
 
 Tabs:
   * Review  - WellViewerApp (from well_viewer package runtime)
-  * Analyze - AnalyzeTab (from analyze_tab.py)
+  * Analyze - AnalyzeTab (from analyze/tab.py)
 
 Run:
     python allwell.py [--data_dir /path/to/results]
@@ -207,7 +207,7 @@ class AllWellApp(QMainWindow):
             app.setStyleSheet(theme_v2.qss())
 
     def _build_ui(self) -> None:
-        from analyze_tab import AnalyzeTab
+        from analyze.tab import AnalyzeTab
         from datasets_tab import DatasetsTab
         from well_viewer import WellViewerApp
 
@@ -409,7 +409,7 @@ class AllWellApp(QMainWindow):
         # the OME-TIFF converter hands its produced input folder to Analyze via
         # _open_dataset_in_analyze. The already-built AnalyzeTab is injected so
         # the Datasets pane's Job Queue page can queue and start Analyze runs
-        # without datasets_tab.py importing analyze_tab.
+        # without datasets_tab.py importing analyze.tab.
         self._datasets = DatasetsTab(
             parent=None,
             on_open_in_review=self._open_dataset_in_review,

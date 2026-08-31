@@ -29,7 +29,7 @@ pytest.importorskip("PySide6")
 
 def _tab(qtbot):
     """A real AnalyzeTab with a valid schema, built offscreen."""
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     tab = AnalyzeTab()
     qtbot.addWidget(tab)

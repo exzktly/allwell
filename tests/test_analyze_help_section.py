@@ -54,7 +54,7 @@ def qapp():
 
 @pytest.fixture(scope="module")
 def analyze_tab(qapp):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     tab = AnalyzeTab()
     tab.resize(400, VIEWPORT_H)

@@ -4,7 +4,7 @@
 cohesive job of reading a ``pipeline_info.json`` sidecar back into every form
 field — the "Load previous run" action, the OME-TIFF converter's channel-role
 handoff, and Validate & Repair's "Complete this run in Analyze" all arrive
-here. Split out of ``analyze_tab_form.py`` for its line budget; the methods
+here. Split out of ``analyze/form.py`` for its line budget; the methods
 bind to ``self`` exactly as before, so this is a pure relocation.
 
 The sidecar is the only durable record of how a dataset was produced, which is

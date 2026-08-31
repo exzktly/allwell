@@ -30,7 +30,7 @@ import pytest
 pytest.importorskip("PySide6")
 
 import services.suspend_record as sr
-from analyze_suspend import AnalyzeSuspendMixin
+from analyze.suspend import AnalyzeSuspendMixin
 from services.run_spec import RunSpec
 
 
@@ -115,7 +115,7 @@ def test_an_unreadable_record_never_blocks_a_queued_run(monkeypatch):
     def _boom():
         raise OSError("record unreadable")
 
-    monkeypatch.setattr("analyze_suspend.load_all", _boom)
+    monkeypatch.setattr("analyze.suspend.load_all", _boom)
     host = _Host()
     spec = _spec("/data/in")
     assert host.resume_aware_spec(spec) is spec
@@ -125,7 +125,7 @@ def test_start_from_queue_routes_through_it(monkeypatch):
     """The wiring, not just the helper: the queue's entry point must use it."""
     import inspect
 
-    from analyze_run_spec import AnalyzeRunMixin
+    from analyze.run_spec import AnalyzeRunMixin
 
     src = inspect.getsource(AnalyzeRunMixin.start_from_queue)
     assert "resume_aware_spec" in src
@@ -157,14 +157,14 @@ def test_the_banner_does_not_offer_a_run_the_queue_owns(tmp_path, monkeypatch):
     Resuming from the banner and then letting the queue start ran the same plate
     twice, concurrently, into one output directory.
     """
-    import analyze_suspend
+    import analyze.suspend
     from services import run_journal as J
 
     monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
     out = tmp_path / "out"
     out.mkdir()
 
-    class _Pane(analyze_suspend.AnalyzeSuspendMixin):
+    class _Pane(analyze.suspend.AnalyzeSuspendMixin):
         pass
 
     def _offers(queued: bool) -> list:
@@ -194,18 +194,18 @@ def test_the_banner_asks_both_records_and_filters_both(tmp_path, monkeypatch):
     Driven through `_resumable`, which is what the banner calls. The previous
     test called `_journal_offers` directly and so entered one step past the bug.
     """
-    import analyze_suspend
+    import analyze.suspend
     from services import run_journal as J
     from services import suspend_record as SR
 
     monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
     monkeypatch.setattr(SR, "record_path", lambda: tmp_path / "suspended.json")
-    monkeypatch.setattr(analyze_suspend, "record_path",
+    monkeypatch.setattr(analyze.suspend, "record_path",
                         lambda: tmp_path / "suspended.json", raising=False)
     out = tmp_path / "out"
     out.mkdir()
 
-    class _Pane(analyze_suspend.AnalyzeSuspendMixin):
+    class _Pane(analyze.suspend.AnalyzeSuspendMixin):
         def _current_output_dir(self):
             return str(out)
 
@@ -255,7 +255,7 @@ def test_the_suspend_record_is_marked_by_the_writer_not_the_reader(
     This drives the writer. The journal side already has its symmetric guard
     in ``test_a_queue_started_run_is_marked_as_the_queue_s``.
     """
-    import analyze_suspend as AS
+    import analyze.suspend as AS
 
     written: list[object] = []
     monkeypatch.setattr(AS, "save", lambda run: written.append(run) or True)

@@ -4,7 +4,7 @@ Three guards landed in the same branch with three different scan surfaces —
 12 root modules, 4 package roots + 3 root modules, and 5 package roots with no
 root modules at all. Each was written for the defect in front of it, and each
 was therefore blind somewhere another one could see: the divider guard could not
-see `analyze_tab_chrome.py`, which builds dividers, and the well-token guard
+see `analyze/form_chrome.py`, which builds dividers, and the well-token guard
 could not see `pipeline/` or `process_microscopy.py`, which are the call sites
 its own docstring cites as the reason the rule exists.
 
@@ -38,6 +38,7 @@ PACKAGE_ROOTS = (
     "well_viewer",
     "widgets",
     "datasets",
+    "analyze",
     "services",
     "pipeline",
     "util",

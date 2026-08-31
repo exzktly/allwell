@@ -8,7 +8,7 @@ input, mid-way through the first one's edits.
 `PipelineRunner` used to call it inside `try: … except TypeError:` and, on a
 `TypeError`, call it again without `proc_hook`. The comment said this was for
 "callers that haven't been updated yet", but the only production caller —
-`analyze_input._resolve_run_dirs_for_runner` — takes `proc_hook`. So the
+`analyze.input._resolve_run_dirs_for_runner` — takes `proc_hook`. So the
 handler could not be reached by a stale signature at all; it could only be
 reached by a `TypeError` raised from *inside* the resolver, which it answered
 by re-running the whole thing. A branch enterable only by masking a bug, whose

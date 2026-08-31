@@ -85,7 +85,7 @@ SECTION_BY_PAGE: dict[str, str] = {
 }
 
 #: Analyze form section title (the ``_section(...)`` titles in
-#: ``analyze_tab_form.py``) -> manual heading. The manual's Analyze block is
+#: ``analyze/form.py``) -> manual heading. The manual's Analyze block is
 #: numbered in the order the form builds its sections, so these read in step.
 ANALYZE_SECTION_HELP: dict[str, str] = {
     "Filename Schema": "1. Filename schema",

@@ -170,7 +170,7 @@ def test_the_readout_never_promises_more_than_the_run_delivers(tmp_path):
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
     QApplication.instance() or QApplication([])
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     tab = AnalyzeTab()
     for i, (build, action) in enumerate(p.values for p in SHAPES):

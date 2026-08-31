@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from analyze_tab_form import AnalyzeTabFormMixin
+from analyze.form import AnalyzeTabFormMixin
 
 
 # ── _pinfo_flat (pure; no Qt) ─────────────────────────────────────────────────
@@ -38,7 +38,7 @@ def test_pinfo_flat_falls_back_to_toplevel_and_qc():
 # ── full apply into a live AnalyzeTab ─────────────────────────────────────────
 
 def test_apply_pipeline_info_populates_form(qtbot, tmp_path):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     tab = AnalyzeTab()
     qtbot.addWidget(tab)
@@ -90,7 +90,7 @@ def test_apply_pipeline_info_populates_form(qtbot, tmp_path):
 
 def test_apply_pipeline_info_v1_fallback_no_exec_options(qtbot, tmp_path):
     """Older sidecars without execution_options still restore the basics."""
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     tab = AnalyzeTab()
     qtbot.addWidget(tab)
@@ -123,9 +123,9 @@ def test_a_sidecar_never_re_arms_the_low_disk_override(qtbot, tmp_path):
     someone happened to open — a volume the user has not measured and may not
     even be writing to now. Re-arming it from that is a safety override nobody
     chose. A *queued job* is the opposite case and does restore it; see
-    ``analyze_job_edit._hydrate_opts_without_sidecar_equivalents``.
+    ``analyze.job_edit._hydrate_opts_without_sidecar_equivalents``.
     """
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     tab = AnalyzeTab()
     qtbot.addWidget(tab)
@@ -145,7 +145,7 @@ def test_a_queued_job_does_restore_it(qtbot):
     """The other half of the asymmetry above: the user set that box for this
     job when they queued it, so editing the job has to show it back — otherwise
     saving the edit silently re-arms the check they turned off."""
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     tab = AnalyzeTab()
     qtbot.addWidget(tab)

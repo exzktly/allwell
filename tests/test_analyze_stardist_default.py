@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from analyze_tab_seg_params import DEFAULT_PROB_THRESH_TEXT
+from analyze.seg_params import DEFAULT_PROB_THRESH_TEXT
 from pipeline.stardist import NMS_THRESH_HELP, PROB_THRESH_HELP, parse_threshold
 from services.pipeline_service import build_pipeline_args
 
@@ -78,7 +78,7 @@ def test_a_restored_sentinel_still_leaves_the_field_blank():
     as blank — overriding it with the fresh-form 0.2 would report the run as
     having used a threshold it did not.
     """
-    from analyze_tab_seg_params import AnalyzeSegParamsMixin
+    from analyze.seg_params import AnalyzeSegParamsMixin
 
     class _Form(AnalyzeSegParamsMixin):
         def __init__(self):

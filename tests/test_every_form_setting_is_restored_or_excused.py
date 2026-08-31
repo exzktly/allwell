@@ -29,19 +29,19 @@ pytest.importorskip("PySide6")
 
 _ROOT = Path(__file__).resolve().parent.parent
 
-#: Keys `_collect_run_options` builds that `analyze_tab_pinfo` does not read,
+#: Keys `_collect_run_options` builds that `analyze.pinfo` does not read,
 #: each with the reason. Anything not here must be restored.
 NOT_RESTORED_BY_PINFO = {
     # Restored, but under a different spelling or by a different applier.
     "auto_threshold": "read as its negated CLI spelling `no_auto_threshold`",
     "run_check": "read as its negated CLI spelling `no_run_check`",
-    "stardist_prob_thresh": "restored by analyze_tab_seg_params."
+    "stardist_prob_thresh": "restored by analyze.seg_params."
                             "_restore_stardist_thresholds, which also translates "
                             "the -1 sentinel to a blank box",
     "stardist_nms_thresh": "as stardist_prob_thresh",
-    "remote_batch_size": "restored by analyze_job_edit._hydrate_opts_without_"
+    "remote_batch_size": "restored by analyze.job_edit._hydrate_opts_without_"
                          "sidecar_equivalents",
-    "auto_threshold_method": "restored by analyze_job_edit; the sidecar re-infers "
+    "auto_threshold_method": "restored by analyze.job_edit; the sidecar re-infers "
                              "it from the recorded control wells",
 
     # Deliberately not restored.
@@ -61,7 +61,7 @@ NOT_RESTORED_BY_PINFO = {
 
 def _collected_keys() -> dict[str, str]:
     """Every keyword `_collect_run_options` builds, mapped to its expression."""
-    tree = parse_source((_ROOT / "analyze_tab_form.py"))
+    tree = parse_source((_ROOT / "analyze/form.py"))
     fn = next((n for n in ast.walk(tree)
                if isinstance(n, ast.FunctionDef)
                and n.name == "_collect_run_options"), None)
@@ -83,15 +83,15 @@ READ_UNDER_ANOTHER_NAME = {
 }
 
 RESTORED_BY_ANOTHER_APPLIER = {
-    "stardist_prob_thresh": "analyze_tab_seg_params.py",
-    "stardist_nms_thresh": "analyze_tab_seg_params.py",
-    "remote_batch_size": "analyze_job_edit.py",
-    "auto_threshold_method": "analyze_job_edit.py",
+    "stardist_prob_thresh": "analyze/seg_params.py",
+    "stardist_nms_thresh": "analyze/seg_params.py",
+    "remote_batch_size": "analyze/job_edit.py",
+    "auto_threshold_method": "analyze/job_edit.py",
 }
 
 
 def _applier_source() -> str:
-    return (_ROOT / "analyze_tab_pinfo.py").read_text()
+    return (_ROOT / "analyze/pinfo.py").read_text()
 
 
 def test_the_scan_can_see_both_sides():

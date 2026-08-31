@@ -52,8 +52,8 @@ from four sources. The piece that could drift is the scope line, and
 ``tests/test_analyze_preflight.py::test_the_scope_line_is_the_planners_own_sentence``
 pins it to the planner's own words.
 
-Held as a mixin rather than folded into ``analyze_tab.py`` for the reason
-``analyze_suspend`` and ``analyze_progress`` were — that file sits against its
+Held as a mixin rather than folded into ``analyze/tab.py`` for the reason
+``analyze.suspend`` and ``analyze.progress`` were — that file sits against its
 line budget, and this is a self-contained feature with one entry point.
 """
 
@@ -110,7 +110,7 @@ class AnalyzePreflightMixin:
         Both answer "is there unfinished work here?", from the two records that
         can know — the suspend/interrupt record, then this folder's own run
         journal — so they are built together rather than from two lines in
-        ``analyze_tab_form``, which is against its line budget and whose every
+        ``analyze.form``, which is against its line budget and whose every
         addition has to buy its place.
 
         They share a holder purely so there is a gap *between* them when both
@@ -137,7 +137,7 @@ class AnalyzePreflightMixin:
         something to say.
 
         Built to the same shape as the resume strip directly above it (see
-        ``analyze_suspend._build_resume_banner`` for why that shape is stacked
+        ``analyze.suspend._build_resume_banner`` for why that shape is stacked
         rather than a row): text first, its own right-aligned action row
         beneath. The reason is sharper here, because this one's buttons are the
         wider pair: *Load these settings* and *Dismiss* side by side left the
@@ -382,7 +382,7 @@ class AnalyzePreflightMixin:
     def resume_card_changed(self) -> None:
         """Repaint the report because the card above appeared or went away.
 
-        Called by ``analyze_suspend._note_resume_card``. What the report says
+        Called by ``analyze.suspend._note_resume_card``. What the report says
         depends on whether that card is covering the same folder, so the
         decision is made at paint time and every path that changes the card —
         a folder settling, Discard, Resume, a run starting or ending — comes
@@ -711,7 +711,7 @@ def _previous_settings(out_dir: Path) -> tuple[dict, str]:
         except (OSError, ValueError):
             return {}, ""
         if isinstance(info, dict):
-            from analyze_tab_pinfo import AnalyzePipelineInfoMixin
+            from analyze.pinfo import AnalyzePipelineInfoMixin
             return AnalyzePipelineInfoMixin._pinfo_flat(info), "pipeline_info.json"
     return {}, ""
 

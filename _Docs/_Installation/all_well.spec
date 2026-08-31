@@ -146,14 +146,29 @@ def _pkg_datas(pkg_root: Path, dest: str, exclude_repo_dirs: list) -> list:
     return out
 
 
+# Every first-party module at the repository root, bundled as source beside
+# the bytecode PyInstaller's own graph collects.
+#
+# The rule is "all of them", deliberately, rather than "the ones the graph
+# might miss". Whether a given module is reachable by static analysis is a
+# property of today's import statements, not of the module: one `importlib`
+# call added inside a package turns a working build into one that fails only
+# when a user reaches that screen, and nothing in this repository would catch
+# it — the frozen build is not exercised by any test. Shipping a small .py
+# twice costs kilobytes; deciding per module costs a released binary.
+#
+# `all_well_launcher.py` is absent because it is the Analysis entry script
+# below, not a data file. `tests/test_spec_ships_every_first_party_module.py`
+# holds this list against the tree.
 sibling_scripts = [
     (str(_parent / "allwell.py"),               "."),
-    (str(_parent / "analyze_tab.py"),           "."),
+    (str(_parent / "boot_diag.py"),             "."),
+    (str(_parent / "datasets_tab.py"),          "."),
+    (str(_parent / "help_topics.py"),           "."),
+    (str(_parent / "mpl_bootstrap.py"),         "."),
     (str(_parent / "process_microscopy.py"),    "."),
     (str(_parent / "WellPlateZipper.py"),       "."),
     (str(_parent / "theme.py"),                 "."),
-    # allwell.py is exec'd (not statically imported), so its `from version
-    # import __version__` isn't followed by PyInstaller — bundle version.py too.
     (str(_parent / "version.py"),               "."),
     # Remote (SLURM/SSH) execution uploads the files in
     # services.remote_runner._REQUIRED_REMOTE_FILES to the worker; that list
@@ -179,7 +194,8 @@ sibling_scripts = [
 # filtered per-file against ``_excluded_repo_dirs`` (excluded feature dirs +
 # non-Qt units like pipeline/cellpose.py dropped); the full build ships them
 # whole.
-for _pkg in ("well_viewer", "widgets", "ui", "services", "pipeline", "util"):
+for _pkg in ("well_viewer", "widgets", "ui", "services", "pipeline", "util",
+             "analyze", "datasets"):
     _pkg_path = _parent / _pkg
     if not _pkg_path.is_dir():
         continue

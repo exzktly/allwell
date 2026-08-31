@@ -33,8 +33,8 @@ data-collection half into a ``collect.py`` (mirroring image_table):
 - barplot/controller.py: 731 lines, after ``barplot/collect.py`` — was 1416.
 - review_image/controller.py: 963 lines, after ``review_image/collect.py`` (the
   pure include/threshold-map + row-key + override-projection data layer) — was 1392.
-- analyze_tab.py: 1176 lines, after the ``_build_*`` form-section builders moved
-  verbatim into ``AnalyzeTabFormMixin`` in ``analyze_tab_form.py`` (a behaviour-
+- analyze/tab.py: 1176 lines, after the ``_build_*`` form-section builders moved
+  verbatim into ``AnalyzeTabFormMixin`` in ``analyze/form.py`` (a behaviour-
   preserving mixin split of the QWidget god-class) — was 1887.
 """
 
@@ -49,7 +49,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # input_resolution_service.select_incremental_scope — so the residual growth here
 # is just orchestration that has to live in the monoliths: process_microscopy's
 # --incremental CLI flags, dispatch, per-task diff/merge branches and driver
-# routing (+154); analyze_tab's one-line integration hook (+8). Resume ratcheting
+# routing (+154); analyze.tab's one-line integration hook (+8). Resume ratcheting
 # down from these.
 # Code-review E2/E3 (+11): narrowed the image-loader catch to log skips instead
 # of swallowing (E2), and back-up-and-surface a corrupt existing pipeline_info
@@ -155,14 +155,14 @@ REVIEW_IMAGE_CONTROLLER_BUDGET = 870
 # module-level field validation (the _INT_FIELDS / _FLOAT_FIELDS tables and
 # _numeric_option_errors). They read the form's widgets; the tab only hosts them.
 # Ratcheted to 970: run-progress rendering (the ETA cluster and
-# _apply_progress_event) moved to analyze_progress.AnalyzeProgressMixin. It is a
+# _apply_progress_event) moved to analyze.progress.AnalyzeProgressMixin. It is a
 # self-contained job with one entry point, and the tab only hosts it.
 # Ratcheted to 964: the grouping-phase events (zipper_start / stage_total)
-# moved to analyze_progress._apply_grouping_event, beside the rest of the
+# moved to analyze.progress._apply_grouping_event, beside the rest of the
 # progress rendering the tab only hosts.
 # 964 -> 899: the segmentation hints and their validation
 # (_refresh_segmentation_hints / _segmentation_validation_errors /
-# _collapse_seg_param_stack) moved to analyze_tab_seg_params.py, beside the
+# _collapse_seg_param_stack) moved to analyze/seg_params.py, beside the
 # parameter panel they drive.
 # 899 -> 895: the Analyze pane's Preview page was removed. The Playground is the
 # app's one interactive segmenter; a second, thinner preview here duplicated it
@@ -170,30 +170,30 @@ REVIEW_IMAGE_CONTROLLER_BUDGET = 870
 # worth a whole page. The right pane is a plain log panel again.
 #
 # 895 -> 855: the run-outcome path (_surface_run_failure and the headline
-# shortener behind it) moved to analyze_tab_log.AnalyzeLogPaneMixin, which
+# shortener behind it) moved to analyze.log_pane.AnalyzeLogPaneMixin, which
 # already owns the log view that path reveals.
 ANALYZE_TAB_BUDGET = 855
 
-# analyze_tab_form.py carried no budget while analyze_tab.py did, so every
+# analyze/form.py carried no budget while analyze/tab.py did, so every
 # addition to the pair landed here by default. Opened at its measured size so it
 # ratchets down like the rest instead of becoming the new dumping ground. From
 # there it only moves down; the next section added to this form should come with
 # an extraction, as the pipeline_info restore (_open_pipeline_info /
-# _pinfo_flat / _apply_pipeline_info → analyze_tab_pinfo.AnalyzePipelineInfoMixin)
+# _pinfo_flat / _apply_pipeline_info → analyze.pinfo.AnalyzePipelineInfoMixin)
 # and the form chrome (_section / _row / _entry / _info_icon / reveal_section →
-# analyze_tab_chrome.AnalyzeFormChromeMixin) and the entry-boundary field
+# analyze.form_chrome.AnalyzeFormChromeMixin) and the entry-boundary field
 # validation (the field tables and _numeric_option_errors →
-# analyze_tab_fields.py) all did.
+# analyze/fields.py) all did.
 # 1170 -> 1107: the per-method segmentation parameter pages (the NamedPageStack
 # and its StarDist / watershed / Cellpose / label-free / classical pages) moved
-# to analyze_tab_seg_params.AnalyzeSegParamsMixin, which is also where the
+# to analyze.seg_params.AnalyzeSegParamsMixin, which is also where the
 # StarDist detection thresholds landed rather than growing this form again.
 # 1107 -> 1105: the Analyze Preview mixin was removed (see ANALYZE_TAB_BUDGET).
 # 1105 -> 1086: the whole run-controls row (Run / Suspend / + Queue / Stop) moved
-# to analyze_run_spec.AnalyzeRunMixin._build_run_row, beside the queue hooks the
+# to analyze.run_spec.AnalyzeRunMixin._build_run_row, beside the queue hooks the
 # new button belongs to. Genuine extraction -- ratchet down to the new size.
 # 1086 -> 994: the pane's output half (the log view, the raw-log toggle and the
-# "Last run ·" card) moved to analyze_tab_log.AnalyzeLogPaneMixin. It is one job
+# "Last run ·" card) moved to analyze.log_pane.AnalyzeLogPaneMixin. It is one job
 # and it is not form-building. Genuine extraction -- ratchet down again.
 ANALYZE_TAB_FORM_BUDGET = 994
 
@@ -261,18 +261,18 @@ def test_review_image_controller_line_budget():
 
 
 def test_analyze_tab_line_budget():
-    n = _line_count("analyze_tab.py")
+    n = _line_count("analyze/tab.py")
     assert n <= ANALYZE_TAB_BUDGET, (
-        f"analyze_tab.py is {n} lines, over the {ANALYZE_TAB_BUDGET} budget. "
+        f"analyze/tab.py is {n} lines, over the {ANALYZE_TAB_BUDGET} budget. "
         "Carve form-build / validation / run / log-poll into helpers rather than "
         "appending; the ratchet only moves down."
     )
 
 
 def test_analyze_tab_form_line_budget():
-    n = _line_count("analyze_tab_form.py")
+    n = _line_count("analyze/form.py")
     assert n <= ANALYZE_TAB_FORM_BUDGET, (
-        f"analyze_tab_form.py is {n} lines, over the "
+        f"analyze/form.py is {n} lines, over the "
         f"{ANALYZE_TAB_FORM_BUDGET} budget. Each form section is already its own "
         "_build_* method; extract a cohesive group of them into a sibling module "
         "rather than appending. The ratchet only moves down."

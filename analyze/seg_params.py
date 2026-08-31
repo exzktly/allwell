@@ -1,4 +1,4 @@
-"""Analyze-tab per-method segmentation parameters, split from analyze_tab_form.py.
+"""Analyze-tab per-method segmentation parameters, split from analyze/form.py.
 
 Each segmentation routine exposes a different set of knobs, so the form shows a
 one-page-per-method stack and swaps the page when the routine changes; the
@@ -6,8 +6,8 @@ StarDist detection thresholds sit below the stack because both StarDist methods
 share them. ``AnalyzeSegParamsMixin`` is mixed into ``AnalyzeTabFormMixin``, so
 every widget it builds lands on the ``AnalyzeTab`` instance under the same
 ``self._<name>`` attribute it had when this code lived in the form — the
-pipeline-info restore in ``analyze_tab_pinfo.py`` and the option collection in
-``analyze_tab_form._collect_run_options`` reach them unchanged.
+pipeline-info restore in ``analyze/pinfo.py`` and the option collection in
+``analyze.form._collect_run_options`` reach them unchanged.
 """
 
 from __future__ import annotations

@@ -54,7 +54,7 @@ def _expand_every_collapsible_section(tab) -> None:
 
 
 def test_analyze_form_fits_rail_w_with_every_section_expanded(qapp):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     from well_viewer.core.app_shell_view import RAIL_W
 
     # Locks the specific target (438 shrunk 25%), not just "whatever RAIL_W
@@ -88,7 +88,7 @@ def test_segmentation_and_auto_threshold_method_combos_fit_and_elide(qapp):
     """The two widest fixed-width combos in the form must be narrower than
     RAIL_W's row budget, and still carry their full text on the tooltip since
     Qt elides the closed box's label rather than showing it in full."""
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     tab = AnalyzeTab()
     seg_cb = tab._seg_method_cb
@@ -112,7 +112,7 @@ def test_run_controls_fit_the_rail_with_the_queue_button_shown(qapp):
     unreadable. The row is a FlowLayout for that reason, and FlowLayout watches
     its children for show/hide so the row re-wraps when the button appears.
     """
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     from well_viewer.core.app_shell_view import RAIL_W
 
     tab = AnalyzeTab()

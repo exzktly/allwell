@@ -1,7 +1,7 @@
 """The JSON-serialisable description of one Analyze run.
 
 Splits an Analyze run into "what would be run" (this module) and "actually
-run it" (``analyze_run_spec.py``'s ``AnalyzeRunMixin``), so the job queue can
+run it" (``analyze/run_spec.py``'s ``AnalyzeRunMixin``), so the job queue can
 persist a run's configuration and replay it later without depending on the
 live Analyze form.
 
@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 # opts["raw"] is the only Path-valued key AnalyzeTabFormMixin._collect_run_options
-# produces (in analyze_tab_form.py) — everything else is already
+# produces (in analyze/form.py) — everything else is already
 # str/int/float/bool/list[str]/None. If a second Path-valued key is ever added
 # to that dict, it must be listed here too, or to_json()/from_json() will
 # silently mis-round-trip it.

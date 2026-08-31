@@ -120,7 +120,7 @@ def test_channel_roles_seed_from_names_and_export_tokens(qapp, tmp_path):
 def test_channel_roles_prefill_analyze_on_open(qapp, tmp_path):
     # The role assignment reaches Analyze: _open_dataset_in_analyze applies the
     # tokens dict to the Analyze form (nuclear token + fluor rows).
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     tab = AnalyzeTab()
     tab._apply_pipeline_info({"nuclear_token": "DAPI", "fluor_tokens": ["GFP", "RFP"]})
@@ -133,7 +133,7 @@ def test_phase_role_handoff_keeps_the_channel_and_ticks_phase(qapp, tmp_path):
     # box ticked. It used to be dropped from fluor_tokens, which left the Analyze
     # form with no row to carry the flag: the channel vanished and _phase_token()
     # came back empty, silently disabling the phase passthrough.
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     tab = AnalyzeTab()
     tab._apply_pipeline_info({
@@ -268,7 +268,7 @@ def test_queue_button_round_trips_source_dest_and_params(qapp, tmp_path):
 
 
 def test_analyze_redirects_a_raw_ome_tiff(qapp, tmp_path):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     p = _write_packed(tmp_path / "plate.ome.tif", n_frames=4, channel_names=("GFP",))
     tab = AnalyzeTab()

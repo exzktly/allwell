@@ -28,7 +28,7 @@ from services import suspend_record  # noqa: E402
 
 def test_both_records_are_dropped_not_just_the_offers_own(tmp_path, monkeypatch):
     """Driven against the two real records, in the state a suspend leaves."""
-    import analyze_suspend
+    import analyze.suspend
 
     monkeypatch.setattr(J, "index_path", lambda: tmp_path / "state" / "idx.json")
     store = tmp_path / "state" / "suspended_runs.json"
@@ -54,10 +54,10 @@ def test_both_records_are_dropped_not_just_the_offers_own(tmp_path, monkeypatch)
     # make this test vacuous.
     known = {"output_dir": str(out), "input_dir": str(in_dir),
              "spec": {}, "from_journal": True}
-    offer = analyze_suspend._Resumable(
-        **{f: known.get(f) for f in analyze_suspend._Resumable.__dataclass_fields__})
+    offer = analyze.suspend._Resumable(
+        **{f: known.get(f) for f in analyze.suspend._Resumable.__dataclass_fields__})
 
-    analyze_suspend.AnalyzeSuspendMixin._forget_resumable(object(), offer)
+    analyze.suspend.AnalyzeSuspendMixin._forget_resumable(object(), offer)
 
     entries = [e for e in J.unfinished_runs()
                if str(e.get("output_dir")) == str(out)]
@@ -79,10 +79,10 @@ def test_the_forget_calls_both_records_unconditionally():
     does not exist, and using it to choose what to delete is what left one
     behind.
     """
-    import analyze_suspend
+    import analyze.suspend
 
     src = inspect.getsource(
-        analyze_suspend.AnalyzeSuspendMixin._forget_resumable)
+        analyze.suspend.AnalyzeSuspendMixin._forget_resumable)
     assert "run_journal.dismiss" in src and "clear(" in src, src
     body = src.split('"""')[-1]
     assert "if offer.from_journal" not in body and "else:" not in body, (
@@ -109,7 +109,7 @@ def test_discard_stops_the_offer_without_disarming_the_recovery(tmp_path, monkey
     "Do not ask me again" is about the banner; "this run did not finish" is
     about the plate.
     """
-    import analyze_suspend
+    import analyze.suspend
     from services import run_journal as J
     from services import suspend_record as SR
 
@@ -121,7 +121,7 @@ def test_discard_stops_the_offer_without_disarming_the_recovery(tmp_path, monkey
     J.open_run(out, input_dir=str(in_dir), mode="local",
                spec={"opts": {"raw": str(in_dir)}})      # left open: app killed
 
-    class _Pane(analyze_suspend.AnalyzeSuspendMixin):
+    class _Pane(analyze.suspend.AnalyzeSuspendMixin):
         def _current_output_dir(self):
             return str(out)
 
@@ -147,14 +147,14 @@ def test_the_resume_message_names_how_the_run_actually_ended(tmp_path, monkeypat
     set of causes with it: an open record means the app was killed, and a closed
     one can say `error` or `stopped` as readily as `suspended` (§7.7 #4).
     """
-    import analyze_suspend
+    import analyze.suspend
     from services import run_journal as J
     from services import suspend_record as SR
 
     monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
     monkeypatch.setattr(SR, "record_path", lambda: tmp_path / "suspended.json")
 
-    class _Pane(analyze_suspend.AnalyzeSuspendMixin):
+    class _Pane(analyze.suspend.AnalyzeSuspendMixin):
         pass
 
     pane = _Pane()

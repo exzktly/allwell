@@ -90,7 +90,7 @@ class SubsetPage(LogPanelMixin, QWidget):
         # _metrics()), and a squeezed few dozen pixels of height produces a
         # squeezed cell size regardless of how much width is available. Wrap
         # everything in a scroll area instead, mirroring the pattern
-        # analyze_tab.py already uses for its own form panel.
+        # analyze/tab.py already uses for its own form panel.
         page_layout = QVBoxLayout(self)
         page_layout.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea(self)

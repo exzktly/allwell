@@ -5,7 +5,7 @@ dataset 2 (the one appended after) = a fresh destination, built by the shared
 :mod:`datasets._common.equation_row` that Merge Plates draws from too — over an
 Analyze-style status view: a live per-well :class:`~datasets.concatenate.dashboard.ConcatDashboard`
 with the raw text log demoted to a collapsible "Show raw log" checkbox (the
-same furniture as ``analyze_tab_log.py``'s ``_build_log``/``_on_toggle_raw_log``,
+same furniture as ``analyze/log_pane.py``'s ``_build_log``/``_on_toggle_raw_log``,
 though Analyze starts its log open and this page starts it closed — see
 :mod:`datasets._common.log_panel` for why).
 
@@ -80,7 +80,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         # that used to make ConcatDashboard._plate render illegibly small,
         # since its cell size derives from its actual allotted width/height
         # (well_plate_selector's _metrics()). Mirrors the pattern
-        # analyze_tab.py already uses for its own form panel.
+        # analyze/tab.py already uses for its own form panel.
         page_layout = QVBoxLayout(self)
         page_layout.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea(self)

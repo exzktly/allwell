@@ -220,7 +220,9 @@ pipeline/               Qt-free analysis modules (background, stardist, cellpose
                         flatfield, shape_features, auto_threshold, io) — re-exported by pm
 util/                   Qt-free general helpers (well_token, aw_safe)
 services/               Analyze-side services (pipeline/remote runners, config) — Qt-free
-analyze_tab.py + analyze_tab_form.py   Analyze pane
+analyze/                Analyze pane — AnalyzeTab (tab.py) + the mixins it is
+                        assembled from (form, input, preflight, progress,
+                        suspend, run_spec, …) + the Remotes dialogs
 well_viewer/            Review pane — the bulk of the app
   core/                 cross-cutting infra (state, event bus, controllers, shell views)
   data/                 IO + decode (data_loading, image_identity, zipfile_cache, …)
@@ -238,8 +240,16 @@ _Docs/Markdowns/        the three live docs — ARCHITECTURE.md, README_WellView
 Where new code goes: pipeline work → `process_microscopy.py` / `pipeline/`; a new
 Review tab → a new `well_viewer/features/<name>/` package registered in
 `features/registry.py`; behaviour for an existing feature → that feature's
-`controller.py`; cross-cutting behaviour → `well_viewer/core/`; a reusable widget
+`controller.py`; Analyze-form behaviour → the `analyze/` module that owns that
+part of the form; cross-cutting behaviour → `well_viewer/core/`; a reusable widget
 with no All-Well knowledge → `widgets/`.
+
+A new top-level package must be added to `PACKAGE_ROOTS` in
+`tests/_repo_scan.py` in the same commit that creates it. Every AST guard
+takes its file list from there, so a package the roster omits is invisible to
+all of them at once — and because the omission removes checks rather than
+adding failures, it reports as a *greener* suite.
+`tests/test_scan_surface_is_complete.py` is what notices.
 
 File-name suffixes carry meaning (`controller.py` = orchestration, `renderer.py`
 = pure matplotlib, `collect.py` = pure data collection, `tab_view.py` / `*_view.py`
@@ -538,7 +548,7 @@ found the cause — and the same four mistakes produced all three.
 3. **Verify which branch the app takes, not which branch exists.** A fast path
    guarded by `if fluor_tokens is None` is worthless if the caller always passes
    a list — and the caller here is a GUI that hardcodes it. Trace inward from
-   the real entry point (`analyze_run_spec._collect_run_spec` for an Analyze run)
+   the real entry point (`analyze.run_spec._collect_run_spec` for an Analyze run)
    rather than outward from the function under repair. Describing an unreachable
    branch as the app's behaviour is worse than saying nothing.
 4. **Fixtures must carry the mess of real data.** Well over a hundred remote
@@ -788,7 +798,7 @@ Three of these are commands now. Run them instead of recalling them.
    *then* watch it go green.
 3. **The scan surface is half the rule.** Three AST guards landed in one branch
    with three different ideas of which files to read, each blind exactly where
-   another could see: the divider guard could not see `analyze_tab_chrome.py`,
+   another could see: the divider guard could not see `analyze/form_chrome.py`,
    which builds dividers, and the well-token guard could not see `pipeline/` or
    `process_microscopy.py` — the call sites `util/well_token.py`'s own docstring
    names as the reason the rule exists. Roots come from `tests/_repo_scan.py`;

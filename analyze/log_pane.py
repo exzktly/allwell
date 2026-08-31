@@ -1,7 +1,7 @@
 """The Analyze pane's output half: the log view, and how a run's outcome
 reaches the screen.
 
-Split out of ``analyze_tab_form.py`` and ``analyze_tab.py`` for their line
+Split out of ``analyze/form.py`` and ``analyze/tab.py`` for their line
 budgets, and because these members are one job that is neither form-building
 nor run-driving. The form gathers the settings a run is launched with, the run
 mixins start it and drain its queue; this shows what the run then said.

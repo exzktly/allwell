@@ -87,9 +87,9 @@ CONTROLS = (
     # spatial/tab_view.py — the Timepoint and Metric pickers at Summary level.
     ("QComboBox", _make_combo),
     ("LabeledComboBox", _make_labeled_combo),
-    # analyze_tab_form.py, merge_plates/view.py, analyze_remote_dialog.py.
+    # analyze/form.py, merge_plates/view.py, analyze/remote_dialog.py.
     ("QLineEdit", lambda: QLineEdit("text")),
-    # import_loose/view.py, analyze_tab.py, playground/tab_view.py.
+    # import_loose/view.py, analyze/tab.py, playground/tab_view.py.
     ("QCheckBox", lambda: QCheckBox("log x")),
     # cell_gating tab_view — the per-layer source radios.
     ("QRadioButton", lambda: QRadioButton("Per-channel")),

@@ -1511,7 +1511,17 @@ Wells with no value for that variable are not plotted, and the figure's own
 title says how many and which — on the figure rather than the status line, so a
 saved copy carries it and so the sentence goes away the moment you fix it. If
 nothing at all is assigned, the plots fall back to your own groups rather than
-going blank; the Variables tab is where you fix that.
+going blank; the Variables tab is where you fix that, and the note on the figure
+says that is what happened rather than claiming wells are missing.
+
+If you have not defined any replicate groups, grouping by a variable also
+ignores your plate selection: every loaded well holding a value is pooled, so
+one well selected can be four drawn. That is what "group the plate by this
+variable" has to mean, and the note on the figure counts the wells it brought in
+so it is not a silent change to every number on screen.
+
+Group by, Colour by and Split by are cleared when you open a different dataset.
+They name that plate's variables, and the next plate's are different ones.
 
 **Colour by and Split by**, in the band's **Decorate** popover beside it, use a
 *second* variable to say how the bars look rather than what they are. Neither

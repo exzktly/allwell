@@ -50,6 +50,13 @@ DECORATED_TABS = frozenset({"Bar Plots"})
 #: — one of them cleared its state when its variable was deleted and the other
 #: did not, so a deleted variable stayed live in the plot with nothing offering
 #: it in the combo.
+#:
+#: ``refresh_group_by_combo`` runs the same fill-and-clear loop and is
+#: deliberately **not** in this table. It differs in more than the three strings:
+#: it lives in the scope zone rather than the popover, it hides its own group
+#: rather than the shared Decorate button, and its visibility does not depend on
+#: which tab is showing. Folding it in would mean a fourth and fifth column used
+#: by one row each — the registry-for-two-things shape, one row further on.
 DECORATION_CONTROLS = (
     ("colour_by_variable", "_plotting_colourby_cb", NO_COLOUR_LABEL),
     ("split_by_variable", "_plotting_splitby_cb", NO_SPLIT_LABEL),

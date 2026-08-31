@@ -564,10 +564,15 @@ def _paint_overlay_combo(ctx, variable) -> None:
     index = combo.findData(keep)
     combo.setCurrentIndex(index if index >= 0 else 0)
     combo.blockSignals(False)
-    # Hidden entirely with nothing to offer, rather than shown holding only
-    # "Nothing" — a control whose every option is a no-op is a control that
-    # invites a click and answers with silence.
+    # Disabled rather than hidden, with the rule stated on it. There *is*
+    # a rule the user can act on — define a second variable — which is the
+    # repo's own test for disabling over hiding; *Group by* is hidden
+    # instead because an empty one states no rule, only an absence. The
+    # comment here used to say "hidden entirely" beside a line that
+    # disables, and nothing anywhere named the rule.
     combo.setEnabled(bool(others))
+    combo.setToolTip(
+        "" if others else "Define a second variable to overlay it on this plate.")
 
 
 def _paint_overlay(ctx, variable) -> None:
@@ -606,7 +611,7 @@ def _paint_groups(ctx, variable) -> None:
     """One row per saved group, showing the value its wells agree on.
 
     **A group never lends a value to a well, and a well never takes one.** A
-    group whose wells disagree reads ``Mixed (2)``; a group holding a well with
+    group whose wells disagree reads ``—mixed— (2 …)``; a group holding a well with
     no value reads ``no value`` and names how many are short. Neither is
     resolved to the group's first well or its commonest value, because a plotted
     member built that way would carry a dose the wells were never given, in a
@@ -650,7 +655,15 @@ def _group_summary(vset, variable, wells) -> str:
         # so this set cannot contain one, and counting it as a "value" is what
         # made this line report three across a group of two doses and one blank.
         distinct = {vset.value_id_for(variable.id, w) for w in wells}
-        return f"Mixed ({len(distinct)} values across {len(wells)} wells)"
+        # ``MIXED_LABEL``, not a second capitalised spelling of it. The figure
+        # bands read ``—mixed—`` and this row read ``Mixed``, while
+        # ``variable_series``' own comment claimed "the figure and the Variables
+        # tab say it identically". A user comparing the tab against the plot has
+        # to recognise them as the same state, so they are the same string.
+        from well_viewer.domain.variable_series import MIXED_LABEL
+
+        return (f"{MIXED_LABEL} ({len(distinct)} values across "
+                f"{len(wells)} wells)")
     if value_id is None:
         short = sv.unassigned_wells(vset, variable.id, wells)
         return (f"no value — {len(short)} of {len(wells)} wells unassigned "

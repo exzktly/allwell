@@ -292,6 +292,11 @@ def _build_plate(ctx, parent: QWidget, reg) -> QWidget:
     # definition form.
     apply_plate_geometry(plate, role="editor")
     plate.setSelectionModel("set")
+    # Rubber-band rectangle, not freeform paint — the configuration §F named and
+    # the one the Groups plate already uses. A block design is what this plate
+    # exists to describe, and painting a 4x3 block freehand takes a serpentine
+    # drag that de-selects any cell the cursor crosses twice.
+    plate.setDragMode("rect")
     column.addWidget(plate, 0, PLATE_ALIGNMENT)
 
     readout = reg.register("_var_readout", QLabel("", host))

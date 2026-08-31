@@ -725,7 +725,13 @@ def test_a_group_whose_wells_disagree_reads_mixed(tab):
     tab.w("_var_plate").selectedWells = ["A02"]
     _chips(tab)[1].click()
 
-    assert "Mixed (2 values across 2 wells)" in _group_rows(tab)[0]
+    # Asserted against the shared constant, not a second copy of the string.
+    # The row read "Mixed" while the figure bands read "—mixed—", under a
+    # comment in variable_series claiming the two say it identically. Comparing
+    # against MIXED_LABEL is what makes that claim testable rather than a hope.
+    from well_viewer.domain.variable_series import MIXED_LABEL
+
+    assert f"{MIXED_LABEL} (2 values across 2 wells)" in _group_rows(tab)[0]
 
 
 def test_a_group_holding_one_unassigned_well_has_no_value_and_says_which(tab):
@@ -907,3 +913,26 @@ def test_colliding_overlay_glyphs_are_broken_apart(tab):
     assert len(set(glyphs.values())) == len(glyphs), glyphs
     assert glyphs[variable.values[0].id] == "0", "an uncollided glyph was changed"
     assert all(g for g in glyphs.values())
+
+
+def test_the_plate_drags_as_a_rubber_band_not_a_paintbrush(tab):
+    """§F named the rubber-band configuration and named the Groups plate as the
+    precedent; this plate was left on ``paint``.
+
+    It matters because a block design is what this plate exists to describe:
+    painting a 4x3 block freehand takes a serpentine drag, and dragging back
+    over a cell already crossed de-selects it.
+    """
+    plate = tab.w("_var_plate")
+    assert plate.dragMode() == "rect"
+
+
+def test_the_overlay_combo_states_its_rule_when_it_has_nothing_to_offer(tab):
+    """Disabled rather than hidden is the right call — there *is* a rule the
+    user can act on — but nothing said what it was. ``Group by`` is hidden in
+    the same situation precisely because an empty one states no rule."""
+    _dose_tab(tab)                       # one variable, so nothing to overlay
+    combo = tab.w("_var_overlay")
+
+    assert not combo.isEnabled()
+    assert "second variable" in combo.toolTip()

@@ -36,26 +36,19 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from well_viewer.core.safe import swallowed
+from well_viewer.core.safe import swallow as _swallow, swallowed
 from well_viewer.core.ui_helpers import clear_notes_editors as _clear_notes_editors
-from contextlib import contextmanager as _contextmanager
 
 from well_viewer.domain.sample_variables import VariableSet
 
 
-@_contextmanager
-def swallowed_scope(note: str):
-    """``swallow`` under a local name — this module already imports ``swallowed``."""
-    from well_viewer.core.safe import swallow
-    with swallow(note):
-        yield
 
 
 def _refresh_variables(ctx) -> None:
     """Repaint the Variables tab and the band's Group by control, if built."""
-    with swallowed_scope("refresh the Variables tab after a reset"):
+    with _swallow("refresh the Variables tab after a reset"):
         ctx.features.call("variables.refresh", ctx)
-    with swallowed_scope("refresh the Group by control after a reset"):
+    with _swallow("refresh the Group by control after a reset"):
         from well_viewer.core.group_by_controller import refresh_group_by_combo
         refresh_group_by_combo(ctx)
 
@@ -274,7 +267,7 @@ def _clear_sample_variables(ctx) -> None:
     # fourth control added there and not here would survive a reset pointing at
     # a variable that no longer exists, which is the same disagreement in a
     # place nobody would think to look.
-    with swallowed_scope("clear the Group by variable"):
+    with _swallow("clear the Group by variable"):
         from well_viewer.core.group_by_controller import DECORATION_CONTROLS
         ctx.state.plot.group_by_variable = ""
         for field, _widget, _label in DECORATION_CONTROLS:

@@ -160,6 +160,10 @@ def orphaned_wells(vset: VariableSet, variable_id: str) -> list[str]:
     is what a guard asserts is empty rather than something the UI expects to
     show. It exists because the alternative — a well silently reading as
     unassigned — is indistinguishable from a well that was never filled.
+
+    **No production caller, by design.** This is what a guard asserts is
+    empty, not something the UI shows — so a dead-code sweep will find it
+    unreferenced outside ``tests/`` and should leave it there.
     """
     variable = vset.by_id(variable_id)
     if variable is None:

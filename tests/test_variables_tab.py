@@ -816,11 +816,21 @@ def _watch_clears(tab, monkeypatch):
 
 
 def test_removing_the_last_variable_blanks_the_plate_it_described(tab, monkeypatch):
-    """Its colours, rings, chips and sentence all belonged to it."""
+    """Its colours, rings, chips and sentence all belonged to it.
+
+    The variable is filled here, so deleting it now asks first — this patches
+    that one call rather than letting the autouse no-modal-dialogs fixture
+    raise, which is the escape ARCHITECTURE names for a test that means to
+    exercise a dialog path.
+    """
+    from PySide6.QtWidgets import QMessageBox
+
     _dose_tab(tab)
     tab.w("_var_fill_apply").click()
     assert tab.w("_var_chips").layout().count() > 0
 
+    monkeypatch.setattr(QMessageBox, "question",
+                        staticmethod(lambda *a, **k: QMessageBox.Yes))
     seen = _watch_clears(tab, monkeypatch)
     tab.w("_var_remove").click()
 
@@ -936,3 +946,77 @@ def test_the_overlay_combo_states_its_rule_when_it_has_nothing_to_offer(tab):
 
     assert not combo.isEnabled()
     assert "second variable" in combo.toolTip()
+
+
+def test_with_no_variable_the_fill_row_is_disabled_and_says_why(tab):
+    """A live Fill-along / repeat / Apply-fill row with nothing to fill.
+
+    ``_clear_plate`` blanked the labels and left the row and the plate enabled,
+    so pressing **Apply fill** hit ``apply_fill``'s first guard and returned in
+    silence. There is a rule the user can act on — define a variable — which is
+    this repo's test for disabling rather than hiding, and ``assign_selected``
+    already applied that standard while ``apply_fill`` did not.
+    """
+    row = tab.w("_var_fill_row")
+    plate = tab.w("_var_plate")
+
+    assert not row.isEnabled(), "the fill row is live with nothing to fill"
+    assert "Define a variable" in row.toolTip()
+    assert not plate.isEnabled()
+
+
+def test_defining_a_variable_makes_them_live_again(tab):
+    """The half that makes the test above mean something: a tab that disabled
+    them and never re-enabled would satisfy it and be useless."""
+    _dose_tab(tab)
+
+    assert tab.w("_var_fill_row").isEnabled()
+    assert tab.w("_var_plate").isEnabled()
+    assert tab.w("_var_fill_row").toolTip() == ""
+
+
+def test_deleting_a_filled_variable_asks_first(tab, monkeypatch):
+    """One click destroyed the definition *and* every assignment under it, with
+    no confirmation and no undo — and a filled 96-well dose grid is the most
+    expensive thing on this page. The Groups tab already confirms a bulk
+    replace; this is a bulk delete."""
+    from PySide6.QtWidgets import QMessageBox
+
+    _dose_tab(tab)
+    tab.w("_var_fill_apply").click()
+    asked = []
+    monkeypatch.setattr(QMessageBox, "question",
+                        staticmethod(lambda *a, **k: asked.append(a) or QMessageBox.No))
+
+    tab.w("_var_remove").click()
+
+    assert asked, "a filled variable was deleted without asking"
+    assert _vset(tab).variables, "answering No deleted it anyway"
+
+
+def test_deleting_an_unfilled_variable_asks_nothing(tab, monkeypatch):
+    """Nothing to lose, so no prompt. A dialog here is the kind users learn to
+    click through — which is how the prompt that matters gets clicked through
+    too."""
+    from PySide6.QtWidgets import QMessageBox
+
+    _dose_tab(tab)                       # defined, never filled
+    asked = []
+    monkeypatch.setattr(QMessageBox, "question",
+                        staticmethod(lambda *a, **k: asked.append(a) or QMessageBox.Yes))
+
+    tab.w("_var_remove").click()
+
+    assert not asked
+    assert not _vset(tab).variables
+
+
+def test_a_fill_says_how_many_wells_it_changed(tab):
+    """A fill overwrites every existing assignment for the variable and used to
+    report nothing, so re-filling a finished plate looked identical to filling an
+    empty one."""
+    _dose_tab(tab)
+
+    tab.w("_var_fill_apply").click()
+
+    assert "Filled" in tab.w("_var_fill_scope").text()

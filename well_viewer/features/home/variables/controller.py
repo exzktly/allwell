@@ -149,6 +149,10 @@ def refresh_variables(ctx) -> None:
     if note is not None:
         note.setText(_note_for(variable))
 
+    # The other half of the pair in ``_clear_plate``: there is a variable, so
+    # the fill row and the plate can do something again.
+    _set_enabled_with_reason(ctx, True, "")
+
     _paint_chips(ctx, variable)
     _paint_overlay_combo(ctx, variable)
     _paint_plate(ctx, variable)
@@ -241,9 +245,42 @@ def add_variable(ctx) -> None:
 
 
 def remove_variable(ctx) -> None:
+    """Delete the selected variable — after asking, when wells would go with it.
+
+    One click destroyed the definition *and* every well→value assignment under
+    it, with no confirmation and no undo: a filled 96-well dose grid is the most
+    expensive thing on this page and was the easiest to lose. The sibling Groups
+    tab already confirms a bulk replace, and this is a bulk delete.
+
+    Only when there is something to lose. A variable nobody has filled yet costs
+    nothing to delete, and a dialog for it would be the kind of prompt users
+    learn to click through — which is how the prompt that matters gets clicked
+    through too.
+    """
+    from PySide6.QtWidgets import QMessageBox
+
     variable_id = selected_variable_id(ctx)
-    if variable_id:
-        _commit(ctx, sv.remove_variable(_vset(ctx), variable_id))
+    if not variable_id:
+        return
+    vset = _vset(ctx)
+    variable = vset.by_id(variable_id)
+    assigned = len(vset.assigned_wells(variable_id))
+    if assigned:
+        resp = QMessageBox.question(
+            # ``getattr``: a parentless message box is still modal and still
+            # asks. Reaching straight for ``ctx.window`` raised on a context
+            # that has none, and the click handler's swallow turned that into a
+            # delete that happened without asking — a confirmation that fails
+            # open is worse than none, because it reads as protection.
+            getattr(ctx, "window", None), "Delete this variable?",
+            f"“{variable.name if variable else variable_id}” is assigned to "
+            f"{assigned} well(s). Deleting it removes those assignments too, "
+            f"and cannot be undone. Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if resp != QMessageBox.Yes:
+            return
+    _commit(ctx, sv.remove_variable(vset, variable_id))
 
 
 def commit_name(ctx) -> None:
@@ -491,8 +528,20 @@ def apply_fill(ctx) -> None:
     if not variable_id or axis is None or repeat is None:
         return
     lines = wells_in_fill_lines(dataset_wells(ctx), axis.currentData())
-    _commit(ctx, sv.fill(_vset(ctx), variable_id, lines,
-                         repeat=repeat.value()))
+    before = _vset(ctx)
+    after = sv.fill(before, variable_id, lines, repeat=repeat.value())
+    _commit(ctx, after)
+
+    # Say what it did. A fill overwrites every existing assignment for this
+    # variable, and reported nothing at all — so a user who meant to fill an
+    # empty plate and instead re-filled a finished one had no signal either way.
+    changed = sum(
+        1 for w in dataset_wells(ctx)
+        if before.value_id_for(variable_id, w) != after.value_id_for(variable_id, w)
+    )
+    readout = _widget(ctx, "_var_fill_scope")
+    if readout is not None and changed:
+        readout.setText(f"Filled {changed} well(s).")
 
 
 # ── a second variable, as a glyph ───────────────────────────────────────────
@@ -671,6 +720,22 @@ def _group_summary(vset, variable, wells) -> str:
     return f"{variable.display_label(value_id)} ({len(wells)} wells)"
 
 
+def _set_enabled_with_reason(ctx, on: bool, reason: str) -> None:
+    """Enable or disable the fill row and the plate, stating why when off.
+
+    Disabled with a reason rather than hidden: a control that cannot work *yet*
+    is different from one that has nothing to say, and the difference is whether
+    the user can do something about it. ``Group by`` is hidden when no variable
+    exists because an empty one states no rule; this one states one.
+    """
+    for name in ("_var_fill_row", "_var_plate"):
+        widget = _widget(ctx, name)
+        if widget is None:
+            continue
+        widget.setEnabled(bool(on))
+        widget.setToolTip("" if on else reason)
+
+
 def _clear_plate(ctx) -> None:
     """Blank every surface that described a variable, when there is none."""
     from PySide6.QtWidgets import QListWidget
@@ -704,3 +769,13 @@ def _clear_plate(ctx) -> None:
         overlay.clear()
         overlay.setEnabled(False)
         overlay.blockSignals(False)
+
+    # The fill row and the plate go with them. Blanking the *labels* left a live
+    # Fill-along / repeat / Apply-fill row and a full plate on screen with
+    # nothing to fill — ``apply_fill`` returns silently at its first guard, so
+    # pressing it did nothing and said nothing. There is a rule the user can act
+    # on ("define a variable first"), which is this repo's test for disabling
+    # rather than hiding, and ``assign_selected`` already applies that standard
+    # while ``apply_fill`` did not.
+    _set_enabled_with_reason(ctx, False,
+                             "Define a variable above before filling the plate.")

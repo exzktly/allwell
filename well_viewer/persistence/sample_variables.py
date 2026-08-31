@@ -82,10 +82,15 @@ def save_to_data_dir(ctx) -> None:
         # ``update_json_atomic``'s own docstring names for it.
         if not update_json_atomic(path, _mutate, create_missing=True,
                                   durable=False):
-            _logger.info(
-                "variables were not written to %s — the file is missing or "
-                "could not be updated. They stay in memory for this session.",
-                path.name)
+            # WARNING, not INFO. A user who fills a 96-well grid into a
+            # read-only or network-stale folder gets no other signal, and the
+            # first they learn of it is the grid being gone next session — the
+            # loss is silent, unbounded and unrecoverable, which is exactly the
+            # shape §7 says must reach the user rather than only a debug log.
+            _logger.warning(
+                "variables were NOT saved to %s — the file is missing or could "
+                "not be updated. They stay in memory for this session and will "
+                "be lost when it ends.", path.name)
 
 
 def load_from_data_dir(ctx) -> None:

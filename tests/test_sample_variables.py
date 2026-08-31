@@ -630,3 +630,36 @@ def test_a_dataset_with_no_sidecar_still_gets_its_variables_written(tmp_path):
 
     written = json.loads((tmp_path / "pipeline_info.json").read_text())
     assert sv.from_block(written[ps.BLOCK_KEY]) == vset
+
+
+def test_a_failed_variables_save_is_reported_loudly(tmp_path, monkeypatch, caplog):
+    """A user who fills a 96-well grid into a read-only folder gets no other
+    signal, and learns of it when the grid is gone next session.
+
+    It logged at INFO, which on a default configuration is not shown at all —
+    silent, unbounded, unrecoverable loss. §7's rule is that a shortfall reaches
+    the user, and WARNING is the least this can do from a debounced autosave.
+    """
+    import logging
+    import types
+
+    from well_viewer.persistence import _io
+    from well_viewer.persistence import sample_variables as psv
+
+    # Patched where it is defined, not where it is used: ``save_to_data_dir``
+    # imports it inside the function, so the module attribute is bound at call
+    # time and a patch on ``psv`` would never be read.
+    monkeypatch.setattr(_io, "update_json_atomic", lambda *a, **k: False)
+    ctx = types.SimpleNamespace(
+        state=types.SimpleNamespace(
+            dataset=types.SimpleNamespace(data_dir=tmp_path),
+            selection=types.SimpleNamespace(variables=sv.VariableSet()),
+        ),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="well_viewer"):
+        psv.save_to_data_dir(ctx)
+
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warnings, "a failed save said nothing at WARNING or above"
+    assert "NOT saved" in warnings[0].getMessage()

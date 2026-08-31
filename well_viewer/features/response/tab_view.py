@@ -26,9 +26,9 @@ from well_viewer.core.ui_helpers import (
 from well_viewer.features.export.service import export_cell_data_from
 from well_viewer.features.response.cell_scope_compute import cell_scope
 from well_viewer.features.response.controller import (
-    export_response_csv, fit_model_labels, fit_settings, on_x_variable_changed,
-    open_timepoint_selector, redraw_response, set_fit_bound, set_fit_model,
-    update_timepoint_button,
+    export_response_csv, fit_model_labels, fit_settings, on_series_changed,
+    on_x_variable_changed, open_timepoint_selector, redraw_response,
+    set_fit_bound, set_fit_model, update_timepoint_button,
 )
 
 #: The figure. One axes, wide rather than tall — a dose–response is read across.
@@ -54,6 +54,17 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     x_combo = reg.register("_response_x_cb", LabeledComboBox("X"))
     x_combo.currentIndexChanged.connect(lambda *_: on_x_variable_changed(ctx))
     band.add_scope("", x_combo)
+
+    # Scope, beside X and for the same reason: it says what the figure is *of*.
+    # One curve per value of this variable per timepoint, so a plate of two cell
+    # lines across a dose series is two curves rather than one line doubling
+    # back at every dose.
+    series_combo = reg.register("_response_series_cb", LabeledComboBox("Series"))
+    series_combo.setToolTip(
+        "Split the members into one curve per value of a second variable — "
+        "colour carries the series, dashes carry the timepoint")
+    series_combo.currentIndexChanged.connect(lambda *_: on_series_changed(ctx))
+    band.add_scope("", series_combo)
 
     # The Bar tab's picker, over this tab's own selection. Self-describing —
     # the button's own text carries the count, so it needs no caption beside it.

@@ -640,7 +640,7 @@ def test_the_fit_is_told_what_the_user_called_the_x_axis(stub_stats):
 
     fits = rc.fit_curves(data, rcompute.FIT_4PL)
 
-    reason = fits[24.0].reason
+    reason = fits[(24.0, "")].reason
     assert "Temperature" in reason, reason
     assert "dose" not in reason.lower(), reason
 
@@ -832,3 +832,146 @@ def test_an_ungrouped_plate_with_nothing_lit_still_says_so(stub_stats):
 
     assert not data.has_points() and data.placed == 0
     assert "select wells on the plate" in rc.empty_reason(data)
+
+
+# ── several curves on one figure ────────────────────────────────────────────
+#
+# Without a series variable every member landed on one curve, sorted by x, so
+# two cell lines each given a dose series were drawn as a single line doubling
+# back at every dose — a zig-zag that reads as a curve, one legend entry, and
+# with a fit on, one EC50 fitted across both conditions.
+#
+# The fixtures below give the two series *different shapes* (one responds, one
+# is flat) and put them at the same doses. That is deliberate: with both series
+# responding identically, a collector that ignored the split entirely would
+# produce points a lenient assertion could not tell from the right answer.
+
+def _two_series_ctx(stub_stats, *, series_assignments=None):
+    # Four doses, not three: a 4PL has four parameters and declines outright
+    # with fewer distinct x values, so a three-dose fixture would test the
+    # refusal rather than the per-series fit.
+    means = {"H-lo": 10.0, "H-mid": 30.0, "H-hi": 75.0, "H-top": 92.0,
+             "U-lo": 20.0, "U-mid": 22.0, "U-hi": 21.0, "U-top": 20.5}
+    for (name, value) in means.items():
+        stub_stats[(name, 24.0)] = value
+    dose = _dose(("0.1", 0.1), ("1", 1.0), ("10", 10.0), ("100", 100.0))
+    line = sv.Variable(
+        id="cl", name="Cell line", kind=sv.TEXT, unit="",
+        values=(sv.VariableValue("hela", "HeLa", None),
+                sv.VariableValue("u2os", "U2OS", None)))
+    cells = series_assignments if series_assignments is not None else {
+        "A01": "hela", "A02": "hela", "A03": "hela", "A04": "hela",
+        "B01": "u2os", "B02": "u2os", "B03": "u2os", "B04": "u2os"}
+    vset = sv.VariableSet(
+        variables=(dose, line),
+        assignments={"dose": {"A01": "d0", "A02": "d1", "A03": "d2",
+                              "A04": "d3", "B01": "d0", "B02": "d1",
+                              "B03": "d2", "B04": "d3"},
+                     "cl": cells})
+    ctx = _ctx(wells=["A01", "A02", "A03", "A04", "B01", "B02", "B03", "B04"],
+               selections=_groups(("H-lo", ["A01"]), ("H-mid", ["A02"]),
+                                  ("H-hi", ["A03"]), ("H-top", ["A04"]),
+                                  ("U-lo", ["B01"]), ("U-mid", ["B02"]),
+                                  ("U-hi", ["B03"]), ("U-top", ["B04"])))
+    ctx.state.selection.variables = vset
+    return ctx
+
+
+def test_without_a_series_every_member_is_still_one_curve(stub_stats):
+    """The existing behaviour, pinned so the feature cannot change it."""
+    ctx = _two_series_ctx(stub_stats)
+    data = rc.collect_response(ctx, "dose", [24.0])
+    assert len(data.curves) == 1
+    assert len(data.curves[0].points) == 8
+    assert data.series_name == ""
+
+
+def test_a_series_variable_splits_the_members_into_one_curve_each(stub_stats):
+    """The reported gap: two conditions, two curves, not one zig-zag."""
+    ctx = _two_series_ctx(stub_stats)
+    data = rc.collect_response(ctx, "dose", [24.0], series_id="cl")
+
+    assert data.series_name == "Cell line"
+    assert [c.key for c in data.curves] == [(24.0, "hela"), (24.0, "u2os")]
+    assert [c.series_label for c in data.curves] == ["HeLa", "U2OS"]
+    # The values, not the counts: a split that put the wrong members on each
+    # curve produces two three-point curves just as happily.
+    assert [(p.x, p.y) for p in data.curves[0].points] == [
+        (0.1, 10.0), (1.0, 30.0), (10.0, 75.0), (100.0, 92.0)]
+    assert [(p.x, p.y) for p in data.curves[1].points] == [
+        (0.1, 20.0), (1.0, 22.0), (10.0, 21.0), (100.0, 20.5)]
+
+
+def test_each_series_is_fitted_on_its_own(stub_stats):
+    """One model, one EC50 per curve — which is why they are comparable.
+
+    Keyed by ``(timepoint, series)``: a timepoint-keyed dict would hand the
+    second series' fit to the first, drawing one curve with the other's fitted
+    line and EC50.
+    """
+    ctx = _two_series_ctx(stub_stats)
+    data = rc.collect_response(ctx, "dose", [24.0], series_id="cl")
+    fits = rc.fit_curves(data, rcompute.FIT_4PL)
+
+    assert set(fits) == {(24.0, "hela"), (24.0, "u2os")}
+    assert {f.model for f in fits.values()} == {"4pl"}
+    # Each fit's plateaus come from *its own* points — HeLa climbs 10 → 92,
+    # U2OS sits flat around 21. Asserted as values rather than as "the two
+    # differ", because a pooled fit filed under both keys also differs from
+    # nothing and would satisfy any weaker check; these numbers can only come
+    # from the curve each key names.
+    hela, u2os = fits[(24.0, "hela")], fits[(24.0, "u2os")]
+    assert hela.ok and u2os.ok
+    assert hela.top == pytest.approx(92.0, rel=0.15)
+    assert u2os.top == pytest.approx(21.0, rel=0.15)
+    # The span, not the bottom: a 4PL puts its lower asymptote at or below the
+    # lowest dose measured, so HeLa's bottom is ~6.9 rather than the 10.0 its
+    # lowest point reads. The span is what separates a responder from a flat
+    # line and is what a pooled fit across both series could not produce.
+    assert hela.top - hela.bottom > 50.0
+    assert u2os.top - u2os.bottom < 5.0
+
+
+def test_the_series_follow_the_variables_own_value_order(stub_stats):
+    """Not alphabetical, and not well order — the order the user arranged.
+
+    U2OS is declared second, so it is second here even though its wells sort
+    after HeLa's either way; the check that bites is the reversed variable
+    below, where alphabetical and declared order disagree.
+    """
+    ctx = _two_series_ctx(stub_stats)
+    vset = ctx.state.selection.variables
+    flipped = sv.Variable(
+        id="cl", name="Cell line", kind=sv.TEXT, unit="",
+        values=(sv.VariableValue("u2os", "U2OS", None),
+                sv.VariableValue("hela", "HeLa", None)))
+    ctx.state.selection.variables = sv.VariableSet(
+        variables=(vset.by_id("dose"), flipped), assignments=vset.assignments)
+
+    data = rc.collect_response(ctx, "dose", [24.0], series_id="cl")
+    assert [c.series_label for c in data.curves] == ["U2OS", "HeLa"]
+
+
+def test_a_member_the_series_variable_never_reached_gets_its_own_curve(stub_stats):
+    """Named, not dropped and not folded into a neighbour.
+
+    A member with a dose but no cell line is real data. Dropping it would take
+    a measured point off the figure over an annotation gap, and folding it into
+    either series would assert it was that condition.
+    """
+    ctx = _two_series_ctx(stub_stats, series_assignments={
+        "A01": "hela", "A02": "hela", "A03": "hela", "A04": "hela",
+        "B01": "u2os"})
+    data = rc.collect_response(ctx, "dose", [24.0], series_id="cl")
+
+    labels = [c.series_label for c in data.curves]
+    assert "no Cell line" in labels, labels
+    stray = next(c for c in data.curves if c.series_label == "no Cell line")
+    assert {p.member for p in stray.points} == {"U-mid", "U-hi", "U-top"}
+
+
+def test_a_series_on_the_x_variable_is_declined(stub_stats):
+    """One curve per dose, each one point long, is not a figure."""
+    ctx = _two_series_ctx(stub_stats)
+    data = rc.collect_response(ctx, "dose", [24.0], series_id="dose")
+    assert len(data.curves) == 1 and data.series_name == ""

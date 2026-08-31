@@ -51,6 +51,9 @@ def snapshot_response(ctx) -> dict:
     combo = ctx.widgets.get_or_none("_response_x_cb")
     if combo is not None and combo.currentData():
         out["x_variable_id"] = str(combo.currentData())
+    series = ctx.widgets.get_or_none("_response_series_cb")
+    if series is not None and series.currentData():
+        out["series_variable_id"] = str(series.currentData())
     return out
 
 
@@ -84,6 +87,7 @@ def apply_response(ctx, state: dict) -> None:
             # and a free plateau is the tab's own default.
             setattr(slice_, key, None)
 
+    slice_.series_variable_id = str(state.get("series_variable_id", "") or "")
     _sync_controls(ctx, slice_, state.get("x_variable_id"))
 
 
@@ -102,6 +106,18 @@ def _sync_controls(ctx, slice_, x_variable_id) -> None:
             combo.blockSignals(True)
             combo.setCurrentIndex(index)
             combo.blockSignals(False)
+
+    # After the x combo, never before: ``refresh_series_combo`` excludes
+    # whichever variable is on X, so seeding the series against a stale x would
+    # offer a list with the wrong variable missing from it.
+    series = ctx.widgets.get_or_none("_response_series_cb")
+    if series is not None:
+        from well_viewer.features.response.controller import refresh_series_combo
+        refresh_series_combo(ctx)
+        index = series.findData(slice_.series_variable_id or "")
+        series.blockSignals(True)
+        series.setCurrentIndex(index if index >= 0 else 0)
+        series.blockSignals(False)
 
     fit_combo = ctx.widgets.get_or_none("_response_fit_cb")
     if fit_combo is not None:

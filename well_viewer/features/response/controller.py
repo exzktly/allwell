@@ -50,6 +50,64 @@ def selected_variable_id(ctx) -> str:
     return (combo.currentData() or "") if combo is not None else ""
 
 
+#: What the Series combo says when no split is wanted. Kept first in the list so
+#: the tab opens on the behaviour it has always had.
+NO_SERIES_LABEL = "None — one curve per timepoint"
+
+
+def series_variables(ctx) -> list:
+    """Every variable that could split the curves — Text *and* Number.
+
+    Text and Number both, unlike the X combo: a plate varying dose against
+    *seeding density* has two numeric variables and either could reasonably be
+    the axis while the other names the curves. The X variable itself is
+    excluded by :func:`refresh_series_combo`, since a series on the axis
+    variable draws one curve per dose with a single point on each.
+    """
+    vset = getattr(ctx.state.selection, "variables", None)
+    return list(getattr(vset, "variables", ()) or ())
+
+
+def selected_series_id(ctx) -> str:
+    combo = _widget(ctx, "_response_series_cb")
+    return (combo.currentData() or "") if combo is not None else ""
+
+
+def refresh_series_combo(ctx) -> None:
+    """List the variables that are not on X, keeping the user's pick.
+
+    Rebuilt on every redraw because the X combo can move under it: picking
+    ``Dose`` as the axis while ``Dose`` was the series has to drop the series
+    rather than draw one curve per dose. The pick survives whenever it still
+    makes sense, the same rule ``refresh_x_combo`` follows.
+    """
+    combo = _widget(ctx, "_response_series_cb")
+    if combo is None:
+        return
+    on_x = selected_variable_id(ctx)
+    keep = combo.currentData()
+
+    combo.blockSignals(True)
+    combo.clear()
+    combo.addItem(NO_SERIES_LABEL, "")
+    for variable in series_variables(ctx):
+        if variable.id == on_x:
+            continue
+        label = (f"{variable.name} ({variable.unit})" if variable.unit
+                 else variable.name)
+        combo.addItem(label, variable.id)
+    index = combo.findData(keep)
+    combo.setCurrentIndex(index if index >= 0 else 0)
+    combo.blockSignals(False)
+
+
+def on_series_changed(ctx) -> None:
+    slice_ = ctx.state.feature_slice("response")
+    if slice_ is not None:
+        slice_.series_variable_id = selected_series_id(ctx)
+    redraw_response(ctx)
+
+
 def refresh_x_combo(ctx) -> None:
     """List the Number variables, keeping the user's pick where it survives."""
     combo = _widget(ctx, "_response_x_cb")
@@ -179,7 +237,8 @@ def response_data(ctx):
     variable_id = selected_variable_id(ctx)
     if not variable_id:
         return ResponseData()
-    return collect_response(ctx, variable_id, timepoints_for(ctx))
+    return collect_response(ctx, variable_id, timepoints_for(ctx),
+                            selected_series_id(ctx))
 
 
 def redraw_response(ctx) -> None:
@@ -202,6 +261,7 @@ def redraw_response(ctx) -> None:
     if ax is None or canvas is None:
         return
     refresh_x_combo(ctx)
+    refresh_series_combo(ctx)
     data = response_data(ctx)
     update_timepoint_button(ctx)
     log_x = resolved_log_x(ctx, ax.figure, data)
@@ -267,15 +327,20 @@ def export_response_csv(ctx) -> None:
             ctx.notify.set_status(
                 f"Nothing to export. {_empty_reason(ctx, data)}".strip())
         return
-    header = ["member", "timepoint", "x", "x_label", "y", "err", "n", "reason"]
+    # A ``series`` column even when no series is chosen, where it is simply
+    # blank. A column that appears and disappears with a control makes two
+    # exports of the same plate un-diffable and breaks any script reading it by
+    # position, and a blank cell already means "this figure had no series".
+    header = ["member", "series", "timepoint", "x", "x_label", "y", "err", "n",
+              "reason"]
     rows = [
-        [p.member, f"{c.timepoint:g}", f"{p.x:g}", p.label,
+        [p.member, c.series_label, f"{c.timepoint:g}", f"{p.x:g}", p.label,
          f"{p.y:g}", _blank_if_undefined(p.err), str(p.n), ""]
         for c in data.curves for p in c.points
     ]
-    rows += [[member, "", "", "", "", "", "", reason]
+    rows += [[member, "", "", "", "", "", "", "", reason]
              for member, reason in data.omitted]
-    rows += [[member, "", "", "", "", "", "", "value is not a number"]
+    rows += [[member, "", "", "", "", "", "", "", "value is not a number"]
              for member in data.non_numeric]
     rows += _fit_rows(ctx, data)
     write_csv_rows(ctx, "response_curve", header, rows)
@@ -292,10 +357,17 @@ def _fit_rows(ctx, data) -> list[list[str]]:
     leave a spreadsheet whose fits are all successful, which is the same silent
     substitution as a figure that draws five of eight groups.
     """
+    labels = {c.key: c.series_label for c in data.curves}
     rows = []
-    for timepoint, fit in sorted(response_fits(ctx, data).items()):
+    for key, fit in sorted(response_fits(ctx, data).items()):
+        timepoint, series_id = key
         ec50 = f"{fit.ec50:g}" if fit.ok and fit.ec50 is not None else ""
-        rows.append([f"fit ({fit.model})", f"{timepoint:g}", ec50,
+        # The series goes in its own column, the same one the point rows use,
+        # because a file whose fit rows all read ``fit (4pl)`` cannot say which
+        # curve each EC50 came from — and with two series that is two numbers a
+        # reader has no way to tell apart.
+        series = labels.get(key) or ""
+        rows.append([f"fit ({fit.model})", series, f"{timepoint:g}", ec50,
                      ec50_text(fit, data.unit), "", "", "",
                      fit.reason])
     return rows

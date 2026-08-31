@@ -37,6 +37,13 @@ MIXED_VALUE = "wells disagree"
 #: somewhere else is worth saying rather than leaving as an absence.
 NOT_NUMERIC = "value is not a number"
 
+#: Series buckets for members the series variable cannot place. Named rather
+#: than dropped, and kept apart from each other: "these wells disagree about
+#: Cell line" and "these wells have no Cell line" have different fixes, the
+#: same distinction ``omitted`` already draws on the x axis.
+_MIXED_SERIES = "\x00mixed"
+_NO_SERIES = "\x00none"
+
 
 @dataclass(frozen=True)
 class ResponsePoint:
@@ -54,10 +61,35 @@ class ResponsePoint:
 
 @dataclass(frozen=True)
 class ResponseCurve:
-    """One timepoint's points, in ascending x."""
+    """One line on the figure: one timepoint of one series, in ascending x.
+
+    A curve used to be a timepoint and nothing else, so every member landed on
+    the same line. Two cell lines each given a dose series were drawn as one
+    line doubling back at every dose — a zig-zag that reads as a curve, with a
+    single legend entry and, with a fit on, one EC50 fitted across both. That
+    is §7's silent substitution: a figure that looks like a plot of one
+    condition when it is a plot of two.
+    """
 
     timepoint: float
     points: tuple[ResponsePoint, ...] = ()
+    #: The series variable's value id this curve draws, or ``""`` when no
+    #: series variable is chosen and the figure is one line per timepoint.
+    series_id: str = ""
+    #: That value as the user typed it (``"HeLa"``), for the legend.
+    series_label: str = ""
+
+    @property
+    def key(self) -> tuple[float, str]:
+        """What identifies this curve — and what a fit is filed under.
+
+        ``timepoint`` alone was the fit key. With series active that collides:
+        two series at one timepoint would share a single ``FitResult``, so one
+        curve would be drawn with the other's fitted line and EC50 — the same
+        wrong-number-presented-confidently failure the fit refusals exist to
+        avoid.
+        """
+        return (self.timepoint, self.series_id)
 
 
 @dataclass
@@ -116,6 +148,10 @@ class ResponseData:
     #: applied here: with one timepoint drawn, every point is its own baseline
     #: and the whole figure would be a flat line at 1.0.
     t0_declined: str = ""
+    #: The series variable's name (``"Cell line"``), or ``""`` when the figure
+    #: is one curve per timepoint. Carried so the legend and the empty state can
+    #: name it without the renderer reaching back into ctx for it.
+    series_name: str = ""
     #: How many members were given an x. Recorded rather than inferred, because
     #: "no member had a dose" and "every member had a dose but none was measured
     #: at the chosen timepoint" both arrive here as zero points, and they have
@@ -227,11 +263,15 @@ def fit_curves(data: ResponseData, model: str, *, fixed_top: float | None = None
     A curve that cannot be fitted still gets an entry. An absent key and a
     refused fit look identical to a caller that used ``.get()``, and the
     refusals are the half that has to reach the legend.
+
+    Keyed by ``curve.key`` — ``(timepoint, series_id)`` — rather than by the
+    timepoint. Two series drawn at one timepoint are two curves with two EC50s,
+    and a timepoint-keyed dict would give the second silently to the first.
     """
     if model == FIT_NONE:
         return {}
     return {
-        curve.timepoint: fit_response(
+        curve.key: fit_response(
             [p.x for p in curve.points], [p.y for p in curve.points],
             model=model, fixed_top=fixed_top, fixed_bottom=fixed_bottom,
             x_name=(data.variable_name or "x"))
@@ -239,8 +279,16 @@ def fit_curves(data: ResponseData, model: str, *, fixed_top: float | None = None
     }
 
 
-def collect_response(ctx, variable_id: str, timepoints) -> ResponseData:
+def collect_response(ctx, variable_id: str, timepoints,
+                    series_id: str = "") -> ResponseData:
     """Build every curve for *variable_id* at *timepoints*.
+
+    *series_id* names a second variable that splits the members into separate
+    curves — one line per (timepoint, series value). Without it the figure is
+    what it always was, one line per timepoint. A member the series variable
+    does not resolve to a single value is put on its own ``unassigned`` curve
+    rather than dropped or folded into a neighbour, because a member silently
+    joining the wrong condition is the failure this whole split exists to end.
 
     Members come from ``plot_members.response_members`` — over the same
     ``plot_replicate_sets`` seam every other tab pools through — so a plate
@@ -281,6 +329,10 @@ def collect_response(ctx, variable_id: str, timepoints) -> ResponseData:
         return ResponseData()
 
     data = ResponseData(variable_name=variable.name, unit=variable.unit)
+    # A series on the x variable would draw one curve per dose, each holding a
+    # single point — every line one point long, which is not a curve.
+    series_variable = (vset.by_id(series_id)
+                       if series_id and series_id != variable_id else None)
     well_paths = ctx.state.dataset.well_paths or {}
     threshold = on_cutoff_for_column(
         ctx, ctx.state.channel.active_val_col,
@@ -314,9 +366,12 @@ def collect_response(ctx, variable_id: str, timepoints) -> ResponseData:
         if value is None or value.number is None:
             data.non_numeric.append(rset.name)
             continue
-        placed.append((rset, float(value.number), value.label))
+        placed.append((rset, float(value.number), value.label,
+                       *_series_of(vset, series_variable, rset, wells)))
     data.placed = len(placed)
 
+    # By x, so each curve's own points come out ascending; the series split
+    # below preserves this order within every curve it produces.
     placed.sort(key=lambda row: row[1])
     targets = [float(t) for t in (timepoints or [])]
     normalise = _member_normaliser(ctx, data, targets, threshold, use_sem)
@@ -326,8 +381,11 @@ def collect_response(ctx, variable_id: str, timepoints) -> ResponseData:
     # before it can be normalised — collecting timepoint-by-timepoint would
     # hand the normaliser one point at a time and every point would be its own
     # baseline.
-    by_timepoint: dict[float, list] = {t: [] for t in targets}
-    for rset, x, label in placed:
+    # Keyed by (timepoint, series id) — the curve, not the timepoint.
+    by_curve: dict[tuple[float, str], list] = {}
+    series_labels: dict[str, str] = {}
+    for rset, x, label, series_key, series_label in placed:
+        series_labels.setdefault(series_key, series_label)
         raw = []
         for target_t in targets:
             mean, err, _frac, _frac_err = compute_rep_stats(
@@ -364,14 +422,68 @@ def collect_response(ctx, variable_id: str, timepoints) -> ResponseData:
                     data.solo_spread += 1
                 else:
                     data.undefined_spread += 1
-            by_timepoint[float(target_t)].append(ResponsePoint(
-                member=rset.name, x=x, y=float(mean),
-                err=float(err) if _is_number(err) else float("nan"),
-                n=n, label=label))
+            by_curve.setdefault((float(target_t), series_key), []).append(
+                ResponsePoint(
+                    member=rset.name, x=x, y=float(mean),
+                    err=float(err) if _is_number(err) else float("nan"),
+                    n=n, label=label))
 
-    data.curves = [ResponseCurve(timepoint=t, points=tuple(by_timepoint[t]))
-                   for t in targets]
+    # Every (timepoint, series) the plate offers, in a stable order: timepoints
+    # ascending, and within one timepoint the series in the variable's own
+    # declared order. Not sorted alphabetically — the order a user put their
+    # values in is the order their legend and their colours should follow, the
+    # same rule the value list on the Variables tab is a list for.
+    order = _series_order(series_variable, series_labels)
+    data.series_name = series_variable.name if series_variable is not None else ""
+    data.curves = [
+        ResponseCurve(timepoint=t, series_id=sid,
+                      series_label=series_labels.get(sid, ""),
+                      points=tuple(by_curve.get((t, sid), ())))
+        for t in targets for sid in order
+        if not series_id or by_curve.get((t, sid))
+    ]
+    if not series_id:
+        # No series chosen: exactly the one curve per timepoint this tab has
+        # always drawn, empty ones included, so "nothing was measured then"
+        # still reaches ``empty_reason`` as a curve with no points.
+        data.curves = [ResponseCurve(timepoint=t,
+                                     points=tuple(by_curve.get((t, ""), ())))
+                       for t in targets]
     return data
+
+
+def _series_of(vset, variable, rset, wells) -> tuple[str, str]:
+    """``(series key, label)`` for *rset* under *variable*.
+
+    ``("", "")`` when no series variable is chosen. A member whose wells
+    disagree, or that holds a well the variable never reached, gets its own
+    named bucket rather than being dropped: the x axis can refuse such a member
+    because a point needs a number, but a *series* is only a grouping, and
+    dropping a fully dosed member for want of a cell-line label would remove
+    real data from the figure over an annotation gap.
+    """
+    from well_viewer.domain.sample_variables import MIXED, roll_up
+
+    if variable is None:
+        return "", ""
+    value_id = roll_up(vset, variable.id, wells) if wells else None
+    if value_id is MIXED:
+        return _MIXED_SERIES, f"{variable.name}: mixed"
+    if value_id is None:
+        return _NO_SERIES, f"no {variable.name}"
+    value = variable.value_by_id(value_id)
+    if value is None:
+        return _NO_SERIES, f"no {variable.name}"
+    return str(value_id), value.label
+
+
+def _series_order(variable, seen: dict[str, str]) -> list[str]:
+    """Series keys in the variable's own value order, oddments last."""
+    if variable is None:
+        return [""]
+    declared = [v.id for v in variable.values if v.id in seen]
+    extra = [k for k in (_MIXED_SERIES, _NO_SERIES) if k in seen]
+    return declared + extra
 
 
 def _is_number(value) -> bool:

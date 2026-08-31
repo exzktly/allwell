@@ -32,6 +32,14 @@ class ResponseState:
     #: state the user chose and is left alone.
     tp_selections: dict[str, bool] = field(default_factory=dict)
 
+    #: The variable whose values split the members into separate curves, by
+    #: **id**, or ``""`` for one curve per timepoint. An id rather than a name
+    #: or a combo index, for the reason ``view_state_io`` records about the x
+    #: variable: a name is renamed and an index moves when another variable is
+    #: added, and either would restore the figure against a different variable
+    #: while looking as though nothing had gone wrong.
+    series_variable_id: str = ""
+
     #: ``FIT_NONE`` / ``FIT_4PL`` / ``FIT_HILL``. Off by default: a fitted line
     #: through points is an assertion about the shape of the response, and the
     #: user should be the one making it rather than finding it already drawn.

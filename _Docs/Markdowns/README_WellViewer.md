@@ -2459,6 +2459,21 @@ well, so a well carries its value whether or not anybody grouped it. Grouping
 wells is what pools replicates into one point with an error bar across them; a
 lone well is a single measurement and is drawn without one.
 
+**Several curves on one plot.** The **Series** control beside **X** splits the
+groups into one curve per value of a second variable — pick `Cell line` and a
+dose series run on HeLa and U2OS is drawn as two curves rather than one line
+doubling back at every dose. Colour tells you the series and the dash pattern
+tells you the timepoint, so with two cell lines at two timepoints you get four
+curves in two colours and two dash patterns, and you can see at a glance which
+share a cell line and which share a moment. Each curve is fitted on its own,
+with the same model and the same pinned plateaus, so their EC50s are
+comparable — which is the only reason to overlay them. The variable already on
+**X** is not offered, since a series on the dose axis would be one curve per
+dose with a single point on each. A group the series variable does not cover —
+wells with no `Cell line`, or a group whose wells disagree about it — gets its
+own curve, named for what is missing rather than quietly joining one of the
+others.
+
 **The axis picks itself.** If your doses span two decades or more the x axis
 opens logarithmic, because a 0.1–10 µM series on a linear axis puts three
 quarters of its points in the leftmost tenth. Every dose gets its own tick

@@ -6,7 +6,7 @@ import csv
 import math
 from pathlib import Path
 
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtWidgets import QMessageBox
 from well_viewer.domain.numeric import is_number
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.domain.viewer_state import parse_rc
@@ -18,6 +18,7 @@ from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates,
     on_cutoff_for_column,
 )
+from well_viewer.core.csv_export import ask_save_csv
 from well_viewer.core.safe import swallow, swallowed
 from well_viewer.core.lazy import lazy as _lazy
 from well_viewer.features.export import cell_scope_compute as csc
@@ -35,7 +36,6 @@ resolve_bar_timepoints = _lazy("well_viewer.features.barplot.renderer", "resolve
 _collect_bar_items_for_app = _lazy("well_viewer.features.barplot.collect", "collect_bar_items_for_app")
 
 
-_CSV_FILTER = "CSV files (*.csv);;All files (*.*)"
 
 
 def _well_labels_map(ctx) -> dict:
@@ -84,13 +84,6 @@ def well_names_joined(tokens, well_labels: dict, *,
     if strict and not any(names):
         return ""
     return sep.join(names)
-
-
-def _ask_save_csv(ctx, title: str, default_name: str) -> str:
-    initial_dir = str(ctx.state.dataset.data_dir) if ctx.state.dataset.data_dir else ""
-    initial_path = str(Path(initial_dir) / default_name) if initial_dir else default_name
-    out, _ = QFileDialog.getSaveFileName(ctx.window, title, initial_path, _CSV_FILTER)
-    return out or ""
 
 
 # ── Shared metric-row builders ───────────────────────────────────────────────
@@ -467,7 +460,7 @@ def export_plot_data(ctx) -> None:
     if not rows_out:
         _warn(ctx.window, "Export", "No data to export for the current selection.")
         return
-    out_path = _ask_save_csv(ctx, "Export plot data", f"{ch}_{metric}_plot_export.csv")
+    out_path = ask_save_csv(ctx, "Export plot data", f"{ch}_{metric}_plot_export.csv")
     if not out_path:
         return
     base_cols = ["well", "well_name"] + (["replicate_set"] if include_repset_col else [])
@@ -578,7 +571,7 @@ def export_bar_plot_data(ctx) -> None:
         tp_list[0][1] if len(tp_list) == 1
         else f"{tp_list[0][1]}-{tp_list[-1][1]}"
     )
-    out_path = _ask_save_csv(
+    out_path = ask_save_csv(
         ctx, "Export bar plot data",
         f"bar_t{tp_label_for_filename}.csv",
     )
@@ -709,7 +702,7 @@ def export_scatter_data(ctx) -> None:
 
     tp_tag = (f"t{timepoints_h[0]:g}" if len(timepoints_h) == 1
               else f"t{min(timepoints_h):g}-{max(timepoints_h):g}")
-    out_path = _ask_save_csv(
+    out_path = ask_save_csv(
         ctx, "Export scatter plot data",
         f"scatter_{ch_x_base}_vs_{ch_y_base}_{tp_tag}.csv",
     )
@@ -795,7 +788,7 @@ def export_scatter_agg_data(ctx) -> None:
     stat_x_safe = stat_x.replace(" ", "_").lower()
     stat_y_safe = stat_y.replace(" ", "_").lower()
 
-    out_path = _ask_save_csv(
+    out_path = ask_save_csv(
         ctx, "Export aggregate scatter plot data",
         f"scatter_agg_{stat_x_safe}_vs_{stat_y_safe}_{tp_range}.csv",
     )
@@ -852,7 +845,7 @@ def export_heatmap_data(ctx) -> None:
         _warn(ctx.window, "Export", "No heatmap cells to export.")
         return
     tp_tag = f"_t{tp:g}h" if tp is not None else ""
-    out_path = _ask_save_csv(
+    out_path = ask_save_csv(
         ctx, "Export heatmap data",
         f"heatmap_{ch}_{metric.replace(' ', '_')}{tp_tag}.csv",
     )
@@ -916,7 +909,7 @@ def export_distribution_data(ctx) -> None:
 
     combined = pd.concat(chunks, ignore_index=True)
     tp_tag = f"_t{tp_h:g}h" if _math.isfinite(tp_h) else ""
-    out_path = _ask_save_csv(
+    out_path = ask_save_csv(
         ctx, "Export distribution data",
         f"distribution_{ch}_{val_col}{tp_tag}.csv",
     )
@@ -1083,7 +1076,7 @@ def export_cell_data(ctx, scope) -> None:
     missing = csc.missing_verdict_layers(frames_columns)
 
     tp_tag = (f"_t{scope.timepoints[0]:g}" if len(scope.timepoints) == 1 else "")
-    out_path = _ask_save_csv(
+    out_path = ask_save_csv(
         ctx, "Save cell data", f"{scope.plot}_cells{tp_tag}.csv")
     if not out_path:
         return

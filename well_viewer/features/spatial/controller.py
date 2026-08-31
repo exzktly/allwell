@@ -469,22 +469,15 @@ def sp_export_summary_csv(ctx) -> None:
 def _write_summary_csv(ctx, rows) -> None:
     """Open a Save-As dialog and write ``rows`` (list of dicts) to CSV."""
     import csv
-    from PySide6.QtWidgets import QFileDialog
-    # ``data_dir``: there is no ``dir`` attribute on DatasetState, so this
-    # silently resolved to "" and every Save-As opened in the process
-    # working directory instead of beside the dataset.
-    dataset_dir = str(getattr(ctx.state.dataset, "data_dir", None) or "")
-    default = "spatial_summary.csv"
-    # Parented, like every other file dialog in the app: an unparented
-    # QFileDialog on macOS opens as a detached window rather than an app
-    # sheet, and can fall behind the main window with no way back to it.
-    # ``widgets/path_field.py`` records the same reason at its own site.
-    parent = ctx.window
-    path, _ = QFileDialog.getSaveFileName(
-        parent, "Export Spatial Summary CSV",
-        f"{dataset_dir}/{default}" if dataset_dir else default,
-        "CSV files (*.csv)",
-    )
+    from well_viewer.core.csv_export import ask_save_csv
+
+    # The dialog is ``core.csv_export``'s: it roots itself at the open dataset,
+    # parents itself to the window (an unparented QFileDialog on macOS opens as
+    # a detached window rather than an app sheet, and can fall behind the main
+    # window with no way back), and offers one filter. Only the *writer* stays
+    # here, because these rows are dicts and the schema is their field names.
+    path = ask_save_csv(ctx, "Export Spatial Summary CSV",
+                        "spatial_summary.csv")
     if not path:
         return
     fieldnames = list(rows[0].keys())

@@ -6,6 +6,13 @@ Leaving it in the export feature meant any other feature that wanted to save a
 table had to import that feature at module scope, which is a cross-feature
 dependency, or defer the import, which is a cycle workaround for a cycle that
 does not exist. ``tests/test_deferred_imports.py`` is what noticed.
+
+The export feature's own seven save dialogs come here too. They are the reason
+the rationale above is true rather than hypothetical, and while they kept a
+private copy the module was a helper with one caller sitting beside the
+original it was extracted from — with the two dialogs offering different "all
+files" filters, so which names the picker showed depended on which button
+opened it.
 """
 
 from __future__ import annotations
@@ -18,6 +25,11 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 _logger = logging.getLogger("well_viewer")
 
+#: ``(*)`` rather than ``(*.*)``: the second is a DOS-era spelling that Qt
+#: honours literally on some platforms, where it hides every extensionless
+#: name from a filter whose label says it shows everything. The export
+#: feature's copy used it and this one did not, so the same dialog listed
+#: different files depending on which button opened it.
 _CSV_FILTER = "CSV files (*.csv);;All files (*)"
 
 

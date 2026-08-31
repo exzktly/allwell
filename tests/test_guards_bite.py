@@ -3120,3 +3120,73 @@ def test_the_pairing_guard_notices_a_roster_entry_that_reports_nothing(
     that never needed to — which is how the original asymmetry survived."""
     exc = _run_pairing_guard(monkeypatch, tmp_path, _NEITHER)
     assert exc is not None, "a surface that reports neither clause went uncaught"
+
+
+# ── one CSV save dialog ─────────────────────────────────────────────────────
+
+_CSV_GUARD = "tests.test_one_csv_save_dialog"
+
+_INLINE_FILTER = (
+    'def export(ctx):\n'
+    '    out, _ = QFileDialog.getSaveFileName(\n'
+    '        ctx.window, "Export", "x.csv", "CSV files (*.csv)")\n'
+)
+#: The shape that shipped, and the one the first version of the guard walked
+#: past: the filter is a module constant, so no `.csv` literal appears inside
+#: the call at all.
+_CONSTANT_FILTER = (
+    '_CSV_FILTER = "CSV files (*.csv);;All files (*.*)"\n'
+    'def export(ctx):\n'
+    '    out, _ = QFileDialog.getSaveFileName(\n'
+    '        ctx.window, "Export", "x", _CSV_FILTER)\n'
+)
+_KEYWORD_FILTER = (
+    'def export(ctx):\n'
+    '    out, _ = QFileDialog.getSaveFileName(\n'
+    '        ctx.window, "Export", "x", filter="CSV files (*.csv)")\n'
+)
+#: A save dialog for something that is not a CSV. The rule is about one CSV
+#: picker, not about banning `getSaveFileName`, and a guard that fired here
+#: would be unusable.
+_OTHER_FORMAT = (
+    'def export(ctx):\n'
+    '    out, _ = QFileDialog.getSaveFileName(\n'
+    '        ctx.window, "Export", "x.png", "PNG (*.png)")\n'
+)
+_THROUGH_THE_HELPER = (
+    'def export(ctx):\n'
+    '    path = ask_save_csv(ctx, "Export", "x.csv")\n'
+)
+
+
+def _run_csv_guard(monkeypatch, tmp_path, body, name="controller.py"):
+    return _run_scan(monkeypatch, _CSV_GUARD,
+                     "test_only_csv_export_opens_a_csv_save_dialog",
+                     [_write(tmp_path, name, body)])
+
+
+def test_the_csv_dialog_guard_catches_an_inline_filter(tmp_path, monkeypatch):
+    exc = _run_csv_guard(monkeypatch, tmp_path, _INLINE_FILTER)
+    assert exc is not None, "a second CSV Save-As went uncaught"
+
+
+def test_the_csv_dialog_guard_catches_a_filter_held_in_a_constant(
+        tmp_path, monkeypatch):
+    """The site that shipped. A guard reading only the literals inside the call
+    found the two that inlined their filter and reported the sweep complete."""
+    exc = _run_csv_guard(monkeypatch, tmp_path, _CONSTANT_FILTER)
+    assert exc is not None, "a constant-held CSV filter went uncaught"
+
+
+def test_the_csv_dialog_guard_catches_a_keyword_filter(tmp_path, monkeypatch):
+    exc = _run_csv_guard(monkeypatch, tmp_path, _KEYWORD_FILTER)
+    assert exc is not None, "a keyword-argument CSV filter went uncaught"
+
+
+def test_the_csv_dialog_guard_leaves_other_formats_alone(tmp_path, monkeypatch):
+    assert _run_csv_guard(monkeypatch, tmp_path, _OTHER_FORMAT) is None
+
+
+def test_the_csv_dialog_guard_clears_a_caller_using_the_helper(
+        tmp_path, monkeypatch):
+    assert _run_csv_guard(monkeypatch, tmp_path, _THROUGH_THE_HELPER) is None

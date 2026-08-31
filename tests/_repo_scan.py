@@ -38,6 +38,7 @@ PACKAGE_ROOTS = (
     "well_viewer",
     "widgets",
     "datasets",
+    "analyze",
     "services",
     "pipeline",
     "util",

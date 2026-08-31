@@ -3544,3 +3544,50 @@ def test_the_tracker_guard_catches_a_count_typed_in_prose(tmp_path, monkeypatch)
 def test_the_tracker_guard_clears_a_well_formed_tracker(
         tmp_path, monkeypatch, test_name):
     assert _run_tracker_guard(monkeypatch, tmp_path, test_name) is None
+
+
+# ── a constructor is not handed a property it computes ──────────────────────
+
+_DERIVED_GUARD = "tests.test_no_constructor_takes_a_derived_property"
+
+#: What shipped: `wells` is a read-only property unioning `members` and
+#: `solo_wells`, so this raises the moment the line runs.
+_PASSES_DERIVED = 'def f(g):\n    return BarGroup(name=g.name, wells=["A01"])\n'
+#: The same, through the aliased import the two shipped sites used.
+_PASSES_DERIVED_ALIASED = (
+    'from well_viewer.domain.batch_models import BarGroup as _BarGroup\n'
+    'def f(g):\n    return _BarGroup(name=g.name, wells=["A01"])\n'
+)
+_CORRECT = 'def f(g):\n    return BarGroup(g.name, solo_wells=["A01"])\n'
+#: A different class with a `wells` *parameter* is not this rule's business.
+_OTHER_CLASS = 'def f():\n    return ReplicateSet(name="x", wells=["A01"])\n'
+
+
+def _run_derived_guard(monkeypatch, tmp_path, body):
+    return _run_scan(monkeypatch, _DERIVED_GUARD,
+                     "test_no_constructor_is_passed_a_property_it_computes",
+                     [_write(tmp_path, "controller.py", body)])
+
+
+def test_the_derived_property_guard_catches_the_shape_that_shipped(
+        tmp_path, monkeypatch):
+    assert _run_derived_guard(monkeypatch, tmp_path, _PASSES_DERIVED) is not None
+
+
+def test_the_derived_property_guard_sees_through_an_alias(tmp_path, monkeypatch):
+    """Both shipped sites imported it as ``_BarGroup``. A guard matching only
+    the bare name would have reported the sweep clean."""
+    exc = _run_derived_guard(monkeypatch, tmp_path, _PASSES_DERIVED_ALIASED)
+    assert exc is not None
+
+
+def test_the_derived_property_guard_clears_the_real_constructor(
+        tmp_path, monkeypatch):
+    assert _run_derived_guard(monkeypatch, tmp_path, _CORRECT) is None
+
+
+def test_the_derived_property_guard_leaves_a_real_parameter_alone(
+        tmp_path, monkeypatch):
+    """``ReplicateSet`` genuinely takes ``wells``. A guard that fired on any
+    ``wells=`` anywhere would be unusable and would be turned off."""
+    assert _run_derived_guard(monkeypatch, tmp_path, _OTHER_CLASS) is None

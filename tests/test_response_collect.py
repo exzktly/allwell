@@ -975,3 +975,124 @@ def test_a_series_on_the_x_variable_is_declined(stub_stats):
     ctx = _two_series_ctx(stub_stats)
     data = rc.collect_response(ctx, "dose", [24.0], series_id="dose")
     assert len(data.curves) == 1 and data.series_name == ""
+
+
+# ── the Spread: FOV toggle, which the tab built and never read ──────────────
+
+def _fov_ctx(monkeypatch, *, well_stats, fov_stats):
+    """A one-well plate whose two stats producers disagree.
+
+    They must disagree, or the test cannot tell which one the collector called
+    — a fixture where both return the same spread passes against the bug.
+    """
+    import well_viewer.domain.stats_compute as sc
+    monkeypatch.setattr(sc, "compute_rep_stats",
+                        lambda *a, **k: well_stats)
+    monkeypatch.setattr(sc, "compute_rep_per_fov_stats",
+                        lambda *a, **k: fov_stats)
+    import well_viewer.core.channel_state_controller as csc
+    monkeypatch.setattr(csc, "on_cutoff_for_column", lambda *a, **k: 0.0)
+    return _ctx(wells=["A01"], variable=_dose(("1", 1.0)),
+                assignments={"dose": {"A01": "d0"}},
+                selections=_groups(("solo", ["A01"])))
+
+
+def test_one_well_with_fov_spread_gets_an_error_bar(monkeypatch):
+    """The report: a single well, Spread: FOV on, and no whisker drawn.
+
+    Across wells a one-well member has one replicate and no spread. Across
+    FOVs it has as many replicates as it has fields, which is exactly what the
+    toggle asks for — and the collector called the well producer regardless.
+    """
+    ctx = _fov_ctx(monkeypatch,
+                   well_stats=(10.0, float("nan"), 0.5, float("nan")),
+                   fov_stats=(10.0, 2.5, 0.5, 0.05))
+    ctx.state.plot.use_fov_replicates = True
+
+    data = rc.collect_response(ctx, "dose", [24.0])
+
+    point = data.curves[0].points[0]
+    assert point.err == 2.5, "the per-FOV spread never reached the point"
+    assert data.solo_spread == 0
+    assert "no error bar" not in rc.omission_caption(data)
+
+
+def test_with_the_toggle_off_the_well_producer_is_still_used(monkeypatch):
+    """The default is unchanged — the toggle is what selects the other one."""
+    ctx = _fov_ctx(monkeypatch,
+                   well_stats=(10.0, 1.25, 0.5, 0.02),
+                   fov_stats=(10.0, 2.5, 0.5, 0.05))
+    ctx.state.plot.use_fov_replicates = False
+
+    data = rc.collect_response(ctx, "dose", [24.0])
+    assert data.curves[0].points[0].err == 1.25
+
+
+def test_a_missing_fov_spread_is_captioned_as_a_lone_fov(monkeypatch):
+    """One FOV has no spread either, and the caption must say which unit.
+
+    Blaming "a single replicate" with the FOV toggle on sends the user to add
+    another well when what they need is another field.
+    """
+    ctx = _fov_ctx(monkeypatch,
+                   well_stats=(10.0, 1.25, 0.5, 0.02),
+                   fov_stats=(10.0, float("nan"), 0.5, float("nan")))
+    ctx.state.plot.use_fov_replicates = True
+
+    data = rc.collect_response(ctx, "dose", [24.0])
+    caption = rc.omission_caption(data)
+    assert data.solo_spread == 1
+    assert "a single FOV has no spread" in caption, caption
+
+
+# ── fraction above threshold on y ───────────────────────────────────────────
+
+def test_the_curves_can_plot_the_fraction_above_threshold(monkeypatch):
+    """The third return value of the stats call, which the tab used to discard.
+
+    The mean and the fraction are deliberately different numbers here, so a
+    collector that ignored the metric and drew the mean cannot pass.
+    """
+    ctx = _fov_ctx(monkeypatch,
+                   well_stats=(10.0, 1.0, 0.42, 0.03),
+                   fov_stats=(10.0, 2.0, 0.42, 0.05))
+
+    means = rc.collect_response(ctx, "dose", [24.0], y_metric=rc.Y_MEAN)
+    fracs = rc.collect_response(ctx, "dose", [24.0], y_metric=rc.Y_FRACTION)
+
+    assert means.curves[0].points[0].y == 10.0
+    assert fracs.curves[0].points[0].y == 0.42
+    assert fracs.curves[0].points[0].err == 0.03
+    assert fracs.y_metric == rc.Y_FRACTION
+
+
+def test_an_unknown_y_metric_falls_back_to_the_mean(monkeypatch):
+    """A hand-edited saved plot must not draw an axis nobody can name."""
+    ctx = _fov_ctx(monkeypatch,
+                   well_stats=(10.0, 1.0, 0.42, 0.03),
+                   fov_stats=(10.0, 2.0, 0.42, 0.05))
+    data = rc.collect_response(ctx, "dose", [24.0], y_metric="nonsense")
+    assert data.y_metric == rc.Y_MEAN
+    assert data.curves[0].points[0].y == 10.0
+
+
+def test_a_fraction_that_was_never_computed_is_a_gap_not_a_zero(monkeypatch):
+    """§7: a fraction of 0.0 means "nothing above the cutoff" and is a result.
+
+    A member with no fraction must leave a gap in the curve, not a point on the
+    floor that reads as a treatment which killed everything.
+    """
+    ctx = _fov_ctx(monkeypatch,
+                   well_stats=(10.0, 1.0, float("nan"), float("nan")),
+                   fov_stats=(10.0, 2.0, float("nan"), float("nan")))
+    data = rc.collect_response(ctx, "dose", [24.0], y_metric=rc.Y_FRACTION)
+    assert not data.has_points(), "an uncomputed fraction was drawn as a point"
+
+
+def test_a_fraction_of_zero_is_drawn_because_it_is_a_measurement(monkeypatch):
+    """The other half of the same rule, and the one a NaN-vs-zero slip breaks."""
+    ctx = _fov_ctx(monkeypatch,
+                   well_stats=(10.0, 1.0, 0.0, 0.01),
+                   fov_stats=(10.0, 2.0, 0.0, 0.01))
+    data = rc.collect_response(ctx, "dose", [24.0], y_metric=rc.Y_FRACTION)
+    assert data.curves[0].points[0].y == 0.0

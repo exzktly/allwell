@@ -40,6 +40,13 @@ class ResponseState:
     #: while looking as though nothing had gone wrong.
     series_variable_id: str = ""
 
+    #: ``"mean"`` or ``"fraction"`` — what the curves plot on y. The tab's own
+    #: choice rather than the shared channel Property, because the fraction
+    #: above threshold is not one of the Properties that combo offers: it is
+    #: computed against the ON cutoff and returned beside the mean, and the
+    #: shared roster only carries it for the aggregate Scatter tab.
+    y_metric: str = "mean"
+
     #: ``FIT_NONE`` / ``FIT_4PL`` / ``FIT_HILL``. Off by default: a fitted line
     #: through points is an assertion about the shape of the response, and the
     #: user should be the one making it rather than finding it already drawn.

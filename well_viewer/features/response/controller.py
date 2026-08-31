@@ -14,7 +14,8 @@ from well_viewer.core.csv_export import write_csv_rows
 from well_viewer.core.safe import swallow
 from well_viewer.domain.sample_variables import NUMBER
 from well_viewer.features.response.collect import (
-    ResponseData, collect_response, empty_reason, fit_curves,
+    Y_FRACTION, Y_MEAN, Y_METRICS, ResponseData, collect_response, empty_reason,
+    fit_curves,
 )
 from well_viewer.features.response.renderer import draw_response
 from well_viewer.features.response.response_compute import (
@@ -99,6 +100,26 @@ def refresh_series_combo(ctx) -> None:
     index = combo.findData(keep)
     combo.setCurrentIndex(index if index >= 0 else 0)
     combo.blockSignals(False)
+
+
+#: ``(label, id)`` for the Y combo, in offer order. Mean first: it is what the
+#: tab has always drawn and what most plates want.
+Y_METRIC_LABELS = (("Mean", Y_MEAN), ("Fraction above threshold", Y_FRACTION))
+
+
+def selected_y_metric(ctx) -> str:
+    """What the curves plot on y. Falls back to the mean for anything unknown."""
+    slice_ = ctx.state.feature_slice("response")
+    value = str(getattr(slice_, "y_metric", Y_MEAN) or Y_MEAN) if slice_ else Y_MEAN
+    return value if value in Y_METRICS else Y_MEAN
+
+
+def set_y_metric(ctx, metric: str) -> None:
+    slice_ = ctx.state.feature_slice("response")
+    if slice_ is None:
+        return
+    slice_.y_metric = metric if metric in Y_METRICS else Y_MEAN
+    redraw_response(ctx)
 
 
 def on_series_changed(ctx) -> None:
@@ -238,7 +259,7 @@ def response_data(ctx):
     if not variable_id:
         return ResponseData()
     return collect_response(ctx, variable_id, timepoints_for(ctx),
-                            selected_series_id(ctx))
+                            selected_series_id(ctx), selected_y_metric(ctx))
 
 
 def redraw_response(ctx) -> None:
@@ -441,8 +462,17 @@ def _y_label(ctx, data=None) -> str:
     normalised without anything on this page being touched.
     """
     channel = str(getattr(ctx.state.channel, "active_channel", "") or "").upper()
-    metric = str(getattr(ctx.state.channel, "active_metric", "") or "")
-    label = " ".join(part for part in (channel, metric.replace("_", " ")) if part)
+    if getattr(data, "y_metric", Y_MEAN) == Y_FRACTION:
+        # Not the channel's Property. The fraction is a different quantity from
+        # whatever the Property names, computed against the ON cutoff, and an
+        # axis reading "GFP mean intensity" over a curve of fractions is the one
+        # thing a figure must never do.
+        label = " ".join(part for part in (channel, "fraction above threshold")
+                         if part)
+    else:
+        metric = str(getattr(ctx.state.channel, "active_metric", "") or "")
+        label = " ".join(part for part in (channel, metric.replace("_", " "))
+                         if part)
     suffix = getattr(data, "normalised", "") if data is not None else ""
     return f"{label} {suffix}".strip() if suffix else label
 

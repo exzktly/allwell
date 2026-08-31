@@ -37,6 +37,15 @@ MIXED_VALUE = "wells disagree"
 #: somewhere else is worth saying rather than leaving as an absence.
 NOT_NUMERIC = "value is not a number"
 
+#: What the curves plot on y. ``MEAN`` is the channel's active property;
+#: ``FRACTION`` is the fraction of cells above the ON cutoff, which
+#: ``compute_rep_stats`` already returns beside the mean and which this tab
+#: used to discard. For a dose response the fraction is often the readout the
+#: experiment is actually about, and an EC50 fitted to it is well defined.
+Y_MEAN = "mean"
+Y_FRACTION = "fraction"
+Y_METRICS = (Y_MEAN, Y_FRACTION)
+
 #: Series buckets for members the series variable cannot place. Named rather
 #: than dropped, and kept apart from each other: "these wells disagree about
 #: Cell line" and "these wells have no Cell line" have different fixes, the
@@ -148,6 +157,16 @@ class ResponseData:
     #: applied here: with one timepoint drawn, every point is its own baseline
     #: and the whole figure would be a flat line at 1.0.
     t0_declined: str = ""
+    #: ``Y_MEAN`` or ``Y_FRACTION`` — what the curves plot. Carried so the axis
+    #: label and the caption describe the numbers actually drawn; an axis
+    #: labelled with the mean above a curve of fractions is the one thing a
+    #: figure must never do.
+    y_metric: str = Y_MEAN
+    #: What one replicate was, for the caption: ``"replicate"`` normally,
+    #: ``"FOV"`` with the Spread: FOV toggle on. A point with no error bar is
+    #: explained by a different fix in each case, and the caption used to name
+    #: only the first.
+    replicate_unit: str = "replicate"
     #: The series variable's name (``"Cell line"``), or ``""`` when the figure
     #: is one curve per timepoint. Carried so the legend and the empty state can
     #: name it without the renderer reaching back into ctx for it.
@@ -197,8 +216,9 @@ def omission_caption(data: ResponseData) -> str:
         parts.append(f"{len(data.control_gaps)} without a control "
                      f"({names}{more})")
     if data.solo_spread:
+        unit = data.replicate_unit
         parts.append(f"{data.solo_spread} point(s) with no error bar: "
-                     f"a single replicate has no spread")
+                     f"a single {unit} has no spread")
     if data.undefined_spread:
         parts.append(f"{data.undefined_spread} point(s) with no error bar: "
                      f"the control had no spread to propagate")
@@ -280,7 +300,7 @@ def fit_curves(data: ResponseData, model: str, *, fixed_top: float | None = None
 
 
 def collect_response(ctx, variable_id: str, timepoints,
-                    series_id: str = "") -> ResponseData:
+                    series_id: str = "", y_metric: str = Y_MEAN) -> ResponseData:
     """Build every curve for *variable_id* at *timepoints*.
 
     *series_id* names a second variable that splits the members into separate
@@ -321,7 +341,9 @@ def collect_response(ctx, variable_id: str, timepoints,
     from well_viewer.core.channel_state_controller import on_cutoff_for_column
     from well_viewer.domain.plot_members import response_members
     from well_viewer.domain.sample_variables import MIXED, roll_up
-    from well_viewer.domain.stats_compute import compute_rep_stats
+    from well_viewer.domain.stats_compute import (
+        compute_rep_per_fov_stats, compute_rep_stats,
+    )
 
     vset = getattr(ctx.state.selection, "variables", None)
     variable = vset.by_id(variable_id) if vset is not None else None
@@ -338,6 +360,16 @@ def collect_response(ctx, variable_id: str, timepoints,
         ctx, ctx.state.channel.active_val_col,
         channel=ctx.state.channel.active_channel)
     use_sem = bool(getattr(ctx.state.plot, "use_sem", True))
+    # The Display popover's "Spread: FOV" toggle, which this tab **built and
+    # never read**: it always reduced across wells, so a member of one well had
+    # one replicate and no spread, and the figure drew a point with no error
+    # bar under a control the user had switched on. Both producers return
+    # ``(mean, mean_err, frac, frac_err, ...)`` in their first four positions;
+    # only what counts as a replicate differs.
+    per_fov = bool(getattr(ctx.state.plot, "use_fov_replicates", False))
+    stats_for = compute_rep_per_fov_stats if per_fov else compute_rep_stats
+    data.replicate_unit = "FOV" if per_fov else "replicate"
+    data.y_metric = y_metric if y_metric in Y_METRICS else Y_MEAN
 
     members = list(response_members(ctx))
     # Only where there is something to pool. The notice exists because the Bar
@@ -374,7 +406,8 @@ def collect_response(ctx, variable_id: str, timepoints,
     # below preserves this order within every curve it produces.
     placed.sort(key=lambda row: row[1])
     targets = [float(t) for t in (timepoints or [])]
-    normalise = _member_normaliser(ctx, data, targets, threshold, use_sem)
+    normalise = _member_normaliser(ctx, data, targets, threshold, use_sem,
+                                   per_fov)
 
     # A member at a time, not a timepoint at a time. ``vs t0`` divides a
     # member's whole series by its own baseline, so the series has to exist
@@ -388,18 +421,36 @@ def collect_response(ctx, variable_id: str, timepoints,
         series_labels.setdefault(series_key, series_label)
         raw = []
         for target_t in targets:
-            mean, err, _frac, _frac_err = compute_rep_stats(
-                ctx, rset, target_t, threshold, use_sem)
-            if not _is_number(mean):
+            mean, err, frac, frac_err = stats_for(
+                ctx, rset, target_t, threshold, use_sem)[:4]
+            drawn = frac if data.y_metric == Y_FRACTION else mean
+            if not _is_number(drawn):
                 # No sample at this timepoint. Not a zero — a member that was
                 # not measured then — so it leaves a gap in the curve rather
                 # than a point on the floor.
                 continue
-            raw.append((target_t, float(mean), float(err or 0.0),
-                        0.0, 0, 0, 0.0, 0.0, 0.0))
+            # The **real** fraction in the fraction slots, not the ``0.0`` that
+            # used to sit there. Nothing read it while the tab only ever drew
+            # means, but a hardcoded zero for something never computed is §7's
+            # own example of the bug — and it becomes live the moment the y
+            # metric can be the fraction, because ``normalize_pts`` divides
+            # index 3 by the control's *fraction* series. Putting the fraction
+            # in the mean slot instead would have divided it by the control's
+            # mean intensity: a ratio of two different quantities, drawn under
+            # a fold-change label with nothing to say so.
+            raw.append((target_t, _num_or_nan(mean), _spread_or_zero(err),
+                        _num_or_nan(frac), 0, 0, _spread_or_zero(frac_err),
+                        0.0, 0.0))
         n = sum(1 for w in rset.wells if w in well_paths)
         for point in normalise(raw, rset.name):
-            target_t, mean, err = point[0], point[1], point[2]
+            target_t = point[0]
+            # Read back the slot the metric is drawn from, so normalisation is
+            # applied to the quantity on the axis rather than to whichever one
+            # happened to be first in the tuple.
+            if data.y_metric == Y_FRACTION:
+                mean, err = point[3], point[6]
+            else:
+                mean, err = point[1], point[2]
             if not _is_number(mean):
                 # Normalisation blanked it: the control resolved to nothing, or
                 # had no sample at this timepoint. Named, because a curve that
@@ -492,7 +543,8 @@ def _is_number(value) -> bool:
     return isinstance(value, (int, float)) and math.isfinite(float(value))
 
 
-def _member_normaliser(ctx, data: ResponseData, targets, threshold, use_sem):
+def _member_normaliser(ctx, data: ResponseData, targets, threshold, use_sem,
+                       per_fov_spread: bool = False):
     """A ``(points, member_name) -> points`` closure over the shared state.
 
     **The same code path the Line tab normalises through**, not a second
@@ -531,7 +583,10 @@ def _member_normaliser(ctx, data: ResponseData, targets, threshold, use_sem):
     data.normalised = fc_module.fold_change_suffix_for(ctx, "response")
     cache = ControlSeriesCache(
         ctx, threshold=threshold, val_col=ctx.state.channel.active_val_col,
-        use_sem=use_sem, per_fov_spread=False,
+        # Matched to the members' own producer. Hardcoded ``False`` meant that
+        # with Spread: FOV on, a per-FOV numerator was normalised against a
+        # cross-well denominator — two different poolings in one ratio.
+        use_sem=use_sem, per_fov_spread=per_fov_spread,
         fluor_gates=get_all_fluor_gates(ctx))
     denominators = control_denominators(
         ctx, cache, fc,
@@ -548,3 +603,37 @@ def _member_normaliser(ctx, data: ResponseData, targets, threshold, use_sem):
         return normalize_member_pts(points, denominators, name, **keywords)
 
     return _normalise
+
+
+def _num_or_nan(value) -> float:
+    """*value* as a float, or NaN — never a stand-in zero.
+
+    §7's rule at the point it bites: "not computed" and "computed as zero" are
+    different facts, and a fraction of 0.0 is a real, meaningful measurement
+    (nothing above the cutoff). Writing 0.0 for a fraction that was never
+    computed would draw a curve sitting on the floor of the axis and reading as
+    a plate where the treatment killed everything.
+    """
+    return float(value) if _is_number(value) else float("nan")
+
+
+def _spread_or_zero(value) -> float:
+    """A spread as a float: ``None`` becomes 0.0, and **NaN stays NaN**.
+
+    The NaN is load-bearing and must survive to the caller, which counts it as
+    a point with no error bar and captions why. An earlier version of this
+    helper flattened every non-number to 0.0 and took that distinction with it:
+    a lone replicate's undefined spread arrived as a defined spread of zero,
+    which draws as a zero-length error bar — a measurement of perfect agreement
+    — and stopped being counted at all. That is §7's computed-as-zero sin, and
+    it went in behind a docstring claiming the opposite.
+
+    ``None`` alone becomes 0.0, which is what the original ``float(err or 0.0)``
+    did and what ``normalize_pts`` expects for "no spread supplied".
+    """
+    if value is None:
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0

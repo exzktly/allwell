@@ -2459,6 +2459,19 @@ well, so a well carries its value whether or not anybody grouped it. Grouping
 wells is what pools replicates into one point with an error bar across them; a
 lone well is a single measurement and is drawn without one.
 
+**What the curves measure.** The **Y** control picks between the channel's
+active Property and **Fraction above threshold** — the proportion of cells above
+the ON cutoff. The fraction is often the readout a dose response is really
+about, and it is not one of the Properties the band offers, so it lives here.
+The axis label follows what you picked, and a fit works on either.
+
+**Error bars with one well.** Set **Spread** to **FOV** in the Display popover
+and each field of view counts as a replicate, so a condition run in a single
+well still gets an error bar. Left on the default, spread is measured across
+wells and a one-well condition has none — the caption under the figure says
+which of the two it is, because "add another well" and "add another field" are
+different fixes.
+
 **Several curves on one plot.** The **Series** control beside **X** splits the
 groups into one curve per value of a second variable — pick `Cell line` and a
 dose series run on HeLa and U2OS is drawn as two curves rather than one line

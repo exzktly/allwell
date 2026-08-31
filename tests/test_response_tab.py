@@ -73,6 +73,12 @@ def tab(qtbot, monkeypatch):
     qtbot.addWidget(series_combo)
     series_combo.currentIndexChanged.connect(
         lambda *_: rctl.on_series_changed(ctx))
+    y_combo = LabeledComboBox("Y")
+    qtbot.addWidget(y_combo)
+    for _label, _metric in rctl.Y_METRIC_LABELS:
+        y_combo.addItem(_label, _metric)
+    y_combo.currentIndexChanged.connect(
+        lambda *_: rctl.set_y_metric(ctx, y_combo.currentData() or ""))
     tp_button = QPushButton("Timepoints: 0 selected")
     qtbot.addWidget(tp_button)
     # A bare ``Figure``, not ``pyplot.subplots``: pyplot would build a Qt canvas
@@ -97,7 +103,8 @@ def tab(qtbot, monkeypatch):
         widgets=_Registry(_response_x_cb=combo, _response_ax=ax,
                           _response_fig=fig, _response_canvas=canvas,
                           _response_tp_button=tp_button,
-                          _response_series_cb=series_combo),
+                          _response_series_cb=series_combo,
+                          _response_y_cb=y_combo),
         notify=SimpleNamespace(set_status=statuses.append),
         state=SimpleNamespace(
             dataset=SimpleNamespace(well_paths={}),
@@ -117,8 +124,14 @@ def tab(qtbot, monkeypatch):
                                  fc_control_map={}, fc_control_render="self",
                                  fc_baseline_tp="", fc_op_ctrl="ratio",
                                  fc_op_t0="ratio", fc_order="ctrl_first"),
+            # ``active_metric`` spelled out: the real ``ChannelState`` always
+            # carries it and ``_y_label`` reads it, so a stub that omitted it
+            # made the axis read "GFP" and any label assertion agree with a
+            # tab that had dropped the metric entirely.
             channel=SimpleNamespace(active_val_col="gfp_mean_intensity",
-                                    active_channel="gfp", fluor_channels=()),
+                                    active_channel="gfp",
+                                    active_metric="mean_intensity",
+                                    fluor_channels=()),
             feature_slice=slices.get,
             # The real slice, not a stub: ``figure_prefs`` seeds it lazily and
             # distinguishes "never set" from "set to off", which is the whole
@@ -128,7 +141,8 @@ def tab(qtbot, monkeypatch):
         runtime=SimpleNamespace(barplot=SimpleNamespace(current_keys=lambda: [])),
     )
     return SimpleNamespace(ctx=ctx, combo=combo, ax=ax, statuses=statuses,
-                           series=series_combo, monkeypatch=monkeypatch,
+                           series=series_combo, y=y_combo,
+                           monkeypatch=monkeypatch,
                            w=ctx.widgets.get_or_none)
 
 
@@ -1346,3 +1360,90 @@ def test_the_series_choice_survives_a_save_and_a_restore(tab):
 
     io.apply_response(tab.ctx, saved)
     assert rctl.selected_series_id(tab.ctx) == "cl"
+
+
+# ── the Y metric, and the spread the toggle asks for ────────────────────────
+
+def test_choosing_the_fraction_in_the_combo_redraws_with_it(tab):
+    """Pressed through the combo, and the drawn values checked.
+
+    The mean and the fraction are far apart in the fixture, so a combo wired to
+    nothing — this tab's recurring failure — cannot pass by coincidence.
+    """
+    tab.monkeypatch.setattr(
+        __import__("well_viewer.domain.stats_compute", fromlist=["x"]),
+        "compute_rep_stats",
+        lambda ctx, rset, t, thr, sem: (10.0, 1.0, 0.42, 0.03))
+    variable = _variable(pairs=(("1", 1.0), ("10", 10.0)))
+    _load(tab, variable, {"A01": "v0", "A02": "v1"},
+          [("lo", ["A01"]), ("hi", ["A02"])])
+    rctl.redraw_response(tab.ctx)
+    assert [float(y) for y in tab.ax.get_lines()[0].get_ydata()] == [10.0, 10.0]
+
+    tab.y.setCurrentIndex(tab.y.findData("fraction"))
+
+    assert [float(y) for y in tab.ax.get_lines()[0].get_ydata()] == [0.42, 0.42]
+
+
+def test_the_axis_label_follows_the_y_metric(tab):
+    """An axis naming the Property over a curve of fractions is a lie.
+
+    Asserted as the label text rather than "the label changed", because the
+    broken version also changes it — the channel is in both.
+    """
+    tab.monkeypatch.setattr(
+        __import__("well_viewer.domain.stats_compute", fromlist=["x"]),
+        "compute_rep_stats",
+        lambda ctx, rset, t, thr, sem: (10.0, 1.0, 0.42, 0.03))
+    variable = _variable(pairs=(("1", 1.0),))
+    _load(tab, variable, {"A01": "v0"}, [("a", ["A01"])])
+
+    tab.y.setCurrentIndex(tab.y.findData("fraction"))
+    data = rctl.response_data(tab.ctx)
+    assert rctl._y_label(tab.ctx, data) == "GFP fraction above threshold"
+
+    tab.y.setCurrentIndex(tab.y.findData("mean"))
+    data = rctl.response_data(tab.ctx)
+    assert rctl._y_label(tab.ctx, data) == "GFP mean intensity"
+
+
+def test_the_y_metric_survives_a_save_and_a_restore(tab):
+    from well_viewer.features.response import view_state_io as io
+
+    variable = _variable(pairs=(("1", 1.0),))
+    _load(tab, variable, {"A01": "v0"}, [("a", ["A01"])])
+    tab.y.setCurrentIndex(tab.y.findData("fraction"))
+
+    saved = io.snapshot_response(tab.ctx)
+    assert saved["y_metric"] == "fraction"
+
+    tab.y.setCurrentIndex(tab.y.findData("mean"))
+    io.apply_response(tab.ctx, saved)
+    assert rctl.selected_y_metric(tab.ctx) == "fraction"
+    assert tab.y.currentData() == "fraction"
+
+
+def test_the_fov_toggle_reaches_the_figure(tab):
+    """A single well with Spread: FOV on draws a whisker, not a bare point.
+
+    The two producers return different spreads, so a redraw that called the
+    well one regardless is distinguishable from one that honoured the toggle.
+    """
+    import well_viewer.domain.stats_compute as sc
+    tab.monkeypatch.setattr(
+        sc, "compute_rep_stats",
+        lambda ctx, rset, t, thr, sem: (10.0, float("nan"), 0.5, float("nan")))
+    tab.monkeypatch.setattr(
+        sc, "compute_rep_per_fov_stats",
+        lambda ctx, rset, t, thr, sem: (10.0, 2.5, 0.5, 0.05))
+
+    variable = _variable(pairs=(("1", 1.0), ("10", 10.0)))
+    _load(tab, variable, {"A01": "v0", "A02": "v1"},
+          [("lo", ["A01"]), ("hi", ["A02"])])
+    tab.ctx.state.plot.use_fov_replicates = True
+    rctl.redraw_response(tab.ctx)
+
+    container = tab.ax.containers[0]
+    assert container.has_yerr, "the curve was drawn with no error bars at all"
+    captions = " | ".join(t.get_text() for t in tab.ax.texts)
+    assert "no error bar" not in captions, captions

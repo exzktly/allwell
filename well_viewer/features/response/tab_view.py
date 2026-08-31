@@ -26,9 +26,10 @@ from well_viewer.core.ui_helpers import (
 from well_viewer.features.export.service import export_cell_data_from
 from well_viewer.features.response.cell_scope_compute import cell_scope
 from well_viewer.features.response.controller import (
-    export_response_csv, fit_model_labels, fit_settings, on_series_changed,
-    on_x_variable_changed, open_timepoint_selector, redraw_response,
-    set_fit_bound, set_fit_model, update_timepoint_button,
+    Y_METRIC_LABELS, export_response_csv, fit_model_labels, fit_settings,
+    on_series_changed, on_x_variable_changed, open_timepoint_selector,
+    redraw_response, selected_y_metric, set_fit_bound, set_fit_model,
+    set_y_metric, update_timepoint_button,
 )
 
 #: The figure. One axes, wide rather than tall — a dose–response is read across.
@@ -54,6 +55,20 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     x_combo = reg.register("_response_x_cb", LabeledComboBox("X"))
     x_combo.currentIndexChanged.connect(lambda *_: on_x_variable_changed(ctx))
     band.add_scope("", x_combo)
+
+    # Scope: what the curves measure. Beside X because the pair of them is the
+    # figure's subject — "fraction above threshold against dose" is one phrase.
+    y_combo = reg.register("_response_y_cb", LabeledComboBox("Y"))
+    y_combo.setToolTip(
+        "What the curves plot — the channel's active Property, or the fraction "
+        "of cells above the ON cutoff")
+    for label, metric in Y_METRIC_LABELS:
+        y_combo.addItem(label, metric)
+    _index = y_combo.findData(selected_y_metric(ctx))
+    y_combo.setCurrentIndex(_index if _index >= 0 else 0)
+    y_combo.currentIndexChanged.connect(
+        lambda *_: set_y_metric(ctx, y_combo.currentData() or ""))
+    band.add_scope("", y_combo)
 
     # Scope, beside X and for the same reason: it says what the figure is *of*.
     # One curve per value of this variable per timepoint, so a plate of two cell

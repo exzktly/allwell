@@ -54,6 +54,7 @@ def snapshot_response(ctx) -> dict:
     series = ctx.widgets.get_or_none("_response_series_cb")
     if series is not None and series.currentData():
         out["series_variable_id"] = str(series.currentData())
+    out["y_metric"] = str(getattr(slice_, "y_metric", "mean") or "mean")
     return out
 
 
@@ -88,6 +89,9 @@ def apply_response(ctx, state: dict) -> None:
             setattr(slice_, key, None)
 
     slice_.series_variable_id = str(state.get("series_variable_id", "") or "")
+    from well_viewer.features.response.collect import Y_MEAN, Y_METRICS
+    y_metric = str(state.get("y_metric", Y_MEAN) or Y_MEAN)
+    slice_.y_metric = y_metric if y_metric in Y_METRICS else Y_MEAN
     _sync_controls(ctx, slice_, state.get("x_variable_id"))
 
 
@@ -118,6 +122,13 @@ def _sync_controls(ctx, slice_, x_variable_id) -> None:
         series.blockSignals(True)
         series.setCurrentIndex(index if index >= 0 else 0)
         series.blockSignals(False)
+
+    y_combo = ctx.widgets.get_or_none("_response_y_cb")
+    if y_combo is not None:
+        index = y_combo.findData(slice_.y_metric)
+        y_combo.blockSignals(True)
+        y_combo.setCurrentIndex(index if index >= 0 else 0)
+        y_combo.blockSignals(False)
 
     fit_combo = ctx.widgets.get_or_none("_response_fit_cb")
     if fit_combo is not None:

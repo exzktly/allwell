@@ -94,7 +94,12 @@ def _delete_row(tab, row: int = 0):
 
 
 def _labels(listing):
-    return [listing.item(i).text() for i in range(listing.count())]
+    # The **painted** text, from the row widget — ``item.text()`` is blanked so
+    # the delegate does not draw it under the widget, and a test reading it
+    # would be asserting a string that never reaches the screen.
+    from well_viewer.features.home.variables.editor_view import row_label_text
+
+    return [row_label_text(listing, i) for i in range(listing.count())]
 
 
 def _rail_labels(tab):
@@ -775,7 +780,12 @@ def _with_groups(tab, groups):
 
 def _group_rows(tab):
     listing = tab.w("_var_groups")
-    return [listing.item(i).text() for i in range(listing.count())]
+    # The **painted** text, from the row widget — ``item.text()`` is blanked so
+    # the delegate does not draw it under the widget, and a test reading it
+    # would be asserting a string that never reaches the screen.
+    from well_viewer.features.home.variables.editor_view import row_label_text
+
+    return [row_label_text(listing, i) for i in range(listing.count())]
 
 
 def test_a_group_whose_wells_agree_shows_that_value(tab):
@@ -1553,3 +1563,29 @@ def test_the_chip_row_wraps_rather_than_running_off_the_page(tab):
     _dose_tab(tab, labels="0, 0.1, 0.3, 1, 3, 10, 30, 100, 300, 1000")
     assert isinstance(tab.w("_var_chips").layout(), FlowLayout)
     assert len(_chips(tab)) == 11          # ten values plus No value
+
+
+def test_the_row_x_deletes_its_own_row_not_the_selected_one(tab):
+    """The one property the × was introduced for, and it had no guard.
+
+    Every other delete test selects the row it then presses, so the clicked row
+    and the selected row are always the same and a × bound to the *selection*
+    passes them all — a reviewer proved it by reverting the binding and
+    watching 96 tests stay green. Here they differ on purpose.
+    """
+    from well_viewer.features.home.variables.editor_view import row_delete_button
+
+    tab.w("_var_add").click()
+    tab.w("_var_add").click()
+    listing = tab.w("_var_list")
+    assert listing.count() == 2, _rail_labels(tab)
+    first = listing.item(0).data(Qt.UserRole)
+
+    listing.setCurrentRow(0)                 # selected: row 0
+    row_delete_button(listing, 1).click()    # pressed:  row 1
+
+    kept = [v.id for v in _vset(tab).variables]
+    remaining = kept
+    assert remaining == [first], (
+        "pressing row 1's × removed the selected row (0) instead of the row "
+        f"it sits on: kept {remaining}, expected {[first]}")

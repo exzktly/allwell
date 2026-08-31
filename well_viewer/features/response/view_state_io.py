@@ -99,7 +99,15 @@ def apply_response(ctx, state: dict) -> None:
 
     slice_.series_variable_id = str(state.get("series_variable_id", "") or "")
     slice_.channel = str(state.get("channel", "") or "")
-    slice_.metric_label = str(state.get("metric_label", "") or "")
+    metric_label = str(state.get("metric_label", "") or "")
+    if not metric_label and str(state.get("y_metric", "") or "") == "fraction":
+        # A plot saved by the release that carried a separate Y combo. Without
+        # this the figure reopens on the mean with nothing saying the restore
+        # was partial — a restored plot that is not the plot that was saved,
+        # which is the silent substitution this whole block exists to prevent.
+        from well_viewer.features.response.controller import FRACTION_LABEL
+        metric_label = FRACTION_LABEL
+    slice_.metric_label = metric_label
     _sync_controls(ctx, slice_, state.get("x_variable_id"))
 
 

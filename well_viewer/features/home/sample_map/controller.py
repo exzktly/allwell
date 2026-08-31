@@ -318,7 +318,7 @@ def refresh_layer(ctx, layer: str | None = None) -> None:
     """
     layer = layer or current_layer(ctx)
     if layer == "Replicates":
-        with swallow("sample map: refreshing the Groups layer"):
+        with swallow("sample map: refreshing the Replicates layer"):
             rep_panel_refresh(ctx)
         return
     if layer == "Variables":

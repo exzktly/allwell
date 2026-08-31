@@ -300,6 +300,17 @@ def value_chip(label: str, value_id: str, parent: QWidget, *,
         # is set here because only the swatch varies per value; everything else
         # about a chip is one rule in ``theme.qss``, and a widget stylesheet
         # merges with the app's rather than replacing it.
+        # **The whole border, not just its left edge.** Stating one property
+        # left the rest of the box's border to the app sheet and the two to
+        # interact — which is what a report of "two overlapping bars, one
+        # smaller" describes. An offscreen render here could not reproduce two
+        # bands, so the mechanism is not confirmed and this is not written as
+        # though it were; what is certain is that one complete declaration
+        # cannot produce them, and it costs nothing over one partial.
         button.setStyleSheet(
-            f"QPushButton#VariableValueChip {{ border-left: 14px solid {swatch}; }}")
+            "QPushButton#VariableValueChip {"
+            f" border: 1px solid {theme.Colors.border};"
+            f" border-left: 14px solid {swatch};"
+            f" border-radius: {theme.Radii.sm}px;"
+            " }")
     return button

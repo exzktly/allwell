@@ -113,16 +113,43 @@ def refresh_series_combo(ctx) -> None:
 FRACTION_LABEL = "Fraction above threshold"
 
 
-def response_channel(ctx) -> str:
-    """The channel this tab measures — its own, falling back to the shared one.
+def response_channel_label(ctx) -> str:
+    """The channel this tab measures, as the combo's **label**.
 
-    Falling back rather than seeding: a tab the user has never touched should
-    follow the plate they picked on the band, and only diverge once they have
-    said something here.
+    Its own, falling back to the shared channel's label — ``active_channel_label``
+    rather than the raw ``active_channel``, because the two differ for every
+    entry kind: a real channel's token is ``gfp`` where the combo says ``GFP``,
+    and a ratio's is ``ratio:GFP/MCHERRY`` where the combo says ``GFP/MCHERRY``.
+    Comparing the token against the combo with a case-sensitive ``findText``
+    left the box reading ``GFP`` while the tab drew ``MCHERRY``.
+
+    A pinned channel the current dataset does not offer is dropped rather than
+    kept: it names a column no frame has, and the combo would show the fallback
+    while the figure asked for the pin.
     """
+    from well_viewer.core.channel_state_controller import active_channel_label
+
     slice_ = ctx.state.feature_slice("response")
     own = str(getattr(slice_, "channel", "") or "") if slice_ else ""
-    return own or str(getattr(ctx.state.channel, "active_channel", "") or "")
+    if own and own in _offered_channel_labels(ctx):
+        return own
+    with swallow("read the shared channel's label for the response tab"):
+        return str(active_channel_label(ctx) or "")
+    return ""
+
+
+def _offered_channel_labels(ctx) -> set[str]:
+    """The labels the Channel combo currently holds."""
+    combo = _widget(ctx, "_response_ch_cb")
+    if combo is None:
+        return set()
+    return {combo.itemText(i) for i in range(combo.count())}
+
+
+#: Back-compat alias. ``response_channel`` returned a label and is still read
+#: by the tab builder and the tests under that name.
+def response_channel(ctx) -> str:
+    return response_channel_label(ctx)
 
 
 def response_metric_label(ctx) -> str:
@@ -144,22 +171,47 @@ def response_draws_fraction(ctx) -> bool:
 def response_val_col(ctx) -> str:
     """The column the stats producers should read for this tab.
 
-    For the fraction the column is still the channel's **mean intensity**: the
-    fraction is the share of cells whose mean intensity clears the ON cutoff,
-    so there is no ``gfp_fraction_above_threshold`` column to read and asking
-    for one would come back empty. That is the whole reason this label cannot
-    live in the shared Property combo, whose consumers derive the column as
-    ``f"{channel}_{metric}"`` and would do exactly that.
+    **Through the aggregate Scatter tab's own resolver, not a second one.**
+    Composing ``f"{channel}_{metric}"`` here was wrong for three of the entry
+    kinds the Channel combo offers, and wrong on the *untouched* path where the
+    tab simply follows the band: a ratio's active channel is ``GFP/MCHERRY``
+    and its column is ``ratio:GFP/MCHERRY``, a shape feature's are both
+    ``shape_area``, and pasting a metric onto either produced a column no frame
+    has — so ``resolve_value_series`` returned a NaN Series and the figure drew
+    nothing, with the empty state naming a cause that was not the cause.
+
+    ``col_for_scatter_axis`` already branches on ``is_ratio_key`` and
+    ``is_shape_column`` through ``label_to_channel_key``, lowercases the token,
+    and maps ``fraction_above_threshold`` to the channel's mean-intensity
+    column — which is exactly this tab's rule, because the fraction is the
+    share of cells whose mean intensity clears the ON cutoff. One definition,
+    reached from both tabs.
     """
     from well_viewer.data.metric_labels import METRIC_LABEL_TO_KEY
+    from well_viewer.features.scatter.controller import col_for_scatter_axis
 
-    channel = response_channel(ctx)
+    channel = response_channel_label(ctx)
     if not channel:
         return str(getattr(ctx.state.channel, "active_val_col", "") or "")
     label = response_metric_label(ctx)
-    key = ("mean_intensity" if label == FRACTION_LABEL
+    key = ("fraction_above_threshold" if label == FRACTION_LABEL
            else METRIC_LABEL_TO_KEY.get(label, "mean_intensity"))
-    return f"{channel}_{key}"
+    return col_for_scatter_axis(ctx, channel, key)
+
+
+def response_channel_key(ctx) -> str:
+    """The tab's channel as a **key** — the lowercase token or ``ratio:…``.
+
+    The combo holds display labels; every other channel consumer stores the
+    key, converting through ``channel_key_for_label`` at the point of choice.
+    This tab stored the raw label and composed a column from it, which survived
+    for real channels only on ``resolve_value_series``'s case-fold fallback —
+    a shim its own comment describes as legacy — and not at all for ratios.
+    """
+    from well_viewer.core.channel_state_controller import channel_key_for_label
+
+    label = response_channel_label(ctx)
+    return channel_key_for_label(ctx, label) if label else ""
 
 
 def on_response_channel_changed(ctx) -> None:

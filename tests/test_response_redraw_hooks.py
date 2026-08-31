@@ -61,6 +61,59 @@ def test_response_curves_repaints_on_every_event_that_changes_it():
     )
 
 
+def test_the_fan_out_guard_names_a_widget_the_tab_registers():
+    """The guard string in ``set_active_metric`` must be a real registry key.
+
+    That loop redraws a leaf only when its guard widget exists, so a typo in
+    the key silently disables the redraw and every AST check still sees the
+    title. A reviewer proved it: renaming the guard to ``_response_ax_typo``
+    *and* emptying the hook body left 75 tests green.
+    """
+    path = next(p for p in python_sources()
+                if p.as_posix().endswith("well_viewer/core/channel_state_controller.py"))
+    guards = set()
+    for node in ast.walk(parse_source(path)):
+        if isinstance(node, ast.FunctionDef) and node.name == "set_active_metric":
+            for pair in ast.walk(node):
+                if (isinstance(pair, ast.Tuple) and len(pair.elts) == 2
+                        and all(isinstance(e, ast.Constant) for e in pair.elts)):
+                    title, guard = (e.value for e in pair.elts)
+                    if title == "Response Curves":
+                        guards.add(guard)
+    assert guards, "no (title, guard) pair for Response Curves in set_active_metric"
+
+    registered = set()
+    tab = next(p for p in python_sources()
+               if p.as_posix().endswith("well_viewer/features/response/tab_view.py"))
+    for node in ast.walk(parse_source(tab)):
+        if (isinstance(node, ast.Call)
+                and getattr(node.func, "attr", None) == "register"
+                and node.args and isinstance(node.args[0], ast.Constant)):
+            registered.add(node.args[0].value)
+    missing = guards - registered
+    assert not missing, (
+        f"set_active_metric guards the Response redraw on {sorted(missing)}, "
+        "which the tab never registers — so the redraw never fires")
+
+
+def test_the_channel_hook_is_not_an_empty_body():
+    """A hook wired to a ``return`` satisfies every name-level check.
+
+    Not a substitute for driving the app, but it costs nothing and closes the
+    exact mutation that got past the previous version of this file.
+    """
+    path = next(p for p in python_sources()
+                if p.as_posix().endswith(_REGISTRY))
+    for node in ast.walk(parse_source(path)):
+        if isinstance(node, ast.FunctionDef) and node.name == "_channel_response":
+            calls = [n for n in ast.walk(node) if isinstance(n, ast.Call)]
+            assert calls, (
+                "_channel_response has no call in its body, so the hook fires "
+                "and repaints nothing")
+            return
+    raise AssertionError("_channel_response not found in the registry")
+
+
 def test_the_metric_fan_out_names_response():
     """``set_active_metric`` reaches the leaves ``redraw_app`` does not.
 

@@ -1067,13 +1067,13 @@ def stats_resync_from_sample_defs(ctx) -> None:
 
     rsets = _stats_groups_from_rep_sets(ctx)
     if not rsets:
-        ctx.notify.set_status("No sample-definition groups to load — define them on Home → Groups.")
+        ctx.notify.set_status("No sample-definition groups to load — define them on Home → Sample map → Replicates.")
         return
     existing = [g for g in ctx.state.stats.groups if g.wells]
     if existing:
         resp = QMessageBox.question(
             ctx.window,
-            "Load from Home → Groups",
+            "Load from Home → Replicates",
             f"Replace the current {len(existing)} comparison group(s) with the "
             f"{len(rsets)} Sample-Definition group(s)?",
             QMessageBox.Yes | QMessageBox.No,
@@ -1084,7 +1084,7 @@ def stats_resync_from_sample_defs(ctx) -> None:
     # Explicit "load all from Home → Groups" — never filter to the
     # split-visible subset (the dialog above promised all rsets groups).
     stats_sync_from_app(ctx, visible_only_in_split=False)
-    ctx.notify.set_status(f"Loaded {len(rsets)} comparison group(s) from Home → Groups.")
+    ctx.notify.set_status(f"Loaded {len(rsets)} comparison group(s) from Home → Replicates.")
 
 
 def refresh_stats_test_inputs(ctx) -> None:

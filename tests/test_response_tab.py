@@ -100,6 +100,7 @@ def tab(qtbot, monkeypatch):
     # The tab's own timepoint selection lives on a feature slice, reached the
     # way core reaches one — a stub must answer ``feature_slice`` or the picker
     # silently has nothing to select.
+    from well_viewer.core.cell_gating_state import CellGatingState
     from well_viewer.core.export_prefs_state import ExportPrefsState
     from well_viewer.features.response.state import ResponseState
 
@@ -146,14 +147,28 @@ def tab(qtbot, monkeypatch):
             channel=SimpleNamespace(active_val_col="gfp_mean_intensity",
                                     active_channel="gfp",
                                     active_metric="mean_intensity",
-                                    label_to_channel_key={},
+                                    # A real label -> key map, because the
+                                    # column resolver goes through it to tell a
+                                    # ratio and a shape feature from a plain
+                                    # channel. Empty, it could not, and the
+                                    # tests below passed against a resolver
+                                    # that pasted the display label into the
+                                    # column name.
+                                    label_to_channel_key={"GFP": "gfp",
+                                                          "RFP": "rfp"},
+                                    ratio_metrics=(),
                                     smfish_channels=(),
-                                    fluor_channels=()),
+                                    fluor_channels=("gfp", "rfp")),
             feature_slice=slices.get,
             # The real slice, not a stub: ``figure_prefs`` seeds it lazily and
             # distinguishes "never set" from "set to off", which is the whole
             # property the log-x tests are about.
             export_prefs=ExportPrefsState(),
+            # ``active_channel_label`` reaches the gating slice through
+            # ``fluor_gate_for``; the real ``AppState`` always carries it, and a
+            # stub without it made the label lookup raise on a path the app
+            # takes on every redraw.
+            cell_gating=CellGatingState(),
         ),
         runtime=SimpleNamespace(barplot=SimpleNamespace(current_keys=lambda: [])),
     )
@@ -1523,16 +1538,20 @@ def test_the_fraction_reads_the_channels_mean_intensity_column(tab):
     slice_ = tab.ctx.state.feature_slice("response")
     slice_.channel = "GFP"
     slice_.metric_label = rctl.FRACTION_LABEL
-    assert rctl.response_val_col(tab.ctx) == "GFP_mean_intensity"
+    # The **key**, lowercased — not the display label. Composing the column
+    # from the label produced "GFP_mean_intensity", which survived only on
+    # ``resolve_value_series``'s legacy case-fold fallback and not at all for a
+    # ratio, whose label and key are entirely different strings.
+    assert rctl.response_val_col(tab.ctx) == "gfp_mean_intensity"
 
     slice_.metric_label = "Mean Intensity"
-    assert rctl.response_val_col(tab.ctx) == "GFP_mean_intensity"
+    assert rctl.response_val_col(tab.ctx) == "gfp_mean_intensity"
     # A real label from ``METRIC_LABEL_TO_KEY``, not an invented one: the
     # first version of this line said "Integrated Intensity", which is not in
     # the roster, so the fallback correctly returned the mean column and the
     # test was asserting against a vocabulary the app does not have.
     slice_.metric_label = "Total Intensity"
-    assert rctl.response_val_col(tab.ctx) == "GFP_total_intensity"
+    assert rctl.response_val_col(tab.ctx) == "gfp_total_intensity"
 
 
 def test_an_untouched_tab_follows_the_shared_channel_and_property(tab):
@@ -1541,9 +1560,13 @@ def test_an_untouched_tab_follows_the_shared_channel_and_property(tab):
     slice_.channel = ""
     slice_.metric_label = ""
     tab.ctx.state.channel.active_channel = "rfp"
+    tab.ctx.state.channel.active_val_col = "rfp_mean_intensity"
     tab.ctx.state.channel.active_metric = "mean_intensity"
 
-    assert rctl.response_channel(tab.ctx) == "rfp"
+    # The **label**, which is what the combo holds. Falling back to the raw
+    # token made a case-sensitive ``findText`` miss, so the box read GFP while
+    # the tab drew the other channel.
+    assert rctl.response_channel(tab.ctx) == "RFP"
     assert rctl.response_metric_label(tab.ctx) == "Mean Intensity"
 
 

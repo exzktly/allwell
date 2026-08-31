@@ -571,13 +571,7 @@ QPushButton#HomeThumbTile:pressed {{
 QPushButton#VariableValueChip {{
     background-color: {c.panel_elevated};
     border: 1px solid {c.border};
-    /* Same width as the swatch ``plate_view.value_chip`` paints, so the chip
-       has exactly one left edge. At 3px here and 14px there, both rendered:
-       a wide band of the value's ink with a narrower grey bar over its inner
-       edge, reading as two overlapping bars. A widget stylesheet merges with
-       this one rather than replacing it, so the two declarations have to agree
-       on the geometry and differ only in the colour. */
-    border-left: 14px solid {c.border};
+    border-left: 3px solid {c.border};
     border-radius: {r.sm}px;
     color: {c.text_primary};
     font-size: {t.small_size}px;

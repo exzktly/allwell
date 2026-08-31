@@ -81,7 +81,7 @@ def build_replicate_panel(ctx, parent: QWidget, *, role: str = "editor") -> None
         # from a programmatic refresh tick while another layer or another tab is
         # showing, and would then silently rewrite the current group — the
         # "wells get reassigned even though I'm not on the Groups tab" bug. The
-        # guard used to read the Home sub-tab's title, which said "Replicates"; the
+        # guard used to read the Home sub-tab's title, which said "Groups"; the
         # layers of one tab are what say it now, and the question is the same
         # one. Both halves are asked: a layer switch inside a tab nobody is
         # looking at must not commit either.

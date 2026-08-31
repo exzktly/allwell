@@ -379,8 +379,13 @@ def collect_response(ctx, variable_id: str, timepoints,
     # the axis label all describe the same measurement. ``None`` keeps the
     # shared one, which is what every headless and export caller passes.
     column = val_col or ctx.state.channel.active_val_col
-    threshold = on_cutoff_for_column(
-        ctx, column, channel=ctx.state.channel.active_channel)
+    # ``channel=None`` so the cutoff is derived from *this* column. Passing the
+    # shared ``active_channel`` made ``on_cutoff_for_column`` skip its own
+    # split entirely and read the shared channel's ThreshFracOn: with the tab
+    # on RFP and the band on GFP, every plotted fraction was "the share of
+    # cells whose RFP intensity clears GFP's cutoff" — a plausible curve, a
+    # wrong number, and nothing on the figure saying so.
+    threshold = on_cutoff_for_column(ctx, column)
     use_sem = bool(getattr(ctx.state.plot, "use_sem", True))
     # The Display popover's "Spread: FOV" toggle, which this tab **built and
     # never read**: it always reduced across wells, so a member of one well had

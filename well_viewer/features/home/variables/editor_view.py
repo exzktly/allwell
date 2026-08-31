@@ -275,9 +275,16 @@ def variable_row(name: str, variable_id: str, annotated: int,
     close.setFixedSize(QSize(_ROW_X, _ROW_X))
     close.setCursor(Qt.PointingHandCursor)
     close.setToolTip(f"Delete “{name}” and every well assignment under it.")
-    close.setProperty("aw_variable_id", variable_id)
     layout.addWidget(close, 0)
 
+    # The delegate paints every index even when it carries an index widget, and
+    # the row has no opaque background — so the item's own text rendered
+    # *underneath* the label, one pixel off, and the row read double-struck.
+    # Blanked here rather than never set: ``variable_item`` is what stamps the
+    # id and the tooltip, and the accessible text keeps the string a screen
+    # reader needs.
+    item.setData(Qt.AccessibleTextRole, item.text())
+    item.setText("")
     item.setSizeHint(row.sizeHint())
     return item, row
 
@@ -295,3 +302,19 @@ def row_delete_button(listing, row: int) -> QPushButton | None:
     if widget is None:
         return None
     return widget.findChild(QPushButton, "VariableRowDelete")
+
+
+def row_label_text(listing, row: int) -> str:
+    """What rail row *row* actually displays.
+
+    The row's text lives on the widget, not on the item — the item's own text
+    is blanked so the delegate does not paint it underneath. A caller reading
+    ``item.text()`` gets "" and, if it asserts on that, is asserting something
+    no user can see.
+    """
+    item = listing.item(row)
+    widget = listing.itemWidget(item) if item is not None else None
+    if widget is None:
+        return item.text() if item is not None else ""
+    label = widget.findChild(QLabel)
+    return label.text() if label is not None else ""

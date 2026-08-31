@@ -8,11 +8,18 @@ fractional-DPI scale) clips the value, and on a two-digit box there is nothing
 left to read. Groups' *Replicates per group* (range 1–12) is the one that was
 reported.
 
-**Measured on the text area, not the widget.** Padding does not fix this and a
-test that measured the widget would have said it did: Qt lays the up/down
-buttons out *inside* the box's right padding, so ``padding-right`` widens the
-widget and leaves the text area exactly as it was. Only ``min-width`` grows the
-part the number is drawn in.
+**Measured on the text area, not the widget.** A test that measured the widget
+would have passed on a change that grew the box and not the field: Qt lays the
+up/down buttons out *inside* the box's right padding, so ``padding-right``
+widens the widget and leaves the text area exactly as it was. Only ``min-width``
+grows the part the number is drawn in.
+
+That property of ``padding-right`` is also the second half of the fix, used
+deliberately. With the app's ordinary 8 px of right padding the 14 px stepper
+has 6 px more than the padding allows for, and whether the excess comes out of
+the text is the platform style's business — which is the shape of a control
+that clips its value on Windows and not on Linux. Reserving the buttons' own
+width there means there is nothing left to decide.
 """
 
 from __future__ import annotations
@@ -133,6 +140,86 @@ def test_a_wide_range_at_least_never_loses_room(qtbot, qapp, low, high):
     assert width >= needed + 6, (
         f"a {low}–{high} spin box gives its value {width}px for {needed}px of "
         f"text, below even Qt's own margin")
+
+
+@pytest.mark.parametrize("style", ["Fusion", "Windows"])
+@pytest.mark.parametrize(("low", "high"), _NARROW + _WIDE)
+def test_the_buttons_are_laid_out_clear_of_the_number(qtbot, qapp, style, low,
+                                                      high):
+    """The stepper gets space of its own, so it cannot be drawn over the value.
+
+    Driven under both style engines this Qt ships, because the reported symptom
+    is one platform clipping where another does not, and the sub-control
+    geometry is the style's to decide.
+
+    **This one does not bite here, and that is recorded rather than hidden.**
+    Removing the reservation leaves it green, because neither style available on
+    this platform ever laid the buttons over the text — the overlap is what was
+    reported on Windows and cannot be reproduced on Linux. It is kept as the
+    invariant a Windows runner would catch, and the assertion that actually
+    holds the fix in place is ``test_the_stylesheet_reserves_the_buttons_width``
+    below, which is decidable anywhere.
+    """
+    from PySide6.QtWidgets import QStyle, QStyleOptionSpinBox
+
+    previous = qapp.style().objectName()
+    qapp.setStyle(style)
+    try:
+        qapp.setStyleSheet(theme.qss())
+        host = QWidget()
+        qtbot.addWidget(host)
+        QHBoxLayout(host)
+        box = QSpinBox(host)
+        box.setRange(low, high)
+        box.setValue(high)
+        host.layout().addWidget(box)
+        host.show()
+
+        option = QStyleOptionSpinBox()
+        option.initFrom(box)
+        up = box.style().subControlRect(QStyle.CC_SpinBox, option,
+                                        QStyle.SC_SpinBoxUp, box)
+        edit = box.lineEdit()
+        gap = up.left() - (edit.x() + edit.width())
+        assert gap >= 0, (
+            f"under {style}, a {low}–{high} spin box lays its buttons {-gap}px "
+            f"over the area the number is drawn in")
+    finally:
+        qapp.setStyle(previous)
+
+
+def test_the_stylesheet_reserves_the_buttons_width(qapp):
+    """The right padding is at least as wide as the stepper drawn inside it.
+
+    Decidable from the stylesheet, so unlike the geometry check above this one
+    fails the moment the reservation is dropped — on any platform. Qt lays a
+    spin box's buttons inside its right padding, so a padding narrower than the
+    buttons leaves the excess for the platform style to take out of somewhere,
+    and "somewhere" was the number on Windows.
+
+    Read out of the generated QSS rather than restated, so the rule and the test
+    cannot drift apart.
+    """
+    import re
+
+    sheet = theme.qss()
+    # Anchored at the start of a line: the generic input rule's selector list
+    # also *ends* ``…, QSpinBox, QDoubleSpinBox {``, and an unanchored search
+    # finds that one instead and reads its padding.
+    block = re.search(r"^QSpinBox,\s*QDoubleSpinBox\s*\{([^}]*)\}",
+                      sheet, re.M)
+    assert block, "the QSpinBox rule is gone from the stylesheet"
+    reserved = re.search(r"padding-right:\s*(\d+)px", block.group(1))
+    assert reserved, (
+        "QSpinBox no longer reserves right padding for its own buttons; Qt "
+        "lays them inside that padding, so without it the platform style "
+        "decides whether they come out of the number")
+    buttons = re.search(r"QSpinBox::up-button[^{]*\{[^}]*width:\s*(\d+)px",
+                        sheet, re.S)
+    assert buttons, "the button width is gone from the stylesheet"
+    assert int(reserved.group(1)) >= int(buttons.group(1)), (
+        f"the right padding reserves {reserved.group(1)}px for a "
+        f"{buttons.group(1)}px stepper")
 
 
 def test_the_floor_is_a_floor_and_not_a_fixed_width(qtbot, qapp):

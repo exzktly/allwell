@@ -405,6 +405,17 @@ class Metrics:
     # costs at most 14 px of width. Boxes whose own range already asks for more
     # than this are untouched.
     spin_min_w   = 28
+    # Right padding a spin box reserves for its own up/down buttons, so they are
+    # laid out in space of their own rather than over the number.
+    #
+    # Qt puts the stepper INSIDE the box's right padding. With the app's ordinary
+    # 8 px there, the 14 px buttons have 6 px more than the padding allows for,
+    # and whether that comes out of the text depends on the platform style —
+    # which is the shape of a bug that clips the value on one operating system
+    # and not another. Reserving the buttons' own width plus the normal gutter
+    # removes the question: measured here, it widens the control and leaves the
+    # text area exactly as wide as it was, which is what "reserved" means.
+    spin_buttons_w = 14 + 8
     # Width of a right-hand inspector dock. One number for every dock in the
     # Review pane, so the Properties sidebar and the Playground's controls do
     # not open to different widths and read as two different kinds of panel.
@@ -1148,6 +1159,7 @@ QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {{
    digit. */
 QSpinBox, QDoubleSpinBox {{
     min-width: {m.spin_min_w}px;
+    padding-right: {m.spin_buttons_w}px;
 }}
 QSpinBox::up-button, QDoubleSpinBox::up-button,
 QSpinBox::down-button, QDoubleSpinBox::down-button {{

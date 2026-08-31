@@ -232,7 +232,7 @@ def _assert_outputs(
 
 
 @pytest.fixture
-def analyze.tab(qapp, monkeypatch):
+def analyze_tab(qapp, monkeypatch):
     """A real AnalyzeTab whose modal error dialogs are captured, not shown.
 
     ``_run`` reports every rejection through ``QMessageBox.critical``, which
@@ -275,10 +275,10 @@ def _drive(tab, qapp, tmp_path, *, channels, method, **form) -> Path:
 # ── one test per shipped segmentation method ─────────────────────────────────
 
 @requires_stardist
-def test_e2e_stardist_nuclei(analyze.tab, qapp, tmp_path):
+def test_e2e_stardist_nuclei(analyze_tab, qapp, tmp_path):
     """The default method: StarDist on the nuclear channel."""
     out_dir = _drive(
-        analyze.tab, qapp, tmp_path,
+        analyze_tab, qapp, tmp_path,
         channels={"DAPI": "nuclear", "GFP": "fluor"},
         method="stardist_nuclei",
         nuclear_token="DAPI", fluor_tokens=["GFP"],
@@ -293,10 +293,10 @@ def test_e2e_stardist_nuclei(analyze.tab, qapp, tmp_path):
 
 
 @requires_stardist
-def test_e2e_stardist_seeded_watershed_cell(analyze.tab, qapp, tmp_path):
+def test_e2e_stardist_seeded_watershed_cell(analyze_tab, qapp, tmp_path):
     """StarDist nuclei as seeds, grown into the cytoplasm channel by watershed."""
     out_dir = _drive(
-        analyze.tab, qapp, tmp_path,
+        analyze_tab, qapp, tmp_path,
         channels={"DAPI": "nuclear", "GFP": "fluor", "CYTO": "cytoplasm"},
         method="stardist_seeded_watershed_cell",
         nuclear_token="DAPI", fluor_tokens=["GFP", "CYTO"],
@@ -316,9 +316,9 @@ def test_e2e_stardist_seeded_watershed_cell(analyze.tab, qapp, tmp_path):
 
 
 @requires_cellpose("nuclei")
-def test_e2e_cellpose(analyze.tab, qapp, tmp_path):
+def test_e2e_cellpose(analyze_tab, qapp, tmp_path):
     """General Cellpose on the chosen segmentation channel, with tuned params."""
-    tab = analyze.tab
+    tab = analyze_tab
     _configure_cellpose(tab, model="nuclei", diameter=str(2 * DEFAULT_RADIUS))
     out_dir = _drive(
         tab, qapp, tmp_path,
@@ -332,7 +332,7 @@ def test_e2e_cellpose(analyze.tab, qapp, tmp_path):
 
 
 @requires_cellpose("cyto3")
-def test_e2e_cellpose_labelfree(analyze.tab, qapp, tmp_path):
+def test_e2e_cellpose_labelfree(analyze_tab, qapp, tmp_path):
     """The label-free preset: Cellpose cyto3 on the channel marked Phase.
 
     No fluorescent stain drives segmentation here — the nuclear slot is remapped
@@ -340,7 +340,7 @@ def test_e2e_cellpose_labelfree(analyze.tab, qapp, tmp_path):
     quantified inside the resulting cell masks.
     """
     out_dir = _drive(
-        analyze.tab, qapp, tmp_path,
+        analyze_tab, qapp, tmp_path,
         channels={"DAPI": "nuclear", "GFP": "fluor", "BF": "phase"},
         method="cellpose_labelfree",
         nuclear_token="DAPI", fluor_tokens=["GFP", "BF"],
@@ -349,10 +349,10 @@ def test_e2e_cellpose_labelfree(analyze.tab, qapp, tmp_path):
     _assert_outputs(out_dir, method="cellpose_labelfree", fluor_token="GFP")
 
 
-def test_e2e_classical_threshold(analyze.tab, qapp, tmp_path):
+def test_e2e_classical_threshold(analyze_tab, qapp, tmp_path):
     """Otsu + watershed — the dependency-free method, always exercised."""
     out_dir = _drive(
-        analyze.tab, qapp, tmp_path,
+        analyze_tab, qapp, tmp_path,
         channels={"DAPI": "nuclear", "GFP": "fluor"},
         method="classical_threshold",
         nuclear_token="DAPI", fluor_tokens=["GFP"],

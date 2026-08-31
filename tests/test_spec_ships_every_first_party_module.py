@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import ast
 
-from tests._repo_scan import PACKAGE_ROOTS, REPO_ROOT
+from tests._repo_scan import PACKAGE_ROOTS, REPO_ROOT, parse_source
 
 SPEC = REPO_ROOT / "_Docs" / "_Installation" / "all_well.spec"
 
@@ -47,7 +47,10 @@ _PKG_EXCUSED = {
 
 
 def _spec_tree() -> ast.Module:
-    return ast.parse(SPEC.read_text(encoding="utf-8"), filename=str(SPEC))
+    # Through `parse_source`, not `ast.parse`: it is a repository file, the
+    # tree is shared per process, and each test here walks it more than once.
+    # Read only — the cached tree is handed to every caller.
+    return parse_source(SPEC)
 
 
 def _path_parts(node: ast.AST) -> list[str] | None:

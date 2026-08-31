@@ -683,7 +683,7 @@ def test_grey_bars_get_no_colour_by_legend(monkeypatch):
 
     drawn: list = []
     monkeypatch.setattr(ann, "bar_legend_entries",
-                        lambda ctx, items: drawn.append(items) or [("HeLa", "#112233")])
+                        lambda ctx, items, **kw: drawn.append(items) or [("HeLa", "#112233")])
 
     fig, ax = plt.subplots()
     try:
@@ -706,3 +706,103 @@ def _ctx_with_mode(mode):
     state.plot.bar_color_mode = mode
     state.plot.colour_by_variable = "dose"
     return SimpleNamespace(state=state)
+
+
+def test_an_exported_figure_gets_a_legend_in_the_groups_own_key_space():
+    """Batch Export builds its own figure, so it draws its own annotations —
+    and it did not.
+
+    ``collect_bar_items_for_group`` decorates the items, so exported bars came
+    out re-inked by the Colour-by variable and re-banded by Split-by, while the
+    legend naming those inks and the notice saying the split replaced this
+    group's own bands were drawn only by the on-tab renderer. A figure carrying
+    a colouring with no key is the half-decorated figure ``_decorate``'s own
+    comment calls worse than none.
+
+    Driven through the annotator with the group's own member map, and asserted
+    on the **labels and colours** that reach the axes — a legend built against
+    the tab's key space would name the members whose names happen to coincide
+    and omit the rest, so "a legend exists" is not the property under test.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from well_viewer.features.barplot._annotations import annotate_decorations
+    from well_viewer.features.barplot.collect import batch_wells_by_key
+
+    variable = _line()
+    ctx = _ctx(variable=variable, colour_by=variable.id,
+               assignments={"A01": "C1", "A02": "C1",
+                            "B01": "C0", "B02": "C0"})
+    group = _group(members=[("CTRL", ["A01", "A02"]), ("TREAT", ["B01", "B02"])])
+    items = _batch_items(ctx, group)
+    wells_by_key = batch_wells_by_key(
+        [("CTRL", "CTRL", ["A01", "A02"], "CTRL", "#000000"),
+         ("TREAT", "TREAT", ["B01", "B02"], "TREAT", "#000000")])
+    palette = vs.value_colors(variable)
+
+    fig, ax = plt.subplots()
+    try:
+        annotate_decorations(ctx, items, [], ax, headers=False,
+                             wells_by_key=wells_by_key)
+        legend = ax.get_legend()
+        assert legend is not None, "an exported figure carries no key to its inks"
+        drawn = {t.get_text(): h.get_facecolor()
+                 for t, h in zip(legend.get_texts(), legend.legend_handles)}
+    finally:
+        plt.close(fig)
+
+    from matplotlib.colors import to_rgba
+    assert set(drawn) == {"HeLa", "U2OS"}, drawn
+    assert drawn["HeLa"] == to_rgba(palette["C0"])
+    assert drawn["U2OS"] == to_rgba(palette["C1"])
+
+
+def test_the_export_panel_reaches_the_annotator():
+    """A source-level check, and labelled as one.
+
+    The test above proves the annotator does the right thing when the export
+    panel calls it; only a full-app Batch Export run proves the panel *does*
+    call it, and that fixture costs a real window. This reads the call site
+    instead — weaker than driving it, stronger than nothing, and honest about
+    which it is. §7.6's lesson is that the gap between "offered" and "works"
+    is where the bugs live, so the seam is pinned above and the wiring here.
+    """
+    from pathlib import Path as _P
+
+    import well_viewer.features.batch_export.bar_panel as bp
+
+    text = _P(bp.__file__).read_text()
+    assert "annotate_decorations(" in text
+    assert "batch_wells_by_key(" in text, (
+        "the legend would be labelled in the tab's key space, not the group's"
+    )
+
+
+def test_a_value_reads_the_same_on_a_legend_as_on_an_axis():
+    """One spelling per value, unit included.
+
+    ``variable_replicate_sets`` names its members with ``display_label`` (unit
+    included) while the legend used the bare ``value.label`` — so a figure
+    grouped by Dose had x labels reading ``1 µM`` and a figure coloured by the
+    same Dose had a legend of bare numbers. On a saved PNG of the second there
+    was nothing anywhere saying µM rather than nM.
+
+    Asserted against ``display_label`` rather than against the literal, so the
+    two cannot drift apart again by editing either one.
+    """
+    import well_viewer.domain.sample_variables as sv
+
+    variable = sv.from_block({
+        "schema_version": 1,
+        "variables": [{
+            "id": "d", "name": "Dose", "kind": "number", "unit": "µM",
+            "values": [{"id": "v1", "label": "1"}, {"id": "v2", "label": "10"}],
+        }],
+        "assignments": {},
+    }).by_id("d")
+
+    for value in variable.values:
+        assert vs.value_label(variable, value.id) == variable.display_label(value.id)
+    assert "µM" in vs.value_label(variable, variable.values[0].id)

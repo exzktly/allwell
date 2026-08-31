@@ -73,13 +73,24 @@ def value_colors(variable) -> dict:
 
 
 def value_label(variable, value_id) -> str:
-    """What a value id is called on an axis, a header or in a legend."""
+    """What a value id is called on an axis, a header or in a legend.
+
+    **With the unit.** ``Variable.display_label`` is the app's one answer to
+    "what is this value called", and it is what the Variables tab's chips and
+    ``variable_replicate_sets``' member names already use — so a figure
+    *grouped* by Dose had x labels reading ``1 µM`` while a figure *coloured* by
+    the same Dose had a legend of bare numbers, and a saved PNG of the second
+    left nobody able to tell µM from nM. Two spellings of one value on figures
+    a reader compares side by side.
+    """
     if value_id is None:
         return UNASSIGNED_LABEL
     if value_id is MIXED or value_id == MIXED:
         return MIXED_LABEL
-    value = variable.value_by_id(value_id) if variable is not None else None
-    return value.label if value is not None else UNASSIGNED_LABEL
+    if variable is None:
+        return UNASSIGNED_LABEL
+    label = variable.display_label(value_id)
+    return label or UNASSIGNED_LABEL
 
 
 def inks_for(variable, values_by_key) -> dict:

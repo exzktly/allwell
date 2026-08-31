@@ -188,7 +188,8 @@ def annotate_bar_values(settings: tuple[bool, str], items, xs: list[float], *,
 DECORATION_TAG = "_aw_decoration"
 
 
-def annotate_decorations(ctx, items, xs, ax, *, headers: bool) -> None:
+def annotate_decorations(ctx, items, xs, ax, *, headers: bool,
+                         wells_by_key=None) -> None:
     """Every annotation pass over the mean panel, in one call.
 
     The cluster headers, the Colour-by legend and the Split-by notice. Together
@@ -207,7 +208,7 @@ def annotate_decorations(ctx, items, xs, ax, *, headers: bool) -> None:
     if headers:
         annotate_cluster_headers(items, xs, ax)
     setattr(ax, "_aw_bar_items", list(items or ()))
-    annotate_colour_legend(ctx, ax)
+    annotate_colour_legend(ctx, ax, wells_by_key=wells_by_key)
     annotate_split_notice(ctx, ax)
 
 
@@ -222,7 +223,7 @@ def _bar_colour_mode(ctx) -> str:
     return str(getattr(plot, "bar_color_mode", "plate") or "plate")
 
 
-def annotate_colour_legend(ctx, ax) -> None:
+def annotate_colour_legend(ctx, ax, *, wells_by_key=None) -> None:
     """A swatch-and-label legend for the *Colour by* variable, or nothing.
 
     Nothing in plate-colour mode, which is the default and needs no legend
@@ -251,7 +252,7 @@ def annotate_colour_legend(ctx, ax) -> None:
         return
 
     items = list(getattr(ax, "_aw_bar_items", ()) or ())
-    entries = bar_legend_entries(ctx, items)
+    entries = bar_legend_entries(ctx, items, wells_by_key=wells_by_key)
     if not entries:
         return
     handles = [Patch(facecolor=colour, edgecolor="none", label=label)

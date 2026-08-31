@@ -34,6 +34,7 @@ from well_viewer.features.batch_export._common import (
     _CLR_ERR_BAR,
 )
 from well_viewer.features.batch_export.base_panel import BatchExportPanel, SkippedJob
+from well_viewer.core.safe import swallow
 # ── ctx-native god-method forms (A8 / Epic-A14 panel conversion) ─────────────
 from well_viewer.core.lazy import lazy as _lazy
 from well_viewer.core.ui_helpers import build_hline_separator
@@ -446,7 +447,17 @@ class BarBatchExportPanel(BatchExportPanel):
     ):
         from matplotlib.figure import Figure as _Figure
         from well_viewer.domain import fold_change as _fc
-        from well_viewer.features.barplot.controller import collect_bar_items_for_group
+        # One deferred import, not four. Bar Plots is a removable feature, so
+        # batch_export may not reach it at module scope — and the
+        # deferred-feature-import budget is a down-only ratchet, so the
+        # annotation helpers ride in through the door already open here
+        # rather than opening three more.
+        from well_viewer.features.barplot.controller import (
+            annotate_decorations,
+            batch_members,
+            batch_wells_by_key,
+            collect_bar_items_for_group,
+        )
 
         fc = _fc.coerce_fc_state(fc_state)
         fc_vs_ctrl = fc.vs_control_on
@@ -607,6 +618,27 @@ class BarBatchExportPanel(BatchExportPanel):
             # figure of the same data.
             value_labels=_value_label_settings(self._ctx),
         )
+        # Colour by / Split by, said on the exported figure as well as inked
+        # into it. ``collect_bar_items_for_group`` already decorated these
+        # items, so the bars come out re-inked and re-banded — but the legend
+        # explaining the inks and the notice saying the split replaced this
+        # group's own bands were drawn only by the on-tab renderer. An exported
+        # figure carrying a colouring with no key, and a re-ordering with
+        # nothing saying so, is the half-decorated figure ``_decorate``'s own
+        # comment calls worse than none.
+        #
+        # ``wells_by_key`` is passed rather than looked up, for the reason the
+        # collector passes it: a batch member is this group's replicate set or
+        # solo well, so the legend has to be labelled in that key space and not
+        # the tab's. ``headers=False`` because this panel draws its own cluster
+        # headers above.
+        with swallow("annotate an exported bar panel's decorations"):
+            annotate_decorations(
+                self._ctx, draw_items, [], ax_mean, headers=False,
+                wells_by_key=batch_wells_by_key(
+                    batch_members(self._ctx, grp,
+                                  pool_replicates=pool_replicates)),
+            )
         # This figure is built here rather than by the on-tab renderer, so the
         # marker that renderer adds has to be added here too: the tick labels and
         # the suptitle above already follow the rescale factor, and without this

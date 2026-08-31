@@ -19,8 +19,9 @@ from typing import Any
 # the registry reaches this module lazily — so there is no cycle to work around,
 # and a deferred feature import that is not breaking a cycle is one the budget
 # guard counts for nothing.
+from well_viewer.features.response.collect import Y_MEAN, Y_METRICS
 from well_viewer.features.response.controller import (
-    refresh_x_combo, update_timepoint_button,
+    refresh_series_combo, refresh_x_combo, update_timepoint_button,
 )
 from well_viewer.features.response.response_compute import FIT_MODELS, FIT_NONE
 
@@ -89,7 +90,6 @@ def apply_response(ctx, state: dict) -> None:
             setattr(slice_, key, None)
 
     slice_.series_variable_id = str(state.get("series_variable_id", "") or "")
-    from well_viewer.features.response.collect import Y_MEAN, Y_METRICS
     y_metric = str(state.get("y_metric", Y_MEAN) or Y_MEAN)
     slice_.y_metric = y_metric if y_metric in Y_METRICS else Y_MEAN
     _sync_controls(ctx, slice_, state.get("x_variable_id"))
@@ -116,7 +116,6 @@ def _sync_controls(ctx, slice_, x_variable_id) -> None:
     # offer a list with the wrong variable missing from it.
     series = ctx.widgets.get_or_none("_response_series_cb")
     if series is not None:
-        from well_viewer.features.response.controller import refresh_series_combo
         refresh_series_combo(ctx)
         index = series.findData(slice_.series_variable_id or "")
         series.blockSignals(True)

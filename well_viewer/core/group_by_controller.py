@@ -273,6 +273,10 @@ def _unpooled_clause(ctx, pooled) -> str:
         return ""
     if getattr(getattr(ctx.state, "plot", None), "bar_pool_replicates", True):
         return ""
+    # ``barplot.controller.toggle_bar_pool_replicates`` repaints the readouts
+    # for this reason: it is the only control that can make one tab disagree
+    # with a sentence derived from the seam, so it is also the only one that has
+    # to say so when it moves.
     return ", though Bar Plots is drawing each well separately (Pooled: Off)"
 
 

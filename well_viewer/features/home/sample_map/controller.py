@@ -112,7 +112,7 @@ def layer_is_showing(ctx, layer: str) -> bool:
     return str(getattr(slice_, "sample_map_layer", "") or "") == layer
 
 
-def _slice(ctx):
+def _slice(ctx) -> object | None:
     """Home's typed state slice, or ``None`` on a context that has no features."""
     getter = getattr(getattr(ctx, "state", None), "feature_slice", None)
     if not callable(getter):

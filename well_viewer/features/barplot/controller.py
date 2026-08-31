@@ -32,9 +32,6 @@ _logger = logging.getLogger(__name__)
 
 
 
-
-
-
 # ``bar_groups_to_dict`` / ``bar_groups_from_data`` are pure domain transforms;
 # they moved to ``well_viewer.domain.bar_groups`` so the domain layer can use
 # them without importing this feature. Re-exported here for existing callers.
@@ -422,7 +419,6 @@ def bar_well_display_label(ctx, lbl: str) -> str:
     return disp
 
 
-
 # ``toggle_fov_replicates`` moved to ``well_viewer.core.plot_toggles`` (A8
 # enabler E3): it drives an app-global control shared by the plot tabs and the
 # batch-export inline row, so it lives in core where any feature can call it
@@ -440,15 +436,9 @@ def toggle_bar_group_mode(ctx) -> None:
 
 def toggle_bar_pool_replicates(ctx) -> None:
     """Flip whether replicate-set wells collapse to a single column."""
-    from well_viewer.core.group_by_controller import refresh_grouping_readouts
     from well_viewer.features.barplot.renderer import redraw_bars
     ctx.state.plot.toggle_bar_pool_replicates()
     refresh_bar_layout_btn_state(ctx)
-    # The pooling readout names this toggle, because it is the one thing that
-    # can make the Bar tab disagree with the sentence describing what the plots
-    # pool by. Left unrepainted it said "grouped by your 2 groups" over a figure
-    # drawing one bar per well.
-    refresh_grouping_readouts(ctx)
     redraw_bars(ctx)
 
 
@@ -550,7 +540,11 @@ def refresh_bar_layout_btn_state(ctx) -> None:
     replicate set is active. It governs pooling for bars *and* violin/beeswarm:
     on collapses each set into one column (its cells pooled for the per-cell
     views), off keeps one column per well.
-    """
+
+    The band's pooling sentence names this button, so it is repainted here
+    rather than in the toggle (``group_by_controller._unpooled_clause``)."""
+    from well_viewer.core.group_by_controller import refresh_grouping_readouts
+    refresh_grouping_readouts(ctx)
     plot = ctx.state.plot
     group_btn = getattr(ctx.runtime.barplot, "group_mode_btn", None)
     pool_btn = getattr(ctx.runtime.barplot, "pool_reps_btn", None)

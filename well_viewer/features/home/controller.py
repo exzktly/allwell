@@ -25,6 +25,11 @@ from well_viewer.core.selection_controller import (
 
 from . import collect as hc
 from .plate_panel import paint_plate, well_tooltip
+# The Sample map tab's layer: which one is showing, and the entry rules for it.
+# Module scope, because nothing under ``home/sample_map`` imports this module
+# back — there is no cycle here to work around, and the deferred-feature-import
+# budget is a ratchet rather than a place to put convenience.
+from .sample_map.controller import current_layer, on_tab_entered
 from .tab_view import (
     IMPORT_KEY, build_recent_tile, build_saved_plot_tile, definition_subtabs,
     format_value, legend_label, legend_swatch_style,
@@ -204,6 +209,23 @@ def sync_home_sidebar(ctx) -> None:
         btn.setVisible(on_a_definition_tab)
 
 
+def current_help_subject(ctx) -> str:
+    """What the help drawer should scroll to for the tab Home is showing.
+
+    The sub-tab's own name, except on **Sample map**, where the three ways of
+    annotating a well are layers with a heading each — so the drawer lands on
+    the one the user is looking at rather than at the top of the section.
+
+    Answered here rather than in ``allwell`` so the shell makes **one** deferred
+    feature import instead of two. That budget is a ratchet, and a page's own
+    "which of me is showing" question belongs to the page.
+    """
+    name = current_subtab(ctx) or ""
+    if name != "Sample map":
+        return name
+    return current_layer(ctx) or name
+
+
 def on_home_subtab_changed(ctx, idx: int) -> None:
     """Build the now-current tab if the drain has not reached it, then refresh."""
     build_home_subtab(ctx, idx)
@@ -222,7 +244,6 @@ def on_home_subtab_changed(ctx, idx: int) -> None:
         # when they merged — so entering the tab quietly stopped deselecting the
         # active group, and the first drag on the plate rewrote whichever group
         # was left over from the last visit.
-        from well_viewer.features.home.sample_map.controller import on_tab_entered
         on_tab_entered(ctx)
         if ctx.widgets.has("_rep_active_group_lbl"):
             update_active_group_label(ctx)

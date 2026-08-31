@@ -404,7 +404,18 @@ class ColorPickerPopover(Popover):
         self._commit()
 
     def _on_recent_picked(self, c: QColor) -> None:
-        self.setColor(c)
+        # Deliberately *not* ``setColor``: that resets ``_committed`` to the new
+        # colour, after which ``_commit`` compares the colour against itself and
+        # returns without emitting. Picking a recent then announced itself live
+        # and never committed — so nothing listening for the finished choice
+        # heard one, and the colour was not promoted to the front of the recents
+        # the way the same colour typed into the hex field would be. Same shape
+        # as ``_commit_hex``: move the colour, keep the baseline, then commit.
+        c = QColor(c)
+        if not c.isValid():
+            return
+        self._color = c
+        self._sync_from_color_keep_committed()
         self.colorPicked.emit(QColor(self._color))
         self._commit()
 

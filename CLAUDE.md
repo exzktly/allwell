@@ -939,7 +939,107 @@ that would break it, then make that edit and watch a test fail. If no edit
 comes to mind, or the suite stays green, the feature is not tested — however
 many tests are passing.
 
-## 7.8 Debugging entry points
+## 7.8 My tests agree with me, which is why they pass
+
+Every section from §7.3 onward is a variation on "the thing you ran to prove the
+fix can itself be wrong", and I have gone on making the same mistake anyway —
+about ten times in one session, on the code I had just written each time. Not
+ten different mistakes. **One mistake with two faces**, and the reason it keeps
+winning is that in both faces the test is *green*, so nothing asks a second
+question.
+
+**Face one: the stub is mine, so it cannot disagree with me.** A
+`SimpleNamespace` ctx has exactly the attributes my code happens to read,
+because I added them when my code raised. It can therefore never catch the two
+things that matter most — that the *real* object has no such attribute, and
+that the real caller never runs this code at all.
+
+- The Response tab raised `TypeError` on **every real app construction from the
+  moment the package existed**: `build_plot_save_menu`'s required `cells_cb` was
+  never passed. About 130 of its own tests were green, because every one drove a
+  control through my stub and **not one called `build_response_tab`**.
+- `draw_response` called `apply_ax_style(ax)` against a three-argument function.
+  Invisible because my own fixture stubbed that helper.
+- A Recent Datasets test wrote `monkeypatch.setattr(..., raising=False)`, which
+  **created** the `_qsettings` attribute the shipped app does not have.
+
+**Face two: the assertion is weaker than the claim.** I assert a property that
+the broken implementation also satisfies, so the test passes both ways.
+
+- "The two colours differ" — true of the palette strategy I was replacing *and*
+  the one replacing it. Four mutations, including deleting the whole decoration
+  call, left the file green.
+- "`focus_timepoint` still reads 24.0" — on a fixture whose seed *was* 24.0, so
+  a tab that wrote the field wrote the same number back.
+- "The readout says `ringed`" — passed with `setWellRings` deleted.
+- "The module mentions the clause somewhere" — passed with three of four
+  surfaces silent.
+- `ResponseData(placed=3)` built by hand — deleting the line that fills `placed`
+  left the lane green.
+
+### The check, at the moment of writing the test
+
+Both faces die to one question, asked before the test is kept:
+
+> **Name the wrong implementation that still passes this.**
+
+If one comes to mind, the test is not finished. "The colours differ" → name it:
+*the palette strategy I just replaced*. "The control is offered" → *a combo
+connected to nothing*. Naming it takes seconds and is the whole of the fix.
+
+Three rules follow, and they are mechanical rather than a matter of remembering:
+
+1. **Assert the value, never a property of it.** Not "they differ" but "it is
+   `palette["C1"]`". Not "a sentence was drawn" but the sentence. A property is
+   satisfied by a set of implementations and only one of them is right.
+2. **Build the fixture so the right and wrong answers differ.** This is the one
+   I keep skipping. The batch collector inks members from the same
+   `WELL_COLORS` in member order, so with values assigned *in* member order the
+   decorated and undecorated figures are byte-identical — no assertion of any
+   strength could tell them apart. I had to assign the values *against* the
+   member order before the test could measure anything. Ask: *what does the
+   broken version produce here?* If the answer is "the same bytes", change the
+   fixture, not the assertion.
+3. **One test per feature goes through the real constructor.** Not the seam I
+   just wrote — the entry point the app calls: `build_<feature>_tab`, the
+   registry hook, the real widget. Everything else may stay cheap and stubbed.
+   §7.6 #2 said this about controls; it is just as true of builders, and the
+   builder is worse, because `centre_view` **catches** a failing builder, logs
+   it, and drops the title from the pending map — so the tab renders as an empty
+   page and `test_drain_builds_all_centre_tabs` goes on passing.
+   `test_app_smoke.py::test_no_tab_builder_raised_while_draining` reads that log
+   instead and costs two seconds. It covers **centre pages**; Home's definition
+   editors build through a different path with a swallow of their own, and are
+   covered by `test_home_page.py::test_every_definition_tab_is_built_after_a_load`,
+   because `built[name] = True` is stamped only on success. Two guards, two
+   mechanisms, neither covering the other's half.
+
+   That last sentence is only accurate because writing this section caught me
+   getting it wrong. I first wrote "covers every tab", then widened the guard's
+   pattern to make that true, then — applying rule 2 above — broke a Home
+   sub-tab to see the widened guard catch it. **It did not.** The section's own
+   check, run against the section's own claim, one paragraph after writing it.
+   Which is the honest measure of how strong this habit is: knowing the rule is
+   not the same as applying it, and the only thing that reliably applies it is
+   building the case where right and wrong differ and *looking*.
+
+### What actually catches it, and what does not
+
+**Mutation catches it. Review and the lane do not.** Three times in one session
+a mutation either made a *failing* test pass or left everything green, and each
+time that was the only signal. A reviewer reading for contracts does not slow
+down at a plausible-looking assertion, and the fast lane cannot see a builder it
+never calls. So when §7.7 #2 says make the edit and watch a test fail: watch
+*which* test fails and *why*. A mutation that changes nothing has told you the
+test measures nothing — that is a finding, not a nuisance to work around.
+
+**And the lane you did not run is where this lives.** The fast lane never builds
+an app, so every defect above was invisible to the check that gates every push.
+The slow lane found the Response builder within one dispatch. Before calling a
+feature done, ask which lane would notice if it were completely broken — and if
+the answer is "none of the ones I ran", that is the work, not a formality.
+
+## 7.9 Debugging entry points
 
 - Widget you can't find: `grep -rn '_line_fig\b' well_viewer/ widgets/` — every
   Review widget is stored as `_<noun>`. Rail pages → `core/centre_view.py`;

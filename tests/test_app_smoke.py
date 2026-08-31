@@ -46,11 +46,26 @@ def test_no_tab_builder_raised_while_draining(viewer_app, caplog):
     the only place the failure can surface.
     """
     import logging
+    import re
+
+    # Matched on shape rather than on one exact phrase, so a reworded message
+    # from the same site still trips it.
+    #
+    # **This covers centre pages, not Home's sub-tabs.** Draining the centre
+    # does not build the definition editors — those go through
+    # ``home/controller`` on an event-loop tick, with a swallow of their own —
+    # so widening the pattern does not reach them, which was measured after
+    # assuming it did. They are covered instead by
+    # ``test_home_page.py::test_every_definition_tab_is_built_after_a_load``:
+    # ``built[name] = True`` is stamped only on success, so a raising sub-tab
+    # leaves the map short and that test fails. Two guards, two mechanisms, and
+    # neither one covers the other's half.
+    build_failed = re.compile(r"build.*failed", re.I)
 
     with caplog.at_level(logging.ERROR, logger="well_viewer"):
         viewer_app._drain_pending_centre_builders()
 
-    failures = [r for r in caplog.records if "Deferred build" in r.getMessage()]
+    failures = [r for r in caplog.records if build_failed.search(r.getMessage())]
     assert not failures, "tab builders raised:\n" + "\n".join(
         f"  {r.getMessage()}\n{r.exc_text or ''}" for r in failures)
 

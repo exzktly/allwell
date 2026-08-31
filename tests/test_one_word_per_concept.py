@@ -2,7 +2,8 @@
 
 The rail's drawer under the plate map saves a set of lit wells you can get back.
 It pools nothing — loading one lights wells and toggles which groups are shown,
-and it never edits a group's membership. Home's **Groups** are replicate sets
+and it never edits a group's membership. Home's **Replicates** layer holds
+replicate sets
 and they pool everything: every plot, the Statistics tab, Batch Export and the
 saved fold-change control references all key on them.
 
@@ -105,7 +106,8 @@ def test_no_user_facing_string_calls_a_saved_selection_a_plot_group():
         "these strings still call a saved selection a \"plot group\":\n  "
         + "\n  ".join(offenders)
         + "\nThe drawer under the plate map is \"Saved selections\"; Home's "
-          "Groups are replicate sets and pool. Rename the string — the "
+          "Replicates layer holds replicate sets, and they pool. Rename the "
+          "string — the "
           "`plot_group` symbols and the persistence key stay."
     )
 
@@ -155,7 +157,7 @@ CONCEPTS = (
 #: **layer** of the Sample map tab, not a tab of its own. Written out in full
 #: because a guard naming only the layer would go on passing after the merge had
 #: left the manual routing readers to three tabs that no longer exist.
-README_CONCEPTS = ("Home \u2192 Sample map \u2192 Groups",
+README_CONCEPTS = ("Home \u2192 Sample map \u2192 Replicates",
                    "Home \u2192 Sample map \u2192 Variables",
                    "Home \u2192 Sample map \u2192 Well Labels",
                    "the rail drawer under the plate map")

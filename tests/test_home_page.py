@@ -658,7 +658,13 @@ def test_the_recents_card_opens_the_dataset_it_names(loaded_app, tmp_path,
         f"{host.layout().count()} rows for one remembered dataset"
     )
 
-    button = host.layout().itemAt(0).widget()
+    # ``row_entry`` and not ``itemAt(0).widget()``: a row that can be forgotten
+    # is a container holding the open button, a slot and the ×, and a row that
+    # cannot is the bare button. Asking the accessor is what keeps a caller from
+    # driving the wrapper instead of the control.
+    from widgets.removable_row import row_entry
+
+    button = row_entry(host.layout().itemAt(0).widget())
     assert "another_plate" in button.text()
     button.click()
     from PySide6.QtTest import QTest

@@ -39,36 +39,41 @@ its reason here and at the site.
 
 | # | Item | Place | Pinned by | State |
 |---|---|---|---|---|
-| M1 | The user's selection must be visible on a well that already carries a value | `widgets/well_plate_selector.py` | `tests/test_plate_selection_rim.py` | done |
-| M2 | A persistent selection readout, and `Select: all / none / unassigned / same value` | `variables/plate_view.py` | | todo |
-| M3 | A fill honours the plate selection, and the scope line states what it will overwrite | `variables/controller.py` | | todo |
-| M4 | One-deep undo over every commit | `variables/controller.py` | | todo |
-| M5 | `Preview` before `Apply fill`, and a report that also fires when nothing changed | `variables/controller.py` | | todo |
-| M6 | A header naming the variable the plate is showing and the one overlaid on it | `variables/tab_view.py` | | todo |
-| M7 | Coverage (`88/96`) in the rail rather than a value count | `domain/sample_variables.py` | `tests/test_variables_domain_readouts.py` | doing — the fact exists; the rail still shows the value count |
-| M8 | The glyph rule is all-or-nothing and lives in the domain | `domain/variable_series.py` | `tests/test_variables_domain_readouts.py` | doing — the rule is moved and fixed; the tab still calls its own copy |
-| M9 | Every silent no-op says what happened, and controls that cannot act are disabled | `variables/controller.py` | | todo |
-| M10 | One label, one job — status stops doubling as instruction and as policy | `variables/controller.py` | | todo |
-| M11 | The destructive verbs name their scope | `variables/tab_view.py` | | todo |
-| M12 | The rail's second plate is hidden on the one tab that has its own | `features/registry.py` | | todo |
+| M1 | The user's selection must be visible on a well that already carries a value | `widgets/well_plate_selector.py` | `test_plate_selection_rim.py` | done |
+| M2 | A persistent selection readout, and `Select: all / none / unassigned / same value` | `variables/plate_view.py` | `test_variables_tab.py::test_the_tab_says_what_is_selected…`, `…::test_select_all_takes_the_dataset_not_ninety_six` | done |
+| M3 | A fill honours the plate selection, and the scope line states what it will overwrite | `variables/controller.py` | `test_variables_tab.py::test_a_fill_with_wells_selected_touches_only_those`, `…::test_the_scope_line_follows_the_selection_rather_than_the_button` | done |
+| M4 | One-deep undo over every commit | `variables/controller.py` | `test_variables_tab.py::test_undo_puts_back_what_a_fill_replaced` and four siblings | done |
+| M5 | `Preview` before `Apply fill`, and a report that also fires when nothing changed | `variables/controller.py` | `test_variables_tab.py::test_preview_paints_the_result_and_stores_nothing`, `…::test_a_fill_that_changed_nothing_says_that…` | done |
+| M6 | A header naming the variable the plate is showing and the one overlaid on it | `variables/tab_view.py` | `test_variables_tab.py::test_the_header_names_the_variable_the_plate_is_showing` | done |
+| M7 | Coverage (`88/96`) in the rail rather than a value count | `domain/sample_variables.py`, `variables/editor_view.py` | `test_variables_domain_readouts.py`, `test_variables_tab.py::test_the_rail_says_how_much_of_the_plate_each_variable_covers` | done |
+| M8 | The glyph rule is all-or-nothing and lives in the domain | `domain/variable_series.py` | `test_variables_domain_readouts.py`, `test_variables_tab.py::test_a_colliding_series_is_drawn_as_a_numbering…` | done |
+| M9 | Every silent no-op says what happened, and controls that cannot act are disabled | `variables/controller.py` | `test_variables_tab.py::test_a_duplicate_value_says_it_was_not_added` and four siblings | done |
+| M10 | One label, one job — status stops doubling as instruction and as policy | `variables/tab_view.py` | `test_variables_tab.py::test_the_shortfall_is_counted_on_the_control_that_selects_it` | done |
+| M11 | The destructive verbs name their scope | `variables/editor_view.py` | `test_variables_tab.py::test_a_chip_is_offered_per_value_plus_a_no_value` | done |
+| M12 | The rail's second plate is hidden on the one tab that has its own | `core/feature_registry.py`, `features/home/controller.py` | `test_home_page.py::test_a_subtab_with_its_own_plate_hides_the_rails` | done |
 
 ### Should
 
 | # | Item | Place | Pinned by | State |
 |---|---|---|---|---|
-| S1 | The value rows carry their colour, so the definition and the plate share one vocabulary | `variables/editor_view.py` | | todo |
-| S2 | A `By group` row selects the wells it is complaining about | `variables/plate_view.py` | | todo |
-| S3 | A chip can select every well holding its value | `variables/plate_view.py` | | todo |
-| S4 | The plate is sized as the page's primary surface | `widgets/plate_geometry.py` | | todo |
-| S5 | First run offers the explanation and the one action, not disabled chrome | `variables/tab_view.py` | | todo |
-| S6 | The chip row wraps rather than running off the page | `variables/plate_view.py` | | todo |
+| S1 | The value rows carry their colour, so the definition and the plate share one vocabulary | `variables/editor_view.py` | `test_variables_tab.py::test_a_value_row_wears_the_ink_its_wells_will_take` | done |
+| S2 | A `By group` row selects the wells it is complaining about | `variables/plate_view.py` | `test_variables_tab.py::test_a_group_row_selects_the_wells_it_is_complaining_about` | done |
+| S3 | A chip can select every well holding its value | `variables/plate_view.py` | `test_variables_tab.py::test_select_same_value_finds_the_rest…` | declined — done as a `Select: same value` link instead |
+| S4 | The plate is sized as the page's primary surface | `widgets/plate_geometry.py` | `test_plate_geometry.py::test_a_canvas_plate_is_larger_than_an_editor_one` | done |
+| S5 | First run offers the explanation and the one action, not disabled chrome | `variables/controller.py` | `test_variables_tab.py::test_with_no_variable_there_is_no_plate_to_stare_at` | done |
+| S6 | The chip row wraps rather than running off the page | `variables/plate_view.py` | `test_variables_tab.py::test_the_chip_row_wraps_rather_than_running_off_the_page` | done |
 
 ### Declined
 
 | # | Item | Reason | State |
 |---|---|---|---|
+| S3 | A chip alt-click selects every well holding its value | The need is real and is met by the `Select: same value` link, which is discoverable, has a tooltip, and works from the keyboard. A modifier-click on a chip is a second, hidden way to do the same thing, and a chip whose plain click *assigns* and whose alt-click *selects* is two verbs on one control — the failure `Also show` was made a combo to avoid. | declined |
+| D2b | Give a `number` variable a sequential colour ramp on the plate instead of the categorical palette | Reported below rather than changed. `variable_series.value_colors` is shared with the plots' *Colour by*, and its `VALUE_PICKS` roster was chosen by measuring separation under four colour-vision simulations. A ramp reads better for an ordered dose on a plate and worse for six values a dichromat has to tell apart in a legend, and that trade is a decision about every figure in the app rather than about this tab. | declined |
 
 ## Reconciliation
 
-Not started. Per §6.1 #6 the whole body is closed only after re-reading every
-row against the tree rather than against this table.
+Every row above re-read against the tree, not against this table, on the commit
+that closes the last of them. Each `done` row's guard was watched failing with
+its fix removed — by mutating HEAD, since every symbol involved is new on this
+branch and `scripts/prove_guard.sh` reports `NOT PROVEN (ImportError)` against a
+base that does not have it.

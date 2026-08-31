@@ -451,8 +451,9 @@ def test_the_rail_plate_is_live_only_where_a_tab_reads_the_selection(loaded_app,
     Groups edits membership with the plate, Cell Gating draws its CDFs from the
     selected wells, and Well Labels' affix actions apply to them. Ratios and
     Pipeline Info ask nothing of it, so a live-looking plate there would take
-    clicks and discard them — which is what it did before. Overview has its own
-    plate in the page body, so the rail's is hidden rather than greyed.
+    clicks and discard them — which is what it did before. Overview and
+    Variables have their own plate in the page body, so the rail's is hidden
+    rather than greyed.
     """
     ctx = loaded_app._ctx
     frame = ctx.widgets.get("_sidebar_sample_frame")
@@ -462,6 +463,7 @@ def test_the_rail_plate_is_live_only_where_a_tab_reads_the_selection(loaded_app,
         "Overview": (False, False),
         "Cell Gating": (True, True),
         "Groups": (True, True),
+        "Variables": (False, False),
         "Well Labels": (True, True),
         "Ratios": (True, False),
         "Pipeline Info": (True, False),
@@ -470,6 +472,37 @@ def test_the_rail_plate_is_live_only_where_a_tab_reads_the_selection(loaded_app,
         _goto_subtab(loaded_app, qtbot, name)
         assert frame.isVisibleTo(loaded_app) is rail_shown, f"{name}: rail visibility"
         assert plate.isEnabled() is plate_live, f"{name}: plate enabled"
+
+
+def test_a_subtab_with_its_own_plate_hides_the_rails(loaded_app, qtbot):
+    """Two plates on one screen, each meaning something different.
+
+    Greying is the right call for a tab that simply asks the rail plate nothing:
+    the rail visibly emptying as you move between sibling tabs reads as
+    something breaking, and a live-looking plate that ignores clicks is worse
+    than a grey one. Neither argument survives a tab that draws its own plate.
+    Variables did — the rail's coloured by group membership, its own by variable
+    value — and that is the hazard ``groups/panel_view`` guards its commit
+    against.
+
+    Declared on the descriptor rather than as a name list in the sidebar sync,
+    so a tab added tomorrow answers for itself.
+    """
+    ctx = loaded_app._ctx
+    frame = ctx.widgets.get("_sidebar_sample_frame")
+    button = ctx.widgets.get("_home_import_btn")
+
+    _goto_subtab(loaded_app, qtbot, "Groups")
+    assert frame.isVisibleTo(loaded_app), "the fixture is not showing the rail"
+
+    _goto_subtab(loaded_app, qtbot, "Variables")
+    assert ctx.features.get("Variables").owns_plate
+    assert not frame.isVisibleTo(loaded_app), (
+        "the rail plate is on screen beside the tab's own, coloured by group "
+        "membership while the tab's is coloured by variable value")
+    # Import merges replicate *selections*, which is not what a button called
+    # Import means on a page of variables.
+    assert not button.isVisibleTo(loaded_app)
 
 
 def test_a_greyed_plate_actually_looks_greyed(qtbot):

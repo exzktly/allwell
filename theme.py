@@ -549,6 +549,56 @@ QPushButton#VariableValueChip:hover {{
     background-color: {c.hover};
     border-color: {c.border_strong};
 }}
+/* The Variables tab's own chrome. The header band states which variable the
+   plate is showing — one rail selection decides four things and nothing else on
+   the page writes the answer down. The message line under it is the tab's one
+   place for "what just happened"; it is styled as an accent note rather than as
+   a muted hint precisely so it is not mistaken for the standing captions
+   around it, which is how the fill's confirmation used to go unread. */
+QWidget#VariablesHeader {{
+    background-color: {c.panel};
+    border-radius: {r.sm}px;
+}}
+QLabel#VariablesCaption {{
+    font-size: {t.caption_size}px;
+    font-weight: {t.semibold};
+    color: {c.text_muted};
+    letter-spacing: 0.08em;
+}}
+QLabel#VariablesHeaderValue {{
+    font-size: {t.small_size}px;
+    font-weight: {t.semibold};
+    color: {c.text_secondary};
+}}
+QLabel#VariablesMessage {{
+    color: {c.accent};
+    font-size: {t.small_size}px;
+    padding: {s.xs}px 0px;
+}}
+/* What the plate currently has selected. Body weight rather than muted: it is
+   the answer to the question the user is in the middle of asking, and every
+   other line on this half of the page is a caption or a hint. */
+QLabel#VariablesSelection {{
+    color: {c.text_primary};
+    font-size: {t.small_size}px;
+}}
+/* The four selection shortcuts. Borderless until hovered, so a row of them
+   reads as links beside the sentence they act on rather than as four more
+   command buttons competing with the chips below. */
+QPushButton#VariablesLink {{
+    background-color: transparent;
+    border: 1px solid transparent;
+    color: {c.accent};
+    font-size: {t.small_size}px;
+    padding: {s.xs}px {s.sm}px;
+}}
+QPushButton#VariablesLink:hover {{
+    background-color: {c.hover};
+    border-color: {c.border};
+}}
+QPushButton#VariablesLink:disabled {{
+    color: {c.text_muted};
+}}
 /* Home's recent-dataset rows — one definition, shared with EmptyState's
    entries; see ``link_row_qss``. */
 {_link_row_home}

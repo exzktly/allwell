@@ -82,6 +82,10 @@ def _labels(listing):
     return [listing.item(i).text() for i in range(listing.count())]
 
 
+def _rail_labels(tab):
+    return _labels(tab.w("_var_list"))
+
+
 # ── the buttons do something ────────────────────────────────────────────────
 
 def test_pressing_add_variable_adds_one_and_shows_the_definition(tab):
@@ -396,17 +400,16 @@ def test_the_fill_row_says_what_it_covers(tab):
 
 
 def test_the_fill_row_names_the_variable_it_will_rewrite(tab):
-    """The plan put a variable combo in this row; the combo was declined because
-    the rail already chooses it, but the *name* is what that combo carried. A
-    fill is the one action on this page that rewrites every well at once, and
-    ``Fill along Rows`` on a page holding four variables does not say which.
+    """A fill is the one action on this page that rewrites every well at once,
+    and ``Give each row the next value`` on a page holding four variables does
+    not say which one.
 
     Asserted on the label's text rather than "the label is not empty", which the
-    static ``Fill along`` it replaced also satisfies.
+    static placeholder it replaces also satisfies.
     """
     _dose_tab(tab)
 
-    assert tab.w("_var_fill_lead").text() == "Fill Dose along"
+    assert tab.w("_var_fill_lead").text() == "the next Dose,"
 
 
 def test_the_fill_row_follows_a_rename(tab):
@@ -416,7 +419,7 @@ def test_the_fill_row_follows_a_rename(tab):
     name.setText("Concentration")
     name.editingFinished.emit()
 
-    assert tab.w("_var_fill_lead").text() == "Fill Concentration along"
+    assert tab.w("_var_fill_lead").text() == "the next Concentration,"
 
 
 # ── select-then-chip ────────────────────────────────────────────────────────
@@ -427,9 +430,9 @@ def _chips(tab):
             if layout.itemAt(i).widget() is not None]
 
 
-def test_a_chip_is_offered_per_value_plus_a_clear(tab):
+def test_a_chip_is_offered_per_value_plus_a_no_value(tab):
     _dose_tab(tab)
-    assert [c.text() for c in _chips(tab)] == ["0", "1", "Clear"]
+    assert [c.text() for c in _chips(tab)] == ["0", "1", "No value"]
 
 
 def test_selecting_wells_then_clicking_a_chip_assigns_them(tab):
@@ -459,7 +462,7 @@ def test_a_chip_with_nothing_selected_says_so_rather_than_doing_nothing(tab):
     _chips(tab)[0].click()
 
     assert _assigned(tab, variable_id) == {}
-    assert "Select wells" in tab.w("_var_readout").text()
+    assert "Select wells" in tab.w("_var_message").text()
 
 
 def test_the_chips_follow_a_rename(tab):
@@ -471,45 +474,73 @@ def test_the_chips_follow_a_rename(tab):
     assert [c.text() for c in _chips(tab)][:2] == ["0 µM", "1 µM"]
 
 
-# ── the plate readout ───────────────────────────────────────────────────────
+# ── am I finished? ──────────────────────────────────────────────────────────
 
-def test_unassigned_wells_are_ringed_and_counted(tab):
-    """Three layers, none of them colour alone: the fill says which value, the
-    ring says this well has none, and the line counts them."""
+def test_the_shortfall_is_counted_on_the_control_that_selects_it(tab):
+    """The count used to be a sentence that also carried up to eight well ids, a
+    rendering fact ("they are ringed") and a policy statement about a different
+    pane, in one muted run-on line under the plate.
+
+    It is one number, and it belongs on the link that selects exactly those
+    wells — which turns "seven are missing" from something to read into
+    something to press.
+    """
     _dose_tab(tab)
     tab.w("_var_plate").selectedWells = ["A01"]
     _chips(tab)[0].click()
 
-    readout = tab.w("_var_readout").text()
-    assert "7 of 8" in readout and "no Dose" in readout
-    assert "ringed" in readout
+    assert tab.w("_var_sel_missing").text() == "unassigned (7)"
+    assert tab.w("_var_sel_missing").isEnabled()
 
 
-def test_a_fully_assigned_plate_says_so(tab):
+def test_pressing_it_selects_exactly_the_wells_that_are_short(tab):
+    """The half that makes the count worth showing. A label that named the wells
+    and could not select them left the user hunting a grid of ninety-six by
+    eye."""
     _dose_tab(tab)
-    tab.w("_var_fill_apply").click()
-    assert tab.w("_var_readout").text() == "All 8 well(s) have a Dose."
-
-
-def test_the_readout_names_the_wells_that_are_short(tab):
-    """Naming them is the difference between a count the user can act on and one
-    they have to hunt for."""
-    _dose_tab(tab)
-    tab.w("_var_plate").selectedWells = [w for w in tab.wells if w != "B04"]
+    tab.w("_var_plate").selectedWells = ["A01"]
     _chips(tab)[0].click()
 
-    assert "B04" in tab.w("_var_readout").text()
+    tab.w("_var_sel_missing").click()
+
+    assert set(tab.w("_var_plate").selectedWells) == set(tab.wells) - {"A01"}
+
+
+def test_a_fully_assigned_plate_offers_no_action_that_would_do_nothing(tab):
+    """Zero short is said by the rail's tick, and the link greys out rather than
+    staying live with nothing to select."""
+    _dose_tab(tab)
+    tab.w("_var_fill_apply").click()
+
+    assert tab.w("_var_sel_missing").text() == "unassigned"
+    assert not tab.w("_var_sel_missing").isEnabled()
+    assert _rail_labels(tab) == ["Dose    8/8 ✓"]
+
+
+def test_the_rail_says_how_much_of_the_plate_each_variable_covers(tab):
+    """Every variable's answer at once, which is the question the tab is asked.
+
+    The rail listed a *value count* — a number the user had just typed in and
+    could read off the list beside it — so "is this plate finished?" could only
+    be answered one variable at a time by selecting each and reading a sentence
+    under the plate.
+    """
+    _dose_tab(tab)
+    tab.w("_var_plate").selectedWells = ["A01", "A02"]
+    _chips(tab)[0].click()
+
+    assert _rail_labels(tab) == ["Dose    2/8"]
 
 
 @pytest.mark.wells({})
 def test_a_plate_with_no_dataset_says_that_rather_than_showing_zero(tab):
     _dose_tab(tab)
-    assert "No dataset is open" in tab.w("_var_readout").text()
+    assert "No dataset is open" in tab.w("_var_fill_scope").text()
 
 
 def test_a_variable_with_no_values_says_there_is_nothing_to_fill(tab):
     tab.w("_var_add").click()
-    assert "nothing to fill" in tab.w("_var_readout").text()
+    assert "nothing to fill" in tab.w("_var_fill_scope").text()
 
 
 def test_the_plate_only_enables_the_wells_the_dataset_holds(tab):
@@ -865,7 +896,7 @@ def test_removing_the_last_variable_blanks_the_plate_it_described(tab, monkeypat
         "the deleted variable's value chips are still there, and still "
         "connected — pressing one reaches assign_selected and does nothing"
     )
-    assert tab.w("_var_readout").text() == ""
+    assert tab.w("_var_selection").text() == ""
 
 
 def test_a_dataset_swap_repaints_rather_than_leaving_the_last_plate(tab,
@@ -886,7 +917,7 @@ def test_a_dataset_swap_repaints_rather_than_leaving_the_last_plate(tab,
 
     assert seen["colors"] and seen["rings"], f"nothing was cleared: {seen}"
     assert tab.w("_var_chips").layout().count() == 0
-    assert tab.w("_var_readout").text() == "", (
+    assert tab.w("_var_selection").text() == "", (
         "the readout still names wells from the dataset that was closed"
     )
 
@@ -902,51 +933,79 @@ def test_the_variables_tab_is_reachable_through_the_feature_service():
 
 
 def test_the_repeat_control_names_what_it_counts(tab):
-    """"repeat each 4" beside "along Rows" reads as four rows to any reader, and
-    that is what it does — but while the cycling counted wells the two readings
-    differed by the width of the plate, and nothing on screen said which was
-    meant. The suffix follows the axis so the two cannot drift apart."""
+    """"2 columns per value" reads as two columns to any reader, and that is
+    what it does — but while the cycling counted wells the two readings differed
+    by the width of the plate, and nothing on screen said which was meant. The
+    unit follows the axis so the two cannot drift apart."""
     _dose_tab(tab)
     axis = tab.w("_var_fill_axis")
-    repeat = tab.w("_var_fill_repeat")
+    unit = tab.w("_var_fill_unit")
+    tab.w("_var_fill_repeat").setValue(2)
 
     axis.setCurrentIndex(axis.findData("row"))
-    assert repeat.suffix().strip() == "rows"
+    assert unit.text() == "rows per value."
 
     axis.setCurrentIndex(axis.findData("col"))
-    assert repeat.suffix().strip() == "columns"
+    assert unit.text() == "columns per value."
 
 
-def test_colliding_overlay_glyphs_are_broken_apart(tab):
-    """Truncation collides, and a collision here is the second factor of a
-    two-factor plate silently reading as one value where it is three.
+def test_the_unit_is_singular_at_one(tab):
+    """The control reads as a sentence now, and "1 rows per value" is the sort
+    of thing that makes a reader stop and wonder what they have misunderstood."""
+    _dose_tab(tab)
+    tab.w("_var_fill_repeat").setValue(1)
+    assert tab.w("_var_fill_unit").text() == "row per value."
 
-    ``0``, ``0.1`` and ``0.3`` all shorten to ``0``; ``HeLa`` and ``HEK293``
-    both give ``H``. Nothing detected it, so three doses painted the same mark
-    and the key read ``0 = 0, 0 = 0.1, 0 = 0.3`` — a key naming one glyph three
-    times, which is worse than no key. The fixture uses a dose series that
-    collides on purpose: with two well-separated values any implementation
-    passes.
+
+def test_a_colliding_series_is_drawn_as_a_numbering_not_as_part_labels(tab):
+    """The rule this replaces truncated per value, and on the series it was
+    built for it mixed two kinds of glyph without marking either.
+
+    ``0, 0.1, 0.3, 1`` came out ``0, 02, 03, 1``: ``1`` is a real dose, ``02``
+    is a code standing for ``0.1``, and nothing on the plate or in the key said
+    which was which. A reader taking ``03`` at face value read a well as three
+    times the dose it holds. Numbering the whole variable is a code that is
+    visibly a code.
+
+    Driven through the plate, not the rule — the rule's own cases are in
+    ``tests/test_variables_domain_readouts.py``. What is asserted here is that
+    the tab draws what the rule says, on the wells it says it about.
     """
-    import well_viewer.domain.sample_variables as sv
-    from well_viewer.features.home.variables.controller import overlay_glyphs
+    dose = _dose_tab(tab, labels="0, 0.1, 0.3, 1")
+    # Along the columns: the fixture is two rows of four, so a fill along rows
+    # would land only two of the four values and the numbering could not be
+    # told from a truncation that happened to agree on those two.
+    axis = tab.w("_var_fill_axis")
+    axis.setCurrentIndex(axis.findData("col"))
+    tab.w("_var_fill_apply").click()          # every well now holds a dose
 
-    vset = sv.from_block({
-        "schema_version": 1,
-        "variables": [{
-            "id": "d", "name": "Dose", "kind": "number",
-            "values": [{"id": f"v{i}", "label": lbl}
-                       for i, lbl in enumerate(["0", "0.1", "0.3", "1"])],
-        }],
-        "assignments": {},
-    })
-    variable = vset.by_id("d")
+    # A second variable to look at, so Dose is available to overlay: the combo
+    # lists the *other* variables, so a variable is never its own overlay.
+    tab.w("_var_add").click()
+    tab.w("_var_name").setText("Line")
+    tab.w("_var_name").editingFinished.emit()
+    tab.w("_var_value_entry").setText("HeLa, U2OS")
+    tab.w("_var_value_add").click()
 
-    glyphs = overlay_glyphs(variable)
+    marks = {}
+    plate = tab.w("_var_plate")
+    plate.setWellMarker = lambda w, g: marks.__setitem__(w, g)
+    combo = tab.w("_var_overlay")
+    combo.setCurrentIndex(combo.findData(dose))
 
-    assert len(set(glyphs.values())) == len(glyphs), glyphs
-    assert glyphs[variable.values[0].id] == "0", "an uncollided glyph was changed"
-    assert all(g for g in glyphs.values())
+    assert set(marks.values()) == {"1", "2", "3", "4"}, marks
+    assert "0" not in marks.values(), (
+        "a value's own label is being drawn beside codes for the others")
+    assert "1 = 0" in tab.w("_var_overlay_legend").text()
+
+
+def _select_variable_row(tab, variable_id):
+    listing = tab.w("_var_list")
+    for row in range(listing.count()):
+        if listing.item(row).data(Qt.UserRole) == variable_id:
+            listing.setCurrentRow(row)
+            return
+    raise AssertionError(f"no rail row for {variable_id}")
 
 
 def test_the_plate_drags_as_a_rubber_band_not_a_paintbrush(tab):
@@ -972,31 +1031,35 @@ def test_the_overlay_combo_states_its_rule_when_it_has_nothing_to_offer(tab):
     assert "second variable" in combo.toolTip()
 
 
-def test_with_no_variable_the_fill_row_is_disabled_and_says_why(tab):
-    """A live Fill-along / repeat / Apply-fill row with nothing to fill.
+def test_with_no_variable_there_is_no_plate_to_stare_at(tab):
+    """The opposite call from a greyed control, and right for the same reason.
 
-    ``_clear_plate`` blanked the labels and left the row and the plate enabled,
-    so pressing **Apply fill** hit ``apply_fill``'s first guard and returned in
-    silence. There is a rule the user can act on — define a variable — which is
-    this repo's test for disabling rather than hiding, and ``assign_selected``
-    already applied that standard while ``apply_fill`` did not.
+    ``_clear_plate`` used to blank the labels and leave a full ninety-six well
+    grid, a fill row and a chip row on screen, all inert. Greying is for a
+    control that cannot work *yet* and states a rule the user can act on; there
+    is no plate to show at all until a variable exists, and a greyed grid around
+    a two-paragraph explainer reads as software that has broken. The one thing a
+    user can do here — ``+ Variable`` — is what is left.
     """
-    row = tab.w("_var_fill_row")
-    plate = tab.w("_var_plate")
+    assert tab.w("_var_plate").isHidden()
+    assert tab.w("_var_fill_row").isHidden()
+    assert tab.w("_var_chips").isHidden()
+    assert not tab.w("_var_add").isHidden(), (
+        "the one action available on an empty tab was hidden too")
 
-    assert not row.isEnabled(), "the fill row is live with nothing to fill"
-    assert "Define a variable" in row.toolTip()
-    assert not plate.isEnabled()
 
+def test_defining_a_variable_brings_the_plate_back(tab):
+    """The half that makes the test above mean something: a tab that hid them
+    and never restored them would satisfy it and be useless.
 
-def test_defining_a_variable_makes_them_live_again(tab):
-    """The half that makes the test above mean something: a tab that disabled
-    them and never re-enabled would satisfy it and be useless."""
+    ``isHidden`` rather than ``isVisible``: a child of a widget that has never
+    been shown reports itself invisible whatever its own flag says.
+    """
     _dose_tab(tab)
 
-    assert tab.w("_var_fill_row").isEnabled()
-    assert tab.w("_var_plate").isEnabled()
-    assert tab.w("_var_fill_row").toolTip() == ""
+    assert not tab.w("_var_plate").isHidden()
+    assert not tab.w("_var_fill_row").isHidden()
+    assert not tab.w("_var_chips").isHidden()
 
 
 def test_deleting_a_filled_variable_asks_first(tab, monkeypatch):
@@ -1043,4 +1106,418 @@ def test_a_fill_says_how_many_wells_it_changed(tab):
 
     tab.w("_var_fill_apply").click()
 
-    assert "Filled" in tab.w("_var_fill_scope").text()
+    assert "Filled 8 well(s) with Dose." == tab.w("_var_message").text()
+
+
+def test_a_fill_that_changed_nothing_says_that_rather_than_going_quiet(tab):
+    """The half the previous fix left out.
+
+    The old confirmation was written only when the count was non-zero, so a user
+    re-running an identical fill to check it had taken got the same screen as one
+    whose button was broken.
+    """
+    _dose_tab(tab)
+    tab.w("_var_fill_apply").click()
+
+    tab.w("_var_fill_apply").click()
+
+    assert "Nothing changed" in tab.w("_var_message").text()
+
+
+# ── the selection is a thing the tab knows about ────────────────────────────
+
+def test_the_tab_says_what_is_selected_and_what_those_wells_hold(tab):
+    """Fourteen controls were connected and none of them was the plate.
+
+    Dragging a box changed nothing on screen, so a user could not tell a
+    selection had been made; and because selecting triggered no redraw, the
+    "select wells on the plate first" instruction a chip wrote into the status
+    label stayed up after they had complied.
+
+    Asserted as the sentence, not as "the label is not empty" — a label that
+    said "some wells are selected" would satisfy the weaker version and tell the
+    user nothing they came for.
+    """
+    variable_id = _dose_tab(tab)
+    plate = tab.w("_var_plate")
+    plate.selectedWells = ["A01", "A02"]
+    _chips(tab)[0].click()                       # A01, A02 -> "0"
+    plate.selectedWells = ["A01", "A02", "A03"]
+    plate.selectionChanged.emit(["A01", "A02", "A03"])
+
+    assert tab.w("_var_selection").text() == (
+        "3 well(s) selected — 2 hold 0, 1 hold no value.")
+    assert variable_id
+
+
+def test_an_empty_selection_says_how_to_make_one(tab):
+    _dose_tab(tab)
+    tab.w("_var_plate").selectedWells = []
+    tab.w("_var_plate").selectionChanged.emit([])
+
+    assert "No wells selected" in tab.w("_var_selection").text()
+
+
+def test_select_all_takes_the_dataset_not_ninety_six(tab):
+    """``role="canvas"`` hides the plate's own All / Invert / Clear row on the
+    promise that the host supplies its own — and that row's ``All`` means all
+    ninety-six, which on a plate imaged in half is wrong."""
+    _dose_tab(tab)
+    tab.w("_var_sel_all").click()
+
+    assert set(tab.w("_var_plate").selectedWells) == set(tab.wells)
+
+
+def test_select_none_clears_a_selection_that_would_otherwise_accumulate(tab):
+    """A rubber-band selection adds across gestures and the corner circle is
+    eleven pixels wide, so without this there was no way back from a wrong
+    one."""
+    _dose_tab(tab)
+    tab.w("_var_sel_all").click()
+    tab.w("_var_sel_none").click()
+
+    assert list(tab.w("_var_plate").selectedWells) == []
+
+
+def test_select_same_value_finds_the_rest_of_the_wells_holding_it(tab):
+    """The route to "four of these got the wrong dose": pick one, press this.
+
+    The fixture gives ``1`` to three wells and ``0`` to one, and selects the
+    single ``0`` — so a rule that grew the selection to *everything*, or that
+    returned it unchanged, produces a different answer from the right one.
+    """
+    variable_id = _dose_tab(tab)
+    plate = tab.w("_var_plate")
+    plate.selectedWells = ["A01", "A02", "A03"]
+    _chips(tab)[1].click()                       # -> "1"
+    plate.selectedWells = ["B01"]
+    _chips(tab)[0].click()                       # -> "0"
+
+    plate.selectedWells = ["A02"]
+    tab.w("_var_sel_same").click()
+
+    assert set(plate.selectedWells) == {"A01", "A02", "A03"}
+    assert _assigned(tab, variable_id)["B01"] == "0"
+
+
+def test_select_same_with_nothing_picked_says_so(tab):
+    _dose_tab(tab)
+    tab.w("_var_plate").selectedWells = []
+    tab.w("_var_sel_same").click()
+
+    assert "at least one well" in tab.w("_var_message").text()
+
+
+def test_a_group_row_selects_the_wells_it_is_complaining_about(tab):
+    """The list knows exactly which wells are inconsistent and could only print
+    them into a sentence for the user to find by eye on the plate above it."""
+    _dose_tab(tab)
+    tab.ctx.state.selection.selections = [
+        {"name": "Ctrl", "wells": ["A01", "A02", "B04"]}]
+    from well_viewer.features.home.variables.controller import refresh_variables
+    refresh_variables(tab.ctx)
+
+    listing = tab.w("_var_groups")
+    listing.itemDoubleClicked.emit(listing.item(0))
+
+    assert set(tab.w("_var_plate").selectedWells) == {"A01", "A02", "B04"}
+
+
+# ── the fill honours the selection, and says so ─────────────────────────────
+
+def test_a_fill_with_wells_selected_touches_only_those(tab):
+    """The most destructive button on the page read the dataset and ignored the
+    plate, so a user who had carefully picked twenty-four wells pressed it and
+    rewrote all ninety-six."""
+    variable_id = _dose_tab(tab)
+    plate = tab.w("_var_plate")
+    plate.selectedWells = ["A01", "A02"]
+    plate.selectionChanged.emit(["A01", "A02"])
+
+    tab.w("_var_fill_apply").click()
+
+    assert set(_assigned(tab, variable_id)) == {"A01", "A02"}
+
+
+def test_the_scope_line_follows_the_selection_rather_than_the_button(tab):
+    """The label and the button have to describe one action.
+
+    This was live in the rebuilt tab and caught in a render: ``_fill_result``
+    narrowed a fill to the selection while the scope label was repainted only by
+    a full redraw, so with four wells picked the page read "Covers all 96
+    well(s)" over a button that would have filled four.
+    """
+    _dose_tab(tab)
+    assert "all 8 well(s)" in tab.w("_var_fill_scope").text()
+
+    plate = tab.w("_var_plate")
+    plate.selectedWells = ["A01", "A02"]
+    plate.selectionChanged.emit(["A01", "A02"])
+
+    assert "selected 2 well(s)" in tab.w("_var_fill_scope").text()
+
+
+def test_the_scope_line_says_what_it_will_overwrite(tab):
+    """It read ``over the 96 well(s) in this dataset`` — a true statement about
+    the dataset that says nothing about the assignments about to be replaced."""
+    _dose_tab(tab)
+    tab.w("_var_fill_apply").click()
+
+    assert "replaces the Dose on 8 of them" in tab.w("_var_fill_scope").text()
+
+
+def test_preview_paints_the_result_and_stores_nothing(tab):
+    """Free, because ``fill`` is pure: the preview is the returned set painted.
+
+    Asserted on both halves. "It stored nothing" alone is satisfied by a button
+    that does nothing at all, and "it painted" alone by one that committed.
+    """
+    variable_id = _dose_tab(tab)
+    painted = {}
+    tab.w("_var_plate").setWellColor = lambda w, c: painted.__setitem__(w, c)
+
+    saves_before = len(tab.saves)
+    tab.w("_var_fill_preview").click()
+
+    assert painted, "Preview painted nothing"
+    assert _assigned(tab, variable_id) == {}, "Preview committed the fill"
+    assert len(tab.saves) == saves_before, "Preview scheduled a save"
+    assert "Preview" in tab.w("_var_fill_scope").text()
+
+
+# ── undo ────────────────────────────────────────────────────────────────────
+
+def test_undo_puts_back_what_a_fill_replaced(tab):
+    variable_id = _dose_tab(tab)
+    tab.w("_var_plate").selectedWells = ["A01"]
+    _chips(tab)[1].click()                       # A01 -> "1"
+    before = _assigned(tab, variable_id)
+
+    tab.w("_var_fill_apply").click()
+    assert _assigned(tab, variable_id) != before
+
+    tab.w("_var_undo").click()
+
+    assert _assigned(tab, variable_id) == before
+
+
+def test_undo_puts_back_a_deleted_variable(tab, monkeypatch):
+    """The most expensive click on the page, and the one the confirmation
+    dialog can only warn about."""
+    from PySide6.QtWidgets import QMessageBox
+
+    _dose_tab(tab)
+    tab.w("_var_fill_apply").click()
+    monkeypatch.setattr(QMessageBox, "question",
+                        staticmethod(lambda *a, **k: QMessageBox.Yes))
+    tab.w("_var_remove").click()
+    assert not _vset(tab).variables
+
+    tab.w("_var_undo").click()
+
+    assert [v.name for v in _vset(tab).variables] == ["Dose"]
+
+
+def test_undo_is_dead_until_there_is_something_to_undo(tab):
+    """A live button that does nothing is the failure this tab's own code
+    names."""
+    assert not tab.w("_var_undo").isEnabled()
+    assert "Nothing to undo" in tab.w("_var_undo").toolTip()
+
+    _dose_tab(tab)
+
+    assert tab.w("_var_undo").isEnabled()
+
+
+def test_undo_is_one_step_and_says_it_ran(tab):
+    """One deep on purpose: the expensive mistake here is a single button, not a
+    session's worth of edits, and a second press must not walk further back."""
+    variable_id = _dose_tab(tab)
+    tab.w("_var_fill_apply").click()
+    tab.w("_var_undo").click()
+    assert tab.w("_var_message").text() == "Undone."
+    after_one = _assigned(tab, variable_id)
+
+    tab.w("_var_undo").click()
+
+    assert _assigned(tab, variable_id) == after_one
+    assert not tab.w("_var_undo").isEnabled()
+
+
+def test_a_dataset_swap_drops_the_undo_with_the_variables_it_belonged_to(tab):
+    """Carried across, it would sit under a live Undo offering the previous
+    plate's doses over the current one's numbers."""
+    from well_viewer.persistence.sample_variables import load_from_data_dir
+
+    _dose_tab(tab)
+    tab.w("_var_fill_apply").click()
+    assert tab.ctx.state.selection.variables_undo is not None
+
+    tab.ctx.state.dataset.data_dir = "/somewhere/else"
+    tab.ctx.state.dataset.pipeline_info = {}
+    load_from_data_dir(tab.ctx)
+
+    assert tab.ctx.state.selection.variables_undo is None
+
+
+# ── a refused edit says it was refused ──────────────────────────────────────
+
+def test_a_duplicate_value_says_it_was_not_added(tab):
+    """``add_value`` drops it, which is the right rule delivered in silence: the
+    entry cleared itself and nothing appeared, so a user who typed a dose they
+    already had saw the same screen as one whose button was broken."""
+    _dose_tab(tab)
+    tab.w("_var_value_entry").setText("1")
+    tab.w("_var_value_add").click()
+
+    assert [v.label for v in _vset(tab).variables[0].values] == ["0", "1"]
+    assert "Already there" in tab.w("_var_message").text()
+
+
+def test_the_ones_that_were_new_are_still_added(tab):
+    """A comma list part-refused must not be refused whole."""
+    _dose_tab(tab)
+    tab.w("_var_value_entry").setText("1, 3")
+    tab.w("_var_value_add").click()
+
+    assert [v.label for v in _vset(tab).variables[0].values] == ["0", "1", "3"]
+    assert "1" in tab.w("_var_message").text()
+
+
+def test_a_rename_onto_another_label_says_why_the_row_snapped_back(tab):
+    _dose_tab(tab)
+    values = tab.w("_var_values")
+    values.item(0).setText("1")               # already taken by the second row
+
+    assert [v.label for v in _vset(tab).variables[0].values] == ["0", "1"]
+    assert "already has a value" in tab.w("_var_message").text()
+
+
+def test_a_variable_renamed_onto_a_taken_name_says_it_was_numbered(tab):
+    """``unique_name`` turns a second ``Dose`` into ``Dose 2`` — renaming beats
+    refusing — but the field was repainted from the model and the user's word was
+    rewritten with nothing said about it."""
+    _dose_tab(tab)
+    tab.w("_var_add").click()
+    tab.w("_var_name").setText("Dose")
+    tab.w("_var_name").editingFinished.emit()
+
+    assert [v.name for v in _vset(tab).variables] == ["Dose", "Dose 2"]
+    assert "already called" in tab.w("_var_message").text()
+
+
+# ── the buttons that could not act were never greyed ────────────────────────
+
+def test_the_value_buttons_are_dead_with_no_value_selected(tab):
+    tab.w("_var_add").click()                 # a variable with no values at all
+
+    for name in ("_var_value_remove", "_var_value_up", "_var_value_down"):
+        assert not tab.w(name).isEnabled(), name
+
+
+def test_the_move_buttons_are_dead_at_the_end_they_cannot_move_towards(tab):
+    """The clamp is real and was invisible: pressing ▲ on the first row did
+    nothing and said nothing."""
+    _dose_tab(tab, labels="0, 1, 3")
+    values = tab.w("_var_values")
+
+    values.setCurrentRow(0)
+    assert not tab.w("_var_value_up").isEnabled()
+    assert tab.w("_var_value_down").isEnabled()
+
+    values.setCurrentRow(2)
+    assert tab.w("_var_value_up").isEnabled()
+    assert not tab.w("_var_value_down").isEnabled()
+
+
+# ── the header says whose marks are on the plate ────────────────────────────
+
+def test_the_header_names_the_variable_the_plate_is_showing(tab):
+    """One rail selection decides the definition on screen, the chips' target,
+    the plate's colours and what a fill rewrites — and the answer was written
+    down nowhere but the rail's own highlight."""
+    _dose_tab(tab)
+    tab.w("_var_unit").setText("µM")
+    tab.w("_var_unit").editingFinished.emit()
+
+    assert tab.w("_var_showing").text() == "Dose (µM) as colour"
+
+
+def test_the_header_names_the_overlay_too(tab):
+    dose = _dose_tab(tab)
+    tab.w("_var_add").click()
+    tab.w("_var_name").setText("Line")
+    tab.w("_var_name").editingFinished.emit()
+    combo = tab.w("_var_overlay")
+    combo.setCurrentIndex(combo.findData(dose))
+
+    assert tab.w("_var_showing").text() == "Line as colour   ·   Dose as letters"
+
+
+def test_the_plate_wears_a_rim_on_the_wells_you_picked(tab):
+    """The tab has spent the fill on data, so without this a selected assigned
+    well and an unselected one are the same pixels — which is the tab's central
+    gesture having no feedback at all.
+
+    Asserted at the plate, on the flag the painter reads, because a controller
+    that computed the right thing and never told the widget is exactly the bug
+    this repo has shipped before.
+    """
+    assert tab.w("_var_plate").selectionRim() is True
+
+
+def test_a_value_row_wears_the_ink_its_wells_will_take(tab):
+    """The definition list was the one surface on the tab with no colour in it.
+
+    The plate and the chips were inked and the list was plain text, so "the
+    third row of my list" and "the yellow wells" could only be connected by
+    counting. It also makes the reorder buttons honest: the ink is indexed by
+    position, so moving a value changes its colour here, on the plate and in
+    every plot.
+
+    Asserted as the swatch matching ``value_colors`` for that value, not as
+    "the row has an icon" — a row wearing the wrong colour would satisfy the
+    weaker version and be worse than a row wearing none.
+    """
+    from well_viewer.domain.variable_series import value_colors
+
+    _dose_tab(tab, labels="0, 1, 3")
+    variable = _vset(tab).variables[0]
+    colours = value_colors(variable)
+    values = tab.w("_var_values")
+
+    for row, value in enumerate(variable.values):
+        icon = values.item(row).icon()
+        assert not icon.isNull(), f"row {row} carries no swatch"
+        assert _dominant_colour(icon) == _rgb(colours[value.id]), (
+            f"row {row} wears an ink that is not its value's")
+
+
+def _rgb(colour):
+    from PySide6.QtGui import QColor
+
+    return QColor(colour).getRgb()[:3]
+
+
+def _dominant_colour(icon):
+    """The commonest opaque colour in an icon, which for a filled square is its
+    fill."""
+    from collections import Counter
+
+    image = icon.pixmap(11, 11).toImage()
+    counts = Counter(
+        image.pixelColor(x, y).getRgb()[:3]
+        for y in range(image.height()) for x in range(image.width())
+        if image.pixelColor(x, y).alpha() > 200)
+    return counts.most_common(1)[0][0] if counts else None
+
+
+def test_the_chip_row_wraps_rather_than_running_off_the_page(tab):
+    """A twelve-value dose series is one row of a plate and an ordinary thing to
+    define. In a ``QHBoxLayout`` the last chips were pushed off the right edge
+    with nothing to scroll and no sign they existed."""
+    from widgets.flow_layout import FlowLayout
+
+    _dose_tab(tab, labels="0, 0.1, 0.3, 1, 3, 10, 30, 100, 300, 1000")
+    assert isinstance(tab.w("_var_chips").layout(), FlowLayout)
+    assert len(_chips(tab)) == 11          # ten values plus No value

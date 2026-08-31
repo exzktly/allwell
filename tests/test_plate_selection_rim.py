@@ -106,6 +106,63 @@ def test_the_value_colour_survives_the_rim(qtbot):
         f"only {kept} of {len(pixels)} pixels still read as the value's ink")
 
 
+def test_selecting_an_uncoloured_well_does_not_ink_it_like_a_value(qtbot):
+    """The other half of the same defect, and the subtler one.
+
+    Selection normally *lights* a well, taking its base from the rank-cycled
+    trace palette — whose first entry is ``#6AB2FB``, byte for byte the first
+    entry a host inks its values from. So on a plate where colour means "this is
+    the value this well holds", picking an unannotated well painted it the exact
+    colour of a value nobody had given it. With the rim on, selection is said by
+    the rim and the well stays recessed.
+
+    Asserted as "not that ink", against the specific ink it used to take, and at
+    a tolerance tight enough to exclude ``accent``. The first version of this
+    allowed ±60 per channel, which spans the 40 that separates ``#6AB2FB`` from
+    the accent ``#6B8AFD`` — so it counted the ring and the recess tint as value
+    ink and failed against the *fixed* painter. The measurement was wrong, not
+    the code.
+    """
+    ink = QColor(_VALUE_INK)
+    # A02 carries no colour override — only A01 does — so with the rim on it
+    # must stay recessed, and with the rim off it takes traces[0], which is that
+    # same hex. The pair is what makes right and wrong differ here.
+    with_rim = sum(1 for p in _well_pixels(_plate(qtbot, rim=True,
+                                                  selected=["A02"]), col=1)
+                   if _near(p, ink, 25))
+    without = sum(1 for p in _well_pixels(_plate(qtbot, rim=False,
+                                                 selected=["A02"]), col=1)
+                  if _near(p, ink, 25))
+    assert without > 50, (
+        "the fixture is not reproducing the defect: an uncoloured selected well "
+        "is meant to be lit from traces[0], which is the value palette's own "
+        "first entry")
+    assert with_rim < 10, (
+        f"{with_rim} pixels of a selected but unassigned well read as the first "
+        f"value's ink; selection is lighting it from the value palette")
+
+
+def test_a_selected_unassigned_well_still_shows_its_ring(qtbot):
+    """Both marks, on one well, at once.
+
+    A well can be unassigned *and* selected — the commonest well there is on a
+    plate someone is halfway through filling — so the two marks are at two radii
+    and must not have replaced one another.
+    """
+    ink = QColor(theme.Colors.accent)
+    plain = _plate(qtbot, rim=True, selected=[])
+    plain.setWellRings(["A02"])
+    both = _plate(qtbot, rim=True, selected=["A02"])
+    both.setWellRings(["A02"])
+    ringed = sum(1 for p in _well_pixels(plain, col=1) if _near(p, ink, 25))
+    ringed_and_picked = sum(1 for p in _well_pixels(both, col=1)
+                            if _near(p, ink, 25))
+    assert ringed > 0, "the ring is not being drawn at all"
+    # The ring survives the rim: the rim is inset, the ring sits outside the
+    # body, so selecting a ringed well must not cost it its ring.
+    assert ringed_and_picked > ringed * 0.5
+
+
 def test_the_rim_is_off_unless_a_host_asks_for_it(qtbot):
     """Every other plate in the app is unchanged.
 

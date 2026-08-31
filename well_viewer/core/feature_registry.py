@@ -137,6 +137,17 @@ class FeatureDescriptor:
     # CDFs from the selected wells, Well Labels' Add Prefix / Add Suffix apply to
     # them; Ratios and Pipeline Info do not.
     reads_well_selection: bool = False
+    # Whether this sub-tab puts a plate of its own on the page, so the rail's
+    # sample frame is *hidden* while it shows rather than greyed.
+    #
+    # Greying the rail plate is right for a tab that simply asks nothing of it:
+    # the rail visibly emptying as you move between sibling tabs reads as
+    # something breaking, and a live-looking plate that ignores clicks is worse
+    # than a grey one. Neither argument survives a tab that draws its own plate.
+    # Variables does, and its two plates said different things about one screen
+    # — the rail's coloured by group membership, its own by variable value —
+    # which is the hazard ``groups/panel_view`` guards its commit against.
+    owns_plate: bool = False
     # Whether this sub-tab's frame takes a gutter. The two editable grids want
     # one; the report and the read-only panes paint to their own edges. The
     # descriptor carries the *decision* and the container supplies the spacing

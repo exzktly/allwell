@@ -569,6 +569,9 @@ class _PlateGrid(QWidget):
             self._markers.clear()
             self.update()
 
+    def selection_rim(self) -> bool:
+        return self._selection_rim
+
     def set_selection_rim(self, on: bool) -> None:
         """Whether a selected well wears a rim over its fill.
 
@@ -1130,8 +1133,94 @@ class _PlateGrid(QWidget):
         p.setPen(QPen(with_alpha(theme.Colors.ink_light, 0.30), max(1.0, wr.width() * 0.06)))
         p.drawArc(hl, 20 * 16, 140 * 16)
 
-    def _paint_lit(self, p: QPainter, wr: QRectF, base: QColor, hovered: bool,
-                   *, selected: bool = False) -> None:
+    def _paint_well(self, p: QPainter, key, wr: QRectF, ri: int, ci: int,
+                    traces, path_seq) -> None:
+        """One enabled well: its body, then the marks laid over it.
+
+        Lifted out of ``paintEvent`` because that method was carrying the
+        headers, the well grid, the rubber band, the path and the disabled
+        scrim, and a well is the one part of it with a decision tree of its own.
+        The four layers here are independent by design — the body says what the
+        well *is*, and the rim, the ring and the glyph each say something a host
+        wants said *about* it, at their own radius.
+        """
+        c = theme.Colors
+        hovered = (
+            self._hover_cell == key
+            or (self._rc_selectable and (self._hover_row == ri or self._hover_col == ci))
+        )
+        group_color = self._colors.get(key)
+        in_selection = key in self._selected
+        # Two visual states for wells with data:
+        #   • selected → raised ``_paint_lit`` (group colour if set, else the
+        #     rank-cycled trace colour).
+        #   • unselected → recessed ``_paint_depressed`` with a muted tint
+        #     (group colour if set, else the app's accent) so the well always
+        #     reads as a faint hue rather than a dark recess.
+        # A well showing progress is drawn AS the dial — the pie is the well
+        # body, not something laid over one. Falls through to the marker glyph
+        # below like any other well.
+        frac = self._fractions.get(key)
+        # A well on the acquisition path is lit like a selected one — the path
+        # *is* this plate's selection when the model is ordered, and it carries
+        # its visit number below.
+        on_path = self._selection_model == "path" and key in path_seq
+        # With the rim on, selection is said by the rim alone and never by the
+        # fill. Lighting an uncoloured selected well hands it ``traces[rank]`` —
+        # whose first entries ARE the palette a host inks its values from,
+        # ``#6AB2FB`` in both — so selecting an unannotated well painted it the
+        # exact colour of a value it had not been given. Left recessed it goes
+        # on reading "no value", which is the true thing about it, and wears the
+        # rim to say it is picked.
+        lit = ((in_selection and not self._selection_rim) or on_path
+               or (self._colored_wells_lit and group_color is not None))
+        if frac is not None:
+            self._paint_fraction(
+                p, wr,
+                group_color if group_color is not None else QColor(c.accent),
+                frac, hovered)
+        elif lit:
+            self._paint_lit(p, wr, self._lit_base(key, group_color, on_path,
+                                                  traces), hovered)
+        else:
+            tint = group_color if group_color is not None else QColor(c.accent)
+            self._paint_depressed(p, wr, hovered, tint=tint)
+
+        # After both painters, so a recessed well can wear it too.
+        if self._selection_rim and in_selection:
+            self._paint_selection_rim(p, wr)
+        if key in self._rings:
+            self._paint_ring(p, wr)
+
+        glyph = self._markers.get(key)
+        if on_path and not glyph:
+            # The visit number is derived from the path's own order, so a host
+            # never has to keep a parallel marker map in sync with it. An
+            # explicit marker still wins — a host that has something else to say
+            # about the well said it deliberately.
+            self._paint_visit_number(p, wr, str(path_seq[key]))
+        elif glyph:
+            f = QFont(self.font())
+            f.setPixelSize(max(7, int(wr.height() * 0.62)))
+            p.setFont(f)
+            # contrast against the well fill (coloured wells are bright)
+            p.setPen(QColor(c.ink_dark if group_color is not None else c.text_primary))
+            p.drawText(wr, int(Qt.AlignCenter), glyph)
+            p.setFont(self.font())
+
+    def _lit_base(self, key, group_color, on_path: bool, traces) -> QColor:
+        """The ink a lit well takes, in priority order."""
+        if group_color is not None:
+            return group_color
+        if on_path:
+            # One hue for the whole path: a visit order is a route, not eight
+            # unrelated series, so the rank-cycled trace palette would say
+            # something the data doesn't.
+            return QColor(theme.Colors.accent)
+        return QColor(traces[self._selected[key] % len(traces)])
+
+    def _paint_lit(self, p: QPainter, wr: QRectF, base: QColor,
+                   hovered: bool) -> None:
         c = theme.Colors
         base = QColor(base)
         p.setBrush(QBrush(self._sphere_gradient(wr, base)))
@@ -1139,8 +1228,6 @@ class _PlateGrid(QWidget):
                       max(1.0, wr.width() * 0.04)))
         p.drawEllipse(wr)
         self._paint_specular(p, wr)
-        if selected:
-            self._paint_selection_rim(p, wr)
 
     @staticmethod
     def _paint_selection_rim(p: QPainter, wr: QRectF) -> None:
@@ -1162,6 +1249,13 @@ class _PlateGrid(QWidget):
         ``text_primary`` rather than ``accent``: the accent is the ring's, and a
         near-white rim is the one ink in the palette that no value can take, so
         it cannot be read as one more category. Two marks, two inks, two radii.
+
+        Turning this on also stops selection *lighting* an uncoloured well, in
+        the paint loop above. Colour on such a plate means "this is the value the
+        well holds", and the rank-cycled trace palette a lit selection would
+        reach for opens with the same ``#6AB2FB`` a host's first value does — so
+        picking an unannotated well used to paint it the exact colour of a value
+        nobody had given it.
         """
         r = QRectF(wr).adjusted(wr.width() * 0.05, wr.height() * 0.05,
                                 -wr.width() * 0.05, -wr.height() * 0.05)
@@ -1387,68 +1481,7 @@ class _PlateGrid(QWidget):
                     if key in self._rings:
                         self._paint_ring(p, wr)
                     continue
-                hovered = (
-                    self._hover_cell == key
-                    or (self._rc_selectable and (self._hover_row == ri or self._hover_col == ci))
-                )
-                group_color = self._colors.get(key)
-                in_selection = key in self._selected
-                # Two visual states for wells with data:
-                #   • selected → raised ``_paint_lit`` (group colour if
-                #     set, else the rank-cycled trace colour).
-                #   • unselected → recessed ``_paint_depressed`` with a
-                #     muted tint (group colour if set, else the app's
-                #     accent) so the well always reads as a faint hue
-                #     rather than a dark recess.
-                # A well showing progress is drawn AS the dial — the pie is the
-                # well body, not something laid over one. Falls through to the
-                # marker glyph below like any other well.
-                frac = self._fractions.get(key)
-                # A well on the acquisition path is lit like a selected one —
-                # the path *is* this plate's selection when the model is
-                # ordered, and it carries its visit number below.
-                on_path = self._selection_model == "path" and key in path_seq
-                lit = (in_selection or on_path
-                       or (self._colored_wells_lit and group_color is not None))
-                if frac is not None:
-                    self._paint_fraction(
-                        p, wr,
-                        group_color if group_color is not None else QColor(c.accent),
-                        frac, hovered)
-                elif lit:
-                    if group_color is not None:
-                        base = group_color
-                    elif on_path:
-                        # One hue for the whole path: a visit order is a route,
-                        # not eight unrelated series, so the rank-cycled trace
-                        # palette would say something the data doesn't.
-                        base = QColor(c.accent)
-                    else:
-                        base = QColor(traces[self._selected[key] % len(traces)])
-                    self._paint_lit(p, wr, base, hovered,
-                                    selected=self._selection_rim and in_selection)
-                else:
-                    tint = group_color if group_color is not None else QColor(c.accent)
-                    self._paint_depressed(p, wr, hovered, tint=tint)
-
-                if key in self._rings:
-                    self._paint_ring(p, wr)
-
-                glyph = self._markers.get(key)
-                if on_path and not glyph:
-                    # The visit number is derived from the path's own order, so
-                    # a host never has to keep a parallel marker map in sync
-                    # with it. An explicit marker still wins — a host that has
-                    # something else to say about the well said it deliberately.
-                    self._paint_visit_number(p, wr, str(path_seq[key]))
-                elif glyph:
-                    f = QFont(self.font())
-                    f.setPixelSize(max(7, int(wr.height() * 0.62)))
-                    p.setFont(f)
-                    # contrast against the well fill (coloured wells are bright)
-                    p.setPen(QColor(c.ink_dark if group_color is not None else c.text_primary))
-                    p.drawText(wr, int(Qt.AlignCenter), glyph)
-                    p.setFont(self.font())
+                self._paint_well(p, key, wr, ri, ci, traces, path_seq)
 
         # Rubber-band rectangle while a "rect" drag-select is in progress.
         if (self._drag_mode == "rect" and self._rect_start is not None
@@ -1658,7 +1691,11 @@ class WellPlateSelector(QWidget):
         self._grid.clear_well_markers()
 
     def setSelectionRim(self, on: bool) -> None:
+        """See ``_PlateGrid.set_selection_rim``."""
         self._grid.set_selection_rim(on)
+
+    def selectionRim(self) -> bool:
+        return self._grid.selection_rim()
 
     def setColoredWellsLit(self, on: bool) -> None:
         """Paint wells that have an explicit colour override in the raised/lit

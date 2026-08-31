@@ -1502,6 +1502,15 @@ list set the order, which is the order a fill walks and the direction a dose axi
 runs, so it is worth getting right — each row carries the colour its wells will
 take, so you can watch a reorder change the plate.
 
+**No colour means two things at once.** Every value on the plate gets its
+own ink, across variables and not just within one — the second variable's
+values carry on from where the first one's left off, rather than both
+starting at the same blue. Previously `HeLa` and `0 µM` could be the same
+colour, one in the chip row and the other on the plate a click later. The
+price of that is worth knowing: adding or removing a value on one variable
+shifts the colours of every variable below it in the list. Nothing about
+your data changes, and you see it happen.
+
 **Text or Number.** Number is what lets a variable be a plot's x axis, and it is
 the only type that takes a unit. You can switch at any time and your values are
 re-read, not retyped. A value that is not a number — a `vehicle` row in a dose

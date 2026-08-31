@@ -105,16 +105,23 @@ def dataset_wells(ctx) -> list[str]:
     return sorted(getattr(ctx.state.dataset, "well_paths", {}) or {})
 
 
-def _value_colours(variable) -> dict:
+def _value_colours(ctx, variable) -> dict:
     """``value id -> colour`` for this tab's chips, rows and plate.
 
-    **Through** ``domain/variable_series.value_colors``, which is where the
-    plots read the same answer. It used to be a second implementation here — the
-    same palette walked with a stride of seven rather than one — and the two
+    **Through** ``domain/variable_series.colors_for``, which is where the plots
+    read the same answer. It used to be a second implementation here — the same
+    palette walked with a stride of seven rather than one — and the two
     disagreed about every value but the first: a dose that inked green on a bar
     chart painted purple on the plate that assigned it.
+
+    The **set**, not the variable alone: no two values on a plate may share an
+    ink, and which inks are free is a fact about the whole set. Indexed per
+    variable, `Cell line`'s two values and `Dose`'s first two took the same two
+    colours.
     """
-    return vseries.value_colors(variable)
+    vid = getattr(variable, "id", "")
+    return vseries.colors_for(
+        getattr(ctx.state.selection, "variables", None), vid)
 
 
 # ── redraw ──────────────────────────────────────────────────────────────────
@@ -230,7 +237,7 @@ def _paint_definition(ctx, variable) -> None:
 
     values = _widget(ctx, "_var_values")
     if values is not None:
-        colours = _value_colours(variable)
+        colours = _value_colours(ctx, variable)
         kept_value = selected_value_id(ctx)
         values.blockSignals(True)
         values.clear()
@@ -719,7 +726,7 @@ def _paint_chips(ctx, variable) -> None:
         if widget is not None:
             widget.setParent(None)
 
-    colours = _value_colours(variable)
+    colours = _value_colours(ctx, variable)
     for value in variable.values:
         chip = value_chip(variable.display_label(value.id), value.id, host,
                           swatch=colours.get(value.id))
@@ -766,7 +773,7 @@ def _paint_plate_from(ctx, plate, vset, variable, wells) -> None:
     plate.clearWellRings()
     plate.setColoredWellsLit(True)
 
-    colours = _value_colours(variable)
+    colours = _value_colours(ctx, variable)
     for well in wells:
         value_id = vset.value_id_for(variable.id, well)
         if value_id in colours:

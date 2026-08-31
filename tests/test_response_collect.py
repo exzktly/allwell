@@ -640,7 +640,7 @@ def test_the_fit_is_told_what_the_user_called_the_x_axis(stub_stats):
 
     fits = rc.fit_curves(data, rcompute.FIT_4PL)
 
-    reason = fits[24.0].reason
+    reason = fits[(24.0, "")].reason
     assert "Temperature" in reason, reason
     assert "dose" not in reason.lower(), reason
 
@@ -832,3 +832,377 @@ def test_an_ungrouped_plate_with_nothing_lit_still_says_so(stub_stats):
 
     assert not data.has_points() and data.placed == 0
     assert "select wells on the plate" in rc.empty_reason(data)
+
+
+# ── several curves on one figure ────────────────────────────────────────────
+#
+# Without a series variable every member landed on one curve, sorted by x, so
+# two cell lines each given a dose series were drawn as a single line doubling
+# back at every dose — a zig-zag that reads as a curve, one legend entry, and
+# with a fit on, one EC50 fitted across both conditions.
+#
+# The fixtures below give the two series *different shapes* (one responds, one
+# is flat) and put them at the same doses. That is deliberate: with both series
+# responding identically, a collector that ignored the split entirely would
+# produce points a lenient assertion could not tell from the right answer.
+
+def _two_series_ctx(stub_stats, *, series_assignments=None):
+    # Four doses, not three: a 4PL has four parameters and declines outright
+    # with fewer distinct x values, so a three-dose fixture would test the
+    # refusal rather than the per-series fit.
+    means = {"H-lo": 10.0, "H-mid": 30.0, "H-hi": 75.0, "H-top": 92.0,
+             "U-lo": 20.0, "U-mid": 22.0, "U-hi": 21.0, "U-top": 20.5}
+    for (name, value) in means.items():
+        stub_stats[(name, 24.0)] = value
+    dose = _dose(("0.1", 0.1), ("1", 1.0), ("10", 10.0), ("100", 100.0))
+    line = sv.Variable(
+        id="cl", name="Cell line", kind=sv.TEXT, unit="",
+        values=(sv.VariableValue("hela", "HeLa", None),
+                sv.VariableValue("u2os", "U2OS", None)))
+    cells = series_assignments if series_assignments is not None else {
+        "A01": "hela", "A02": "hela", "A03": "hela", "A04": "hela",
+        "B01": "u2os", "B02": "u2os", "B03": "u2os", "B04": "u2os"}
+    vset = sv.VariableSet(
+        variables=(dose, line),
+        assignments={"dose": {"A01": "d0", "A02": "d1", "A03": "d2",
+                              "A04": "d3", "B01": "d0", "B02": "d1",
+                              "B03": "d2", "B04": "d3"},
+                     "cl": cells})
+    ctx = _ctx(wells=["A01", "A02", "A03", "A04", "B01", "B02", "B03", "B04"],
+               selections=_groups(("H-lo", ["A01"]), ("H-mid", ["A02"]),
+                                  ("H-hi", ["A03"]), ("H-top", ["A04"]),
+                                  ("U-lo", ["B01"]), ("U-mid", ["B02"]),
+                                  ("U-hi", ["B03"]), ("U-top", ["B04"])))
+    ctx.state.selection.variables = vset
+    return ctx
+
+
+def test_without_a_series_every_member_is_still_one_curve(stub_stats):
+    """The existing behaviour, pinned so the feature cannot change it."""
+    ctx = _two_series_ctx(stub_stats)
+    data = rc.collect_response(ctx, "dose", [24.0])
+    assert len(data.curves) == 1
+    assert len(data.curves[0].points) == 8
+    assert data.series_name == ""
+
+
+def test_a_series_variable_splits_the_members_into_one_curve_each(stub_stats):
+    """The reported gap: two conditions, two curves, not one zig-zag."""
+    ctx = _two_series_ctx(stub_stats)
+    data = rc.collect_response(ctx, "dose", [24.0], series_id="cl")
+
+    assert data.series_name == "Cell line"
+    assert [c.key for c in data.curves] == [(24.0, "hela"), (24.0, "u2os")]
+    assert [c.series_label for c in data.curves] == ["HeLa", "U2OS"]
+    # The values, not the counts: a split that put the wrong members on each
+    # curve produces two three-point curves just as happily.
+    assert [(p.x, p.y) for p in data.curves[0].points] == [
+        (0.1, 10.0), (1.0, 30.0), (10.0, 75.0), (100.0, 92.0)]
+    assert [(p.x, p.y) for p in data.curves[1].points] == [
+        (0.1, 20.0), (1.0, 22.0), (10.0, 21.0), (100.0, 20.5)]
+
+
+def test_each_series_is_fitted_on_its_own(stub_stats):
+    """One model, one EC50 per curve — which is why they are comparable.
+
+    Keyed by ``(timepoint, series)``: a timepoint-keyed dict would hand the
+    second series' fit to the first, drawing one curve with the other's fitted
+    line and EC50.
+    """
+    ctx = _two_series_ctx(stub_stats)
+    data = rc.collect_response(ctx, "dose", [24.0], series_id="cl")
+    fits = rc.fit_curves(data, rcompute.FIT_4PL)
+
+    assert set(fits) == {(24.0, "hela"), (24.0, "u2os")}
+    assert {f.model for f in fits.values()} == {"4pl"}
+    # Each fit's plateaus come from *its own* points — HeLa climbs 10 → 92,
+    # U2OS sits flat around 21. Asserted as values rather than as "the two
+    # differ", because a pooled fit filed under both keys also differs from
+    # nothing and would satisfy any weaker check; these numbers can only come
+    # from the curve each key names.
+    hela, u2os = fits[(24.0, "hela")], fits[(24.0, "u2os")]
+    assert hela.ok and u2os.ok
+    assert hela.top == pytest.approx(92.0, rel=0.15)
+    assert u2os.top == pytest.approx(21.0, rel=0.15)
+    # The span, not the bottom: a 4PL puts its lower asymptote at or below the
+    # lowest dose measured, so HeLa's bottom is ~6.9 rather than the 10.0 its
+    # lowest point reads. The span is what separates a responder from a flat
+    # line and is what a pooled fit across both series could not produce.
+    assert hela.top - hela.bottom > 50.0
+    assert u2os.top - u2os.bottom < 5.0
+
+
+def test_the_series_follow_the_variables_own_value_order(stub_stats):
+    """Not alphabetical, and not well order — the order the user arranged.
+
+    U2OS is declared second, so it is second here even though its wells sort
+    after HeLa's either way; the check that bites is the reversed variable
+    below, where alphabetical and declared order disagree.
+    """
+    ctx = _two_series_ctx(stub_stats)
+    vset = ctx.state.selection.variables
+    flipped = sv.Variable(
+        id="cl", name="Cell line", kind=sv.TEXT, unit="",
+        values=(sv.VariableValue("u2os", "U2OS", None),
+                sv.VariableValue("hela", "HeLa", None)))
+    ctx.state.selection.variables = sv.VariableSet(
+        variables=(vset.by_id("dose"), flipped), assignments=vset.assignments)
+
+    data = rc.collect_response(ctx, "dose", [24.0], series_id="cl")
+    assert [c.series_label for c in data.curves] == ["U2OS", "HeLa"]
+
+
+def test_a_member_the_series_variable_never_reached_gets_its_own_curve(stub_stats):
+    """Named, not dropped and not folded into a neighbour.
+
+    A member with a dose but no cell line is real data. Dropping it would take
+    a measured point off the figure over an annotation gap, and folding it into
+    either series would assert it was that condition.
+    """
+    ctx = _two_series_ctx(stub_stats, series_assignments={
+        "A01": "hela", "A02": "hela", "A03": "hela", "A04": "hela",
+        "B01": "u2os"})
+    data = rc.collect_response(ctx, "dose", [24.0], series_id="cl")
+
+    labels = [c.series_label for c in data.curves]
+    assert "no Cell line" in labels, labels
+    stray = next(c for c in data.curves if c.series_label == "no Cell line")
+    assert {p.member for p in stray.points} == {"U-mid", "U-hi", "U-top"}
+
+
+def test_a_series_on_the_x_variable_is_declined(stub_stats):
+    """One curve per dose, each one point long, is not a figure."""
+    ctx = _two_series_ctx(stub_stats)
+    data = rc.collect_response(ctx, "dose", [24.0], series_id="dose")
+    assert len(data.curves) == 1 and data.series_name == ""
+
+
+# ── the Spread: FOV toggle, which the tab built and never read ──────────────
+
+def _fov_ctx(monkeypatch, *, well_stats, fov_stats):
+    """A one-well plate whose two stats producers disagree.
+
+    They must disagree, or the test cannot tell which one the collector called
+    — a fixture where both return the same spread passes against the bug.
+    """
+    import well_viewer.domain.stats_compute as sc
+    monkeypatch.setattr(sc, "compute_rep_stats",
+                        lambda *a, **k: well_stats)
+    monkeypatch.setattr(sc, "compute_rep_per_fov_stats",
+                        lambda *a, **k: fov_stats)
+    import well_viewer.core.channel_state_controller as csc
+    monkeypatch.setattr(csc, "on_cutoff_for_column", lambda *a, **k: 0.0)
+    return _ctx(wells=["A01"], variable=_dose(("1", 1.0)),
+                assignments={"dose": {"A01": "d0"}},
+                selections=_groups(("solo", ["A01"])))
+
+
+def test_one_well_with_fov_spread_gets_an_error_bar(monkeypatch):
+    """The report: a single well, Spread: FOV on, and no whisker drawn.
+
+    Across wells a one-well member has one replicate and no spread. Across
+    FOVs it has as many replicates as it has fields, which is exactly what the
+    toggle asks for — and the collector called the well producer regardless.
+    """
+    ctx = _fov_ctx(monkeypatch,
+                   well_stats=(10.0, float("nan"), 0.5, float("nan")),
+                   fov_stats=(10.0, 2.5, 0.5, 0.05))
+    ctx.state.plot.use_fov_replicates = True
+
+    data = rc.collect_response(ctx, "dose", [24.0])
+
+    point = data.curves[0].points[0]
+    assert point.err == 2.5, "the per-FOV spread never reached the point"
+    assert data.solo_spread == 0
+    assert "no error bar" not in rc.omission_caption(data)
+
+
+def test_with_the_toggle_off_the_well_producer_is_still_used(monkeypatch):
+    """The default is unchanged — the toggle is what selects the other one."""
+    ctx = _fov_ctx(monkeypatch,
+                   well_stats=(10.0, 1.25, 0.5, 0.02),
+                   fov_stats=(10.0, 2.5, 0.5, 0.05))
+    ctx.state.plot.use_fov_replicates = False
+
+    data = rc.collect_response(ctx, "dose", [24.0])
+    assert data.curves[0].points[0].err == 1.25
+
+
+def test_a_missing_fov_spread_is_captioned_as_a_lone_fov(monkeypatch):
+    """One FOV has no spread either, and the caption must say which unit.
+
+    Blaming "a single replicate" with the FOV toggle on sends the user to add
+    another well when what they need is another field.
+    """
+    ctx = _fov_ctx(monkeypatch,
+                   well_stats=(10.0, 1.25, 0.5, 0.02),
+                   fov_stats=(10.0, float("nan"), 0.5, float("nan")))
+    ctx.state.plot.use_fov_replicates = True
+
+    data = rc.collect_response(ctx, "dose", [24.0])
+    caption = rc.omission_caption(data)
+    assert data.solo_spread == 1
+    assert "a single FOV has no spread" in caption, caption
+
+
+# ── fraction above threshold on y ───────────────────────────────────────────
+
+def test_the_curves_can_plot_the_fraction_above_threshold(monkeypatch):
+    """The third return value of the stats call, which the tab used to discard.
+
+    The mean and the fraction are deliberately different numbers here, so a
+    collector that ignored the metric and drew the mean cannot pass.
+    """
+    ctx = _fov_ctx(monkeypatch,
+                   well_stats=(10.0, 1.0, 0.42, 0.03),
+                   fov_stats=(10.0, 2.0, 0.42, 0.05))
+
+    means = rc.collect_response(ctx, "dose", [24.0], y_metric=rc.Y_MEAN)
+    fracs = rc.collect_response(ctx, "dose", [24.0], y_metric=rc.Y_FRACTION)
+
+    assert means.curves[0].points[0].y == 10.0
+    assert fracs.curves[0].points[0].y == 0.42
+    assert fracs.curves[0].points[0].err == 0.03
+    assert fracs.y_metric == rc.Y_FRACTION
+
+
+def test_an_unknown_y_metric_falls_back_to_the_mean(monkeypatch):
+    """A hand-edited saved plot must not draw an axis nobody can name."""
+    ctx = _fov_ctx(monkeypatch,
+                   well_stats=(10.0, 1.0, 0.42, 0.03),
+                   fov_stats=(10.0, 2.0, 0.42, 0.05))
+    data = rc.collect_response(ctx, "dose", [24.0], y_metric="nonsense")
+    assert data.y_metric == rc.Y_MEAN
+    assert data.curves[0].points[0].y == 10.0
+
+
+def test_a_fraction_that_was_never_computed_is_a_gap_not_a_zero(monkeypatch):
+    """§7: a fraction of 0.0 means "nothing above the cutoff" and is a result.
+
+    A member with no fraction must leave a gap in the curve, not a point on the
+    floor that reads as a treatment which killed everything.
+    """
+    ctx = _fov_ctx(monkeypatch,
+                   well_stats=(10.0, 1.0, float("nan"), float("nan")),
+                   fov_stats=(10.0, 2.0, float("nan"), float("nan")))
+    data = rc.collect_response(ctx, "dose", [24.0], y_metric=rc.Y_FRACTION)
+    assert not data.has_points(), "an uncomputed fraction was drawn as a point"
+
+
+def test_a_fraction_of_zero_is_drawn_because_it_is_a_measurement(monkeypatch):
+    """The other half of the same rule, and the one a NaN-vs-zero slip breaks."""
+    ctx = _fov_ctx(monkeypatch,
+                   well_stats=(10.0, 1.0, 0.0, 0.01),
+                   fov_stats=(10.0, 2.0, 0.0, 0.01))
+    data = rc.collect_response(ctx, "dose", [24.0], y_metric=rc.Y_FRACTION)
+    assert data.curves[0].points[0].y == 0.0
+
+
+# ── which shortfall it actually was ─────────────────────────────────────────
+
+def test_a_per_fov_spread_that_is_undefined_blames_the_fov_not_a_control(
+        monkeypatch):
+    """The caption the FOV commit claimed to fix, on the path it enabled.
+
+    A two-well member whose per-FOV reduction yields no spread. The old split
+    asked ``n <= 1`` against the **well** count, so two wells meant "not a lone
+    replicate" and the shortfall was blamed on a control — on a plate that has
+    no control at all. The raw spread answers it directly in either mode.
+    """
+    import well_viewer.domain.stats_compute as sc
+    import well_viewer.core.channel_state_controller as csc
+    monkeypatch.setattr(csc, "on_cutoff_for_column", lambda *a, **k: 0.0)
+    monkeypatch.setattr(sc, "compute_rep_stats",
+                        lambda *a, **k: (10.0, 1.0, 0.5, 0.02))
+    monkeypatch.setattr(sc, "compute_rep_per_fov_stats",
+                        lambda *a, **k: (10.0, float("nan"), 0.5, float("nan")))
+
+    ctx = _ctx(wells=["A01", "A02"], variable=_dose(("1", 1.0)),
+               assignments={"dose": {"A01": "d0", "A02": "d0"}},
+               selections=_groups(("pair", ["A01", "A02"])))
+    ctx.state.plot.use_fov_replicates = True
+
+    data = rc.collect_response(ctx, "dose", [24.0])
+    caption = rc.omission_caption(data)
+
+    assert data.solo_spread == 1 and data.undefined_spread == 0
+    assert "a single FOV has no spread" in caption, caption
+    assert "control" not in caption, caption
+
+
+class _ZeroControl:
+    """A denominator whose control resolves fine and reads 0 at every t."""
+
+    def series_for(self, _member):
+        return "ctl", "ok", {24.0: (0.0, 0.0)}, {24.0: (0.0, 0.0)}, {}
+
+
+def test_a_control_that_reads_zero_says_so_rather_than_blaming_a_gap(
+        stub_stats, monkeypatch):
+    """The commonest control in a fraction experiment, and the worst caption.
+
+    A control with nothing above the cutoff has a fraction of 0.0. Dividing by
+    it is undefined, so the points blank — and the figure used to report "1
+    without a control", sending the user to fix a control assignment that is
+    already correct. The two have opposite fixes, so they are counted apart.
+    """
+    ctx = _ctx(wells=["A01"], variable=_dose(("1", 1.0)),
+               assignments={"dose": {"A01": "d0"}},
+               selections=_groups(("treated", ["A01"])))
+
+    def _blanking(points, _name):
+        return [(p[0], float("nan"), 0.0, float("nan"), *p[4:]) for p in points]
+
+    _blanking.denominators = _ZeroControl()
+    _blanking.op_ctrl = "ratio"
+    monkeypatch.setattr(rc, "_member_normaliser",
+                        lambda *a, **k: _blanking)
+
+    data = rc.collect_response(ctx, "dose", [24.0], y_metric=rc.Y_FRACTION)
+    caption = rc.omission_caption(data)
+
+    assert data.zero_control == [("treated", 24.0)], data.zero_control
+    assert data.control_gaps == [], data.control_gaps
+    assert "the control reads 0 there" in caption, caption
+    assert "without a control" not in caption, caption
+
+
+def test_a_control_that_never_resolved_is_still_a_gap(stub_stats, monkeypatch):
+    """The other half — the distinction is only worth drawing if both fire."""
+    ctx = _ctx(wells=["A01"], variable=_dose(("1", 1.0)),
+               assignments={"dose": {"A01": "d0"}},
+               selections=_groups(("treated", ["A01"])))
+
+    class _Unresolved:
+        def series_for(self, _member):
+            return None, None, {}, {}, {}
+
+    def _blanking(points, _name):
+        return [(p[0], float("nan"), 0.0, float("nan"), *p[4:]) for p in points]
+
+    _blanking.denominators = _Unresolved()
+    _blanking.op_ctrl = "ratio"
+    monkeypatch.setattr(rc, "_member_normaliser", lambda *a, **k: _blanking)
+
+    data = rc.collect_response(ctx, "dose", [24.0], y_metric=rc.Y_FRACTION)
+    assert data.control_gaps == [("treated", 24.0)]
+    assert data.zero_control == []
+
+
+def test_subtracting_a_zero_control_is_not_reported_as_a_problem(
+        stub_stats, monkeypatch):
+    """Subtracting zero is well defined — only a ratio is undefined by it."""
+    ctx = _ctx(wells=["A01"], variable=_dose(("1", 1.0)),
+               assignments={"dose": {"A01": "d0"}},
+               selections=_groups(("treated", ["A01"])))
+
+    def _blanking(points, _name):
+        return [(p[0], float("nan"), 0.0, float("nan"), *p[4:]) for p in points]
+
+    _blanking.denominators = _ZeroControl()
+    _blanking.op_ctrl = "subtract"
+    monkeypatch.setattr(rc, "_member_normaliser", lambda *a, **k: _blanking)
+
+    data = rc.collect_response(ctx, "dose", [24.0], y_metric=rc.Y_FRACTION)
+    assert data.zero_control == []
+    assert data.control_gaps == [("treated", 24.0)]

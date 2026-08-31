@@ -268,7 +268,10 @@ def test_home_subtab_behaviour_is_declared_not_listed():
     whichever answer the constant happened to give it, with no error and nothing
     on screen saying so.
 
-    Its sibling ``reads_well_selection`` is gone rather than moved. It said
+    Two siblings are gone rather than moved. ``owns_plate`` hid the rail plate on
+    a sub-tab that drew one of its own, which is the two-plates hazard from the
+    other side; with no rail plate on Home there is nothing to hide.
+    ``reads_well_selection`` said
     whether the rail plate stayed live while a Home sub-tab showed, and Home
     keeps no rail plate: the one it had edited a group's membership, never wrote
     ``selection.selected_wells``, and is a layer of the Sample map tab now. A
@@ -284,10 +287,10 @@ def test_home_subtab_behaviour_is_declared_not_listed():
     inset = {n for n, d in subs.items() if d.subtab_inset}
     assert inset == {"Sample map"}
 
-    assert not any(hasattr(d, "reads_well_selection")
-                   for d in build_feature_registry(FULL).all()), (
-        "the field is retired; a descriptor carrying it again means the rail "
-        "plate came back to Home without the docstring above being revisited")
+    for field in ("reads_well_selection", "owns_plate"):
+        assert not any(hasattr(d, field) for d in build_feature_registry(FULL).all()), (
+            f"{field} is retired; a descriptor carrying it again means the rail "
+            "plate came back to Home without the docstring above being revisited")
 
     # Nothing outside Home claims the inset flag: it is a sub-tab behaviour, and
     # a top-level page's plate rule is `per_well_selection`, resolved per page.

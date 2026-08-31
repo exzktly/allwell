@@ -125,6 +125,56 @@ def value_label(variable, value_id) -> str:
     return label or UNASSIGNED_LABEL
 
 
+def overlay_glyphs(variable) -> dict:
+    """``value id -> the short mark a second variable wears on the plate``.
+
+    A well is a few pixels of ink, so a second factor drawn on top of the first
+    one's colour gets one or two characters and a key beside it. The rule is
+    **all or nothing across the variable**, and that is the whole of it: either
+    every value has a distinct first character and they are all initials, or
+    none of them is and they are all ordinal positions.
+
+    The previous rule mixed the two per value, and on the series it was built
+    for that was worse than either. ``0, 0.1, 0.3, 1, 3, 10`` came out as
+    ``0, 02, 03, 1, 3, 10``: ``10`` is the real dose, ``02`` is a code standing
+    for ``0.1``, and nothing on the plate or in the key distinguished a
+    two-character glyph that means itself from one that does not. A reader who
+    took ``03`` at face value read a well as three times the dose it holds.
+
+    Ordinals cannot be mistaken for values, because they are visibly a
+    numbering: ``1…6`` under a key reading ``4 = 1 µM`` is a code that says it
+    is one. Initials stay for the case they are good at — ``HeLa`` / ``U2OS``
+    give ``H`` / ``U``, which needs no key at all — and that case is exactly
+    the one where they are unambiguous.
+
+    Values whose label is empty take no mark; they are unassignable in practice
+    and a blank glyph is indistinguishable from a well with no value.
+    """
+    values = [v for v in (getattr(variable, "values", ()) or ())
+              if (v.label or "").strip()]
+    if not values:
+        return {}
+    initials = [v.label.strip()[0].upper() for v in values]
+    if len(set(initials)) == len(initials):
+        return {v.id: initial for v, initial in zip(values, initials)}
+    return {v.id: str(i + 1) for i, v in enumerate(values)}
+
+
+def glyph_key(variable) -> str:
+    """``H = HeLa, U = U2OS`` — what the marks on the plate stand for.
+
+    Beside :func:`overlay_glyphs` rather than in the tab, so the plate and the
+    sentence under it are read from one map and cannot come to disagree about
+    what a value's mark is.
+    """
+    glyphs = overlay_glyphs(variable)
+    pairs = ", ".join(f"{glyphs[v.id]} = {v.label}"
+                      for v in (getattr(variable, "values", ()) or ())
+                      if v.id in glyphs)
+    name = getattr(variable, "name", "") or ""
+    return f"{name}: {pairs}" if pairs else ""
+
+
 def _inks_for(variable, values_by_key) -> dict:
     """``member key -> colour``, from values already resolved.
 

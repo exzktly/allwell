@@ -8,6 +8,7 @@ decisions here are about the axes.
 from __future__ import annotations
 
 import logging
+from typing import NamedTuple
 
 from well_viewer.features.response.collect import empty_reason, omission_caption
 from well_viewer.features.response.response_compute import (
@@ -59,37 +60,11 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
     # measured point that happens to be small.
     off_scale_x = zero_position(positives) if use_log else None
 
-    def _x(value: float) -> float:
-        return off_scale_x if (use_log and value <= 0) else value
-
+    marks = _CurveStyles(_series_colours(data), _timepoint_styles(data))
     drew_off_scale = False
     for curve in data.curves:
-        if not curve.points:
-            continue
-        on_axis = [p for p in curve.points if not (use_log and p.x <= 0)]
-        off = [p for p in curve.points if use_log and p.x <= 0]
-        fit = (fits or {}).get(curve.timepoint)
-        label = f"t={curve.timepoint:g}"
-        if fit is not None:
-            # The EC50 rides in the legend entry rather than in a box of its
-            # own, so that two overlaid timepoints cannot get their numbers
-            # swapped by a reader: the number sits against the swatch of the
-            # curve it came from.
-            label = f"{label} · {ec50_text(fit, data.unit)}"
-        if on_axis:
-            line = ax.errorbar([p.x for p in on_axis], [p.y for p in on_axis],
-                               yerr=[p.err for p in on_axis],
-                               marker="o", capsize=3, label=label)
-            if fit is not None and fit.ok:
-                _draw_fit_line(ax, fit, [p.x for p in on_axis], use_log,
-                               _errorbar_colour(line))
-        if off and off_scale_x is not None:
-            # Same colour as its own curve would be too clever: this point is
-            # deliberately not on the curve, and joining it with a line would
-            # assert a slope across a break in the axis.
-            ax.errorbar([_x(p.x) for p in off], [p.y for p in off],
-                        yerr=[p.err for p in off], fmt="o", capsize=3,
-                        markerfacecolor="none")
+        if _draw_one_curve(ax, data, curve, fits, marks,
+                           use_log=use_log, off_scale_x=off_scale_x):
             drew_off_scale = True
 
     if use_log and positives:
@@ -109,10 +84,11 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
     # is where its EC50 is written: suppressing it would drop the number the
     # fit exists to produce.
     if len([c for c in data.curves if c.points]) > 1 or fits:
-        ax.legend(fontsize="small")
+        ax.legend(fontsize="small", title=data.series_name or None)
 
     caption = " · ".join(
-        part for part in (omission_caption(data), _fit_caption(fits)) if part)
+        part for part in (omission_caption(data), _fit_caption(fits, data))
+        if part)
     if caption:
         # Under the axes rather than in the title: it is a note about the
         # figure's completeness, not what the figure is of, and a reader
@@ -159,20 +135,32 @@ def _draw_fit_line(ax, fit, xs, use_log: bool, colour) -> None:
             zorder=1)
 
 
-def _fit_caption(fits: dict | None) -> str:
+def _fit_caption(fits: dict | None, data=None) -> str:
     """Why each refused fit was refused, for under the axes.
 
     In the caption as well as the legend because the legend has room for
     ``(no fit)`` and not for the sentence, and "no fit" without a reason is the
     thing that sends a user to re-run a plate.
+
+    *fits* is keyed by ``(timepoint, series id)``, so each sentence names the
+    curve it belongs to. With two series refused for different reasons, a
+    caption saying only ``t=24`` twice would leave a reader unable to tell
+    which curve either sentence was about.
     """
-    refused = [(t, f.reason) for t, f in sorted((fits or {}).items())
+    labels = {c.key: c.series_label for c in getattr(data, "curves", ())}
+    refused = [(key, f.reason) for key, f in sorted((fits or {}).items())
                if not f.ok and f.reason]
     if not refused:
         return ""
-    if len(refused) == 1:
-        return f"No fit at t={refused[0][0]:g}: {refused[0][1]}"
-    return " ".join(f"No fit at t={t:g}: {reason}" for t, reason in refused)
+    return " ".join(f"No fit at {_curve_name(key, labels)}: {reason}"
+                    for key, reason in refused)
+
+
+def _curve_name(key, labels: dict) -> str:
+    """``t=24`` or ``HeLa t=24`` — enough to pick the curve out of the legend."""
+    timepoint, _series_id = key
+    series = labels.get(key) or ""
+    return f"{series} t={timepoint:g}" if series else f"t={timepoint:g}"
 
 
 def _draw_empty_state(ax, reason: str, caption: str) -> None:
@@ -269,3 +257,130 @@ def _tick_label(value: float) -> str:
     if value == 0:
         return "0"
     return f"{value:g}"
+
+
+#: Dash patterns for the timepoints on one figure, in ascending order. Solid
+#: first, so the common single-timepoint case is an ordinary solid curve and
+#: nothing about the figure changes until a second timepoint is ticked.
+_TIMEPOINT_DASHES = ("-", "--", "-.", ":")
+
+
+def _timepoint_styles(data) -> dict[float, str] | None:
+    """``{timepoint: linestyle}``, or ``None`` to leave matplotlib's default.
+
+    ``None`` rather than a dict of solids when there is nothing to distinguish:
+    passing an explicit ``linestyle`` on a single-timepoint figure would be a
+    no-op that still has to be read and reasoned about at the call site.
+
+    Past the fourth timepoint the patterns repeat. Four overlaid timepoints per
+    series is already at the edge of readable, and inventing a fifth pattern
+    that nobody can name is worse than a repeat the legend still disambiguates.
+    """
+    timepoints = sorted({c.timepoint for c in data.curves if c.points})
+    if len(timepoints) < 2:
+        return None
+    return {t: _TIMEPOINT_DASHES[i % len(_TIMEPOINT_DASHES)]
+            for i, t in enumerate(timepoints)}
+
+
+def _series_colours(data) -> dict[str, str] | None:
+    """``{series id: colour}``, or ``None`` when there is no series split.
+
+    Assigned from the curve order, which ``collect`` already put in the series
+    variable's own declared value order — so the colours follow the order the
+    user arranged their values in rather than the order the wells happened to
+    be walked. A series drawn at two timepoints gets **one** colour across both,
+    which is the whole point of splitting the two encodings.
+    """
+    ids = []
+    for curve in data.curves:
+        if curve.points and curve.series_id not in ids:
+            ids.append(curve.series_id)
+    if not data.series_name or len(ids) < 2:
+        return None
+    from matplotlib import pyplot as plt
+
+    cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color") or ["C0"]
+    return {sid: cycle[i % len(cycle)] for i, sid in enumerate(ids)}
+
+
+def _curve_label(data, curve) -> str:
+    """The legend entry: the series, the timepoint, or both.
+
+    Only what distinguishes this curve from the others on the figure. A single
+    timepoint drawn per series makes ``t=24`` on every entry pure noise, and a
+    single series makes its name the same on every entry — so each half is
+    included only when it varies.
+    """
+    parts = []
+    if curve.series_label and data.series_name:
+        parts.append(curve.series_label)
+    if len({c.timepoint for c in data.curves if c.points}) > 1 or not parts:
+        parts.append(f"t={curve.timepoint:g}")
+    return " · ".join(parts)
+
+
+class _CurveStyles(NamedTuple):
+    """How a curve is inked: colour by series, dash by timepoint.
+
+    A pair rather than two loose arguments so the two encodings travel together
+    — they are one decision about how the figure is read, and splitting them
+    across a signature is how one of them ends up applied and the other
+    forgotten. Either half is ``None`` when there is nothing to distinguish,
+    and the curve then takes matplotlib's own cycle exactly as it always did.
+    """
+
+    colours: dict | None
+    dashes: dict | None
+
+    def for_curve(self, curve) -> dict:
+        """The ``errorbar`` keywords this curve should be drawn with."""
+        style: dict = {}
+        if self.colours is not None:
+            style["color"] = self.colours[curve.series_id]
+        if self.dashes is not None:
+            style["linestyle"] = self.dashes[curve.timepoint]
+        return style
+
+
+def _draw_one_curve(ax, data, curve, fits, marks: _CurveStyles, *,
+                    use_log: bool, off_scale_x: float | None) -> bool:
+    """Draw *curve* and its fit. Returns whether it put anything off-scale.
+
+    Split out of :func:`draw_response` to keep that function under the
+    complexity ratchet, which only ever moves down — and because "how one curve
+    is drawn" is a whole thought: its points, the ones that fall off a log
+    axis, its legend entry and its fitted line all belong together, and the
+    caller only needs to know whether the off-scale column was used.
+    """
+    if not curve.points:
+        return False
+    on_axis = [p for p in curve.points if not (use_log and p.x <= 0)]
+    off = [p for p in curve.points if use_log and p.x <= 0]
+
+    label = _curve_label(data, curve)
+    fit = (fits or {}).get(curve.key)
+    if fit is not None:
+        # The EC50 rides in the legend entry rather than in a box of its own,
+        # so that two overlaid curves cannot get their numbers swapped by a
+        # reader: the number sits against the swatch of the curve it came from.
+        label = f"{label} · {ec50_text(fit, data.unit)}"
+
+    if on_axis:
+        line = ax.errorbar([p.x for p in on_axis], [p.y for p in on_axis],
+                           yerr=[p.err for p in on_axis],
+                           marker="o", capsize=3, label=label,
+                           **marks.for_curve(curve))
+        if fit is not None and fit.ok:
+            _draw_fit_line(ax, fit, [p.x for p in on_axis], use_log,
+                           _errorbar_colour(line))
+
+    if off and off_scale_x is not None:
+        # Same colour as its own curve would be too clever: this point is
+        # deliberately not on the curve, and joining it with a line would
+        # assert a slope across a break in the axis.
+        ax.errorbar([off_scale_x] * len(off), [p.y for p in off],
+                    yerr=[p.err for p in off], fmt="o", capsize=3,
+                    markerfacecolor="none")
+        return True
+    return False

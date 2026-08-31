@@ -28,6 +28,7 @@ run produced.
 
 from __future__ import annotations
 
+import json
 import logging
 
 from well_viewer.core.safe import swallow
@@ -93,6 +94,46 @@ def save_to_data_dir(ctx) -> None:
                 "be lost when it ends.", path.name)
 
 
+def read_block(data_dir) -> dict | None:
+    """The ``variables`` block as the sidecar on disk actually holds it.
+
+    **Read from the file, not from ``dataset.pipeline_info``.** That attribute
+    is not the sidecar's contents: ``viewer_state.read_pipeline_info`` builds a
+    *whitelist* of the keys the pipeline itself owns — ``schema``,
+    ``fluor_tokens``, ``available_timepoints`` and the index fields — each
+    through a ``.get`` with a default, so a block it has never heard of cannot
+    appear in it. ``variables`` is not in that whitelist and structurally never
+    will be, so hydrating from it returned ``None`` on every load and handed
+    back an empty set: every variable and every plate fill the user had made
+    was silently gone the next time the dataset was opened, while the block sat
+    correctly written in the file the whole time.
+
+    This mirrors ``domain.sample_definitions.read_sample_definitions``, which
+    re-reads the sidecar for exactly this reason — the sibling block in the same
+    file, which is why one of the two survived a reopen and the other did not.
+
+    ``None`` for an absent file, unreadable JSON, or no block; the caller turns
+    that into an empty set rather than into "keep what is loaded".
+    """
+    from pathlib import Path
+
+    from well_viewer.domain.viewer_state import resolve_pipeline_info_path
+
+    info_path = resolve_pipeline_info_path(Path(data_dir))
+    if not info_path.exists():
+        return None
+    try:
+        data = json.loads(info_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        _logger.warning("Could not read %s for the variables block: %s",
+                        info_path, exc)
+        return None
+    if not isinstance(data, dict):
+        return None
+    block = data.get(BLOCK_KEY)
+    return block if isinstance(block, dict) else None
+
+
 def load_from_data_dir(ctx) -> None:
     """Hydrate the variable set from the open dataset.
 
@@ -106,5 +147,9 @@ def load_from_data_dir(ctx) -> None:
     dataset = ctx.state.dataset
     if not dataset.data_dir:
         return
-    ctx.state.selection.variables = from_block(
-        (dataset.pipeline_info or {}).get(BLOCK_KEY))
+    ctx.state.selection.variables = from_block(read_block(dataset.data_dir))
+    # The one-step undo belongs to the plate that is going away. Carried across
+    # a swap it would sit under a live Undo button offering the *previous*
+    # dataset's variables — the same class of defect as the early return this
+    # function's docstring records, arriving by a different door.
+    ctx.state.selection.variables_undo = None

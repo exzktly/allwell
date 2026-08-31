@@ -102,12 +102,42 @@ def _visible_plates(ctx) -> list[str]:
 
 
 @pytest.mark.parametrize("layer", LAYERS)
-def test_exactly_one_plate_is_on_screen(layer, tab):
+def test_no_layer_shows_another_layers_plate(layer, tab):
+    """At most one, and never a different layer's.
+
+    Not *exactly* one: the Variables layer hides its plate until a variable
+    exists, because a greyed ninety-six well grid around a two-paragraph
+    explainer reads as software that has broken. What the merge guarantees is
+    that no second plate is ever up — which is the state that shipped, the
+    rail's greyed behind a live one.
+    """
     set_layer(tab.ctx, layer)
     tab.frame.show()
-    assert _visible_plates(tab.ctx) == [layer], (
-        "the point of the merge is that one plate is on screen and the switch "
-        "says what it is")
+    assert _visible_plates(tab.ctx) in ([layer], []), (
+        f"{_visible_plates(tab.ctx)} on screen while {layer} is showing")
+
+
+def test_a_layer_with_something_to_show_shows_its_plate(tab):
+    """The other half, so "at most one" cannot be satisfied by showing none.
+
+    Driven per layer with that layer given something to draw: a group for
+    Groups, a variable for Variables, and the label grid, which is always there.
+    """
+    from well_viewer.domain.sample_variables import VariableSet, new_variable
+
+    set_layer(tab.ctx, "Well Labels")
+    assert _visible_plates(tab.ctx) == ["Well Labels"]
+
+    tab.ctx.state.selection.selections = [
+        {"id": "g1", "name": "Ctrl", "wells": ["A01"], "hidden": False,
+         "color": "#5B9BF8", "replicates": None, "source": "user"}]
+    set_layer(tab.ctx, "Groups")
+    assert _visible_plates(tab.ctx) == ["Groups"]
+
+    vset, _id = new_variable(VariableSet(), "Dose")
+    tab.ctx.state.selection.variables = vset
+    set_layer(tab.ctx, "Variables")
+    assert _visible_plates(tab.ctx) == ["Variables"]
 
 
 def test_every_roster_entry_resolves_to_something_real(tab):
@@ -347,6 +377,31 @@ def test_the_groups_layer_never_publishes(tab):
     tab.ctx.widgets.get_or_none("_rep_map_plate").setSelectedWellIds(["A01"])
     on_layer_selection_changed(tab.ctx, "Groups")
     assert tab.ctx.state.selection.selected_wells == set()
+
+
+def test_import_follows_the_layer_not_the_tab(tab):
+    """**Import** merges replicate selections and well labels, so it means
+    something on two layers and nothing on the third.
+
+    A per-*tab* rule while Variables was a tab of its own; the merge makes it a
+    per-layer one, and a finer one, since Variables is now a layer of the very
+    tab whose other two layers are what Import writes. The slow lane asserts it
+    against the real button; this asserts the rule where a mutation can reach it.
+    """
+    from PySide6.QtWidgets import QPushButton
+
+    from well_viewer.features.home.controller import sync_home_sidebar
+    from well_viewer.features.home.tab_view import IMPORT_KEY
+
+    button = tab.ctx.widgets.register(IMPORT_KEY, QPushButton(""))
+    tab.ctx.runtime.home.subtabs = SimpleNamespace(
+        count=lambda: 1, tabText=lambda _i: "Sample map", currentIndex=lambda: 0)
+    tab.ctx.features = SimpleNamespace(sub_leaves=lambda _p: ("Sample map",))
+    for layer, offered in (("Groups", True), ("Well Labels", True),
+                           ("Variables", False)):
+        set_layer(tab.ctx, layer)
+        sync_home_sidebar(tab.ctx)
+        assert button.isVisibleTo(tab.frame) is offered, layer
 
 
 # ── Home keeps no rail body ─────────────────────────────────────────────────

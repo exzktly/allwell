@@ -484,6 +484,36 @@ def test_one_plate_is_on_screen_on_every_home_tab(loaded_app, qtbot):
         assert _visible() == [], f"{name}: a plate is on screen with nothing to say"
 
 
+def test_import_is_offered_on_the_layers_it_writes(loaded_app, qtbot):
+    """**Import** merges a sample-definitions JSON — replicate selections and
+    well labels — so it means something on two of the three layers and nothing
+    on the third.
+
+    That was a per-*tab* rule while Variables was a tab of its own, decided by
+    an ``owns_plate`` descriptor field: the rail's plate coloured by group
+    membership sat behind the tab's own coloured by variable value, and the
+    button came off with the frame. The merge makes it a per-**layer** rule, and
+    a finer one — Variables is now a layer of the very tab whose other two
+    layers are what Import writes, so the tab cannot answer for it.
+    """
+    from well_viewer.features.home.sample_map.controller import set_layer
+
+    ctx = loaded_app._ctx
+    button = ctx.widgets.get("_home_import_btn")
+
+    _goto_subtab(loaded_app, qtbot, "Sample map")
+    for layer in ("Groups", "Well Labels"):
+        set_layer(ctx, layer)
+        qtbot.wait(10)
+        assert button.isVisibleTo(loaded_app), layer
+
+    set_layer(ctx, "Variables")
+    qtbot.wait(10)
+    assert not button.isVisibleTo(loaded_app), (
+        "Import merges replicate selections, which is not what a button called "
+        "Import means on a page of variables")
+
+
 def test_a_greyed_plate_actually_looks_greyed(qtbot):
     """``setEnabled(False)`` on this widget used to be a no-op on screen.
 

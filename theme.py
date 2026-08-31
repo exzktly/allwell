@@ -384,6 +384,38 @@ class Metrics:
     toolbtn_pad_h = 4  # QToolButton horizontal padding (kept compact)
     input_pad_v  = 4   # QLineEdit / QSpinBox / QComboBox vertical padding
     input_pad_h  = 8   # …horizontal padding
+    # Floor under a spin box's *text* area, so a short range still leaves room
+    # for the number in it.
+    #
+    # Measured rather than chosen: Qt sizes a QSpinBox's text area to the widest
+    # value the range can hold plus a fixed **6 px**, and that 6 px is the same
+    # whether the range is 1–9 or 0–65535. Six pixels is under half a digit, so
+    # any platform whose text renders slightly wider than the metric predicted —
+    # a different font fallback, a hinting difference, a fractional-DPI scale —
+    # clips the value, and on a two-digit box there is nothing left to read.
+    # Groups' "Replicates per group" (range 1–12) is the one that was reported.
+    #
+    # A floor rather than more padding, because padding does not help: Qt lays
+    # the up/down buttons out *inside* the box's right padding, so
+    # ``padding-right`` widens the widget and leaves the text area exactly as it
+    # was. ``min-width`` applies to the contents rect and is the only lever that
+    # grows the part the number is drawn in.
+    #
+    # 28 px takes a one- or two-digit box from 6 px of slack to 20 / 15, and
+    # costs at most 14 px of width. Boxes whose own range already asks for more
+    # than this are untouched.
+    spin_min_w   = 28
+    # Right padding a spin box reserves for its own up/down buttons, so they are
+    # laid out in space of their own rather than over the number.
+    #
+    # Qt puts the stepper INSIDE the box's right padding. With the app's ordinary
+    # 8 px there, the 14 px buttons have 6 px more than the padding allows for,
+    # and whether that comes out of the text depends on the platform style —
+    # which is the shape of a bug that clips the value on one operating system
+    # and not another. Reserving the buttons' own width plus the normal gutter
+    # removes the question: measured here, it widens the control and leaves the
+    # text area exactly as wide as it was, which is what "reserved" means.
+    spin_buttons_w = 14 + 8
     # Width of a right-hand inspector dock. One number for every dock in the
     # Review pane, so the Properties sidebar and the Playground's controls do
     # not open to different widths and read as two different kinds of panel.
@@ -548,6 +580,56 @@ QPushButton#VariableValueChip {{
 QPushButton#VariableValueChip:hover {{
     background-color: {c.hover};
     border-color: {c.border_strong};
+}}
+/* The Variables tab's own chrome. The header band states which variable the
+   plate is showing — one rail selection decides four things and nothing else on
+   the page writes the answer down. The message line under it is the tab's one
+   place for "what just happened"; it is styled as an accent note rather than as
+   a muted hint precisely so it is not mistaken for the standing captions
+   around it, which is how the fill's confirmation used to go unread. */
+QWidget#VariablesHeader {{
+    background-color: {c.panel};
+    border-radius: {r.sm}px;
+}}
+QLabel#VariablesCaption {{
+    font-size: {t.caption_size}px;
+    font-weight: {t.semibold};
+    color: {c.text_muted};
+    letter-spacing: 0.08em;
+}}
+QLabel#VariablesHeaderValue {{
+    font-size: {t.small_size}px;
+    font-weight: {t.semibold};
+    color: {c.text_secondary};
+}}
+QLabel#VariablesMessage {{
+    color: {c.accent};
+    font-size: {t.small_size}px;
+    padding: {s.xs}px 0px;
+}}
+/* What the plate currently has selected. Body weight rather than muted: it is
+   the answer to the question the user is in the middle of asking, and every
+   other line on this half of the page is a caption or a hint. */
+QLabel#VariablesSelection {{
+    color: {c.text_primary};
+    font-size: {t.small_size}px;
+}}
+/* The four selection shortcuts. Borderless until hovered, so a row of them
+   reads as links beside the sentence they act on rather than as four more
+   command buttons competing with the chips below. */
+QPushButton#VariablesLink {{
+    background-color: transparent;
+    border: 1px solid transparent;
+    color: {c.accent};
+    font-size: {t.small_size}px;
+    padding: {s.xs}px {s.sm}px;
+}}
+QPushButton#VariablesLink:hover {{
+    background-color: {c.hover};
+    border-color: {c.border};
+}}
+QPushButton#VariablesLink:disabled {{
+    color: {c.text_muted};
 }}
 /* Home's recent-dataset rows — one definition, shared with EmptyState's
    entries; see ``link_row_qss``. */
@@ -1083,6 +1165,13 @@ QSpinBox:focus, QDoubleSpinBox:focus {{
 QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {{
     color: {c.text_muted};
     background-color: {c.panel};
+}}
+/* See ``Metrics.spin_min_w``: Qt gives a spin box's text area the width of its
+   widest value plus a fixed 6 px, whichever the range, and 6 px is under half a
+   digit. */
+QSpinBox, QDoubleSpinBox {{
+    min-width: {m.spin_min_w}px;
+    padding-right: {m.spin_buttons_w}px;
 }}
 QSpinBox::up-button, QDoubleSpinBox::up-button,
 QSpinBox::down-button, QDoubleSpinBox::down-button {{

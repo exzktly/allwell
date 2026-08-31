@@ -174,6 +174,99 @@ def orphaned_wells(vset: VariableSet, variable_id: str) -> list[str]:
                   if value_id not in known)
 
 
+def coverage(vset: VariableSet, variable_id: str, wells) -> tuple[int, int]:
+    """``(annotated, total)`` for *variable_id* over *wells*.
+
+    The answer to "am I finished?", which is the question this whole tab is
+    asked and the one it used to answer worst. The rail listed each variable's
+    **value count** — a number the user typed in themselves and can see in the
+    list beside it — so telling whether a plate was fully annotated meant
+    selecting each variable in turn and reading a sentence under the plate.
+    A pair per variable puts every answer on screen at once.
+
+    Counted over *wells* rather than over the whole assignment map: a plate
+    imaged in half has forty-eight wells, and ``48/48`` is finished while
+    ``48/96`` is not. An assignment for a well the dataset does not hold — left
+    behind by a dataset swap — is not evidence of coverage and does not count.
+    """
+    wells = set(wells)
+    return len(wells & vset.assigned_wells(variable_id)), len(wells)
+
+
+def wells_with_value(vset: VariableSet, variable_id: str,
+                     value_id: str | None, wells) -> list[str]:
+    """The wells of *wells* holding *value_id*, sorted; ``None`` means unassigned.
+
+    What "select every well holding this dose" is made of. The tab could only
+    ever paint that fact, so a user who needed to *act* on it — four wells got
+    the wrong dose, which of them are they — had to find the wells by eye on a
+    grid of ninety-six.
+    """
+    wells = set(wells)
+    if value_id is None:
+        return unassigned_wells(vset, variable_id, wells)
+    mapping = vset.assignments.get(variable_id, {})
+    return sorted(w for w in wells if mapping.get(w) == value_id)
+
+
+def selection_summary(vset: VariableSet, variable_id: str,
+                      wells) -> list[tuple[str | None, int]]:
+    """What *wells* currently hold for *variable_id*: ``(value id, count)`` pairs.
+
+    In the **variable's own order**, with unassigned last under ``None``, so a
+    reader gets the same sequence here as in the value list, the legend and a
+    plot's axis. Sorting by count instead would reorder the sentence every time
+    a well changed hands.
+
+    This is what a selection readout says, and it exists because the tab said
+    nothing at all: no signal on the plate was connected, so a user who dragged
+    a box saw no confirmation that anything had been picked, and the "select
+    wells first" instruction stayed on screen after they had.
+    """
+    variable = vset.by_id(variable_id)
+    mapping = vset.assignments.get(variable_id, {})
+    held = [mapping.get(w) for w in wells]
+    counts: list[tuple[str | None, int]] = []
+    for value in (variable.values if variable is not None else ()):
+        n = sum(1 for v in held if v == value.id)
+        if n:
+            counts.append((value.id, n))
+    unassigned = sum(1 for v in held if v is None)
+    if unassigned:
+        counts.append((None, unassigned))
+    return counts
+
+
+def refusal_for_value(variable: Variable | None, label: str, *,
+                      exclude: str = "") -> str | None:
+    """Why adding or renaming a value to *label* would do nothing, or ``None``.
+
+    :func:`add_value` and :func:`rename_value` both refuse a duplicate label by
+    returning the set unchanged, which is the right rule and was delivered in
+    the worst possible way: the entry box cleared itself and nothing appeared,
+    or an edited row snapped back to its old text, with no word either way. The
+    tab's own standard — *"a chip that appears inert is indistinguishable from
+    one that is broken"* — was not being applied to its own value list.
+
+    The reason is derived here rather than returned from the mutators so that
+    their signatures stay what every other caller already expects, and so the
+    sentence is a fact about the model that a test can ask for without a window.
+    """
+    if variable is None:
+        return None
+    label = (label or "").strip()
+    if not label:
+        return "Type a value first."
+    twin = next((v for v in variable.values
+                 if v.label.strip().casefold() == label.casefold()
+                 and v.id != exclude), None)
+    if twin is not None:
+        return (f"“{variable.name}” already has a value called “{twin.label}”. "
+                f"Two rows with one label would split that condition into two "
+                f"series holding half the wells each.")
+    return None
+
+
 def roll_up(vset: VariableSet, variable_id: str, wells) -> str | None:
     """The one value *wells* share for *variable_id*, :data:`MIXED`, or ``None``.
 

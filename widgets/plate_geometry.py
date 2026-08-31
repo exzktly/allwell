@@ -22,10 +22,15 @@ behavioural things:
 ``"picker"`` shown                       interactive (``"select"``)
 ``"status"`` hidden                      read-only (``"passive"``)
 ``"editor"`` hidden (host has its own)   interactive (``"select"``)
+``"canvas"`` hidden (host has its own)   interactive (``"select"``)
 ===========  ==========================  ===============================
 
-``"rail"`` and ``"editor"`` differ only in the size caps: the rail picker is
-exempt from them (see below), an editor plate sitting in a page is not.
+``"canvas"`` behaves exactly as ``"editor"`` does here and differs only in its
+size caps. The rail picker is exempt from them (see below); an
+editor plate sitting among other controls on a page takes them; a canvas plate
+— one that *is* its page's primary surface rather than one control on it —
+takes the larger :data:`PLATE_CANVAS_WIDTH` / :data:`PLATE_CANVAS_HEIGHT`
+instead.
 
 Why a maximum *width* as well as a maximum height: ``WellPlateSelector`` paints
 its panel background and border across its entire allocated widget box, while
@@ -66,6 +71,21 @@ PLATE_MAX_WIDTH = 330
 #: constraint, so every plate in the app resolves to the same cell scale.
 PLATE_MAX_HEIGHT = 210
 
+#: The caps for a ``"canvas"`` plate — one that is not a control on its page but
+#: the surface the page exists to operate. The Variables tab's is the case:
+#: every gesture it offers is "pick wells here, then say what they are", and its
+#: plate carries three independent marks at once (a value's colour, a ring for
+#: an unannotated well, a second variable's glyph). At the editor caps that
+#: resolves to roughly 16.5 px of well and a 10 px glyph inside it.
+#:
+#: Not the rail's exemption, which is uncapped. Reusing that role here would
+#: also inherit an argument written about Review's rail specifically, and would
+#: let this plate grow to whatever width the page happens to have — the failure
+#: the width cap exists to prevent. A named ceiling keeps the card hugging its
+#: content and keeps the reason for the number attached to it.
+PLATE_CANVAS_WIDTH = 470
+PLATE_CANVAS_HEIGHT = 300
+
 #: How every plate is placed in its container. Pass it as the alignment argument
 #: of ``addWidget`` (``layout.addWidget(plate, 0, PLATE_ALIGNMENT)``) so a
 #: container wider than the width cap centres the card instead of stranding it
@@ -75,7 +95,7 @@ PLATE_ALIGNMENT = Qt.AlignHCenter
 #: Qt's QWIDGETSIZE_MAX — "no ceiling", used to exempt the rail picker.
 _UNCAPPED = 16_777_215
 
-_ROLES = ("rail", "picker", "status", "editor")
+_ROLES = ("rail", "picker", "status", "editor", "canvas")
 
 #: ``objectName`` of the grid child inside a ``WellPlateSelector``. Everything
 #: else in the selector's layout is chrome around the grid.
@@ -165,6 +185,10 @@ def apply_plate_geometry(plate, *, role: str = "rail") -> None:
         # same rule; only the ceiling differs.
         plate.setMaximumWidth(_UNCAPPED)
         plate.setMaximumHeight(_UNCAPPED)
+        return
+    if role == "canvas":
+        plate.setMaximumWidth(PLATE_CANVAS_WIDTH)
+        plate.setMaximumHeight(PLATE_CANVAS_HEIGHT + _action_row_allowance(plate))
         return
     plate.setMaximumWidth(PLATE_MAX_WIDTH)
     plate.setMaximumHeight(PLATE_MAX_HEIGHT + _action_row_allowance(plate))

@@ -153,6 +153,11 @@ def build_home_tab(ctx, parent: QWidget) -> None:
     body.layout().addWidget(sub_tabs, 1)
     ctx.runtime.home.subtabs = sub_tabs
     ctx.runtime.home.built = {}
+    # The Sample map tab's layer switch repaints Home's own chrome through this,
+    # because Home's controller imports that tab's controller and the call
+    # cannot travel back as an import.
+    from well_viewer.features.home.controller import sync_home_sidebar
+    ctx.runtime.home.sync_sidebar = lambda: sync_home_sidebar(ctx)
 
     # Fresh frames mean nothing is built into them yet, so the per-tab
     # "already built" flags reset with them. Cell Gating carries its own —

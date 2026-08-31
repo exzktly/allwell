@@ -1,4 +1,4 @@
-"""Smoke tests for analyze_remote_dialog (v5.1.0).
+"""Smoke tests for analyze.remote_dialog (v5.1.0).
 
 Requires PySide6 + pytest-qt. Skipped when those aren't installed (e.g.
 the lean CI runner used for the pure-logic test suite).
@@ -36,8 +36,8 @@ from PySide6.QtWidgets import QDialogButtonBox
 from services.remote_config import RemoteHost, load_remotes, write_remote
 
 # Imported after the importorskip so the module fails fast on a bare
-# Python runner without Qt instead of importing analyze_remote_dialog.
-from analyze_remote_dialog import (
+# Python runner without Qt instead of importing analyze.remote_dialog.
+from analyze.remote_dialog import (
     BootstrapLogDialog, ManageRemotesDialog, RemoteFormDialog,
 )
 

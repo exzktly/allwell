@@ -6,7 +6,7 @@ the job's stored spec. Every Datasets tool gets that for free, because its
 ``show_job(spec)`` is a genuine inverse of its ``collect_spec()`` — the two
 read and write the same handful of keys.
 
-Analyze is the exception. Its ``show_job`` (``analyze_run_spec.py``) sets only
+Analyze is the exception. Its ``show_job`` (``analyze/run_spec.py``) sets only
 the input-folder field, and deliberately so: it exists for *preview*, and the
 queue re-derives a full ``RunSpec`` from the persisted JSON at dequeue time
 regardless, so the live form only has to look right. That is fine for a
@@ -18,7 +18,7 @@ which the user had asked to change.
 session only. ``show_job`` keeps its shallow preview behaviour.
 
 Most of the work is already done by
-``analyze_tab_pinfo.AnalyzePipelineInfoMixin._apply_pipeline_info``, which
+``analyze.pinfo.AnalyzePipelineInfoMixin._apply_pipeline_info``, which
 restores nearly the whole form from argparse-style keys — and a job's
 ``spec["opts"]`` is argparse-style, being what ``build_pipeline_args``
 consumes. What it is not is *identical*: the sidecar that ``_apply_pipeline_info``

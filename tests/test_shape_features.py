@@ -163,7 +163,7 @@ def test_analyze_shape_selector_is_dropdown(qapp):
     """Regression: the Analyze 'Shape Metrics' selector is the compact dropdown
     (not a wide chip row), defaults round-trip into the run options, and a
     changed selection flows through unchanged."""
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     from widgets.checkable_dropdown import CheckableDropdown
 
     tab = AnalyzeTab()

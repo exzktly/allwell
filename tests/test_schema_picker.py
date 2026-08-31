@@ -117,7 +117,7 @@ def test_a_schema_longer_than_the_picker_survives(picker):
 # ── the hosts ────────────────────────────────────────────────────────────────
 
 def test_analyze_reads_its_schema_through_the_picker(qapp):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     tab = AnalyzeTab()
     tab._schema_picker.setSchema("plate:channel:well:site:tp")

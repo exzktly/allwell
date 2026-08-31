@@ -100,7 +100,7 @@ WELL_STATES = (
 #: worth doing; it is not why it would be worth claiming.
 #:
 #: Two independent writers record these on a remote run and neither can be
-#: ordered against the other: ``analyze_progress`` writes ``analysed`` from a
+#: ordered against the other: ``analyze.progress`` writes ``analysed`` from a
 #: parsed stdout line, drained by the GUI's poll timer, while the Fetcher
 #: thread writes ``fetched`` after polling the remote sidecar. A small well can
 #: download before the GUI queue drains, and the late ``analysed`` then
@@ -125,7 +125,7 @@ _WELL_STAGE_ORDER = {
 #: dropped ``uploaded`` and ``skipped``.
 #: ...and what "finished" means depends on where the run happened, which is why
 #: there are two of these rather than one. ``analysed`` is written from the
-#: pipeline's own stdout by ``analyze_progress``, on a local and a remote run
+#: pipeline's own stdout by ``analyze.progress``, on a local and a remote run
 #: alike, and it means the same thing in both: *the pipeline announced this well
 #: finished*. Where it ran is what differs. Locally the CSV and the out-zip are
 #: on disk the moment that line is printed, so the well is done. Remotely they

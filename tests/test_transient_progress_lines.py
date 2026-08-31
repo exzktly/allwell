@@ -4,7 +4,7 @@ A remote transfer used to write a line every few seconds — bytes so far, time
 elapsed — plus rsync's own percentage stream once a second. A log records things
 that *happened*, and "still transferring" is a sample of a continuous variable,
 not an event. Worse, it evicted the record it was crowding: the log holds 10 000
-blocks, and ``analyze_tab._log_line`` carries a block of scroll-compensation
+blocks, and ``analyze.tab._log_line`` carries a block of scroll-compensation
 whose own comment blames this stream for making that trimming common.
 
 Those lines now carry ``TRANSIENT_PREFIX`` and are routed to the dashboard's
@@ -90,7 +90,7 @@ def test_the_gui_skips_transient_lines(qapp):
     """The wiring: ``_poll_log`` must consult the predicate before logging."""
     import inspect
 
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     src = inspect.getsource(AnalyzeTab._poll_log)
     assert "is_transient_progress(payload)" in src
@@ -101,7 +101,7 @@ def test_the_gui_routes_per_well_transfer_progress_to_the_plate():
     """The other half of the wiring: the event has to reach a dial."""
     import inspect
 
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     src = inspect.getsource(AnalyzeTab._apply_progress_event)
     assert "well_xfer" in src

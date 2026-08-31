@@ -106,7 +106,7 @@ from util.retry_io import retry_io, volume_hint
 #
 # A log records things that happened, and "still transferring" is a sample of a
 # continuous variable. One line per sample also evicted real history: the log
-# holds 10 000 blocks, and ``analyze_tab._log_line`` carries a block of
+# holds 10 000 blocks, and ``analyze.tab._log_line`` carries a block of
 # scroll-compensation whose own comment blames this stream for making that
 # trimming common.
 #

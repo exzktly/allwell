@@ -1361,8 +1361,8 @@ QWidget#ContextBanner QLabel {{
 
 /* ── The Analyze pane's folder banners ───────────────────────────────── */
 /* Two strips at the head of the Analyze sidebar, reporting what the folder in
-   the form already holds: the resume offer (analyze_suspend) and the pre-run
-   report (analyze_preflight). Both were built with an object name and styled
+   the form already holds: the resume offer (analyze.suspend) and the pre-run
+   report (analyze.preflight). Both were built with an object name and styled
    nowhere, so they had no fill, no edge and no separation from the form —
    loose page chrome that happened to have buttons in it. Contained here, and
    ranked against each other: the resume strip carries an action the user can

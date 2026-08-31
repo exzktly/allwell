@@ -45,7 +45,7 @@ def test_the_playground_shows_the_pipeline_strings_not_its_own():
 
 
 def test_the_analyze_form_shows_the_pipeline_strings_not_its_own():
-    from analyze_tab_seg_params import _threshold_help
+    from analyze.seg_params import _threshold_help
     assert _threshold_help() == (PROB_THRESH_HELP, NMS_THRESH_HELP)
 
 
@@ -74,7 +74,7 @@ def test_the_playground_row_helper_puts_the_tooltip_on_the_label(qtbot):
 
 def test_the_analyze_row_helper_puts_the_tooltip_on_the_label(qtbot):
     from PySide6.QtWidgets import QVBoxLayout, QWidget
-    from analyze_tab_chrome import AnalyzeFormChromeMixin
+    from analyze.form_chrome import AnalyzeFormChromeMixin
 
     parent = QWidget()
     QVBoxLayout(parent)
@@ -100,6 +100,6 @@ def test_a_row_without_a_tooltip_gains_none(qtbot, builder):
         from well_viewer.features.image_browser.playground.tab_view import _row
         cell = _row(parent, "Zoom")
     else:
-        from analyze_tab_chrome import AnalyzeFormChromeMixin
+        from analyze.form_chrome import AnalyzeFormChromeMixin
         cell = AnalyzeFormChromeMixin._row(AnalyzeFormChromeMixin(), parent, "Zoom")
     assert cell.parent().toolTip() == ""

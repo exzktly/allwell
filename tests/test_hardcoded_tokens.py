@@ -38,7 +38,7 @@ _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 #: The same colour, anywhere inside a string rather than as the whole of one.
 #: The first version of this scan matched only a whole literal, so a hex written
 #: into a longer f-string — ``f"<span style='color: #4caf50;'>✓ …"``, the two
-#: that shipped in ``analyze_remote_dialog.py`` — was invisible to it. The file
+#: that shipped in ``analyze/remote_dialog.py`` — was invisible to it. The file
 #: was not in the allowlist below, so those were an evasion rather than an
 #: exemption: a colour that cannot follow a theme, with nothing saying so.
 _EMBEDDED_HEX = re.compile(r"#[0-9a-fA-F]{6}\b")
@@ -265,7 +265,7 @@ def test_no_inline_pixel_sizes():
         "Pixel size(s) written at the call site. Give the number a name: a "
         "`theme.Metrics` token when the role is shared across panes, a "
         "module-level constant when it belongs to one module's controls "
-        "(the precedent is `analyze_tab_chrome._ROW_LABEL_W`, "
+        "(the precedent is `analyze.form_chrome._ROW_LABEL_W`, "
         "`core/app_shell_view.RAIL_W`):\n  " + "\n  ".join(sorted(offenders))
     )
 

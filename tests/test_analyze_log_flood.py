@@ -35,7 +35,7 @@ pytest.importorskip("PySide6")
 
 @pytest.fixture
 def tab(qtbot):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     t = AnalyzeTab()
     qtbot.addWidget(t)
@@ -53,7 +53,7 @@ def _flood(tab, n):
 def test_one_poll_takes_a_slice_not_the_whole_queue(tab):
     """The property the window's responsiveness rests on: a poll returns to the
     event loop after a bounded amount of work, however much is waiting."""
-    from analyze_tab import _POLL_MAX_LINES
+    from analyze.tab import _POLL_MAX_LINES
 
     queued = _POLL_MAX_LINES * 4
     _flood(tab, queued)
@@ -70,7 +70,7 @@ def test_repeated_polls_drain_everything_in_order(tab):
     """Bounded, not lossy. The slices have to add up to the whole run, in the
     order it was said — a log that drops or reorders under load is worse than a
     slow one."""
-    from analyze_tab import _POLL_MAX_LINES
+    from analyze.tab import _POLL_MAX_LINES
 
     queued = _POLL_MAX_LINES * 3 + 7
     _flood(tab, queued)

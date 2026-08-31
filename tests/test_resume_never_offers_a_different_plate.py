@@ -27,12 +27,12 @@ class _Form:
 
     def __init__(self, text: str):
         self._text = text
-        import analyze_suspend
+        import analyze.suspend
         # `getattr` with a default, so this stub still stands up against code
         # that predates the constant — otherwise the test below raises
         # AttributeError instead of reaching its assertion, and proves nothing.
         self.UNRESOLVED = getattr(
-            analyze_suspend.AnalyzeSuspendMixin, "UNRESOLVED", "\x00unresolved")
+            analyze.suspend.AnalyzeSuspendMixin, "UNRESOLVED", "\x00unresolved")
 
     class _Edit:
         def __init__(self, text):
@@ -47,20 +47,20 @@ class _Form:
 
 
 def _resolve(text: str) -> str:
-    import analyze_suspend
+    import analyze.suspend
 
     form = _Form(text)
-    return analyze_suspend.AnalyzeSuspendMixin._current_output_dir(form)
+    return analyze.suspend.AnalyzeSuspendMixin._current_output_dir(form)
 
 
 def test_an_empty_field_is_not_the_same_answer_as_an_unresolvable_one():
-    import analyze_suspend
+    import analyze.suspend
 
     assert _resolve("") == ""
     assert _resolve("   ") == ""
 
     got = _resolve("/nonexistent/definitely/not/a/plate")
-    assert got == analyze_suspend.AnalyzeSuspendMixin.UNRESOLVED, (
+    assert got == analyze.suspend.AnalyzeSuspendMixin.UNRESOLVED, (
         f"an unresolvable input resolved to {got!r}; if that is the empty "
         f"string, the resume banner treats it as 'no folder named' and offers "
         f"the newest unfinished run on any plate")
@@ -68,9 +68,9 @@ def test_an_empty_field_is_not_the_same_answer_as_an_unresolvable_one():
 
 def test_an_unresolvable_folder_is_offered_nothing():
     """The behaviour, driven through `_resumable` itself."""
-    import analyze_suspend
+    import analyze.suspend
 
-    mixin = analyze_suspend.AnalyzeSuspendMixin
+    mixin = analyze.suspend.AnalyzeSuspendMixin
     offered: list = []
 
     class _Stub:
@@ -95,9 +95,9 @@ def test_an_unresolvable_folder_is_offered_nothing():
 def test_an_empty_form_still_gets_the_newest_run_anywhere():
     """The documented behaviour, kept. Refusing here too would be a different
     regression, invisible until someone wanted the feature."""
-    import analyze_suspend
+    import analyze.suspend
 
-    mixin = analyze_suspend.AnalyzeSuspendMixin
+    mixin = analyze.suspend.AnalyzeSuspendMixin
     sentinel = object()
 
     class _Stub:

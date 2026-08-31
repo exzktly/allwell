@@ -23,7 +23,7 @@ def qapp():
 
 
 def test_output_option_checkboxes_removed(qapp):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     tab = AnalyzeTab()
     assert not hasattr(tab, "_compress_input_cb")
     assert not hasattr(tab, "_compress_output_cb")
@@ -31,7 +31,7 @@ def test_output_option_checkboxes_removed(qapp):
 
 
 def test_opts_always_zip_and_move(qapp, tmp_path):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     tab = AnalyzeTab()
     tab._input_edit.setText(str(tmp_path))
     opts = tab._collect_run_options()
@@ -41,7 +41,7 @@ def test_opts_always_zip_and_move(qapp, tmp_path):
 
 
 def test_build_pipeline_args_never_disables_compression(qapp, tmp_path):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     from services.pipeline_service import build_pipeline_args
     tab = AnalyzeTab()
     tab._input_edit.setText(str(tmp_path))

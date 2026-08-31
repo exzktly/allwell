@@ -23,7 +23,7 @@ def qapp():
 
 @pytest.fixture
 def tab(qapp):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
     return AnalyzeTab()
 
 

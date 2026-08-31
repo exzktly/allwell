@@ -26,7 +26,7 @@ def _write_loose(in_dir, channels=("DAPI", "GFP")):
 
 
 def test_browse_scan_prefills_schema_and_channels(qapp, tmp_path):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     _write_loose(tmp_path / "ds" / "in")
     tab = AnalyzeTab()
@@ -47,7 +47,7 @@ def test_scan_keeps_a_phase_channel_out_of_the_segmentation_slot(qapp, tmp_path)
     acquired in, so DIC leads. It must be designated Phase, keep a channel row
     to carry that designation, and never take the segmentation slot.
     """
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     _write_loose(tmp_path / "ds" / "in", channels=("mCherry", "GFP", "DIC"))
     tab = AnalyzeTab()
@@ -68,7 +68,7 @@ def test_scan_without_a_channel_slot_keeps_the_typed_channel_list(qapp, tmp_path
     the single default row — so an unrecognised layout used to wipe a list the
     operator had typed by hand.
     """
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     d = tmp_path / "ds" / "in"
     d.mkdir(parents=True)
@@ -88,7 +88,7 @@ def test_scan_without_a_channel_slot_keeps_the_typed_channel_list(qapp, tmp_path
 
 
 def test_scan_leaves_form_untouched_when_unparseable(qapp, tmp_path):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     d = tmp_path / "notadataset"
     d.mkdir()

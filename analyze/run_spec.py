@@ -1,4 +1,4 @@
-"""Analyze-pane run splitting, mirroring ``analyze_input.py``'s precedent.
+"""Analyze-pane run splitting, mirroring ``analyze/input.py``'s precedent.
 
 ``AnalyzeTab`` mixes in :class:`AnalyzeRunMixin` for two members that split
 "what would be run" from "actually run it": :meth:`_collect_run_spec` turns
@@ -9,7 +9,7 @@ persist a Analyze run's configuration as a plain, JSON-round-trippable
 same values it had at enqueue time.
 
 The queue's *edit* flow needs the opposite direction too — a spec written back
-into the form — which is :class:`analyze_job_edit.AnalyzeJobEditMixin`, mixed
+into the form — which is :class:`analyze.job_edit.AnalyzeJobEditMixin`, mixed
 in here because it is part of the same queue-facing surface. ``show_job`` below
 stays a shallow preview; ``hydrate_job`` is the full inverse.
 
@@ -24,7 +24,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QPushButton, QWidget
 
-from analyze_job_edit import AnalyzeJobEditMixin
+from analyze.job_edit import AnalyzeJobEditMixin
 from services.pipeline_service import find_pipeline_script
 from services.run_spec import RunSpec, RunSpecError
 from widgets.flow_layout import FlowLayout
@@ -105,7 +105,7 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
     def set_queue_sink(self, sink) -> None:
         """Where "+ Queue" sends a run. Injected by the Datasets pane, which
         owns the queue — so this module never imports it, exactly as the queue
-        never imports ``analyze_tab``. Left unset when the pane is not in the
+        never imports ``analyze.tab``. Left unset when the pane is not in the
         build, and the button hides itself rather than failing on click."""
         self._queue_sink = sink
         btn = getattr(self, "_queue_btn", None)
@@ -115,7 +115,7 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
     def _build_run_row(self, parent: QWidget) -> QWidget:
         """The whole run-controls row: Run, Suspend, + Queue, Stop.
 
-        Built here rather than in ``analyze_tab_form.py`` because that file is
+        Built here rather than in ``analyze/form.py`` because that file is
         at its line budget and the ratchet only moves down — moving the row out
         wholesale lowers it.
 

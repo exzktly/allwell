@@ -15,7 +15,7 @@ module is the seam between them: a button that asks the run to wind down and
 writes the spec down, and a banner that offers the spec back with incremental
 forced on.
 
-Held as a mixin rather than added to ``analyze_tab.py`` for the same reason
+Held as a mixin rather than added to ``analyze/tab.py`` for the same reason
 ``AnalyzeRunMixin`` is — that file sits against its line budget, and this is a
 self-contained feature rather than something the tab's other behaviour reaches
 into.
@@ -595,7 +595,7 @@ class AnalyzeSuspendMixin:
         ``RunRecord.tally`` returns a sentence written to be *concatenated* — it
         opens with a space, and with "It recorded", so it reads on from whatever
         precedes it. The other surface that renders it (the pre-run report in
-        ``analyze_preflight``) still concatenates, so the shape stays as it is
+        ``analyze.preflight``) still concatenates, so the shape stays as it is
         and the space is stripped here. Standing alone the sentence is still
         correct: the line above it has just named the run.
         """

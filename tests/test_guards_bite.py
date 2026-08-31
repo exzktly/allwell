@@ -124,7 +124,7 @@ def test_colour_guard_clears_a_token_read(tmp_path, monkeypatch):
 
 
 EMBEDDED_HEX_VIOLATIONS = {
-    # The two that shipped in analyze_remote_dialog.py: a hex inside a longer
+    # The two that shipped in analyze/remote_dialog.py: a hex inside a longer
     # f-string, which the whole-literal `^…$` match walked straight past.
     "fstring": ('def paint(lbl, alias):\n'
                 '    lbl.setText(f"<span style=\'color: #4caf50;\'>ok {alias}</span>")\n'),
@@ -548,7 +548,7 @@ def _help_topics_root(tmp_path: Path) -> Path:
     """A synthetic repo root holding the three files the guard reads."""
     _write(tmp_path, "_Docs/Markdowns/README_WellViewer.md", _FAKE_README)
     _write(tmp_path, "datasets_tab.py", _FAKE_DATASETS_TAB)
-    _write(tmp_path, "analyze_tab_form.py", _FAKE_ANALYZE_FORM)
+    _write(tmp_path, "analyze/form.py", _FAKE_ANALYZE_FORM)
     return tmp_path
 
 

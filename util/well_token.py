@@ -6,7 +6,7 @@ normalisation logic:
 * `WellPlateZipper._extract_well_from_filename`
 * `process_microscopy._canonical_well_label`
 * `services/input_resolution_service._is_well_named` /
-  `analyze_tab._WELL_NAME_RE`
+  `analyze.tab._WELL_NAME_RE`
 
 They agreed by coincidence; this module is the canonical home so a
 future change can't drift the parsers apart again. It depends only on

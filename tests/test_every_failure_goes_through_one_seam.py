@@ -22,7 +22,7 @@ the queue directly, so its own failures never passed through the runner at all.
 No rule inside `pipeline_runner.py` can see that writer, and the bookkeeping
 does not belong to any one writer anyway — so it moved to the queue, and the
 tests at the bottom of this file drive it from outside the class exactly as
-`analyze_input._resolve_run_dirs_for_runner` does.
+`analyze.input._resolve_run_dirs_for_runner` does.
 """
 from __future__ import annotations
 
@@ -112,7 +112,7 @@ def _runner():
 def test_a_stop_during_grouping_is_not_painted_as_a_failure():
     """The reported bug: red dashboard and a forced-open log for a user's Stop.
 
-    `analyze_input._resolve_run_dirs_for_runner` reports an input failure by
+    `analyze.input._resolve_run_dirs_for_runner` reports an input failure by
     putting straight onto the public queue, so pressing Stop while a plate was
     grouping produced a genuine `("error", …)` — the zipper killed by signal —
     that had never been through the latch. The GUI read `(False, False)`, chose
@@ -156,7 +156,7 @@ def test_a_failure_on_the_public_queue_reaches_the_record(tmp_path, monkeypatch)
     r._open_journal(tmp_path / "in", out, ["process_microscopy.py"], {})
     assert r.journal_token is not None, "the journal did not open; nothing below measures anything"
 
-    # Exactly what `analyze_input._resolve_run_dirs_for_runner` does: the queue
+    # Exactly what `analyze.input._resolve_run_dirs_for_runner` does: the queue
     # is public and this writer never passes through `_enqueue_error`.
     r.log_q.put(("error", "Input error: no such folder\n"))
     r._close_journal()

@@ -5,7 +5,7 @@ a negative value (the CLI's ``-1`` sentinel) all mean *use the pretrained
 model's own threshold*; anything else must be a number in ``[0, 1]``, and a
 value outside that range is refused by raising rather than clamped.
 
-``analyze_tab_fields._threshold_errors`` restates that rule instead of importing
+``analyze.fields._threshold_errors`` restates that rule instead of importing
 it, because ``pipeline.stardist`` pulls numpy, scipy and skimage into whatever
 imports it and the Analyze form deliberately keeps them out of its graph — the
 pipeline runs as a subprocess. A restated rule is two rules the day one of them
@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import pytest
 
-from analyze_tab_fields import _numeric_option_errors
+from analyze.fields import _numeric_option_errors
 
 stardist = pytest.importorskip("pipeline.stardist")
 

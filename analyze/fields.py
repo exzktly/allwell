@@ -15,7 +15,7 @@ its say. A field that is coerced on its way *into* ``opts`` is structurally
 unvalidatable, which is how ``qc_min_area``, the four Cellpose parameters and
 the minimum nucleus area came to accept a typo as "no bound at all".
 
-``analyze_tab`` and ``analyze_tab_form`` both re-export ``_numeric_option_errors``
+``analyze.tab`` and ``analyze.form`` both re-export ``_numeric_option_errors``
 so every existing import path still resolves.
 """
 
@@ -27,7 +27,7 @@ import math
 # ── Entry-boundary parsing + numeric validation ─────────────────────────────
 #
 # These read the form's text fields, so they live beside the widgets rather than
-# in the tab that hosts them. ``analyze_tab`` re-exports
+# in the tab that hosts them. ``analyze.tab`` re-exports
 # ``_numeric_option_errors`` so its old import path still resolves.
 
 #: Whole-number fields where ``0`` is a meaningful value ("off" / "no bound"):

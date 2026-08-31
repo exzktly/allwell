@@ -4,7 +4,7 @@
 vocabulary every ``_build_*`` section is written in: a collapsible titled
 section, a two-column label+widget row, a fixed-width entry, and the hover ``ⓘ``
 marker that keeps long explanatory notes off the form. Split out of
-``analyze_tab_form.py`` for its line budget; the methods bind to ``self``
+``analyze/form.py`` for its line budget; the methods bind to ``self``
 exactly as before, so this is a pure relocation.
 
 The optional sections fold by default so the required fields lead the form.

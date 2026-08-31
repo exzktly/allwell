@@ -1,5 +1,5 @@
 """
-analyze_tab.py — AnalyzeTab widget (PySide6 port).
+analyze/tab.py — AnalyzeTab widget (PySide6 port).
 
 Input-folder resolution rules (applied when Run is pressed, and previewed under
 the input field the moment a folder is chosen):
@@ -39,16 +39,16 @@ from services.pipeline_service import find_pipeline_script
 import theme
 from well_viewer.core.app_shell_view import RAIL_W
 from well_viewer.core.safe import swallowed
-from analyze_input import AnalyzeInputMixin
-from analyze_preflight import AnalyzePreflightMixin
-from analyze_progress import AnalyzeProgressMixin
-from analyze_run_spec import AnalyzeRunMixin
-from analyze_suspend import AnalyzeSuspendMixin
-from analyze_tab_log import AnalyzeLogPaneMixin
-from analyze_tab_form import (  # form builders (split out)
+from analyze.input import AnalyzeInputMixin
+from analyze.preflight import AnalyzePreflightMixin
+from analyze.progress import AnalyzeProgressMixin
+from analyze.run_spec import AnalyzeRunMixin
+from analyze.suspend import AnalyzeSuspendMixin
+from analyze.log_pane import AnalyzeLogPaneMixin
+from analyze.form import (  # form builders (split out)
     AnalyzeTabFormMixin,
     # Entry-boundary numeric validation lives with the fields it reads; re-exported
-    # so ``from analyze_tab import _numeric_option_errors`` still resolves.
+    # so ``from analyze.tab import _numeric_option_errors`` still resolves.
     _numeric_option_errors,  # noqa: F401 (re-export)
 )
 
@@ -248,7 +248,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
         # Lazy import to avoid pulling the dialog module into the
         # AnalyzeTab import graph on startup — the dialog imports
         # services.remote_runner which has heavier-weight dependencies.
-        from analyze_remote_dialog import ManageRemotesDialog
+        from analyze.remote_dialog import ManageRemotesDialog
         dlg = ManageRemotesDialog(self)
         dlg.remotes_changed.connect(self._reload_remotes_combo)
         try:
@@ -416,7 +416,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzePreflightMixin,
 
     # Segmentation hints (_segmentation_validation_errors /
     # _collapse_seg_param_stack / _refresh_segmentation_hints) live in
-    # analyze_tab_seg_params.AnalyzeSegParamsMixin, beside the parameter panel
+    # analyze.seg_params.AnalyzeSegParamsMixin, beside the parameter panel
     # they drive.
 
     # ------------------------------------------------------------------

@@ -59,8 +59,8 @@ _PROBE_POLL_MS = 120
 
 # How long one bootstrap-log drain slice may hold the GUI thread, and how many
 # lines it may carry — the same pair, for the same reason, as
-# ``analyze_tab._POLL_BUDGET_S`` / ``_POLL_MAX_LINES``. Restated rather than
-# imported: ``analyze_tab`` imports this module (lazily, from the Manage…
+# ``analyze.tab._POLL_BUDGET_S`` / ``_POLL_MAX_LINES``. Restated rather than
+# imported: ``analyze.tab`` imports this module (lazily, from the Manage…
 # button), so importing it back would close the cycle.
 _POLL_BUDGET_S = 0.015
 _POLL_MAX_LINES = 500
@@ -1531,7 +1531,7 @@ class ManageRemotesDialog(QDialog):
         PySide6 6.7.3 an exception escaping a slot prints a traceback and lets
         the event loop carry on, so a hand-edited ``remotes.toml`` did not crash
         the app — it made Edit…, Test and Manage… buttons that do nothing at
-        all, with the only evidence in a boot log nobody reads. ``analyze_tab``
+        all, with the only evidence in a boot log nobody reads. ``analyze.tab``
         has caught the pair around this same call for as long as the combo has
         existed; this carries that knowledge across.
         """

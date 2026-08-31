@@ -1,7 +1,7 @@
 """The Analyze pane's two folder banners are objects, and their text has room.
 
 Both strips at the head of the Analyze sidebar — the resume offer
-(``analyze_suspend``) and the pre-run report (``analyze_preflight``) — were
+(``analyze.suspend``) and the pre-run report (``analyze.preflight``) — were
 built as a ``QHBoxLayout`` of one wrapping label followed by two buttons, and
 given an object name that ``theme.qss()`` had no rule for. Two consequences,
 neither of which any test could see:
@@ -59,7 +59,7 @@ def strips(qtbot):
     puts the gap between the two cards and what must collapse to nothing when
     both are hidden.
     """
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     tab = AnalyzeTab()
     qtbot.addWidget(tab)
@@ -106,7 +106,7 @@ def test_the_banner_paints_its_own_background(qtbot, name):
     """``WA_StyledBackground``, without which the fill above is ignored."""
     from PySide6.QtCore import Qt
 
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     tab = AnalyzeTab()
     qtbot.addWidget(tab)
@@ -204,7 +204,7 @@ def test_every_unfinished_outcome_has_a_kicker_and_a_phrase():
     """The strip names the state in two words above the sentence explaining
     it. An outcome the journal can record and the strip cannot spell falls
     into a generic fallback, and the user is told less than the app knows."""
-    import analyze_suspend as A
+    import analyze.suspend as A
 
     missing = [o for o in J.UNFINISHED_OUTCOMES
                if o not in A._UNFINISHED_KICKERS or o not in A._UNFINISHED_PHRASES]
@@ -221,7 +221,7 @@ def test_the_incremental_promise_is_made_once(strips, tmp_path):
     """The strip, the one-sentence headline and the log line all say what
     Resume does. Three separately-worded copies is how a user reads two
     different accounts of the same behaviour."""
-    import analyze_suspend as A
+    import analyze.suspend as A
 
     tab, _host = strips
     out = _journal_offer(tab, tmp_path)

@@ -192,7 +192,7 @@ def _progress_host(qapp):
     """
     from PySide6.QtWidgets import QWidget
 
-    from analyze_progress import AnalyzeProgressMixin
+    from analyze.progress import AnalyzeProgressMixin
     from widgets.run_dashboard import RunDashboard
 
     class _Host(AnalyzeProgressMixin, QWidget):
@@ -391,7 +391,7 @@ def test_an_uncomputed_well_is_reported_as_such_without_changing_the_plate():
 
 def test_the_journal_records_an_uncomputed_well_as_skipped(tmp_path, monkeypatch):
     """At the boundary: what reaches ``record_well``, not what the tracker returns."""
-    import analyze_progress
+    import analyze.progress
     from services import run_journal as J
     from services.pipeline_runner import ProgressTracker
 
@@ -416,7 +416,7 @@ def test_the_journal_records_an_uncomputed_well_as_skipped(tmp_path, monkeypatch
         def __getattr__(self, name):
             return lambda *a, **k: None
 
-    class _Mixin(analyze_progress.AnalyzeProgressMixin):
+    class _Mixin(analyze.progress.AnalyzeProgressMixin):
         def __init__(self):
             self._runner = _Runner()
             self._dashboard = _Dash()
@@ -498,7 +498,7 @@ def test_a_dropped_line_takes_both_facts_with_it(tmp_path, monkeypatch):
     but not wrong, which is the distinction that matters (CLAUDE.md §7). The
     assertion is on the record on disk (§7.4 #1).
     """
-    import analyze_progress
+    import analyze.progress
     from services import run_journal as J
     from services.pipeline_runner import (PipelineRunner, ProgressTracker,
                                           RunEventQueue)
@@ -515,7 +515,7 @@ def test_a_dropped_line_takes_both_facts_with_it(tmp_path, monkeypatch):
             last_output_dir = out
             journal_token = token
 
-        class _Mixin(analyze_progress.AnalyzeProgressMixin):
+        class _Mixin(analyze.progress.AnalyzeProgressMixin):
             def __init__(self):
                 self._runner = _Runner()
                 self._dashboard = _Dash()

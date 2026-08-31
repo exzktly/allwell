@@ -1,16 +1,16 @@
-"""Analyze-tab form construction (Qt widget builders), split from analyze_tab.py.
+"""Analyze-tab form construction (Qt widget builders), split from analyze/tab.py.
 
 ``AnalyzeTab`` mixes in :class:`AnalyzeTabFormMixin` to inherit the ``_build_*``
 section builders verbatim — they still bind to ``self`` exactly as before, so
 this is a pure relocation (no behaviour change), trimming the 1.8k-line god-class
 down to its run / validation / log-poll core. The schema vocabulary constants
-live here too (the form reads them) and are re-exported by ``analyze_tab``.
+live here too (the form reads them) and are re-exported by ``analyze.tab``.
 
 Restoring a prior run's settings from its ``pipeline_info.json`` sidecar is its
-own cohesive job and lives in ``analyze_tab_pinfo.py``; the form's own chrome
+own cohesive job and lives in ``analyze/pinfo.py``; the form's own chrome
 (``_section``/``_row``/``_entry``/``_info_icon``/``reveal_section``) lives in
-``analyze_tab_chrome.py``; the per-method segmentation params, thresholds and
-hints in ``analyze_tab_seg_params.py``. This mixin inherits them all, so every
+``analyze/form_chrome.py``; the per-method segmentation params, thresholds and
+hints in ``analyze/seg_params.py``. This mixin inherits them all, so every
 name stays reachable on the form exactly where callers expect it.
 """
 
@@ -23,13 +23,13 @@ from PySide6.QtWidgets import (
     QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
-from analyze_tab_chrome import AnalyzeFormChromeMixin
-from analyze_tab_fields import (  # noqa: F401 — re-exported for analyze_tab
+from analyze.form_chrome import AnalyzeFormChromeMixin
+from analyze.fields import (  # noqa: F401 — re-exported for analyze.tab
     _INT_FIELDS,
     _numeric_option_errors,
 )
-from analyze_tab_pinfo import AnalyzePipelineInfoMixin
-from analyze_tab_seg_params import AnalyzeSegParamsMixin
+from analyze.pinfo import AnalyzePipelineInfoMixin
+from analyze.seg_params import AnalyzeSegParamsMixin
 from services.remote_config import default_remote_index, load_remotes
 from widgets.checkable_dropdown import CheckableDropdown
 from widgets.wrap_checkbox import WrapCheckBox
@@ -163,7 +163,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
         self._fluor_add_btn = add_btn  # for an OME-mode hide nothing performs yet
 
         # Per-method parameter pages + the shared StarDist thresholds
-        # (analyze_tab_seg_params.AnalyzeSegParamsMixin).
+        # (analyze.seg_params.AnalyzeSegParamsMixin).
         self._build_seg_param_stack(sec)
 
         self._segmentation_hint_lbl = QLabel("", sec)

@@ -22,7 +22,7 @@ def qapp():
 
 
 def test_robust_mesh_param_fields_gated_and_collected(qapp):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     tab = AnalyzeTab()
 
@@ -49,7 +49,7 @@ def test_robust_mesh_param_fields_gated_and_collected(qapp):
 
 
 def test_remote_params_grouped_and_gated_on_selection(qapp):
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     tab = AnalyzeTab()
 
@@ -107,7 +107,7 @@ def test_fluor_radius_info_icon_precedes_disable_checkbox(qapp):
     it clear of the checkbox regardless of platform style. Assert the layout
     order (a number that holds on any style) rather than the rendered pixels.
     """
-    from analyze_tab import AnalyzeTab
+    from analyze.tab import AnalyzeTab
 
     tab = AnalyzeTab()
     tab._background_cb.setCurrentText("robust_mesh")  # reveals the radius rows

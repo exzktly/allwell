@@ -26,7 +26,7 @@ from well_viewer.domain.dataset_name import dataset_display_name
 
 
 #: The left panel's width, shared by all three modes — Review's own rail,
-#: Datasets' sidebar, and Analyze's form panel (``analyze_tab.py``) all pin to
+#: Datasets' sidebar, and Analyze's form panel (``analyze/tab.py``) all pin to
 #: this one value, so switching modes never visibly resizes the window. The
 #: app header's mode bar spans exactly this too, so it and the rail beneath it
 #: share a left column.
@@ -38,7 +38,7 @@ from well_viewer.domain.dataset_name import dataset_display_name
 #: which needs anywhere near that much room — pinned exactly as wide, reading
 #: as an oversized sidebar with no content to justify it. Rather than let
 #: Analyze's widest row set the width for all three panes, its form itself was
-#: narrowed to fit: ``analyze_tab_form.py``'s row label column shrank
+#: narrowed to fit: ``analyze/form.py``'s row label column shrank
 #: (150→``_ROW_LABEL_W`` == 108) with word-wrap enabled instead of a hard
 #: clip, its widest fixed-width combos (segmentation method, auto-threshold
 #: method) shrank to 165 and rely on Qt's built-in text eliding plus a

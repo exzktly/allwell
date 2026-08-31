@@ -1277,9 +1277,15 @@ class BootstrapLogDialog(QDialog):
 
     def _spawn(self) -> None:
         from services.input_resolution_service import build_bootstrap_cmd
+        # The repository root is asked for, never derived from this module's own
+        # location: ``__file__.parent`` was the root only while this file sat at
+        # the top level, and answered ``analyze/`` the moment it moved into a
+        # package — pointing the bootstrap at a path that has never existed.
+        # ``remote_runner.repo_root`` is the one definition of it, shared with
+        # the bootstrap script's own helpers.
+        from services.remote_runner import repo_root
 
-        repo_root = Path(__file__).resolve().parent
-        bootstrap = repo_root / "scripts" / "_bootstrap_lib.py"
+        bootstrap = repo_root() / "scripts" / "_bootstrap_lib.py"
         # Source runs invoke the interpreter on the ``.py`` path, so it must
         # exist; the frozen build re-execs the .app binary via the
         # ``--run-bootstrap`` sentinel and never touches this path.

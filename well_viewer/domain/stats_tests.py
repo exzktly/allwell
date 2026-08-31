@@ -23,7 +23,7 @@ quietly, in the direction of looking like a real change in the data.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -66,10 +66,20 @@ class EffectSize:
     diff: float | None = None
     lo: float | None = None
     hi: float | None = None
+    #: The interval's coverage, as a percentage, so the label cannot claim 95%
+    #: for an interval computed at another level.
+    level: float = 95.0
+    #: Why *g* alone is missing while the interval is real. Separate from
+    #: :attr:`undefined`, which means *nothing* was computed — a result with a
+    #: difference and an interval but no pooled SD is a partial answer, and
+    #: collapsing the two would either hide the reason or hide the numbers.
+    g_undefined: str = ""
     undefined: str = ""
 
     @property
     def ok(self) -> bool:
+        """Whether the whole result computed. See :attr:`g_undefined` for the
+        partial case, which is ``ok`` and still has something to say."""
         return not self.undefined
 
 
@@ -78,9 +88,9 @@ def hedges_g(a, b) -> float | None:
 
     Cohen's *d* on the pooled standard deviation, times the small-sample
     correction ``1 - 3/(4*df - 1)``. The correction is not cosmetic at the sizes
-    this app sees: at n=3 per group *d* overstates the effect by about 16%, and
-    a per-well replicate count of three is the normal case here rather than the
-    small-sample corner.
+    this app sees: at n=3 per group the factor is 0.8, so the uncorrected *d*
+    overstates the effect by 25%, and a per-well replicate count of three is
+    the normal case here rather than the small-sample corner.
 
     ``None`` when either sample has fewer than two usable values, or when both
     samples are constant — a pooled standard deviation of zero makes the ratio
@@ -124,19 +134,29 @@ def effect_size(a, b, *, resamples: int = BOOTSTRAP_RESAMPLES,
     diff = float(xa.mean() - xb.mean())
     if resamples < 2:
         return EffectSize(g=g, diff=diff,
-                          undefined="the interval was asked for 0 resamples")
+                          undefined=f"an interval needs 2 or more resamples, "
+                                    f"not {int(resamples)}")
     rng = np.random.default_rng(_BOOTSTRAP_SEED)
     draws_a = rng.choice(xa, size=(resamples, xa.size), replace=True).mean(axis=1)
     draws_b = rng.choice(xb, size=(resamples, xb.size), replace=True).mean(axis=1)
     diffs = draws_a - draws_b
     tail = (1.0 - float(level)) / 2.0
     lo, hi = np.quantile(diffs, [tail, 1.0 - tail])
+    level_pct = float(level) * 100.0
     if not (math.isfinite(lo) and math.isfinite(hi)):
         return EffectSize(g=g, diff=diff,
                           undefined="the bootstrap interval did not converge")
-    undefined = "" if g is not None else "both groups are constant, so g has no pooled SD"
+    # **A partial result is not an undefined one, and says which half is
+    # missing.** Two constant groups have a real difference of means and a real
+    # (zero-width) interval, and no pooled SD — so *g* alone is undefined. An
+    # earlier version returned that in ``undefined`` beside real numbers, which
+    # broke this module's own promise that the field is empty exactly when the
+    # numbers beside it are real, and the report then printed the interval with
+    # the reason dropped.
     return EffectSize(g=g, diff=diff, lo=float(lo), hi=float(hi),
-                      undefined=undefined)
+                      level=level_pct,
+                      g_undefined=("" if g is not None else
+                                   "both groups are constant, so g has no pooled SD"))
 
 
 # ── H2: the omnibus gate ────────────────────────────────────────────────────
@@ -151,6 +171,10 @@ class Omnibus:
     p: float | None = None
     df_between: int | None = None
     df_within: int | None = None
+    #: Groups left out for having fewer than two usable values. Named rather
+    #: than counted away: an omnibus over three of four groups reads exactly
+    #: like one over all four, and the df alone will not tell a reader which.
+    dropped: tuple[str, ...] = ()
     undefined: str = ""
 
     @property
@@ -174,12 +198,21 @@ def omnibus(groups, *, parametric: bool = True) -> Omnibus:
     match the Test combo's own choice, so a run whose pairwise tests are
     rank-based is not gated by an ANOVA.
     """
-    samples = [_clean(v) for _n, v in (groups or ())]
-    usable = [s for s in samples if s.size >= 2]
+    named = [(str(n), _clean(v)) for n, v in (groups or ())]
+    usable = [s for _n, s in named if s.size >= 2]
+    dropped = tuple(n for n, s in named if s.size < 2)
     if len(usable) < 3:
-        return Omnibus(undefined="an omnibus needs 3 or more groups")
-    if all(np.allclose(s, s[0]) for s in usable) or _all_identical(usable):
-        return Omnibus(undefined="every group is constant, so there is no variance to partition")
+        return Omnibus(dropped=dropped,
+                       undefined="an omnibus needs 3 or more groups")
+    # **Only when every group is constant at the *same* value.** The first
+    # version also refused when each group was internally constant at a
+    # *different* value — three groups reading 1, 2 and 3 — which
+    # ``kruskal`` answers perfectly well (H = 8.0, p = 0.018) and which
+    # count-like statistics reach routinely, so the report printed "no variance
+    # to partition" over data with a significant between-group effect.
+    if _all_identical(usable):
+        return Omnibus(undefined="every group holds the same constant value, "
+                                 "so there is no variance to partition")
     import scipy.stats as _st
 
     try:
@@ -191,13 +224,14 @@ def omnibus(groups, *, parametric: bool = True) -> Omnibus:
             name, stat_name = "Kruskal-Wallis", "H"
         stat, p = float(res.statistic), float(res.pvalue)
     except Exception as exc:
-        return Omnibus(undefined=str(exc))
+        return Omnibus(dropped=dropped, undefined=str(exc))
     if not (math.isfinite(stat) and math.isfinite(p)):
-        return Omnibus(name=name, undefined="the test returned no finite result")
+        return Omnibus(name=name, dropped=dropped,
+                       undefined="the test returned no finite result")
     k = len(usable)
     n = int(sum(s.size for s in usable))
     return Omnibus(name=name, stat_name=stat_name, stat=stat, p=p,
-                   df_between=k - 1, df_within=n - k)
+                   df_between=k - 1, df_within=n - k, dropped=dropped)
 
 
 def _all_identical(samples) -> bool:
@@ -264,19 +298,24 @@ def dunnett_vs_control(control_name: str, control_values,
         ps = [float(p) for p in np.atleast_1d(res.pvalue)]
     except Exception as exc:
         return DunnettResult(control=control_name, undefined=str(exc))
-    out = []
+    by_name = {}
     for (name, _vals), stat, p in zip(usable, stats, ps):
-        if math.isfinite(stat) and math.isfinite(p):
-            out.append(ControlComparison(name=name, stat=stat, p=p))
-        else:
-            out.append(ControlComparison(
-                name=name, undefined="the test returned no finite result"))
-    skipped = [n for n, v in named if v.size < 2]
-    undefined = ""
-    if skipped and not out:
-        undefined = "no treatment group has 2 or more usable replicates"
-    return DunnettResult(control=control_name, comparisons=tuple(out),
-                         undefined=undefined)
+        by_name[name] = (ControlComparison(name=name, stat=stat, p=p)
+                         if math.isfinite(stat) and math.isfinite(p)
+                         else ControlComparison(
+                             name=name,
+                             undefined="the test returned no finite result"))
+    # **A treatment too short to test still gets a row.** It used to be dropped
+    # from ``usable`` and never seen again — the guard meant to notice
+    # (``if skipped and not out``) could not fire, because an empty ``usable``
+    # has already returned above. So a group with one replicate vanished from
+    # the table with no line and no reason, which is indistinguishable from a
+    # group the user never defined.
+    out = [by_name.get(name) or ControlComparison(
+               name=name,
+               undefined="fewer than 2 usable replicates in this group")
+           for name, _v in named]
+    return DunnettResult(control=control_name, comparisons=tuple(out))
 
 
 # ── H4: paired and repeated-measures ────────────────────────────────────────
@@ -352,9 +391,17 @@ def paired_test(a_by_key, b_by_key, *, parametric: bool = True) -> PairedResult:
         return PairedResult(n_pairs=len(xa), unmatched=tuple(unmatched),
                             undefined=str(exc))
     if not (math.isfinite(stat) and math.isfinite(p)):
+        # Say *which* degenerate case. The commonest by far is a perfectly
+        # constant shift — every pair differing by the same amount, so the
+        # differences have no variance and the ratio is undefined — and "the
+        # test returned no finite result" tells a user nothing they can act on.
+        diffs = [a - b for a, b in zip(xa, xb)]
+        spread = max(diffs) - min(diffs) if diffs else 0.0
+        reason = ("every pair differs by the same amount, so there is no "
+                  "variation between pairs for the test to weigh"
+                  if spread == 0.0 else "the test returned no finite result")
         return PairedResult(name=name, n_pairs=len(xa),
-                            unmatched=tuple(unmatched),
-                            undefined="the test returned no finite result")
+                            unmatched=tuple(unmatched), undefined=reason)
     return PairedResult(name=name, stat_name=stat_name, stat=stat, p=p,
                         n_pairs=len(xa), unmatched=tuple(unmatched))
 
@@ -378,7 +425,7 @@ class TwoWayResult:
     terms: tuple[AnovaTerm, ...] = ()
     residual_ss: float | None = None
     residual_df: int | None = None
-    empty_cells: tuple[str, ...] = field(default=())
+    empty_cells: tuple[str, ...] = ()
     undefined: str = ""
 
     @property
@@ -460,9 +507,29 @@ def two_way_anova(rows, *, factor_a: str = "A", factor_b: str = "B") -> TwoWayRe
                              for lvl in levels_b[1:]])
 
     sse_full, rank_full = _sse(y, x_full)
-    sse_add, _rank_add = _sse(y, x_add)
+    sse_add, rank_add = _sse(y, x_add)
     sse_a, _r = _sse(y, x_a_only)
     sse_b, _r = _sse(y, x_b_only)
+
+    # **Confounded factors produce no main effects, and must not produce
+    # zeros.** With an empty cell the additive design can be rank-deficient —
+    # in the limit each level of A appears with exactly one level of B, so the
+    # two variables are the same partition of the plate under two names. Least
+    # squares still solves it, ``sse_b - sse_add`` collapses to 0, and the
+    # table reports ``F = 0, p = 1`` for both: *neither factor matters*, on data
+    # where the levels differ by nine residual standard deviations. That is a
+    # number the data does not support, printed indistinguishably from a real
+    # null — this module's own cardinal sin, and it is the ordinary case rather
+    # than an exotic one (each cell line given one dose, each dose run on one
+    # day). The interaction refusal above does not cover it: it names an
+    # interaction problem and says nothing about the main effects.
+    expected_add_rank = 1 + (len(levels_a) - 1) + (len(levels_b) - 1)
+    if rank_add < expected_add_rank:
+        return TwoWayResult(
+            factor_a=factor_a, factor_b=factor_b, empty_cells=tuple(empty),
+            undefined=(f"{factor_a} and {factor_b} are confounded — no set of "
+                       "replicates tells them apart, so neither main effect is "
+                       "estimable. Vary one while holding the other."))
 
     df_resid = len(y) - rank_full
     if df_resid <= 0:

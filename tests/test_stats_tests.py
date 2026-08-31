@@ -30,9 +30,10 @@ from well_viewer.domain import stats_tests as st
 # ── H1: effect size and interval ────────────────────────────────────────────
 
 def test_hedges_g_applies_the_small_sample_correction():
-    """Not Cohen's *d*. At n=3 per group the uncorrected statistic overstates
-    the effect by about 16%, and n=3 wells is the normal case in this app — so
-    "the two differ" is not the assertion; the corrected value is.
+    """Not Cohen's *d*. At n=3 per group the correction factor is 0.8, so the
+    uncorrected statistic overstates the effect by 25%, and n=3 wells is the
+    normal case in this app — so "the two differ" is not the assertion; the
+    corrected value is.
 
     The wrong implementation this excludes is plain *d*, which is what the
     formula reduces to if the correction factor is dropped.
@@ -354,6 +355,45 @@ def test_both_main_effects_are_found_where_the_data_has_them():
     assert by_name["Cell line"].p < 0.001
 
 
+#: The unbalanced fixture below, and the Type II sums of squares
+#: ``statsmodels.anova_lm(typ=2)`` reports for it. Hard-coded from that
+#: reference run rather than recomputed here, so this test cannot agree with the
+#: implementation by sharing its arithmetic.
+#:
+#: **The number is what separates Type II from Type III.** Swap-symmetry does
+#: not: Type III is symmetric too (measured on this same fixture, 95.796 /
+#: 6.550 in either order), so the order test below excludes Type I and nothing
+#: else. On this design the three types give three different answers, and only
+#: one of them is what the module claims to compute.
+_UNBALANCED_COUNTS = {("low", "HeLa"): 5, ("low", "U2OS"): 2,
+                      ("mid", "HeLa"): 3, ("mid", "U2OS"): 6,
+                      ("high", "HeLa"): 4, ("high", "U2OS"): 3}
+_TYPE_II_SS = {"Dose": 169.28987797143947, "Line": 4.652462291792863}
+_TYPE_III_SS = {"Dose": 95.79621515091752, "Line": 6.550198968568208}
+
+
+def _unbalanced_rows():
+    rng = np.random.default_rng(3)
+    rows = []
+    for (a, b), k in _UNBALANCED_COUNTS.items():
+        i = ["low", "mid", "high"].index(a)
+        j = ["HeLa", "U2OS"].index(b)
+        rows += [(a, b, float(10 + 3 * i + 1.5 * j + rng.normal(0, 1)))
+                 for _ in range(k)]
+    return rows
+
+
+def test_the_sums_of_squares_are_type_two_and_not_type_three():
+    result = st.two_way_anova(_unbalanced_rows(), factor_a="Dose",
+                              factor_b="Line")
+
+    by_name = {t.name: t.ss for t in result.terms}
+    assert by_name["Dose"] == pytest.approx(_TYPE_II_SS["Dose"], rel=1e-9)
+    assert by_name["Line"] == pytest.approx(_TYPE_II_SS["Line"], rel=1e-9)
+    assert by_name["Dose"] != pytest.approx(_TYPE_III_SS["Dose"], rel=1e-3)
+    assert by_name["Line"] != pytest.approx(_TYPE_III_SS["Line"], rel=1e-3)
+
+
 def test_type_two_gives_the_same_answer_whichever_factor_is_named_first():
     """The property Type II is chosen for. A sequential (Type I) decomposition
     gives each main effect a different sum of squares depending on the entry
@@ -436,3 +476,100 @@ def test_every_declined_result_says_why_and_carries_no_number(result):
         assert value is None or not math.isfinite(float(value)), (
             f"{type(result).__name__}.{field_name} carries {value!r} "
             "on a result that could not be computed")
+
+
+# ── what the review found ───────────────────────────────────────────────────
+
+def test_two_confounded_factors_are_refused_rather_than_reported_as_null():
+    """The cardinal sin, in the shape that ships on a real plate.
+
+    When each level of one variable appears with exactly one level of the
+    other, the two are the same partition of the plate under two names and
+    neither main effect is estimable. Least squares still solves the design,
+    the model comparisons collapse to zero, and the table reported
+    ``F = 0, p = 1`` for both — *neither factor matters* — on data whose levels
+    differ by nine residual standard deviations.
+
+    The wrong implementation this excludes is the one that ships: it produced a
+    complete-looking table, so "it returned terms" or "it did not raise" passes
+    against it. Only refusing does not.
+    """
+    rows = [("a1", "b1", 1.0), ("a1", "b1", 2.0),
+            ("a2", "b2", 10.0), ("a2", "b2", 11.0)]
+
+    result = st.two_way_anova(rows, factor_a="Dose", factor_b="Line")
+
+    assert not result.ok
+    assert "confounded" in result.undefined
+    assert result.terms == ()
+
+
+def test_a_partly_confounded_design_that_is_still_estimable_is_not_refused():
+    """The other side: an empty cell alone does not confound the factors, and
+    refusing there would throw away two perfectly good main effects."""
+    rows = [("low", "HeLa", 1.0), ("low", "HeLa", 1.4),
+            ("low", "U2OS", 2.0), ("low", "U2OS", 2.3),
+            ("high", "HeLa", 3.0), ("high", "HeLa", 3.6)]
+
+    result = st.two_way_anova(rows, factor_a="Dose", factor_b="Line")
+
+    assert result.ok
+    assert [t.name for t in result.terms] == ["Dose", "Line", "Dose x Line"]
+
+
+def test_groups_constant_at_different_values_are_a_real_result():
+    """``kruskal`` answers this perfectly well (H = 8.0, p = 0.018), and
+    count-like statistics reach it routinely. The guard used to refuse it and
+    print "no variance to partition" over a significant between-group effect."""
+    result = st.omnibus([("A", [1.0, 1.0, 1.0]), ("B", [2.0, 2.0, 2.0]),
+                         ("C", [3.0, 3.0, 3.0])], parametric=False)
+
+    assert result.ok
+    assert result.p == pytest.approx(0.018315638888734137)
+
+
+def test_groups_all_constant_at_the_same_value_are_still_refused():
+    result = st.omnibus([("A", [2.0, 2.0]), ("B", [2.0, 2.0]),
+                         ("C", [2.0, 2.0])])
+
+    assert not result.ok
+    assert "same constant value" in result.undefined
+
+
+def test_a_group_too_short_to_test_is_named_rather_than_dropped():
+    result = st.omnibus([("a", [1.0, 2.0, 3.0]), ("b", [4.0, 5.0, 6.0]),
+                         ("c", [7.0, 8.0, 9.0]), ("solo", [1.0])])
+
+    assert result.ok
+    assert result.dropped == ("solo",)
+
+
+def test_a_treatment_too_short_for_dunnett_gets_a_row_saying_so():
+    """It used to vanish from the table entirely, which is indistinguishable
+    from a group the user never defined. The guard meant to notice could not
+    fire — an empty ``usable`` had already returned above it."""
+    result = st.dunnett_vs_control("ctrl", [1.0, 2.0, 3.0],
+                                   [("T1", [4.0, 5.0, 6.0]), ("T2", [99.0])])
+
+    assert [c.name for c in result.comparisons] == ["T1", "T2"]
+    short = result.comparisons[1]
+    assert short.p is None
+    assert "fewer than 2 usable replicates" in short.undefined
+
+
+def test_a_constant_paired_shift_says_which_degenerate_case_it_hit():
+    """"the test returned no finite result" tells a user nothing they can act
+    on, and this is the commonest way a paired test fails."""
+    a = {f"b{i}": float(i * 10) for i in range(4)}
+    b = {f"b{i}": float(i * 10 + 1) for i in range(4)}
+
+    result = st.paired_test(a, b)
+
+    assert not result.ok
+    assert "same amount" in result.undefined
+
+
+def test_an_interval_asked_for_one_resample_says_one_not_zero():
+    result = st.effect_size([1.0, 2.0, 3.0], [4.0, 5.0, 6.0], resamples=1)
+
+    assert "2 or more resamples, not 1" in result.undefined

@@ -71,11 +71,39 @@ def test_a_non_significant_omnibus_says_so_without_hiding_the_pairwise():
     assert "still shown" in text
 
 
-def test_an_omnibus_that_could_not_run_says_why():
-    text = _text(rep.omnibus_lines(st.omnibus([("a", [1.0, 2.0])])))
+def test_a_two_group_run_prints_no_omnibus_refusal_at_all():
+    """The commonest path, and the one place a refusal would be noise.
+
+    "an omnibus needs 3 or more groups" over every two-group comparison — and
+    over every KS run, which is two groups by definition — refuses something
+    the user never asked for. Silence is the honest answer there; every other
+    shortfall is a real one and is said.
+    """
+    assert rep.omnibus_lines(st.omnibus([("a", [1.0, 2.0])])) == []
+    assert rep.omnibus_lines(
+        st.omnibus([("a", [1.0, 2.0]), ("b", [3.0, 4.0])])) == []
+
+
+def test_a_real_omnibus_shortfall_is_still_said():
+    """The other half. Silencing the two-group case must not silence the cases
+    that mean something — a wrong implementation that returned ``[]`` for every
+    refusal would pass the test above on its own."""
+    text = _text(rep.omnibus_lines(st.omnibus(
+        [("a", [2.0, 2.0]), ("b", [2.0, 2.0]), ("c", [2.0, 2.0])])))
 
     assert "not run" in text
-    assert "3 or more groups" in text
+    assert "same constant value" in text
+
+
+def test_a_group_the_omnibus_left_out_is_named():
+    """An omnibus over three of four groups reads exactly like one over all
+    four, and the degrees of freedom will not tell a reader which."""
+    text = _text(rep.omnibus_lines(st.omnibus(
+        [("a", [1.0, 2.0, 3.0]), ("b", [4.0, 5.0, 6.0]),
+         ("c", [7.0, 8.0, 9.0]), ("solo", [1.0])])))
+
+    assert "Left out" in text
+    assert "solo" in text
 
 
 def test_the_rank_based_branch_is_named_in_the_report():
@@ -140,8 +168,12 @@ def test_an_unpaired_replicate_is_named_in_the_report():
 def test_a_paired_test_that_could_not_pair_says_so_rather_than_printing_a_p():
     text = _text(rep.paired_lines("A", "B", st.paired_test({"b1": 1.0}, {"b1": 2.0})))
 
-    assert "Not computed:" in text
+    assert "Not computed" in text
     assert "p = " not in text
+    # The count goes on the declined line too: "nothing could be paired" and
+    # "the pairs carry no variation" are different problems with different
+    # fixes, and this is what separates them.
+    assert "n = 1 pairs" in text
 
 
 # ── two-way ─────────────────────────────────────────────────────────────────
@@ -186,3 +218,28 @@ def test_a_two_way_that_could_not_run_says_why():
 
     assert "not run" in text
     assert "fewer than 4 usable replicates" in text
+
+
+# ── the partial effect size ─────────────────────────────────────────────────
+
+def test_a_partial_effect_prints_both_the_numbers_and_the_missing_half():
+    """Two constant groups have a real difference and a real (zero-width)
+    interval and no pooled SD. Printing the interval and dropping the reason
+    leaves a reader with a zero-width CI, no ``g``, and no explanation of
+    either — which is the conflation this module exists to prevent, in its
+    quietest form."""
+    text = rep.effect_size_text(st.effect_size([1.0, 1.0, 1.0], [2.0, 2.0, 2.0]))
+
+    assert "Δ = -1" in text
+    assert "no g:" in text
+    assert "pooled SD" in text
+    assert "g = " not in text.split("(no g")[0]
+
+
+def test_the_interval_label_states_the_level_it_was_computed_at():
+    """Hard-coded, it read ``95% CI`` over an interval computed at any level."""
+    text = rep.effect_size_text(
+        st.effect_size([1.0, 2.0, 3.0, 4.0], [6.0, 7.0, 8.0, 9.0], level=0.90))
+
+    assert "90% CI" in text
+    assert "95%" not in text

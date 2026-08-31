@@ -40,16 +40,28 @@ def effect_size_text(effect) -> str:
     """
     if effect is None:
         return ""
-    if not effect.ok and effect.g is None and effect.diff is None:
+    if not effect.ok:
         return f"effect size: {effect.undefined}"
-    parts = [f"g = {_num(effect.g, '.3g')}"] if effect.g is not None else []
+    parts = []
+    if effect.g is not None:
+        parts.append(f"g = {_num(effect.g, '.3g')}")
     if effect.diff is not None:
         if effect.lo is None or effect.hi is None:
-            parts.append(f"Δ = {_num(effect.diff, '.3g')} "
-                         f"[CI: {effect.undefined or 'not computed'}]")
+            parts.append(f"Δ = {_num(effect.diff, '.3g')} [no interval]")
         else:
-            parts.append(f"Δ = {_num(effect.diff, '.3g')} "
-                         f"[95% CI {_num(effect.lo, '.3g')}, {_num(effect.hi, '.3g')}]")
+            # The level comes from the result, not from this string. Hard-coded
+            # it read `95% CI` over an interval computed at whatever level the
+            # caller asked for.
+            parts.append(
+                f"Δ = {_num(effect.diff, '.3g')} "
+                f"[{effect.level:g}% CI {_num(effect.lo, '.3g')}, "
+                f"{_num(effect.hi, '.3g')}]")
+    # **A partial result says which half is missing.** Two constant groups have
+    # a real difference and a real (zero-width) interval and no pooled SD, so
+    # *g* alone is undefined — printing the interval and dropping the reason
+    # leaves a reader with a zero-width CI, no g, and no explanation for either.
+    if effect.g_undefined:
+        parts.append(f"(no g: {effect.g_undefined})")
     return "   ".join(parts)
 
 
@@ -65,6 +77,13 @@ def omnibus_lines(result) -> list[str]:
     if result is None:
         return []
     if not result.ok:
+        # **Silent for the two-group case, which is most runs.** "an omnibus
+        # needs 3 or more groups" over every two-group comparison — and over
+        # every KS run, which is two groups by definition — is a refusal of
+        # something the user did not ask for, printed on the commonest path.
+        # Every other reason is a real shortfall and is said.
+        if "3 or more groups" in result.undefined:
+            return []
         return [f"Omnibus:    not run — {result.undefined}", ""]
     line = (f"Omnibus:    {result.name}   "
             f"{result.stat_name}({result.df_between}, {result.df_within}) = "
@@ -75,6 +94,13 @@ def omnibus_lines(result) -> list[str]:
         lines.append(
             "            No overall difference at the 5% level. The pairwise "
             "results below are still shown, and still adjusted.")
+    if result.dropped:
+        # Named, not counted away: an omnibus over three of four groups reads
+        # exactly like one over all four, and the df will not tell a reader
+        # which groups it actually weighed.
+        lines.append(f"            Left out ({len(result.dropped)} group(s) "
+                     f"with fewer than 2 replicates): "
+                     f"{', '.join(result.dropped)}.")
     lines.append("")
     return lines
 
@@ -113,7 +139,13 @@ def paired_lines(name_a: str, name_b: str, result) -> list[str]:
         return []
     lines = [f"── {name_a}  vs  {name_b} ──"]
     if not result.ok:
-        lines.append(f"  Not computed: {result.undefined}")
+        # **The pair count goes on the declined line too.** "no variation
+        # between pairs" and "nothing could be paired" are different problems
+        # with different fixes, and the count is what separates them — a
+        # declined test that did not say how many pairs it had left the reader
+        # unable to tell whether the pairing worked at all.
+        lines.append(f"  Not computed (n = {result.n_pairs} pairs): "
+                     f"{result.undefined}")
     else:
         lines.append(f"  {result.stat_name} = {_num(result.stat, '.4f')}   "
                      f"{p_phrase(result.p)}   {significance_stars(result.p)}   "

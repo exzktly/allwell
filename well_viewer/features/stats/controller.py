@@ -523,8 +523,13 @@ def _two_way_rows(ctx, grp, target_t, id_a, id_b, *,
     Per **well**, not per group: a two-way ANOVA needs replicates inside each
     cell of the two factors, and a group summarised to one number contributes a
     single observation to one cell — which is the design the domain module
-    declines for having no residual degrees of freedom. The well is the
-    replicate the rest of this tab already uses.
+    declines for having no residual degrees of freedom.
+
+    The unit *within* a well follows the tab's shared FOV rule, like every other
+    test here: with FOV mode off a well is one row, and with it on each field is
+    a row. The second is pseudo-replication for this table — three fields of one
+    well are not three replicates of that well's dose — so the caller says so
+    above the table rather than letting the residual df imply otherwise.
     """
     from well_viewer.domain.batch_models import BarGroup as _BarGroup
     from well_viewer.domain.sample_variables import MIXED, roll_up
@@ -594,10 +599,15 @@ def _alternative_test_lines(ctx, *, kind, spec, groups, group_vals, target_t,
         # return an empty map, and an empty map pairs to zero replicates, which
         # the paired test then declines for a reason that names the variable
         # rather than the missing group.
+        # ``group_vals`` was built from ``groups`` in this same call, so every
+        # name resolves; the guard is here because a silent ``None`` would
+        # reach ``collect_group_values_by_variable`` as an empty map and the
+        # paired test would then decline naming the *variable* rather than the
+        # missing group — a true-sounding reason for the wrong cause.
         maps = {}
         for name, _vals in group_vals:
             grp = _group_named(groups, name)
-            if grp is None:
+            if grp is None:                                  # pragma: no cover
                 continue
             maps[name] = collect_group_values_by_variable(
                 ctx, grp, target_t, variable_id, val_col=val_col,
@@ -620,13 +630,37 @@ def _alternative_test_lines(ctx, *, kind, spec, groups, group_vals, target_t,
     if id_a == id_b:
         return [f"Two-way ANOVA: not run — both factors are '{label_a}'. "
                 "Two-way needs two different variables."]
+    # **Each well once, however many groups hold it.** Comparison groups may
+    # overlap — ``stats_apply_drag`` adds a well to the active group and never
+    # removes it from another, and ``stats_refresh_map`` documents the overlap
+    # as supported — so iterating groups double-counts every shared well. On a
+    # balanced 2x2 with one well in two groups that halves every p-value and
+    # doubles the residual df, with nothing in the table saying the n moved.
+    # The ANOVA's unit is the well, so the wells are what is de-duplicated.
+    seen: set[str] = set()
     rows = []
     for grp in groups:
-        rows += _two_way_rows(ctx, grp, target_t, id_a, id_b,
-                              val_col=val_col, threshold=threshold,
+        fresh = [w for w in grp.wells if w not in seen]
+        seen.update(fresh)
+        if not fresh:
+            continue
+        from well_viewer.domain.batch_models import BarGroup as _BG
+        rows += _two_way_rows(ctx, _BG(grp.name, solo_wells=fresh), target_t,
+                              id_a, id_b, val_col=val_col, threshold=threshold,
                               statistic=statistic, use_fov=use_fov)
-    return two_way_lines(_st.two_way_anova(rows, factor_a=label_a,
-                                           factor_b=label_b))
+    lines = two_way_lines(_st.two_way_anova(rows, factor_a=label_a,
+                                            factor_b=label_b))
+    if use_fov and lines:
+        # The same warning the pairwise header carries, on the table whose
+        # residual df a reader will quote. With FOV mode on each field of view
+        # is a row, so three fields of one well count as three replicates of
+        # that well's dose *and* of its cell line — which is pseudo-replication,
+        # and the df are exactly where it shows.
+        lines.insert(1, "Replicates: per-FOV (FOV mode is ON). Each field of "
+                        "view is one row, so a single well contributes several "
+                        "replicates to its cell — the residual df reflect "
+                        "fields, not wells.")
+    return lines
 
 
 def run_stats(ctx, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
@@ -647,6 +681,12 @@ def run_stats(ctx, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
         app._stats_write_result("Define at least 2 non-empty groups to run a test.")
         return
 
+    # The pickers list things that live elsewhere — the tab's groups, and the
+    # plate's sample variables — and the run is the moment their contents
+    # matter. Refreshing here means a control or a factor chosen before the
+    # thing it names existed cannot silently be read from a stale list.
+    with swallow("refresh the Statistics test inputs before a run"):
+        refresh_stats_test_inputs(app._ctx)
     test = app._stats_test_cb.currentText()
     spec = test_spec(test)
     kind = spec["kind"]
@@ -906,6 +946,16 @@ def stats_refresh_group_list(ctx) -> None:
         refresh_empty_state_pages(ctx.window)
     except Exception:
         swallowed()
+    # **The Dunnett control picker lists these groups, so it refreshes here.**
+    # This is the funnel every group mutation goes through — add, delete,
+    # rename, clear-all, and the sync from Home's groups. Filling that combo
+    # only when the *test* changes left it holding the groups as they were at
+    # that moment: define your groups after choosing Dunnett and the combo
+    # stayed empty, so "pick a control group" named an action the user could
+    # not perform; rename one and the run refused a control the combo still
+    # offered. The same call keeps the two variable pickers current.
+    with swallow("refresh the Statistics test inputs after a group change"):
+        refresh_stats_test_inputs(ctx)
     container = ctx.widgets.get("_stats_grp_inner")
     layout = container.layout()
     if layout is None:

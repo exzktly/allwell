@@ -25,6 +25,25 @@ NO_VARIABLE_LABEL = "Wells / groups"
 NO_COLOUR_LABEL = "Plate colours"
 NO_SPLIT_LABEL = "One band"
 
+#: The centre tabs whose renderer actually reads *Colour by* and *Split by*.
+#:
+#: The two combos live on the page-level plotting band, which every Plotting
+#: leaf shares — and a control added to the band directly is never hidden by the
+#: per-leaf slot machinery. So they appeared on Bar Plots, Line Graphs, Response
+#: Curves, Scatter, Distribution and Heat Map, and exactly one of those six
+#: draws through ``features/barplot/_decorate``. On the other five, picking a
+#: variable wrote the state, emitted ``plot_options_changed``, redrew every tab
+#: and changed nothing on screen, with nothing saying why: §7.6's control that
+#: exists and does not work, against the band's own rule — quoted two comments
+#: above the code that broke it — that it "only ever carries controls that do
+#: something".
+#:
+#: A roster rather than a hardcoded ``== "Bar Plots"`` so that adding the second
+#: renderer is one line here, and so the reason is written where the rule is.
+#: *Group by* is deliberately **not** gated: every tab pools through
+#: ``plot_replicate_sets``, so it really does do something everywhere.
+DECORATED_TABS = frozenset({"Bar Plots"})
+
 #: ``(state field, widget name, "no" label)`` for the two decoration controls.
 #: A roster rather than two hand-written blocks: they differ only in those three
 #: strings, and the version that had two blocks grew a difference in the third
@@ -116,7 +135,22 @@ def refresh_decoration_combos(ctx) -> None:
     button = ctx.widgets.get_or_none("_plotting_decorate_btn")
     if button is not None:
         vset = getattr(ctx.state.selection, "variables", None)
-        button.setVisible(bool(getattr(vset, "variables", ()) or ()))
+        has_variables = bool(getattr(vset, "variables", ()) or ())
+        button.setVisible(has_variables and _current_tab_decorates(ctx))
+
+
+def _current_tab_decorates(ctx) -> bool:
+    """Whether the tab on screen draws through the decoration seam.
+
+    Read at refresh time rather than cached: the band is shared, so the answer
+    changes on every tab switch and a cached one would show the control on the
+    tab the user just left.
+    """
+    from well_viewer.core.tab_controller import current_centre_tab
+
+    with swallow("read the current centre tab for the Decorate button"):
+        return current_centre_tab(ctx) in DECORATED_TABS
+    return False
 
 
 def set_decoration_variable(ctx, field: str, variable_id: str) -> None:

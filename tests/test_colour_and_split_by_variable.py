@@ -140,9 +140,44 @@ def test_the_palette_entries_are_far_enough_apart(n, floor):
 
 def test_the_two_ways_of_having_no_value_are_different_inks():
     """"You filled these inconsistently" and "these were never filled" are
-    different mistakes with different fixes, so they are not one grey."""
-    assert vs.MIXED_COLOR != vs.UNASSIGNED_COLOR
+    different mistakes with different fixes, so they are not one grey.
+
+    Measured, not merely compared. This asserted `!=` twenty-five lines below
+    `_separation`, whose own docstring says distinct is not distinguishable —
+    and the two greys it passed were **23** apart in RGB, less than the 30 the
+    workplan records as "one colour to any reader" and a fifth of the floor this
+    file holds six real values to. §7.8 face two, in the file that documents it.
+    """
     assert vs.MIXED_LABEL != vs.UNASSIGNED_LABEL
+    assert _separation([vs.MIXED_COLOR, vs.UNASSIGNED_COLOR]) >= 100, (
+        "the two non-values are one grey to a reader"
+    )
+
+
+def test_neither_non_value_ink_is_mistakable_for_a_real_value():
+    """The other half: far apart from each other is not enough if either lands
+    on top of a value's own colour."""
+    variable = _line()
+    values = list(vs.value_colors(variable).values())
+
+    for ink, name in ((vs.MIXED_COLOR, "MIXED"), (vs.UNASSIGNED_COLOR, "UNASSIGNED")):
+        assert _separation(values + [ink]) >= 60, name
+
+
+def test_the_variables_tab_and_the_plots_ink_a_value_the_same():
+    """One colour vocabulary, asserted across the two modules that draw it.
+
+    The tab had its own implementation — the same palette walked with a stride
+    of seven rather than one — so every value but the first was one colour on
+    the plate that assigned it and a different colour on the bar chart. Asserted
+    on the mapping rather than on "both are non-empty", because two wrong
+    mappings are both non-empty.
+    """
+    from well_viewer.features.home.variables import controller as vc
+
+    variable = _line()
+
+    assert vc._value_colours(variable) == vs.value_colors(variable)
 
 
 def test_a_member_whose_wells_disagree_takes_the_mixed_ink():

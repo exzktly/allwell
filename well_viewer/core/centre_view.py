@@ -588,6 +588,15 @@ def build_centre(win, parent: QWidget) -> None:
             scatter_grp = getattr(win, "_plotting_scatter_grp", None)
             if scatter_grp is not None:
                 scatter_grp.setVisible(is_scatter)
+            # Decorate ▾ is shared band furniture, so it needs the same per-leaf
+            # answer the scatter group gets: only the tabs in
+            # ``group_by_controller.DECORATED_TABS`` read Colour by / Split by,
+            # and offering them elsewhere is a control that does nothing.
+            from well_viewer.core.group_by_controller import (
+                refresh_decoration_combos,
+            )
+            with swallow("re-evaluate the Decorate button for this tab"):
+                refresh_decoration_combos(win._ctx)
             # The Scatter page is built lazily, so the toggle can outlive a
             # window in which the feature's runtime hook does not exist yet.
             # Mirror whichever mode the page settled on rather than assuming

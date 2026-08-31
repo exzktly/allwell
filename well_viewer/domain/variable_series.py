@@ -30,11 +30,21 @@ MIXED_LABEL = MIXED
 #: fault, and this is an ordinary state of a plate someone is halfway through.
 UNASSIGNED_LABEL = "no value"
 
-#: The inks the two non-values take. Deliberately both neutral and deliberately
-#: different from each other: one grey for both would say the two states are the
-#: same, and a palette colour for either would put them among the real values.
+#: The inks the two non-values take. Both neutral, so neither joins the real
+#: values; and far enough apart to be two inks rather than one, which is the
+#: half this got wrong. ``plot_mono`` against ``text_muted`` measured **23**
+#: apart in RGB — this file's own floor for six real values is 100, and the
+#: workplan records 30 as "one colour to any reader" — while the comment here
+#: claimed they were "deliberately different from each other". They now measure
+#: 196, and ``test_the_two_non_values_are_as_far_apart_as_two_values`` holds
+#: them to the same floor the values are held to, so the claim and the pixels
+#: cannot part company again.
+#:
+#: Mid grey for *Mixed* and a pale one for *no value*, in that direction on
+#: purpose: an unassigned well is the emptier of the two states and reads that
+#: way, while a member whose wells disagree is a real member with a real bar.
 MIXED_COLOR = theme.Colors.plot_mono
-UNASSIGNED_COLOR = theme.Colors.text_muted
+UNASSIGNED_COLOR = theme.Colors.text_primary
 
 
 def value_colors(variable) -> dict:

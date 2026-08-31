@@ -340,17 +340,26 @@ def dataset_wells(ctx) -> list[str]:
     return sorted(getattr(ctx.state.dataset, "well_paths", {}) or {})
 
 
-def _value_colour(index: int) -> str:
-    """A stable colour per value position.
+def _value_colours(variable) -> dict:
+    """``value id -> colour`` for this tab's chips and plate.
 
-    Read off the plate palette by *position in the value list*, not by id, so
-    the same dose is the same colour on every plate and reordering the values
-    reorders the colours with them — which is what makes the legend and the
-    plate agree without either being told about the other.
+    **Through** ``domain/variable_series.value_colors``, which is where the
+    plots read the same answer. It used to be a second implementation here — the
+    same palette walked with a stride of seven rather than one — and the two
+    disagreed about every value but the first: a dose that inked green on a bar
+    chart painted purple on the plate that assigned it. ``value_colors``' own
+    docstring argues the shared palette exists so there is not "a second
+    categorical vocabulary… two unrelated colour languages on one screen", and
+    that is exactly what two strides over one palette produced.
+
+    The stride was not an arbitrary difference either. The plots' `i % n` was
+    chosen on a measurement — consecutive palette entries are 199 apart in RGB
+    at three values against 30 for picks spread across all 96 — and this copy
+    kept a third strategy that measurement never covered.
     """
-    from well_viewer.domain.plate_layout import WELL_COLORS
+    from well_viewer.domain.variable_series import value_colors
 
-    return WELL_COLORS[(index * 7) % len(WELL_COLORS)]
+    return value_colors(variable)
 
 
 def _paint_chips(ctx, variable) -> None:
@@ -369,9 +378,10 @@ def _paint_chips(ctx, variable) -> None:
         if widget is not None:
             widget.setParent(None)
 
-    for index, value in enumerate(variable.values):
+    colours = _value_colours(variable)
+    for value in variable.values:
         chip = value_chip(variable.display_label(value.id), value.id, host,
-                          swatch=_value_colour(index))
+                          swatch=colours.get(value.id))
         chip.clicked.connect(
             lambda _checked=False, _v=value.id: assign_selected(ctx, _v))
         layout.addWidget(chip)
@@ -404,8 +414,7 @@ def _paint_plate(ctx, variable) -> None:
     plate.clearWellRings()
     plate.setColoredWellsLit(True)
 
-    colours = {value.id: _value_colour(i)
-               for i, value in enumerate(variable.values)}
+    colours = _value_colours(variable)
     for well in wells:
         value_id = vset.value_id_for(variable.id, well)
         if value_id in colours:

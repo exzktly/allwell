@@ -24,7 +24,7 @@ from well_viewer.core.selection_controller import (
 
 from . import collect as hc
 from .plate_panel import paint_plate, well_tooltip
-# The Sample map tab's layer: which one is showing, and the entry rules for it.
+# The Sample Map tab's layer: which one is showing, and the entry rules for it.
 # Module scope, because nothing under ``home/sample_map`` imports this module
 # back — there is no cycle here to work around, and the deferred-feature-import
 # budget is a ratchet rather than a place to put convenience.
@@ -187,7 +187,7 @@ def sync_home_sidebar(ctx) -> None:
     wrote ``ctx.state.selection.selected_wells`` — measured, not assumed — so the
     two tabs it was described as feeding, Cell Gating's CDFs and Add Prefix's
     fallback, were reading a selection it could not set. It is the Groups layer's
-    plate on the Sample map tab now, one of three that take turns in one slot,
+    plate on the Sample Map tab now, one of three that take turns in one slot,
     and that tab publishes its selection so those two finally read the plate the
     user is looking at. With nothing in the rail frame there is no state to
     manage: it stays hidden, and the fields that decided between three states
@@ -195,7 +195,7 @@ def sync_home_sidebar(ctx) -> None:
 
     All that is left here is the **Import** button, which merges a
     sample-definitions JSON — so it names nothing on Overview, and nothing on
-    the Variables layer either. The Sample map tab reaches this through
+    the Variables layer either. The Sample Map tab reaches this through
     ``ctx.runtime.home.sync_sidebar`` rather than importing it: this module
     imports that one, so the call has to travel by attribute lookup, which is
     the indirection ``plot_members`` already uses for the bar tab's drag order.
@@ -218,7 +218,7 @@ def sync_home_sidebar(ctx) -> None:
 def current_help_subject(ctx) -> str:
     """What the help drawer should scroll to for the tab Home is showing.
 
-    The sub-tab's own name, except on **Sample map**, where the three ways of
+    The sub-tab's own name, except on **Sample Map**, where the three ways of
     annotating a well are layers with a heading each — so the drawer lands on
     the one the user is looking at rather than at the top of the section.
 
@@ -227,7 +227,7 @@ def current_help_subject(ctx) -> str:
     "which of me is showing" question belongs to the page.
     """
     name = current_subtab(ctx) or ""
-    if name != "Sample map":
+    if name != "Sample Map":
         return name
     return current_layer(ctx) or name
 
@@ -243,7 +243,7 @@ def on_home_subtab_changed(ctx, idx: int) -> None:
         cb = ctx.runtime.pipeline_info.refresh
         if callable(cb):
             cb()            # re-read in case the dataset changed
-    elif name == "Sample map":
+    elif name == "Sample Map":
         # The three annotation editors are layers of this tab, so the entry
         # rules are the layer's rather than the sub-tab's. This branch used to
         # read ``"Replicates"``, which the registry stopped being able to produce
@@ -759,7 +759,7 @@ _ACTION_PAGE = {
 }
 
 #: Actions that land on a tab of this page rather than on another page.
-_ACTION_SUBTAB = {"samples": "Sample map"}
+_ACTION_SUBTAB = {"samples": "Sample Map"}
 
 
 def run_home_action(ctx, action: str) -> None:

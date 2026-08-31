@@ -96,6 +96,8 @@ class EmptyState(QWidget):
         self._action.setObjectName("EmptyStateAction")
         self._action.setVisible(False)
         self._action_slot = None
+        # Whether a hint may stand beside an action; see ``setAction``.
+        self._keep_hint = False
         outer.addSpacing(theme.Spacing.md)
         outer.addWidget(self._action, 0, Qt.AlignHCenter)
         # A column of secondary links under the action, empty and hidden until a
@@ -138,7 +140,7 @@ class EmptyState(QWidget):
         self._icon_name = name
         self._refresh_glyph()
 
-    def setAction(self, label: str, on_click) -> None:
+    def setAction(self, label: str, on_click, *, keep_hint: bool = False) -> None:
         """Show a button in place of the hint, replacing any previously set one.
 
         For a placeholder whose way out is one action the page can perform
@@ -146,6 +148,12 @@ class EmptyState(QWidget):
         somewhere else — and those keep no button at all. The hint's text is
         kept, so ``clearAction`` brings the line back. ARCHITECTURE.md
         § "Empty states" has why the button replaces it rather than joining it.
+
+        *keep_hint* shows both. The default exists because a hint usually points
+        at a control **elsewhere**, and printing that under a button which does
+        the job right here sends the reader away from the answer. A hint that is
+        the *payoff* for pressing this very button is the other case, and it is
+        the one this flag is for — opt-in, so no existing placeholder changes.
         """
         if self._action_slot is not None:
             self._action.clicked.disconnect(self._action_slot)
@@ -156,6 +164,7 @@ class EmptyState(QWidget):
                 _fn()
             self._action.clicked.connect(_slot)
             self._action_slot = _slot
+        self._keep_hint = bool(keep_hint)
         self._action.setVisible(bool(label))
         self._sync_hint_visibility()
 
@@ -269,6 +278,10 @@ class EmptyState(QWidget):
             self._action_slot = None
         self._action.setText("")
         self._action.setVisible(False)
+        # Back to the default: a placeholder with no action has no reason to
+        # carry the exception ``setAction(keep_hint=True)`` granted it, and a
+        # flag left set is a rule that outlives what it was for.
+        self._keep_hint = False
         self._sync_hint_visibility()
 
     def _sync_hint_visibility(self) -> None:
@@ -283,8 +296,12 @@ class EmptyState(QWidget):
         ``isVisible()``: a child of a widget that has not been shown yet reports
         itself invisible however it was configured, and a placeholder is built
         long before the page it covers is first painted.
+
+        A site that asked for both keeps both — see :meth:`setAction`.
         """
-        self._hint.setVisible(bool(self._hint.text()) and not self._action.text())
+        self._hint.setVisible(
+            bool(self._hint.text())
+            and (self._keep_hint or not self._action.text()))
 
     # ── internals ────────────────────────────────────────────────────────
     def _icon_px(self) -> int:

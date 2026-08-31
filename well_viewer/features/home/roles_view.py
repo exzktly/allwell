@@ -8,7 +8,7 @@ vanished the moment a user defined one; Well Labels said nothing at all. A user
 meeting three tabs that all take a well selection had no way to tell which one
 would change a number.
 
-The strip is built here and mounted by the Sample map tab, which rebuilds it
+The strip is built here and mounted by the Sample Map tab, which rebuilds it
 whenever the layer changes: the sentence is about what the plate below it means
 *now*, so three strips stacked and hidden would be three answers with two of them
 waiting for a bug to show them.

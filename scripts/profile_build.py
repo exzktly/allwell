@@ -150,9 +150,9 @@ README_SUBTAB_TITLES = {
     # Home's notebook. "Overview" is the report page itself, not a sub-leaf, and
     # has no ``####`` heading of its own — it is the prose the Home section opens
     # with, so it is deliberately absent here.
-    # Replicates, Variables and Well Labels are ``#####`` headings under Sample map,
+    # Replicates, Variables and Well Labels are ``#####`` headings under Sample Map,
     # not sub-tabs of their own: they are layers of that one tab.
-    "Home": {"Cell Gating", "Sample map", "Ratios", "Pipeline Info"},
+    "Home": {"Cell Gating", "Sample Map", "Ratios", "Pipeline Info"},
 }
 
 #: Of those, the ones a ``[subtabs]`` line cannot actually drop — their
@@ -168,7 +168,7 @@ README_SUBTAB_TITLES = {
 #: the registry, which is where the drift check belongs.
 README_ALWAYS_SUBTABS = {
     "Image Browser": {"Segmentation"},
-    "Home": {"Cell Gating", "Sample map"},
+    "Home": {"Cell Gating", "Sample Map"},
 }
 
 _H1_3 = re.compile(r"^#{1,3} ")     # an h1/h2/h3 heading ends a ``###`` section

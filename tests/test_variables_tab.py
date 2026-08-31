@@ -22,7 +22,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import QWidget
 
 import theme
@@ -151,7 +151,7 @@ def test_pressing_add_variable_adds_one_and_shows_the_definition(tab):
     an ancestor has been painted.
     """
     assert tab.w("_var_body").isHidden() is True
-    assert tab.w("_var_hint").isHidden() is False
+    assert tab.w("_var_empty").isHidden() is False
 
     tab.w("_var_add").click()
 
@@ -160,7 +160,7 @@ def test_pressing_add_variable_adds_one_and_shows_the_definition(tab):
         "the definition pane stayed hidden, so the variable that was just "
         "added cannot be named"
     )
-    assert tab.w("_var_hint").isHidden() is True
+    assert tab.w("_var_empty").isHidden() is True
 
 
 def test_the_new_variable_is_selected_and_its_name_is_ready_to_type(tab):
@@ -1623,52 +1623,139 @@ def test_the_row_x_deletes_its_own_row_not_the_selected_one(tab):
         f"it sits on: kept {remaining}, expected {[first]}")
 
 
-def test_a_chips_left_edge_carries_exactly_one_band_of_colour(qtbot):
-    """Reported, twice: "two color bars next to each variable chip", side by
+def test_a_chips_ink_is_one_painted_block_and_not_a_border(qtbot):
+    """Reported twice: "two color bars next to each variable chip", side by
     side and both on the left.
 
-    Not reproduced. Five renders — the chip alone, the chip composited into its
-    ``FlowLayout`` host under three orderings of the application stylesheet, and
-    the chip row grabbed from a Variables layer built inside a running app —
-    all show one band, so the mechanism behind the report is still unknown and
-    nothing here claims to have found it.
+    The photograph that finally reproduced it showed two coloured shapes on
+    every chip carrying a swatch and none on the chip without one, which places
+    the defect in the swatch declaration itself. It was a wide ``border-left``
+    beside a hairline on the other three sides and a corner radius — an
+    asymmetric border, which Qt paints as a polygon joining the outer and inner
+    rects. That join is what rendered as the second shape. It renders as one
+    clean band under Fusion, so nothing measurable here would ever have caught
+    it and nothing here pretends to reproduce it.
 
-    What this pins is the property a second band would break: between the chip's
-    left edge and its background there is **one** run of colour, it is the
-    value's ink, and it is as wide as the chip was built to draw it. The chip's
-    edge now has a single declaration (the app sheet states one hairline for all
-    four sides and says nothing more about the left one), and a second
-    declaration reappearing anywhere in the cascade is what this would catch.
+    What this pins is that the construct is gone: the chip declares **no**
+    stylesheet of its own, so its border is the one uniform rule in the app
+    sheet, and the ink arrives as an icon — one pixmap blit, with no join to
+    mis-paint on any platform.
     """
     from well_viewer.features.home.variables.plate_view import (
-        SWATCH_BAND, value_chip,
+        SWATCH_H, SWATCH_W, value_chip,
     )
 
-    ink = "#FF00AA"          # in neither the palette nor any theme token, so a
-    # band of it can only have come from the swatch that was asked for.
+    ink = "#FF00AA"
     host = QWidget()
     qtbot.addWidget(host)
     host.setStyleSheet(theme.qss())
     chip = value_chip("0.3", "value-1", host, swatch=ink)
-    chip.move(0, 0)
-    chip.adjustSize()
-    host.resize(chip.width(), chip.height())
-    host.show()
-    qtbot.waitExposed(host)
 
-    image = chip.grab().toImage()
-    row = image.height() // 2
-    runs: list[list] = []
-    for x in range(image.width()):
-        pixel = "#%06X" % (image.pixel(x, row) & 0xFFFFFF)
-        if runs and runs[-1][0] == pixel:
-            runs[-1][1] += 1
-        else:
-            runs.append([pixel, 1])
+    assert chip.styleSheet() == "", (
+        f"the chip carries a stylesheet of its own ({chip.styleSheet()!r}); a "
+        "second rule for one edge is the shape the report describes")
+    assert not chip.icon().isNull(), "the chip carries no swatch at all"
+    assert chip.iconSize() == QSize(SWATCH_W, SWATCH_H)
 
-    coloured = [run for run in runs if run[0] == ink]
-    assert coloured == [[ink, SWATCH_BAND]], (
-        f"the chip's mid-line reads {runs[:4]} — the value's ink should appear "
-        f"once, as one {SWATCH_BAND}px band, and nowhere else")
-    assert runs[0][0] == ink, (
-        f"the ink is not the chip's left edge; the edge reads {runs[0]}")
+    painted = chip.icon().pixmap(QSize(SWATCH_W, SWATCH_H)).toImage()
+    middle = painted.pixelColor(SWATCH_W // 2, SWATCH_H // 2)
+    assert middle.name().upper() == ink, (
+        f"the swatch is painted {middle.name()}, not the value's ink")
+
+
+def test_a_chip_without_a_value_colour_carries_no_swatch(qtbot):
+    """``No value`` is a chip too, and the absence has to be visible as an
+    absence rather than as a block of whatever colour a missing entry decays
+    to."""
+    from well_viewer.features.home.variables.plate_view import value_chip
+
+    host = QWidget()
+    qtbot.addWidget(host)
+    assert value_chip("No value", "", host).icon().isNull()
+    assert value_chip("No value", "", host, swatch="").icon().isNull()
+
+
+# ── the empty state ─────────────────────────────────────────────────────────
+#
+# Reported: on a brand new dataset the tab showed "exclusively an empty
+# variables box and + button and absolutely nothing else". Measured, it showed
+# a little more than that — a role strip and a muted paragraph — but all of it
+# sat in a 268 px rail with three quarters of a 1154 px page blank beside it,
+# and the one thing there was to do was a secondary button in that rail. The
+# placeholder now stands in the plate's place and carries the action.
+
+
+def test_the_empty_tab_offers_the_one_thing_there_is_to_do(tab, qtbot):
+    """Pressed, not merely present.
+
+    The button is on a widget the tab builds and hides, which is exactly the
+    shape that ships broken: a placeholder that renders correctly and is wired
+    to nothing looks identical until somebody clicks it.
+    """
+    empty = tab.w("_var_empty")
+    assert empty is not None, "the tab has no placeholder where the plate goes"
+    assert empty.isHidden() is False, "premise: no variables, so it is showing"
+    assert len(_vset(tab).variables) == 0
+
+    empty._action.click()
+
+    assert len(_vset(tab).variables) == 1, (
+        "the placeholder's button did nothing, so an empty tab has no way out "
+        "of itself except the rail")
+    assert empty.isHidden() is True, (
+        "the placeholder is still over the plate it was standing in for")
+
+
+def test_the_empty_tab_says_what_a_variable_buys(tab):
+    """The payoff sentence survives beside the button rather than under it.
+
+    ``EmptyState`` hides its hint whenever an action is set — a hint normally
+    names a control somewhere else, and printing that under a button that does
+    the job here sends the reader away from the answer. This one is the payoff
+    for pressing that very button, which is what ``keep_hint`` is for, and a
+    regression to the default would silently drop the only explanation on the
+    page.
+    """
+    from well_viewer.features.home.variables.tab_view import EMPTY_HINT
+
+    empty = tab.w("_var_empty")
+    assert empty._hint.isHidden() is False, (
+        "the hint went away when the action was set, so the empty tab explains "
+        "nothing")
+    assert empty._hint.text() == EMPTY_HINT
+
+
+def test_the_payoff_is_stated_once(tab):
+    """The rail used to carry the same paragraph. One sentence in two places on
+    one screen is two things to keep in step, and the pair had already drifted
+    once — Variables said the right thing only in its empty state, so it
+    vanished the moment somebody defined a variable."""
+    from PySide6.QtWidgets import QLabel
+
+    from well_viewer.features.home.variables.tab_view import EMPTY_HINT
+
+    saying_it = [w for w in tab.frame.findChildren(QLabel)
+                 if w.text() == EMPTY_HINT]
+    assert len(saying_it) == 1, (
+        f"{len(saying_it)} widgets carry the empty-state paragraph")
+
+
+def test_undo_is_not_on_screen_at_all_until_there_is_a_variable(tab):
+    """Hidden, not merely disabled.
+
+    Disabled is right for a control whose rule the user can act on. There is no
+    history to restore on a plate with no variables, and on a page whose whole
+    content is one call to action a second, dead button beside it competes with
+    the only thing there is to press.
+    """
+    undo = tab.w("_var_undo")
+    assert undo.isHidden() is True, (
+        "a dead Undo shares an otherwise empty page with the one live button")
+
+    tab.w("_var_add").click()
+
+    assert undo.isHidden() is False, (
+        "Undo never comes back, so the tab's one safety net is unreachable")
+    # Enabled, because adding the variable is itself the change it would undo —
+    # ``add_variable`` goes through ``_commit`` like every other edit.
+    assert undo.isEnabled() is True

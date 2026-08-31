@@ -48,7 +48,7 @@ _VALUES_H = 290
 
 
 def build_editor_column(ctx, parent: QWidget, reg) -> QWidget:
-    from .tab_view import EDITOR_W, EMPTY_HINT, section_label
+    from .tab_view import EDITOR_W, section_label
 
     host = QWidget(parent)
     host.setFixedWidth(EDITOR_W)
@@ -75,11 +75,6 @@ def build_editor_column(ctx, parent: QWidget, reg) -> QWidget:
     add = reg.register("_var_add", QPushButton("+ Variable", host))
     add.setObjectName("HomeAction")
     column.addWidget(add)
-
-    hint = reg.register("_var_hint", QLabel(EMPTY_HINT, host))
-    hint.setObjectName("Muted")
-    hint.setWordWrap(True)
-    column.addWidget(hint)
 
     body = reg.register("_var_body", QWidget(host))
     body_column = QVBoxLayout(body)

@@ -147,11 +147,8 @@ def refresh_variables(ctx, *, note: str = "") -> None:
     variable = vset.by_id(variable_id) if variable_id else None
 
     body = _widget(ctx, "_var_body")
-    hint = _widget(ctx, "_var_hint")
     if body is not None:
         body.setVisible(variable is not None)
-    if hint is not None:
-        hint.setVisible(variable is None)
 
     _paint_undo(ctx)
     _say(ctx, note)
@@ -1150,3 +1147,16 @@ def _set_plate_column_shown(ctx, on: bool) -> None:
     if caption is not None:
         # The header's "SHOWING" label with nothing after it.
         caption.setVisible(bool(on))
+    empty = _widget(ctx, "_var_empty")
+    if empty is not None:
+        # The placeholder stands in the plate's place, so it is the exact
+        # inverse of it — never both, and never neither.
+        empty.setVisible(not on)
+    undo = _widget(ctx, "_var_undo")
+    if undo is not None:
+        # Hidden rather than merely disabled while the tab is empty. Disabled is
+        # right for a control whose rule the user can act on; there is no
+        # history to restore on a plate with no variables, and on a page whose
+        # whole content is one call to action a second, dead button beside it
+        # competes with the only thing there is to press.
+        undo.setVisible(bool(on))

@@ -901,7 +901,7 @@ def _features() -> list[FeatureDescriptor]:
         FeatureDescriptor(
             name="Home", group="Home", build=_build_home,
             states=(StateSpec("home", _state_home),),
-            # The Sample map tab's layer switch repaints Home's chrome through
+            # The Sample Map tab's layer switch repaints Home's chrome through
             # this: **Import** writes selections and well labels, so it means
             # nothing on the Variables layer, and the tab cannot import Home's
             # controller because that controller imports the tab's.
@@ -1108,7 +1108,7 @@ def _features() -> list[FeatureDescriptor]:
         # so there is no profile in which two of the three ship without the
         # third. A profile that wants none of them drops this descriptor whole,
         # which is the granularity that is actually coherent.
-        FeatureDescriptor(name="Sample map", parent="Home",
+        FeatureDescriptor(name="Sample Map", parent="Home",
                           build=_build_sample_map, removable=False,
                           subtab_inset=True,
                           services={

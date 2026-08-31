@@ -57,13 +57,13 @@ def panel(qapp):
         state=SimpleNamespace(selection=selection, dataset=dataset,
                               feature_slice=lambda name: home if name == "home" else None),
         runtime=SimpleNamespace(home=SimpleNamespace(subtabs=SimpleNamespace(
-            # The Groups editor is a layer of the Sample map tab now, and the
+            # The Groups editor is a layer of the Sample Map tab now, and the
             # commit guard asks the sub-tab **and** the layer. The layer half is
             # answered from Home's typed slice below, not from the switch
             # widget: the guard fails closed, so a fixture that simply omitted
             # the record would refuse every commit rather than allowing them by
             # default.
-            tabText=lambda index: "Sample map", currentIndex=lambda: 0,
+            tabText=lambda index: "Sample Map", currentIndex=lambda: 0,
         ))),
         coordinator=SimpleNamespace(
             rebuild_all=lambda: None, refresh_sidebar_map=lambda: None,
@@ -117,7 +117,7 @@ def test_a_well_id_that_has_no_plate_position_does_not_break_the_edit(panel):
 
 
 def test_a_drag_from_another_layer_does_not_rewrite_the_group(panel):
-    """The Groups editor shares the Sample map tab with two other layers, and
+    """The Groups editor shares the Sample Map tab with two other layers, and
     its ``selectionDragFinished`` still fires on programmatic refresh ticks
     while one of those is showing. Without the layer half of the guard, a
     Variables fill repainting the tab rewrites whichever group happens to be

@@ -22,7 +22,7 @@ class HomeState:
     """
 
     last_rendered_for: str = ""
-    #: Which layer of the Sample map tab is showing — Groups, Variables or Well
+    #: Which layer of the Sample Map tab is showing — Groups, Variables or Well
     #: Labels. On typed state rather than read back off the ``SegmentedControl``
     #: that emitted the change: the widget updates its own index *before* it
     #: emits, so a handler asking the control which layer is current is told the

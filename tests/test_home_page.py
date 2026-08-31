@@ -350,7 +350,7 @@ def test_the_page_opens_on_overview(loaded_app):
     than asks. The definition editors follow it."""
     sub = _subtabs(loaded_app)
     assert [sub.tabText(i) for i in range(sub.count())] == [
-        "Overview", "Cell Gating", "Sample map", "Ratios", "Pipeline Info",
+        "Overview", "Cell Gating", "Sample Map", "Ratios", "Pipeline Info",
     ]
     assert sub.tabText(sub.currentIndex()) == "Overview"
 
@@ -367,7 +367,7 @@ def test_every_definition_tab_is_built_after_a_load(loaded_app):
     """
     ctx = loaded_app._ctx
     assert ctx.runtime.home.built == {
-        "Cell Gating": True, "Sample map": True, "Ratios": True,
+        "Cell Gating": True, "Sample Map": True, "Ratios": True,
         "Pipeline Info": True,
     }
     for key in ("_rep_list", "_lbl_grid", "_ratio_panel"):
@@ -379,13 +379,13 @@ def test_every_definition_tab_is_built_after_a_load(loaded_app):
 def test_home_shows_no_rail_body_on_any_tab(loaded_app, qtbot):
     """``activate_home``'s docstring has always said Home shows no rail frame,
     and the sample frame contradicted it: it carried the plate that composed a
-    group, so the Sample map tab would show that plate in the rail *and*
+    group, so the Sample Map tab would show that plate in the rail *and*
     whichever plate its layer carried in the page. The plate is a layer of the
     tab now and the frame holds nothing."""
     ctx = loaded_app._ctx
     frame = ctx.widgets.get("_sidebar_sample_frame")
 
-    for name in ("Overview", "Cell Gating", "Sample map", "Ratios",
+    for name in ("Overview", "Cell Gating", "Sample Map", "Ratios",
                  "Pipeline Info"):
         _goto_subtab(loaded_app, qtbot, name)
         assert not frame.isVisibleTo(loaded_app), f"{name}: a rail body appeared"
@@ -396,7 +396,7 @@ def test_import_is_offered_only_where_it_means_something(loaded_app, qtbot):
     nothing the user can see."""
     btn = loaded_app._ctx.widgets.get("_home_import_btn")
 
-    _goto_subtab(loaded_app, qtbot, "Sample map")
+    _goto_subtab(loaded_app, qtbot, "Sample Map")
     assert btn.isVisibleTo(loaded_app)
     _goto_subtab(loaded_app, qtbot, "Overview")
     assert not btn.isVisibleTo(loaded_app)
@@ -426,7 +426,7 @@ def test_a_plate_drag_edits_the_group_only_from_the_groups_layer(loaded_app, qtb
         {"id": "g1", "name": "G1", "wells": [wells[0]]})
     plate = ctx.widgets.get("_rep_map_plate")
 
-    _goto_subtab(loaded_app, qtbot, "Sample map")
+    _goto_subtab(loaded_app, qtbot, "Sample Map")
     set_layer(ctx, "Replicates")
     # Entering the tab deselects whatever was active, so a plate click has no
     # consequence until the user picks a group — the order a real edit follows.
@@ -479,7 +479,7 @@ def test_one_plate_is_on_screen_on_every_home_tab(loaded_app, qtbot):
     _goto_subtab(loaded_app, qtbot, "Overview")
     assert _visible() == ["_home_plate"]
 
-    _goto_subtab(loaded_app, qtbot, "Sample map")
+    _goto_subtab(loaded_app, qtbot, "Sample Map")
     for layer in LAYERS:
         set_layer(ctx, layer)
         qtbot.wait(10)
@@ -516,7 +516,7 @@ def test_import_is_offered_on_the_layers_it_writes(loaded_app, qtbot):
     ctx = loaded_app._ctx
     button = ctx.widgets.get("_home_import_btn")
 
-    _goto_subtab(loaded_app, qtbot, "Sample map")
+    _goto_subtab(loaded_app, qtbot, "Sample Map")
     for layer in ("Replicates", "Well Labels"):
         set_layer(ctx, layer)
         qtbot.wait(10)
@@ -578,7 +578,7 @@ def test_the_help_drawer_lands_on_the_current_tab_not_the_top_of_the_chapter(
         _goto_subtab(loaded_app, qtbot, tab)
         assert resolve(None, loaded_app) == heading, tab
 
-    # **Sample map resolves to its current layer, not to the tab.** Each of the
+    # **Sample Map resolves to its current layer, not to the tab.** Each of the
     # three has a heading of its own under the tab's, so landing on the tab
     # would put the reader above the paragraph describing what is in front of
     # them — and it would leave the three layer entries in ``SECTION_BY_PAGE``
@@ -586,7 +586,7 @@ def test_the_help_drawer_lands_on_the_current_tab_not_the_top_of_the_chapter(
     # version that answered "Replicates" for every layer passes a single check.
     from well_viewer.features.home.sample_map.controller import LAYERS, set_layer
 
-    _goto_subtab(loaded_app, qtbot, "Sample map")
+    _goto_subtab(loaded_app, qtbot, "Sample Map")
     for layer in LAYERS:
         set_layer(loaded_app._ctx, layer)
         assert resolve(None, loaded_app) == layer, layer

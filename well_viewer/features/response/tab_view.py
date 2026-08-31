@@ -23,6 +23,8 @@ from well_viewer.core.ui_helpers import (
 # Module scope, not function-local: nothing in ``controller`` imports this
 # module, so there is no cycle to work around — and a deferred feature import
 # that is not breaking a cycle is one the budget guard counts for nothing.
+from well_viewer.features.export.service import export_cell_data_from
+from well_viewer.features.response.cell_scope_compute import cell_scope
 from well_viewer.features.response.controller import (
     export_response_csv, fit_model_labels, fit_settings, on_x_variable_changed,
     open_timepoint_selector, redraw_response, set_fit_bound, set_fit_model,
@@ -79,9 +81,15 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     install_fold_change_controls(ctx, fc_panel, fc_layout, scope="response")
     band.add_action(fc_button)
 
+    # ``cells_cb`` is required rather than optional, deliberately: a tab cannot
+    # acquire this menu without offering the cells its plot was drawn from. It
+    # was missing here, and because it is keyword-only the omission was a
+    # TypeError at build time rather than a menu with a gap — which is how the
+    # whole tab came to raise on every real app construction.
     export_btn, _menu, _act = build_plot_save_menu(
         ctx, band, card_key="_response_card", data_label="Save plot data…",
         data_cb=lambda: _export_response_data(ctx),
+        cells_cb=lambda: export_cell_data_from(ctx, cell_scope),
     )
     band.add_action(export_btn)
     band.add_action(make_properties_button(ctx, band, "response"))

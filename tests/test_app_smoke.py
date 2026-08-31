@@ -30,6 +30,31 @@ def test_drain_builds_all_centre_tabs(viewer_app):
     assert not remaining, f"tabs left unbuilt after drain: {sorted(remaining)}"
 
 
+def test_no_tab_builder_raised_while_draining(viewer_app, caplog):
+    """A builder that raises is *caught* — so nothing above notices.
+
+    ``centre_view`` logs the traceback, tells the status bar, and returns. The
+    tab is then an empty page, which is indistinguishable from a tab with
+    nothing to show, and it is removed from the pending map either way — so
+    ``test_drain_builds_all_centre_tabs`` above passes with a tab that is
+    completely broken. That is exactly what happened: Response Curves raised on
+    every real app construction for as long as it existed, while its own ~130
+    tests were green, because every one of them drove the tab's parts through a
+    stub ctx and none of them called the builder.
+
+    The fast lane cannot see this at all — it never builds an app — so this is
+    the only place the failure can surface.
+    """
+    import logging
+
+    with caplog.at_level(logging.ERROR, logger="well_viewer"):
+        viewer_app._drain_pending_centre_builders()
+
+    failures = [r for r in caplog.records if "Deferred build" in r.getMessage()]
+    assert not failures, "tab builders raised:\n" + "\n".join(
+        f"  {r.getMessage()}\n{r.exc_text or ''}" for r in failures)
+
+
 def test_tab_switch_matrix(viewer_app):
     """Switching to every centre page fires ``_on_tab_change`` without error."""
     viewer_app._drain_pending_centre_builders()

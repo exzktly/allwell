@@ -350,8 +350,8 @@ def test_the_page_opens_on_overview(loaded_app):
     than asks. The definition editors follow it."""
     sub = _subtabs(loaded_app)
     assert [sub.tabText(i) for i in range(sub.count())] == [
-        "Overview", "Cell Gating", "Groups", "Well Labels", "Ratios",
-        "Pipeline Info",
+        "Overview", "Cell Gating", "Groups", "Variables", "Well Labels",
+        "Ratios", "Pipeline Info",
     ]
     assert sub.tabText(sub.currentIndex()) == "Overview"
 
@@ -368,8 +368,8 @@ def test_every_definition_tab_is_built_after_a_load(loaded_app):
     """
     ctx = loaded_app._ctx
     assert ctx.runtime.home.built == {
-        "Cell Gating": True, "Groups": True, "Well Labels": True,
-        "Ratios": True, "Pipeline Info": True,
+        "Cell Gating": True, "Groups": True, "Variables": True,
+        "Well Labels": True, "Ratios": True, "Pipeline Info": True,
     }
     for key in ("_rep_list", "_lbl_grid", "_ratio_panel"):
         assert ctx.widgets.get_or_none(key) is not None, key

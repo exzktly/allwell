@@ -116,7 +116,7 @@ review"; it is open until the gate closes.
 | 6 | B | Fast lane emits coverage; slow lane emits coverage | ☑ | `ALLWELL_COVERAGE=1` in front of either lane's script. Parallel mode in `[tool.coverage.run]`; both scripts read the one variable. |
 | 7 | B | `coverage combine` across both lanes | ☑ | `scripts/coverage.sh` — combine, `--zero`, `--diff`, `--html`. Proven end to end on the real fast lane: 7,262 tests, 73,839 statements, 63.9%. |
 | 8 | B | Differential coverage on the PR diff, advisory at first | ☑ | `scripts/coverage.sh --diff`, local and advisory. Not a PR gate: the slow lane does not run on PRs, so genuinely-covered code would read uncovered, and a per-PR run costs 3x the lane. `coverage.yml` states what turning it on would cost. |
-| 9 | B | One-off zero-coverage inventory, triaged into rows here | ◐ | Fast lane alone: 11 modules, 1,860 statements, no executed lines — and that list is **measurably wrong in the direction that invents dead code**. Adding a single slow-lane file (`tests/test_app_smoke.py`, six tests) to the same measurement takes it from 11 modules to 6: `core/redraw_coordinator.py`, `widgets/gradient_strip.py`, `widgets/lut_selector.py`, `widgets/saved_selections_list.py` and `widgets/search_input.py` all turn out to be reached, by one file out of roughly a hundred in that lane. Static triage had already found every one of the eleven has a live application importer; this is the same conclusion arrived at by measurement rather than by reading. The combined run is what closes the row, and it is now reachable without anyone handing over a file: dispatch **Slow lane** with `coverage` ticked, then **Coverage inventory** with that run's id, and read the list out of the job log. |
+| 9 | B | One-off zero-coverage inventory, triaged into rows here | ☑ | Both lanes in one measurement — Slow lane #36 at `463722f`, six shards green, 54 batch data files, combined with the fast lane at the same head: **76,964 statements, 79.8%, five modules with no executed lines**. Triage table in §B3. One is genuinely unreachable and now says so in its own docstring (`all_well_launcher.py`, the PyInstaller entry point, guarded at source level instead); the other four are a test that should exist — `widgets/color_picker_popover` (306), `widgets/color_swatch_row` (213), `widgets/chip_group` (89) and `well_viewer/persistence/bar_groups` (32). **None is dead code.** The value of doing this properly is in what the partial answer got wrong: the fast-lane-only list named eleven modules, and six of them are reached — five by a single slow-lane file. Acting on it would have deleted live code five times out of eleven. |
 | 10 | B | `ci.yml`'s header states the lane it actually gates | ☑ | It read "~1,770 tests, ~60s". Measured on this container: **7,681 collected, ~5 min 50 s** — the lane grew more than fourfold underneath a comment nobody re-read. That comment is what a reader consults to decide whether the 15-minute job cap still has headroom, so a stale number there is the most load-bearing kind. Corrected, with the two-second command to re-measure written beside it. |
 | 11 | B | Scoped mutation testing over `domain/` and `pipeline/` | ⊘ | **Declined on measurement, and the plan's own premise is what the measurement refutes.** §B says mutants over these two trees "run in the fast lane's budget" because both are Qt-free and pure. Counted: `well_viewer/domain/` is 4,042 statements across 36 files and `pipeline/` 2,937 across 21 — **6,979** statements, so roughly 7,000–14,000 mutants at mutmut's usual one-to-three per mutable statement. Each needs a test run: at an optimistic 5 s that is 10–19 hours, at a realistic 20 s it is 39–78. Not a budget overrun — two orders of magnitude out. Per-module is barely better where it would matter most: `domain/fold_change.py` alone is 829 statements, about 9 hours, and it is the module §7.5 #8 names as the one worth mutating. `mutmut` 3.7.0 does install cleanly against the pins (10 transitive deps, no conflict), so this is a cost decision and not a feasibility one. It is also C row 12's argument a second time: a lane nobody runs is this repository's largest existing gap rather than a fix for one. What already serves the purpose is the ritual itself — §7.7 #2's "name the edit that would break it, make it, watch a test fail" — run at the point of change, which is where the mutant is chosen by judgement rather than by enumeration; this session alone proved roughly sixty that way, and three of them found defects a full lane and a review pass had both missed. `scripts/prove_guard.sh` mechanises the half of it that has a base branch to compare against. If the by-hand half is worth scripting too, that is its own row and a small one; it is not this. |
 | 12 | B | Review gate: the lanes combine, and no threshold masquerades as a gate | ☐ | |
@@ -272,27 +272,37 @@ with zero coverage from **either** lane, and triage each into: a test that
 should exist, dead code to delete, or genuinely unreachable and worth a comment
 saying so.
 
-**Partial, and the partial answer is already useful.** The fast lane alone names
-eleven modules and 1,860 statements with no executed lines. A static pass over
-them settles the most dangerous of the three categories immediately: **every one
-is imported by live application code**, so nothing on the list is dead, and the
-delete-it reading is off the table before anyone acts on it.
+**The finding, from both lanes in one measurement.** Slow lane #36 at `463722f`
+(six shards green, 54 batch data files) combined with the fast lane at the same
+head: **76,964 statements, 79.8% covered, and five modules with no executed
+lines.**
 
-| module | imported by | reached only through |
-| --- | --- | --- |
-| `core/redraw_coordinator` | `core/bus_wiring` | app construction |
-| `persistence/bar_groups` | `runtime_app`, `barplot/controller` | a user-picked file |
-| `widgets/saved_selections_list` | `home/groups/tab_view` | a lazily-built tab |
-| `widgets/lut_selector` | `heatmap/tab_view`, `playground/tab_view` | lazily-built tabs |
-| `widgets/color_swatch_row` | `cell_browser/tab_view`, `review_image/controller` | lazily-built tabs |
-| `widgets/chip_group`, `color_picker_popover`, `gradient_strip`, `search_input` | the widgets above | their hosts |
-| `widgets/kbd_hint` | `allwell.py`, `widgets/icon_button` | the shell |
-| `all_well_launcher` | the PyInstaller entry point | a frozen build |
+| module | stmt | verdict | why |
+| --- | --- | --- | --- |
+| `all_well_launcher.py` | 74 | genuinely unreachable | The PyInstaller entry point. Importing it installs a `setuptools._distutils.compilers` stub and runs the `_MEIPASS` bootstrap, which would reshape the interpreter for every later test in the process. Guarded at source level instead — `test_bootstrap_frozen_dispatch.py` and `test_profile_meipass.py` read its syntax tree through `_repo_scan`. The comment B3 asks for is now in its docstring. |
+| `widgets/color_picker_popover.py` | 306 | a test that should exist | Reached only from `ColorSwatchRow._open_picker`, so it is one level deeper than the row below and unreachable until that one is driven. |
+| `widgets/color_swatch_row.py` | 213 | a test that should exist | Three live call sites — `cell_browser/tab_view._cb_pick_color`, `review_image/controller.pick_review_image_color`, `saved_selections_list._on_recolour_requested` — each opening a `Popover` from a button press. Exactly §7.6's shape: the control is offered everywhere and driven nowhere. |
+| `widgets/chip_group.py` | 89 | a test that should exist | One call site, `saved_selections_list._build_readonly`, and it is wrapped in `try/except Exception` with a silent fallback to a comma-joined `QLabel`. So a broken `ChipGroup` degrades to plain text with nothing said — §7's rule, and a second reason this module wants a test. |
+| `well_viewer/persistence/bar_groups.py` | 32 | a test that should exist | Reached only through `runtime_app._bar_load_groups` → `load_via_dialog`, and `conftest.py`'s autouse `_no_modal_dialogs` makes every dialog raise. No test *can* reach it as written; separating the parse-and-apply half from the dialog seam is what would make it testable. |
 
-Almost all of it is behind a lazily-built tab, which is exactly what the slow
-lane constructs — so the combined figure will be materially different, and this
-list is not yet the finding. The row stays open until both lanes are in one
-measurement. This is the trap B1 names, met in practice rather than in theory.
+**Nothing on the list is dead code**, which was the dangerous reading and is now
+settled twice over — by a static pass showing every module has a live
+application importer, and by the measurement itself.
+
+**The fast-lane-only list was wrong, and wrong in the direction that invents
+dead code.** It named eleven modules and 1,860 statements. Six of those eleven
+turn out to be reached: `core/redraw_coordinator`, `widgets/gradient_strip`,
+`widgets/lut_selector`, `widgets/saved_selections_list` and
+`widgets/search_input` fall out on adding a *single* slow-lane file
+(`tests/test_app_smoke.py`, six tests), and `widgets/kbd_hint` on adding the
+rest of the lane. Acting on the partial list would have deleted live code in
+five of eleven cases. This is the trap B1 names, met in practice rather than in
+theory.
+
+**Getting both lanes into one measurement is itself two dispatches**, and how to
+run them is in ARCHITECTURE.md's coverage section: dispatch **Slow lane** with
+`coverage` ticked, then **Coverage inventory** with that run's id, and read the
+list out of the job log.
 
 **Pair with mutation testing, scoped — measured, and declined.** The proposal
 was `mutmut` over `well_viewer/domain/` and `pipeline/` only, on the grounds

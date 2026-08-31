@@ -183,7 +183,7 @@ def save_to_pipeline_info(app) -> None:
         f"Sample definitions saved to {info_path.name}: "
         f"{len(block['well_labels'])} label(s), "
         f"{len(selections)} selection(s), "
-        f"{len(plot_groups)} plot group(s)"
+        f"{len(plot_groups)} saved selection(s)"
         + (f" ({n_hidden} hidden)" if n_hidden else "")
         + " (schema v2)."
     )

@@ -1211,7 +1211,7 @@ What is on it:
   channels were given different values, both are shown. A reference-well
   correction with no well named is flagged: nothing was measured, so the frames
   went through uncorrected, and the images look no different for it.
-- **Your work here.** Replicate sets, plot groups, labelled wells, smFISH
+- **Your work here.** Replicate sets, saved selections, labelled wells, smFISH
   thresholds, ratios, notes — with what you have not started yet reading "None
   yet", because that is a real answer rather than a missing one.
 - **Saved plots.** Thumbnails of the figures you have captured from this
@@ -1242,14 +1242,31 @@ does not come here: it takes you to the tab that plot came from.
 #### Telling the app what your wells mean
 
 The rest of Home's tabs are where you *declare* things, rather than read them:
-which cells count, which wells are replicates of each other, what to call them,
-and what ratios to derive. **Import**, at the right end of the page's controls
-row, merges definitions from a JSON file into what is already there; it is
-hidden on Overview, where there is nothing to merge into. Everything on these
-tabs autosaves to the dataset folder as you edit, so there is no Save button to
-look for; to discard definitions, use **Reset analysis** in the title bar
-([Starting over](#starting-over)), which lets you pick exactly which kinds to
-drop.
+which cells count, which wells are replicates of each other, what you varied
+across the plate, what to call them, and what ratios to derive. **Import**, at
+the right end of the page's controls row, merges definitions from a JSON file
+into what is already there; it is hidden on Overview, where there is nothing to
+merge into. Everything on these tabs autosaves to the dataset folder as you
+edit, so there is no Save button to look for; to discard definitions, use
+**Reset analysis** in the title bar ([Starting over](#starting-over)), which
+lets you pick exactly which kinds to drop.
+
+**Which one do I use?** There are four ways to say something about a well, and
+each answers a different question. Nothing else in the app is a way of defining
+wells, and none of these four is a substitute for another.
+
+| | The question it answers | What it does |
+|---|---|---|
+| **Group** (Home → Groups) | *Which wells are replicates of one condition?* | **Pools.** Every plot, the Statistics tab and Batch Export draw one bar, trace or row per group instead of per well. A group carries a colour and a place in the plot order. |
+| **Variable** (Home → Variables) | *What did you change across the plate?* | **Pools, colours and splits.** A named axis with ordered values — `Dose: 0, 0.1, 1, 10` — assigned per well. Pick one as **Group by** and the plots pool by it; as **Colour by** or **Split by** and they ink or band by it. A numeric one can be a Response Curve's x axis. |
+| **Well label** (Home → Well Labels) | *What should this well be called on a figure?* | **Display only.** The label replaces the raw well token in legends, tick labels and exported names. It pools nothing and changes no number. |
+| **Saved selection** (the rail drawer under the plate map) | *Can I get these wells back later?* | **Nothing but recall.** It lights the same wells again in one click. It is not a group, it is not a replicate set, and loading one never edits a group's membership. |
+
+The one worth knowing before you start painting: **a variable is not a group,
+and it saves you most of the painting.** Two cell lines at six doses is twelve
+conditions. With variables you name two axes once and the plots can group,
+colour and split by either; without them you would paint twelve group names by
+hand.
 
 #### Cell Gating
 
@@ -1634,7 +1651,7 @@ It is read-only — it reports what the run recorded, not something you set here
   that same column and collapses with it, so while the rail is hidden the
   sub-tabs run to the window's left edge; bring the rail back to switch between
   Review, Analyze, and Datasets.
-- **Plate map + Plot Groups** — pinned to the bottom of the left rail; the
+- **Plate map + Saved selections** — pinned to the bottom of the left rail; the
   well selection they drive is what every tab plots (see below).
 - **Controls band** — the row directly above the plot canvas: what is shown on
   the left (channel, property, timepoint, threshold), what to do with it on the
@@ -1671,12 +1688,13 @@ at the same size, centred in whatever panel holds it. A plate looks the same
 wherever you meet it, so a well you can find on one is in the same place on
 the next.
 
-#### Plot Groups and Split View
+#### Saved selections and Split View
 
-- **Plot Groups** — the collapsible drawer under the plate map saves the
-  current well selection under a name so you can reload it in one click. Plot
-  Groups are *plotting selections only* — not replicate sets or stats groups —
-  and loading one drives both the plate selection and, where a tab keeps its
+- **Saved selections** — the collapsible drawer under the plate map saves the
+  current well selection under a name so you can reload it in one click. A
+  saved selection only restores which wells are lit: it pools nothing, so it is
+  neither a group nor a replicate set. Loading one drives both the plate
+  selection and, where a tab keeps its
   own well set, that tab's set too. The Image Table sidebar carries the same
   drawer, so a saved set can drive the image grid as well — and **Add** there
   saves the wells picked on the Image Table's own plate, which is a separate
@@ -2452,7 +2470,7 @@ One point per group, at that group's value, with error bars across its
 replicates. Groups come from the same place every other page's groups come
 from, so this tab and the Bar tab always agree about what a member is.
 
-**You do not need groups.** If you have not defined any Plot Groups, the wells
+**You do not need groups.** If you have not defined any saved selections, the wells
 you have lit on the plate are the points — one each, at its own value, exactly
 as the Bar and Line tabs treat them. A variable is filled onto the plate well by
 well, so a well carries its value whether or not anybody grouped it. Grouping
@@ -2795,7 +2813,7 @@ dataset is open it asks you to load a directory, and once one is open it names
 what the page is still waiting for. On the plot tabs, Multivariate, Review CSV
 and smFISH that is a well selection, so they read "No wells selected." — "No well
 selected." on smFISH, which shows one well at a time — with a
-line telling you to click wells on the plate at the left (or open Plot Groups
+line telling you to click wells on the plate at the left (or open Saved selections
 below it) until you pick some. Statistics asks for two comparison groups instead — it names the gap when you
 have one as well as when you have none —
 because it compares groups rather than plotting the plate directly, and the Heat
@@ -3146,7 +3164,7 @@ timepoints / FOVs, including more than two at once (e.g. a time-course of every
 channel for every well).
 
 - **Needs** — image ZIPs present, and a well set (drive it from the plate
-  picker, or save/pick a **Plot Group** in this sidebar's Plot Groups panel).
+  picker, or save/pick a **saved selection** in this sidebar's Saved selections panel).
 - **Opens as** — **Rows = Wells › Channels** (each well's channels nested under
   it), **Columns = Timepoint**, and FOV pinned under **Fixed**. Only the **last**
   timepoint is selected: timepoints are the column axis, so selecting the whole
@@ -3678,7 +3696,7 @@ leave ticked, then reloads the dataset:
 
 | Item | What you lose |
 |---|---|
-| **Sample definitions** | Well labels, groups, notes, plot groups. |
+| **Sample definitions** | Well labels, groups, notes, saved selections. |
 | **Gating** | FluorGating floors, ThreshFracOn cutoffs, drawn scatter gates, and the QC debris gate — the last returning to the settings the pipeline run itself used, not to no gate at all. |
 | **Curation** | The crop region and every manual include/exclude on individual cells. |
 | **Ratio metrics** | Every ratio channel you defined. |

@@ -627,7 +627,7 @@ def your_work(ctx) -> list:
 
     return [
         {"key": "replicates", "label": "Replicate sets", "count": len(sets)},
-        {"key": "plot_groups", "label": "Plot groups", "count": len(groups)},
+        {"key": "plot_groups", "label": "Saved selections", "count": len(groups)},
         # The denominator is the plate's loaded wells, not the size of the
         # label map: that map holds only wells that *have* a label, so
         # ``labelled of len(labels)`` could only ever read "N of N" and told

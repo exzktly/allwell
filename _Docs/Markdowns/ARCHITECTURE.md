@@ -2809,9 +2809,22 @@ functions (`on_sidebar_plate_selection_changed`, `…_drag_finished`,
 to those functions, kept so the sidebar's `signal.connect(app._on_…)` wires
 still resolve.
 
-The same module builds the **Plot Groups** drawer. Both halves of the drawer —
-capturing a group and loading one — branch on which mode the sidebar plate is
-in, because the two modes keep "the current selection" in different stores.
+The same module builds the **Saved selections** drawer. Both halves of the
+drawer — capturing a selection and loading one — branch on which mode the
+sidebar plate is in, because the two modes keep "the current selection" in
+different stores.
+
+**The name on screen is "Saved selections"; the symbols are still
+`plot_group`.** The drawer saves a set of lit wells and pools nothing, while
+Home's groups are replicate sets and pool everything — every plot, Statistics,
+Batch Export and every saved fold-change `ControlRef` keys on them. One word for
+both is a collision that costs a paragraph of disambiguation wherever either is
+described. Renaming the user-visible strings costs nothing; renaming
+`persistence.json::plot_groups` would be a migration with a compatibility window,
+and no user reads that key. So `build_plot_groups_drawer`,
+`_wells_for_new_plot_group`, `plot_group_visibility_plan` and the `plot_groups`
+section keep their spelling, and `tests/test_one_word_per_concept.py` holds the
+boundary at the string literals.
 
 What a new group captures depends on which sidebar's Add was pressed, so
 `build_plot_groups_drawer` takes a `wells_source` callable and each caller
@@ -2823,7 +2836,7 @@ set visibility and clicks toggle a set's `hidden` flag, so what is on screen is
 the union of every visible set's wells plus `active_solo_wells` — the same
 active set the plots draw from. `selection.selected_wells` is not consulted in
 that mode at all: nothing keeps it current there, so it holds whatever a
-per-well tab or an earlier Plot Group load last wrote. In per-well mode the
+per-well tab or an earlier saved-selection load last wrote. In per-well mode the
 plate *is* a well selector and `selected_wells` is the answer.
 
 The Image Table's sidebar passes `image_table_active_wells` instead, because its
@@ -2839,10 +2852,10 @@ visibility through the pure `plot_group_visibility_plan`, because in replicate
 mode the plotting tabs draw one trace per *visible* replicate set and never read
 `selection.selected_wells`. Every set the group's wells touch is shown, the rest
 hidden, and wells belonging to no set become `active_solo_wells`. This is
-visibility only — no replicate set's membership is edited, so Plot Groups never
-mutate the sample definitions.
+visibility only — no replicate set's membership is edited, so a saved selection
+never mutates the sample definitions.
 
-Plot Groups have two homes on disk: the `plot_groups` section of
+Saved selections have two homes on disk: the `plot_groups` section of
 `persistence.json` (written on every drawer edit) and a copy inside the
 `sample_definitions` block of `pipeline_info.json` (written whenever sample
 definitions autosave). The `pipeline_info.json` hydrator runs first on load and
@@ -3044,7 +3057,7 @@ The relevant modules:
 right while the app is running and wrong on quit and on a dataset swap.
 `PersistenceRegistry.flush_all` writes every pending domain now, and
 `AllWellApp.closeEvent` and `load_controller` both call it — a ratio, a
-heat-map layout, a curated cell override, a line order, a plot group, a note, a
+heat-map layout, a curated cell override, a line order, a saved selection, a note, a
 sample definition, a QC parameter or a crop edited within half a second of ⌘W
 reaches disk, and a swap cannot leave a timer alive to fire *after* the new data
 directory is in place and write the previous dataset's state into it.
@@ -3099,7 +3112,7 @@ Every "save state into the dataset folder" path lives under
 | `persistence.json::view_state` | `view_state.py` | Active tab, selected wells, channel/metric, fold-change scopes, per-tab combos, export-style prefs. Saved on dataset switch + app close. **The two "absent" stashes are per-plate and are cleared before the section is read.** `restore` remembers the wells a saved view names that the plate in front of it does not hold, so `snapshot` can union them back and a subset load does not prune them — but those sets describe one particular `persistence.json`, and they are the only piece of view state written by `restore` and read by `snapshot` without either being keyed to a data directory. `restore` reassigns both, and it only runs when the new plate *has* a `view_state` section; when it has none the assignment never happens and the previous plate's wells were unioned into this plate's saved selection. `forget_absent_wells(ctx)` empties them, called at the top of `load_from_data_dir` before the section is read and therefore ahead of every path that returns without reaching `restore` — no saved block, a section that is not a dict, a document that cannot be migrated. |
 | `persistence.json::qc_params` | `qc_params.py` | QC debris-gating thresholds edited on the Home → Cell Gating tab (the fundamental always-applied inclusion layer); seeded from `pipeline_info.json` `qc_options` when unset. |
 | `cell_overrides.json` | `cell_overrides.py` | Per-cell `Included` overrides set on the Segmentation tab (kept separate — large + write-heavy). |
-| `bar_groups.json` | `bar_groups.py` | User-picked file for bar-plot group state (no auto-save). |
+| `bar_groups.json` | `bar_groups.py` | User-picked file for Batch Export's `BarGroup` state (no auto-save). |
 
 `persistence.json` is a single consolidated viewer-state document managed by
 `_doc.py`. On first load it migrates any legacy `ratios.json`,
@@ -3216,7 +3229,7 @@ A scope names every storage **domain** it owns, and its `clear` is responsible
 for all of them — the live typed state and every file the value is written to,
 whether that is `persistence.json`, `pipeline_info.json`, or a standalone
 sidecar. That is the property the design turns on, because the same value is
-often stored twice: plot groups live in both `persistence.json::plot_groups` and
+often stored twice: saved selections live in both `persistence.json::plot_groups` and
 the `sample_definitions` block of the sidecar, and clearing one of the two is a
 no-op once the loader (which treats an absent section as "nothing to say", so a
 folder shared without its sidecar keeps its groups) re-hydrates from the other.
@@ -7778,10 +7791,10 @@ schema. Going through that pair rather than the raw keys is the whole point:
 `rep_sets`/`groups` are absent from a block written by today's app, and the
 result *replaces* dataset 1's block — so a reader that finds nothing produces an
 empty block, and a merge of two normally-saved plates has discarded every
-selection, plot group, well label, note and current selection from both
+selection, saved selection, well label, note and current selection from both
 datasets while reporting a clean success.
 
-Dataset 2's well references — a selection's `wells` and each plot group's
+Dataset 2's well references — a selection's `wells` and each saved selection's
 `wells` — are remapped through the well map. A selection's `replicates` is not,
 because the field is reserved: `make_selection` collapses it to `None` on every
 selection the model builds, so nothing downstream would ever read a remapped
@@ -10305,8 +10318,12 @@ control row, so only a per-mode pass exercises the one that makes the row wrap.
 | **Ctxbar** | The horizontal contextual control row above each plot card. Hosts channel / metric / timepoint combos + action buttons. |
 | **PlotCard** | The framed container around each matplotlib figure. Provides the screen↔publication toggle, the custom toolbar, and the stats chip slot. |
 | **Properties sidebar / Export Style sidebar** | The right-side dock that slides out when the user clicks the Properties button on a plot card. Backed by `app._export_style_prefs`. |
-| **Selection** | A named, persisted subset of wells. Lives in `app._selections` (schema v2). Aliased as "Sample Definition" in the UI. |
-| **Replicate set** | A group of wells treated as replicates for a single condition. On Home → Groups a group **is** exactly one replicate set — its `wells` are its replicate members (or a single well); there is no `replicates` sub-partition (the field is reserved/`None`). "Quick Replicates" auto-builds groups of a chosen size N (spinbox) along rows/columns. (The separate batch-export `BarGroup` — from a user-picked `bar_groups.json` — can still hold multiple member sets + solo wells; that is a distinct feature.) |
+| **Selection** | A named, persisted subset of wells. Lives in `ctx.state.selection.selections` (schema v2). Surfaced in the UI as a **group** on Home → Groups. |
+| **Group** | *Which wells are replicates of one condition?* A `Selection` as the user meets it on Home → Groups: a named well set with a colour, a hidden flag and a place in the plot order. **It pools.** Every plot, Statistics and Batch Export draw one member per visible group, and a saved fold-change `ControlRef` is keyed on its name. |
+| **Replicate set** | The `ReplicateSet` a group becomes when a plot asks what to pool. On Home → Groups a group **is** exactly one replicate set — its `wells` are its replicate members (or a single well); there is no `replicates` sub-partition (the field is reserved/`None`). "Quick Replicates" auto-builds groups of a chosen size N (spinbox) along rows/columns. `domain/plot_members.plot_replicate_sets` is the one place the sets a plot pools into are decided, and a sample variable chosen as *Group by* substitutes for the user's groups there. (The separate batch-export `BarGroup` — from a user-picked `bar_groups.json` — can still hold multiple member sets + solo wells; that is a distinct feature.) |
+| **Sample variable** | *What did you change across the plate?* A named annotation axis with a type, an optional unit and an **ordered** list of values, assigned per well (`domain/sample_variables`, `pipeline_info.json::variables`). **It pools, inks and bands** — *Group by*, *Colour by*, *Split by*, the Response x axis, the two-factor tests. A variable is not a group: two cell lines at six doses is twelve conditions and nobody has to paint twelve group names. |
+| **Well label** | *What should this well be called on a figure?* Free text per well (`sample_definitions.well_labels`), edited on Home → Well Labels. **Display only** — it pools nothing. It substitutes for the well token in legends, tick labels and exported names, and, through `selections_model.replicate_display_label`, for a group's own name when that name looks auto-generated. |
+| **Saved selection** | A named set of lit wells in the rail drawer under the plate map, reloadable in one click (`persistence.json::plot_groups`, mirrored into the `sample_definitions` block). **It pools nothing** — loading one lights wells and toggles group visibility, and never edits a group's membership. The symbols and the on-disk key still say `plot_group`; that is a spelling, not a second concept. |
 | **`pipeline_info.json`** | The sidecar file written by `process_microscopy.py` next to the per-well CSVs. Holds schema, channel tokens, available timepoints, persisted selections, gating thresholds. |
 | **Well token** | Two-letter / two-digit well identifier (`A01` … `H12`). Always uppercase, always zero-padded. |
 | **fov, tp** | Field-of-view and timepoint extracted from a filename via the schema-aware extractor in `viewer_state.make_schema_extractor`. |

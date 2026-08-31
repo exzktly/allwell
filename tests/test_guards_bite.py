@@ -3643,3 +3643,58 @@ def test_scan_surface_guard_catches_a_roster_entry_with_no_package(tmp_path, mon
                            extra={"PACKAGE_ROOTS": ("listed", "gone")})
     assert exc is not None, "a roster entry naming nothing went uncaught"
     assert "gone" in str(exc)
+
+
+# ── one word per concept ────────────────────────────────────────────────────
+
+#: Every shape that was live in the tree before the vocabulary sweep, plus the
+#: two the pattern must *not* claim. The near-miss cases matter as much as the
+#: hits: "a plot grouped by Dose" is a plot pooled by a sample variable, and
+#: `plot_groups` is the persistence key the rule deliberately leaves alone.
+VOCABULARY_CASES = {
+    "heading": ('def build(p):\n'
+                '    return CollapsibleSection("Plot Groups", p)\n', True),
+    "singular": ('def add(n):\n    return f"Plot Group {n}"\n', True),
+    "sentence": ('def hint():\n'
+                 '    return "Select wells before adding a Plot Group."\n', True),
+    "lowercase": ('LABEL = "Plot groups"\n', True),
+    "mid_sentence": ('DETAIL = "Well labels, groups, notes, and plot groups."\n', True),
+    "parenthesised": ('def line(n):\n    return f"{n} plot group(s)"\n', True),
+    # Not this feature: a plot pooled by a sample variable.
+    "grouped_by": ('def note(v):\n    return f"A plot grouped by {v} draws one bar per value."\n',
+                   False),
+    # The symbol and the persistence key keep their spelling on purpose.
+    "symbol": ('SECTION = "plot_groups"\n', False),
+    # Documentation naming the key is what the exemption exists for.
+    "docstring": ('"""Saved selections live in the plot groups section."""\n', False),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(VOCABULARY_CASES))
+def test_vocabulary_guard_catches_only_the_user_facing_spelling(
+        tmp_path, monkeypatch, shape):
+    body, should_fire = VOCABULARY_CASES[shape]
+    path = _write(tmp_path, f"vocab_{shape}.py", body)
+    exc = _run_scan(monkeypatch, "tests.test_one_word_per_concept",
+                    "test_no_user_facing_string_calls_a_saved_selection_a_plot_group",
+                    [path])
+    if should_fire:
+        assert exc is not None, f"the {shape} spelling went uncaught"
+        assert f"vocab_{shape}.py" in str(exc)
+    else:
+        assert exc is None, f"the {shape} shape is not this feature and must clear"
+
+
+def test_vocabulary_guard_reads_the_live_docs(tmp_path, monkeypatch):
+    """The docs half walks from `REPO_ROOT`, so it needs its own case."""
+    _write(tmp_path, "_Docs/Markdowns/README_WellViewer.md",
+           "- **Plot Groups** — the drawer under the plate map.\n")
+    _write(tmp_path, "_Docs/Markdowns/ARCHITECTURE.md",
+           "Saved selections live in `persistence.json::plot_groups`.\n")
+    exc = _run_rooted_scan(monkeypatch, "tests.test_one_word_per_concept",
+                           "test_the_live_docs_use_one_word_for_each", tmp_path)
+    assert exc is not None, "a manual still naming the drawer a Plot Group went uncaught"
+    assert "README_WellViewer.md:1" in str(exc)
+    assert "ARCHITECTURE.md" not in str(exc), (
+        "the persistence key is not a violation — the rule stops at what a user reads"
+    )

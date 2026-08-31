@@ -179,7 +179,7 @@ def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True,
     """
     from widgets.collapsible_section import CollapsibleSection
 
-    section = CollapsibleSection("Plot Groups", parent, expanded=False)
+    section = CollapsibleSection("Saved selections", parent, expanded=False)
     section.setObjectName("PlotGroupsDrawer")
 
     if include_add_controls:
@@ -193,8 +193,9 @@ def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True,
         add_btn = QPushButton("Add", name_row)
         add_btn.setProperty("variant", "secondary")
         add_btn.setToolTip(
-            "Save the currently selected wells as a Plot Group. Plot Groups only "
-            "reload well selections; they are not stats or replicate groups."
+            "Save the wells currently selected under a name you can get back. "
+            "A saved selection only restores which wells are lit — it pools "
+            "nothing, so it is neither a group nor a replicate set."
         )
         # Pass THIS drawer's own name field into the handler (closure) so several
         # author-capable drawers (main sidebar + Image Table) don't fight over the
@@ -212,7 +213,7 @@ def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True,
             ctx.widgets.register("_plot_group_name_edit", name_edit)
             ctx.widgets.register("_plot_groups_add_btn", add_btn)
 
-    empty_label = QLabel("No Plot Groups yet.", section)
+    empty_label = QLabel("No saved selections yet.", section)
     empty_label.setObjectName("Muted")
     empty_label.setWordWrap(True)
     section.addWidget(empty_label)
@@ -325,9 +326,9 @@ def _plot_groups_add_current(ctx, name_edit=None, *, wells_source=None) -> None:
              else _wells_for_new_plot_group(ctx))
     if not wells:
         ctx.notify.set_status(
-            "Select wells on the plate above before adding a Plot Group."
+            "Select wells on the plate above before saving a selection."
             if callable(wells_source) else
-            "Select wells (or show a group) before adding a Plot Group."
+            "Select wells (or show a group) before saving a selection."
         )
         return
     # Prefer the drawer that triggered this (its own name field); fall back to the
@@ -338,7 +339,7 @@ def _plot_groups_add_current(ctx, name_edit=None, *, wells_source=None) -> None:
     used_names = {g.get("name") for g in existing}
     used_ids = {g.get("id") for g in existing}
     group = make_plot_group(
-        name=name or f"Plot Group {len(existing) + 1}",
+        name=name or f"Selection {len(existing) + 1}",
         wells=wells,
         used_names=used_names,
         used_ids=used_ids,
@@ -349,7 +350,7 @@ def _plot_groups_add_current(ctx, name_edit=None, *, wells_source=None) -> None:
     refresh_plot_groups_sidebar(ctx)
     _plot_groups_schedule_save(ctx)
     ctx.notify.set_status(
-        f"Added Plot Group “{group['name']}” ({len(group['wells'])} wells)."
+        f"Added saved selection “{group['name']}” ({len(group['wells'])} wells)."
     )
 
 
@@ -447,7 +448,7 @@ def _plot_groups_load(ctx, group_id: str) -> None:
     except Exception:
         _logger.debug("plot_groups: image table active_wells sync failed", exc_info=True)
     ctx.notify.set_status(
-        f"Loaded Plot Group “{group.get('name', 'Plot Group')}” "
+        f"Loaded saved selection “{group.get('name', 'Selection')}” "
         f"({len(wells)} wells)."
     )
 
@@ -503,7 +504,7 @@ def refresh_plot_groups_sidebar(ctx) -> None:
             rl.setSpacing(4)
             wells = [w for w in (group.get("wells") or []) if w in valid]
             load_btn = QPushButton(
-                f"{group.get('name', 'Plot Group')} ({len(wells)})",
+                f"{group.get('name', 'Selection')} ({len(wells)})",
                 row,
             )
             load_btn.setToolTip(", ".join(wells) or "No loaded wells in this group")
@@ -513,7 +514,7 @@ def refresh_plot_groups_sidebar(ctx) -> None:
             rl.addWidget(load_btn, 1)
             del_btn = QPushButton("×", row)
             del_btn.setFixedWidth(theme.Metrics.icon_btn_w)
-            del_btn.setToolTip("Delete this Plot Group")
+            del_btn.setToolTip("Delete this saved selection")
             del_btn.clicked.connect(
                 lambda _=False, gid=group.get("id", ""): _plot_groups_delete(ctx, gid)
             )

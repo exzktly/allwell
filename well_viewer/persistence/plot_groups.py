@@ -45,4 +45,4 @@ def load_from_data_dir(ctx) -> None:
         try:
             refresh()
         except Exception:
-            _logger.exception("Plot Groups sidebar refresh failed after load")
+            _logger.exception("Saved selections sidebar refresh failed after load")

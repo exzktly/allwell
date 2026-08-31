@@ -22,7 +22,7 @@ def _mint_id(used: set[str]) -> str:
 
 
 def _unique_name(name: Any, used: set[str]) -> str:
-    base = (str(name).strip() if name is not None else "") or "Plot Group"
+    base = (str(name).strip() if name is not None else "") or "Selection"
     if base not in used:
         return base
     i = 2

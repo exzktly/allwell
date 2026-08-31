@@ -298,19 +298,26 @@ def test_an_alternative_test_stores_no_pairwise_records_of_its_own(loaded_app):
     assert "Dunnett (vs control group)" not in named
 
 
-def test_the_real_app_state_carries_the_slices_the_pickers_tolerate_missing():
+def test_a_built_tab_really_has_the_slices_the_pickers_tolerate_missing(loaded_app):
     """``refresh_stats_test_inputs`` runs while the panel is being built, and
     several callers construct a context holding only the slices they read — so
     it tolerates a missing ``stats`` or ``selection`` slice as "nothing to offer
     yet".
 
-    That tolerance must not be able to hide a production context that has
-    quietly stopped carrying one, which is the shape ``plot_members`` guards the
-    same way. Asserted on the real ``AppState``, not on a stub.
+    That tolerance must not be able to hide a *built tab* whose slices have
+    quietly gone away, which is the shape ``plot_members`` guards the same way.
+
+    Pinned against a real loaded app rather than a bare ``AppState``: the stats
+    slice is a **feature** slice and does not exist on a fresh state at all, so
+    the tolerance is covering a case that genuinely occurs rather than a
+    hypothetical one. Asserting it on `AppState()` was this test's first
+    version, and it failed against code that is correct.
     """
-    from well_viewer.core.app_state import AppState
+    app = loaded_app
+    _open_stats(app)
+    state = app._app_state
 
-    state = AppState()
-
-    assert hasattr(state, "stats") and hasattr(state.stats, "groups")
-    assert hasattr(state, "selection") and hasattr(state.selection, "variables")
+    assert getattr(state.stats, "groups", None) is not None
+    assert getattr(state.selection, "variables", None) is not None
+    # And the pickers really did fill from them rather than from a stub.
+    assert app._ctx.widgets.get_or_none("_stats_var_a_cb") is not None

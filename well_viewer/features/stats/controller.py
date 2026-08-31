@@ -503,7 +503,13 @@ def _chosen_variable(ctx, widget_name: str) -> str:
     return str(combo.currentData() or "") if combo is not None else ""
 
 
-def _group_named(groups, name: str):
+def _group_named(groups, name: str) -> "BarGroup | None":
+    """The comparison group called *name*, or ``None``.
+
+    ``None`` means the tab's groups moved between resolving the samples and
+    formatting the report — a caller must not read it as an empty group, which
+    would pair against nothing and report a test that ran on no data.
+    """
     for g in groups:
         if g.name == name:
             return g
@@ -583,14 +589,23 @@ def _alternative_test_lines(ctx, *, kind, spec, groups, group_vals, target_t,
                     "that guessed it would produce a number with no basis."]
         lines = [f"Paired by {label}. Replicates are matched on the value each "
                  f"well holds for it, never on list order.", ""]
-        maps = {
-            name: collect_group_values_by_variable(
-                ctx, _group_named(groups, name), target_t, variable_id,
-                val_col=val_col, threshold=threshold, statistic=statistic,
-                use_fov=use_fov)
-            for name, _vals in group_vals}
+        # A group that has gone missing is skipped rather than paired against
+        # nothing: ``collect_group_values_by_variable`` would take ``None`` and
+        # return an empty map, and an empty map pairs to zero replicates, which
+        # the paired test then declines for a reason that names the variable
+        # rather than the missing group.
+        maps = {}
+        for name, _vals in group_vals:
+            grp = _group_named(groups, name)
+            if grp is None:
+                continue
+            maps[name] = collect_group_values_by_variable(
+                ctx, grp, target_t, variable_id, val_col=val_col,
+                threshold=threshold, statistic=statistic, use_fov=use_fov)
         for i, (name_a, _va) in enumerate(group_vals):
             for name_b, _vb in group_vals[i + 1:]:
+                if name_a not in maps or name_b not in maps:
+                    continue
                 lines += paired_lines(name_a, name_b, _st.paired_test(
                     maps[name_a], maps[name_b], parametric=spec["parametric"]))
         return lines

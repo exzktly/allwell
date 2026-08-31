@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 
+from well_viewer.core.channel_state_controller import col_for_scatter_axis
 from well_viewer.core.csv_export import write_csv_rows
 from well_viewer.core.safe import swallow
 from well_viewer.domain.sample_variables import NUMBER
@@ -188,7 +189,6 @@ def response_val_col(ctx) -> str:
     reached from both tabs.
     """
     from well_viewer.data.metric_labels import METRIC_LABEL_TO_KEY
-    from well_viewer.features.scatter.controller import col_for_scatter_axis
 
     channel = response_channel_label(ctx)
     if not channel:

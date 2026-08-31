@@ -972,6 +972,39 @@ def on_metric_selected_global(ctx) -> None:
 
 
 
+def col_for_scatter_axis(ctx, channel_entry: str, metric_key: str) -> str:
+    """Map a ``(channel_entry, metric_key)`` pair to a CSV column or ratio key.
+
+    **In core, not in a feature.** This is the channel vocabulary's own rule —
+    it reads ``label_to_channel_key`` and branches on ``is_ratio_key`` /
+    ``is_shape_column``, and there is nothing about a scatter in it. It lived in
+    ``features/scatter/controller`` because that tab needed it first, so the
+    Response tab reaching for it had to be a function-local feature import —
+    a cycle workaround for a cycle that does not exist, which is what the
+    deferred-import budget exists to refuse. Both tabs import it from here.
+
+    Ratio channels collapse to the ratio key regardless of metric (ratios
+    don't carry a metric suffix). Otherwise builds ``<channel>_<metric>``.
+    ``metric_key`` may be ``fraction_above_threshold`` for the agg scatter
+    — that's a synthetic key that downstream aggregation code treats as a
+    Fraction-On aggregation against the channel's mean-intensity column.
+    """
+    mapped_key = ctx.state.channel.label_to_channel_key.get(channel_entry)
+    if mapped_key and is_ratio_key(mapped_key):
+        return mapped_key
+    # Shape features are a single per-cell value (the ``shape_*`` column itself);
+    # they carry no metric suffix, like ratios.
+    if mapped_key and is_shape_column(mapped_key):
+        return mapped_key
+    if metric_key in ("fraction_above_threshold", "smfish_count"):
+        # Fraction-on uses MFI as the underlying value column; smFISH
+        # uses the dedicated count column. (.lower(): CSV cols are lower-case.)
+        if metric_key == "smfish_count":
+            return f"{channel_entry.lower()}_smfish_count"
+        return f"{channel_entry.lower()}_mean_intensity"
+    return f"{channel_entry.lower()}_{metric_key}"
+
+
 def channel_key_for_label(ctx, label: str) -> str:
     """Map a dropdown label back to the ``_set_active_channel`` argument.
 

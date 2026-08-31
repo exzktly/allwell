@@ -20,7 +20,7 @@ from typing import Any
 # and a deferred feature import that is not breaking a cycle is one the budget
 # guard counts for nothing.
 from well_viewer.features.response.controller import (
-    refresh_response_metric_combo, refresh_series_combo, refresh_x_combo,
+    FRACTION_LABEL, refresh_response_metric_combo, refresh_series_combo, refresh_x_combo,
     update_timepoint_button,
 )
 from well_viewer.features.response.response_compute import FIT_MODELS, FIT_NONE
@@ -105,7 +105,6 @@ def apply_response(ctx, state: dict) -> None:
         # this the figure reopens on the mean with nothing saying the restore
         # was partial — a restored plot that is not the plot that was saved,
         # which is the silent substitution this whole block exists to prevent.
-        from well_viewer.features.response.controller import FRACTION_LABEL
         metric_label = FRACTION_LABEL
     slice_.metric_label = metric_label
     _sync_controls(ctx, slice_, state.get("x_variable_id"))

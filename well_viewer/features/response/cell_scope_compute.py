@@ -18,7 +18,9 @@ from __future__ import annotations
 from well_viewer.core.channel_state_controller import on_cutoff_for_column
 from well_viewer.domain.stats_compute import _thresh_on_col
 from well_viewer.features.export.cell_scope_compute import CellScope, scope_from_ctx
-from well_viewer.features.response.controller import timepoints_for
+from well_viewer.features.response.controller import (
+    response_val_col, timepoints_for,
+)
 
 
 def cell_scope(ctx) -> CellScope:
@@ -26,8 +28,6 @@ def cell_scope(ctx) -> CellScope:
     # file has to describe the figure it was saved from, and the Channel and
     # Property became tab-local: left reading the band, "Export cell data" on a
     # Response figure of RFP fractions wrote GFP mean intensity at GFP's cutoff.
-    from well_viewer.features.response.controller import response_val_col
-
     val_col = response_val_col(ctx) or ctx.state.channel.active_val_col
     rep_note = (
         "a member's point is the mean of its wells' means with a cross-well SD "

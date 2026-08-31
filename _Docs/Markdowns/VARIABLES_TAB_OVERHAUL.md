@@ -39,7 +39,7 @@ its reason here and at the site.
 
 | # | Item | Place | Pinned by | State |
 |---|---|---|---|---|
-| M1 | The user's selection must be visible on a well that already carries a value | `widgets/well_plate_selector.py` | | todo |
+| M1 | The user's selection must be visible on a well that already carries a value | `widgets/well_plate_selector.py` | `tests/test_plate_selection_rim.py` | done |
 | M2 | A persistent selection readout, and `Select: all / none / unassigned / same value` | `variables/plate_view.py` | | todo |
 | M3 | A fill honours the plate selection, and the scope line states what it will overwrite | `variables/controller.py` | | todo |
 | M4 | One-deep undo over every commit | `variables/controller.py` | | todo |

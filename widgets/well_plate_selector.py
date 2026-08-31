@@ -159,6 +159,12 @@ class _PlateGrid(QWidget):
         self._tooltip_provider = None          # Callable[[str], str] | None
         self._markers: dict[tuple[int, int], str] = {}  # per-well glyph overlay
         self._colored_wells_lit = False        # paint colour-override wells raised/lit
+        # Draw a rim on every selected well, on top of whatever the fill says.
+        # Off by default: on a plate whose fill is free, selection already shows
+        # as the difference between lit and recessed, and a second mark saying
+        # the same thing is noise. A host that spends the fill on data has no
+        # such difference to offer and turns this on — see ``_paint_selection_rim``.
+        self._selection_rim = False
         # Drag-source / drop-sink config (heatmap-layout DnD).
         self._drag_mime: str | None = None     # when set, a press starts a QDrag
         self._accept_mime: str | None = None   # when set, the grid accepts drops
@@ -561,6 +567,17 @@ class _PlateGrid(QWidget):
     def clear_well_markers(self) -> None:
         if self._markers:
             self._markers.clear()
+            self.update()
+
+    def set_selection_rim(self, on: bool) -> None:
+        """Whether a selected well wears a rim over its fill.
+
+        For a host that has spent the fill on data of its own. See
+        :meth:`_paint_selection_rim`.
+        """
+        on = bool(on)
+        if on != self._selection_rim:
+            self._selection_rim = on
             self.update()
 
     def set_colored_wells_lit(self, on: bool) -> None:
@@ -1113,7 +1130,8 @@ class _PlateGrid(QWidget):
         p.setPen(QPen(with_alpha(theme.Colors.ink_light, 0.30), max(1.0, wr.width() * 0.06)))
         p.drawArc(hl, 20 * 16, 140 * 16)
 
-    def _paint_lit(self, p: QPainter, wr: QRectF, base: QColor, hovered: bool) -> None:
+    def _paint_lit(self, p: QPainter, wr: QRectF, base: QColor, hovered: bool,
+                   *, selected: bool = False) -> None:
         c = theme.Colors
         base = QColor(base)
         p.setBrush(QBrush(self._sphere_gradient(wr, base)))
@@ -1121,6 +1139,35 @@ class _PlateGrid(QWidget):
                       max(1.0, wr.width() * 0.04)))
         p.drawEllipse(wr)
         self._paint_specular(p, wr)
+        if selected:
+            self._paint_selection_rim(p, wr)
+
+    @staticmethod
+    def _paint_selection_rim(p: QPainter, wr: QRectF) -> None:
+        """"This one is in your selection", said without touching the fill.
+
+        A host that colours its wells has already spent the fill on data, so it
+        has nothing left to say selection with: ``_paint_lit`` takes the colour
+        override as its ``base`` whether or not the well is selected, which
+        renders a selected assigned well and an unselected one identically. On
+        a plate whose whole job is "select these wells, then give them a value"
+        that is the interaction breaking, not a cosmetic shortfall.
+
+        Inset rather than outside the body, because outside is taken:
+        :meth:`_paint_ring` annotates a well from 7% beyond its edge, and this
+        plate's hosts need both marks on one well at once — a well can be
+        unassigned *and* selected, which is the commonest well there is on a
+        plate someone is halfway through filling.
+
+        ``text_primary`` rather than ``accent``: the accent is the ring's, and a
+        near-white rim is the one ink in the palette that no value can take, so
+        it cannot be read as one more category. Two marks, two inks, two radii.
+        """
+        r = QRectF(wr).adjusted(wr.width() * 0.05, wr.height() * 0.05,
+                                -wr.width() * 0.05, -wr.height() * 0.05)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(QColor(theme.Colors.text_primary), max(1.5, wr.width() * 0.10)))
+        p.drawEllipse(r)
 
     @staticmethod
     def _paint_ring(p: QPainter, wr: QRectF) -> None:
@@ -1378,7 +1425,8 @@ class _PlateGrid(QWidget):
                         base = QColor(c.accent)
                     else:
                         base = QColor(traces[self._selected[key] % len(traces)])
-                    self._paint_lit(p, wr, base, hovered)
+                    self._paint_lit(p, wr, base, hovered,
+                                    selected=self._selection_rim and in_selection)
                 else:
                     tint = group_color if group_color is not None else QColor(c.accent)
                     self._paint_depressed(p, wr, hovered, tint=tint)
@@ -1608,6 +1656,9 @@ class WellPlateSelector(QWidget):
 
     def clearWellMarkers(self) -> None:
         self._grid.clear_well_markers()
+
+    def setSelectionRim(self, on: bool) -> None:
+        self._grid.set_selection_rim(on)
 
     def setColoredWellsLit(self, on: bool) -> None:
         """Paint wells that have an explicit colour override in the raised/lit

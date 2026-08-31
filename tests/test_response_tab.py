@@ -66,6 +66,19 @@ def tab(qtbot, monkeypatch):
     # mutation that removed it left the whole file green.
     combo.currentIndexChanged.connect(
         lambda *_: rctl.on_x_variable_changed(ctx))
+    # Connected the way ``build_response_tab`` connects it — an unconnected
+    # combo makes every series test a test of ``refresh_series_combo`` alone,
+    # which is the exact gap that let the X combo ship dead once already.
+    series_combo = LabeledComboBox("Series")
+    qtbot.addWidget(series_combo)
+    series_combo.currentIndexChanged.connect(
+        lambda *_: rctl.on_series_changed(ctx))
+    y_combo = LabeledComboBox("Y")
+    qtbot.addWidget(y_combo)
+    for _label, _metric in rctl.Y_METRIC_LABELS:
+        y_combo.addItem(_label, _metric)
+    y_combo.currentIndexChanged.connect(
+        lambda *_: rctl.set_y_metric(ctx, y_combo.currentData() or ""))
     tp_button = QPushButton("Timepoints: 0 selected")
     qtbot.addWidget(tp_button)
     # A bare ``Figure``, not ``pyplot.subplots``: pyplot would build a Qt canvas
@@ -89,7 +102,9 @@ def tab(qtbot, monkeypatch):
         # registry name, and without it the prefs get an unstable key and warn.
         widgets=_Registry(_response_x_cb=combo, _response_ax=ax,
                           _response_fig=fig, _response_canvas=canvas,
-                          _response_tp_button=tp_button),
+                          _response_tp_button=tp_button,
+                          _response_series_cb=series_combo,
+                          _response_y_cb=y_combo),
         notify=SimpleNamespace(set_status=statuses.append),
         state=SimpleNamespace(
             dataset=SimpleNamespace(well_paths={}),
@@ -109,8 +124,14 @@ def tab(qtbot, monkeypatch):
                                  fc_control_map={}, fc_control_render="self",
                                  fc_baseline_tp="", fc_op_ctrl="ratio",
                                  fc_op_t0="ratio", fc_order="ctrl_first"),
+            # ``active_metric`` spelled out: the real ``ChannelState`` always
+            # carries it and ``_y_label`` reads it, so a stub that omitted it
+            # made the axis read "GFP" and any label assertion agree with a
+            # tab that had dropped the metric entirely.
             channel=SimpleNamespace(active_val_col="gfp_mean_intensity",
-                                    active_channel="gfp", fluor_channels=()),
+                                    active_channel="gfp",
+                                    active_metric="mean_intensity",
+                                    fluor_channels=()),
             feature_slice=slices.get,
             # The real slice, not a stub: ``figure_prefs`` seeds it lazily and
             # distinguishes "never set" from "set to off", which is the whole
@@ -120,6 +141,7 @@ def tab(qtbot, monkeypatch):
         runtime=SimpleNamespace(barplot=SimpleNamespace(current_keys=lambda: [])),
     )
     return SimpleNamespace(ctx=ctx, combo=combo, ax=ax, statuses=statuses,
+                           series=series_combo, y=y_combo,
                            monkeypatch=monkeypatch,
                            w=ctx.widgets.get_or_none)
 
@@ -141,6 +163,47 @@ def _load(tab, variable, assignments, groups, timepoints=(24.0,)):
     tab.ctx.state.selection.selections = [
         {"id": f"g{i}", "name": n, "wells": w} for i, (n, w) in enumerate(groups)]
     tab.ctx.runtime.barplot.current_keys = lambda: [g[0] for g in groups]
+
+
+def _load_two_series(tab, timepoints=(24.0,)):
+    """A dose series run on two cell lines — the plate the feature is for."""
+    import well_viewer.data.data_loading as dl
+    tab.monkeypatch.setattr(dl, "get_all_timepoints",
+                            lambda _ctx: list(timepoints))
+    dose = _variable(pairs=(("1", 1.0), ("10", 10.0)))
+    line = sv.Variable(
+        id="cl", name="Cell line", kind=sv.TEXT, unit="",
+        values=(sv.VariableValue("hela", "HeLa", None),
+                sv.VariableValue("u2os", "U2OS", None)))
+    wells = ["A01", "A02", "B01", "B02"]
+    tab.ctx.state.dataset.well_paths = {w: f"/{w}.csv" for w in wells}
+    tab.ctx.state.selection.variables = sv.VariableSet(
+        variables=(dose, line),
+        assignments={"dose": {"A01": "v0", "A02": "v1",
+                              "B01": "v0", "B02": "v1"},
+                     "cl": {"A01": "hela", "A02": "hela",
+                            "B01": "u2os", "B02": "u2os"}})
+    groups = [("H-lo", ["A01"]), ("H-hi", ["A02"]),
+              ("U-lo", ["B01"]), ("U-hi", ["B02"])]
+    tab.ctx.state.selection.selections = [
+        {"id": f"g{i}", "name": n, "wells": w} for i, (n, w) in enumerate(groups)]
+    tab.ctx.runtime.barplot.current_keys = lambda: [g[0] for g in groups]
+
+
+def _pick_series(tab, variable_id):
+    """Redraw so the combo is populated, then choose *variable_id* in it.
+
+    The order matters and is the app's own: ``refresh_series_combo`` runs
+    inside the redraw, so a test that calls ``findData`` on a combo nothing has
+    filled gets -1, selects nothing, and then asserts against a figure that was
+    never drawn — which reads as the feature being broken.
+    """
+    rctl.redraw_response(tab.ctx)
+    index = tab.series.findData(variable_id)
+    assert index >= 0, (
+        f"{variable_id!r} was not offered in the Series combo: "
+        f"{[tab.series.itemData(i) for i in range(tab.series.count())]}")
+    tab.series.setCurrentIndex(index)
 
 
 def _load_ungrouped(tab, variable, assignments, timepoints=(24.0,)):
@@ -686,7 +749,7 @@ def test_pinning_a_plateau_in_the_popover_changes_the_fit(tab, fit_ui):
 
     assert tab.ctx.state.feature_slice("response").fit_top == 200.0
     data = rctl.response_data(tab.ctx)
-    assert rctl.response_fits(tab.ctx, data)[24.0].top == 200.0
+    assert rctl.response_fits(tab.ctx, data)[(24.0, "")].top == 200.0
 
 
 def test_clearing_a_plateau_frees_it_again(tab, fit_ui):
@@ -745,8 +808,12 @@ def test_the_csv_carries_the_ec50_and_the_reason_it_has_none(tab, fit_ui,
 
     fit_rows = [r for r in written["rows"] if r[0].startswith("fit")]
     assert len(fit_rows) == 1, written["rows"]
-    assert float(fit_rows[0][2]) == pytest.approx(2.5, rel=1e-2)
-    assert "EC50" in fit_rows[0][3]
+    # Columns shifted one right by the new `series` column, which is blank
+    # here because no series variable is chosen.
+    assert written["header"][1] == "series"
+    assert fit_rows[0][1] == ""
+    assert float(fit_rows[0][3]) == pytest.approx(2.5, rel=1e-2)
+    assert "EC50" in fit_rows[0][4]
 
 
 def test_the_csv_row_for_a_refused_fit_carries_the_reason_and_no_number(
@@ -760,7 +827,8 @@ def test_the_csv_row_for_a_refused_fit_carries_the_reason_and_no_number(
     rctl.export_response_csv(tab.ctx)
 
     row = next(r for r in written["rows"] if r[0].startswith("fit"))
-    assert row[2] == "", f"a refused fit wrote an EC50: {row}"
+    assert row[1] == "", f"a fit row carried a series with none chosen: {row}"
+    assert row[3] == "", f"a refused fit wrote an EC50: {row}"
     assert "flat" in row[-1], row
 
 
@@ -780,7 +848,7 @@ def test_the_fit_settings_are_one_set_for_the_whole_figure(tab, fit_ui):
 
     fits = rctl.response_fits(tab.ctx, rctl.response_data(tab.ctx))
 
-    assert set(fits) == {24.0, 48.0}
+    assert set(fits) == {(24.0, ""), (48.0, "")}
     assert {f.bottom for f in fits.values()} == {0.0}
     assert {f.model for f in fits.values()} == {"4pl"}
 
@@ -1174,3 +1242,229 @@ def test_an_ungrouped_figure_is_not_captioned_replicates_pooled(tab):
     captions = " | ".join(t.get_text() for t in tab.ax.texts)
     assert "pooled" not in captions, captions
     assert tab.ax.has_data(), "the figure lost its points"
+
+
+# ── several curves on one figure ────────────────────────────────────────────
+
+def test_choosing_a_series_in_the_combo_splits_the_figure_into_two_curves(tab):
+    """Pressed through the combo, not by calling the collector.
+
+    The combo is what a user touches, and an unconnected combo is the exact
+    failure this tab has shipped before — the control is offered, the figure
+    never changes, and every test that called the collector directly stays
+    green.
+    """
+    _load_two_series(tab)
+    rctl.redraw_response(tab.ctx)
+    before = len(tab.ax.containers)
+
+    tab.series.setCurrentIndex(tab.series.findData("cl"))
+
+    # ``ax.containers`` is one ErrorbarContainer per curve. Counting
+    # ``get_lines()`` instead counts each errorbar's caplines too, which made
+    # the unsplit figure look like three curves.
+    assert before == 1, "the unsplit figure was not one curve to begin with"
+    assert len(tab.ax.containers) == 2, (
+        f"choosing a series drew {len(tab.ax.containers)} curves, not two")
+    # Each curve spans both doses rather than one holding all four points.
+    for container in tab.ax.containers:
+        xs = [float(x) for x in container.lines[0].get_xdata()]
+        assert xs == [1.0, 10.0], xs
+
+
+def test_the_series_combo_never_offers_the_variable_on_x(tab):
+    """A series on the axis variable is one curve per dose, one point each."""
+    _load_two_series(tab)
+    rctl.redraw_response(tab.ctx)
+    offered = [tab.series.itemData(i) for i in range(tab.series.count())]
+    assert "cl" in offered
+    assert "dose" not in offered, offered
+
+
+def test_moving_x_onto_the_series_variable_drops_the_series(tab):
+    """The two combos cannot both hold one variable, and X wins.
+
+    Reached by changing X *after* a series is chosen, which is the order a user
+    hits it in. Leaving the stale pick would draw one curve per dose.
+    """
+    _load_two_series(tab)
+    _pick_series(tab, "cl")
+    assert rctl.selected_series_id(tab.ctx) == "cl"
+
+    tab.combo.blockSignals(True)
+    tab.combo.clear()
+    tab.combo.addItem("Cell line", "cl")
+    tab.combo.blockSignals(False)
+    rctl.refresh_series_combo(tab.ctx)
+
+    assert rctl.selected_series_id(tab.ctx) == ""
+
+
+def test_the_legend_names_the_series_rather_than_only_the_timepoint(tab):
+    """With one timepoint drawn, `t=24` on every entry is pure noise."""
+    _load_two_series(tab)
+    _pick_series(tab, "cl")
+
+    labels = [t.get_text() for t in tab.ax.get_legend().get_texts()]
+    assert labels == ["HeLa", "U2OS"], labels
+
+
+def test_two_series_over_two_timepoints_colour_by_series_and_dash_by_time(tab):
+    """Four curves, two colours, two dash patterns — not four unrelated colours.
+
+    The encoding is the feature: a reader has to be able to see which two
+    curves are the same cell line and which two are the same moment.
+    """
+    _load_two_series(tab, timepoints=(24.0, 48.0))
+    slice_ = tab.ctx.state.feature_slice("response")
+    slice_.tp_selections = {"24": True, "48": True}
+    _pick_series(tab, "cl")
+
+    marks = [c.lines[0] for c in tab.ax.containers]
+    assert len(marks) == 4, f"expected four curves, got {len(marks)}"
+    # Paired with their legend labels, because counting two colours and two
+    # dashes is satisfied by **swapping** the encodings — colour on timepoint,
+    # dash on series — which is a different figure with the same tallies. A
+    # reviewer named that wrong implementation against the previous version of
+    # this test, and it passed.
+    by_label = {t.get_text(): m
+                for t, m in zip(tab.ax.get_legend().get_texts(), marks)}
+    assert set(by_label) == {"HeLa · t=24", "HeLa · t=48",
+                             "U2OS · t=24", "U2OS · t=48"}, sorted(by_label)
+    hela24, hela48 = by_label["HeLa · t=24"], by_label["HeLa · t=48"]
+    u2os24 = by_label["U2OS · t=24"]
+    assert hela24.get_color() == hela48.get_color(), (
+        "one cell line drawn in two colours — colour is not the series")
+    assert hela24.get_color() != u2os24.get_color(), (
+        "two cell lines share a colour — colour does not separate the series")
+    assert hela24.get_linestyle() == u2os24.get_linestyle(), (
+        "one timepoint drawn with two dash patterns — dash is not the time")
+    assert hela24.get_linestyle() != hela48.get_linestyle(), (
+        "two timepoints share a dash pattern — dash does not separate them")
+    labels = sorted(t.get_text() for t in tab.ax.get_legend().get_texts())
+    assert labels == ["HeLa · t=24", "HeLa · t=48",
+                      "U2OS · t=24", "U2OS · t=48"], labels
+
+
+def test_the_series_reaches_the_exported_csv(tab, monkeypatch):
+    """A file whose rows cannot say which curve they came from is unusable."""
+    written = {}
+    monkeypatch.setattr(rctl, "write_csv_rows",
+                        lambda ctx, name, header, rows: written.update(
+                            header=header, rows=rows))
+    _load_two_series(tab)
+    _pick_series(tab, "cl")
+    rctl.export_response_csv(tab.ctx)
+
+    assert written["header"][1] == "series"
+    point_rows = [r for r in written["rows"] if r[3]]  # rows with an x
+    assert {r[1] for r in point_rows} == {"HeLa", "U2OS"}
+
+
+def test_the_series_choice_survives_a_save_and_a_restore(tab):
+    """Stored by id, so a rename or a new variable cannot move it."""
+    from well_viewer.features.response import view_state_io as io
+
+    _load_two_series(tab)
+    _pick_series(tab, "cl")
+    saved = io.snapshot_response(tab.ctx)
+    assert saved["series_variable_id"] == "cl"
+
+    tab.series.setCurrentIndex(0)
+    assert rctl.selected_series_id(tab.ctx) == ""
+
+    io.apply_response(tab.ctx, saved)
+    assert rctl.selected_series_id(tab.ctx) == "cl"
+
+
+# ── the Y metric, and the spread the toggle asks for ────────────────────────
+
+def test_choosing_the_fraction_in_the_combo_redraws_with_it(tab):
+    """Pressed through the combo, and the drawn values checked.
+
+    The mean and the fraction are far apart in the fixture, so a combo wired to
+    nothing — this tab's recurring failure — cannot pass by coincidence.
+    """
+    tab.monkeypatch.setattr(
+        __import__("well_viewer.domain.stats_compute", fromlist=["x"]),
+        "compute_rep_stats",
+        lambda ctx, rset, t, thr, sem: (10.0, 1.0, 0.42, 0.03))
+    variable = _variable(pairs=(("1", 1.0), ("10", 10.0)))
+    _load(tab, variable, {"A01": "v0", "A02": "v1"},
+          [("lo", ["A01"]), ("hi", ["A02"])])
+    rctl.redraw_response(tab.ctx)
+    assert [float(y) for y in tab.ax.get_lines()[0].get_ydata()] == [10.0, 10.0]
+
+    tab.y.setCurrentIndex(tab.y.findData("fraction"))
+
+    assert [float(y) for y in tab.ax.get_lines()[0].get_ydata()] == [0.42, 0.42]
+
+
+def test_the_axis_label_follows_the_y_metric(tab):
+    """An axis naming the Property over a curve of fractions is a lie.
+
+    Asserted as the label text rather than "the label changed", because the
+    broken version also changes it — the channel is in both.
+    """
+    tab.monkeypatch.setattr(
+        __import__("well_viewer.domain.stats_compute", fromlist=["x"]),
+        "compute_rep_stats",
+        lambda ctx, rset, t, thr, sem: (10.0, 1.0, 0.42, 0.03))
+    variable = _variable(pairs=(("1", 1.0),))
+    _load(tab, variable, {"A01": "v0"}, [("a", ["A01"])])
+
+    tab.y.setCurrentIndex(tab.y.findData("fraction"))
+    data = rctl.response_data(tab.ctx)
+    assert rctl._y_label(tab.ctx, data) == "GFP fraction above threshold"
+
+    tab.y.setCurrentIndex(tab.y.findData("mean"))
+    data = rctl.response_data(tab.ctx)
+    assert rctl._y_label(tab.ctx, data) == "GFP mean intensity"
+
+
+def test_the_y_metric_survives_a_save_and_a_restore(tab):
+    from well_viewer.features.response import view_state_io as io
+
+    variable = _variable(pairs=(("1", 1.0),))
+    _load(tab, variable, {"A01": "v0"}, [("a", ["A01"])])
+    tab.y.setCurrentIndex(tab.y.findData("fraction"))
+
+    saved = io.snapshot_response(tab.ctx)
+    assert saved["y_metric"] == "fraction"
+
+    tab.y.setCurrentIndex(tab.y.findData("mean"))
+    io.apply_response(tab.ctx, saved)
+    assert rctl.selected_y_metric(tab.ctx) == "fraction"
+    assert tab.y.currentData() == "fraction"
+
+
+def test_the_fov_toggle_reaches_the_figure(tab):
+    """A single well with Spread: FOV on draws a whisker, not a bare point.
+
+    The two producers return different spreads, so a redraw that called the
+    well one regardless is distinguishable from one that honoured the toggle.
+    """
+    import well_viewer.domain.stats_compute as sc
+    tab.monkeypatch.setattr(
+        sc, "compute_rep_stats",
+        lambda ctx, rset, t, thr, sem: (10.0, float("nan"), 0.5, float("nan")))
+    tab.monkeypatch.setattr(
+        sc, "compute_rep_per_fov_stats",
+        lambda ctx, rset, t, thr, sem: (10.0, 2.5, 0.5, 0.05))
+
+    variable = _variable(pairs=(("1", 1.0), ("10", 10.0)))
+    _load(tab, variable, {"A01": "v0", "A02": "v1"},
+          [("lo", ["A01"]), ("hi", ["A02"])])
+    tab.ctx.state.plot.use_fov_replicates = True
+    rctl.redraw_response(tab.ctx)
+
+    # NOT ``container.has_yerr``: matplotlib sets that True for a yerr list of
+    # all-NaN, so it is True on the broken path too and measures nothing. The
+    # cap line's actual y positions are the drawn whisker.
+    container = tab.ax.containers[0]
+    caps = [c.get_ydata() for c in container[1]]
+    lows_highs = sorted(float(v) for arr in caps for v in arr)
+    assert lows_highs == [7.5, 7.5, 12.5, 12.5], (
+        f"the whiskers are not the per-FOV spread of 2.5 about 10.0: {lows_highs}")
+    captions = " | ".join(t.get_text() for t in tab.ax.texts)
+    assert "no error bar" not in captions, captions

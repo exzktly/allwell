@@ -15,6 +15,7 @@ Pure lane — no Qt, no dataset, no filesystem.
 
 from __future__ import annotations
 
+import json
 import pathlib
 
 import pytest
@@ -320,6 +321,13 @@ def test_a_label_for_a_value_that_no_longer_exists_is_empty_not_the_raw_id(plate
 
 # ── the block on disk, and the dataset swap ─────────────────────────────────
 
+def _ctx_with(vset, data_dir):
+    """A ctx holding *vset*, pointed at *data_dir* — the saving side."""
+    ctx = _ctx(data_dir=str(data_dir))
+    ctx.state.selection.variables = vset
+    return ctx
+
+
 def _ctx(pipeline_info=None, data_dir=None):
     import types
 
@@ -356,9 +364,20 @@ def test_a_dataset_with_no_variables_clears_the_previous_plates(plate, tmp_path)
 
 
 def test_a_dataset_that_has_variables_hydrates_them(plate, tmp_path):
+    """From the block **on disk**, which is the only place it ever lives.
+
+    This used to pass ``pipeline_info={BLOCK_KEY: to_block(plate)}`` with no
+    file written at all. That dict shape does not occur in the app:
+    ``dataset.pipeline_info`` is the whitelist ``read_pipeline_info`` builds,
+    and it cannot carry this block. So the test asserted the loader could read
+    a dict nothing produces, and stayed green for the whole time the shipped
+    app dropped every variable on reopen.
+    """
     from well_viewer.persistence import sample_variables as ps
 
-    ctx = _ctx(pipeline_info={ps.BLOCK_KEY: sv.to_block(plate)}, data_dir=tmp_path)
+    (tmp_path / "pipeline_info.json").write_text(
+        json.dumps({ps.BLOCK_KEY: sv.to_block(plate)}))
+    ctx = _ctx(pipeline_info={}, data_dir=tmp_path)
     ps.load_from_data_dir(ctx)
     assert ctx.state.selection.variables == plate
 
@@ -698,3 +717,103 @@ def test_a_variable_id_stays_legible_beside_the_name_it_carries():
     _, vid = sv.new_variable(sv.VariableSet(), "Dose")
     assert vid.startswith("variable-")
     assert len(vid) <= len("variable-") + 8
+
+
+# ── the reopen, through the app's own reader ────────────────────────────────
+#
+# Every test above this line hands the loader a ``pipeline_info`` dict it built
+# itself, usually as ``{BLOCK_KEY: sv.to_block(plate)}``. That stub supplies the
+# key the real dict never carries, so the load looked perfect while the shipped
+# app lost every variable and every fill on each reopen.
+#
+# ``viewer_state.read_pipeline_info`` does not return the sidecar's contents.
+# It builds a whitelist of the keys the pipeline owns — ``schema``,
+# ``fluor_tokens``, ``available_timepoints``, the index fields — each through a
+# ``.get`` with a default, so a block it has not heard of cannot appear in it.
+# These tests therefore go through that function, which is the only route the
+# app itself takes (``runtime_app._read_pipeline_info`` →
+# ``load_controller`` → ``dataset.pipeline_info``).
+
+def _filled_plate():
+    dose = sv.Variable(id="dose", name="Dose", kind=sv.NUMBER, unit="µM",
+                       values=(sv.VariableValue("d0", "0.1", 0.1),
+                               sv.VariableValue("d1", "10", 10.0)))
+    line = sv.Variable(id="cl", name="Cell line", kind=sv.TEXT, unit="",
+                       values=(sv.VariableValue("c0", "HeLa", None),))
+    return sv.VariableSet(
+        variables=(dose, line),
+        assignments={"dose": {"A01": "d0", "A02": "d1"},
+                     "cl": {"A01": "c0"}})
+
+
+def _reopen(data_dir):
+    """A ctx hydrated the way a relaunched app hydrates one."""
+    from well_viewer.domain.viewer_state import read_pipeline_info
+    from well_viewer.persistence import sample_variables as ps
+
+    *_rest, info = read_pipeline_info(data_dir)
+    ctx = _ctx(pipeline_info=info, data_dir=str(data_dir))
+    ps.load_from_data_dir(ctx)
+    return ctx.state.selection.variables
+
+
+def test_a_filled_plate_survives_quitting_and_reopening(tmp_path):
+    """The reported defect: everything gone after a quit and relaunch.
+
+    Asserts the values, not that "something came back" — an implementation
+    that restored the variables and dropped every assignment satisfies a
+    "two variables are back" check and is exactly as lossy for the user, who
+    filled the grid one well at a time.
+    """
+    from well_viewer.persistence import sample_variables as ps
+
+    ps.save_to_data_dir(_ctx_with(_filled_plate(), tmp_path))
+
+    back = _reopen(tmp_path)
+    assert [v.name for v in back.variables] == ["Dose", "Cell line"]
+    assert back.value_id_for("dose", "A01") == "d0"
+    assert back.value_id_for("dose", "A02") == "d1"
+    assert back.value_id_for("cl", "A01") == "c0"
+
+
+def test_the_reopen_works_in_the_analyze_in_out_layout(tmp_path):
+    """``data_dir`` is ``out/`` while the sidecar sits at the dataset root.
+
+    The save resolves that fallback; a reader that resolved it differently
+    would write the block somewhere the load never looks, which is the same
+    loss wearing a path bug rather than a whitelist bug.
+    """
+    from well_viewer.persistence import sample_variables as ps
+
+    out = tmp_path / "out"
+    out.mkdir()
+    (tmp_path / "pipeline_info.json").write_text(
+        json.dumps({"fluor_tokens": ["gfp"]}))
+    ps.save_to_data_dir(_ctx_with(_filled_plate(), out))
+
+    assert not (out / "pipeline_info.json").exists(), (
+        "the block went into out/ rather than beside the sidecar it read")
+    back = _reopen(out)
+    assert back.value_id_for("dose", "A02") == "d1"
+
+
+def test_the_pipeline_s_own_keys_survive_the_variables_write(tmp_path):
+    """The sidecar has several writers and the pipeline owns some of its keys."""
+    from well_viewer.domain.viewer_state import read_pipeline_info
+    from well_viewer.persistence import sample_variables as ps
+
+    (tmp_path / "pipeline_info.json").write_text(json.dumps(
+        {"fluor_tokens": ["gfp", "rfp"], "separator": "_", "tp_index": 2,
+         "well_index": 0, "fov_index": 1}))
+    ps.save_to_data_dir(_ctx_with(_filled_plate(), tmp_path))
+
+    *_rest, info = read_pipeline_info(tmp_path)
+    assert info["fluor_tokens"] == ["gfp", "rfp"]
+    assert info["tp_index"] == 2
+    assert _reopen(tmp_path).value_id_for("dose", "A01") == "d0"
+
+
+def test_a_dataset_whose_sidecar_has_no_block_reopens_empty(tmp_path):
+    """Not "keep whatever is loaded" — that is the cross-plate leak."""
+    (tmp_path / "pipeline_info.json").write_text(json.dumps({"schema": "x"}))
+    assert _reopen(tmp_path).variables == ()

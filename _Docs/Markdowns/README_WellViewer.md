@@ -2487,6 +2487,42 @@ well, so a well carries its value whether or not anybody grouped it. Grouping
 wells is what pools replicates into one point with an error bar across them; a
 lone well is a single measurement and is drawn without one.
 
+**What the curves measure.** The **Y** control picks between the channel's
+active Property and **Fraction above threshold** — the proportion of cells above
+the ON cutoff. The fraction is often the readout a dose response is really
+about, and it is not one of the Properties the band offers, so it lives here.
+The axis label follows what you picked, and a fit works on either.
+
+If you also turn on fold change, note that a control with **nothing** above the
+threshold has a fraction of zero, and dividing by it is undefined. The figure
+says so in as many words rather than reporting a missing control — switch the
+operation to subtract, or plot the raw fraction.
+
+**Error bars with one well.** Set **Spread** to **FOV** in the Display popover
+and each field of view counts as a replicate, so a condition run in a single
+well still gets an error bar. Left on the default, spread is measured across
+wells and a one-well condition has none — the caption under the figure names
+the unit, because "add another well" and "add another field" are different
+fixes. The exported CSV carries a `spread_unit` column beside `n` for the same
+reason: `n` counts the condition's wells, and with FOV spread on the error bar
+is taken across fields, so the two are not the pair you would combine to
+recover a standard deviation.
+
+**Several curves on one plot.** The **Series** control beside **X** splits the
+groups into one curve per value of a second variable — pick `Cell line` and a
+dose series run on HeLa and U2OS is drawn as two curves rather than one line
+doubling back at every dose. Colour tells you the series and the dash pattern
+tells you the timepoint, so with two cell lines at two timepoints you get four
+curves in two colours and two dash patterns, and you can see at a glance which
+share a cell line and which share a moment. Each curve is fitted on its own,
+with the same model and the same pinned plateaus, so their EC50s are
+comparable — which is the only reason to overlay them. The variable already on
+**X** is not offered, since a series on the dose axis would be one curve per
+dose with a single point on each. A group the series variable does not cover —
+wells with no `Cell line`, or a group whose wells disagree about it — gets its
+own curve, named for what is missing rather than quietly joining one of the
+others.
+
 **The axis picks itself.** If your doses span two decades or more the x axis
 opens logarithmic, because a 0.1–10 µM series on a linear axis puts three
 quarters of its points in the leftmost tenth. Every dose gets its own tick

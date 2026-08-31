@@ -110,6 +110,7 @@ def _resolve_export_dock(win, fig) -> QWidget | None:
         ("_distribution_fig", "_distribution_export_dock"),
         ("_sp_fig", "_spatial_export_dock"),
         ("_mv_fig", "_mv_export_dock"),
+        ("_response_fig", "_response_export_dock"),
     )
     for fig_attr, dock_attr in mapping:
         if getattr(win, fig_attr, None) is fig:
@@ -216,9 +217,31 @@ def open_export_style_panel(win, plot_key: str) -> None:
     """Open the floating Export Style sidebar for ``plot_key``'s figure.
 
     Each plot tab (line / bar / scatter cells / scatter agg / distribution /
-    heatmap / spatial / multivariate) pre-allocates a right-side dock when its
-    view is built. This routes the per-card "▸" style button to the
+    heatmap / spatial / multivariate / response) pre-allocates a right-side dock
+    when its view is built. This routes the per-card "▸" style button to the
     ExportStyleSidebar mounted in that dock.
+
+    **This roster is the contract, and nothing in the app enforced it.** A tab
+    reaches its Properties panel by handing ``ui_helpers.make_properties_button``
+    a key, and a key that is absent here falls to the status line and the panel
+    simply never opens — the Response tab shipped that way, its Properties
+    button inert for the whole of its existence. The button is built from a
+    literal at the call site and looked up by a literal here, so the two can
+    disagree forever without a name to grep or an import to break.
+    **There are two rosters here, and both have to carry a tab.** This one maps
+    the key to its figure; ``_resolve_export_dock`` maps that figure to the
+    pre-allocated right-side dock the sidebar mounts into. Adding a row here
+    and not there is not a half-fix that half-works — ``launch_export_editor``
+    takes its ``dock is None`` fallback and appends the sidebar into the plot
+    card's own layout, so the panel opens somewhere no other tab puts it, with
+    nothing red anywhere. That is exactly what happened when Response Curves
+    was added to this mapping alone.
+
+    ``tests/test_properties_panel_keys.py`` closes both seams: it reads every
+    key any tab passes to ``make_properties_button`` and fails on one this
+    mapping does not carry, and it fails on a figure here that
+    ``_resolve_export_dock`` does not name — or on a dock it names that no tab
+    registers.
     """
     mapping = {
         "line":          ("_line_fig",         "_line_canvas",         "line_figure"),
@@ -229,6 +252,7 @@ def open_export_style_panel(win, plot_key: str) -> None:
         "heatmap":       ("_heatmap_fig",      "_heatmap_canvas",      "heatmap_figure"),
         "spatial":       ("_sp_fig",           "_sp_canvas",           "spatial_figure"),
         "multivariate":  ("_mv_fig",           "_mv_canvas",           "multivariate_figure"),
+        "response":      ("_response_fig",     "_response_canvas",     "response_figure"),
     }
     spec = mapping.get(plot_key)
     if spec is None:

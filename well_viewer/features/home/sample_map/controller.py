@@ -54,7 +54,7 @@ LAYERS: tuple[str, ...] = tuple(r.tab for r in DECLARATION_ROLES if r.tab)
 #: this module which layer is current, so a static import of the builders would
 #: close that loop at import time.
 LAYER_BUILDERS: dict[str, tuple[str, str]] = {
-    "Groups": ("well_viewer.features.home.groups.tab_view",
+    "Replicates": ("well_viewer.features.home.groups.tab_view",
                "build_replicate_groups_centre"),
     "Variables": ("well_viewer.features.home.variables.tab_view",
                   "build_variables_subtab"),
@@ -67,7 +67,7 @@ LAYER_BUILDERS: dict[str, tuple[str, str]] = {
 #: ``WellPlateSelector``s and the third is the 96-cell text grid, which exists
 #: precisely because a label cell takes free text.
 LAYER_PLATES: dict[str, str] = {
-    "Groups": "_rep_map_plate",
+    "Replicates": "_rep_map_plate",
     "Variables": "_var_plate",
     "Well Labels": "_lbl_grid",
 }
@@ -192,7 +192,7 @@ def set_layer(ctx, layer: str) -> None:
 
     _paint_strip(ctx, layer)
     refresh_layer(ctx, layer)
-    if layer == "Groups":
+    if layer == "Replicates":
         _clear_active_group(ctx)
     _carry_selection(ctx, outgoing, layer)
     with swallow("sample map: restating what the plots pool by"):
@@ -317,7 +317,7 @@ def refresh_layer(ctx, layer: str | None = None) -> None:
     anything tries to select on it.
     """
     layer = layer or current_layer(ctx)
-    if layer == "Groups":
+    if layer == "Replicates":
         with swallow("sample map: refreshing the Groups layer"):
             rep_panel_refresh(ctx)
         return

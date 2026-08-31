@@ -53,7 +53,13 @@ def build_editor_column(ctx, parent: QWidget, reg) -> QWidget:
     host = QWidget(parent)
     host.setFixedWidth(EDITOR_W)
     column = QVBoxLayout(host)
-    column.setContentsMargins(0, 0, 0, 0)
+    # A left inset, because the rail sits hard against the pane edge and the
+    # sidebar's show/hide toggle floats over that edge — landing on top of the
+    # right-aligned "Name" and "Type" labels of the form below. The column is
+    # the right place for it rather than the form: every row in it starts at
+    # the same x, and insetting one of them would leave the list and the
+    # buttons under the toggle instead.
+    column.setContentsMargins(theme.Spacing.md, 0, 0, 0)
     column.setSpacing(theme.Spacing.sm)
 
     column.addWidget(section_label(host, "Variables"))
@@ -81,15 +87,6 @@ def build_editor_column(ctx, parent: QWidget, reg) -> QWidget:
     body_column.setSpacing(theme.Spacing.sm)
     _build_definition_form(ctx, body, body_column, reg)
     _build_value_list(ctx, body, body_column, reg)
-
-    # The delete lives at the foot of the definition it deletes, and names what
-    # it takes. Two buttons reading "Remove" a few hundred pixels apart — one
-    # dropping a value, one destroying a variable and every well assignment
-    # under it — was one word for two scopes of damage.
-    remove = reg.register("_var_remove", QPushButton("Delete this variable",
-                                                     body))
-    remove.setObjectName("HomeAction")
-    body_column.addWidget(remove)
 
     column.addWidget(body)
     # The block sits at the top of the rail. Handing the definition the column's
@@ -136,6 +133,24 @@ def _build_value_list(ctx, body: QWidget, column, reg) -> None:
 
     column.addWidget(section_label(body, "Values, in order"))
 
+    # The entry and its Add sit directly under the heading, above the list they
+    # append to — so the reading order is "Values, in order / type one / here
+    # they are", and the button a user reaches for most is the one nearest the
+    # label that names the section. Underneath the box it sat below the three
+    # reorder buttons, four controls away from the heading.
+    add_row = QHBoxLayout()
+    add_row.setSpacing(theme.Spacing.sm)
+    entry = reg.register("_var_value_entry", QLineEdit(body))
+    # The comma rule, stated on the control that applies it. It was only ever in
+    # the README and in the handler, and the placeholder's example read equally
+    # well as "here is what one value looks like".
+    entry.setPlaceholderText("0, 0.1, 1 — commas add several")
+    add_row.addWidget(entry, 1)
+    add = reg.register("_var_value_add", QPushButton("Add", body))
+    add.setObjectName("HomeAction")
+    add_row.addWidget(add)
+    column.addLayout(add_row)
+
     values = reg.register("_var_values", QListWidget(body))
     values.setEditTriggers(QListWidget.DoubleClicked | QListWidget.EditKeyPressed)
     values.setToolTip("Double-click to correct a label — that is a rename, so "
@@ -159,19 +174,6 @@ def _build_value_list(ctx, body: QWidget, column, reg) -> None:
         buttons.addWidget(button)
     buttons.addStretch(1)
     column.addLayout(buttons)
-
-    add_row = QHBoxLayout()
-    add_row.setSpacing(theme.Spacing.sm)
-    entry = reg.register("_var_value_entry", QLineEdit(body))
-    # The comma rule, stated on the control that applies it. It was only ever in
-    # the README and in the handler, and the placeholder's example read equally
-    # well as "here is what one value looks like".
-    entry.setPlaceholderText("0, 0.1, 1 — commas add several")
-    add_row.addWidget(entry, 1)
-    add = reg.register("_var_value_add", QPushButton("Add", body))
-    add.setObjectName("HomeAction")
-    add_row.addWidget(add)
-    column.addLayout(add_row)
 
     note = reg.register("_var_note", QLabel("", body))
     note.setObjectName("Muted")
@@ -235,3 +237,61 @@ def variable_item(name: str, variable_id: str, annotated: int,
         item.setToolTip(f"{total - annotated} well(s) have no value for "
                         f"“{name}”.")
     return item
+
+
+#: Side of the × on a variable row. Small enough not to crowd the coverage
+#: count, large enough to be a comfortable target at typical densities.
+_ROW_X = 18
+
+
+def variable_row(name: str, variable_id: str, annotated: int,
+                 total: int, parent: QWidget) -> tuple[QListWidgetItem, QWidget]:
+    """A rail row and the widget that paints it: the label, and its own ×.
+
+    The delete used to be one button at the foot of the column, several hundred
+    pixels below the list, reading "Delete “Dose”" and acting on whatever the
+    rail happened to have selected. Two problems in one control: it was nowhere
+    near the thing it destroys, and the thing it destroys was named only in its
+    own label — so the row a user was looking at and the variable the button
+    would delete were separate facts they had to keep in agreement themselves.
+    An × on the row cannot disagree with the row it is on.
+
+    The item keeps its text and its ``Qt.UserRole`` id even though the widget
+    is what gets painted: the text is what a screen reader and every existing
+    caller read, and the id is what an edit is resolved through — reading a row
+    back by its label is how a rename becomes a delete-and-add.
+    """
+    item = variable_item(name, variable_id, annotated, total)
+
+    row = QWidget(parent)
+    layout = QHBoxLayout(row)
+    layout.setContentsMargins(theme.Spacing.xs, 0, theme.Spacing.xs, 0)
+    layout.setSpacing(theme.Spacing.xs)
+    label = QLabel(item.text(), row)
+    layout.addWidget(label, 1)
+
+    close = QPushButton("✕", row)
+    close.setObjectName("VariableRowDelete")
+    close.setFixedSize(QSize(_ROW_X, _ROW_X))
+    close.setCursor(Qt.PointingHandCursor)
+    close.setToolTip(f"Delete “{name}” and every well assignment under it.")
+    close.setProperty("aw_variable_id", variable_id)
+    layout.addWidget(close, 0)
+
+    item.setSizeHint(row.sizeHint())
+    return item, row
+
+
+def row_delete_button(listing, row: int) -> QPushButton | None:
+    """The × on rail row *row*, or ``None``.
+
+    A named accessor rather than each caller reaching through
+    ``itemWidget(...).findChild(...)``: the tests drive this button, and a
+    lookup spelled five different ways is five places to fix when the row's
+    shape changes.
+    """
+    item = listing.item(row)
+    widget = listing.itemWidget(item) if item is not None else None
+    if widget is None:
+        return None
+    return widget.findChild(QPushButton, "VariableRowDelete")

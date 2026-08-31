@@ -80,7 +80,10 @@ SECTION_BY_PAGE: dict[str, str] = {
     # stay mapped because each is still a heading of its own under the tab's,
     # so a caller that knows which layer is showing lands on that paragraph.
     "Sample map": "Sample map",
-    "Groups": "Groups",
+    # Keyed on the layer name the tab reports, which is "Replicates"; the value
+    # is the manual heading it lands on, which follows the rename in the README
+    # so the two halves of this row stay the same word.
+    "Replicates": "Replicates",
     "Variables": "Variables",
     "Well Labels": "Well Labels",
     "Ratios": "Ratios",

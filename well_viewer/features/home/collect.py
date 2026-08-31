@@ -69,7 +69,12 @@ class DeclarationRole:
 DECLARATION_ROLES: tuple[DeclarationRole, ...] = (
     DeclarationRole(
         key="replicates",
-        tab="Groups",
+        # The layer's visible name and its key in one field, so the page a user
+        # reads as "Replicates" cannot be the layer the code calls something
+        # else. It read "Groups", which named the *widget* — a saved plot group
+        # — rather than the thing the page is for, and sat beside a `key` that
+        # had said ``replicates`` all along.
+        tab="Replicates",
         question="Which wells are replicates of one condition?",
         effect="Pools plots",
         role=("A group is a set of wells you are treating as replicates of one "
@@ -729,7 +734,7 @@ def your_work(ctx) -> list:
                           "ratio_metrics", None) or [])
 
     return [
-        {"key": "replicates", "label": "Groups", "count": len(sets),
+        {"key": "replicates", "label": "Replicates", "count": len(sets),
          "effect": ROLE_BY_KEY["replicates"].effect},
         # Variables were absent from this block entirely while the page's whole
         # promise is "what you have already done here". A user who had filled a

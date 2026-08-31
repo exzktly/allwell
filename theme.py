@@ -571,11 +571,33 @@ QPushButton#HomeThumbTile:pressed {{
 QPushButton#VariableValueChip {{
     background-color: {c.panel_elevated};
     border: 1px solid {c.border};
-    border-left: 3px solid {c.border};
+    /* Same width as the swatch ``plate_view.value_chip`` paints, so the chip
+       has exactly one left edge. At 3px here and 14px there, both rendered:
+       a wide band of the value's ink with a narrower grey bar over its inner
+       edge, reading as two overlapping bars. A widget stylesheet merges with
+       this one rather than replacing it, so the two declarations have to agree
+       on the geometry and differ only in the colour. */
+    border-left: 14px solid {c.border};
     border-radius: {r.sm}px;
     color: {c.text_primary};
     font-size: {t.small_size}px;
     padding: {s.xs}px {s.sm}px;
+}}
+/* The × that deletes a variable, on its own rail row. Quiet until the row is
+   under the cursor: it destroys a definition and every well assignment under
+   it, so it should not read as the row's primary action while the user is
+   picking which variable to look at. */
+QPushButton#VariableRowDelete {{
+    background: transparent;
+    border: none;
+    border-radius: {r.sm}px;
+    color: {c.text_muted};
+    font-size: {t.small_size}px;
+    padding: 0px;
+}}
+QPushButton#VariableRowDelete:hover {{
+    background-color: {c.hover};
+    color: {c.warn};
 }}
 QPushButton#VariableValueChip:hover {{
     background-color: {c.hover};

@@ -150,7 +150,7 @@ README_SUBTAB_TITLES = {
     # Home's notebook. "Overview" is the report page itself, not a sub-leaf, and
     # has no ``####`` heading of its own — it is the prose the Home section opens
     # with, so it is deliberately absent here.
-    # Groups, Variables and Well Labels are ``#####`` headings under Sample map,
+    # Replicates, Variables and Well Labels are ``#####`` headings under Sample map,
     # not sub-tabs of their own: they are layers of that one tab.
     "Home": {"Cell Gating", "Sample map", "Ratios", "Pipeline Info"},
 }

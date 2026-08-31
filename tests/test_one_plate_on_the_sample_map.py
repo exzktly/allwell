@@ -67,7 +67,7 @@ def _ctx(selections=()):
         state=SimpleNamespace(
             # Home's **real** typed slice, not a namespace shaped to whatever
             # the code happens to read: the Sample map tab records which layer
-            # is showing there, and a stub without it answers "Groups" to every
+            # is showing there, and a stub without it answers "Replicates" to every
             # question and passes whatever the code does (§7.8, face one).
             feature_slice=lambda name: home if name == "home" else None,
             selection=selection,
@@ -131,8 +131,8 @@ def test_a_layer_with_something_to_show_shows_its_plate(tab):
     tab.ctx.state.selection.selections = [
         {"id": "g1", "name": "Ctrl", "wells": ["A01"], "hidden": False,
          "color": "#5B9BF8", "replicates": None, "source": "user"}]
-    set_layer(tab.ctx, "Groups")
-    assert _visible_plates(tab.ctx) == ["Groups"]
+    set_layer(tab.ctx, "Replicates")
+    assert _visible_plates(tab.ctx) == ["Replicates"]
 
     vset, _id = new_variable(VariableSet(), "Dose")
     tab.ctx.state.selection.variables = vset
@@ -267,7 +267,7 @@ def test_arriving_on_the_groups_layer_picks_no_group(tab):
          "color": "#5B9BF8", "replicates": None, "source": "user"}]
     tab.ctx.state.selection.current_selection_id = "g1"
     set_layer(tab.ctx, "Variables")
-    _press(tab.ctx, "Groups")
+    _press(tab.ctx, "Replicates")
     assert tab.ctx.state.selection.current_selection_id is None
 
     tab.ctx.state.selection.current_selection_id = "g1"
@@ -312,11 +312,11 @@ def test_the_selection_carries_between_the_two_layers_that_share_it(tab):
 def test_the_selection_is_never_carried_into_the_groups_layer(tab):
     """Its plate is a group's membership. Writing a selection into it and
     letting the commit fire is a group silently taking wells nobody put in it."""
-    assert "Groups" not in SHARED_SELECTION_LAYERS
+    assert "Replicates" not in SHARED_SELECTION_LAYERS
     set_layer(tab.ctx, "Variables")
     tab.ctx.widgets.get_or_none("_var_plate").setSelectedWellIds(["A02", "B03"])
-    set_layer(tab.ctx, "Groups")
-    assert selected_on(tab.ctx, "Groups") == []
+    set_layer(tab.ctx, "Replicates")
+    assert selected_on(tab.ctx, "Replicates") == []
 
 
 def test_the_shared_layers_publish_to_the_app_wide_selection(tab):
@@ -360,7 +360,7 @@ def test_switching_to_a_layer_publishes_what_that_layer_already_holds(
     """
     set_layer(tab.ctx, layer)
     getattr(tab.ctx.widgets.get_or_none(key), setter)(["B01", "B04"])
-    set_layer(tab.ctx, "Groups")
+    set_layer(tab.ctx, "Replicates")
     tab.ctx.state.selection.selected_wells = set()
     set_layer(tab.ctx, layer)
     assert tab.ctx.state.selection.selected_wells == {"B01", "B04"}
@@ -373,9 +373,9 @@ def test_the_groups_layer_never_publishes(tab):
         on_layer_selection_changed,
     )
 
-    set_layer(tab.ctx, "Groups")
+    set_layer(tab.ctx, "Replicates")
     tab.ctx.widgets.get_or_none("_rep_map_plate").setSelectedWellIds(["A01"])
-    on_layer_selection_changed(tab.ctx, "Groups")
+    on_layer_selection_changed(tab.ctx, "Replicates")
     assert tab.ctx.state.selection.selected_wells == set()
 
 
@@ -397,7 +397,7 @@ def test_import_follows_the_layer_not_the_tab(tab):
     tab.ctx.runtime.home.subtabs = SimpleNamespace(
         count=lambda: 1, tabText=lambda _i: "Sample map", currentIndex=lambda: 0)
     tab.ctx.features = SimpleNamespace(sub_leaves=lambda _p: ("Sample map",))
-    for layer, offered in (("Groups", True), ("Well Labels", True),
+    for layer, offered in (("Replicates", True), ("Well Labels", True),
                            ("Variables", False)):
         set_layer(tab.ctx, layer)
         sync_home_sidebar(tab.ctx)

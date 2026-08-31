@@ -78,6 +78,21 @@ def _vset(tab):
     return tab.ctx.state.selection.variables
 
 
+def _delete_row(tab, row: int = 0):
+    """Press the × on rail row *row* — the control that now deletes a variable.
+
+    Through the real button rather than by calling ``remove_variable``: the
+    delete moved from one button at the foot of the column onto each row, and
+    a test that calls the handler directly would pass against a row whose ×
+    was never connected — the failure this tab has shipped before.
+    """
+    from well_viewer.features.home.variables.editor_view import row_delete_button
+
+    button = row_delete_button(tab.w("_var_list"), row)
+    assert button is not None, f"rail row {row} has no delete button"
+    button.click()
+
+
 def _labels(listing):
     return [listing.item(i).text() for i in range(listing.count())]
 
@@ -212,7 +227,7 @@ def test_remove_takes_the_selected_value(tab):
 def test_remove_takes_the_selected_variable(tab):
     tab.w("_var_add").click()
     tab.w("_var_add").click()
-    tab.w("_var_remove").click()
+    _delete_row(tab, tab.w("_var_list").currentRow())
 
     assert len(_vset(tab).variables) == 1
 
@@ -887,7 +902,7 @@ def test_removing_the_last_variable_blanks_the_plate_it_described(tab, monkeypat
     monkeypatch.setattr(QMessageBox, "question",
                         staticmethod(lambda *a, **k: QMessageBox.Yes))
     seen = _watch_clears(tab, monkeypatch)
-    tab.w("_var_remove").click()
+    _delete_row(tab, tab.w("_var_list").currentRow())
 
     assert seen["colors"] and seen["rings"] and seen["markers"], (
         f"the deleted variable's decoration was never cleared: {seen}"
@@ -1092,7 +1107,7 @@ def test_deleting_a_filled_variable_asks_first(tab, monkeypatch):
     monkeypatch.setattr(QMessageBox, "question",
                         staticmethod(lambda *a, **k: asked.append(a) or QMessageBox.No))
 
-    tab.w("_var_remove").click()
+    _delete_row(tab, tab.w("_var_list").currentRow())
 
     assert asked, "a filled variable was deleted without asking"
     assert _vset(tab).variables, "answering No deleted it anyway"
@@ -1109,7 +1124,7 @@ def test_deleting_an_unfilled_variable_asks_nothing(tab, monkeypatch):
     monkeypatch.setattr(QMessageBox, "question",
                         staticmethod(lambda *a, **k: asked.append(a) or QMessageBox.Yes))
 
-    tab.w("_var_remove").click()
+    _delete_row(tab, tab.w("_var_list").currentRow())
 
     assert not asked
     assert not _vset(tab).variables
@@ -1327,7 +1342,7 @@ def test_undo_puts_back_a_deleted_variable(tab, monkeypatch):
     tab.w("_var_fill_apply").click()
     monkeypatch.setattr(QMessageBox, "question",
                         staticmethod(lambda *a, **k: QMessageBox.Yes))
-    tab.w("_var_remove").click()
+    _delete_row(tab, tab.w("_var_list").currentRow())
     assert not _vset(tab).variables
 
     tab.w("_var_undo").click()

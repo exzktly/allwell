@@ -205,14 +205,18 @@ def _build_fill_row(ctx, parent: QWidget, reg) -> QWidget:
     The variable being filled is the one selected in the rail rather than a
     fourth combo — the definition of it is on screen directly above, and a fill
     that could target a variable the user is not looking at is a fill that lands
-    somewhere they will not check.
+    somewhere they will not check. It is still **named on the control**, which
+    is the part of the plan that combo was carrying: the row otherwise reads
+    ``Fill along Rows`` on a page that can hold four variables, and a fill is
+    the one action here that rewrites every well at once.
     """
     host = reg.register("_var_fill_row", QWidget(parent))
     row = QHBoxLayout(host)
     row.setContentsMargins(0, 0, 0, 0)
     row.setSpacing(theme.Spacing.sm)
 
-    row.addWidget(QLabel("Fill along", host))
+    lead = reg.register("_var_fill_lead", QLabel("Fill along", host))
+    row.addWidget(lead)
     axis = reg.register("_var_fill_axis", QComboBox(host))
     for token, label in ((FILL_ALONG_ROWS, "Rows"), (FILL_ALONG_COLS, "Columns")):
         axis.addItem(label, token)

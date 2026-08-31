@@ -395,6 +395,30 @@ def test_the_fill_row_says_what_it_covers(tab):
     assert "8 well" in tab.w("_var_fill_scope").text()
 
 
+def test_the_fill_row_names_the_variable_it_will_rewrite(tab):
+    """The plan put a variable combo in this row; the combo was declined because
+    the rail already chooses it, but the *name* is what that combo carried. A
+    fill is the one action on this page that rewrites every well at once, and
+    ``Fill along Rows`` on a page holding four variables does not say which.
+
+    Asserted on the label's text rather than "the label is not empty", which the
+    static ``Fill along`` it replaced also satisfies.
+    """
+    _dose_tab(tab)
+
+    assert tab.w("_var_fill_lead").text() == "Fill Dose along"
+
+
+def test_the_fill_row_follows_a_rename(tab):
+    """It is repainted from the live set, so it cannot name the old variable."""
+    _dose_tab(tab)
+    name = tab.w("_var_name")
+    name.setText("Concentration")
+    name.editingFinished.emit()
+
+    assert tab.w("_var_fill_lead").text() == "Fill Concentration along"
+
+
 # ── select-then-chip ────────────────────────────────────────────────────────
 
 def _chips(tab):

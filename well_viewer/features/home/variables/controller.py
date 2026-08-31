@@ -460,6 +460,13 @@ def _paint_plate(ctx, variable) -> None:
     missing = sv.unassigned_wells(vset, variable.id, wells)
     plate.setWellRings(missing)
 
+    lead = _widget(ctx, "_var_fill_lead")
+    if lead is not None:
+        # Which variable this fills. The plan put it in the control as a combo;
+        # the combo was declined (the rail already chooses it) and the *name*
+        # is the half of it that was carrying the meaning.
+        lead.setText(f"Fill {variable.name} along")
+
     scope = _widget(ctx, "_var_fill_scope")
     if scope is not None:
         scope.setText(f"over the {len(wells)} well(s) in this dataset")
@@ -539,9 +546,11 @@ def apply_fill(ctx) -> None:
         1 for w in dataset_wells(ctx)
         if before.value_id_for(variable_id, w) != after.value_id_for(variable_id, w)
     )
+    filled = after.by_id(variable_id)
     readout = _widget(ctx, "_var_fill_scope")
     if readout is not None and changed:
-        readout.setText(f"Filled {changed} well(s).")
+        named = filled.name if filled is not None else "the variable"
+        readout.setText(f"Filled {changed} well(s) with {named}.")
 
 
 # ── a second variable, as a glyph ───────────────────────────────────────────

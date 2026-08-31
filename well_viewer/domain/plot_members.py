@@ -28,6 +28,7 @@ same indirection ``core/scope_registry.py`` uses for redraw callables.
 
 from __future__ import annotations
 
+from well_viewer.domain.batch_models import ReplicateSet
 from well_viewer.domain.plot_order import apply_order
 from well_viewer.domain.selections_model import (
     active_replicate_sets, replicate_sets_loaded,
@@ -160,15 +161,41 @@ def line_member_keys(ctx) -> list[str]:
         selected, list(ctx.state.plot.line_order_wells or []), key=lambda x: x)
 
 
-def response_member_keys(ctx) -> list[str]:
-    """The members Response Curves draws, which are always replicate sets.
+def response_members(ctx):
+    """The members Response Curves draws — replicate sets, else the lit wells.
 
-    No fallback to the selected wells, unlike the bar and line lists. A point
-    on a response curve is a member at a dose, and a loose well has no dose
-    until it is in something the plate annotates; the tab says so in its empty
-    state rather than drawing a curve through wells nobody grouped.
+    The visible replicate sets when there are any, and otherwise one single-well
+    set per selected well, in plate order. Same fallback the bar and line lists
+    make, and for the same reason: a well lit on the plate is a member the user
+    has asked to see.
+
+    This used to have no fallback, on the reasoning that a loose well has no
+    dose until it is in something the plate annotates. That reasoning is wrong
+    about where the annotation lives. A sample variable is assigned **per well**
+    — ``VariableSet.assignments`` maps a well token to a value id — so a lit
+    well carries its dose whether or not anybody grouped it, and ``roll_up``
+    over its one well returns that value. The tab drew nothing on a plate that
+    was fully annotated, under an empty state telling the user to select wells
+    on the plate, which is what they had already done.
+
+    Returns ``ReplicateSet`` objects rather than names because the collector
+    needs the wells: ``compute_rep_stats`` pools a set, and a one-well set is
+    the shape that makes a lone well go down the same path as a group of four.
     """
-    return [rset.name for rset in plot_replicate_sets(ctx)]
+    rsets = list(plot_replicate_sets(ctx))
+    if rsets:
+        return rsets
+    well_paths = ctx.state.dataset.well_paths or {}
+    selected = sorted(
+        (w for w in (ctx.state.selection.selected_wells or ()) if w in well_paths),
+        key=parse_rc,
+    )
+    return [ReplicateSet(w, [w]) for w in selected]
+
+
+def response_member_keys(ctx) -> list[str]:
+    """The keys Response Curves draws, in order — set names, or well tokens."""
+    return [rset.name for rset in response_members(ctx)]
 
 
 def plotted_member_keys(ctx, scope: str) -> list[str]:
@@ -220,11 +247,12 @@ _ALWAYS_POOLED_SCOPES = frozenset({"line", "response"})
 def _keys_are_replicate_sets(ctx, scope: str) -> bool:
     """Whether *scope*'s keys name replicate sets rather than wells.
 
-    Bar is the only scope that can flip: ``bar_pool_replicates`` turns its bars
-    into wells. Line and Response always pool — Response because a dose is a
-    property of a condition, and an un-pooled response curve would draw one
-    point per well at the same x, which is a scatter of replicates rather than
-    a curve.
+    With no replicate set active every scope is well-keyed, which is the guard
+    above. Given sets, bar is the only scope that can flip back:
+    ``bar_pool_replicates`` turns its bars into wells. Line and Response keep
+    pooling — Response because a dose is a property of a condition, and an
+    un-pooled response curve would draw one point per well at the same x, which
+    is a scatter of replicates rather than a curve.
     """
     if not plot_replicate_sets(ctx):
         return False

@@ -2,7 +2,7 @@
 
 The three ways of annotating a well — grouping them, giving them a variable's
 value, naming them — were three sibling tabs. This is one tab with three
-layers. ``plate_map/controller.py`` holds the switching rule and the reason the
+layers. ``sample_map/controller.py`` holds the switching rule and the reason the
 selection travels between two of the three and not the third.
 
 The bodies are the unchanged builders from ``home/groups``, ``home/variables``
@@ -21,7 +21,7 @@ from well_viewer.features.home.sample_map.controller import (
 )
 
 
-def build_plate_map_subtab(ctx, frame: QWidget) -> None:
+def build_sample_map_subtab(ctx, frame: QWidget) -> None:
     """Build the tab body into *frame*. Registered lazily, like every sub-tab."""
     import importlib
 

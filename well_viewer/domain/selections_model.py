@@ -186,9 +186,24 @@ def groups_relabelled_on_figures(ctx) -> list[tuple[str, str]]:
     wired together in exactly this one place, and nothing said so.
 
     Visible groups only: a hidden one is not drawn, so nothing relabels it.
+    **And none of them when a sample variable is pooling the plots**, for the
+    same reason one step out: the groups are not drawn at all then, so a note
+    saying figures label them with their wells describes a figure that is not on
+    screen — and it appeared on the same tab as, and directly contradicted, the
+    line saying those groups were not pooling. The dependency list this rule
+    was first written against — a group's name, its membership, and the labels
+    on another tab — was missing the fourth: whether the group is drawn.
+
     Returns the pairs rather than a sentence so the count, the wording and the
     order are the caller's, and so the rule is drivable without a widget.
     """
+    # Deferred: ``plot_members`` imports this module at module scope, so the
+    # seam has to be reached from inside the function. It is the one answer to
+    # "is a variable pooling", and re-deriving it here would be a second one.
+    from well_viewer.domain.plot_members import variable_grouping_in_force
+
+    if variable_grouping_in_force(ctx):
+        return []
     out: list[tuple[str, str]] = []
     for rset in active_replicate_sets(
             ctx.state.selection.selections or [],

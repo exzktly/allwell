@@ -440,9 +440,15 @@ def toggle_bar_group_mode(ctx) -> None:
 
 def toggle_bar_pool_replicates(ctx) -> None:
     """Flip whether replicate-set wells collapse to a single column."""
+    from well_viewer.core.group_by_controller import refresh_grouping_readouts
     from well_viewer.features.barplot.renderer import redraw_bars
     ctx.state.plot.toggle_bar_pool_replicates()
     refresh_bar_layout_btn_state(ctx)
+    # The pooling readout names this toggle, because it is the one thing that
+    # can make the Bar tab disagree with the sentence describing what the plots
+    # pool by. Left unrepainted it said "grouped by your 2 groups" over a figure
+    # drawing one bar per well.
+    refresh_grouping_readouts(ctx)
     redraw_bars(ctx)
 
 

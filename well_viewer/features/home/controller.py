@@ -215,13 +215,15 @@ def on_home_subtab_changed(ctx, idx: int) -> None:
         cb = ctx.runtime.pipeline_info.refresh
         if callable(cb):
             cb()            # re-read in case the dataset changed
-    elif name == "Groups":
-        # Entering Groups deselects any previously-active group, so a click on
-        # the rail plate has no consequence until the user picks one.
-        if ctx.state.selection.current_selection_id is not None:
-            ctx.state.selection.current_selection_id = None
-            groups_centre_refresh(ctx)
-            ctx.coordinator.refresh_sidebar_map()
+    elif name == "Sample map":
+        # The three annotation editors are layers of this tab, so the entry
+        # rules are the layer's rather than the sub-tab's. This branch used to
+        # read ``"Groups"``, which the registry stopped being able to produce
+        # when they merged — so entering the tab quietly stopped deselecting the
+        # active group, and the first drag on the plate rewrote whichever group
+        # was left over from the last visit.
+        from well_viewer.features.home.sample_map.controller import on_tab_entered
+        on_tab_entered(ctx)
         if ctx.widgets.has("_rep_active_group_lbl"):
             update_active_group_label(ctx)
     sync_home_sidebar(ctx)

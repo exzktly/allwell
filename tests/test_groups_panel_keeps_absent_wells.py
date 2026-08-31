@@ -49,16 +49,20 @@ def panel(qapp):
     dataset = SimpleNamespace(
         well_paths={"A01": 1, "A02": 2}, well_labels={}, tok_to_label={},
     )
+    from well_viewer.features.home.state import HomeState
+    home = HomeState(sample_map_layer="Groups")
     registry = WidgetRegistry(SimpleNamespace())
     ctx = SimpleNamespace(
         widgets=registry,
-        state=SimpleNamespace(selection=selection, dataset=dataset),
+        state=SimpleNamespace(selection=selection, dataset=dataset,
+                              feature_slice=lambda name: home if name == "home" else None),
         runtime=SimpleNamespace(home=SimpleNamespace(subtabs=SimpleNamespace(
-            # The Groups editor is a layer of the Sample map tab now; the
-            # commit guard asks the sub-tab and the layer, and this fixture
-            # registers no layer switch, so ``current_layer`` answers with the
-            # first layer — Groups — which is what a tab built with no switch
-            # shows.
+            # The Groups editor is a layer of the Sample map tab now, and the
+            # commit guard asks the sub-tab **and** the layer. The layer half is
+            # answered from Home's typed slice below, not from the switch
+            # widget: the guard fails closed, so a fixture that simply omitted
+            # the record would refuse every commit rather than allowing them by
+            # default.
             tabText=lambda index: "Sample map", currentIndex=lambda: 0,
         ))),
         coordinator=SimpleNamespace(
@@ -120,15 +124,26 @@ def test_a_drag_from_another_layer_does_not_rewrite_the_group(panel):
     current — an annotation nobody made, which is the defect the whole design is
     shaped around.
     """
-    from types import SimpleNamespace
-
-    from well_viewer.features.home.sample_map.controller import SWITCH_KEY
-
     ctx, group, plate, _parent = panel
     before = list(group["wells"])
-    ctx.widgets.register(SWITCH_KEY,
-                         SimpleNamespace(currentData=lambda: "Variables"))
+    ctx.state.feature_slice("home").sample_map_layer = "Variables"
     plate.setSelectedWellIds(["A01", "A02"])
     plate.selectionDragFinished.emit()
     assert group["wells"] == before, (
         "a drag while the Variables layer was showing rewrote the group")
+
+
+def test_a_drag_before_any_layer_is_recorded_does_not_commit(panel):
+    """The guard fails **closed**.
+
+    ``current_layer`` falls back to the first layer for a tab that has recorded
+    none, and the first layer is Groups — the one layer whose plate edits. A
+    guard written on that fallback answers "yes, commit" in exactly the state
+    where nothing is known, so the question is asked of the record instead.
+    """
+    ctx, group, plate, _parent = panel
+    before = list(group["wells"])
+    ctx.state.feature_slice("home").sample_map_layer = ""
+    plate.setSelectedWellIds(["A01", "A02"])
+    plate.selectionDragFinished.emit()
+    assert group["wells"] == before

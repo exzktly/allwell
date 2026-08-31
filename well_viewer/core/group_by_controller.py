@@ -241,12 +241,14 @@ def grouping_summary(ctx) -> str:
         lead = (f"{variable.name} groups no wells, so plots"
                 if variable is not None else "Plots")
         if pooled:
-            return _plural_groups(len(pooled), f"{lead} are grouped by your")
+            return (_plural_groups(len(pooled), f"{lead} are grouped by your")
+                    .rstrip(".") + _unpooled_clause(ctx, pooled) + ".")
         return f"{lead} draw one member per selected well."
 
     values = len(pooled)
     plural = "" if values == 1 else "s"
     said = f"Plots are grouped by {variable.name} ({values} value{plural})"
+    said += _unpooled_clause(ctx, pooled)
     # The clause only when there is something to displace. A user with no groups
     # has nothing taken away, and telling them their 0 groups are not pooling is
     # a sentence about a thing that does not exist.
@@ -255,6 +257,23 @@ def grouping_summary(ctx) -> str:
         return f"{said}."
     return said + "; " + _plural_groups(len(displaced), "your",
                                         suffix=" are not pooling.")
+
+
+def _unpooled_clause(ctx, pooled) -> str:
+    """The Bar tab's own escape from the pooling this sentence describes.
+
+    ``bar_pool_replicates`` flips the bar key space from member names to well
+    tokens **after** the seam (``plot_members.bar_member_keys``), so with it off
+    the Bar tab draws one bar per well while every other tab still pools. A
+    sentence that named only the pooling was therefore printed in the same
+    control row as the switch contradicting it. Named here rather than in each
+    branch so both readouts and both states carry it.
+    """
+    if not pooled:
+        return ""
+    if getattr(getattr(ctx.state, "plot", None), "bar_pool_replicates", True):
+        return ""
+    return ", though Bar Plots is drawing each well separately (Pooled: Off)"
 
 
 def _plural_groups(count: int, lead: str, suffix: str = ".") -> str:

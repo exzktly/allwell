@@ -22,6 +22,14 @@ class HomeState:
     """
 
     last_rendered_for: str = ""
+    #: Which layer of the Sample map tab is showing — Groups, Variables or Well
+    #: Labels. On typed state rather than read back off the ``SegmentedControl``
+    #: that emitted the change: the widget updates its own index *before* it
+    #: emits, so a handler asking the control which layer is current is told the
+    #: **incoming** one, and every "what was I looking at a moment ago" question
+    #: silently answered "the layer I am moving to". That is what made a layer
+    #: switch drop the selection it was supposed to carry.
+    sample_map_layer: str = ""
     #: Wells the user selected from Home's plate, so the selection they made
     #: here survives a trip to another page and back.
     last_plate_selection: set = field(default_factory=set)

@@ -1261,9 +1261,9 @@ wells, and none of these four is a substitute for another.
 
 | | The question it answers | What it does |
 |---|---|---|
-| **Group** (Home → Groups) | *Which wells are replicates of one condition?* | **Pools.** Every plot, the Statistics tab and Batch Export draw one bar, trace or row per group instead of per well. A group carries a colour and a place in the plot order. |
-| **Variable** (Home → Variables) | *What did you change across the plate?* | **Pools, colours and splits.** A named axis with ordered values — `Dose: 0, 0.1, 1, 10` — assigned per well. Pick one as **Group by** and the plots pool by it; as **Colour by** or **Split by** and they ink or band by it. A numeric one can be a Response Curve's x axis. |
-| **Well label** (Home → Well Labels) | *What should this well be called on a figure?* | **Display only.** The label replaces the raw well token in legends, tick labels and exported names. It pools nothing and changes no number. |
+| **Group** (Home → Sample map → Groups) | *Which wells are replicates of one condition?* | **Pools.** Every plot, the Statistics tab and Batch Export draw one bar, trace or row per group instead of per well. A group carries a colour and a place in the plot order. |
+| **Variable** (Home → Sample map → Variables) | *What did you change across the plate?* | **Pools, colours and splits.** A named axis with ordered values — `Dose: 0, 0.1, 1, 10` — assigned per well. Pick one as **Group by** and the plots pool by it; as **Colour by** or **Split by** and they ink or band by it. A numeric one can be a Response Curve's x axis. |
+| **Well label** (Home → Sample map → Well Labels) | *What should this well be called on a figure?* | **Display only.** The label replaces the raw well token in legends, tick labels and exported names. It pools nothing and changes no number. |
 | **Saved selection** (the rail drawer under the plate map) | *Can I get these wells back later?* | **Nothing but recall.** It lights the same wells again in one click. It is not a group, it is not a replicate set, and loading one never edits a group's membership. |
 
 The one worth knowing before you start painting: **a variable is not a group,
@@ -1428,10 +1428,14 @@ conditions.
 
 #### Sample map
 
-One tab, one plate, and a switch across the top naming what the plate is
-showing: **Groups**, one segment per **variable**'s editor, or **Well Labels**.
-Only one plate is on screen at a time, so the control in front of you is the
-control that acts.
+One tab, one plate, and a switch across the top with three segments naming what
+the plate is showing: **Groups**, **Variables** or **Well Labels**. Only one
+plate is on screen at a time, so the control in front of you is the control that
+acts, and the line under the switch says what that layer is for.
+
+Arriving on **Groups** selects no group, so a click on the plate has no
+consequence until you pick one — otherwise the first click would edit whichever
+group was still active from your last visit.
 
 Under the switch, one line says what your plots are **currently pooling by** —
 *"Plots are grouped by Dose (6 values); your 4 groups are not pooling."* That is
@@ -1479,7 +1483,7 @@ by hand to plot them apart. With them you say "Cell line: HeLa, U2OS" and
 "Dose: 0, 0.1, 0.3, 1, 3, 10" once, and the plots can group, colour and split by
 either.
 
-On **Home → Variables**, **+ Variable** adds one. Give it a name, pick its
+On **Home → Sample map → Variables**, **+ Variable** adds one. Give it a name, pick its
 type, and type its values into the box at the bottom — commas work, so
 `0, 0.1, 0.3, 1, 3, 10` adds six in one go. Double-click a value to correct it:
 that is a rename, so every well already holding it follows, and fixing `1uM` to
@@ -2092,7 +2096,7 @@ Fold change:  Control [— ▾]   Baseline [— ▾]
 - **Control** — pick a loaded well or replicate set to divide every bar
   / curve by its mean at the matching timepoint. `—` disables this
   axis. (The Bar Plots control combo also includes any replicate sets
-  defined on Home → Groups.) When a group name happens to match a well
+  defined on Home → Sample map → Groups.) When a group name happens to match a well
   token, the well's entry is shown as `A01 (well)` so the two can be told
   apart on screen. The suffix is only a label: the entry records which of
   the two you picked, so a group named `A01 (well)` is still selectable
@@ -2499,7 +2503,7 @@ density, MOI, temperature, how long you pre-treated for. A serial dilution is
 one case of it, which is why the tab is not named for one.
 
 The x axis comes from a **Number** variable you defined on
-[Home → Variables](#variables): define it, fill it onto the plate, then pick it
+[Home → Sample map → Variables](#variables): define it, fill it onto the plate, then pick it
 under **X** in the band. Until a Number variable exists the tab says so and
 points you there — there is nothing for it to plot.
 
@@ -2798,7 +2802,7 @@ answer a different question: **Dunnett** against one control group, a **paired
 t-test** and **Wilcoxon signed-rank**, and a **two-way ANOVA**.
 
 - **Needs** — at least two groups. On first visit the tab auto-populates from
-  the replicate sets defined on [Home → Groups](#groups).
+  the replicate sets defined on [Home → Sample map → Groups](#groups).
 - **Controls** — the group editor is in the sidebar; everything else is on the
   same one-row controls band every tab uses — **Channel**, **Property**,
   **Statistic**, **Timepoint** and **Test**, then an FOV-replicate indicator
@@ -2821,7 +2825,7 @@ t-test** and **Wilcoxon signed-rank**, and a **two-way ANOVA**.
 - **Paired tests and the two-way ANOVA read a sample variable.** A paired test
   needs to know which replicate in one group matches which in the other, and
   that only exists if you have said so — declare a batch or day variable on
-  [Home → Variables](#variables) and choose it under **Pair by**. The tab will
+  [Home → Sample map → Variables](#variables) and choose it under **Pair by**. The tab will
   not pair by list order and says so rather than guessing: replicates present in
   only one group are named in the report rather than quietly dropped. The
   two-way ANOVA takes two variables and reports both main effects and their
@@ -3386,7 +3390,7 @@ channel for every well).
   well or timepoint selection, or crop the view.
 - **Well labels** — where a well would show its `A01` position (axis / group labels,
   cell tooltips, exported labels and titles), its custom label is shown instead when
-  one is set under Home → Well Labels.
+  one is set under Home → Sample map → Well Labels.
 - **Optimal use** — drag **Well** onto Rows and nest a couple of channels, drag
   **Timepoint** onto Columns → one row per well×channel, one column per timepoint,
   for a treatment's full time-course at a glance. Flip a root to **Overlay** for a
@@ -3747,7 +3751,7 @@ something you asked to discard. If one item fails (an unreadable file, say), the
 others still run and the status line names the one that did not.
 
 Smaller resets stay next to the thing they affect: **Clear all groups** on
-Home → Groups, and **Reset crop + curation** in the Segmentation
+Home → Sample map → Groups, and **Reset crop + curation** in the Segmentation
 tab's Edit menu, which is the same action as the Curation checkbox above.
 
 ---

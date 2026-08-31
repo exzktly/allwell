@@ -1498,9 +1498,9 @@ bar is called. `features/home/collect.DECLARATION_ROLES` is the single roster of
 the four ways to say something about a well — those three plus the rail's saved
 selections — carrying, per entry, the question it answers, the effect in two or
 three words, the sentence the tab states, and where to go when the answer is one
-of the others. Three surfaces read it: `features/home/roles_view.add_role_strip`
-puts the last two lines at the top of each definition tab, Overview's *Your work
-here* column takes the effect, and the manual's comparison table says the same
+of the others. Three surfaces read it: `features/home/roles_view.build_role_strip`
+builds the last two lines, which the Sample map tab rebuilds above the plate
+whenever the layer changes, Overview's *Your work here* column takes the effect, and the manual's comparison table says the same
 four things in the user's vocabulary. Written out at each surface the three
 copies drifted immediately, which is why the roster is data rather than three
 paragraphs. Cell Gating, Ratios and Pipeline Info resolve to `None` through
@@ -1585,7 +1585,7 @@ constant through `Profile.includes_subtab`, a bare string check against the
 tabs nothing had declared; enumerating from the registry is what makes every
 name a `[subtabs]` line can reference a real descriptor.
 
-Two of the six builders do not have the `(ctx, frame)` shape and are adapted in
+Two of the four builders do not have the `(ctx, frame)` shape and are adapted in
 `features/registry.py`: Cell Gating's takes no frame (it finds its own, because
 persistence can build the tab with no frame to hand over), and the Ratios editor
 is *returned* rather than mounted. Both adapters are function-local imports
@@ -1610,7 +1610,7 @@ descriptor whole, which is the granularity that is coherent. `Ratios` and
 
 **Overview is built eagerly and the definition tabs are drained, one per
 event-loop tick.** Neither extreme works. Home holds the eager first-tab slot,
-so building six editors inline would put all of them on the startup path; but
+so building four editors inline would put all of them on the startup path; but
 building them on first click would change what exists after a load, and
 persistence hydration, the plot tabs' ThreshFracOn quick-edit and the
 Playground's context bar all read those widgets without opening a tab. Draining
@@ -3683,7 +3683,7 @@ test_not_installed_is_single_tab`.)
   self-guards), which is why both panes stay live — and why, uninstalled, they
   fan out to exactly one tab. `selection_controller.rebuild_all` likewise guards
   **each** plot redraw (Bar / Line / Distribution / Heat Map / Scatter) behind
-  `_is_tab_visible`: a group edit on Home → Groups no longer
+  `_is_tab_visible`: a group edit on Home → Sample map → Groups no longer
   tears down and redraws 3–5 off-screen figures — plus the from-scratch stats
   recompute that fed them — on every well click; an off-screen plot is re-rendered
   from current state by its `on_activate` hook the moment the user switches to it.
@@ -9400,7 +9400,7 @@ toggle. There is deliberately no "show raw" option — a raw control beside rati
 bars puts two units on one axis.
 
 `Auto-pair` chunks the plotted members N at a time and pairs each chunk to its
-first or last, which is Home → Groups' Quick Replicates one level up and reuses
+first or last, which is Home → Sample map → Groups' Quick Replicates one level up and reuses
 vocabulary the user already has. A plate-geometry rule (row, column, quadrant)
 is deliberately absent: it is undefined the moment the members are replicate
 sets, which is a domain predicate applied outside its domain. Name-pattern
@@ -10410,11 +10410,11 @@ control row, so only a per-mode pass exercises the one that makes the row wrap.
 | **Ctxbar** | The horizontal contextual control row above each plot card. Hosts channel / metric / timepoint combos + action buttons. |
 | **PlotCard** | The framed container around each matplotlib figure. Provides the screen↔publication toggle, the custom toolbar, and the stats chip slot. |
 | **Properties sidebar / Export Style sidebar** | The right-side dock that slides out when the user clicks the Properties button on a plot card. Backed by `app._export_style_prefs`. |
-| **Selection** | A named, persisted subset of wells. Lives in `ctx.state.selection.selections` (schema v2). Surfaced in the UI as a **group** on Home → Groups. |
-| **Group** | *Which wells are replicates of one condition?* A `Selection` as the user meets it on Home → Groups: a named well set with a colour, a hidden flag and a place in the plot order. **It pools.** Every plot, Statistics and Batch Export draw one member per visible group, and a saved fold-change `ControlRef` is keyed on its name. |
-| **Replicate set** | The `ReplicateSet` a group becomes when a plot asks what to pool. On Home → Groups a group **is** exactly one replicate set — its `wells` are its replicate members (or a single well); there is no `replicates` sub-partition (the field is reserved/`None`). "Quick Replicates" auto-builds groups of a chosen size N (spinbox) along rows/columns. `domain/plot_members.plot_replicate_sets` is the one place the sets a plot pools into are decided, and a sample variable chosen as *Group by* substitutes for the user's groups there. (The separate batch-export `BarGroup` — from a user-picked `bar_groups.json` — can still hold multiple member sets + solo wells; that is a distinct feature.) |
+| **Selection** | A named, persisted subset of wells. Lives in `ctx.state.selection.selections` (schema v2). Surfaced in the UI as a **group** on Home → Sample map → Groups. |
+| **Group** | *Which wells are replicates of one condition?* A `Selection` as the user meets it on Home → Sample map → Groups: a named well set with a colour, a hidden flag and a place in the plot order. **It pools.** Every plot, Statistics and Batch Export draw one member per visible group, and a saved fold-change `ControlRef` is keyed on its name. |
+| **Replicate set** | The `ReplicateSet` a group becomes when a plot asks what to pool. On Home → Sample map → Groups a group **is** exactly one replicate set — its `wells` are its replicate members (or a single well); there is no `replicates` sub-partition (the field is reserved/`None`). "Quick Replicates" auto-builds groups of a chosen size N (spinbox) along rows/columns. `domain/plot_members.plot_replicate_sets` is the one place the sets a plot pools into are decided, and a sample variable chosen as *Group by* substitutes for the user's groups there. (The separate batch-export `BarGroup` — from a user-picked `bar_groups.json` — can still hold multiple member sets + solo wells; that is a distinct feature.) |
 | **Sample variable** | *What did you change across the plate?* A named annotation axis with a type, an optional unit and an **ordered** list of values, assigned per well (`domain/sample_variables`, `pipeline_info.json::variables`). **It pools, inks and bands** — *Group by*, *Colour by*, *Split by*, the Response x axis, the two-factor tests. A variable is not a group: two cell lines at six doses is twelve conditions and nobody has to paint twelve group names. |
-| **Well label** | *What should this well be called on a figure?* Free text per well (`sample_definitions.well_labels`), edited on Home → Well Labels. **Display only** — it pools nothing. It substitutes for the well token in legends, tick labels and exported names, and, through `selections_model.replicate_display_label`, for a group's own name when that name looks auto-generated. |
+| **Well label** | *What should this well be called on a figure?* Free text per well (`sample_definitions.well_labels`), edited on Home → Sample map → Well Labels. **Display only** — it pools nothing. It substitutes for the well token in legends, tick labels and exported names, and, through `selections_model.replicate_display_label`, for a group's own name when that name looks auto-generated. |
 | **Saved selection** | A named set of lit wells in the rail drawer under the plate map, reloadable in one click (`persistence.json::plot_groups`, mirrored into the `sample_definitions` block). **It pools nothing** — loading one lights wells and toggles group visibility, and never edits a group's membership. The symbols and the on-disk key still say `plot_group`; that is a spelling, not a second concept. |
 | **`pipeline_info.json`** | The sidecar file written by `process_microscopy.py` next to the per-well CSVs. Holds schema, channel tokens, available timepoints, persisted selections, gating thresholds. |
 | **Well token** | Two-letter / two-digit well identifier (`A01` … `H12`). Always uppercase, always zero-padded. |

@@ -48,14 +48,26 @@ def _wells(rows="AB", cols=(1, 2, 3, 4)):
 
 def _ctx(wells=None, selections=(), labels=None):
     from well_viewer.core.selection_state import SelectionState
+    from well_viewer.features.home.state import HomeState
 
     selection = SelectionState()
     selection.selections = [dict(s) for s in selections]
+    home = HomeState()
     return SimpleNamespace(
         widgets=_Registry(),
         window=SimpleNamespace(),
+        coordinator=SimpleNamespace(refresh_sidebar_map=lambda: None,
+                                    rebuild_all=lambda: None),
+        features=SimpleNamespace(call=lambda *a, **k: None,
+                                 get=lambda _n: None,
+                                 sub_leaves=lambda _p: ("Sample map",)),
         runtime=SimpleNamespace(groups=SimpleNamespace(inline_edit_idx=-1)),
         state=SimpleNamespace(
+            # Home's **real** typed slice, not a namespace shaped to whatever
+            # the code happens to read: the Sample map tab records which layer
+            # is showing there, and a stub without it answers "Groups" to every
+            # question and passes whatever the code does (§7.8, face one).
+            feature_slice=lambda name: home if name == "home" else None,
             selection=selection,
             dataset=SimpleNamespace(well_paths=wells if wells is not None else _wells(),
                                     well_labels=dict(labels or {})),
@@ -70,14 +82,14 @@ def _texts(root: QWidget) -> list[str]:
 
 # ── the strip is on every layer that declares a role ────────────────────────
 
-def _build_plate_map(qtbot, ctx=None):
+def _build_sample_map(qtbot, ctx=None):
     """The merged tab, through its real builder."""
-    from well_viewer.features.home.sample_map.tab_view import build_plate_map_subtab
+    from well_viewer.features.home.sample_map.tab_view import build_sample_map_subtab
 
     ctx = ctx if ctx is not None else _ctx()
     frame = QWidget()
     qtbot.addWidget(frame)
-    build_plate_map_subtab(ctx, frame)
+    build_sample_map_subtab(ctx, frame)
     return ctx, frame
 
 
@@ -100,7 +112,7 @@ def test_every_layer_states_its_role_and_its_sibling(layer, qtbot):
 
     role = hc.role_for_tab(layer)
     assert role is not None, f"{layer} declares no role in DECLARATION_ROLES"
-    ctx, _frame = _build_plate_map(qtbot)
+    ctx, _frame = _build_sample_map(qtbot)
     set_layer(ctx, layer)
     texts = _strip_texts(ctx)
     assert role.role in texts, (
@@ -115,7 +127,7 @@ def test_only_the_current_layer_s_role_is_on_screen(qtbot):
     waiting for a bug to show them. There is one, rebuilt per layer."""
     from well_viewer.features.home.sample_map.controller import set_layer
 
-    ctx, _frame = _build_plate_map(qtbot)
+    ctx, _frame = _build_sample_map(qtbot)
     set_layer(ctx, "Variables")
     texts = _strip_texts(ctx)
     others = [r.role for r in hc.DECLARATION_ROLES if r.tab and r.tab != "Variables"]
@@ -253,6 +265,30 @@ def test_a_hidden_group_is_not_reported():
     assert relabelled_groups_clause(ctx) == ""
 
 
+def test_a_variable_grouping_silences_the_relabel_note():
+    """A group a variable grouping has displaced is not drawn, so nothing
+    relabels it — and the note appeared on the same tab as, and flatly
+    contradicted, the line saying those groups were not pooling."""
+    from well_viewer.domain import sample_variables as sv
+    from well_viewer.domain.selections_model import relabelled_groups_clause
+
+    ctx = _ctx(selections=[_group("1", ["A01", "A02"])],
+               labels={"A01": "shCtrl", "A02": "shA"})
+    assert relabelled_groups_clause(ctx), "premise: it speaks without a variable"
+
+    dose = sv.Variable(
+        id="dose", name="Dose", kind=sv.NUMBER, unit="uM",
+        values=(sv.VariableValue("d0", "0", 0.0),
+                sv.VariableValue("d1", "10", 10.0)))
+    ctx.state.selection.variables = sv.VariableSet(
+        variables=(dose,),
+        assignments={"dose": {"A01": "d0", "A02": "d1"}})
+    ctx.state.plot = SimpleNamespace(group_by_variable="dose",
+                                     bar_pool_replicates=True,
+                                     line_order_rsets=[], line_order_wells=[])
+    assert relabelled_groups_clause(ctx) == ""
+
+
 def test_the_clause_counts_the_ones_it_does_not_name():
     from well_viewer.domain.selections_model import relabelled_groups_clause
 
@@ -276,7 +312,7 @@ def test_the_groups_tab_shows_the_clause_on_its_own_label(qtbot):
 
     ctx = _ctx(selections=[_group("1", ["A01", "A02"])],
                labels={"A01": "shCtrl", "A02": "shA"})
-    _c, frame = _build_plate_map(qtbot, ctx=ctx)
+    _c, frame = _build_sample_map(qtbot, ctx=ctx)
     note = ctx.widgets.get_or_none("_rep_relabel_note")
     assert note is not None, "the Groups layer has no relabel note at all"
     rep_panel_refresh(ctx)
@@ -288,7 +324,7 @@ def test_the_note_stays_off_when_nothing_is_relabelled(qtbot):
     from well_viewer.features.home.groups.selections_view import rep_panel_refresh
 
     ctx = _ctx(selections=[_group("Control", ["A01", "A02"])])
-    _c, frame = _build_plate_map(qtbot, ctx=ctx)
+    _c, frame = _build_sample_map(qtbot, ctx=ctx)
     rep_panel_refresh(ctx)
     note = ctx.widgets.get_or_none("_rep_relabel_note")
     assert note.text() == ""

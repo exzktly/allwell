@@ -963,12 +963,24 @@ class AllWellApp(QMainWindow):
         pages = help_topics.SECTION_BY_PAGE
         if leaf == "Home":
             # Home is a notebook and `current_centre_tab` stops at the page, so
-            # without this every one of its six tabs lands on the top of the Home
+            # without this every one of its tabs lands on the top of the Home
             # chapter. Ask Home which tab is showing and prefer that heading;
             # Overview has none of its own and correctly falls through to "Home".
             with swallow("help: home sub-tab"):
                 from well_viewer.features.home.controller import current_subtab
                 sub = current_subtab(ctx) or ""
+                if sub == "Sample map":
+                    # Its three layers each have a heading of their own under
+                    # the tab's, so the drawer lands on the one the user is
+                    # looking at rather than at the top of the section. Without
+                    # this the layer entries in ``SECTION_BY_PAGE`` had no
+                    # reader at all, which is the roster-with-no-reader shape.
+                    from well_viewer.features.home.sample_map.controller import (
+                        current_layer,
+                    )
+                    layer = current_layer(ctx)
+                    if layer in pages:
+                        return pages[layer]
                 if sub in pages:
                     return pages[sub]
         if leaf in pages:

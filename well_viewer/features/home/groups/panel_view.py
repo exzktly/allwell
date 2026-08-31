@@ -26,7 +26,7 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from well_viewer.core.safe import swallowed
 from well_viewer.features.home.groups.controller import rep_refresh_map
-from well_viewer.features.home.sample_map.controller import current_layer
+from well_viewer.features.home.sample_map.controller import layer_is_showing
 
 
 def _plate_order(well: str) -> tuple:
@@ -92,7 +92,11 @@ def build_replicate_panel(ctx, parent: QWidget, *, role: str = "editor") -> None
                     return
             except Exception:
                 swallowed()  # was: pass (silent except)
-        if current_layer(ctx) != "Groups":
+        # ``layer_is_showing``, not ``current_layer(...) == "Groups"``: the
+        # latter falls back to the first layer, which *is* Groups, so a context
+        # that has recorded nothing would have answered yes — a guard failing
+        # open on the one layer that edits.
+        if not layer_is_showing(ctx, "Groups"):
             return
         sid = ctx.state.selection.current_selection_id
         sel = sel_by_id(ctx, sid) if sid else None

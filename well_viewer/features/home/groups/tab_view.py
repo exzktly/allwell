@@ -152,8 +152,8 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     hint = QLabel(
         "Click a group above to make it the ACTIVE group — its row "
         "highlights with an accent stripe. Then click wells on the plate "
-        "map (left sidebar) to add or remove them. Expand a group to edit "
-        "its replicate structure.",
+        "above to add or remove them. Expand a group to edit its replicate "
+        "structure.",
         parent,
     )
     hint.setObjectName("Muted")

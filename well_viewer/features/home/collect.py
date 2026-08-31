@@ -113,7 +113,7 @@ DECLARATION_ROLES: tuple[DeclarationRole, ...] = (
     ),
 )
 
-#: ``key -> role``, for the two callers that look one up.
+#: ``key -> role``, for the lookups ``your_work`` makes when it builds its rows.
 ROLE_BY_KEY: dict[str, DeclarationRole] = {r.key: r for r in DECLARATION_ROLES}
 
 

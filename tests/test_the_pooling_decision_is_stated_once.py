@@ -140,6 +140,37 @@ def test_a_hidden_group_is_not_counted_as_displaced_either():
         "Plots are grouped by Dose (2 values); your 2 groups are not pooling.")
 
 
+def test_the_bar_tabs_pooling_toggle_is_named_when_it_is_off():
+    """``bar_pool_replicates`` flips the bar key space **after** the seam, so
+    with it off the Bar tab draws one bar per well while every other tab pools.
+    The sentence sits in the same control row as the switch, so a version that
+    named only the pooling contradicted the figure beside it."""
+    ctx = _ctx(selections=[_group("Ctrl", ["A01", "A02"]),
+                           _group("Drug", ["A03", "A04"])])
+    ctx.state.plot.bar_pool_replicates = False
+    assert grouping_summary(ctx) == (
+        "Plots are grouped by your 2 groups, though Bar Plots is drawing each "
+        "well separately (Pooled: Off).")
+
+
+def test_the_toggle_is_named_under_a_variable_grouping_too():
+    ctx = _ctx(variables=[_dose("0", "10")],
+               assignments={"dose": {"A01": "d0", "A03": "d1"}},
+               group_by="dose")
+    ctx.state.plot.bar_pool_replicates = False
+    assert grouping_summary(ctx) == (
+        "Plots are grouped by Dose (2 values), though Bar Plots is drawing each "
+        "well separately (Pooled: Off).")
+
+
+def test_the_toggle_is_not_named_when_nothing_is_pooled_anyway():
+    """With no groups and no variable every tab already draws per well, so
+    saying the Bar tab does is a distinction without a difference."""
+    ctx = _ctx()
+    ctx.state.plot.bar_pool_replicates = False
+    assert grouping_summary(ctx) == "Plots draw one member per selected well."
+
+
 def test_with_no_dataset_it_says_nothing():
     """A page with no plate open has no pooling to report, and a sentence about
     a plate that is not there is worse than silence."""
@@ -223,34 +254,66 @@ def test_the_roster_names_both_surfaces():
 def test_each_surface_actually_builds_its_label(key, qtbot):
     """The roster naming a widget nobody builds is a readout that never appears.
 
-    Built through each host's real constructor, per §7.8 #3.
+    Through each host's real constructor, per §7.8 #3. The band half used to be
+    an AST search for the literal in ``centre_view.py`` — §7.8's "the module
+    mentions the clause somewhere", which passes against a label added to a
+    container nobody ever shows. It builds a real ``ControlBand`` now and reads
+    the widget back out of a real ``WidgetRegistry``, which is the lookup the
+    refresh actually performs.
     """
-    from types import SimpleNamespace as NS
-
     from PySide6.QtWidgets import QWidget
 
     if key == "_sample_map_grouping_note":
         from tests.test_one_plate_on_the_sample_map import _ctx as sample_ctx
         from well_viewer.features.home.sample_map.tab_view import (
-            build_plate_map_subtab,
+            build_sample_map_subtab,
         )
         host_ctx = sample_ctx()
         frame = QWidget()
         qtbot.addWidget(frame)
-        build_plate_map_subtab(host_ctx, frame)
+        build_sample_map_subtab(host_ctx, frame)
         assert host_ctx.widgets.get_or_none(key) is not None
         return
 
-    # The band's label is built by ``centre_view``; assert the construction site
-    # names it rather than building the whole shell for one widget.
+    from widgets.control_band import ControlBand
+
+    host = QWidget()
+    qtbot.addWidget(host)
+    band = ControlBand(host)
+    label = QLabel("")
+    item = band.add_scope("", label)
+    assert item is label, (
+        "add_scope with one unlabelled widget returns that widget, which is why "
+        "the group key and the label key must name the same object")
+
+
+def test_the_group_by_control_is_reachable_through_the_registry(qtbot):
+    """The band's Group by combo is shown and hidden by registry lookup.
+
+    A pre-existing defect this branch depends on: ``centre_view`` stamped
+    ``win._plotting_groupby_grp`` as a plain attribute, and
+    ``refresh_group_by_combo`` looks it up through ``ctx.widgets`` — which
+    answered ``None``, so nothing ever re-showed the control and the combo was
+    hidden for the life of the session however many variables the plate had.
+    Workstream D's sentence describes that control, so it has to exist.
+    """
     import ast
 
     from tests._repo_scan import REPO_ROOT, parse_source
 
     tree = parse_source(REPO_ROOT / "well_viewer" / "core" / "centre_view.py")
     registered = {
-        node.value for node in ast.walk(tree)
-        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        node.args[0].value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "register"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
     }
-    assert key in registered, f"centre_view never registers {key}"
-    _ = NS
+    for key in ("_plotting_groupby_cb", "_plotting_groupby_grp",
+                "_plotting_grouping_note"):
+        assert key in registered, (
+            f"{key} is assigned but never registered, so every "
+            f"ctx.widgets lookup of it answers None")

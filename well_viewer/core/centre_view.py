@@ -423,7 +423,16 @@ def build_centre(win, parent: QWidget) -> None:
                     win._ctx, win._plotting_groupby_cb.currentData() or "")
 
         win._plotting_groupby_cb.currentIndexChanged.connect(_on_group_by)
-        win._plotting_groupby_grp = band.add_scope("", win._plotting_groupby_cb)
+        # **Registered, not just stamped on the window.**
+        # ``refresh_group_by_combo`` shows and hides this through
+        # ``ctx.widgets.get_or_none("_plotting_groupby_grp")``, and a plain
+        # attribute assignment does not put the widget in that registry — so the
+        # lookup answered None, nothing ever re-showed the control, and the
+        # Group by combo was hidden for the life of the session however many
+        # variables the plate declared. (With an empty label and one widget,
+        # ``add_scope`` returns that widget, so the group *is* the combo.)
+        win._plotting_groupby_grp = win._ctx.widgets.register(
+            "_plotting_groupby_grp", band.add_scope("", win._plotting_groupby_cb))
         win._plotting_groupby_grp.setVisible(False)
 
         # What the combo *did*, beside what it is set to. The two are different

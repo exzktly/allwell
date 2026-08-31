@@ -119,8 +119,8 @@ _build_batch_export = _lazy_build("well_viewer.features.batch_export.tab_view", 
 _build_review_csv = _lazy_build("well_viewer.features.review_csv.tab_view", "build_review_csv_tab")
 _build_home = _lazy_build("well_viewer.features.home.tab_view", "build_home_tab")
 
-_build_plate_map = _lazy_build("well_viewer.features.home.sample_map.tab_view",
-                               "build_plate_map_subtab")
+_build_sample_map = _lazy_build("well_viewer.features.home.sample_map.tab_view",
+                                "build_sample_map_subtab")
 _build_response = _lazy_build("well_viewer.features.response.tab_view",
                               "build_response_tab")
 _redraw_response = _lazy_hook("well_viewer.features.response.controller",
@@ -1076,7 +1076,7 @@ def _features() -> list[FeatureDescriptor]:
         # plate of its own beneath the rail's, so two were on screen with one
         # greyed. They are layers of one tab now — one plate at a time, and a
         # switch that names what it is showing. The three bodies are unchanged
-        # and still live in their own sub-packages; ``plate_map`` builds each
+        # and still live in their own sub-packages; ``sample_map`` builds each
         # into a page of its stack.
         #
         # ``removable=False``: the layer roster comes from
@@ -1085,7 +1085,7 @@ def _features() -> list[FeatureDescriptor]:
         # third. A profile that wants none of them drops this descriptor whole,
         # which is the granularity that is actually coherent.
         FeatureDescriptor(name="Sample map", parent="Home",
-                          build=_build_plate_map, removable=False,
+                          build=_build_sample_map, removable=False,
                           subtab_inset=True,
                           services={
                               "groups.panel_refresh": _svc_groups_panel_refresh,

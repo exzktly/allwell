@@ -151,9 +151,14 @@ CONCEPTS = (
 )
 
 #: The README says the same four things in the user's vocabulary rather than
-#: the model's, so its table is keyed on the tab name a user clicks.
-README_CONCEPTS = ("Home \u2192 Groups", "Home \u2192 Variables",
-                   "Home \u2192 Well Labels", "the rail drawer under the plate map")
+#: the model's, so its table is keyed on the route a user clicks — which is the
+#: **layer** of the Sample map tab, not a tab of its own. Written out in full
+#: because a guard naming only the layer would go on passing after the merge had
+#: left the manual routing readers to three tabs that no longer exist.
+README_CONCEPTS = ("Home \u2192 Sample map \u2192 Groups",
+                   "Home \u2192 Sample map \u2192 Variables",
+                   "Home \u2192 Sample map \u2192 Well Labels",
+                   "the rail drawer under the plate map")
 
 
 def test_the_architecture_glossary_defines_each_concept_and_what_it_reaches():

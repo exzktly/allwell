@@ -49,15 +49,27 @@ def _wells():
 
 def _ctx(selections=()):
     from well_viewer.core.selection_state import SelectionState
+    from well_viewer.features.home.state import HomeState
 
     selection = SelectionState()
     selection.selections = [dict(s) for s in selections]
+    home = HomeState()
     return SimpleNamespace(
         widgets=_Registry(),
         window=SimpleNamespace(),
+        coordinator=SimpleNamespace(refresh_sidebar_map=lambda: None,
+                                    rebuild_all=lambda: None),
+        features=SimpleNamespace(call=lambda *a, **k: None,
+                                 get=lambda _n: None,
+                                 sub_leaves=lambda _p: ("Sample map",)),
         runtime=SimpleNamespace(home=SimpleNamespace(subtabs=None),
                                 groups=SimpleNamespace(inline_edit_idx=-1)),
         state=SimpleNamespace(
+            # Home's **real** typed slice, not a namespace shaped to whatever
+            # the code happens to read: the Sample map tab records which layer
+            # is showing there, and a stub without it answers "Groups" to every
+            # question and passes whatever the code does (§7.8, face one).
+            feature_slice=lambda name: home if name == "home" else None,
             selection=selection,
             dataset=SimpleNamespace(well_paths=_wells(), well_labels={}),
         ),
@@ -67,13 +79,13 @@ def _ctx(selections=()):
 
 @pytest.fixture
 def tab(qtbot):
-    from well_viewer.features.home.sample_map.tab_view import build_plate_map_subtab
+    from well_viewer.features.home.sample_map.tab_view import build_sample_map_subtab
 
     ctx = _ctx()
     frame = QWidget()
     qtbot.addWidget(frame)
     frame.resize(900, 700)
-    build_plate_map_subtab(ctx, frame)
+    build_sample_map_subtab(ctx, frame)
     frame.show()
     qtbot.waitExposed(frame)
     return SimpleNamespace(ctx=ctx, frame=frame)
@@ -98,6 +110,28 @@ def test_exactly_one_plate_is_on_screen(layer, tab):
         "says what it is")
 
 
+def test_every_roster_entry_resolves_to_something_real(tab):
+    """Key-set equality is not enough: a builder name that resolves to nothing
+    and a plate key nothing registers both pass it while the tab is broken."""
+    import importlib
+
+    from well_viewer.features.home.sample_map.controller import LAYER_BUILDERS
+
+    for layer, (module, builder) in LAYER_BUILDERS.items():
+        assert callable(getattr(importlib.import_module(module), builder, None)), (
+            f"{layer}'s builder {module}.{builder} does not resolve")
+    for layer, key in LAYER_PLATES.items():
+        widget = tab.ctx.widgets.get_or_none(key)
+        assert widget is not None, f"{layer}'s plate {key} is never registered"
+        # ``selected_on`` and ``_apply_selection`` walk a two-name protocol and
+        # answer [] for a widget carrying neither, which would be a layer whose
+        # selection silently never travels.
+        assert any(callable(getattr(widget, n, None))
+                   for n in ("selectedWellIds", "selectedTokens")), key
+        assert any(callable(getattr(widget, n, None))
+                   for n in ("setSelectedWellIds", "setSelectedTokens")), key
+
+
 def test_the_switch_and_the_page_agree(tab):
     from well_viewer.features.home.sample_map.controller import STACK_KEY, SWITCH_KEY
 
@@ -109,15 +143,131 @@ def test_the_switch_and_the_page_agree(tab):
                 == LAYERS.index(layer))
 
 
+def _press(ctx, layer):
+    """Press a segment the way a mouse does.
+
+    ``QButtonGroup.idClicked`` reaches ``_on_clicked``, which is a different
+    entry point from ``setCurrentIndex`` — and the difference matters, because
+    both update the control's own index **before** emitting. Every test in this
+    file used to call ``set_layer`` directly, one step under the control, which
+    is how a switch that carried nothing on a real press passed all of them.
+    """
+    from well_viewer.features.home.sample_map.controller import SWITCH_KEY
+
+    ctx.widgets.get_or_none(SWITCH_KEY)._on_clicked(LAYERS.index(layer))
+
+
 def test_pressing_a_segment_switches_the_layer(tab):
     """The control, not the function behind it. A switch wired to nothing shows
     the same three segments."""
-    from well_viewer.features.home.sample_map.controller import SWITCH_KEY
-
-    switch = tab.ctx.widgets.get_or_none(SWITCH_KEY)
-    switch.setCurrentIndex(LAYERS.index("Well Labels"))
+    _press(tab.ctx, "Well Labels")
     assert current_layer(tab.ctx) == "Well Labels"
     assert _visible_plates(tab.ctx) == ["Well Labels"]
+
+
+def test_pressing_a_segment_carries_the_selection_too(tab):
+    """The same property as the ``set_layer`` case, through the real control.
+
+    This is the one that bit: the outgoing layer was read back off the
+    ``SegmentedControl``, which had already moved to the incoming one, so the
+    handler asked an empty plate what to carry and carried nothing.
+    """
+    set_layer(tab.ctx, "Variables")
+    tab.ctx.widgets.get_or_none("_var_plate").setSelectedWellIds(["A02", "B03"])
+    _press(tab.ctx, "Well Labels")
+    assert selected_on(tab.ctx, "Well Labels") == ["A02", "B03"]
+    assert tab.ctx.state.selection.selected_wells == {"A02", "B03"}
+
+
+def test_looking_at_a_layer_never_clears_the_app_wide_selection(tab):
+    """Pressing a segment is not a deselection.
+
+    The wells a user picked on Home's Overview plate are what Cell Gating's CDFs
+    and Add Prefix read. The first version published the incoming layer's empty
+    plate over them, so visiting the tab emptied the selection the publishing
+    exists to serve.
+    """
+    tab.ctx.state.selection.selected_wells = {"A01", "A02", "A03"}
+    _press(tab.ctx, "Variables")
+    assert tab.ctx.state.selection.selected_wells == {"A01", "A02", "A03"}
+    # And the plate the user is now looking at shows them, rather than sitting
+    # empty beside a selection it disagrees with.
+    assert selected_on(tab.ctx, "Variables") == ["A01", "A02", "A03"]
+
+
+def test_a_selection_the_incoming_plate_cannot_show_is_not_thrown_away(tab):
+    """The case the refusal to publish an empty layer actually protects.
+
+    Well labels outlive the wells they name — a plate re-run over fewer wells
+    keeps them — so ``selected_wells`` can hold a token this load does not have.
+    The label grid drops it (it selects only enabled cells), leaving the layer
+    empty. Publishing that empty over the real selection deletes a well the user
+    picked, on a plate that never had the chance to show it.
+    """
+    tab.ctx.state.selection.selected_wells = {"H12"}
+    _press(tab.ctx, "Well Labels")
+    assert selected_on(tab.ctx, "Well Labels") == [], "premise: the grid drops it"
+    assert tab.ctx.state.selection.selected_wells == {"H12"}
+
+
+def test_clearing_a_plate_by_hand_still_clears_the_selection(tab):
+    """The other half of that rule. A click that leaves nothing selected **is**
+    a deselection, and suppressing it would be the opposite bug."""
+    from well_viewer.features.home.sample_map.controller import (
+        on_layer_selection_changed,
+    )
+
+    set_layer(tab.ctx, "Variables")
+    tab.ctx.widgets.get_or_none("_var_plate").setSelectedWellIds(["A01"])
+    on_layer_selection_changed(tab.ctx, "Variables")
+    assert tab.ctx.state.selection.selected_wells == {"A01"}
+    tab.ctx.widgets.get_or_none("_var_plate").setSelectedWellIds([])
+    on_layer_selection_changed(tab.ctx, "Variables")
+    assert tab.ctx.state.selection.selected_wells == set()
+
+
+def test_arriving_on_the_groups_layer_picks_no_group(tab):
+    """Otherwise the first drag on the plate edits whichever group was left
+    active from the last visit. Home's sub-tab handler did this while Groups was
+    a tab; the merge left it reading a tab name the registry cannot produce."""
+    from well_viewer.features.home.sample_map.controller import on_tab_entered
+
+    tab.ctx.state.selection.selections = [
+        {"id": "g1", "name": "Ctrl", "wells": ["A01"], "hidden": False,
+         "color": "#5B9BF8", "replicates": None, "source": "user"}]
+    tab.ctx.state.selection.current_selection_id = "g1"
+    set_layer(tab.ctx, "Variables")
+    _press(tab.ctx, "Groups")
+    assert tab.ctx.state.selection.current_selection_id is None
+
+    tab.ctx.state.selection.current_selection_id = "g1"
+    on_tab_entered(tab.ctx)
+    assert tab.ctx.state.selection.current_selection_id is None
+
+
+def test_a_layer_switch_redraws_once_not_twice(tab):
+    """The switch used to re-enter ``set_layer`` for the same layer, so every
+    programmatic switch ran the whole selection fan-out twice — the first time
+    with nothing selected."""
+    seen = []
+    original = tab.ctx.state.selection.selected_wells
+
+    class _Watched(set):
+        pass
+
+    set_layer(tab.ctx, "Variables")
+    tab.ctx.widgets.get_or_none("_var_plate").setSelectedWellIds(["A01", "A02"])
+    import well_viewer.core.selection_controller as sc
+    real = sc.set_selected_wells
+    sc.set_selected_wells = lambda ctx, wells, **kw: (
+        seen.append(sorted(wells)), real(ctx, wells, **kw))[1]
+    try:
+        _press(tab.ctx, "Well Labels")
+    finally:
+        sc.set_selected_wells = real
+    assert seen == [], f"the switch published more than the carry needed: {seen}"
+    assert tab.ctx.state.selection.selected_wells == {"A01", "A02"}
+    assert isinstance(original, set) and _Watched is not None
 
 
 # ── the selection travels where it means the same thing ─────────────────────

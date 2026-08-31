@@ -205,7 +205,8 @@ def group_by_shortfall(ctx) -> str:
     likely to be comparing two plots.
     """
     from well_viewer.domain.plot_members import (
-        variable_replicate_sets, wells_without_variable,
+        variable_replicate_sets, wells_the_grouping_adds,
+        wells_without_variable,
     )
 
     variable_id = str(getattr(ctx.state.plot, "group_by_variable", "") or "")
@@ -226,6 +227,18 @@ def group_by_shortfall(ctx) -> str:
     if not variable_replicate_sets(ctx, variable_id):
         return (f"Group by {variable.name} matched no wells — "
                 f"showing your own groups instead.")
+
+    # **The addition, not only the subtraction.** With no replicate sets defined
+    # the plate's selection is what drives every plot — and grouping by a
+    # variable ignores it, pooling every *loaded* well that holds a value. One
+    # well selected, four drawn. That is the defensible semantics of "group the
+    # plate by this variable", but it is still a substitution the user did not
+    # ask for on that click, and the sentence reported only what grouping takes
+    # away.
+    added = wells_the_grouping_adds(ctx, variable_id)
+    if added:
+        return (f"Grouped by {variable.name}: every well with a value is "
+                f"pooled, including {len(added)} outside your selection.")
 
     missing = wells_without_variable(ctx, variable_id)
     if not missing:

@@ -344,6 +344,38 @@ def member_variable_values(ctx, scope: str, variable_id: str) -> dict:
         member_wells(ctx, scope))
 
 
+def wells_the_grouping_adds(ctx, variable_id: str) -> list[str]:
+    """Wells a variable grouping draws that the plate selection does not hold.
+
+    **The addition, not only the subtraction.** With no replicate sets defined
+    the plate's selection is what drives every plot, and grouping by a variable
+    ignores it: it pools every *loaded* well holding a value. One well
+    selected, four drawn. That is the defensible reading of "group the plate by
+    this variable", but it is a substitution the user did not ask for on that
+    click, so the sentence over the figure has to name it.
+
+    Empty unless the selection is what would otherwise drive the plot — with
+    visible replicate sets defined, ``selected_wells`` is not what is plotted
+    and comparing against it would report a difference nobody made. Asking that
+    question is why this lives here beside :func:`plot_replicate_sets` rather
+    than in the controller that prints the sentence: it has to compare the two
+    poolings, so it is one of the few callers entitled to name the one the
+    substitution replaced.
+    """
+    from well_viewer.domain.selections_model import active_replicate_sets
+
+    selected = set(getattr(ctx.state.selection, "selected_wells", None) or ())
+    if not selected:
+        return []
+    if active_replicate_sets(ctx.state.selection.selections,
+                             ctx.state.dataset.well_paths or {}):
+        return []
+    drawn: set[str] = set()
+    for rset in variable_replicate_sets(ctx, variable_id):
+        drawn.update(getattr(rset, "wells", ()) or ())
+    return sorted(drawn - selected)
+
+
 def wells_without_variable(ctx, variable_id: str) -> list[str]:
     """The dataset's wells that :func:`variable_replicate_sets` leaves out."""
     from well_viewer.domain.sample_variables import unassigned_wells

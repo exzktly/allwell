@@ -52,6 +52,12 @@ _RAW_POOLERS = {"active_replicate_sets", "replicate_sets_loaded"}
 #: living beside the substitution that replaced it.
 _SEAM_FUNCTIONS = {
     "plot_replicate_sets", "plot_replicate_sets_loaded",
+    # ``wells_the_grouping_adds`` exists to *compare* the two poolings — it
+    # reports the wells the variable grouping draws that the user's own
+    # selection does not hold — so naming the replaced one is its whole job,
+    # and it pools nothing itself. It lives in ``plot_members`` beside the
+    # seam for that reason.
+    "wells_the_grouping_adds",
     # ``selections_model`` defines them; its own module is exempt entirely.
 }
 _SEAM_MODULE = "selections_model.py"

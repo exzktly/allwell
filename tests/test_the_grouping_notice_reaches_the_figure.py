@@ -203,3 +203,55 @@ def test_a_real_bar_figure_carries_the_notice(loaded_app):
         "notice — the wells it dropped are unaccounted for on the artifact"
     )
     assert wells[-1] in notices[0], notices
+
+
+# ── the addition, not only the subtraction ──────────────────────────────────
+
+def test_the_notice_reports_the_wells_the_grouping_pools_in():
+    """One well selected, four drawn, and the old sentence said nothing.
+
+    With no replicate sets defined the plate selection is what drives every
+    plot; grouping by a variable ignores it and pools every loaded well holding
+    a value. That is the right reading of "group the plate by this variable",
+    but it is a substitution the user did not make, and it moves every number
+    on screen. The wrong implementation that still passes an assertion like
+    "some notice was drawn" is the *subtraction* sentence — A03 and A04 have no
+    dose here either — so this pins the sentence itself.
+    """
+    ctx = _plate()
+    ctx.state.selection.selected_wells = {"A01"}
+
+    assert group_by_shortfall(ctx) == (
+        "Grouped by Dose: every well with a value is pooled, "
+        "including 1 outside your selection."
+    )
+
+
+def test_a_selection_that_already_holds_every_grouped_well_reports_the_gap():
+    """Nothing is added, so the sentence goes back to what is left out."""
+    ctx = _plate()
+    ctx.state.selection.selected_wells = {"A01", "A02", "A03", "A04"}
+
+    assert group_by_shortfall(ctx) == (
+        "Grouped by Dose: 2 well(s) have no value and are not plotted — A03, A04."
+    )
+
+
+def test_with_replicate_sets_defined_the_selection_is_not_what_is_plotted():
+    """The comparison is only meaningful when the selection drives the plot.
+
+    With a visible replicate set active, ``selected_wells`` is not the member
+    list, so reporting a difference against it would name a substitution nobody
+    made — and it would do so on every figure in the app.
+    """
+    ctx = _plate()
+    ctx.state.selection.selected_wells = {"A01"}
+    ctx.state.selection.selections = [
+        {"id": "s1", "name": "Group 1", "wells": ["A01", "A02"]}]
+
+    message = group_by_shortfall(ctx)
+
+    assert "outside your selection" not in message
+    assert message == (
+        "Grouped by Dose: 2 well(s) have no value and are not plotted — A03, A04."
+    )

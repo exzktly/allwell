@@ -1,21 +1,23 @@
-"""The rail plate that edits a group's well membership.
+"""The plate that edits a group's well membership.
 
-Home's **Groups** tab and this plate are two halves of one editor: the tab
-(``groups/tab_view.py``) carries the group list, the header and Quick
-Replicates, and this supplies the plate in the left rail that says which wells
-are in the group currently selected there. They are separate modules because
-they mount in separate places -- ``core/centre_view.build_centre`` puts this one
-in the sidebar stack at startup, beside every other feature's rail panel.
+The **Groups** layer of Home's Sample map tab is two halves: the list, the header
+and Quick Replicates in ``groups/tab_view.py``, and this plate, which says which
+wells are in the group selected there and edits that membership when dragged.
 
-That is also why it is a ``*_view.py`` and not part of ``tab_view.py``:
-ARCHITECTURE §3 reserves ``tab_view.py`` for a feature's main tab page and gives
-sidebars and sub-panels their own ``*_view.py``. The two were briefly in one
-file, which put the rail builder under the tab-page name and left the module
-docstring describing the panel rather than the tab.
+It used to live in the left rail, mounted by ``core/centre_view.build_centre``
+beside every other feature's rail panel, and it is in the tab body now. Two
+reasons, and the second is the one that matters. A rail plate on Home was a
+second plate on screen the moment a layer carried its own — which Variables
+did, greyed behind its live one. And measured rather than assumed: this plate
+never wrote ``ctx.state.selection.selected_wells``. It was described as the
+picker Cell Gating drew its CDFs from and Add Prefix applied to, and it was
+neither; both read the app-wide selection, which only Overview's plate set. So
+moving it costs those two tabs nothing and the Sample map tab's own selection
+publishing gives them a picker they never had.
 
-The plate is live only on the three Home tabs that read the well selection --
-see ``home/controller.sync_home_sidebar`` -- and greyed elsewhere, so a click
-that would have no consequence looks like it has none.
+It stays a ``*_view.py`` rather than folding into ``tab_view.py``: ARCHITECTURE
+§3 reserves ``tab_view.py`` for a feature's main tab page and gives its panels
+their own ``*_view.py``, and this is one panel of a layered tab.
 """
 
 from __future__ import annotations
@@ -40,12 +42,13 @@ def _plate_order(well: str) -> tuple:
     return (row is None, row or "", col or "", well)
 
 
-def build_replicate_panel(ctx, parent: QWidget) -> None:
-    """Sample-Definitions LEFT sidebar: the plate map only.
+def build_replicate_panel(ctx, parent: QWidget, *, role: str = "editor") -> None:
+    """The Groups layer's plate. *role* is the shared plate geometry's role.
 
-    The GROUPS panel (header + Quick Replicates + SavedSelectionsList +
-    hint line) lives in the centre area now; see
-    ``build_replicate_groups_centre``.
+    ``"editor"`` — an interactive plate that sits in a page rather than the
+    rail and whose actions are supplied by its host — is what this is now, and
+    it is what the Variables layer's plate already asked for. ``"rail"`` is kept
+    reachable for a caller that mounts it in the sidebar, and there is none.
     """
 
     layout = parent.layout()
@@ -65,26 +68,32 @@ def build_replicate_panel(ctx, parent: QWidget) -> None:
     # The app-wide plate geometry (widgets/plate_geometry.py): same caps, same
     # cell scale and same centring as every other plate map in the app. The
     # trailing addStretch below pins the plate to the top of the column.
-    apply_plate_geometry(plate, role="rail")
+    apply_plate_geometry(plate, role=role)
     layout.addWidget(plate, 0, PLATE_ALIGNMENT)
     layout.addStretch(1)
     ctx.widgets.register("_rep_map_plate", plate)
 
     def _commit_plate_to_current(*_a) -> None:
         from well_viewer.core.selection_controller import sel_by_id, sel_set_composition
-        # Well-membership edits should only land while the user is on Home's
-        # GROUPS tab. From Overview / Cell Gating / Well Labels / Ratios /
-        # Pipeline Info, this plate's selectionDragFinished can still fire
-        # (e.g. from programmatic refresh ticks) and silently rewrite the
-        # current group's composition — exactly the "wells get reassigned even
-        # though I'm not on the Groups tab" bug. Guard against it here.
+        # Well-membership edits should only land while the user is looking at
+        # the **Groups layer**. This plate's ``selectionDragFinished`` can fire
+        # from a programmatic refresh tick while another layer or another tab is
+        # showing, and would then silently rewrite the current group — the
+        # "wells get reassigned even though I'm not on the Groups tab" bug. The
+        # guard used to read the Home sub-tab's title, which said "Groups"; the
+        # layers of one tab are what say it now, and the question is the same
+        # one. Both halves are asked: a layer switch inside a tab nobody is
+        # looking at must not commit either.
+        from well_viewer.features.home.sample_map.controller import current_layer
         sub_tabs = ctx.runtime.home.subtabs
         if sub_tabs is not None:
             try:
-                if sub_tabs.tabText(sub_tabs.currentIndex()) != "Groups":
+                if sub_tabs.tabText(sub_tabs.currentIndex()) != "Sample map":
                     return
             except Exception:
                 swallowed()  # was: pass (silent except)
+        if current_layer(ctx) != "Groups":
+            return
         sid = ctx.state.selection.current_selection_id
         sel = sel_by_id(ctx, sid) if sid else None
         if sel is None:

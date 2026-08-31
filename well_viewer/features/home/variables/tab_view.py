@@ -28,7 +28,6 @@ from PySide6.QtWidgets import (
 import theme
 from well_viewer.domain.plate_layout import FILL_ALONG_COLS, FILL_ALONG_ROWS
 from well_viewer.domain.sample_variables import NUMBER, TEXT
-from well_viewer.features.home.roles_view import add_role_strip
 
 #: The definition columns' widths. Named rather than written inline: the left
 #: list is a fixed rail so the value list beside it does not reflow every time a
@@ -61,8 +60,6 @@ def build_variables_subtab(ctx, frame: QWidget) -> None:
     # would double it on one tab only.
     outer.setContentsMargins(0, 0, 0, 0)
     outer.setSpacing(theme.Spacing.md)
-
-    add_role_strip(ctx, "Variables", frame)
 
     panes = QWidget(frame)
     row = QHBoxLayout(panes)

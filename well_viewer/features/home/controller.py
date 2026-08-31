@@ -179,22 +179,26 @@ def sync_home_sidebar(ctx) -> None:
     worse. The plate paints its own disabled state; nothing in it consulted
     ``isEnabled()`` before this, so greying it used to be invisible.
 
-    Which editors read the selection is the descriptor's ``reads_well_selection``
-    rather than a name list here: Groups edits a group's membership with the
-    plate, Cell Gating draws its CDFs from the selected wells, Well Labels' Add
-    Prefix / Add Suffix apply to them, and Ratios and Pipeline Info ask nothing
-    of it. A tab added tomorrow declares its own answer instead of inheriting
-    whichever one a constant here happened to give it.
+    All that is left here is the **Import** button, which merges a
+    sample-definitions JSON and names nothing on Overview. The rail plate it
+    used to enable and grey is gone: it edited a group's membership and never
+    wrote ``ctx.state.selection.selected_wells``, so the two tabs it was
+    described as feeding — Cell Gating's CDFs, Add Prefix's fallback — were
+    reading a selection it could not set. It lives on the Sample map tab now,
+    where the layer switch says what it means, and that tab publishes its
+    selection so those two finally read the plate the user is looking at.
     """
     name = current_subtab(ctx)
     on_a_definition_tab = name in definition_subtabs(ctx)
     frame = ctx.widgets.get_or_none("_sidebar_sample_frame")
     if frame is not None:
-        frame.setVisible(on_a_definition_tab)
-    plate = ctx.widgets.get_or_none("_rep_map_plate")
-    if plate is not None:
-        desc = ctx.features.get(name)
-        plate.setEnabled(bool(desc is not None and desc.reads_well_selection))
+        # Home has no rail body, which is what ``activate_home`` has always
+        # said and what this frame used to contradict: it carried the plate
+        # that edited a group's membership, so the Sample map tab showed that
+        # plate in the rail *and* whichever plate its layer carried in the
+        # page. The plate is in the tab now and this frame holds nothing, so it
+        # stays hidden rather than being toggled per tab.
+        frame.setVisible(False)
     btn = ctx.widgets.get_or_none(IMPORT_KEY)
     if btn is not None:
         btn.setVisible(on_a_definition_tab)
@@ -726,7 +730,7 @@ _ACTION_PAGE = {
 }
 
 #: Actions that land on a tab of this page rather than on another page.
-_ACTION_SUBTAB = {"samples": "Groups"}
+_ACTION_SUBTAB = {"samples": "Sample map"}
 
 
 def run_home_action(ctx, action: str) -> None:

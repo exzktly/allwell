@@ -40,7 +40,7 @@ to add features, how to debug, and build / environment troubleshooting), see
 3. [Quick start](#quick-start)
 4. [Analyze mode — running the pipeline](#analyze-mode--running-the-pipeline)
 5. [Review mode — exploring results](#review-mode--exploring-results)
-   - [Home](#home) (Overview · Cell Gating · Groups · Variables · Well Labels · Ratios · Pipeline Info)
+   - [Home](#home) (Overview · Cell Gating · Sample map — Groups · Variables · Well Labels — · Ratios · Pipeline Info)
    - [The Review window at a glance](#the-review-window-at-a-glance)
    - [Controls shared by every tab](#controls-shared-by-every-tab)
    - Plotting: [Bar Plots](#bar-plots) · [Line Graphs](#line-graphs) · [Response Curves](#response-curves) · [Scatter Plot](#scatter-plot) · [Distribution](#distribution) · [Heat Map](#heat-map)
@@ -1426,7 +1426,21 @@ the crop region and the QC gate.
 cutoffs, then use the optimizer on the one channel that separates your
 conditions.
 
-#### Groups
+#### Sample map
+
+One tab, one plate, and a switch across the top naming what the plate is
+showing: **Groups**, one segment per **variable**'s editor, or **Well Labels**.
+Only one plate is on screen at a time, so the control in front of you is the
+control that acts.
+
+The selection travels between **Variables** and **Well Labels**, because on both
+it means the same thing — the wells you are about to act on — and it is also
+what Cell Gating's CDFs and **Add Prefix** read. It does **not** travel into
+**Groups**: there the plate is the current group's membership, and a drag on it
+edits that group, so carrying a selection in would hand a group wells you never
+put in it.
+
+##### Groups
 
 Name a set of wells as replicates; every plot, the Statistics tab, and Batch
 Export can then treat them as one condition. A group **is** exactly one
@@ -1444,7 +1458,7 @@ only paint those — but the group's other members are still part of it. Adding
 or removing a well changes only what you clicked; the members the plate cannot
 show stay in the group.
 
-#### Variables
+##### Variables
 
 A **variable** is anything you varied: cell line, dose, the timepoint you
 treated at. You name it, list its values in order, and then fill those values
@@ -1568,7 +1582,7 @@ Variables are saved with the dataset, alongside your groups and well labels.
 **Reset analysis** clears them under their own heading, separately from sample
 definitions, so redoing your groups does not cost you a plate of doses.
 
-#### Well Labels
+##### Well Labels
 
 Give a **well** a human-readable name; it shows in every plot legend instead of
 the raw well token. A label pools nothing and changes no number — it is display

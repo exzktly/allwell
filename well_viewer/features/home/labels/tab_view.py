@@ -230,6 +230,26 @@ class LabelGrid(QWidget):
     def selectedTokens(self) -> list[str]:
         return sorted(self._selected)
 
+    def setSelectedTokens(self, tokens) -> None:
+        """Select exactly *tokens* (the enabled ones), replacing the selection.
+
+        The counterpart of :meth:`selectedTokens`, added so the Sample map tab's
+        layer switch can carry a selection from the Variables layer into this
+        one — both mean "the wells I am about to act on", so switching between
+        them must not silently drop what the user had picked. Emits
+        ``selectionChanged`` once, not once per cell.
+        """
+        wanted = {str(t) for t in (tokens or ())}
+        if self._enabled is not None:
+            wanted &= set(self._enabled)
+        if wanted == self._selected:
+            return
+        self._selected = wanted
+        for tok, cell in self._cells.items():
+            cell.setSelected(tok in wanted)
+        self._sync_header_actives()
+        self.selectionChanged.emit(self.selectedTokens())
+
     def refresh(self) -> None:
         """Re-load every cell from ``app._app_state.dataset.well_labels`` without firing
         textChanged."""
@@ -383,9 +403,6 @@ def build_label_grid(ctx, parent: QWidget) -> None:
         parent.setLayout(layout)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-
-    from well_viewer.features.home.roles_view import add_role_strip
-    add_role_strip(ctx, "Well Labels", parent)
 
     # ── top help + affix toolbar ─────────────────────────────────────
     head = QWidget(parent)

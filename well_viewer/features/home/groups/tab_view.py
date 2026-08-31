@@ -22,7 +22,6 @@ from well_viewer.core.ui_helpers import btn_primary, btn_secondary, build_hline_
 from well_viewer.features.home.groups.controller import (
     rep_add, rep_quick_pairs_from_dropdowns,
 )
-from well_viewer.features.home.roles_view import add_role_strip
 
 
 def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
@@ -30,7 +29,7 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
 
     Hoists the legacy "below the plate" GROUPS chrome out of the sidebar.
     Contents (top → bottom):
-      - the role strip: what a group is and what it reaches
+      - the plate that edits the current group's membership
       - GROUPS header with Clear-all / + Add buttons
       - Quick Replicates row (Pair + Order dropdowns + Apply button)
       - SavedSelectionsList (composable) over ``ctx.state.selection.selections``
@@ -43,7 +42,14 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-    add_role_strip(ctx, "Groups", parent)
+    # The plate this layer edits, in the page rather than the rail. Above the
+    # list because that is the reading order of the sentence the two make: this
+    # group, these wells.
+    from well_viewer.features.home.groups.panel_view import build_replicate_panel
+    plate_host = QWidget(parent)
+    QVBoxLayout(plate_host).setContentsMargins(0, 0, 0, 0)
+    build_replicate_panel(ctx, plate_host, role="editor")
+    layout.addWidget(plate_host)
 
     hdr = QWidget(parent)
     hdr_l = QHBoxLayout(hdr)

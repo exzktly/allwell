@@ -119,12 +119,8 @@ _build_batch_export = _lazy_build("well_viewer.features.batch_export.tab_view", 
 _build_review_csv = _lazy_build("well_viewer.features.review_csv.tab_view", "build_review_csv_tab")
 _build_home = _lazy_build("well_viewer.features.home.tab_view", "build_home_tab")
 
-_build_groups = _lazy_build("well_viewer.features.home.groups.tab_view",
-                            "build_replicate_groups_centre")
-_build_well_labels = _lazy_build("well_viewer.features.home.labels.tab_view",
-                                 "build_label_grid")
-_build_variables = _lazy_build("well_viewer.features.home.variables.tab_view",
-                               "build_variables_subtab")
+_build_plate_map = _lazy_build("well_viewer.features.home.sample_map.tab_view",
+                               "build_plate_map_subtab")
 _build_response = _lazy_build("well_viewer.features.response.tab_view",
                               "build_response_tab")
 _redraw_response = _lazy_hook("well_viewer.features.response.controller",
@@ -427,9 +423,6 @@ def _svc_heatmap_well_dropped():
     return _on_drop_event
 
 
-def _svc_groups_build_replicate_panel():
-    from well_viewer.features.home.groups.panel_view import build_replicate_panel
-    return build_replicate_panel
 
 
 def _svc_preview_build_picker():
@@ -1059,7 +1052,6 @@ def _features() -> list[FeatureDescriptor]:
         # never asks whether they are present — see ``removable``.
         FeatureDescriptor(name="Cell Gating", parent="Home",
                           build=_build_cell_gating, removable=False,
-                          reads_well_selection=True,
                           services={
                               "cell_gating.threshold_count_on_changed":
                                   _svc_cell_gating_threshold_count_on_changed,
@@ -1078,25 +1070,27 @@ def _features() -> list[FeatureDescriptor]:
                               "cell_gating.start_worker":
                                   _svc_cell_gating_start_worker,
                           }),
-        FeatureDescriptor(name="Groups", parent="Home",
-                          build=_build_groups, removable=False,
-                          reads_well_selection=True, subtab_inset=True,
+        # **One tab for the three ways of annotating a well.** Groups,
+        # Variables and Well Labels were three sibling sub-tabs that all took a
+        # well selection and all looked alike, and the Variables one carried a
+        # plate of its own beneath the rail's, so two were on screen with one
+        # greyed. They are layers of one tab now — one plate at a time, and a
+        # switch that names what it is showing. The three bodies are unchanged
+        # and still live in their own sub-packages; ``plate_map`` builds each
+        # into a page of its stack.
+        #
+        # ``removable=False``: the layer roster comes from
+        # ``collect.DECLARATION_ROLES`` and every layer's body is built at once,
+        # so there is no profile in which two of the three ship without the
+        # third. A profile that wants none of them drops this descriptor whole,
+        # which is the granularity that is actually coherent.
+        FeatureDescriptor(name="Sample map", parent="Home",
+                          build=_build_plate_map, removable=False,
+                          subtab_inset=True,
                           services={
                               "groups.panel_refresh": _svc_groups_panel_refresh,
                               "groups.map_refresh": _svc_groups_map_refresh,
-                              "groups.build_replicate_panel":
-                                  _svc_groups_build_replicate_panel,
-                          }),
-        FeatureDescriptor(name="Variables", parent="Home",
-                          build=_build_variables, removable=True,
-                          reads_well_selection=False, subtab_inset=True,
-                          services={
                               "variables.refresh": _svc_variables_refresh,
-                          }),
-        FeatureDescriptor(name="Well Labels", parent="Home",
-                          build=_build_well_labels, removable=False,
-                          reads_well_selection=True, subtab_inset=True,
-                          services={
                               "labels.grid_refresh": _svc_labels_grid_refresh,
                           }),
         FeatureDescriptor(name="Ratios", parent="Home", build=_build_ratios),

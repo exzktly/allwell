@@ -128,15 +128,6 @@ class FeatureDescriptor:
     # Selection-behaviour flags (replace the hard-coded tab-name string sets).
     per_well_selection: bool = False     # was membership in _PER_WELL_TABS
     single_well_selection: bool = False  # was the smFISH single-well check
-    # Whether this SUB-tab reads the rail plate's well selection, so the plate
-    # is interactive while it is showing and greyed while it is not. Finer than
-    # ``per_well_selection``, which is resolved per *page* (``current_centre_tab``
-    # stops at Home) and answers whether the page keeps per-well selection at all.
-    # Home is per-well as a page, yet only three of its five editors ask the
-    # plate anything -- Groups edits a group's membership, Cell Gating draws its
-    # CDFs from the selected wells, Well Labels' Add Prefix / Add Suffix apply to
-    # them; Ratios and Pipeline Info do not.
-    reads_well_selection: bool = False
     # Whether this sub-tab's frame takes a gutter. The two editable grids want
     # one; the report and the read-only panes paint to their own edges. The
     # descriptor carries the *decision* and the container supplies the spacing

@@ -75,6 +75,11 @@ SECTION_BY_PAGE: dict[str, str] = {
     # reached by `_review_help_section` asking Home which sub-tab is current
     # before it falls back to the page's own key.
     "Cell Gating": "Cell Gating",
+    # The three ways of annotating a well are layers of one sub-tab, and the
+    # sub-tab is what ``_review_help_section`` asks Home for. The layer names
+    # stay mapped because each is still a heading of its own under the tab's,
+    # so a caller that knows which layer is showing lands on that paragraph.
+    "Sample map": "Sample map",
     "Groups": "Groups",
     "Variables": "Variables",
     "Well Labels": "Well Labels",

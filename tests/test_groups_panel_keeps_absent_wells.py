@@ -54,7 +54,12 @@ def panel(qapp):
         widgets=registry,
         state=SimpleNamespace(selection=selection, dataset=dataset),
         runtime=SimpleNamespace(home=SimpleNamespace(subtabs=SimpleNamespace(
-            tabText=lambda index: "Groups", currentIndex=lambda: 0,
+            # The Groups editor is a layer of the Sample map tab now; the
+            # commit guard asks the sub-tab and the layer, and this fixture
+            # registers no layer switch, so ``current_layer`` answers with the
+            # first layer — Groups — which is what a tab built with no switch
+            # shows.
+            tabText=lambda index: "Sample map", currentIndex=lambda: 0,
         ))),
         coordinator=SimpleNamespace(
             rebuild_all=lambda: None, refresh_sidebar_map=lambda: None,
@@ -105,3 +110,25 @@ def test_a_well_id_that_has_no_plate_position_does_not_break_the_edit(panel):
     plate.selectionDragFinished.emit()
 
     assert group["wells"] == ["A01", "A02"]
+
+
+def test_a_drag_from_another_layer_does_not_rewrite_the_group(panel):
+    """The Groups editor shares the Sample map tab with two other layers, and
+    its ``selectionDragFinished`` still fires on programmatic refresh ticks
+    while one of those is showing. Without the layer half of the guard, a
+    Variables fill repainting the tab rewrites whichever group happens to be
+    current — an annotation nobody made, which is the defect the whole design is
+    shaped around.
+    """
+    from types import SimpleNamespace
+
+    from well_viewer.features.home.sample_map.controller import SWITCH_KEY
+
+    ctx, group, plate, _parent = panel
+    before = list(group["wells"])
+    ctx.widgets.register(SWITCH_KEY,
+                         SimpleNamespace(currentData=lambda: "Variables"))
+    plate.setSelectedWellIds(["A01", "A02"])
+    plate.selectionDragFinished.emit()
+    assert group["wells"] == before, (
+        "a drag while the Variables layer was showing rewrote the group")

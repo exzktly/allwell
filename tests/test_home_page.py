@@ -350,8 +350,7 @@ def test_the_page_opens_on_overview(loaded_app):
     than asks. The definition editors follow it."""
     sub = _subtabs(loaded_app)
     assert [sub.tabText(i) for i in range(sub.count())] == [
-        "Overview", "Cell Gating", "Groups", "Variables", "Well Labels",
-        "Ratios", "Pipeline Info",
+        "Overview", "Cell Gating", "Sample map", "Ratios", "Pipeline Info",
     ]
     assert sub.tabText(sub.currentIndex()) == "Overview"
 
@@ -368,8 +367,8 @@ def test_every_definition_tab_is_built_after_a_load(loaded_app):
     """
     ctx = loaded_app._ctx
     assert ctx.runtime.home.built == {
-        "Cell Gating": True, "Groups": True, "Variables": True,
-        "Well Labels": True, "Ratios": True, "Pipeline Info": True,
+        "Cell Gating": True, "Sample map": True, "Ratios": True,
+        "Pipeline Info": True,
     }
     for key in ("_rep_list", "_lbl_grid", "_ratio_panel"):
         assert ctx.widgets.get_or_none(key) is not None, key
@@ -377,17 +376,19 @@ def test_every_definition_tab_is_built_after_a_load(loaded_app):
     assert callable(ctx.runtime.pipeline_info.refresh)
 
 
-def test_the_group_plate_follows_the_tab(loaded_app, qtbot):
-    """The rail plate composes groups. On Overview that question is not being
-    asked — and Overview has a plate of its own in the page body, so leaving the
-    rail one up would put two plates on screen answering different things."""
+def test_home_shows_no_rail_body_on_any_tab(loaded_app, qtbot):
+    """``activate_home``'s docstring has always said Home shows no rail frame,
+    and the sample frame contradicted it: it carried the plate that composed a
+    group, so the Sample map tab would show that plate in the rail *and*
+    whichever plate its layer carried in the page. The plate is a layer of the
+    tab now and the frame holds nothing."""
     ctx = loaded_app._ctx
     frame = ctx.widgets.get("_sidebar_sample_frame")
 
-    _goto_subtab(loaded_app, qtbot, "Groups")
-    assert frame.isVisibleTo(loaded_app)
-    _goto_subtab(loaded_app, qtbot, "Overview")
-    assert not frame.isVisibleTo(loaded_app)
+    for name in ("Overview", "Cell Gating", "Sample map", "Ratios",
+                 "Pipeline Info"):
+        _goto_subtab(loaded_app, qtbot, name)
+        assert not frame.isVisibleTo(loaded_app), f"{name}: a rail body appeared"
 
 
 def test_import_is_offered_only_where_it_means_something(loaded_app, qtbot):
@@ -395,25 +396,28 @@ def test_import_is_offered_only_where_it_means_something(loaded_app, qtbot):
     nothing the user can see."""
     btn = loaded_app._ctx.widgets.get("_home_import_btn")
 
-    _goto_subtab(loaded_app, qtbot, "Well Labels")
+    _goto_subtab(loaded_app, qtbot, "Sample map")
     assert btn.isVisibleTo(loaded_app)
     _goto_subtab(loaded_app, qtbot, "Overview")
     assert not btn.isVisibleTo(loaded_app)
 
 
-def test_a_plate_drag_edits_the_group_only_from_the_groups_tab(loaded_app, qtbot):
+def test_a_plate_drag_edits_the_group_only_from_the_groups_layer(loaded_app, qtbot):
     """Two failures in one test, because they are two halves of one rule.
 
-    The rail plate must still commit from Groups once a group exists — the
+    The plate must still commit from the Groups layer once a group exists — the
     plate goes passive in group mode unless a *well-editing* pane is on screen,
     and that predicate is page-level, so Home has to be named in it or the drag
-    silently does nothing. And it must not commit from any other tab, where
+    silently does nothing. And it must not commit from any other layer, where
     ``selectionDragFinished`` still fires on programmatic refresh ticks and
-    would rewrite the group's composition unasked.
+    would rewrite the group's composition unasked. The guard used to ask the
+    Home sub-tab's title; the layers of one tab are what say it now, and the
+    question is the same one.
     """
     from well_viewer.core.selection_controller import (
         _plate_passive_in_group_mode, sel_by_id,
     )
+    from well_viewer.features.home.sample_map.controller import set_layer
 
     ctx = loaded_app._ctx
     wells = sorted(ctx.state.dataset.well_paths)
@@ -422,54 +426,62 @@ def test_a_plate_drag_edits_the_group_only_from_the_groups_tab(loaded_app, qtbot
         {"id": "g1", "name": "G1", "wells": [wells[0]]})
     plate = ctx.widgets.get("_rep_map_plate")
 
-    _goto_subtab(loaded_app, qtbot, "Groups")
+    _goto_subtab(loaded_app, qtbot, "Sample map")
+    set_layer(ctx, "Groups")
     # Entering the tab deselects whatever was active, so a plate click has no
     # consequence until the user picks a group — the order a real edit follows.
     assert ctx.state.selection.current_selection_id is None
     ctx.state.selection.current_selection_id = "g1"
 
     assert not _plate_passive_in_group_mode(ctx), (
-        "the plate went passive on Groups, so a drag would be dropped")
+        "the plate went passive on the Groups layer, so a drag would be dropped")
     plate.setSelectedWellIds(wells[:2])
     plate.selectionDragFinished.emit()
     qtbot.wait(10)
     assert sel_by_id(ctx, "g1").get("wells") == wells[:2]
 
-    _goto_subtab(loaded_app, qtbot, "Well Labels")
+    set_layer(ctx, "Well Labels")
     ctx.state.selection.current_selection_id = "g1"
     plate.setSelectedWellIds(wells[1:3])
     plate.selectionDragFinished.emit()
     qtbot.wait(10)
     assert sel_by_id(ctx, "g1").get("wells") == wells[:2], (
-        "a drag from a non-Groups tab rewrote the group")
+        "a drag from a layer other than Groups rewrote the group")
 
 
+def test_one_plate_is_on_screen_on_every_home_tab(loaded_app, qtbot):
+    """The whole point of the merge, asserted against the real application.
 
-def test_the_rail_plate_is_live_only_where_a_tab_reads_the_selection(loaded_app, qtbot):
-    """Three states, and the greyed one has to be visible to be worth having.
-
-    Groups edits membership with the plate, Cell Gating draws its CDFs from the
-    selected wells, and Well Labels' affix actions apply to them. Ratios and
-    Pipeline Info ask nothing of it, so a live-looking plate there would take
-    clicks and discard them — which is what it did before. Overview has its own
-    plate in the page body, so the rail's is hidden rather than greyed.
+    Three sibling editors meant three plates, and on Variables two of them were
+    on screen at once — the rail's, greyed, behind the tab's own live one. Home
+    now shows exactly one: Overview's report plate, or the Sample map layer's,
+    or none.
     """
-    ctx = loaded_app._ctx
-    frame = ctx.widgets.get("_sidebar_sample_frame")
-    plate = ctx.widgets.get("_rep_map_plate")
+    from well_viewer.features.home.sample_map.controller import (
+        LAYER_PLATES, LAYERS, set_layer,
+    )
 
-    expected = {
-        "Overview": (False, False),
-        "Cell Gating": (True, True),
-        "Groups": (True, True),
-        "Well Labels": (True, True),
-        "Ratios": (True, False),
-        "Pipeline Info": (True, False),
-    }
-    for name, (rail_shown, plate_live) in expected.items():
+    ctx = loaded_app._ctx
+    every_plate = ("_home_plate", *LAYER_PLATES.values())
+
+    def _visible():
+        return [k for k in every_plate
+                if (w := ctx.widgets.get_or_none(k)) is not None
+                and w.isVisibleTo(loaded_app)]
+
+    _goto_subtab(loaded_app, qtbot, "Overview")
+    assert _visible() == ["_home_plate"]
+
+    _goto_subtab(loaded_app, qtbot, "Sample map")
+    for layer in LAYERS:
+        set_layer(ctx, layer)
+        qtbot.wait(10)
+        assert _visible() == [LAYER_PLATES[layer]], (
+            f"{layer}: {_visible()} on screen")
+
+    for name in ("Cell Gating", "Ratios", "Pipeline Info"):
         _goto_subtab(loaded_app, qtbot, name)
-        assert frame.isVisibleTo(loaded_app) is rail_shown, f"{name}: rail visibility"
-        assert plate.isEnabled() is plate_live, f"{name}: plate enabled"
+        assert _visible() == [], f"{name}: a plate is on screen with nothing to say"
 
 
 def test_a_greyed_plate_actually_looks_greyed(qtbot):
@@ -515,7 +527,7 @@ def test_the_help_drawer_lands_on_the_current_tab_not_the_top_of_the_chapter(
 
     resolve = allwell.AllWellApp._review_help_section
 
-    for tab, heading in (("Groups", "Groups"),
+    for tab, heading in (("Sample map", "Sample map"),
                          ("Ratios", "Ratios"),
                          ("Pipeline Info", "Pipeline Info"),
                          ("Cell Gating", "Cell Gating")):

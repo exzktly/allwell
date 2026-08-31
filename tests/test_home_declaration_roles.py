@@ -68,49 +68,73 @@ def _texts(root: QWidget) -> list[str]:
     return [w.text() for w in root.findChildren(QLabel)]
 
 
-# ── the strip is on every tab that declares a role ──────────────────────────
+# ── the strip is on every layer that declares a role ────────────────────────
 
-_BUILDERS = {
-    "Groups": ("well_viewer.features.home.groups.tab_view",
-               "build_replicate_groups_centre"),
-    "Variables": ("well_viewer.features.home.variables.tab_view",
-                  "build_variables_subtab"),
-    "Well Labels": ("well_viewer.features.home.labels.tab_view",
-                    "build_label_grid"),
-}
+def _build_plate_map(qtbot, ctx=None):
+    """The merged tab, through its real builder."""
+    from well_viewer.features.home.sample_map.tab_view import build_plate_map_subtab
 
-
-def _build(tab_name, qtbot, ctx=None):
-    import importlib
-
-    module, func = _BUILDERS[tab_name]
     ctx = ctx if ctx is not None else _ctx()
     frame = QWidget()
     qtbot.addWidget(frame)
-    getattr(importlib.import_module(module), func)(ctx, frame)
+    build_plate_map_subtab(ctx, frame)
     return ctx, frame
 
 
-@pytest.mark.parametrize("tab_name", sorted(_BUILDERS))
-def test_every_definition_tab_states_its_role_and_its_sibling(tab_name, qtbot):
-    """The real builder, not the strip helper — a strip nothing calls is a
-    strip that ships invisible, which is what §7.6 is about."""
-    role = hc.role_for_tab(tab_name)
-    assert role is not None, f"{tab_name} declares no role in DECLARATION_ROLES"
-    _ctx_, frame = _build(tab_name, qtbot)
-    texts = _texts(frame)
+def _strip_texts(ctx) -> list[str]:
+    from well_viewer.features.home.sample_map.controller import STRIP_KEY
+
+    host = ctx.widgets.get_or_none(STRIP_KEY)
+    return _texts(host) if host is not None else []
+
+
+@pytest.mark.parametrize("layer", ["Groups", "Variables", "Well Labels"])
+def test_every_layer_states_its_role_and_its_sibling(layer, qtbot):
+    """Through the tab's real builder and its real switch.
+
+    Not the strip helper: a strip nothing calls is §7.6's control that ships
+    invisible, and the whole point of moving the strip onto the tab is that one
+    statement is on screen at a time.
+    """
+    from well_viewer.features.home.sample_map.controller import set_layer
+
+    role = hc.role_for_tab(layer)
+    assert role is not None, f"{layer} declares no role in DECLARATION_ROLES"
+    ctx, _frame = _build_plate_map(qtbot)
+    set_layer(ctx, layer)
+    texts = _strip_texts(ctx)
     assert role.role in texts, (
-        f"the {tab_name} tab never says what it is. Rendered: {texts[:6]}")
+        f"the {layer} layer never says what it is. Rendered: {texts}")
     assert role.cross_link in texts, (
-        f"the {tab_name} tab never points at the sibling answering the other "
-        f"question. Rendered: {texts[:6]}")
+        f"the {layer} layer never points at the sibling answering the other "
+        f"question. Rendered: {texts}")
 
 
-def test_the_roster_and_the_builders_name_the_same_tabs():
-    """A role for a tab nobody builds is copy nobody reads, and the reverse is
-    a tab with no statement of what it is for."""
-    declared = {r.tab for r in hc.DECLARATION_ROLES if r.tab}
-    assert declared == set(_BUILDERS)
+def test_only_the_current_layer_s_role_is_on_screen(qtbot):
+    """Three strips stacked and hidden would be three answers, two of them
+    waiting for a bug to show them. There is one, rebuilt per layer."""
+    from well_viewer.features.home.sample_map.controller import set_layer
+
+    ctx, _frame = _build_plate_map(qtbot)
+    set_layer(ctx, "Variables")
+    texts = _strip_texts(ctx)
+    others = [r.role for r in hc.DECLARATION_ROLES if r.tab and r.tab != "Variables"]
+    assert hc.role_for_tab("Variables").role in texts
+    for sentence in others:
+        assert sentence not in texts, "a layer that is not showing still speaks"
+
+
+def test_the_roster_and_the_layers_name_the_same_things():
+    """A role for a layer nobody builds is copy nobody reads, and the reverse is
+    a layer with no statement of what it is for."""
+    from well_viewer.features.home.sample_map.controller import (
+        LAYER_BUILDERS, LAYER_PLATES, LAYERS,
+    )
+
+    declared = tuple(r.tab for r in hc.DECLARATION_ROLES if r.tab)
+    assert LAYERS == declared
+    assert set(LAYER_BUILDERS) == set(declared)
+    assert set(LAYER_PLATES) == set(declared)
 
 
 @pytest.mark.parametrize("tab_name", ["Cell Gating", "Ratios", "Pipeline Info"])
@@ -252,9 +276,9 @@ def test_the_groups_tab_shows_the_clause_on_its_own_label(qtbot):
 
     ctx = _ctx(selections=[_group("1", ["A01", "A02"])],
                labels={"A01": "shCtrl", "A02": "shA"})
-    _c, frame = _build("Groups", qtbot, ctx=ctx)
+    _c, frame = _build_plate_map(qtbot, ctx=ctx)
     note = ctx.widgets.get_or_none("_rep_relabel_note")
-    assert note is not None, "the Groups tab has no relabel note at all"
+    assert note is not None, "the Groups layer has no relabel note at all"
     rep_panel_refresh(ctx)
     assert "“shCtrl,shA”" in note.text()
     assert note.isVisibleTo(frame)
@@ -264,7 +288,7 @@ def test_the_note_stays_off_when_nothing_is_relabelled(qtbot):
     from well_viewer.features.home.groups.selections_view import rep_panel_refresh
 
     ctx = _ctx(selections=[_group("Control", ["A01", "A02"])])
-    _c, frame = _build("Groups", qtbot, ctx=ctx)
+    _c, frame = _build_plate_map(qtbot, ctx=ctx)
     rep_panel_refresh(ctx)
     note = ctx.widgets.get_or_none("_rep_relabel_note")
     assert note.text() == ""

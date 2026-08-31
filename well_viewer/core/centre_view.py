@@ -224,8 +224,6 @@ def build_centre(win, parent: QWidget) -> None:
     # Sidebars referenced by data-load + tab-switch logic must exist
     # immediately even though the centre tab bodies that depend on them
     # are deferred.
-    win._ctx.features.call("groups.build_replicate_panel",
-                           win._ctx, win._sidebar_sample_frame)
     win._ctx.features.call("preview.build_picker",
                            win, win._sidebar_preview_frame)
 

@@ -43,7 +43,7 @@ to add features, how to debug, and build / environment troubleshooting), see
    - [Home](#home) (Overview · Cell Gating · Groups · Variables · Well Labels · Ratios · Pipeline Info)
    - [The Review window at a glance](#the-review-window-at-a-glance)
    - [Controls shared by every tab](#controls-shared-by-every-tab)
-   - Plotting: [Bar Plots](#bar-plots) · [Line Graphs](#line-graphs) · [Scatter Plot](#scatter-plot) · [Distribution](#distribution) · [Heat Map](#heat-map)
+   - Plotting: [Bar Plots](#bar-plots) · [Line Graphs](#line-graphs) · [Response Curves](#response-curves) · [Scatter Plot](#scatter-plot) · [Distribution](#distribution) · [Heat Map](#heat-map)
    - [Statistics](#statistics) · [Multivariate analysis](#multivariate-analysis) · [Spatial analysis](#spatial-analysis)
    - [Image Browser](#image-browser) (Segmentation · Image Table · Cell Browser · Playground) · [smFISH](#smfish) · [Review CSV](#review-csv)
    - [Saved Plots](#saved-plots) · [Batch export](#batch-export)
@@ -1405,140 +1405,6 @@ the crop region and the QC gate.
 cutoffs, then use the optimizer on the one channel that separates your
 conditions.
 
-### Response Curves
-
-Plots a measurement against a **number you varied** — concentration, seeding
-density, MOI, temperature, how long you pre-treated for. A serial dilution is
-one case of it, which is why the tab is not named for one.
-
-The x axis comes from a **Number** variable you defined on
-[Home → Variables](#variables): define it, fill it onto the plate, then pick it
-under **X** in the band. Until a Number variable exists the tab says so and
-points you there — there is nothing for it to plot.
-
-One point per group, at that group's value, with error bars across its
-replicates. Groups come from the same place every other page's groups come
-from, so this tab and the Bar tab always agree about what a member is.
-
-**The axis picks itself.** If your doses span two decades or more the x axis
-opens logarithmic, because a 0.1–10 µM series on a linear axis puts three
-quarters of its points in the leftmost tenth. Every dose gets its own tick
-rather than the decades matplotlib would otherwise label.
-
-**A zero dose is drawn, off the scale.** Log axes cannot show zero, and the two
-usual outcomes are both wrong: dropping the point makes a figure that is missing
-its vehicle control look complete, and nudging it to some small positive number
-states a concentration you never administered. It goes in its own column to the
-left of a dotted break, ticked `0`, and it is left out of any fit.
-
-**Which timepoints are drawn is this tab's own choice.** It opens on the one
-timepoint the rest of the app is focused on, because a twelve-timepoint plate
-opened as twelve overlapping curves per condition is not a plot anyone can
-read. Add more from the **Timepoints** button, whose own label carries the
-count. Changing them here does not move the Heat Map or the Distribution tab.
-
-**What could not be plotted is named on the figure.** A group whose wells hold
-two different doses, and a group containing a well with no dose at all, are two
-different mistakes with two different fixes, so they are counted separately in a
-caption under the axes — not only on the status line, which does not travel with
-a saved figure. The exported CSV carries a row for each of them too, with an
-empty x and the reason, because a spreadsheet is exactly where someone counts
-rows and believes the total.
-
-**A figure with nothing on it says why.** Empty axes are the same answer to six
-quite different situations, so instead the tab writes which one it is, and where
-to fix it: no Number variable picked, no timepoint ticked, no group filled in
-yet, groups whose wells disagree, values that are not numbers, or a timepoint at
-which nothing was measured. The last two of those look identical on a blank
-plot and have nothing to do with each other.
-
-#### Fitting a curve
-
-**Fit** in the band offers two models, and neither is on by default — a fitted
-line through points is an assertion about the shape of the response, and it
-should be yours rather than something you find already drawn.
-
-- **4PL**, the four-parameter logistic: bottom, top, EC50 and slope all fitted.
-- **Hill (bottom = 0)**, the same curve with its floor pinned at zero. The right
-  model when your assay's zero is a real zero — a background-subtracted
-  readout — and letting the bottom float would buy a better-looking fit by
-  inventing a floor the experiment says is not there. It also needs one fewer
-  dose than the 4PL, because a pinned parameter is not a fitted one.
-
-Leave **Top** and **Bottom** blank to fit them, or type a number to pin a
-plateau you already know — 100 on a normalised assay, 0 on a subtracted one.
-Whatever you set applies to **every curve on the figure**: two timepoints fitted
-with independently floating tops produce two EC50s that cannot be compared, and
-comparing them is the only reason to draw both at once.
-
-The curve is fitted against **log₁₀ of your x**, whatever scale the axis is
-showing. Decade-spaced doses fitted in linear x weight the top dose almost
-exclusively — the residual at 10 µM is a hundred times the residual at 0.1 µM
-for the same proportional error — so a linear fit is effectively ignoring the
-bottom half of the curve, which is the half that decides the EC50.
-
-The EC50 appears in the legend entry for its own curve, with a 95% interval that
-is **asymmetric**: it is symmetric about log₁₀(EC50), so the upper arm is longer,
-which is the truth about a dose estimated on a log axis. A single ± would claim
-a lower bound the fit does not support. The same numbers go into **Save plot
-data…**.
-
-**When the data will not support a fit, you get an em dash and a reason** —
-never a number. `EC50 — (no fit)` appears in the legend and the reason under the
-axes, and no line is drawn. The five reasons are:
-
-- **too few distinct doses** — the caption says how many the model needs.
-  Replicates at the same dose do not count; three wells at 1 µM are one dose.
-- **the response is flat** — nothing changed, so there is no half-maximal
-  anything. Worth knowing that a flat line fits a 4PL *perfectly*, with the top
-  equal to the bottom, at which point the EC50 is whatever the fitter started
-  from. That number is not shown.
-- **a parameter ran to the edge of its range** — usually the top or bottom
-  plateau, meaning your doses never reached it.
-- **the EC50 lies outside the doses you tested** — extrapolation, not
-  measurement.
-- **the fit did not converge.**
-
-An interval can also be missing from a fit that otherwise worked, and it says
-which: as many points as parameters leaves nothing to estimate an error from
-(dose more, and it appears), whereas parameters that are not separable at these
-doses will not be fixed by more of the same ones.
-
-**Saving the plot keeps the fit.** A response plot sent to the gallery comes
-back with its x variable, its timepoints, its model and any plateau you pinned —
-the fit is the point of the page and none of it can be worked out again from the
-plate.
-
-If the axis went logarithmic because your doses span two decades rather than
-because you asked, the caption says so and points at Properties. The checkbox
-there shows your own answer, and until you give one it reads "off" while the
-axis is log; setting it either way from then on stands.
-
-#### Fold change on a response curve
-
-The band's **Fold change** popover is the same one the Bar and Line tabs carry,
-over the same shared setting — a control picked on one is picked on all three,
-and the y-axis label says what it was normalised by so a normalised number is
-never sitting under a raw label.
-
-**vs t0 needs more than one timepoint drawn.** With one, every point is its own
-baseline and the whole figure would be a flat line at 1.0, so the tab declines
-it and says so under the axes rather than either obeying it or ignoring it
-quietly.
-
-Where a control could not be resolved — it names nothing loaded, or it has no
-sample at a timepoint — the affected points are named under the axes rather
-than dropped, because a curve that stops at its third dose looks exactly like a
-plate that was never dosed higher. A point whose error bar could not be
-propagated is counted too: no bar at all, rather than a zero-length one, which
-would read as perfect agreement between replicates.
-
-**There is no per-well mode here.** A dose is a property of a condition, so one
-point per well at the same x would be a scatter of replicates rather than a
-curve. If you have turned pooling off for the Bar tab, this tab still pools and
-says so on the figure — the two pages would otherwise disagree with nothing on
-either to explain why.
-
 #### Groups
 
 Name a set of wells as replicates; every plot, the Statistics tab, and Batch
@@ -2555,6 +2421,140 @@ still exported (see below).
   fields, so the pipeline had no field token to record (it now warns about this
   during the run too). Re-run those wells with a schema matching their
   filenames to restore per-field statistics.
+
+### Response Curves
+
+Plots a measurement against a **number you varied** — concentration, seeding
+density, MOI, temperature, how long you pre-treated for. A serial dilution is
+one case of it, which is why the tab is not named for one.
+
+The x axis comes from a **Number** variable you defined on
+[Home → Variables](#variables): define it, fill it onto the plate, then pick it
+under **X** in the band. Until a Number variable exists the tab says so and
+points you there — there is nothing for it to plot.
+
+One point per group, at that group's value, with error bars across its
+replicates. Groups come from the same place every other page's groups come
+from, so this tab and the Bar tab always agree about what a member is.
+
+**The axis picks itself.** If your doses span two decades or more the x axis
+opens logarithmic, because a 0.1–10 µM series on a linear axis puts three
+quarters of its points in the leftmost tenth. Every dose gets its own tick
+rather than the decades matplotlib would otherwise label.
+
+**A zero dose is drawn, off the scale.** Log axes cannot show zero, and the two
+usual outcomes are both wrong: dropping the point makes a figure that is missing
+its vehicle control look complete, and nudging it to some small positive number
+states a concentration you never administered. It goes in its own column to the
+left of a dotted break, ticked `0`, and it is left out of any fit.
+
+**Which timepoints are drawn is this tab's own choice.** It opens on the one
+timepoint the rest of the app is focused on, because a twelve-timepoint plate
+opened as twelve overlapping curves per condition is not a plot anyone can
+read. Add more from the **Timepoints** button, whose own label carries the
+count. Changing them here does not move the Heat Map or the Distribution tab.
+
+**What could not be plotted is named on the figure.** A group whose wells hold
+two different doses, and a group containing a well with no dose at all, are two
+different mistakes with two different fixes, so they are counted separately in a
+caption under the axes — not only on the status line, which does not travel with
+a saved figure. The exported CSV carries a row for each of them too, with an
+empty x and the reason, because a spreadsheet is exactly where someone counts
+rows and believes the total.
+
+**A figure with nothing on it says why.** Empty axes are the same answer to six
+quite different situations, so instead the tab writes which one it is, and where
+to fix it: no Number variable picked, no timepoint ticked, no group filled in
+yet, groups whose wells disagree, values that are not numbers, or a timepoint at
+which nothing was measured. The last two of those look identical on a blank
+plot and have nothing to do with each other.
+
+#### Fitting a curve
+
+**Fit** in the band offers two models, and neither is on by default — a fitted
+line through points is an assertion about the shape of the response, and it
+should be yours rather than something you find already drawn.
+
+- **4PL**, the four-parameter logistic: bottom, top, EC50 and slope all fitted.
+- **Hill (bottom = 0)**, the same curve with its floor pinned at zero. The right
+  model when your assay's zero is a real zero — a background-subtracted
+  readout — and letting the bottom float would buy a better-looking fit by
+  inventing a floor the experiment says is not there. It also needs one fewer
+  dose than the 4PL, because a pinned parameter is not a fitted one.
+
+Leave **Top** and **Bottom** blank to fit them, or type a number to pin a
+plateau you already know — 100 on a normalised assay, 0 on a subtracted one.
+Whatever you set applies to **every curve on the figure**: two timepoints fitted
+with independently floating tops produce two EC50s that cannot be compared, and
+comparing them is the only reason to draw both at once.
+
+The curve is fitted against **log₁₀ of your x**, whatever scale the axis is
+showing. Decade-spaced doses fitted in linear x weight the top dose almost
+exclusively — the residual at 10 µM is a hundred times the residual at 0.1 µM
+for the same proportional error — so a linear fit is effectively ignoring the
+bottom half of the curve, which is the half that decides the EC50.
+
+The EC50 appears in the legend entry for its own curve, with a 95% interval that
+is **asymmetric**: it is symmetric about log₁₀(EC50), so the upper arm is longer,
+which is the truth about a dose estimated on a log axis. A single ± would claim
+a lower bound the fit does not support. The same numbers go into **Save plot
+data…**.
+
+**When the data will not support a fit, you get an em dash and a reason** —
+never a number. `EC50 — (no fit)` appears in the legend and the reason under the
+axes, and no line is drawn. The five reasons are:
+
+- **too few distinct doses** — the caption says how many the model needs.
+  Replicates at the same dose do not count; three wells at 1 µM are one dose.
+- **the response is flat** — nothing changed, so there is no half-maximal
+  anything. Worth knowing that a flat line fits a 4PL *perfectly*, with the top
+  equal to the bottom, at which point the EC50 is whatever the fitter started
+  from. That number is not shown.
+- **a parameter ran to the edge of its range** — usually the top or bottom
+  plateau, meaning your doses never reached it.
+- **the EC50 lies outside the doses you tested** — extrapolation, not
+  measurement.
+- **the fit did not converge.**
+
+An interval can also be missing from a fit that otherwise worked, and it says
+which: as many points as parameters leaves nothing to estimate an error from
+(dose more, and it appears), whereas parameters that are not separable at these
+doses will not be fixed by more of the same ones.
+
+**Saving the plot keeps the fit.** A response plot sent to the gallery comes
+back with its x variable, its timepoints, its model and any plateau you pinned —
+the fit is the point of the page and none of it can be worked out again from the
+plate.
+
+If the axis went logarithmic because your doses span two decades rather than
+because you asked, the caption says so and points at Properties. The checkbox
+there shows your own answer, and until you give one it reads "off" while the
+axis is log; setting it either way from then on stands.
+
+#### Fold change on a response curve
+
+The band's **Fold change** popover is the same one the Bar and Line tabs carry,
+over the same shared setting — a control picked on one is picked on all three,
+and the y-axis label says what it was normalised by so a normalised number is
+never sitting under a raw label.
+
+**vs t0 needs more than one timepoint drawn.** With one, every point is its own
+baseline and the whole figure would be a flat line at 1.0, so the tab declines
+it and says so under the axes rather than either obeying it or ignoring it
+quietly.
+
+Where a control could not be resolved — it names nothing loaded, or it has no
+sample at a timepoint — the affected points are named under the axes rather
+than dropped, because a curve that stops at its third dose looks exactly like a
+plate that was never dosed higher. A point whose error bar could not be
+propagated is counted too: no bar at all, rather than a zero-length one, which
+would read as perfect agreement between replicates.
+
+**There is no per-well mode here.** A dose is a property of a condition, so one
+point per well at the same x would be a scatter of replicates rather than a
+curve. If you have turned pooling off for the Bar tab, this tab still pools and
+says so on the figure — the two pages would otherwise disagree with nothing on
+either to explain why.
 
 ### Scatter Plot
 

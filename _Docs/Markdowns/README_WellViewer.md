@@ -2480,6 +2480,13 @@ One point per group, at that group's value, with error bars across its
 replicates. Groups come from the same place every other page's groups come
 from, so this tab and the Bar tab always agree about what a member is.
 
+**You do not need groups.** If you have not defined any Plot Groups, the wells
+you have lit on the plate are the points — one each, at its own value, exactly
+as the Bar and Line tabs treat them. A variable is filled onto the plate well by
+well, so a well carries its value whether or not anybody grouped it. Grouping
+wells is what pools replicates into one point with an error bar across them; a
+lone well is a single measurement and is drawn without one.
+
 **The axis picks itself.** If your doses span two decades or more the x axis
 opens logarithmic, because a 0.1–10 µM series on a linear axis puts three
 quarters of its points in the leftmost tenth. Every dose gets its own tick
@@ -2507,9 +2514,9 @@ rows and believes the total.
 
 **A figure with nothing on it says why.** Empty axes are the same answer to six
 quite different situations, so instead the tab writes which one it is, and where
-to fix it: no Number variable picked, no timepoint ticked, no group filled in
-yet, groups whose wells disagree, values that are not numbers, or a timepoint at
-which nothing was measured. The last two of those look identical on a blank
+to fix it: no Number variable picked, no timepoint ticked, nothing selected on
+the plate at all, no group filled in yet, groups whose wells disagree, values
+that are not numbers, or a timepoint at which nothing was measured. The last two of those look identical on a blank
 plot and have nothing to do with each other.
 
 #### Fitting a curve

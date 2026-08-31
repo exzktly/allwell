@@ -30,15 +30,23 @@ def _dose(*pairs):
                      for i, (lab, num) in enumerate(pairs)))
 
 
-def _ctx(*, wells, variable=None, assignments=None, selections=(), means=None):
-    """A ctx with the slices the collector reads, and a stubbed stats call."""
+def _ctx(*, wells, variable=None, assignments=None, selections=(), means=None,
+         selected=()):
+    """A ctx with the slices the collector reads, and a stubbed stats call.
+
+    *selected* is the wells lit on the plate. It defaults to none because most
+    of this file is about grouped plates — but it defaulting to none for every
+    test is how the ungrouped plate went unmeasured until a user reported it,
+    so the tests below that pass it are load-bearing rather than incidental.
+    """
     vset = sv.VariableSet(variables=(variable,) if variable else (),
                           assignments=dict(assignments or {}))
     return SimpleNamespace(
         state=SimpleNamespace(
             dataset=SimpleNamespace(well_paths={w: f"/{w}.csv" for w in wells}),
             selection=SimpleNamespace(selections=list(selections),
-                                      selected_wells=set(), variables=vset),
+                                      selected_wells=set(selected),
+                                      variables=vset),
             plot=SimpleNamespace(group_by_variable="", bar_pool_replicates=True,
                                  use_sem=True, line_order_rsets=[],
                                  line_order_wells=[],
@@ -743,3 +751,84 @@ def test_a_measured_plate_reports_no_shortfall_at_all(stub_stats):
 
     assert (data.solo_spread, data.undefined_spread, data.control_gaps) == (0, 0, [])
     assert rc.omission_caption(data) == ""
+
+
+# ── a plate whose wells are lit but not grouped ─────────────────────────────
+#
+# The reported defect: a Number variable defined and filled, wells clicked on
+# the plate, nothing drawn — under a sentence telling the user to select wells
+# on the plate, which is what they had already done. The members came from
+# ``plot_replicate_sets``, which is the user's *groups* alone, so a plate
+# nobody had grouped had no members at all.
+#
+# The reasoning behind that had the annotation in the wrong place. A sample
+# variable is assigned per **well** (``VariableSet.assignments`` maps a well
+# token to a value id), so a lit well carries its own dose and there is nothing
+# a group adds except pooled replicates.
+
+def test_wells_lit_on_an_ungrouped_plate_each_get_a_point_at_their_own_dose(
+        stub_stats):
+    """The reported case. Members are the lit wells, keyed by their tokens."""
+    ctx = _ctx(wells=["A01", "A02", "A03"],
+               variable=_dose(("0.1", 0.1), ("1", 1.0), ("10", 10.0)),
+               assignments={"dose": {"A01": "d0", "A02": "d1", "A03": "d2"}},
+               selections=(),
+               selected={"A01", "A02", "A03"})
+    data = rc.collect_response(ctx, "dose", [24.0])
+
+    assert [(p.member, p.x) for p in data.curves[0].points] == [
+        ("A01", 0.1), ("A02", 1.0), ("A03", 10.0)]
+    assert data.placed == 3
+    assert rc.empty_reason(data) == ""
+
+
+def test_a_lit_well_the_variable_never_reached_is_named_not_dropped(stub_stats):
+    """The omission machinery has to work in the well key space too.
+
+    Two of three wells dosed. The third must come back in ``omitted`` under
+    its own token — a curve that quietly draws two of the three wells the user
+    lit is the silent substitution this whole module exists to prevent.
+    """
+    ctx = _ctx(wells=["A01", "A02", "A03"],
+               variable=_dose(("1", 1.0), ("10", 10.0)),
+               assignments={"dose": {"A01": "d0", "A02": "d1"}},
+               selections=(),
+               selected={"A01", "A02", "A03"})
+    data = rc.collect_response(ctx, "dose", [24.0])
+
+    assert [p.member for p in data.curves[0].points] == ["A01", "A02"]
+    assert data.omitted == [("A03", rc.NO_VALUE)]
+
+
+def test_a_group_still_pools_its_wells_when_those_wells_are_also_lit(stub_stats):
+    """The fallback must not shadow the groups, or it trades one bug for another.
+
+    ``A01`` and ``A02`` are one group at one dose *and* both lit on the plate.
+    The fixture puts them at the same dose so that the wrong answer — two
+    points, one per well — is distinguishable from the right one, which is a
+    single pooled point named for the group.
+    """
+    ctx = _ctx(wells=["A01", "A02"],
+               variable=_dose(("1", 1.0),),
+               assignments={"dose": {"A01": "d0", "A02": "d0"}},
+               selections=_groups(("treated", ["A01", "A02"])),
+               selected={"A01", "A02"})
+    data = rc.collect_response(ctx, "dose", [24.0])
+
+    assert [(p.member, p.n) for p in data.curves[0].points] == [("treated", 2)]
+
+
+def test_an_ungrouped_plate_with_nothing_lit_still_says_so(stub_stats):
+    """The empty state stays reachable — the fallback is not a fallback to all.
+
+    Falling back to every loaded well would draw a plate nobody asked for, and
+    would make the "select wells" sentence unreachable rather than accurate.
+    """
+    ctx = _ctx(wells=["A01", "A02"],
+               variable=_dose(("1", 1.0), ("10", 10.0)),
+               assignments={"dose": {"A01": "d0", "A02": "d1"}},
+               selections=(), selected=())
+    data = rc.collect_response(ctx, "dose", [24.0])
+
+    assert not data.has_points() and data.placed == 0
+    assert "select wells on the plate" in rc.empty_reason(data)

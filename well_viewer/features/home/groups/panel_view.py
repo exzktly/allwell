@@ -26,6 +26,7 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from well_viewer.core.safe import swallowed
 from well_viewer.features.home.groups.controller import rep_refresh_map
+from well_viewer.features.home.sample_map.controller import current_layer
 
 
 def _plate_order(well: str) -> tuple:
@@ -84,7 +85,6 @@ def build_replicate_panel(ctx, parent: QWidget, *, role: str = "editor") -> None
         # layers of one tab are what say it now, and the question is the same
         # one. Both halves are asked: a layer switch inside a tab nobody is
         # looking at must not commit either.
-        from well_viewer.features.home.sample_map.controller import current_layer
         sub_tabs = ctx.runtime.home.subtabs
         if sub_tabs is not None:
             try:

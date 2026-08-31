@@ -22,6 +22,7 @@ from well_viewer.core.ui_helpers import btn_primary, btn_secondary, build_hline_
 from well_viewer.features.home.groups.controller import (
     rep_add, rep_quick_pairs_from_dropdowns,
 )
+from well_viewer.features.home.groups.panel_view import build_replicate_panel
 
 
 def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
@@ -45,7 +46,6 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     # The plate this layer edits, in the page rather than the rail. Above the
     # list because that is the reading order of the sentence the two make: this
     # group, these wells.
-    from well_viewer.features.home.groups.panel_view import build_replicate_panel
     plate_host = QWidget(parent)
     QVBoxLayout(plate_host).setContentsMargins(0, 0, 0, 0)
     build_replicate_panel(ctx, plate_host, role="editor")

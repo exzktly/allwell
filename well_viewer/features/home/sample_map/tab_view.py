@@ -16,7 +16,8 @@ from PySide6.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 import theme
 from well_viewer.features.home.sample_map.controller import (
-    LAYER_BUILDERS, LAYERS, STACK_KEY, STRIP_KEY, SWITCH_KEY, set_layer,
+    LAYER_BUILDERS, LAYER_PLATES, LAYERS, SHARED_SELECTION_LAYERS, STACK_KEY,
+    STRIP_KEY, SWITCH_KEY, on_layer_selection_changed, set_layer,
 )
 
 
@@ -83,10 +84,6 @@ def _wire_selection_publishers(ctx) -> None:
     those bodies were built for three separate tabs and must not grow a
     dependency on this one.
     """
-    from well_viewer.features.home.sample_map.controller import (
-        LAYER_PLATES, SHARED_SELECTION_LAYERS, on_layer_selection_changed,
-    )
-
     for layer in SHARED_SELECTION_LAYERS:
         widget = ctx.widgets.get_or_none(LAYER_PLATES.get(layer, ""))
         signal = getattr(widget, "selectionChanged", None)

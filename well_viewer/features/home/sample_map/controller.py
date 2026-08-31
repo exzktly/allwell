@@ -29,14 +29,18 @@ strip above the plate says which of the two the plate currently means.
 from __future__ import annotations
 
 from well_viewer.core.safe import swallow
-from well_viewer.features.home.collect import DECLARATION_ROLES
+from well_viewer.features.home.collect import DECLARATION_ROLES, role_for_tab
+from well_viewer.features.home.groups.selections_view import rep_panel_refresh
+from well_viewer.features.home.labels.tab_view import label_grid_refresh
+from well_viewer.features.home.roles_view import build_role_strip
+from well_viewer.features.home.variables.controller import refresh_variables
 
 #: Registry key for the layer switch itself.
-SWITCH_KEY = "_plate_map_layers"
+SWITCH_KEY = "_sample_map_layers"
 #: Registry key for the page stack the three bodies are built into.
-STACK_KEY = "_plate_map_stack"
+STACK_KEY = "_sample_map_stack"
 #: Registry key for the host the current layer's role strip is painted into.
-STRIP_KEY = "_plate_map_strip"
+STRIP_KEY = "_sample_map_strip"
 
 #: The layers, in the order the tabs used to appear. Derived from the one
 #: declaration roster rather than restated: a layer added there and forgotten
@@ -45,8 +49,10 @@ STRIP_KEY = "_plate_map_strip"
 LAYERS: tuple[str, ...] = tuple(r.tab for r in DECLARATION_ROLES if r.tab)
 
 #: ``layer -> (module, builder)`` for the three bodies, unchanged from when each
-#: was a tab of its own. Function-local imports at build time keep the
-#: sub-packages removable.
+#: was a tab of its own. Resolved by ``importlib`` at build time rather than
+#: imported here: ``groups/tab_view`` imports ``groups/panel_view``, which asks
+#: this module which layer is current, so a static import of the builders would
+#: close that loop at import time.
 LAYER_BUILDERS: dict[str, tuple[str, str]] = {
     "Groups": ("well_viewer.features.home.groups.tab_view",
                "build_replicate_groups_centre"),
@@ -95,7 +101,7 @@ def selected_on(ctx, layer: str) -> list[str]:
     for name in ("selectedWellIds", "selectedTokens"):
         getter = getattr(widget, name, None)
         if callable(getter):
-            with swallow(f"plate map: reading {layer}'s selection"):
+            with swallow(f"sample map: reading {layer}'s selection"):
                 return [str(w) for w in (getter() or ())]
     return []
 
@@ -107,7 +113,7 @@ def _apply_selection(ctx, layer: str, wells) -> None:
     for name in ("setSelectedWellIds", "setSelectedTokens"):
         setter = getattr(widget, name, None)
         if callable(setter):
-            with swallow(f"plate map: applying a selection to {layer}"):
+            with swallow(f"sample map: applying a selection to {layer}"):
                 setter(list(wells))
             return
 
@@ -154,14 +160,11 @@ def _publish_selection(ctx, layer: str) -> None:
     wells = set(selected_on(ctx, layer))
     if wells == set(ctx.state.selection.selected_wells or ()):
         return
-    with swallow("plate map: publishing the layer's selection"):
+    with swallow("sample map: publishing the layer's selection"):
         set_selected_wells(ctx, wells)
 
 
 def _paint_strip(ctx, layer: str) -> None:
-    from well_viewer.features.home.collect import role_for_tab
-    from well_viewer.features.home.roles_view import build_role_strip
-
     host = ctx.widgets.get_or_none(STRIP_KEY)
     role = role_for_tab(layer)
     if host is None or role is None:
@@ -188,21 +191,14 @@ def refresh_layer(ctx, layer: str | None = None) -> None:
     """
     layer = layer or current_layer(ctx)
     if layer == "Groups":
-        with swallow("plate map: refreshing the Groups layer"):
-            from well_viewer.features.home.groups.selections_view import (
-                rep_panel_refresh,
-            )
+        with swallow("sample map: refreshing the Groups layer"):
             rep_panel_refresh(ctx)
         return
     if layer == "Variables":
-        with swallow("plate map: refreshing the Variables layer"):
-            from well_viewer.features.home.variables.controller import (
-                refresh_variables,
-            )
+        with swallow("sample map: refreshing the Variables layer"):
             refresh_variables(ctx)
         return
-    with swallow("plate map: refreshing the Well Labels layer"):
-        from well_viewer.features.home.labels.tab_view import label_grid_refresh
+    with swallow("sample map: refreshing the Well Labels layer"):
         # The feature's own refresh, not ``grid.refresh()``. That one reloads
         # the text and leaves the enabled set alone, so a grid that had not yet
         # been told which wells the dataset holds stayed inert: every cell

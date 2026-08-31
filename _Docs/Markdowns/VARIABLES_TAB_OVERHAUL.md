@@ -45,8 +45,8 @@ its reason here and at the site.
 | M4 | One-deep undo over every commit | `variables/controller.py` | | todo |
 | M5 | `Preview` before `Apply fill`, and a report that also fires when nothing changed | `variables/controller.py` | | todo |
 | M6 | A header naming the variable the plate is showing and the one overlaid on it | `variables/tab_view.py` | | todo |
-| M7 | Coverage (`88/96`) in the rail rather than a value count | `domain/sample_variables.py` | | todo |
-| M8 | The glyph rule is all-or-nothing and lives in the domain | `domain/variable_series.py` | | todo |
+| M7 | Coverage (`88/96`) in the rail rather than a value count | `domain/sample_variables.py` | `tests/test_variables_domain_readouts.py` | doing — the fact exists; the rail still shows the value count |
+| M8 | The glyph rule is all-or-nothing and lives in the domain | `domain/variable_series.py` | `tests/test_variables_domain_readouts.py` | doing — the rule is moved and fixed; the tab still calls its own copy |
 | M9 | Every silent no-op says what happened, and controls that cannot act are disabled | `variables/controller.py` | | todo |
 | M10 | One label, one job — status stops doubling as instruction and as policy | `variables/controller.py` | | todo |
 | M11 | The destructive verbs name their scope | `variables/tab_view.py` | | todo |

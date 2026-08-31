@@ -1,16 +1,24 @@
 """One well picker on the rail, it belongs to the focused pane, and it does not
 move.
 
-Four sidebar sections offer a ``WellPlateSelector`` — the shared one for
-``_sidebar_main_frame``, plus Statistics, Segmentation and Image Table. They were
-mutually exclusive for as long as only one section showed at a time. Showing
-every visible pane's section put two of them on the rail at once: stacked,
-identical-looking, and meaning different things — the Statistics plate paints
-wells into comparison groups, the shared one selects wells to plot.
+Three sidebar sections offer a ``WellPlateSelector`` — the shared one for
+``_sidebar_main_frame``, plus Segmentation and Image Table. They were mutually
+exclusive for as long as only one section showed at a time. Showing every
+visible pane's section put two of them on the rail at once: stacked and
+identical-looking while selecting for different pages.
 
-That regression got past its own test file because the test asserted the two
-*frames* were visible and never asked what was inside them. Counting flags is not
-counting pickers, so this file counts pickers.
+The pair used here is Plots beside Image Browser, parked on Segmentation. It was
+Plots beside Statistics, whose plate did not merely select for a different page
+but meant something else entirely — a click on it painted a well into a named
+comparison group. That plate is no longer on the rail at all: the comparison-group
+editor is part of the Statistics page (``tests/test_stats_groups_need_no_focus.py``),
+so every picker the rail still arbitrates between answers the same question,
+"which wells am I looking at". The arbitration rule below is unchanged and still
+needs a test.
+
+The original regression got past its own test file because the test asserted the
+two *frames* were visible and never asked what was inside them. Counting flags is
+not counting pickers, so this file counts pickers.
 
 The rule: sections follow visibility, plates follow focus — the same split the
 heat-map drag mode already uses, since a plate is interaction.
@@ -42,6 +50,13 @@ def _split(app, tab_a, tab_b):
     return app._visible_centre_tabs()
 
 
+def _park_on_segmentation(app):
+    """Segmentation is a leaf inside the Image Browser container, and it is the
+    leaf that owns ``_sidebar_preview_frame`` and its picker."""
+    from well_viewer.features.image_browser.controller import show_image_browser_subtab
+    assert show_image_browser_subtab(app._ctx, "Segmentation")
+
+
 #: The per-tab sidebar sections, named here rather than imported from
 #: ``tab_controller``. The fix under test adds helpers there, and a test that
 #: reached for them would fail on the pre-fix tree with an ``ImportError`` —
@@ -52,7 +67,6 @@ _SECTION_FRAMES = (
     "_sidebar_preview_frame",
     "_sidebar_image_table_frame",
     "_sidebar_sample_frame",
-    "_sidebar_stats_frame",
     "_sidebar_cell_browser_frame",
 )
 
@@ -99,11 +113,12 @@ def _plate_shown(app, frame_name) -> bool:
 
 
 @pytest.mark.slow
-def test_plots_beside_statistics_draws_one_picker(loaded_app):
-    """The reported regression, in the arrangement it was reported in."""
+def test_two_plate_bearing_panes_draw_one_picker(loaded_app):
+    """The reported regression: two sections with a plate each, one rail."""
     app = loaded_app
+    _park_on_segmentation(app)
     app._notebook.setCurrentByName("Plotting")
-    _split(app, "Plotting", "Statistics")
+    _split(app, "Plotting", "Image Browser")
 
     shown = _shown_plates(app)
     assert len(shown) == 1, (
@@ -114,41 +129,44 @@ def test_plots_beside_statistics_draws_one_picker(loaded_app):
 @pytest.mark.slow
 def test_the_picker_that_survives_is_the_focused_pane_s(loaded_app):
     app = loaded_app
+    _park_on_segmentation(app)
     app._notebook.setCurrentByName("Plotting")
-    _split(app, "Plotting", "Statistics")
+    _split(app, "Plotting", "Image Browser")
 
     assert _plate_shown(app, "_sidebar_main_frame")
-    assert not _plate_shown(app, "_sidebar_stats_frame")
+    assert not _plate_shown(app, "_sidebar_preview_frame")
 
 
 @pytest.mark.slow
-def test_focusing_statistics_hands_the_picker_over(loaded_app):
+def test_focusing_the_other_pane_hands_the_picker_over(loaded_app):
     """The other direction, and the reason the plate is hidden rather than the
-    whole section: focus the Statistics pane and its group-painting plate is the
-    one on the rail."""
+    whole section: focus the Image Browser pane and its picker is the one on the
+    rail."""
     app = loaded_app
-    app._notebook.setCurrentByName("Statistics")
-    _split(app, "Statistics", "Plotting")
+    _park_on_segmentation(app)
+    app._notebook.setCurrentByName("Image Browser")
+    _split(app, "Image Browser", "Plotting")
 
-    assert _plate_shown(app, "_sidebar_stats_frame")
+    assert _plate_shown(app, "_sidebar_preview_frame")
     assert not _plate_shown(app, "_sidebar_main_frame")
     assert len(_shown_plates(app)) == 1
 
 
 @pytest.mark.slow
-def test_the_group_editor_still_shows_without_focusing_it(loaded_app):
-    """What the plate suppression must not undo. The Statistics *section* is on
-    screen unfocused — that is the whole point of the change this fixes — and
-    only its duplicate picker is withheld."""
+def test_the_unfocused_section_still_shows_without_focusing_it(loaded_app):
+    """What the plate suppression must not undo. The unfocused pane's *section*
+    is on screen — that is the whole point of the change this fixes — and only
+    its duplicate picker is withheld."""
     app = loaded_app
+    _park_on_segmentation(app)
     app._notebook.setCurrentByName("Plotting")
-    _split(app, "Plotting", "Statistics")
+    _split(app, "Plotting", "Image Browser")
 
-    stats_frame = _frame_of(app, "_sidebar_stats_frame")
-    assert stats_frame is not None and not stats_frame.isHidden(), (
-        "suppressing the duplicate picker must not take the group editor with it")
-    grp = app._ctx.widgets.get_or_none("_stats_grp_inner")
-    assert grp is not None and not grp.isHidden()
+    frame = _frame_of(app, "_sidebar_preview_frame")
+    assert frame is not None and not frame.isHidden(), (
+        "suppressing the duplicate picker must not take its section with it")
+    lbl = app._ctx.widgets.get_or_none("_preview_sel_lbl")
+    assert lbl is not None and not lbl.isHidden()
 
 
 @pytest.mark.slow
@@ -161,15 +179,16 @@ def test_a_suppressed_picker_comes_back_on_the_next_tab_change(loaded_app):
     from well_viewer.core.split_view import exit_split
 
     app = loaded_app
+    _park_on_segmentation(app)
     app._notebook.setCurrentByName("Plotting")
-    _split(app, "Plotting", "Statistics")
-    assert not _plate_shown(app, "_sidebar_stats_frame")
+    _split(app, "Plotting", "Image Browser")
+    assert not _plate_shown(app, "_sidebar_preview_frame")
 
     exit_split(app._ctx)
-    app._notebook.setCurrentByName("Statistics")
+    app._notebook.setCurrentByName("Image Browser")
 
-    assert _plate_shown(app, "_sidebar_stats_frame"), (
-        "the Statistics picker stayed suppressed after the split ended")
+    assert _plate_shown(app, "_sidebar_preview_frame"), (
+        "the Segmentation picker stayed suppressed after the split ended")
     assert len(_shown_plates(app)) == 1
 
 
@@ -177,8 +196,9 @@ def test_a_suppressed_picker_comes_back_on_the_next_tab_change(loaded_app):
 def test_a_single_pane_is_untouched(loaded_app):
     """No split, no suppression: one section, its own picker."""
     app = loaded_app
-    app._notebook.setCurrentByName("Statistics")
-    assert _plate_shown(app, "_sidebar_stats_frame")
+    _park_on_segmentation(app)
+    app._notebook.setCurrentByName("Image Browser")
+    assert _plate_shown(app, "_sidebar_preview_frame")
     assert len(_shown_plates(app)) == 1
 
     app._notebook.setCurrentByName("Plotting")
@@ -221,8 +241,9 @@ def _rail_geometry(app):
 def _split_and_show(app):
     app.resize(1600, 1000)
     app.show()          # geometry is only real once the layout has been shown
+    _park_on_segmentation(app)
     app._notebook.setCurrentByName("Plotting")
-    _split(app, "Plotting", "Statistics")
+    _split(app, "Plotting", "Image Browser")
 
 
 @pytest.mark.slow
@@ -232,7 +253,7 @@ def test_nothing_on_the_rail_moves_when_the_focus_does(loaded_app):
     Each section used to build its own picker, so the unfocused one collapsed by
     the picker's height and carried everything below it up the rail: measured on
     a 1600x1000 window, the plot-groups drawer sat at y=789 under Plotting and
-    y=456 under Statistics. Reserving the space instead is the same bug wearing
+    y=456 under the other. Reserving the space instead is the same bug wearing
     the other face — a 303px hole where the missing picker would be. With one
     slot above the sections, choosing whose picker shows changes no one's
     height, so this compares the entire rail rather than any one widget.
@@ -244,11 +265,11 @@ def test_nothing_on_the_rail_moves_when_the_focus_does(loaded_app):
 
     focus_split(app._ctx, "Plotting")
     plots = _rail_geometry(app)
-    focus_split(app._ctx, "Statistics")
-    stats = _rail_geometry(app)
+    focus_split(app._ctx, "Image Browser")
+    browser = _rail_geometry(app)
 
-    moved = {k: (plots[k], stats[k]) for k in plots.keys() & stats.keys()
-             if plots[k] != stats[k]}
+    moved = {k: (plots[k], browser[k]) for k in plots.keys() & browser.keys()
+             if plots[k] != browser[k]}
     assert not moved, (
         "the rail moves when the focus does: "
         + "; ".join(f"{k} {a} -> {b}" for k, (a, b) in sorted(moved.items())[:6]))
@@ -271,7 +292,7 @@ def test_the_rail_returns_to_where_it_started(loaded_app):
 
     focus_split(app._ctx, "Plotting")
     before = _rail_geometry(app)
-    focus_split(app._ctx, "Statistics")
+    focus_split(app._ctx, "Image Browser")
     focus_split(app._ctx, "Plotting")
     after = _rail_geometry(app)
 
@@ -294,12 +315,12 @@ def test_the_picker_keeps_its_size_whichever_pane_owns_it(loaded_app):
 
     focus_split(app._ctx, "Plotting")
     plots_h = _picker_height(app)
-    focus_split(app._ctx, "Statistics")
-    stats_h = _picker_height(app)
+    focus_split(app._ctx, "Image Browser")
+    browser_h = _picker_height(app)
 
-    assert plots_h and stats_h
-    assert plots_h == stats_h, (
-        f"the picker is {plots_h}px under one pane and {stats_h}px under the "
+    assert plots_h and browser_h
+    assert plots_h == browser_h, (
+        f"the picker is {plots_h}px under one pane and {browser_h}px under the "
         f"other")
 
 

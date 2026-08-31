@@ -1,9 +1,9 @@
 """One sizing/alignment rule for every :class:`~widgets.well_plate_selector.WellPlateSelector`.
 
-Ten places in the app build a plate map — Review's five sidebar pickers, the
-Sample-Definitions "New Replicate Set" dialog, the saved-selections compose
-popover, the Subset tool's well picker, and the status map inside every run
-dashboard (``widgets/plate_progress.py``). They differ in what the *host* does
+Ten places in the app build a plate map — Review's rail pickers, the Statistics
+comparison-group editor, the Sample-Definitions "New Replicate Set" dialog, the
+saved-selections compose popover, the Subset tool's well picker, and the status
+map inside every run dashboard (``widgets/plate_progress.py``). They differ in what the *host* does
 with the plate (which signals it wires, which wells it enables, whether it
 paints run states onto it), and they used to differ in how big the plate was
 allowed to be, because each one set its own caps and its own alignment. Three

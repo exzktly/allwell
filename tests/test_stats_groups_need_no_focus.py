@@ -1,0 +1,187 @@
+"""Defining a comparison group takes no click into the Statistics pane.
+
+Reported: in Split View with plots on the left and Statistics on the right, and
+no replicate sets defined on Home, ``+ Add`` made a group with no members and
+paid no attention to the wells picked on the plate. The user had to click the
+Statistics pane first — a gesture unrelated to the task, on a panel they were
+already looking at.
+
+The cause was a mode on a shared instrument. The rail carries exactly one well
+picker (``well_viewer/core/rail_plate.py``) and it follows the focused pane, so
+the plate on screen was the shared one, which selects wells to plot. The plate
+that paints wells into a comparison group belonged to the Statistics rail
+section and was hidden. Two plates, identical to look at, opposite meanings, and
+nothing on screen naming which was which — so ``+ Add`` created a group the
+visible selection could never reach.
+
+The fix is not a label. The comparison-group editor is part of the Statistics
+*page*: Statistics contributes no rail section and no rail plate at all, so the
+rail while a Statistics pane is on screen belongs unambiguously to the other
+pane, and the plate that fills a group is inside the pane the user is working
+in, beside the cards that name the group it fills.
+
+Slow lane on purpose: this is about two real panes, the real rail and the real
+activation dispatch, and every cheaper seam sits underneath what was broken.
+"""
+
+from __future__ import annotations
+
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("MPLBACKEND", "Agg")
+
+import pytest
+
+pytest.importorskip("PySide6")
+
+
+def _split_plots_left_statistics_right(app):
+    """The reported arrangement: Plots focused, Statistics beside it."""
+    from well_viewer.core.split_view import enter_split
+    app._notebook.setCurrentByName("Statistics")     # build the page
+    app._notebook.setCurrentByName("Plotting")
+    enter_split(app._ctx, "Plotting", "Statistics")
+    assert "Statistics" in app._visible_centre_tabs()
+    return app._ctx
+
+
+def _rail_plates(ctx):
+    """Every well picker mounted in the shared rail slot, hidden or not."""
+    from widgets.well_plate_selector import WellPlateSelector
+    slot = ctx.widgets.get_or_none("_sidebar_plate_slot")
+    return [] if slot is None else list(slot.findChildren(WellPlateSelector))
+
+
+@pytest.mark.slow
+def test_the_group_plate_is_on_screen_with_the_other_pane_focused(loaded_app):
+    """The reported symptom, stated as the thing the user could not see.
+
+    ``isHidden()``, not ``isVisible()``: the test window is never shown, so
+    ``isVisible()`` is False for everything in it and asserting it would pass on
+    any implementation. The flag the old rail mount wrote — ``setVisible(False)``
+    on every plate that is not the focused pane's — is the state under test.
+    """
+    app = loaded_app
+    ctx = _split_plots_left_statistics_right(app)
+
+    plate = ctx.widgets.get_or_none("_stats_map_plate")
+    assert plate is not None, "the Statistics comparison-group plate was never built"
+    assert not plate.isHidden(), (
+        "the plate that paints wells into a comparison group was hidden while "
+        "its pane was on screen — the user had to click the pane to reveal it")
+
+
+@pytest.mark.slow
+def test_the_group_plate_is_not_on_the_rail(loaded_app):
+    """Where it is, not only that it is somewhere.
+
+    Being on screen is not enough: mounted in the rail slot it would be on
+    screen only for as long as Statistics held the focus, which is the bug.
+    """
+    app = loaded_app
+    ctx = _split_plots_left_statistics_right(app)
+
+    plate = ctx.widgets.get("_stats_map_plate")
+    assert plate not in _rail_plates(ctx), (
+        "the comparison-group plate is mounted in the shared rail slot, so its "
+        "visibility is still a function of which pane has the focus")
+
+
+@pytest.mark.slow
+def test_painting_a_well_fills_the_group_without_a_focus_change(loaded_app):
+    """The whole reported gesture, in one pass, with the focus never moving.
+
+    Asserts the well that lands in the group, not merely that the group stopped
+    being empty: "not empty" is satisfied by any implementation that puts
+    *something* there, and the defect was a group that ignored the wells the
+    user had picked.
+    """
+    from well_viewer.features.stats.controller import stats_grp_add
+
+    app = loaded_app
+    ctx = _split_plots_left_statistics_right(app)
+    focused_before = ctx.runtime.split.focused
+
+    ctx.state.stats.clear_groups()
+    stats_grp_add(ctx)
+    well = next(iter(ctx.state.dataset.well_paths))
+
+    plate = ctx.widgets.get("_stats_map_plate")
+    # The reachability assertion is part of the gesture, not decoration. Driven
+    # programmatically the plate's wiring works whether or not it is on screen —
+    # measured against the pre-fix tree the rest of this test passes — so
+    # without this line the test would confirm a control the user cannot touch.
+    assert not plate.isHidden(), (
+        "the map the group is painted on is off screen, so this gesture is not "
+        "one the user could perform")
+    plate.setSelectedWellIds([well])
+    plate.selectionDragFinished.emit()
+
+    group = ctx.state.stats.active_group()
+    assert group is not None and well in group.wells, (
+        f"{well} was painted onto the comparison-group map and did not reach "
+        f"the active group (it holds {sorted(group.wells) if group else None})")
+    assert ctx.runtime.split.focused == focused_before, (
+        "defining a group moved the focus — the click into the pane this "
+        "change exists to remove")
+
+
+@pytest.mark.slow
+def test_statistics_puts_no_picker_on_the_rail(loaded_app):
+    """The root cause, removed rather than arbitrated.
+
+    Every plate still on the rail answers "which wells am I looking at" — the
+    shared one selects wells to plot, Segmentation's picks the well to preview,
+    the Image Table's picks the wells to tile. The comparison-group plate asked
+    a different question in the same slot, and that is the mode this file is
+    about. It is gone from the slot entirely, so there is nothing to arbitrate.
+    """
+    app = loaded_app
+    ctx = _split_plots_left_statistics_right(app)
+
+    from well_viewer.core.rail_plate import section_of
+    stats_frame = ctx.widgets.get_or_none("_sidebar_stats_frame")
+    assert stats_frame is None, (
+        "Statistics still owns a rail section; its editor is meant to live on "
+        "its own page")
+    shown = [p for p in _rail_plates(ctx) if not p.isHidden()]
+    assert len(shown) == 1, (
+        f"{len(shown)} well pickers on the rail; expected the plot selector "
+        f"alone (sections: {[section_of(p) for p in shown]})")
+    assert shown[0] is ctx.widgets.get("_sidebar_plate"), (
+        "the picker on the rail is not the shared plot selector")
+
+
+@pytest.mark.slow
+def test_focusing_statistics_leaves_the_rail_to_the_other_pane(loaded_app):
+    """The other direction. With no section of its own, Statistics taking the
+    focus must not blank the rail: the picker belongs to whatever else is on
+    screen, and in this split that is the plots."""
+    from well_viewer.core.split_view import focus_split
+
+    app = loaded_app
+    ctx = _split_plots_left_statistics_right(app)
+    focus_split(ctx, "Statistics")
+
+    shown = [p for p in _rail_plates(ctx) if not p.isHidden()]
+    assert len(shown) == 1 and shown[0] is ctx.widgets.get("_sidebar_plate"), (
+        "focusing the Statistics pane took the plot selector off the rail")
+    assert not ctx.widgets.get("_stats_map_plate").isHidden(), (
+        "the comparison-group plate went away when its pane took the focus")
+
+
+@pytest.mark.slow
+def test_a_single_statistics_pane_carries_its_own_editor(loaded_app):
+    """Not a Split-View feature. Outside a split the editor is on the page for
+    the same reason, and the rail is left to the pages that use it."""
+    app = loaded_app
+    app._notebook.setCurrentByName("Statistics")
+    ctx = app._ctx
+
+    plate = ctx.widgets.get_or_none("_stats_map_plate")
+    assert plate is not None and not plate.isHidden()
+    assert plate not in _rail_plates(ctx)
+    assert [p for p in _rail_plates(ctx) if not p.isHidden()] == [], (
+        "a rail picker is on screen on the Statistics page, where no rail "
+        "section is shown — it belongs to a page the user is not looking at")

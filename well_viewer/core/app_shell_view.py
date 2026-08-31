@@ -513,12 +513,13 @@ def build_ui(win) -> None:
     win._sidebar_image_table_frame = win._ctx.widgets.register(
         "_sidebar_image_table_frame", QWidget())
     win._sidebar_sample_frame = win._ctx.widgets.register("_sidebar_sample_frame", QWidget())
-    win._sidebar_stats_frame = win._ctx.widgets.register("_sidebar_stats_frame", QWidget())
     win._sidebar_cell_browser_frame = win._ctx.widgets.register(
         "_sidebar_cell_browser_frame", QWidget())
+    # Statistics is deliberately absent: its comparison-group editor is part of
+    # the Statistics page, not of the rail, so the tab contributes no section
+    # and no well picker here.
     for w in (win._sidebar_preview_frame, win._sidebar_image_table_frame,
-              win._sidebar_sample_frame,
-              win._sidebar_stats_frame):
+              win._sidebar_sample_frame):
         QVBoxLayout(w).setContentsMargins(0, 0, 0, 0)
         sidebar_layout.addWidget(w, 1)
         w.hide()

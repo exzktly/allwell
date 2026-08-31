@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QLabel, QTextEdit,
+    QComboBox, QHBoxLayout, QLabel, QTextEdit,
     QVBoxLayout, QWidget,
 )
 
 from well_viewer.core.ui_helpers import (
-    btn_primary, btn_secondary, build_hline_separator, build_section_header,
+    btn_primary, btn_secondary, build_section_header,
 )
 from widgets.labeled_combo import LabeledComboBox
 from widgets.page_body import build_page_body
@@ -35,59 +36,109 @@ def build_stats_tab(ctx, parent: QWidget) -> None:
     ctx.state.stats.groups = []
     ctx.state.stats.active_grp = -1
     build_stats_results_panel(ctx, parent)
+    # The comparison-group editor belongs to this page, above its results and
+    # below the control band. It is built after the results panel because that
+    # is what lays the page body out, and inserted at the top of that body
+    # rather than appended — the order on screen is band, groups, results.
+    host = ctx.widgets.register("_stats_group_editor", QWidget(parent))
+    build_stats_group_editor(ctx, host)
+    ctx.widgets.get("_stats_page_body").layout().insertWidget(0, host)
 
 
 def build_stats_group_editor(ctx, parent: QWidget) -> None:
-    """Build the left-hand statistics group editor.
+    """Build the comparison-group editor — the plate that paints wells into a
+    group, and the group cards beside it.
 
-    A8 teardown: takes ``ctx`` — registers its widget handles through
-    ``ctx.widgets`` (which stamp the legacy ``app._stats_*`` names for the
-    controllers) and drives the group-editor controllers ctx-natively.
+    This is part of the Statistics **page**, and deliberately not of the left
+    rail. The rail carries exactly one well picker (``core/rail_plate.py``),
+    and every other plate mounted there answers the same question: which wells
+    am I looking at. The shared picker selects wells to plot, Segmentation's
+    picks the one well to preview, the Image Table's picks the wells to tile.
+    This plate answers a different question — a click on it writes a well into
+    a *named comparison group* — and two verbs competing for one slot is a
+    mode.
+
+    A mode on a shared instrument is invisible, and in Split View it was also
+    unreachable. The slot showed whichever plate belonged to the focused pane,
+    so with Plots beside Statistics the plate on screen selected wells to plot
+    while the ``+ Add`` button below it created comparison groups those wells
+    never reached: the group came out empty, and nothing on screen said why.
+    The only way to reach the plate that fills a group was to click into the
+    Statistics pane first — a gesture unrelated to the task, and one the user
+    had no reason to think was needed on a panel they were already looking at.
+
+    Keeping the editor with the tab it serves removes the mode rather than
+    labelling it. Statistics owns no rail section at all, so while a Statistics
+    pane is on screen the rail belongs unambiguously to the other pane, and
+    painting a group needs no focus change: the plate is inside the pane the
+    user is already working in, beside the cards that name the group it paints
+    into.
     """
+    import theme
     from well_viewer.core.ui_helpers import make_scrollable_canvas
+    from well_viewer.core.ui_helpers import well_plate_tooltip_provider
+    from widgets.plate_geometry import PLATE_MAX_HEIGHT, apply_plate_geometry
     from widgets.well_plate_selector import WellPlateSelector
 
-    layout = parent.layout()
-    if layout is None:
-        layout = QVBoxLayout(parent)
-        parent.setLayout(layout)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(0)
+    row = parent.layout()
+    if row is None:
+        row = QHBoxLayout(parent)
+        parent.setLayout(row)
+    row.setContentsMargins(0, 0, 0, theme.Spacing.md)
+    row.setSpacing(theme.Spacing.lg)
 
-    # Plate map first — nothing should appear above the well picker.
+    # ── The plate, on the left ──────────────────────────────────────────────
     plate = WellPlateSelector(parent)
     plate.setDragSelectEnabled(True)
     plate.setRowColumnSelectable(True)
     plate.setEnabledWells([])
-    from well_viewer.core.ui_helpers import well_plate_tooltip_provider
     plate.setWellTooltipProvider(well_plate_tooltip_provider(ctx))
-    # The app-wide plate geometry (widgets/plate_geometry.py): same caps, same
-    # cell scale and same centring as every other plate map in the app.
-    from well_viewer.core.rail_plate import mount_rail_plate
-    from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
-    apply_plate_geometry(plate, role="rail")
-    mount_rail_plate(ctx, parent, plate, alignment=PLATE_ALIGNMENT,
-                     fallback_layout=layout)
+    # ``editor``, not ``rail``: this is one control on a page rather than the
+    # rail picker, so it takes the app-wide size caps (widgets/plate_geometry.py)
+    # like every other in-page plate, and hides the built-in All / Invert /
+    # Clear row — clearing a *comparison group* is the group card's ✕, and a
+    # second Clear meaning something else beside it is the confusion this whole
+    # change is about.
+    apply_plate_geometry(plate, role="editor")
+    row.addWidget(plate, 0, Qt.AlignTop)
     ctx.widgets.register("_stats_map_plate", plate)
 
-    layout.addWidget(build_hline_separator(parent))
+    # ── The groups, on the right ────────────────────────────────────────────
+    side = QWidget(parent)
+    col = QVBoxLayout(side)
+    col.setContentsMargins(0, 0, 0, 0)
+    col.setSpacing(0)
+
     hdr = build_section_header(
-        parent,
+        side,
         "COMPARISON GROUPS",
+        hint="Select a group card, then drag wells on the map to assign them.",
         buttons=(
-            btn_secondary(parent, "Clear All", partial(stats_grp_clear_all, ctx)),
-            btn_primary(parent, "+ Add", partial(stats_grp_add, ctx)),
+            btn_secondary(side, "Clear All", partial(stats_grp_clear_all, ctx)),
+            btn_primary(side, "+ Add", partial(stats_grp_add, ctx)),
         ),
     )
-    layout.addWidget(hdr)
+    col.addWidget(hdr)
 
     # Pull the comparison groups straight from the shared Sample-Definition
-    # sets (S1) — own full-width row so the narrow sidebar doesn't truncate it.
+    # sets (S1) — own full-width row so a narrow pane does not truncate it.
     from_defs_btn = btn_secondary(
-        parent, "↻ Load groups from Home → Replicates",
+        side, "↻ Load groups from Home → Replicates",
         partial(stats_resync_from_sample_defs, ctx),
     )
-    layout.addWidget(from_defs_btn)
+    col.addWidget(from_defs_btn)
+
+    sa, inner = make_scrollable_canvas(side)
+    # Bounded by the plate it sits beside, so however many groups are defined
+    # the editor stays a strip at the top of the page and the results below it
+    # keep the rest. Derived from the plate cap rather than chosen, so the two
+    # columns cannot drift apart when that cap moves.
+    sa.setMaximumHeight(PLATE_MAX_HEIGHT)
+    col.addWidget(sa, 1)
+    ctx.widgets.register("_stats_grp_canvas", sa)
+    ctx.widgets.register("_stats_grp_inner", inner)
+
+    row.addWidget(side, 1)
 
     ctx.state.stats.drag_adding = True
     ctx.state.stats.drag_visited = set()
@@ -117,21 +168,6 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     # selectionDragFinished fires once per click *and* once at the end of a drag.
     plate.selectionDragFinished.connect(_commit_plate_to_group)
 
-    layout.addWidget(build_hline_separator(parent))
-
-    sa, inner = make_scrollable_canvas(parent)
-    layout.addWidget(sa, 1)
-    ctx.widgets.register("_stats_grp_canvas", sa)
-    ctx.widgets.register("_stats_grp_inner", inner)
-
-    help_lbl = QLabel(
-        "Drag wells to assign them to a group. Select a group card first.",
-        parent,
-    )
-    help_lbl.setObjectName("Muted")
-    help_lbl.setWordWrap(True)
-    layout.addWidget(help_lbl)
-
     stats_refresh_map(ctx)
     stats_refresh_group_list(ctx)
 
@@ -156,6 +192,9 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     band, body = build_page_body(parent, content_margins=(12, 12, 12))
     layout = body.layout()
     layout.setSpacing(0)
+    # ``build_stats_tab`` inserts the comparison-group editor at the top of this
+    # host once the rest of the page exists; it needs the handle to do so.
+    reg.register("_stats_page_body", body)
     stats_ctrl = reg.register("_stats_ctrl", band)
 
     channel_cb = reg.register("_stats_channel_cb", QComboBox())
@@ -266,7 +305,7 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     result_text.setLineWrapMode(QTextEdit.WidgetWidth)
     # Hint in the otherwise-blank results panel before the first run.
     result_text.setPlaceholderText(
-        "Select two comparison groups (left panel), choose a test, then click "
+        "Define two comparison groups above, choose a test, then click "
         "Run test to see results here."
     )
     rl.addWidget(result_text)
@@ -288,11 +327,13 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
         if n == 1:
             return EmptyReason(
                 "One comparison group so far.",
-                "Add a second group to run a test — + Add in the left panel.",
+                "Add a second group to run a test — + Add under Comparison "
+                "groups above.",
             )
         return EmptyReason(
             "No comparison groups yet.",
-            "Click + Add in the left panel, then drag wells onto a group card.",
+            "Click + Add under Comparison groups above, select the card it "
+            "makes, then drag wells on the map beside it.",
         )
 
     layout.addWidget(wrap_with_empty_state(

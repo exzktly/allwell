@@ -1,24 +1,30 @@
 """Both panes of a Split View get their sidebar section, not just the focused one.
 
-Reported: with Plots and Statistics side by side, the Statistics group-definition
-editor — which lives in the left sidebar under the well picker — did not appear
-until the user clicked into the Statistics pane. The click bought nothing: they
-were already looking at the tab the panel belongs to, and the panel is how you
-define the groups the tab compares.
+Reported against Plots beside Statistics: a per-tab sidebar section did not
+appear until the user clicked into its pane. The click bought nothing — they
+were already looking at the tab the panel belongs to.
 
 ``on_tab_change`` hides every per-tab sidebar frame and then runs ``on_activate``
 for the tab ``current_centre_tab`` reports. In Split View that resolver returns
 the *focused* leaf, so the other pane's frame was hidden by the first half and
 never shown by the second — visible pane, invisible controls.
 
+The pair here is Plots beside Image Browser, parked on Segmentation. Statistics
+no longer has a rail section to be hidden: its comparison-group editor is part
+of the Statistics page, which is what
+``tests/test_stats_groups_need_no_focus.py`` covers. The rule this file states
+outlives that change — three sidebar sections are still shown or hidden per
+visible pane — and a rule tested only through the one tab that stopped
+exercising it is a rule with no test at all.
+
 Slow lane on purpose: this is about two real panes, a real sidebar and the real
 activation dispatch, and every cheaper seam is underneath the thing that was
 broken.
 
 **This file asserts that the sections are shown; it does not assert what is in
-them, and that gap shipped a regression.** Four sidebar sections build their own
-well picker, so showing two of them put two pickers on the rail — which every
-assertion here passes happily, because a visibility flag is not a picker.
+them, and that gap shipped a regression.** Three sidebar sections build their
+own well picker, so showing two of them put two pickers on the rail — which
+every assertion here passes happily, because a visibility flag is not a picker.
 ``tests/test_split_sidebar_one_well_picker.py`` counts the pickers. Read the two
 together: this one says the section is on screen, that one says the rail is not
 duplicated.
@@ -42,6 +48,13 @@ def _split(app, tab_a, tab_b):
     return app._visible_centre_tabs()
 
 
+def _park_on_segmentation(app):
+    """Segmentation is a leaf inside the Image Browser container, and it is the
+    leaf that owns ``_sidebar_preview_frame``."""
+    from well_viewer.features.image_browser.controller import show_image_browser_subtab
+    assert show_image_browser_subtab(app._ctx, "Segmentation")
+
+
 def _visible(app, name) -> bool:
     """Whether *name*'s own show/hide flag is set.
 
@@ -55,17 +68,18 @@ def _visible(app, name) -> bool:
 
 
 @pytest.mark.slow
-def test_the_statistics_editor_shows_without_clicking_its_pane(loaded_app):
+def test_the_other_pane_s_section_shows_without_clicking_it(loaded_app):
     """The reported case, with Plots focused — the state you land in when you
     open the split from the Plots side."""
     app = loaded_app
+    _park_on_segmentation(app)
     app._notebook.setCurrentByName("Plotting")
-    tabs = _split(app, "Plotting", "Statistics")
-    assert "Statistics" in tabs
+    tabs = _split(app, "Plotting", "Image Browser")
+    assert "Segmentation" in tabs
 
-    assert _visible(app, "_sidebar_stats_frame"), (
-        "the Statistics group editor stayed hidden while its pane was on "
-        "screen — the user had to click the pane to reveal it")
+    assert _visible(app, "_sidebar_preview_frame"), (
+        "the Segmentation controls stayed hidden while their pane was on "
+        "screen — the user had to click the pane to reveal them")
 
 
 @pytest.mark.slow
@@ -73,10 +87,11 @@ def test_the_focused_pane_keeps_its_own_section(loaded_app):
     """The other half of the rule. Showing the second pane's section must not
     cost the focused pane its own."""
     app = loaded_app
+    _park_on_segmentation(app)
     app._notebook.setCurrentByName("Plotting")
-    _split(app, "Plotting", "Statistics")
+    _split(app, "Plotting", "Image Browser")
     assert _visible(app, "_sidebar_main_frame")
-    assert _visible(app, "_sidebar_stats_frame")
+    assert _visible(app, "_sidebar_preview_frame")
 
 
 @pytest.mark.slow
@@ -84,29 +99,31 @@ def test_it_holds_with_the_panes_the_other_way_round(loaded_app):
     """Focus lands on pane A, so a rule written only for "the second one" would
     pass one ordering and fail the other."""
     app = loaded_app
-    app._notebook.setCurrentByName("Statistics")
-    _split(app, "Statistics", "Plotting")
-    assert _visible(app, "_sidebar_stats_frame")
+    _park_on_segmentation(app)
+    app._notebook.setCurrentByName("Image Browser")
+    _split(app, "Image Browser", "Plotting")
+    assert _visible(app, "_sidebar_preview_frame")
     assert _visible(app, "_sidebar_main_frame")
 
 
 @pytest.mark.slow
 def test_leaving_split_puts_the_sidebar_back_to_one_section(loaded_app):
     """The frames are hidden by ``on_tab_change`` and shown per visible pane, so
-    exiting has to leave exactly the single-pane sidebar behind — a Statistics
-    editor still showing over the Plots tab would be the mirror bug."""
+    exiting has to leave exactly the single-pane sidebar behind — a Segmentation
+    section still showing over the Plots tab would be the mirror bug."""
     from well_viewer.core.split_view import exit_split
 
     app = loaded_app
+    _park_on_segmentation(app)
     app._notebook.setCurrentByName("Plotting")
-    _split(app, "Plotting", "Statistics")
-    assert _visible(app, "_sidebar_stats_frame")
+    _split(app, "Plotting", "Image Browser")
+    assert _visible(app, "_sidebar_preview_frame")
 
     exit_split(app._ctx)
     app._notebook.setCurrentByName("Plotting")
 
-    assert not _visible(app, "_sidebar_stats_frame"), (
-        "the Statistics section outlived the pane it belongs to")
+    assert not _visible(app, "_sidebar_preview_frame"), (
+        "the Segmentation section outlived the pane it belongs to")
     assert _visible(app, "_sidebar_main_frame")
 
 

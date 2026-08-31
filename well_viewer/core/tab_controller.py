@@ -48,7 +48,6 @@ SIDEBAR_SECTION_FRAMES = (
     "_sidebar_preview_frame",
     "_sidebar_image_table_frame",
     "_sidebar_sample_frame",
-    "_sidebar_stats_frame",
     "_sidebar_cell_browser_frame",
 )
 
@@ -186,22 +185,27 @@ def on_tab_change(ctx, _e=None) -> None:
         ctx.coordinator.refresh_sidebar_map()
         redraw_app(ctx)
 
-    # **One well picker on screen, and it belongs to the focused pane.** Four
+    # **One well picker on screen, and it belongs to the focused pane.** Three
     # sidebar sections offer a ``WellPlateSelector`` — the shared one for
-    # `_sidebar_main_frame`, plus Statistics, Segmentation and Image Table — and
-    # they were mutually exclusive for as long as only one section showed at a
-    # time. Showing every visible pane's section (above) put two of them on the
-    # rail at once, stacked and identical-looking while meaning different things:
-    # the Statistics plate paints wells into comparison groups, the shared one
-    # selects wells to plot. Two pickers with different consequences and no way
-    # to tell them apart is worse than the click this change removed.
+    # `_sidebar_main_frame`, plus Segmentation and Image Table — and they were
+    # mutually exclusive for as long as only one section showed at a time.
+    # Showing every visible pane's section (above) puts two of them on the rail
+    # at once, stacked and identical-looking while selecting for different
+    # pages. Two pickers with no way to tell them apart is worse than the click
+    # this arrangement removed.
     #
     # So the sections all stay and the picker follows the focus — the rule the
     # heat-map drag mode already uses a few lines above: frames follow
     # visibility, interaction follows focus, and a plate is interaction. All
-    # four plates live in one slot above the sections (``core/rail_plate.py``),
+    # three plates live in one slot above the sections (``core/rail_plate.py``),
     # so choosing whose picker shows is a visibility decision and not a change
     # of anyone's height: the rail does not move when the focus does.
+    #
+    # Every one of them answers the same question — which wells am I looking at.
+    # Statistics has no section here for that reason: a click on its plate
+    # writes a well into a named comparison group, and a slot showing one plate
+    # at a time makes two verbs into a mode nothing on screen states. Its editor
+    # is on its own page (``features/stats/tab_view``).
     #
     # Every plate is set, not only the ones whose section is on screen. A plate
     # in the shared slot is not hidden by its section being hidden — that is

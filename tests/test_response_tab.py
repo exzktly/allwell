@@ -999,3 +999,36 @@ def test_a_linear_axis_says_nothing(tab):
 
     captions = " | ".join(t.get_text() for t in tab.ax.texts)
     assert "logarithmic" not in captions, captions
+
+
+def test_the_activation_hook_actually_repaints(tab, monkeypatch):
+    """Its sibling above drives ``on_selection_changed``; nothing drove this one.
+
+    The test that covers it asserts ``descriptor.on_activate is not None`` — a
+    property, satisfied by an ``on_activate`` that shows the sidebar and never
+    repaints, which is precisely the pre-fix state the hook was added for.
+    Confirmed by mutation: removing ``_redraw_response(ctx)`` from
+    ``_activate_response`` left all 50 tests in this file green.
+
+    The hook exists because a leaf built while the plate was empty and shown
+    again after a dataset loaded drew nothing, with no control on the page out
+    of place to suggest why.
+    """
+    from PySide6.QtWidgets import QWidget
+
+    from well_viewer.features.registry import build_feature_registry
+
+    # The two pieces of chrome the hook touches on its way to the redraw. Given
+    # rather than patched over, so the hook runs as written — patching them out
+    # would step past the very sequence under test.
+    _frame = QWidget()
+    tab.ctx.widgets.get = lambda name, _f=_frame: _f
+    from types import SimpleNamespace as _NS
+    tab.ctx.coordinator = _NS(refresh_sidebar_map=lambda *a, **k: None)
+
+    drawn = []
+    monkeypatch.setattr(rctl, "redraw_response", lambda ctx: drawn.append(ctx))
+
+    build_feature_registry().get("Response Curves").on_activate(tab.ctx)
+
+    assert drawn == [tab.ctx], "activating the tab repainted nothing"

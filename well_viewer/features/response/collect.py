@@ -90,6 +90,12 @@ class ResponseData:
     #: as zero, because an error bar of zero length reads as a measurement of
     #: perfect agreement.
     undefined_spread: int = 0
+
+    #: Points with no error bar because the member has one replicate — a
+    #: separate count from ``undefined_spread``, which is the normalisation
+    #: losing a spread the member did have. Two causes, two fixes, so two
+    #: numbers rather than one sentence guessing between them.
+    solo_spread: int = 0
     #: Set when the log x axis was chosen from the doses rather than asked for.
     #: The Properties panel's ``x_log`` checkbox is bound to the stored
     #: preference, and an unset preference reads as *off* — so on every dose
@@ -154,6 +160,9 @@ def omission_caption(data: ResponseData) -> str:
                 if len(data.control_gaps) > 3 else "")
         parts.append(f"{len(data.control_gaps)} without a control "
                      f"({names}{more})")
+    if data.solo_spread:
+        parts.append(f"{data.solo_spread} point(s) with no error bar: "
+                     f"a single replicate has no spread")
     if data.undefined_spread:
         parts.append(f"{data.undefined_spread} point(s) with no error bar: "
                      f"the control had no spread to propagate")
@@ -331,7 +340,20 @@ def collect_response(ctx, variable_id: str, timepoints) -> ResponseData:
                 data.control_gaps.append((rset.name, float(target_t)))
                 continue
             if not _is_number(err):
-                data.undefined_spread += 1
+                # Counted by *cause*, because the two have different fixes and
+                # the caption used to name only one of them — the one that
+                # cannot fire. A member with a single replicate has no spread to
+                # begin with (``compute_rep_stats`` returns NaN), and with fold
+                # change off the identity normaliser passes that straight
+                # through; the fix is another replicate. A member with several
+                # wells that still comes back without a spread lost it in
+                # normalisation, and the fix is the control. The old sentence
+                # blamed the control in both cases, so a plate with no control
+                # at all was told its control had no spread to propagate.
+                if n <= 1:
+                    data.solo_spread += 1
+                else:
+                    data.undefined_spread += 1
             by_timepoint[float(target_t)].append(ResponsePoint(
                 member=rset.name, x=x, y=float(mean),
                 err=float(err) if _is_number(err) else float("nan"),

@@ -661,3 +661,85 @@ def test_the_caption_names_which_mistake_each_omission_was():
 
     assert "1 omitted: no Dose (grpA)" in caption
     assert "2 omitted: wells disagree about Dose (grpB, grpC)" in caption
+
+
+# ── the shortfall counters, driven by the collector ─────────────────────────
+#
+# These were written by code no test reached: replacing either the append or the
+# increment with `pass` left 131 response tests green. The caption tests build
+# ``ResponseData`` by hand, which exercises the *formatter* and never the
+# collector that fills it — §7.8's "ResponseData(placed=3) built by hand", the
+# exact shape this repo has already been bitten by once.
+
+def test_a_single_replicate_member_is_counted_as_having_no_spread(stub_stats, monkeypatch):
+    """A member with one well has no spread to draw, and says which cause.
+
+    The caption used to blame the control for every missing error bar — "the
+    control had no spread to propagate" — on a plate that need have no control
+    at all. ``compute_rep_stats`` returns NaN for a lone replicate and, with
+    fold change off, the identity normaliser passes it straight through. Two
+    causes with two different fixes (another replicate, or a control), so two
+    counts rather than one sentence guessing between them.
+    """
+    def _stats(ctx, rset, target_t, threshold, use_sem):
+        return (10.0, float("nan"), 0.5, 0.1)      # a mean, no spread
+
+    import well_viewer.domain.stats_compute as sc
+    monkeypatch.setattr(sc, "compute_rep_stats", _stats)
+
+    ctx = _ctx(wells=["A01"],
+               variable=_dose(("1", 1.0)),
+               assignments={"dose": {"A01": "d0"}},
+               selections=_groups(("solo", ["A01"])))
+
+    data = rc.collect_response(ctx, "dose", [24.0])
+
+    assert data.solo_spread == 1, "the lone replicate was not counted"
+    assert data.undefined_spread == 0, "it was blamed on a control that does not exist"
+    caption = rc.omission_caption(data)
+    assert "a single replicate has no spread" in caption
+    assert "control" not in caption
+
+
+def test_a_point_normalisation_blanked_is_named_not_dropped(stub_stats, monkeypatch):
+    """A curve that simply stops at its third dose looks like a plate nobody
+    dosed higher. ``control_gaps`` is what stops that being silent — and nothing
+    drove the collector into filling it.
+
+    Reaching it takes fold change **on** with a control that resolves to
+    nothing: the member is measured, so it survives the raw stage, and the
+    normaliser is what blanks it. My first attempt at this test stubbed the raw
+    stats to ``None`` instead, which blanks the point one stage earlier — before
+    ``raw.append`` — so ``normalise`` saw an empty list and the counter was never
+    reached. It passed, and a mutation deleting the append left it passing.
+    """
+    ctx = _ctx(wells=["A01", "A02"],
+               variable=_dose(("1", 1.0), ("10", 10.0)),
+               assignments={"dose": {"A01": "d0", "A02": "d1"}},
+               selections=_groups(("lo", ["A01"]), ("hi", ["A02"])))
+    ctx.state.plot.fc_vs_control_on = True
+    from well_viewer.domain.control_ref import ControlRef
+
+    ctx.state.plot.fc_control = ControlRef("set", "a-group-that-does-not-exist")
+
+    data = rc.collect_response(ctx, "dose", [24.0])
+
+    assert data.control_gaps, (
+        "every point was blanked by an unresolvable control and none was named"
+    )
+    assert {m for m, _t in data.control_gaps} == {"lo", "hi"}
+    assert "without a control" in rc.omission_caption(data)
+
+
+def test_a_measured_plate_reports_no_shortfall_at_all(stub_stats):
+    """The half that makes the two above mean something: a collector that
+    incremented unconditionally would satisfy them and be wrong."""
+    ctx = _ctx(wells=["A01", "A02"],
+               variable=_dose(("1", 1.0), ("10", 10.0)),
+               assignments={"dose": {"A01": "d0", "A02": "d1"}},
+               selections=_groups(("lo", ["A01"]), ("hi", ["A02"])))
+
+    data = rc.collect_response(ctx, "dose", [24.0])
+
+    assert (data.solo_spread, data.undefined_spread, data.control_gaps) == (0, 0, [])
+    assert rc.omission_caption(data) == ""

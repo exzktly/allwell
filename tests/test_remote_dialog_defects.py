@@ -699,3 +699,55 @@ def test_every_probe_call_site_reads_the_return_before_taking_its_control():
         "these call probe_ssh_async and throw the answer away, so a refused "
         f"probe leaves their control mid-flight: lines {unchecked} "
         "(relative to the module source)")
+
+
+# ── the bootstrap path is asked for, never derived from this file's location ──
+#
+# `_spawn` located `scripts/_bootstrap_lib.py` by treating its own module's
+# directory as the repository root. That held only while this file sat at the
+# top level: moving it into `analyze/` made the expression answer `analyze/`,
+# and the path it built has never existed. Nothing in the suite looked at it,
+# because every test of this dialog replaces `_spawn` outright.
+#
+# So the assertion is at the boundary (CLAUDE.md §7.4 #1): not what the
+# expression computes, but what `_spawn` actually hands to the thing that turns
+# it into a command line.
+
+def test_the_bootstrap_path_spawn_builds_is_a_file_that_exists(qtbot, monkeypatch):
+    import analyze.remote_dialog as ard
+    from services import input_resolution_service as irs
+
+    handed: list = []
+
+    class _FakeProc:
+        stdout = None
+        pid = 1
+
+        def poll(self):
+            return 0
+
+    def _record(bootstrap, alias):
+        handed.append(bootstrap)
+        return ["true"]
+
+    # `__init__` arms `_spawn` on a zero-delay timer, so it stays unfired while
+    # nothing pumps the event loop; the call below is the one that runs.
+    monkeypatch.setattr(irs, "build_bootstrap_cmd", _record)
+    monkeypatch.setattr(ard.subprocess, "Popen", lambda *a, **k: _FakeProc())
+    monkeypatch.setattr(ard.BootstrapLogDialog, "_mark_finished",
+                        lambda _self, _code: None)
+
+    dlg = ard.BootstrapLogDialog(None, alias="hpc")
+    qtbot.addWidget(dlg)
+    dlg._spawn()
+
+    assert handed, (
+        "_spawn never reached build_bootstrap_cmd — it bailed at the "
+        "'bootstrap script not found' guard, which is exactly the symptom a "
+        "wrong repository root produces")
+    bootstrap = handed[0]
+    assert bootstrap.is_file(), (
+        f"_spawn built a bootstrap path that does not exist: {bootstrap}. "
+        "The repository root must come from services.remote_runner.repo_root, "
+        "not from this module's own __file__, which moves with the file.")
+    assert bootstrap.name == "_bootstrap_lib.py"

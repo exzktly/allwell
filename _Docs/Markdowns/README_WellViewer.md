@@ -1435,50 +1435,77 @@ by hand to plot them apart. With them you say "Cell line: HeLa, U2OS" and
 "Dose: 0, 0.1, 0.3, 1, 3, 10" once, and the plots can group, colour and split by
 either.
 
-On **Home → Variables**, **+ Variable** adds one. Give it a name, pick its
-type, and type its values into the box at the bottom — commas work, so
-`0, 0.1, 0.3, 1, 3, 10` adds six in one go. Double-click a value to correct it:
-that is a rename, so every well already holding it follows, and fixing `1uM` to
-`1 µM` after you have filled the plate costs nothing. The arrows beside the list
-set the order, which is the order a fill walks and the direction a dose axis
-runs, so it is worth getting right.
+On **Home → Variables** the page is a plate with the definition beside it. The
+strip across the top always says which variable the plate is showing, and which
+one is drawn on top of it, because one click in the list on the left decides four
+things at once: what the form below it is editing, what the value buttons assign,
+what colour the wells are, and what a fill rewrites. Under that strip is one line
+that says what just happened — what a fill changed, what an edit was refused for
+— and an **Undo** button that puts the variables back the way they were before
+your last change.
+
+**Defining one.** **+ Variable** adds one and puts the cursor in the name field.
+Pick its type, and type its values into the box under the list — commas work, so
+`0, 0.1, 0.3, 1, 3, 10` adds six in one go. If you type a value it already has,
+it says so rather than quietly clearing the box. Double-click a value to correct
+it: that is a rename, so every well already holding it follows, and fixing `1uM`
+to `1 µM` after you have filled the plate costs nothing. The arrows beside the
+list set the order, which is the order a fill walks and the direction a dose axis
+runs, so it is worth getting right — each row carries the colour its wells will
+take, so you can watch a reorder change the plate.
 
 **Text or Number.** Number is what lets a variable be a plot's x axis, and it is
 the only type that takes a unit. You can switch at any time and your values are
 re-read, not retyped. A value that is not a number — a `vehicle` row in a dose
-series — is kept, and the tab tells you which ones they are: they still group
-and colour, they just have no place on a numeric axis.
+series — is kept, and the tab tells you which ones they are: they still group and
+colour, they just have no place on a numeric axis.
 
-The list also tells you when a variable is not ready — one with no values cannot
-be filled onto anything.
+**Am I finished?** Every variable in the list carries how much of the plate it
+annotates — `88/96`, or `96/96 ✓` when it is done. That is the number to aim for,
+because a plot grouped by a variable leaves out any group containing a well with
+no value, and says how many on the figure. The wells that are short are **ringed**
+on the plate, and the **unassigned (8)** link under it selects exactly those eight
+so you can fix them in one go.
 
-**Filling the plate.** Under the definition is a plate of this dataset's wells
-and one row of controls: *Fill along [Rows or Columns] · repeat each [N] ·
-Apply fill*. **N counts rows or columns**, whichever axis you picked, and the
-number says so beside itself. Six doses along the columns repeating each two
-columns fills a 12-column plate; two cell lines along the rows repeating each
-four rows fills the eight rows. Any block design is one click.
+**Selecting wells.** Drag a box on the plate, or click a row letter or column
+number. The wells you pick get a white rim — even the ones that already have a
+colour — and the line under the plate says how many you have and what they
+currently hold: *4 wells selected — 3 hold 1 µM, 1 holds 10 µM*. Beside it are
+four shortcuts: **all** (the wells this dataset has, not always ninety-six),
+**none**, **unassigned**, and **same value**, which grows your selection to every
+well holding what you have already picked. That last one is how you fix four
+wells that got the wrong dose: click one of them, press **same value**, and the
+rest are found for you.
+
+**Assigning.** Pick wells, then click one of the value buttons under
+*Set the selected wells to*. **No value** unassigns them, putting them back to
+ringed and uncounted.
+
+**Filling the plate.** Under the buttons is a sentence:
+*Give each **[row or column]** the next Dose, **[N]** rows per value.* Six doses
+down the columns two columns per value fills a 12-column plate; two cell lines
+across the rows four rows per value fills the eight rows. Any block design is one
+click. **N counts rows or columns**, whichever you picked, and the sentence says
+so.
+
+The line under it says what the fill will do before you press it — how many wells
+it covers and how many existing values it will replace. If you have wells
+selected it fills only those, and says so. **Preview** paints the result on the
+plate without saving it; click anywhere to put the plate back. **Apply fill**
+does it and reports how many wells changed — including when the answer is none,
+so re-running a fill to check it took does not look like a broken button. If it
+was not what you wanted, **Undo**.
 
 A well the dataset does not have costs only itself: the wells either side of a
 gap keep the value their row or column carries, so a plate missing one
 acquisition is still the block design you asked for, minus that well.
 
-For anything the fill does not cover, select wells on the plate — drag across
-them, or click a row letter or column number — and click one of the value chips
-above it. Same two steps as **Well Labels**' select-then-Add-Prefix. **Clear**
-unassigns the selection.
-
-Each value gets its own colour on the plate. A well that belongs to the dataset
-but has no value for the variable you are looking at is **ringed**, and the line
-underneath names those wells and counts them — an empty socket means something
-different, that the well is not in the dataset at all. Getting to "All 96 wells
-have a Dose." is the thing to aim for, because a plot grouped by a variable
-leaves out any group containing an unassigned well, and tells you how many.
-
 **Seeing two variables at once.** *Also show* draws a second variable on top of
-the first as a short glyph — `0` / `10` for a dose, `H` / `U` for HeLa and U2OS
-— with a key beside it. Colour for one factor, a letter for the other, so a
-two-factor plate reads in one look instead of by switching back and forth.
+the first as a short mark, with a key under it. When every value starts with a
+different letter you get initials — `H` and `U` for HeLa and U2OS, which need no
+key at all. When they do not, every value is numbered instead, so a mark is
+always either a real initial or visibly a code, and never something you could
+read as a value it is not.
 
 Hovering a well gives you the whole row: `A01 — shCtrl · Cell line: HeLa ·
 Dose: 1 µM`. A variable the well has no value for shows as `Dose: —` rather than
@@ -1487,8 +1514,9 @@ variable".
 
 **By group.** If you have replicate groups defined, a list under the plate shows
 what each one resolves to. A group whose wells all agree shows that value. One
-whose wells disagree reads *Mixed*. One containing even a single well with no
-value reads *no value*, and names the wells that are short.
+whose wells disagree reads *—mixed—*. One containing even a single well with no
+value reads *no value*, and names the wells that are short. **Double-click any
+row to select that group's wells on the plate.**
 
 That last case is the one to know about. Wells are never given a value they were
 not assigned: if you add a well to a group after filling, it stays unassigned and

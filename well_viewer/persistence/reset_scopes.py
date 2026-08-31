@@ -258,6 +258,10 @@ def _clear_sample_variables(ctx) -> None:
     back on the next load, which is the shape of "the reset did not take".
     """
     ctx.state.selection.variables = VariableSet()
+    # And the one-step undo behind them. Left in place it would offer to put
+    # back exactly what the user asked to be rid of, one click after the reset
+    # and under a button that says nothing about which plate it is restoring.
+    ctx.state.selection.variables_undo = None
     # The grouping goes with them. Left set, the band still offers a variable
     # that no longer exists and ``plot_replicate_sets`` has silently fallen back
     # to the user's groups — the combo-and-plot disagreement

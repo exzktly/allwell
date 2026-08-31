@@ -148,3 +148,8 @@ def load_from_data_dir(ctx) -> None:
     if not dataset.data_dir:
         return
     ctx.state.selection.variables = from_block(read_block(dataset.data_dir))
+    # The one-step undo belongs to the plate that is going away. Carried across
+    # a swap it would sit under a live Undo button offering the *previous*
+    # dataset's variables — the same class of defect as the early return this
+    # function's docstring records, arriving by a different door.
+    ctx.state.selection.variables_undo = None

@@ -170,14 +170,19 @@ def drain_home_subtabs(ctx) -> None:
 def sync_home_sidebar(ctx) -> None:
     """Put the rail plate in the state the current tab warrants.
 
-    Three states, because there are three cases. Overview has its own plate in
-    the page body, so the rail's would be a second one answering a different
-    question — hidden. The editors that read the well selection get it live. The
-    two that do not get it greyed rather than removed: it is the page's fixture
-    and the rail visibly emptying as you move between sibling tabs reads as
-    something breaking, but a live-looking plate that silently ignores clicks is
-    worse. The plate paints its own disabled state; nothing in it consulted
-    ``isEnabled()`` before this, so greying it used to be invisible.
+    Three states, because there are three cases. A tab with a plate of its own
+    in the page body hides the rail's, because the rail's would be a second one
+    answering a different question — Overview, and Variables, whose own plate
+    says which wells hold which value while the rail's colours by group
+    membership. That is the hazard ``groups/panel_view`` guards its commit
+    against, and it is declared as ``owns_plate`` on the descriptor rather than
+    as a name list here. The editors that read the well selection get the rail
+    plate live. The ones that do not get it greyed rather than removed: it is
+    the page's fixture and the rail visibly emptying as you move between sibling
+    tabs reads as something breaking, but a live-looking plate that silently
+    ignores clicks is worse. The plate paints its own disabled state; nothing in
+    it consulted ``isEnabled()`` before this, so greying it used to be
+    invisible.
 
     Which editors read the selection is the descriptor's ``reads_well_selection``
     rather than a name list here: Groups edits a group's membership with the
@@ -187,17 +192,21 @@ def sync_home_sidebar(ctx) -> None:
     whichever one a constant here happened to give it.
     """
     name = current_subtab(ctx)
-    on_a_definition_tab = name in definition_subtabs(ctx)
+    desc = ctx.features.get(name)
+    owns_plate = bool(desc is not None and desc.owns_plate)
+    show_rail_frame = name in definition_subtabs(ctx) and not owns_plate
     frame = ctx.widgets.get_or_none("_sidebar_sample_frame")
     if frame is not None:
-        frame.setVisible(on_a_definition_tab)
+        frame.setVisible(show_rail_frame)
     plate = ctx.widgets.get_or_none("_rep_map_plate")
     if plate is not None:
-        desc = ctx.features.get(name)
         plate.setEnabled(bool(desc is not None and desc.reads_well_selection))
     btn = ctx.widgets.get_or_none(IMPORT_KEY)
     if btn is not None:
-        btn.setVisible(on_a_definition_tab)
+        # Import brings in replicate *selections*, which is not the thing a user
+        # on a page of variables would expect a button called Import to take —
+        # so it goes with the frame on a tab that owns its own plate.
+        btn.setVisible(show_rail_frame)
 
 
 def on_home_subtab_changed(ctx, idx: int) -> None:

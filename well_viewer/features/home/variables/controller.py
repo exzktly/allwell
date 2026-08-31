@@ -1104,16 +1104,26 @@ def _clear_plate(ctx, wells) -> None:
         overlay.setEnabled(False)
         overlay.blockSignals(False)
 
-    for name in ("_var_plate", "_var_fill_row", "_var_chips",
-                 "_var_chips_caption"):
-        widget = _widget(ctx, name)
-        if widget is not None:
-            widget.setVisible(False)
+    _set_plate_column_shown(ctx, False)
 
 
 def _show_plate_surfaces(ctx) -> None:
-    for name in ("_var_plate", "_var_fill_row", "_var_chips",
-                 "_var_chips_caption"):
-        widget = _widget(ctx, name)
-        if widget is not None:
-            widget.setVisible(True)
+    _set_plate_column_shown(ctx, True)
+
+
+def _set_plate_column_shown(ctx, on: bool) -> None:
+    """Show or hide the plate and everything that acts on it, as one widget.
+
+    One widget rather than a list of names, because a list is a thing to keep
+    up to date and this one was already out of date the day it was written: it
+    named the plate, the fill row and the chips, and left the selection links,
+    the Preview / Apply fill buttons, the overlay combo and the standing policy
+    note live on an empty tab with nothing to act on.
+    """
+    column = _widget(ctx, "_var_plate_column")
+    if column is not None:
+        column.setVisible(bool(on))
+    caption = _widget(ctx, "_var_showing_caption")
+    if caption is not None:
+        # The header's "SHOWING" label with nothing after it.
+        caption.setVisible(bool(on))

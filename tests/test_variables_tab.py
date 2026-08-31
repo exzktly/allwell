@@ -1031,6 +1031,24 @@ def test_the_overlay_combo_states_its_rule_when_it_has_nothing_to_offer(tab):
     assert "second variable" in combo.toolTip()
 
 
+#: Everything on the plate side of the tab, which stands or falls together.
+#: A roster rather than the three widgets that came to mind: the first version
+#: of the empty state hid the plate, the fill row and the chips and left the
+#: selection links, the Preview / Apply fill buttons, the overlay combo and the
+#: standing policy note live on a tab with nothing to act on — and the test
+#: asserted only the three, so it passed.
+#:
+#: ``isVisibleTo`` rather than ``isHidden``: hiding a parent does not set a
+#: child's own hidden flag, so ``isHidden`` answers False for every child of a
+#: hidden column and the roster would measure nothing.
+_PLATE_SIDE = (
+    "_var_plate_column", "_var_plate", "_var_fill_row", "_var_chips",
+    "_var_chips_caption", "_var_fill_preview", "_var_fill_apply",
+    "_var_overlay", "_var_sel_all", "_var_sel_none", "_var_sel_missing",
+    "_var_sel_same", "_var_selection", "_var_showing_caption",
+)
+
+
 def test_with_no_variable_there_is_no_plate_to_stare_at(tab):
     """The opposite call from a greyed control, and right for the same reason.
 
@@ -1041,10 +1059,10 @@ def test_with_no_variable_there_is_no_plate_to_stare_at(tab):
     a two-paragraph explainer reads as software that has broken. The one thing a
     user can do here — ``+ Variable`` — is what is left.
     """
-    assert tab.w("_var_plate").isHidden()
-    assert tab.w("_var_fill_row").isHidden()
-    assert tab.w("_var_chips").isHidden()
-    assert not tab.w("_var_add").isHidden(), (
+    for name in _PLATE_SIDE:
+        assert not tab.w(name).isVisibleTo(tab.frame), (
+            f"{name} is live on a tab with no variable to act on")
+    assert tab.w("_var_add").isVisibleTo(tab.frame), (
         "the one action available on an empty tab was hidden too")
 
 
@@ -1057,9 +1075,8 @@ def test_defining_a_variable_brings_the_plate_back(tab):
     """
     _dose_tab(tab)
 
-    assert not tab.w("_var_plate").isHidden()
-    assert not tab.w("_var_fill_row").isHidden()
-    assert not tab.w("_var_chips").isHidden()
+    for name in _PLATE_SIDE:
+        assert tab.w(name).isVisibleTo(tab.frame), name
 
 
 def test_deleting_a_filled_variable_asks_first(tab, monkeypatch):

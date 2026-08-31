@@ -113,7 +113,8 @@ def _build_header(ctx, parent: QWidget, reg) -> QWidget:
                            theme.Spacing.sm, theme.Spacing.xs)
     row.setSpacing(theme.Spacing.sm)
 
-    row.addWidget(_caption(host, "SHOWING"))
+    row.addWidget(reg.register("_var_showing_caption",
+                               _caption(host, "SHOWING")))
     showing = reg.register("_var_showing", QLabel("", host))
     showing.setObjectName("VariablesHeaderValue")
     row.addWidget(showing)

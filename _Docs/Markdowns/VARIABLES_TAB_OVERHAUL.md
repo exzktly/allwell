@@ -97,4 +97,18 @@ repaints the fill rather than against the original defect, and
 `test_two_cell_lines_keep_their_initials` pins the case the glyph rule change
 deliberately leaves alone.
 
+**One row came back after the reconciliation, and it is worth recording how.**
+S5 was marked `done` and its guard was watched failing — and the fix was still
+half a fix. `_clear_plate` hid the plate, the fill row and the chips by name, and
+left the selection links, the Preview / Apply fill buttons, the overlay combo and
+the standing policy note live on a tab with nothing to act on. The test asserted
+exactly the three widgets the fix named, so it passed: §7.8's second face, an
+assertion no stronger than the implementation it was written beside. Neither the
+grep-based reconciliation nor the mutation caught it, because both were asking
+about the three names. **Rendering the tab and looking at it caught it**, which is
+the only check in this whole body of work that could have. The column is now one
+registered widget hidden as a unit, and the guard reads a roster with
+`isVisibleTo` — `isHidden` answers False for every child of a hidden parent, so
+the obvious spelling of that assertion would have measured nothing.
+
 This tracker is deleted by the pull request that carries this line.

@@ -55,7 +55,12 @@ def build_plate_column(ctx, parent: QWidget, reg) -> QWidget:
     outer_row.setContentsMargins(0, 0, 0, 0)
     outer_row.setSpacing(0)
 
-    host = QWidget(outer)
+    # Registered as one widget so the whole column can be hidden at once. Hiding
+    # the plate, the fill row and the chips by name left the selection links,
+    # the Preview / Apply fill buttons, the overlay combo and the policy note on
+    # screen with nothing to act on — the empty state this was meant to fix,
+    # minus the three widgets that happened to come to mind.
+    host = reg.register("_var_plate_column", QWidget(outer))
     host.setMaximumWidth(_COLUMN_W)
     outer_row.addWidget(host)
     outer_row.addStretch(1)

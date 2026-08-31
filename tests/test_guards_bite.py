@@ -3643,3 +3643,79 @@ def test_scan_surface_guard_catches_a_roster_entry_with_no_package(tmp_path, mon
                            extra={"PACKAGE_ROOTS": ("listed", "gone")})
     assert exc is not None, "a roster entry naming nothing went uncaught"
     assert "gone" in str(exc)
+
+
+# ── the Properties-panel roster ─────────────────────────────────────────────
+#
+# ``tests/test_properties_panel_keys.py`` ties a tab's Properties button to the
+# roster the panel opener looks its key up in. Both halves are string literals
+# at opposite ends of the app, so the shape that shipped — a tab asking for a
+# key the roster has never carried — has no symbol to grep and no import to
+# break. These drive the guard's own helpers over synthetic trees, so the rule
+# keeps biting once the real offender is fixed and ``prove_guard`` can no
+# longer show it failing on the base branch.
+
+def _panel_key_guard():
+    import tests.test_properties_panel_keys as mod
+    return mod
+
+
+def _keys_from(monkeypatch, panel_src: str, tab_src: str):
+    """Run the guard's two readers over a synthetic two-file tree."""
+    import ast
+    from pathlib import Path
+
+    mod = _panel_key_guard()
+    trees = [
+        (Path("well_viewer/features/export/style.py"), ast.parse(panel_src)),
+        (Path("well_viewer/features/fake/tab_view.py"), ast.parse(tab_src)),
+    ]
+    monkeypatch.setattr(mod, "_trees", lambda: trees)
+    return mod
+
+
+_PANEL_WITH = '''
+def open_export_style_panel(win, plot_key):
+    mapping = {"line": ("_line_fig", "_line_canvas", "line_figure")}
+    return mapping.get(plot_key)
+'''
+
+
+def test_properties_guard_catches_a_button_for_a_key_the_roster_lacks(monkeypatch):
+    """The shape that shipped: the Response tab's inert Properties button."""
+    mod = _keys_from(monkeypatch, _PANEL_WITH,
+                     'make_properties_button(ctx, band, "response")')
+    with pytest.raises(AssertionError) as exc:
+        mod.test_every_properties_button_names_a_panel_that_exists()
+    assert "response" in str(exc.value)
+
+
+def test_properties_guard_reads_the_key_passed_by_keyword(monkeypatch):
+    """``figure_key=`` is the same call; a positional-only reader misses it."""
+    mod = _keys_from(monkeypatch, _PANEL_WITH,
+                     'make_properties_button(ctx, band, figure_key="ghost")')
+    with pytest.raises(AssertionError) as exc:
+        mod.test_every_properties_button_names_a_panel_that_exists()
+    assert "ghost" in str(exc.value)
+
+
+def test_properties_guard_clears_a_tab_whose_key_is_in_the_roster(monkeypatch):
+    mod = _keys_from(monkeypatch, _PANEL_WITH,
+                     'make_properties_button(ctx, band, "line")')
+    mod.test_every_properties_button_names_a_panel_that_exists()
+
+
+def test_properties_guard_refuses_a_key_it_cannot_read(monkeypatch):
+    """A non-literal key is unprotected, and silence would read as a pass."""
+    mod = _keys_from(monkeypatch, _PANEL_WITH,
+                     'make_properties_button(ctx, band, chosen_key)')
+    with pytest.raises(AssertionError) as exc:
+        mod.test_every_properties_button_names_a_panel_that_exists()
+    assert "non-literal" in str(exc.value)
+
+
+def test_properties_guard_notices_when_it_can_see_neither_half(monkeypatch):
+    """An empty roster passes every key at once — that must fail loudly."""
+    mod = _keys_from(monkeypatch, "x = 1", "y = 2")
+    with pytest.raises(AssertionError):
+        mod.test_the_guard_can_see_both_halves()

@@ -3318,6 +3318,21 @@ look for a paper. Two families are per figure instead, keyed by
   writes those globals now, so that is the value saved before marks became
   per-figure, and it keeps applying until the user gives a figure its own.
 
+`features/export/style.py` also owns the **Properties-panel roster**.
+`open_export_style_panel` maps a plot key to the figure, canvas and default
+export name it opens over, and a tab reaches it by handing that key to
+`core/ui_helpers.make_properties_button`. Both halves are string literals at
+opposite ends of the app: nothing imports across the seam, there is no shared
+symbol a rename would break, and a key the roster lacks writes `Unknown export
+panel: <key>` to the status bar and opens nothing. So the two drifted — a tab
+shipped with an inert Properties button, past a full fast lane and a real app
+construction, because building a button is not pressing it.
+`tests/test_properties_panel_keys.py` closes the seam: it reads every key any
+tab passes to `make_properties_button`, fails on one the roster does not carry,
+refuses a key it cannot read as a literal rather than skipping it, and presses
+`open_export_style_panel` itself so the roster's *behaviour* is measured and
+not only its contents. Adding a plotting leaf means adding its row here.
+
 `features/export/style.py` owns the prefs dict + the apply pipeline. Every
 redraw path ends with a call to
 `features.export.style.apply_export_style_to_current(app, fig, canvas)` so

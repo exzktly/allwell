@@ -216,9 +216,20 @@ def open_export_style_panel(win, plot_key: str) -> None:
     """Open the floating Export Style sidebar for ``plot_key``'s figure.
 
     Each plot tab (line / bar / scatter cells / scatter agg / distribution /
-    heatmap / spatial / multivariate) pre-allocates a right-side dock when its
-    view is built. This routes the per-card "▸" style button to the
+    heatmap / spatial / multivariate / response) pre-allocates a right-side dock
+    when its view is built. This routes the per-card "▸" style button to the
     ExportStyleSidebar mounted in that dock.
+
+    **This roster is the contract, and nothing in the app enforced it.** A tab
+    reaches its Properties panel by handing ``ui_helpers.make_properties_button``
+    a key, and a key that is absent here falls to the status line and the panel
+    simply never opens — the Response tab shipped that way, its Properties
+    button inert for the whole of its existence. The button is built from a
+    literal at the call site and looked up by a literal here, so the two can
+    disagree forever without a name to grep or an import to break.
+    ``tests/test_properties_panel_keys.py`` is what closes it: it reads every
+    key any tab passes to ``make_properties_button`` and fails on one this
+    mapping does not carry.
     """
     mapping = {
         "line":          ("_line_fig",         "_line_canvas",         "line_figure"),
@@ -229,6 +240,7 @@ def open_export_style_panel(win, plot_key: str) -> None:
         "heatmap":       ("_heatmap_fig",      "_heatmap_canvas",      "heatmap_figure"),
         "spatial":       ("_sp_fig",           "_sp_canvas",           "spatial_figure"),
         "multivariate":  ("_mv_fig",           "_mv_canvas",           "multivariate_figure"),
+        "response":      ("_response_fig",     "_response_canvas",     "response_figure"),
     }
     spec = mapping.get(plot_key)
     if spec is None:

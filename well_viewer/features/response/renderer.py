@@ -95,7 +95,8 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
     if use_log and positives:
         ax.set_xscale("log")
         _tick_the_doses(ax, positives,
-                        off_scale_x if drew_off_scale else None)
+                        off_scale_x if drew_off_scale else None,
+                        _labels_the_user_typed(data))
     # ``_aw_force_xlog`` pins it, the way the scatter tab pins its own log/log:
     # ``apply_export_style_prefs`` re-reads the shared ``x_log`` on every
     # restyle and would otherwise reset an axis whose scale this tab chose from
@@ -195,13 +196,44 @@ def _draw_empty_state(ax, reason: str, caption: str) -> None:
     ax.set_xlabel("")
 
 
-def _tick_the_doses(ax, positives, off_scale_x: float | None) -> None:
+def _labels_the_user_typed(data) -> dict[float, str]:
+    """``{x: the label as typed}``, for the doses that agree on one.
+
+    ``ResponsePoint.label`` carries the value's label as the user wrote it —
+    ``0.30``, ``1e-3``, ``10 µM`` — for exactly this: a tick that says what
+    they typed rather than what the parse produced. Nothing read it, so the
+    axis was relabelled from the parsed float and a series typed as a dilution
+    came back reformatted.
+
+    A dose is dropped from the map when two values parse to the same number and
+    were typed differently (``0.3`` and ``0.30``): one tick cannot say both, so
+    it says the number, which is at least true of both.
+    """
+    seen: dict[float, str] = {}
+    dropped: set[float] = set()
+    for curve in data.curves:
+        for point in curve.points:
+            text = (point.label or "").strip()
+            if not text:
+                continue
+            x = float(point.x)
+            if x in seen and seen[x] != text:
+                dropped.add(x)
+            seen.setdefault(x, text)
+    return {x: text for x, text in seen.items() if x not in dropped}
+
+
+def _tick_the_doses(ax, positives, off_scale_x: float | None,
+                    typed: dict[float, str] | None = None) -> None:
     """One tick per dose, plus the off-scale column, and nothing else.
 
     matplotlib's log locator ticks the decades — 1, 10, 100 — which on a
     0.1/0.3/1/3/10 series labels two of the five points and invents three
     positions no well was given. A dose series is a short list of values the
     experimenter chose, so those are the ticks.
+
+    Labelled with what the experimenter typed where that is unambiguous (see
+    :func:`_labels_the_user_typed`), falling back to the parsed number.
 
     The off-scale column gets a dotted rule between it and the axis proper.
     That break is what makes the zero-dose point honest: without it the point
@@ -210,14 +242,17 @@ def _tick_the_doses(ax, positives, off_scale_x: float | None) -> None:
     """
     import numpy as np
 
+    typed = typed or {}
     doses = sorted(set(positives))
     ticks = list(doses)
-    labels = [_tick_label(d) for d in doses]
+    labels = [typed.get(d) or _tick_label(d) for d in doses]
     if off_scale_x is not None:
         ax.axvline(float(np.sqrt(off_scale_x * doses[0])),
                    linestyle=":", linewidth=0.8, alpha=0.6)
         ticks = [off_scale_x, *ticks]
-        labels = ["0", *labels]
+        # The column stands for the zero-dose points, which sit at their own
+        # x; the label they carry is the one the user typed for that value.
+        labels = [typed.get(0.0) or "0", *labels]
         ax.set_xlim(left=off_scale_x / 2.0)
     else:
         ax.set_xlim(left=doses[0] / 2.0)

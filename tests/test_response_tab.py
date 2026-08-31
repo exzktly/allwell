@@ -452,6 +452,57 @@ def test_the_chosen_scale_survives_the_shared_restyle(tab):
     assert getattr(tab.ax, "_aw_force_xlog", None) is True
 
 
+def test_the_dose_ticks_say_what_the_user_typed(tab):
+    """``ResponsePoint.label`` exists for this and nothing read it.
+
+    The fixture's labels are ones the parse does **not** round-trip — ``0.10``
+    keeps its trailing zero, ``1e0`` is written as an exponent, ``10 µM``
+    carries its unit — because with labels the float formatter reproduces
+    (``0.1``/``1``/``10``) the fixed and the broken renderer draw the same
+    ticks and no assertion of any strength could tell them apart.
+    """
+    from well_viewer.features.response.collect import (
+        ResponseCurve, ResponseData, ResponsePoint,
+    )
+    from well_viewer.features.response.renderer import draw_response
+
+    points = tuple(
+        ResponsePoint(f"m{i}", x, 5.0, 0.1, 3, text)
+        for i, (x, text) in enumerate(
+            ((0.1, "0.10"), (1.0, "1e0"), (10.0, "10 µM"))))
+    draw_response(None, tab.ax,
+                  ResponseData("Dose", "µM", [ResponseCurve(24.0, points)]),
+                  log_x=True)
+
+    assert [t.get_text() for t in tab.ax.get_xticklabels()] == [
+        "0.10", "1e0", "10 µM"]
+
+
+def test_a_dose_two_members_typed_differently_falls_back_to_the_number(tab):
+    """One tick cannot say both ``0.3`` and ``0.30``, so it says what is true
+    of both. Silently picking one would put a label on the axis that half the
+    plate's wells were not given."""
+    from well_viewer.features.response.collect import (
+        ResponseCurve, ResponseData, ResponsePoint,
+    )
+    from well_viewer.features.response.renderer import draw_response
+
+    # ``0.30`` is *first*, so the fallback and "keep whichever label arrived
+    # first" produce different ticks. With ``0.3`` first they agree, and
+    # deleting the collision check leaves this green — which is what the first
+    # version of this test did.
+    points = (
+        ResponsePoint("a", 0.3, 5.0, 0.1, 3, "0.30"),
+        ResponsePoint("b", 0.3, 6.0, 0.1, 3, "0.3"),
+        ResponsePoint("c", 30.0, 7.0, 0.1, 3, "30"),
+    )
+    draw_response(None, tab.ax,
+                  ResponseData("Dose", "", [ResponseCurve(24.0, points)]),
+                  log_x=True)
+
+    assert [t.get_text() for t in tab.ax.get_xticklabels()] == ["0.3", "30"]
+
+
 # ── nothing to draw ─────────────────────────────────────────────────────────
 
 def test_a_plate_with_no_values_draws_the_reason_not_empty_axes(tab):

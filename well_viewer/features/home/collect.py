@@ -33,6 +33,104 @@ from well_viewer.domain.dataset_name import dataset_display_name
 # in a build without it.
 _saved_plots_store = lazy("well_viewer.features.saved_plots.state", "get_store")
 
+@dataclass(frozen=True)
+class DeclarationRole:
+    """One way a user can say something about a well, and what it reaches.
+
+    Four surfaces annotate wells and each answers a different question. Nothing
+    in the application said which, so a user met three sibling tabs plus a rail
+    drawer with no way to tell what any of them would do to a figure. The
+    distinction that matters is **whether it pools**: a group and a variable
+    change which bars exist, a label changes only what one is called, and a
+    saved selection changes nothing at all.
+
+    One roster, read by three surfaces — the sentence at the top of each
+    definition tab, the cross-link that sends a user to the sibling answering
+    the other question, and the effect column on Overview's *Your work here*.
+    Written out three times it drifted immediately; the version of this text
+    that lived only in the manual already disagreed with the tabs.
+    """
+
+    #: Matches the ``key`` of this declaration's ``your_work`` row.
+    key: str
+    #: The Home sub-tab that edits it, or ``None`` for the rail drawer.
+    tab: str | None
+    #: The question this declaration answers, in the user's words.
+    question: str
+    #: Two or three words for the effect column: does it pool, or not?
+    effect: str
+    #: The sentence at the top of the tab: what it is and what it does.
+    role: str
+    #: Where to go instead when the user's question is a different one.
+    cross_link: str
+
+
+#: The four, in the order Home's tabs offer them.
+DECLARATION_ROLES: tuple[DeclarationRole, ...] = (
+    DeclarationRole(
+        key="replicates",
+        tab="Groups",
+        question="Which wells are replicates of one condition?",
+        effect="Pools plots",
+        role=("A group is a set of wells you are treating as replicates of one "
+              "condition. Every plot, the Statistics tab and Batch Export draw "
+              "one member per group instead of one per well."),
+        cross_link=("Changed a dose or a cell line across the plate? Define a "
+                    "variable on the Variables tab rather than painting a group "
+                    "per condition."),
+    ),
+    DeclarationRole(
+        key="variables",
+        tab="Variables",
+        question="What did you change across the plate?",
+        effect="Pools, colours, splits",
+        role=("A variable is something you changed across the plate — cell "
+              "line, dose, the timepoint you treated at. Name it, list its "
+              "values in order, then fill them onto the wells."),
+        cross_link=("Wells you want pooled as replicates of one condition are a "
+                    "group, on the Groups tab."),
+    ),
+    DeclarationRole(
+        key="labels",
+        tab="Well Labels",
+        question="What should this well be called on a figure?",
+        effect="Display only",
+        role=("A label is what a well is called on a figure: it replaces the "
+              "well token in legends, tick labels and exported names."),
+        cross_link=("A label pools nothing and changes no number. To pool wells "
+                    "use a group; to record what you varied use a variable."),
+    ),
+    DeclarationRole(
+        key="plot_groups",
+        tab=None,
+        question="Can I get these wells back later?",
+        effect="Recall only",
+        role=("A saved selection lights the same wells again in one click. It "
+              "is not a group and not a replicate set, and loading one never "
+              "edits a group's membership."),
+        cross_link=("Saved selections live in the drawer under the plate map, "
+                    "not on this page."),
+    ),
+)
+
+#: ``key -> role``, for the lookups ``your_work`` makes when it builds its rows.
+ROLE_BY_KEY: dict[str, DeclarationRole] = {r.key: r for r in DECLARATION_ROLES}
+
+
+def role_for_tab(name: str) -> DeclarationRole | None:
+    """The declaration role a Home sub-tab edits, or ``None`` for the rest.
+
+    Cell Gating, Ratios and Pipeline Info reach this and get ``None``, which is
+    correct rather than an omission: a gate is a threshold and a ratio is a
+    derived channel. Neither says what a well *is*, so neither belongs in a
+    taxonomy of ways to annotate one.
+    """
+    for role in DECLARATION_ROLES:
+        if role.tab == name:
+            return role
+    return None
+
+
 #: What the plate paints, over and above the recorded health states. These are
 #: *renderings*, derived from numbers already in the record — not a second
 #: opinion about whether a well is complete. ``pipeline.completeness.health``
@@ -612,6 +710,11 @@ def your_work(ctx) -> list:
     labelled = sum(1 for well, value in labels.items()
                    if well in loaded_wells and str(value or "").strip())
     notes = str(getattr(selection, "notes_text", "") or "")
+    # The variable set is a typed object on the selection slice, not a mapping,
+    # so its emptiness is asked of the definitions rather than of the object:
+    # a ``VariableSet`` holding no variables is still truthy.
+    vset = getattr(selection, "variables", None)
+    variables = list(getattr(vset, "variables", None) or ())
 
     info = _sidecar(ctx)
     smfish = info.get("smfish_thresholds") or {}
@@ -626,14 +729,24 @@ def your_work(ctx) -> list:
                           "ratio_metrics", None) or [])
 
     return [
-        {"key": "replicates", "label": "Replicate sets", "count": len(sets)},
-        {"key": "plot_groups", "label": "Plot groups", "count": len(groups)},
+        {"key": "replicates", "label": "Groups", "count": len(sets),
+         "effect": ROLE_BY_KEY["replicates"].effect},
+        # Variables were absent from this block entirely while the page's whole
+        # promise is "what you have already done here". A user who had filled a
+        # dose grid across the plate was told about their groups, their labels
+        # and their ratios, and nothing about the annotation the plots were
+        # actually pooling by.
+        {"key": "variables", "label": "Variables", "count": len(variables),
+         "effect": ROLE_BY_KEY["variables"].effect},
+        {"key": "plot_groups", "label": "Saved selections", "count": len(groups),
+         "effect": ROLE_BY_KEY["plot_groups"].effect},
         # The denominator is the plate's loaded wells, not the size of the
         # label map: that map holds only wells that *have* a label, so
         # ``labelled of len(labels)`` could only ever read "N of N" and told
         # the user nothing about how much of the plate was still unlabelled.
         {"key": "labels", "label": "Wells labelled", "count": labelled,
-         "total": len(loaded_wells) or None},
+         "total": len(loaded_wells) or None,
+         "effect": ROLE_BY_KEY["labels"].effect},
         {"key": "smfish", "label": "smFISH thresholds", "count": len(smfish)},
         # Read from the live channel state, so the count is right in a build
         # with the Ratios editor profiled out: the ratio model is core, and a

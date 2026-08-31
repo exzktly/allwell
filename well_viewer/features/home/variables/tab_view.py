@@ -36,16 +36,15 @@ import theme
 #: reflow every time a variable is renamed.
 EDITOR_W = 268
 
-#: What the tab says when a plate has no variables yet. It names the payoff
-#: rather than the mechanism, because the mechanism is visible and the payoff is
-#: the reason to bother: a variable is not a group, and defining one saves
-#: painting a group name per condition.
+#: What the tab says when a plate has no variables yet — the payoff alone. The
+#: Sample map tab's role strip sits above this and already says what a variable
+#: *is*, whether or not any exist; saying it twice on one screen is how the only
+#: statement of that used to disappear the moment somebody defined one.
 EMPTY_HINT = (
-    "A variable is anything you changed across the plate — cell line, dose, "
-    "timepoint of treatment. Name it, list its values, then fill them onto the "
-    "plate.\n\nA variable is not a group: two cell lines at six doses is twelve "
-    "conditions, and you do not have to paint twelve group names to plot them "
-    "separately."
+    "Two cell lines at six doses is twelve conditions, and you do not have to "
+    "paint twelve group names to plot them separately: name the two variables "
+    "once, fill their values onto the plate, and every plot can group, colour "
+    "and split by either."
 )
 
 #: Said once, at the top, rather than appended to a status line that is re-read

@@ -32,9 +32,6 @@ _logger = logging.getLogger(__name__)
 
 
 
-
-
-
 # ``bar_groups_to_dict`` / ``bar_groups_from_data`` are pure domain transforms;
 # they moved to ``well_viewer.domain.bar_groups`` so the domain layer can use
 # them without importing this feature. Re-exported here for existing callers.
@@ -422,7 +419,6 @@ def bar_well_display_label(ctx, lbl: str) -> str:
     return disp
 
 
-
 # ``toggle_fov_replicates`` moved to ``well_viewer.core.plot_toggles`` (A8
 # enabler E3): it drives an app-global control shared by the plot tabs and the
 # batch-export inline row, so it lives in core where any feature can call it
@@ -544,7 +540,11 @@ def refresh_bar_layout_btn_state(ctx) -> None:
     replicate set is active. It governs pooling for bars *and* violin/beeswarm:
     on collapses each set into one column (its cells pooled for the per-cell
     views), off keeps one column per well.
-    """
+
+    The band's pooling sentence names this button, so it is repainted here
+    rather than in the toggle (``group_by_controller._unpooled_clause``)."""
+    from well_viewer.core.group_by_controller import refresh_grouping_readouts
+    refresh_grouping_readouts(ctx)
     plot = ctx.state.plot
     group_btn = getattr(ctx.runtime.barplot, "group_mode_btn", None)
     pool_btn = getattr(ctx.runtime.barplot, "pool_reps_btn", None)

@@ -25,6 +25,11 @@ from well_viewer.core.selection_controller import (
 
 from . import collect as hc
 from .plate_panel import paint_plate, well_tooltip
+# The Sample map tab's layer: which one is showing, and the entry rules for it.
+# Module scope, because nothing under ``home/sample_map`` imports this module
+# back — there is no cycle here to work around, and the deferred-feature-import
+# budget is a ratchet rather than a place to put convenience.
+from .sample_map.controller import current_layer, on_tab_entered
 from .tab_view import (
     IMPORT_KEY, build_recent_tile, build_saved_plot_tile, definition_subtabs,
     format_value, legend_label, legend_swatch_style,
@@ -168,45 +173,64 @@ def drain_home_subtabs(ctx) -> None:
 
 
 def sync_home_sidebar(ctx) -> None:
-    """Put the rail plate in the state the current tab warrants.
+    """Put the page's own chrome in the state the current tab warrants.
 
-    Three states, because there are three cases. A tab with a plate of its own
-    in the page body hides the rail's, because the rail's would be a second one
-    answering a different question — Overview, and Variables, whose own plate
-    says which wells hold which value while the rail's colours by group
-    membership. That is the hazard ``groups/panel_view`` guards its commit
-    against, and it is declared as ``owns_plate`` on the descriptor rather than
-    as a name list here. The editors that read the well selection get the rail
-    plate live. The ones that do not get it greyed rather than removed: it is
-    the page's fixture and the rail visibly emptying as you move between sibling
-    tabs reads as something breaking, but a live-looking plate that silently
-    ignores clicks is worse. The plate paints its own disabled state; nothing in
-    it consulted ``isEnabled()`` before this, so greying it used to be
-    invisible.
+    **Home has no rail body**, which is what :func:`activate_home` has always
+    said and what the rail's sample frame used to contradict. That frame carried
+    ``_rep_map_plate``, and two descriptor fields grew to manage it:
+    ``reads_well_selection``, which greyed it on a tab that asked nothing of it,
+    and ``owns_plate``, which hid it on a tab drawing a plate of its own —
+    because two plates on one screen said different things, the rail's coloured
+    by group membership and the tab's by variable value, which is the hazard
+    ``groups/panel_view`` guards its commit against.
 
-    Which editors read the selection is the descriptor's ``reads_well_selection``
-    rather than a name list here: Groups edits a group's membership with the
-    plate, Cell Gating draws its CDFs from the selected wells, Well Labels' Add
-    Prefix / Add Suffix apply to them, and Ratios and Pipeline Info ask nothing
-    of it. A tab added tomorrow declares its own answer instead of inheriting
-    whichever one a constant here happened to give it.
+    Both are gone, and so is the plate. It edited a group's membership and never
+    wrote ``ctx.state.selection.selected_wells`` — measured, not assumed — so the
+    two tabs it was described as feeding, Cell Gating's CDFs and Add Prefix's
+    fallback, were reading a selection it could not set. It is the Groups layer's
+    plate on the Sample map tab now, one of three that take turns in one slot,
+    and that tab publishes its selection so those two finally read the plate the
+    user is looking at. With nothing in the rail frame there is no state to
+    manage: it stays hidden, and the fields that decided between three states
+    have no reader.
+
+    All that is left here is the **Import** button, which merges a
+    sample-definitions JSON — so it names nothing on Overview, and nothing on
+    the Variables layer either. The Sample map tab reaches this through
+    ``ctx.runtime.home.sync_sidebar`` rather than importing it: this module
+    imports that one, so the call has to travel by attribute lookup, which is
+    the indirection ``plot_members`` already uses for the bar tab's drag order.
     """
     name = current_subtab(ctx)
-    desc = ctx.features.get(name)
-    owns_plate = bool(desc is not None and desc.owns_plate)
-    show_rail_frame = name in definition_subtabs(ctx) and not owns_plate
     frame = ctx.widgets.get_or_none("_sidebar_sample_frame")
     if frame is not None:
-        frame.setVisible(show_rail_frame)
-    plate = ctx.widgets.get_or_none("_rep_map_plate")
-    if plate is not None:
-        plate.setEnabled(bool(desc is not None and desc.reads_well_selection))
+        frame.setVisible(False)
     btn = ctx.widgets.get_or_none(IMPORT_KEY)
     if btn is not None:
-        # Import brings in replicate *selections*, which is not the thing a user
-        # on a page of variables would expect a button called Import to take —
-        # so it goes with the frame on a tab that owns its own plate.
-        btn.setVisible(show_rail_frame)
+        # Import brings in replicate *selections* and well labels, which is not
+        # the thing a user on a page of variables would expect a button called
+        # Import to take. That used to be a per-tab rule; the merge makes it a
+        # per-**layer** one, since Variables is a layer of a tab whose other two
+        # layers are exactly what Import writes.
+        btn.setVisible(name in definition_subtabs(ctx)
+                       and current_layer(ctx) != "Variables")
+
+
+def current_help_subject(ctx) -> str:
+    """What the help drawer should scroll to for the tab Home is showing.
+
+    The sub-tab's own name, except on **Sample map**, where the three ways of
+    annotating a well are layers with a heading each — so the drawer lands on
+    the one the user is looking at rather than at the top of the section.
+
+    Answered here rather than in ``allwell`` so the shell makes **one** deferred
+    feature import instead of two. That budget is a ratchet, and a page's own
+    "which of me is showing" question belongs to the page.
+    """
+    name = current_subtab(ctx) or ""
+    if name != "Sample map":
+        return name
+    return current_layer(ctx) or name
 
 
 def on_home_subtab_changed(ctx, idx: int) -> None:
@@ -220,13 +244,14 @@ def on_home_subtab_changed(ctx, idx: int) -> None:
         cb = ctx.runtime.pipeline_info.refresh
         if callable(cb):
             cb()            # re-read in case the dataset changed
-    elif name == "Groups":
-        # Entering Groups deselects any previously-active group, so a click on
-        # the rail plate has no consequence until the user picks one.
-        if ctx.state.selection.current_selection_id is not None:
-            ctx.state.selection.current_selection_id = None
-            groups_centre_refresh(ctx)
-            ctx.coordinator.refresh_sidebar_map()
+    elif name == "Sample map":
+        # The three annotation editors are layers of this tab, so the entry
+        # rules are the layer's rather than the sub-tab's. This branch used to
+        # read ``"Groups"``, which the registry stopped being able to produce
+        # when they merged — so entering the tab quietly stopped deselecting the
+        # active group, and the first drag on the plate rewrote whichever group
+        # was left over from the last visit.
+        on_tab_entered(ctx)
         if ctx.widgets.has("_rep_active_group_lbl"):
             update_active_group_label(ctx)
     sync_home_sidebar(ctx)
@@ -700,6 +725,16 @@ def _row_widget(parent: QWidget, row: dict, *, kind: str) -> QWidget:
 
     label = QLabel(str(row.get("label") or ""), host)
     line.addWidget(label)
+    # What this declaration *does*, beside what there is of it. A count alone
+    # puts groups, variables, labels and saved selections in one column as
+    # four interchangeable tallies, which is exactly the reading that made
+    # them hard to tell apart: two of the four change which bars exist, one
+    # changes only what a bar is called, and one changes nothing on any figure.
+    effect = str(row.get("effect") or "")
+    if effect:
+        chip = QLabel(effect, host)
+        chip.setObjectName("Muted")
+        line.addWidget(chip)
     line.addStretch(1)
     count = int(row.get("count") or 0)
     total = row.get("total")
@@ -725,7 +760,7 @@ _ACTION_PAGE = {
 }
 
 #: Actions that land on a tab of this page rather than on another page.
-_ACTION_SUBTAB = {"samples": "Groups"}
+_ACTION_SUBTAB = {"samples": "Sample map"}
 
 
 def run_home_action(ctx, action: str) -> None:

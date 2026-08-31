@@ -404,6 +404,41 @@ def wells_the_grouping_adds(ctx, variable_id: str) -> list[str]:
     return sorted(drawn - selected)
 
 
+def variable_grouping_in_force(ctx) -> bool:
+    """Whether the plots are pooling by a variable rather than by the groups.
+
+    Not "is a variable chosen": :func:`plot_replicate_sets` falls back to the
+    user's own sets when the chosen variable groups nothing, so the setting and
+    the effect disagree in exactly the case a reader most needs told apart.
+    """
+    variable_id = _group_by_variable(ctx)
+    return bool(variable_id and variable_replicate_sets(ctx, variable_id))
+
+
+def groups_the_variable_replaced(ctx) -> list:
+    """The user's own visible groups, when a variable grouping has displaced them.
+
+    Empty when the substitution is not in force **or** when the user had no
+    groups to displace — which is why it is not the predicate. Those are two
+    different states and a caller that read this list as "is a variable
+    pooling" reported the fallback sentence over a plate that really was
+    grouped by dose. Ask :func:`variable_grouping_in_force` for the predicate
+    and this for the count.
+
+    Beside :func:`wells_the_grouping_adds` and for the same reason: comparing
+    the two poolings is its whole job, so it is one of the few functions
+    entitled to name the one the substitution replaced. Asked here rather than
+    in the controller that prints the sentence, which would then hold a second
+    definition of "the user's groups" (§7.5 #10 — needing an exemption is first
+    a claim about where the code lives).
+    """
+    if not variable_grouping_in_force(ctx):
+        return []
+    return list(active_replicate_sets(
+        ctx.state.selection.selections or [],
+        ctx.state.dataset.well_paths or {}))
+
+
 def wells_without_variable(ctx, variable_id: str) -> list[str]:
     """The dataset's wells that :func:`variable_replicate_sets` leaves out."""
     from well_viewer.domain.sample_variables import unassigned_wells

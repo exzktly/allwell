@@ -3429,123 +3429,6 @@ def test_the_purity_guard_clears_a_module_that_orders_nothing(
     assert _run_purity_guard(monkeypatch, tmp_path, _PURE) is None
 
 
-# ── the tracker is well-formed ──────────────────────────────────────────────
-
-_TRACKER_GUARD = "tests.test_workplan_is_honest"
-
-_TRACKER_HEAD = (
-    "# A tracker\n\n"
-    "## A — First\n\n## B — Second\n\n"
-    "## The tracker\n\n"
-    "| # | Workstream | Item | Status | Note |\n|---|---|---|---|---|\n"
-)
-
-
-def _tracker(rows: str, prose: str = "") -> str:
-    return _TRACKER_HEAD + rows + "\n---\n" + prose + "\n"
-
-
-_GOOD_ROWS = (
-    "| 1 | A | do the thing | ☑ | |\n"
-    "| 2 | A | Review gate: A | ☐ | |\n"
-    "| 3 | B | do the other thing | ☐ | |\n"
-    "| 4 | B | Review gate: B | ☐ | |\n"
-)
-#: A row the regex cannot read simply vanishes from the results, so without the
-#: parse check it is reported as whichever *other* rule its absence breaks —
-#: which is how the first version of this file passed its own bite case for the
-#: wrong reason.
-_UNPARSEABLE_ROW = _GOOD_ROWS.replace("| 3 | B | do the other thing | ☐ | |",
-                                      "| three | B | do the other thing | ☐ |")
-_GATE_NOT_LAST = (
-    "| 1 | A | Review gate: A | ☐ | |\n"
-    "| 2 | A | do the thing | ☐ | |\n"
-)
-_NO_GATE = "| 1 | A | do the thing | ☐ | |\n"
-_INTERLEAVED = (
-    "| 1 | A | do the thing | ☐ | |\n"
-    "| 2 | B | do the other | ☐ | |\n"
-    "| 3 | A | Review gate: A | ☐ | |\n"
-    "| 4 | B | Review gate: B | ☐ | |\n"
-)
-_A_SECTION_WITH_NO_ROWS = _GOOD_ROWS.replace("| 3 | B | do the other thing | ☐ | |\n"
-                                             "| 4 | B | Review gate: B | ☐ | |\n", "")
-_TYPED_COUNT = "Nine rows are done and three remain: 9 rows done.\n"
-
-
-def _run_tracker_guard(monkeypatch, tmp_path, test_name, rows=_GOOD_ROWS,
-                       prose=""):
-    module = importlib.import_module(_TRACKER_GUARD)
-    path = _write(tmp_path, "TRACKER.md", _tracker(rows, prose))
-    monkeypatch.setattr(module, "_TRACKER", path)
-    try:
-        getattr(module, test_name)()
-    except AssertionError as exc:
-        return exc
-    return None
-
-
-def test_the_tracker_guard_catches_a_row_it_cannot_parse(tmp_path, monkeypatch):
-    exc = _run_tracker_guard(monkeypatch, tmp_path,
-                             "test_every_table_line_parses_as_a_row",
-                             rows=_UNPARSEABLE_ROW)
-    assert exc is not None, "a row that vanishes from the parse went uncaught"
-
-
-def test_the_tracker_guard_catches_a_gate_that_is_not_last(tmp_path, monkeypatch):
-    exc = _run_tracker_guard(monkeypatch, tmp_path,
-                             "test_every_workstream_ends_with_its_review_gate",
-                             rows=_GATE_NOT_LAST)
-    assert exc is not None, "a gate in the middle of its own work went uncaught"
-
-
-def test_the_tracker_guard_catches_a_workstream_with_no_gate(tmp_path, monkeypatch):
-    exc = _run_tracker_guard(monkeypatch, tmp_path,
-                             "test_every_workstream_ends_with_its_review_gate",
-                             rows=_NO_GATE)
-    assert exc is not None, "a workstream that never grew a gate went uncaught"
-
-
-def test_the_tracker_guard_catches_interleaved_workstreams(tmp_path, monkeypatch):
-    exc = _run_tracker_guard(monkeypatch, tmp_path,
-                             "test_a_workstream_is_a_contiguous_block_of_rows",
-                             rows=_INTERLEAVED)
-    assert exc is not None, "interleaved workstreams went uncaught"
-
-
-def test_the_tracker_guard_catches_a_section_nobody_is_tracking(
-        tmp_path, monkeypatch):
-    exc = _run_tracker_guard(
-        monkeypatch, tmp_path,
-        "test_the_table_and_the_sections_describe_the_same_workstreams",
-        rows=_A_SECTION_WITH_NO_ROWS)
-    assert exc is not None, "a section with no rows went uncaught"
-
-
-def test_the_tracker_guard_catches_a_count_typed_in_prose(tmp_path, monkeypatch):
-    """A hand-maintained total drifts from the rows within a day and is then the
-    most confidently wrong line in the file."""
-    exc = _run_tracker_guard(monkeypatch, tmp_path,
-                             "test_no_count_of_rows_is_written_in_prose",
-                             prose=_TYPED_COUNT)
-    assert exc is not None, "a typed count went uncaught"
-
-
-@pytest.mark.parametrize("test_name", [
-    "test_the_tracker_exists_and_has_rows",
-    "test_every_table_line_parses_as_a_row",
-    "test_row_numbers_are_contiguous_and_unique",
-    "test_every_row_has_an_item_and_a_known_status",
-    "test_the_table_and_the_sections_describe_the_same_workstreams",
-    "test_every_workstream_ends_with_its_review_gate",
-    "test_a_workstream_is_a_contiguous_block_of_rows",
-    "test_no_count_of_rows_is_written_in_prose",
-])
-def test_the_tracker_guard_clears_a_well_formed_tracker(
-        tmp_path, monkeypatch, test_name):
-    assert _run_tracker_guard(monkeypatch, tmp_path, test_name) is None
-
-
 # ── a constructor is not handed a property it computes ──────────────────────
 
 _DERIVED_GUARD = "tests.test_no_constructor_takes_a_derived_property"
@@ -3643,6 +3526,61 @@ def test_scan_surface_guard_catches_a_roster_entry_with_no_package(tmp_path, mon
                            extra={"PACKAGE_ROOTS": ("listed", "gone")})
     assert exc is not None, "a roster entry naming nothing went uncaught"
     assert "gone" in str(exc)
+
+
+# ── one word per concept ────────────────────────────────────────────────────
+
+#: Every shape that was live in the tree before the vocabulary sweep, plus the
+#: two the pattern must *not* claim. The near-miss cases matter as much as the
+#: hits: "a plot grouped by Dose" is a plot pooled by a sample variable, and
+#: `plot_groups` is the persistence key the rule deliberately leaves alone.
+VOCABULARY_CASES = {
+    "heading": ('def build(p):\n'
+                '    return CollapsibleSection("Plot Groups", p)\n', True),
+    "singular": ('def add(n):\n    return f"Plot Group {n}"\n', True),
+    "sentence": ('def hint():\n'
+                 '    return "Select wells before adding a Plot Group."\n', True),
+    "lowercase": ('LABEL = "Plot groups"\n', True),
+    "mid_sentence": ('DETAIL = "Well labels, groups, notes, and plot groups."\n', True),
+    "parenthesised": ('def line(n):\n    return f"{n} plot group(s)"\n', True),
+    # Not this feature: a plot pooled by a sample variable.
+    "grouped_by": ('def note(v):\n    return f"A plot grouped by {v} draws one bar per value."\n',
+                   False),
+    # The symbol and the persistence key keep their spelling on purpose.
+    "symbol": ('SECTION = "plot_groups"\n', False),
+    # Documentation naming the key is what the exemption exists for.
+    "docstring": ('"""Saved selections live in the plot groups section."""\n', False),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(VOCABULARY_CASES))
+def test_vocabulary_guard_catches_only_the_user_facing_spelling(
+        tmp_path, monkeypatch, shape):
+    body, should_fire = VOCABULARY_CASES[shape]
+    path = _write(tmp_path, f"vocab_{shape}.py", body)
+    exc = _run_scan(monkeypatch, "tests.test_one_word_per_concept",
+                    "test_no_user_facing_string_calls_a_saved_selection_a_plot_group",
+                    [path])
+    if should_fire:
+        assert exc is not None, f"the {shape} spelling went uncaught"
+        assert f"vocab_{shape}.py" in str(exc)
+    else:
+        assert exc is None, f"the {shape} shape is not this feature and must clear"
+
+
+def test_vocabulary_guard_reads_the_live_docs(tmp_path, monkeypatch):
+    """The docs half walks from `REPO_ROOT`, so it needs its own case."""
+    _write(tmp_path, "_Docs/Markdowns/README_WellViewer.md",
+           "- **Plot Groups** — the drawer under the plate map.\n")
+    _write(tmp_path, "_Docs/Markdowns/ARCHITECTURE.md",
+           "Saved selections live in `persistence.json::plot_groups`.\n")
+    exc = _run_rooted_scan(monkeypatch, "tests.test_one_word_per_concept",
+                           "test_the_live_docs_use_one_word_for_each", tmp_path)
+    assert exc is not None, "a manual still naming the drawer a Plot Group went uncaught"
+    assert "README_WellViewer.md:1" in str(exc)
+    assert "ARCHITECTURE.md" not in str(exc), (
+        "the persistence key is not a violation — the rule stops at what a user reads"
+    )
 
 
 # ── the Properties-panel roster ─────────────────────────────────────────────

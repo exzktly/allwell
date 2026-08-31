@@ -963,12 +963,16 @@ class AllWellApp(QMainWindow):
         pages = help_topics.SECTION_BY_PAGE
         if leaf == "Home":
             # Home is a notebook and `current_centre_tab` stops at the page, so
-            # without this every one of its six tabs lands on the top of the Home
+            # without this every one of its tabs lands on the top of the Home
             # chapter. Ask Home which tab is showing and prefer that heading;
             # Overview has none of its own and correctly falls through to "Home".
             with swallow("help: home sub-tab"):
-                from well_viewer.features.home.controller import current_subtab
-                sub = current_subtab(ctx) or ""
+                # ``current_help_subject`` answers with the Sample map tab's
+                # current *layer* where there is one, since each has a heading
+                # of its own under the tab's — without which the layer entries
+                # in ``SECTION_BY_PAGE`` had no reader at all.
+                from well_viewer.features.home.controller import current_help_subject
+                sub = current_help_subject(ctx)
                 if sub in pages:
                     return pages[sub]
         if leaf in pages:

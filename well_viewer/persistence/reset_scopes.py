@@ -294,7 +294,7 @@ ANALYSIS_SCOPES: tuple[ResetScope, ...] = (
     ResetScope(
         key="sample_definitions",
         title="Sample definitions",
-        detail="Well labels, groups, notes, and plot groups.",
+        detail="Well labels, groups, notes, and saved selections.",
         domains=("sample_definitions", "notes", "plot_groups"),
         clear=_clear_sample_definitions,
     ),

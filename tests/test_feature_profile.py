@@ -145,10 +145,10 @@ def test_a_non_removable_subleaf_survives_a_narrowing_subtabs_list():
 
     A container that enumerates its sub-tabs from the registry hands the profile
     a lever over every leaf — including ones other code reaches without asking
-    whether they are present. Home's Groups tab is the case: ``build_centre``
-    builds the rail plate that edits it at startup with no descriptor check, so
-    a manifest able to drop the tab would produce a build that starts and then
-    shows a plate editing something that is not there.
+    whether they are present. Home's Sample map tab is the case: the three ways
+    of annotating a well are layers of it, built together from one roster, so a
+    manifest able to drop it would produce a build whose Overview still reports
+    groups, variables and labels with no editor for any of them.
     """
     p = Profile(name="p", features=frozenset({"Home", "Image Browser"}),
                 subtabs={"Home": frozenset({"Ratios"}),
@@ -169,7 +169,7 @@ def test_a_non_removable_subleaf_survives_a_narrowing_subtabs_list():
 
     ctx = types.SimpleNamespace(features=reg)
     home_tabs = active_subtabs(ctx)
-    for name in ("Cell Gating", "Groups", "Well Labels"):
+    for name in ("Cell Gating", "Sample map"):
         assert name in home_tabs, f"Home tab {name!r} narrowed away"
     assert "Segmentation" in _active_subtabs(ctx), "Image Browser tab narrowed away"
 
@@ -238,17 +238,15 @@ def test_home_enumerates_its_tabs_from_the_registry():
     full = build_feature_registry(FULL)
     ctx = SimpleNamespace(features=full)
     assert active_subtabs(ctx) == (
-        "Overview", "Cell Gating", "Groups", "Variables", "Well Labels",
-        "Ratios", "Pipeline Info",
+        "Overview", "Cell Gating", "Sample map", "Ratios", "Pipeline Info",
     )
 
-    # The sanctioned manifest line keeps the three load-bearing editors and drops
+    # The sanctioned manifest line keeps the two load-bearing editors and drops
     # only what is declared removable.
     narrowed = Profile(name="p", features=frozenset({"Home"}),
                        subtabs={"Home": frozenset({"Cell Gating"})})
     ctx = SimpleNamespace(features=build_feature_registry(narrowed))
-    assert active_subtabs(ctx) == (
-        "Overview", "Cell Gating", "Groups", "Well Labels")
+    assert active_subtabs(ctx) == ("Overview", "Cell Gating", "Sample map")
 
 
 def test_every_home_tab_has_a_builder():
@@ -264,30 +262,38 @@ def test_every_home_tab_has_a_builder():
 def test_home_subtab_behaviour_is_declared_not_listed():
     """Home's per-tab facts live on the descriptors, not in name lists.
 
-    Two behaviours used to be module constants in the Home package: which tabs
-    inset their frame (``_SUBTAB_MARGINS``) and which read the well selection so
-    the rail plate stays live (``_TABS_USING_THE_PLATE``). Both are the same
-    shape as issue #14 in miniature -- a tab added to the registry and not to the
-    constant would silently inherit whichever answer the constant happened to
-    give it, with no error and nothing on screen saying so. A greyed plate on a
-    tab that needs it is a control that ignores clicks; a live one on a tab that
-    does not is a control whose clicks do nothing.
+    Which tabs inset their frame used to be a module constant in the Home
+    package (``_SUBTAB_MARGINS``). That is issue #14's shape in miniature -- a
+    tab added to the registry and not to the constant would silently inherit
+    whichever answer the constant happened to give it, with no error and nothing
+    on screen saying so.
 
-    The values themselves are asserted here because they are the *user-visible*
-    rule, and they are what a careless edit to the registry would change.
+    Two siblings are gone rather than moved. ``owns_plate`` hid the rail plate on
+    a sub-tab that drew one of its own, which is the two-plates hazard from the
+    other side; with no rail plate on Home there is nothing to hide.
+    ``reads_well_selection`` said
+    whether the rail plate stayed live while a Home sub-tab showed, and Home
+    keeps no rail plate: the one it had edited a group's membership, never wrote
+    ``selection.selected_wells``, and is a layer of the Sample map tab now. A
+    descriptor field with no reader is the same defect one level down from a
+    control that does nothing.
+
+    The value is asserted here because it is the *user-visible* rule, and it is
+    what a careless edit to the registry would change.
     """
     reg = build_feature_registry(FULL)
     subs = {n: reg.get(n) for n in reg.sub_leaves("Home")}
 
-    reads = {n for n, d in subs.items() if d.reads_well_selection}
-    assert reads == {"Groups", "Cell Gating", "Well Labels"}
-
     inset = {n for n, d in subs.items() if d.subtab_inset}
-    assert inset == {"Groups", "Variables", "Well Labels"}
+    assert inset == {"Sample map"}
 
-    # Nothing outside Home claims either flag: they are sub-tab behaviours, and a
-    # top-level page's plate rule is `per_well_selection`, resolved per page.
+    for field in ("reads_well_selection", "owns_plate"):
+        assert not any(hasattr(d, field) for d in build_feature_registry(FULL).all()), (
+            f"{field} is retired; a descriptor carrying it again means the rail "
+            "plate came back to Home without the docstring above being revisited")
+
+    # Nothing outside Home claims the inset flag: it is a sub-tab behaviour, and
+    # a top-level page's plate rule is `per_well_selection`, resolved per page.
     for d in build_feature_registry(FULL).all():
         if d.parent != "Home":
-            assert not d.reads_well_selection, d.name
             assert not d.subtab_inset, d.name

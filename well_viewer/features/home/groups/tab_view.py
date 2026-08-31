@@ -22,6 +22,7 @@ from well_viewer.core.ui_helpers import btn_primary, btn_secondary, build_hline_
 from well_viewer.features.home.groups.controller import (
     rep_add, rep_quick_pairs_from_dropdowns,
 )
+from well_viewer.features.home.groups.panel_view import build_replicate_panel
 
 
 def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
@@ -29,6 +30,7 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
 
     Hoists the legacy "below the plate" GROUPS chrome out of the sidebar.
     Contents (top → bottom):
+      - the plate that edits the current group's membership
       - GROUPS header with Clear-all / + Add buttons
       - Quick Replicates row (Pair + Order dropdowns + Apply button)
       - SavedSelectionsList (composable) over ``ctx.state.selection.selections``
@@ -40,6 +42,14 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
         layout = QVBoxLayout(parent)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+
+    # The plate this layer edits, in the page rather than the rail. Above the
+    # list because that is the reading order of the sentence the two make: this
+    # group, these wells.
+    plate_host = QWidget(parent)
+    QVBoxLayout(plate_host).setContentsMargins(0, 0, 0, 0)
+    build_replicate_panel(ctx, plate_host, role="editor")
+    layout.addWidget(plate_host)
 
     hdr = QWidget(parent)
     hdr_l = QHBoxLayout(hdr)
@@ -129,11 +139,21 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     layout.addWidget(rep_list, 1)
     _wire(ctx, rep_list)
 
+    # What a figure will actually call these groups, when that is not their
+    # name. Empty and hidden until the substitution applies to something —
+    # ``selections_model.relabelled_groups_clause`` returns "" otherwise, and a
+    # line that is always on screen is one nobody reads on the day it matters.
+    relabel = ctx.widgets.register("_rep_relabel_note", QLabel("", parent))
+    relabel.setObjectName("Muted")
+    relabel.setWordWrap(True)
+    relabel.setVisible(False)
+    layout.addWidget(relabel)
+
     hint = QLabel(
         "Click a group above to make it the ACTIVE group — its row "
         "highlights with an accent stripe. Then click wells on the plate "
-        "map (left sidebar) to add or remove them. Expand a group to edit "
-        "its replicate structure.",
+        "above to add or remove them. Expand a group to edit its replicate "
+        "structure.",
         parent,
     )
     hint.setObjectName("Muted")

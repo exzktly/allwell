@@ -831,6 +831,18 @@ QFrame#HomeNextStep {{
     border-left: 3px solid {c.border_strong};
     border-radius: {r.md}px;
 }}
+/* The two-line strip at the top of Home's Sample map tab: what this layer of
+   the plate means, and where to go when the answer is one of the others. The
+   sentence carries the page's ordinary text weight and the frame a hairline
+   under it, so it reads as a statement about the tab rather than a caption on
+   the control beneath it. */
+QWidget#HomeRoleStrip {{
+    border-bottom: 1px solid {c.border_subtle};
+}}
+QLabel#HomeRoleText {{
+    font-size: {t.small_size}px;
+    color: {c.text_secondary};
+}}
 QLabel#HomeTileLabel {{
     font-size: {t.caption_size}px;
     font-weight: {t.medium};

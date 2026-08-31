@@ -85,5 +85,5 @@ def test_an_empty_image_table_selection_says_so_and_saves_nothing():
 
     assert ctx.state.selection.plot_groups == []
     assert statuses == [
-        "Select wells on the plate above before adding a Plot Group."
+        "Select wells on the plate above before saving a selection."
     ]

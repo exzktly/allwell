@@ -84,5 +84,24 @@ def rep_panel_refresh(ctx) -> None:
         row = getattr(lst, "_rows", {}).get(sels[idx].get("id"))
         if row is not None and hasattr(row, "trigger_rename"):
             QTimer.singleShot(0, row.trigger_rename)
+    _paint_relabel_note(ctx)
     from well_viewer.features.home.groups.controller import rep_refresh_map
     rep_refresh_map(ctx)
+
+
+def _paint_relabel_note(ctx) -> None:
+    """Say which groups a figure will call something other than their name.
+
+    Painted here rather than once at build time because the substitution
+    depends on three things that all change under the user's hands — a group's
+    name, its membership, and the well labels on a different tab — so a note
+    written when the tab was built describes a plate that has since moved.
+    """
+    from well_viewer.domain.selections_model import relabelled_groups_clause
+
+    note = ctx.widgets.get_or_none("_rep_relabel_note")
+    if note is None:
+        return
+    clause = relabelled_groups_clause(ctx)
+    note.setText(clause)
+    note.setVisible(bool(clause))

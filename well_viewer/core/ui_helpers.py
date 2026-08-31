@@ -267,7 +267,7 @@ def wrap_with_empty_state(
 
 def no_selection_reason(
     title: str = "No wells selected.",
-    hint: str = "Click wells on the plate at the left, or open Plot Groups below it.",
+    hint: str = "Click wells on the plate at the left, or open Saved selections below it.",
 ) -> Callable[[Any], EmptyReason | None]:
     """A ``reason`` for tabs that plot exactly the plate selection.
 

@@ -18,6 +18,15 @@ from well_viewer.core.safe import swallow
 
 _logger = logging.getLogger("well_viewer")
 
+#: Registry keys of the two labels that state what the plots are pooling by.
+#: A roster rather than two hand-written repaints: the pair that was written out
+#: twice is the pair that grew a difference, which is what the decoration
+#: controls below already record.
+GROUPING_READOUTS: tuple[str, ...] = (
+    "_plotting_grouping_note",   # the plotting band, beside Group by
+    "_sample_map_grouping_note",  # Home → Sample map, where the groups are made
+)
+
 #: What the combo calls "do not group by a variable".
 NO_VARIABLE_LABEL = "Wells / groups"
 
@@ -106,6 +115,7 @@ def refresh_group_by_combo(ctx) -> None:
     if group is not None:
         group.setVisible(bool(variables))
     refresh_decoration_combos(ctx)
+    refresh_grouping_readouts(ctx)
 
 
 def refresh_decoration_combos(ctx) -> None:
@@ -195,6 +205,111 @@ def set_group_by_variable(ctx, variable_id: str) -> None:
         ctx.bus.plot_options_changed.emit(ctx.state.plot)
 
 
+def grouping_summary(ctx) -> str:
+    """What ``plot_replicate_sets`` actually decided, in one sentence.
+
+    The band's combo names the *setting*; this names the *consequence*, and they
+    are not the same fact. A user who has painted four groups and then picks
+    ``Group by: Dose`` has had those four stop pooling anything, everywhere —
+    in the Bar tab, in Statistics, in Batch Export — and the only thing that
+    mentioned it was a shortfall sentence about the wells the grouping left out.
+    The choice is made on the plotting band and the groups are declared on Home,
+    so the consequence has to be legible in both places.
+
+    **Derived from the seam, never recomputed.** It asks
+    ``plot_replicate_sets`` what the plots will pool into and
+    ``active_replicate_sets`` what they would have pooled into otherwise, and
+    reports the difference. A second computation of "what are we grouping by"
+    is a second answer, and its failure mode is a sentence confidently
+    describing a figure that is not on screen.
+    """
+    from well_viewer.domain.plot_members import (
+        groups_the_variable_replaced, plot_replicate_sets,
+        variable_grouping_in_force,
+    )
+
+    if not (ctx.state.dataset.well_paths or {}):
+        return ""
+    pooled = list(plot_replicate_sets(ctx))
+    variable = _chosen_variable(ctx)
+
+    if variable is None or not variable_grouping_in_force(ctx):
+        # Either no variable was chosen, or one was and it grouped nothing — the
+        # seam falls back rather than emptying every plot in the app, so what is
+        # drawn is the user's own pooling either way. ``pooled`` *is* that, so
+        # the count comes from the seam's answer rather than from a second one.
+        lead = (f"{variable.name} groups no wells, so plots"
+                if variable is not None else "Plots")
+        if pooled:
+            return (_plural_groups(len(pooled), f"{lead} are grouped by your")
+                    .rstrip(".") + _unpooled_clause(ctx, pooled) + ".")
+        return f"{lead} draw one member per selected well."
+
+    values = len(pooled)
+    plural = "" if values == 1 else "s"
+    said = f"Plots are grouped by {variable.name} ({values} value{plural})"
+    said += _unpooled_clause(ctx, pooled)
+    # The clause only when there is something to displace. A user with no groups
+    # has nothing taken away, and telling them their 0 groups are not pooling is
+    # a sentence about a thing that does not exist.
+    displaced = groups_the_variable_replaced(ctx)
+    if not displaced:
+        return f"{said}."
+    return said + "; " + _plural_groups(len(displaced), "your",
+                                        suffix=" are not pooling.")
+
+
+def _unpooled_clause(ctx, pooled) -> str:
+    """The Bar tab's own escape from the pooling this sentence describes.
+
+    ``bar_pool_replicates`` flips the bar key space from member names to well
+    tokens **after** the seam (``plot_members.bar_member_keys``), so with it off
+    the Bar tab draws one bar per well while every other tab still pools. A
+    sentence that named only the pooling was therefore printed in the same
+    control row as the switch contradicting it. Named here rather than in each
+    branch so both readouts and both states carry it.
+    """
+    if not pooled:
+        return ""
+    if getattr(getattr(ctx.state, "plot", None), "bar_pool_replicates", True):
+        return ""
+    # ``barplot.controller.toggle_bar_pool_replicates`` repaints the readouts
+    # for this reason: it is the only control that can make one tab disagree
+    # with a sentence derived from the seam, so it is also the only one that has
+    # to say so when it moves.
+    return ", though Bar Plots is drawing each well separately (Pooled: Off)"
+
+
+def _plural_groups(count: int, lead: str, suffix: str = ".") -> str:
+    return f"{lead} {count} group{'' if count == 1 else 's'}{suffix}"
+
+
+def _chosen_variable(ctx) -> object | None:
+    variable_id = str(getattr(ctx.state.plot, "group_by_variable", "") or "")
+    if not variable_id:
+        return None
+    vset = getattr(ctx.state.selection, "variables", None)
+    return vset.by_id(variable_id) if vset is not None else None
+
+
+def refresh_grouping_readouts(ctx) -> None:
+    """Repaint every surface that states what the plots are pooling by.
+
+    Both read :func:`grouping_summary`, so the band and Home cannot describe
+    different figures. Painting the sentence into a label rather than the status
+    bar is the same call ``_announce`` documents below: the status bar is a
+    single persistent slot and a redraw with nothing to report writes nothing to
+    it, so a sentence put there outlives the condition that produced it.
+    """
+    message = grouping_summary(ctx)
+    for key in GROUPING_READOUTS:
+        label = ctx.widgets.get_or_none(key)
+        if label is None:
+            continue
+        label.setText(message)
+        label.setVisible(bool(message))
+
+
 def group_by_shortfall(ctx) -> str:
     """``""``, or the sentence naming the wells this grouping leaves out.
 
@@ -264,3 +379,4 @@ def _announce(ctx) -> None:
     message = group_by_shortfall(ctx)
     if message:
         _logger.info("%s", message)
+    refresh_grouping_readouts(ctx)

@@ -150,15 +150,17 @@ README_SUBTAB_TITLES = {
     # Home's notebook. "Overview" is the report page itself, not a sub-leaf, and
     # has no ``####`` heading of its own — it is the prose the Home section opens
     # with, so it is deliberately absent here.
-    "Home": {"Cell Gating", "Groups", "Well Labels", "Ratios", "Pipeline Info"},
+    # Groups, Variables and Well Labels are ``#####`` headings under Sample map,
+    # not sub-tabs of their own: they are layers of that one tab.
+    "Home": {"Cell Gating", "Sample map", "Ratios", "Pipeline Info"},
 }
 
 #: Of those, the ones a ``[subtabs]`` line cannot actually drop — their
 #: descriptors carry ``removable=False``, so ``Profile.includes`` admits them
 #: whatever the allowlist says and their tabs ship in every build. Trimming their
 #: sections deletes documentation for a tab the binary still has: with
-#: ``[subtabs] "Home" = ["Ratios"]`` the trimmer removed Cell Gating, Groups and
-#: Well Labels from the manual while all three stayed in the app.
+#: ``[subtabs] "Home" = ["Ratios"]`` the trimmer removed Cell Gating and Sample
+#: map from the manual while both stayed in the app.
 #:
 #: Restated here rather than read from the registry because this module is
 #: stdlib-only — ``all_well.spec`` imports it at build time and importing
@@ -166,7 +168,7 @@ README_SUBTAB_TITLES = {
 #: the registry, which is where the drift check belongs.
 README_ALWAYS_SUBTABS = {
     "Image Browser": {"Segmentation"},
-    "Home": {"Cell Gating", "Groups", "Well Labels"},
+    "Home": {"Cell Gating", "Sample map"},
 }
 
 _H1_3 = re.compile(r"^#{1,3} ")     # an h1/h2/h3 heading ends a ``###`` section

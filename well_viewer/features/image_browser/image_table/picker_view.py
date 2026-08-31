@@ -126,4 +126,4 @@ def build_image_table_picker(ctx, parent: QWidget) -> None:
         from well_viewer.core.sidebar_view import refresh_plot_groups_sidebar
         refresh_plot_groups_sidebar(ctx)
     except Exception:
-        swallowed("image table picker: plot groups refresh on build")
+        swallowed("image table picker: saved selections refresh on build")

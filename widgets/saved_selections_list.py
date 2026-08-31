@@ -762,7 +762,7 @@ class SavedSelectionsList(QWidget):
     @staticmethod
     def _sanitise(s: dict) -> dict:
         s.setdefault("id", "")
-        s.setdefault("name", "Selection")
+        s.setdefault("name", "Group")
         s["color"] = _hex6(s.get("color", "#5B9BF8"))
         s["hidden"] = bool(s.get("hidden"))
         s["wells"] = list(s.get("wells") or [])
@@ -796,7 +796,7 @@ class SavedSelectionsList(QWidget):
 
     def _unique_name(self, name: str, *, exclude_id: str | None = None,
                      taken: set[str] | None = None) -> str:
-        name = name.strip() or "Selection"
+        name = name.strip() or "Group"
         if taken is None:
             taken = {s["name"] for s in self._selections if s["id"] != exclude_id}
         if name not in taken:

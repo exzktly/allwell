@@ -224,8 +224,6 @@ def build_centre(win, parent: QWidget) -> None:
     # Sidebars referenced by data-load + tab-switch logic must exist
     # immediately even though the centre tab bodies that depend on them
     # are deferred.
-    win._ctx.features.call("groups.build_replicate_panel",
-                           win._ctx, win._sidebar_sample_frame)
     win._ctx.features.call("preview.build_picker",
                            win, win._sidebar_preview_frame)
 
@@ -425,8 +423,33 @@ def build_centre(win, parent: QWidget) -> None:
                     win._ctx, win._plotting_groupby_cb.currentData() or "")
 
         win._plotting_groupby_cb.currentIndexChanged.connect(_on_group_by)
-        win._plotting_groupby_grp = band.add_scope("", win._plotting_groupby_cb)
+        # **Registered, not just stamped on the window.**
+        # ``refresh_group_by_combo`` shows and hides this through
+        # ``ctx.widgets.get_or_none("_plotting_groupby_grp")``, and a plain
+        # attribute assignment does not put the widget in that registry — so the
+        # lookup answered None, nothing ever re-showed the control, and the
+        # Group by combo was hidden for the life of the session however many
+        # variables the plate declared. (With an empty label and one widget,
+        # ``add_scope`` returns that widget, so the group *is* the combo.)
+        win._plotting_groupby_grp = win._ctx.widgets.register(
+            "_plotting_groupby_grp", band.add_scope("", win._plotting_groupby_cb))
         win._plotting_groupby_grp.setVisible(False)
+
+        # What the combo *did*, beside what it is set to. The two are different
+        # facts: a user who has painted four groups and then picks a variable
+        # has had those four stop pooling anything, in every tab at once, and
+        # the combo reading "Group by: Dose" does not say so. The sentence comes
+        # from ``group_by_controller.grouping_summary``, which asks the pooling
+        # seam what it decided rather than deciding again.
+        from PySide6.QtWidgets import QLabel as _QLabel
+        win._plotting_grouping_note = win._ctx.widgets.register(
+            "_plotting_grouping_note", _QLabel(""))
+        win._plotting_grouping_note.setObjectName("Muted")
+        win._plotting_grouping_note.setStyleSheet(
+            f"color: {_C.text_muted}; font-size: {_T.caption_size}px;")
+        win._plotting_grouping_grp = band.add_scope(
+            "", win._plotting_grouping_note)
+        win._plotting_grouping_grp.setVisible(False)
 
         # Colour by / Split by, in a popover rather than beside Group by. They
         # are **decoration, not scope**: neither changes what a member is or

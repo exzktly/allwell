@@ -131,16 +131,17 @@ def build_sidebar(win, parent: QWidget) -> None:
 
     # Absorb leftover vertical space so the well picker stays pinned to the
     # top of the sidebar even when the sidebar is taller than its contents.
-    # Placed *before* the Plot Groups drawer so that drawer is pinned to the
+    # Placed *before* the Saved selections drawer so that drawer is pinned to the
     # bottom of the sidebar and expands upward (see below).
     layout.addStretch(1)
 
-    # Plot Groups are quick-load well subsets for plotting only. They live in a
-    # collapsible drawer pinned to the bottom of the sidebar so users can save
-    # the current selection and restore it later without creating stats /
+    # Saved selections are quick-load well subsets for plotting only. They live
+    # in a collapsible drawer pinned to the bottom of the sidebar so users can
+    # save the current selection and restore it later without creating stats /
     # replicate groups. Collapsed by default — only the header shows until the
-    # user opens it — so the name field + saved-group list never push up into
-    # (and overlap) the selected-well count bar above the plate.
+    # user opens it — so the name field + saved list never push up into (and
+    # overlap) the selected-well count bar above the plate. The symbols keep the
+    # ``plot_group`` spelling; only what a user reads was renamed.
     plot_groups_section = build_plot_groups_drawer(
         win._ctx, parent, include_add_controls=True,
     )
@@ -151,7 +152,7 @@ def build_sidebar(win, parent: QWidget) -> None:
 
 def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True,
                              wells_source=None):
-    """Build a Plot Groups quick-load drawer and register it for refresh.
+    """Build a Saved selections quick-load drawer and register it for refresh.
 
     Returns a ``CollapsibleSection`` widget the caller adds to its layout.
     Multiple drawers can co-exist (one on the main plotting sidebar, one on
@@ -179,7 +180,7 @@ def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True,
     """
     from widgets.collapsible_section import CollapsibleSection
 
-    section = CollapsibleSection("Plot Groups", parent, expanded=False)
+    section = CollapsibleSection("Saved selections", parent, expanded=False)
     section.setObjectName("PlotGroupsDrawer")
 
     if include_add_controls:
@@ -193,8 +194,9 @@ def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True,
         add_btn = QPushButton("Add", name_row)
         add_btn.setProperty("variant", "secondary")
         add_btn.setToolTip(
-            "Save the currently selected wells as a Plot Group. Plot Groups only "
-            "reload well selections; they are not stats or replicate groups."
+            "Save the wells currently selected under a name you can get back. "
+            "A saved selection only restores which wells are lit — it pools "
+            "nothing, so it is neither a group nor a replicate set."
         )
         # Pass THIS drawer's own name field into the handler (closure) so several
         # author-capable drawers (main sidebar + Image Table) don't fight over the
@@ -212,7 +214,7 @@ def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True,
             ctx.widgets.register("_plot_group_name_edit", name_edit)
             ctx.widgets.register("_plot_groups_add_btn", add_btn)
 
-    empty_label = QLabel("No Plot Groups yet.", section)
+    empty_label = QLabel("No saved selections yet.", section)
     empty_label.setObjectName("Muted")
     empty_label.setWordWrap(True)
     section.addWidget(empty_label)
@@ -280,7 +282,7 @@ def _group_visibility_mode(ctx) -> bool:
 
 
 def _wells_for_new_plot_group(ctx) -> list[str]:
-    """The well set a new Plot Group should capture, sorted by plate position.
+    """The well set a new saved selection should capture, in plate position order.
 
     Which store holds "the current selection" depends on the mode the sidebar
     plate is in, so the capture has to branch on the same condition the plate
@@ -293,8 +295,8 @@ def _wells_for_new_plot_group(ctx) -> list[str]:
       the plotting tabs draw from (see ``selection_controller``).
       ``selected_wells`` is not consulted at all here, because nothing in this
       mode keeps it current — it holds whatever a per-well tab, or an earlier
-      Plot Group load, last wrote. Reading it first meant that once any well
-      landed there, "Add Plot Group" saved that stale set instead of the sets
+      saved-selection load, last wrote. Reading it first meant that once any well
+      landed there, "Add Saved selection" saved that stale set instead of the sets
       the user could see, so a group covering several replicate sets came back
       as one.
     * **per-well mode** — the plate is a well selector and ``selected_wells`` is
@@ -315,7 +317,7 @@ def _wells_for_new_plot_group(ctx) -> list[str]:
 
 
 def _plot_groups_add_current(ctx, name_edit=None, *, wells_source=None) -> None:
-    """Save the current selection as a Plot Group.
+    """Save the current selection as a Saved selection.
 
     ``wells_source`` is the triggering drawer's own selection reader (see
     :func:`build_plot_groups_drawer`); without one this is the plotting
@@ -325,9 +327,9 @@ def _plot_groups_add_current(ctx, name_edit=None, *, wells_source=None) -> None:
              else _wells_for_new_plot_group(ctx))
     if not wells:
         ctx.notify.set_status(
-            "Select wells on the plate above before adding a Plot Group."
+            "Select wells on the plate above before saving a selection."
             if callable(wells_source) else
-            "Select wells (or show a group) before adding a Plot Group."
+            "Select wells (or show a group) before saving a selection."
         )
         return
     # Prefer the drawer that triggered this (its own name field); fall back to the
@@ -338,7 +340,7 @@ def _plot_groups_add_current(ctx, name_edit=None, *, wells_source=None) -> None:
     used_names = {g.get("name") for g in existing}
     used_ids = {g.get("id") for g in existing}
     group = make_plot_group(
-        name=name or f"Plot Group {len(existing) + 1}",
+        name=name or f"Selection {len(existing) + 1}",
         wells=wells,
         used_names=used_names,
         used_ids=used_ids,
@@ -349,12 +351,12 @@ def _plot_groups_add_current(ctx, name_edit=None, *, wells_source=None) -> None:
     refresh_plot_groups_sidebar(ctx)
     _plot_groups_schedule_save(ctx)
     ctx.notify.set_status(
-        f"Added Plot Group “{group['name']}” ({len(group['wells'])} wells)."
+        f"Added saved selection “{group['name']}” ({len(group['wells'])} wells)."
     )
 
 
 def plot_group_visibility_plan(selections, wells) -> tuple[list[bool], set[str]]:
-    """How loading a Plot Group of *wells* should repaint replicate visibility.
+    """How loading a Saved selection of *wells* should repaint replicate visibility.
 
     Returns ``(hidden_flags, solo_wells)`` — one ``hidden`` flag per entry of
     *selections*, in order, and the subset of *wells* that belongs to no
@@ -376,7 +378,7 @@ def plot_group_visibility_plan(selections, wells) -> tuple[list[bool], set[str]]
 
 
 def _apply_plot_group_to_rep_mode(ctx, wells) -> None:
-    """Repaint replicate visibility from a just-loaded Plot Group. No-op when no
+    """Repaint replicate visibility from a just-loaded Saved selection. No-op when no
     replicate sets are defined (plain mode already honours ``selected_wells``)."""
     sel = ctx.state.selection
     selections = [s for s in (sel.selections or []) if isinstance(s, dict)]
@@ -447,7 +449,7 @@ def _plot_groups_load(ctx, group_id: str) -> None:
     except Exception:
         _logger.debug("plot_groups: image table active_wells sync failed", exc_info=True)
     ctx.notify.set_status(
-        f"Loaded Plot Group “{group.get('name', 'Plot Group')}” "
+        f"Loaded saved selection “{group.get('name', 'Selection')}” "
         f"({len(wells)} wells)."
     )
 
@@ -463,9 +465,9 @@ def _plot_groups_delete(ctx, group_id: str) -> None:
 
 
 def refresh_plot_groups_sidebar(ctx) -> None:
-    """Rebuild the Plot Groups quick-load buttons across every registered drawer.
+    """Rebuild the Saved selections quick-load buttons across every registered drawer.
 
-    Each sidebar that hosts a Plot Groups drawer registers it via
+    Each sidebar that hosts a Saved selections drawer registers it via
     ``build_plot_groups_drawer``; this function repaints every one so the
     main plotting sidebar and the Image Table sidebar stay in lock-step.
     """
@@ -503,7 +505,7 @@ def refresh_plot_groups_sidebar(ctx) -> None:
             rl.setSpacing(4)
             wells = [w for w in (group.get("wells") or []) if w in valid]
             load_btn = QPushButton(
-                f"{group.get('name', 'Plot Group')} ({len(wells)})",
+                f"{group.get('name', 'Selection')} ({len(wells)})",
                 row,
             )
             load_btn.setToolTip(", ".join(wells) or "No loaded wells in this group")
@@ -513,7 +515,7 @@ def refresh_plot_groups_sidebar(ctx) -> None:
             rl.addWidget(load_btn, 1)
             del_btn = QPushButton("×", row)
             del_btn.setFixedWidth(theme.Metrics.icon_btn_w)
-            del_btn.setToolTip("Delete this Plot Group")
+            del_btn.setToolTip("Delete this saved selection")
             del_btn.clicked.connect(
                 lambda _=False, gid=group.get("id", ""): _plot_groups_delete(ctx, gid)
             )

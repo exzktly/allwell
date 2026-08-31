@@ -54,6 +54,20 @@ class SelectionState:
     # key space mid-plot.
     variables: VariableSet = field(default_factory=VariableSet)
 
+    # What ``variables`` was one edit ago, or ``None`` when there is nothing to
+    # go back to. One deep, and deliberately so: the expensive mistake on the
+    # Variables tab is a single button — Apply fill rewrites every well for a
+    # variable at once — and a one-step reversal covers it without the tab
+    # having to grow a command history. Every edit stashes, so the same button
+    # also reverses a mis-clicked chip and a delete.
+    #
+    # Here beside ``variables`` rather than on a feature slice for the reason
+    # the field above gives: it is per-dataset state, so it has to be cleared by
+    # the same swap and the same reset. An undo that outlived its plate would
+    # offer to restore the previous dataset's doses over the current one's.
+    # Never persisted — an undo is about the last minute, not the last session.
+    variables_undo: VariableSet | None = None
+
     # Freeform project notes (persisted in the sample_definitions block). Cached
     # here so headless save/load has the text even before the Notes widget builds.
     notes_text: str = ""

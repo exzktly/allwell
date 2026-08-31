@@ -1089,7 +1089,8 @@ def _features() -> list[FeatureDescriptor]:
                           }),
         FeatureDescriptor(name="Variables", parent="Home",
                           build=_build_variables, removable=True,
-                          reads_well_selection=False, subtab_inset=True,
+                          reads_well_selection=False, owns_plate=True,
+                          subtab_inset=True,
                           services={
                               "variables.refresh": _svc_variables_refresh,
                           }),

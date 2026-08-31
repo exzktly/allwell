@@ -2546,11 +2546,17 @@ well, so a well carries its value whether or not anybody grouped it. Grouping
 wells is what pools replicates into one point with an error bar across them; a
 lone well is a single measurement and is drawn without one.
 
-**What the curves measure.** The **Y** control picks between the channel's
-active Property and **Fraction above threshold** — the proportion of cells above
-the ON cutoff. The fraction is often the readout a dose response is really
-about, and it is not one of the Properties the band offers, so it lives here.
-The axis label follows what you picked, and a fit works on either.
+**What the curves measure.** This tab has its **own** Channel and Property
+controls, like the aggregate Scatter tab — and its Property list includes
+**Fraction above threshold**, the proportion of cells above the ON cutoff,
+which the shared band cannot offer. The fraction is often the readout a dose
+response is really about. The axis label follows what you picked, and a fit
+works on either.
+
+Because they are this tab's own, changing them here does not move Bar, Line,
+Distribution or Heat Map. Until you touch them they follow the channel and
+property you picked on the band, so a tab you have never configured is showing
+the same measurement as everything else.
 
 If you also turn on fold change, note that a control with **nothing** above the
 threshold has a fraction of zero, and dividing by it is undefined. The figure

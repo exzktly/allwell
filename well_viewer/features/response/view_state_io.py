@@ -19,9 +19,9 @@ from typing import Any
 # the registry reaches this module lazily — so there is no cycle to work around,
 # and a deferred feature import that is not breaking a cycle is one the budget
 # guard counts for nothing.
-from well_viewer.features.response.collect import Y_MEAN, Y_METRICS
 from well_viewer.features.response.controller import (
-    refresh_series_combo, refresh_x_combo, update_timepoint_button,
+    refresh_response_metric_combo, refresh_series_combo, refresh_x_combo,
+    update_timepoint_button,
 )
 from well_viewer.features.response.response_compute import FIT_MODELS, FIT_NONE
 
@@ -55,7 +55,15 @@ def snapshot_response(ctx) -> dict:
     series = ctx.widgets.get_or_none("_response_series_cb")
     if series is not None and series.currentData():
         out["series_variable_id"] = str(series.currentData())
-    out["y_metric"] = str(getattr(slice_, "y_metric", "mean") or "mean")
+    # The tab's own Channel and Property, by their combo labels — the same
+    # strings ``populate_metric_combo`` produces, so a restore needs no second
+    # vocabulary. Empty means "was following the shared choice", which restores
+    # as following it rather than pinning whatever it happened to be.
+    for key, attribute in (("channel", "channel"),
+                           ("metric_label", "metric_label")):
+        value = str(getattr(slice_, attribute, "") or "")
+        if value:
+            out[key] = value
     return out
 
 
@@ -90,8 +98,8 @@ def apply_response(ctx, state: dict) -> None:
             setattr(slice_, key, None)
 
     slice_.series_variable_id = str(state.get("series_variable_id", "") or "")
-    y_metric = str(state.get("y_metric", Y_MEAN) or Y_MEAN)
-    slice_.y_metric = y_metric if y_metric in Y_METRICS else Y_MEAN
+    slice_.channel = str(state.get("channel", "") or "")
+    slice_.metric_label = str(state.get("metric_label", "") or "")
     _sync_controls(ctx, slice_, state.get("x_variable_id"))
 
 
@@ -122,12 +130,25 @@ def _sync_controls(ctx, slice_, x_variable_id) -> None:
         series.setCurrentIndex(index if index >= 0 else 0)
         series.blockSignals(False)
 
-    y_combo = ctx.widgets.get_or_none("_response_y_cb")
-    if y_combo is not None:
-        index = y_combo.findData(slice_.y_metric)
-        y_combo.blockSignals(True)
-        y_combo.setCurrentIndex(index if index >= 0 else 0)
-        y_combo.blockSignals(False)
+    ch_combo = ctx.widgets.get_or_none("_response_ch_cb")
+    if ch_combo is not None and slice_.channel:
+        index = ch_combo.findText(slice_.channel)
+        if index >= 0:
+            ch_combo.blockSignals(True)
+            ch_combo.setCurrentIndex(index)
+            ch_combo.blockSignals(False)
+    # After the channel, never before: the Property list is reshaped for the
+    # channel, so seeding it against a stale one offers a list the restored
+    # label may not be in.
+    metric_combo = ctx.widgets.get_or_none("_response_metric_cb")
+    if metric_combo is not None:
+        refresh_response_metric_combo(ctx)
+        if slice_.metric_label:
+            index = metric_combo.findText(slice_.metric_label)
+            if index >= 0:
+                metric_combo.blockSignals(True)
+                metric_combo.setCurrentIndex(index)
+                metric_combo.blockSignals(False)
 
     fit_combo = ctx.widgets.get_or_none("_response_fit_cb")
     if fit_combo is not None:

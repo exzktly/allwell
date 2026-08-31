@@ -40,12 +40,20 @@ class ResponseState:
     #: while looking as though nothing had gone wrong.
     series_variable_id: str = ""
 
-    #: ``"mean"`` or ``"fraction"`` — what the curves plot on y. The tab's own
-    #: choice rather than the shared channel Property, because the fraction
-    #: above threshold is not one of the Properties that combo offers: it is
-    #: computed against the ON cutoff and returned beside the mean, and the
-    #: shared roster only carries it for the aggregate Scatter tab.
-    y_metric: str = "mean"
+    #: The channel this tab measures, and the Property on it — **this tab's
+    #: own**, as the aggregate Scatter tab's are, not the shared plotting
+    #: band's. Response owns them so its Property list can carry ``Fraction
+    #: above threshold``: that entry is not a column, and putting it in the
+    #: shared combo would offer Bar, Line, Distribution and Heat Map a metric
+    #: their collectors resolve to ``f"{channel}_{metric}"`` and cannot read.
+    #: Empty means "follow the shared channel", which is what a tab that has
+    #: never been touched should do.
+    #:
+    #: Stored as the combo **labels**, which is what the shared
+    #: ``populate_metric_combo`` produces and what ``METRIC_LABEL_TO_KEY``
+    #: consumes — so this tab holds no second vocabulary of its own.
+    channel: str = ""
+    metric_label: str = ""
 
     #: ``FIT_NONE`` / ``FIT_4PL`` / ``FIT_HILL``. Off by default: a fitted line
     #: through points is an assertion about the shape of the response, and the

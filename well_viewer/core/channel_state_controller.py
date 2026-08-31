@@ -428,8 +428,14 @@ def update_channel_selector(ctx) -> None:
     if shape_labels:
         plot_sections.append(("Shape Features", shape_labels))
     have_any = bool(real_labels or ratio_labels or shape_labels)
+    # ``_response_ch_cb`` is here and **deliberately not** in the
+    # sync-to-active roster in ``set_active_channel``. Response owns its
+    # channel the way the aggregate Scatter tab does, so it takes the same
+    # *entries* as every other plot combo and keeps its own *selection*; adding
+    # it above would drag the tab back onto the shared channel on every switch,
+    # which is precisely what a tab-local control exists not to do.
     for attr in ("_chan_cb_line", "_chan_cb_bar", "_chan_cb_distribution",
-                 "_chan_cb_heatmap", "_plotting_channel_cb"):
+                 "_chan_cb_heatmap", "_plotting_channel_cb", "_response_ch_cb"):
         cb = ctx.widgets.get_or_none(attr)
         if cb is not None:
             if have_any:
@@ -703,8 +709,16 @@ def set_active_metric(ctx, metric: str) -> None:
     refresh_thresh_frac_quick_edit(ctx)
     invalidate_stats_cache(ctx)
     redraw_app(ctx)
-    if ctx.widgets.get_or_none("_bar_tp_cb") is not None:
-        ctx.features.redraw(ctx, "Bar Plots")
+    # ``redraw_app`` fans out to the default-scope tabs only — Line,
+    # Distribution and Heat Map. Every other plotting leaf re-renders through
+    # its own shim, so a leaf missing from here draws the *previous* property
+    # until something else repaints it. Response reached its figure only via
+    # ``on_activate``, so switching Property while it was on screen changed
+    # nothing until the user left the tab and came back.
+    for _title, _guard in (("Bar Plots", "_bar_tp_cb"),
+                           ("Response Curves", "_response_ax")):
+        if ctx.widgets.get_or_none(_guard) is not None:
+            ctx.features.redraw(ctx, _title)
 
 
 

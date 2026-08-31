@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QFrame, QPushButton, QScrollArea, QWidget,
 )
 
+from well_viewer.core.safe import swallow
 from well_viewer.core.fold_change_controls_view import (
     install_fold_change_controls,
 )
@@ -27,10 +28,11 @@ from well_viewer.core.ui_helpers import (
 from well_viewer.features.export.service import export_cell_data_from
 from well_viewer.features.response.cell_scope_compute import cell_scope
 from well_viewer.features.response.controller import (
-    Y_METRIC_LABELS, export_response_csv, fit_model_labels, fit_settings,
-    on_series_changed, on_x_variable_changed, open_timepoint_selector,
-    redraw_response, selected_y_metric, set_fit_bound, set_fit_model,
-    set_y_metric, update_timepoint_button,
+    export_response_csv, fit_model_labels, fit_settings,
+    on_response_channel_changed, on_response_metric_changed, on_series_changed,
+    on_x_variable_changed, open_timepoint_selector, redraw_response,
+    refresh_response_metric_combo, response_channel,
+    set_fit_bound, set_fit_model, update_timepoint_button,
 )
 
 #: The figure. One axes, wide rather than tall — a dose–response is read across.
@@ -66,19 +68,25 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     x_combo.currentIndexChanged.connect(lambda *_: on_x_variable_changed(ctx))
     band.add_scope("", x_combo)
 
-    # Scope: what the curves measure. Beside X because the pair of them is the
-    # figure's subject — "fraction above threshold against dose" is one phrase.
-    y_combo = reg.register("_response_y_cb", LabeledComboBox("Y"))
-    y_combo.setToolTip(
-        "What the curves plot — the channel's active Property, or the fraction "
-        "of cells above the ON cutoff")
-    for label, metric in Y_METRIC_LABELS:
-        y_combo.addItem(label, metric)
-    _index = y_combo.findData(selected_y_metric(ctx))
-    y_combo.setCurrentIndex(_index if _index >= 0 else 0)
-    y_combo.currentIndexChanged.connect(
-        lambda *_: set_y_metric(ctx, y_combo.currentData() or ""))
-    band.add_scope("", y_combo)
+    # This tab's **own** Channel and Property, as the aggregate Scatter tab has
+    # its own: only a tab that owns the pair can offer `Fraction above
+    # threshold`, which is not a column and which the shared band's consumers
+    # would resolve to `f"{channel}_{metric}"` and fail to read. They fall back
+    # to the shared choice until the user touches them, so a tab nobody has
+    # configured still follows the plate they picked on the band.
+    ch_combo = reg.register("_response_ch_cb", LabeledComboBox("Channel"))
+    ch_combo.setToolTip("The channel this tab measures — its own, not the band's")
+    ch_combo.currentIndexChanged.connect(
+        lambda *_: on_response_channel_changed(ctx))
+    band.add_scope("", ch_combo)
+
+    metric_combo = reg.register("_response_metric_cb", LabeledComboBox("Property"))
+    metric_combo.setToolTip(
+        "What the curves measure, including the fraction of cells above the "
+        "ON cutoff")
+    metric_combo.currentIndexChanged.connect(
+        lambda *_: on_response_metric_changed(ctx))
+    band.add_scope("", metric_combo)
 
     # Scope, beside X and for the same reason: it says what the figure is *of*.
     # One curve per value of this variable per timepoint, so a plate of two cell
@@ -87,7 +95,8 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     series_combo = reg.register("_response_series_cb", LabeledComboBox("Series"))
     series_combo.setToolTip(
         "Split the members into one curve per value of a second variable — "
-        "colour carries the series, dashes carry the timepoint")
+        "colour carries the series, dashes carry the timepoint. "
+        "None draws one curve per timepoint.")
     series_combo.currentIndexChanged.connect(lambda *_: on_series_changed(ctx))
     band.add_scope("", series_combo)
 
@@ -161,6 +170,8 @@ def build_response_tab(ctx, parent: QWidget) -> None:
         ),
     ), 1)
 
+    _seed_channel_combo(ctx, ch_combo)
+    refresh_response_metric_combo(ctx)
     update_timepoint_button(ctx)
     redraw_response(ctx)
 
@@ -210,3 +221,32 @@ def _build_fit_popover(ctx, band):
 
 def _export_response_data(ctx) -> None:
     export_response_csv(ctx)
+
+
+def _seed_channel_combo(ctx, combo) -> None:
+    """Fill the tab's Channel list and select what it is currently measuring.
+
+    The entries are the same ones the shared band offers, read off
+    ``ChannelState`` rather than rebuilt, so a ratio or an smFISH channel
+    appears here exactly as it does there. Signals are blocked: seeding emits
+    ``currentIndexChanged``, and letting that run would write the tab's own
+    channel on first build — turning a tab that should follow the shared
+    choice into one that has silently diverged from it before the user has
+    touched anything.
+    """
+    from well_viewer.core.channel_state_controller import update_channel_selector
+
+    # The **entries** come from the shared refresher, which now carries this
+    # combo in its roster — so a ratio, a shape feature and the section headers
+    # appear here exactly as on every other plot tab, from one definition. Only
+    # the *selection* is this tab's.
+    with swallow("fill the response channel list"):
+        update_channel_selector(ctx)
+    blocked = combo.blockSignals(True)
+    try:
+        current = response_channel(ctx)
+        index = combo.findText(current) if current else -1
+        if index >= 0:
+            combo.setCurrentIndex(index)
+    finally:
+        combo.blockSignals(blocked)

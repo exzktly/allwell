@@ -68,7 +68,7 @@ def stub_stats(monkeypatch):
     """``compute_rep_stats`` and the ON cutoff, so the curve's shape is the test's."""
     means = {}
 
-    def _stats(ctx, rset, target_t, threshold, use_sem):
+    def _stats(ctx, rset, target_t, threshold, use_sem, **kw):
         value = means.get((rset.name, target_t), 10.0)
         return (None, None, None, None) if value is None else (value, 1.0, 0.5, 0.1)
 
@@ -689,7 +689,7 @@ def test_a_single_replicate_member_is_counted_as_having_no_spread(stub_stats, mo
     causes with two different fixes (another replicate, or a control), so two
     counts rather than one sentence guessing between them.
     """
-    def _stats(ctx, rset, target_t, threshold, use_sem):
+    def _stats(ctx, rset, target_t, threshold, use_sem, **kw):
         return (10.0, float("nan"), 0.5, 0.1)      # a mean, no spread
 
     import well_viewer.domain.stats_compute as sc

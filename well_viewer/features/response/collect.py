@@ -319,7 +319,8 @@ def fit_curves(data: ResponseData, model: str, *, fixed_top: float | None = None
 
 
 def collect_response(ctx, variable_id: str, timepoints,
-                    series_id: str = "", y_metric: str = Y_MEAN) -> ResponseData:
+                    series_id: str = "", y_metric: str = Y_MEAN,
+                    *, val_col: str | None = None) -> ResponseData:
     """Build every curve for *variable_id* at *timepoints*.
 
     *series_id* names a second variable that splits the members into separate
@@ -374,9 +375,12 @@ def collect_response(ctx, variable_id: str, timepoints,
     series_variable = (vset.by_id(series_id)
                        if series_id and series_id != variable_id else None)
     well_paths = ctx.state.dataset.well_paths or {}
+    # The tab's own column when it has one, so the ON cutoff, the stats and
+    # the axis label all describe the same measurement. ``None`` keeps the
+    # shared one, which is what every headless and export caller passes.
+    column = val_col or ctx.state.channel.active_val_col
     threshold = on_cutoff_for_column(
-        ctx, ctx.state.channel.active_val_col,
-        channel=ctx.state.channel.active_channel)
+        ctx, column, channel=ctx.state.channel.active_channel)
     use_sem = bool(getattr(ctx.state.plot, "use_sem", True))
     # The Display popover's "Spread: FOV" toggle, which this tab **built and
     # never read**: it always reduced across wells, so a member of one well had
@@ -408,7 +412,7 @@ def collect_response(ctx, variable_id: str, timepoints,
     placed.sort(key=lambda row: row[1])
     targets = [float(t) for t in (timepoints or [])]
     normalise = _member_normaliser(ctx, data, targets, threshold, use_sem,
-                                   per_fov)
+                                   per_fov, column)
 
     # A member at a time, not a timepoint at a time. ``vs t0`` divides a
     # member's whole series by its own baseline, so the series has to exist
@@ -431,7 +435,7 @@ def collect_response(ctx, variable_id: str, timepoints,
         raw_spread_defined: dict[float, bool] = {}
         for target_t in targets:
             mean, err, frac, frac_err = stats_for(
-                ctx, rset, target_t, threshold, use_sem)[:4]
+                ctx, rset, target_t, threshold, use_sem, val_col=column)[:4]
             drawn = frac if data.y_metric == Y_FRACTION else mean
             drawn_err = frac_err if data.y_metric == Y_FRACTION else err
             raw_spread_defined[float(target_t)] = _is_number(drawn_err)
@@ -615,7 +619,7 @@ def _is_number(value) -> bool:
 
 
 def _member_normaliser(ctx, data: ResponseData, targets, threshold, use_sem,
-                       per_fov_spread: bool = False):
+                       per_fov_spread: bool = False, val_col: str = ""):
     """A ``(points, member_name) -> points`` closure over the shared state.
 
     **The same code path the Line tab normalises through**, not a second
@@ -653,7 +657,8 @@ def _member_normaliser(ctx, data: ResponseData, targets, threshold, use_sem,
 
     data.normalised = fc_module.fold_change_suffix_for(ctx, "response")
     cache = ControlSeriesCache(
-        ctx, threshold=threshold, val_col=ctx.state.channel.active_val_col,
+        ctx, threshold=threshold,
+        val_col=val_col or ctx.state.channel.active_val_col,
         # Matched to the members' own producer. Hardcoded ``False`` meant that
         # with Spread: FOV on, a per-FOV numerator was normalised against a
         # cross-well denominator — two different poolings in one ratio.

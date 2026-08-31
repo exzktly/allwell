@@ -14,8 +14,7 @@ from well_viewer.core.csv_export import write_csv_rows
 from well_viewer.core.safe import swallow
 from well_viewer.domain.sample_variables import NUMBER
 from well_viewer.features.response.collect import (
-    Y_FRACTION, Y_MEAN, Y_METRICS, ResponseData, collect_response, empty_reason,
-    fit_curves,
+    Y_FRACTION, Y_MEAN, ResponseData, collect_response, empty_reason, fit_curves,
 )
 from well_viewer.features.response.renderer import draw_response
 from well_viewer.features.response.response_compute import (
@@ -53,7 +52,12 @@ def selected_variable_id(ctx) -> str:
 
 #: What the Series combo says when no split is wanted. Kept first in the list so
 #: the tab opens on the behaviour it has always had.
-NO_SERIES_LABEL = "None — one curve per timepoint"
+#:
+#: Short, because ``LabeledComboBox`` sizes to the text it is *painting* rather
+#: than to the widest item — so a long default made this one box far wider than
+#: its neighbours and left the band visibly ragged. The explanation moved to the
+#: combo's tooltip, which costs nothing until someone wants it.
+NO_SERIES_LABEL = "None"
 
 
 def series_variables(ctx) -> list:
@@ -102,24 +106,104 @@ def refresh_series_combo(ctx) -> None:
     combo.blockSignals(False)
 
 
-#: ``(label, id)`` for the Y combo, in offer order. Mean first: it is what the
-#: tab has always drawn and what most plates want.
-Y_METRIC_LABELS = (("Mean", Y_MEAN), ("Fraction above threshold", Y_FRACTION))
+#: The Property label that is not a column. Named once here rather than
+#: spelled at each comparison: it is the same string ``populate_metric_combo``
+#: appends and the aggregate Scatter tab keys on, and a second spelling of it
+#: is how one of the two sites silently stops matching.
+FRACTION_LABEL = "Fraction above threshold"
 
 
-def selected_y_metric(ctx) -> str:
-    """What the curves plot on y. Falls back to the mean for anything unknown."""
+def response_channel(ctx) -> str:
+    """The channel this tab measures — its own, falling back to the shared one.
+
+    Falling back rather than seeding: a tab the user has never touched should
+    follow the plate they picked on the band, and only diverge once they have
+    said something here.
+    """
     slice_ = ctx.state.feature_slice("response")
-    value = str(getattr(slice_, "y_metric", Y_MEAN) or Y_MEAN) if slice_ else Y_MEAN
-    return value if value in Y_METRICS else Y_MEAN
+    own = str(getattr(slice_, "channel", "") or "") if slice_ else ""
+    return own or str(getattr(ctx.state.channel, "active_channel", "") or "")
 
 
-def set_y_metric(ctx, metric: str) -> None:
+def response_metric_label(ctx) -> str:
+    """The Property label this tab draws, falling back to the shared metric."""
+    from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL
+
     slice_ = ctx.state.feature_slice("response")
-    if slice_ is None:
+    own = str(getattr(slice_, "metric_label", "") or "") if slice_ else ""
+    if own:
+        return own
+    shared = str(getattr(ctx.state.channel, "active_metric", "") or "")
+    return METRIC_KEY_TO_LABEL.get(shared, "Mean Intensity")
+
+
+def response_draws_fraction(ctx) -> bool:
+    return response_metric_label(ctx) == FRACTION_LABEL
+
+
+def response_val_col(ctx) -> str:
+    """The column the stats producers should read for this tab.
+
+    For the fraction the column is still the channel's **mean intensity**: the
+    fraction is the share of cells whose mean intensity clears the ON cutoff,
+    so there is no ``gfp_fraction_above_threshold`` column to read and asking
+    for one would come back empty. That is the whole reason this label cannot
+    live in the shared Property combo, whose consumers derive the column as
+    ``f"{channel}_{metric}"`` and would do exactly that.
+    """
+    from well_viewer.data.metric_labels import METRIC_LABEL_TO_KEY
+
+    channel = response_channel(ctx)
+    if not channel:
+        return str(getattr(ctx.state.channel, "active_val_col", "") or "")
+    label = response_metric_label(ctx)
+    key = ("mean_intensity" if label == FRACTION_LABEL
+           else METRIC_LABEL_TO_KEY.get(label, "mean_intensity"))
+    return f"{channel}_{key}"
+
+
+def on_response_channel_changed(ctx) -> None:
+    """Store the tab's own channel, then reshape its Property list for it.
+
+    Its own, and deliberately **not** written back to
+    ``ctx.state.channel.active_channel``: this control moving Bar and Line is
+    the surprise a tab-local control exists to avoid, and it is how the
+    aggregate Scatter tab's pair already behaves.
+    """
+    combo = _widget(ctx, "_response_ch_cb")
+    slice_ = ctx.state.feature_slice("response")
+    if combo is None or slice_ is None:
         return
-    slice_.y_metric = metric if metric in Y_METRICS else Y_MEAN
+    slice_.channel = str(combo.currentText() or "")
+    refresh_response_metric_combo(ctx)
     redraw_response(ctx)
+
+
+def on_response_metric_changed(ctx) -> None:
+    combo = _widget(ctx, "_response_metric_cb")
+    slice_ = ctx.state.feature_slice("response")
+    if combo is None or slice_ is None:
+        return
+    slice_.metric_label = str(combo.currentText() or "")
+    redraw_response(ctx)
+
+
+def refresh_response_metric_combo(ctx) -> None:
+    """Reshape the Property list for the chosen channel, fraction included.
+
+    Through the shared ``populate_metric_combo`` with ``include_fraction=True``
+    — the same call the aggregate Scatter tab makes — so the ratio and shape
+    collapses, the smFISH gating and the fallback all behave identically here
+    and this tab holds no second copy of those rules.
+    """
+    from well_viewer.core.channel_state_controller import populate_metric_combo
+
+    combo = _widget(ctx, "_response_metric_cb")
+    if combo is None:
+        return
+    channel = response_channel(ctx)
+    populate_metric_combo(ctx, combo, channel_entry=channel,
+                          smfish_channel=channel, include_fraction=True)
 
 
 def on_series_changed(ctx) -> None:
@@ -258,8 +342,10 @@ def response_data(ctx):
     variable_id = selected_variable_id(ctx)
     if not variable_id:
         return ResponseData()
-    return collect_response(ctx, variable_id, timepoints_for(ctx),
-                            selected_series_id(ctx), selected_y_metric(ctx))
+    return collect_response(
+        ctx, variable_id, timepoints_for(ctx), selected_series_id(ctx),
+        Y_FRACTION if response_draws_fraction(ctx) else Y_MEAN,
+        val_col=response_val_col(ctx))
 
 
 def redraw_response(ctx) -> None:
@@ -467,7 +553,7 @@ def _y_label(ctx, data=None) -> str:
     its fold-change state with the Bar and Line tabs, so the axis can become
     normalised without anything on this page being touched.
     """
-    channel = str(getattr(ctx.state.channel, "active_channel", "") or "").upper()
+    channel = response_channel(ctx).upper()
     if getattr(data, "y_metric", Y_MEAN) == Y_FRACTION:
         # Not the channel's Property. The fraction is a different quantity from
         # whatever the Property names, computed against the ON cutoff, and an
@@ -476,8 +562,8 @@ def _y_label(ctx, data=None) -> str:
         label = " ".join(part for part in (channel, "fraction above threshold")
                          if part)
     else:
-        metric = str(getattr(ctx.state.channel, "active_metric", "") or "")
-        label = " ".join(part for part in (channel, metric.replace("_", " "))
+        label = " ".join(part for part in (channel,
+                                           response_metric_label(ctx).lower())
                          if part)
     suffix = getattr(data, "normalised", "") if data is not None else ""
     return f"{label} {suffix}".strip() if suffix else label

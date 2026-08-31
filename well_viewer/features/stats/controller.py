@@ -13,9 +13,59 @@ from well_viewer.data.data_loading import (
     is_ratio_key,
     resolve_value_series,
 )
+from well_viewer.core.safe import swallow
 from well_viewer.domain.significance import p_phrase, significance_stars
+from well_viewer.features.stats._report import (
+    dunnett_lines, effect_size_text, omnibus_lines, paired_lines, two_way_lines,
+)
 from well_viewer.domain.stats_compute import group_replicate_stats
 from well_viewer.domain.tp_match import tp_close_mask
+
+
+#: Every entry the Test combo offers, in the order it offers them, with what
+#: each one needs. **One roster**, because the same three facts — is this test
+#: rank-based, does it pair, does it need a sample variable — were being
+#: re-derived from the label's spelling at each site that asked, and a fourth
+#: site that asked differently is how a test comes to run under another test's
+#: rules. ``tab_view`` fills the combo from this and nothing else.
+#:
+#: ``kind`` is what the run branches on; ``parametric`` picks the omnibus to
+#: match, so a rank-based run is not gated by an ANOVA.
+TESTS: tuple[dict, ...] = (
+    {"label": "t-test (Welch, unequal var)", "kind": "pairwise",
+     "parametric": True, "needs": ()},
+    {"label": "t-test (Student, pooled var)", "kind": "pairwise",
+     "parametric": True, "needs": ()},
+    {"label": "Wilcoxon rank-sum", "kind": "pairwise",
+     "parametric": False, "needs": ()},
+    {"label": "Mann-Whitney U", "kind": "pairwise",
+     "parametric": False, "needs": ()},
+    {"label": "KS test (2 wells only)", "kind": "ks",
+     "parametric": False, "needs": ()},
+    {"label": "Dunnett (vs control group)", "kind": "dunnett",
+     "parametric": True, "needs": ("control",)},
+    {"label": "Paired t-test", "kind": "paired",
+     "parametric": True, "needs": ("pairing",)},
+    {"label": "Wilcoxon signed-rank", "kind": "paired",
+     "parametric": False, "needs": ("pairing",)},
+    {"label": "Two-way ANOVA", "kind": "two_way",
+     "parametric": True, "needs": ("factor_a", "factor_b")},
+)
+
+TEST_LABELS: tuple[str, ...] = tuple(t["label"] for t in TESTS)
+
+
+def test_spec(label: str) -> dict:
+    """The roster entry for *label*, falling back to the first pairwise test.
+
+    A label the roster does not know is a saved view state from another version
+    or one edited by hand; degrading to Welch is what every other combo in the
+    app does with an unknown stored value, and it beats raising while drawing.
+    """
+    for entry in TESTS:
+        if entry["label"] == str(label):
+            return entry
+    return TESTS[0]
 
 
 _STAT_LABELS = {
@@ -213,6 +263,68 @@ def _run_pair_tests(group_vals, test, is_ks):
     return out
 
 
+def _pair_effect_sizes(group_vals):
+    """One :class:`EffectSize` per pair, in ``_run_pair_tests``' own order.
+
+    A parallel list rather than a sixth element of that function's tuple: the
+    tuple's shape is read positionally by ``_bh_adjust`` and by two formatters,
+    and widening it to carry a quantity none of them use is how an index goes
+    stale. Same pair order, built from the same list, so ``zip`` is safe.
+    """
+    from well_viewer.domain.stats_tests import effect_size
+
+    return [effect_size(vals_a, vals_b)
+            for i, (_na, vals_a) in enumerate(group_vals)
+            for _nb, vals_b in group_vals[i + 1:]]
+
+
+def collect_group_values_by_variable(ctx, grp, target_t, variable_id, *,
+                                     val_col, threshold, statistic, use_fov):
+    """``{value label: statistic}`` for one group, split by a sample variable.
+
+    The pairing key for a paired test. Both it and the two-way ANOVA need to
+    know *which* replicate of group A corresponds to which of group B, and that
+    correspondence does not exist in the data model except as a sample variable
+    the user declared — a `replicate` or `batch` axis.
+
+    A well with no value for the variable is left out rather than pooled into a
+    default bucket, and a value several of the group's wells hold takes their
+    mean, because the pairing unit is the *value* and not the well.
+    """
+    from well_viewer.domain.batch_models import BarGroup as _BarGroup
+    from well_viewer.domain.sample_variables import MIXED, roll_up
+
+    vset = getattr(ctx.state.selection, "variables", None)
+    variable = vset.by_id(variable_id) if vset is not None else None
+    if variable is None:
+        return {}
+    well_paths = ctx.state.dataset.well_paths or {}
+    by_value: dict[str, list[float]] = {}
+    for well in grp.wells:
+        if well not in well_paths:
+            continue
+        value_id = roll_up(vset, variable_id, [well])
+        # ``MIXED`` cannot arise for a single well today, and is excluded
+        # anyway: it is a *string* like a real value id, so an ``isinstance``
+        # check alone would key a pairing bucket on "these disagree".
+        if not isinstance(value_id, str) or value_id == MIXED:
+            continue
+        vals = collect_group_values(
+            ctx, _BarGroup(grp.name, solo_wells=[well]), target_t,
+            val_col=val_col, threshold=threshold, statistic=statistic,
+            use_fov=use_fov)
+        if vals:
+            by_value.setdefault(variable.display_label(value_id), []).extend(vals)
+    return {label: float(sum(vs) / len(vs)) for label, vs in by_value.items() if vs}
+
+
+def _variable_label(ctx, variable_id: str) -> str:
+    """A variable's own name, for the report — ``""`` when it is gone."""
+    vset = getattr(ctx.state.selection, "variables", None)
+    variable = vset.by_id(variable_id) if vset is not None else None
+    return getattr(variable, "name", "") or ""
+
+
 def compute_pairwise(ctx, *, groups, target_t, val_col, statistic, threshold, test,
                      use_fov: bool = True) -> list:
     """Widget-free computation of the structured pairwise results that drive the
@@ -343,7 +455,8 @@ def _format_group_summary_lines(group_vals: list[tuple[str, list[float]]]) -> li
     return lines
 
 
-def _format_pairwise_lines(pair_results, adjusted: dict, show_adjusted: bool) -> list[str]:
+def _format_pairwise_lines(pair_results, adjusted: dict, show_adjusted: bool,
+                           effects=None) -> list[str]:
     """Pairwise test results + BH-adjusted p-values (audit A5). Pure.
 
     Both p-values go through :func:`~well_viewer.domain.significance.p_phrase`,
@@ -366,6 +479,13 @@ def _format_pairwise_lines(pair_results, adjusted: dict, show_adjusted: bool) ->
                 ap = adjusted[idx]
                 line += f"   |   {p_phrase(ap, adjusted=True)}   {_sig_marker(ap)}"
             lines.append(line)
+            # The effect size on its own line under the p, always. With three
+            # replicate wells a p-value says very little on its own, and a
+            # reader who is given only the p will quote only the p.
+            if effects is not None and idx < len(effects):
+                text = effect_size_text(effects[idx])
+                if text:
+                    lines.append(f"  {text}")
         lines.append("")
     if show_adjusted:
         lines.append(
@@ -374,6 +494,172 @@ def _format_pairwise_lines(pair_results, adjusted: dict, show_adjusted: bool) ->
             f"raw p when quoting significance with 3+ groups."
         )
         lines.append("")
+    return lines
+
+
+def _chosen_variable(ctx, widget_name: str) -> str:
+    """The sample-variable id (or group name) a picker holds, or ``""``."""
+    combo = ctx.widgets.get_or_none(widget_name)
+    return str(combo.currentData() or "") if combo is not None else ""
+
+
+def _group_named(groups, name: str) -> "BarGroup | None":
+    """The comparison group called *name*, or ``None``.
+
+    ``None`` means the tab's groups moved between resolving the samples and
+    formatting the report — a caller must not read it as an empty group, which
+    would pair against nothing and report a test that ran on no data.
+    """
+    for g in groups:
+        if g.name == name:
+            return g
+    return None
+
+
+def _two_way_rows(ctx, grp, target_t, id_a, id_b, *,
+                  val_col, threshold, statistic, use_fov) -> list[tuple]:
+    """``(level_a, level_b, value)`` per well of *grp*, for the ANOVA.
+
+    Per **well**, not per group: a two-way ANOVA needs replicates inside each
+    cell of the two factors, and a group summarised to one number contributes a
+    single observation to one cell — which is the design the domain module
+    declines for having no residual degrees of freedom.
+
+    The unit *within* a well follows the tab's shared FOV rule, like every other
+    test here: with FOV mode off a well is one row, and with it on each field is
+    a row. The second is pseudo-replication for this table — three fields of one
+    well are not three replicates of that well's dose — so the caller says so
+    above the table rather than letting the residual df imply otherwise.
+    """
+    from well_viewer.domain.batch_models import BarGroup as _BarGroup
+    from well_viewer.domain.sample_variables import MIXED, roll_up
+
+    vset = getattr(ctx.state.selection, "variables", None)
+    var_a = vset.by_id(id_a) if vset is not None else None
+    var_b = vset.by_id(id_b) if vset is not None else None
+    if var_a is None or var_b is None:
+        return []
+    well_paths = ctx.state.dataset.well_paths or {}
+    rows = []
+    for well in grp.wells:
+        if well not in well_paths:
+            continue
+        va = roll_up(vset, id_a, [well])
+        vb = roll_up(vset, id_b, [well])
+        if not isinstance(va, str) or va == MIXED:
+            continue
+        if not isinstance(vb, str) or vb == MIXED:
+            continue
+        for value in collect_group_values(
+                ctx, _BarGroup(grp.name, solo_wells=[well]), target_t,
+                val_col=val_col, threshold=threshold, statistic=statistic,
+                use_fov=use_fov):
+            rows.append((var_a.display_label(va), var_b.display_label(vb),
+                         float(value)))
+    return rows
+
+
+def _alternative_test_lines(ctx, *, kind, spec, groups, group_vals, target_t,
+                            val_col, threshold, statistic, use_fov) -> list[str]:
+    """The report block for Dunnett, a paired test, or the two-way ANOVA.
+
+    One function because all three share the same shape — resolve what the test
+    needs from the pickers, decline in words if it is not there, otherwise hand
+    pure lists to ``domain/stats_tests`` and format the answer. Splitting them
+    into three would put three copies of the decline-with-a-reason path in three
+    places, and that path is the one §7 cares about.
+    """
+    from well_viewer.domain import stats_tests as _st
+
+    if kind == "dunnett":
+        control = _chosen_variable(ctx, "_stats_control_cb")
+        by_name = dict(group_vals)
+        if control not in by_name:
+            return [f"Dunnett: not run — pick a control group. "
+                    f"'{control}' is not one of the groups being compared."]
+        treatments = [(n, v) for n, v in group_vals if n != control]
+        return dunnett_lines(
+            _st.dunnett_vs_control(control, by_name[control], treatments))
+
+    if kind == "paired":
+        variable_id = _chosen_variable(ctx, "_stats_var_a_cb")
+        label = _variable_label(ctx, variable_id)
+        if not label:
+            return ["Paired test: not run — pick the variable that says which "
+                    "replicate of one group matches which of the other. "
+                    "Define one on Home → Variables (a batch or day axis).",
+                    "",
+                    "Pairing by list order is not offered: which replicate "
+                    "corresponds to which is a fact about the data, and a test "
+                    "that guessed it would produce a number with no basis."]
+        lines = [f"Paired by {label}. Replicates are matched on the value each "
+                 f"well holds for it, never on list order.", ""]
+        # A group that has gone missing is skipped rather than paired against
+        # nothing: ``collect_group_values_by_variable`` would take ``None`` and
+        # return an empty map, and an empty map pairs to zero replicates, which
+        # the paired test then declines for a reason that names the variable
+        # rather than the missing group.
+        # ``group_vals`` was built from ``groups`` in this same call, so every
+        # name resolves; the guard is here because a silent ``None`` would
+        # reach ``collect_group_values_by_variable`` as an empty map and the
+        # paired test would then decline naming the *variable* rather than the
+        # missing group — a true-sounding reason for the wrong cause.
+        maps = {}
+        for name, _vals in group_vals:
+            grp = _group_named(groups, name)
+            if grp is None:                                  # pragma: no cover
+                continue
+            maps[name] = collect_group_values_by_variable(
+                ctx, grp, target_t, variable_id, val_col=val_col,
+                threshold=threshold, statistic=statistic, use_fov=use_fov)
+        for i, (name_a, _va) in enumerate(group_vals):
+            for name_b, _vb in group_vals[i + 1:]:
+                if name_a not in maps or name_b not in maps:
+                    continue
+                lines += paired_lines(name_a, name_b, _st.paired_test(
+                    maps[name_a], maps[name_b], parametric=spec["parametric"]))
+        return lines
+
+    # two_way
+    id_a = _chosen_variable(ctx, "_stats_var_a_cb")
+    id_b = _chosen_variable(ctx, "_stats_var_b_cb")
+    label_a, label_b = _variable_label(ctx, id_a), _variable_label(ctx, id_b)
+    if not label_a or not label_b:
+        return ["Two-way ANOVA: not run — pick two sample variables. "
+                "Define them on Home → Variables."]
+    if id_a == id_b:
+        return [f"Two-way ANOVA: not run — both factors are '{label_a}'. "
+                "Two-way needs two different variables."]
+    # **Each well once, however many groups hold it.** Comparison groups may
+    # overlap — ``stats_apply_drag`` adds a well to the active group and never
+    # removes it from another, and ``stats_refresh_map`` documents the overlap
+    # as supported — so iterating groups double-counts every shared well. On a
+    # balanced 2x2 with one well in two groups that halves every p-value and
+    # doubles the residual df, with nothing in the table saying the n moved.
+    # The ANOVA's unit is the well, so the wells are what is de-duplicated.
+    seen: set[str] = set()
+    rows = []
+    for grp in groups:
+        fresh = [w for w in grp.wells if w not in seen]
+        seen.update(fresh)
+        if not fresh:
+            continue
+        from well_viewer.domain.batch_models import BarGroup as _BG
+        rows += _two_way_rows(ctx, _BG(grp.name, solo_wells=fresh), target_t,
+                              id_a, id_b, val_col=val_col, threshold=threshold,
+                              statistic=statistic, use_fov=use_fov)
+    lines = two_way_lines(_st.two_way_anova(rows, factor_a=label_a,
+                                            factor_b=label_b))
+    if use_fov and lines:
+        # The same warning the pairwise header carries, on the table whose
+        # residual df a reader will quote. With FOV mode on each field of view
+        # is a row, so three fields of one well count as three replicates of
+        # that well's dose *and* of its cell line — which is pseudo-replication,
+        # and the df are exactly where it shows.
+        lines.insert(1, "Replicates: per-FOV (FOV mode is ON). Each field of "
+                        "view is one row, so a single well contributes several "
+                        "replicates to its cell — the residual df reflect "
+                        "fields, not wells.")
     return lines
 
 
@@ -395,8 +681,16 @@ def run_stats(ctx, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
         app._stats_write_result("Define at least 2 non-empty groups to run a test.")
         return
 
+    # The pickers list things that live elsewhere — the tab's groups, and the
+    # plate's sample variables — and the run is the moment their contents
+    # matter. Refreshing here means a control or a factor chosen before the
+    # thing it names existed cannot silently be read from a stale list.
+    with swallow("refresh the Statistics test inputs before a run"):
+        refresh_stats_test_inputs(app._ctx)
     test = app._stats_test_cb.currentText()
-    is_ks = test.startswith("KS")
+    spec = test_spec(test)
+    kind = spec["kind"]
+    is_ks = kind == "ks"
 
     if is_ks:
         if len(groups) != 2:
@@ -478,13 +772,42 @@ def run_stats(ctx, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     )
     lines += _format_group_summary_lines(group_vals)
 
+    # The three tests that are not an all-pairs sweep take the report from
+    # here. Each is a different question about the same samples, so each has
+    # its own block and none of them runs the pairwise pass underneath.
+    #
+    # **No all-pairs records are stored, and none are cleared.** These produce
+    # none of the pairwise comparisons the Bar plot's brackets read, so there is
+    # nothing to add; and an earlier pairwise run under this key is a true
+    # record of a comparison that really happened, which ``StatsState.runs``
+    # keeps deliberately — its own docstring is why ``invalidate_stats_run`` is
+    # a no-op. Every stored record names the test that produced it, so no
+    # bracket can end up attributed to this run.
+    if kind in ("dunnett", "paired", "two_way"):
+        lines += _alternative_test_lines(
+            app._ctx, kind=kind, spec=spec, groups=groups, group_vals=group_vals,
+            target_t=target_t, val_col=val_col, threshold=threshold,
+            statistic=statistic, use_fov=use_fov)
+        app._stats_write_result("\n".join(lines))
+        stats_refresh_fov_indicator(app._ctx)
+        app._stats_fig_frame.setVisible(False)
+        return
+
+    # Whether *anything* differs, asked once and printed above the pairwise
+    # block. It never suppresses those results — which comparisons a reader may
+    # look at is not this app's policy — but reporting fifteen of them without
+    # first asking is the practice a BH adjustment only partly compensates for.
+    from well_viewer.domain.stats_tests import omnibus as _omnibus
+    lines += omnibus_lines(_omnibus(group_vals, parametric=spec["parametric"]))
+
     # Run every pair, then apply Benjamini-Hochberg FDR across all valid
     # p-values (shared with ``compute_pairwise`` so the live results and a
     # Saved-Plot re-run are computed by the exact same code).
     pair_results = _run_pair_tests(group_vals, test, is_ks)
     adjusted = _bh_adjust(pair_results)
     show_adjusted = len(adjusted) >= 2
-    lines += _format_pairwise_lines(pair_results, adjusted, show_adjusted)
+    effects = None if is_ks else _pair_effect_sizes(group_vals)
+    lines += _format_pairwise_lines(pair_results, adjusted, show_adjusted, effects)
 
     app._stats_write_result("\n".join(lines))
 
@@ -623,6 +946,16 @@ def stats_refresh_group_list(ctx) -> None:
         refresh_empty_state_pages(ctx.window)
     except Exception:
         swallowed()
+    # **The Dunnett control picker lists these groups, so it refreshes here.**
+    # This is the funnel every group mutation goes through — add, delete,
+    # rename, clear-all, and the sync from Home's groups. Filling that combo
+    # only when the *test* changes left it holding the groups as they were at
+    # that moment: define your groups after choosing Dunnett and the combo
+    # stayed empty, so "pick a control group" named an action the user could
+    # not perform; rename one and the run refused a control the combo still
+    # offered. The same call keeps the two variable pickers current.
+    with swallow("refresh the Statistics test inputs after a group change"):
+        refresh_stats_test_inputs(ctx)
     container = ctx.widgets.get("_stats_grp_inner")
     layout = container.layout()
     if layout is None:
@@ -754,6 +1087,95 @@ def stats_resync_from_sample_defs(ctx) -> None:
     ctx.notify.set_status(f"Loaded {len(rsets)} comparison group(s) from Home → Groups.")
 
 
+def refresh_stats_test_inputs(ctx) -> None:
+    """Show the pickers the chosen test needs, and fill them.
+
+    Driven off the roster's ``needs``, so adding a test that wants a new input
+    is one roster entry and one widget rather than a condition repeated at every
+    site that asks — the shape that let three band controls ship connected to
+    nothing on another tab.
+
+    The **control** list is the tab's own comparison groups, and deliberately
+    not the shared fold-change control picker. That picker names a
+    ``ControlRef`` over replicate sets and plate wells — what a plot divides
+    by — and a Dunnett control must be one of the k+1 groups actually being
+    compared. Offering a control that is not in the comparison would not be a
+    second way to name the same thing; it would be a control the test cannot
+    use. The reuse the workplan asked for is declined for that reason, here and
+    in the row.
+    """
+    combo = ctx.widgets.get_or_none("_stats_test_cb")
+    if combo is None:
+        return
+    needs = test_spec(combo.currentText()).get("needs", ())
+
+    control_cb = ctx.widgets.get_or_none("_stats_control_cb")
+    if control_cb is not None:
+        control_cb.setVisible("control" in needs)
+        if "control" in needs:
+            _fill_combo(control_cb, [(g.name, g.name)
+                                     for g in _stats_groups(ctx) if g.wells])
+
+    variables = _variable_choices(ctx)
+    for name, need, label in (("_stats_var_a_cb", "pairing", "Pair by"),
+                              ("_stats_var_a_cb", "factor_a", "Factor"),
+                              ("_stats_var_b_cb", "factor_b", "and")):
+        widget = ctx.widgets.get_or_none(name)
+        if widget is None or need not in needs:
+            continue
+        widget.setVisible(True)
+        with swallow("relabel a Statistics variable picker"):
+            widget.setLabel(label)
+        _fill_combo(widget, variables)
+    for name, keys in (("_stats_var_a_cb", ("pairing", "factor_a")),
+                       ("_stats_var_b_cb", ("factor_b",))):
+        widget = ctx.widgets.get_or_none(name)
+        if widget is not None and not any(k in needs for k in keys):
+            widget.setVisible(False)
+
+
+def _stats_groups(ctx):
+    """The tab's comparison groups, tolerating a context with no stats slice.
+
+    Same tolerance, and the same reason, as ``plot_members._group_by_variable``:
+    this runs while the panel is being *built*, and several callers construct a
+    context holding only the slices they read. A missing slice honestly means
+    "no groups to offer yet", and a builder that needed a ``swallow`` to survive
+    it is a builder that would fail silently in production instead.
+
+    ``tests/test_stats_h_tests_are_wired`` pins that the real ``AppState``
+    always carries both slices, so the tolerance cannot hide a production
+    context that has quietly stopped providing one.
+    """
+    return list(getattr(getattr(ctx.state, "stats", None), "groups", ()) or ())
+
+
+def _variable_choices(ctx) -> list[tuple[str, str]]:
+    """``(display name, variable id)`` for every sample variable on the plate.
+
+    Tolerates a missing ``selection`` slice for the reason :func:`_stats_groups`
+    records.
+    """
+    vset = getattr(getattr(ctx.state, "selection", None), "variables", None)
+    return [(v.name, v.id) for v in (getattr(vset, "variables", ()) or ())]
+
+
+def _fill_combo(combo, entries) -> None:
+    """Repopulate *combo*, keeping the selection when the same id is still on
+    offer. Signals are blocked: refilling is a redraw, not a user's choice, and
+    a fill that emitted would invalidate the run it was called to prepare."""
+    keep = combo.currentData()
+    blocked = combo.blockSignals(True)
+    try:
+        combo.clear()
+        for text, data in entries:
+            combo.addItem(text, data)
+        index = combo.findData(keep)
+        combo.setCurrentIndex(index if index >= 0 else 0)
+    finally:
+        combo.blockSignals(blocked)
+
+
 def stats_on_test_change(ctx) -> None:
     """Invalidate the last run when the test configuration changes.
 
@@ -773,6 +1195,10 @@ def stats_on_test_change(ctx) -> None:
     """
     _stats_write_result(ctx, "")
     invalidate_stats_run(ctx)
+    # The pickers follow the test: choosing Two-way ANOVA has to make its two
+    # factor combos appear, or the test can only ever decline.
+    with swallow("refresh the Statistics test inputs"):
+        refresh_stats_test_inputs(ctx)
     # Keep the stats Property combo in sync with the channel (ratio
     # channels collapse the metric set to "Calculated Val").
     try:

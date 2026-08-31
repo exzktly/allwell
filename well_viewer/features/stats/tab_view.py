@@ -16,6 +16,8 @@ from widgets.page_body import build_page_body
 from well_viewer.features.stats.controller import stats_active_group
 from well_viewer.features.stats.controller import stats_apply_drag
 from well_viewer.features.stats.controller import stats_on_test_change
+from well_viewer.features.stats.controller import TEST_LABELS
+from well_viewer.features.stats.controller import refresh_stats_test_inputs
 from well_viewer.features.stats.controller import stats_refresh_group_list
 from well_viewer.features.stats.controller import stats_refresh_fov_indicator
 from well_viewer.features.stats.controller import stats_update_tp_menu
@@ -197,18 +199,34 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     stats_ctrl.add_scope("", tp_cb)
 
     test_cb = reg.register("_stats_test_cb", QComboBox())
-    test_cb.addItems([
-        "t-test (Welch, unequal var)",
-        "t-test (Student, pooled var)",
-        "Wilcoxon rank-sum",
-        "Mann-Whitney U",
-        "KS test (2 wells only)",
-    ])
-    test_cb.setCurrentText("t-test (Welch, unequal var)")
+    # From the controller's roster and nowhere else. A second hand-written list
+    # here is how the combo comes to offer a test the run branch has never
+    # heard of, which reaches the user as a Run that quietly does the default.
+    test_cb.addItems(list(TEST_LABELS))
+    test_cb.setCurrentText(TEST_LABELS[0])
     test_cb.currentIndexChanged.connect(
         lambda _i: stats_on_test_change(ctx)
     )
     stats_ctrl.add_scope("Test", test_cb)
+
+    # The three pickers the newer tests need, each hidden until a test asks for
+    # it. Hidden rather than disabled, deliberately, and the opposite call from
+    # the unit field on the Variables tab: greying a control out states a rule
+    # the user can act on, and there is no rule here — a Welch t-test has no
+    # control group, and a picker for one is not a thing they could satisfy.
+    control_cb = reg.register("_stats_control_cb", LabeledComboBox("Control"))
+    control_cb.currentIndexChanged.connect(lambda _i: stats_on_test_change(ctx))
+    stats_ctrl.add_scope("", control_cb)
+
+    var_a_cb = reg.register("_stats_var_a_cb", LabeledComboBox("Pair by"))
+    var_a_cb.currentIndexChanged.connect(lambda _i: stats_on_test_change(ctx))
+    stats_ctrl.add_scope("", var_a_cb)
+
+    var_b_cb = reg.register("_stats_var_b_cb", LabeledComboBox("and"))
+    var_b_cb.currentIndexChanged.connect(lambda _i: stats_on_test_change(ctx))
+    stats_ctrl.add_scope("", var_b_cb)
+
+    refresh_stats_test_inputs(ctx)
 
     # Acknowledge the replicate mode the test will use (driven by the shared
     # per-FOV toggle) so the tab is explicit about the unit of replication.

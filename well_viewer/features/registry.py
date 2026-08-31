@@ -238,7 +238,8 @@ def _activate_image_table(ctx) -> None:
 
 def _activate_statistics(ctx) -> None:
     from well_viewer.features.stats.controller import (
-        stats_sync_from_app, stats_update_tp_menu, stats_refresh_fov_indicator,
+        refresh_stats_test_inputs, stats_sync_from_app, stats_update_tp_menu,
+        stats_refresh_fov_indicator,
     )
     ctx.widgets.get("_sidebar_stats_frame").setVisible(True)
     # Auto-populate from rep-sets on first visit
@@ -248,6 +249,13 @@ def _activate_statistics(ctx) -> None:
         stats_update_tp_menu(ctx)
     # Reflect the current FOV-replicate mode (may have been toggled on a plot tab).
     stats_refresh_fov_indicator(ctx)
+    # The paired and two-way pickers list the plate's sample variables, which
+    # are declared on a different page entirely. Arriving here is the moment
+    # that list can have changed without this tab hearing about it — a variable
+    # added on Home → Variables would otherwise never appear, and the test
+    # could only ever decline.
+    if ctx.widgets.has("_stats_test_cb"):
+        refresh_stats_test_inputs(ctx)
 
 
 def _activate_multivariate(ctx) -> None:

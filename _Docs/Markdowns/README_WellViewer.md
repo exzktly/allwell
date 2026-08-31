@@ -2729,15 +2729,45 @@ place cells in a grid that mirrors your plate or your experimental design.
 
 ### Statistics
 
-**What it shows.** Pairwise significance tests across your saved selections /
-replicate sets — **t-test**, **Mann-Whitney**, and **KS** — with a KS CDF plot.
+**What it shows.** Significance tests across your saved selections / replicate
+sets — pairwise **t-tests** (Welch or Student), **Wilcoxon rank-sum**,
+**Mann-Whitney U** and a **KS** test with its CDF plot, plus four tests that
+answer a different question: **Dunnett** against one control group, a **paired
+t-test** and **Wilcoxon signed-rank**, and a **two-way ANOVA**.
 
 - **Needs** — at least two groups. On first visit the tab auto-populates from
   the replicate sets defined on [Home → Groups](#groups).
 - **Controls** — the group editor is in the sidebar; everything else is on the
   same one-row controls band every tab uses — **Channel**, **Property**,
   **Statistic**, **Timepoint** and **Test**, then an FOV-replicate indicator
-  that mirrors the plot tabs' FOV mode, with **Run test** at the right.
+  that mirrors the plot tabs' FOV mode, with **Run test** at the right. Three
+  more pickers appear only when the chosen test needs them: **Control** for
+  Dunnett, **Pair by** for the paired tests, and **Factor** / **and** for the
+  two-way ANOVA.
+- **Every run reports the size of the difference, not only its p-value.** Under
+  each pairwise result you get Hedges' *g* and a 95% confidence interval on the
+  difference of means, in the data's own units. With three replicate wells a
+  p-value on its own says very little, and this is the number worth quoting.
+- **With three or more groups it asks the omnibus question first** — a one-way
+  ANOVA, or Kruskal-Wallis if the test you picked is rank-based — printed above
+  the pairwise block. It does not hide the pairwise results when it comes back
+  non-significant; that is your call, not the app's. It just says what it found.
+- **Dunnett** compares every group to one control instead of comparing all
+  pairs. That is usually the design you ran, and it is the more powerful test,
+  because it corrects for the handful of comparisons you actually care about
+  rather than for all of them. Pick the control from your own comparison groups.
+- **Paired tests and the two-way ANOVA read a sample variable.** A paired test
+  needs to know which replicate in one group matches which in the other, and
+  that only exists if you have said so — declare a batch or day variable on
+  [Home → Variables](#variables) and choose it under **Pair by**. The tab will
+  not pair by list order and says so rather than guessing: replicates present in
+  only one group are named in the report rather than quietly dropped. The
+  two-way ANOVA takes two variables and reports both main effects and their
+  interaction — "does the drug effect depend on the cell line".
+- **A test that cannot run says why, in the panel.** A confidence interval that
+  did not converge, an ANOVA with a combination no well holds, a paired test
+  with nothing to pair: each prints its reason where the number would have been,
+  never a blank and never a zero.
 - **Replicate unit.** What counts as one replicate is the single rule shared
   with the bar / line error bars, so the test's `n` and the plotted spread never
   disagree. With FOV mode **off**, each well in a group is one replicate. With

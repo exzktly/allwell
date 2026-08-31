@@ -1093,5 +1093,52 @@ def apply_export_style_to_current(ctx, fig, canvas=None) -> None:
         return
     prefs = figure_prefs(ctx, fig)
     apply_export_style_prefs(fig, prefs)
+    _apply_grouping_notice(ctx, fig)
     if canvas is not None:
         canvas.draw_idle()
+
+
+#: Marks the figure-level text this module owns, so a redraw replaces its own
+#: notice rather than stacking a second one under the first.
+_NOTICE_TAG = "_aw_grouping_notice"
+
+
+def _apply_grouping_notice(ctx, fig) -> None:
+    """Say on the figure what the Group-by setting did to its members.
+
+    **Here, because here is the one place every plot passes through.** Grouping
+    by a sample variable substitutes the member set for every view at once —
+    bars, lines, statistics, the heat map, scatter, the exports — and it drops
+    every well with no value for the variable. That is §7's cardinal case: the
+    numbers move, the *n* moves, and a figure that silently lost eight wells
+    looks exactly like a figure of a plate that had eighty-eight.
+
+    The sentence had a home on exactly one tab. Reaching the other eight would
+    have meant editing eight renderers and hoping the ninth never arrives, which
+    is the half-swept shape §7.5 #5 is about. Every renderer already ends at
+    ``apply_export_style_to_current`` — thirty-nine call sites, and a guard that
+    keeps it that way — so a notice drawn from here cannot miss a tab, and a tab
+    added tomorrow gets it without knowing it exists.
+
+    Drawn on the **figure** rather than an axes so it survives a multi-panel
+    layout, and re-applied rather than appended: the previous notice is removed
+    first, so filling in the missing wells clears it on the next redraw instead
+    of leaving a sentence that outlived its condition — the defect that moved
+    this off the status bar in the first place.
+    """
+    from well_viewer.core.group_by_controller import group_by_shortfall
+    from well_viewer.core.safe import swallow
+
+    with swallow("draw the Group-by notice on a figure"):
+        for text in list(getattr(fig, "texts", []) or []):
+            if getattr(text, _NOTICE_TAG, False):
+                text.remove()
+        message = group_by_shortfall(ctx)
+        if not message:
+            return
+        artist = fig.text(
+            0.01, 0.005, message,
+            fontsize=7, ha="left", va="bottom",
+            color=theme.Colors.text_secondary, wrap=True,
+        )
+        setattr(artist, _NOTICE_TAG, True)

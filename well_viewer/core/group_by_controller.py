@@ -163,7 +163,9 @@ def group_by_shortfall(ctx) -> str:
     on screen accounts for it. §7's rule, in the one place a user is most
     likely to be comparing two plots.
     """
-    from well_viewer.domain.plot_members import wells_without_variable
+    from well_viewer.domain.plot_members import (
+        variable_replicate_sets, wells_without_variable,
+    )
 
     variable_id = str(getattr(ctx.state.plot, "group_by_variable", "") or "")
     if not variable_id:
@@ -172,6 +174,18 @@ def group_by_shortfall(ctx) -> str:
     variable = vset.by_id(variable_id) if vset is not None else None
     if variable is None:
         return ""
+
+    # **Which sentence is true depends on whether the grouping applied at all.**
+    # ``plot_replicate_sets`` falls back to the user's own sets when the chosen
+    # variable groups nothing, rather than emptying every plot in the app — so
+    # in that case the wells with no value *are* on the figure, and the band
+    # still reads "Group by: Dose" over bars named after the user's groups.
+    # Saying "not plotted" there would be a sentence contradicting the picture
+    # it is printed on, which is worse than saying nothing.
+    if not variable_replicate_sets(ctx, variable_id):
+        return (f"Group by {variable.name} matched no wells — "
+                f"showing your own groups instead.")
+
     missing = wells_without_variable(ctx, variable_id)
     if not missing:
         return ""

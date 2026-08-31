@@ -40,6 +40,7 @@ API
 
 from __future__ import annotations
 
+import logging
 import os as _os
 import sys as _sys
 import uuid as _uuid
@@ -350,18 +351,42 @@ class _SelectionRow(QFrame):
         self._chips_inner.addStretch(1)
 
     def _build_readonly(self, bv: QVBoxLayout, parent: QWidget) -> None:
-        try:
-            from widgets.chip_group import ChipGroup
-            cg = ChipGroup(exclusive=False)
-            for w in self._wells:
-                cg.addChip(w, data=w)
-            cg.setEnabled(False)
-            bv.addWidget(cg)
-        except Exception:
-            lbl = QLabel(", ".join(self._wells) or "(no wells)", parent)
+        """The wells as disabled chips, or a named placeholder when there are none.
+
+        **No fallback around the chips**, and the absence is deliberate. This
+        used to build them inside ``except Exception`` with a comma-joined
+        ``QLabel`` underneath it, which had two problems and solved neither.
+
+        Nothing it could catch was real: ``widgets/chip_group`` is first-party
+        and ships in every profile and every frozen bundle — ``all_well.spec``
+        filters the tree by excluded *feature* directories, never by widget —
+        so the import cannot fail in a working install. What the catch did
+        instead was swallow genuine faults in the loop beneath it and render a
+        comma list, which looks like a deliberate compact style rather than
+        like something going wrong. That is the one substitution §7 forbids:
+        degraded output indistinguishable from good output. And the fallback
+        could not have survived the case it looks written for either — a
+        ``_wells`` holding anything but strings raises just as hard inside
+        ``", ".join`` as inside ``addChip``.
+
+        An *empty* selection is a different thing from a failed one, and now
+        says so. It renders the named placeholder, which is a fact about the
+        selection rather than a symptom, and the only path that reaches it.
+        """
+        from widgets.chip_group import ChipGroup
+
+        if not self._wells:
+            lbl = QLabel("(no wells)", parent)
             lbl.setObjectName("Caption")
             lbl.setWordWrap(True)
             bv.addWidget(lbl)
+            return
+
+        cg = ChipGroup(exclusive=False)
+        for w in self._wells:
+            cg.addChip(w, data=w)
+        cg.setEnabled(False)
+        bv.addWidget(cg)
 
     def _chip_strip(self, label: str, wells, *, parent: QWidget) -> QWidget:
         w = QWidget(parent)
@@ -434,6 +459,14 @@ class _SelectionRow(QFrame):
             try:
                 plate = self._plate_factory()
             except Exception:
+                # Logged, not silent. A factory that *raises* is not the same
+                # as no factory: the default plate below enables a full 96-well
+                # grid, so a caller whose factory was meant to narrow the plate
+                # to its own dataset gets a chooser offering wells that dataset
+                # does not have — and would have had nothing anywhere saying
+                # why.
+                swallowed("selection-row plate factory raised; falling back to "
+                          "a full-grid plate", level=logging.WARNING)
                 plate = None
         if plate is None:
             from widgets.well_plate_selector import WellPlateSelector

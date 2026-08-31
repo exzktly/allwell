@@ -454,8 +454,15 @@ def test_one_plate_is_on_screen_on_every_home_tab(loaded_app, qtbot):
 
     Three sibling editors meant three plates, and on Variables two of them were
     on screen at once — the rail's, greyed, behind the tab's own live one. Home
-    now shows exactly one: Overview's report plate, or the Sample map layer's,
-    or none.
+    shows at most one now: Overview's report plate, or the current layer's, or
+    none.
+
+    **At most, not exactly.** The Variables layer hides its plate until a
+    variable exists, and the fixture's dataset declares none — so a layer
+    showing nothing is correct here, and a layer showing a *different* layer's
+    plate is the failure. A variable is defined below to check the plate does
+    appear once there is something to draw, or "at most one" would be satisfied
+    by a tab that never draws anything.
     """
     from well_viewer.features.home.sample_map.controller import (
         LAYER_PLATES, LAYERS, set_layer,
@@ -476,8 +483,16 @@ def test_one_plate_is_on_screen_on_every_home_tab(loaded_app, qtbot):
     for layer in LAYERS:
         set_layer(ctx, layer)
         qtbot.wait(10)
-        assert _visible() == [LAYER_PLATES[layer]], (
+        assert _visible() in ([LAYER_PLATES[layer]], []), (
             f"{layer}: {_visible()} on screen")
+
+    # And with something to draw, the layer's own plate is up.
+    from well_viewer.domain.sample_variables import new_variable
+    ctx.state.selection.variables, _id = new_variable(
+        ctx.state.selection.variables, "Dose")
+    set_layer(ctx, "Variables")
+    qtbot.wait(10)
+    assert _visible() == [LAYER_PLATES["Variables"]]
 
     for name in ("Cell Gating", "Ratios", "Pipeline Info"):
         _goto_subtab(loaded_app, qtbot, name)

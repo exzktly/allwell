@@ -57,6 +57,15 @@ REPORT_DIR="${SLOW_REPORT_DIR:-.pytest-slow-reports}"
 rm -rf "$REPORT_DIR"
 mkdir -p "$REPORT_DIR"
 
+# Clear this shard's coverage data too, for the same reason the reports are
+# cleared: a previous run's leftovers must not be read as this one's. Each
+# batch's own pytest-cov erase only touches its own name, so a run with
+# `--batch 1` (many batches) followed by one with `--batch 2` (fewer) leaves the
+# tail of the first run's files on disk, and `coverage combine` merges them —
+# a union across two commits, silently, feeding the inventory that decides which
+# modules no test reaches.
+rm -f ".coverage.slow-${SHARD_INDEX}-"*
+
 # Discover the lane from pytest's own marker rather than by grepping for fixture
 # names: conftest.py applies `slow` by fixture closure, so the marker is the only
 # thing that knows the real membership.

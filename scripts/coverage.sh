@@ -17,8 +17,11 @@
 #   scripts/coverage.sh --diff                   # lines THIS branch adds that no test runs
 #   scripts/coverage.sh --html                   # browsable report in htmlcov/
 #
-# Run order does not matter: parallel mode writes one data file per process and
-# `coverage combine` merges whatever is there.
+# Run order does not matter, and that is a property of the two scripts rather
+# than of coverage: each lane writes under its own COVERAGE_FILE prefix
+# (`.coverage.fast`, `.coverage.slow-<shard>-<batch>`), so neither can be
+# skipped by the combine nor erase the other's files. It did matter, both ways,
+# while the fast lane used the default name — see the note in scripts/test.sh.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -39,6 +42,19 @@ if (( ${#parts[@]} == 0 )) && [[ ! -f .coverage ]]; then
     echo "No coverage data. Run a lane with ALLWELL_COVERAGE=1 first:" >&2
     echo "  ALLWELL_COVERAGE=1 scripts/test.sh" >&2
     exit 1
+fi
+
+# A bare `.coverage` sitting beside per-process files is data this run is about
+# to destroy: `coverage combine` writes its result to that name and does not read
+# it first. It can only come from a lane run before the lanes took their own
+# COVERAGE_FILE prefixes, or from a hand-rolled `pytest --cov`. Say so rather
+# than folding it in silently — the whole point of this script is that a union
+# missing a lane names live code dead, and that is the shape it would take.
+if (( ${#parts[@]} > 0 )) && [[ -f .coverage ]]; then
+    echo "WARNING: a bare .coverage is present alongside ${#parts[@]} per-process file(s)." >&2
+    echo "         combine writes to .coverage without reading it, so whatever that" >&2
+    echo "         file holds is NOT in this report. Delete it and re-run the lane" >&2
+    echo "         it came from, or accept a report that is missing it." >&2
 fi
 
 # `combine` consumes the per-process files into .coverage. It refuses to run
@@ -86,6 +102,13 @@ PY
             --compare-branch=origin/main --fail-under=0
         ;;
     summary)
-        python -m coverage report --sort=cover | tail -40
+        # `--sort=cover` is ascending, so the *least*-covered modules come
+        # first. `tail` here printed the forty best-covered ones — thirty-nine
+        # rows near 100% and the total — under a heading promising a summary,
+        # which is the inverse of the question this measurement exists to ask.
+        # `head` keeps the total by appending it separately.
+        python -m coverage report --sort=cover | head -42
+        echo "  … (least-covered first; run 'python -m coverage report' for all)"
+        python -m coverage report --sort=cover | tail -2
         ;;
 esac

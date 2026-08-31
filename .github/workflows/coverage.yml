@@ -46,14 +46,48 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           ALLWELL_COVERAGE: "1"
         # The lane's own teardown SIGSEGV is tolerated the same way ci.yml
-        # tolerates it; what matters here is that the data file was written.
+        # tolerates it; the next step is what checks the data file was written.
         run: ALLWELL_COVERAGE=1 scripts/test.sh || true
+      - name: Check the lane actually measured something
+        # `|| true` above swallows a lane that died mid-session as readily as it
+        # swallows the teardown crash, and the two look identical afterwards
+        # except here. Without this, a collection error or an OOM leaves the
+        # per-process files uncombined, `coverage.sh` merges whatever fraction
+        # ran, and a partial fast lane is published as the month's answer.
+        run: |
+          shopt -s nullglob
+          parts=( .coverage.fast* )
+          if (( ${#parts[@]} == 0 )); then
+            echo "::error::The fast lane wrote no coverage data. It did not"
+            echo "::error::finish, so anything reported from here would describe"
+            echo "::error::a fraction of the lane without saying which fraction."
+            exit 1
+          fi
+          ls -l "${parts[@]}"
       - name: Combine and report
         run: |
+          scripts/coverage.sh --html
+          echo "::group::Coverage summary (least-covered first)"
           scripts/coverage.sh
-          echo "::group::Modules no test reaches"
-          scripts/coverage.sh --zero
           echo "::endgroup::"
+      # **No zero-coverage list here, deliberately.** This job runs one lane,
+      # and the fast lane alone reports every full-app-only module as unreached.
+      # Measured on this repo: eleven modules, six of them reached — five by a
+      # single slow-lane file. Printing that list under a heading like "modules
+      # no test reaches", beside `coverage.sh --zero`'s own "triage each into: a
+      # test that should exist, dead code, or genuinely unreachable", is an
+      # unattended monthly instruction to delete live code.
+      #
+      # The inventory needs both lanes and has its own two-step workflow: run
+      # **Slow lane** with `coverage` ticked, then **Coverage inventory** with
+      # that run's id. That one refuses to print anything without slow-lane
+      # data; this one does not print it at all.
+      - name: Say where the inventory lives
+        run: |
+          echo "::notice::Percentages above are the FAST LANE ONLY. For the list of"
+          echo "::notice::modules no test reaches, run Slow lane with coverage ticked,"
+          echo "::notice::then Coverage inventory with that run's id — the fast lane"
+          echo "::notice::alone names full-app-only modules unreached."
       - name: Upload coverage data
         uses: actions/upload-artifact@v4
         with:
@@ -61,4 +95,10 @@ jobs:
           path: |
             .coverage
             htmlcov/
+          # Both paths are produced now (`--html` above writes htmlcov/), and
+          # `.coverage` is dot-prefixed, which upload-artifact@v4 skips by
+          # default. Without this the step matched zero files and stayed green
+          # on `if-no-files-found: warn` — a red condition reading green, which
+          # slow-lane.yml already documents at its own upload.
+          include-hidden-files: true
           if-no-files-found: warn

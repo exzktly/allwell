@@ -319,46 +319,75 @@ def _assigned(tab, variable_id):
             for w, vid in vset.assignments.get(variable_id, {}).items()}
 
 
+@pytest.mark.wells({f"{r}{c:02d}": f"/d/{r}{c:02d}.csv"
+                    for r in "ABCD" for c in (1, 2, 3, 4)})
 def test_apply_fill_cycles_the_values_along_the_rows(tab):
+    """Four rows and four columns, so "repeat 2" means two *rows* and cannot be
+    confused with two wells.
+
+    The default 2x4 fixture could not tell those apart — with two rows of four,
+    "two rows" and "two wells" land differently but the assertion was written
+    from the implementation, so the striped plate the old code produced read as
+    correct. §7.8 rule 2: build the fixture so the right and wrong answers
+    differ, or no assertion can measure anything.
+    """
     variable_id = _dose_tab(tab)
     axis = tab.w("_var_fill_axis")
     axis.setCurrentIndex(axis.findData("row"))
     tab.w("_var_fill_repeat").setValue(2)
     tab.w("_var_fill_apply").click()
 
-    assert _assigned(tab, variable_id) == {
-        "A01": "0", "A02": "0", "A03": "1", "A04": "1",
-        "B01": "0", "B02": "0", "B03": "1", "B04": "1",
-    }
+    assigned = _assigned(tab, variable_id)
+    for col in (1, 2, 3, 4):
+        assert assigned[f"A{col:02d}"] == "0" and assigned[f"B{col:02d}"] == "0"
+        assert assigned[f"C{col:02d}"] == "1" and assigned[f"D{col:02d}"] == "1"
 
 
+@pytest.mark.wells({f"{r}{c:02d}": f"/d/{r}{c:02d}.csv"
+                    for r in "ABCD" for c in (1, 2, 3, 4)})
 def test_apply_fill_along_the_columns_walks_down_first(tab):
-    """Two cell lines down eight rows is the other half of a block design."""
+    """The other half of a block design: two columns per dose, whole columns."""
     variable_id = _dose_tab(tab)
     axis = tab.w("_var_fill_axis")
     axis.setCurrentIndex(axis.findData("col"))
     tab.w("_var_fill_repeat").setValue(2)
     tab.w("_var_fill_apply").click()
 
-    assert _assigned(tab, variable_id) == {
-        "A01": "0", "B01": "0", "A02": "1", "B02": "1",
-        "A03": "0", "B03": "0", "A04": "1", "B04": "1",
-    }
+    assigned = _assigned(tab, variable_id)
+    for row in "ABCD":
+        assert assigned[f"{row}01"] == "0" and assigned[f"{row}02"] == "0"
+        assert assigned[f"{row}03"] == "1" and assigned[f"{row}04"] == "1"
 
 
-@pytest.mark.wells({"A01": "x", "A03": "x", "A04": "x"})
-def test_a_fill_closes_gaps_rather_than_counting_them(tab):
-    """A plate whose column 2 was never imaged is a plate of three wells here.
+@pytest.mark.wells({f"{r}{c:02d}": f"/d/{r}{c:02d}.csv"
+                    for r in "ABCD" for c in (1, 2, 3, 4)
+                    if not (r == "C" and c == 2)})
+def test_a_missing_well_costs_only_itself(tab):
+    """C02 was never imaged, which is an ordinary failed acquisition.
 
-    Leaving a slot for the absent well would put every value after it one place
-    out, and there is nothing on screen where that well would be for the user to
-    notice by.
+    It used to cost more than itself. With the wells flattened into one
+    sequence the gap was closed, so every well after it moved one place along
+    the cycle and one well was handed the wrong dose — carrying a value, so no
+    ring, no count and no mention: a plate that looks like a clean block design
+    with one cell quietly wrong. §7's cardinal case.
+
+    This replaces a test that asserted the old behaviour. It was not loosened —
+    it was pinning the defect, so it is rewritten around what the user should
+    get.
     """
     variable_id = _dose_tab(tab)
-    tab.w("_var_fill_repeat").setValue(1)
+    axis = tab.w("_var_fill_axis")
+    axis.setCurrentIndex(axis.findData("col"))
+    tab.w("_var_fill_repeat").setValue(2)
     tab.w("_var_fill_apply").click()
 
-    assert _assigned(tab, variable_id) == {"A01": "0", "A03": "1", "A04": "0"}
+    assigned = _assigned(tab, variable_id)
+    assert "C02" not in assigned
+    for row in "ABCD":
+        for col, expected in ((1, "0"), (3, "1"), (4, "1")):
+            assert assigned[f"{row}{col:02d}"] == expected, f"{row}{col:02d}"
+    for row in "ABD":
+        assert assigned[f"{row}02"] == "0", f"{row}02 shifted by the gap"
 
 
 def test_the_fill_row_says_what_it_covers(tab):
@@ -547,7 +576,11 @@ def _two_variables(tab):
     line = _vset(tab).variables[1].id
     axis = tab.w("_var_fill_axis")
     axis.setCurrentIndex(axis.findData("col"))
-    tab.w("_var_fill_repeat").setValue(4)
+    # Two columns per cell line over the fixture's four, so both values land.
+    # This read 4 while the repeat counted wells; under the corrected
+    # line-counting semantics 4 columns at 4-per-value is one block and the
+    # plate came out entirely HeLa.
+    tab.w("_var_fill_repeat").setValue(2)
     tab.w("_var_fill_apply").click()
     return dose, line
 
@@ -826,3 +859,19 @@ def test_the_variables_tab_is_reachable_through_the_feature_service():
 
     reg = build_feature_registry()
     assert reg.service("variables.refresh") is not None
+
+
+def test_the_repeat_control_names_what_it_counts(tab):
+    """"repeat each 4" beside "along Rows" reads as four rows to any reader, and
+    that is what it does — but while the cycling counted wells the two readings
+    differed by the width of the plate, and nothing on screen said which was
+    meant. The suffix follows the axis so the two cannot drift apart."""
+    _dose_tab(tab)
+    axis = tab.w("_var_fill_axis")
+    repeat = tab.w("_var_fill_repeat")
+
+    axis.setCurrentIndex(axis.findData("row"))
+    assert repeat.suffix().strip() == "rows"
+
+    axis.setCurrentIndex(axis.findData("col"))
+    assert repeat.suffix().strip() == "columns"

@@ -265,28 +265,36 @@ def remove_variable(vset: VariableSet, variable_id: str) -> VariableSet:
     )
 
 
-def fill(vset: VariableSet, variable_id: str, wells, *, repeat: int = 1) -> VariableSet:
-    """Cycle *variable_id*'s values over *wells* in order, *repeat* wells each.
+def fill(vset: VariableSet, variable_id: str, lines, *, repeat: int = 1) -> VariableSet:
+    """Cycle *variable_id*'s values over *lines*, *repeat* **lines** each.
 
-    The one-click way to describe a block design: hand it the wells in row order
-    for a fill along rows, in column order for a fill along columns. Ordering
-    the wells is the **caller's** job — this module knows nothing about plate
-    geometry, and mixing the two would put a second definition of "along
-    columns" here beside ``domain/plate_layout.py``'s.
+    A *line* is a sequence of wells that all take the same value — one plate row
+    for a fill along rows, one column for a fill along columns. Grouping the
+    wells into lines is the **caller's** job (``plate_layout.wells_in_fill_lines``):
+    this module knows nothing about plate geometry, and mixing the two would put
+    a second definition of "along columns" here beside that one.
 
-    Wells beyond the last cycle keep going round, because a plate is rarely an
+    **The unit is the line, not the well**, and that is the whole point. Cycling
+    over a flat well sequence made ``repeat`` count wells, so "along Rows ·
+    repeat each 4" gave four wells per value rather than four rows and striped
+    the plate instead of blocking it. It also meant a single absent well shifted
+    every well after it along the cycle, handing one of them the wrong value
+    with nothing on the plate to show it — a value is a value, so no ring, no
+    count, no mention.
+
+    Lines beyond the last cycle keep going round, because a plate is rarely an
     exact multiple: eight columns over six doses at two each fills the first
-    four doses twice and then wraps, which is visible on the plate and is
-    better than four unassigned columns with no explanation.
+    four doses twice and then wraps, which is visible on the plate and better
+    than four unassigned columns with no explanation.
     """
     variable = vset.by_id(variable_id)
     if variable is None or not variable.values:
         return vset
     repeat = max(1, int(repeat))
     out = vset
-    for index, well in enumerate(wells):
+    for index, line in enumerate(lines):
         value = variable.values[(index // repeat) % len(variable.values)]
-        out = assign(out, variable_id, [well], value.id)
+        out = assign(out, variable_id, list(line), value.id)
     return out
 
 

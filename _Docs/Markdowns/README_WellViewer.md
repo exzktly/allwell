@@ -1454,9 +1454,14 @@ be filled onto anything.
 
 **Filling the plate.** Under the definition is a plate of this dataset's wells
 and one row of controls: *Fill along [Rows or Columns] · repeat each [N] ·
-Apply fill*. Six doses along the columns repeating each twice fills a 12-column
-plate; two cell lines along the rows repeating each four fills the eight rows.
-Any block design is one click.
+Apply fill*. **N counts rows or columns**, whichever axis you picked, and the
+number says so beside itself. Six doses along the columns repeating each two
+columns fills a 12-column plate; two cell lines along the rows repeating each
+four rows fills the eight rows. Any block design is one click.
+
+A well the dataset does not have costs only itself: the wells either side of a
+gap keep the value their row or column carries, so a plate missing one
+acquisition is still the block design you asked for, minus that well.
 
 For anything the fill does not cover, select wells on the plate — drag across
 them, or click a row letter or column number — and click one of the value chips

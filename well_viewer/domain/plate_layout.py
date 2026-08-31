@@ -54,6 +54,57 @@ def wells_in_fill_order(wells, axis: str = FILL_ALONG_ROWS) -> list[str]:
     return [*ordered, *unparsed]
 
 
+def wells_in_fill_lines(wells, axis: str = FILL_ALONG_ROWS) -> list[list[str]]:
+    """*wells* grouped into the lines a fill along *axis* walks.
+
+    A **line** is one row for a fill along rows, one column for a fill along
+    columns — which is the unit the control names ("along Rows · repeat each
+    N"), and therefore the unit the cycling has to use.
+
+    This replaces handing ``fill`` a flat sequence, and it repairs two defects
+    that were the same defect twice.
+
+    The repeat counted **wells**. On a 96-well plate, ``along Rows · repeat 4``
+    is read by everyone — including the plan that specified it — as four rows
+    per value; it gave four *wells* per value, so the values changed three times
+    inside row A and the plate came out striped rather than blocked. To get the
+    intended design a user had to type 48. Grouping into lines makes N mean what
+    the label says.
+
+    And a single absent well silently misaligned the rest. Flattening closed the
+    gap, so on a plate missing ``C02`` every well after it shifted one place
+    along the cycle and one well was given the wrong value — carrying a value,
+    so no ring, no count, no mention: a plate that looks like a clean block
+    design with one cell quietly wrong. With each line its own bucket, a missing
+    well costs that well and nothing downstream of it.
+
+    Empty lines are dropped rather than consuming a turn of the cycle: a plate
+    whose column 6 was never imaged is a plate of eleven columns for this
+    purpose, which is the original ordering's argument kept intact at the level
+    it is actually true. Wells whose token does not parse ride in a final line
+    of their own rather than being dropped, so a fill never silently ignores one.
+    """
+    by_line: dict[int, list[str]] = {}
+    for well in wells:
+        rc = _rc(well)
+        if rc is None:
+            continue
+        key = rc[1] if axis == FILL_ALONG_COLS else rc[0]
+        by_line.setdefault(key, []).append(well)
+
+    lines = []
+    for key in sorted(by_line):
+        members = by_line[key]
+        members.sort(key=lambda w: (_rc(w)[1], _rc(w)[0]) if axis == FILL_ALONG_COLS
+                     else _rc(w))
+        lines.append(members)
+
+    unparsed = [w for w in wells if _rc(w) is None]
+    if unparsed:
+        lines.append(unparsed)
+    return lines
+
+
 def _rc(token: str):
     """``(row_letter, column)`` for *token*, or ``None`` when it is not a well."""
     from well_viewer.domain.viewer_state import parse_rc

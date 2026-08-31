@@ -21,7 +21,7 @@ from PySide6.QtCore import Qt
 
 from well_viewer.core.safe import swallow
 from well_viewer.domain import sample_variables as sv
-from well_viewer.domain.plate_layout import wells_in_fill_order
+from well_viewer.domain.plate_layout import wells_in_fill_lines
 
 _logger = logging.getLogger("well_viewer")
 
@@ -472,7 +472,7 @@ def assign_selected(ctx, value_id: str | None) -> None:
 def apply_fill(ctx) -> None:
     """Cycle the selected variable's values over the dataset's wells.
 
-    The ordering is ``plate_layout.wells_in_fill_order`` and the cycling is
+    The grouping is ``plate_layout.wells_in_fill_lines`` and the cycling is
     ``sample_variables.fill``: one module knows the geometry, the other knows
     the values, and neither holds a second definition of the other's job.
     """
@@ -481,8 +481,8 @@ def apply_fill(ctx) -> None:
     repeat = _widget(ctx, "_var_fill_repeat")
     if not variable_id or axis is None or repeat is None:
         return
-    wells = wells_in_fill_order(dataset_wells(ctx), axis.currentData())
-    _commit(ctx, sv.fill(_vset(ctx), variable_id, wells,
+    lines = wells_in_fill_lines(dataset_wells(ctx), axis.currentData())
+    _commit(ctx, sv.fill(_vset(ctx), variable_id, lines,
                          repeat=repeat.value()))
 
 

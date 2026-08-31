@@ -39,9 +39,12 @@ def _line():
 
 @pytest.fixture
 def plate():
-    """Two variables, and A01–A04 filled with two doses two wells each."""
+    """Two variables, and A01–A04 filled with two doses, two wells each.
+
+    Handed as *lines* — ``fill`` cycles over lines rather than over wells, so
+    "two wells each" is expressed as two one-well lines per value."""
     vset = sv.VariableSet(variables=(_dose("0", "1"), _line()))
-    return sv.fill(vset, "dose", ["A01", "A02", "A03", "A04"], repeat=2)
+    return sv.fill(vset, "dose", [["A01"], ["A02"], ["A03"], ["A04"]], repeat=2)
 
 
 # ── the rule that must not be softened ──────────────────────────────────────
@@ -141,12 +144,46 @@ def test_removing_a_variable_takes_its_assignments_with_it(plate):
 
 # ── the fill row ────────────────────────────────────────────────────────────
 
-def test_fill_cycles_values_over_the_wells_in_the_order_given():
+def test_fill_cycles_values_over_the_lines_in_the_order_given():
     vset = sv.VariableSet(variables=(_dose("0", "1", "10"),))
-    filled = sv.fill(vset, "dose", [f"A{i:02d}" for i in range(1, 7)], repeat=2)
+    lines = [[f"A{i:02d}"] for i in range(1, 7)]
+    filled = sv.fill(vset, "dose", lines, repeat=2)
     labels = [filled.by_id("dose").display_label(filled.value_id_for("dose", w))
               for w in [f"A{i:02d}" for i in range(1, 7)]]
     assert labels == ["0 µM", "0 µM", "1 µM", "1 µM", "10 µM", "10 µM"]
+
+
+def test_every_well_of_a_line_takes_that_line_s_value():
+    """The unit is the line. A line of four wells is four wells at one value,
+    not four turns of the cycle — which is the difference between "repeat 4"
+    meaning four rows (what the control says) and four wells (what it did)."""
+    vset = sv.VariableSet(variables=(_dose("0", "1"),))
+    lines = [["A01", "A02", "A03"], ["B01", "B02", "B03"]]
+
+    filled = sv.fill(vset, "dose", lines, repeat=1)
+
+    label = lambda w: filled.by_id("dose").display_label(  # noqa: E731
+        filled.value_id_for("dose", w))
+    assert [label(w) for w in lines[0]] == ["0 µM"] * 3
+    assert [label(w) for w in lines[1]] == ["1 µM"] * 3
+
+
+def test_a_short_line_does_not_shift_the_lines_after_it():
+    """A well missing from the middle of a plate is ordinary — a failed
+    acquisition — and used to cost more than itself: with the wells flattened,
+    every well after the gap moved one place along the cycle and one of them was
+    given the wrong value, carrying a value so nothing ringed it, counted it or
+    named it. Per line, a gap costs exactly the well that is gone."""
+    vset = sv.VariableSet(variables=(_dose("0", "1", "10"),))
+    lines = [["A01", "A02"], ["B01"], ["C01", "C02"]]   # B02 never imaged
+
+    filled = sv.fill(vset, "dose", lines, repeat=1)
+
+    label = lambda w: filled.by_id("dose").display_label(  # noqa: E731
+        filled.value_id_for("dose", w))
+    assert label("C01") == "10 µM" and label("C02") == "10 µM", (
+        "the line after the gap took the value of the one before it"
+    )
 
 
 def test_fill_wraps_rather_than_leaving_the_tail_unassigned():
@@ -156,7 +193,7 @@ def test_fill_wraps_rather_than_leaving_the_tail_unassigned():
     with no explanation is neither.
     """
     vset = sv.VariableSet(variables=(_dose("0", "1"),))
-    filled = sv.fill(vset, "dose", [f"A{i:02d}" for i in range(1, 7)], repeat=1)
+    filled = sv.fill(vset, "dose", [[f"A{i:02d}"] for i in range(1, 7)], repeat=1)
     assert sv.unassigned_wells(filled, "dose",
                               [f"A{i:02d}" for i in range(1, 7)]) == []
 

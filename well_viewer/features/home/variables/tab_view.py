@@ -222,6 +222,18 @@ def _build_fill_row(ctx, parent: QWidget, reg) -> QWidget:
     repeat = reg.register("_var_fill_repeat", QSpinBox(host))
     repeat.setRange(1, 96)
     repeat.setValue(1)
+    # The unit, on the control. "repeat each 4" beside "along Rows" reads as
+    # four rows to every reader — which is what it means — but nothing said so,
+    # and while the cycling counted *wells* the two readings differed by the
+    # width of the plate: a user wanting four rows had to type 48. The number
+    # now names what it counts, and it follows the axis combo so it cannot go
+    # stale against it.
+    def _say_unit() -> None:
+        repeat.setSuffix(" columns" if axis.currentData() == FILL_ALONG_COLS
+                         else " rows")
+
+    _say_unit()
+    axis.currentIndexChanged.connect(lambda _i: _say_unit())
     row.addWidget(repeat)
 
     apply_button = reg.register("_var_fill_apply", QPushButton("Apply fill", host))

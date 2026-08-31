@@ -50,9 +50,24 @@ APP_FIXTURES = frozenset({
 })
 
 
-def _offenders():
+def _root_name(node: ast.AST) -> str | None:
+    """The leftmost ``Name`` of an attribute chain — ``app`` in ``app.ctx.window``.
+
+    The first version matched only a bare ``Name``, so it saw
+    ``monkeypatch.setattr(loaded_app, ...)`` and walked past
+    ``monkeypatch.setattr(loaded_app.ctx.window, ...)`` — the same invention one
+    dot further in, on an object that is just as much the shipped application's.
+    A guard that catches one spelling of a rule teaches the other spelling.
+    """
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    return node.id if isinstance(node, ast.Name) else None
+
+
+def _offenders(root: Path | None = None):
     out = []
-    for path in sorted(Path(__file__).resolve().parent.glob("test_*.py")):
+    root = root or Path(__file__).resolve().parent
+    for path in sorted(root.glob("test_*.py")):
         for node in ast.walk(parse_source(path)):
             if not isinstance(node, ast.Call):
                 continue
@@ -60,9 +75,10 @@ def _offenders():
                 continue
             if getattr(node.func.value, "id", None) != "monkeypatch":
                 continue
-            if not node.args or not isinstance(node.args[0], ast.Name):
+            if not node.args:
                 continue
-            if node.args[0].id not in APP_FIXTURES:
+            target = _root_name(node.args[0])
+            if target not in APP_FIXTURES:
                 continue
             for kw in node.keywords:
                 if (kw.arg == "raising"
@@ -73,7 +89,7 @@ def _offenders():
                             and isinstance(node.args[1], ast.Constant)
                             else "?")
                     out.append(f"{path.name}:{node.lineno} — "
-                               f"{node.args[0].id}.{name}")
+                               f"{target}.{name}")
     return out
 
 

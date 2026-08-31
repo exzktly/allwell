@@ -61,12 +61,12 @@ def _ctx(selections=()):
                                     rebuild_all=lambda: None),
         features=SimpleNamespace(call=lambda *a, **k: None,
                                  get=lambda _n: None,
-                                 sub_leaves=lambda _p: ("Sample map",)),
+                                 sub_leaves=lambda _p: ("Sample Map",)),
         runtime=SimpleNamespace(home=SimpleNamespace(subtabs=None),
                                 groups=SimpleNamespace(inline_edit_idx=-1)),
         state=SimpleNamespace(
             # Home's **real** typed slice, not a namespace shaped to whatever
-            # the code happens to read: the Sample map tab records which layer
+            # the code happens to read: the Sample Map tab records which layer
             # is showing there, and a stub without it answers "Replicates" to every
             # question and passes whatever the code does (§7.8, face one).
             feature_slice=lambda name: home if name == "home" else None,
@@ -395,8 +395,8 @@ def test_import_follows_the_layer_not_the_tab(tab):
 
     button = tab.ctx.widgets.register(IMPORT_KEY, QPushButton(""))
     tab.ctx.runtime.home.subtabs = SimpleNamespace(
-        count=lambda: 1, tabText=lambda _i: "Sample map", currentIndex=lambda: 0)
-    tab.ctx.features = SimpleNamespace(sub_leaves=lambda _p: ("Sample map",))
+        count=lambda: 1, tabText=lambda _i: "Sample Map", currentIndex=lambda: 0)
+    tab.ctx.features = SimpleNamespace(sub_leaves=lambda _p: ("Sample Map",))
     for layer, offered in (("Replicates", True), ("Well Labels", True),
                            ("Variables", False)):
         set_layer(tab.ctx, layer)
@@ -417,7 +417,7 @@ def test_home_never_shows_a_rail_plate_frame(qtbot):
     frame.show()
     ctx.widgets.register("_sidebar_sample_frame", frame)
     ctx.features = SimpleNamespace(get=lambda _n: None,
-                                   sub_leaves=lambda _p: ("Sample map",))
+                                   sub_leaves=lambda _p: ("Sample Map",))
     ctx.runtime.home.subtabs = None
     sync_home_sidebar(ctx)
     assert not frame.isVisible()

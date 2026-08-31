@@ -25,7 +25,8 @@ three radii and three inks rather than three uses of one mark.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QLabel, QListWidget, QPushButton, QSpinBox,
     QVBoxLayout, QWidget,
@@ -63,7 +64,7 @@ def build_plate_column(ctx, parent: QWidget, reg) -> QWidget:
     host = reg.register("_var_plate_column", QWidget(outer))
     host.setMaximumWidth(_COLUMN_W)
     outer_row.addWidget(host)
-    outer_row.addStretch(1)
+    outer_row.addWidget(_build_empty_state(ctx, outer, reg), 1)
     column = QVBoxLayout(host)
     column.setContentsMargins(0, 0, 0, 0)
     column.setSpacing(theme.Spacing.sm)
@@ -95,6 +96,58 @@ def build_plate_column(ctx, parent: QWidget, reg) -> QWidget:
     column.addWidget(policy)
     column.addStretch(1)
     return outer
+
+
+def _build_empty_state(ctx, parent: QWidget, reg) -> QWidget:
+    """What stands in the plate's place before there is a variable to draw.
+
+    Two things put it **here** rather than in the rail beside it. It sits in the
+    space it is explaining — the plate's — instead of leaving three quarters of
+    the page blank next to a paragraph of muted 12 px text in a 268 px column.
+    And it carries the one action there is to take, which was otherwise a
+    secondary button in that same narrow rail: the manual's own rule is that a
+    placeholder gets its own button when the page is the *start* of the flow and
+    points at the existing control otherwise, and a plate with no variables on it
+    is exactly the start of the flow.
+
+    **Two ``+ Variable`` buttons is deliberate.** The rail keeps its own, at
+    secondary weight, because it is where the control lives for the rest of the
+    tab's life and every test that needs a variable presses it there; this one
+    is the primary action on the one page where adding a variable is the entire
+    point. Hiding the rail's while the tab is empty would read better still, and
+    was not done: it would leave several dozen tests pressing a control the user
+    cannot see, which is the exact shape this tab has shipped broken in before.
+
+    The hint is kept beside the button (``keep_hint=True``) because
+    :data:`~well_viewer.features.home.variables.tab_view.EMPTY_HINT` is the
+    payoff for pressing that button rather than a pointer at a control
+    elsewhere, which is the case the flag exists for. It is stated once, in one
+    place: the rail used to carry the same paragraph, and one sentence in two
+    positions on one screen is two things to keep in step.
+    """
+    from widgets.empty_state import EmptyState
+
+    from .tab_view import EMPTY_HINT
+
+    empty = reg.register("_var_empty", EmptyState(
+        "No variables on this plate yet", icon="grid", parent=parent,
+        hint=EMPTY_HINT))
+    empty.setAction("+ Variable", lambda: _add_variable(ctx), keep_hint=True)
+    return empty
+
+
+def _add_variable(ctx) -> None:
+    """The placeholder's button, doing exactly what the rail's ``+ Variable`` does.
+
+    Imported at call time rather than at module scope: ``controller`` imports
+    this module for the plate builder, so a module-scope import back would be a
+    cycle. Routed through the controller rather than reimplemented, because two
+    buttons that add a variable in two slightly different ways is the shape a
+    "why does it only work from the rail" report comes from.
+    """
+    from .controller import add_variable
+
+    add_variable(ctx)
 
 
 def _build_selection_row(ctx, host: QWidget, column, reg) -> None:
@@ -276,6 +329,44 @@ def _action(parent: QWidget, text: str) -> QPushButton:
     return button
 
 
+#: Side of the block of the value's ink on a chip, in pixels. Tall and narrow,
+#: so it reads as a swatch of the plate's colour rather than as an icon.
+SWATCH_W = 10
+SWATCH_H = 14
+
+
+def swatch_block(colour: str) -> QIcon:
+    """A filled block of *colour*, for the left of a chip.
+
+    **Painted, not a border.** The swatch used to be a wide ``border-left`` on
+    the chip's own stylesheet, next to a hairline on the other three sides and a
+    corner radius. Qt paints an asymmetric border as a polygon joining the outer
+    and inner rects, and on the reporter's machine that join rendered as a
+    *second* shape beside the band — reported twice as "two colour bars next to
+    each variable chip", side by side and both on the left, on every chip
+    carrying a swatch and on none of the chips without one. It renders as one
+    clean band under Fusion, which is why five offscreen renders of the old
+    construct — the chip alone, composited into its host under three orderings
+    of the application stylesheet, and grabbed from a tab built inside a running
+    app — all came back single-banded and could not find it.
+
+    A pixmap is one blit. There is no join to mis-paint, on any platform, and
+    the chip keeps the plain uniform border every other token in the app has.
+    It is also the mark the value rows in the rail beside it already wear
+    (``editor_view.swatch_icon``), so the two lists showing the same values now
+    show them the same way.
+    """
+    pixmap = QPixmap(QSize(SWATCH_W, SWATCH_H))
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.setBrush(QColor(colour))
+    painter.setPen(QColor(theme.Colors.border))
+    painter.drawRoundedRect(0, 0, SWATCH_W - 1, SWATCH_H - 1, 2, 2)
+    painter.end()
+    return QIcon(pixmap)
+
+
 def value_chip(label: str, value_id: str, parent: QWidget, *,
                swatch: str = "") -> QPushButton:
     """One assignable value, as a button carrying its id.
@@ -294,23 +385,10 @@ def value_chip(label: str, value_id: str, parent: QWidget, *,
     button.setCursor(Qt.PointingHandCursor)
     button.setProperty("aw_value_id", value_id)
     if swatch:
-        # A block of the value's ink rather than a three-pixel stripe. The chip
-        # row is where a user reads "this colour means this dose", and a hairline
-        # is not enough of the colour to match against a plate. Only the swatch
-        # is set here because only the swatch varies per value; everything else
-        # about a chip is one rule in ``theme.qss``, and a widget stylesheet
-        # merges with the app's rather than replacing it.
-        # **The whole border, not just its left edge.** Stating one property
-        # left the rest of the box's border to the app sheet and the two to
-        # interact — which is what a report of "two overlapping bars, one
-        # smaller" describes. An offscreen render here could not reproduce two
-        # bands, so the mechanism is not confirmed and this is not written as
-        # though it were; what is certain is that one complete declaration
-        # cannot produce them, and it costs nothing over one partial.
-        button.setStyleSheet(
-            "QPushButton#VariableValueChip {"
-            f" border: 1px solid {theme.Colors.border};"
-            f" border-left: 14px solid {swatch};"
-            f" border-radius: {theme.Radii.sm}px;"
-            " }")
+        # A block of the value's ink rather than a hairline. The chip row is
+        # where a user reads "this colour means this dose", and a stripe is not
+        # enough of the colour to match against a plate. Set as an icon and not
+        # as a border — see :func:`swatch_block` for the report that cost.
+        button.setIcon(swatch_block(swatch))
+        button.setIconSize(QSize(SWATCH_W, SWATCH_H))
     return button

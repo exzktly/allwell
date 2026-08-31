@@ -129,6 +129,47 @@ def test_the_live_docs_use_one_word_for_each():
     )
 
 
+#: The tab is **Sample Map**, both words capitalised, wherever it is named — the
+#: tab label, the feature descriptor every sub-tab lookup keys on, the help
+#: topic map, the manual's heading, the cross-references that send a reader to
+#: it, and the comments that mention it. Case-sensitive on purpose: it matches
+#: only the wrong spelling, and it cannot catch "per-sample mapping", which is
+#: an unrelated phrase in Batch Export.
+_TAB_MISSPELLING = re.compile(r"\bSample map\b")
+
+
+def test_the_tab_is_spelled_sample_map_everywhere():
+    """A tab name is one string in twenty-six files, and a half-done rename
+    leaves the two halves disagreeing where it matters most.
+
+    Three of the sites are load-bearing rather than prose: ``help_topics`` maps
+    the tab's name to a **manual heading** and both sides have to move together
+    or Help lands nowhere; ``scripts/profile_build`` checks feature names
+    against those headings; and the ``FeatureDescriptor`` name is what
+    ``_ACTION_SUBTAB``, ``role_for_tab`` and every sub-tab lookup key on. So the
+    guard reads the whole tree rather than the docs alone.
+    """
+    offenders = []
+    for path in python_sources():
+        for number, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), 1):
+            if _TAB_MISSPELLING.search(line):
+                offenders.append(f"{rel(path)}:{number} {line.strip()[:90]!r}")
+    for name in _DOCS:
+        doc = REPO_ROOT / name
+        if not doc.exists():
+            continue
+        for number, line in enumerate(
+                doc.read_text(encoding="utf-8").splitlines(), 1):
+            if _TAB_MISSPELLING.search(line):
+                offenders.append(f"{name}:{number} {line.strip()[:90]!r}")
+    assert not offenders, (
+        "these lines spell the tab \"Sample map\":\n  "
+        + "\n  ".join(offenders)
+        + "\nIt is \"Sample Map\". Both words, everywhere it is named."
+    )
+
+
 def test_every_exemption_names_a_live_site():
     """An exemption that no longer describes a real violation is a dead rule.
 
@@ -154,12 +195,12 @@ CONCEPTS = (
 
 #: The README says the same four things in the user's vocabulary rather than
 #: the model's, so its table is keyed on the route a user clicks — which is the
-#: **layer** of the Sample map tab, not a tab of its own. Written out in full
+#: **layer** of the Sample Map tab, not a tab of its own. Written out in full
 #: because a guard naming only the layer would go on passing after the merge had
 #: left the manual routing readers to three tabs that no longer exist.
-README_CONCEPTS = ("Home \u2192 Sample map \u2192 Replicates",
-                   "Home \u2192 Sample map \u2192 Variables",
-                   "Home \u2192 Sample map \u2192 Well Labels",
+README_CONCEPTS = ("Home \u2192 Sample Map \u2192 Replicates",
+                   "Home \u2192 Sample Map \u2192 Variables",
+                   "Home \u2192 Sample Map \u2192 Well Labels",
                    "the rail drawer under the plate map")
 
 

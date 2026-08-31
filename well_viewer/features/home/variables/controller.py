@@ -105,16 +105,23 @@ def dataset_wells(ctx) -> list[str]:
     return sorted(getattr(ctx.state.dataset, "well_paths", {}) or {})
 
 
-def _value_colours(variable) -> dict:
+def _value_colours(ctx, variable) -> dict:
     """``value id -> colour`` for this tab's chips, rows and plate.
 
-    **Through** ``domain/variable_series.value_colors``, which is where the
-    plots read the same answer. It used to be a second implementation here — the
-    same palette walked with a stride of seven rather than one — and the two
+    **Through** ``domain/variable_series.colors_for``, which is where the plots
+    read the same answer. It used to be a second implementation here — the same
+    palette walked with a stride of seven rather than one — and the two
     disagreed about every value but the first: a dose that inked green on a bar
     chart painted purple on the plate that assigned it.
+
+    The **set**, not the variable alone: no two values on a plate may share an
+    ink, and which inks are free is a fact about the whole set. Indexed per
+    variable, `Cell line`'s two values and `Dose`'s first two took the same two
+    colours.
     """
-    return vseries.value_colors(variable)
+    vid = getattr(variable, "id", "")
+    return vseries.colors_for(
+        getattr(ctx.state.selection, "variables", None), vid)
 
 
 # ── redraw ──────────────────────────────────────────────────────────────────
@@ -140,11 +147,8 @@ def refresh_variables(ctx, *, note: str = "") -> None:
     variable = vset.by_id(variable_id) if variable_id else None
 
     body = _widget(ctx, "_var_body")
-    hint = _widget(ctx, "_var_hint")
     if body is not None:
         body.setVisible(variable is not None)
-    if hint is not None:
-        hint.setVisible(variable is None)
 
     _paint_undo(ctx)
     _say(ctx, note)
@@ -230,7 +234,7 @@ def _paint_definition(ctx, variable) -> None:
 
     values = _widget(ctx, "_var_values")
     if values is not None:
-        colours = _value_colours(variable)
+        colours = _value_colours(ctx, variable)
         kept_value = selected_value_id(ctx)
         values.blockSignals(True)
         values.clear()
@@ -719,7 +723,7 @@ def _paint_chips(ctx, variable) -> None:
         if widget is not None:
             widget.setParent(None)
 
-    colours = _value_colours(variable)
+    colours = _value_colours(ctx, variable)
     for value in variable.values:
         chip = value_chip(variable.display_label(value.id), value.id, host,
                           swatch=colours.get(value.id))
@@ -766,7 +770,7 @@ def _paint_plate_from(ctx, plate, vset, variable, wells) -> None:
     plate.clearWellRings()
     plate.setColoredWellsLit(True)
 
-    colours = _value_colours(variable)
+    colours = _value_colours(ctx, variable)
     for well in wells:
         value_id = vset.value_id_for(variable.id, well)
         if value_id in colours:
@@ -1143,3 +1147,16 @@ def _set_plate_column_shown(ctx, on: bool) -> None:
     if caption is not None:
         # The header's "SHOWING" label with nothing after it.
         caption.setVisible(bool(on))
+    empty = _widget(ctx, "_var_empty")
+    if empty is not None:
+        # The placeholder stands in the plate's place, so it is the exact
+        # inverse of it — never both, and never neither.
+        empty.setVisible(not on)
+    undo = _widget(ctx, "_var_undo")
+    if undo is not None:
+        # Hidden rather than merely disabled while the tab is empty. Disabled is
+        # right for a control whose rule the user can act on; there is no
+        # history to restore on a plate with no variables, and on a page whose
+        # whole content is one call to action a second, dead button beside it
+        # competes with the only thing there is to press.
+        undo.setVisible(bool(on))

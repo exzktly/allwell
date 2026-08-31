@@ -96,6 +96,8 @@ class EmptyState(QWidget):
         self._action.setObjectName("EmptyStateAction")
         self._action.setVisible(False)
         self._action_slot = None
+        # Whether a hint may stand beside an action; see ``setAction``.
+        self._keep_hint = False
         outer.addSpacing(theme.Spacing.md)
         outer.addWidget(self._action, 0, Qt.AlignHCenter)
         # A column of secondary links under the action, empty and hidden until a
@@ -138,7 +140,7 @@ class EmptyState(QWidget):
         self._icon_name = name
         self._refresh_glyph()
 
-    def setAction(self, label: str, on_click) -> None:
+    def setAction(self, label: str, on_click, *, keep_hint: bool = False) -> None:
         """Show a button in place of the hint, replacing any previously set one.
 
         For a placeholder whose way out is one action the page can perform
@@ -146,6 +148,12 @@ class EmptyState(QWidget):
         somewhere else — and those keep no button at all. The hint's text is
         kept, so ``clearAction`` brings the line back. ARCHITECTURE.md
         § "Empty states" has why the button replaces it rather than joining it.
+
+        *keep_hint* shows both. The default exists because a hint usually points
+        at a control **elsewhere**, and printing that under a button which does
+        the job right here sends the reader away from the answer. A hint that is
+        the *payoff* for pressing this very button is the other case, and it is
+        the one this flag is for — opt-in, so no existing placeholder changes.
         """
         if self._action_slot is not None:
             self._action.clicked.disconnect(self._action_slot)
@@ -156,6 +164,7 @@ class EmptyState(QWidget):
                 _fn()
             self._action.clicked.connect(_slot)
             self._action_slot = _slot
+        self._keep_hint = bool(keep_hint)
         self._action.setVisible(bool(label))
         self._sync_hint_visibility()
 
@@ -163,23 +172,57 @@ class EmptyState(QWidget):
         """Show a column of secondary links below the action, replacing any set before.
 
         *entries* is a sequence of ``(label, sublabel, on_click, enabled,
-        tooltip)``. Fixed width rather than optional tails: the short form had
-        no caller anywhere, and a variadic tuple whose meaning depends on its
-        length is harder to read than the row it encodes. An entry with
-        ``enabled=False`` is still **drawn** — greyed, with *tooltip* saying
+        tooltip, on_remove)``. Fixed width rather than optional tails: a
+        variadic tuple whose meaning depends on its length is harder to read
+        than the row it encodes, so carrying the remove callback widened the
+        row for every caller rather than making a last field optional. An entry
+        with ``enabled=False`` is still **drawn** — greyed, with *tooltip* saying
         why — because the commonest reason a site disables one of these is a
         path on a drive that is not mounted, and dropping the row instead would
         tell the user their history had been lost rather than that their disk is
         elsewhere.
 
+        *on_remove* is a callable, or ``None`` for a row that cannot be taken
+        off the list. When it is set the row grows a × revealed on hover, and
+        that × is live **even on a disabled row** — an unreachable folder is
+        precisely the entry a user wants gone.
+
         Passing an empty sequence is :meth:`clearEntries`.
         """
         self.clearEntries()
         rows = list(entries or ())
-        for label, sublabel, on_click, enabled, tooltip in rows:
+        for label, sublabel, on_click, enabled, tooltip, on_remove in rows:
             self._entries_layout.addWidget(
-                self._make_entry(label, sublabel, on_click, enabled, tooltip))
+                self._make_entry(label, sublabel, on_click, enabled, tooltip,
+                                 on_remove))
         self._entries.setVisible(bool(rows))
+
+    def entryAt(self, index: int):
+        """The clickable row at *index*, whichever shape :meth:`setEntries` gave it.
+
+        A row with a remove callback is a container around the button; one
+        without is the button itself. Callers ask here rather than each
+        spelling out that difference — and the tests press what this returns,
+        so a change of shape cannot leave them driving the wrapper instead of
+        the control.
+        """
+        from widgets.removable_row import row_entry
+
+        item = self._entries_layout.itemAt(index)
+        widget = item.widget() if item is not None else None
+        return row_entry(widget) if widget is not None else None
+
+    def removeButtonAt(self, index: int):
+        """The × on the row at *index*, or ``None`` when the row carries none."""
+        from widgets.removable_row import row_remove_button
+
+        item = self._entries_layout.itemAt(index)
+        widget = item.widget() if item is not None else None
+        return row_remove_button(widget) if widget is not None else None
+
+    def entryCount(self) -> int:
+        """How many rows :meth:`setEntries` is currently showing."""
+        return self._entries_layout.count()
 
     def clearEntries(self) -> None:
         while self._entries_layout.count():
@@ -196,7 +239,7 @@ class EmptyState(QWidget):
         self._entries.setVisible(False)
 
     def _make_entry(self, label: str, sublabel: str, on_click,
-                    enabled: bool, tooltip: str) -> QPushButton:
+                    enabled: bool, tooltip: str, on_remove=None) -> QWidget:
         """One row of :meth:`setEntries`.
 
         A ``QPushButton`` rather than a label with a mouse handler, so it is
@@ -204,6 +247,10 @@ class EmptyState(QWidget):
         is a real widget state — reported to assistive technology and refusing
         the click — rather than a look. Its *colour* when disabled is a theme
         token like every other, in ``theme.link_row_qss``.
+
+        With *on_remove* set the button is wrapped in a row carrying a ×, and
+        the returned widget is then the row rather than the button — which is
+        why the caller adds what this returns instead of assuming a button.
         """
         button = QPushButton(self._entries)
         button.setObjectName("EmptyStateEntry")
@@ -216,7 +263,14 @@ class EmptyState(QWidget):
             def _slot(_checked=False, _fn=on_click):
                 _fn()
             button.clicked.connect(_slot)
-        return button
+        if not callable(on_remove):
+            return button
+        from widgets.removable_row import removable_row
+        return removable_row(
+            button, on_remove, parent=self._entries,
+            object_name="EmptyStateEntryRemove",
+            tooltip=f"Forget “{label}” — take it off this list. The folder "
+                    "itself is not touched.")
 
     def clearAction(self) -> None:
         if self._action_slot is not None:
@@ -224,6 +278,10 @@ class EmptyState(QWidget):
             self._action_slot = None
         self._action.setText("")
         self._action.setVisible(False)
+        # Back to the default: a placeholder with no action has no reason to
+        # carry the exception ``setAction(keep_hint=True)`` granted it, and a
+        # flag left set is a rule that outlives what it was for.
+        self._keep_hint = False
         self._sync_hint_visibility()
 
     def _sync_hint_visibility(self) -> None:
@@ -238,8 +296,12 @@ class EmptyState(QWidget):
         ``isVisible()``: a child of a widget that has not been shown yet reports
         itself invisible however it was configured, and a placeholder is built
         long before the page it covers is first painted.
+
+        A site that asked for both keeps both — see :meth:`setAction`.
         """
-        self._hint.setVisible(bool(self._hint.text()) and not self._action.text())
+        self._hint.setVisible(
+            bool(self._hint.text())
+            and (self._keep_hint or not self._action.text()))
 
     # ── internals ────────────────────────────────────────────────────────
     def _icon_px(self) -> int:
@@ -306,6 +368,7 @@ class EmptyState(QWidget):
            datasets card; see theme.link_row_qss. */
         QWidget#EmptyStateEntries {{ background: transparent; }}
         {theme.link_row_qss("EmptyStateEntry")}
+        {theme.row_remove_qss("EmptyStateEntryRemove")}
         """
 
 

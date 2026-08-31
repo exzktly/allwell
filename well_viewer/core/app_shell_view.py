@@ -61,6 +61,12 @@ def _dataset_button(win, parent):
     tail as often as their head (``plate3_run2_2024-06-11`` against
     ``plate3_run2_2024-06-12``), so a right-elided name can leave two datasets
     indistinguishable. The full path is on the tooltip either way.
+
+    The menu carries the recently opened datasets under ``Open``, rebuilt each
+    time it is about to be shown. This is the control a user reaches for to
+    change plate, and offering only a folder picker there meant the way back to
+    the plate opened ten minutes ago was to remember where it lived — while
+    Home had known the answer the whole time.
     """
     from PySide6.QtWidgets import QMenu, QToolButton
     btn = QToolButton(parent)
@@ -71,7 +77,12 @@ def _dataset_button(win, parent):
     from widgets.icons import make_icon
     btn.setIcon(make_icon("folder-open", 14))
     menu = QMenu(btn)
-    menu.addAction("Open").triggered.connect(lambda _=False: win._browse())
+    # Rebuilt on every show rather than filled once: the history changes as the
+    # session runs — every load adds to it and Home's × takes rows off it — and
+    # a menu built at window construction would show the list as it stood at
+    # launch for the rest of the session.
+    menu.aboutToShow.connect(lambda: _fill_dataset_menu(win, menu))
+    _fill_dataset_menu(win, menu)
     btn.setMenu(menu)
     win._dataset_menu = menu
     # Assign before refreshing: ``refresh_dataset_button`` reads the button off
@@ -80,6 +91,54 @@ def _dataset_button(win, parent):
     win._dataset_btn = btn
     refresh_dataset_button(win)
     return btn
+
+
+#: How many remembered datasets the rail head's menu offers. Fewer than the
+#: store keeps: this menu is a shortcut back to the plate you were just on, and
+#: a ten-item list under a folder button is a file manager with a caret.
+RECENTS_IN_MENU = 6
+
+
+def _fill_dataset_menu(win, menu) -> None:
+    """``Open…``, then the datasets this user opened recently.
+
+    Rows come from ``core.recent_view.entry_rows``, the same function Home's
+    card and its placeholder draw from, so a folder that has gone missing reads
+    the same way in all three places — offered, disabled, with the reason on its
+    tooltip — rather than being silently absent from one of them.
+
+    No remove here. ``entry_rows`` is asked for none (it takes no *on_removed*),
+    because a ``QMenu`` row is a line of text with nothing to reveal a second
+    control over; forgetting a dataset is Home's ×.
+    """
+    from well_viewer.core.recent_view import entry_rows
+
+    menu.clear()
+    # Qt hides action tooltips by default, and the tooltip is where a row says
+    # its full path and when it was last opened — the two facts that tell
+    # ``plate3_run2`` from ``plate3_run2`` on another drive.
+    menu.setToolTipsVisible(True)
+    menu.addAction("Open…").triggered.connect(lambda _=False: win._browse())
+
+    ctx = getattr(win, "_ctx", None)
+    if ctx is None:
+        return
+    state = getattr(win, "_app_state", None)
+    dataset = getattr(state, "dataset", None) if state is not None else None
+    rows = entry_rows(ctx, RECENTS_IN_MENU,
+                      exclude=str(getattr(dataset, "data_dir", "") or ""))
+    if not rows:
+        return
+    menu.addSeparator()
+    heading = menu.addAction("Recent")
+    heading.setEnabled(False)
+    for label, sublabel, on_click, enabled, tooltip, _on_remove in rows:
+        action = menu.addAction(label)
+        action.setToolTip(tooltip)
+        action.setEnabled(bool(enabled))
+        if callable(on_click):
+            action.triggered.connect(
+                lambda _checked=False, _fn=on_click: _fn())
 
 
 def refresh_dataset_button(win) -> None:

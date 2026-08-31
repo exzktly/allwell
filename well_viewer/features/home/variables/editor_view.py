@@ -48,7 +48,7 @@ _VALUES_H = 290
 
 
 def build_editor_column(ctx, parent: QWidget, reg) -> QWidget:
-    from .tab_view import EDITOR_W, EMPTY_HINT, section_label
+    from .tab_view import EDITOR_W, section_label
 
     host = QWidget(parent)
     host.setFixedWidth(EDITOR_W)
@@ -75,11 +75,6 @@ def build_editor_column(ctx, parent: QWidget, reg) -> QWidget:
     add = reg.register("_var_add", QPushButton("+ Variable", host))
     add.setObjectName("HomeAction")
     column.addWidget(add)
-
-    hint = reg.register("_var_hint", QLabel(EMPTY_HINT, host))
-    hint.setObjectName("Muted")
-    hint.setWordWrap(True)
-    column.addWidget(hint)
 
     body = reg.register("_var_body", QWidget(host))
     body_column = QVBoxLayout(body)
@@ -285,7 +280,16 @@ def variable_row(name: str, variable_id: str, annotated: int,
     # reader needs.
     item.setData(Qt.AccessibleTextRole, item.text())
     item.setText("")
-    item.setSizeHint(row.sizeHint())
+
+    # **Add the delegate's padding back.** Qt hands an index widget the item
+    # rect *minus* ``QListWidget::item``'s padding, so a hint taken from the row
+    # alone comes out short by exactly that much: the × is a fixed 18 px, the
+    # row asked for 18, the list gave the row 10, and the button rendered as its
+    # top half. Nothing else here needs a floor — the button's fixed size is
+    # already what makes the row's own hint tall enough.
+    hint = row.sizeHint()
+    item.setSizeHint(QSize(hint.width(),
+                           hint.height() + 2 * theme.Metrics.list_item_pad_v))
     return item, row
 
 

@@ -1,4 +1,4 @@
-"""Home — **Sample map**: one plate, and a switch saying what it is showing.
+"""Home — **Sample Map**: one plate, and a switch saying what it is showing.
 
 The three ways of annotating a well — grouping them, giving them a variable's
 value, naming them — were three sibling tabs. This is one tab with three

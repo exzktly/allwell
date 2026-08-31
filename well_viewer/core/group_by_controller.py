@@ -24,7 +24,7 @@ _logger = logging.getLogger("well_viewer")
 #: controls below already record.
 GROUPING_READOUTS: tuple[str, ...] = (
     "_plotting_grouping_note",   # the plotting band, beside Group by
-    "_sample_map_grouping_note",  # Home → Sample map, where the groups are made
+    "_sample_map_grouping_note",  # Home → Sample Map, where the groups are made
 )
 
 #: What the combo calls "do not group by a variable".

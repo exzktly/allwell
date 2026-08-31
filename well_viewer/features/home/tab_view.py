@@ -493,14 +493,19 @@ def build_recent_tile(ctx, parent: QWidget, entry) -> QWidget:
     than as child labels, because a row is one line of type and needs none of
     the tile's picture-above-caption layout.
 
-    *entry* is ``(label, sublabel, on_click, enabled, tooltip)``, the shape
-    ``EmptyState.setEntries`` takes, so the card and the placeholder are fed
-    from one function in the controller and cannot disagree about which folders
-    are reachable — and its text comes from ``entry_row_text`` for the same
-    reason, one list having rendered as two stacked lines in one place and a
-    run-on line in the other.
+    *entry* is ``(label, sublabel, on_click, enabled, tooltip, on_remove)``,
+    the shape ``EmptyState.setEntries`` takes, so the card and the placeholder
+    are fed from one function in the controller and cannot disagree about which
+    folders are reachable — and its text comes from ``entry_row_text`` for the
+    same reason, one list having rendered as two stacked lines in one place and
+    a run-on line in the other.
+
+    With *on_remove* set the row carries a × that appears while the pointer is
+    over it, and what this returns is then the row rather than the button. The
+    × stays live on a row whose folder is unreachable, which is the row it is
+    most often wanted on.
     """
-    label, sublabel, on_click, enabled, tooltip = entry
+    label, sublabel, on_click, enabled, tooltip, on_remove = entry
     button = QPushButton(parent)
     button.setObjectName("HomeRecentTile")
     button.setText(entry_row_text(label, sublabel))
@@ -510,7 +515,14 @@ def build_recent_tile(ctx, parent: QWidget, entry) -> QWidget:
         button.setToolTip(tooltip)
     if callable(on_click) and enabled:
         button.clicked.connect(lambda _checked=False, _fn=on_click: _fn())
-    return button
+    if not callable(on_remove):
+        return button
+    from widgets.removable_row import removable_row
+    return removable_row(
+        button, on_remove, parent=parent,
+        object_name="HomeRecentTileRemove",
+        tooltip=f"Forget “{label}” — take it off this list. The folder itself "
+                "is not touched.")
 
 
 def _build_saved_plots(ctx, page: QWidget, reg) -> QWidget:

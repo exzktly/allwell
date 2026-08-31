@@ -233,7 +233,7 @@ class LabelGrid(QWidget):
     def setSelectedTokens(self, tokens) -> None:
         """Select exactly *tokens* (the enabled ones), replacing the selection.
 
-        The counterpart of :meth:`selectedTokens`, added so the Sample map tab's
+        The counterpart of :meth:`selectedTokens`, added so the Sample Map tab's
         layer switch can carry a selection from the Variables layer into this
         one — both mean "the wells I am about to act on", so switching between
         them must not silently drop what the user had picked. Emits

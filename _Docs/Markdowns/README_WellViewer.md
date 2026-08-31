@@ -40,7 +40,7 @@ to add features, how to debug, and build / environment troubleshooting), see
 3. [Quick start](#quick-start)
 4. [Analyze mode — running the pipeline](#analyze-mode--running-the-pipeline)
 5. [Review mode — exploring results](#review-mode--exploring-results)
-   - [Home](#home) (Overview · Cell Gating · Sample map — Replicates · Variables · Well Labels — · Ratios · Pipeline Info)
+   - [Home](#home) (Overview · Cell Gating · Sample Map — Replicates · Variables · Well Labels — · Ratios · Pipeline Info)
    - [The Review window at a glance](#the-review-window-at-a-glance)
    - [Controls shared by every tab](#controls-shared-by-every-tab)
    - Plotting: [Bar Plots](#bar-plots) · [Line Graphs](#line-graphs) · [Response Curves](#response-curves) · [Scatter Plot](#scatter-plot) · [Distribution](#distribution) · [Heat Map](#heat-map)
@@ -1144,7 +1144,17 @@ them your history of other plates. A folder that opened but turned out to hold
 no wells is not added.
 
 Once a dataset is open the same list appears as a **Recent datasets** card at the
-bottom of Overview, minus the one you are already in.
+bottom of Overview, minus the one you are already in. It is also under the
+dataset button at the top of the left rail: that button names the plate you are
+in, and its menu now offers **Open…** followed by the last few you were in, which
+is the shortest way to swap plates without going near a folder picker.
+
+**Taking something off the list.** Hover a row on Overview's card — or on the
+start-up placeholder — and an **✕** appears at its right end. Clicking it forgets
+that dataset: it leaves the list here and stays gone at the next launch. Nothing
+happens to the folder itself, and opening it again puts it back at the top. The
+✕ works on a greyed-out row too, which is the row you are most likely to want
+gone: a plate on a drive you will not be plugging in again.
 
 **It reports; it does not measure.** Working out how much of each well's input
 its output covers means opening an archive and reading a whole CSV for every
@@ -1261,9 +1271,9 @@ wells, and none of these four is a substitute for another.
 
 | | The question it answers | What it does |
 |---|---|---|
-| **Group** (Home → Sample map → Replicates) | *Which wells are replicates of one condition?* | **Pools.** Every plot, the Statistics tab and Batch Export draw one bar, trace or row per group instead of per well. A group carries a colour and a place in the plot order. |
-| **Variable** (Home → Sample map → Variables) | *What did you change across the plate?* | **Pools, colours and splits.** A named axis with ordered values — `Dose: 0, 0.1, 1, 10` — assigned per well. Pick one as **Group by** and the plots pool by it; as **Colour by** or **Split by** and they ink or band by it. A numeric one can be a Response Curve's x axis. |
-| **Well label** (Home → Sample map → Well Labels) | *What should this well be called on a figure?* | **Display only.** The label replaces the raw well token in legends, tick labels and exported names. It pools nothing and changes no number. |
+| **Group** (Home → Sample Map → Replicates) | *Which wells are replicates of one condition?* | **Pools.** Every plot, the Statistics tab and Batch Export draw one bar, trace or row per group instead of per well. A group carries a colour and a place in the plot order. |
+| **Variable** (Home → Sample Map → Variables) | *What did you change across the plate?* | **Pools, colours and splits.** A named axis with ordered values — `Dose: 0, 0.1, 1, 10` — assigned per well. Pick one as **Group by** and the plots pool by it; as **Colour by** or **Split by** and they ink or band by it. A numeric one can be a Response Curve's x axis. |
+| **Well label** (Home → Sample Map → Well Labels) | *What should this well be called on a figure?* | **Display only.** The label replaces the raw well token in legends, tick labels and exported names. It pools nothing and changes no number. |
 | **Saved selection** (the rail drawer under the plate map) | *Can I get these wells back later?* | **Nothing but recall.** It lights the same wells again in one click. It is not a group, it is not a replicate set, and loading one never edits a group's membership. |
 
 The one worth knowing before you start painting: **a variable is not a group,
@@ -1426,7 +1436,7 @@ the crop region and the QC gate.
 cutoffs, then use the optimizer on the one channel that separates your
 conditions.
 
-#### Sample map
+#### Sample Map
 
 One tab, one plate, and a switch across the top with three segments naming what
 the plate is showing: **Replicates**, **Variables** or **Well Labels**. Only one
@@ -1483,7 +1493,9 @@ by hand to plot them apart. With them you say "Cell line: HeLa, U2OS" and
 "Dose: 0, 0.1, 0.3, 1, 3, 10" once, and the plots can group, colour and split by
 either.
 
-On **Home → Sample map → Variables** the page is a plate with the definition beside it. The
+On a plate with no variables yet, the page is a single panel where the plate will go — what a variable buys you, and a **+ Variable** button. Nothing else is drawn, because there is nothing yet to draw it about.
+
+On **Home → Sample Map → Variables** the page is a plate with the definition beside it. The
 strip across the top always says which variable the plate is showing, and which
 one is drawn on top of it, because one click in the list on the left decides four
 things at once: what the form below it is editing, what the value buttons assign,
@@ -1501,6 +1513,15 @@ to `1 µM` after you have filled the plate costs nothing. The arrows beside the
 list set the order, which is the order a fill walks and the direction a dose axis
 runs, so it is worth getting right — each row carries the colour its wells will
 take, so you can watch a reorder change the plate.
+
+**No colour means two things at once.** Every value on the plate gets its
+own ink, across variables and not just within one — the second variable's
+values carry on from where the first one's left off, rather than both
+starting at the same blue. Previously `HeLa` and `0 µM` could be the same
+colour, one in the chip row and the other on the plate a click later. The
+price of that is worth knowing: adding or removing a value on one variable
+shifts the colours of every variable below it in the list. Nothing about
+your data changes, and you see it happen.
 
 **Text or Number.** Number is what lets a variable be a plot's x axis, and it is
 the only type that takes a unit. You can switch at any time and your values are
@@ -2128,7 +2149,7 @@ Fold change:  Control [— ▾]   Baseline [— ▾]
 - **Control** — pick a loaded well or replicate set to divide every bar
   / curve by its mean at the matching timepoint. `—` disables this
   axis. (The Bar Plots control combo also includes any replicate sets
-  defined on Home → Sample map → Replicates.) When a group name happens to match a well
+  defined on Home → Sample Map → Replicates.) When a group name happens to match a well
   token, the well's entry is shown as `A01 (well)` so the two can be told
   apart on screen. The suffix is only a label: the entry records which of
   the two you picked, so a group named `A01 (well)` is still selectable
@@ -2535,7 +2556,7 @@ density, MOI, temperature, how long you pre-treated for. A serial dilution is
 one case of it, which is why the tab is not named for one.
 
 The x axis comes from a **Number** variable you defined on
-[Home → Sample map → Variables](#variables): define it, fill it onto the plate, then pick it
+[Home → Sample Map → Variables](#variables): define it, fill it onto the plate, then pick it
 under **X** in the band. Until a Number variable exists the tab says so and
 points you there — there is nothing for it to plot.
 
@@ -2876,7 +2897,7 @@ answer a different question: **Dunnett** against one control group, a **paired
 t-test** and **Wilcoxon signed-rank**, and a **two-way ANOVA**.
 
 - **Needs** — at least two groups. On first visit the tab auto-populates from
-  the replicate sets defined on [Home → Sample map → Replicates](#replicates).
+  the replicate sets defined on [Home → Sample Map → Replicates](#replicates).
 - **Controls** — the group editor is on the page itself, a strip between the
   controls band and the results: the well map on the left, and the group cards
   with **+ Add**, **Clear All** and **↻ Load groups from Home → Replicates** on
@@ -2906,7 +2927,7 @@ t-test** and **Wilcoxon signed-rank**, and a **two-way ANOVA**.
 - **Paired tests and the two-way ANOVA read a sample variable.** A paired test
   needs to know which replicate in one group matches which in the other, and
   that only exists if you have said so — declare a batch or day variable on
-  [Home → Sample map → Variables](#variables) and choose it under **Pair by**. The tab will
+  [Home → Sample Map → Variables](#variables) and choose it under **Pair by**. The tab will
   not pair by list order and says so rather than guessing: replicates present in
   only one group are named in the report rather than quietly dropped. The
   two-way ANOVA takes two variables and reports both main effects and their
@@ -3471,7 +3492,7 @@ channel for every well).
   well or timepoint selection, or crop the view.
 - **Well labels** — where a well would show its `A01` position (axis / group labels,
   cell tooltips, exported labels and titles), its custom label is shown instead when
-  one is set under Home → Sample map → Well Labels.
+  one is set under Home → Sample Map → Well Labels.
 - **Optimal use** — drag **Well** onto Rows and nest a couple of channels, drag
   **Timepoint** onto Columns → one row per well×channel, one column per timepoint,
   for a treatment's full time-course at a glance. Flip a root to **Overlay** for a
@@ -3832,7 +3853,7 @@ something you asked to discard. If one item fails (an unreadable file, say), the
 others still run and the status line names the one that did not.
 
 Smaller resets stay next to the thing they affect: **Clear all groups** on
-Home → Sample map → Replicates, and **Reset crop + curation** in the Segmentation
+Home → Sample Map → Replicates, and **Reset crop + curation** in the Segmentation
 tab's Edit menu, which is the same action as the Curation checkbox above.
 
 ---

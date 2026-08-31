@@ -1067,7 +1067,7 @@ def stats_resync_from_sample_defs(ctx) -> None:
 
     rsets = _stats_groups_from_rep_sets(ctx)
     if not rsets:
-        ctx.notify.set_status("No sample-definition groups to load — define them on Home → Sample map → Replicates.")
+        ctx.notify.set_status("No sample-definition groups to load — define them on Home → Sample Map → Replicates.")
         return
     existing = [g for g in ctx.state.stats.groups if g.wells]
     if existing:

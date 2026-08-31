@@ -18,6 +18,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from PySide6.QtTest import QTest
 
 from widgets.empty_state import EmptyState
@@ -295,20 +296,26 @@ def _ctx_with_recents(monkeypatch, paths, *, data_dir=None, loaded=None):
         record_open(settings, str(path), Path(path).name, float(i))
     monkeypatch.setattr(app_settings_module, "app_settings", lambda: settings)
     ctx, calls = _ctx()
+    # Handed back on the ctx so a test that reads the history afterwards has
+    # the stub in hand. Importing ``app_settings`` by name instead works only
+    # if the import happens *after* this patch, and a test that gets that order
+    # wrong reads the developer's real configuration file and passes or fails
+    # on whatever is in it.
+    ctx.settings = settings
     ctx.window._load_path = loaded or (lambda p: calls.append(p))
     ctx.state.dataset.data_dir = data_dir
     return ctx, calls
 
 
 def test_the_placeholder_offers_the_datasets_that_are_there(qtbot, tmp_path, monkeypatch):
-    from well_viewer.features.home.controller import _recent_entry_rows
+    from well_viewer.core.recent_view import entry_rows
 
     a, b = tmp_path / "plate_a", tmp_path / "plate_b"
     a.mkdir()
     b.mkdir()
     ctx, _ = _ctx_with_recents(monkeypatch, [a, b])
 
-    rows = _recent_entry_rows(ctx, 5)
+    rows = entry_rows(ctx, 5)
     assert [r[0] for r in rows] == ["plate_b", "plate_a"], "newest is not first"
     assert all(r[3] for r in rows), "a folder that exists came back disabled"
 
@@ -317,14 +324,14 @@ def test_a_dataset_whose_drive_is_gone_is_shown_and_disabled(tmp_path, monkeypat
     """Not hidden. Dropping the row tells the user their history was lost, when
     what happened is that a drive is unplugged — and the row must come back by
     itself when it is plugged in again."""
-    from well_viewer.features.home.controller import _recent_entry_rows
+    from well_viewer.core.recent_view import entry_rows
 
     here = tmp_path / "mounted"
     here.mkdir()
     gone = tmp_path / "unmounted"
     ctx, _ = _ctx_with_recents(monkeypatch, [here, gone])
 
-    rows = _recent_entry_rows(ctx, 5)
+    rows = entry_rows(ctx, 5)
     assert [r[0] for r in rows] == ["unmounted", "mounted"], (
         "the unreachable folder was dropped from the list"
     )
@@ -337,7 +344,7 @@ def test_the_open_dataset_is_not_offered_back_to_itself(tmp_path, monkeypatch):
     """The card sits inside the dataset it would offer to reopen, and the
     in/out layout is where a naive string comparison misses: the list stores the
     folder Review was pointed at, and ``data_dir`` is the ``out`` inside it."""
-    from well_viewer.features.home.controller import _recent_entry_rows
+    from well_viewer.core.recent_view import entry_rows
 
     root = tmp_path / "plate_a"
     (root / "out").mkdir(parents=True)
@@ -345,7 +352,7 @@ def test_the_open_dataset_is_not_offered_back_to_itself(tmp_path, monkeypatch):
     other.mkdir()
     ctx, _ = _ctx_with_recents(monkeypatch, [root, other], data_dir=root / "out")
 
-    rows = _recent_entry_rows(ctx, 5, exclude=ctx.state.dataset.data_dir)
+    rows = entry_rows(ctx, 5, exclude=ctx.state.dataset.data_dir)
     assert [r[0] for r in rows] == ["plate_b"]
 
 
@@ -353,7 +360,7 @@ def test_clicking_a_recent_row_opens_it_by_the_browsed_route(qtbot, tmp_path, mo
     """Asserted at the boundary: what reaches ``_load_path``, not what the row
     computed. A row that renders correctly and calls nothing is the failure this
     guards — §7.6, a control that exists is not a control that works."""
-    from well_viewer.features.home.controller import _recent_entry_rows
+    from well_viewer.core.recent_view import entry_rows
 
     root = tmp_path / "plate_a"
     root.mkdir()
@@ -362,9 +369,9 @@ def test_clicking_a_recent_row_opens_it_by_the_browsed_route(qtbot, tmp_path, mo
 
     empty = EmptyState("Load a directory.")
     qtbot.addWidget(empty)
-    empty.setEntries(_recent_entry_rows(ctx, 5))
+    empty.setEntries(entry_rows(ctx, 5))
 
-    button = empty._entries_layout.itemAt(0).widget()
+    button = empty.entryAt(0)
     assert button.text().startswith("plate_a")
     button.click()
     # ``open_recent`` defers by 50 ms, the same deferral the folder picker uses.
@@ -373,22 +380,22 @@ def test_clicking_a_recent_row_opens_it_by_the_browsed_route(qtbot, tmp_path, mo
 
 
 def test_a_disabled_row_does_nothing_when_clicked(qtbot, tmp_path, monkeypatch):
-    from well_viewer.features.home.controller import _recent_entry_rows
+    from well_viewer.core.recent_view import entry_rows
 
     opened = []
     ctx, _ = _ctx_with_recents(monkeypatch, [tmp_path / "gone"], loaded=lambda p: opened.append(p))
     empty = EmptyState("Load a directory.")
     qtbot.addWidget(empty)
-    empty.setEntries(_recent_entry_rows(ctx, 5))
+    empty.setEntries(entry_rows(ctx, 5))
 
     # Without this the check is vacuous: a row that was dropped rather than
     # disabled leaves nothing to click, and "nothing was opened" is then true
     # for the wrong reason.
-    assert empty._entries_layout.count() == 1, (
+    assert empty.entryCount() == 1, (
         "the unreachable folder left no row at all, so this proves nothing "
         "about what clicking a disabled one does"
     )
-    button = empty._entries_layout.itemAt(0).widget()
+    button = empty.entryAt(0)
     assert button.isEnabled() is False
     button.click()
     QTest.qWait(120)
@@ -399,17 +406,17 @@ def test_a_placeholder_has_no_entries_until_it_is_given_some(qtbot):
     empty = EmptyState("Load a directory.")
     qtbot.addWidget(empty)
     assert empty._entries.isVisible() is False
-    assert empty._entries_layout.count() == 0
+    assert empty.entryCount() == 0
 
 
 def test_setting_entries_twice_replaces_rather_than_appends(qtbot):
     fired = []
     empty = EmptyState("Load a directory.")
     qtbot.addWidget(empty)
-    empty.setEntries([("one", "", lambda: fired.append("one"), True, "")])
-    empty.setEntries([("two", "", lambda: fired.append("two"), True, "")])
+    empty.setEntries([("one", "", lambda: fired.append("one"), True, "", None)])
+    empty.setEntries([("two", "", lambda: fired.append("two"), True, "", None)])
 
-    assert empty._entries_layout.count() == 1
+    assert empty.entryCount() == 1
     empty._entries_layout.itemAt(0).widget().click()
     assert fired == ["two"], "the replaced row is still connected"
 
@@ -418,11 +425,11 @@ def test_an_empty_sequence_takes_the_column_away(qtbot):
     empty = EmptyState("Load a directory.")
     qtbot.addWidget(empty)
     empty.show()
-    empty.setEntries([("one", "", lambda: None, True, "")])
+    empty.setEntries([("one", "", lambda: None, True, "", None)])
     assert empty._entries.isVisible() is True
     empty.setEntries([])
     assert empty._entries.isVisible() is False
-    assert empty._entries_layout.count() == 0
+    assert empty.entryCount() == 0
 
 
 def test_a_settings_backend_that_raises_costs_the_list_and_nothing_else(
@@ -431,7 +438,7 @@ def test_a_settings_backend_that_raises_costs_the_list_and_nothing_else(
     import logging
 
     from well_viewer.core import app_settings as app_settings_module
-    from well_viewer.features.home.controller import recent_datasets
+    from well_viewer.core.recent_view import recent_datasets
 
     class _Broken:
         def value(self, key, default=None):
@@ -481,11 +488,11 @@ def test_the_placeholder_is_actually_painted_with_the_recents(qtbot, tmp_path,
 
     paint_recents_placeholder(ctx)
 
-    assert placeholder._entries_layout.count() == 1, (
+    assert placeholder.entryCount() == 1, (
         "the placeholder was never given the recents, so the list is invisible "
         "at exactly the moment it is for"
     )
-    assert "plate_a" in placeholder._entries_layout.itemAt(0).widget().text()
+    assert "plate_a" in placeholder.entryAt(0).text()
 
 
 def test_refresh_home_paints_the_placeholder():
@@ -549,7 +556,9 @@ def test_an_emptied_card_does_not_keep_the_last_datasets_rows(qtbot, monkeypatch
     )
 
 
-def test_clearing_entries_does_not_accumulate_widgets(qtbot):
+@pytest.mark.parametrize("removable", [False, True],
+                         ids=["plain-rows", "rows-with-an-x"])
+def test_clearing_entries_does_not_accumulate_widgets(qtbot, removable):
     """``setParent(None)`` alone; ``deleteLater`` defers the C++ delete.
 
     PySide6 hands ownership back to Python on reparent, so the row is freed
@@ -557,17 +566,24 @@ def test_clearing_entries_does_not_accumulate_widgets(qtbot):
     the next event-loop turn, which a test that never spins one never reaches —
     measured at +60 live widgets over 20 refreshes. That is the cost CLAUDE.md
     §2 rule 1 exists to keep out of the lane.
+
+    Run over both row shapes. A removable row is a container holding the entry
+    button, a fixed slot, a × and an event filter watching all four, and the
+    layout only ever takes the container back — so if the reparent did not
+    reach the rest, this is where it would show.
     """
     from PySide6.QtWidgets import QApplication, QPushButton
 
     empty = EmptyState("Load a directory.")
     qtbot.addWidget(empty)
-    rows = [(f"p{i}", "", lambda: None, True, "") for i in range(3)]
+    remove = (lambda: None) if removable else None
+    rows = [(f"p{i}", "", lambda: None, True, "", remove) for i in range(3)]
 
     def live():
         return sum(1 for w in QApplication.allWidgets()
                    if isinstance(w, QPushButton)
-                   and w.objectName() == "EmptyStateEntry")
+                   and w.objectName() in ("EmptyStateEntry",
+                                          "EmptyStateEntryRemove"))
 
     empty.setEntries(rows)
     baseline = live()
@@ -578,3 +594,172 @@ def test_clearing_entries_does_not_accumulate_widgets(qtbot):
         f"{live() - baseline} rows outlived their replacement without an event "
         "loop to reclaim them"
     )
+
+
+# ── forgetting a dataset ────────────────────────────────────────────────────
+#
+# The × is on the row rather than in a menu somewhere, and it is revealed by
+# hovering the row rather than drawn permanently: ten rows each wearing a
+# delete control read as a page about deleting. Everything below presses the
+# button — §7.6, a control that exists is not a control that works — and the
+# two that matter most assert what came back out of ``QSettings``, not what the
+# row computed on its way there.
+
+
+def test_the_rows_carry_a_way_to_forget_them(tmp_path, monkeypatch):
+    from well_viewer.core.recent_view import entry_rows
+
+    here = tmp_path / "plate_a"
+    here.mkdir()
+    ctx, _ = _ctx_with_recents(monkeypatch, [here])
+
+    assert entry_rows(ctx, 5)[0][5] is None, (
+        "a caller that asked for no removal got a remove callback anyway")
+    assert callable(entry_rows(ctx, 5, on_removed=lambda: None)[0][5])
+
+
+def test_an_unreachable_row_can_still_be_forgotten(tmp_path, monkeypatch):
+    """The row whose folder is gone is the one a user most wants off the list,
+    and its open button is disabled — so the × must not be gated on the same
+    flag."""
+    from well_viewer.core.recent_view import entry_rows
+
+    ctx, _ = _ctx_with_recents(monkeypatch, [tmp_path / "unmounted"])
+    row = entry_rows(ctx, 5, on_removed=lambda: None)[0]
+
+    assert row[3] is False, "premise: the folder is not reachable"
+    assert callable(row[5]), "the row that most needs forgetting cannot be"
+
+
+def test_pressing_the_x_takes_the_dataset_out_of_the_stored_history(
+        qtbot, tmp_path, monkeypatch):
+    """Asserted on what ``QSettings`` holds afterwards, not on the row.
+
+    A × that repaints the list without writing looks identical for the rest of
+    the session and comes back at the next launch, which is the failure mode
+    worth guarding: the list is storage, and the screen is a picture of it.
+    """
+    from well_viewer.core.recent_datasets import load
+    from well_viewer.core.recent_view import entry_rows
+
+    a, b = tmp_path / "plate_a", tmp_path / "plate_b"
+    a.mkdir()
+    b.mkdir()
+    ctx, _ = _ctx_with_recents(monkeypatch, [a, b])
+
+    repainted = []
+    empty = EmptyState("Load a directory.")
+    qtbot.addWidget(empty)
+    empty.setEntries(entry_rows(ctx, 5, on_removed=lambda: repainted.append(1)))
+
+    assert [e.name for e in load(ctx.settings)] == ["plate_b", "plate_a"]
+    button = empty.removeButtonAt(0)
+    assert button is not None, "the row carries no ×"
+    button.click()
+
+    assert [e.name for e in load(ctx.settings)] == ["plate_a"], (
+        "the × did not reach the stored list, so the row is back next launch")
+    assert repainted == [1], "nothing redrew, so the row is still on screen"
+
+
+def test_the_x_is_hidden_until_the_pointer_is_on_the_row(qtbot, tmp_path,
+                                                         monkeypatch):
+    """And survives the move from the row onto the × itself.
+
+    Qt sends Leave to the row and Enter to the button as the pointer crosses
+    between them, so a handler that hid on any Leave would take the button away
+    exactly as the user reached for it. The events are sent here in that order
+    because that is the order the crossing produces.
+    """
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication
+
+    from well_viewer.core.recent_view import entry_rows
+
+    here = tmp_path / "plate_a"
+    here.mkdir()
+    ctx, _ = _ctx_with_recents(monkeypatch, [here])
+    empty = EmptyState("Load a directory.")
+    qtbot.addWidget(empty)
+    empty.setEntries(entry_rows(ctx, 5, on_removed=lambda: None))
+
+    row = empty._entries_layout.itemAt(0).widget()
+    button = empty.removeButtonAt(0)
+    # ``isVisibleTo(row)`` and not ``isVisible()``: the placeholder is never
+    # shown in this test, so ``isVisible()`` is False for every widget in it
+    # and the check would pass against a × that is never hidden at all.
+    assert not button.isVisibleTo(row), (
+        "the × is drawn before anything is hovered")
+
+    QApplication.sendEvent(row, QEvent(QEvent.Enter))
+    assert button.isVisibleTo(row), "hovering the row did not reveal the ×"
+
+    QApplication.sendEvent(button, QEvent(QEvent.Enter))
+    QApplication.sendEvent(row, QEvent(QEvent.Leave))
+    assert button.isVisibleTo(row), (
+        "the × vanished as the pointer moved onto it, so it cannot be clicked")
+
+    QApplication.sendEvent(button, QEvent(QEvent.Leave))
+    assert not button.isVisibleTo(row), "the × stayed after the pointer left"
+
+
+def test_forgetting_a_row_repaints_both_of_homes_surfaces(monkeypatch, tmp_path):
+    """The card and the placeholder are one list in the two states of one page.
+
+    Repainting only the one that was clicked leaves the other holding a row for
+    a dataset the history no longer has, which surfaces the moment a dataset is
+    opened or closed.
+    """
+    import well_viewer.features.home.controller as home
+
+    here = tmp_path / "plate_a"
+    here.mkdir()
+    ctx, _ = _ctx_with_recents(monkeypatch, [here])
+
+    painted = []
+    monkeypatch.setattr(home, "_paint_recents", lambda _c: painted.append("card"))
+    monkeypatch.setattr(home, "paint_recents_placeholder",
+                        lambda _c: painted.append("placeholder"))
+
+    home.recent_rows(ctx, 5)[0][5]()
+    assert painted == ["card", "placeholder"]
+
+
+def test_the_cards_own_x_forgets_the_dataset_and_redraws_the_card(
+        qtbot, monkeypatch, tmp_path):
+    """Through ``_paint_recents``, the painter the page actually calls.
+
+    The placeholder's rows and the card's rows are built by two different
+    renderers over one row list, so a × wired up in ``EmptyState`` proves
+    nothing about ``build_recent_tile``. This presses the card's own.
+    """
+    from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+
+    from well_viewer.core.recent_datasets import load
+    from well_viewer.features.home.controller import _paint_recents
+    from widgets.removable_row import row_remove_button
+
+    a, b = tmp_path / "plate_a", tmp_path / "plate_b"
+    a.mkdir()
+    b.mkdir()
+    ctx, _ = _ctx_with_recents(monkeypatch, [a, b])
+
+    card, host, note = QWidget(), QWidget(), QLabel()
+    qtbot.addWidget(card)
+    QVBoxLayout(host)
+    widgets = {"_home_recents_card": card, "_home_recents": host,
+               "_home_recents_note": note}
+    ctx.widgets = SimpleNamespace(get_or_none=widgets.get)
+
+    _paint_recents(ctx)
+    assert host.layout().count() == 2, "premise: the card drew both rows"
+
+    row = host.layout().itemAt(0).widget()
+    button = row_remove_button(row)
+    assert button is not None, "the card's rows carry no ×"
+    button.click()
+
+    assert [e.name for e in load(ctx.settings)] == ["plate_a"], (
+        "the card's × did not reach the stored list")
+    assert host.layout().count() == 1, (
+        "the row is still on the card, so the × looks like it did nothing")

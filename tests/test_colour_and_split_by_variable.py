@@ -217,6 +217,16 @@ def test_neither_non_value_ink_is_mistakable_for_a_real_value():
         assert _separation(values + [ink]) >= 60, name
 
 
+def _two_variable_ctx():
+    """A plate carrying two variables, which is what the reuse rule is about."""
+    cell = _line()
+    dose = _line("Dose", (("0", 0.0), ("1", 1.0), ("10", 10.0)))
+    ctx = _ctx(variable=cell)
+    ctx.state.selection.variables = sv.VariableSet(
+        variables=(cell, dose), assignments={})
+    return ctx, cell, dose
+
+
 def test_the_variables_tab_and_the_plots_ink_a_value_the_same():
     """One colour vocabulary, asserted across the two modules that draw it.
 
@@ -225,12 +235,55 @@ def test_the_variables_tab_and_the_plots_ink_a_value_the_same():
     the plate that assigned it and a different colour on the bar chart. Asserted
     on the mapping rather than on "both are non-empty", because two wrong
     mappings are both non-empty.
+
+    Driven on the **second** variable of a set. Both modules agreed while both
+    indexed from zero, so a one-variable fixture passes whether or not either
+    honours the plate's other values — the shape §7.8 calls a fixture in which
+    the right and the wrong answer are the same bytes.
     """
     from well_viewer.features.home.variables import controller as vc
 
-    variable = _line()
+    ctx, _cell, dose = _two_variable_ctx()
+    vset = ctx.state.selection.variables
 
-    assert vc._value_colours(variable) == vs.value_colors(variable)
+    assert vc._value_colours(ctx, dose) == vs.colors_for(vset, dose.id)
+
+
+def test_no_two_values_on_a_plate_share_an_ink():
+    """Reported: "colors should not be reused between variables. They currently
+    are."
+
+    ``value_colors`` indexed every variable from zero, so `Cell line`'s two
+    values took the same two inks as `Dose`'s first two — one blue meaning
+    `HeLa` in the chip row and `0 µM` on the plate a click later. The offset is
+    the count of values every earlier variable took, so the palette is shared
+    out across the whole set.
+    """
+    _ctx_, cell, dose = _two_variable_ctx()
+    vset = sv.VariableSet(variables=(cell, dose), assignments={})
+
+    cell_inks = list(vs.colors_for(vset, cell.id).values())
+    dose_inks = list(vs.colors_for(vset, dose.id).values())
+    assert len(cell_inks) == 2 and len(dose_inks) == 3, "premise: both are inked"
+    assert not (set(cell_inks) & set(dose_inks)), (
+        f"{sorted(set(cell_inks) & set(dose_inks))} means two different values")
+    every = cell_inks + dose_inks
+    assert len(set(every)) == len(every), "an ink repeats within the plate"
+
+
+def test_a_variables_inks_still_start_at_the_measured_picks():
+    """The offset must not cost the first variable the picks.
+
+    ``VALUE_PICKS`` is a measured roster — the entries a dichromat can still
+    tell apart — and a per-variable *stride* would have pushed every variable
+    after the first past it into the unmeasured tail. Cumulative keeps the head
+    in play for the plate as a whole.
+    """
+    cell = _line()
+    vset = sv.VariableSet(variables=(cell,), assignments={})
+    assert (list(vs.colors_for(vset, cell.id).values())
+            == list(vs.value_colors(cell, offset=0).values()))
+    assert vs.color_offset(vset, cell.id) == 0
 
 
 def test_a_member_whose_wells_disagree_takes_the_mixed_ink():

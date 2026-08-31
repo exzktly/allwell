@@ -60,11 +60,11 @@ def _ctx(wells=None, selections=(), labels=None):
                                     rebuild_all=lambda: None),
         features=SimpleNamespace(call=lambda *a, **k: None,
                                  get=lambda _n: None,
-                                 sub_leaves=lambda _p: ("Sample map",)),
+                                 sub_leaves=lambda _p: ("Sample Map",)),
         runtime=SimpleNamespace(groups=SimpleNamespace(inline_edit_idx=-1)),
         state=SimpleNamespace(
             # Home's **real** typed slice, not a namespace shaped to whatever
-            # the code happens to read: the Sample map tab records which layer
+            # the code happens to read: the Sample Map tab records which layer
             # is showing there, and a stub without it answers "Replicates" to every
             # question and passes whatever the code does (§7.8, face one).
             feature_slice=lambda name: home if name == "home" else None,

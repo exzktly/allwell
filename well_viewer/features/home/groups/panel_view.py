@@ -1,6 +1,6 @@
 """The plate that edits a group's well membership.
 
-The **Groups** layer of Home's Sample map tab is two halves: the list, the header
+The **Groups** layer of Home's Sample Map tab is two halves: the list, the header
 and Quick Replicates in ``groups/tab_view.py``, and this plate, which says which
 wells are in the group selected there and edits that membership when dragged.
 
@@ -12,7 +12,7 @@ did, greyed behind its live one. And measured rather than assumed: this plate
 never wrote ``ctx.state.selection.selected_wells``. It was described as the
 picker Cell Gating drew its CDFs from and Add Prefix applied to, and it was
 neither; both read the app-wide selection, which only Overview's plate set. So
-moving it costs those two tabs nothing and the Sample map tab's own selection
+moving it costs those two tabs nothing and the Sample Map tab's own selection
 publishing gives them a picker they never had.
 
 It stays a ``*_view.py`` rather than folding into ``tab_view.py``: ARCHITECTURE
@@ -88,7 +88,7 @@ def build_replicate_panel(ctx, parent: QWidget, *, role: str = "editor") -> None
         sub_tabs = ctx.runtime.home.subtabs
         if sub_tabs is not None:
             try:
-                if sub_tabs.tabText(sub_tabs.currentIndex()) != "Sample map":
+                if sub_tabs.tabText(sub_tabs.currentIndex()) != "Sample Map":
                     return
             except Exception:
                 swallowed()  # was: pass (silent except)

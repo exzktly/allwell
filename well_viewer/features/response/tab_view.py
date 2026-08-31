@@ -10,7 +10,7 @@ the one-line-removable property ``tests/test_feature_removal.py`` enforces.
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QFrame, QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QFrame, QPushButton, QScrollArea, QWidget,
 )
 
 from well_viewer.core.fold_change_controls_view import (
@@ -18,7 +18,8 @@ from well_viewer.core.fold_change_controls_view import (
 )
 from well_viewer.core.ui_helpers import (
     build_plot_save_menu, install_canvas_wheel_scroll, make_band_controls,
-    make_popover_button, make_properties_button, plotting_band_slot,
+    make_plot_with_right_dock, make_popover_button, make_properties_button,
+    plotting_band_slot,
 )
 # Module scope, not function-local: nothing in ``controller`` imports this
 # module, so there is no cycle to work around — and a deferred feature import
@@ -44,8 +45,17 @@ def build_response_tab(ctx, parent: QWidget) -> None:
         apply_plot_card_decorators, no_selection_reason, wrap_with_empty_state,
     )
     reg = ctx.widgets
-    layout = parent.layout() or QVBoxLayout(parent)
-    parent.setLayout(layout)
+    # The right-side dock the Properties sidebar mounts into, the same one every
+    # other plotting leaf builds. Without it ``style._resolve_export_dock``
+    # returns None and ``launch_export_editor`` falls back to appending the
+    # sidebar into the PlotCard's own layout — inside this tab's QScrollArea,
+    # below the toolbar — so the panel opened somewhere no other tab puts it.
+    # Adding the key to ``open_export_style_panel``'s roster alone was half the
+    # sweep: that file holds *two* rosters answering the same question, a
+    # hundred lines apart.
+    plot_area, layout, export_dock = make_plot_with_right_dock(parent)
+    reg.register("_response_export_dock", export_dock)
+    parent = plot_area
     layout.setContentsMargins(0, 0, 0, 0)
 
     band = plotting_band_slot(ctx, "Response Curves")

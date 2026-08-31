@@ -1096,3 +1096,113 @@ def test_a_fraction_of_zero_is_drawn_because_it_is_a_measurement(monkeypatch):
                    fov_stats=(10.0, 2.0, 0.0, 0.01))
     data = rc.collect_response(ctx, "dose", [24.0], y_metric=rc.Y_FRACTION)
     assert data.curves[0].points[0].y == 0.0
+
+
+# ── which shortfall it actually was ─────────────────────────────────────────
+
+def test_a_per_fov_spread_that_is_undefined_blames_the_fov_not_a_control(
+        monkeypatch):
+    """The caption the FOV commit claimed to fix, on the path it enabled.
+
+    A two-well member whose per-FOV reduction yields no spread. The old split
+    asked ``n <= 1`` against the **well** count, so two wells meant "not a lone
+    replicate" and the shortfall was blamed on a control — on a plate that has
+    no control at all. The raw spread answers it directly in either mode.
+    """
+    import well_viewer.domain.stats_compute as sc
+    import well_viewer.core.channel_state_controller as csc
+    monkeypatch.setattr(csc, "on_cutoff_for_column", lambda *a, **k: 0.0)
+    monkeypatch.setattr(sc, "compute_rep_stats",
+                        lambda *a, **k: (10.0, 1.0, 0.5, 0.02))
+    monkeypatch.setattr(sc, "compute_rep_per_fov_stats",
+                        lambda *a, **k: (10.0, float("nan"), 0.5, float("nan")))
+
+    ctx = _ctx(wells=["A01", "A02"], variable=_dose(("1", 1.0)),
+               assignments={"dose": {"A01": "d0", "A02": "d0"}},
+               selections=_groups(("pair", ["A01", "A02"])))
+    ctx.state.plot.use_fov_replicates = True
+
+    data = rc.collect_response(ctx, "dose", [24.0])
+    caption = rc.omission_caption(data)
+
+    assert data.solo_spread == 1 and data.undefined_spread == 0
+    assert "a single FOV has no spread" in caption, caption
+    assert "control" not in caption, caption
+
+
+class _ZeroControl:
+    """A denominator whose control resolves fine and reads 0 at every t."""
+
+    def series_for(self, _member):
+        return "ctl", "ok", {24.0: (0.0, 0.0)}, {24.0: (0.0, 0.0)}, {}
+
+
+def test_a_control_that_reads_zero_says_so_rather_than_blaming_a_gap(
+        stub_stats, monkeypatch):
+    """The commonest control in a fraction experiment, and the worst caption.
+
+    A control with nothing above the cutoff has a fraction of 0.0. Dividing by
+    it is undefined, so the points blank — and the figure used to report "1
+    without a control", sending the user to fix a control assignment that is
+    already correct. The two have opposite fixes, so they are counted apart.
+    """
+    ctx = _ctx(wells=["A01"], variable=_dose(("1", 1.0)),
+               assignments={"dose": {"A01": "d0"}},
+               selections=_groups(("treated", ["A01"])))
+
+    def _blanking(points, _name):
+        return [(p[0], float("nan"), 0.0, float("nan"), *p[4:]) for p in points]
+
+    _blanking.denominators = _ZeroControl()
+    _blanking.op_ctrl = "ratio"
+    monkeypatch.setattr(rc, "_member_normaliser",
+                        lambda *a, **k: _blanking)
+
+    data = rc.collect_response(ctx, "dose", [24.0], y_metric=rc.Y_FRACTION)
+    caption = rc.omission_caption(data)
+
+    assert data.zero_control == [("treated", 24.0)], data.zero_control
+    assert data.control_gaps == [], data.control_gaps
+    assert "the control reads 0 there" in caption, caption
+    assert "without a control" not in caption, caption
+
+
+def test_a_control_that_never_resolved_is_still_a_gap(stub_stats, monkeypatch):
+    """The other half — the distinction is only worth drawing if both fire."""
+    ctx = _ctx(wells=["A01"], variable=_dose(("1", 1.0)),
+               assignments={"dose": {"A01": "d0"}},
+               selections=_groups(("treated", ["A01"])))
+
+    class _Unresolved:
+        def series_for(self, _member):
+            return None, None, {}, {}, {}
+
+    def _blanking(points, _name):
+        return [(p[0], float("nan"), 0.0, float("nan"), *p[4:]) for p in points]
+
+    _blanking.denominators = _Unresolved()
+    _blanking.op_ctrl = "ratio"
+    monkeypatch.setattr(rc, "_member_normaliser", lambda *a, **k: _blanking)
+
+    data = rc.collect_response(ctx, "dose", [24.0], y_metric=rc.Y_FRACTION)
+    assert data.control_gaps == [("treated", 24.0)]
+    assert data.zero_control == []
+
+
+def test_subtracting_a_zero_control_is_not_reported_as_a_problem(
+        stub_stats, monkeypatch):
+    """Subtracting zero is well defined — only a ratio is undefined by it."""
+    ctx = _ctx(wells=["A01"], variable=_dose(("1", 1.0)),
+               assignments={"dose": {"A01": "d0"}},
+               selections=_groups(("treated", ["A01"])))
+
+    def _blanking(points, _name):
+        return [(p[0], float("nan"), 0.0, float("nan"), *p[4:]) for p in points]
+
+    _blanking.denominators = _ZeroControl()
+    _blanking.op_ctrl = "subtract"
+    monkeypatch.setattr(rc, "_member_normaliser", lambda *a, **k: _blanking)
+
+    data = rc.collect_response(ctx, "dose", [24.0], y_metric=rc.Y_FRACTION)
+    assert data.zero_control == []
+    assert data.control_gaps == [("treated", 24.0)]

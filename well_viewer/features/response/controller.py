@@ -352,16 +352,22 @@ def export_response_csv(ctx) -> None:
     # blank. A column that appears and disappears with a control makes two
     # exports of the same plate un-diffable and breaks any script reading it by
     # position, and a blank cell already means "this figure had no series".
+    # ``spread_unit`` beside ``n`` because they count different things once
+    # Spread: FOV is on: ``n`` is the member's loaded wells, and the error is
+    # taken across pooled FOVs. Without the unit stated, a reader reconstructing
+    # SD as ``SEM x sqrt(n)`` gets a number from two columns that do not belong
+    # to the same denominator — a wrong value produced from a correct file.
     header = ["member", "series", "timepoint", "x", "x_label", "y", "err", "n",
-              "reason"]
+              "spread_unit", "reason"]
+    unit = data.replicate_unit
     rows = [
         [p.member, c.series_label, f"{c.timepoint:g}", f"{p.x:g}", p.label,
-         f"{p.y:g}", _blank_if_undefined(p.err), str(p.n), ""]
+         f"{p.y:g}", _blank_if_undefined(p.err), str(p.n), unit, ""]
         for c in data.curves for p in c.points
     ]
-    rows += [[member, "", "", "", "", "", "", "", reason]
+    rows += [[member, "", "", "", "", "", "", "", "", reason]
              for member, reason in data.omitted]
-    rows += [[member, "", "", "", "", "", "", "", "value is not a number"]
+    rows += [[member, "", "", "", "", "", "", "", "", "value is not a number"]
              for member in data.non_numeric]
     rows += _fit_rows(ctx, data)
     write_csv_rows(ctx, "response_curve", header, rows)
@@ -389,7 +395,7 @@ def _fit_rows(ctx, data) -> list[list[str]]:
         # reader has no way to tell apart.
         series = labels.get(key) or ""
         rows.append([f"fit ({fit.model})", series, f"{timepoint:g}", ec50,
-                     ec50_text(fit, data.unit), "", "", "",
+                     ec50_text(fit, data.unit), "", "", "", "",
                      fit.reason])
     return rows
 

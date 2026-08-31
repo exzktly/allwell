@@ -3327,11 +3327,24 @@ symbol a rename would break, and a key the roster lacks writes `Unknown export
 panel: <key>` to the status bar and opens nothing. So the two drifted — a tab
 shipped with an inert Properties button, past a full fast lane and a real app
 construction, because building a button is not pressing it.
-`tests/test_properties_panel_keys.py` closes the seam: it reads every key any
-tab passes to `make_properties_button`, fails on one the roster does not carry,
-refuses a key it cannot read as a literal rather than skipping it, and presses
-`open_export_style_panel` itself so the roster's *behaviour* is measured and
-not only its contents. Adding a plotting leaf means adding its row here.
+**There are two rosters in that file and a tab needs both.**
+`open_export_style_panel` maps the key to its figure; `_resolve_export_dock`
+maps that figure to the pre-allocated right-side dock `make_plot_with_right_dock`
+builds. A tab in the first and not the second does not half-work:
+`launch_export_editor` takes its `dock is None` fallback and appends the sidebar
+into the plot card's own layout — inside whatever scroll area the tab wraps it
+in — so the panel opens somewhere no other tab puts it, and nothing goes red.
+Response Curves was added to the first roster alone and shipped exactly that,
+under a commit whose own message argues about rosters drifting.
+
+`tests/test_properties_panel_keys.py` closes both seams: it reads every key any
+tab passes to `make_properties_button` and fails on one the panel roster does
+not carry; it fails on a figure the dock roster does not name, and on a dock
+name no tab registers; it selects the roster dict by the shape of its values
+rather than by its variable name, so an unrelated dict in the same function
+cannot vouch for a missing row; and it refuses a key it cannot read as a
+literal rather than skipping it. Adding a plotting leaf means a row in each
+roster and a `make_plot_with_right_dock` call in its `tab_view`.
 
 `features/export/style.py` owns the prefs dict + the apply pipeline. Every
 redraw path ends with a call to

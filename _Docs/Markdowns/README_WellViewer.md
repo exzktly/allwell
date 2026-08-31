@@ -2465,12 +2465,20 @@ the ON cutoff. The fraction is often the readout a dose response is really
 about, and it is not one of the Properties the band offers, so it lives here.
 The axis label follows what you picked, and a fit works on either.
 
+If you also turn on fold change, note that a control with **nothing** above the
+threshold has a fraction of zero, and dividing by it is undefined. The figure
+says so in as many words rather than reporting a missing control — switch the
+operation to subtract, or plot the raw fraction.
+
 **Error bars with one well.** Set **Spread** to **FOV** in the Display popover
 and each field of view counts as a replicate, so a condition run in a single
 well still gets an error bar. Left on the default, spread is measured across
-wells and a one-well condition has none — the caption under the figure says
-which of the two it is, because "add another well" and "add another field" are
-different fixes.
+wells and a one-well condition has none — the caption under the figure names
+the unit, because "add another well" and "add another field" are different
+fixes. The exported CSV carries a `spread_unit` column beside `n` for the same
+reason: `n` counts the condition's wells, and with FOV spread on the error bar
+is taken across fields, so the two are not the pair you would combine to
+recover a standard deviation.
 
 **Several curves on one plot.** The **Series** control beside **X** splits the
 groups into one curve per value of a second variable — pick `Cell line` and a

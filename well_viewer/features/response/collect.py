@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from well_viewer.core.safe import swallow
+
 # Module scope, not function-local: ``response_compute`` imports nothing from
 # here, so there is no cycle to work around — and a deferred feature import
 # that is not breaking a cycle is one the budget guard counts for nothing.
@@ -121,6 +123,16 @@ class ResponseData:
     #: while the Bar tab beside it is normalised would be the same number
     #: meaning two things on one screen.
     normalised: str = ""
+    #: ``(member, timepoint)`` for a point whose control resolved fine but
+    #: whose value there is **zero**, so a ratio is undefined. Kept apart from
+    #: ``control_gaps`` because the fixes are opposites: that one means "point
+    #: this member at a control", this one means "your control has nothing
+    #: above the cutoff, so a fold change against it cannot be formed — switch
+    #: the operation to subtract, or plot the raw fraction". A control with a
+    #: fraction of 0.0 is the *commonest* control in a fraction-above-threshold
+    #: experiment, and reporting it as a missing control sends the user to fix
+    #: an assignment that is already correct.
+    zero_control: list[tuple[str, float]] = field(default_factory=list)
     #: ``(member, timepoint)`` for a point the control could not be resolved
     #: for. Named rather than dropped: a curve missing its top dose because the
     #: vehicle had no sample at that timepoint looks exactly like a curve that
@@ -215,6 +227,13 @@ def omission_caption(data: ResponseData) -> str:
                 if len(data.control_gaps) > 3 else "")
         parts.append(f"{len(data.control_gaps)} without a control "
                      f"({names}{more})")
+    if data.zero_control:
+        names = ", ".join(f"{m} t={t:g}" for m, t in data.zero_control[:3])
+        more = (f" and {len(data.zero_control) - 3} more"
+                if len(data.zero_control) > 3 else "")
+        parts.append(f"{len(data.zero_control)} not divisible: the control "
+                     f"reads 0 there ({names}{more}) — use subtract, or plot "
+                     f"the raw value")
     if data.solo_spread:
         unit = data.replicate_unit
         parts.append(f"{data.solo_spread} point(s) with no error bar: "
@@ -340,7 +359,6 @@ def collect_response(ctx, variable_id: str, timepoints,
     """
     from well_viewer.core.channel_state_controller import on_cutoff_for_column
     from well_viewer.domain.plot_members import response_members
-    from well_viewer.domain.sample_variables import MIXED, roll_up
     from well_viewer.domain.stats_compute import (
         compute_rep_per_fov_stats, compute_rep_stats,
     )
@@ -381,25 +399,8 @@ def collect_response(ctx, variable_id: str, timepoints,
     if not bool(getattr(ctx.state.plot, "bar_pool_replicates", True)) and any(
             len(getattr(rset, "wells", ()) or ()) > 1 for rset in members):
         data.pooled_notice = "replicates pooled — this tab has no per-well mode"
-    # x is resolved once per member, not once per (member, timepoint): a
-    # member's dose does not depend on when it was measured, and resolving it
-    # inside the loop would report the same omission once per curve.
-    placed: list[tuple[object, float, str]] = []
-    for rset in members:
-        wells = [w for w in (getattr(rset, "wells", None) or []) if w in well_paths]
-        value_id = roll_up(vset, variable_id, wells) if wells else None
-        if value_id is MIXED:
-            data.omitted.append((rset.name, MIXED_VALUE))
-            continue
-        if value_id is None:
-            data.omitted.append((rset.name, NO_VALUE))
-            continue
-        value = variable.value_by_id(value_id)
-        if value is None or value.number is None:
-            data.non_numeric.append(rset.name)
-            continue
-        placed.append((rset, float(value.number), value.label,
-                       *_series_of(vset, series_variable, rset, wells)))
+    placed = _place_on_x(vset, variable, variable_id, members, well_paths,
+                         series_variable, data)
     data.placed = len(placed)
 
     # By x, so each curve's own points come out ascending; the series split
@@ -420,10 +421,20 @@ def collect_response(ctx, variable_id: str, timepoints,
     for rset, x, label, series_key, series_label in placed:
         series_labels.setdefault(series_key, series_label)
         raw = []
+        # Was the spread defined *before* normalisation, per timepoint? The
+        # cause split below used to ask ``n <= 1`` against the **well** count,
+        # which stops being the replicate count the moment Spread: FOV is on —
+        # so a two-well member whose per-FOV spread was undefined got blamed on
+        # a control it may not even have. The raw spread answers the question
+        # directly, in either mode, and needs no second definition of what a
+        # replicate is.
+        raw_spread_defined: dict[float, bool] = {}
         for target_t in targets:
             mean, err, frac, frac_err = stats_for(
                 ctx, rset, target_t, threshold, use_sem)[:4]
             drawn = frac if data.y_metric == Y_FRACTION else mean
+            drawn_err = frac_err if data.y_metric == Y_FRACTION else err
+            raw_spread_defined[float(target_t)] = _is_number(drawn_err)
             if not _is_number(drawn):
                 # No sample at this timepoint. Not a zero — a member that was
                 # not measured then — so it leaves a gap in the curve rather
@@ -441,6 +452,15 @@ def collect_response(ctx, variable_id: str, timepoints,
             raw.append((target_t, _num_or_nan(mean), _spread_or_zero(err),
                         _num_or_nan(frac), 0, 0, _spread_or_zero(frac_err),
                         0.0, 0.0))
+        # The member's loaded wells, which is what ``ResponsePoint.n`` has
+        # always meant. Deliberately **not** relabelled as a replicate count:
+        # under Spread: FOV the replicates are the pooled FOVs and this is not
+        # that number, so the CSV carries ``spread_unit`` beside it rather than
+        # letting a reader reconstruct SD as ``SEM x sqrt(n)`` from two columns
+        # that count different things. Deriving the FOV count here would mean a
+        # second trip through the data layer from a collector that is otherwise
+        # pure, and a second definition of "replicate" beside
+        # ``stats_compute.replicate_unit``.
         n = sum(1 for w in rset.wells if w in well_paths)
         for point in normalise(raw, rset.name):
             target_t = point[0]
@@ -456,7 +476,11 @@ def collect_response(ctx, variable_id: str, timepoints,
                 # had no sample at this timepoint. Named, because a curve that
                 # simply stops at its third dose looks like a plate that was
                 # never dosed higher.
-                data.control_gaps.append((rset.name, float(target_t)))
+                if _control_reads_zero(normalise, rset.name, float(target_t),
+                                       data.y_metric):
+                    data.zero_control.append((rset.name, float(target_t)))
+                else:
+                    data.control_gaps.append((rset.name, float(target_t)))
                 continue
             if not _is_number(err):
                 # Counted by *cause*, because the two have different fixes and
@@ -469,7 +493,7 @@ def collect_response(ctx, variable_id: str, timepoints,
                 # normalisation, and the fix is the control. The old sentence
                 # blamed the control in both cases, so a plate with no control
                 # at all was told its control had no spread to propagate.
-                if n <= 1:
+                if not raw_spread_defined.get(float(target_t), True):
                     data.solo_spread += 1
                 else:
                     data.undefined_spread += 1
@@ -501,6 +525,42 @@ def collect_response(ctx, variable_id: str, timepoints,
                                      points=tuple(by_curve.get((t, ""), ())))
                        for t in targets]
     return data
+
+
+def _place_on_x(vset, variable, variable_id, members, well_paths,
+                series_variable, data: ResponseData) -> list[tuple]:
+    """Which members get an x, and why each of the rest does not.
+
+    Returns ``[(rset, x, label, series_key, series_label)]`` and records every
+    refusal on *data* as it goes. Split out of :func:`collect_response` to keep
+    that function under the complexity ratchet, which only moves down — and
+    because deciding a member's position on the axis is a whole thought,
+    separate from measuring it at each timepoint.
+
+    x is resolved once per member, not once per (member, timepoint): a member's
+    dose does not depend on when it was measured, and resolving it inside the
+    timepoint loop would report the same omission once per curve.
+    """
+    from well_viewer.domain.sample_variables import MIXED, roll_up
+
+    placed: list[tuple] = []
+    for rset in members:
+        wells = [w for w in (getattr(rset, "wells", None) or [])
+                 if w in well_paths]
+        value_id = roll_up(vset, variable_id, wells) if wells else None
+        if value_id is MIXED:
+            data.omitted.append((rset.name, MIXED_VALUE))
+            continue
+        if value_id is None:
+            data.omitted.append((rset.name, NO_VALUE))
+            continue
+        value = variable.value_by_id(value_id)
+        if value is None or value.number is None:
+            data.non_numeric.append(rset.name)
+            continue
+        placed.append((rset, float(value.number), value.label,
+                       *_series_of(vset, series_variable, rset, wells)))
+    return placed
 
 
 def _series_of(vset, variable, rset, wells) -> tuple[str, str]:
@@ -538,9 +598,20 @@ def _series_order(variable, seen: dict[str, str]) -> list[str]:
 
 
 def _is_number(value) -> bool:
-    """A real, finite float. ``None`` and ``NaN`` are both "not computed"."""
-    import math
-    return isinstance(value, (int, float)) and math.isfinite(float(value))
+    """A real, finite number. ``None`` and ``NaN`` are both "not computed".
+
+    Delegates to ``domain.numeric.is_number`` rather than spelling
+    ``isinstance(value, (int, float))`` here. That spelling accepts
+    ``numpy.float64`` (which subclasses ``float``) and rejects
+    ``numpy.float32`` (which does not) — the exact divergence §7.5 #8 records,
+    where a shared helper's extra isinstance check turned a float32 spread into
+    no error bar at all in the most numerically sensitive module in the app.
+    The producers cast through ``float()`` today so nothing reaches here as a
+    float32, but this function now gates the drawn **fraction** as well as the
+    mean, and a latent narrow predicate on a widened path is worth one line.
+    """
+    from well_viewer.domain.numeric import is_number
+    return is_number(value)
 
 
 def _member_normaliser(ctx, data: ResponseData, targets, threshold, use_sem,
@@ -602,6 +673,12 @@ def _member_normaliser(ctx, data: ResponseData, targets, threshold, use_sem,
     def _normalise(points, name):
         return normalize_member_pts(points, denominators, name, **keywords)
 
+    # Carried on the closure rather than returned alongside it: every caller
+    # wants the function, and only the shortfall reporting wants the
+    # denominators. ``op_ctrl`` rides along because "the control reads zero" is
+    # only a problem for a ratio — subtracting zero is perfectly well defined.
+    _normalise.denominators = denominators
+    _normalise.op_ctrl = keywords["op_ctrl"]
     return _normalise
 
 
@@ -637,3 +714,34 @@ def _spread_or_zero(value) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _control_reads_zero(normalise, member: str, target_t: float,
+                        y_metric: str) -> bool:
+    """Whether this member's control resolved but reads 0 at *target_t*.
+
+    The two ways a normalised point comes back blank look identical once it is
+    NaN, and they have opposite fixes — "point this member at a control" versus
+    "your control has nothing above the cutoff". Asking the denominator which
+    it was is the only way to tell, and reporting the wrong one sends the user
+    to change a control assignment that is already correct.
+
+    Only for a ratio. ``subtract`` handles a zero denominator perfectly well,
+    which is exactly what ``fold_change._baseline_usable`` records about the
+    same number on the t0 axis.
+    """
+    denominators = getattr(normalise, "denominators", None)
+    if denominators is None or getattr(normalise, "op_ctrl", "") != "ratio":
+        return False
+    with swallow("ask the control denominator what it held"):
+        _ref, outcome, stats, frac, _n = denominators.series_for(member)
+        if not outcome:
+            return False
+        series = frac if y_metric == Y_FRACTION else stats
+        value = (series or {}).get(target_t)
+        # ``series_for`` yields ``{t: (value, spread)}``; a control that never
+        # resolved yields empty dicts, which is ``control_gaps``, not this.
+        if isinstance(value, (tuple, list)) and value:
+            value = value[0]
+        return _is_number(value) and float(value) == 0.0
+    return False

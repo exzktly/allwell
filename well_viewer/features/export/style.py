@@ -110,6 +110,7 @@ def _resolve_export_dock(win, fig) -> QWidget | None:
         ("_distribution_fig", "_distribution_export_dock"),
         ("_sp_fig", "_spatial_export_dock"),
         ("_mv_fig", "_mv_export_dock"),
+        ("_response_fig", "_response_export_dock"),
     )
     for fig_attr, dock_attr in mapping:
         if getattr(win, fig_attr, None) is fig:
@@ -227,9 +228,20 @@ def open_export_style_panel(win, plot_key: str) -> None:
     button inert for the whole of its existence. The button is built from a
     literal at the call site and looked up by a literal here, so the two can
     disagree forever without a name to grep or an import to break.
-    ``tests/test_properties_panel_keys.py`` is what closes it: it reads every
+    **There are two rosters here, and both have to carry a tab.** This one maps
+    the key to its figure; ``_resolve_export_dock`` maps that figure to the
+    pre-allocated right-side dock the sidebar mounts into. Adding a row here
+    and not there is not a half-fix that half-works — ``launch_export_editor``
+    takes its ``dock is None`` fallback and appends the sidebar into the plot
+    card's own layout, so the panel opens somewhere no other tab puts it, with
+    nothing red anywhere. That is exactly what happened when Response Curves
+    was added to this mapping alone.
+
+    ``tests/test_properties_panel_keys.py`` closes both seams: it reads every
     key any tab passes to ``make_properties_button`` and fails on one this
-    mapping does not carry.
+    mapping does not carry, and it fails on a figure here that
+    ``_resolve_export_dock`` does not name — or on a dock it names that no tab
+    registers.
     """
     mapping = {
         "line":          ("_line_fig",         "_line_canvas",         "line_figure"),

@@ -1322,10 +1322,25 @@ def test_two_series_over_two_timepoints_colour_by_series_and_dash_by_time(tab):
 
     marks = [c.lines[0] for c in tab.ax.containers]
     assert len(marks) == 4, f"expected four curves, got {len(marks)}"
-    assert len({m.get_color() for m in marks}) == 2, (
-        "four colours, so nothing shows which curves share a cell line")
-    assert len({m.get_linestyle() for m in marks}) == 2, (
-        "one dash pattern, so nothing shows which curves share a timepoint")
+    # Paired with their legend labels, because counting two colours and two
+    # dashes is satisfied by **swapping** the encodings — colour on timepoint,
+    # dash on series — which is a different figure with the same tallies. A
+    # reviewer named that wrong implementation against the previous version of
+    # this test, and it passed.
+    by_label = {t.get_text(): m
+                for t, m in zip(tab.ax.get_legend().get_texts(), marks)}
+    assert set(by_label) == {"HeLa · t=24", "HeLa · t=48",
+                             "U2OS · t=24", "U2OS · t=48"}, sorted(by_label)
+    hela24, hela48 = by_label["HeLa · t=24"], by_label["HeLa · t=48"]
+    u2os24 = by_label["U2OS · t=24"]
+    assert hela24.get_color() == hela48.get_color(), (
+        "one cell line drawn in two colours — colour is not the series")
+    assert hela24.get_color() != u2os24.get_color(), (
+        "two cell lines share a colour — colour does not separate the series")
+    assert hela24.get_linestyle() == u2os24.get_linestyle(), (
+        "one timepoint drawn with two dash patterns — dash is not the time")
+    assert hela24.get_linestyle() != hela48.get_linestyle(), (
+        "two timepoints share a dash pattern — dash does not separate them")
     labels = sorted(t.get_text() for t in tab.ax.get_legend().get_texts())
     assert labels == ["HeLa · t=24", "HeLa · t=48",
                       "U2OS · t=24", "U2OS · t=48"], labels
@@ -1342,7 +1357,7 @@ def test_the_series_reaches_the_exported_csv(tab, monkeypatch):
     rctl.export_response_csv(tab.ctx)
 
     assert written["header"][1] == "series"
-    point_rows = [r for r in written["rows"] if r[3]]
+    point_rows = [r for r in written["rows"] if r[3]]  # rows with an x
     assert {r[1] for r in point_rows} == {"HeLa", "U2OS"}
 
 
@@ -1443,7 +1458,13 @@ def test_the_fov_toggle_reaches_the_figure(tab):
     tab.ctx.state.plot.use_fov_replicates = True
     rctl.redraw_response(tab.ctx)
 
+    # NOT ``container.has_yerr``: matplotlib sets that True for a yerr list of
+    # all-NaN, so it is True on the broken path too and measures nothing. The
+    # cap line's actual y positions are the drawn whisker.
     container = tab.ax.containers[0]
-    assert container.has_yerr, "the curve was drawn with no error bars at all"
+    caps = [c.get_ydata() for c in container[1]]
+    lows_highs = sorted(float(v) for arr in caps for v in arr)
+    assert lows_highs == [7.5, 7.5, 12.5, 12.5], (
+        f"the whiskers are not the per-FOV spread of 2.5 about 10.0: {lows_highs}")
     captions = " | ".join(t.get_text() for t in tab.ax.texts)
     assert "no error bar" not in captions, captions

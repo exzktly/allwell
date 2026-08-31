@@ -34,10 +34,11 @@ from well_viewer.features.image_browser.image_table.image_compose import (
     _row_display_opts,
     cell_chrome_kwargs,
     cell_display_rgb,
-    draw_cell_chrome,
+    apply_cell_chrome,
     mark_uncorrected,
     overlay_cell_rgb,
-    partial_scan_report,
+    partial_scan_clause,
+    scale_bar_refusal_clause,
     reset_scan_misses,
     resolve_chrome_plan,
 )
@@ -459,8 +460,7 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None):
             # gallery downscale, so the bar and text scale with the pixels.
             if rgb is not None:
                 ck = cell_chrome_kwargs(ctx, r, c, cell, chrome_plan, overlay_chans)
-                if ck:
-                    rgb = draw_cell_chrome(rgb, **ck)
+                rgb = apply_cell_chrome(ctx, rgb, ck, cell)
                 # A figure that dropped the uncorrected mark would leave the app
                 # carrying exactly the ambiguity the live grid no longer has.
                 # ``overlay_chans`` because an overlay cell's own token names no
@@ -535,15 +535,14 @@ def image_table_export(ctx) -> None:
         if fmt == "png":
             kw["dpi"] = dpi
         fig.savefig(out, **kw)
-        # A PNG on disk outlives the status line, so a truncated inventory has
-        # to be said at the moment of saving: the file is short by however many
-        # frames the scan never reached, and nothing in it says so.
-        partial_wells, _reasons = partial_scan_report(ctx)
-        short = (
-            f"  WARNING: the image list for {', '.join(partial_wells)} is "
-            "INCOMPLETE — frames the dataset holds are missing from this file."
-        ) if partial_wells else ""
-        ctx.notify.set_status(f"Image table saved → {Path(out).name}{short}")
+        # Both clauses, in the Generate line's own words. A PNG on disk
+        # outlives the status line, so what the artifact is short of has to be
+        # said at the moment of saving — the file is missing however many
+        # frames the scan never reached, and carries no bar on the cells too
+        # narrow to hold one, and nothing in it says either.
+        ctx.notify.set_status(
+            f"Image table saved → {Path(out).name}"
+            f"{partial_scan_clause(ctx)}{scale_bar_refusal_clause(ctx)}")
     except Exception as exc:
         QMessageBox.critical(ctx.window, "Export failed", str(exc))
 
@@ -568,7 +567,9 @@ def image_table_copy_png(ctx) -> None:
         QMessageBox.critical(ctx.window, "Copy failed", "Could not decode rendered PNG.")
         return
     QGuiApplication.clipboard().setImage(img)
-    ctx.notify.set_status("Image table copied to clipboard (PNG).")
+    ctx.notify.set_status("Image table copied to clipboard (PNG)."
+                          + partial_scan_clause(ctx)
+                          + scale_bar_refusal_clause(ctx))
 
 
 def image_table_copy_svg(ctx) -> None:
@@ -592,7 +593,9 @@ def image_table_copy_svg(ctx) -> None:
     if status.startswith("Copy failed"):
         QMessageBox.critical(ctx.window, "Copy failed", "Could not render the image table.")
         return
-    ctx.notify.set_status("Image table " + status[0].lower() + status[1:])
+    ctx.notify.set_status("Image table " + status[0].lower() + status[1:]
+                          + partial_scan_clause(ctx)
+                          + scale_bar_refusal_clause(ctx))
 
 
 def _downsample_dpi(orig_dpi: int, w_in: float, h_in: float,
@@ -704,7 +707,8 @@ def image_table_save_to_gallery(ctx) -> None:
 
         from well_viewer.features.saved_plots.controller import save_plot_from_card
         status = save_plot_from_card(ctx, "Image Table", buf.getvalue(), label)
-        ctx.notify.set_status(status)
+        ctx.notify.set_status(status + partial_scan_clause(ctx)
+                              + scale_bar_refusal_clause(ctx))
     finally:
         if dlg is not None:
             try:

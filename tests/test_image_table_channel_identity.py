@@ -275,16 +275,18 @@ def test_an_ordinary_cell_reads_its_own_channel(monkeypatch):
 def test_a_pre_rendered_rgb_cell_gets_the_chrome_and_the_badge(monkeypatch):
     """Live and exported cells must be the same picture.
 
-    The pre-rendered-RGB shortcut skipped ``draw_cell_chrome`` and
-    ``mark_uncorrected`` and thumbnailed through the row's LUT window, while
+    The pre-rendered-RGB shortcut skipped the chrome and ``mark_uncorrected``
+    and thumbnailed through the row's LUT window, while
     ``export._build_export_figure`` sent the identical cell through the shared
     composer plus both marks at a fixed 0..255.
     """
     chrome, marks, thumbs = [], [], []
     real_mark = IC.mark_uncorrected
 
-    monkeypatch.setattr(C, "draw_cell_chrome",
-                        lambda rgb, **k: (chrome.append(k), rgb)[1])
+    # ``apply_cell_chrome`` is the seam the render path goes through: it decides
+    # whether a scale bar fits before handing the cell to ``draw_cell_chrome``.
+    monkeypatch.setattr(C, "apply_cell_chrome",
+                        lambda ctx_, rgb, k, cell_: (chrome.append(k), rgb)[1])
     monkeypatch.setattr(
         C, "mark_uncorrected",
         lambda c_, cell_, rgb, ov=None: (marks.append(cell_.get("chan")),

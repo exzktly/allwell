@@ -22,6 +22,7 @@ from well_viewer.core.plot_annotations import (
     LABEL_HEADROOM,
     annotate_value,
 )
+from well_viewer.features.barplot._decorate import bar_legend_entries
 from well_viewer.features.barplot.collect import cluster_centers
 from well_viewer.core.safe import swallowed
 from well_viewer.domain.numeric import is_number
@@ -180,3 +181,118 @@ def annotate_bar_values(settings: tuple[bool, str], items, xs: list[float], *,
         if ax_n is not None and is_number(item.n_above):
             label_bar(ax_n, x, item.n_above, item.n_above_spread, draw_err=draw_err,
                       ci_scale=ci_scale, fmt=fmt, ceiling=ceilings[id(ax_n)])
+
+
+#: Marks the Colour-by legend and the Split-by notice, so a later pass — or a
+#: test — can find them among the panel's other artists.
+DECORATION_TAG = "_aw_decoration"
+
+
+def annotate_decorations(ctx, items, xs, ax, *, headers: bool,
+                         wells_by_key=None) -> None:
+    """Every annotation pass over the mean panel, in one call.
+
+    The cluster headers, the Colour-by legend and the Split-by notice. Together
+    because they always go together and are all about the same thing — how the
+    bars are grouped and inked — and because a caller that drew the legend and
+    forgot the notice would produce the figure this arrangement exists to
+    prevent: bars banded by a variable, with nothing on the axes saying that
+    the split replaced the layout the user had arranged.
+
+    All three are ordinary artists, so the next redraw's ``cla()`` clears them
+    — the property that keeps them from going stale, and the reason none of
+    them is written to the persistent status bar.
+    """
+    if ax is None:
+        return
+    if headers:
+        annotate_cluster_headers(items, xs, ax)
+    setattr(ax, "_aw_bar_items", list(items or ()))
+    annotate_colour_legend(ctx, ax, wells_by_key=wells_by_key)
+    annotate_split_notice(ctx, ax)
+
+
+def _bar_colour_mode(ctx) -> str:
+    """The Bar tab's Colours setting, or ``"plate"`` when there is no ctx.
+
+    ``"plate"`` is the default and the mode in which the decoration inks
+    actually reach the bars; ``"grey"`` replaces every bar's colour with
+    ``mono_bar_color``.
+    """
+    plot = getattr(getattr(ctx, "state", None), "plot", None)
+    return str(getattr(plot, "bar_color_mode", "plate") or "plate")
+
+
+def annotate_colour_legend(ctx, ax, *, wells_by_key=None) -> None:
+    """A swatch-and-label legend for the *Colour by* variable, or nothing.
+
+    Nothing in plate-colour mode, which is the default and needs no legend
+    because the plate *is* the legend — that is the whole argument for it being
+    the default. Once the bars are coloured by a variable instead, the plate no
+    longer explains them and the figure has to.
+
+    Drawn from the *drawn* bars, so it lists the values on screen rather than
+    every value the variable defines. A legend naming six doses over a figure
+    showing two is a claim about what is in front of the reader, and the reader
+    counts the legend.
+
+    **Colour is the only channel here, which is a constraint on the palette
+    rather than on this legend.** A reader who cannot separate two inks cannot
+    use the key either, however it is drawn — so the answer is inks a dichromat
+    can separate, which is what ``variable_series.VALUE_PICKS`` is chosen and
+    measured for, and not a second visual channel bolted onto the legend. A
+    redundant encoding on the bars themselves (hatching, say) was not added:
+    *Split by* already gives the same fact a labelled position when a reader
+    wants one that does not depend on colour at all, and hatching every bar to
+    duplicate a distinction the palette already carries would cost every
+    figure legibility to serve a case the palette covers.
+    """
+    if ax is None:
+        return
+    from matplotlib.patches import Patch
+
+    from well_viewer.core.plot_style import follows_theme
+
+    # Nothing in grey mode either, and for the same reason: the bars are not
+    # carrying the variable's inks. ``redraw_bars`` passes ``mono_bar_color``
+    # for every bar, which discards the ``item.color`` ``decorate_bar_items``
+    # just set — so a legend here would be a key to a colouring the figure does
+    # not have, printed over uniformly grey bars for a reader to map onto them.
+    # Worse than no legend, because it is confidently wrong.
+    if _bar_colour_mode(ctx) != "plate":
+        return
+
+    items = list(getattr(ax, "_aw_bar_items", ()) or ())
+    entries = bar_legend_entries(ctx, items, wells_by_key=wells_by_key)
+    if not entries:
+        return
+    handles = [Patch(facecolor=colour, edgecolor="none", label=label)
+               for label, colour in entries]
+    legend = ax.legend(handles=handles, loc="upper right", fontsize=7,
+                       framealpha=0.0, handlelength=1.0, borderpad=0.2)
+    setattr(legend, DECORATION_TAG, True)
+    follows_theme(legend)
+
+
+def annotate_split_notice(ctx, ax) -> None:
+    """Say what *Split by* had to replace, when it replaced something.
+
+    On the axes rather than on the status line, for the reason the significance
+    note is: ``notify.set_status`` writes the persistent bar and a redraw with
+    nothing to report has no reason to clear it, so the sentence outlives its
+    condition. A note drawn here is cleared by the same redraw that resolves it.
+    """
+    if ax is None:
+        return
+    from well_viewer.core.plot_style import follows_theme, tokens_for
+
+    reader = getattr(getattr(ctx, "state", None), "feature_slice", None)
+    slice_ = reader("bar") if callable(reader) else None
+    notice = str(getattr(slice_, "split_notice", "") or "")
+    if not notice:
+        return
+    note = follows_theme(ax.text(
+        0.01, 0.94, notice, transform=ax.transAxes, ha="left", va="top",
+        fontsize=7, color=tokens_for(ax)[2], zorder=6, clip_on=False),
+        muted=True)
+    setattr(note, DECORATION_TAG, True)

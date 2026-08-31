@@ -5,9 +5,14 @@ name: CI
 # The pytest job runs `-m "not slow"`: full-app Qt tests (the `viewer_app` /
 # `loaded_app` fixtures) are auto-marked `slow` by tests/conftest.py because they
 # are slow under the offscreen QPA platform (and a true C-level hang can't be
-# interrupted by pytest's signal timeout). The fast lane (~1,770 tests, ~60s) is
-# the guardrails + pure-logic + per-feature/widget tests — the refactor-safety
-# net. The heavy full-app integration tests + the real-StarDist e2e + the
+# interrupted by pytest's signal timeout). The fast lane (~7,680 tests, ~6 min
+# on a quiet container) is the guardrails + pure-logic + per-feature/widget
+# tests — the refactor-safety net. Those two numbers are worth keeping honest:
+# they read "~1,770 tests, ~60s" for long enough that the lane grew more than
+# fourfold underneath them, and this comment is what a reader consults to decide
+# whether the 15-minute job cap below still has headroom. Re-measure with
+# `python -m pytest tests -m "not slow" -q --collect-only | tail -1`, which
+# takes about two seconds. The heavy full-app integration tests + the real-StarDist e2e + the
 # playground worker run in the local/manual full pass (`pytest` with no marker
 # filter, or `-m slow`). A job-level timeout-minutes is the backstop if a `slow`
 # tag is ever missed.

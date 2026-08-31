@@ -174,6 +174,14 @@ class ImageTableState:
     # simply absent from it. Same per-pass lifetime as the other two, and the
     # Generate status line reports it for the same reason.
     partial_scans: set = field(default_factory=set)
+    # ``(well, chan_lower, tp, fov)`` cells whose scale bar was REFUSED during
+    # the CURRENT render pass because the bar is longer than the cell can hold.
+    # The bar's length is what states the physical scale, so it is never drawn
+    # short; a refused cell simply carries no bar, and this is what lets the
+    # status line say which cells lost one. Without it a narrow crop looks like
+    # a cell the user never asked a bar for. Same per-pass lifetime as the three
+    # records above.
+    scale_bar_refusals: set = field(default_factory=set)
 
     def clear_caches(self) -> None:
         """Drop the per-generate render / image caches (call on dataset swap)."""
@@ -184,6 +192,7 @@ class ImageTableState:
         self.scan_misses.clear()
         self.raw_fallbacks.clear()
         self.partial_scans.clear()
+        self.scale_bar_refusals.clear()
 
     def effective_row_dims(self) -> list:
         """Ordered row dimensions — ``row_dims`` if set, else ``[row_axis]``.

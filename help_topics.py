@@ -55,6 +55,7 @@ SECTION_BY_PAGE: dict[str, str] = {
     "Home": "Home",
     "Bar Plots": "Bar Plots",
     "Line Graphs": "Line Graphs",
+    "Response Curves": "Response Curves",
     "Scatter Plot": "Scatter Plot",
     "Distribution": "Distribution",
     "Heat Map": "Heat Map",
@@ -75,6 +76,7 @@ SECTION_BY_PAGE: dict[str, str] = {
     # before it falls back to the page's own key.
     "Cell Gating": "Cell Gating",
     "Groups": "Groups",
+    "Variables": "Variables",
     "Well Labels": "Well Labels",
     "Ratios": "Ratios",
     "Pipeline Info": "Pipeline Info",

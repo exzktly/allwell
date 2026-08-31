@@ -160,7 +160,7 @@ stats_refresh_map = _lazy("well_viewer.features.stats.controller", "stats_refres
 from well_viewer.core.ui_helpers import refresh_plot_empty_states
 update_bar_tp_menu, bar_event_xdata, on_bar_drag_motion, toggle_swarm, toggle_violin, bar_well_display_label, rep_sets_active, collect_bar_items_for_app, refresh_bar_layout_btn_state, update_bar_tp_selection_display = _lazy_names("well_viewer.features.barplot.controller", "update_bar_tp_menu", "bar_event_xdata", "on_bar_drag_motion", "toggle_swarm", "toggle_violin", "bar_well_display_label", "rep_sets_active", "collect_bar_items_for_app", "refresh_bar_layout_btn_state", "update_bar_tp_selection_display")
 from well_viewer.core.channel_state_controller import get_fluor_gate, get_all_fluor_gates, get_thresh_frac_on, set_thresh_frac_on, refresh_thresh_frac_quick_edit, ratio_label_for, active_channel_label, set_ratio_metrics, on_plot_channel_selected, on_metric_selected_global
-from well_viewer.domain.selections_model import color_for_replicate_set, replicate_display_label, replicate_sets_loaded, well_display_label
+from well_viewer.domain.selections_model import color_for_replicate_set, replicate_display_label, well_display_label
 from well_viewer.core.load_controller import load_path_shim
 from well_viewer.core.plot_orchestrator import redraw_app
 from well_viewer.features.preview.controller import refresh_preview_picker_shim
@@ -736,7 +736,9 @@ class WellViewerApp(QWidget):
 
     def _replicate_display_label(self, rset: ReplicateSet) -> str: return replicate_display_label(self._ctx, rset)
 
-    def _rep_sets_loaded(self) -> list[ReplicateSet]: return replicate_sets_loaded(self._app_state.selection.selections, self._app_state.dataset.well_paths)
+    def _rep_sets_loaded(self) -> list[ReplicateSet]:
+        from well_viewer.domain.plot_members import plot_replicate_sets_loaded
+        return plot_replicate_sets_loaded(self._ctx)
 
     def _groups_from_rep_sets(self) -> list[BarGroup]:
         """One BarGroup per loaded selection (each wrapping its ReplicateSet)."""

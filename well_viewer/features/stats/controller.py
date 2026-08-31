@@ -532,10 +532,9 @@ from well_viewer.core.safe import swallowed
 # the loaded / visible rep-sets and their rank colours through the pure DOMAIN
 # enumerators (a lower layer, so no cross-feature module import and no
 # god-object reach-through — the same rule ``deserialize_stats_groups`` follows).
+from well_viewer.domain.plot_members import plot_replicate_sets
 from well_viewer.domain.selections_model import (
-    active_replicate_sets as _active_replicate_sets,
     color_for_replicate_set as _color_for_replicate_set,
-    replicate_sets_loaded as _replicate_sets_loaded,
 )
 
 
@@ -546,8 +545,8 @@ def _rank_color_rset(ctx, rset) -> str:
 
 def _rep_sets_loaded(ctx):
     """All rep-sets with ≥1 loaded well (incl. hidden), from typed state."""
-    return _replicate_sets_loaded(
-        ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    from well_viewer.domain.plot_members import plot_replicate_sets_loaded
+    return plot_replicate_sets_loaded(ctx)
 
 
 def _stats_groups_from_rep_sets(ctx) -> list[BarGroup]:
@@ -558,8 +557,7 @@ def _stats_groups_from_rep_sets(ctx) -> list[BarGroup]:
 def _stats_groups_from_visible_rep_sets(ctx) -> list[BarGroup]:
     """One BarGroup per *visible* (non-hidden) rep-set — the traces actually
     drawn on the plots."""
-    rsets = _active_replicate_sets(
-        ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    rsets = plot_replicate_sets(ctx)
     return [BarGroup(r.name, members=[r]) for r in rsets]
 
 

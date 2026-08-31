@@ -10,7 +10,9 @@ re-export these names.
 
 from __future__ import annotations
 
-from well_viewer.domain.selections_model import (color_for_replicate_set, color_for_well, replicate_display_label, well_display_label, active_replicate_sets)
+from well_viewer.domain.plot_members import plot_replicate_sets
+
+from well_viewer.domain.selections_model import (color_for_replicate_set, color_for_well, replicate_display_label, well_display_label)
 from well_viewer.core.channel_state_controller import get_all_fluor_gates, on_cutoff_for_column
 from well_viewer.data.data_loading import get_rows
 from well_viewer.domain.text_columns import fov_text
@@ -21,6 +23,10 @@ import math
 from collections import Counter
 from dataclasses import dataclass
 
+# Module scope, not function-local: ``_decorate`` imports nothing from here,
+# so there is no cycle to work around — and a deferred feature import that is
+# not breaking a cycle is one the budget guard counts for nothing.
+from well_viewer.features.barplot._decorate import decorate_bar_items
 from well_viewer.domain.batch_models import BarGroup, ReplicateSet
 from well_viewer.domain import fold_change as _fc
 from well_viewer.domain.fold_change_series_cache import (
@@ -318,7 +324,7 @@ def collect_bar_items(
     threshold = on_cutoff_for_column(
         ctx, ctx.state.channel.active_val_col,
         channel=ctx.state.channel.active_channel)
-    active_rsets = active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    active_rsets = plot_replicate_sets(ctx)
     pool_reps = bool(getattr(ctx.state.plot, "bar_pool_replicates", True))
     # ``use_groups`` here drives the renderer's bar-width preset (wider for
     # grouped mode); it stays True only when wells are actually being
@@ -740,7 +746,58 @@ def collect_bar_items(
             for items_for_tp, _tp in per_tp:
                 if ki < len(items_for_tp):
                     items.append(items_for_tp[ki])
+    # Colour by / Split by, once over the finished list rather than in each of
+    # the four construction branches above. A sweep that edited the branches
+    # would be a sweep with a branch left out, and a figure where some bars
+    # honour the control and some do not is worse than one where none does.
+    items, _notice = decorate_bar_items(ctx, items)
     return use_groups, items, band_lbl
+
+
+def batch_members(ctx, group, *, pool_replicates: bool):
+    """``(key, display, wells, rset_name_or_None, colour)`` for a batch group.
+
+    Extracted because two callers need the same answer: this collector, and
+    ``batch_export/bar_panel``, which labels the Colour-by legend on the figure
+    it builds itself. A batch member is a ``BarGroup``'s replicate set or solo
+    well — in expanded mode a well of one — so its key space is not the tab's,
+    and a legend built against the tab's keys names the members whose names
+    happen to coincide and omits the rest. One definition, so the ink and the
+    key that explains it cannot be computed two different ways.
+    """
+    # Build (key, display, wells, rset_name_or_None, color) member list.
+    from well_viewer.domain.plate_layout import WELL_COLORS as _WELL_COLORS
+    members: list[tuple[str, str, list[str], str | None, str]] = []
+    if pool_replicates:
+        for i, rset in enumerate(group.members):
+            valid = [w for w in rset.wells if w in ctx.state.dataset.well_paths]
+            if not valid:
+                continue
+            members.append((rset.name, replicate_display_label(ctx, rset), valid, rset.name,
+                            _WELL_COLORS[len(members) % len(_WELL_COLORS)]))
+        for w in group.solo_wells:
+            if w not in ctx.state.dataset.well_paths:
+                continue
+            members.append((w, well_display_label(ctx, w), [w], None,
+                            _WELL_COLORS[len(members) % len(_WELL_COLORS)]))
+    else:
+        # Expand rset members into per-well entries; each well coloured by
+        # the rset's palette colour so the membership stays visible.
+        seen: set = set()
+        for ri, rset in enumerate(group.members):
+            rcolor = _WELL_COLORS[ri % len(_WELL_COLORS)]
+            for w in rset.wells:
+                if w in seen or w not in ctx.state.dataset.well_paths:
+                    continue
+                seen.add(w)
+                members.append((w, f"{well_display_label(ctx, w)} [{rset.name}]", [w], rset.name, rcolor))
+        for w in group.solo_wells:
+            if w in seen or w not in ctx.state.dataset.well_paths:
+                continue
+            seen.add(w)
+            members.append((w, well_display_label(ctx, w), [w], None,
+                            _WELL_COLORS[len(members) % len(_WELL_COLORS)]))
+    return members
 
 
 def collect_bar_items_for_group(
@@ -793,38 +850,7 @@ def collect_bar_items_for_group(
     fc_op_t0 = _fc.parse_fc_op_t0(ctx)
     fc_order = _fc.parse_fc_order(ctx)
 
-    # Build (key, display, wells, rset_name_or_None, color) member list.
-    from well_viewer.domain.plate_layout import WELL_COLORS as _WELL_COLORS
-    members: list[tuple[str, str, list[str], str | None, str]] = []
-    if pool_replicates:
-        for i, rset in enumerate(group.members):
-            valid = [w for w in rset.wells if w in ctx.state.dataset.well_paths]
-            if not valid:
-                continue
-            members.append((rset.name, replicate_display_label(ctx, rset), valid, rset.name,
-                            _WELL_COLORS[len(members) % len(_WELL_COLORS)]))
-        for w in group.solo_wells:
-            if w not in ctx.state.dataset.well_paths:
-                continue
-            members.append((w, well_display_label(ctx, w), [w], None,
-                            _WELL_COLORS[len(members) % len(_WELL_COLORS)]))
-    else:
-        # Expand rset members into per-well entries; each well coloured by
-        # the rset's palette colour so the membership stays visible.
-        seen: set = set()
-        for ri, rset in enumerate(group.members):
-            rcolor = _WELL_COLORS[ri % len(_WELL_COLORS)]
-            for w in rset.wells:
-                if w in seen or w not in ctx.state.dataset.well_paths:
-                    continue
-                seen.add(w)
-                members.append((w, f"{well_display_label(ctx, w)} [{rset.name}]", [w], rset.name, rcolor))
-        for w in group.solo_wells:
-            if w in seen or w not in ctx.state.dataset.well_paths:
-                continue
-            seen.add(w)
-            members.append((w, well_display_label(ctx, w), [w], None,
-                            _WELL_COLORS[len(members) % len(_WELL_COLORS)]))
+    members = batch_members(ctx, group, pool_replicates=pool_replicates)
 
     def _member_pts(wells: list[str], rset_name: str | None) -> list:
         """AggPoint list for one member, matching the plotting tab's statistic.
@@ -997,7 +1023,29 @@ def collect_bar_items_for_group(
             for items_for_tp, _tp in per_tp:
                 if ki < len(items_for_tp):
                     items.append(items_for_tp[ki])
+    # Colour by / Split by, over **this group's** key space rather than the
+    # tab's. The two differ — a batch member is a `BarGroup`'s replicate set or
+    # solo well, and in expanded mode a well of one — which is why the map is
+    # passed rather than looked up, exactly as the fold-change resolver above
+    # already does with ``scope_wells``. Matching against the tab's keys instead
+    # would colour the members whose names happened to coincide and leave the
+    # rest, which is the half-decorated figure that is worse than none.
+    items, _notice = decorate_bar_items(
+        ctx, items, wells_by_key=batch_wells_by_key(members))
     return items
+
+
+def batch_wells_by_key(members) -> dict:
+    """``member key -> wells`` for a batch group's own key space.
+
+    Shared with ``batch_export/bar_panel``, which needs the same map to label
+    the Colour-by legend on the figure it builds. A batch member is a
+    ``BarGroup``'s replicate set or solo well — and in expanded mode a well of
+    one — so its keys are not the tab's, and a legend built against the tab's
+    keys would name the members whose names happened to coincide and omit the
+    rest.
+    """
+    return {key: wells for (key, _d, wells, _r, _c) in members}
 
 
 def _pooled_wells_for_fov_mode(ctx) -> list[str]:
@@ -1008,7 +1056,7 @@ def _pooled_wells_for_fov_mode(ctx) -> list[str]:
     "Aggregate FOV" mode already collapses well identity). When no rsets are
     active, the user's plate selection is pooled.
     """
-    active_rsets = active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    active_rsets = plot_replicate_sets(ctx)
     out: list[str] = []
     seen: set = set()
     if active_rsets:

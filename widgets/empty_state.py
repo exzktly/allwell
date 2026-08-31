@@ -11,6 +11,10 @@ API
 * ``setAction(label, on_click)`` / ``clearAction()`` — an optional button that
   takes the hint's place. Absent unless asked for, so a site that only describes
   its emptiness looks exactly as it did.
+* ``setEntries(entries)`` / ``clearEntries()`` — an optional column of secondary
+  links *below* the action, each an ``(label, sublabel, on_click, enabled,
+  tooltip)``. For a placeholder whose way out is not only "do this" but "or go
+  back to one of these". Also absent unless asked for.
 """
 
 from __future__ import annotations
@@ -26,6 +30,18 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
+
+
+def entry_row_text(label: str, sublabel: str) -> str:
+    """The two lines of a secondary-link row, as one button label.
+
+    Shared with Home's Recent datasets card, which draws the same rows outside
+    an ``EmptyState``. It was two formatters — a newline here and three spaces
+    there — so one list rendered as two stacked lines in the placeholder and as
+    one run-on line on the card, which is the same defect as two stylesheets for
+    one control, in the layer above.
+    """
+    return f"{label}\n{sublabel}" if sublabel else label
 
 import theme
 from widgets import icons
@@ -82,6 +98,20 @@ class EmptyState(QWidget):
         self._action_slot = None
         outer.addSpacing(theme.Spacing.md)
         outer.addWidget(self._action, 0, Qt.AlignHCenter)
+        # A column of secondary links under the action, empty and hidden until a
+        # site sets one. Centred on the same axis as the button rather than
+        # stretched, so the page keeps reading as one centred stack; the rows
+        # inside it are left-aligned against each other, because a list of names
+        # of different lengths centred individually has no edge for the eye to
+        # run down.
+        self._entries = QWidget(self)
+        self._entries.setObjectName("EmptyStateEntries")
+        self._entries_layout = QVBoxLayout(self._entries)
+        self._entries_layout.setContentsMargins(0, 0, 0, 0)
+        self._entries_layout.setSpacing(theme.Spacing.xs)
+        self._entries.setVisible(False)
+        outer.addSpacing(theme.Spacing.md)
+        outer.addWidget(self._entries, 0, Qt.AlignHCenter)
         outer.addStretch(1)
         # Belt-and-suspenders against the same 1-line-sizeHint quirk: reserve a
         # two-line minimum for each wrap label, sized to that label's OWN font
@@ -128,6 +158,65 @@ class EmptyState(QWidget):
             self._action_slot = _slot
         self._action.setVisible(bool(label))
         self._sync_hint_visibility()
+
+    def setEntries(self, entries) -> None:
+        """Show a column of secondary links below the action, replacing any set before.
+
+        *entries* is a sequence of ``(label, sublabel, on_click, enabled,
+        tooltip)``. Fixed width rather than optional tails: the short form had
+        no caller anywhere, and a variadic tuple whose meaning depends on its
+        length is harder to read than the row it encodes. An entry with
+        ``enabled=False`` is still **drawn** — greyed, with *tooltip* saying
+        why — because the commonest reason a site disables one of these is a
+        path on a drive that is not mounted, and dropping the row instead would
+        tell the user their history had been lost rather than that their disk is
+        elsewhere.
+
+        Passing an empty sequence is :meth:`clearEntries`.
+        """
+        self.clearEntries()
+        rows = list(entries or ())
+        for label, sublabel, on_click, enabled, tooltip in rows:
+            self._entries_layout.addWidget(
+                self._make_entry(label, sublabel, on_click, enabled, tooltip))
+        self._entries.setVisible(bool(rows))
+
+    def clearEntries(self) -> None:
+        while self._entries_layout.count():
+            item = self._entries_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                # ``setParent(None)`` alone: PySide6 hands ownership back to
+                # Python, so the row is freed when the last reference goes.
+                # Adding ``deleteLater()`` instead defers the C++ delete to the
+                # next event-loop turn, which a test that never spins one never
+                # reaches — measured at +60 live widgets over 20 refreshes,
+                # against +0 without it.
+                widget.setParent(None)
+        self._entries.setVisible(False)
+
+    def _make_entry(self, label: str, sublabel: str, on_click,
+                    enabled: bool, tooltip: str) -> QPushButton:
+        """One row of :meth:`setEntries`.
+
+        A ``QPushButton`` rather than a label with a mouse handler, so it is
+        reachable by keyboard and announced as a button, and so being disabled
+        is a real widget state — reported to assistive technology and refusing
+        the click — rather than a look. Its *colour* when disabled is a theme
+        token like every other, in ``theme.link_row_qss``.
+        """
+        button = QPushButton(self._entries)
+        button.setObjectName("EmptyStateEntry")
+        button.setText(entry_row_text(label, sublabel))
+        button.setEnabled(bool(enabled))
+        button.setCursor(Qt.PointingHandCursor if enabled else Qt.ArrowCursor)
+        if tooltip:
+            button.setToolTip(tooltip)
+        if callable(on_click) and enabled:
+            def _slot(_checked=False, _fn=on_click):
+                _fn()
+            button.clicked.connect(_slot)
+        return button
 
     def clearAction(self) -> None:
         if self._action_slot is not None:
@@ -213,6 +302,10 @@ class EmptyState(QWidget):
             background: {c.hover};
             border-color: {c.border_strong};
         }}
+        /* The secondary links — one definition, shared with Home's Recent
+           datasets card; see theme.link_row_qss. */
+        QWidget#EmptyStateEntries {{ background: transparent; }}
+        {theme.link_row_qss("EmptyStateEntry")}
         """
 
 

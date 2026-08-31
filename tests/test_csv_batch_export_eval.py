@@ -112,7 +112,7 @@ def _run_ontab_export(ctx, fn, tmp_path, name="out") -> list[dict] | None:
     from well_viewer.features.export import service as svc
 
     out = Path(tmp_path) / f"{name}.csv"
-    with mock.patch.object(svc, "_ask_save_csv", return_value=str(out)):
+    with mock.patch.object(svc, "ask_save_csv", return_value=str(out)):
         fn(ctx)
     if not out.exists():
         return None

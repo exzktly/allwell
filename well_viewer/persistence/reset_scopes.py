@@ -15,8 +15,9 @@ So state is modelled in two tiers and every reset is expressed in them:
 per-tab controls, plot preferences, draw order, heatmap arrangement, the Image
 Table grid. Cheap to rebuild, carries no scientific decision.
 
-**Analysis** — decisions the user made about the science: sample definitions,
-gating, curation, ratio metrics, smFISH thresholds, Batch Export groups. Each is
+**Analysis** — decisions the user made about the science: sample variables,
+sample definitions, gating, curation, ratio metrics, smFISH thresholds, Batch
+Export groups. Each is
 one :data:`ANALYSIS_SCOPES` entry, individually selectable.
 
 A scope names every storage *domain* it owns, and its ``clear`` is responsible
@@ -35,8 +36,21 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from well_viewer.core.safe import swallowed
+from well_viewer.core.safe import swallow as _swallow, swallowed
 from well_viewer.core.ui_helpers import clear_notes_editors as _clear_notes_editors
+
+from well_viewer.domain.sample_variables import VariableSet
+
+
+
+
+def _refresh_variables(ctx) -> None:
+    """Repaint the Variables tab and the band's Group by control, if built."""
+    with _swallow("refresh the Variables tab after a reset"):
+        ctx.features.call("variables.refresh", ctx)
+    with _swallow("refresh the Group by control after a reset"):
+        from well_viewer.core.group_by_controller import refresh_group_by_combo
+        refresh_group_by_combo(ctx)
 
 _logger = logging.getLogger("well_viewer")
 
@@ -229,7 +243,50 @@ def _clear_export_groups(ctx) -> None:
                 _logger.exception("reset: Batch Export panel refresh failed")
 
 
+def _clear_sample_variables(ctx) -> None:
+    """The plate's annotation axes, and every well's value for them.
+
+    Its own scope rather than a line inside "Sample definitions", because the
+    two are separately expensive to rebuild and separately likely to be wrong.
+    A user who painted their replicate groups badly and wants to start those
+    again must not lose a 96-well dose grid in the same click — filling that
+    grid is the longer job of the two, and nothing about redoing groups implies
+    the doses were wrong.
+
+    Writes the emptied block out, rather than only clearing memory: the block
+    lives in ``pipeline_info.json`` and a reset that left it there would come
+    back on the next load, which is the shape of "the reset did not take".
+    """
+    ctx.state.selection.variables = VariableSet()
+    # The grouping goes with them. Left set, the band still offers a variable
+    # that no longer exists and ``plot_replicate_sets`` has silently fallen back
+    # to the user's groups — the combo-and-plot disagreement
+    # ``refresh_group_by_combo``'s own docstring says cannot happen.
+    # The grouping and both decorations go with them. Cleared through the
+    # controller's own roster rather than by naming the two fields here: a
+    # fourth control added there and not here would survive a reset pointing at
+    # a variable that no longer exists, which is the same disagreement in a
+    # place nobody would think to look.
+    with _swallow("clear the Group by variable"):
+        from well_viewer.core.group_by_controller import DECORATION_CONTROLS
+        ctx.state.plot.group_by_variable = ""
+        for field, _widget, _label in DECORATION_CONTROLS:
+            setattr(ctx.state.plot, field, "")
+    _save(ctx, "sample_variables")
+    # Every sibling scope notifies its own surface; without this the Variables
+    # tab stays painted with the plate it just cleared.
+    _refresh_variables(ctx)
+
+
 ANALYSIS_SCOPES: tuple[ResetScope, ...] = (
+    ResetScope(
+        key="sample_variables",
+        title="Sample variables",
+        detail="The variables declared for this plate — cell line, dose — and "
+               "every well's value for them.",
+        domains=("sample_variables",),
+        clear=_clear_sample_variables,
+    ),
     ResetScope(
         key="sample_definitions",
         title="Sample definitions",

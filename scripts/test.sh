@@ -25,6 +25,37 @@ cd "$(dirname "$0")/.."
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}"
 export MPLBACKEND="${MPLBACKEND:-Agg}"
 
+# Coverage is opt-in (ALLWELL_COVERAGE=1), so the default run — which is the gate
+# for every push and is run many times a day — pays nothing for it. Both lanes
+# read the same variable and write parallel-mode data files that
+# scripts/coverage.sh combines; measuring one lane alone reports every
+# full-app-only module as dead, which is worse than not measuring at all.
+COV=()
+if [[ -n "${ALLWELL_COVERAGE:-}" ]]; then
+    COV=(--cov --cov-report=)
+    # A data file of this lane's own, for two reasons that both cost a whole
+    # measurement when they bite. Neither is theoretical; both were reproduced.
+    #
+    # Left on the default name, this lane writes plain `.coverage` — pytest-cov
+    # combines its parallel files at session end and saves under the base name.
+    # `coverage combine` then globs `<data_file>.*`, which never matches
+    # `.coverage` itself, so the slow lane's `.coverage.slow-*` files combine
+    # *without* it and overwrite it. Measured: a module the fast lane covers
+    # reported 0% after the documented fast-then-slow-then-combine sequence,
+    # and `coverage combine` said "Combined 1 file".
+    #
+    # Worse in the other order. pytest-cov calls `Coverage.erase()` at session
+    # start, and in parallel mode that globs `<data_file>.*` and unlinks every
+    # match — so a fast lane run after the slow one deletes every
+    # `.coverage.slow-*` on disk. Hours of work gone, and `coverage.sh` then
+    # reports the fast lane alone with nothing saying the rest is missing.
+    #
+    # Under its own name the lane can neither be skipped by the combine nor
+    # erase anything but its own files, and run order genuinely stops mattering.
+    export COVERAGE_FILE="${COVERAGE_FILE:-.coverage.fast}"
+fi
+
 exec python -m pytest -m "not slow" -q \
     --timeout=90 --timeout-method=signal \
+    "${COV[@]+"${COV[@]}"}" \
     "$@"

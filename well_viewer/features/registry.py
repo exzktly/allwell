@@ -123,6 +123,12 @@ _build_groups = _lazy_build("well_viewer.features.home.groups.tab_view",
                             "build_replicate_groups_centre")
 _build_well_labels = _lazy_build("well_viewer.features.home.labels.tab_view",
                                  "build_label_grid")
+_build_variables = _lazy_build("well_viewer.features.home.variables.tab_view",
+                               "build_variables_subtab")
+_build_response = _lazy_build("well_viewer.features.response.tab_view",
+                              "build_response_tab")
+_redraw_response = _lazy_hook("well_viewer.features.response.controller",
+                              "redraw_response")
 _build_pipeline_info = _lazy_build("well_viewer.features.home.pipeline_info.tab_view",
                                    "build_pipeline_info_subtab")
 
@@ -172,6 +178,7 @@ _state_preview = _lazy_state("well_viewer.features.image_browser.review_image.st
 _state_image_table = _lazy_state("well_viewer.features.image_browser.image_table.state", "ImageTableState")
 _state_playground = _lazy_state("well_viewer.features.image_browser.playground.state", "PlaygroundState")
 _state_home = _lazy_state("well_viewer.features.home.state", "HomeState")
+_state_response = _lazy_state("well_viewer.features.response.state", "ResponseState")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -490,6 +497,11 @@ def _svc_cell_gating_threshold_frac_on_changed():
     return cell_gating_on_threshold_frac_on_change
 
 
+def _svc_variables_refresh():
+    from well_viewer.features.home.variables.controller import refresh_variables
+    return refresh_variables
+
+
 def _svc_labels_grid_refresh():
     from well_viewer.features.home.labels.tab_view import label_grid_refresh
     return label_grid_refresh
@@ -785,12 +797,62 @@ def _fold_change_scope_bar():
     )
 
 
+def _activate_response(ctx) -> None:
+    """Show the shared sidebar and repaint, as the other plotting leaves do.
+
+    Without this the figure was whatever it was when the tab body was first
+    built. A leaf that is built while the plate is empty and shown again after
+    a dataset is loaded drew nothing, with no control on the page out of place
+    to suggest why — and the generic ``redraw_app`` fan-out reaches only
+    Distribution and Heat Map, so nothing else was going to repaint it.
+    """
+    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
+    ctx.coordinator.refresh_sidebar_map()
+    _redraw_response(ctx)
+
+
+def _sel_response(ctx) -> None:
+    """Repaint on a selection change.
+
+    A tab with no hook here falls through to the shared ``app._redraw()``,
+    which does not reach this figure — so selecting different wells left the
+    curves drawn from the previous selection, which is a plot of the wrong
+    data that looks exactly like a plot of the right data.
+    """
+    _redraw_response(ctx)
+
+
+def _fold_change_scope_response():
+    from well_viewer.domain.fold_change_scopes import FoldChangeScope
+    from well_viewer.features.response.controller import redraw_response
+    return FoldChangeScope(
+        name="response",
+        ctrl_combo_attr="_fc_ctrl_combo_response",
+        baseline_combo_attr="_fc_baseline_combo_response",
+        redraw=lambda a: redraw_response(a._ctx),
+        tab_names=("Response Curves",),
+    )
+
+
 def _saved_plots_card_decorator():
     """The Saved Plots plot-card decorator (lazy). Plot tabs apply this via
     ``ui_helpers.apply_plot_card_decorators`` so they never import saved_plots —
     a profiled-out Saved Plots simply isn't in the registry, so nothing runs."""
     from well_viewer.features.saved_plots.controller import wire_save_to_gallery
     return wire_save_to_gallery
+
+
+def _response_view_state_io():
+    """Response Curves' (snapshot, apply) view-state pair (lazy).
+
+    The fit is the point of the page and is not recoverable from the plate, so
+    a saved plot without this block restored with no curve and no EC50 while
+    looking like a complete restore.
+    """
+    from well_viewer.features.response.view_state_io import (
+        apply_response, snapshot_response,
+    )
+    return snapshot_response, apply_response
 
 
 def _image_table_view_state_io():
@@ -916,6 +978,13 @@ def _features() -> list[FeatureDescriptor]:
         FeatureDescriptor(name="Line Graphs", parent="Plotting", build=_build_lineplot,
                           on_activate=_activate_default_plot,
                           redraw=_redraw_line_graphs),
+        FeatureDescriptor(name="Response Curves", parent="Plotting",
+                          build=_build_response, redraw=_redraw_response,
+                          on_activate=_activate_response,
+                          on_selection_changed=_sel_response,
+                          states=(StateSpec("response", _state_response),),
+                          fold_change_scope_factory=_fold_change_scope_response,
+                          view_state_io=_response_view_state_io),
         FeatureDescriptor(
             name="Scatter Plot", parent="Plotting", build=_build_scatter,
             on_activate=_activate_scatter,
@@ -1009,6 +1078,12 @@ def _features() -> list[FeatureDescriptor]:
                               "groups.map_refresh": _svc_groups_map_refresh,
                               "groups.build_replicate_panel":
                                   _svc_groups_build_replicate_panel,
+                          }),
+        FeatureDescriptor(name="Variables", parent="Home",
+                          build=_build_variables, removable=True,
+                          reads_well_selection=False, subtab_inset=True,
+                          services={
+                              "variables.refresh": _svc_variables_refresh,
                           }),
         FeatureDescriptor(name="Well Labels", parent="Home",
                           build=_build_well_labels, removable=False,

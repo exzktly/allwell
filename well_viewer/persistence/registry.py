@@ -114,7 +114,7 @@ def build_persistence_registry(ctx) -> PersistenceRegistry:
     from well_viewer.persistence import (
         cell_overrides, crop_region, heatmap_layouts, line_order,
         qc_params, plot_groups, ratios, sample_definitions,
-        view_state,
+        sample_variables, view_state,
     )
 
     registry = PersistenceRegistry(ctx)
@@ -139,6 +139,9 @@ def build_persistence_registry(ctx) -> PersistenceRegistry:
     registry.register("notes", save=sample_definitions.save_notes)
     registry.register("sample_definitions",
                       save=sample_definitions.autosave_to_pipeline_info)
+    registry.register("sample_variables",
+                      save=sample_variables.save_to_data_dir,
+                      load=sample_variables.load_from_data_dir)
     registry.register("qc_params",
                       save=qc_params.save_to_data_dir,
                       load=qc_params.load_from_data_dir)

@@ -376,6 +376,13 @@ hiddenimports = [
     "pandas.io.formats",
     "pandas.io.formats.style",
 
+    # pyarrow — the per-well Parquet frame cache (well_viewer/data/parquet_cache.py).
+    # Imported lazily inside that module, so PyInstaller's module graph cannot
+    # see it and it has to be named here. Absent, the app parses CSVs instead of
+    # failing, but a shipped build should carry it: it is a 60x read.
+    "pyarrow",
+    "pyarrow.parquet",
+
     # PIL / Pillow — Qt6 path uses ImageQt instead of ImageTk.
     "PIL",
     "PIL.Image",

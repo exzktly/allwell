@@ -40,10 +40,10 @@ to add features, how to debug, and build / environment troubleshooting), see
 3. [Quick start](#quick-start)
 4. [Analyze mode — running the pipeline](#analyze-mode--running-the-pipeline)
 5. [Review mode — exploring results](#review-mode--exploring-results)
-   - [Home](#home) (Overview · Cell Gating · Groups · Well Labels · Ratios · Pipeline Info)
+   - [Home](#home) (Overview · Cell Gating · Groups · Variables · Well Labels · Ratios · Pipeline Info)
    - [The Review window at a glance](#the-review-window-at-a-glance)
    - [Controls shared by every tab](#controls-shared-by-every-tab)
-   - Plotting: [Bar Plots](#bar-plots) · [Line Graphs](#line-graphs) · [Scatter Plot](#scatter-plot) · [Distribution](#distribution) · [Heat Map](#heat-map)
+   - Plotting: [Bar Plots](#bar-plots) · [Line Graphs](#line-graphs) · [Response Curves](#response-curves) · [Scatter Plot](#scatter-plot) · [Distribution](#distribution) · [Heat Map](#heat-map)
    - [Statistics](#statistics) · [Multivariate analysis](#multivariate-analysis) · [Spatial analysis](#spatial-analysis)
    - [Image Browser](#image-browser) (Segmentation · Image Table · Cell Browser · Playground) · [smFISH](#smfish) · [Review CSV](#review-csv)
    - [Saved Plots](#saved-plots) · [Batch export](#batch-export)
@@ -1133,6 +1133,19 @@ left off rather than sending you across the window to press the other one. There
 is one folder picker behind both. Nothing else on the page is drawn until a
 dataset is open, because there would be nothing in it to read.
 
+**Under that button are the datasets you opened recently**, newest first, so
+getting back to yesterday's plate does not mean navigating to it again. Clicking
+one opens it exactly as the folder picker would. A dataset whose folder is not
+reachable right now — an external drive that is not plugged in is the usual
+reason — is still listed, greyed out, with the reason if you hover it; it comes
+back by itself when the drive does. The list is kept per user on this machine,
+not in any dataset folder, so copying a dataset to a colleague does not hand
+them your history of other plates. A folder that opened but turned out to hold
+no wells is not added.
+
+Once a dataset is open the same list appears as a **Recent datasets** card at the
+bottom of Overview, minus the one you are already in.
+
 **It reports; it does not measure.** Working out how much of each well's input
 its output covers means opening an archive and reading a whole CSV for every
 well — far too slow for a page you pass through constantly, and a cached answer
@@ -1409,6 +1422,130 @@ you opened a folder that holds only some of the plate's wells, the picker can
 only paint those — but the group's other members are still part of it. Adding
 or removing a well changes only what you clicked; the members the plate cannot
 show stay in the group.
+
+#### Variables
+
+A **variable** is anything you varied: cell line, dose, the timepoint you
+treated at. You name it, list its values in order, and then fill those values
+onto the wells.
+
+It is not a group, and that is the point of having it. Two cell lines at six
+doses is twelve conditions; without variables you would paint twelve group names
+by hand to plot them apart. With them you say "Cell line: HeLa, U2OS" and
+"Dose: 0, 0.1, 0.3, 1, 3, 10" once, and the plots can group, colour and split by
+either.
+
+On **Home → Variables**, **+ Variable** adds one. Give it a name, pick its
+type, and type its values into the box at the bottom — commas work, so
+`0, 0.1, 0.3, 1, 3, 10` adds six in one go. Double-click a value to correct it:
+that is a rename, so every well already holding it follows, and fixing `1uM` to
+`1 µM` after you have filled the plate costs nothing. The arrows beside the list
+set the order, which is the order a fill walks and the direction a dose axis
+runs, so it is worth getting right.
+
+**Text or Number.** Number is what lets a variable be a plot's x axis, and it is
+the only type that takes a unit. You can switch at any time and your values are
+re-read, not retyped. A value that is not a number — a `vehicle` row in a dose
+series — is kept, and the tab tells you which ones they are: they still group
+and colour, they just have no place on a numeric axis.
+
+The list also tells you when a variable is not ready — one with no values cannot
+be filled onto anything.
+
+**Filling the plate.** Under the definition is a plate of this dataset's wells
+and one row of controls: *Fill along [Rows or Columns] · repeat each [N] ·
+Apply fill*. **N counts rows or columns**, whichever axis you picked, and the
+number says so beside itself. Six doses along the columns repeating each two
+columns fills a 12-column plate; two cell lines along the rows repeating each
+four rows fills the eight rows. Any block design is one click.
+
+A well the dataset does not have costs only itself: the wells either side of a
+gap keep the value their row or column carries, so a plate missing one
+acquisition is still the block design you asked for, minus that well.
+
+For anything the fill does not cover, select wells on the plate — drag across
+them, or click a row letter or column number — and click one of the value chips
+above it. Same two steps as **Well Labels**' select-then-Add-Prefix. **Clear**
+unassigns the selection.
+
+Each value gets its own colour on the plate. A well that belongs to the dataset
+but has no value for the variable you are looking at is **ringed**, and the line
+underneath names those wells and counts them — an empty socket means something
+different, that the well is not in the dataset at all. Getting to "All 96 wells
+have a Dose." is the thing to aim for, because a plot grouped by a variable
+leaves out any group containing an unassigned well, and tells you how many.
+
+**Seeing two variables at once.** *Also show* draws a second variable on top of
+the first as a short glyph — `0` / `10` for a dose, `H` / `U` for HeLa and U2OS
+— with a key beside it. Colour for one factor, a letter for the other, so a
+two-factor plate reads in one look instead of by switching back and forth.
+
+Hovering a well gives you the whole row: `A01 — shCtrl · Cell line: HeLa ·
+Dose: 1 µM`. A variable the well has no value for shows as `Dose: —` rather than
+being left out, so you can tell "nothing was assigned" from "there is no such
+variable".
+
+**By group.** If you have replicate groups defined, a list under the plate shows
+what each one resolves to. A group whose wells all agree shows that value. One
+whose wells disagree reads *Mixed*. One containing even a single well with no
+value reads *no value*, and names the wells that are short.
+
+That last case is the one to know about. Wells are never given a value they were
+not assigned: if you add a well to a group after filling, it stays unassigned and
+the group stops having a value. Nothing is inherited from its neighbours and
+nothing is guessed from the majority, because a bar built that way would carry a
+dose those wells were never given and would look exactly like a correct one.
+Assign the well, and the group resolves again.
+
+**Plotting by a variable.** Once a variable is defined, a **Group by** control
+appears in the band at the top of the plotting pages, next to Channel and
+Property. Set it to `Dose` and every plot — bars, lines, statistics, heat map,
+the exports — draws one member per dose instead of one per replicate group. You
+do not need to have defined any groups at all.
+
+It applies everywhere at once, deliberately: a Bar tab grouped by dose beside a
+Statistics tab still grouped by your replicate sets would be two descriptions of
+one plate with nothing saying which you were looking at.
+
+Wells with no value for that variable are not plotted, and the figure's own
+title says how many and which — on the figure rather than the status line, so a
+saved copy carries it and so the sentence goes away the moment you fix it. If
+nothing at all is assigned, the plots fall back to your own groups rather than
+going blank; the Variables tab is where you fix that, and the note on the figure
+says that is what happened rather than claiming wells are missing.
+
+If you have not defined any replicate groups, grouping by a variable also
+ignores your plate selection: every loaded well holding a value is pooled, so
+one well selected can be four drawn. That is what "group the plate by this
+variable" has to mean, and the note on the figure counts the wells it brought in
+so it is not a silent change to every number on screen.
+
+Group by, Colour by and Split by are cleared when you open a different dataset.
+They name that plate's variables, and the next plate's are different ones.
+
+**Colour by and Split by**, in the band's **Decorate** popover beside it, use a
+*second* variable to say how the bars look rather than what they are. Neither
+moves a single number: with two cell lines at six doses, set **Group by** to
+`Dose` and **Colour by** to `Cell line` and you get the same twelve bars in two
+colours, with a legend naming the two lines. **Split by** the same variable and
+those bars are laid out in two labelled bands instead of one run.
+
+Because they only decorate, nothing is dropped: a group whose wells hold two
+different values gets its own ink and its own band called `—mixed—`, and one
+containing a well you have not filled in yet gets `no value`. Those are
+different mistakes with different fixes, so they are never the same colour.
+
+The bar tab already uses bands for timepoints and for wells, so if **Split by**
+replaces a layout you had, it says so on the figure rather than quietly taking
+your headers away.
+
+**Batch Export draws them the same way.** A plate exported group by group gets
+the same inks and the same bands as the tab on screen, so a figure you check
+once is the figure that lands in the folder.
+
+Variables are saved with the dataset, alongside your groups and well labels.
+**Reset analysis** clears them under their own heading, separately from sample
+definitions, so redoing your groups does not cost you a plate of doses.
 
 #### Well Labels
 
@@ -2300,6 +2437,140 @@ still exported (see below).
   during the run too). Re-run those wells with a schema matching their
   filenames to restore per-field statistics.
 
+### Response Curves
+
+Plots a measurement against a **number you varied** — concentration, seeding
+density, MOI, temperature, how long you pre-treated for. A serial dilution is
+one case of it, which is why the tab is not named for one.
+
+The x axis comes from a **Number** variable you defined on
+[Home → Variables](#variables): define it, fill it onto the plate, then pick it
+under **X** in the band. Until a Number variable exists the tab says so and
+points you there — there is nothing for it to plot.
+
+One point per group, at that group's value, with error bars across its
+replicates. Groups come from the same place every other page's groups come
+from, so this tab and the Bar tab always agree about what a member is.
+
+**The axis picks itself.** If your doses span two decades or more the x axis
+opens logarithmic, because a 0.1–10 µM series on a linear axis puts three
+quarters of its points in the leftmost tenth. Every dose gets its own tick
+rather than the decades matplotlib would otherwise label.
+
+**A zero dose is drawn, off the scale.** Log axes cannot show zero, and the two
+usual outcomes are both wrong: dropping the point makes a figure that is missing
+its vehicle control look complete, and nudging it to some small positive number
+states a concentration you never administered. It goes in its own column to the
+left of a dotted break, ticked `0`, and it is left out of any fit.
+
+**Which timepoints are drawn is this tab's own choice.** It opens on the one
+timepoint the rest of the app is focused on, because a twelve-timepoint plate
+opened as twelve overlapping curves per condition is not a plot anyone can
+read. Add more from the **Timepoints** button, whose own label carries the
+count. Changing them here does not move the Heat Map or the Distribution tab.
+
+**What could not be plotted is named on the figure.** A group whose wells hold
+two different doses, and a group containing a well with no dose at all, are two
+different mistakes with two different fixes, so they are counted separately in a
+caption under the axes — not only on the status line, which does not travel with
+a saved figure. The exported CSV carries a row for each of them too, with an
+empty x and the reason, because a spreadsheet is exactly where someone counts
+rows and believes the total.
+
+**A figure with nothing on it says why.** Empty axes are the same answer to six
+quite different situations, so instead the tab writes which one it is, and where
+to fix it: no Number variable picked, no timepoint ticked, no group filled in
+yet, groups whose wells disagree, values that are not numbers, or a timepoint at
+which nothing was measured. The last two of those look identical on a blank
+plot and have nothing to do with each other.
+
+#### Fitting a curve
+
+**Fit** in the band offers two models, and neither is on by default — a fitted
+line through points is an assertion about the shape of the response, and it
+should be yours rather than something you find already drawn.
+
+- **4PL**, the four-parameter logistic: bottom, top, EC50 and slope all fitted.
+- **Hill (bottom = 0)**, the same curve with its floor pinned at zero. The right
+  model when your assay's zero is a real zero — a background-subtracted
+  readout — and letting the bottom float would buy a better-looking fit by
+  inventing a floor the experiment says is not there. It also needs one fewer
+  dose than the 4PL, because a pinned parameter is not a fitted one.
+
+Leave **Top** and **Bottom** blank to fit them, or type a number to pin a
+plateau you already know — 100 on a normalised assay, 0 on a subtracted one.
+Whatever you set applies to **every curve on the figure**: two timepoints fitted
+with independently floating tops produce two EC50s that cannot be compared, and
+comparing them is the only reason to draw both at once.
+
+The curve is fitted against **log₁₀ of your x**, whatever scale the axis is
+showing. Decade-spaced doses fitted in linear x weight the top dose almost
+exclusively — the residual at 10 µM is a hundred times the residual at 0.1 µM
+for the same proportional error — so a linear fit is effectively ignoring the
+bottom half of the curve, which is the half that decides the EC50.
+
+The EC50 appears in the legend entry for its own curve, with a 95% interval that
+is **asymmetric**: it is symmetric about log₁₀(EC50), so the upper arm is longer,
+which is the truth about a dose estimated on a log axis. A single ± would claim
+a lower bound the fit does not support. The same numbers go into **Save plot
+data…**.
+
+**When the data will not support a fit, you get an em dash and a reason** —
+never a number. `EC50 — (no fit)` appears in the legend and the reason under the
+axes, and no line is drawn. The five reasons are:
+
+- **too few distinct doses** — the caption says how many the model needs.
+  Replicates at the same dose do not count; three wells at 1 µM are one dose.
+- **the response is flat** — nothing changed, so there is no half-maximal
+  anything. Worth knowing that a flat line fits a 4PL *perfectly*, with the top
+  equal to the bottom, at which point the EC50 is whatever the fitter started
+  from. That number is not shown.
+- **a parameter ran to the edge of its range** — usually the top or bottom
+  plateau, meaning your doses never reached it.
+- **the EC50 lies outside the doses you tested** — extrapolation, not
+  measurement.
+- **the fit did not converge.**
+
+An interval can also be missing from a fit that otherwise worked, and it says
+which: as many points as parameters leaves nothing to estimate an error from
+(dose more, and it appears), whereas parameters that are not separable at these
+doses will not be fixed by more of the same ones.
+
+**Saving the plot keeps the fit.** A response plot sent to the gallery comes
+back with its x variable, its timepoints, its model and any plateau you pinned —
+the fit is the point of the page and none of it can be worked out again from the
+plate.
+
+If the axis went logarithmic because your doses span two decades rather than
+because you asked, the caption says so and points at Properties. The checkbox
+there shows your own answer, and until you give one it reads "off" while the
+axis is log; setting it either way from then on stands.
+
+#### Fold change on a response curve
+
+The band's **Fold change** popover is the same one the Bar and Line tabs carry,
+over the same shared setting — a control picked on one is picked on all three,
+and the y-axis label says what it was normalised by so a normalised number is
+never sitting under a raw label.
+
+**vs t0 needs more than one timepoint drawn.** With one, every point is its own
+baseline and the whole figure would be a flat line at 1.0, so the tab declines
+it and says so under the axes rather than either obeying it or ignoring it
+quietly.
+
+Where a control could not be resolved — it names nothing loaded, or it has no
+sample at a timepoint — the affected points are named under the axes rather
+than dropped, because a curve that stops at its third dose looks exactly like a
+plate that was never dosed higher. A point whose error bar could not be
+propagated is counted too: no bar at all, rather than a zero-length one, which
+would read as perfect agreement between replicates.
+
+**There is no per-well mode here.** A dose is a property of a condition, so one
+point per well at the same x would be a scatter of replicates rather than a
+curve. If you have turned pooling off for the Bar tab, this tab still pools and
+says so on the figure — the two pages would otherwise disagree with nothing on
+either to explain why.
+
 ### Scatter Plot
 
 **What it shows.** Two views, chosen with the **View** toggle at the left of the
@@ -2939,9 +3210,13 @@ channel for every well).
   still draws the frames it did get, because a partial answer beats none. But a
   short list of real images looks exactly like a well that genuinely holds that
   few, so the status line after **Generate** names the wells whose inventory was
-  cut short and why, and a PNG saved from the table repeats it: that file
-  outlives the status line and is short by however many frames were never
-  reached.
+  cut short and why — and so does **every way of getting the table out of the
+  app**: Export to File, Copy PNG, Copy SVG and Save to Saved Plots all repeat
+  it. Those artifacts outlive the status line and are short by however many
+  frames were never reached, with nothing in them to say so. It is the same
+  sentence in all five places, beside the one about a scale bar that would not
+  fit, and the two always appear together: a line naming one and staying quiet
+  about the other would read as a full account of what is wrong with the file.
 - **Action strip** — **Generate** · **Table ▾** (*Reset table layout*, back to
   defaults; *Clear rendered images*, which keeps the layout so Generate re-renders
   in one click) · **Crop view ▾** (drag a region on any image — the button reads

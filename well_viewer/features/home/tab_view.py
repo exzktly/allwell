@@ -33,6 +33,7 @@ import theme
 from well_viewer.core.app_shell_view import mirror_tab_widget
 from well_viewer.core.selection_controller import import_selections_from_json
 from well_viewer.core.ui_helpers import notes_schedule_save
+from widgets.empty_state import entry_row_text
 from widgets.icon_button import IconButton
 from widgets.page_body import build_page_body
 
@@ -239,6 +240,7 @@ def build_home_overview(ctx, parent: QWidget) -> None:
     body.addLayout(_build_health_and_receipt(ctx, page, reg))
     body.addWidget(_build_your_work(ctx, page, reg))
     body.addWidget(_build_saved_plots(ctx, page, reg))
+    body.addWidget(_build_recents(ctx, page, reg))
     body.addStretch(1)
 
     from .controller import hide_rail_body, refresh_home
@@ -459,6 +461,56 @@ def _build_your_work(ctx, page: QWidget, reg) -> QWidget:
 _THUMB_W = 168
 _THUMB_H = 118
 _THUMB_CAPTION_H = 32
+
+
+def _build_recents(ctx, page: QWidget, reg) -> QWidget:
+    """The strip of recently opened datasets, and the route back into one.
+
+    Home reports on the plate that is open; this is the way to a different one
+    without going through the folder picker and remembering where it lived. The
+    same card shape as the saved-plots strip above it, deliberately — that
+    precedent is load-bearing and tested, and a second card idiom on one page is
+    a second thing to keep in step.
+
+    Built even when there is nothing to put in it, and hidden by the controller,
+    so the page's block order is the same in every build and on every launch.
+    """
+    card, layout = _card(page, "Recent datasets")
+    layout.addWidget(reg.register("_home_recents_note", _muted(card, "")))
+    host = reg.register("_home_recents", QWidget(card))
+    rows = QVBoxLayout(host)
+    rows.setContentsMargins(0, 0, 0, 0)
+    rows.setSpacing(theme.Spacing.xs)
+    layout.addWidget(host)
+    return reg.register("_home_recents_card", card)
+
+
+def build_recent_tile(ctx, parent: QWidget, entry) -> QWidget:
+    """One clickable row: the dataset's name, and the folder holding it.
+
+    A ``QPushButton`` for the same reason the saved-plot tile is one — keyboard
+    reachable, announced as pressable — with the two lines as its text rather
+    than as child labels, because a row is one line of type and needs none of
+    the tile's picture-above-caption layout.
+
+    *entry* is ``(label, sublabel, on_click, enabled, tooltip)``, the shape
+    ``EmptyState.setEntries`` takes, so the card and the placeholder are fed
+    from one function in the controller and cannot disagree about which folders
+    are reachable — and its text comes from ``entry_row_text`` for the same
+    reason, one list having rendered as two stacked lines in one place and a
+    run-on line in the other.
+    """
+    label, sublabel, on_click, enabled, tooltip = entry
+    button = QPushButton(parent)
+    button.setObjectName("HomeRecentTile")
+    button.setText(entry_row_text(label, sublabel))
+    button.setEnabled(bool(enabled))
+    button.setCursor(Qt.PointingHandCursor if enabled else Qt.ArrowCursor)
+    if tooltip:
+        button.setToolTip(tooltip)
+    if callable(on_click) and enabled:
+        button.clicked.connect(lambda _checked=False, _fn=on_click: _fn())
+    return button
 
 
 def _build_saved_plots(ctx, page: QWidget, reg) -> QWidget:

@@ -223,3 +223,52 @@ def test_a_well_in_two_sets_is_owned_by_the_first():
 
 def test_no_sets_means_no_inheritance():
     assert member_replicate_sets(_ctx(selections=[])) == {}
+
+
+# ── the response scope ──────────────────────────────────────────────────────
+#
+# Response Curves always pools: a dose is a property of a condition, so one
+# point per well at the same x would be a scatter of replicates rather than a
+# curve. The half that is easy to leave un-swept is not the collector — it is
+# ``_keys_are_replicate_sets``, which decides what a *key* resolves to when the
+# per-sample control editor asks. A scope missing from that predicate answers
+# "wells", and a key that resolves to no well simply loses its denominator: the
+# control silently stops applying, with nothing red anywhere.
+
+def test_the_response_keys_are_the_replicate_sets():
+    ctx = _ctx(selections=_TWO_SETS, pool_reps=True)
+    assert plotted_member_keys(ctx, "response") == ["CTRL", "TREAT"]
+
+
+def test_the_response_keys_stay_sets_when_bar_pooling_is_off():
+    """``bar_pool_replicates`` is the *Bar* tab's switch. This tab has no
+    per-well mode, so its keys do not flip with it."""
+    ctx = _ctx(selections=_TWO_SETS, pool_reps=False)
+    assert bar_member_keys(ctx) == ["A01", "A02", "B01", "B02"]
+    assert plotted_member_keys(ctx, "response") == ["CTRL", "TREAT"]
+
+
+def test_a_response_key_resolves_to_its_sets_wells_not_to_a_well_of_that_name():
+    """The assertion the ``scope == "line"`` spelling could not make.
+
+    That spelling answered *False* for every scope it had not heard of, so each
+    response key resolved to "the well with this name" — and ``CTRL`` is not a
+    well, so it resolved to nothing at all. A member whose wells come back
+    empty cannot be matched to a control, and the whole fold-change axis goes
+    quiet on a plate that is perfectly well formed.
+    """
+    ctx = _ctx(selections=_TWO_SETS, pool_reps=True)
+    wells = member_wells(ctx, "response")
+    assert wells == {"CTRL": ["A01", "A02"], "TREAT": ["B01", "B02"]}
+
+
+def test_the_response_scope_resolves_the_same_wells_with_bar_pooling_off():
+    ctx = _ctx(selections=_TWO_SETS, pool_reps=False)
+    assert member_wells(ctx, "response") == {
+        "CTRL": ["A01", "A02"], "TREAT": ["B01", "B02"]}
+
+
+def test_a_scope_nobody_registered_still_answers_empty():
+    """Unknown scopes get no members rather than a guess."""
+    ctx = _ctx(selections=_TWO_SETS, pool_reps=True)
+    assert plotted_member_keys(ctx, "no-such-tab") == []

@@ -238,8 +238,8 @@ def test_home_enumerates_its_tabs_from_the_registry():
     full = build_feature_registry(FULL)
     ctx = SimpleNamespace(features=full)
     assert active_subtabs(ctx) == (
-        "Overview", "Cell Gating", "Groups", "Well Labels", "Ratios",
-        "Pipeline Info",
+        "Overview", "Cell Gating", "Groups", "Variables", "Well Labels",
+        "Ratios", "Pipeline Info",
     )
 
     # The sanctioned manifest line keeps the three load-bearing editors and drops
@@ -283,7 +283,7 @@ def test_home_subtab_behaviour_is_declared_not_listed():
     assert reads == {"Groups", "Cell Gating", "Well Labels"}
 
     inset = {n for n, d in subs.items() if d.subtab_inset}
-    assert inset == {"Groups", "Well Labels"}
+    assert inset == {"Groups", "Variables", "Well Labels"}
 
     # Nothing outside Home claims either flag: they are sub-tab behaviours, and a
     # top-level page's plate rule is `per_well_selection`, resolved per page.

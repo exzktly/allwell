@@ -1557,8 +1557,17 @@ class AllWellApp(QMainWindow):
             swallowed()  # was: pass (silent except)
 
     def _qsettings(self):
-        from PySide6.QtCore import QSettings
-        return QSettings("AllWell", "AllWellApp")
+        """This window's settings handle. See ``core/app_settings``.
+
+        Kept as a method because two of this class's own methods call it, but
+        it no longer *defines* where the settings are: a feature reaching for
+        ``_qsettings`` on the object it happens to hold is how the
+        recent-datasets list came to read every value as absent, since
+        ``ctx.window`` is the review widget and this is the main window that
+        contains it.
+        """
+        from well_viewer.core.app_settings import app_settings
+        return app_settings()
 
     def _restore_window_state(self) -> None:
         """Restore the main window geometry + splitter sizes saved from the

@@ -406,14 +406,14 @@ def _display_label_for(ctx, name: str) -> str:
 
     A8 teardown: pure ctx — the display-label leaves all take ``ctx`` now.
     """
+    from well_viewer.domain.plot_members import plot_replicate_sets
     from well_viewer.domain.selections_model import (
-        active_replicate_sets, replicate_display_label, well_display_label,
+        replicate_display_label, well_display_label,
     )
     try:
         if name in (ctx.state.dataset.well_paths or {}):
             return well_display_label(ctx, name)
-        for rset in active_replicate_sets(
-                ctx.state.selection.selections, ctx.state.dataset.well_paths):
+        for rset in plot_replicate_sets(ctx):
             if getattr(rset, "name", None) == name:
                 return replicate_display_label(ctx, rset)
     except Exception:

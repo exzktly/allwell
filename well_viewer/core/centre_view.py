@@ -32,7 +32,10 @@ from PySide6.QtWidgets import (
     QLabel, QStackedWidget, QVBoxLayout, QWidget,
 )
 from well_viewer.core.tab_controller import on_tab_change
-from well_viewer.core.safe import swallowed
+from well_viewer.core.group_by_controller import (
+    DECORATION_CONTROLS as _DECORATION_CONTROLS,
+)
+from well_viewer.core.safe import swallow, swallowed
 import theme
 from well_viewer.core.plot_card_actions import PLOT_CARD_ATTRS
 
@@ -394,6 +397,67 @@ def build_centre(win, parent: QWidget) -> None:
         win._plotting_metric_cb.currentIndexChanged.connect(_on_global_metric)
         win._plotting_metric_grp = band.add_scope("", win._plotting_metric_cb)
 
+        # Group the plot's members by a sample variable instead of by the user's
+        # replicate sets. In the scope zone because that is exactly what it does
+        # — it scopes what a member *is* — and beside Channel and Property
+        # because all three change what every tab draws rather than how one tab
+        # draws it.
+        #
+        # Hidden entirely until a variable is defined. The band's stated rule is
+        # that it only ever carries controls that do something, and a "Group by"
+        # offering nothing but "Wells / groups" is a control whose every option
+        # is the status quo.
+        win._plotting_groupby_cb = win._ctx.widgets.register(
+            "_plotting_groupby_cb", _QComboBox("Group by"))
+        win._plotting_groupby_cb.setStyleSheet(
+            f"QComboBox {{ background-color: {_C.panel_elevated}; "
+            f"color: {_C.text_secondary}; "
+            f"border: 1px solid {_C.border_subtle}; "
+            f"border-radius: {_R.pill}px; padding: 2px 22px 2px 10px; "
+            f"font-size: {_T.caption_size}px; font-weight: 500; }}"
+            f"QComboBox:hover {{ color: {_C.text_primary}; }}"
+        )
+
+        def _on_group_by(_idx: int) -> None:
+            from well_viewer.core.group_by_controller import set_group_by_variable
+            with swallow("apply the Group by variable"):
+                set_group_by_variable(
+                    win._ctx, win._plotting_groupby_cb.currentData() or "")
+
+        win._plotting_groupby_cb.currentIndexChanged.connect(_on_group_by)
+        win._plotting_groupby_grp = band.add_scope("", win._plotting_groupby_cb)
+        win._plotting_groupby_grp.setVisible(False)
+
+        # Colour by / Split by, in a popover rather than beside Group by. They
+        # are **decoration, not scope**: neither changes what a member is or
+        # moves a single number, so putting them in the scope zone would say
+        # they do. Group by earns its place there because it does.
+        #
+        # Hidden with the same rule and for the same reason as Group by: two
+        # combos whose only option is the status quo are two controls that do
+        # nothing.
+        from well_viewer.core.ui_helpers import make_popover_button
+
+        _dec_btn, _dec_panel, _dec_lay = make_popover_button("Decorate ▾", band)
+        _dec_btn.setToolTip("Colour and split the plot by a sample variable")
+        win._ctx.widgets.register("_plotting_decorate_btn", _dec_btn)
+        for _field, _name, _label in _DECORATION_CONTROLS:
+            _cb = win._ctx.widgets.register(_name, _QComboBox(
+                "Colour by" if _field == "colour_by_variable" else "Split by"))
+
+            def _on_decorate(_idx: int, field=_field, combo=_cb) -> None:
+                from well_viewer.core.group_by_controller import (
+                    set_decoration_variable,
+                )
+                with swallow("apply a plot decoration variable"):
+                    set_decoration_variable(win._ctx, field,
+                                            combo.currentData() or "")
+
+            _cb.currentIndexChanged.connect(_on_decorate)
+            _dec_lay.addWidget(_cb)
+        band.add_action(_dec_btn)
+        _dec_btn.setVisible(False)
+
         # Quick-edit for the active channel's ThreshFracOn (the per-channel
         # ON/OFF intensity threshold that drives the fraction-above- and
         # mean-above-threshold series). Editing here writes through the Cell
@@ -524,6 +588,15 @@ def build_centre(win, parent: QWidget) -> None:
             scatter_grp = getattr(win, "_plotting_scatter_grp", None)
             if scatter_grp is not None:
                 scatter_grp.setVisible(is_scatter)
+            # Decorate ▾ is shared band furniture, so it needs the same per-leaf
+            # answer the scatter group gets: only the tabs in
+            # ``group_by_controller.DECORATED_TABS`` read Colour by / Split by,
+            # and offering them elsewhere is a control that does nothing.
+            from well_viewer.core.group_by_controller import (
+                refresh_decoration_combos,
+            )
+            with swallow("re-evaluate the Decorate button for this tab"):
+                refresh_decoration_combos(win._ctx)
             # The Scatter page is built lazily, so the toggle can outlive a
             # window in which the feature's runtime hook does not exist yet.
             # Mirror whichever mode the page settled on rather than assuming

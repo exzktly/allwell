@@ -95,6 +95,34 @@ def _hooks(tree):
             yield f'variant="{args[1].value}"', args[1].value
 
 
+def _generated_names(tree):
+    """Names handed to a ``theme`` QSS generator, which styles them at runtime.
+
+    A rule can reach Qt without its selector ever appearing as text beside the
+    widget: ``theme.link_row_qss("EmptyStateEntry")`` returns the four rules for
+    that name, so the module's source carries the *name* and never the
+    ``#name`` selector this scan looks for. Text-matching alone therefore
+    reports a hook as unstyled when it is styled — and the fix for that must not
+    be to exempt the name, which would stop anyone noticing if the rule really
+    did go away.
+
+    Keyed on the shape rather than on one function: a call into ``theme`` whose
+    single string argument is the hook's own name is a generator being asked to
+    style it. What actually reaches Qt is asserted separately, by
+    ``tests/test_theme_roles_render.py``, which renders both sheets.
+    """
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        if getattr(node.func.value, "id", None) not in {"theme", "_theme"}:
+            continue
+        if not node.func.attr.endswith("qss"):
+            continue
+        if (len(node.args) == 1 and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)):
+            yield node.args[0].value
+
+
 def _offenders():
     theme = pytest.importorskip("theme")
     qss = theme.qss()
@@ -102,6 +130,7 @@ def _offenders():
     for path in _py_files():
         tree = parse_source(path)
         local = _string_literals(tree)
+        generated = set(_generated_names(tree))
         for selector, name in sorted(set(_hooks(tree))):
             if name in UNSTYLED_NAMES:
                 continue
@@ -109,6 +138,8 @@ def _offenders():
                 continue
             if any(selector in text for text in local):
                 continue  # styled by a stylesheet in its own module
+            if name in generated:
+                continue  # styled by a theme QSS generator in its own module
             out.append(f"{path.relative_to(REPO_ROOT)}: {selector}")
     return out
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 from well_viewer.data.data_loading import get_rows
 
 from well_viewer.domain.viewer_state import parse_rc
-from well_viewer.domain.selections_model import active_replicate_sets
+from well_viewer.domain.plot_members import plot_replicate_sets
 
 from dataclasses import dataclass
 
@@ -260,7 +260,7 @@ def cell_browser_source_wells(ctx) -> list[str]:
     if selections:
         wells: list[str] = []
         seen: set = set()
-        for rset in active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths):
+        for rset in plot_replicate_sets(ctx):
             for w in rset.wells:
                 if w in paths and w not in seen:
                     seen.add(w)

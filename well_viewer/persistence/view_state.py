@@ -162,6 +162,23 @@ def snapshot(ctx) -> dict:
         "line_order_rsets": [str(x) for x in (ctx.state.plot.line_order_rsets or [])],
         "line_order_wells": [str(x) for x in (ctx.state.plot.line_order_wells or [])],
         "focus_timepoint": ctx.state.plot.focus_timepoint,
+        # The three sample-variable band settings, in the cross-tab block
+        # because that is what they are — every plot pools through
+        # ``plot_replicate_sets``, so *Group by* decides what a member is on
+        # every page at once, and *Colour by* / *Split by* decorate every bar
+        # figure. Captured for the reason ``pool_replicates`` beside them is:
+        # **Group by changes what a bar means.** A saved figure grouped by dose
+        # that restores ungrouped comes back with different members, different
+        # means and a different n, under the same title and with nothing on it
+        # saying so — which is the substitution §7 forbids, arrived at through
+        # a gap in the snapshot rather than through a bug in the plot.
+        # Stored as the variable ids, which is what the state holds; a file
+        # whose variable has since been deleted restores to no grouping,
+        # exactly as ``refresh_group_by_combo`` and ``plot_replicate_sets``
+        # already agree to do for a live selection that goes stale.
+        "group_by_variable": str(ctx.state.plot.group_by_variable or ""),
+        "colour_by_variable": str(ctx.state.plot.colour_by_variable or ""),
+        "split_by_variable": str(ctx.state.plot.split_by_variable or ""),
         "fold_change": _snapshot_fold_change(ctx),
         "export_style_prefs": _nondefault_export_prefs(ctx),
         "export_axis_prefs": _snapshot_axis_prefs(ctx),
@@ -624,6 +641,14 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> list[str]:
         except Exception:
             failed.append("focus timepoint")
             swallowed()
+
+    for _key in ("group_by_variable", "colour_by_variable", "split_by_variable"):
+        if _key in state:
+            try:
+                setattr(ctx.state.plot, _key, str(state.get(_key) or ""))
+            except Exception:
+                failed.append(_key.replace("_", " "))
+                swallowed()
 
     if "use_fov_replicates" in state:
         # The FOV-spread toggle on Line Graphs / Bar Plots. Set the field, then

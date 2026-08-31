@@ -173,6 +173,15 @@ files this touches, green; the full lane not run" is the shape. Never let a
 failure you already know about go unmentioned because the summary reads better
 without it.
 
+**A run is evidence only for the tree it ran against.** A lane backgrounded
+while the work continues is measuring a tree that no longer exists by the time
+it prints its total, and four commits later that total is a number about
+nothing — I quoted one into a PR body before catching it. Guards in particular
+read the source from disk *during* the run, so a lane straddling an edit is not
+even internally consistent. Either hold off starting the lane until the last
+commit is in, or re-run it afterwards; and when reporting, say which commit the
+number belongs to.
+
 ### Waiting on a long run
 
 Slow-lane runs take minutes to hours, so they go in the background — and the
@@ -462,6 +471,18 @@ at the site *and* in the row — never silently dropped, because a dropped row i
 indistinguishable from a forgotten one, which is exactly the confusion this
 section exists to prevent.
 
+**Each finding is a hypothesis about the tree as it stood when it was written,
+and the tree has moved since.** Rows are worked over days while the branch keeps
+changing, including by the fixes to earlier rows. One row here read "this module
+has one importer and four functions with no user"; measured against the tree it
+had two importers, and blanking each public function in turn took twenty-four
+tests down between them. Two of its six claims were true and were fixed. So
+reproduce a finding before fixing it — the same rule §7.3 #3 applies to
+"did I break this?" — and when a row is part right, record what was measured
+alongside what was fixed. Writing "declined, the module has two importers" is
+worth more than a closed row, because the next reader can tell a finding that was
+answered from one that was waved away.
+
 ## 7. Diagnosing a wrong number
 
 A plot that draws the wrong value — or quietly draws nothing — is almost never a
@@ -735,6 +756,20 @@ Three of these are commands now. Run them instead of recalling them.
    measured nothing. It also reports *passed on the base*, which means the rule
    already held and the test is a hypothesis rather than a guard.
 
+   **Read the site count it prints against your own.** The proof measures the
+   *guard*, not only the code: a sweep that converted three sites, proved by a
+   guard that names two, has found a blind guard rather than an over-eager
+   sweep. That is exactly how the CSV-dialog guard was caught reading only the
+   string literals *inside* each call and walking past the one site that held
+   its filter in a module constant — the site that had actually shipped. Any
+   mismatch between the two numbers is a finding.
+
+   **It cannot prove a guard over code that is new on this branch.** The base
+   worktree has no such module, so it reports `NOT PROVEN (ImportError)` and has
+   measured nothing — twice in one session I reached for it anyway. Before
+   running it, ask whether the symbol the guard names exists on the base ref;
+   when it does not, the mutation goes on HEAD instead, per §7.7 #2.
+
    **That proof expires, so it cannot be a CI check.** Once the fix merges, the
    rule holds on the base and the script correctly reports "passed on the base"
    for ever after — a CI step doing this would go red the day it merged. The
@@ -772,12 +807,31 @@ Three of these are commands now. Run them instead of recalling them.
    again: source folder deleted, plate uploaded one well short, and the error
    blamed the filename schema. **Half-swept is worse than unswept**, because one
    function now holds two definitions of the same word and neither looks wrong.
+
+   **Find the remaining siblings by searching for the concept, not for the
+   symbol you just deleted.** Deleting a private helper and converting its
+   callers leaves nothing to grep for, so the sweep reports itself complete: the
+   CSV Save-As sweep converted the seven sites that called
+   `export/service._ask_save_csv` and stopped, and grepping for the *string*
+   `"CSV files ("` then found two more dialogs in two other features that had
+   never gone near that helper. Search for what the code does — the API call,
+   the literal, the shape — because the sites that most need converting are the
+   ones that never shared a name with the thing being replaced.
 6. **After a move, run `scripts/rename_sweep_check.sh <old> <new> [<old-dir>]`.**
    A path substitution leaves the bare basename in directory trees and layer
    diagrams, and leaves the sentence that now contradicts itself — §7.3 #6,
    broken again by exactly the mechanism it describes. The script runs both
    queries: the basename alone, and the old directory name within a few lines of
    the new symbol.
+
+   **A rename with no symbol in it needs the same sweep and has no script.**
+   When a function starts cycling over *lines* of wells rather than over wells,
+   its name, its module and its call sites can all be untouched while every
+   sentence describing it is now false. ARCHITECTURE went on saying `fill`
+   "cycles values over the wells in the order given" for the rest of the
+   session, in two separate rows, and only the final documentation pass caught
+   it. After changing what a function *means*, grep the docs for the old
+   concept word rather than for anything you edited.
 7. **Measure the thing you are about to name.** An unnamed divider was reported
    as "3 px of near-white, three times the intended weight" and that went into
    ARCHITECTURE. It is a **1 px** line inside a frame that reserves 3 px for it —
@@ -806,6 +860,18 @@ Three of these are commands now. Run them instead of recalling them.
     liveness test that fails when an entry stops describing a real violation. A
     colour allowlist justified by one file's icon-painter palette exempted every
     literal in that whole file.
+
+    **Needing an exemption is first a claim about where the code lives.** A
+    helper that reports which wells a variable grouping adds has to name the
+    pooling function every tab is forbidden to reach for, because comparing the
+    two poolings is its entire job — so it belongs in the module that owns the
+    seam, next to the substitution, rather than in the controller that prints
+    its sentence. Moving it made the exemption defensible and one line long.
+    Before widening a guard, ask whether the guard is telling you the code is
+    in the wrong place; when the answer really is "this site is entitled",
+    exempt it by function name and write the reason twice — at the site and in
+    the roster — because a bare name in an exemption list is indistinguishable
+    from one somebody added to make a failure go away.
 11. **Ruff's F821 is enforced, but it does not see everything.** Stripping an
     `app = ctx.window` bridge left `app` undefined in three functions and lint
     passed, because F821 was in the ignore list; it no longer is, and
@@ -939,7 +1005,123 @@ that would break it, then make that edit and watch a test fail. If no edit
 comes to mind, or the suite stays green, the feature is not tested — however
 many tests are passing.
 
-## 7.8 Debugging entry points
+## 7.8 My tests agree with me, which is why they pass
+
+Every section from §7.3 onward is a variation on "the thing you ran to prove the
+fix can itself be wrong", and I have gone on making the same mistake anyway —
+about ten times in one session, on the code I had just written each time. Not
+ten different mistakes. **One mistake with two faces**, and the reason it keeps
+winning is that in both faces the test is *green*, so nothing asks a second
+question.
+
+**Face one: the stub is mine, so it cannot disagree with me.** A
+`SimpleNamespace` ctx has exactly the attributes my code happens to read,
+because I added them when my code raised. It can therefore never catch the two
+things that matter most — that the *real* object has no such attribute, and
+that the real caller never runs this code at all.
+
+- The Response tab raised `TypeError` on **every real app construction from the
+  moment the package existed**: `build_plot_save_menu`'s required `cells_cb` was
+  never passed. About 130 of its own tests were green, because every one drove a
+  control through my stub and **not one called `build_response_tab`**.
+- `draw_response` called `apply_ax_style(ax)` against a three-argument function.
+  Invisible because my own fixture stubbed that helper.
+- A Recent Datasets test wrote `monkeypatch.setattr(..., raising=False)`, which
+  **created** the `_qsettings` attribute the shipped app does not have.
+
+**Face two: the assertion is weaker than the claim.** I assert a property that
+the broken implementation also satisfies, so the test passes both ways.
+
+- "The two colours differ" — true of the palette strategy I was replacing *and*
+  the one replacing it. Four mutations, including deleting the whole decoration
+  call, left the file green.
+- "`focus_timepoint` still reads 24.0" — on a fixture whose seed *was* 24.0, so
+  a tab that wrote the field wrote the same number back.
+- "The readout says `ringed`" — passed with `setWellRings` deleted.
+- "The module mentions the clause somewhere" — passed with three of four
+  surfaces silent.
+- `ResponseData(placed=3)` built by hand — deleting the line that fills `placed`
+  left the lane green.
+
+### The check, at the moment of writing the test
+
+Both faces die to one question, asked before the test is kept:
+
+> **Name the wrong implementation that still passes this.**
+
+If one comes to mind, the test is not finished. "The colours differ" → name it:
+*the palette strategy I just replaced*. "The control is offered" → *a combo
+connected to nothing*. Naming it takes seconds and is the whole of the fix.
+
+Three rules follow, and they are mechanical rather than a matter of remembering:
+
+1. **Assert the value, never a property of it.** Not "they differ" but "it is
+   `palette["C1"]`". Not "a sentence was drawn" but the sentence. A property is
+   satisfied by a set of implementations and only one of them is right.
+2. **Build the fixture so the right and wrong answers differ.** This is the one
+   I keep skipping. The batch collector inks members from the same
+   `WELL_COLORS` in member order, so with values assigned *in* member order the
+   decorated and undecorated figures are byte-identical — no assertion of any
+   strength could tell them apart. I had to assign the values *against* the
+   member order before the test could measure anything. Ask: *what does the
+   broken version produce here?* If the answer is "the same bytes", change the
+   fixture, not the assertion.
+
+   Two shapes of this keep recurring, and both feel like careful test-writing
+   at the time. **The fixture is more varied than reality**, so the collision
+   the defect is made of cannot occur in it: a test written to reject ids
+   minted from a fixed placeholder named its two variables `Dose` and
+   `Cell line`, which mint two *different* slot ids — while the editor creates
+   every variable in the application with the placeholder `Variable`. The test
+   passed against the exact code it was written to fail. Before building an
+   input, go and read what the caller actually passes; a realistic-looking
+   value is not the same thing as the real one, and where the real one is
+   uniform, variety in the fixture hides the bug. And **the fixture's ordering
+   makes two answers agree**: a fallback that says "when two members disagree,
+   use the parsed number" was tested with the labels in the order where "keep
+   whichever arrived first" produces that same number. Deleting the collision
+   check left it green. When a rule picks between candidates, order the
+   candidates so that every wrong rule picks something else.
+3. **One test per feature goes through the real constructor.** Not the seam I
+   just wrote — the entry point the app calls: `build_<feature>_tab`, the
+   registry hook, the real widget. Everything else may stay cheap and stubbed.
+   §7.6 #2 said this about controls; it is just as true of builders, and the
+   builder is worse, because `centre_view` **catches** a failing builder, logs
+   it, and drops the title from the pending map — so the tab renders as an empty
+   page and `test_drain_builds_all_centre_tabs` goes on passing.
+   `test_app_smoke.py::test_no_tab_builder_raised_while_draining` reads that log
+   instead and costs two seconds. It covers **centre pages**; Home's definition
+   editors build through a different path with a swallow of their own, and are
+   covered by `test_home_page.py::test_every_definition_tab_is_built_after_a_load`,
+   because `built[name] = True` is stamped only on success. Two guards, two
+   mechanisms, neither covering the other's half.
+
+   That last sentence is only accurate because writing this section caught me
+   getting it wrong. I first wrote "covers every tab", then widened the guard's
+   pattern to make that true, then — applying rule 2 above — broke a Home
+   sub-tab to see the widened guard catch it. **It did not.** The section's own
+   check, run against the section's own claim, one paragraph after writing it.
+   Which is the honest measure of how strong this habit is: knowing the rule is
+   not the same as applying it, and the only thing that reliably applies it is
+   building the case where right and wrong differ and *looking*.
+
+### What actually catches it, and what does not
+
+**Mutation catches it. Review and the lane do not.** Three times in one session
+a mutation either made a *failing* test pass or left everything green, and each
+time that was the only signal. A reviewer reading for contracts does not slow
+down at a plausible-looking assertion, and the fast lane cannot see a builder it
+never calls. So when §7.7 #2 says make the edit and watch a test fail: watch
+*which* test fails and *why*. A mutation that changes nothing has told you the
+test measures nothing — that is a finding, not a nuisance to work around.
+
+**And the lane you did not run is where this lives.** The fast lane never builds
+an app, so every defect above was invisible to the check that gates every push.
+The slow lane found the Response builder within one dispatch. Before calling a
+feature done, ask which lane would notice if it were completely broken — and if
+the answer is "none of the ones I ran", that is the work, not a formality.
+
+## 7.9 Debugging entry points
 
 - Widget you can't find: `grep -rn '_line_fig\b' well_viewer/ widgets/` — every
   Review widget is stored as `_<noun>`. Rail pages → `core/centre_view.py`;

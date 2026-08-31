@@ -361,6 +361,40 @@ _MODAL_CALLS = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _settings_go_to_a_scratch_file(tmp_path_factory, monkeypatch):
+    """No test writes the developer's real ``~/.config/AllWell/AllWellApp.conf``.
+
+    ``core/recent_datasets``' own module docstring says the store is written the
+    way it is precisely so no test mutates the machine it runs on — "a test that
+    mutates the machine it runs on is not a test anyone will run twice". It did
+    anyway: every full-app load test reaches ``_remember_if_it_loaded``, and a
+    reviewer found ten entries in the real file after one run, enough to evict a
+    developer's actual history through the ten-entry cap.
+
+    Patched at ``core.app_settings.app_settings``, which that module calls the
+    one door onto this store. ``QSettings.setPath`` was tried first and does not
+    hold: with the default format already resolved, a full-app run still wrote
+    the real path — measured, not assumed. Patching the door is also what the
+    one broken test in this area got wrong in the other direction, aiming its
+    stub at ``ctx.window._qsettings``, which nothing reads.
+
+    A fresh ``QSettings`` per test, so a store written by one test is not read
+    by the next — the isolation the ``recent_datasets`` tests build by hand, now
+    true of every test including the full-app ones.
+    """
+    from PySide6.QtCore import QSettings
+
+    from well_viewer.core import app_settings as app_settings_module
+
+    scratch = tmp_path_factory.mktemp("qsettings") / "AllWellApp.ini"
+    monkeypatch.setattr(
+        app_settings_module, "app_settings",
+        lambda: QSettings(str(scratch), QSettings.IniFormat),
+    )
+    yield scratch
+
+
 class ModalDialogInTest(AssertionError):
     """A test reached a modal dialog. See the note above ``_MODAL_CALLS``."""
 

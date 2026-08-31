@@ -78,13 +78,12 @@ _TP_LB_MIN_H = 120
 # Sibling-feature ctx forms reached through core.lazy proxies — a call, not an
 # import statement, so no module-load cycle and no deferred-import-budget hit.
 from well_viewer.domain.numeric import is_number
-from well_viewer.domain.selections_model import replicate_sets_loaded
 
 
 def _rep_sets_loaded(ctx):
     """All rep-sets with >=1 loaded well (hidden included), from typed state."""
-    return replicate_sets_loaded(ctx.state.selection.selections,
-                                 ctx.state.dataset.well_paths)
+    from well_viewer.domain.plot_members import plot_replicate_sets_loaded
+    return plot_replicate_sets_loaded(ctx)
 
 
 _col_for_scatter_axis = _lazy("well_viewer.features.scatter.controller", "col_for_scatter_axis")

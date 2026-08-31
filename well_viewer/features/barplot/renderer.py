@@ -10,7 +10,9 @@ from __future__ import annotations
 from well_viewer.features.barplot.controller import refresh_bar_layout_btn_state
 from well_viewer.features.barplot.collect import _bar_debug, bar_err_settings, collect_bar_items_for_app
 
-from well_viewer.domain.selections_model import (color_for_replicate_set, color_for_well, well_display_label, active_replicate_sets)
+from well_viewer.domain.plot_members import plot_replicate_sets
+
+from well_viewer.domain.selections_model import (color_for_replicate_set, color_for_well, well_display_label)
 from well_viewer.domain.bar_colors import apply_bar_color_mode, mono_bar_color
 from well_viewer.core.channel_state_controller import get_all_fluor_gates, on_cutoff_for_column
 from well_viewer.core.empty_state_copy import NO_DATASET_MESSAGE
@@ -846,8 +848,7 @@ def _match_pairs_to_bars(ctx, items, pairwise, *, xs, rec_tp, val_attr,
     # Statistics group and the bar's replicate set are named differently.
     wells_to_key: dict[frozenset, str] = {}
     rset_names: set[str] = set()
-    for rset in active_replicate_sets(ctx.state.selection.selections,
-                                      ctx.state.dataset.well_paths):
+    for rset in plot_replicate_sets(ctx):
         fw = frozenset(getattr(rset, "wells", []) or [])
         if fw:
             wells_to_key.setdefault(fw, rset.name)
@@ -1179,7 +1180,7 @@ def redraw_bars(ctx) -> None:
         ctx, ctx.state.channel.active_val_col,
         channel=ctx.state.channel.active_channel)
 
-    active_rsets = active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    active_rsets = plot_replicate_sets(ctx)
     # Keep the Display-popover toggles (notably "Pool Replicates", hidden until
     # replicate sets exist) in sync on every redraw — covers the case where the
     # user just created a replicate set, which otherwise never refreshed the

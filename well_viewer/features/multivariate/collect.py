@@ -22,7 +22,8 @@ import numpy as np
 from well_viewer.data.data_loading import df_included_mask, resolve_value_series, get_rows
 from well_viewer.domain.metric_registry import METRIC_BY_KEY
 from well_viewer.domain.viewer_state import parse_rc
-from well_viewer.domain.selections_model import color_for_replicate_set, color_for_well, active_replicate_sets
+from well_viewer.domain.plot_members import plot_replicate_sets
+from well_viewer.domain.selections_model import color_for_replicate_set, color_for_well
 from well_viewer.domain.tp_match import tp_close_mask
 
 _logger = logging.getLogger(__name__)
@@ -135,8 +136,7 @@ def collect_feature_matrix(
         well_labels.extend([well_label] * sel.size)
         tp_values.extend(tp[sel].tolist())
 
-    active_rsets = active_replicate_sets(
-        ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    active_rsets = plot_replicate_sets(ctx)
     if active_rsets:
         for rset in active_rsets:
             group_name = rset.name

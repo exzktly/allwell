@@ -53,7 +53,7 @@ from well_viewer.domain.gating_state import (
     resolve_gate_key,
 )
 from well_viewer.domain.metric_registry import channel_supports_smfish
-from well_viewer.domain.selections_model import active_replicate_sets
+from well_viewer.domain.plot_members import plot_replicate_sets
 from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.features.home.cell_gating.gating_compute import (
     _cell_gating_first_frame_rows,
@@ -1597,8 +1597,7 @@ def _cell_gating_autofill_opt_range(ctx) -> None:
 
 
 def _cell_gating_source_wells(ctx) -> list[str]:
-    active_rsets = active_replicate_sets(
-        ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    active_rsets = plot_replicate_sets(ctx)
 
     if active_rsets:
         seen: set[str] = set()

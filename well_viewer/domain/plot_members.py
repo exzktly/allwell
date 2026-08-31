@@ -29,8 +29,78 @@ same indirection ``core/scope_registry.py`` uses for redraw callables.
 from __future__ import annotations
 
 from well_viewer.domain.plot_order import apply_order
-from well_viewer.domain.selections_model import active_replicate_sets
+from well_viewer.domain.selections_model import (
+    active_replicate_sets, replicate_sets_loaded,
+)
 from well_viewer.domain.viewer_state import parse_rc
+
+
+def plot_replicate_sets(ctx):
+    """The sets a plot pools its wells into — **the one answer for every tab**.
+
+    Normally the user's own visible replicate sets. When
+    ``ctx.state.plot.group_by_variable`` names a sample variable, one set per
+    value of it instead, pooling the wells that hold that value, in the
+    variable's own order.
+
+    **Why every tab goes through here.** Grouping by a variable is not a Bar-tab
+    setting: if the Bar tab pooled by dose while Statistics still pooled by the
+    user's groups, the two would describe the same plate differently and neither
+    would say so. So the substitution happens once, at the point every view asks
+    the question, and `tests/test_group_by_variable.py` fails on a caller that
+    reaches past it to ``active_replicate_sets`` with a ctx in hand.
+
+    Grouping by a variable does **not** invent a third member-key shape.
+    Pooling the wells that share a dose is structurally what a replicate set
+    already is, so every collector's existing grouped branch is reused — which
+    is what keeps fifty-odd call sites and every saved per-sample control
+    reference working.
+    """
+    variable_id = _group_by_variable(ctx)
+    if variable_id:
+        sets = variable_replicate_sets(ctx, variable_id)
+        if sets:
+            return sets
+        # A variable that groups nothing — every well unassigned, or the
+        # variable deleted while it was selected — falls back to the user's own
+        # sets rather than emptying every plot in the app. The Variables tab is
+        # where that shortfall is reported; a blank Bar tab three clicks away is
+        # not an explanation.
+    return active_replicate_sets(
+        ctx.state.selection.selections, ctx.state.dataset.well_paths or {})
+
+
+def plot_replicate_sets_loaded(ctx):
+    """:func:`plot_replicate_sets`, but including sets the user has hidden.
+
+    The Heat Map's rep-set average and Batch Export's group roster need the
+    whole pool rather than the visible traces. **Under a variable grouping the
+    two are the same list** — a value has no hidden flag — which is exactly why
+    this must exist rather than callers reaching for ``replicate_sets_loaded``:
+    left unconverted, four sites kept pooling by the user's groups while their
+    neighbours regrouped, and the Heat Map averaged the whole plate into every
+    dose cell while labelling them all with the first group's name.
+    """
+    variable_id = _group_by_variable(ctx)
+    if variable_id:
+        sets = variable_replicate_sets(ctx, variable_id)
+        if sets:
+            return sets
+    return replicate_sets_loaded(
+        ctx.state.selection.selections, ctx.state.dataset.well_paths or {})
+
+
+def _group_by_variable(ctx) -> str:
+    """The chosen grouping variable, tolerating a context with no plot slice.
+
+    ``ctx.state.plot`` is absent on the headless export and CSV paths, which
+    build a context holding only the slices they read. A missing slice means
+    "no grouping chosen"; ``tests/test_group_by_variable.py`` pins that the real
+    ``PlotState`` always carries the field, so the tolerance cannot hide a
+    production context that silently stopped honouring it.
+    """
+    return str(getattr(getattr(ctx.state, "plot", None),
+                       "group_by_variable", "") or "")
 
 
 def bar_member_keys(ctx) -> list[str]:
@@ -45,8 +115,7 @@ def bar_member_keys(ctx) -> list[str]:
     * no replicate sets — the selected wells, in drag order.
     """
     well_paths = ctx.state.dataset.well_paths or {}
-    active_rsets = active_replicate_sets(
-        ctx.state.selection.selections, well_paths)
+    active_rsets = plot_replicate_sets(ctx)
     pool_reps = bool(getattr(ctx.state.plot, "bar_pool_replicates", True))
     ordered_keys = list(ctx.runtime.barplot.current_keys() or [])
 
@@ -74,8 +143,7 @@ def bar_member_keys(ctx) -> list[str]:
 def line_member_keys(ctx) -> list[str]:
     """The ``LineSeries.key`` values ``collect_line_series`` will emit."""
     well_paths = ctx.state.dataset.well_paths or {}
-    active_rsets = active_replicate_sets(
-        ctx.state.selection.selections, well_paths)
+    active_rsets = plot_replicate_sets(ctx)
     if active_rsets:
         ordered = apply_order(
             active_rsets,
@@ -92,12 +160,25 @@ def line_member_keys(ctx) -> list[str]:
         selected, list(ctx.state.plot.line_order_wells or []), key=lambda x: x)
 
 
+def response_member_keys(ctx) -> list[str]:
+    """The members Response Curves draws, which are always replicate sets.
+
+    No fallback to the selected wells, unlike the bar and line lists. A point
+    on a response curve is a member at a dose, and a loose well has no dose
+    until it is in something the plate annotates; the tab says so in its empty
+    state rather than drawing a curve through wells nobody grouped.
+    """
+    return [rset.name for rset in plot_replicate_sets(ctx)]
+
+
 def plotted_member_keys(ctx, scope: str) -> list[str]:
-    """Dispatch on the fold-change scope name (``"bar"`` / ``"line"``)."""
+    """Dispatch on the fold-change scope name (``"bar"`` / ``"line"`` / ``"response"``)."""
     if scope == "bar":
         return bar_member_keys(ctx)
     if scope == "line":
         return line_member_keys(ctx)
+    if scope == "response":
+        return response_member_keys(ctx)
     return []
 
 
@@ -116,10 +197,7 @@ def member_wells(ctx, scope: str) -> dict[str, list[str]]:
     """
     keys = plotted_member_keys(ctx, scope)
     well_paths = ctx.state.dataset.well_paths or {}
-    by_name = {
-        r.name: r
-        for r in active_replicate_sets(ctx.state.selection.selections, well_paths)
-    }
+    by_name = {r.name: r for r in plot_replicate_sets(ctx)}
     grouped = _keys_are_replicate_sets(ctx, scope)
     out: dict[str, list[str]] = {}
     for key in keys:
@@ -131,14 +209,28 @@ def member_wells(ctx, scope: str) -> dict[str, list[str]]:
     return out
 
 
+#: The scopes whose keys are replicate-set names whenever any set is active.
+#: Named rather than tested with ``scope == "line"``: that spelling answered
+#: *False* for every scope it had not heard of, so a third pooled tab would
+#: have had its controls resolved against well tokens — silently, since a key
+#: that resolves to no well simply loses its denominator.
+_ALWAYS_POOLED_SCOPES = frozenset({"line", "response"})
+
+
 def _keys_are_replicate_sets(ctx, scope: str) -> bool:
-    """Whether *scope*'s keys name replicate sets rather than wells."""
-    well_paths = ctx.state.dataset.well_paths or {}
-    if not active_replicate_sets(ctx.state.selection.selections, well_paths):
+    """Whether *scope*'s keys name replicate sets rather than wells.
+
+    Bar is the only scope that can flip: ``bar_pool_replicates`` turns its bars
+    into wells. Line and Response always pool — Response because a dose is a
+    property of a condition, and an un-pooled response curve would draw one
+    point per well at the same x, which is a scatter of replicates rather than
+    a curve.
+    """
+    if not plot_replicate_sets(ctx):
         return False
     if scope == "bar":
         return bool(getattr(ctx.state.plot, "bar_pool_replicates", True))
-    return scope == "line"
+    return scope in _ALWAYS_POOLED_SCOPES
 
 
 def member_replicate_sets(ctx) -> dict[str, str]:
@@ -149,9 +241,147 @@ def member_replicate_sets(ctx) -> dict[str, str]:
     against the sets would otherwise be silently orphaned by a toggle that has
     nothing to do with fold change.
     """
-    well_paths = ctx.state.dataset.well_paths or {}
     out: dict[str, str] = {}
-    for rset in active_replicate_sets(ctx.state.selection.selections, well_paths):
+    # Through the seam, not ``active_replicate_sets``: with a variable grouping
+    # active and pooling switched off, a well was inheriting its *user group's*
+    # control while the plot pooled by dose — two definitions of "the set this
+    # well belongs to" in one figure, and the outcome vocabulary reported OK.
+    for rset in plot_replicate_sets(ctx):
         for w in rset.wells:
             out.setdefault(w, rset.name)
     return out
+
+
+# ``member_variable_values`` answers "what value does this member hold, in
+# whatever key space the plot is in". It is defined below and is live —
+# ``domain/variable_series.member_inks`` and ``member_bands`` are its callers,
+# which is Colour-by and Split-by reading it exactly as planned.
+#
+# This comment used to say it had been *removed*, alongside a
+# ``split_members_by_variable`` that was never written at all; it survived the
+# commit that brought the function back sixty lines below it. The rule it
+# defers to is unchanged and worth keeping: ``sample_variables.roll_up`` owns
+# the "every well must agree" decision and is tested there, so nothing here
+# re-derives it.
+
+
+def variable_replicate_sets(ctx, variable_id: str):
+    """One ``ReplicateSet`` per value of *variable_id*, in the value order.
+
+    **Grouping a plot by a variable is not a new key space.** Pooling the wells
+    that share a dose into one member is structurally what a replicate set
+    already is, so the plot's grouped branch is reused rather than a third
+    member shape being introduced into every collector — which would have
+    touched fifty-odd call sites and orphaned every saved per-sample control
+    reference.
+
+    A well with no value for the variable joins no set, so it is not drawn. That
+    is the same refusal :func:`member_variable_values` makes and for the same
+    reason; the count of what was left out is the caller's to report.
+    """
+    from well_viewer.domain.batch_models import ReplicateSet
+
+    vset = getattr(ctx.state.selection, "variables", None)
+    variable = vset.by_id(variable_id) if vset is not None else None
+    if variable is None:
+        return []
+    well_paths = ctx.state.dataset.well_paths or {}
+    out = []
+    for value in variable.values:
+        wells = sorted(
+            (w for w in well_paths
+             if vset.value_id_for(variable_id, w) == value.id),
+            key=parse_rc,
+        )
+        if wells:
+            # ``name_is_verbatim``: these labels are the user's own, so the
+            # auto-generated-name heuristic must not rewrite a dose of "10"
+            # into the tokens of the wells that received it.
+            out.append(ReplicateSet(variable.display_label(value.id), wells,
+                                    name_is_verbatim=True))
+    return out
+
+
+def variable_values_for(vset, variable_id: str, wells_by_key) -> dict:
+    """``member key -> value id / MIXED / None``, from an explicit key space.
+
+    The rule, separated from the question of *which* members are drawn. Two
+    surfaces ask it over different key spaces — the plotting tabs over
+    ``member_wells(ctx, scope)``, Batch Export over a ``BarGroup``'s own
+    members, whose keys are the group's and not the tab's — and the one thing
+    that must not differ between them is what a member's value *is*. Sharing
+    the rule and letting each provide its own key space is what keeps a batch
+    figure and the tab it mirrors from disagreeing about a well.
+    """
+    from well_viewer.domain.sample_variables import roll_up
+
+    if vset is None or not variable_id or vset.by_id(variable_id) is None:
+        return {}
+    return {key: roll_up(vset, variable_id, wells) if wells else None
+            for key, wells in (wells_by_key or {}).items()}
+
+
+def member_variable_values(ctx, scope: str, variable_id: str) -> dict:
+    """``member key -> value id``, or ``MIXED``, or ``None``, for one scope.
+
+    The single answer to "what is this member, in terms of this variable" — the
+    question *Colour by* and *Split by* both ask, and the one a renderer must
+    not answer for itself. It is built on :func:`member_wells`, so the key space
+    is whatever that scope actually draws: replicate-set names where the scope
+    pools, well tokens where it does not, and the two are never guessed at from
+    the key's spelling (``A01`` is both a well and a set someone named ``A01``).
+
+    Three outcomes, not two, because :func:`sample_variables.roll_up` has three
+    and collapsing them here would undo the reason it has them. ``MIXED`` is a
+    member whose wells disagree — a real state, reached by adding a well to a
+    group after filling — and ``None`` is a member holding a well with no value
+    at all. A caller that painted both the same colour would say two different
+    things with one ink, and one of them ("you filled these inconsistently") is
+    a mistake the user can fix while the other is not.
+    """
+    return variable_values_for(
+        getattr(ctx.state.selection, "variables", None), variable_id,
+        member_wells(ctx, scope))
+
+
+def wells_the_grouping_adds(ctx, variable_id: str) -> list[str]:
+    """Wells a variable grouping draws that the plate selection does not hold.
+
+    **The addition, not only the subtraction.** With no replicate sets defined
+    the plate's selection is what drives every plot, and grouping by a variable
+    ignores it: it pools every *loaded* well holding a value. One well
+    selected, four drawn. That is the defensible reading of "group the plate by
+    this variable", but it is a substitution the user did not ask for on that
+    click, so the sentence over the figure has to name it.
+
+    Empty unless the selection is what would otherwise drive the plot — with
+    visible replicate sets defined, ``selected_wells`` is not what is plotted
+    and comparing against it would report a difference nobody made. Asking that
+    question is why this lives here beside :func:`plot_replicate_sets` rather
+    than in the controller that prints the sentence: it has to compare the two
+    poolings, so it is one of the few callers entitled to name the one the
+    substitution replaced.
+    """
+    from well_viewer.domain.selections_model import active_replicate_sets
+
+    selected = set(getattr(ctx.state.selection, "selected_wells", None) or ())
+    if not selected:
+        return []
+    if active_replicate_sets(ctx.state.selection.selections,
+                             ctx.state.dataset.well_paths or {}):
+        return []
+    drawn: set[str] = set()
+    for rset in variable_replicate_sets(ctx, variable_id):
+        drawn.update(getattr(rset, "wells", ()) or ())
+    return sorted(drawn - selected)
+
+
+def wells_without_variable(ctx, variable_id: str) -> list[str]:
+    """The dataset's wells that :func:`variable_replicate_sets` leaves out."""
+    from well_viewer.domain.sample_variables import unassigned_wells
+
+    vset = getattr(ctx.state.selection, "variables", None)
+    if vset is None or vset.by_id(variable_id) is None:
+        return []
+    return unassigned_wells(vset, variable_id,
+                            (ctx.state.dataset.well_paths or {}))

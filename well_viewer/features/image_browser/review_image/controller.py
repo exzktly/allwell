@@ -30,7 +30,7 @@ from well_viewer.data.curation import apply_curation_to_cache
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 from well_viewer.core.ui_helpers import norm_timepoint
 # The FOV / timepoint sort orders and the row fetch live in collect.py now.
-from well_viewer.domain.selections_model import active_replicate_sets
+from well_viewer.domain.plot_members import plot_replicate_sets
 from well_viewer.domain.viewer_state import parse_rc
 import numpy as _np
 
@@ -657,8 +657,7 @@ def _refresh_review_csv_impl(ctx) -> None:
     # branch and left Review CSV empty whenever groups were defined.
     if not sels and ctx.state.selection.selections:
         seen: set = set()
-        for rset in active_replicate_sets(
-                ctx.state.selection.selections, ctx.state.dataset.well_paths):
+        for rset in plot_replicate_sets(ctx):
             for well in rset.wells:
                 if well in ctx.state.dataset.well_paths and well not in seen:
                     seen.add(well)

@@ -3012,3 +3012,535 @@ def test_text_decode_guard_catches_a_locale_decode(tmp_path, monkeypatch, shape)
 def test_text_decode_guard_clears_a_named_codec(tmp_path, monkeypatch, shape):
     good = _write(tmp_path, "good_decode.py", shape)
     assert _run_scan(monkeypatch, _DECODE_GUARD, _DECODE_TEST, [good]) is None
+
+
+# ── the one door onto a well's rows ─────────────────────────────────────────
+#
+# Three spellings, because the first version of this guard matched on the call
+# name alone and the aliased import walked straight through it — the same shape
+# as the aliased `QFrame` above, which is why CLAUDE.md §7.5 names it.
+
+def _door_offenders(tmp_path, name, body):
+    from tests.test_parquet_cache import load_well_csv_call_sites
+
+    path = _write(tmp_path, name, body)
+    return load_well_csv_call_sites([(path, parse_source(path))])
+
+
+@pytest.mark.parametrize("shape", [
+    "from well_viewer.data.data_loading import load_well_csv\n"
+    "def f(p):\n    return load_well_csv(p)\n",
+
+    "from well_viewer.data import data_loading as dl\n"
+    "def f(p):\n    return dl.load_well_csv(p)\n",
+
+    "from well_viewer.data.data_loading import load_well_csv as _read\n"
+    "def f(p):\n    return _read(p)\n",
+])
+def test_the_door_guard_catches_every_spelling_of_the_bypass(tmp_path, shape):
+    assert _door_offenders(tmp_path, "bad_door.py", shape), (
+        "a call site that skips the Parquet cache went unseen; it parses the "
+        "CSV on every load and, worse, could cache an already-projected frame"
+    )
+
+
+def test_the_door_guard_clears_the_sanctioned_call(tmp_path):
+    """Going through the door is what the rule asks for, and an unrelated
+    function whose name merely ends the same way is not a violation."""
+    good = ("from well_viewer.data.data_loading import read_well_frame\n"
+            "def f(p):\n    return read_well_frame(p)\n"
+            "def g(p):\n    return maybe_load_well_csv_later(p)\n")
+    assert _door_offenders(tmp_path, "good_door.py", good) == []
+
+
+def test_the_door_guard_does_not_fire_on_an_unused_alias(tmp_path):
+    """An import with no call is a lint problem, not a bypass — and a guard
+    that reported it would be reporting something ruff already owns."""
+    body = ("from well_viewer.data.data_loading import load_well_csv as _read\n"
+            "def f(p):\n    return p\n")
+    assert _door_offenders(tmp_path, "unused_alias.py", body) == []
+
+
+# ── a short artifact says it is short ───────────────────────────────────────
+#
+# The pairing guard: every function that appends the scale-bar clause must
+# append the truncated-inventory clause too. The shape it exists for is the one
+# that shipped — four surfaces reporting a refused bar, one of them reporting a
+# short image list — because a line that names one shortfall and stays silent
+# about the other convinces the reader it is telling them what is wrong.
+
+_SHORT_ARTIFACT_GUARD = "tests.test_both_shortfalls_travel_together"
+
+_BOTH = ('def save(ctx):\n'
+         '    ctx.notify.set_status("saved" + partial_scan_clause(ctx)\n'
+         '                          + scale_bar_refusal_clause(ctx))\n')
+_BAR_ONLY = ('def save(ctx):\n'
+             '    ctx.notify.set_status("saved" + scale_bar_refusal_clause(ctx))\n')
+_PARTIAL_ONLY = ('def save(ctx):\n'
+                 '    ctx.notify.set_status("saved" + partial_scan_clause(ctx))\n')
+_NEITHER = 'def save(ctx):\n    ctx.notify.set_status("saved")\n'
+
+
+def _run_pairing_guard(monkeypatch, tmp_path, body, *, surfaces=("surface.py::save",)):
+    module = importlib.import_module(_SHORT_ARTIFACT_GUARD)
+    path = _write(tmp_path, "surface.py", body)
+    monkeypatch.setattr(module, "_MODULES", (str(path),))
+    monkeypatch.setattr(module, "_SURFACES",
+                        frozenset(f"{path}::{s.split('::')[1]}" for s in surfaces))
+    try:
+        module.test_the_two_clauses_travel_together()
+        module.test_every_export_surface_is_covered()
+    except AssertionError as exc:
+        return exc
+    return None
+
+
+def test_the_pairing_guard_catches_a_surface_reporting_only_the_bar(
+        tmp_path, monkeypatch):
+    """The shape that actually shipped: four surfaces, one clause between them."""
+    exc = _run_pairing_guard(monkeypatch, tmp_path, _BAR_ONLY)
+    assert exc is not None, "a half-reporting surface went uncaught"
+    assert "save" in str(exc)
+
+
+def test_the_pairing_guard_catches_the_mirror_image(tmp_path, monkeypatch):
+    """The other direction too. A guard that only understands one order would
+    pass the day someone drops the bar clause instead."""
+    exc = _run_pairing_guard(monkeypatch, tmp_path, _PARTIAL_ONLY)
+    assert exc is not None, "a surface reporting only the short list went uncaught"
+
+
+def test_the_pairing_guard_clears_a_surface_reporting_both(tmp_path, monkeypatch):
+    assert _run_pairing_guard(monkeypatch, tmp_path, _BOTH) is None
+
+
+def test_the_pairing_guard_notices_a_roster_entry_that_reports_nothing(
+        tmp_path, monkeypatch):
+    """A named surface that has stopped reporting is indistinguishable from one
+    that never needed to — which is how the original asymmetry survived."""
+    exc = _run_pairing_guard(monkeypatch, tmp_path, _NEITHER)
+    assert exc is not None, "a surface that reports neither clause went uncaught"
+
+
+# ── one CSV save dialog ─────────────────────────────────────────────────────
+
+_CSV_GUARD = "tests.test_one_csv_save_dialog"
+
+_INLINE_FILTER = (
+    'def export(ctx):\n'
+    '    out, _ = QFileDialog.getSaveFileName(\n'
+    '        ctx.window, "Export", "x.csv", "CSV files (*.csv)")\n'
+)
+#: The shape that shipped, and the one the first version of the guard walked
+#: past: the filter is a module constant, so no `.csv` literal appears inside
+#: the call at all.
+_CONSTANT_FILTER = (
+    '_CSV_FILTER = "CSV files (*.csv);;All files (*.*)"\n'
+    'def export(ctx):\n'
+    '    out, _ = QFileDialog.getSaveFileName(\n'
+    '        ctx.window, "Export", "x", _CSV_FILTER)\n'
+)
+_KEYWORD_FILTER = (
+    'def export(ctx):\n'
+    '    out, _ = QFileDialog.getSaveFileName(\n'
+    '        ctx.window, "Export", "x", filter="CSV files (*.csv)")\n'
+)
+#: A save dialog for something that is not a CSV. The rule is about one CSV
+#: picker, not about banning `getSaveFileName`, and a guard that fired here
+#: would be unusable.
+_OTHER_FORMAT = (
+    'def export(ctx):\n'
+    '    out, _ = QFileDialog.getSaveFileName(\n'
+    '        ctx.window, "Export", "x.png", "PNG (*.png)")\n'
+)
+_THROUGH_THE_HELPER = (
+    'def export(ctx):\n'
+    '    path = ask_save_csv(ctx, "Export", "x.csv")\n'
+)
+
+
+def _run_csv_guard(monkeypatch, tmp_path, body, name="controller.py"):
+    return _run_scan(monkeypatch, _CSV_GUARD,
+                     "test_only_csv_export_opens_a_csv_save_dialog",
+                     [_write(tmp_path, name, body)])
+
+
+def test_the_csv_dialog_guard_catches_an_inline_filter(tmp_path, monkeypatch):
+    exc = _run_csv_guard(monkeypatch, tmp_path, _INLINE_FILTER)
+    assert exc is not None, "a second CSV Save-As went uncaught"
+
+
+def test_the_csv_dialog_guard_catches_a_filter_held_in_a_constant(
+        tmp_path, monkeypatch):
+    """The site that shipped. A guard reading only the literals inside the call
+    found the two that inlined their filter and reported the sweep complete."""
+    exc = _run_csv_guard(monkeypatch, tmp_path, _CONSTANT_FILTER)
+    assert exc is not None, "a constant-held CSV filter went uncaught"
+
+
+def test_the_csv_dialog_guard_catches_a_keyword_filter(tmp_path, monkeypatch):
+    exc = _run_csv_guard(monkeypatch, tmp_path, _KEYWORD_FILTER)
+    assert exc is not None, "a keyword-argument CSV filter went uncaught"
+
+
+def test_the_csv_dialog_guard_leaves_other_formats_alone(tmp_path, monkeypatch):
+    assert _run_csv_guard(monkeypatch, tmp_path, _OTHER_FORMAT) is None
+
+
+def test_the_csv_dialog_guard_clears_a_caller_using_the_helper(
+        tmp_path, monkeypatch):
+    assert _run_csv_guard(monkeypatch, tmp_path, _THROUGH_THE_HELPER) is None
+
+
+# ── the group-by seam ───────────────────────────────────────────────────────
+
+_SEAM_GUARD = "tests.test_group_by_variable"
+
+_RAW_POOLING = (
+    'from well_viewer.domain.selections_model import active_replicate_sets\n'
+    'def redraw(ctx):\n'
+    '    return active_replicate_sets(ctx.state.selection.selections, {})\n'
+)
+#: The spelling that genuinely shipped: the import is aliased, so a guard
+#: matching the imported name misses the call.
+_ALIASED_POOLING = (
+    'from well_viewer.domain.selections_model import (\n'
+    '    active_replicate_sets as _pool)\n'
+    'def redraw(ctx):\n'
+    '    return _pool(ctx.state.selection.selections, {})\n'
+)
+#: The sibling that was missed by the first sweep. A value has no hidden flag,
+#: so under a variable grouping the two lists are the same — which is exactly
+#: why a caller reaching for this one keeps pooling by the user's groups.
+_LOADED_POOLING = (
+    'from well_viewer.domain.selections_model import replicate_sets_loaded\n'
+    'def redraw(ctx):\n'
+    '    return replicate_sets_loaded(ctx.state.selection.selections, {})\n'
+)
+_THROUGH_THE_SEAM = (
+    'from well_viewer.domain.plot_members import plot_replicate_sets\n'
+    'def redraw(ctx):\n'
+    '    return plot_replicate_sets(ctx)\n'
+)
+#: The seam's own body, which must be allowed to name what it replaces.
+_THE_SEAM_ITSELF = (
+    'from well_viewer.domain.selections_model import active_replicate_sets\n'
+    'def plot_replicate_sets(ctx):\n'
+    '    return active_replicate_sets(ctx.state.selection.selections, {})\n'
+)
+
+
+def _run_seam_guard(monkeypatch, tmp_path, body, name="controller.py"):
+    return _run_scan(monkeypatch, _SEAM_GUARD,
+                     "test_no_tab_reaches_past_the_seam_for_its_grouping",
+                     [_write(tmp_path, name, body)])
+
+
+def test_the_seam_guard_catches_a_tab_pooling_the_old_way(tmp_path, monkeypatch):
+    assert _run_seam_guard(monkeypatch, tmp_path, _RAW_POOLING) is not None
+
+
+def test_the_seam_guard_catches_an_aliased_import(tmp_path, monkeypatch):
+    """One tab really did alias it. Matching the call rather than the import is
+    what makes that visible."""
+    assert _run_seam_guard(monkeypatch, tmp_path, _ALIASED_POOLING) is not None
+
+
+def test_the_seam_guard_catches_the_hidden_including_sibling(
+        tmp_path, monkeypatch):
+    """The first sweep converted every ``active_replicate_sets`` site and left
+    four ``replicate_sets_loaded`` ones, and the Heat Map then averaged the
+    whole plate into every dose cell."""
+    assert _run_seam_guard(monkeypatch, tmp_path, _LOADED_POOLING) is not None
+
+
+def test_the_seam_guard_clears_a_tab_going_through_the_seam(tmp_path, monkeypatch):
+    assert _run_seam_guard(monkeypatch, tmp_path, _THROUGH_THE_SEAM) is None
+
+
+def test_the_seam_guard_lets_the_seam_name_what_it_replaces(tmp_path, monkeypatch):
+    """The exemption is per *function*, not per file — a file-level one is what
+    let ``member_replicate_sets`` keep the old pooling beside the substitution
+    that replaced it."""
+    assert _run_seam_guard(monkeypatch, tmp_path, _THE_SEAM_ITSELF) is None
+
+
+# ── a test may not invent an app attribute ──────────────────────────────────
+
+_INVENTED_GUARD = "tests.test_no_invented_app_attributes"
+
+_INVENTS_ON_THE_APP = (
+    'def test_x(loaded_app, monkeypatch):\n'
+    '    monkeypatch.setattr(loaded_app, "_qsettings", None, raising=False)\n'
+)
+#: The same invention one dot further in. The guard's first version matched
+#: only a bare Name and walked straight past this.
+_INVENTS_ONE_DOT_IN = (
+    'def test_x(loaded_app, monkeypatch):\n'
+    '    monkeypatch.setattr(loaded_app.ctx.window, "_qsettings", None,\n'
+    '                        raising=False)\n'
+)
+_PATCHES_A_MODULE = (
+    'def test_x(monkeypatch):\n'
+    '    monkeypatch.setattr(some_module, "_hook", None, raising=False)\n'
+)
+_PATCHES_THE_APP_WITHOUT_THE_FLAG = (
+    'def test_x(loaded_app, monkeypatch):\n'
+    '    monkeypatch.setattr(loaded_app, "_notebook", None)\n'
+)
+
+
+def _run_invented_guard(monkeypatch, tmp_path, body):
+    """The guard globs a directory rather than going through `python_sources`,
+    so it is redirected by binding its own collector to the temp root."""
+    module = importlib.import_module(_INVENTED_GUARD)
+    _write(tmp_path, "test_probe.py", body)
+    collect = module._offenders
+    monkeypatch.setattr(module, "_offenders", lambda: collect(tmp_path))
+    try:
+        module.test_no_test_invents_an_attribute_on_a_real_app()
+    except AssertionError as exc:
+        return exc
+    return None
+
+
+def test_the_invented_attribute_guard_catches_the_shape_that_shipped(
+        tmp_path, monkeypatch):
+    """Recent Datasets shipped dead because a full-app test created the very
+    attribute the feature was missing, then verified the feature against it."""
+    assert _run_invented_guard(monkeypatch, tmp_path, _INVENTS_ON_THE_APP) is not None
+
+
+def test_the_invented_attribute_guard_catches_it_one_dot_in(
+        tmp_path, monkeypatch):
+    """``loaded_app.ctx.window`` is just as much the shipped application's
+    attribute surface, and the first version of the guard could not see it."""
+    assert _run_invented_guard(monkeypatch, tmp_path, _INVENTS_ONE_DOT_IN) is not None
+
+
+def test_the_invented_attribute_guard_leaves_a_module_patch_alone(
+        tmp_path, monkeypatch):
+    """``raising=False`` on a module is the case the flag is *for*: a lazily
+    imported symbol, an optional hook. A guard that fired here would be
+    unusable and would be turned off."""
+    assert _run_invented_guard(monkeypatch, tmp_path, _PATCHES_A_MODULE) is None
+
+
+def test_the_invented_attribute_guard_allows_patching_what_exists(
+        tmp_path, monkeypatch):
+    assert _run_invented_guard(
+        monkeypatch, tmp_path, _PATCHES_THE_APP_WITHOUT_THE_FLAG) is None
+
+
+# ── the two coverage lanes ──────────────────────────────────────────────────
+
+_LANES_GUARD = "tests.test_the_lanes_combine"
+
+#: What shipped: the fast lane on the bare default name, which `combine`
+#: writes *to* and never reads, so its data is discarded by the merge step.
+_FAST_ON_THE_DEFAULT = 'export COVERAGE_FILE="${COVERAGE_FILE:-.coverage}"\n'
+#: The subtler one. `Coverage.erase()` in parallel mode unlinks
+#: `<data_file>.*`, so a fast lane at `.coverage` sweeps `.coverage.slow-1-1`
+#: on the way past — two strings that differ and still destroy each other.
+_FAST_SWEEPS_SLOW = 'export COVERAGE_FILE="${COVERAGE_FILE:-.coverage.}"\n'
+_FAST_OK = 'export COVERAGE_FILE="${COVERAGE_FILE:-.coverage.fast}"\n'
+_SLOW_OK = 'export COVERAGE_FILE=".coverage.slow-${SHARD_INDEX}-${N}"\n'
+
+
+def _run_lanes_guard(monkeypatch, tmp_path, fast, slow, test_name):
+    module = importlib.import_module(_LANES_GUARD)
+    monkeypatch.setattr(module, "FAST", _write(tmp_path, "test.sh", fast))
+    monkeypatch.setattr(module, "SLOW", _write(tmp_path, "test_slow.sh", slow))
+    try:
+        getattr(module, test_name)()
+    except AssertionError as exc:
+        return exc
+    return None
+
+
+def test_the_lane_guard_catches_the_fast_lane_on_the_default_name(
+        tmp_path, monkeypatch):
+    exc = _run_lanes_guard(monkeypatch, tmp_path, _FAST_ON_THE_DEFAULT, _SLOW_OK,
+                           "test_the_fast_lane_writes_under_a_name_of_its_own")
+    assert exc is not None, "a lane back on .coverage went uncaught"
+
+
+def test_the_lane_guard_catches_one_prefix_sweeping_the_other(
+        tmp_path, monkeypatch):
+    """The property, not "the two strings differ" — which the sweeping pair
+    also satisfies, and which is how the second defect survived the first fix."""
+    exc = _run_lanes_guard(monkeypatch, tmp_path, _FAST_SWEEPS_SLOW, _SLOW_OK,
+                           "test_neither_lane_can_erase_the_other_s_data")
+    assert exc is not None, "a prefix that sweeps the other lane went uncaught"
+
+
+def test_the_lane_guard_clears_two_lanes_under_their_own_names(
+        tmp_path, monkeypatch):
+    for name in ("test_the_fast_lane_writes_under_a_name_of_its_own",
+                 "test_neither_lane_can_erase_the_other_s_data",
+                 "test_the_lane_scripts_do_not_share_one_prefix"):
+        assert _run_lanes_guard(
+            monkeypatch, tmp_path, _FAST_OK, _SLOW_OK, name) is None, name
+
+
+# ── the Qt-free, geometry-free half of sample variables ─────────────────────
+
+_PURITY_GUARD = "tests.test_sample_variables"
+
+_PURE = 'from dataclasses import replace\ndef fill(vset, lines):\n    return vset\n'
+_IMPORTS_GEOMETRY = (
+    'from well_viewer.domain.plate_layout import wells_in_fill_lines\n'
+    'def fill(vset, wells):\n'
+    '    return wells_in_fill_lines(wells, "row")\n'
+)
+_IMPORTS_QT = 'from PySide6.QtWidgets import QWidget\ndef fill(vset):\n    return None\n'
+_IMPORTS_A_FEATURE = (
+    'from well_viewer.features.home.variables import controller\n'
+    'def fill(vset):\n'
+    '    return controller\n'
+)
+
+
+def _run_purity_guard(monkeypatch, tmp_path, body):
+    """The guard reads one module by its ``__file__``, so the redirect points
+    that module's path at a synthetic file."""
+    module = importlib.import_module(_PURITY_GUARD)
+    path = _write(tmp_path, "sample_variables.py", body)
+    monkeypatch.setattr(module.sv, "__file__", str(path))
+    try:
+        module.test_this_module_knows_nothing_about_plate_geometry_or_Qt()
+    except AssertionError as exc:
+        return exc
+    return None
+
+
+@pytest.mark.parametrize("body,why", [
+    (_IMPORTS_GEOMETRY, "a second definition of 'along columns'"),
+    (_IMPORTS_QT, "Qt in the module the fast lane drives by a list"),
+    (_IMPORTS_A_FEATURE, "the domain reaching up into a feature"),
+])
+def test_the_purity_guard_catches_each_forbidden_import(
+        tmp_path, monkeypatch, body, why):
+    assert _run_purity_guard(monkeypatch, tmp_path, body) is not None, why
+
+
+def test_the_purity_guard_clears_a_module_that_orders_nothing(
+        tmp_path, monkeypatch):
+    assert _run_purity_guard(monkeypatch, tmp_path, _PURE) is None
+
+
+# ── the tracker is well-formed ──────────────────────────────────────────────
+
+_TRACKER_GUARD = "tests.test_workplan_is_honest"
+
+_TRACKER_HEAD = (
+    "# A tracker\n\n"
+    "## A — First\n\n## B — Second\n\n"
+    "## The tracker\n\n"
+    "| # | Workstream | Item | Status | Note |\n|---|---|---|---|---|\n"
+)
+
+
+def _tracker(rows: str, prose: str = "") -> str:
+    return _TRACKER_HEAD + rows + "\n---\n" + prose + "\n"
+
+
+_GOOD_ROWS = (
+    "| 1 | A | do the thing | ☑ | |\n"
+    "| 2 | A | Review gate: A | ☐ | |\n"
+    "| 3 | B | do the other thing | ☐ | |\n"
+    "| 4 | B | Review gate: B | ☐ | |\n"
+)
+#: A row the regex cannot read simply vanishes from the results, so without the
+#: parse check it is reported as whichever *other* rule its absence breaks —
+#: which is how the first version of this file passed its own bite case for the
+#: wrong reason.
+_UNPARSEABLE_ROW = _GOOD_ROWS.replace("| 3 | B | do the other thing | ☐ | |",
+                                      "| three | B | do the other thing | ☐ |")
+_GATE_NOT_LAST = (
+    "| 1 | A | Review gate: A | ☐ | |\n"
+    "| 2 | A | do the thing | ☐ | |\n"
+)
+_NO_GATE = "| 1 | A | do the thing | ☐ | |\n"
+_INTERLEAVED = (
+    "| 1 | A | do the thing | ☐ | |\n"
+    "| 2 | B | do the other | ☐ | |\n"
+    "| 3 | A | Review gate: A | ☐ | |\n"
+    "| 4 | B | Review gate: B | ☐ | |\n"
+)
+_A_SECTION_WITH_NO_ROWS = _GOOD_ROWS.replace("| 3 | B | do the other thing | ☐ | |\n"
+                                             "| 4 | B | Review gate: B | ☐ | |\n", "")
+_TYPED_COUNT = "Nine rows are done and three remain: 9 rows done.\n"
+
+
+def _run_tracker_guard(monkeypatch, tmp_path, test_name, rows=_GOOD_ROWS,
+                       prose=""):
+    module = importlib.import_module(_TRACKER_GUARD)
+    path = _write(tmp_path, "TRACKER.md", _tracker(rows, prose))
+    monkeypatch.setattr(module, "_TRACKER", path)
+    try:
+        getattr(module, test_name)()
+    except AssertionError as exc:
+        return exc
+    return None
+
+
+def test_the_tracker_guard_catches_a_row_it_cannot_parse(tmp_path, monkeypatch):
+    exc = _run_tracker_guard(monkeypatch, tmp_path,
+                             "test_every_table_line_parses_as_a_row",
+                             rows=_UNPARSEABLE_ROW)
+    assert exc is not None, "a row that vanishes from the parse went uncaught"
+
+
+def test_the_tracker_guard_catches_a_gate_that_is_not_last(tmp_path, monkeypatch):
+    exc = _run_tracker_guard(monkeypatch, tmp_path,
+                             "test_every_workstream_ends_with_its_review_gate",
+                             rows=_GATE_NOT_LAST)
+    assert exc is not None, "a gate in the middle of its own work went uncaught"
+
+
+def test_the_tracker_guard_catches_a_workstream_with_no_gate(tmp_path, monkeypatch):
+    exc = _run_tracker_guard(monkeypatch, tmp_path,
+                             "test_every_workstream_ends_with_its_review_gate",
+                             rows=_NO_GATE)
+    assert exc is not None, "a workstream that never grew a gate went uncaught"
+
+
+def test_the_tracker_guard_catches_interleaved_workstreams(tmp_path, monkeypatch):
+    exc = _run_tracker_guard(monkeypatch, tmp_path,
+                             "test_a_workstream_is_a_contiguous_block_of_rows",
+                             rows=_INTERLEAVED)
+    assert exc is not None, "interleaved workstreams went uncaught"
+
+
+def test_the_tracker_guard_catches_a_section_nobody_is_tracking(
+        tmp_path, monkeypatch):
+    exc = _run_tracker_guard(
+        monkeypatch, tmp_path,
+        "test_the_table_and_the_sections_describe_the_same_workstreams",
+        rows=_A_SECTION_WITH_NO_ROWS)
+    assert exc is not None, "a section with no rows went uncaught"
+
+
+def test_the_tracker_guard_catches_a_count_typed_in_prose(tmp_path, monkeypatch):
+    """A hand-maintained total drifts from the rows within a day and is then the
+    most confidently wrong line in the file."""
+    exc = _run_tracker_guard(monkeypatch, tmp_path,
+                             "test_no_count_of_rows_is_written_in_prose",
+                             prose=_TYPED_COUNT)
+    assert exc is not None, "a typed count went uncaught"
+
+
+@pytest.mark.parametrize("test_name", [
+    "test_the_tracker_exists_and_has_rows",
+    "test_every_table_line_parses_as_a_row",
+    "test_row_numbers_are_contiguous_and_unique",
+    "test_every_row_has_an_item_and_a_known_status",
+    "test_the_table_and_the_sections_describe_the_same_workstreams",
+    "test_every_workstream_ends_with_its_review_gate",
+    "test_a_workstream_is_a_contiguous_block_of_rows",
+    "test_no_count_of_rows_is_written_in_prose",
+])
+def test_the_tracker_guard_clears_a_well_formed_tracker(
+        tmp_path, monkeypatch, test_name):
+    assert _run_tracker_guard(monkeypatch, tmp_path, test_name) is None

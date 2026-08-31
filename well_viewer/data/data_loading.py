@@ -154,8 +154,11 @@ def load_well_csv(path: Path) -> pd.DataFrame:
     converted back. On a 537,393-row × 37-column file that is a 152 MiB pointer
     array plus roughly 16.6 million short strings, and it is where a plate that
     size died with ``Unable to allocate 152 MiB for an array with shape
-    (37, 537393) and dtype object``. Measured on a file of exactly that shape:
-    1749 MiB peak before, 1073 MiB after.
+    (37, 537393) and dtype object``. Measured on a file of exactly that shape,
+    each read in its own process: 1729 MiB peak before, 867 MiB after. The
+    separate processes are the point — ``ru_maxrss`` is a high-water mark that
+    never falls, so measuring both reads in one process reports the first
+    strategy's peak as the second one's.
 
     Chunking the old read does **not** help — the coerced chunks stay alive
     until the concat — which is why this types the read instead.
@@ -383,6 +386,40 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True) -> pd.Serie
     return mask
 
 
+def read_well_frame(path: Path) -> pd.DataFrame:
+    """One well's parsed measurement frame, from the Parquet cache or the CSV.
+
+    **The one door onto a well's rows**, so the cache cannot be consulted on one
+    path and skipped on another. On a miss the CSV is parsed by
+    :func:`load_well_csv` exactly as before and the result is cached for next
+    time; on a hit the parse is skipped, which measured 51 ms against 3,068 ms on
+    a 120,000-row well.
+
+    The frame cached here is the CSV's own parse, **before** any verdict column
+    is projected onto it — see :mod:`well_viewer.data.parquet_cache`. That is not
+    incidental to where this function sits: it is why the write belongs here,
+    one call above :func:`load_and_project`'s projector loop, rather than
+    anywhere the frame has already been through it.
+
+    The fingerprint is taken **before** the parse and handed to the write, which
+    declines if the file has moved on since. Stamping the file's state after a
+    three-second read would record the new file's identity against the old
+    file's rows whenever something rewrote the CSV in between, and that cache is
+    then wrong on every read afterwards with nothing to notice it by.
+    """
+    from well_viewer.data.parquet_cache import (
+        read_cached, source_fingerprint, write_cache,
+    )
+
+    cached = read_cached(path)
+    if cached is not None:
+        return cached
+    before = source_fingerprint(path)
+    frame = load_well_csv(path)
+    write_cache(path, frame, before)
+    return frame
+
+
 def get_rows(ctx, label: str) -> pd.DataFrame:
     """Return the measurement frame for well *label*, loading + projecting lazily.
 
@@ -433,7 +470,7 @@ def load_and_project(ctx, label: str, path: Path | None = None) -> pd.DataFrame:
     dataset = ctx.state.dataset
     if path is not None:
         dataset.well_paths[label] = path
-    dataset.cache[label] = load_well_csv(dataset.well_paths[label])
+    dataset.cache[label] = read_well_frame(dataset.well_paths[label])
     for _project in iter_cache_projectors():
         _project(ctx, label)
     # The loader used to have to record this itself, having built the frame
@@ -1070,11 +1107,10 @@ def plot_group_well_lists(ctx, fallback_to_all: bool = True) -> list[tuple[str, 
     back: a pooled frame's ``well`` column is parsed from the image filename and
     need not equal the token the app keys wells by.
     """
-    from well_viewer.domain.selections_model import active_replicate_sets
+    from well_viewer.domain.plot_members import plot_replicate_sets
 
     well_paths = ctx.state.dataset.well_paths or {}
-    selections = ctx.state.selection.selections
-    rep_sets = list(active_replicate_sets(selections, well_paths))
+    rep_sets = list(plot_replicate_sets(ctx))
     selected = set(ctx.state.selection.selected_wells or set())
 
     out: list[tuple[str, list[str], Any]] = []

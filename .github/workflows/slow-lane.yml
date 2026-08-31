@@ -31,6 +31,11 @@ on:
         description: "Test files per pytest process (1 is safest, 2 is the default)"
         required: false
         default: "2"
+      coverage:
+        description: "Measure coverage and upload the data (slower; for the zero-coverage inventory)"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: slow-lane-${{ github.ref }}
@@ -68,10 +73,27 @@ jobs:
       - name: Run slow lane shard
         env:
           QT_QPA_PLATFORM: offscreen
+          # Opt-in, so an ordinary "is the lane green" dispatch is not slowed by
+          # a measurement it does not want. Set it for the zero-coverage
+          # inventory, which needs BOTH lanes in one measurement: the fast lane
+          # alone reports every full-app-only module as unreached, and acting on
+          # that list would delete live code.
+          ALLWELL_COVERAGE: ${{ inputs.coverage && '1' || '' }}
         run: |
           scripts/test_slow.sh \
             --shard ${{ matrix.shard }}/6 \
             --batch ${{ github.event.inputs.batch || '2' }}
+      - name: Upload coverage data
+        if: always() && inputs.coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: slow-lane-coverage-shard-${{ matrix.shard }}
+          # One file per shard, combined against the fast lane's locally.
+          # ``relative_files`` is on in pyproject, so a runner's checkout path
+          # does not make these a different set of files from anyone else's.
+          path: .coverage*
+          include-hidden-files: true
+          if-no-files-found: warn
       - name: Upload JUnit reports
         if: always()
         uses: actions/upload-artifact@v4

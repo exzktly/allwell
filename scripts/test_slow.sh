@@ -57,6 +57,15 @@ REPORT_DIR="${SLOW_REPORT_DIR:-.pytest-slow-reports}"
 rm -rf "$REPORT_DIR"
 mkdir -p "$REPORT_DIR"
 
+# Clear this shard's coverage data too, for the same reason the reports are
+# cleared: a previous run's leftovers must not be read as this one's. Each
+# batch's own pytest-cov erase only touches its own name, so a run with
+# `--batch 1` (many batches) followed by one with `--batch 2` (fewer) leaves the
+# tail of the first run's files on disk, and `coverage combine` merges them —
+# a union across two commits, silently, feeding the inventory that decides which
+# modules no test reaches.
+rm -f ".coverage.slow-${SHARD_INDEX}-"*
+
 # Discover the lane from pytest's own marker rather than by grepping for fixture
 # names: conftest.py applies `slow` by fixture closure, so the marker is the only
 # thing that knows the real membership.
@@ -84,6 +93,27 @@ done
 echo "Slow lane: ${#ALL_FILES[@]} files total, ${#FILES[@]} in shard ${SHARD_INDEX}/${SHARD_TOTAL}, ${BATCH} per process."
 echo
 
+# Same opt-in flag as the fast lane, but this lane needs one thing the fast lane
+# does not: a data file per batch.
+#
+# Parallel mode alone is NOT enough, which was measured rather than assumed
+# after this comment claimed for a while that it was. pytest-cov combines at the
+# END of each session: it consumes that session's `.coverage.<host>.<pid>.<rand>`
+# files and writes `.coverage` — a name the NEXT batch's combine does not pick
+# up, and then overwrites. Run two pytest processes in a row and the second
+# one's data replaces the first's; measured on this repo, a module went from 86
+# covered lines to 68, the second run's own figure rather than the union. Across
+# the ~54 batches this lane runs, that leaves the last batch's data wearing the
+# whole lane's name — and it feeds the zero-coverage inventory, so the error
+# lands as "no test reaches this module" on modules a test reaches.
+#
+# Giving each batch its own COVERAGE_FILE keeps them all on disk for the final
+# `coverage combine` to merge.
+COV=()
+if [[ -n "${ALLWELL_COVERAGE:-}" ]]; then
+    COV=(--cov --cov-report=)
+fi
+
 failed_batches=0
 batch_no=0
 for (( i = 0; i < ${#FILES[@]}; i += BATCH )); do
@@ -92,10 +122,14 @@ for (( i = 0; i < ${#FILES[@]}; i += BATCH )); do
     report="${REPORT_DIR}/batch-${SHARD_INDEX}-${batch_no}.xml"
 
     echo "── batch ${batch_no}: ${chunk[*]}"
+    # One data file per batch (see the note above COV). Harmless when coverage
+    # is off: nothing reads it.
+    COVERAGE_FILE=".coverage.slow-${SHARD_INDEX}-${batch_no}" \
     timeout --kill-after=30 "$BATCH_TIMEOUT" \
         python -m pytest -m slow -q \
         --timeout=300 --timeout-method=signal \
         --junitxml="$report" \
+        "${COV[@]+"${COV[@]}"}" \
         "${chunk[@]}" "$@"
     status=$?
 

@@ -522,6 +522,7 @@ _FIG_PREF_KEY_MAP = (
     ("_sp_fig", "spatial"),
     ("_mv_fig", "multivariate"),
     ("_stats_fig", "stats"),
+    ("_response_fig", "response"),
 )
 
 
@@ -635,6 +636,24 @@ def figure_prefs(ctx, fig):
     store = _ensure_axis_prefs_store(ctx)
     axis = store.setdefault(figure_pref_key(ctx, fig), {})
     return _FigurePrefs(global_prefs, axis)
+
+
+def figure_pref_is_set(ctx, fig, key: str) -> bool:
+    """Whether *key* has actually been chosen for *fig*, rather than defaulted.
+
+    :func:`figure_prefs` deliberately reads an unset axis key as its neutral
+    default, which is right for drawing — but it makes "the user turned this
+    off" and "the user never touched it" identical, and a caller whose default
+    is *not* the neutral one cannot tell them apart. §7's rule about undefined
+    versus computed, applied to a preference.
+
+    The Response tab is the caller: its x axis defaults to logarithmic when the
+    doses span two decades, so it has to ask the data on an untouched toggle and
+    obey the user on a set one. Reading ``False`` for both would mean the toggle
+    could never be honoured in the off position.
+    """
+    store = _ensure_axis_prefs_store(ctx)
+    return key in (store.get(figure_pref_key(ctx, fig)) or {})
 
 
 def axis_scoped_value(prefs, idx, key, default=None):
@@ -1074,5 +1093,52 @@ def apply_export_style_to_current(ctx, fig, canvas=None) -> None:
         return
     prefs = figure_prefs(ctx, fig)
     apply_export_style_prefs(fig, prefs)
+    _apply_grouping_notice(ctx, fig)
     if canvas is not None:
         canvas.draw_idle()
+
+
+#: Marks the figure-level text this module owns, so a redraw replaces its own
+#: notice rather than stacking a second one under the first.
+_NOTICE_TAG = "_aw_grouping_notice"
+
+
+def _apply_grouping_notice(ctx, fig) -> None:
+    """Say on the figure what the Group-by setting did to its members.
+
+    **Here, because here is the one place every plot passes through.** Grouping
+    by a sample variable substitutes the member set for every view at once —
+    bars, lines, statistics, the heat map, scatter, the exports — and it drops
+    every well with no value for the variable. That is §7's cardinal case: the
+    numbers move, the *n* moves, and a figure that silently lost eight wells
+    looks exactly like a figure of a plate that had eighty-eight.
+
+    The sentence had a home on exactly one tab. Reaching the other eight would
+    have meant editing eight renderers and hoping the ninth never arrives, which
+    is the half-swept shape §7.5 #5 is about. Every renderer already ends at
+    ``apply_export_style_to_current`` — thirty-nine call sites, and a guard that
+    keeps it that way — so a notice drawn from here cannot miss a tab, and a tab
+    added tomorrow gets it without knowing it exists.
+
+    Drawn on the **figure** rather than an axes so it survives a multi-panel
+    layout, and re-applied rather than appended: the previous notice is removed
+    first, so filling in the missing wells clears it on the next redraw instead
+    of leaving a sentence that outlived its condition — the defect that moved
+    this off the status bar in the first place.
+    """
+    from well_viewer.core.group_by_controller import group_by_shortfall
+    from well_viewer.core.safe import swallow
+
+    with swallow("draw the Group-by notice on a figure"):
+        for text in list(getattr(fig, "texts", []) or []):
+            if getattr(text, _NOTICE_TAG, False):
+                text.remove()
+        message = group_by_shortfall(ctx)
+        if not message:
+            return
+        artist = fig.text(
+            0.01, 0.005, message,
+            fontsize=7, ha="left", va="bottom",
+            color=theme.Colors.text_secondary, wrap=True,
+        )
+        setattr(artist, _NOTICE_TAG, True)

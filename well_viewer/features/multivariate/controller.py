@@ -392,7 +392,7 @@ def mv_set_timepoints(ctx, tps) -> None:
 
 def mv_export_csv(ctx) -> None:
     """Write the current feature matrix (+ any cluster labels) to a CSV file."""
-    from PySide6.QtWidgets import QFileDialog, QMessageBox
+    from PySide6.QtWidgets import QMessageBox
 
     import numpy as np
 
@@ -414,9 +414,12 @@ def mv_export_csv(ctx) -> None:
         QMessageBox.information(ctx.window, "Nothing to export",
                                "The current selection produced no feature matrix.")
         return
-    init_dir = str(ctx.state.dataset.data_dir or "")
-    path, _ = QFileDialog.getSaveFileName(
-        ctx.window, "Export feature matrix", init_dir, "CSV files (*.csv)")
+    # ``core.csv_export``'s dialog, like every other Save-As in the app. It
+    # also suggests a filename, which this one did not: it passed the dataset
+    # directory as the initial *path*, so the picker opened in the right place
+    # with the name field empty while every sibling dialog pre-filled one.
+    from well_viewer.core.csv_export import ask_save_csv
+    path = ask_save_csv(ctx, "Export feature matrix", "feature_matrix.csv")
     if not path:
         return
     try:

@@ -478,12 +478,14 @@ def reset_scan_misses(ctx) -> None:
     well/channel that came up empty once would stay written off for the rest of
     the session), the raw-fallback set, and the truncated-inventory set — the
     last two are counted by the status line, so both have to describe the pass
-    that just ran and no earlier one.
+    that just ran and no earlier one. The refused-scale-bar set is cleared for
+    the same reason.
     """
     st = getattr(getattr(ctx, "state", None), "image_table", None)
     if st is None:
         return
-    for attr in ("scan_misses", "raw_fallbacks", "partial_scans"):
+    for attr in ("scan_misses", "raw_fallbacks", "partial_scans",
+                 "scale_bar_refusals"):
         rec = getattr(st, attr, None)
         if isinstance(rec, set):
             rec.clear()
@@ -529,6 +531,120 @@ def _partial_scans(ctx) -> set:
     st = getattr(getattr(ctx, "state", None), "image_table", None)
     rec = getattr(st, "partial_scans", None)
     return rec if isinstance(rec, set) else set()
+
+
+def _scale_bar_refusals(ctx) -> set:
+    """The current render pass's ``(well, channel, tp, fov)`` cells whose scale
+    bar did not fit and was therefore not drawn — see :func:`bar_fits`.
+
+    Same lifetime and same stub tolerance as :func:`_scan_misses`.
+    """
+    st = getattr(getattr(ctx, "state", None), "image_table", None)
+    rec = getattr(st, "scale_bar_refusals", None)
+    return rec if isinstance(rec, set) else set()
+
+
+def scale_bar_refusal_report(ctx) -> list[str]:
+    """The wells holding a cell whose scale bar would not fit, sorted.
+
+    The public reader over :func:`_scale_bar_refusals`, so the status line does
+    not have to know the set's tuple shape. Empty on a pass where every bar fit.
+    """
+    return sorted({str(key[0]) for key in _scale_bar_refusals(ctx)
+                   if key and key[0]})
+
+
+def can_carry_bar(rgb, bar_px: int) -> bool:
+    """Will a *bar_px* bar actually be drawn into *rgb*?
+
+    :func:`bar_fits` answers the length question; this answers the whole one, by
+    also applying the array guards :func:`draw_cell_chrome` returns early on — an
+    array that is not 3-channel, and one under 4 px on a side. A 200x3 crop
+    passes the length test and draws nothing, which is the silent hole this whole
+    change exists to close, reopened one guard along.
+
+    Comparing the array before and after is not the alternative: an identity
+    label is burned in by the same call, so a labelled cell's array changes
+    whether or not its bar was drawn.
+    """
+    if rgb is None or int(bar_px) <= 0:
+        return False
+    try:
+        if rgb.ndim != 3 or rgb.shape[2] < 3:
+            return False
+        h, w = rgb.shape[:2]
+    except (AttributeError, IndexError, ValueError):
+        return False
+    return h >= 4 and w >= 4 and bar_fits(w, h, bar_px)
+
+
+def scale_bar_refusal_clause(ctx) -> str:
+    """The one sentence describing this pass's refused scale bars, or ``""``.
+
+    One wording, not one per surface: the Generate line and the saved-figure line
+    report the same fact — these wells carry no bar, and here are the two
+    controls that would change it. Only the framing around it differs, and that
+    is the caller's sentence rather than this clause.
+    """
+    wells = scale_bar_refusal_report(ctx)
+    if not wells:
+        return ""
+    return (f" No scale bar on {len(wells)} well{'' if len(wells) == 1 else 's'} "
+            f"({', '.join(wells)}) — the bar is longer than those cells can hold; "
+            "shorten Bar length µm or widen the crop.")
+
+
+def apply_cell_chrome(ctx, rgb, chrome_kwargs, cell):
+    """Burn one cell's chrome in, recording a scale bar that would not fit.
+
+    The one place a cell's chrome is drawn, so the refusal is reported exactly
+    once per cell and in exactly one wording. :func:`draw_cell_chrome` decides
+    whether the bar fits and is a pure array function with no idea which cell it
+    holds; this knows the cell and owns the render pass, which is the split
+    ``frame_load``'s ``scan_misses`` / ``raw_fallbacks`` already use.
+
+    *chrome_kwargs* is :func:`cell_chrome_kwargs`' output, or ``None`` for a cell
+    that carries no chrome at all — in which case *rgb* comes back untouched.
+    """
+    if rgb is None or not chrome_kwargs:
+        return rgb
+    bar_px = int(chrome_kwargs.get("bar_px") or 0)
+    # Asked for and not drawn, for any of the reasons ``can_carry_bar`` knows —
+    # the length, the channel count, a degenerate side. Decided before the draw,
+    # because afterwards an identity label makes a refused cell look identical to
+    # a drawn one.
+    if bar_px > 0 and not can_carry_bar(rgb, bar_px):
+        _scale_bar_refusals(ctx).add(
+            (cell.get("well"), str(cell.get("chan") or "").lower(),
+             cell.get("tp"), cell.get("fov")))
+    return draw_cell_chrome(rgb, **chrome_kwargs)
+
+
+def partial_scan_clause(ctx) -> str:
+    """The one sentence describing this pass's truncated inventories, or ``""``.
+
+    The sibling of :func:`scale_bar_refusal_clause`, and one wording for the
+    same reason. Two hand-written sentences for one fact drift: the Generate
+    line counted the wells and named the scans' reasons, while the saved-PNG
+    line listed the wells without either — so the artifact that outlives the
+    session carried *less* than the transient line, which is backwards.
+
+    Neutral about what the artifact is. "This grid" and "this file" is the
+    caller's framing; the fact is that frames the dataset holds are not in what
+    was just produced, and that is the same fact in both.
+
+    **Every surface that can produce a short artifact says it.** A grid drawn
+    from a truncated inventory is made entirely of real images, so nothing else
+    counts the gap and the result reads as complete — which is §7's rule
+    exactly: degraded output must never be indistinguishable from good output.
+    """
+    wells, reasons = partial_scan_report(ctx)
+    if not wells:
+        return ""
+    return (f" WARNING: the image list for {len(wells)} well"
+            f"{'' if len(wells) == 1 else 's'} ({', '.join(wells)}) is "
+            f"INCOMPLETE — frames the dataset holds are missing from this "
+            f"artifact: {'; '.join(reasons) or 'a scan stopped short'}.")
 
 
 def partial_scan_report(ctx) -> tuple[list[str], list[str]]:
@@ -859,6 +975,24 @@ def _load_chrome_font(px: int) -> Any:
         return None
 
 
+def bar_margin(h: int) -> int:
+    """The inset a burned-in scale bar keeps from the image edge, in pixels."""
+    return max(2, int(h) // 25)
+
+
+def bar_fits(w: int, h: int, bar_px: int) -> bool:
+    """Can a *bar_px*-long scale bar be drawn at its true length in a *w* x *h* image?
+
+    The one answer, so :func:`draw_cell_chrome` and :func:`apply_cell_chrome`
+    cannot disagree about which cells carry a bar. A bar that does not fit is
+    **not drawn short**: the length is what states the physical scale, so a
+    clamped bar is a wrong number burned into the picture, indistinguishable from
+    a correct one (§7 of ``CLAUDE.md``). The caller reports the refusal; this
+    only decides it.
+    """
+    return int(bar_px) > 0 and int(bar_px) <= int(w) - 2 * bar_margin(h)
+
+
 def draw_cell_chrome(rgb, *, bar_px: int = 0, bar_corner: str = "br",
                      bar_color: str = "white", bar_thickness_px: int = 0,
                      label_text: str = "",
@@ -872,7 +1006,14 @@ def draw_cell_chrome(rgb, *, bar_px: int = 0, bar_corner: str = "br",
     thumbnail size and at full export resolution. ``bar_thickness_px`` is that
     nominal thickness (≤ 0 → a sensible auto default); a too-thin bar can vanish
     when the cell is downscaled, so it's user-tunable. Returns a mutated copy, or
-    the input unchanged when there's nothing to draw."""
+    the input unchanged when there's nothing to draw.
+
+    **A bar longer than the image is not drawn at all** (:func:`bar_fits`). It
+    used to be clamped to the image width, which drew a 50 µm bar as 37.7 µm on a
+    narrow crop and presented it as 50 — a wrong number burned into an exported
+    figure. Nothing here reports the refusal, because this function does not know
+    which cell it is drawing; :func:`apply_cell_chrome` is the wrapper that does.
+    """
     import numpy as _np
 
     if rgb is None or (not bar_px and not label_text):
@@ -885,8 +1026,10 @@ def draw_cell_chrome(rgb, *, bar_px: int = 0, bar_corner: str = "br",
         return rgb
 
     # Scale bar — a filled rectangle with a contrasting halo for legibility.
-    if bar_px and bar_px > 0:
-        blen = int(min(bar_px, W - 2))
+    # A bar too long for the image is REFUSED, never shortened to fit: see
+    # :func:`bar_fits`.
+    if bar_fits(W, H, bar_px):
+        blen = int(bar_px)
         if blen >= 1:
             # Thickness scales with the cell (like the label font) so it's stable
             # across live/export; user value is px-at-240, ≤0 falls back to auto.
@@ -894,7 +1037,7 @@ def draw_cell_chrome(rgb, *, bar_px: int = 0, bar_corner: str = "br",
                 thick = max(1, int(round(float(bar_thickness_px) * H / 240.0)))
             else:
                 thick = max(2, H // 100)
-            margin = max(2, H // 25)
+            margin = bar_margin(H)
             corner = str(bar_corner or "br").strip().lower()
             if corner in ("tl", "bl"):
                 x0 = margin

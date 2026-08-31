@@ -36,6 +36,32 @@ class PlotState:
 
     use_sem: bool = True
     use_fov_replicates: bool = False
+
+    # Group the plot's members by a sample variable instead of by the user's
+    # replicate sets: one member per value of ``group_by_variable``, pooling the
+    # wells that hold it. Empty means "use the replicate sets", which is every
+    # plot's behaviour when no variable is chosen and was the only behaviour
+    # before variables existed.
+    #
+    # Cross-tab and not per-feature because every collector that pools wells
+    # reads it through ``plot_members.plot_replicate_sets`` (or its
+    # hidden-inclusive twin), which is where the substitution happens — a
+    # per-tab copy would let the Bar tab and the Statistics tab describe the
+    # same plate two ways.
+    group_by_variable: str = ""
+
+    # Ink and layout, from a second and third variable. These do **not** change
+    # what a member is — ``group_by_variable`` alone decides that — so they can
+    # name a different variable without moving a single number: a plate of two
+    # cell lines at six doses is grouped by Dose, coloured by Cell line, and
+    # split into two labelled bands by the same, and every bar in it is the
+    # same bar it was before any of the three were set.
+    #
+    # Kept beside ``group_by_variable`` and cross-tab for its reason: a reader
+    # comparing the Bar tab with the Statistics tab must not find one coloured
+    # by cell line and the other by dose.
+    colour_by_variable: str = ""
+    split_by_variable: str = ""
     legend_visible: dict[str, bool] = field(default_factory=_default_legend)
     # Show the ON/OFF threshold marker overlaid on plots (the vertical line /
     # shaded band at ThreshFracOn on the Distribution, line-plot CDF, and smFISH
@@ -400,3 +426,18 @@ class PlotState:
         # factor is the same bug in a quieter form.
         self.time_scale = 1.0
         self.time_offset = 0.0
+
+        # **The variable band names this plate's variables by id.** A variable
+        # id is minted per set, so plate A's `Dose` and plate B's `Cell line`
+        # can hold the same one — leaving the field set does not offer a
+        # variable that no longer exists, it silently regroups every plot by a
+        # different one, under a band still reading the old name. That is the
+        # fold-change case above in a quieter form: a description of a plate
+        # that is no longer open. Cleared through the controller's own roster
+        # so a fourth control added there cannot survive the swap; the two
+        # cleared here by name are `group_by_variable`, which is not on that
+        # roster, and nothing else.
+        self.group_by_variable = ""
+        from well_viewer.core.group_by_controller import DECORATION_CONTROLS
+        for _field, _widget, _label in DECORATION_CONTROLS:
+            setattr(self, _field, "")

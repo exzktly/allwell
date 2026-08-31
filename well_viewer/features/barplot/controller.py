@@ -5,12 +5,13 @@ from __future__ import annotations
 from well_viewer.core.plot_annotations import value_label_settings
 from well_viewer.features.barplot._annotations import (
     annotate_bar_values,
-    annotate_cluster_headers as _annotate_cluster_headers,
     mark_undefined_spread as _mark_undefined_spread,
+    annotate_decorations,  # noqa: F401  (also re-exported for batch_export)
 )
 from well_viewer.features.barplot._axis_fit import fit_bar_panels
 from well_viewer.domain.numeric import is_number
-from well_viewer.domain.selections_model import well_display_label, active_replicate_sets
+from well_viewer.domain.plot_members import plot_replicate_sets
+from well_viewer.domain.selections_model import well_display_label
 from well_viewer.domain.viewer_state import parse_rc
 from widgets import menu_exec
 
@@ -54,6 +55,8 @@ from well_viewer.features.barplot.collect import (  # noqa: F401
     bar_err_settings,
     bar_guide_x,
     bar_idx_at_x,
+    batch_members,
+    batch_wells_by_key,
     cluster_x_for_group_keys,
     cluster_centers,
     clustered_x_positions,
@@ -67,7 +70,7 @@ from well_viewer.features.barplot.collect import (  # noqa: F401
 
 def ordered_bar_keys(ctx) -> list:
     """Return ordered bar keys for current mode, respecting custom drag order."""
-    active_rsets = active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    active_rsets = plot_replicate_sets(ctx)
     if active_rsets:
         keys = [r.name for r in active_rsets]
     elif ctx.state.selection.selections:
@@ -256,8 +259,7 @@ def render_bar_items(
         ax.set_xlim(xlim_lo, xlim_hi)
         # Mark categorical x-axis so downstream styling does not reset tick formatters.
         setattr(ax, "_categorical_xaxis", True)
-    if has_clusters:
-        _annotate_cluster_headers(items, xs, ax_mean)
+    annotate_decorations(ctx, items, xs, ax_mean, headers=has_clusters)
     # Value labels (Properties → Overlays). Drawn before the y-fit below so the
     # fit can widen the headroom that keeps them inside the panel.
     _labels = value_labels if value_labels is not None else value_label_settings(ctx)
@@ -408,9 +410,7 @@ def rep_sets_active(ctx) -> list[ReplicateSet]:
 
     A8 teardown: takes ``ctx`` — delegates to the pure domain enumerator over
     ``ctx.state`` (no god-object)."""
-    from well_viewer.domain.selections_model import active_replicate_sets
-    return active_replicate_sets(
-        ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    return plot_replicate_sets(ctx)
 
 
 
@@ -548,7 +548,7 @@ def refresh_bar_layout_btn_state(ctx) -> None:
     plot = ctx.state.plot
     group_btn = getattr(ctx.runtime.barplot, "group_mode_btn", None)
     pool_btn = getattr(ctx.runtime.barplot, "pool_reps_btn", None)
-    has_rsets = bool(active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths))
+    has_rsets = bool(plot_replicate_sets(ctx))
     if group_btn is not None:
         # Two-way mode selector: label names the current mode, highlight tracks
         # the non-default "timepoint" mode so label and highlight never conflict.

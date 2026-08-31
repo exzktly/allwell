@@ -13,6 +13,7 @@ import pytest
 pytest.importorskip("PySide6")
 
 from well_viewer.features.image_browser.image_table import controller as C
+from well_viewer.features.image_browser.image_table import image_compose as IC
 from well_viewer.features.image_browser.image_table.state import (
     TableSpec, Axis, ChannelSpec,
 )
@@ -35,12 +36,12 @@ def test_generate_paints_scale_bar_with_default_toggle(image_table_app, monkeypa
 
     # Spy on the burn-in so we assert the bar is actually requested per cell.
     seen = {"bar_calls": 0}
-    real = C.draw_cell_chrome
+    real = IC.draw_cell_chrome
     def spy(rgb, **kw):
         if kw.get("bar_px", 0):
             seen["bar_calls"] += 1
         return real(rgb, **kw)
-    monkeypatch.setattr(C, "draw_cell_chrome", spy)
+    monkeypatch.setattr(IC, "draw_cell_chrome", spy)
 
     image_table_apply_spec(
         ctx, TableSpec(rows=Axis(None, [ChannelSpec("gfp", "corrected")]),

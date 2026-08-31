@@ -30,6 +30,11 @@ _pytest*.log
 
 # Coverage data
 .coverage
+# Parallel-mode data files, one per test process — scripts/coverage.sh combines
+# them. Without this they are untracked leftovers that preflight's tree check
+# fails on, and that `git add -A` would sweep into a commit.
+.coverage.*
+coverage.xml
 htmlcov/
 
 # CI fast-lane JUnit report (gates on this instead of the segfault-prone exit code)

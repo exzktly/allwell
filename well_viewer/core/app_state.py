@@ -45,6 +45,7 @@ _FEATURE_STATE_OWNERS = {
     "multivariate": "Multivariate",
     "playground": "Image Browser",
     "preview": "Image Browser",
+    "response": "Response Curves",
     "review_image": "Image Browser",
     "scatter": "Scatter",
     "smfish": "smFISH",

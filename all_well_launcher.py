@@ -21,6 +21,17 @@ This launcher ensures:
 
 When running from source (not bundled), sys._MEIPASS is not set, so
 modules are loaded from the repository root instead.
+
+**No test imports this module, and none should.** Importing it installs a
+``setuptools._distutils.compilers`` runtime stub and runs the ``_MEIPASS``
+bootstrap, both of which only mean anything inside a frozen bundle; doing that
+in a test process would reshape the interpreter every later test runs in. It is
+therefore the one entry in the zero-coverage inventory that is *meant* to have
+no executed lines, rather than a module waiting for a test. What guards it
+instead is source-level: ``tests/test_bootstrap_frozen_dispatch.py`` and
+``tests/test_profile_meipass.py`` read this file through ``tests/_repo_scan``
+and assert on its syntax tree, so the dispatch sentinel and the ``_MEIPASS``
+path handling are pinned without the import ever happening.
 """
 
 import sys

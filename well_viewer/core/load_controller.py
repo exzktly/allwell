@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 import csv
 import logging
+import time
 from pathlib import Path
 
 from PySide6.QtWidgets import QMessageBox
@@ -23,8 +24,9 @@ from well_viewer.core.ui_helpers import (
     show_progress as _show_progress,
     step_progress as _step_progress,
 )
-from well_viewer.core.safe import swallowed
+from well_viewer.core.safe import swallow, swallowed
 from well_viewer.data.curation import apply_curation_to_cache
+from well_viewer.domain.dataset_name import dataset_display_name
 
 
 # ── "Opening dataset…" responsiveness guard ─────────────────────────────────
@@ -150,6 +152,70 @@ def load_path(ctx, path: Path) -> None:
             app._load_directory(path)
     finally:
         _close_opening_dialog(ctx)
+    _remember_if_it_loaded(ctx, path)
+    _prune_frame_cache(ctx, path)
+
+
+def _remember_if_it_loaded(ctx, path: Path) -> None:
+    """Add *path* to the recent-datasets list, if the load actually found wells.
+
+    **On success only, and success means wells.** A folder that opened without
+    raising and yielded nothing readable — the wrong directory, an ``out/`` the
+    pipeline never wrote to — is not a dataset the user wants offered back to
+    them on the next launch, and offering it would make the list a record of
+    the user's mistakes rather than of their work. ``well_paths`` is the test
+    because it is what every other part of Review treats as "there is a dataset
+    here".
+
+    The path stored is the one Review was *pointed at*, not the ``out`` half it
+    may have descended into, so reopening from the list takes the same branch
+    through :func:`load_path` that the original open took. The name stored is
+    ``dataset_display_name``'s answer for the folder actually loaded, which is
+    the one that knows to say the root's name rather than the literal "out".
+
+    Failing to remember must never cost the user the dataset they just opened,
+    which is already loaded and on screen by the time this runs — so a settings
+    backend that will not write is logged and dropped.
+    """
+    dataset = ctx.state.dataset
+    if not dataset.well_paths:
+        return
+    from well_viewer.core.app_settings import app_settings
+    from well_viewer.core.recent_datasets import record_open
+
+    loaded = dataset.data_dir or path
+    # ``app_settings()`` and not ``ctx.window._qsettings()``: ``ctx.window`` is
+    # the review widget and ``_qsettings`` belongs to the main window that
+    # contains it, with no forwarding — so that spelling read as absent in the
+    # shipped app and this list never wrote a thing.
+    try:
+        record_open(app_settings(), path, dataset_display_name(loaded),
+                    time.time())
+    except Exception:
+        # Loud, because the two ways this can fail — an unreachable settings
+        # backend and an empty history — render identically to the user, and a
+        # DEBUG line is how the whole feature stayed silently dead once before.
+        logging.getLogger("well_viewer").warning(
+            "%s was loaded but could not be added to the recent-datasets "
+            "list; the list will not offer it next launch.", path,
+            exc_info=True)
+
+
+def _prune_frame_cache(ctx, path: Path) -> None:
+    """Reclaim Parquet cache files the open dataset can no longer address.
+
+    One listdir, on a path already open, at the one moment the set of wells is
+    known to be current: a cache entry whose CSV has been renamed or deleted can
+    never be read or overwritten again, so nothing else would reclaim it.
+
+    Its own function rather than a few lines inside the recents recorder, which
+    is where it first landed — a reader deleting the recents call would have
+    silently disabled cache reclamation with it, and the recorder returns early
+    for a folder that yielded no wells, which has nothing to do with whether
+    this dataset has stale cache files.
+    """
+    from well_viewer.data.parquet_cache import prune
+    prune(Path(ctx.state.dataset.data_dir or path))
 
 
 def _reset_gating_state(ctx) -> None:
@@ -424,7 +490,9 @@ def load_directory(ctx, d: Path, label=None) -> None:
         _image_table.last_render = {}
         _image_table.prefetched_cells = set()
         _image_table.scan_misses = set()
+        _image_table.raw_fallbacks = set()
         _image_table.partial_scans = set()
+        _image_table.scale_bar_refusals = set()
         # Cleared per load, set True by view_state_io.apply_image_table when it
         # restores a saved grid for this load — tells the on_dataset_loaded reset
         # hook below (registry._loaded_image_table) not to clobber a selection
@@ -574,6 +642,26 @@ def load_directory(ctx, d: Path, label=None) -> None:
     # combos afterward.
     set_ratio_metrics(ctx, [])
     app._persistence.load("ratios")
+    # The plate's annotation axes. Unconditional, and its loader assigns even
+    # when the new dataset has no block — the failure mode being avoided is the
+    # one recorded three lines above for ratios: a plot grouped by `Dose` would
+    # otherwise keep drawing the previous plate's doses over this plate's
+    # numbers, with the page's own masthead naming the new dataset.
+    app._persistence.load("sample_variables")
+    # The band's Group by combo lists them, and is hidden when a plate declares
+    # none. Refreshed here rather than on first use because the band is built
+    # once at startup and a stale combo would offer the previous plate's
+    # variables against this plate's wells.
+    with swallow("refresh the Group by control for the new dataset"):
+        from well_viewer.core.group_by_controller import refresh_group_by_combo
+        refresh_group_by_combo(ctx)
+    # And the tab itself. Replacing the state is only half of it: the plate
+    # keeps the previous dataset's colours, rings and sentence until something
+    # repaints it, so a plate of one well showed four ringed wells from the
+    # plate before — with stale value chips still connected. Through the
+    # feature service seam, so core names no feature.
+    with swallow("refresh the Variables tab for the new dataset"):
+        ctx.features.call("variables.refresh", ctx)
     # Eagerly hydrate Cell Gating thresholds from ``pipeline_info.json`` so the
     # very first plot draw (line / bar / batch export) has the user's
     # per-channel and per-ratio ThreshFracOn values available. The Cell Gating

@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from functools import partial
 from well_viewer.core import rail_plate as _rail_plate
-from well_viewer.core.safe import swallowed
+from well_viewer.core.safe import swallow, swallowed
 from well_viewer.core.lazy import lazy as _lazy
 
 _logger = logging.getLogger("well_viewer.runtime_app")
@@ -107,6 +107,16 @@ def on_tab_change(ctx, _e=None) -> None:
         return
     prev_tab = ctx.runtime.tab.last_tab_name
     prev_selected = set(ctx.state.selection.selected_wells)
+
+    # The Decorate ▾ popover is page-level band furniture, so it is not hidden
+    # by the per-leaf slot machinery — but only the tabs in
+    # ``group_by_controller.DECORATED_TABS`` read Colour by / Split by. Offering
+    # it on the other five Plotting leaves is a control that writes state,
+    # redraws every tab and changes nothing on screen. Re-evaluated here rather
+    # than at build time because the answer is a property of the tab on screen.
+    from well_viewer.core.group_by_controller import refresh_decoration_combos
+    with swallow("re-evaluate the Decorate button for the new tab"):
+        refresh_decoration_combos(ctx)
 
     # Dismiss any open figure configurator on tab change -- the user can
     # re-open it on the new tab via the plot card's sliders IconButton.

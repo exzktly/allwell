@@ -163,11 +163,22 @@ class _FakeAx:
     def set_ylim(self, *a, **kw):
         pass
 
-    def set_xscale(self, _s):
-        pass
+    # Recorded and readable, the way a real ``Axes`` is: ``apply_axis_log_scale``
+    # asks an axis what scale it is already in before setting one, so a double
+    # that could only be written to modelled half of what the pass does with it
+    # and raised ``AttributeError`` from inside the styling call. ``**kw`` for
+    # the ``base=`` the log path passes.
+    def set_xscale(self, s, **_kw):
+        self._xscale = s
 
-    def set_yscale(self, _s):
-        pass
+    def get_xscale(self):
+        return getattr(self, "_xscale", "linear")
+
+    def set_yscale(self, s, **_kw):
+        self._yscale = s
+
+    def get_yscale(self):
+        return getattr(self, "_yscale", "linear")
 
     def get_position(self):
         return SimpleNamespace(frozen=lambda: None)

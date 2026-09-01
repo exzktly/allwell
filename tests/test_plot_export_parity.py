@@ -286,12 +286,30 @@ def test_every_plot_renderer_applies_the_export_style():
 
 
 def test_the_properties_reset_repaints_the_cached_render_tabs():
-    """Spatial and Multivariate render from their own cached result and are not
-    in ``redraw_app``'s fan-out. Reset-to-defaults had a branch for one of
-    them."""
-    src = (REPO_ROOT / "well_viewer" / "features" / "export" / "sidebar_view.py").read_text()
-    assert '"Spatial", "Multivariate"' in src, (
-        "Reset-to-defaults repaints only one of the two cached-render tabs")
+    """Spatial, Multivariate and Response Curves each render from their own
+    state and are not in ``redraw_app``'s fan-out, so reset-to-defaults has to
+    reach them by name. It had a branch for one of the three.
+
+    Read off the roster the reset path dispatches through rather than as a
+    substring of the module: the tab names used to be a literal in the ``elif``,
+    and a guard that greps for a literal fails the day the literal is factored
+    into the constant two call sites share — which says nothing about whether
+    the tabs are still repainted.
+    """
+    from well_viewer.features.export.sidebar_view import (
+        _FEATURES_THAT_REDRAW_THEMSELVES, ExportStyleSidebar,
+    )
+
+    missing = [name for name in ("Spatial", "Multivariate", "Response Curves")
+               if name not in _FEATURES_THAT_REDRAW_THEMSELVES]
+    assert not missing, (
+        f"reset-to-defaults does not repaint these cached-render tabs: {missing}")
+    reset_path = ast.unparse(
+        parse_source(REPO_ROOT / "well_viewer" / "features" / "export"
+                     / "sidebar_view.py"))
+    assert "_FEATURES_THAT_REDRAW_THEMSELVES" in reset_path, (
+        "the roster is no longer what the reset path dispatches through")
+    assert hasattr(ExportStyleSidebar, "_redraw_active_plot")
 
 
 # ── 6. a count of zero is a measurement ──────────────────────────────────────

@@ -121,7 +121,12 @@ def autosave_to_pipeline_info(ctx, *, keep_absent_labels: bool = True) -> None:
             selections, current_id, notes=notes_text,
             plot_groups=plot_groups,
         )
-        _write_block(ds.data_dir, block)
+        # ``deferrable``: the Sample Definitions tab autosaves on every
+        # keystroke pause, through the same seven-round-trip write that froze
+        # the Variables tab. This arm catches and logs every failure anyway, so
+        # deferring loses no report — the background writer makes the same one,
+        # and also puts it on the status line.
+        _write_block(ds.data_dir, block, deferrable=True)
     except Exception:
         # Autosave is best-effort and runs off a debounce timer with no user
         # dialog, so any failure (disk error *or* a malformed-selection build

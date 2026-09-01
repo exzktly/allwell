@@ -1265,6 +1265,17 @@ edit, so there is no Save button to look for; to discard definitions, use
 **Reset analysis** in the title bar ([Starting over](#starting-over)), which
 lets you pick exactly which kinds to drop.
 
+The autosave waits until you have stopped editing for half a second, then writes
+in the background, so it never blocks what you are doing — this matters most on
+a network share, where writing the sidecar takes about a second and used to
+freeze the window for that long after every pause. Keep editing; the writes
+queue up in order and the last thing you did is the last thing written. Closing
+the window or opening another dataset waits for that queue to finish first, so
+nothing is lost on the way out. If a write cannot be made — a read-only folder,
+a share that has gone away — the status line and a warning toast say which kind
+of state it was, and that it is being held in memory only for the rest of the
+session.
+
 **Which one do I use?** There are four ways to say something about a well, and
 each answers a different question. Nothing else in the app is a way of defining
 wells, and none of these four is a substitute for another.

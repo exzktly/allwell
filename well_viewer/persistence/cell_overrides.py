@@ -99,7 +99,10 @@ def save_to_data_dir(ctx) -> None:
         "overrides": overrides,
     }
     try:
-        atomic_write_json(path, payload)
+        # ``deferrable``: this runs off the 500 ms autosave debounce on the GUI
+        # thread, and the payload above is already fully built, so the file
+        # operations go to the background writer when one is active.
+        atomic_write_json(path, payload, deferrable=True)
     except OSError as exc:
         _logger.warning("Failed to save cell overrides to %s: %s", path, exc)
 

@@ -11,6 +11,18 @@ optional ``load``) callable and are addressed by name.
 Replaces the ~17 thin ``WellViewerApp._<domain>_{save,load}_to_data_dir`` /
 ``_schedule_save`` wrapper methods — call sites use
 ``app._persistence.{save,load,schedule_save}(name)`` directly.
+
+**The debounced path writes on a background thread.** ``_flush`` runs the
+domain's ``save`` inside ``_io.background_writes``, so the parts of it that read
+application state stay here on the GUI thread while the file operations are
+handed to :class:`well_viewer.persistence._writer.PersistenceWriter` — one
+serialized worker. On a network share those operations were about a second per
+autosave, which is what froze the window whenever the user paused while editing
+a variable. ``flush_all`` drains that queue before returning, because its two
+callers (quitting, and loading another dataset) cannot proceed until the writes
+have landed. Nothing outside this debounced path is affected: an explicit Save
+button, the smFISH threshold writer and the gating block all still write inline
+and still get a real answer back.
 """
 
 from __future__ import annotations
@@ -18,7 +30,10 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
+
+from well_viewer.persistence._io import background_writes
+from well_viewer.persistence._writer import PersistenceWriter
 
 _DEBOUNCE_MS = 500
 _logger = logging.getLogger("well_viewer")
@@ -32,6 +47,7 @@ class PersistenceRegistry:
         self._save: dict[str, Callable] = {}
         self._load: dict[str, Callable] = {}
         self._pending: set[str] = set()
+        self._writer: PersistenceWriter | None = None
 
     def register(self, name: str, *, save: Callable,
                  load: Callable | None = None) -> None:
@@ -79,9 +95,19 @@ class PersistenceRegistry:
         Failures are logged per domain and never propagate — this runs on the
         way out, and one domain's disk error must not stop the others being
         written.
+
+        Each ``_flush`` only *queues* its write, so the drain at the end is what
+        makes this method mean what its name says. Without it the quit path
+        would return while the writes were still in flight on a daemon thread
+        the interpreter is about to discard, and the dataset-swap path would
+        return before the previous plate's state had reached the previous
+        plate's folder — the exact loss this method exists to prevent, moved
+        one thread across.
         """
         for name in sorted(self._pending):
             self._flush(name)
+        if self._writer is not None:
+            self._writer.drain()
 
     def _flush(self, name: str) -> None:
         # The ``QTimer.singleShot`` lambdas ``schedule_save`` arms cannot be
@@ -102,11 +128,61 @@ class PersistenceRegistry:
         # the Qt event loop, so the user's edits silently fail to persist with
         # no trace (audit E16). Log it so the failure is at least diagnosable.
         try:
-            self.save(name)
+            # The save runs here, on the GUI thread — it reads ``ctx.state`` and
+            # builds its payload, and neither may be touched from another
+            # thread. Only the file operations it reaches, and only the ones
+            # whose call site passed ``deferrable=True``, are handed to the
+            # writer. See ``_io.background_writes``.
+            with background_writes(lambda job, _n=name: self._enqueue(_n, job)):
+                self.save(name)
         except Exception:
             _logger.exception(
                 "persistence: debounced autosave for %r failed; the edit was "
                 "not written to disk", name)
+
+    # -- the background writer -------------------------------------------
+
+    def _enqueue(self, name: str, job) -> None:
+        """Hand one deferred write to the (lazily created) writer thread."""
+        if self._writer is None:
+            self._writer = PersistenceWriter()
+            # Explicitly queued, and stated rather than relied upon.
+            # ``failed`` is emitted on the writer thread while
+            # ``_on_write_failed`` writes the window's status label, so the
+            # delivery has to cross back to the GUI thread. Measured, PySide6's
+            # default AutoConnection already resolves that way here — a bound
+            # method of a plain (non-QObject) receiver is dispatched against
+            # the *sender's* thread affinity, and the writer was created on the
+            # GUI thread — but that is a resolution rule this code would rather
+            # name than depend on, and a direct connection here would paint a
+            # widget from the writer.
+            self._writer.failed.connect(self._on_write_failed,
+                                        Qt.ConnectionType.QueuedConnection)
+        self._writer.submit(name, job)
+
+    def _on_write_failed(self, name: str, detail: str) -> None:
+        """Say on screen that a background save did not land.
+
+        The writer has already logged it. This is the other half the user asked
+        for: a deferred write has no caller left to return ``False`` to, so
+        without a status line the only signal that a plate of variables was
+        never written would be finding them gone next session — degraded output
+        indistinguishable from good output, which is the defect itself.
+        """
+        notify = getattr(self._ctx, "notify", None)
+        if notify is None:
+            return
+        msg = (
+            f"WARNING — {name} could not be saved to disk ({detail}). The edit "
+            f"stays in memory for this session and will be lost when it ends. "
+            f"See the log."
+        )
+        fn = getattr(notify, "set_status", None)
+        if callable(fn):
+            fn(msg)
+        fn = getattr(notify, "toast", None)
+        if callable(fn):
+            fn(msg, kind="error", msec=8000)
 
 
 def build_persistence_registry(ctx) -> PersistenceRegistry:

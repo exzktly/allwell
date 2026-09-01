@@ -1,9 +1,11 @@
 """Scatter plot rendering for multi-well fluorescence analysis.
 
-The pure data-gathering half (``collect_scatter_data`` / ``collect_scatter_agg_data``
-/ ``get_all_timepoints``) lives in :mod:`well_viewer.features.scatter.collect`
+The pure data-gathering half (``collect_scatter_data`` /
+``collect_scatter_agg_data``) lives in :mod:`well_viewer.features.scatter.collect`
 and is re-exported here for backwards compatibility; this module owns the
-matplotlib rendering, click handling, and combo wiring.
+matplotlib rendering, click handling, and combo wiring. The timepoint list a
+picker offers comes straight from ``data_loading.offerable_timepoints`` — the
+one definition every tab's picker reads.
 """
 
 from __future__ import annotations
@@ -27,9 +29,9 @@ from well_viewer.features.scatter.collect import (  # re-export
     collect_scatter_data,
     gate_filter_title_suffix,
     gates_for_axes,
-    get_all_timepoints,
     scatter_points_gated,
 )
+from well_viewer.data.data_loading import offerable_timepoints
 from well_viewer.features.scatter._messages import agg_empty_message, clear_cut_status
 from well_viewer.features.scatter.gating import (
     paint_gates,
@@ -599,7 +601,10 @@ def update_scatter_menus(ctx) -> None:
         refresh_scatter_metric_for_axis(ctx, axis)
 
     # Update timepoint dropdown for cells scatter
-    timepoints = list(ctx.state.dataset.all_timepoints_cache) or get_all_timepoints(ctx)
+    # The picker's enumeration, named once in the data layer rather than
+    # spelled here: written out at each call site it is one call site away
+    # from disagreeing, which is how Response Curves came to offer none.
+    timepoints = offerable_timepoints(ctx)
     tp_strs = [f"{tp:.1f}" for tp in timepoints] if timepoints else ["0"]
     tp_cb = ctx.widgets.get_or_none("_scatter_tp_cb")
     _set_combo_values(tp_cb, tp_strs)

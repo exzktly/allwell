@@ -19,7 +19,7 @@ from well_viewer.core.ui_helpers import (
 from well_viewer.features.export.service import (
     export_cell_data_from, export_distribution_data)
 from well_viewer.features.distribution.cell_scope_compute import cell_scope
-from well_viewer.data.data_loading import get_all_timepoints
+from well_viewer.data.data_loading import offerable_timepoints
 from widgets.labeled_combo import LabeledComboBox
 
 
@@ -211,13 +211,13 @@ def refresh_distribution_timepoints(ctx) -> None:
     """Populate the timepoint dropdown from the loaded data.
 
     A8-teardown T3: takes ``ctx`` — the combo comes from the WidgetRegistry and
-    the timepoint leaves (``get_all_timepoints`` / ``current_focus_tp``) now take
+    the timepoint leaves (``offerable_timepoints`` / ``current_focus_tp``) now take
     ``ctx`` too, so this handler names no god-object."""
     cb = ctx.widgets.get_or_none("_distribution_tp_cb")
     if cb is None:
         return
     try:
-        tps = get_all_timepoints(ctx)
+        tps = offerable_timepoints(ctx)
     except Exception:
         tps = []
     items = [f"{tp:g}" for tp in tps] if tps else []

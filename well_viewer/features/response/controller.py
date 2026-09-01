@@ -298,10 +298,21 @@ def _tp_state(ctx) -> dict:
 
 
 def available_timepoints(ctx) -> list[float]:
-    """Every timepoint the open dataset holds, ascending."""
+    """Every timepoint the open dataset holds, ascending.
+
+    ``offerable_timepoints`` rather than ``get_all_timepoints``, because this
+    fills a **picker**. The narrow reader answers "which timepoints did the
+    included rows measure" from ``timepoint_hours`` alone and skips a well
+    whose CSV has no such column; the canonical list also carries the parsed
+    text ``timepoint`` strings and ``pipeline_info``'s own
+    ``available_timepoints``. This tab was the one place asking the narrow
+    question of a picker, so on a plate recording its timepoints either of the
+    other two ways the button read ``Timepoints: 0 selected`` over an empty
+    menu while every other tab enumerated the plate correctly.
+    """
     with swallow("read the dataset's timepoints for the response curve"):
-        from well_viewer.data.data_loading import get_all_timepoints
-        return [float(t) for t in (get_all_timepoints(ctx) or [])]
+        from well_viewer.data.data_loading import offerable_timepoints
+        return [float(t) for t in (offerable_timepoints(ctx) or [])]
     return []
 
 

@@ -14,8 +14,35 @@ def test_save_button_hidden_until_handler_set(qapp):
     # No handler → save button is not among the hover buttons.
     assert card._save_btn not in card._hover_buttons()
     card.set_save_handler(lambda png, label, svg, panel: "ok")
-    # Single-axis figure still offers the save button (unlike copy).
+    # Single-axis figure still offers the save button.
     assert card._save_btn in card._hover_buttons()
+
+
+def test_a_single_axis_card_offers_the_copy_button_too(qapp):
+    """Reported: the Response card's hover row "only shows the save figure
+    glyph, so is missing the copy figure button".
+
+    Copy used to be multi-axis-only, on the reasoning that a single-axis card
+    is covered by "the whole-canvas Copy button" — which no plot tab in this
+    app has, because all nine build with ``header=False``. The only copy left
+    was ``Save ▾ → Copy figure as SVG``, in a menu named for saving.
+
+    Asserted with **no** save handler as well as with one: the copy button does
+    not depend on one, and a test that only checked the wired case would pass
+    against a copy button that had merely been folded in beside the save.
+    """
+    card = PlotCard(figsize=(3, 2))
+    card.figure.add_subplot(1, 1, 1)
+
+    assert card._copy_btn in card._hover_buttons(), (
+        "a single-axis card offers no way to copy its one panel")
+
+    card.set_save_handler(lambda png, label, svg, panel: "ok")
+    btns = card._hover_buttons()
+    assert card._copy_btn in btns and card._save_btn in btns
+    # The whole-figure save stays multi-axis-only — the one suppression with a
+    # reason the other two do not share.
+    assert card._save_fig_btn not in btns
 
 
 def test_save_click_invokes_handler_with_png_bytes(qapp):

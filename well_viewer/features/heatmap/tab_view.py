@@ -283,8 +283,8 @@ def refresh_heatmap_timepoints(ctx) -> None:
     if cb is None:
         return
     try:
-        from well_viewer.features.scatter.controller import get_all_timepoints
-        tps = list(get_all_timepoints(ctx))
+        from well_viewer.data.data_loading import offerable_timepoints
+        tps = list(offerable_timepoints(ctx))
     except Exception:
         tps = []
     ctx.state.heatmap.tp_values = tps

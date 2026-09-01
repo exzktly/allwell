@@ -255,9 +255,23 @@ if _HAVE_MPL:
         def _build_axis_copy_overlay(self) -> None:
             """A small "copy" IconButton that floats near the top of whichever
             subplot the cursor is over, so a single panel can be copied to the
-            clipboard. Only shown on multi-axis figures (Bar/Line) — on a
-            single-axis plot a per-panel copy is the same as the whole-canvas
-            Copy button, so it would just duplicate that affordance."""
+            clipboard.
+
+            Shown on every figure, single-axis included. It used to be
+            multi-axis-only, on the reasoning that a per-panel copy of a
+            one-panel figure duplicates "the whole-canvas Copy button" — but
+            there is no such button on any plot tab in this app. All nine build
+            their card with ``header=False``, so the only copy left is the
+            ``Save ▾`` menu's *Copy figure as SVG*, several clicks away and in a
+            menu named for saving. The result was a single-axis card offering
+            one hover glyph where a multi-axis card offers three, which is how
+            it was reported: the copy button reads as missing rather than as
+            deliberately withheld.
+
+            The same argument would suppress the save glyph, which is kept
+            precisely because the menu is not the affordance — see
+            ``set_save_handler`` below. Treating the two differently against the
+            same menu was the inconsistency, not the duplication."""
             self._hover_ax = None
             self._copy_btn_hovered = False
             self._copy_btn = IconButton(
@@ -269,10 +283,9 @@ if _HAVE_MPL:
             self._copy_btn.installEventFilter(self)
             self._copy_btn.clicked.connect(self._on_copy_axis_clicked)
             # Optional sibling "save to Saved Plots" button, enabled per-tab via
-            # ``set_save_handler``. Unlike copy (suppressed on single-axis since
-            # the whole-canvas Copy covers it), the save button is the only
-            # affordance for sending a plot to the gallery, so it appears on
-            # single-axis figures too whenever a handler is wired.
+            # ``set_save_handler``. Like copy, it appears on single-axis figures
+            # too whenever a handler is wired: a menu item is not a substitute
+            # for the glyph on the figure.
             self._save_handler = None
             self._save_btn_hovered = False
             self._save_btn = IconButton(
@@ -309,14 +322,14 @@ if _HAVE_MPL:
         def _hover_buttons(self) -> list:
             """The hover buttons to show for the current figure, right→left.
 
-            Copy is offered only on multi-axis figures (single-axis is covered
-            by the whole-canvas Copy); the per-panel save button shows on any
-            figure once a save handler is wired; the whole-figure save button is
-            multi-axis-only (single-axis per-panel save already == whole figure)."""
+            Copy and the per-panel save show on any figure with axes. The
+            whole-figure save button is the one that stays multi-axis-only, and
+            for a reason the other two do not share: on a single-axis figure the
+            per-panel save beside it already *is* the whole figure, so the two
+            glyphs would do the identical thing under different icons."""
             btns = []
             multi = len(self.figure.axes) > 1
-            if multi:
-                btns.append(self._copy_btn)
+            btns.append(self._copy_btn)
             if self._save_handler is not None:
                 btns.append(self._save_btn)
                 if multi:

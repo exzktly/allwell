@@ -136,6 +136,32 @@ class NamedPageStack(QStackedWidget):
             self.currentNameChanged.emit(self._names[idx])
 
 
+#: Plotting leaves known to carry their own Channel / Property selectors, for a
+#: caller with no feature registry (a lightweight test harness). The real app
+#: always answers from ``FeatureDescriptor.owns_channel_controls``; this only
+#: seeds the fallback, the same shape ``selection_controller`` uses for its two
+#: selection flags.
+_OWN_CHANNEL_TAB_NAMES = ("Scatter Plot", "Scatter Cells", "Scatter Agg",
+                          "Response Curves")
+
+
+def _leaf_owns_channel_controls(win, title: str) -> bool:
+    """Whether *title*'s leaf drives its figure from its own Channel/Property.
+
+    Such a leaf must not also show the shared band's pair. Two Channel
+    dropdowns in one control row is the reported symptom; the ON-threshold
+    quick-edit beside them is the quieter half, because it writes the *shared*
+    channel's cutoff and so edits a number the tab is not measuring against.
+    """
+    feats = getattr(win, "_features", None) or getattr(
+        getattr(win, "_ctx", None), "features", None)
+    if feats is not None:
+        descriptor = feats.get(title)
+        if descriptor is not None:
+            return bool(descriptor.owns_channel_controls)
+    return title in _OWN_CHANNEL_TAB_NAMES
+
+
 def build_centre(win, parent: QWidget) -> None:
     layout = parent.layout()
     if layout is None:
@@ -603,11 +629,18 @@ def build_centre(win, parent: QWidget) -> None:
             """
             global_cb = getattr(win, "_plotting_channel_cb", None)
             is_scatter = title in ("Scatter Plot", "Scatter Cells", "Scatter Agg")
+            # Asked of the feature registry rather than of a tab-name tuple.
+            # The tuple said "scatter", which was the only leaf owning its own
+            # pair when it was written; Response Curves grew one and the tuple
+            # did not, so that tab shipped showing both Channel dropdowns with
+            # nothing to say which drove the figure. See
+            # ``FeatureDescriptor.owns_channel_controls``.
+            owns_own = _leaf_owns_channel_controls(win, title)
             for grp_attr in ("_plotting_channel_grp", "_plotting_metric_grp",
                              "_plotting_thresh_frac_grp"):
                 grp = getattr(win, grp_attr, None)
                 if grp is not None:
-                    grp.setVisible(not is_scatter)
+                    grp.setVisible(not owns_own)
             scatter_grp = getattr(win, "_plotting_scatter_grp", None)
             if scatter_grp is not None:
                 scatter_grp.setVisible(is_scatter)

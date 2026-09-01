@@ -63,10 +63,6 @@ def timepoint_color_map(timepoints) -> dict[float, Any]:
     return {tp: cmap(v) for tp, v in zip(tps, np.linspace(0, 1, len(tps)))}
 
 
-# ``get_all_timepoints`` is a dataset-level helper shared by scatter /
-# distribution / heat map, so it lives in the data layer now; re-exported here
-# for the existing ``scatter.collect`` / ``scatter.controller`` import paths.
-from well_viewer.data.data_loading import get_all_timepoints  # noqa: F401
 from well_viewer.domain.tp_match import tp_close_mask
 
 # Lazy: ``gating`` imports ``timepoint_color_map`` from this module, so a

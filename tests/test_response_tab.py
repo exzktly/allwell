@@ -182,13 +182,23 @@ def tab(qtbot, monkeypatch):
 def _load(tab, variable, assignments, groups, timepoints=(24.0,)):
     """Point the ctx at a dataset, and say which timepoints it holds.
 
-    ``get_all_timepoints`` walks the real row cache, so it is stubbed on the
-    module the controller reads it from — the picker seeds itself from that
-    list, and without it every curve would be drawn at no timepoint at all.
+    The timepoints go on ``all_timepoints_cache``, which is where the app puts
+    them: ``DatasetState.rebuild_timepoints`` merges the numeric
+    ``timepoint_hours``, the parsed text ``timepoint`` strings and
+    ``pipeline_info``'s own list into that one field, and every picker in the
+    app reads it through ``data_loading.offerable_timepoints``.
+
+    ``get_all_timepoints`` — the narrow row scan, which sees only
+    ``timepoint_hours`` — is stubbed to return **nothing**, deliberately. It is
+    what this tab used to call, and a plate recording its timepoints either of
+    the other two ways is exactly the plate on which it returned nothing and
+    the Timepoints button read ``0 selected``. Stubbing it empty is what makes
+    right and wrong differ here: every test below fails against a picker that
+    reads it.
     """
     import well_viewer.data.data_loading as dl
-    tab.monkeypatch.setattr(dl, "get_all_timepoints",
-                            lambda _ctx: list(timepoints))
+    tab.monkeypatch.setattr(dl, "get_all_timepoints", lambda _ctx: [])
+    tab.ctx.state.dataset.all_timepoints_cache = list(timepoints)
     wells = sorted({w for ws in (g[1] for g in groups) for w in ws})
     tab.ctx.state.dataset.well_paths = {w: f"/{w}.csv" for w in wells}
     tab.ctx.state.selection.variables = sv.VariableSet(
@@ -201,8 +211,8 @@ def _load(tab, variable, assignments, groups, timepoints=(24.0,)):
 def _load_two_series(tab, timepoints=(24.0,)):
     """A dose series run on two cell lines — the plate the feature is for."""
     import well_viewer.data.data_loading as dl
-    tab.monkeypatch.setattr(dl, "get_all_timepoints",
-                            lambda _ctx: list(timepoints))
+    tab.monkeypatch.setattr(dl, "get_all_timepoints", lambda _ctx: [])
+    tab.ctx.state.dataset.all_timepoints_cache = list(timepoints)
     dose = _variable(pairs=(("1", 1.0), ("10", 10.0)))
     line = sv.Variable(
         id="cl", name="Cell line", kind=sv.TEXT, unit="",
@@ -248,8 +258,8 @@ def _load_ungrouped(tab, variable, assignments, timepoints=(24.0,)):
     a test of grouped plates only.
     """
     import well_viewer.data.data_loading as dl
-    tab.monkeypatch.setattr(dl, "get_all_timepoints",
-                            lambda _ctx: list(timepoints))
+    tab.monkeypatch.setattr(dl, "get_all_timepoints", lambda _ctx: [])
+    tab.ctx.state.dataset.all_timepoints_cache = list(timepoints)
     wells = sorted(assignments)
     tab.ctx.state.dataset.well_paths = {w: f"/{w}.csv" for w in wells}
     tab.ctx.state.selection.variables = sv.VariableSet(
@@ -870,9 +880,7 @@ def test_the_fit_settings_are_one_set_for_the_whole_figure(tab, fit_ui):
     that cannot be compared, and comparing them is the only reason to draw
     both."""
     _dose_plate(tab, ec50=2.5)
-    tab.monkeypatch.setattr(
-        "well_viewer.data.data_loading.get_all_timepoints",
-        lambda _ctx: [24.0, 48.0])
+    tab.ctx.state.dataset.all_timepoints_cache = [24.0, 48.0]
     slice_ = tab.ctx.state.feature_slice("response")
     slice_.tp_selections = {"24": True, "48": True}
     fit_ui.combo.setCurrentIndex(fit_ui.combo.findData("4pl"))

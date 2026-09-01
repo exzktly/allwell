@@ -128,6 +128,26 @@ class FeatureDescriptor:
     # Selection-behaviour flags (replace the hard-coded tab-name string sets).
     per_well_selection: bool = False     # was membership in _PER_WELL_TABS
     single_well_selection: bool = False  # was the smFISH single-well check
+    # Whether this plotting leaf carries its **own** Channel / Property
+    # selectors rather than reading the shared Plotting band's. A leaf that does
+    # must not also show the band's pair: two Channel dropdowns in one control
+    # row, one of which drives the figure and one of which does not, and no way
+    # to tell them apart. The band's ON-threshold quick-edit goes with them —
+    # it writes ``set_on_cutoff`` for the *shared* channel, so on a tab
+    # measuring RFP while the band is on GFP it silently edits the wrong
+    # channel's cutoff. Such a tab reads its own cutoff from its own column
+    # (``on_cutoff_for_column``) and its editor of record is the Cell Gating
+    # tab's ThreshFracOn, which is what that stepper's own tooltip names.
+    #
+    # ``centre_view._refresh_channel_chip`` gated all three on a hardcoded
+    # ``title in ("Scatter Plot", "Scatter Cells", "Scatter Agg")``. Response
+    # Curves grew its own pair for the same reason the aggregate scatter has
+    # one — only a tab that owns the pair can offer "Fraction above threshold",
+    # which is not a column — and the tuple never heard about it, so the tab
+    # shipped with both pairs visible. The answer lives on the descriptor for
+    # the same reason the two flags above do: beside the tab, not in a string
+    # set in another module.
+    owns_channel_controls: bool = False
     # Whether this sub-tab's frame takes a gutter. The two editable grids want
     # one; the report and the read-only panes paint to their own edges. The
     # descriptor carries the *decision* and the container supplies the spacing

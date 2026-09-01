@@ -1019,6 +1019,9 @@ def _features() -> list[FeatureDescriptor]:
                           on_channel_changed=_channel_response,
                           states=(StateSpec("response", _state_response),),
                           fold_change_scope_factory=_fold_change_scope_response,
+                          # Its own Channel and Property, so the shared band's
+                          # pair is hidden while this leaf is showing.
+                          owns_channel_controls=True,
                           view_state_io=_response_view_state_io),
         FeatureDescriptor(
             name="Scatter Plot", parent="Plotting", build=_build_scatter,
@@ -1027,6 +1030,8 @@ def _features() -> list[FeatureDescriptor]:
             on_channel_changed=_channel_scatter,
             redraw=_redraw_scatter,
             states=(StateSpec("scatter", _state_scatter),),
+            # Per-axis Channel and Property on both scatter pages.
+            owns_channel_controls=True,
         ),
         FeatureDescriptor(
             name="Distribution", parent="Plotting", build=_build_distribution,

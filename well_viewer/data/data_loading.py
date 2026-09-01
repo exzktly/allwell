@@ -505,8 +505,45 @@ def record_fov_verdict(ctx, label: str, df) -> None:
         )
 
 
+def offerable_timepoints(ctx) -> list[float]:
+    """Every timepoint a **picker** should offer, ascending.
+
+    Not the same question as :func:`get_all_timepoints`, and the difference is
+    what this exists for. That one answers *which timepoints did the included
+    rows measure* by reading ``timepoint_hours`` and nothing else, which is
+    right for a collector deciding what it can reduce. A picker is asking
+    *which timepoints does this dataset have*, and the canonical answer to that
+    is ``DatasetState.rebuild_timepoints``: it merges the numeric
+    ``timepoint_hours``, the parsed text ``timepoint`` strings, and
+    ``pipeline_info``'s ``available_timepoints`` — three sources, so that (in
+    its own words) every tab that reads ``all_timepoints_cache`` agrees.
+
+    Response Curves asked the narrow question of a picker. On a plate whose
+    CSVs carry a text ``timepoint`` column rather than a numeric
+    ``timepoint_hours``, or whose timepoints are recorded only in
+    ``pipeline_info``, the narrow reader returns nothing at all while the cache
+    holds the real list — so the Timepoints button read ``0 selected`` and its
+    menu was empty, on a plate every other tab enumerated correctly.
+
+    The cache is the answer whenever it has one; the row scan is the fallback,
+    for a context built before the cache was rebuilt. That pair is exactly what
+    ``features/scatter/controller`` already spells inline, which is the other
+    half of the reason it is named here: a picker's enumeration written out at
+    each call site is one call site away from disagreeing.
+    """
+    cached = list(getattr(ctx.state.dataset, "all_timepoints_cache", None) or [])
+    if cached:
+        return sorted(float(t) for t in cached)
+    return get_all_timepoints(ctx)
+
+
 def get_all_timepoints(ctx) -> list[float]:
     """Unique included timepoints across all loaded wells.
+
+    The **measured** timepoints: read from ``timepoint_hours`` on the included
+    rows, so a well whose CSV lacks that column contributes nothing. A picker
+    wants :func:`offerable_timepoints` instead — see there for why the two
+    answers differ and when each is right.
 
     A dataset-level helper used by several plot tabs (scatter / distribution /
     heat map), so it lives in the data layer rather than any one feature.

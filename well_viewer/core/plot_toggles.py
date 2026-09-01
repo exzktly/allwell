@@ -20,16 +20,14 @@ load time and the bar feature stays independently deletable.
 
 from __future__ import annotations
 
-from well_viewer.core.plot_orchestrator import redraw_app
-from well_viewer.core.tab_controller import is_tab_visible
 from well_viewer.core.selection_controller import invalidate_stats_cache
 from well_viewer.core.safe import swallowed
 from well_viewer.core.lazy import lazy as _lazy
 
-# Feature-specific wiring, bound as lazy proxies so importing this module never
+# Feature-specific wiring, bound as a lazy proxy so importing this module never
 # imports the bar feature (a ``lazy(...)`` binding is a call, not an import
-# statement — see core/lazy.py).
-_redraw_bars = _lazy("well_viewer.features.barplot.renderer", "redraw_bars")
+# statement — see core/lazy.py). Only the button-state refresh is left: the
+# redraws go out on the bus now, so no toggle here names a tab.
 _refresh_bar_layout_btn_state = _lazy(
     "well_viewer.features.barplot.controller", "refresh_bar_layout_btn_state"
 )
@@ -52,8 +50,8 @@ def _live_buttons(bank) -> list:
     ``RuntimeError: Internal C++ object already deleted``. Because the button
     loops were unguarded, that aborted the toggle part-way: the buttons after
     the dead one kept the previous label and variant while the state had already
-    flipped, and in ``toggle_sem`` the ``redraw_app`` below never ran, so the
-    plots kept the old error band too. The observer loops immediately beneath
+    flipped, and in ``toggle_sem`` the redraw below never ran, so the plots kept
+    the old error band too. The observer loops immediately beneath
     each button loop already guarded the identical case.
 
     Pruning rather than skipping keeps the bank from growing without bound
@@ -140,6 +138,32 @@ def refresh_fov_btn_state(ctx) -> None:
     _notify_observers(ctx.runtime.fov.observers, is_on)
 
 
+def _announce_a_plot_option(ctx) -> None:
+    """Tell every plot the error-band settings moved.
+
+    Through the bus, which is what ``plot_options_changed`` is for: the
+    ``EventBus`` docstring names "error bars" in that signal's own description,
+    and these two toggles were the ones never emitting it.
+
+    What they did instead was ``redraw_app`` plus a hardcoded branch for the Bar
+    tab. ``redraw_app`` fans out over Line, Distribution and Heat Map only, so
+    the SD/SEM button reached four tabs out of nine by name: flipping it on
+    Response Curves, Scatter, Multivariate or Spatial changed
+    ``ctx.state.plot.use_sem``, which those collectors do read, and nothing
+    repainted — a control that looked dead because the figure in front of it
+    never redrew. The same roster shape as the other tab-name list this file's
+    neighbours have been bitten by, one layer up.
+
+    ``RedrawCoordinator`` turns the emit into ``redraw_scopes_or_defer``, which
+    draws every visible scope and marks the rest dirty for the next tab switch.
+    That subsumes the Bar branch as well, and correctly: ``visible_scope_names``
+    is Split-View-aware, which is the case that branch was added for. The
+    default scope's own redraw *is* ``redraw_app``, so Line, Distribution and
+    Heat Map still go through exactly the path they did before.
+    """
+    ctx.bus.plot_options_changed.emit(ctx.state.plot)
+
+
 def toggle_sem(ctx) -> None:
     invalidate_stats_cache(ctx)
     is_sem = ctx.state.plot.toggle_sem()
@@ -155,27 +179,20 @@ def toggle_sem(ctx) -> None:
     for btn in _live_buttons(ctx.runtime.sem.btns):
         _style_button(btn, _apply_sem)
     _notify_observers(ctx.runtime.sem.observers, is_sem)
-    redraw_app(ctx)
-    # Redraw the bar pane too whenever it is on screen — in Split View it can be
-    # visible alongside another pane without being the focused tab.
-    if is_tab_visible(ctx, "Bar Plots"):
-        _redraw_bars(ctx)
+    _announce_a_plot_option(ctx)
 
 
 def toggle_fov_replicates(ctx) -> None:
     ctx.state.plot.toggle_fov_replicates()
     invalidate_stats_cache(ctx)
     refresh_fov_btn_state(ctx)
-    # Gated on the bar feature being *present*. (``_redraw_bars`` below is
-    # gated too, but on the tab being *visible* — a different question that
-    # happens to imply this one.) This is an app-global button and
+    # Gated on the bar feature being *present*, which is a different question
+    # from whether its tab is visible — the announcement below leaves that one
+    # to the scope coalescer. This is an app-global button and
     # ``_refresh_bar_layout_btn_state`` is a lazy proxy into
     # ``features/barplot``: with that feature profiled out the call raised
     # ModuleNotFoundError *after* the state had already been flipped, so the
     # toggle both failed and took effect.
     if ctx.state.feature_slice("bar") is not None:
         _refresh_bar_layout_btn_state(ctx)
-    redraw_app(ctx)
-    # Split View: redraw the bar pane whenever it is on screen, even if unfocused.
-    if is_tab_visible(ctx, "Bar Plots"):
-        _redraw_bars(ctx)
+    _announce_a_plot_option(ctx)

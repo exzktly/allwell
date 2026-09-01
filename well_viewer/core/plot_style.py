@@ -396,7 +396,11 @@ def mark_time_rescale(*axes, rescale) -> None:
 
 #: What the Properties panel offers in its log-base field. Editable, so a base
 #: this list does not name is still accepted — these are the ones worth a click.
-LOG_BASE_CHOICES = ("10", "2", "e")
+#: In the order they are reached for rather than sorted: 10 is the default and
+#: almost always the answer, 2 and 3 are the doubling and tripling series a
+#: dilution plate is laid out in, and *e* is the one that is a symbol rather
+#: than a number.
+LOG_BASE_CHOICES = ("10", "2", "3", "e")
 
 #: The base a log axis takes when nothing has said otherwise.
 DEFAULT_LOG_BASE = 10.0

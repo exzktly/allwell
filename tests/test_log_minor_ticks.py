@@ -75,6 +75,43 @@ def test_base_two_has_no_whole_multiple_inside_it_and_takes_its_midpoint():
     assert log_minor_subs(math.e) == (2.0,)
 
 
+def test_every_base_the_panel_offers_actually_subdivides():
+    """The list is a promise: a base one click away that draws no subdivisions
+    would be a control that half-works, and only the offered ones are reachable
+    without typing. Driven from ``LOG_BASE_CHOICES`` rather than from a list
+    written here, so a base added to the panel is covered by having been added.
+    """
+    from well_viewer.core.plot_style import LOG_BASE_CHOICES, log_base_value
+
+    for text in LOG_BASE_CHOICES:
+        base = log_base_value(text)
+        subs = log_minor_subs(base)
+        assert subs, f"base {text!r} offers no subdivision"
+        assert all(1.0 < float(sub) < base for sub in subs), (text, base, subs)
+
+
+def test_the_offered_bases_are_the_ones_worth_a_click():
+    """Pinned as the list, because the field is editable and the list is the
+    only part that is a decision — anything else is typed."""
+    from well_viewer.core.plot_style import LOG_BASE_CHOICES
+
+    assert LOG_BASE_CHOICES == ("10", "2", "3", "e")
+
+
+def test_base_three_puts_a_tick_between_each_pair_of_powers():
+    """The base added last, measured on the axes rather than in the resolver:
+    3 has exactly one whole multiple inside it, so each step from 3^k to 3^(k+1)
+    carries a single mark at twice the lower power."""
+    fig, ax = _fig()
+    ax.plot([1, 9], [1, 2])
+    prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
+    prefs["x_log"] = True
+    prefs["x_log_base"] = "3"
+    apply_export_style_prefs(fig, prefs)
+    ticks = [t for t in _minor(ax) if 1.0 <= t <= 9.0]
+    assert ticks == pytest.approx([2.0, 6.0]), ticks
+
+
 def test_a_base_that_is_not_a_base_falls_back_to_ten():
     """The field is editable, so this is reachable from a typo rather than only
     from a bug — and a locator built on base 1 is a division by zero."""

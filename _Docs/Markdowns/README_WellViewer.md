@@ -1969,7 +1969,7 @@ row, holding five actions:
 - **Properties** — opens a slide-out sidebar that styles the active figure:
   axis label / tick / title sizes, grid on/off + alpha + linestyle, legend,
   line / marker widths, axis limits + log-scale (with the **log base** each
-  logarithmic axis is drawn in — 10, 2, e, or anything else above 1), layout
+  logarithmic axis is drawn in — 10, 2, 3, e, or anything else above 1), layout
   engine, and an export-profile picker. A logarithmic axis also carries the
   standard subdivisions between its labelled powers — 2, 3, … 9 in each decade,
   unlabelled — so you can read a value between two labels; they are part of the
@@ -2817,8 +2817,8 @@ tab chose reads as log rather than contradicting the plot above it; once you set
 it either way, your answer stands and the doses stop deciding.
 
 **Properties → Limits & Scale → Log base** sets what that axis is logarithmic
-in. **10** is the default, **2** and **e** are on the list, and you can type any
-other number above 1. The base does not move the points relative to one another
+in. **10** is the default, with **2**, **3** and **e** on the list, and you can
+type any other number above 1. The base does not move the points relative to one another
 — every base is the same axis stretched by a constant — so what it changes is
 the spacing you read the gaps against, and on a response curve it also decides
 where a zero dose sits: one step of your base below the lowest real dose, behind

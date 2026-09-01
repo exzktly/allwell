@@ -537,8 +537,13 @@ def import_selections_from_json(ctx) -> None:
         replicates = sel.get("replicates")
         source = sel.get("source") or "imported"
         try:
+            # The file's own flag, carried rather than re-derived: an
+            # imported group called ``10`` was named after a dose on the plate
+            # it came from, and dropping that here would relabel it as its
+            # wells on every axis in this dataset.
             sel_add(ctx, name=name, wells=list(wells),
-                    replicates=replicates, source=source)
+                    replicates=replicates, source=source,
+                    name_is_verbatim=bool(sel.get("name_is_verbatim")))
             added += 1
         except Exception:
             _logger = __import__("logging").getLogger("well_viewer.runtime_app")
@@ -1056,13 +1061,22 @@ def _schedule_sample_def_autosave(ctx) -> None:
 
 
 def sel_add(ctx, name=None, wells=None, replicates=None, source="user",
-             *, make_current=True):
+             *, make_current=True, name_is_verbatim=False):
+    """Append one new selection and make it current.
+
+    ``name_is_verbatim`` says *name* was composed from the sample variables the
+    wells hold rather than generated from their tokens, and it has to travel:
+    a one-variable plate names a group after a `Dose` of ``10``, which
+    ``replicate_display_label`` would otherwise read as an auto-generated name
+    and redraw on every axis as ``A01,A02``.
+    """
     from well_viewer.domain.selections_model import make_selection
     sel_state = ctx.state.selection
     used_names = {s.get("name") for s in sel_state.selections}
     used_ids = {s.get("id") for s in sel_state.selections}
     sel = make_selection(name=name, wells=wells, replicates=replicates,
                          source=source, used_names=used_names, used_ids=used_ids,
+                         name_is_verbatim=name_is_verbatim,
                          fallback_color_idx=len(sel_state.selections))
     sel_strip_wells(ctx, sel["wells"], keep_id=sel["id"])
     sel_state.selections.append(sel)
@@ -1207,6 +1221,11 @@ def sel_rename(ctx, sid, name) -> None:
     # fold-change state, which names groups in three places.
     _upgrade_fc_controls(ctx)
     s["name"] = new
+    # The name is now the user's, so it goes back under the rule every typed
+    # name lives under: ``name_is_verbatim`` exempts a name the *app* composed
+    # from the sample variables, and leaving it set would quietly spare this
+    # group the relabelling every other typed ``3`` gets.
+    s.pop("name_is_verbatim", None)
     ctx.state.plot.rename_member(old, new)
     ctx.coordinator.rebuild_all()
 

@@ -41,6 +41,55 @@ def make_replicate_pairs(toks, size=2):
     return sets
 
 
+def name_sets_from_variables(ctx, sets) -> None:
+    """Rename *sets* from the sample variables their wells hold, in place.
+
+    A replicate group's generated name is the tokens of the wells in it —
+    ``A01/A02`` — which says where the group is on the plate and nothing about
+    what it *is*. Once the user has declared what was varied across the plate,
+    the plate already knows: the wells of one group hold one cell line and one
+    dose, and ``HeLa · 10 µM`` is the name they would have typed.
+
+    Only where the variables answer. A plate with no variables, or a group whose
+    wells disagree about every one of them, keeps the tokens
+    :func:`make_replicate_pairs` gave it — :func:`sample_variables.name_for_wells`
+    refuses rather than guessing, and the tokens are a true statement about a
+    group nothing else can describe.
+
+    ``name_is_verbatim`` rides along because a one-variable plate composes a name
+    that *is* the value: a `Dose` of ``10`` with no unit typed matches
+    :func:`replicate_display_label`'s auto-generated-name pattern exactly, and
+    without the flag every axis would draw the well tokens this function exists
+    to replace.
+    """
+    from well_viewer.domain.sample_variables import names_for_well_sets
+
+    vset = getattr(ctx.state.selection, "variables", None)
+    if vset is None or not vset.variables:
+        return
+    names = names_for_well_sets(vset, [list(s.wells) for s in sets])
+    for rset, name in zip(sets, names):
+        if name:
+            rset.name = name
+            rset.name_is_verbatim = True
+
+
+def _variable_name_for(ctx, wells) -> str:
+    """What *wells* are in sample-variable terms, or ``""`` — ctx-shaped.
+
+    One line over :func:`sample_variables.name_for_wells`, and it earns its own
+    name by being the single place the two group-creating flows agree on where
+    the variable set lives. ``getattr`` because a context built for a headless
+    path carries a selection slice without the variables field.
+    """
+    from well_viewer.domain.sample_variables import name_for_wells
+
+    vset = getattr(ctx.state.selection, "variables", None)
+    if vset is None or not vset.variables:
+        return ""
+    return name_for_wells(vset, wells)
+
+
 def rep_quick_pairs(ctx) -> None:
     """Generate quick replicate pairs using current dropdown selections."""
     pair_dir = ctx.runtime.groups.pair_dir or "row"
@@ -95,6 +144,7 @@ def rep_quick_pairs(ctx) -> None:
 
     if not new_sets:
         return
+    name_sets_from_variables(ctx, new_sets)
     if sel_state.selections:
         resp = QMessageBox.question(
             ctx.window, "Replace groups?",
@@ -110,6 +160,7 @@ def rep_quick_pairs(ctx) -> None:
     # no explicit ``replicates`` partition is stored (see selections_model).
     sels = [make_selection(name=s.name, wells=list(s.wells),
                            replicates=None,
+                           name_is_verbatim=s.name_is_verbatim,
                            source="rep_set", used_names=used_names, used_ids=used_ids,
                            fallback_color_idx=i)
             for i, s in enumerate(new_sets)]
@@ -118,12 +169,36 @@ def rep_quick_pairs(ctx) -> None:
     ctx.coordinator.rebuild_all()
 
 
-def rep_add(ctx) -> None:
-    """Open a dialog to create a new named ReplicateSet, picking its wells on the
-    same graphical plate the "+ wells…" popover uses to edit an existing group's
-    membership — not a text list of well names. Configured identically to
-    ``SavedSelectionsList._open_compose_popover`` so the two flows look and feel
-    the same (rubber-band rectangle select, row/column headers, multi-select)."""
+def build_rep_add_dialog(ctx) -> QDialog:
+    """Build the New Replicate Set dialog, fully wired, without showing it.
+
+    Wells are picked on the same graphical plate the "+ wells…" popover uses to
+    edit an existing group's membership — not a text list of well names.
+    Configured identically to ``SavedSelectionsList._open_compose_popover`` so
+    the two flows look and feel the same (rubber-band rectangle select,
+    row/column headers, multi-select).
+
+    The name field tracks the plate while it still holds the name this dialog
+    put there: pick the wells of one condition and the box fills in with what
+    the sample variables say they are, ``HeLa · 10 µM`` in place of ``Rep 3``.
+    One keystroke in the field ends that — the text is then the user's and is
+    never overwritten, which is the whole of the rule and the reason the last
+    offered name is remembered rather than the field being re-derived on every
+    change.
+
+    **Separate from** :func:`rep_add` **so that rule can be driven.** Every
+    behaviour above lives in a closure connected to a signal, and a closure
+    reachable only from inside ``QDialog.exec`` is reachable from no test at
+    all: a modal blocks for ever under the offscreen QPA. Building and exec'ing
+    apart is what lets a test select wells on the real plate and read the real
+    name box, rather than calling the naming rule directly one step past the
+    connection that is the thing most likely to be wrong (§7.6).
+
+    The widgets a caller needs are named children — ``_grp_add_name`` and
+    ``_grp_add_plate`` — so a test finds them by ``findChild`` rather than by
+    walking the layout, which is a description of the layout and breaks when a
+    row moves.
+    """
     from well_viewer.core.selection_controller import sel_add
     from well_viewer.domain.viewer_state import parse_rc
     from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
@@ -136,12 +211,20 @@ def rep_add(ctx) -> None:
     dlg.setMinimumSize(_DLG_MIN_W, _DLG_MIN_H)
     v = QVBoxLayout(dlg)
     v.addWidget(QLabel("Name:"))
-    name_edit = QLineEdit(f"Rep {len(sel_state.selections)+1}")
+    fallback_name = f"Rep {len(sel_state.selections)+1}"
+    name_edit = QLineEdit(fallback_name)
+    name_edit.setObjectName("_grp_add_name")
     v.addWidget(name_edit)
     v.addWidget(QLabel("Choose wells for this group:"))
 
+    # The last name this dialog offered, and whether it came from the variables.
+    # A one-element list because ``_offer_name`` closes over it and rebinding a
+    # plain name inside a nested function would make it local to that function.
+    offered = [fallback_name, False]
+
     enabled = sorted(well_paths.keys(), key=lambda l: parse_rc(l))
     plate = WellPlateSelector()
+    plate.setObjectName("_grp_add_plate")
     try:
         plate.setEnabledWells(enabled)
         plate.setRowColumnSelectable(True)
@@ -155,6 +238,18 @@ def rep_add(ctx) -> None:
     except Exception:
         swallowed()
     v.addWidget(plate, 1, PLATE_ALIGNMENT)
+
+    def _offer_name(*_a) -> None:
+        """Fill the name box from what the picked wells are, unless it was typed in."""
+        if name_edit.text().strip() != offered[0]:
+            return
+        picked = [w for w in plate.selectedWellIds() if w in well_paths]
+        name = _variable_name_for(ctx, picked)
+        offered[0] = name or fallback_name
+        offered[1] = bool(name)
+        name_edit.setText(offered[0])
+
+    plate.selectionChanged.connect(_offer_name)
 
     btn_row = QHBoxLayout()
     v.addLayout(btn_row)
@@ -171,15 +266,30 @@ def rep_add(ctx) -> None:
         if not picked:
             QMessageBox.warning(dlg, "No wells", "Select at least one well.")
             return
-        name = name_edit.text().strip() or f"Rep {len(sel_state.selections) + 1}"
+        name = name_edit.text().strip() or fallback_name
+        # Verbatim only while the field still holds the name the variables
+        # composed. A name the user typed over it is theirs, and a `Dose` group
+        # they chose to call ``3`` is exactly the auto-generated-looking name the
+        # relabelling heuristic is for.
+        verbatim = offered[1] and name == offered[0]
         dlg.accept()
         # sel_add enforces well-exclusivity (the new group takes the wells).
         # A group is one condition; its wells are implicitly its replicate set.
-        sel_add(ctx, name, list(picked), replicates=None, source="rep_set")
+        sel_add(ctx, name, list(picked), replicates=None, source="rep_set",
+                name_is_verbatim=verbatim)
 
     ok_btn.clicked.connect(_ok)
     cancel_btn.clicked.connect(dlg.reject)
-    dlg.exec()
+    return dlg
+
+
+def rep_add(ctx) -> None:
+    """Open the New Replicate Set dialog and run it.
+
+    The whole of what this adds to :func:`build_rep_add_dialog` is the ``exec``,
+    which is the one line a test cannot run.
+    """
+    build_rep_add_dialog(ctx).exec()
 
 
 

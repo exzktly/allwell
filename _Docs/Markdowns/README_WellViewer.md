@@ -1475,6 +1475,22 @@ spinbox (default 2), walking the wells along the Rows / Columns direction. On
 the Replicates plate every well is tinted by its **group's** colour, so all wells in
 a group read as one condition and match the group's row swatch.
 
+**Once you have filled in Variables, new groups are named after them.** A group
+whose wells all hold `HeLa` and `10 µM` is created as `HeLa · 10 µM` rather than
+`A01/A02`, whether it came from **Quick Replicates** or from **+ Add** — in the
+**+ Add** dialog the name box fills in as you pick the wells, and stops doing so
+the moment you type a name of your own. Groups that end up with the same name —
+four replicates of one dose split into two groups, say — each carry their wells
+after it, so you can tell them apart.
+
+Where the variables cannot answer, the wells stay in the name. A group whose
+wells hold two different doses is named for what they *do* agree on plus the
+wells themselves (`HeLa (A01/A03)`), because a group spanning two doses must not
+read like one that is only ever `HeLa`; and a group on a plate with no variables
+filled in keeps the plain `A01/A02` it always had. Nothing here guesses: a well
+you have not annotated is never given a neighbour's value. Every name is a
+starting point — rename any group by double-clicking it in the list.
+
 **Editing a group on a partly-loaded plate keeps the wells you cannot see.** If
 you opened a folder that holds only some of the plate's wells, the picker can
 only paint those — but the group's other members are still part of it. Adding

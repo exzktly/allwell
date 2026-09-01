@@ -304,6 +304,111 @@ def roll_up(vset: VariableSet, variable_id: str, wells) -> str | None:
     return next(iter(seen))
 
 
+#: What joins one variable's value to the next in a composed group name.
+#: The separator the rest of the app already reads as "and also" — an image
+#: table's ``well · channel · timepoint`` caption, the builder's zone headings —
+#: rather than a comma, which a value label may itself contain.
+NAME_JOIN = " · "
+
+
+def _resolved_labels(vset: VariableSet, wells) -> tuple[list[str], bool]:
+    """``(the labels *wells* agree on, whether they agree on every variable)``.
+
+    Labels come in the user's own order and carry their units, so a name reads
+    the way the same value reads in the value list, on a legend and on an axis.
+    The second half is the part a name cannot be built honestly without: a group
+    that resolves two of three variables is *described* by what it resolved and
+    is not *identified* by it, and the two look identical once the labels are
+    joined into a string.
+    """
+    wells = list(wells)
+    if not wells:
+        return [], False
+    labels: list[str] = []
+    complete = True
+    for variable in vset.variables:
+        value_id = roll_up(vset, variable.id, wells)
+        label = ("" if value_id is None or value_id == MIXED
+                 else variable.display_label(value_id).strip())
+        if label:
+            labels.append(label)
+        else:
+            complete = False
+    return labels, complete
+
+
+def _with_wells(name: str, wells) -> str:
+    """*name* with the wells that carry it, in the tokens a generated name uses.
+
+    ``"/"`` rather than the display separator, so a name that has fallen back to
+    its wells and one that has been *completed* by them read as the same fact
+    about the same plate.
+    """
+    return f"{name} ({'/'.join(wells)})" if wells else name
+
+
+def name_for_wells(vset: VariableSet, wells) -> str:
+    """What *wells* are, said in the variables they agree on, or ``""``.
+
+    ``HeLa · 10 µM`` for a pair of wells holding one cell line and one dose.
+    ``""`` when the plate has no variables, or when none of them resolves over
+    these wells — the caller then keeps whatever it would have generated, which
+    is a true statement about a group nothing else can describe.
+
+    **A variable that does not resolve contributes nothing, and the name says
+    so.** :func:`roll_up`'s two refusals are both refusals here — :data:`MIXED`
+    wells disagree, and an unassigned well was never annotated — and neither
+    belongs in a name: a legend reading ``—mixed—`` reports a state the
+    Variables tab already counts. But dropping the variable silently is the
+    worse half: a group spanning two doses would come back as plain ``HeLa``,
+    which is exactly what a fully-resolved group on a one-variable plate is
+    called. So a partial description is completed by the wells it came from
+    (``HeLa (A01/A03)``) and can no longer be read as a whole one.
+
+    Naming a group is the only thing this is for, so it is deliberately not a
+    display label for an arbitrary set of wells: it is read once, at the moment
+    a group is created, and the string it returns is then the user's to edit
+    like any other name.
+    """
+    wells = list(wells)
+    labels, complete = _resolved_labels(vset, wells)
+    if not labels:
+        return ""
+    name = NAME_JOIN.join(labels)
+    return name if complete else _with_wells(name, wells)
+
+
+def names_for_well_sets(vset: VariableSet, well_sets) -> list[str]:
+    """:func:`name_for_wells` for each of *well_sets*, kept distinct from each other.
+
+    One entry per set, in the order given, ``""`` where the variables name
+    nothing. Two sets that compose the same name — four replicates of one dose
+    split into two groups, or a plate whose only variable is the dose — each get
+    their wells appended, because the alternative is the ``_v2`` suffix
+    :func:`selections_model._unique_name` falls back to, and ``1 µM_v2`` says
+    only that something else was called ``1 µM``. The wells say *which*
+    replicates these are, which is the fact that tells two otherwise identical
+    conditions apart.
+
+    Disambiguated across the whole batch rather than pairwise as it goes, so the
+    first of a colliding pair carries its wells too. Naming one ``1 µM`` and the
+    next ``1 µM (B01/B02)`` would read as a group and a sub-group of it.
+
+    A collision and a partial description take the **same** suffix and never
+    both: they are one question — is this name enough to identify the group —
+    asked of the batch and of the set, and a name carrying its wells twice
+    answers it worse than either.
+    """
+    sets = [list(wells) for wells in well_sets]
+    resolved = [_resolved_labels(vset, wells) for wells in sets]
+    names = [NAME_JOIN.join(labels) for labels, _ in resolved]
+    clashing = {name for name in names if name and names.count(name) > 1}
+    return [""
+            if not name else
+            name if (complete and name not in clashing) else _with_wells(name, wells)
+            for (_labels, complete), name, wells in zip(resolved, names, sets)]
+
+
 def assign(vset: VariableSet, variable_id: str, wells, value_id: str | None) -> VariableSet:
     """*vset* with *wells* set to *value_id*, or cleared when it is ``None``.
 

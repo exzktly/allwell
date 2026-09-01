@@ -11,7 +11,14 @@ A ``Selection`` is a plain ``dict`` (JSON-friendly):
         "replicates": [["A01","A02"], ...] | None,   # partition of `wells`
         "labels":     {...} | None,         # per-well overrides; reserved/ignored v1
         "source":     "bar_group" | "rep_set" | "user" | "import",
+        "name_is_verbatim": True,           # optional; only ever present as True
     }
+
+``name_is_verbatim`` marks a name that stands on its own — one composed from the
+sample variables the group's wells hold — so ``replicate_display_label`` leaves
+it alone instead of reading a `Dose` group called ``10`` as an auto-generated
+name and redrawing it as its well tokens. Absent on every selection that has not
+claimed it, which is most of them.
 
 The model proper is ``selections: list[Selection]`` — the array order *is* the
 bar-plot order. ``well_labels`` (a ``dict[token, str]``) stays a separate sibling.
@@ -239,7 +246,13 @@ def active_replicate_sets(selections: Iterable[Any], well_paths: Any):
     """One ``ReplicateSet`` per visible (non-hidden) selection with ≥1 loaded
     well, in order — the traces drawn on the plots. Pure core of
     ``barplot.controller.rep_sets_active`` (A8 teardown), so the data layer can
-    enumerate groups without importing a feature."""
+    enumerate groups without importing a feature.
+
+    Carries each selection's ``name_is_verbatim`` onto the set it builds. That
+    flag is the only thing standing between a group named from a sample variable
+    and :func:`replicate_display_label`'s auto-generated-name heuristic, and a
+    flag dropped in the one function every plot reaches the groups through is a
+    flag nothing reads."""
     from well_viewer.domain.batch_models import ReplicateSet
     out = []
     for s in selections:
@@ -247,7 +260,8 @@ def active_replicate_sets(selections: Iterable[Any], well_paths: Any):
             continue
         wells = s.get("wells") or []
         if any(w in well_paths for w in wells):
-            out.append(ReplicateSet(s.get("name") or "", list(wells)))
+            out.append(ReplicateSet(s.get("name") or "", list(wells),
+                                    name_is_verbatim=bool(s.get("name_is_verbatim"))))
     return out
 
 
@@ -257,13 +271,15 @@ def replicate_sets_loaded(selections: Iterable[Any], well_paths: Any):
     expansion walks (it colours a cell by the rep-set its well belongs to
     regardless of trace visibility). Pure core of the legacy
     ``WellViewerApp._rep_sets_loaded`` (A8 R-leaf), so the heatmap reads it
-    without a feature import."""
+    without a feature import. Carries ``name_is_verbatim`` for the reason
+    :func:`active_replicate_sets` does."""
     from well_viewer.domain.batch_models import ReplicateSet
     out = []
     for s in selections:
         wells = s.get("wells") or []
         if any(w in well_paths for w in wells):
-            out.append(ReplicateSet(s.get("name") or "", list(wells)))
+            out.append(ReplicateSet(s.get("name") or "", list(wells),
+                                    name_is_verbatim=bool(s.get("name_is_verbatim"))))
     return out
 
 
@@ -379,6 +395,7 @@ def _unique_name(name: Any, used: set) -> str:
 def make_selection(*, name: Any, wells: Any, replicates: Any = None,
                    hidden: bool = False, color: Any = None, source: Any = "user",
                    labels: Any = None, sel_id: Any = None,
+                   name_is_verbatim: bool = False,
                    used_names: set | None = None, used_ids: set | None = None,
                    used_colors: set | None = None,
                    fallback_color_idx: int = 0,
@@ -389,6 +406,16 @@ def make_selection(*, name: Any, wells: Any, replicates: Any = None,
     ``used_names`` / ``used_ids`` / ``used_colors`` (if given) are updated
     in place so a sequence of calls produces globally-unique names / ids /
     colours.
+
+    ``name_is_verbatim`` marks a name that means something on its own — a name
+    composed from the sample variables the group's wells hold, rather than one
+    the app made up from their tokens. It is stored **only when true**, so a
+    selection that has never claimed it keeps exactly the keys it always had,
+    and it rides through save and load on ``validate_repair``'s unknown-key
+    passthrough. :func:`active_replicate_sets` hands it to the ``ReplicateSet``,
+    which is where :func:`replicate_display_label` reads it: without it a `Dose`
+    group named ``10`` matches the auto-generated-name pattern and is redrawn on
+    every axis as the tokens of the wells that received that dose.
     """
     used_names = used_names if used_names is not None else set()
     used_ids = used_ids if used_ids is not None else set()
@@ -424,6 +451,8 @@ def make_selection(*, name: Any, wells: Any, replicates: Any = None,
         "replicates": reps,
         "source": str(source) if source else "user",
     }
+    if name_is_verbatim:
+        sel["name_is_verbatim"] = True
     if isinstance(labels, dict) and labels:
         sel["labels"] = {str(k): str(v) for k, v in labels.items() if str(v).strip()}
     # preserve unknown keys for forward-compat
@@ -457,6 +486,7 @@ def validate_repair(selections: Any, *, palette: Sequence[str] | None = None,
             source=raw.get("source", "user"),
             labels=raw.get("labels"),
             sel_id=raw.get("id"),
+            name_is_verbatim=bool(raw.get("name_is_verbatim")),
             used_names=used_names, used_ids=used_ids,
             used_colors=used_colors,
             fallback_color_idx=i, palette=palette, id_factory=id_factory,
@@ -464,7 +494,8 @@ def validate_repair(selections: Any, *, palette: Sequence[str] | None = None,
         # carry through any unknown keys (forward-compat)
         for k, v in raw.items():
             if k not in sel and k not in ("id", "name", "color", "hidden", "wells",
-                                          "replicates", "source", "labels"):
+                                          "replicates", "source", "labels",
+                                          "name_is_verbatim"):
                 sel[k] = v
         out.append(sel)
     return out

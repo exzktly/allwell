@@ -59,6 +59,13 @@ def build_editor_column(ctx, parent: QWidget, reg) -> QWidget:
     # the right place for it rather than the form: every row in it starts at
     # the same x, and insetting one of them would leave the list and the
     # buttons under the toggle instead.
+    #
+    # Every Sample Map layer owes the same inset for the same reason, and each
+    # pays it where its own leftmost content is — the Replicates page on its
+    # outer layout, Well Labels inside its grid card. What holds them together
+    # is not a shared constant but
+    # ``test_home_page.test_every_sample_map_layer_clears_the_rail_toggle``,
+    # which measures the three and fails on whichever one starts at the edge.
     column.setContentsMargins(theme.Spacing.md, 0, 0, 0)
     column.setSpacing(theme.Spacing.sm)
 

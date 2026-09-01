@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QLabel, QSpinBox, QVBoxLayout, QWidget,
 )
 
+import theme
+
 from well_viewer.domain.plate_layout import PLATE_COLS
 from well_viewer.core.ui_helpers import btn_primary, btn_secondary, build_hline_separator
 from well_viewer.features.home.groups.controller import (
@@ -40,8 +42,21 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     layout = parent.layout()
     if layout is None:
         layout = QVBoxLayout(parent)
-        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+    # A left inset, for the same reason ``variables/editor_view`` carries one:
+    # the rail sits hard against the pane's left edge and the collapse toggle
+    # floats over that boundary, overhanging the centre pane by half its own
+    # width at about the vertical middle of the panel
+    # (``core/app_shell_view.position_rail_toggle``). This layer's content was
+    # the only one of the three starting at x=0 — measured, Variables' list and
+    # section title start at 12 and Well Labels' grid at 13, because each pays
+    # this inset in its own way, and Replicates paid none. The toggle therefore
+    # landed on the "Group along:" label and the plate beside it.
+    #
+    # Set unconditionally rather than only when this function creates the
+    # layout: under Sample Map the caller supplies the page and its layout, so
+    # the branch above never runs and the margins set inside it never applied.
+    layout.setContentsMargins(theme.Spacing.md, 0, 0, 0)
 
     # The plate this layer edits, in the page rather than the rail. Above the
     # list because that is the reading order of the sentence the two make: this

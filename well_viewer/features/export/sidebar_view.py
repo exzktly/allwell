@@ -149,6 +149,7 @@ def _base_suffix(text: str) -> str:
 #: click handler and the re-seed cannot spell the same mode three ways.
 _SEGMENT_LABELS = {
     "plate": "Plate",
+    "series": "Series",
     "grey": "Grey",
     "mean": "Mean",
     "mean_spread": "Mean+spread",
@@ -404,28 +405,47 @@ class ExportStyleSidebar(QWidget):
         # are named in the legend, and whose colours would only compete with
         # the data.
         #
-        # What grey *means* differs between the two, and the difference is the
-        # reason each tab has its own state field rather than sharing one. A
-        # bar is named by the tick label under it, so every bar can take the
+        # What grey *means* differs between the three, and the difference is
+        # the reason each tab has its own state field rather than sharing one.
+        # A bar is named by the tick label under it, so every bar can take the
         # same ink and lose nothing. A trace is not, so the Line tab's grey
         # mode gives each trace its own shade **and** its own marker — see
-        # ``domain/line_colors.py``. One control, two rules, and neither tab
-        # shows the other's: the setting changes nothing on any other plot,
-        # like the Density / Gates / Cell values sections above.
+        # ``domain/line_colors.py``. A response curve is not either, and its
+        # dash is already spent on the timepoint, so its grey mode is the Line
+        # tab's minus the dash — ``domain/response_colors.py``. One control,
+        # three rules, and no tab shows another's: the setting changes nothing
+        # on any other plot, like the Density / Gates / Cell values sections
+        # above.
+        #
+        # The default half of the segment is named per tab too. "Plate" is
+        # literal on Bar and Line — the column or trace takes the colour its
+        # well or replicate group carries on the plate picker, so the plate
+        # doubles as the legend. A response curve is a *series* pooled across
+        # however many wells hold that value, so it has no plate colour to
+        # take; calling its mode "Plate" would name a thing the figure does
+        # not do.
         _color_target = None
         if self._is_bar_fig():
             from well_viewer.domain.bar_colors import bar_color_mode as _mode_of
-            _color_target = ("bar_color_mode", "Bar colours", _mode_of)
+            _color_target = ("bar_color_mode", "Bar colours", _mode_of, "plate")
         elif self._is_line_fig():
             from well_viewer.domain.line_colors import line_color_mode as _mode_of
-            _color_target = ("line_color_mode", "Line colours", _mode_of)
+            _color_target = ("line_color_mode", "Line colours", _mode_of, "plate")
+        elif self._is_response_fig():
+            from well_viewer.domain.response_colors import (
+                response_color_mode as _mode_of,
+            )
+            _color_target = ("response_color_mode", "Curve colours", _mode_of,
+                             "series")
         if _color_target is not None:
             from widgets.plot_card import _make_segmented as _seg_color
-            _color_field, _color_label, _color_resolver = _color_target
+            (_color_field, _color_label, _color_resolver,
+             _color_default) = _color_target
             s_colors = section("Colours", expanded=True)
             _color_init = _color_resolver(self._app._app_state.plot)
             color_sc = _seg_color(
-                [("Plate", "plate"), ("Grey", "grey")], current=_color_init,
+                [(_SEGMENT_LABELS[_color_default], _color_default),
+                 ("Grey", "grey")], current=_color_init,
             )
             if color_sc is not None:
                 self._color_seg = color_sc
@@ -439,13 +459,19 @@ class ExportStyleSidebar(QWidget):
                 # believes it is current. That is the exact failure this
                 # function's own docstring was written about.
                 self._color_seg_field = _color_field
+                # …and what that field's absence means. Three tabs now, and
+                # only two of them default to "plate"; re-seeding a Response
+                # segment to "plate" would move it to a value its own segment
+                # does not offer, leaving ``setCurrentByData`` with nothing to
+                # select and the control showing whatever it showed before.
+                self._color_seg_default = _color_default
                 _color_preview = QLabel(_SEGMENT_LABELS[_color_init])
                 _color_preview.setObjectName("Muted")
                 self._color_seg_preview = _color_preview
                 s_colors.setValueWidget(_color_preview)
 
                 def _on_color_mode_change(*_a) -> None:
-                    v = str(color_sc.currentData() or "plate")
+                    v = str(color_sc.currentData() or _color_default)
                     setattr(self._app._app_state.plot, _color_field, v)
                     _color_preview.setText(_SEGMENT_LABELS[v])
                     # A full redraw, not a restyle: the colour and the marker
@@ -1620,6 +1646,10 @@ class ExportStyleSidebar(QWidget):
         """True only for the Bar plot figure (the colour mode applies there)."""
         return getattr(self._app, "_bar_fig", None) is self._fig
 
+    def _is_response_fig(self) -> bool:
+        """True only for the Response Curves figure (its colour mode applies)."""
+        return getattr(self._app, "_response_fig", None) is self._fig
+
     def _on_cell_format_changed(self) -> None:
         """Persist the Heat Map cell format, then redraw.
 
@@ -1843,9 +1873,10 @@ class ExportStyleSidebar(QWidget):
         on a dataset load (``_apply_bar`` for the bar mode, the top-level plot
         block for the line one) and on a reset (``restore_defaults``).
 
-        ``_color_seg`` is whichever of the two Colours segments this panel was
-        built for, so the field it re-seeds from is recorded when it is built
-        rather than assumed here.
+        ``_color_seg`` is whichever of the three Colours segments this panel was
+        built for, so the field it re-seeds from — and that field's default,
+        which is not "plate" on all three — is recorded when it is built rather
+        than assumed here.
 
         This panel is built once per figure and cached for the life of the
         process, so without a re-seed here the widget keeps showing the previous
@@ -1864,7 +1895,7 @@ class ExportStyleSidebar(QWidget):
             return
         for attr, field, default in (
             ("_color_seg", getattr(self, "_color_seg_field", "bar_color_mode"),
-             "plate"),
+             getattr(self, "_color_seg_default", "plate")),
             ("_show_seg", "bar_show_mode", "mean_spread"),
         ):
             seg = getattr(self, attr, None)

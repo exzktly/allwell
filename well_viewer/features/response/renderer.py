@@ -10,6 +10,9 @@ from __future__ import annotations
 import logging
 from typing import NamedTuple
 
+from well_viewer.domain.response_colors import (
+    response_color_mode, series_styles,
+)
 from well_viewer.features.response.collect import empty_reason, omission_caption
 from well_viewer.features.response.response_compute import (
     curve_y, ec50_text, spans_enough_decades, zero_position,
@@ -69,7 +72,7 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
     # that it stays one tick-step wide whatever base the axis is drawn in.
     off_scale_x = zero_position(positives, base=log_base) if use_log else None
 
-    marks = _CurveStyles(_series_colours(data), _timepoint_styles(data))
+    marks = _CurveStyles(_series_styles(ctx, data), _timepoint_styles(data))
     drew_off_scale = False
     for curve in data.curves:
         if _draw_one_curve(ax, data, curve, fits, marks,
@@ -324,25 +327,40 @@ def _timepoint_styles(data) -> dict[float, str] | None:
             for i, t in enumerate(timepoints)}
 
 
-def _series_colours(data) -> dict[str, str] | None:
-    """``{series id: colour}``, or ``None`` when there is no series split.
+def _series_styles(ctx, data) -> dict | None:
+    """``{series id: LineTraceStyle}``, or ``None`` to leave the defaults alone.
 
-    Assigned from the curve order, which ``collect`` already put in the series
-    variable's own declared value order — so the colours follow the order the
-    user arranged their values in rather than the order the wells happened to
-    be walked. A series drawn at two timepoints gets **one** colour across both,
-    which is the whole point of splitting the two encodings.
+    The ids come from the curve order, which ``collect`` already put in the
+    series variable's own declared value order — so the inks follow the order
+    the user arranged their values in rather than the order the wells happened
+    to be walked. A series drawn at two timepoints gets **one** style across
+    both, which is the whole point of splitting the two encodings.
+
+    ``None`` in the ``"series"`` mode when there is nothing to distinguish (no
+    series variable, or one value): the curve then takes matplotlib's own cycle
+    exactly as it always did, and passing a dict of one colour would be a no-op
+    the call site still has to read.
+
+    **Never ``None`` in grey mode.** The whole request there is "take the colour
+    out of this figure", and returning ``None`` for a lone curve would leave it
+    in C0 blue — the request refused on the one figure where it is most
+    visible. ``domain/response_colors.series_styles`` is what decides that; the
+    branch is stated there rather than here so the two entry points cannot
+    answer it differently.
     """
     ids = []
     for curve in data.curves:
         if curve.points and curve.series_id not in ids:
             ids.append(curve.series_id)
-    if not data.series_name or len(ids) < 2:
+    if not ids:
+        return None
+    mode = response_color_mode(getattr(getattr(ctx, "state", None), "plot", None))
+    if mode != "grey" and (not data.series_name or len(ids) < 2):
         return None
     from matplotlib import pyplot as plt
 
     cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color") or ["C0"]
-    return {sid: cycle[i % len(cycle)] for i, sid in enumerate(ids)}
+    return series_styles(mode, ids, cycle)
 
 
 def _curve_label(data, curve) -> str:
@@ -361,27 +379,71 @@ def _curve_label(data, curve) -> str:
     return " · ".join(parts)
 
 
+#: The marker every curve draws when nothing else has an opinion. In grey mode
+#: the series owns the shape, so this is what the ``"series"`` mode uses and
+#: what an unsplit figure keeps.
+_DEFAULT_MARKER = "o"
+
+
 class _CurveStyles(NamedTuple):
-    """How a curve is inked: colour by series, dash by timepoint.
+    """How a curve is inked: the series' style, and the dash for its timepoint.
 
     A pair rather than two loose arguments so the two encodings travel together
     — they are one decision about how the figure is read, and splitting them
     across a signature is how one of them ends up applied and the other
     forgotten. Either half is ``None`` when there is nothing to distinguish,
     and the curve then takes matplotlib's own cycle exactly as it always did.
+
+    The dash belongs to the timepoint in **both** colour modes, which is why
+    grey mode gives a series a shade and a marker and no dash of its own; see
+    ``domain/response_colors``.
     """
 
-    colours: dict | None
+    styles: dict | None
     dashes: dict | None
 
     def for_curve(self, curve) -> dict:
         """The ``errorbar`` keywords this curve should be drawn with."""
-        style: dict = {}
-        if self.colours is not None:
-            style["color"] = self.colours[curve.series_id]
+        style: dict = {"marker": _DEFAULT_MARKER}
+        trace = None if self.styles is None else self.styles.get(curve.series_id)
+        if trace is not None:
+            style["color"] = trace.color
+            if trace.marker is not None:
+                # Face and edge explicitly, in both fills: half the grey cycle
+                # is the same six shapes open, and matplotlib spells an open
+                # marker as a face of "none" with a real edge — an open marker
+                # with no edge is an invisible one.
+                style["marker"] = trace.marker
+                style["markerfacecolor"] = trace.face
+                style["markeredgecolor"] = trace.color
         if self.dashes is not None:
             style["linestyle"] = self.dashes[curve.timepoint]
         return style
+
+    def tag(self, container) -> None:
+        """Tell the export-style pass which of this curve's cues carry data.
+
+        ``core/plot_style`` stamps the Properties sidebar's marker shape, marker
+        fill and line style over every artist on every redraw, and each of the
+        three has to be opted out of separately. This figure spends its dash on
+        the timepoint in **both** colour modes — so that flag is unconditional,
+        and without it one pref pattern replaced four timepoints' worth of
+        dashes while the legend went on naming all four. The two marker flags
+        are grey mode's, where the shape and the fill together say which series
+        a curve is.
+        """
+        lines = list(getattr(container, "lines", ()) or ())
+        artists = [ln for ln in lines[:1] if ln is not None]
+        if not artists:
+            return
+        marker_is_data = any(
+            t.marker is not None for t in (self.styles or {}).values())
+        for artist in artists:
+            if self.dashes is not None:
+                artist._aw_linestyle_is_data = True
+            if marker_is_data:
+                artist._aw_marker_is_data = True
+                artist._aw_marker_face_is_data = True
 
 
 def _draw_one_curve(ax, data, curve, fits, marks: _CurveStyles, *,
@@ -410,8 +472,9 @@ def _draw_one_curve(ax, data, curve, fits, marks: _CurveStyles, *,
     if on_axis:
         line = ax.errorbar([p.x for p in on_axis], [p.y for p in on_axis],
                            yerr=[p.err for p in on_axis],
-                           marker="o", capsize=3, label=label,
+                           capsize=3, label=label,
                            **marks.for_curve(curve))
+        marks.tag(line)
         if fit is not None and fit.ok:
             _draw_fit_line(ax, fit, [p.x for p in on_axis], use_log,
                            _errorbar_colour(line))
@@ -420,8 +483,16 @@ def _draw_one_curve(ax, data, curve, fits, marks: _CurveStyles, *,
         # Same colour as its own curve would be too clever: this point is
         # deliberately not on the curve, and joining it with a line would
         # assert a slope across a break in the axis.
+        # The colour is the curve's own here and only here. The comment above
+        # is about the *line*, not the ink: what must not be asserted is a
+        # slope across the axis break, and there is none. Letting this take the
+        # next entry of matplotlib's cycle instead put a stray colour on a
+        # figure the user had just asked to be drawn in greys, which is the one
+        # mode where a reader cannot tell decoration from data.
+        off_colour = marks.for_curve(curve).get("color")
         ax.errorbar([off_scale_x] * len(off), [p.y for p in off],
                     yerr=[p.err for p in off], fmt="o", capsize=3,
-                    markerfacecolor="none")
+                    markerfacecolor="none",
+                    **({} if off_colour is None else {"color": off_colour}))
         return True
     return False

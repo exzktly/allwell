@@ -91,7 +91,8 @@ def _stub_app():
 
 
 def _build_sidebar(qtbot, monkeypatch, *, is_bar: bool = False,
-                   is_line: bool = False, redraw_ok: bool = True):
+                   is_line: bool = False, is_response: bool = False,
+                   redraw_ok: bool = True):
     """The built sidebar, plus the list of redraws it asked for.
 
     ``_redraw_bound_figure`` is the only route from this control to the screen,
@@ -110,6 +111,8 @@ def _build_sidebar(qtbot, monkeypatch, *, is_bar: bool = False,
         app._bar_fig = fig
     if is_line:
         app._line_fig = fig
+    if is_response:
+        app._response_fig = fig
     redraws: list[int] = []
 
     def _record(self):
@@ -117,8 +120,10 @@ def _build_sidebar(qtbot, monkeypatch, *, is_bar: bool = False,
         return redraw_ok
     monkeypatch.setattr(ExportStyleSidebar, "_redraw_bound_figure",
                         _record, raising=False)
-    sb = ExportStyleSidebar(app, None, fig, None,
-                            default_name="line" if is_line else "bar")
+    sb = ExportStyleSidebar(
+        app, None, fig, None,
+        default_name=("response" if is_response
+                      else "line" if is_line else "bar"))
     qtbot.addWidget(sb)
     return app, sb, redraws
 
@@ -377,3 +382,110 @@ def test_the_show_segment_is_re_seeded_too(qtbot, monkeypatch):
     app._app_state.plot.bar_show_mode = "all_pts"
     sb._resync_plot_state_segments()
     assert show.currentData() == "all_pts"
+
+
+# ── Response Curves' own mode ───────────────────────────────────────────────
+
+def test_the_response_figure_offers_series_and_grey(qtbot, monkeypatch):
+    """"Series", not "Plate". A response curve is a *series* pooled across
+    however many wells hold that value, so it has no plate-picker colour to
+    take — the other two tabs' label would name a thing this figure does not
+    do. The data values are asserted as well as the words, because a segment
+    can carry the right label and the wrong payload and only the payload
+    reaches the state."""
+    _app, sb, _r = _build_sidebar(qtbot, monkeypatch, is_response=True)
+    seg = _colour_segment(sb)
+    assert seg is not None, "no Colours segment on the response figure"
+    assert [seg.segmentText(i) for i in range(seg.count())] == ["Series", "Grey"]
+    for data in ("series", "grey"):
+        seg.setCurrentByData(data)
+        assert seg.currentData() == data
+
+
+def test_picking_grey_on_the_response_figure_writes_its_own_field(
+        qtbot, monkeypatch):
+    from well_viewer.domain.response_colors import response_color_mode
+
+    app, sb, redraws = _build_sidebar(qtbot, monkeypatch, is_response=True)
+    _colour_segment(sb).setCurrentByData("grey")
+    assert app._app_state.plot.response_color_mode == "grey"
+    assert response_color_mode(app._app_state.plot) == "grey"
+    assert app._app_state.plot.bar_color_mode == "plate", (
+        "the Response control wrote the Bar tab's field")
+    assert app._app_state.plot.line_color_mode == "plate", (
+        "the Response control wrote the Line tab's field")
+    assert redraws, "the mode changed but nothing asked for a redraw"
+
+
+def test_picking_series_again_is_reachable_from_the_same_control(
+        qtbot, monkeypatch):
+    """Reversible, and reversible to the value this tab's default actually is.
+    A handler that fell back to the two other tabs' ``"plate"`` would write a
+    mode this segment does not offer, leaving the control unable to show what
+    the state says."""
+    app, sb, _r = _build_sidebar(qtbot, monkeypatch, is_response=True)
+    seg = _colour_segment(sb)
+    seg.setCurrentByData("grey")
+    seg.setCurrentByData("series")
+    assert app._app_state.plot.response_color_mode == "series"
+
+
+def test_the_response_segment_is_re_seeded_from_its_own_field(qtbot, monkeypatch):
+    """The re-seed reads the field this panel's segment writes, not the bar
+    one. Reading the bar field on a response panel would move the widget with
+    signals blocked — it then shows a mode the figure is not drawn in, and the
+    click that should fix it is swallowed as a no-op."""
+    app, sb, _r = _build_sidebar(qtbot, monkeypatch, is_response=True)
+    app._app_state.plot.response_color_mode = "grey"
+    app._app_state.plot.bar_color_mode = "plate"
+    sb._resync_plot_state_segments()
+    assert _colour_segment(sb).currentData() == "grey"
+
+    app._app_state.plot.response_color_mode = "series"
+    sb._resync_plot_state_segments()
+    assert _colour_segment(sb).currentData() == "series"
+
+
+def test_an_empty_mode_re_seeds_to_this_tab_s_default_not_the_others(
+        qtbot, monkeypatch):
+    """The one case the recorded default is reachable in.
+
+    ``_resync_plot_state_segments`` reads ``getattr(plot, field, default) or
+    default``, and the field is always present on a real ``PlotState`` — so the
+    default is only consulted for a *falsy* value, which is what an emptied or
+    hand-edited ``persistence.json`` leaves behind. Three tabs now and only two
+    of them default to "plate": with the old hardcoded one, this asks
+    ``setCurrentByData`` for a value the Response segment does not carry, and
+    the control keeps showing whatever it showed before while the figure draws
+    something else.
+
+    Written after watching the first version of this test pass against the
+    hardcoded default — it seeded the field with a real mode, which never
+    reaches the fallback at all.
+    """
+    app, sb, _r = _build_sidebar(qtbot, monkeypatch, is_response=True)
+    seg = _colour_segment(sb)
+    seg.setCurrentByData("grey")
+    app._app_state.plot.response_color_mode = ""
+    sb._resync_plot_state_segments()
+    assert seg.currentData() == "series", (
+        f"re-seeded to {seg.currentData()!r}; the Response segment offers "
+        f"{[seg.segmentText(i) for i in range(seg.count())]}")
+
+
+def test_the_real_redraw_reaches_the_response_figure(qtbot, monkeypatch):
+    """Not any figure — *this* one. The dispatch falls through to the Line
+    tab's redraw for a figure it does not name, so before this branch existed
+    the control set the mode, repainted the Line plot, and reported success
+    while Response stayed exactly as it was."""
+    from well_viewer.features.export.sidebar_view import ExportStyleSidebar
+
+    _app, sb, _r = _build_sidebar(qtbot, monkeypatch, is_response=True)
+    monkeypatch.undo()
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "well_viewer.features.export.sidebar_view.redraw_response",
+        lambda _ctx: calls.append("response"))
+    sb._app._redraw = lambda: calls.append("line")
+    assert ExportStyleSidebar._redraw_bound_figure(sb) is True
+    assert calls == ["response"], calls

@@ -2688,6 +2688,15 @@ wells with no `Cell line`, or a group whose wells disagree about it — gets its
 own curve, named for what is missing rather than quietly joining one of the
 others.
 
+**Grey curves for a paper.** **Properties → Colours** offers this tab *Colour*
+or *Grey*, the same control the Bar Plots and Line Graphs tabs carry. In grey
+mode each series takes its own shade and its own marker — a shape and, further
+down the cycle, an open version of it — while the dash pattern goes on telling
+you the timepoint, so a figure means the same thing in either mode and you can
+switch to grey at the end without re-reading it. The setting is this tab's own:
+picking grey here leaves every other plot as it was, and it is saved with the
+view, so a plot sent to the gallery comes back in the mode it was saved in.
+
 **The axis picks itself.** If your doses span two decades or more the x axis
 opens logarithmic, because a 0.1–10 µM series on a linear axis puts three
 quarters of its points in the leftmost tenth. Every dose gets its own tick

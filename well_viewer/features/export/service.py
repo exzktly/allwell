@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from well_viewer.data.metric_labels import spread_label
+
 import csv
 import math
 from pathlib import Path
@@ -383,7 +385,7 @@ def export_plot_data(ctx) -> None:
     threshold = on_cutoff_for_column(
         ctx, ctx.state.channel.active_val_col, channel=ch)
     use_sem = bool(ctx.state.plot.use_sem)
-    band_lbl = "SEM" if use_sem else "SD"
+    band_lbl = spread_label(use_sem)
     fluor_gates = get_all_fluor_gates(ctx)
     well_labels = _well_labels_map(ctx)
     include_repset_col = bool(well_to_repset)

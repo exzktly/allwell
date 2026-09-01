@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from well_viewer.data.metric_labels import spread_label
+
 import csv
 import re
 
@@ -983,7 +985,7 @@ class BatchExportPanel(QWidget):
         eb_row.setContentsMargins(12, 2, 12, 2)
         self._add_bold_label(eb_row, "Error band:", min_width=_FIELD_LABEL_W)
         initial_sem = bool(ctx.state.plot.use_sem)
-        sem_btn = QPushButton("SEM" if initial_sem else "SD")
+        sem_btn = QPushButton(spread_label(initial_sem))
         sem_btn.setProperty("variant", "sem" if initial_sem else "sem_warn")
         sem_btn.setToolTip(
             "Switch the spread used by line/bar batch exports between\n"
@@ -1846,7 +1848,7 @@ class BatchExportPanel(QWidget):
             channel=self._resolved_channel_key(_ch_selected),
         )
         use_sem = self._ctx.state.plot.use_sem
-        band_lbl = "SEM" if use_sem else "SD"
+        band_lbl = spread_label(use_sem)
         fmt = self._fmt_cb.currentText()
 
         def _progress(grp: BarGroup, step: int, total: int) -> str:

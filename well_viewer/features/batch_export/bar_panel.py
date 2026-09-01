@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from well_viewer.data.metric_labels import spread_label
+
 import csv
 import re
 from pathlib import Path
@@ -222,7 +224,7 @@ class BarBatchExportPanel(BatchExportPanel):
             channel=self._resolved_channel_key(_ch_selected),
         )
         use_sem = self._ctx.state.plot.use_sem
-        band_lbl = "SEM" if use_sem else "SD"
+        band_lbl = spread_label(use_sem)
         fmt = self._fmt_cb.currentText()
         _panel_fc = self._fc_state()
         fc_vs_ctrl = _panel_fc.vs_control_on

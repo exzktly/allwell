@@ -10,6 +10,8 @@ re-export these names.
 
 from __future__ import annotations
 
+from well_viewer.data.metric_labels import spread_label
+
 from well_viewer.domain.plot_members import plot_replicate_sets
 
 from well_viewer.domain.selections_model import (color_for_replicate_set, color_for_well, replicate_display_label, well_display_label)
@@ -311,7 +313,7 @@ def collect_bar_items(
     display labels and colours so callers don't need to re-resolve them.
     """
     use_sem = ctx.state.plot.use_sem
-    band_lbl = "SEM" if use_sem else "SD"
+    band_lbl = spread_label(use_sem)
     if isinstance(target_t, (list, tuple)):
         target_ts = [float(t) for t in target_t]
     else:
@@ -1108,7 +1110,7 @@ def collect_bar_items_fov_pooled(
     )
 
     use_sem = ctx.state.plot.use_sem
-    band_lbl = "SEM" if use_sem else "SD"
+    band_lbl = spread_label(use_sem)
     if not target_ts:
         return [], band_lbl
 

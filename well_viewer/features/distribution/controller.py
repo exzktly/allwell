@@ -7,6 +7,8 @@ ratio-aware (handled transparently by ``data_loading.resolve_value_series``).
 
 from __future__ import annotations
 
+from well_viewer.data.metric_labels import timepoint_title
+
 import math
 from collections.abc import Iterable, Sequence
 
@@ -651,7 +653,7 @@ def _xlabel_for(ctx) -> str:
 def _title_for(ctx, tp_h: float, n_cells: int, n_groups: int) -> str:
     label = active_channel_label(ctx)
     if math.isfinite(tp_h):
-        tp_str = f"t = {tp_h:g} h"
+        tp_str = timepoint_title([tp_h], f"{tp_h:g}")
     else:
         tp_str = "all timepoints"
     return f"{label} distribution — {tp_str} ({n_cells} cells, {n_groups} groups)"

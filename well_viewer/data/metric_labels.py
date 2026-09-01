@@ -91,6 +91,35 @@ def events_total_title(metric_key: str) -> str:
     return "Events above threshold (N)"
 
 
+def spread_label(use_sem) -> str:
+    """What the ``±`` in a plot title is measuring: ``"SEM"`` or ``"SD"``.
+
+    Two words, and it was written out at eight call sites — every plot title
+    that carries an error band, plus the collectors that hand the label on and
+    the two export panels that redraw the same figures for a whole plate. Eight
+    copies of a two-branch expression is eight places for the vocabulary to
+    drift, and a figure whose title says SD over a band drawn as SEM is the
+    silent substitution §7 of ``CLAUDE.md`` is about. One answer, here, beside
+    the rest of the title wording.
+    """
+    return "SEM" if use_sem else "SD"
+
+
+def timepoint_title(timepoints, tp_str: str) -> str:
+    """The ``t = …`` clause a plot title ends with, or ``""`` for no timepoint.
+
+    Singular reads ``t = 24 h`` and plural ``t = [24, 48] h``, because a bare
+    list of one is a figure claiming to overlay something it does not. *tp_str*
+    is the already-formatted number (or comma-joined numbers) the caller drew
+    with, so the title cannot round differently from the axis.
+    """
+    if not list(timepoints or ()):
+        return ""
+    if len(list(timepoints)) == 1:
+        return f"t = {tp_str} h"
+    return f"t = [{tp_str}] h"
+
+
 def value_column_label(col: str) -> str:
     """Human-readable name for any scatter/plot value column.
 

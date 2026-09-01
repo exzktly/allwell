@@ -9,6 +9,8 @@ gallery thumbnail.
 
 from __future__ import annotations
 
+from well_viewer.data.metric_labels import spread_label
+
 import logging
 from typing import Any
 
@@ -263,7 +265,7 @@ def build_summary(tab: str, params: dict, thresholds: dict) -> str:
     lines.append(f"Fold change: {_fc_summary(fc)}")
 
     if params.get("use_sem") is not None:
-        band = "SEM" if params.get("use_sem") else "SD"
+        band = spread_label(params.get("use_sem"))
         fov = " · per-FOV" if params.get("use_fov_replicates") else ""
         lines.append(f"Error band: {band}{fov}")
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from well_viewer.data.metric_labels import spread_label
+
 import math
 from dataclasses import dataclass, field
 
@@ -239,7 +241,7 @@ def collect_line_series(
     Returns ``(series, band_lbl)``. ``band_lbl`` is "SEM" or "SD"
     matching ``use_sem``.
     """
-    band_lbl = "SEM" if use_sem else "SD"
+    band_lbl = spread_label(use_sem)
 
     if fc_state is None:
         fc_state = _fc.fold_change_state(ctx)
@@ -920,7 +922,7 @@ def redraw_line_plots(
     # "Time (hours)" x-labels are set below alongside ax_n's.
 
     use_sem = ctx.state.plot.use_sem
-    band_lbl = "SEM" if use_sem else "SD"
+    band_lbl = spread_label(use_sem)
     # The ON cutoff follows the value column: shapes keep every cell, spot
     # counts read ThreshCountOn, intensities read ThreshFracOn.
     threshold = on_cutoff_for_column(

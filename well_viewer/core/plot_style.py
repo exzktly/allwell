@@ -427,8 +427,20 @@ def log_base_value(text) -> float:
     return base
 
 
-#: Where :func:`apply_axis_log_scale` records the base it last set on an axis.
-_LOG_BASE_STAMP = "_aw_log_base"
+def axis_log_base(ax, which: str) -> float | None:
+    """The base *ax*'s log axis is actually drawn in, or ``None`` if it is not.
+
+    Read off the axis's own transform — ``Axis.get_transform()`` is public and a
+    ``LogTransform`` carries its ``base`` — rather than off a value this module
+    remembers writing. The difference matters because this module is not the
+    only writer: the Distribution tab sets its scales in its renderer and
+    ``ax.hist(log=True)`` sets one inside matplotlib. A remembered base goes
+    stale the moment one of those runs, and a stale "the axis is already base 2"
+    is the one answer that makes :func:`_already_scaled` skip the call that
+    would have corrected it.
+    """
+    axis = ax.xaxis if which == "x" else ax.yaxis
+    return getattr(axis.get_transform(), "base", None)
 
 
 def _already_scaled(ax, which: str, name: str, base: float | None) -> bool:
@@ -446,18 +458,17 @@ def _already_scaled(ax, which: str, name: str, base: float | None) -> bool:
     So an axis that is already in the requested scale is left alone, and a tab
     that ticked its own axis keeps its ticks.
 
-    The base is compared against a stamp this module writes rather than read
-    back off matplotlib's scale object, whose ``base`` is not public API. A
-    missing stamp reads as "not the same", so an axis set to log by anything
-    else is rebuilt once and stamped — the safe direction to be wrong in.
+    The base comes from :func:`axis_log_base`, which asks the axis rather than
+    this module's memory; an axis whose transform carries no base is treated as
+    not matching, so it is rebuilt rather than assumed.
     """
     current_name = (ax.get_xscale if which == "x" else ax.get_yscale)()
     if current_name != name:
         return False
     if base is None:
         return True
-    stamped = getattr(ax, f"{_LOG_BASE_STAMP}_{which}", None)
-    return stamped is not None and abs(float(stamped) - float(base)) < 1e-9
+    current = axis_log_base(ax, which)
+    return current is not None and abs(float(current) - float(base)) < 1e-9
 
 
 def apply_axis_log_scale(ax, which: str, on: bool,
@@ -484,7 +495,6 @@ def apply_axis_log_scale(ax, which: str, on: bool,
     if not bool(getattr(ax, "_aw_log_plus1", False)):
         if not _already_scaled(ax, which, "log", base):
             set_scale("log", base=base)
-            setattr(ax, f"{_LOG_BASE_STAMP}_{which}", float(base))
         return
     import numpy as _np
 

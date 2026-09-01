@@ -114,10 +114,12 @@ def test_the_figure_is_drawn_in_the_base_it_was_given():
     Asserted as the recorded value rather than as "the axis is log", because
     every base makes the axis log and the whole question here is *which*.
     """
+    from well_viewer.core.plot_style import axis_log_base
+
     fig, ax = _figure()
     draw_response(SimpleNamespace(), ax, _data(), log_x=True, log_base=2.0)
     assert ax.get_xscale() == "log"
-    assert getattr(ax, "_aw_log_base_x") == pytest.approx(2.0)
+    assert axis_log_base(ax, "x") == pytest.approx(2.0)
 
 
 def test_a_plain_figure_takes_its_base_from_the_properties_pref():
@@ -137,7 +139,9 @@ def test_a_plain_figure_takes_its_base_from_the_properties_pref():
     prefs["x_log"] = True
     prefs["x_log_base"] = "2"
     apply_export_style_prefs(fig, prefs)
-    assert getattr(ax, "_aw_log_base_x") == pytest.approx(2.0)
+    from well_viewer.core.plot_style import axis_log_base
+
+    assert axis_log_base(ax, "x") == pytest.approx(2.0)
     ticks = [t for t in ax.get_xticks() if 1 <= t <= 16]
     # Every tick a power of two. Not the exact list: matplotlib thins a
     # base-2 decade set to fit the axis, and pinning its choice would make

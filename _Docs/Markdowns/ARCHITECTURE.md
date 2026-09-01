@@ -3613,6 +3613,50 @@ the list from the feature registry, and when it cannot be derived, write the
 roster once and guard it against the thing it is a list of.** A guard that
 holds a roster against another roster has moved the problem up one level.
 
+An audit for the rest of them, run after those five were closed, found three
+more of the same shape. `selection_controller.PLOTTING_TABS` decides which tabs
+mirror the replicate-mode active set: the leaf missing from it painted **no
+wells at all** in rep-mode, because the plate took the branch written for the
+Image Table, and a well click fell to the legacy handler that knows nothing
+about solo wells. The redraw block in `rebuild_all` named Bar, then the three
+default-scope tabs, then Scatter — so a replicate-group edit made while a
+fourth leaf was on screen left it drawn from the previous groups. And
+`runtime_app._PLOTTING_TABS` was a five-name roster with **no readers at all**,
+which is the same hazard in its most durable form: a list that looks
+authoritative, is wrong, and cannot be caught by any behaviour.
+
+All three are gone. The rep-mirror set is derived (`_rep_mirror_tabs`), the
+group-edit and Property-change repaints go through one fan-out, and the dead
+roster is deleted.
+
+### Adding a Plotting leaf
+
+`plot_orchestrator.redraw_every_scope` is **the** fan-out for "something changed
+that every plot draws" — the error band, the replicate unit, the active
+Property, a replicate-group edit. It runs `redraw_app` for the three scopes that
+share that callable and hands the rest to the coalescer, so a leaf reaches every
+one of those events by being a registered scope rather than by being named. Use
+it; do not write a fourth list of tab titles.
+
+What a new leaf still has to join, and what each costs when it is missed:
+
+| Seam | Missed → | Guarded by |
+|---|---|---|
+| `FeatureDescriptor` in `features/registry.py`, with `build`, `redraw`, and — unless `redraw_app` already covers it — `on_activate`, `on_selection_changed`, `on_channel_changed` | the figure draws the previous answer until the tab is left and re-entered | `test_a_plot_leaf_is_wired_everywhere` |
+| `fold_change_scope_factory` on that descriptor | every coalescer fan-out skips it, so each caller has to name it | same (Scatter's exemption is written there) |
+| `plotting_band_slot(ctx, "<leaf>")` in its `tab_view` | a second control strip stacks above the plot | same |
+| `apply_plot_card_decorators(ctx, card, "<leaf>")` | no hover save, no Saved Plots record | same |
+| `plot_card_actions._CARDS` | no Screen/Publication toggle, no global Copy/Save, and `Save figure…` raises into a swallow | `test_plot_card_roster` |
+| both rosters in `export/style.py` | an inert Properties button, or a panel that opens in the wrong place | `test_properties_panel_keys` |
+| `app_state._FEATURE_STATE_OWNERS` | a disabled feature's slice raises a bare `AttributeError` | `test_feature_slice_names` |
+| `ui_helpers.OWN_CHANNEL_LEAVES` — only if the leaf scopes its own Channel/Property | two Channel dropdowns, and an ON-cutoff box editing a channel the tab is not drawing | `test_band_globals_follow_the_leaf` |
+| `plot_style.FIGURE_PLOT_KEYS` | the figure's per-figure prefs fall back to a diagnostic key | — |
+
+Everything else — the restore router, the rep-mirror set, the band's slot
+switching, the repaint fan-outs — reads the registry and needs no edit at all.
+That is the direction to push each of the rows above in as they come up for
+other reasons.
+
 `features/export/style.py` owns the prefs dict + the apply pipeline. Every
 redraw path ends with a call to
 `features.export.style.apply_export_style_to_current(app, fig, canvas)` so

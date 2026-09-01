@@ -97,15 +97,15 @@ def _ctx(sem_bank, fov_bank, *, use_fov=False, use_sem=True,
 def no_side_effects(monkeypatch):
     """Stub what the toggles do *besides* walking their button banks.
 
-    The repaint is one call now — ``_redraw_every_scope``, which draws the
-    shared scopes through ``redraw_app`` and fans the rest out through the
-    scope registry — so it is stubbed here as a whole rather than by naming
-    each of the redraws it makes. The tests below still assert that it ran:
+    The repaint is one call now — ``plot_orchestrator.redraw_every_scope``,
+    which draws the shared scopes through ``redraw_app`` and fans the rest out
+    through the scope registry — so it is stubbed here as a whole rather than by
+    naming each of the redraws it makes. The tests below still assert that it ran:
     the failure this file exists for is a dead widget aborting the toggle
     part-way, which shows up as the repaint never happening.
     """
     monkeypatch.setattr(plot_toggles, "invalidate_stats_cache", lambda _c: None)
-    monkeypatch.setattr(plot_toggles, "_redraw_every_scope",
+    monkeypatch.setattr(plot_toggles, "redraw_every_scope",
                         lambda _c: _c._calls.append("redraw"))
 
 

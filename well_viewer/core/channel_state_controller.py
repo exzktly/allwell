@@ -665,7 +665,7 @@ def set_active_metric(ctx, metric: str) -> None:
     ``ctx.state.dataset.cache`` directly, and the combo-sync / threshold /
     stats / redraw fan-out all take ``ctx``. No god-object unwrap.
     """
-    from well_viewer.core.plot_orchestrator import redraw_app
+    from well_viewer.core.plot_orchestrator import redraw_every_scope
     from well_viewer.core.selection_controller import invalidate_stats_cache
     channel = ctx.state.channel
     if metric == channel.active_metric:
@@ -708,17 +708,14 @@ def set_active_metric(ctx, metric: str) -> None:
     # switch that used to be the first thing to correct it.
     refresh_thresh_frac_quick_edit(ctx)
     invalidate_stats_cache(ctx)
-    redraw_app(ctx)
-    # ``redraw_app`` fans out to the default-scope tabs only — Line,
-    # Distribution and Heat Map. Every other plotting leaf re-renders through
-    # its own shim, so a leaf missing from here draws the *previous* property
-    # until something else repaints it. Response reached its figure only via
-    # ``on_activate``, so switching Property while it was on screen changed
-    # nothing until the user left the tab and came back.
-    for _title, _guard in (("Bar Plots", "_bar_tp_cb"),
-                           ("Response Curves", "_response_ax")):
-        if ctx.widgets.get_or_none(_guard) is not None:
-            ctx.features.redraw(ctx, _title)
+    # Every plot draws the active Property, so every plot is repainted — through
+    # the one fan-out rather than a list of tab names. ``redraw_app`` alone
+    # reaches Line, Distribution and Heat Map, so a leaf absent from the list
+    # beside it drew the *previous* property until something else repainted it:
+    # Response reached its figure only via ``on_activate``, which meant
+    # switching Property while it was on screen changed nothing until the user
+    # left the tab and came back.
+    redraw_every_scope(ctx)
 
 
 

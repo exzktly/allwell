@@ -276,16 +276,38 @@ def _set_groups_hidden(ctx, sels, *, target=None) -> None:
         app._rebuild_all(invalidate=False)
 
 
+#: The fallback plotting-leaf names, for a context with no feature registry to
+#: ask — see :func:`_rep_mirror_tabs`, which is what callers use.
 PLOTTING_TABS = frozenset({
     "Line Graphs", "Bar Plots", "Scatter Plot", "Distribution", "Heat Map",
 })
 
-# Per-well tabs that consume the replicate-mode *active set* (visible groups +
-# solo wells) like the plotting tabs — so in rep-mode the plate highlights their
-# active wells and a well click toggles that group. Spatial / Multivariate read
-# ``rep_sets_active`` (not ``selected_wells``, which is empty in passive
-# rep-mode); without this they fall back to first/all wells.
-_REP_MIRROR_TABS = PLOTTING_TABS | frozenset({"Spatial", "Multivariate"})
+#: Per-well tabs that consume the replicate-mode *active set* (visible groups +
+#: solo wells) like the plotting leaves do, and are not plotting leaves
+#: themselves. Spatial / Multivariate read ``rep_sets_active`` (not
+#: ``selected_wells``, which is empty in passive rep-mode); without this they
+#: fall back to first/all wells.
+_EXTRA_REP_MIRROR_TABS = frozenset({"Spatial", "Multivariate"})
+
+
+def _rep_mirror_tabs(ctx) -> frozenset[str]:
+    """The tabs whose plate mirrors the replicate-mode active set.
+
+    Every Plotting leaf plus the two per-well tabs above. **Read from the
+    feature registry**, not from a list written when there were five leaves:
+    Response Curves was added to Plotting and to no roster here, so on that tab
+    in rep-mode the plate painted no wells at all — ``setSelectedWellIds([])``,
+    the branch meant for the Image Table — and a well click fell through to the
+    legacy handler, which has no idea about solo wells. Nothing raised; the
+    plate was simply blank on one tab out of six.
+
+    Falls back to :data:`PLOTTING_TABS` when there is no registry to ask, which
+    is the behaviour every headless caller and stub-window test had before.
+    """
+    features = getattr(ctx, "features", None)
+    sub_leaves = getattr(features, "sub_leaves", None)
+    leaves = frozenset(sub_leaves("Plotting") or ()) if callable(sub_leaves) else frozenset()
+    return (leaves or PLOTTING_TABS) | _EXTRA_REP_MIRROR_TABS
 
 
 def _select_plate_line(ctx, value: str, rc_index: int) -> None:
@@ -447,7 +469,7 @@ def on_sidebar_plate_well_activated(ctx, well_id: str) -> None:
         tab = app._current_centre_tab()
     except Exception:
         tab = ""
-    if tab in _REP_MIRROR_TABS:
+    if tab in _rep_mirror_tabs(ctx):
         sid = app._sel_id_for_well(well_id)
         if sid is not None:
             app._sel_toggle_hidden(sid)
@@ -753,7 +775,7 @@ def refresh_sidebar_map_now(ctx) -> None:
     # identical whether the Scatter or the Cell Browser pane is focused (no
     # focus-driven flip / apparent "loss"). Other rep-mode tabs (Image Table /
     # smFISH / etc) keep the legacy "no per-well selection" override.
-    plotting_tab = tab_name in _REP_MIRROR_TABS
+    plotting_tab = tab_name in _rep_mirror_tabs(ctx)
     mirror_tab = plotting_tab or tab_name == "Cell Browser"
     if rep_mode and not mirror_tab:
         plate.setSelectedWellIds([])
@@ -1036,10 +1058,24 @@ def rebuild_all(ctx, *, invalidate: bool = True) -> None:
     # them — on every single well click: the "group edits are ridiculously slow"
     # bug. ``_is_tab_visible`` is true in either split-view pane, so a plot shown
     # side-by-side still updates live.
-    if app._is_tab_visible("Bar Plots"):
-        ctx.features.redraw(ctx, "Bar Plots")
+    # Through the scope coalescer, which already means "redraw what is on
+    # screen and defer the rest" — the visibility rule this block was written
+    # to implement by hand. Named tabs are how Response Curves came to be left
+    # out: editing a replicate group while it was on screen left the curves
+    # drawn from the previous groups, and nothing about the page said so.
+    from well_viewer.core.scope_registry import redraw_app_scope
+    from well_viewer.domain.fold_change_scopes import redraw_scopes_or_defer
+
     if any(app._is_tab_visible(_n) for _n in ("Line Graphs", "Distribution", "Heat Map")):
         app._redraw()
+        redraw_scopes_or_defer(app, skip=redraw_app_scope)
+    else:
+        redraw_scopes_or_defer(app)
+    # Scatter is still named, because it is the one Plotting leaf with no
+    # registered fold-change scope — so no coalescer fan-out reaches it and
+    # every caller that wants it repainted has to say so. That exemption is
+    # written down and held by ``tests/test_a_plot_leaf_is_wired_everywhere.py``
+    # rather than left as an absence, which is what it was here.
     if app._is_tab_visible("Scatter Plot"):
         try:
             ctx.features.redraw(ctx, "Scatter Plot")

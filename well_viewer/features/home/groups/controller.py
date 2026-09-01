@@ -92,17 +92,30 @@ def name_sets_from_variables(ctx, sets) -> None:
 def _variable_name_for(ctx, wells) -> str:
     """What *wells* are in sample-variable terms, or ``""`` — ctx-shaped.
 
-    One line over :func:`sample_variables.name_for_wells`, and it earns its own
-    name by being the single place the two group-creating flows agree on where
-    the variable set lives. ``getattr`` because a context built for a headless
-    path carries a selection slice without the variables field.
+    One line over :func:`sample_variables.name_for_wells`, plus the one thing
+    that function cannot know: whether a group already on the plate is called
+    that. It earns its own name by being the single place the two
+    group-creating flows agree on both answers. ``getattr`` because a context
+    built for a headless path carries a selection slice without the variables
+    field.
+
+    **The collision is settled here rather than left to ``_unique_name``.**
+    :func:`sample_variables.names_for_well_sets` disambiguates a Quick
+    Replicates batch by appending the wells, on the stated grounds that
+    ``1 µM_v2`` says only that something else was called ``1 µM`` while the
+    wells say which replicates these are. This flow adds one group at a time,
+    so it has no batch to clash within and used to fall through to exactly the
+    ``_v2`` that argument rejects — two flows, one plate, two different answers,
+    and a manual sentence that described only one of them.
     """
     from well_viewer.domain.sample_variables import name_for_wells
 
     vset = getattr(ctx.state.selection, "variables", None)
     if vset is None or not vset.variables:
         return ""
-    return name_for_wells(vset, wells)
+    return name_for_wells(
+        vset, wells,
+        taken={s.get("name") for s in (ctx.state.selection.selections or [])})
 
 
 def rep_quick_pairs(ctx) -> None:

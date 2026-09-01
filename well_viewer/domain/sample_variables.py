@@ -311,6 +311,25 @@ def roll_up(vset: VariableSet, variable_id: str, wells) -> str | None:
 NAME_JOIN = " · "
 
 
+def _annotates_anything(vset: VariableSet, variable: Variable) -> bool:
+    """Whether *variable* could resolve for **any** well on the plate.
+
+    A variable with no values, or with values that were never put on a well,
+    answers for nobody. It is a variable the user has begun and not finished —
+    clicking *+ Variable* before typing its values is the normal authoring
+    order, and :func:`from_block` persists the empty one, so the state is
+    durable rather than a moment during editing.
+
+    This is the difference between the two ways a name can come up short, and
+    they are not the same fact. "These wells disagree about the dose, or one of
+    them was never dosed" is about *this group* and is worth saying. "You
+    created a `Timepoint` variable and have not filled it in" is about the
+    plate, is true of every group at once, and saying it on each of them is
+    noise that reads as the first thing.
+    """
+    return bool(variable.values) and bool(vset.assignments.get(variable.id))
+
+
 def _resolved_labels(vset: VariableSet, wells) -> tuple[list[str], bool]:
     """``(the labels *wells* agree on, whether they agree on every variable)``.
 
@@ -320,6 +339,12 @@ def _resolved_labels(vset: VariableSet, wells) -> tuple[list[str], bool]:
     that resolves two of three variables is *described* by what it resolved and
     is not *identified* by it, and the two look identical once the labels are
     joined into a string.
+
+    Counted over the variables that annotate *something* — see
+    :func:`_annotates_anything`. An empty variable would otherwise mark every
+    group on the plate incomplete at once, so every one of them would carry the
+    wells suffix that is supposed to mean "this particular group spans two
+    doses".
     """
     wells = list(wells)
     if not wells:
@@ -327,6 +352,8 @@ def _resolved_labels(vset: VariableSet, wells) -> tuple[list[str], bool]:
     labels: list[str] = []
     complete = True
     for variable in vset.variables:
+        if not _annotates_anything(vset, variable):
+            continue
         value_id = roll_up(vset, variable.id, wells)
         label = ("" if value_id is None or value_id == MIXED
                  else variable.display_label(value_id).strip())
@@ -347,7 +374,7 @@ def _with_wells(name: str, wells) -> str:
     return f"{name} ({'/'.join(wells)})" if wells else name
 
 
-def name_for_wells(vset: VariableSet, wells) -> str:
+def name_for_wells(vset: VariableSet, wells, *, taken=()) -> str:
     """What *wells* are, said in the variables they agree on, or ``""``.
 
     ``HeLa · 10 µM`` for a pair of wells holding one cell line and one dose.
@@ -365,17 +392,34 @@ def name_for_wells(vset: VariableSet, wells) -> str:
     called. So a partial description is completed by the wells it came from
     (``HeLa (A01/A03)``) and can no longer be read as a whole one.
 
+    *taken* is the names already on the plate. A composed name that is one of
+    them takes the wells too, for the reason :func:`names_for_well_sets` gives
+    about a batch: the caller's fallback is ``_unique_name``'s ``1 µM_v2``,
+    which says only that something else was called ``1 µM``. Passing it is what
+    keeps the one-at-a-time flow and the batch flow answering alike; the default
+    is empty because a caller replacing every group on the plate has nothing to
+    clash with.
+
+    **The name is read once and does not follow the plate afterwards.** Renaming
+    the value, or moving a well to a different one, leaves the group carrying
+    what it was called when it was made — which is deliberate, since the name is
+    the user's to edit from that moment, and is why the Variables tab's *By
+    group* list rolls each group up live: that list, not the name, is where the
+    current answer is. A stale composed name is a real cost of naming from data
+    and worth knowing about; it is the same staleness a hand-typed name has
+    always had, on a string that now looks more authoritative.
+
     Naming a group is the only thing this is for, so it is deliberately not a
-    display label for an arbitrary set of wells: it is read once, at the moment
-    a group is created, and the string it returns is then the user's to edit
-    like any other name.
+    display label for an arbitrary set of wells.
     """
     wells = list(wells)
     labels, complete = _resolved_labels(vset, wells)
     if not labels:
         return ""
     name = NAME_JOIN.join(labels)
-    return name if complete else _with_wells(name, wells)
+    if complete and name not in set(taken or ()):
+        return name
+    return _with_wells(name, wells)
 
 
 def names_for_well_sets(vset: VariableSet, well_sets) -> list[str]:

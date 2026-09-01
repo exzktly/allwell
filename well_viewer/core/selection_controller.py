@@ -498,35 +498,31 @@ def on_sidebar_plate_well_dropped(ctx, well_id: str, token: str) -> None:
         logging.getLogger(__name__).exception("Heat map well drop handling failed")
 
 
-def import_selections_from_json(ctx) -> None:
-    """Import a selections JSON file (the same schema used by Save) and
-    merge it into ``ctx.state.selection.selections``. Existing names get a ``_v2``
-    suffix on collision so nothing already loaded is overwritten."""
-    import json
-    from PySide6.QtWidgets import QFileDialog, QMessageBox
+def merge_imported_selections(ctx, payload) -> int | None:
+    """Add every selection in *payload* to the plate; ``None`` if it holds none.
 
-    path, _ = QFileDialog.getOpenFileName(
-        ctx.window, "Import selections from JSON", "", "JSON (*.json);;All files (*)",
-    )
-    if not path:
-        return
-    try:
-        with open(path) as fh:
-            payload = json.load(fh)
-    except Exception as exc:
-        QMessageBox.critical(ctx.window, "Import failed", f"Could not parse JSON:\n{exc}")
-        return
+    Accepts either a v2 ``sample_definitions`` block (with a ``selections`` key)
+    or a bare list of selection dicts. Returns how many were added, or ``None``
+    for a payload with nothing importable in it — a distinct answer rather than
+    ``0``, because "this file has no selections" is a sentence to show the user
+    and "every selection in it failed to add" is a different one.
 
-    # Accept either a v2 sample-definitions block (with a 'selections' key)
-    # or a bare list of selection dicts.
+    **Split from** :func:`import_selections_from_json` **so it can be driven.**
+    That function opens a modal file dialog first, and a modal blocks for ever
+    under the offscreen QPA — so every rule in this loop was reachable only
+    through a picker no test can answer. A guard written against ``sel_add``
+    instead passes with this whole loop deleted, which is exactly what happened
+    to the flag below: the carry was reviewed as untested and the first test
+    written for it called ``sel_add`` directly, one step past the thing that
+    was in doubt.
+    """
     items = None
     if isinstance(payload, dict):
         items = payload.get("selections") or payload.get("sample_definitions", {}).get("selections")
     elif isinstance(payload, list):
         items = payload
     if not items:
-        QMessageBox.warning(ctx.window, "Import", "No selections found in that file.")
-        return
+        return None
 
     added = 0
     for sel in items:
@@ -548,6 +544,32 @@ def import_selections_from_json(ctx) -> None:
         except Exception:
             _logger = __import__("logging").getLogger("well_viewer.runtime_app")
             _logger.exception("Import selection failed for %r", name)
+    return added
+
+
+def import_selections_from_json(ctx) -> None:
+    """Import a selections JSON file (the same schema used by Save) and
+    merge it into ``ctx.state.selection.selections``. Existing names get a ``_v2``
+    suffix on collision so nothing already loaded is overwritten."""
+    import json
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+    path, _ = QFileDialog.getOpenFileName(
+        ctx.window, "Import selections from JSON", "", "JSON (*.json);;All files (*)",
+    )
+    if not path:
+        return
+    try:
+        with open(path) as fh:
+            payload = json.load(fh)
+    except Exception as exc:
+        QMessageBox.critical(ctx.window, "Import failed", f"Could not parse JSON:\n{exc}")
+        return
+
+    added = merge_imported_selections(ctx, payload)
+    if added is None:
+        QMessageBox.warning(ctx.window, "Import", "No selections found in that file.")
+        return
 
     try:
         groups_centre_refresh(ctx)

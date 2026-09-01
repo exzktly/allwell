@@ -465,5 +465,180 @@ def test_a_typed_name_is_not_marked_verbatim(qtbot):
     assert "name_is_verbatim" not in sel
 
 
+# ── the flag reaches every seam that builds a set from a selection ──────────
+#
+# Three carry sites, and a review found two of them unguarded: deleting either
+# left the whole lane green. They are not one test's worth of the same fact —
+# each feeds a different half of the app, and the batch one is the half that
+# would have disagreed with the tab it mirrors.
+
+def _flagged_selection(name="10"):
+    return make_selection(name=name, wells=["A01", "A02"], name_is_verbatim=True)
+
+
+def test_the_hidden_and_loaded_seam_carries_the_flag_too():
+    """``replicate_sets_loaded`` is what Batch Export and the Heat Map pool through.
+
+    Guarded separately from ``active_replicate_sets`` because the two are
+    different functions feeding different figures: with only the first one
+    tested, a `Dose` group called ``10`` read ``10`` on the tab and ``A01,A02``
+    on the batch-exported figure of the same plate — the batch-disagrees-with-
+    the-tab failure, from a flag dropped in one of two near-identical lines.
+    """
+    from well_viewer.domain.selections_model import replicate_sets_loaded
+
+    rsets = replicate_sets_loaded([_flagged_selection()],
+                                  {"A01": "A01", "A02": "A02"})
+    assert rsets[0].name_is_verbatim is True
+    assert replicate_display_label(_label_ctx(["A01", "A02"]), rsets[0]) == "10"
+
+
+def test_a_hidden_group_keeps_its_flag():
+    """The seam's whole reason for existing is that it includes hidden groups."""
+    from well_viewer.domain.selections_model import replicate_sets_loaded
+
+    sel = _flagged_selection()
+    sel["hidden"] = True
+    rsets = replicate_sets_loaded([sel], {"A01": "A01", "A02": "A02"})
+    assert [r.name_is_verbatim for r in rsets] == [True]
+
+
+def _import_ctx():
+    from well_viewer.core.plot_state import PlotState
+
+    ctx = _ctx(["A01", "A02"], sv.VariableSet())
+    ctx.state.plot = PlotState()
+    return ctx
+
+
+def test_importing_a_selection_carries_the_flag_from_the_file():
+    """An imported group named after a dose on its own plate keeps that name.
+
+    Drives ``merge_imported_selections`` — the loop itself. The first version of
+    this test called ``sel_add`` with the flag already extracted, which is one
+    step *past* the line under review: deleting the whole loop's flag argument
+    left it green, so it measured nothing about the thing the review flagged.
+    That is why the loop was split out from its file dialog.
+    """
+    from well_viewer.core.selection_controller import merge_imported_selections
+
+    ctx = _import_ctx()
+    added = merge_imported_selections(ctx, {"selections": [
+        {"name": "10", "wells": ["A01", "A02"], "name_is_verbatim": True}]})
+    assert added == 1
+    sel = ctx.state.selection.selections[0]
+    assert sel["name_is_verbatim"] is True
+    rsets = active_replicate_sets([sel], {"A01": "A01", "A02": "A02"})
+    assert replicate_display_label(_label_ctx(["A01", "A02"]), rsets[0]) == "10"
+
+
+def test_importing_a_selection_that_never_claimed_the_flag_does_not_gain_one():
+    """The other half — without it, "always true" passes the test above."""
+    from well_viewer.core.selection_controller import merge_imported_selections
+
+    ctx = _import_ctx()
+    merge_imported_selections(ctx, [{"name": "Control", "wells": ["A01"]}])
+    assert "name_is_verbatim" not in ctx.state.selection.selections[0]
+
+
+def test_a_payload_with_no_selections_is_told_apart_from_one_that_added_none():
+    """``None`` and ``0`` are different sentences for the user, not one.
+
+    The zero case uses a non-dict entry, which the loop skips. A dict with no
+    recognised keys does *not* give zero — it is added as an empty group called
+    ``Imported`` — which is pre-existing behaviour this change does not touch,
+    and which the first version of this test asserted away because the expected
+    value was guessed rather than read off the loop.
+    """
+    from well_viewer.core.selection_controller import merge_imported_selections
+
+    assert merge_imported_selections(_import_ctx(), {"selections": []}) is None
+    assert merge_imported_selections(_import_ctx(), ["not a selection"]) == 0
+
+
+def test_the_statistics_tabs_own_copy_of_the_rule_agrees_with_the_domains():
+    """``deserialize_stats_groups`` inlines ``replicate_sets_loaded``'s rule.
+
+    Two copies of one rule grow a difference — this is the file that says so
+    about itself, in the comment directly above the line.
+    """
+    from well_viewer.features.stats.controller import deserialize_stats_groups
+
+    ctx = _ctx(["A01", "A02"], sv.VariableSet())
+    ctx.state.selection.selections = [_flagged_selection()]
+    groups = deserialize_stats_groups(
+        ctx, [{"name": "G", "members": ["10"], "solo_wells": []}])
+    assert [m.name_is_verbatim for m in groups[0].members] == [True]
+
+
+# ── a variable nobody has filled in is not this group's shortfall ───────────
+
+def test_an_empty_variable_does_not_put_wells_on_every_group():
+    """Clicking + Variable before typing its values is the normal order.
+
+    Without this, declaring a `Timepoint` and not filling it made every group on
+    the plate carry a wells suffix at once — under a manual that explains the
+    suffix as "this group spans two doses".
+    """
+    empty = sv.Variable(id="tp", name="Timepoint", kind=sv.NUMBER, unit="h")
+    vset = _vset(_dose(), empty, dose=_ASSIGN["dose"])
+    assert sv.names_for_well_sets(vset, [["A01", "A02"], ["A03", "A04"]]) \
+        == ["1 µM", "10 µM"]
+
+
+def test_a_variable_declared_but_never_put_on_a_well_is_the_same_case():
+    declared = sv.Variable(id="ln", name="Cell line", kind=sv.TEXT,
+                           values=(sv.VariableValue("c0", "HeLa"),))
+    vset = _vset(_dose(), declared, dose=_ASSIGN["dose"])
+    assert sv.name_for_wells(vset, ["A01", "A02"]) == "1 µM"
+
+
+def test_a_variable_filled_for_some_wells_still_reports_this_groups_gap():
+    """The signal the rule above must not have blunted.
+
+    `Cell line` reaches A01 and nothing else, so it *can* answer for someone —
+    and this group holding an unfilled well is a real fact about this group.
+    """
+    partly = _vset(_dose(), _line(), dose=_ASSIGN["dose"],
+                   line={"A01": "c0"})
+    assert sv.name_for_wells(partly, ["A01", "A02"]) == "1 µM (A01/A02)"
+
+
+# ── one plate, one answer about a clashing name ────────────────────────────
+
+def test_the_dialog_disambiguates_against_the_groups_already_there(qtbot):
+    """The + Add flow has no batch to clash within, so it clashes with the plate.
+
+    Left to ``make_selection``, this fell through to ``_unique_name`` and came
+    out ``10 µM_v2`` while Quick Replicates on the same plate produced
+    ``10 µM (A01/A02)`` — two flows, one plate, two different answers, and a
+    manual sentence that stated only one of them.
+    """
+    vset = _vset(_dose(), dose={"A01": "d0", "A02": "d0",
+                                "B01": "d0", "B02": "d0"})
+    existing = make_selection(name="1 µM", wells=["A01", "A02"])
+    ctx = _dialog_ctx(["A01", "A02", "B01", "B02"], vset,
+                      selections=[existing])
+    dlg, name_edit, plate = _dialog(ctx)
+    qtbot.addWidget(dlg)
+    plate.setSelectedWellIds(["B01", "B02"])
+    assert name_edit.text() == "1 µM (B01/B02)"
+    _press_create(dlg)
+    assert ctx.state.selection.selections[-1]["name"] == "1 µM (B01/B02)"
+
+
+def test_a_name_no_group_holds_is_left_alone(qtbot):
+    """The other half — without it, "always suffix" passes the test above."""
+    vset = _vset(_dose(), dose={"A01": "d0", "A02": "d0",
+                                "B01": "d1", "B02": "d1"})
+    existing = make_selection(name="1 µM", wells=["A01", "A02"])
+    ctx = _dialog_ctx(["A01", "A02", "B01", "B02"], vset,
+                      selections=[existing])
+    dlg, name_edit, plate = _dialog(ctx)
+    qtbot.addWidget(dlg)
+    plate.setSelectedWellIds(["B01", "B02"])
+    assert name_edit.text() == "10 µM"
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__]))

@@ -1531,7 +1531,8 @@ def deserialize_stats_groups(ctx, data) -> list:
     for s in ctx.state.selection.selections:
         s_wells = s.get("wells") or []
         if any(w in paths for w in s_wells):
-            rs = ReplicateSet(s.get("name") or "", list(s_wells))
+            rs = ReplicateSet(s.get("name") or "", list(s_wells),
+                               name_is_verbatim=bool(s.get("name_is_verbatim")))
             rep_by_name[rs.name] = rs
     out = []
     for item in data or []:

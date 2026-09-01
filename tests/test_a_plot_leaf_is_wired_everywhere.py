@@ -213,7 +213,6 @@ def test_a_group_edit_repaints_the_visible_plot_scope():
     on the group state, which was always written correctly.
     """
     from dataclasses import dataclass, field
-    from types import SimpleNamespace
 
     from well_viewer.core.app_state import AppState
     from well_viewer.core.scope_registry import redraw_app_scope

@@ -30,8 +30,14 @@ class _Slice:
 
 class _State:
     def __init__(self):
+        from well_viewer.core.plot_state import PlotState
         from well_viewer.core.stats_cache_state import StatsCacheState
         self.stats_cache = StatsCacheState()
+        # The real ``PlotState``, not a namespace with the two fields this file
+        # reads: ``rebuild_all`` hands the repaint to the scope coalescer, whose
+        # dirty set lives here, and a stub missing it makes the fan-out
+        # untestable from this file rather than making it not happen.
+        self.plot = PlotState()
 
     def feature_slice(self, name):
         return None
@@ -111,6 +117,11 @@ class _Window:
     def __init__(self, ctx):
         self._ctx = ctx
         self.invalidated = 0
+        # The real window carries this, and the repaint fan-out reads it: the
+        # scope coalescer keeps its dirty set on ``PlotState``. A stub without
+        # it does not model the app, it models what the code happened to touch
+        # on the day it was written.
+        self._app_state = ctx.state
 
     def _invalidate_stats_cache(self):
         self.invalidated += 1

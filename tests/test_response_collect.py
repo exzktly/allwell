@@ -31,23 +31,33 @@ def _dose(*pairs):
 
 
 def _ctx(*, wells, variable=None, assignments=None, selections=(), means=None,
-         selected=()):
+         selected=(), variables=None, group_by="", response_state=None):
     """A ctx with the slices the collector reads, and a stubbed stats call.
 
     *selected* is the wells lit on the plate. It defaults to none because most
     of this file is about grouped plates — but it defaulting to none for every
     test is how the ungrouped plate went unmeasured until a user reported it,
     so the tests below that pass it are load-bearing rather than incidental.
+
+    *variables* takes a whole tuple where *variable* takes one, for a plate that
+    varies more than the dose. *group_by* and *response_state* are what the
+    member seam reads: a real ``ResponseState`` rather than a namespace, so a
+    field the tab actually keeps cannot be missing from the stub and pass.
     """
-    vset = sv.VariableSet(variables=(variable,) if variable else (),
+    declared = tuple(variables) if variables is not None else (
+        (variable,) if variable else ())
+    vset = sv.VariableSet(variables=declared,
                           assignments=dict(assignments or {}))
+    slices = {"response": response_state}
     return SimpleNamespace(
         state=SimpleNamespace(
+            feature_slice=lambda name: slices.get(name),
             dataset=SimpleNamespace(well_paths={w: f"/{w}.csv" for w in wells}),
             selection=SimpleNamespace(selections=list(selections),
                                       selected_wells=set(selected),
                                       variables=vset),
-            plot=SimpleNamespace(group_by_variable="", bar_pool_replicates=True,
+            plot=SimpleNamespace(group_by_variable=group_by,
+                                 bar_pool_replicates=True,
                                  use_sem=True, line_order_rsets=[],
                                  line_order_wells=[],
                                  fc_vs_control_on=False, fc_control=None,
@@ -1293,3 +1303,122 @@ def test_the_on_cutoff_is_resolved_for_the_tab_s_own_column(monkeypatch):
     assert seen["channel"] is None, (
         f"the cutoff was pinned to the shared channel {seen['channel']!r} "
         "instead of being derived from this tab's column")
+
+
+# ── Group by, which is the second layer of split ────────────────────────────
+
+def _two_factor_plate():
+    """A dose series run on two cell lines: the plate Group by is for.
+
+    Every combination is filled, and the doses are assigned **against** the
+    cell-line order — A01/B01 low, A02/B02 high — so a collector that pooled by
+    cell line alone and a collector that crosses do not produce the same points
+    by coincidence.
+    """
+    dose = _dose(("1", 1.0), ("10", 10.0))
+    line = sv.Variable(
+        id="cl", name="Cell line", kind=sv.TEXT, unit="",
+        values=(sv.VariableValue("hela", "HeLa", None),
+                sv.VariableValue("u2os", "U2OS", None)))
+    assignments = {
+        "dose": {"A01": "d0", "A02": "d1", "B01": "d0", "B02": "d1"},
+        "cl": {"A01": "hela", "A02": "hela", "B01": "u2os", "B02": "u2os"},
+    }
+    return dose, line, assignments
+
+
+def _response_slice(**kwargs):
+    from well_viewer.features.response.state import ResponseState
+
+    return ResponseState(**kwargs)
+
+
+def test_group_by_a_second_variable_draws_a_curve_per_value(stub_stats):
+    """The reported defect: Group by anything but the axis emptied the figure.
+
+    Grouping pools every well holding a value, so *Group by: Cell line* handed
+    this tab one member per cell line carrying **both** doses — and a member
+    with two doses has no position on a dose axis, so every one of them was
+    refused as "wells disagree about Dose" and the figure came back blank under
+    a sentence blaming the user's fill.
+
+    The value of each point is asserted, not merely that curves exist: the stub
+    keys its means on the member name, so a crossing that produced the wrong
+    members would draw the default rather than these numbers.
+    """
+    dose, line, assignments = _two_factor_plate()
+    # Keyed on the member names the crossing produces — the axis label first,
+    # then the grouping's, which is the order the ids are given in.
+    stub_stats[("1 µM · HeLa", 24.0)] = 5.0
+    stub_stats[("10 µM · HeLa", 24.0)] = 50.0
+    stub_stats[("1 µM · U2OS", 24.0)] = 7.0
+    stub_stats[("10 µM · U2OS", 24.0)] = 70.0
+    ctx = _ctx(wells=["A01", "A02", "B01", "B02"],
+               variables=(dose, line), assignments=assignments,
+               group_by="cl",
+               response_state=_response_slice(x_variable_id="dose"))
+
+    data = rc.collect_response(ctx, "dose", [24.0], ("cl",))
+
+    assert data.omitted == [], (
+        "a member was refused an x under a grouping that crosses the axis")
+    assert [c.series_label for c in data.curves] == ["HeLa", "U2OS"]
+    assert [[(p.x, p.y) for p in c.points] for c in data.curves] == [
+        [(1.0, 5.0), (10.0, 50.0)], [(1.0, 7.0), (10.0, 70.0)]]
+    # The member name says which cell of the plate it pooled, so the CSV and
+    # the per-sample control editor can tell four members apart.
+    assert [p.member for p in data.curves[0].points] == [
+        "1 µM · HeLa", "10 µM · HeLa"]
+
+
+def test_the_two_layers_cross_into_one_curve_each(stub_stats):
+    """Group by and Series together: one curve per (outer, inner) value.
+
+    The legend label carries both, in the order the layers were given, so a
+    reader can tell four curves apart rather than seeing two pairs that share a
+    name.
+    """
+    dose, line, assignments = _two_factor_plate()
+    medium = sv.Variable(
+        id="med", name="Medium", kind=sv.TEXT, unit="",
+        values=(sv.VariableValue("dmem", "DMEM", None),
+                sv.VariableValue("rpmi", "RPMI", None)))
+    assignments = dict(assignments)
+    assignments["dose"] = dict(assignments["dose"], C01="d0", C02="d1")
+    assignments["cl"] = dict(assignments["cl"], C01="hela", C02="hela")
+    assignments["med"] = {"A01": "dmem", "A02": "dmem", "B01": "dmem",
+                          "B02": "dmem", "C01": "rpmi", "C02": "rpmi"}
+    ctx = _ctx(wells=["A01", "A02", "B01", "B02", "C01", "C02"],
+               variables=(dose, line, medium), assignments=assignments,
+               group_by="cl",
+               response_state=_response_slice(x_variable_id="dose",
+                                              series_variable_id="med"))
+
+    data = rc.collect_response(ctx, "dose", [24.0], ("cl", "med"))
+
+    assert [c.series_label for c in data.curves] == [
+        "HeLa · DMEM", "HeLa · RPMI", "U2OS · DMEM"]
+    assert data.series_name == "Cell line · Medium"
+    # Every curve is a real dose series rather than a single doubled-back line.
+    assert all(len(c.points) == 2 for c in data.curves)
+    # U2OS was never run in RPMI, so there is no empty curve claiming it was.
+    assert "U2OS · RPMI" not in [c.series_label for c in data.curves]
+
+
+def test_a_grouping_the_axis_cannot_cross_falls_back_rather_than_emptying(stub_stats):
+    """Grouping and axis filled on disjoint wells: draw the user's own groups.
+
+    The same choice ``plot_replicate_sets`` makes for a grouping that groups
+    nothing — an empty figure three clicks from where the fix is made explains
+    nothing, and what was left out is reported on the figure itself.
+    """
+    dose, line, assignments = _two_factor_plate()
+    assignments = {"dose": assignments["dose"], "cl": {}}
+    ctx = _ctx(wells=["A01", "A02"], variables=(dose, line),
+               assignments=assignments, group_by="cl",
+               selections=_groups(("low", ["A01"]), ("high", ["A02"])),
+               response_state=_response_slice(x_variable_id="dose"))
+
+    data = rc.collect_response(ctx, "dose", [24.0], ("cl",))
+
+    assert [p.member for p in data.curves[0].points] == ["low", "high"]

@@ -161,13 +161,85 @@ def line_member_keys(ctx) -> list[str]:
         selected, list(ctx.state.plot.line_order_wells or []), key=lambda x: x)
 
 
-def response_members(ctx):
-    """The members Response Curves draws — replicate sets, else the lit wells.
+def _response_slice(ctx):
+    """The Response feature slice, or ``None`` when this ctx carries none.
 
-    The visible replicate sets when there are any, and otherwise one single-well
-    set per selected well, in plate order. Same fallback the bar and line lists
-    make, and for the same reason: a well lit on the plate is a member the user
-    has asked to see.
+    Two ways it is absent and both are legitimate: the feature is profiled out
+    (``AppState.feature_slice`` answers ``None`` by design), and the headless
+    export and CSV paths build a state holding only the slices they read, which
+    can be a plain namespace with no ``feature_slice`` at all. Either way the
+    honest reading is "this tab has chosen nothing", which is the same tolerance
+    :func:`_group_by_variable` documents for the plot slice —
+    ``tests/test_plot_members.py`` pins that the real ``AppState`` does carry
+    the accessor, so the tolerance cannot hide a production context that
+    quietly stopped answering.
+    """
+    getter = getattr(getattr(ctx, "state", None), "feature_slice", None)
+    return getter("response") if callable(getter) else None
+
+
+def response_split_variables(ctx) -> tuple[str, ...]:
+    """The variables that split this tab's curves, outermost first.
+
+    *Group by* first, then the tab's own *Series* — two layers, which is what a
+    plate of two cell lines each treated in two media needs. Each is dropped
+    when it is unset, when it is the axis variable (a series on the axis is one
+    curve per dose with a single point on it), or when the other already names
+    it.
+
+    Read off typed state, so this stays Qt-free: ``ResponseState`` mirrors both
+    of the tab's combos, which is why ``x_variable_id`` lives there beside
+    ``series_variable_id`` rather than only in the widget.
+    """
+    slice_ = _response_slice(ctx)
+    on_x = str(getattr(slice_, "x_variable_id", "") or "") if slice_ else ""
+    series = str(getattr(slice_, "series_variable_id", "") or "") if slice_ else ""
+    out: list[str] = []
+    for variable_id in (_group_by_variable(ctx), series):
+        if variable_id and variable_id != on_x and variable_id not in out:
+            out.append(variable_id)
+    return tuple(out)
+
+
+def crossed_response_sets(ctx):
+    """Response's crossed members, or ``[]`` when it is not pooling that way.
+
+    Crossing is what *Group by* means on this tab, so it is in force only when
+    a grouping is chosen **and** an axis variable is picked to cross it with.
+    A *Series* on its own does not cross: it splits the members the rest of the
+    app already pools into, which is what it has always done and what a plate
+    whose replicate sets are the conditions wants.
+
+    One definition, because two callers need the same answer and would drift:
+    :func:`response_members` builds the list, and
+    :func:`_keys_are_replicate_sets` decides whether those keys name sets or
+    wells. A key space that two functions disagree about is a control resolving
+    against wells that do not exist, silently.
+    """
+    slice_ = _response_slice(ctx)
+    axis = str(getattr(slice_, "x_variable_id", "") or "") if slice_ else ""
+    if not (axis and _group_by_variable(ctx)):
+        return []
+    return crossed_replicate_sets(ctx, (axis, *response_split_variables(ctx)))
+
+
+def response_members(ctx):
+    """The members Response Curves draws — one per point on the figure.
+
+    **Under a grouping, the cross of the axis variable with what splits the
+    curves.** ``plot_replicate_sets`` pools every well holding a value, so
+    *Group by: Cell line* hands this tab one member per cell line holding all
+    six doses — and a member holding six doses has no position on a dose axis:
+    it rolls up to MIXED and is refused, which emptied the figure and blamed
+    the user's fill on Home → Variables. Crossing the grouping with the axis
+    gives a member per (dose, cell line): each has one dose, so each is a
+    point, and the cell line is what tells the curves apart.
+
+    Otherwise unchanged, and deliberately so: with no grouping in force this is
+    the visible replicate sets, and failing those one single-well set per
+    selected well, in plate order. Same fallback the bar and line lists make,
+    and for the same reason: a well lit on the plate is a member the user has
+    asked to see.
 
     This used to have no fallback, on the reasoning that a loose well has no
     dose until it is in something the plate annotates. That reasoning is wrong
@@ -182,6 +254,13 @@ def response_members(ctx):
     needs the wells: ``compute_rep_stats`` pools a set, and a one-well set is
     the shape that makes a lone well go down the same path as a group of four.
     """
+    crossed = crossed_response_sets(ctx)
+    if crossed:
+        return crossed
+    # A cross that matched no well — the grouping and the axis filled on
+    # disjoint parts of the plate — falls back rather than emptying the figure,
+    # the same choice ``plot_replicate_sets`` makes for a grouping that groups
+    # nothing. What was left out is reported on the figure.
     rsets = list(plot_replicate_sets(ctx))
     if rsets:
         return rsets
@@ -224,7 +303,14 @@ def member_wells(ctx, scope: str) -> dict[str, list[str]]:
     """
     keys = plotted_member_keys(ctx, scope)
     well_paths = ctx.state.dataset.well_paths or {}
-    by_name = {r.name: r for r in plot_replicate_sets(ctx)}
+    # **The scope's own member list, not the shared seam.** Response can pool
+    # into the cross of the axis variable with what splits its curves, and those
+    # names are not in ``plot_replicate_sets`` — a key looked up there would
+    # resolve to no wells at all, which is silent: a member with no wells simply
+    # loses its fold-change denominator and its per-sample control, with nothing
+    # to say the resolution failed rather than the control being unset.
+    sets = response_members(ctx) if scope == "response" else plot_replicate_sets(ctx)
+    by_name = {r.name: r for r in sets}
     grouped = _keys_are_replicate_sets(ctx, scope)
     out: dict[str, list[str]] = {}
     for key in keys:
@@ -248,12 +334,19 @@ def _keys_are_replicate_sets(ctx, scope: str) -> bool:
     """Whether *scope*'s keys name replicate sets rather than wells.
 
     With no replicate set active every scope is well-keyed, which is the guard
-    above. Given sets, bar is the only scope that can flip back:
+    above — except under a grouping, where Response pools into crossed sets
+    that exist whether or not the user has drawn a group of their own, and
+    whose names are what its collector emits. Given sets, bar is the only scope
+    that can flip back:
     ``bar_pool_replicates`` turns its bars into wells. Line and Response keep
     pooling — Response because a dose is a property of a condition, and an
     un-pooled response curve would draw one point per well at the same x, which
     is a scatter of replicates rather than a curve.
     """
+    if scope == "response" and crossed_response_sets(ctx):
+        # Crossed members are sets whether or not the user drew a group, and
+        # their names are what this tab's collector emits.
+        return True
     if not plot_replicate_sets(ctx):
         return False
     if scope == "bar":
@@ -327,6 +420,65 @@ def variable_replicate_sets(ctx, variable_id: str):
             # into the tokens of the wells that received it.
             out.append(ReplicateSet(variable.display_label(value.id), wells,
                                     name_is_verbatim=True))
+    return out
+
+
+def crossed_replicate_sets(ctx, variable_ids):
+    """One ``ReplicateSet`` per **combination** of values across *variable_ids*.
+
+    The wells of a combination are the wells that hold every one of its values,
+    and the name joins the labels in the order the ids were given, so a plate of
+    two cell lines across a dose series pools into ``HeLa · 10`` rather than
+    into ``HeLa`` (six doses deep) or ``10`` (two cell lines wide).
+
+    That is the shape a response curve needs and the shape a single grouping
+    cannot give it. ``variable_replicate_sets`` pools every well holding a
+    value, so grouping by `Cell line` puts all six doses of HeLa in one member —
+    and a member with six doses has no position on a dose axis at all: it rolls
+    up to MIXED and is refused. Crossing the grouping with the axis variable
+    gives back a member per point, still a ``ReplicateSet`` and still in the one
+    key space every collector and every saved control reference already uses.
+
+    Combinations no well holds are dropped rather than drawn empty — a plate
+    where only two cell lines got the top dose is a plate with two members
+    there, not four, and an empty member would draw a point at no value.
+
+    Order is each variable's own declared value order, the outer variable
+    moving slowest, which is the order ``variable_replicate_sets`` follows for
+    one variable and the order the legend and the colours then take.
+    """
+    from itertools import product
+
+    from well_viewer.domain.batch_models import ReplicateSet
+    from well_viewer.domain.sample_variables import NAME_JOIN
+
+    vset = getattr(ctx.state.selection, "variables", None)
+    variables = [vset.by_id(vid) for vid in variable_ids] if vset is not None else []
+    variables = [v for v in variables if v is not None]
+    if not variables:
+        return []
+    well_paths = ctx.state.dataset.well_paths or {}
+    out = []
+    for combination in product(*(v.values for v in variables)):
+        wells = sorted(
+            (w for w in well_paths
+             if all(vset.value_id_for(v.id, w) == value.id
+                    for v, value in zip(variables, combination))),
+            key=parse_rc,
+        )
+        if not wells:
+            continue
+        # ``name_is_verbatim``: the labels are the user's own, so the
+        # auto-generated-name heuristic must not rewrite a dose of "10" into
+        # the tokens of the wells that received it.
+        # ``NAME_JOIN``, not a literal: this is the same question
+        # ``sample_variables.name_for_wells`` answers for a replicate group —
+        # what these wells *are*, said in the values they hold — and two
+        # separators for one idea is how a crossed member and a named group
+        # come to read as different kinds of thing on one plate.
+        name = NAME_JOIN.join(v.display_label(value.id)
+                              for v, value in zip(variables, combination))
+        out.append(ReplicateSet(name, wells, name_is_verbatim=True))
     return out
 
 

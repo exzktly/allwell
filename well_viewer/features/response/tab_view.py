@@ -83,7 +83,8 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     metric_combo = reg.register("_response_metric_cb", LabeledComboBox("Property"))
     metric_combo.setToolTip(
         "What the curves measure, including the fraction of cells above the "
-        "ON cutoff")
+        "ON cutoff — which is set on Home → Cell Gating, since this tab "
+        "measures its own channel rather than the band's")
     metric_combo.currentIndexChanged.connect(
         lambda *_: on_response_metric_changed(ctx))
     band.add_scope("", metric_combo)

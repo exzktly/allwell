@@ -35,17 +35,20 @@ class _RedrawCounter:
     """Tally every invocation of the line / bar scope redraw callables.
 
     The bar scope only enters through the scope coalescer, so wrapping
-    the scope's callable is enough. The line scope enters through THREE
-    paths, each resolving a *different* binding of
-    ``plot_orchestrator.redraw_app``: the coalescer (via the line scope's
-    closure ``_redraw_app_scope``), the ``dataset_loaded`` subscriber (via
-    ``app._redraw``, runtime_app's module-top binding), and the tab-switch
-    activation (``on_tab_change`` / ``_activate_default_plot``, which import
-    ``redraw_app`` function-locally and so resolve the *module* attribute).
-    Wrap all three — the two scope/app callables plus the module attribute —
-    so every effective redraw is observed exactly once. The three bindings are
-    disjoint, so no path is double-counted. Wrappers call through to the
-    originals; ``restore()`` undoes every wrapping.
+    the scope's callable is enough. The line scope enters through THREE paths,
+    of which only TWO resolve distinct bindings of
+    ``plot_orchestrator.redraw_app``: the ``dataset_loaded`` subscriber (via
+    ``app._redraw``, runtime_app's module-top binding), and everything that
+    imports ``redraw_app`` function-locally and so resolves the *module*
+    attribute — the tab-switch activation (``on_tab_change`` /
+    ``_activate_default_plot``) **and** the coalescer, whose line scope calls
+    ``scope_registry.redraw_app_scope``, which imports it the same way.
+
+    So the line scope's own callable is deliberately **not** wrapped: it does
+    not resolve a binding of its own, and wrapping it as well counted a single
+    repaint as two. Wrap the two real bindings and every effective redraw is
+    observed exactly once. Wrappers call through to the originals;
+    ``restore()`` undoes every wrapping.
     """
 
     def __init__(self, app) -> None:
@@ -53,13 +56,14 @@ class _RedrawCounter:
         self.counts = {"line": 0, "bar": 0}
 
         self._original_scopes = {}
-        for name in ("line", "bar"):
+        for name in ("bar",):
             scope = get_scope(name)
             assert scope is not None, f"scope {name!r} not registered"
             self._original_scopes[name] = scope
             register_fold_change_scope(replace(
                 scope, redraw=self._wrap(name, scope.redraw),
             ))
+        assert get_scope("line") is not None, "scope 'line' not registered"
 
         self._original_app_redraw = app._redraw
         app._redraw = self._wrap("line", app._redraw)

@@ -32,6 +32,16 @@ class ResponseState:
     #: state the user chose and is left alone.
     tp_selections: dict[str, bool] = field(default_factory=dict)
 
+    #: The variable on the x axis, by **id**, mirroring the tab's X combo.
+    #:
+    #: The combo is where the user picks it, but a widget is not readable from
+    #: ``domain/``, and the axis variable is exactly what the member seam needs:
+    #: under a *Group by*, this tab pools into the **cross** of the axis with
+    #: what splits its curves, so ``plot_members`` has to know what the axis is.
+    #: Kept in step by ``controller.refresh_x_combo``, which is the one place
+    #: the combo's selection is decided.
+    x_variable_id: str = ""
+
     #: The variable whose values split the members into separate curves, by
     #: **id**, or ``""`` for one curve per timepoint. An id rather than a name
     #: or a combo index, for the reason ``view_state_io`` records about the x

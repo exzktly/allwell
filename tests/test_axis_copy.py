@@ -132,3 +132,69 @@ def test_copy_figure_to_clipboard_status_on_fallback(monkeypatch):
     assert isinstance(status, str)
     assert not status.startswith("Copy failed")
     assert QApplication.clipboard().mimeData() is not None
+
+
+def test_a_one_axes_card_offers_the_copy_button(qapp):
+    """A single-axes figure carries the hover Copy glyph.
+
+    It did not, on the reasoning that a per-panel copy duplicates "the
+    whole-canvas Copy button". That button is gone — the card's header was
+    retired when the shared ControlBand took its controls — so the suppression
+    removed the only glyph rather than de-duplicating it, and the five
+    single-axes plot tabs (Response Curves, Heat Map, Distribution and the two
+    Scatter leaves) hovered to a lone save icon.
+
+    The wrong implementation this rules out is the one that shipped: a
+    ``_hover_buttons`` that gates Copy on ``len(figure.axes) > 1``.
+    """
+    from widgets.plot_card import PlotCard
+
+    single = PlotCard(figsize=(3, 2))
+    single.figure.add_subplot(1, 1, 1).plot([0, 1], [0, 1])
+    assert single._copy_btn in single._hover_buttons()
+    # …and it says what it copies. On one axes that is the plot, and calling it
+    # "this panel" names a division the reader cannot see.
+    assert single._copy_btn.toolTip() == "Copy this plot to the clipboard"
+
+    multi = PlotCard(figsize=(3, 4))
+    multi.figure.add_subplot(2, 1, 1).plot([0, 1], [0, 1])
+    multi.figure.add_subplot(2, 1, 2).plot([0, 1], [1, 0])
+    assert multi._copy_btn in multi._hover_buttons()
+    assert multi._copy_btn.toolTip() == "Copy this panel to the clipboard"
+
+
+def test_a_one_axes_capture_keeps_the_figure_s_own_title(qapp):
+    """A per-panel capture of a one-axes figure is the whole figure.
+
+    The two answers differ only in what they discard, and it is worth measuring
+    which: an axes-tight crop carries a free ``ax.text`` drawn below the axes
+    (Response Curves' omission caption survives), and discards anything the
+    *figure* owns — a ``suptitle`` or a ``fig.text`` footnote. Distribution
+    titles its single-axes figure with a suptitle, so cropping to the axes
+    handed the user an untitled plot that looked like a complete one.
+
+    Asserted as the bbox the capture paths pass to ``savefig`` — ``"tight"``,
+    the whole figure — rather than as "the crop is big enough", which a crop
+    one point too small would also satisfy.
+    """
+    from widgets.fig_clipboard import axis_tight_bbox_inches
+    from widgets.plot_card import PlotCard
+
+    card = PlotCard(figsize=(6, 4), constrained=False)
+    ax = card.figure.add_subplot(1, 1, 1)
+    ax.plot([1, 2, 3], [1, 2, 3])
+    card.figure.subplots_adjust(bottom=0.3, top=0.8)
+    before = axis_tight_bbox_inches(ax, pad_in=0.0)
+    card.figure.suptitle("Response vs Dose")
+    after = axis_tight_bbox_inches(ax, pad_in=0.0)
+    # The premise, measured: the axes crop does not grow to hold the suptitle.
+    assert after.y1 == before.y1
+
+    assert card._panel_bbox(ax) == "tight"
+
+    multi = PlotCard(figsize=(3, 4))
+    top = multi.figure.add_subplot(2, 1, 1)
+    top.plot([0, 1], [0, 1])
+    multi.figure.add_subplot(2, 1, 2).plot([0, 1], [1, 0])
+    # With siblings the crop is the point of the affordance and stays a bbox.
+    assert multi._panel_bbox(top) != "tight"

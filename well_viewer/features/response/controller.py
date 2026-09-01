@@ -290,6 +290,23 @@ def refresh_x_combo(ctx) -> None:
     index = combo.findData(keep)
     combo.setCurrentIndex(index if index >= 0 else 0)
     combo.blockSignals(False)
+    _store_x_variable(ctx)
+
+
+def _store_x_variable(ctx) -> None:
+    """Mirror the X combo's pick onto the slice.
+
+    ``domain/plot_members`` needs the axis variable — under a *Group by* this
+    tab pools into the cross of the axis with what splits its curves — and it
+    cannot read a widget. Written here as well as in the change handler because
+    this function decides the selection too: it re-lists the variables on every
+    redraw and falls back to the first when the user's pick has gone, with
+    signals blocked, so the handler does not fire for the fall-back and the
+    slice would keep naming a variable the combo no longer shows.
+    """
+    slice_ = ctx.state.feature_slice("response")
+    if slice_ is not None:
+        slice_.x_variable_id = selected_variable_id(ctx)
 
 
 def _tp_state(ctx) -> dict:
@@ -298,10 +315,24 @@ def _tp_state(ctx) -> dict:
 
 
 def available_timepoints(ctx) -> list[float]:
-    """Every timepoint the open dataset holds, ascending."""
+    """Every timepoint the open dataset holds, ascending.
+
+    Through ``timepoint_sync.plottable_timepoints`` — the same answer the Bar
+    tab's picker takes. This asked ``data_loading.get_all_timepoints`` instead,
+    which reads only the numeric ``timepoint_hours`` column: on a plate whose
+    filename schema has no timepoint slot that column is NaN in every row, so
+    the picker offered nothing, the button read "Timepoints: 0 selected" and the
+    figure was empty — while every other tab listed the plate's timepoints and
+    drew it. The aggregator files those rows at 0.0, which is what the shared
+    helper returns, so asking for it draws them.
+
+    It is also read on every redraw, and the old route walked every loaded
+    well's rows to answer — a gate mask and a numeric coercion per well, per
+    repaint, to recompute something the dataset already caches.
+    """
     with swallow("read the dataset's timepoints for the response curve"):
-        from well_viewer.data.data_loading import get_all_timepoints
-        return [float(t) for t in (get_all_timepoints(ctx) or [])]
+        from well_viewer.core.timepoint_sync import plottable_timepoints
+        return [float(t) for t in plottable_timepoints(ctx)]
     return []
 
 
@@ -345,7 +376,14 @@ def timepoints_for(ctx) -> list[float]:
 
 
 def open_timepoint_selector(ctx) -> None:
-    """The Bar tab's checkbox menu, over this tab's own selection."""
+    """The Bar tab's checkbox menu, over this tab's own selection.
+
+    With its All / None pair too. A twelve-timepoint plate is twelve clicks to
+    see the whole series and twelve more to get back, and the tab a click away
+    offers both — a picker that is the same control minus two actions reads as
+    the one that is broken.
+    """
+    from PySide6.QtGui import QAction
     from PySide6.QtWidgets import QCheckBox, QMenu, QWidgetAction
 
     from widgets import menu_exec
@@ -355,9 +393,11 @@ def open_timepoint_selector(ctx) -> None:
         return
     sync_timepoint_menu(ctx)
     menu = QMenu(button)
+    boxes: dict[str, QCheckBox] = {}
     for tp_str in sorted(_tp_state(ctx).keys(), key=float):
         box = QCheckBox(tp_str, menu)
         box.setChecked(bool(_tp_state(ctx).get(tp_str)))
+        boxes[tp_str] = box
 
         def _handler(checked: bool, tp=tp_str) -> None:
             _tp_state(ctx)[tp] = bool(checked)
@@ -368,18 +408,48 @@ def open_timepoint_selector(ctx) -> None:
         action = QWidgetAction(menu)
         action.setDefaultWidget(box)
         menu.addAction(action)
-    if not menu.actions():
+    if not boxes:
         menu.addAction("No timepoints in this dataset").setEnabled(False)
+    else:
+        menu.addSeparator()
+
+        def _set_all(value: bool) -> None:
+            # The checkboxes are set with their signals blocked and the state
+            # written directly, so twelve toggles do not queue twelve redraws
+            # of the same figure. One repaint at the end, from the state the
+            # user asked for.
+            for tp_str, box in boxes.items():
+                blocked = box.blockSignals(True)
+                try:
+                    box.setChecked(value)
+                finally:
+                    box.blockSignals(blocked)
+                _tp_state(ctx)[tp_str] = value
+            update_timepoint_button(ctx)
+            redraw_response(ctx)
+
+        for label, value in (("All", True), ("None", False)):
+            action = QAction(label, menu)
+            action.triggered.connect(lambda _=False, v=value: _set_all(v))
+            menu.addAction(action)
     menu_exec.exec_menu(menu, button.mapToGlobal(button.rect().bottomLeft()))
 
 
 def update_timepoint_button(ctx) -> None:
-    """The button carries its own readout, as the Bar tab's does."""
+    """The button carries its own readout, as the Bar tab's does.
+
+    Through the shared ``multiselect_button_text``, so it reads "2/5 selected"
+    rather than "2 selected". The count alone cannot say whether the other
+    three are unticked or simply not there, and this tab's failure mode was
+    exactly that: a picker with nothing in it, reading "0 selected", which is
+    also what a user who unticked everything sees.
+    """
+    from well_viewer.core.ui_helpers import multiselect_button_text
+
     button = _widget(ctx, "_response_tp_button")
     if button is None:
         return
-    n = len(timepoints_for(ctx))
-    button.setText(f"Timepoints: {n} selected")
+    button.setText(multiselect_button_text("Timepoints", _tp_state(ctx)))
 
 
 def response_data(ctx):
@@ -394,8 +464,15 @@ def response_data(ctx):
     variable_id = selected_variable_id(ctx)
     if not variable_id:
         return ResponseData()
+    # Both layers, from the seam that owns which is which: *Group by* splits
+    # the curves outermost and the tab's own *Series* inside it. Passing the
+    # Series combo alone here is what made the plate-wide grouping do nothing
+    # on this tab but empty it — the members were pooled across the axis and
+    # every one of them rolled up to "wells disagree".
+    from well_viewer.domain.plot_members import response_split_variables
+
     return collect_response(
-        ctx, variable_id, timepoints_for(ctx), selected_series_id(ctx),
+        ctx, variable_id, timepoints_for(ctx), response_split_variables(ctx),
         Y_FRACTION if response_draws_fraction(ctx) else Y_MEAN,
         val_col=response_val_col(ctx))
 
@@ -443,6 +520,7 @@ def redraw_response(ctx) -> None:
 
 
 def on_x_variable_changed(ctx) -> None:
+    _store_x_variable(ctx)
     redraw_response(ctx)
 
 
@@ -635,10 +713,40 @@ def _figure_title(ctx, data) -> str:
     parts = []
     if data.variable_name:
         parts.append(f"Response vs {data.variable_name}")
-    shortfall = group_by_shortfall(ctx)
-    if shortfall:
-        parts.append(shortfall)
+    for shortfall in (group_by_shortfall(ctx), _uncrossed_grouping(ctx)):
+        if shortfall:
+            parts.append(shortfall)
     return " — ".join(parts)
+
+
+def _uncrossed_grouping(ctx) -> str:
+    """Said when a grouping is chosen and this tab could not use it.
+
+    Under *Group by* this tab pools into the cross of the grouping with the
+    axis variable, and a cross can come out empty — the two are filled on
+    disjoint parts of the plate, so no well holds both. The members then fall
+    back to the user's own groups rather than the figure emptying, which is the
+    right answer and a **substitution**: the band reads "Group by: Cell line"
+    over curves that are not grouped by cell line at all, and nothing else on
+    the page would say so. ``group_by_shortfall`` cannot: it asks whether the
+    grouping matched any wells, and here it did — it is the *crossing* that
+    found none.
+    """
+    from well_viewer.domain.plot_members import crossed_response_sets
+
+    variable_id = str(getattr(ctx.state.plot, "group_by_variable", "") or "")
+    if not variable_id or not selected_variable_id(ctx):
+        return ""
+    if crossed_response_sets(ctx):
+        return ""
+    vset = getattr(ctx.state.selection, "variables", None)
+    variable = vset.by_id(variable_id) if vset is not None else None
+    if variable is None:
+        return ""
+    axis = vset.by_id(selected_variable_id(ctx))
+    axis_name = axis.name if axis is not None else "the x variable"
+    return (f"No well holds both {variable.name} and {axis_name}, so these "
+            f"curves are your own groups rather than {variable.name}")
 
 
 def _log_x_was_asked_for(ctx, fig) -> bool:

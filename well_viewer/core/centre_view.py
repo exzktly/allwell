@@ -593,21 +593,31 @@ def build_centre(win, parent: QWidget) -> None:
             the dropdown two or three times to force a re-sync via
             ``_set_active_channel``.
 
-            ``title`` selects which scope controls the band carries. The
-            scatter tabs own per-axis (channel, property) selectors, so the
-            global Channel / Property / Threshold groups do not drive the plot
-            there and are swapped out for the scatter View toggle. They used to
-            stay in place greyed, beside a note reading "Scatter uses per-axis
-            channels below" — three dead controls and an apology for them,
-            occupying the row every other tab uses for live controls.
+            ``title`` selects which scope controls the band carries. A leaf in
+            ``ui_helpers.OWN_CHANNEL_LEAVES`` scopes its own channel and
+            property, so the global Channel / Property / Threshold groups do not
+            drive the plot there and are hidden; on the scatter leaves they are
+            swapped out for the scatter View toggle. They used to stay in place
+            greyed, beside a note reading "Scatter uses per-axis channels below"
+            — three dead controls and an apology for them, occupying the row
+            every other tab uses for live controls.
+
+            The test used to be the scatter titles written out here, which is
+            how Response Curves came to show two Channel dropdowns and two
+            Property dropdowns side by side: it owns its pair for the same
+            reason the aggregate Scatter tab does, and was in neither list. The
+            View toggle stays scatter-only — that one really is about scatter
+            and not about owning a channel.
             """
             global_cb = getattr(win, "_plotting_channel_cb", None)
+            from well_viewer.core.ui_helpers import OWN_CHANNEL_LEAVES
             is_scatter = title in ("Scatter Plot", "Scatter Cells", "Scatter Agg")
+            owns_channel = title in OWN_CHANNEL_LEAVES
             for grp_attr in ("_plotting_channel_grp", "_plotting_metric_grp",
                              "_plotting_thresh_frac_grp"):
                 grp = getattr(win, grp_attr, None)
                 if grp is not None:
-                    grp.setVisible(not is_scatter)
+                    grp.setVisible(not owns_channel)
             scatter_grp = getattr(win, "_plotting_scatter_grp", None)
             if scatter_grp is not None:
                 scatter_grp.setVisible(is_scatter)

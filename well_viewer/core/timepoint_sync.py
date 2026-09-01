@@ -23,6 +23,34 @@ from collections.abc import Sequence
 from well_viewer.core.safe import swallowed
 
 
+def plottable_timepoints(ctx) -> list[float]:
+    """Every timepoint a plot can ask for, ascending. **The one answer.**
+
+    ``dataset.all_timepoints_cache`` is the canonical list, rebuilt on load from
+    three sources at once — the numeric ``timepoint_hours`` column, the text
+    ``timepoint`` column parsed, and ``pipeline_info``'s ``available_timepoints``
+    — so a tab reading it agrees with every other tab about what the plate holds.
+
+    The ``0.0`` fallback is the other half, and it is not a placeholder: a
+    dataset whose filename schema carries no timepoint slot has
+    ``timepoint_hours`` NaN in every row, and ``data_loading.resolved_timepoints``
+    resolves those rows to **0.0** — so 0.0 is where the aggregator actually
+    files their points, and asking for it returns the data. Without it a
+    single-timepoint plate has an empty timepoint list, which reads as "nothing
+    to draw" and empties the figure.
+
+    Named here rather than in either tab because two of them had answered this
+    question differently. Response Curves asked ``data_loading.get_all_timepoints``,
+    which reads only the numeric column and applies the inclusion mask, and so
+    reported *nothing* for a schema with no timepoint field — its picker read
+    "Timepoints: 0 selected" and its figure was blank, while the Bar tab beside
+    it, which had the fallback, drew the plate. Two definitions of "the
+    dataset's timepoints", one of them not the one the aggregator uses.
+    """
+    tps = [float(t) for t in (ctx.state.dataset.all_timepoints_cache or [])]
+    return tps or [0.0]
+
+
 def current_focus_tp(ctx) -> float | None:
     """The shared focus timepoint, or ``None`` when not yet chosen.
 

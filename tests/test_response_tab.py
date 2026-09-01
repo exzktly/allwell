@@ -182,13 +182,13 @@ def tab(qtbot, monkeypatch):
 def _load(tab, variable, assignments, groups, timepoints=(24.0,)):
     """Point the ctx at a dataset, and say which timepoints it holds.
 
-    ``get_all_timepoints`` walks the real row cache, so it is stubbed on the
-    module the controller reads it from — the picker seeds itself from that
-    list, and without it every curve would be drawn at no timepoint at all.
+    Written into ``dataset.all_timepoints_cache``, which is the field the app
+    fills on load and the field every tab's picker reads. It used to be a stub
+    over ``data_loading.get_all_timepoints`` — the function this tab alone
+    called — and a stub of a function nothing else uses cannot notice that the
+    rest of the app is answering the question somewhere else.
     """
-    import well_viewer.data.data_loading as dl
-    tab.monkeypatch.setattr(dl, "get_all_timepoints",
-                            lambda _ctx: list(timepoints))
+    tab.ctx.state.dataset.all_timepoints_cache = [float(t) for t in timepoints]
     wells = sorted({w for ws in (g[1] for g in groups) for w in ws})
     tab.ctx.state.dataset.well_paths = {w: f"/{w}.csv" for w in wells}
     tab.ctx.state.selection.variables = sv.VariableSet(
@@ -200,9 +200,7 @@ def _load(tab, variable, assignments, groups, timepoints=(24.0,)):
 
 def _load_two_series(tab, timepoints=(24.0,)):
     """A dose series run on two cell lines — the plate the feature is for."""
-    import well_viewer.data.data_loading as dl
-    tab.monkeypatch.setattr(dl, "get_all_timepoints",
-                            lambda _ctx: list(timepoints))
+    tab.ctx.state.dataset.all_timepoints_cache = [float(t) for t in timepoints]
     dose = _variable(pairs=(("1", 1.0), ("10", 10.0)))
     line = sv.Variable(
         id="cl", name="Cell line", kind=sv.TEXT, unit="",
@@ -247,9 +245,7 @@ def _load_ungrouped(tab, variable, assignments, timepoints=(24.0,)):
     its own argument and leaves ``selected_wells`` empty, so the whole file was
     a test of grouped plates only.
     """
-    import well_viewer.data.data_loading as dl
-    tab.monkeypatch.setattr(dl, "get_all_timepoints",
-                            lambda _ctx: list(timepoints))
+    tab.ctx.state.dataset.all_timepoints_cache = [float(t) for t in timepoints]
     wells = sorted(assignments)
     tab.ctx.state.dataset.well_paths = {w: f"/{w}.csv" for w in wells}
     tab.ctx.state.selection.variables = sv.VariableSet(
@@ -431,7 +427,57 @@ def test_it_opens_on_one_timepoint_not_all_of_them(tab):
     assert rctl.timepoints_for(tab.ctx) == [24.0], (
         "the picker seeded with something other than the shared focus timepoint"
     )
-    assert tab.w("_response_tp_button").text() == "Timepoints: 1 selected"
+    assert tab.w("_response_tp_button").text() == "Timepoints: 1/4 selected"
+
+
+def test_a_plate_with_no_timepoint_field_still_has_a_timepoint_to_draw(tab):
+    """The reported defect: "only shows the number 0", on a plate every other
+    tab drew.
+
+    A dataset whose filename schema carries no timepoint slot has
+    ``timepoint_hours`` NaN in every row, so ``all_timepoints_cache`` is empty —
+    and ``data_loading.resolved_timepoints`` files those rows at **0.0**, which
+    is where the aggregator keeps their points. Bar Plots has always added that
+    0.0 back; this tab asked ``get_all_timepoints``, which reads the raw column
+    only, got nothing, and offered nothing: a picker with no entries, a button
+    reading 0, and an empty figure with no explanation on it.
+
+    The wrong implementation this rules out is the one that shipped: an
+    ``available_timepoints`` that reports what the numeric column holds rather
+    than what the plots can ask for. The fixture is a plate with data and no
+    timepoint field, which is the case where the two answers differ.
+    """
+    variable = _variable()
+    _load(tab, variable, {"A01": "v0"}, [("a", ["A01"])], timepoints=())
+    assert tab.ctx.state.dataset.all_timepoints_cache == []
+
+    rctl.redraw_response(tab.ctx)
+
+    assert rctl.available_timepoints(tab.ctx) == [0.0]
+    assert rctl.timepoints_for(tab.ctx) == [0.0], (
+        "the picker offered no timepoint on a plate whose points are all at 0.0"
+    )
+    assert tab.w("_response_tp_button").text() == "Timepoints: All 1 selected"
+    assert tab.ax.has_data(), "the figure is empty on a plate that has data"
+
+
+def test_the_button_says_how_many_of_how_many(tab):
+    """"0 selected" cannot say whether the rest are unticked or not there.
+
+    Which is the whole of the reported symptom: the button read 0 both when a
+    user had unticked everything and when the tab had found nothing to offer,
+    and those have different fixes. The shared readout names the total.
+    """
+    variable = _variable()
+    _load(tab, variable, {"A01": "v0"}, [("a", ["A01"])],
+          timepoints=(0.0, 24.0, 48.0))
+    rctl.redraw_response(tab.ctx)
+    assert tab.w("_response_tp_button").text() == "Timepoints: 1/3 selected"
+
+    tab.ctx.state.feature_slice("response").tp_selections = {
+        "0": True, "24": True, "48": True}
+    rctl.update_timepoint_button(tab.ctx)
+    assert tab.w("_response_tp_button").text() == "Timepoints: All 3 selected"
 
 
 def test_the_shared_focus_timepoint_is_never_written(tab):
@@ -482,7 +528,7 @@ def test_turning_every_timepoint_off_is_a_choice_and_is_left_alone(tab):
 
     rctl.redraw_response(tab.ctx)
     assert rctl.timepoints_for(tab.ctx) == []
-    assert tab.w("_response_tp_button").text() == "Timepoints: 0 selected"
+    assert tab.w("_response_tp_button").text() == "Timepoints: 0/2 selected"
 
 
 def test_a_timepoint_the_new_dataset_lacks_is_dropped_from_the_selection(tab):
@@ -870,9 +916,7 @@ def test_the_fit_settings_are_one_set_for_the_whole_figure(tab, fit_ui):
     that cannot be compared, and comparing them is the only reason to draw
     both."""
     _dose_plate(tab, ec50=2.5)
-    tab.monkeypatch.setattr(
-        "well_viewer.data.data_loading.get_all_timepoints",
-        lambda _ctx: [24.0, 48.0])
+    tab.ctx.state.dataset.all_timepoints_cache = [24.0, 48.0]
     slice_ = tab.ctx.state.feature_slice("response")
     slice_.tp_selections = {"24": True, "48": True}
     fit_ui.combo.setCurrentIndex(fit_ui.combo.findData("4pl"))
@@ -1597,3 +1641,96 @@ def test_the_series_default_is_short_enough_not_to_stretch_the_band(tab):
     this one several times the width of its neighbours.
     """
     assert len(rctl.NO_SERIES_LABEL) <= 12, rctl.NO_SERIES_LABEL
+
+
+# ── Group by, driven through the plate-wide control ─────────────────────────
+
+def test_group_by_a_variable_splits_the_curves_rather_than_emptying_the_plot(tab):
+    """The reported defect, driven the way the user drives it.
+
+    *Group by* pools every well holding a value, so grouping by `Cell line`
+    handed this tab one member per cell line holding both doses — no position
+    on a dose axis, refused as "wells disagree", figure blank. Now the members
+    are the cross of the grouping with the axis, and the grouping is what tells
+    the curves apart.
+
+    Written against the state the band's control writes, not the collector's
+    argument, because the defect was that the plate-wide setting never reached
+    this tab's collector at all.
+    """
+    _load_two_series(tab)
+    # The redraw is what fills the X combo and mirrors its pick onto the slice,
+    # which is where the member seam reads the axis from. Dose is the plate's
+    # only Number variable, so it selects itself, exactly as it does on screen.
+    rctl.redraw_response(tab.ctx)
+    tab.ctx.state.plot.group_by_variable = "cl"
+
+    rctl.redraw_response(tab.ctx)
+    data = rctl.response_data(tab.ctx)
+
+    assert [c.series_label for c in data.curves] == ["HeLa", "U2OS"]
+    assert all(len(c.points) == 2 for c in data.curves), (
+        "a grouped curve does not span the dose series"
+    )
+    assert data.omitted == []
+    assert tab.ax.has_data()
+
+
+def test_group_by_and_series_are_two_layers_on_this_tab(tab):
+    """Group by outermost, the tab's own Series inside it.
+
+    Both name the same variable here, which is the case where a naive "use
+    them both" produces `HeLa · HeLa`: the seam drops the duplicate, so the
+    figure is two curves rather than two curves with doubled labels.
+    """
+    _load_two_series(tab)
+    rctl.redraw_response(tab.ctx)
+    tab.ctx.state.plot.group_by_variable = "cl"
+    _pick_series(tab, "cl")
+
+    data = rctl.response_data(tab.ctx)
+
+    assert [c.series_label for c in data.curves] == ["HeLa", "U2OS"]
+    assert data.series_name == "Cell line"
+
+
+def test_the_figure_says_when_a_grouping_could_not_be_crossed(tab):
+    """A grouping that matches wells but shares none with the axis.
+
+    The members fall back to the user's own groups, which is the right answer
+    and a substitution — the band still reads "Group by: Cell line" over curves
+    that are not grouped by it. ``group_by_shortfall`` cannot say this: it asks
+    whether the grouping matched any wells, and here it did. It is the
+    *crossing* that found none, so the sentence has to be its own.
+
+    The fixture is the case where the two sentences differ. An earlier version
+    dropped the cell-line assignments entirely, which makes the grouping match
+    nothing — and ``group_by_shortfall``'s existing sentence for that case
+    already contains both "Cell line" and "your own groups", so the test passed
+    against origin/main with the whole feature absent.
+    """
+    _load_two_series(tab)
+    # Dose on the A row, Cell line on the B row: each variable matches wells,
+    # and no well carries both.
+    variables = tab.ctx.state.selection.variables
+    tab.ctx.state.selection.variables = sv.VariableSet(
+        variables=variables.variables,
+        assignments={"dose": {"A01": "v0", "A02": "v1"},
+                     "cl": {"B01": "hela", "B02": "u2os"}})
+    rctl.redraw_response(tab.ctx)
+    tab.ctx.state.plot.group_by_variable = "cl"
+
+    # Read at the boundary — what the renderer hands the axes — because the
+    # fixture stubs ``apply_ax_style`` to a no-op, so ``ax.get_title()`` is
+    # empty here for every figure and would pass this test with the sentence
+    # deleted.
+    import well_viewer.core.plot_style as ps
+    titles = []
+    tab.monkeypatch.setattr(
+        ps, "apply_ax_style", lambda _ax, title, _ylabel: titles.append(title))
+
+    rctl.redraw_response(tab.ctx)
+
+    assert titles, "the renderer never styled the axes"
+    assert "No well holds both Cell line and Dose" in titles[-1], (
+        f"the figure does not say the grouping was not applied: {titles[-1]!r}")

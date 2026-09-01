@@ -49,9 +49,11 @@ def snapshot_response(ctx) -> dict:
         # 0.0 for an unset bottom would turn every restored 4PL into a Hill.
         if value is not None:
             out[key] = float(value)
-    combo = ctx.widgets.get_or_none("_response_x_cb")
-    if combo is not None and combo.currentData():
-        out["x_variable_id"] = str(combo.currentData())
+    # From the slice, which the controller keeps in step with the combo — and
+    # which is what the member seam reads. A snapshot taken from the widget
+    # alone could not be taken at all on a headless path.
+    if slice_.x_variable_id:
+        out["x_variable_id"] = str(slice_.x_variable_id)
     series = ctx.widgets.get_or_none("_response_series_cb")
     if series is not None and series.currentData():
         out["series_variable_id"] = str(series.currentData())
@@ -125,6 +127,12 @@ def _sync_controls(ctx, slice_, x_variable_id) -> None:
             combo.blockSignals(True)
             combo.setCurrentIndex(index)
             combo.blockSignals(False)
+            # The slice mirrors the combo, and the signals that normally keep
+            # it in step are blocked here. Left unwritten, the axis the member
+            # seam reads would be whatever the combo had settled on before the
+            # restore — so a saved plot grouped by Cell line would come back
+            # crossed against the wrong variable, or not crossed at all.
+            slice_.x_variable_id = str(x_variable_id)
 
     # After the x combo, never before: ``refresh_series_combo`` excludes
     # whichever variable is on X, so seeding the series against a stale x would

@@ -14,7 +14,8 @@ def test_save_button_hidden_until_handler_set(qapp):
     # No handler → save button is not among the hover buttons.
     assert card._save_btn not in card._hover_buttons()
     card.set_save_handler(lambda png, label, svg, panel: "ok")
-    # Single-axis figure still offers the save button (unlike copy).
+    # Single-axis figure offers the save button; so does copy, which needs
+    # no handler and is asserted in tests/test_axis_copy.py.
     assert card._save_btn in card._hover_buttons()
 
 

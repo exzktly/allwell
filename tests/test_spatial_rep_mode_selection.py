@@ -60,8 +60,24 @@ def test_no_groups_uses_selected_wells():
 
 
 def test_spatial_and_multivariate_in_rep_mirror_set():
-    from well_viewer.core.selection_controller import _REP_MIRROR_TABS
-    assert "Spatial" in _REP_MIRROR_TABS
-    assert "Multivariate" in _REP_MIRROR_TABS
+    """The mirror set is the Plotting leaves plus these two per-well tabs.
+
+    It used to be a constant holding a hand-written list of the leaves; it is
+    now derived from the feature registry (a list of leaves is a list that
+    stops being complete — Response Curves was added to Plotting and to no
+    roster here, and its plate painted no wells in rep-mode). Spatial and
+    Multivariate are the part that cannot be derived: they mirror the same
+    active set without being plotting leaves, so they stay named.
+    """
+    from types import SimpleNamespace
+
+    from well_viewer.core.selection_controller import _rep_mirror_tabs
+    from well_viewer.features.registry import build_feature_registry
+
+    mirrored = _rep_mirror_tabs(SimpleNamespace(features=build_feature_registry()))
+    assert "Spatial" in mirrored
+    assert "Multivariate" in mirrored
     # plotting tabs stay in the mirror set too
-    assert "Bar Plots" in _REP_MIRROR_TABS
+    assert "Bar Plots" in mirrored
+    # …and so does every other leaf the registry declares, which is the point.
+    assert "Response Curves" in mirrored

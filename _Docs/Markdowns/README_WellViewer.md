@@ -2648,15 +2648,23 @@ reason: `n` counts the condition's wells, and with FOV spread on the error bar
 is taken across fields, so the two are not the pair you would combine to
 recover a standard deviation.
 
-**Several curves on one plot, in two layers.** The **Series** control beside
-**X** splits the groups into one curve per value of a second variable — pick
-`Cell line` and a dose series run on HeLa and U2OS is drawn as two curves
-rather than one line doubling back at every dose. **Group by** is the outer
-layer and **Series** the inner, so a plate that varies cell line *and* medium
-across a dose series can carry both: group by `Cell line`, set Series to
-`Medium`, and you get one curve per combination, labelled `HeLa · DMEM`.
-Naming the same variable in both is not an error — the second mention is
-ignored rather than doubling the label. Colour tells you the series and the dash pattern
+**Several curves on one plot.** The **Series** button beside **X** opens a
+checklist of the plate's other variables and splits the groups into one curve
+per value — tick `Cell line` and a dose series run on HeLa and U2OS is drawn
+as two curves rather than one line doubling back at every dose.
+
+**Tick more than one and they cross.** `Cell line` and `RNA` together give one
+curve per combination, labelled `HeLa · shGFP`, in the order you ticked them —
+so ticking `RNA` first reads `shGFP · HeLa` instead. The button says what the
+figure is split by once the menu is closed, and **None** at the foot of the
+menu clears the lot.
+
+**Group by** is a further, outer layer, for when you want the whole app pooled
+that way rather than just this figure: it is the plate-wide control, so
+grouping by `Cell line` there and adding `RNA` here gives the same four curves
+while the Bar tab and Statistics pool by cell line too. Naming one variable in
+both places is not an error — the second mention is ignored rather than
+doubling the label. Colour tells you the series and the dash pattern
 tells you the timepoint, so with two cell lines at two timepoints you get four
 curves in two colours and two dash patterns, and you can see at a glance which
 share a cell line and which share a moment. Each curve is fitted on its own,
@@ -2690,6 +2698,12 @@ does not move the Heat Map or the Distribution tab.
 A plate whose filenames carry no timepoint at all is a single timepoint of
 `0`, listed and ticked like any other, so the tab draws it rather than
 reporting that there is nothing to draw.
+
+The picker reconciles with the plate every time it opens: timepoints you have
+ticked or unticked keep your answer, and any the plate has that you have never
+been asked about are added unticked. So a figure saved before the plate's
+timepoints were readable offers all of them now, rather than staying pinned to
+the one it was saved with.
 
 **What could not be plotted is named on the figure.** A group whose wells hold
 two different doses, and a group containing a well with no dose at all, are two

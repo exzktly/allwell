@@ -20,7 +20,8 @@ from typing import Any
 # and a deferred feature import that is not breaking a cycle is one the budget
 # guard counts for nothing.
 from well_viewer.features.response.controller import (
-    FRACTION_LABEL, refresh_response_metric_combo, refresh_series_combo, refresh_x_combo,
+    FRACTION_LABEL, refresh_response_metric_combo, refresh_series_control,
+    refresh_x_combo,
     update_timepoint_button,
 )
 from well_viewer.features.response.response_compute import FIT_MODELS, FIT_NONE
@@ -54,9 +55,10 @@ def snapshot_response(ctx) -> dict:
     # alone could not be taken at all on a headless path.
     if slice_.x_variable_id:
         out["x_variable_id"] = str(slice_.x_variable_id)
-    series = ctx.widgets.get_or_none("_response_series_cb")
-    if series is not None and series.currentData():
-        out["series_variable_id"] = str(series.currentData())
+    # From the slice, which is where the Series menu keeps its answer — and in
+    # the user's own pick order, which is the order the curves are labelled in.
+    if slice_.series_variable_ids:
+        out["series_variable_ids"] = [str(v) for v in slice_.series_variable_ids]
     # The tab's own Channel and Property, by their combo labels — the same
     # strings ``populate_metric_combo`` produces, so a restore needs no second
     # vocabulary. Empty means "was following the shared choice", which restores
@@ -99,7 +101,16 @@ def apply_response(ctx, state: dict) -> None:
             # and a free plateau is the tab's own default.
             setattr(slice_, key, None)
 
-    slice_.series_variable_id = str(state.get("series_variable_id", "") or "")
+    raw_series = state.get("series_variable_ids")
+    if isinstance(raw_series, (list, tuple)):
+        slice_.series_variable_ids = [str(v) for v in raw_series if v]
+    else:
+        # A plot saved by the release whose Series was one combo. Read the
+        # single id rather than dropping it: a restored figure with no split is
+        # a different figure from the one that was saved, and it looks like a
+        # complete restore.
+        one = str(state.get("series_variable_id", "") or "")
+        slice_.series_variable_ids = [one] if one else []
     slice_.channel = str(state.get("channel", "") or "")
     metric_label = str(state.get("metric_label", "") or "")
     if not metric_label and str(state.get("y_metric", "") or "") == "fraction":
@@ -134,16 +145,10 @@ def _sync_controls(ctx, slice_, x_variable_id) -> None:
             # crossed against the wrong variable, or not crossed at all.
             slice_.x_variable_id = str(x_variable_id)
 
-    # After the x combo, never before: ``refresh_series_combo`` excludes
-    # whichever variable is on X, so seeding the series against a stale x would
-    # offer a list with the wrong variable missing from it.
-    series = ctx.widgets.get_or_none("_response_series_cb")
-    if series is not None:
-        refresh_series_combo(ctx)
-        index = series.findData(slice_.series_variable_id or "")
-        series.blockSignals(True)
-        series.setCurrentIndex(index if index >= 0 else 0)
-        series.blockSignals(False)
+    # After the x combo, never before: ``refresh_series_control`` drops whichever
+    # variable is on X, so reconciling the series against a stale x would drop
+    # the wrong one.
+    refresh_series_control(ctx)
 
     ch_combo = ctx.widgets.get_or_none("_response_ch_cb")
     if ch_combo is not None and slice_.channel:

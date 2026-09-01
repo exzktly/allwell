@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from well_viewer.core import plot_toggles
+from well_viewer.core.plot_orchestrator import redraw_every_scope
 from well_viewer.core.app_state import AppState
 from well_viewer.core.scope_registry import redraw_app_scope
 from well_viewer.domain.fold_change_scopes import (
@@ -80,14 +81,15 @@ def ctx(monkeypatch, scopes):
 
     app = _App()
     calls = app.redraws
-    monkeypatch.setattr(plot_toggles, "redraw_app",
+    import well_viewer.core.plot_orchestrator as po
+    monkeypatch.setattr(po, "redraw_app",
                         lambda _ctx: calls.append("redraw_app"))
     return SimpleNamespace(window=app, state=app._app_state, redraws=calls)
 
 
 def test_the_visible_scope_is_repainted(ctx):
     """Response Curves on screen: its scope redraws, in this click."""
-    plot_toggles._redraw_every_scope(ctx)
+    redraw_every_scope(ctx)
     assert "response" in ctx.redraws, (
         "the tab the user is looking at was not repainted after an error-band "
         "change, so its figure still shows the previous error band")
@@ -95,7 +97,7 @@ def test_the_visible_scope_is_repainted(ctx):
 
 def test_a_hidden_scope_is_deferred_rather_than_forgotten(ctx):
     """Bar is not on screen, so it is marked dirty for the tab-change flush."""
-    plot_toggles._redraw_every_scope(ctx)
+    redraw_every_scope(ctx)
     assert "bar" not in ctx.redraws
     assert "bar" in ctx.state.plot.fc_dirty_scopes
 
@@ -110,7 +112,7 @@ def test_the_shared_scopes_are_drawn_once_and_left_clean(ctx):
     switch.
     """
     ctx.window.current_tab = "Line Graphs"
-    plot_toggles._redraw_every_scope(ctx)
+    redraw_every_scope(ctx)
     assert ctx.redraws.count("redraw_app") == 1
     dirty = ctx.state.plot.fc_dirty_scopes
     assert not ({"line", "distribution", "heatmap"} & dirty)

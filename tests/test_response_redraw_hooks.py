@@ -61,39 +61,39 @@ def test_response_curves_repaints_on_every_event_that_changes_it():
     )
 
 
-def test_the_fan_out_guard_names_a_widget_the_tab_registers():
-    """The guard string in ``set_active_metric`` must be a real registry key.
+def test_the_metric_change_goes_through_the_one_fan_out():
+    """``set_active_metric`` reaches the leaves ``redraw_app`` does not.
 
-    That loop redraws a leaf only when its guard widget exists, so a typo in
-    the key silently disables the redraw and every AST check still sees the
-    title. A reviewer proved it: renaming the guard to ``_response_ax_typo``
-    *and* emptying the hook body left 75 tests green.
+    A Property change is not a channel change and does not go through the
+    ``on_channel_changed`` dispatch, so that hook is not enough on its own —
+    this is the other half, and the half the user actually reported.
+
+    It used to reach them through a ``(title, guard widget)`` roster written
+    into ``set_active_metric``, and this file pinned Response's row in it. The
+    roster is gone: the repaint goes through
+    ``plot_orchestrator.redraw_every_scope``, which draws the shared scopes and
+    hands the rest to the coalescer, so every registered scope is reached by
+    being registered. What is pinned now is that the fan-out is what is called
+    — naming a tab here again is the regression, not a missing name.
     """
     path = next(p for p in python_sources()
                 if p.as_posix().endswith("well_viewer/core/channel_state_controller.py"))
-    guards = set()
     for node in ast.walk(parse_source(path)):
         if isinstance(node, ast.FunctionDef) and node.name == "set_active_metric":
-            for pair in ast.walk(node):
-                if (isinstance(pair, ast.Tuple) and len(pair.elts) == 2
-                        and all(isinstance(e, ast.Constant) for e in pair.elts)):
-                    title, guard = (e.value for e in pair.elts)
-                    if title == "Response Curves":
-                        guards.add(guard)
-    assert guards, "no (title, guard) pair for Response Curves in set_active_metric"
-
-    registered = set()
-    tab = next(p for p in python_sources()
-               if p.as_posix().endswith("well_viewer/features/response/tab_view.py"))
-    for node in ast.walk(parse_source(tab)):
-        if (isinstance(node, ast.Call)
-                and getattr(node.func, "attr", None) == "register"
-                and node.args and isinstance(node.args[0], ast.Constant)):
-            registered.add(node.args[0].value)
-    missing = guards - registered
-    assert not missing, (
-        f"set_active_metric guards the Response redraw on {sorted(missing)}, "
-        "which the tab never registers — so the redraw never fires")
+            called = {getattr(c.func, "attr", None) or getattr(c.func, "id", None)
+                      for c in ast.walk(node) if isinstance(c, ast.Call)}
+            assert "redraw_every_scope" in called, (
+                "set_active_metric does not run the shared repaint fan-out, so "
+                "a Property change leaves every leaf outside redraw_app's three "
+                "scopes showing the previous property")
+            named = {c.value for c in ast.walk(node)
+                     if isinstance(c, ast.Constant) and isinstance(c.value, str)}
+            assert not ({"Bar Plots", "Response Curves"} & named), (
+                "set_active_metric names a plot tab again — that roster is what "
+                "left Response Curves out of the Property repaint in the first "
+                "place")
+            return
+    raise AssertionError("set_active_metric not found — this guard measures nothing")
 
 
 def test_the_channel_hook_is_not_an_empty_body():
@@ -112,23 +112,3 @@ def test_the_channel_hook_is_not_an_empty_body():
                 "and repaints nothing")
             return
     raise AssertionError("_channel_response not found in the registry")
-
-
-def test_the_metric_fan_out_names_response():
-    """``set_active_metric`` reaches the leaves ``redraw_app`` does not.
-
-    A Property change is not a channel change and does not go through the
-    ``on_channel_changed`` dispatch, so the hook above is not enough on its own
-    — this is the other half, and the half the user actually reported.
-    """
-    path = next(p for p in python_sources()
-                if p.as_posix().endswith("well_viewer/core/channel_state_controller.py"))
-    for node in ast.walk(parse_source(path)):
-        if isinstance(node, ast.FunctionDef) and node.name == "set_active_metric":
-            named = {c.value for c in ast.walk(node)
-                     if isinstance(c, ast.Constant) and isinstance(c.value, str)}
-            assert "Response Curves" in named, (
-                "set_active_metric does not redraw Response Curves, so changing "
-                "Property leaves its figure showing the previous one")
-            return
-    raise AssertionError("set_active_metric not found — this guard measures nothing")

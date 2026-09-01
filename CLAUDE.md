@@ -251,6 +251,35 @@ all of them at once — and because the omission removes checks rather than
 adding failures, it reports as a *greener* suite.
 `tests/test_scan_surface_is_complete.py` is what notices.
 
+**A new tab is not one edit, and the missing edits do not fail loudly.** A tab
+builds itself, and then a dozen pieces of *shared* chrome have to find it —
+redraw fan-outs, the plate's replicate-mode behaviour, the card roster the
+Screen/Publication toggle walks, the band's slot, the restore router. Most of
+those found a tab by iterating a list somebody wrote when there were fewer
+tabs, so the failure is always the same and always quiet: the control is built,
+it is wired, it writes its state, and the tab it should have reached is not in
+the list. Nothing raises. Response Curves shipped missing from **eight** of
+them, which is where the guard and the checklist came from:
+ARCHITECTURE.md's *Adding a Plotting leaf* table says what to join and what
+each omission costs, and `tests/test_a_plot_leaf_is_wired_everywhere.py`
+enforces the half that is decidable, stated against the feature registry so the
+next leaf is covered by having been declared.
+
+Two habits behind it, both worth applying beyond plot tabs:
+
+- **When shared chrome needs to know about a tab, derive the list from the
+  registry** (`features.sub_leaves("Plotting")`) rather than writing one. Where
+  it truly cannot be derived, write the roster once and guard it *against the
+  thing it is a list of* — a guard that holds one roster against another has
+  moved the problem up a level, not solved it.
+- **Repaints go through the one fan-out**
+  (`plot_orchestrator.redraw_every_scope`), never through a fresh list of tab
+  titles. A named tab is a roster of one, and it is always written at a moment
+  when it happens to be complete.
+
+An exemption is a row with a written reason, never an absence: a tab left out
+on purpose and a tab nobody remembered look identical in code six months later.
+
 File-name suffixes carry meaning (`controller.py` = orchestration, `renderer.py`
 = pure matplotlib, `collect.py` = pure data collection, `tab_view.py` / `*_view.py`
 = Qt builders, `state.py` = dataclass only, `worker.py` = QThread). The full table

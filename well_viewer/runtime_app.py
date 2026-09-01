@@ -628,10 +628,6 @@ class WellViewerApp(QWidget):
     def _set_selected_wells(self, new_set, *, commit = True) -> None:
         return set_selected_wells(self._ctx, new_set, commit=commit)
 
-    _PLOTTING_TABS = frozenset({
-        "Line Graphs", "Bar Plots", "Scatter Plot", "Distribution", "Heat Map",
-    })
-
     # ── Ratio metric helpers ─────────────────────────────────────────────────
 
     def _ratio_label_for(self, ratio: RatioMetric) -> str: return ratio_label_for(self._ctx, ratio)

@@ -13,7 +13,7 @@ import logging
 from well_viewer.core.channel_state_controller import col_for_scatter_axis
 from well_viewer.core.csv_export import write_csv_rows
 from well_viewer.core.safe import swallow
-from well_viewer.domain.sample_variables import NUMBER
+from well_viewer.domain.sample_variables import NAME_JOIN, NUMBER
 from well_viewer.features.response.collect import (
     Y_FRACTION, Y_MEAN, ResponseData, collect_response, empty_reason, fit_curves,
 )
@@ -52,12 +52,8 @@ def selected_variable_id(ctx) -> str:
 
 
 #: What the Series combo says when no split is wanted. Kept first in the list so
-#: the tab opens on the behaviour it has always had.
-#:
-#: Short, because ``LabeledComboBox`` sizes to the text it is *painting* rather
-#: than to the widest item — so a long default made this one box far wider than
-#: its neighbours and left the band visibly ragged. The explanation moved to the
-#: combo's tooltip, which costs nothing until someone wants it.
+#: the tab opens on the behaviour it has always had, and what the menu's
+#: clear-everything action is called.
 NO_SERIES_LABEL = "None"
 
 
@@ -67,44 +63,130 @@ def series_variables(ctx) -> list:
     Text and Number both, unlike the X combo: a plate varying dose against
     *seeding density* has two numeric variables and either could reasonably be
     the axis while the other names the curves. The X variable itself is
-    excluded by :func:`refresh_series_combo`, since a series on the axis
+    excluded by :func:`refresh_series_control`, since a series on the axis
     variable draws one curve per dose with a single point on each.
     """
     vset = getattr(ctx.state.selection, "variables", None)
     return list(getattr(vset, "variables", ()) or ())
 
 
-def selected_series_id(ctx) -> str:
-    combo = _widget(ctx, "_response_series_cb")
-    return (combo.currentData() or "") if combo is not None else ""
+def selected_series_ids(ctx) -> list[str]:
+    """The chosen series variables, in the order the user picked them.
+
+    Read from the slice rather than from the control, because the control is a
+    menu that is rebuilt every time it opens and the order is the user's: a
+    figure split by cell line and then by RNA labels its curves
+    ``HeLa · shGFP``, and reversing that pair would relabel every curve on a
+    redraw.
+    """
+    slice_ = ctx.state.feature_slice("response")
+    ids = list(getattr(slice_, "series_variable_ids", ()) or []) if slice_ else []
+    on_x = selected_variable_id(ctx)
+    offered = {v.id for v in series_variables(ctx)}
+    return [vid for vid in ids if vid in offered and vid != on_x]
 
 
-def refresh_series_combo(ctx) -> None:
-    """List the variables that are not on X, keeping the user's pick.
+def toggle_series_variable(ctx, variable_id: str, on: bool) -> None:
+    """Add or remove one series variable, keeping the rest in their order.
+
+    Appended rather than inserted, so the order is the order they were chosen —
+    which is the order the curve labels read in, and the order the legend sorts
+    by. Removing and re-adding one moves it to the end, which is the only
+    reordering control this needs to be worth building.
+    """
+    slice_ = ctx.state.feature_slice("response")
+    if slice_ is None or not variable_id:
+        return
+    ids = [vid for vid in (slice_.series_variable_ids or []) if vid != variable_id]
+    if on:
+        ids.append(variable_id)
+    slice_.series_variable_ids = ids
+
+
+def series_button_text(ctx) -> str:
+    """What the Series button says: the variables it is splitting by.
+
+    Their names rather than a count, because the reader needs to know *which*
+    two a figure of four curves is crossing, and the button is the only place
+    on screen that says so once the menu is closed.
+    """
+    chosen = set(selected_series_ids(ctx))
+    names = [v.name for v in series_variables(ctx) if v.id in chosen]
+    # In the user's own pick order, not the variable list's.
+    order = {vid: i for i, vid in enumerate(selected_series_ids(ctx))}
+    by_id = {v.id: v.name for v in series_variables(ctx)}
+    names = [by_id[vid] for vid in sorted(order, key=order.get) if vid in by_id]
+    return f"Series: {NAME_JOIN.join(names)}" if names else f"Series: {NO_SERIES_LABEL}"
+
+
+def refresh_series_control(ctx) -> None:
+    """Drop any series variable that is no longer offered, and repaint the button.
 
     Rebuilt on every redraw because the X combo can move under it: picking
-    ``Dose`` as the axis while ``Dose`` was the series has to drop the series
-    rather than draw one curve per dose. The pick survives whenever it still
-    makes sense, the same rule ``refresh_x_combo`` follows.
+    ``Dose`` as the axis while ``Dose`` was a series has to drop it rather than
+    draw one curve per dose. A pick survives whenever it still makes sense, the
+    same rule ``refresh_x_combo`` follows.
     """
-    combo = _widget(ctx, "_response_series_cb")
-    if combo is None:
+    slice_ = ctx.state.feature_slice("response")
+    if slice_ is not None:
+        kept = selected_series_ids(ctx)
+        if kept != list(slice_.series_variable_ids or []):
+            slice_.series_variable_ids = kept
+    button = _widget(ctx, "_response_series_btn")
+    if button is not None:
+        button.setText(series_button_text(ctx))
+
+
+def open_series_selector(ctx) -> None:
+    """The checkbox menu behind the Series button.
+
+    A menu rather than a second combo: the number of variables a plate can be
+    split by is the number of variables it has, and a control that offers two
+    of them is the single-select combo this replaced wearing a wider coat.
+    """
+    from PySide6.QtGui import QAction
+    from PySide6.QtWidgets import QCheckBox, QMenu, QWidgetAction
+
+    from widgets import menu_exec
+
+    button = _widget(ctx, "_response_series_btn")
+    if button is None:
         return
     on_x = selected_variable_id(ctx)
-    keep = combo.currentData()
-
-    combo.blockSignals(True)
-    combo.clear()
-    combo.addItem(NO_SERIES_LABEL, "")
-    for variable in series_variables(ctx):
-        if variable.id == on_x:
-            continue
+    chosen = set(selected_series_ids(ctx))
+    menu = QMenu(button)
+    offered = [v for v in series_variables(ctx) if v.id != on_x]
+    for variable in offered:
         label = (f"{variable.name} ({variable.unit})" if variable.unit
                  else variable.name)
-        combo.addItem(label, variable.id)
-    index = combo.findData(keep)
-    combo.setCurrentIndex(index if index >= 0 else 0)
-    combo.blockSignals(False)
+        box = QCheckBox(label, menu)
+        box.setChecked(variable.id in chosen)
+
+        def _handler(checked: bool, vid=variable.id) -> None:
+            toggle_series_variable(ctx, vid, checked)
+            refresh_series_control(ctx)
+            redraw_response(ctx)
+
+        box.toggled.connect(_handler)
+        action = QWidgetAction(menu)
+        action.setDefaultWidget(box)
+        menu.addAction(action)
+    if not offered:
+        menu.addAction("No other variable to split by").setEnabled(False)
+    else:
+        menu.addSeparator()
+
+        def _clear() -> None:
+            slice_ = ctx.state.feature_slice("response")
+            if slice_ is not None:
+                slice_.series_variable_ids = []
+            refresh_series_control(ctx)
+            redraw_response(ctx)
+
+        action = QAction(NO_SERIES_LABEL, menu)
+        action.triggered.connect(lambda _=False: _clear())
+        menu.addAction(action)
+    menu_exec.exec_menu(menu, button.mapToGlobal(button.rect().bottomLeft()))
 
 
 #: The Property label that is not a column. Named once here rather than
@@ -258,13 +340,6 @@ def refresh_response_metric_combo(ctx) -> None:
                           smfish_channel=channel, include_fraction=True)
 
 
-def on_series_changed(ctx) -> None:
-    slice_ = ctx.state.feature_slice("response")
-    if slice_ is not None:
-        slice_.series_variable_id = selected_series_id(ctx)
-    redraw_response(ctx)
-
-
 def refresh_x_combo(ctx) -> None:
     """List the Number variables, keeping the user's pick where it survives."""
     combo = _widget(ctx, "_response_x_cb")
@@ -348,21 +423,40 @@ def sync_timepoint_menu(ctx) -> None:
 
     An already-populated selection with everything off is left alone — that is
     a state the user chose, and re-seeding it would override them every redraw.
+
+    **Reconciled in both directions.** This used to drop the timepoints the
+    dataset lacks and stop, which meant a stored selection could only ever
+    shrink: a tab whose selection was saved while the picker offered one
+    timepoint went on offering that one after the dataset gained the rest,
+    because the saved dict was non-empty and was taken as the whole answer. It
+    is a real state and not a hypothetical — the release before this one could
+    not see a plate's timepoints at all, so every selection saved under it says
+    ``{"0": True}`` — and it is invisible from the tab, which reports what it
+    holds rather than what the plate has. The user's on/off answers are kept
+    for the timepoints they were made about; timepoints they have never been
+    asked about are added **off**, so a plate that gains a timepoint offers it
+    without silently drawing it.
     """
     slice_ = ctx.state.feature_slice("response")
     if slice_ is None:
         return
-    available = {f"{t:g}" for t in available_timepoints(ctx)}
+    available = [f"{t:g}" for t in available_timepoints(ctx)]
     existing = dict(slice_.tp_selections)
-    if existing:
-        # Drop timepoints this dataset does not have, keep the rest as they are.
-        slice_.tp_selections = {k: v for k, v in existing.items()
-                                if k in available}
-        if slice_.tp_selections:
-            return
+    if existing and any(tp in existing for tp in available):
+        # The stored selection is about *this* plate: keep every answer the
+        # user gave, including all-off, and offer the timepoints they were
+        # never asked about — off, so a plate that gains one does not silently
+        # start drawing it.
+        slice_.tp_selections = {tp: bool(existing.get(tp, False))
+                                for tp in available}
+        return
+    # Either nothing is stored, or what is stored names a plate this is not —
+    # a different dataset opened into the same session. Seed afresh rather than
+    # leaving a picker whose entries belong to something else.
     if not available:
         slice_.tp_selections = {}
         return
+    available = set(available)
     focus = getattr(ctx.state.plot, "focus_timepoint", None)
     seed = f"{float(focus):g}" if focus is not None else sorted(available, key=float)[0]
     if seed not in available:
@@ -497,7 +591,7 @@ def redraw_response(ctx) -> None:
     if ax is None or canvas is None:
         return
     refresh_x_combo(ctx)
-    refresh_series_combo(ctx)
+    refresh_series_control(ctx)
     data = response_data(ctx)
     update_timepoint_button(ctx)
     log_x = resolved_log_x(ctx, ax.figure, data)

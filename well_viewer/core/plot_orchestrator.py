@@ -231,6 +231,31 @@ def redraw_app(ctx) -> None:
 
 
 
+def redraw_every_scope(ctx) -> None:
+    """Repaint every plot: the shared scopes, then the rest through the coalescer.
+
+    **The one fan-out for "something changed that every plot draws".** The error
+    band, the replicate unit, the active Property, a replicate-group edit — each
+    changes the number on every figure, and each used to reach the figures
+    through a list of tab names written when there were fewer tabs. A leaf
+    missing from one of those lists does not fail loudly: it keeps drawing the
+    previous answer until something else repaints it, which on the tab the user
+    is looking at is a plot of the wrong data that looks exactly like a plot of
+    the right data.
+
+    ``redraw_app`` covers the three scopes registered with the same callable —
+    Line, Distribution and Heat Map — and ``skip`` keeps the coalescer from
+    drawing them a second time; every other registered scope is redrawn if its
+    tab is on screen and marked dirty otherwise, which is the defer-until-viewed
+    contract every other cross-tab setting already follows.
+    """
+    from well_viewer.core.scope_registry import redraw_app_scope
+    from well_viewer.domain.fold_change_scopes import redraw_scopes_or_defer
+
+    redraw_app(ctx)
+    redraw_scopes_or_defer(ctx.window, skip=redraw_app_scope)
+
+
 def _switch_to_batch_export_tab(ctx, mode: str) -> None:
     """Focus the Batch Export notebook tab and select ``mode`` on its builder."""
     nb = getattr(ctx.window, "_notebook", None)

@@ -181,21 +181,22 @@ def _response_slice(ctx):
 def response_split_variables(ctx) -> tuple[str, ...]:
     """The variables that split this tab's curves, outermost first.
 
-    *Group by* first, then the tab's own *Series* — two layers, which is what a
-    plate of two cell lines each treated in two media needs. Each is dropped
-    when it is unset, when it is the axis variable (a series on the axis is one
-    curve per dose with a single point on it), or when the other already names
-    it.
+    *Group by* first, then the tab's own *Series* — which is itself a list, so
+    a plate varying cell line and RNA across a dose series is one curve per
+    combination without spending the plate-wide grouping on the second one.
+    Each is dropped when it is the axis variable (a split on the axis is one
+    curve per dose with a single point on it), and a variable named twice
+    counts once, in the outermost position it was named.
 
-    Read off typed state, so this stays Qt-free: ``ResponseState`` mirrors both
-    of the tab's combos, which is why ``x_variable_id`` lives there beside
-    ``series_variable_id`` rather than only in the widget.
+    Read off typed state, so this stays Qt-free: ``ResponseState`` mirrors the
+    tab's controls, which is why ``x_variable_id`` lives there beside
+    ``series_variable_ids`` rather than only in the widgets.
     """
     slice_ = _response_slice(ctx)
     on_x = str(getattr(slice_, "x_variable_id", "") or "") if slice_ else ""
-    series = str(getattr(slice_, "series_variable_id", "") or "") if slice_ else ""
+    series = list(getattr(slice_, "series_variable_ids", ()) or []) if slice_ else []
     out: list[str] = []
-    for variable_id in (_group_by_variable(ctx), series):
+    for variable_id in (_group_by_variable(ctx), *series):
         if variable_id and variable_id != on_x and variable_id not in out:
             out.append(variable_id)
     return tuple(out)

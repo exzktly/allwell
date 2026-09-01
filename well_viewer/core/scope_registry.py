@@ -11,14 +11,6 @@ Called once from ``core/bus_wiring.wire_event_bus``.
 
 from __future__ import annotations
 
-# Module scope, and load-bearing that it is: this binding is what the scope
-# callable calls. Resolving ``plot_orchestrator.redraw_app`` *inside* the
-# function instead would make the scope path and the module-attribute path the
-# same object at call time, and ``tests/test_redraw_fanout`` — which wraps the
-# three redraw bindings separately and requires them disjoint — would count one
-# repaint as two.
-from well_viewer.core.plot_orchestrator import redraw_app
-
 
 def redraw_app_scope(a):
     """The redraw the line / distribution / heat-map scopes share.
@@ -35,7 +27,18 @@ def redraw_app_scope(a):
     because a caller that has *already* run this redraw itself needs to be able
     to name it and skip the scopes that use it — see ``core/plot_toggles``.
     Identity is the whole point, so there is one function object, made once.
+
+    The import stays function-local, which means the *module attribute* is
+    resolved on every call rather than bound here at import. That is what
+    ``tests/test_default_scopes`` pins: a monkeypatch of
+    ``plot_orchestrator.redraw_app`` has to reach the scope, as it does for
+    every other function-local import in this app. It also means this path and
+    the module-attribute path are the same object, so a harness wrapping both
+    counts one repaint twice — ``tests/test_redraw_fanout`` knows that and
+    wraps only one of them.
     """
+    from well_viewer.core.plot_orchestrator import redraw_app
+
     return redraw_app(a._ctx)
 
 

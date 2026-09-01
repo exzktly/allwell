@@ -1910,12 +1910,17 @@ row, holding five actions:
   (paste into Illustrator / Inkscape / Keynote / Slides). On macOS the
   clipboard is written natively (PDF + SVG) so Illustrator pastes editable
   vector; this needs `pyobjc-framework-Cocoa` (see `requirements.txt`).
+  The same copy is reachable by hovering a plot and clicking the floating
+  **copy** button at the top-right of the panel under the cursor. On a
+  multi-panel tab that copies just that panel; on a single-plot tab it copies
+  the figure, which is what the tooltip says it will do.
 - **Save to Saved Plots** — sends the whole figure, plus the exact parameters
   that produced it, to the per-dataset [Saved Plots](#saved-plots) gallery.
   The same capture is also reachable by hovering a plot panel's top-right
-  corner and clicking the floating **save** button, which saves just that one
-  panel rather than the whole figure — handy on a multi-panel tab (Bar Plot,
-  Line Graphs) when you only want one of the stacked subplots. Either way the
+  corner and clicking the floating **save** button, which on a multi-panel tab
+  (Bar Plot, Line Graphs) saves just the one panel under the cursor — handy
+  when you only want one of the stacked subplots. On a single-plot tab it saves
+  the whole figure, title included. Either way the
   figure is captured twice — once as a high-resolution image, once as vector —
   which is what later lets the gallery export it to PowerPoint as shapes you can
   edit rather than as a picture.
@@ -2564,6 +2569,16 @@ One point per group, at that group's value, with error bars across its
 replicates. Groups come from the same place every other page's groups come
 from, so this tab and the Bar tab always agree about what a member is.
 
+**Group by works here, and it splits the curves.** Picking a variable under
+**Group by** on the band pools the plate by it everywhere — and on this tab a
+member has to be one point, so the pooling is by *that variable and the dose
+together*: `Group by: Cell line` against a dose series gives one point per
+(dose, cell line) and one curve per cell line. That is the same picture the
+**Series** control draws, reached from the plate-wide control instead. If the
+grouping variable and the dose are filled on wells that do not overlap, the
+curves fall back to your own groups and the figure's title says so rather than
+leaving the band claiming a grouping that is not on screen.
+
 **You do not need groups.** If you have not defined any saved selections, the wells
 you have lit on the plate are the points — one each, at its own value, exactly
 as the Bar and Line tabs treat them. A variable is filled onto the plate well by
@@ -2581,7 +2596,11 @@ works on either.
 Because they are this tab's own, changing them here does not move Bar, Line,
 Distribution or Heat Map. Until you touch them they follow the channel and
 property you picked on the band, so a tab you have never configured is showing
-the same measurement as everything else.
+the same measurement as everything else. The band's own Channel, Property and
+ON-cutoff controls step aside while this tab is on screen — as they do on the
+Scatter tabs — so the row carries one of each rather than two. The ON cutoff
+the **Fraction above threshold** property counts against is the one on
+[Home → Cell Gating](#cell-gating).
 
 If you also turn on fold change, note that a control with **nothing** above the
 threshold has a fraction of zero, and dividing by it is undefined. The figure
@@ -2598,10 +2617,15 @@ reason: `n` counts the condition's wells, and with FOV spread on the error bar
 is taken across fields, so the two are not the pair you would combine to
 recover a standard deviation.
 
-**Several curves on one plot.** The **Series** control beside **X** splits the
-groups into one curve per value of a second variable — pick `Cell line` and a
-dose series run on HeLa and U2OS is drawn as two curves rather than one line
-doubling back at every dose. Colour tells you the series and the dash pattern
+**Several curves on one plot, in two layers.** The **Series** control beside
+**X** splits the groups into one curve per value of a second variable — pick
+`Cell line` and a dose series run on HeLa and U2OS is drawn as two curves
+rather than one line doubling back at every dose. **Group by** is the outer
+layer and **Series** the inner, so a plate that varies cell line *and* medium
+across a dose series can carry both: group by `Cell line`, set Series to
+`Medium`, and you get one curve per combination, labelled `HeLa · DMEM`.
+Naming the same variable in both is not an error — the second mention is
+ignored rather than doubling the label. Colour tells you the series and the dash pattern
 tells you the timepoint, so with two cell lines at two timepoints you get four
 curves in two colours and two dash patterns, and you can see at a glance which
 share a cell line and which share a moment. Each curve is fitted on its own,
@@ -2628,7 +2652,13 @@ left of a dotted break, ticked `0`, and it is left out of any fit.
 timepoint the rest of the app is focused on, because a twelve-timepoint plate
 opened as twelve overlapping curves per condition is not a plot anyone can
 read. Add more from the **Timepoints** button, whose own label carries the
-count. Changing them here does not move the Heat Map or the Distribution tab.
+count of how many of how many are ticked (`Timepoints: 2/5 selected`), and
+which offers **All** and **None** at the bottom of its menu. Changing them here
+does not move the Heat Map or the Distribution tab.
+
+A plate whose filenames carry no timepoint at all is a single timepoint of
+`0`, listed and ticked like any other, so the tab draws it rather than
+reporting that there is nothing to draw.
 
 **What could not be plotted is named on the figure.** A group whose wells hold
 two different doses, and a group containing a well with no dose at all, are two

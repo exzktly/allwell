@@ -819,6 +819,45 @@ def axis_scoped_value(prefs, idx, key, default=None):
     return v
 
 
+def _hold_typed_limits(ax, xlo, xhi, ylo, yhi) -> None:
+    """Re-assert a limit the user typed, and say so when it had been lost.
+
+    **A typed limit is the last word about the view.** It is applied early in
+    the pass because the steps after it want a settled range to lay ticks and a
+    legend out against — but every one of those steps is a chance to lose it,
+    and matplotlib re-autoscales on a good many of them (a scale change, an
+    artist added, an axes cleared under a stale reference). The failure is
+    silent by construction: the number the user typed is still in the field and
+    still in the store, and the plot is simply drawn somewhere else, which reads
+    as the setting not working rather than as the setting being discarded.
+
+    So the limit is applied again at the end of the pass, and a mismatch is
+    **logged rather than quietly corrected**. §7 of ``CLAUDE.md``: degraded
+    output must not be indistinguishable from good output — if something in
+    between is undoing a user's axis limits, that is a defect with a cause, and
+    a silent re-application would hide it for the next person as effectively as
+    it hides it now. The log line names the axis and both numbers, so a report
+    of "my limits keep coming back wrong" has something to read.
+    """
+    for which, lo, hi in (("x", xlo, xhi), ("y", ylo, yhi)):
+        if lo is None and hi is None:
+            continue
+        current = ax.get_xlim() if which == "x" else ax.get_ylim()
+        want = (lo if lo is not None else current[0],
+                hi if hi is not None else current[1])
+        if all(abs(float(a) - float(b)) <= abs(float(b)) * 1e-9
+               for a, b in zip(current, want)):
+            continue
+        _logger.warning(
+            "export style: the %s limits set on this figure were %s after the "
+            "style pass but the user asked for %s — re-applying. Something "
+            "between the two is autoscaling over a typed limit.",
+            which, tuple(round(v, 6) for v in current),
+            tuple(round(v, 6) for v in want))
+        _apply_axis_limits(want[0], want[1],
+                           setter=ax.set_xlim if which == "x" else ax.set_ylim)
+
+
 def _apply_axis_limits(lo, hi, *, setter) -> None:
     """Apply a user-entered axis-limit override, nudging apart an equal
     lo/hi so matplotlib doesn't emit "identical low and high ylims" and
@@ -1149,6 +1188,10 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
             cur = ax.get_ylim()
             _apply_axis_limits(ylo if ylo is not None else cur[0],
                                 yhi if yhi is not None else cur[1], setter=ax.set_ylim)
+        # Whatever the rest of this pass does to the axes, a limit the user
+        # typed is the last word — so it is re-asserted at the end and the
+        # discrepancy is reported. See :func:`_hold_typed_limits`.
+        _typed_limits = (xlo, xhi, ylo, yhi)
 
         if target_idx is None or idx == target_idx:
             # ``_aw_force_xlog``/``_aw_force_ylog`` let an axis pin its own log
@@ -1237,6 +1280,8 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
         fixed_pos = getattr(ax, "_fixed_axes_position", None)
         if fixed_pos is not None:
             ax.set_position(fixed_pos)
+
+        _hold_typed_limits(ax, *_typed_limits)
 
     use_constrained = bool(prefs.get("layout_constrained", False))
     use_tight = bool(prefs.get("layout_tight", False))

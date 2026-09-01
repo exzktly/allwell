@@ -96,6 +96,54 @@ def test_the_mode_list_and_the_defaults_agree():
     assert LINE_COLOR_MODES == ("plate", "grey")
 
 
+def test_grey_style_carries_exactly_the_cues_it_was_asked_for():
+    """The extraction's whole contract: a plot asks for the channels it has
+    free, and gets those and no others.
+
+    A cue not asked for comes back ``None``, which every caller already reads as
+    "leave whatever the panel draws" — so an omitted dash cannot overwrite one
+    the figure is spending on something else.
+    """
+    from well_viewer.domain.line_colors import GREY_CUES, grey_style
+
+    assert GREY_CUES == ("shade", "marker", "dash")
+    for cues, wants_shade, wants_marker, wants_dash in (
+        (("shade", "marker", "dash"), True, True, True),
+        (("shade", "marker"), True, True, False),
+        (("shade",), True, False, False),
+        (("dash",), False, False, True),
+        ((), False, False, False),
+    ):
+        style = grey_style(3, cues=cues)
+        assert bool(style.color) is wants_shade, (cues, style)
+        assert (style.marker is not None) is wants_marker, (cues, style)
+        assert (style.linestyle is not None) is wants_dash, (cues, style)
+
+
+def test_a_requested_cue_is_the_same_value_whichever_set_it_came_in():
+    """The cues do not interact: asking for two must not shift the one you
+    would have got asking for three, or the same series would be inked
+    differently on a figure that gained a timepoint."""
+    from well_viewer.domain.line_colors import grey_style
+
+    for index in range(6):
+        full = grey_style(index)
+        pair = grey_style(index, cues=("shade", "marker"))
+        assert (pair.color, pair.marker, pair.filled) == (
+            full.color, full.marker, full.filled)
+
+
+def test_the_line_tab_asks_for_all_three():
+    """``grey_trace_style`` is the Line panels' answer, and they have every
+    channel free — stated here because it is now a choice rather than the only
+    thing the function can do."""
+    from well_viewer.domain.line_colors import grey_style, grey_trace_style
+
+    for index in range(6):
+        assert grey_trace_style(index) == grey_style(index)
+        assert grey_trace_style(index).linestyle is not None
+
+
 def test_neighbouring_traces_differ_in_dash_as_well():
     """The third cue. Shape and shade both cost something — shape needs a
     marker drawn, shade needs contrast — while a dash pattern costs nothing and

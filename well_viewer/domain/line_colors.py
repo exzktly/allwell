@@ -135,27 +135,60 @@ def line_color_mode(plot) -> str:
     return mode if mode in LINE_COLOR_MODES else "plate"
 
 
-def grey_trace_style(index: int) -> LineTraceStyle:
-    """The grey mode's style for the *index*-th trace of a plot.
+#: The three cues a grey-mode style can carry. A plot asks for the ones it has
+#: *free* — which is a property of the figure, not of the tab: the Line panels
+#: have all three, and a Response figure has the dash only while its timepoints
+#: are not using it.
+GREY_CUES = ("shade", "marker", "dash")
 
-    Shade, dash and marker all advance with the index, so neighbouring traces
-    differ in all three and the triple is unique for the first
-    ``len(LINE_MARKERS)`` — twelve — traces. That is the number the screen
-    legend names individually, so it is the number that has to be distinct;
-    past it both cycle, and the legend is already reporting how many it has
-    stopped naming.
+
+def grey_style(index: int, *, cues=GREY_CUES) -> LineTraceStyle:
+    """The grey mode's style for the *index*-th trace, in the *cues* available.
+
+    **One function, asked for different cues, rather than one rule per tab.**
+    What differs between the plots is not how the greys are chosen but how many
+    channels are free to carry identity, and that is a parameter: a Line panel
+    has shade, dash and marker to spend; a Response figure drawn at several
+    timepoints has already spent its dash on *which moment*, so it asks for two.
+    Written as three rules in three modules, the shared half was copied and the
+    differing half was a constant, which is how a tab ends up quietly giving up
+    a cue in a case where nothing is using it.
+
+    Every requested cue advances with the index, so neighbouring traces differ
+    in all of them. With all three the triple is unique across the first
+    ``len(LINE_MARKERS)`` — twelve — traces, which is what the screen legend
+    names individually and therefore the number that has to be distinct; the
+    marker alone is unique across those twelve, so dropping the dash costs
+    redundancy rather than uniqueness.
+
+    A cue not asked for comes back ``None``, which every caller already reads as
+    "leave whatever the panel draws" — so an omitted dash cannot overwrite one
+    the figure is using for something else.
 
     The index is the trace's position in the drawn list, so it is stable for a
-    given plot and changes when the user reorders — which is correct: the
-    marker names *this figure's* first trace, and the legend beside it says
-    which well that is.
+    given plot and changes when the user reorders — which is correct: the marker
+    names *this figure's* first trace, and the legend beside it says which one
+    that is.
     """
+    wanted = set(cues or ())
     ramp = tuple(theme.Colors.plot_grey_ramp)
     shape, filled = LINE_MARKERS[index % len(LINE_MARKERS)]
-    shade = ramp[index % len(ramp)]
-    dash = LINE_STYLES[index % len(LINE_STYLES)]
-    return LineTraceStyle(color=shade, marker=shape, filled=filled,
-                          linestyle=dash)
+    return LineTraceStyle(
+        color=ramp[index % len(ramp)] if "shade" in wanted else "",
+        marker=shape if "marker" in wanted else None,
+        filled=filled,
+        linestyle=LINE_STYLES[index % len(LINE_STYLES)] if "dash" in wanted else None,
+    )
+
+
+def grey_trace_style(index: int) -> LineTraceStyle:
+    """:func:`grey_style` with every cue — the Line panels, which have all three.
+
+    Kept as its own name because "a trace on the Line tab" is what the rest of
+    that feature asks for, and because the cue set is the tab's answer rather
+    than each call site's.
+    """
+    return grey_style(index)
 
 
 def trace_style_for_mode(mode: str, index: int,

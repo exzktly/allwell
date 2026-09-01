@@ -2073,13 +2073,15 @@ condition drawn from however many wells carry it, so there is no plate colour it
 could take.
 
 **Grey** gives each series its own **shade** and its own **marker**, from the
-same cycles the Line tab uses. It does **not** give it a dash, and that is the
-one difference worth knowing about: on this figure the dash pattern already
-means something. Solid, dashed, dash-dot and dotted are the **timepoints**, so
-that a series measured at 24 and 48 hours is one colour in two dashes and you
-can see at a glance which curves are the same condition and which are the same
-moment. Spending the dash on the series as well would have quietly replaced one
-of those with the other.
+same cycles the Line tab uses — and its own **dash** as well, whenever the
+timepoints are not using it. On a figure drawn at more than one timepoint the
+dash already means something: solid, dashed, dash-dot and dotted are the
+**timepoints**, so a series measured at 24 and 48 hours is one shade in two
+patterns and you can see at a glance which curves are the same condition and
+which are the same moment. Spending the dash on the series there would quietly
+replace one of those with the other, so it is left alone. Draw a single
+timepoint and nothing is using it, so grey mode takes it: three series come out
+solid, dashed and dash-dot rather than three solid lines a shade apart.
 
 The mode reaches a figure with no Series variable set too — a plate drawn as one
 curve per timepoint comes out in grey, told apart by the dashes. That is the

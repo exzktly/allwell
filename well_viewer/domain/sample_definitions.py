@@ -125,6 +125,16 @@ def save_to_pipeline_info(
     Raises FileNotFoundError when the pipeline file does not yet exist —
     the caller should run the pipeline first so the file gets created.
 
+    *deferrable* hands the write, and the two checks that read its outcome, to
+    the background writer when one is active (``_io.background_writes``, entered
+    only by the debounced autosave path). It then **raises nothing**: the caller
+    gets the path back immediately and a failure is reported by the writer —
+    logged, and put on the status line — instead. Only the autosave passes it,
+    and only because that caller already catches and logs every failure rather
+    than showing it, so nothing is lost but the frame the report comes from. The
+    explicit Save button leaves it False and keeps the exception its own
+    callers key off.
+
     **The read-modify-write goes through**
     :func:`well_viewer.persistence._io.update_json_atomic`, which re-reads the
     file and compares it byte-for-byte against the copy the mutation was built

@@ -130,9 +130,10 @@ class PersistenceRegistry:
         try:
             # The save runs here, on the GUI thread — it reads ``ctx.state`` and
             # builds its payload, and neither may be touched from another
-            # thread. Only the file operations it reaches, and only the ones
-            # whose call site passed ``deferrable=True``, are handed to the
-            # writer. See ``_io.background_writes``.
+            # thread. Only the file operations it reaches are handed to the
+            # writer, and only where the call site opted in — with
+            # ``deferrable=True`` on the primitive, or by wrapping the write
+            # and its outcome check in one callable given to ``_io.defer_io``.
             with background_writes(lambda job, _n=name: self._enqueue(_n, job)):
                 self.save(name)
         except Exception:

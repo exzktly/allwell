@@ -43,6 +43,10 @@ _logger = logging.getLogger("well_viewer")
 # itself for ever.
 _sink = threading.local()
 
+#: A no-arg callable performing the I/O and returning ``(ok, detail)``.
+#: ``detail`` is a human-readable reason, read only when *ok* is false.
+Job = Callable[[], "tuple[bool, str]"]
+
 
 @contextmanager
 def background_writes(submit: "Callable[[Job], None]") -> Iterator[None]:
@@ -67,11 +71,7 @@ def background_writes(submit: "Callable[[Job], None]") -> Iterator[None]:
         _sink.submit = prev
 
 
-#: A no-arg callable performing the I/O and returning ``(ok, detail)``.
-Job = "Callable[[], tuple[bool, str]]"
-
-
-def defer_io(job) -> bool:
+def defer_io(job: Job) -> bool:
     """Hand *job* to the active background writer. ``False`` when there is none.
 
     ``False`` is the ordinary answer everywhere except inside a debounced

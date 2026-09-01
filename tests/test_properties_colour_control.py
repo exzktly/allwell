@@ -474,18 +474,24 @@ def test_an_empty_mode_re_seeds_to_this_tab_s_default_not_the_others(
 
 
 def test_the_real_redraw_reaches_the_response_figure(qtbot, monkeypatch):
-    """Not any figure — *this* one. The dispatch falls through to the Line
-    tab's redraw for a figure it does not name, so before this branch existed
-    the control set the mode, repainted the Line plot, and reported success
-    while Response stayed exactly as it was."""
+    """Not any figure — *this* one.
+
+    ``_redraw_bound_figure`` falls through to the Line tab's redraw for a figure
+    it cannot place, so a Response figure it did not reach meant the control set
+    the mode, repainted the Line plot, and reported success while Response
+    stayed exactly as it was. It is placed through ``_FIGURE_OWNING_FEATURES``,
+    which asks the feature registry for the redraw rather than naming a function
+    here, so this drives the real dispatch and asserts the fall-through was
+    **not** what ran — the half a bare "did something redraw?" assertion would
+    miss, since the fall-through redraws too.
+    """
     from well_viewer.features.export.sidebar_view import ExportStyleSidebar
 
     _app, sb, _r = _build_sidebar(qtbot, monkeypatch, is_response=True)
     monkeypatch.undo()
     calls: list[str] = []
-    monkeypatch.setattr(
-        "well_viewer.features.export.sidebar_view.redraw_response",
-        lambda _ctx: calls.append("response"))
-    sb._app._redraw = lambda: calls.append("line")
+    sb._app._ctx.features = SimpleNamespace(
+        redraw=lambda _ctx, feature: (calls.append(feature), True)[1])
+    sb._app._redraw = lambda: calls.append("the Line tab's fall-through")
     assert ExportStyleSidebar._redraw_bound_figure(sb) is True
-    assert calls == ["response"], calls
+    assert calls == ["Response Curves"], calls

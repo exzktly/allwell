@@ -3657,3 +3657,73 @@ def test_properties_guard_notices_when_it_can_see_neither_half(monkeypatch):
     mod = _keys_from(monkeypatch, "x = 1", "y = 2")
     with pytest.raises(AssertionError):
         mod.test_the_guard_can_see_both_halves()
+
+
+# ── the roster is complete, not merely written once ─────────────────────────
+
+_ROSTER_COMPLETE_TEST = "test_the_roster_holds_every_plot_card_the_app_builds"
+
+
+def test_roster_guard_catches_a_card_the_roster_omits(tmp_path, monkeypatch):
+    """The Response Curves shape: a feature registers a PlotCard and the roster
+    never hears about it, so the Screen/Publication toggle skips the tab."""
+    bad = _write(tmp_path, "bad_missing_card.py",
+                 "def build(ctx, parent):\n"
+                 "    card = PlotCard(parent, figsize=(4, 3))\n"
+                 '    ctx.widgets.register("_nobody_knows_card", card)\n'
+                 "    return card\n")
+    exc = _run_scan(monkeypatch, "tests.test_plot_card_roster",
+                    _ROSTER_COMPLETE_TEST, [bad])
+    assert exc is not None and "_nobody_knows_card" in str(exc)
+
+
+def test_roster_guard_ignores_a_registration_with_no_plot_card(tmp_path, monkeypatch):
+    """The file filter is `PlotCard(` — a module registering a widget whose name
+    happens to end in `_card` is not a plot tab and must not be demanded."""
+    good = _write(tmp_path, "good_no_plot_card.py",
+                  "def build(ctx, parent):\n"
+                  '    ctx.widgets.register("_some_tile_card", QFrame(parent))\n')
+    assert _run_scan(monkeypatch, "tests.test_plot_card_roster",
+                     _ROSTER_COMPLETE_TEST, [good]) is None
+
+
+# ── a free artist left on matplotlib's default black ────────────────────────
+
+_BLACK_INK_TEST = "test_no_free_artist_is_left_on_matplotlibs_default_black"
+
+
+@pytest.mark.parametrize("shape", [
+    # The omission caption Response drew under its axes.
+    'def d(ax, caption):\n'
+    '    ax.text(0.0, -0.18, caption, transform=ax.transAxes, fontsize="small")\n',
+    # Its empty state — the drawing whose entire job is to be read.
+    'def d(ax, reason):\n'
+    '    ax.text(0.5, 0.5, reason, ha="center", va="center", wrap=True)\n',
+    # An annotate rather than a text.
+    'def d(ax):\n    ax.annotate("x", xy=(0, 0))\n',
+    # A figure-level footnote, which belongs to no axes.
+    'def d(fig):\n    fig.text(0.5, 0.0, "note")\n',
+])
+def test_black_ink_guard_catches_an_uncoloured_artist(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_black_ink.py", shape)
+    exc = _run_scan(monkeypatch, _THEME_INK_GUARD, _BLACK_INK_TEST, [bad])
+    assert exc is not None and "bad_black_ink.py" in str(exc)
+
+
+@pytest.mark.parametrize("shape", [
+    # Coloured from the theme and tagged — the fixed shape.
+    'def d(ax, caption):\n'
+    '    follows_theme(ax.text(0, 0, caption, color=tokens_for(ax)[2]),\n'
+    '                  muted=True)\n',
+    # A data colour is still a colour: this rule is only about having none.
+    'def d(ax, colour):\n    ax.text(0, 0, "x", color=colour)\n',
+    # The short spelling matplotlib also accepts.
+    'def d(ax):\n    ax.text(0, 0, "x", c="#4C9AFF")\n',
+    # A receiver that is not a plot surface — a QLabel, say — draws no artist.
+    'def d(widget):\n    widget.text()\n',
+    # `set_title` is a named part of an Axes; `setPlotTheme` repaints it.
+    'def d(ax):\n    ax.set_title("t")\n',
+])
+def test_black_ink_guard_clears_a_coloured_or_unrelated_call(tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, "good_black_ink.py", shape)
+    assert _run_scan(monkeypatch, _THEME_INK_GUARD, _BLACK_INK_TEST, [good]) is None

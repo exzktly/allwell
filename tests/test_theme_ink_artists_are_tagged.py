@@ -215,3 +215,104 @@ def test_a_figure_level_footnote_is_repainted_too(card):
                                           color=screen_muted), muted=True)
     card.setPlotTheme("publication")
     assert note.get_color() == tokens_for(ax)[2] != screen_muted
+
+
+# ── the sibling the rule above cannot see ────────────────────────────────────
+#
+# ``_untagged_ink_artists`` starts by reading the call's ``color=``, so an
+# artist with no ``color=`` at all is invisible to it — and that is the *worse*
+# case, not a lesser one. An uncoloured ``ax.text`` takes matplotlib's black,
+# which is legible on the publication theme and near-invisible on the screen
+# theme's ``#131A24``; and having no ink token in it, it is not tagged either,
+# so ``repaint_theme_ink`` walks straight past it and no later flip corrects it.
+#
+# Response Curves shipped three of these — the omission caption under the axes
+# and both sentences of the empty state, which is the drawing whose entire job
+# is to be read. The guard above was green throughout, because the rule it
+# enforces is about artists that *have* the ink and the defect was artists that
+# have no colour at all. §7.6 #3: after fixing a defect, ask what else is
+# decidable from the same syntax tree.
+
+#: Receivers whose ``text`` / ``annotate`` draws onto a themed figure. Matching
+#: on the receiver name rather than on the module keeps the scan surface the
+#: whole tree (§7.5 #3) instead of a hand-picked list of renderers, which is
+#: what a rule about "every plot surface" needs.
+_PLOT_RECEIVERS = frozenset({"ax", "axes", "fig", "figure"})
+
+#: ``module::function`` sites entitled to matplotlib's default black, with the
+#: reason. Exempted by function rather than by file (§7.5 #10): a file-wide
+#: exemption here would cover every future artist in the same module.
+_ENTITLED_TO_BLACK = {
+    # The image-table export draws each cell onto an axes it has just set to
+    # white (`ax.set_facecolor("none" if transparent_bg else "white")`, a few
+    # lines above), and the placeholder is the text inside one such cell. It is
+    # not on a PlotCard and follows no Screen/Publication toggle, so there is no
+    # theme for it to follow and black is the correct ink.
+    "well_viewer/features/image_browser/image_table/export.py::_build_export_figure",
+}
+
+
+def _uncoloured_free_artists(tree, module: str) -> list[tuple[int, str]]:
+    """Every free text artist drawn with no colour at all, as ``(line, call)``."""
+    offenders = []
+    for func in ast.walk(tree):
+        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if f"{module}::{func.name}" in _ENTITLED_TO_BLACK:
+            continue
+        for node in ast.walk(func):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in ("text", "annotate")):
+                continue
+            receiver = node.func.value
+            name = (receiver.id if isinstance(receiver, ast.Name)
+                    else getattr(receiver, "attr", ""))
+            if name not in _PLOT_RECEIVERS:
+                continue
+            if any(kw.arg in ("color", "c") for kw in node.keywords):
+                continue
+            offenders.append(
+                (node.lineno, f"{func.name}: {name}.{node.func.attr}(…) — no colour"))
+    return offenders
+
+
+def test_no_free_artist_is_left_on_matplotlibs_default_black():
+    offenders = []
+    for path in python_sources():
+        module = rel(path)
+        for line, call in _uncoloured_free_artists(parse_source(path), module):
+            offenders.append(f"{module}:{line}: {call}")
+    assert not offenders, (
+        "a free `ax.text` / `ax.annotate` with no `color=` is black on both "
+        "themes — unreadable on the screen theme's #131A24 — and carries no "
+        "ink tag, so `repaint_theme_ink` never corrects it. Colour it from "
+        "`tokens_for(ax)` (index 1 for the primary ink, 2 for muted) and wrap "
+        "it in `follows_theme(...)`. A site genuinely drawing onto a non-themed "
+        "figure goes in `_ENTITLED_TO_BLACK` with its reason:\n  "
+        + "\n  ".join(offenders))
+
+
+def test_the_entitlement_roster_names_only_live_sites():
+    """An exemption that no longer describes a real call is indistinguishable
+    from one somebody added to make a failure go away."""
+    live = set()
+    for path in python_sources():
+        module = rel(path)
+        tree = parse_source(path)
+        for func in ast.walk(tree):
+            if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            key = f"{module}::{func.name}"
+            if key not in _ENTITLED_TO_BLACK:
+                continue
+            for node in ast.walk(func):
+                if (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute)
+                        and node.func.attr in ("text", "annotate")
+                        and not any(kw.arg in ("color", "c")
+                                    for kw in node.keywords)):
+                    live.add(key)
+    stale = sorted(_ENTITLED_TO_BLACK - live)
+    assert not stale, (
+        f"these entitlements no longer describe an uncoloured artist: {stale}")

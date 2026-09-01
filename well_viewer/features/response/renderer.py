@@ -93,8 +93,20 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
         # Under the axes rather than in the title: it is a note about the
         # figure's completeness, not what the figure is of, and a reader
         # scanning titles across a gallery should not have to parse it.
-        ax.text(0.0, -0.18, caption, transform=ax.transAxes, fontsize="small",
-                va="top", ha="left", wrap=True)
+        #
+        # Coloured from the theme's muted ink and tagged with ``follows_theme``,
+        # because neither happens by default and both are needed. Untagged and
+        # uncoloured it took matplotlib's black: legible on the publication
+        # theme, invisible on the dark screen one, and untouched by the repaint
+        # that flips every other piece of chrome — ``repaint_theme_ink`` walks
+        # only the artists carrying that tag.
+        from well_viewer.core.plot_style import follows_theme, tokens_for
+        follows_theme(
+            ax.text(0.0, -0.18, caption, transform=ax.transAxes,
+                    fontsize="small", va="top", ha="left", wrap=True,
+                    color=tokens_for(ax)[2]),
+            muted=True,
+        )
 
     from well_viewer.core.plot_style import apply_ax_style
     apply_ax_style(ax, title, ylabel)
@@ -171,12 +183,24 @@ def _draw_empty_state(ax, reason: str, caption: str) -> None:
     as a message, which is what it is. The omission caption still goes
     underneath when there is one — it lists *which* groups were dropped, which
     the one-line reason above deliberately does not.
+
+    Both sentences take their colour from the theme and carry the ink tag, for
+    the reason ``draw_response``'s caption does: a bare ``ax.text`` is black
+    whatever the card is set to, and ``repaint_theme_ink`` walks only the
+    tagged artists, so an untagged one stays black through every later flip.
+    On the screen theme that is a message the user cannot read at all, and the
+    empty state is the one drawing whose entire job is to be read.
     """
-    ax.text(0.5, 0.5, reason, transform=ax.transAxes, ha="center", va="center",
-            fontsize="medium", wrap=True)
+    from well_viewer.core.plot_style import follows_theme, tokens_for
+    _bg, fg, muted, _grid, _spine = tokens_for(ax)
+    follows_theme(
+        ax.text(0.5, 0.5, reason, transform=ax.transAxes, ha="center",
+                va="center", fontsize="medium", wrap=True, color=fg))
     if caption:
-        ax.text(0.5, 0.30, caption, transform=ax.transAxes, ha="center",
-                va="top", fontsize="small", wrap=True)
+        follows_theme(
+            ax.text(0.5, 0.30, caption, transform=ax.transAxes, ha="center",
+                    va="top", fontsize="small", wrap=True, color=muted),
+            muted=True)
     ax.set_xticks([])
     ax.set_yticks([])
     for spine in ax.spines.values():

@@ -298,10 +298,24 @@ def _tp_state(ctx) -> dict:
 
 
 def available_timepoints(ctx) -> list[float]:
-    """Every timepoint the open dataset holds, ascending."""
+    """Every timepoint the open dataset holds, ascending.
+
+    Through ``timepoint_sync.plottable_timepoints`` — the same answer the Bar
+    tab's picker takes. This asked ``data_loading.get_all_timepoints`` instead,
+    which reads only the numeric ``timepoint_hours`` column: on a plate whose
+    filename schema has no timepoint slot that column is NaN in every row, so
+    the picker offered nothing, the button read "Timepoints: 0 selected" and the
+    figure was empty — while every other tab listed the plate's timepoints and
+    drew it. The aggregator files those rows at 0.0, which is what the shared
+    helper returns, so asking for it draws them.
+
+    It is also read on every redraw, and the old route walked every loaded
+    well's rows to answer — a gate mask and a numeric coercion per well, per
+    repaint, to recompute something the dataset already caches.
+    """
     with swallow("read the dataset's timepoints for the response curve"):
-        from well_viewer.data.data_loading import get_all_timepoints
-        return [float(t) for t in (get_all_timepoints(ctx) or [])]
+        from well_viewer.core.timepoint_sync import plottable_timepoints
+        return [float(t) for t in plottable_timepoints(ctx)]
     return []
 
 
@@ -345,7 +359,14 @@ def timepoints_for(ctx) -> list[float]:
 
 
 def open_timepoint_selector(ctx) -> None:
-    """The Bar tab's checkbox menu, over this tab's own selection."""
+    """The Bar tab's checkbox menu, over this tab's own selection.
+
+    With its All / None pair too. A twelve-timepoint plate is twelve clicks to
+    see the whole series and twelve more to get back, and the tab a click away
+    offers both — a picker that is the same control minus two actions reads as
+    the one that is broken.
+    """
+    from PySide6.QtGui import QAction
     from PySide6.QtWidgets import QCheckBox, QMenu, QWidgetAction
 
     from widgets import menu_exec
@@ -355,9 +376,11 @@ def open_timepoint_selector(ctx) -> None:
         return
     sync_timepoint_menu(ctx)
     menu = QMenu(button)
+    boxes: dict[str, QCheckBox] = {}
     for tp_str in sorted(_tp_state(ctx).keys(), key=float):
         box = QCheckBox(tp_str, menu)
         box.setChecked(bool(_tp_state(ctx).get(tp_str)))
+        boxes[tp_str] = box
 
         def _handler(checked: bool, tp=tp_str) -> None:
             _tp_state(ctx)[tp] = bool(checked)
@@ -368,18 +391,48 @@ def open_timepoint_selector(ctx) -> None:
         action = QWidgetAction(menu)
         action.setDefaultWidget(box)
         menu.addAction(action)
-    if not menu.actions():
+    if not boxes:
         menu.addAction("No timepoints in this dataset").setEnabled(False)
+    else:
+        menu.addSeparator()
+
+        def _set_all(value: bool) -> None:
+            # The checkboxes are set with their signals blocked and the state
+            # written directly, so twelve toggles do not queue twelve redraws
+            # of the same figure. One repaint at the end, from the state the
+            # user asked for.
+            for tp_str, box in boxes.items():
+                blocked = box.blockSignals(True)
+                try:
+                    box.setChecked(value)
+                finally:
+                    box.blockSignals(blocked)
+                _tp_state(ctx)[tp_str] = value
+            update_timepoint_button(ctx)
+            redraw_response(ctx)
+
+        for label, value in (("All", True), ("None", False)):
+            action = QAction(label, menu)
+            action.triggered.connect(lambda _=False, v=value: _set_all(v))
+            menu.addAction(action)
     menu_exec.exec_menu(menu, button.mapToGlobal(button.rect().bottomLeft()))
 
 
 def update_timepoint_button(ctx) -> None:
-    """The button carries its own readout, as the Bar tab's does."""
+    """The button carries its own readout, as the Bar tab's does.
+
+    Through the shared ``multiselect_button_text``, so it reads "2/5 selected"
+    rather than "2 selected". The count alone cannot say whether the other
+    three are unticked or simply not there, and this tab's failure mode was
+    exactly that: a picker with nothing in it, reading "0 selected", which is
+    also what a user who unticked everything sees.
+    """
+    from well_viewer.core.ui_helpers import multiselect_button_text
+
     button = _widget(ctx, "_response_tp_button")
     if button is None:
         return
-    n = len(timepoints_for(ctx))
-    button.setText(f"Timepoints: {n} selected")
+    button.setText(multiselect_button_text("Timepoints", _tp_state(ctx)))
 
 
 def response_data(ctx):

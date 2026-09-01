@@ -319,13 +319,14 @@ def update_bar_tp_menu(ctx) -> None:
         update_bar_tp_selection_display(ctx)
         return
 
-    all_tps: set = set(ctx.state.dataset.all_timepoints_cache)
-    # If no timepoints were found the schema had no timepoint field.
-    # Use 0.0 as a single synthetic timepoint so bar plots remain usable.
-    if not all_tps:
-        all_tps.add(0.0)
+    # The canonical list plus the 0.0 a schema with no timepoint field resolves
+    # to, from the one helper that answers this — ``timepoint_sync``. The pair
+    # used to be spelled here, and Response Curves asked a third source that
+    # knew about neither, so its picker was empty on exactly the plates this
+    # fallback exists for.
+    from well_viewer.core.timepoint_sync import plottable_timepoints
 
-    sorted_tps = sorted(all_tps)
+    sorted_tps = plottable_timepoints(ctx)
     tp_strs = [f"{t:.4g}" for t in sorted_tps]
 
     cur = ctx.runtime.barplot.tp_cb.currentText() if (ctx.runtime.barplot.tp_cb is not None) else ""

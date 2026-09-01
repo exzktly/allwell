@@ -2899,18 +2899,20 @@ t-test** and **Wilcoxon signed-rank**, and a **two-way ANOVA**.
 - **Needs** — at least two groups. On first visit the tab auto-populates from
   the replicate sets defined on [Home → Sample Map → Replicates](#replicates).
 - **Controls** — the group editor is on the page itself, a strip between the
-  controls band and the results: the well map on the left, and the group cards
-  with **+ Add**, **Clear All** and **↻ Load groups from Home → Replicates** on
-  the right. Select a card, then drag wells on the map to assign them to that
-  group. On a narrow pane — a small window with the rail open and Split View on
-  — the map moves above the cards rather than shrinking beside them, and the
-  page scrolls rather than squeezing either. **Click the section header to fold
-  the editor away** once the groups are defined; folded, it still says how many
-  there are, and the results get the height back. It is on the page rather than
-  in the sidebar so that defining groups never depends on which pane has the
-  focus — see
-  [Saved selections and Split View](#saved-selections-and-split-view).
-  Everything else is on the
+  controls band and the results: the well map on the left, and beside it the
+  group list with **+ Add group**, **Clear All** and **↻ Load from Replicates**
+  at its foot. Click a group to arm it — the armed one carries an accent rule
+  down its left edge — then drag wells on the map to assign them to it. On a
+  narrow pane — a small window with the rail open and Split View on — the map
+  moves above the list rather than shrinking beside it, and the page scrolls
+  rather than squeezing either. **Click the section header to fold the editor
+  away** once the groups are defined; folded, it still says how many there are,
+  and the results get the height back. It is on the page rather than in the
+  sidebar so that defining groups never depends on which pane has the focus —
+  see [Saved selections and Split View](#saved-selections-and-split-view).
+  Outside Split View the sidebar keeps its usual well picker, which selects
+  wells to plot as it does everywhere else; the map on this page is the one
+  that paints groups. Everything else is on the
   same one-row controls band every tab uses — **Channel**, **Property**,
   **Statistic**, **Timepoint** and **Test**, then an FOV-replicate indicator
   that mirrors the plot tabs' FOV mode, with **Run test** at the right. Three

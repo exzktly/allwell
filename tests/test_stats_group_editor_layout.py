@@ -39,13 +39,23 @@ def _rect(widget):
     return QRect(top_left, widget.size())
 
 
-def _settle(ms: int = 0) -> None:
+def _settle(ms: int = 90) -> None:
     """Let the layout finish.
 
     A single ``processEvents`` catches a transient mid-resize layout — measured
     once as a map overflowing its pane by 60px that the settled geometry did not
     have. An assertion against that state would fail on a layout no user ever
     sees, which is the same defect as passing on one.
+
+    Draining the event queue is not enough on its own, and the default here used
+    to be ``ms=0``, which did exactly that. Some of what a resize starts is
+    posted for a later turn of the loop rather than queued for this one, so
+    under contention the page's scrollbar was still reporting its pre-resize
+    range: ``test_the_page_scrolls_rather_than_crushing_the_editor`` failed on a
+    tree where the page did scroll — measured at the same size, 295px of range —
+    and would have passed again on a quiet container. A real turn of the loop is
+    the difference, and the default is the safe one because every caller here
+    wants settled geometry.
     """
     from PySide6.QtCore import QEventLoop, QTimer
     from PySide6.QtWidgets import QApplication
@@ -237,6 +247,35 @@ def test_the_page_scrolls_rather_than_crushing_the_editor(loaded_app):
     assert scroll.horizontalScrollBar().maximum() == 0, (
         "the page scrolls sideways, so width no longer forces the editor to "
         "stack and it can go on clipping instead")
+
+
+@pytest.mark.slow
+def test_the_page_never_scrolls_sideways(loaded_app):
+    """The invariant the whole responsive design rests on, at every size.
+
+    Width is what forces the editor to stack; a page that can be dragged
+    sideways lets it escape that decision and clip instead. Horizontal scrolling
+    is off, so range on that scrollbar is not an escape hatch either — it is
+    content behind the page's own edge, unreachable.
+
+    Swept, because it was found at one size and one size only: a card-list
+    minimum width capped at the plate's *cap* rather than its *floor* overflowed
+    a 300px pane by seven pixels, and every other size in this file was clean.
+    """
+    app = loaded_app
+    ctx = app._ctx
+    app.resize(1600, 1000)
+    _statistics_split(app)
+    _two_groups(ctx)
+    scroll = ctx.widgets.get("_stats_page_scroll")
+
+    for w, h in _SIZES:
+        app.resize(w, h)
+        _settle()
+        assert scroll.horizontalScrollBar().maximum() == 0, (
+            f"at {w}x{h} the page is "
+            f"{scroll.horizontalScrollBar().maximum()}px wider than its "
+            f"viewport, and that width is unreachable rather than scrollable")
 
 
 @pytest.mark.slow

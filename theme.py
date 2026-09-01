@@ -875,6 +875,27 @@ QFrame#HomeCard, QWidget#HomeTile {{
     border: 1px solid {c.border_subtle};
     border-radius: {r.md}px;
 }}
+/* A comparison-group row on the Statistics page, and the one of them that is
+   armed. The editor's own instruction is "select a group below, then drag wells
+   on the map to assign them to it", so which row is selected is the difference
+   between a drag landing where the user meant it and landing somewhere else —
+   and until this rule existed the ``state="selected"`` property was set on
+   every pass and painted nothing at all. A left rule in the accent rather than
+   a filled row: each card already carries its group's rank colour as a dot, and
+   a tinted background would compete with it for the same meaning. */
+QFrame#StatsGroupCard {{
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: {r.sm}px;
+}}
+QFrame#StatsGroupCard:hover {{
+    background: {c.hover};
+}}
+QFrame#StatsGroupCard[state="selected"] {{
+    background: {c.panel_elevated};
+    border: 1px solid {c.border_subtle};
+    border-left: 3px solid {c.accent};
+}}
 QLabel#HomeTitle {{
     font-size: {t.h2_size}px;
     font-weight: {t.semibold};

@@ -385,6 +385,10 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     result_text.setReadOnly(True)
     result_text.setLineWrapMode(QTextEdit.WidgetWidth)
     # Hint in the otherwise-blank results panel before the first run.
+    # Set here for the first paint and rewritten by ``stats_refresh_group_list``
+    # as groups come and go: with two groups already defined, a placeholder
+    # telling the user to define two is the page disagreeing with what is on it
+    # twenty pixels above.
     result_text.setPlaceholderText(
         "Define two comparison groups above, choose a test, then click "
         "Run test to see results here."

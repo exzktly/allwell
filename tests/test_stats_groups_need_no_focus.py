@@ -231,14 +231,55 @@ def test_the_group_editor_survives_that_hand_over(loaded_app):
 @pytest.mark.slow
 def test_a_single_statistics_pane_carries_its_own_editor(loaded_app):
     """Not a Split-View feature. Outside a split the editor is on the page for
-    the same reason, and the rail is left to the pages that use it."""
+    the same reason: the map that paints groups belongs with the cards it paints
+    into, wherever the rail happens to be pointing."""
     app = loaded_app
     app._notebook.setCurrentByName("Statistics")
     ctx = app._ctx
 
     plate = ctx.widgets.get_or_none("_stats_map_plate")
     assert plate is not None and not plate.isHidden()
-    assert plate not in _rail_plates(ctx)
-    assert [p for p in _rail_plates(ctx) if not p.isHidden()] == [], (
-        "a rail picker is on screen on the Statistics page, where no rail "
-        "section is shown — it belongs to a page the user is not looking at")
+    assert plate not in _rail_plates(ctx), (
+        "the comparison-group map is mounted in the shared rail slot, where its "
+        "visibility would again be a function of which pane has the focus")
+
+
+@pytest.mark.slow
+def test_the_rail_keeps_the_shared_picker_on_a_single_statistics_pane(loaded_app):
+    """Outside a split, nothing is competing for the rail, so it goes on doing
+    what it does on every other page.
+
+    The editor moved off the rail because one slot cannot carry two verbs at
+    once. With one pane there is no second claimant: the rail selects wells to
+    plot, as everywhere else, and the page's own map paints groups. Leaving it
+    empty was the alternative and read as an unfinished screen.
+    """
+    app = loaded_app
+    app._notebook.setCurrentByName("Statistics")
+    ctx = app._ctx
+
+    shown = [p for p in _rail_plates(ctx) if not p.isHidden()]
+    assert len(shown) == 1, f"{len(shown)} pickers on the rail; expected one"
+    assert shown[0] is ctx.widgets.get("_sidebar_plate"), (
+        "the picker on the rail is not the shared plot selector")
+
+
+@pytest.mark.slow
+def test_it_gives_the_rail_up_again_the_moment_a_split_opens(loaded_app):
+    """And the half that keeps the single-pane rule from undoing the fix.
+
+    In a split the other pane has a claim on the rail, and a tab with no section
+    taking it anyway is the ambiguity the editor was moved to remove. Asserts
+    the picker on screen belongs to the *other* pane's section, not merely that
+    there is one.
+    """
+    from well_viewer.core.rail_plate import section_of
+
+    app = loaded_app
+    ctx = _split_statistics_beside_segmentation(app)
+
+    shown = [p for p in _rail_plates(ctx) if not p.isHidden()]
+    assert len(shown) == 1, f"{len(shown)} pickers on the rail; expected one"
+    assert section_of(shown[0]) is ctx.widgets.get("_sidebar_preview_frame"), (
+        "Statistics kept the rail in a split, where the other pane has a claim "
+        "on it")

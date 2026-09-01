@@ -13,6 +13,7 @@ import logging
 from well_viewer.core.channel_state_controller import col_for_scatter_axis
 from well_viewer.core.csv_export import write_csv_rows
 from well_viewer.core.safe import swallow
+from well_viewer.domain.response_colors import response_color_mode
 from well_viewer.domain.sample_variables import NAME_JOIN, NUMBER
 from well_viewer.features.response.collect import (
     Y_FRACTION, Y_MEAN, ResponseData, collect_response, empty_reason, fit_curves,
@@ -603,6 +604,7 @@ def redraw_response(ctx) -> None:
     draw_response(ctx, ax, data,
                   log_x=log_x,
                   log_base=resolved_log_base(ctx, ax.figure),
+                  color_mode=response_color_mode(ctx.state.plot),
                   title=_figure_title(ctx, data),
                   ylabel=_y_label(ctx, data),
                   variable_chosen=bool(selected_variable_id(ctx)),

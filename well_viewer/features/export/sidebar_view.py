@@ -149,6 +149,12 @@ def _base_suffix(text: str) -> str:
 #: click handler and the re-seed cannot spell the same mode three ways.
 _SEGMENT_LABELS = {
     "plate": "Plate",
+    # The Response tab's default mode. Not "Plate": a response curve is one
+    # value of a sample variable rather than one well, so its colours come from
+    # the figure's palette and never from the plate picker — a segment reading
+    # "Plate" there would be a label making a false claim about where the
+    # colour came from.
+    "colour": "Colour",
     "grey": "Grey",
     "mean": "Mean",
     "mean_spread": "Mean+spread",
@@ -397,35 +403,48 @@ class ExportStyleSidebar(QWidget):
             add_row(s_cells, "Value format", fmt_edit)
 
         # ── What the plot's data ink is coloured by ─────────────────────────
-        # "Plate" is the historical behaviour on both tabs — each column or
-        # trace takes the colour its well or replicate group carries on the
-        # plate picker, so the plate doubles as the legend. "Grey" is for a
-        # figure whose columns are already named on the axis, or whose traces
-        # are named in the legend, and whose colours would only compete with
-        # the data.
+        # The first segment is each tab's historical behaviour: "Plate" on the
+        # Bar and Line figures, where every column or trace takes the colour its
+        # well or replicate group carries on the plate picker so that the plate
+        # doubles as the legend, and "Colour" on the Response figure, where a
+        # curve is one value of a sample variable rather than one well and takes
+        # the figure's palette instead. "Grey" is for a figure whose columns are
+        # already named on the axis, or whose curves are named in the legend,
+        # and whose colours would only compete with the data.
         #
-        # What grey *means* differs between the two, and the difference is the
-        # reason each tab has its own state field rather than sharing one. A
-        # bar is named by the tick label under it, so every bar can take the
-        # same ink and lose nothing. A trace is not, so the Line tab's grey
-        # mode gives each trace its own shade **and** its own marker — see
-        # ``domain/line_colors.py``. One control, two rules, and neither tab
-        # shows the other's: the setting changes nothing on any other plot,
-        # like the Density / Gates / Cell values sections above.
+        # What grey *means* differs on all three, and that difference is the
+        # reason each tab has its own state field rather than sharing one. A bar
+        # is named by the tick label under it, so every bar can take the same
+        # ink and lose nothing. A trace is not, so the Line tab's grey mode
+        # gives each trace its own shade, dash **and** marker
+        # (``domain/line_colors.py``). A response curve is a trace whose dash is
+        # already spoken for — it carries the timepoint — so its grey mode takes
+        # the shade and the marker and leaves the dash alone
+        # (``domain/response_colors.py``). One control, three rules, and no tab
+        # shows another's: the setting changes nothing on any other plot, like
+        # the Density / Gates / Cell values sections above.
         _color_target = None
         if self._is_bar_fig():
             from well_viewer.domain.bar_colors import bar_color_mode as _mode_of
-            _color_target = ("bar_color_mode", "Bar colours", _mode_of)
+            _color_target = ("bar_color_mode", "Bar colours", _mode_of, "plate")
         elif self._is_line_fig():
             from well_viewer.domain.line_colors import line_color_mode as _mode_of
-            _color_target = ("line_color_mode", "Line colours", _mode_of)
+            _color_target = ("line_color_mode", "Line colours", _mode_of, "plate")
+        elif self._is_response_fig():
+            from well_viewer.domain.response_colors import (
+                response_color_mode as _mode_of,
+            )
+            _color_target = ("response_color_mode", "Curve colours", _mode_of,
+                             "colour")
         if _color_target is not None:
             from widgets.plot_card import _make_segmented as _seg_color
-            _color_field, _color_label, _color_resolver = _color_target
+            (_color_field, _color_label, _color_resolver,
+             _color_default) = _color_target
             s_colors = section("Colours", expanded=True)
             _color_init = _color_resolver(self._app._app_state.plot)
             color_sc = _seg_color(
-                [("Plate", "plate"), ("Grey", "grey")], current=_color_init,
+                [(_SEGMENT_LABELS[_color_default], _color_default),
+                 ("Grey", "grey")], current=_color_init,
             )
             if color_sc is not None:
                 self._color_seg = color_sc
@@ -439,6 +458,13 @@ class ExportStyleSidebar(QWidget):
                 # believes it is current. That is the exact failure this
                 # function's own docstring was written about.
                 self._color_seg_field = _color_field
+                # And the value that field defaults to, because the re-seed
+                # below has to know what an unset one reads as — and the three
+                # tabs do not agree: "plate" for the bar and line figures,
+                # "colour" for the response one. A single hardcoded default
+                # there would move a Response segment to "Plate", a value its
+                # own segment does not offer, with signals blocked.
+                self._color_seg_default = _color_default
                 _color_preview = QLabel(_SEGMENT_LABELS[_color_init])
                 _color_preview.setObjectName("Muted")
                 self._color_seg_preview = _color_preview
@@ -1564,6 +1590,16 @@ class ExportStyleSidebar(QWidget):
     def _is_line_fig(self) -> bool:
         return getattr(self._app, "_line_fig", None) is self._fig
 
+    def _is_response_fig(self) -> bool:
+        """True only for the Response Curves figure.
+
+        The Colours section is gated per figure for the same reason the Density
+        and Cell values sections are: the mode changes nothing on a scatter or
+        heat-map figure, and a control that does nothing is the defect §7.6 of
+        ``CLAUDE.md`` is about wearing the opposite face.
+        """
+        return getattr(self._app, "_response_fig", None) is self._fig
+
     def _redraw_for_a_user_edit(self) -> None:
         """Redraw the bound figure, unless the panel is writing to itself.
 
@@ -1864,7 +1900,7 @@ class ExportStyleSidebar(QWidget):
             return
         for attr, field, default in (
             ("_color_seg", getattr(self, "_color_seg_field", "bar_color_mode"),
-             "plate"),
+             getattr(self, "_color_seg_default", "plate")),
             ("_show_seg", "bar_show_mode", "mean_spread"),
         ):
             seg = getattr(self, attr, None)

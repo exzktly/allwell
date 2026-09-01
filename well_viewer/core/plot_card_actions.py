@@ -88,6 +88,7 @@ _CARDS = (
     ("_heatmap_card", "heatmap.png"),
     ("_sp_card", "spatial.png"),
     ("_mv_card", "multivariate.png"),
+    ("_response_card", "response.png"),
 )
 
 #: Widget-registry names of every plot card, for callers that act on all of

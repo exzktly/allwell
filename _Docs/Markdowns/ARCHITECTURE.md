@@ -2504,14 +2504,29 @@ to naming the same card. The name is optional only for a global toolbar action
 that belongs to no tab, which is what the fallback exists for. A tab's `PlotCard` must
 also call `ui_helpers.apply_plot_card_decorators(ctx, card, "<Tab Name>")`
 for the hover-based gallery save and Saved Plots registration to exist at
-all, and its widget-registry attribute name must be listed in **both**
-`allwell.py::_on_present_toggled`'s `card_attrs` (the global Screen/
-Publication toggle) and `core/plot_card_actions.py::_CARDS` (which maps a card
-name to its default export filename, and backs the global "first visible card"
-fallback) — these are hardcoded allowlists, not
-auto-discovered from the feature registry, so a new plot tab that skips
-either silently gets no Screen/Publication toggle or no global Copy/Save,
-exactly the bug that shipped for Spatial and Multivariate.
+all, and its widget-registry attribute name must be listed in
+`core/plot_card_actions.py::_CARDS`, which maps a card name to its default
+export filename, backs the global "first visible card" fallback, and is
+re-exported as `PLOT_CARD_ATTRS` — the roster the global Screen/Publication
+toggle (`allwell.py::_on_present_toggled`) iterates, calling `setPlotTheme` on
+each name it finds in the widget registry. The roster is a hardcoded allowlist,
+not auto-discovered from the feature registry, so a plot tab absent from it
+silently gets no Screen/Publication toggle and no global Copy/Save.
+
+That allowlist has now been short three times — Spatial, Multivariate and
+Response Curves — and the third time is what the two rules below are between
+them for. A card the toggle never reaches does not merely fail to flip on the
+click: `plot_style.tokens_for` resolves the theme by asking
+`figure._plot_card.plotTheme()`, so every subsequent redraw faithfully repaints
+the stale answer, and the tab looks broken in a way no redraw corrects.
+`tests/test_plot_card_roster.py` holds both halves — that the roster is written
+**once** (no module restates the names; the shell reads `PLOT_CARD_ATTRS`), and
+that it is written **completely**: the expected set is derived by scanning the
+source for a `register("_x_card", …)` in a module that constructs a `PlotCard`,
+so a new tab that skips the roster fails there instead of shipping. Home's
+`_home_recents_card` and `_home_saved_plots_card` are named in that test as the
+two registered cards that are deliberately outside it — a gallery thumbnail and
+a recent-datasets tile, neither with axes to restyle or a figure to copy.
 5. Wires signals to the feature's controller / renderer entry points
    (e.g. matplotlib clicks → `features.scatter.controller.on_scatter_click`,
    button presses → `features.barplot.renderer.redraw_bars`).
@@ -3105,6 +3120,19 @@ than a match on the outgoing colour. It is the mirror of `_aw_no_style_override`
 above — that one takes an artist *out* of a styling pass, this one puts it *in*.
 `tests/test_theme_ink_artists_are_tagged.py` fails on any free artist coloured
 from `tokens_for` without it.
+
+**And on any free artist with no colour at all**, which is the same rule seen
+from the other side. An `ax.text` that names no colour takes matplotlib's
+black — legible on the publication theme and near-invisible on the screen
+theme's `#131A24` — and, having no ink token in it, is not tagged either, so
+`repaint_theme_ink` walks straight past it and no later flip corrects it. The
+ink guard could not see that shape, because it begins by reading the call's
+`color=`; the two halves are asserted separately in the same file. A site
+genuinely drawing onto a non-themed figure is exempted by
+`module::function` with its reason, and a companion test fails when an
+exemption stops describing a real call. Today there is one: the image-table
+export's `(no image)` placeholder, drawn inside a cell whose axes the exporter
+has just set to white.
 
 Per-feature controllers / renderers (under `well_viewer/features/`):
 
@@ -10705,7 +10733,9 @@ The map (each rule links to the test that holds it):
 | No Datasets tool imports another Datasets tool, so each stays independently deletable (§6b) | `tests/test_datasets_tool_isolation.py` |
 | Every Datasets dashboard ends a run through the shared outcome setters rather than its own copies (§6b) | `tests/test_datasets_dashboard_outcomes.py` |
 | Every Datasets tool controller owns its worker through `DatasetToolController`, and the one tool whose worker cannot be interrupted still reaches its own stop method (§6b) | `tests/test_datasets_controller_lifecycle.py` |
-| The plot-card roster is written once — the shell reads `plot_card_actions.PLOT_CARD_ATTRS` rather than restating the names (§5.3) | `tests/test_plot_card_roster.py` |
+| The plot-card roster is written once **and completely** — the shell reads `plot_card_actions.PLOT_CARD_ATTRS` rather than restating the names, and every `PlotCard` a feature registers is in it (§5.3) | `tests/test_plot_card_roster.py` |
+| The Response figure follows the Screen/Publication toggle through the shell's own loop, and its free text artists are drawn in the theme's ink | `tests/test_response_follows_the_plot_theme.py` |
+| A free `ax.text` / `ax.annotate` / `ax.plot` on a themed figure is coloured from `tokens_for` **and** tagged `follows_theme` — neither an ink colour without the tag nor no colour at all (§5.3) | `tests/test_theme_ink_artists_are_tagged.py` |
 | The Analyze layout readout renders `plan_input_layout`'s message rather than composing its own sentence about the folder, so the preview and the run cannot disagree (§6.1) | `tests/test_layout_readout_single_source.py` |
 | Every per-cell render-mode lookup in the Image Table names the channel it is for, so a cell never resolves its raw/corrected setting or its LUT window against a neighbouring channel's (§5.5) | `tests/test_image_table_channel_identity.py::test_every_render_mode_lookup_names_the_channel_it_is_for` |
 | A Batch Export job closure reads no live control — the channel, value column, metric and scatter axes are snapshotted before the job loop, which pumps the event loop between jobs (§9.5) | `tests/test_batch_export_run_snapshot.py::test_no_per_job_closure_reads_a_live_combo`, `::test_a_scatter_job_reads_no_live_axis_control`, `::test_the_snapshot_is_taken_before_the_job_loop` |

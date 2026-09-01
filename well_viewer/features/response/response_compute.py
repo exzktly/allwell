@@ -40,15 +40,20 @@ def spans_enough_decades(values, threshold: float = LOG_X_DECADE_THRESHOLD) -> b
     return math.log10(max(positives)) - math.log10(min(positives)) >= threshold
 
 
-def zero_position(values, offset_decades: float = ZERO_OFFSET_DECADES) -> float | None:
+def zero_position(values, offset_decades: float = ZERO_OFFSET_DECADES,
+                  base: float = 10.0) -> float | None:
     """Where a zero-valued point sits on a log x axis, or ``None``.
 
-    **A decade below the lowest positive value, behind an axis break.** The two
-    alternatives are both wrong and both common: dropping the point is
-    matplotlib's default and a silent substitution — the vehicle control simply
-    vanishes from a figure that still looks complete — while squeezing it onto
-    the axis at some small positive number is a lie about the concentration it
-    was given.
+    **One step of the axis's own base below the lowest positive value, behind an
+    axis break.** The two alternatives are both wrong and both common: dropping
+    the point is matplotlib's default and a silent substitution — the vehicle
+    control simply vanishes from a figure that still looks complete — while
+    squeezing it onto the axis at some small positive number is a lie about the
+    concentration it was given.
+
+    *base* is the base the axis is drawn in, so the gap is one tick-step wide
+    whichever base the user picked rather than always a factor of ten. On the
+    default base-10 axis that is the decade this has always been.
 
     ``None`` when there is no positive value to be below, which is a series that
     cannot be drawn on a log axis at all.
@@ -58,7 +63,8 @@ def zero_position(values, offset_decades: float = ZERO_OFFSET_DECADES) -> float 
                  and float(v) > 0 and math.isfinite(float(v))]
     if not positives:
         return None
-    return 10.0 ** (math.log10(min(positives)) - float(offset_decades))
+    step = float(base) if float(base) > 1.0 else 10.0
+    return min(positives) / (step ** float(offset_decades))
 
 
 # ── curve fitting ───────────────────────────────────────────────────────────

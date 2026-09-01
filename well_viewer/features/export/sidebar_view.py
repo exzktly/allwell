@@ -7,6 +7,7 @@ matplotlib export pipeline live in ``well_viewer.figure_export_editor``.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from collections.abc import Callable
 
@@ -26,7 +27,9 @@ from well_viewer.features.export.style import (
     _resolve_export_dock,
     apply_export_style_to_current,
 )
-from well_viewer.core.plot_style import figure_prefs
+from well_viewer.core.plot_style import (
+    LOG_BASE_CHOICES, figure_pref_is_set, figure_prefs,
+)
 
 # v2 chrome: this panel is composed from the custom widgets in ``widgets/``
 # (CollapsibleSection, ToggleSwitch) plus theme-styled stock widgets. The
@@ -53,6 +56,30 @@ from well_viewer.domain.time_rescale import (
     factor_for_interval as _factor_for_interval,
     rescale_for as _rescale_for,
 )
+
+_logger = logging.getLogger("well_viewer")
+
+#: Plot tabs whose figure this panel can open but whose redraw is not one of
+#: the callables imported above: they are reached by name through the feature
+#: registry, so this module imports none of them and a profiled-out feature
+#: simply falls through.
+#:
+#: **This is a roster, and a roster is where a control silently stops working.**
+#: A figure absent here fell to ``app._redraw()``, which redraws the *Line* tab
+#: — so a Properties edit on the Response tab repainted a different figure and
+#: reported success. ``tests/test_properties_panel_redraws.py`` holds it against
+#: the Properties roster in ``features/export/style.py``, which is the list of
+#: figures this panel can be opened on in the first place.
+_FIGURE_OWNING_FEATURES = (
+    ("_sp_fig", "Spatial"),
+    ("_mv_fig", "Multivariate"),
+    ("_response_fig", "Response Curves"),
+)
+
+#: The same features, named by *tab* rather than by figure, for the reset path
+#: (``_redraw_active_plot``), which dispatches on the tab in view.
+_FEATURES_THAT_REDRAW_THEMSELVES = tuple(
+    feature for _attr, feature in _FIGURE_OWNING_FEATURES)
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -105,6 +132,16 @@ _PER_AXIS_STYLE_KEYS = (
     "x_tick_angle", "group_label_size",
     "tick_major", "tick_minor", "tick_length", "tick_direction",
 )
+
+
+def _base_suffix(text: str) -> str:
+    """What the Limits & Scale summary adds after "X log" for a non-default base.
+
+    Empty for base 10, so the common case reads as it always has and only a
+    figure actually drawn in another base carries the extra words.
+    """
+    cleaned = str(text or "").strip()
+    return "" if cleaned in ("", "10") else f" base {cleaned}"
 
 
 #: Human-readable text for the segment values that are re-seeded from
@@ -1015,34 +1052,71 @@ class ExportStyleSidebar(QWidget):
         _ykey = "scatter_y_log" if _is_scatter else "y_log"
         _xdef = True if _is_scatter else False
         xlog_cb = ToggleSwitch("X log")
-        xlog_cb.setChecked(bool(self._prefs.get(_xkey, _xdef)))
+        xlog_cb.setChecked(self._log_toggle_seed(_xkey, "x", _xdef))
         ylog_cb = ToggleSwitch("Y log")
-        ylog_cb.setChecked(bool(self._prefs.get(_ykey, _xdef)))
+        ylog_cb.setChecked(self._log_toggle_seed(_ykey, "y", _xdef))
         self._bind_getter_setter(_xkey, xlog_cb)
         self._bind_getter_setter(_ykey, ylog_cb)
-        # Scatter re-tags its axis on redraw; the distribution must fully redraw
-        # so its histogram bars are re-drawn with the correct ``log=`` baseline
-        # (and so its on-plot "log x"/"log y" checkboxes re-sync). Other figures
-        # keep the lightweight restyle path.
-        _is_distribution = getattr(self._app, "_distribution_fig", None) is self._fig
-        if _is_scatter or _is_distribution:
-            xlog_cb.toggled.connect(lambda _=False: self._redraw_bound_figure())
-            ylog_cb.toggled.connect(lambda _=False: self._redraw_bound_figure())
+        # **A redraw, not a restyle.** The restyle path can only set the scale
+        # of an axis that is already drawn; it cannot re-decide anything the
+        # renderer chose from the data, and on a tab that pins its own log state
+        # (``_aw_force_xlog`` — Response Curves, the scatter) it is overruled
+        # outright, which is how the Response tab's X log toggle came to do
+        # nothing at all. Every figure redraws here for the same reason, and
+        # each redraw ends in a restyle anyway, so the lightweight path is not
+        # lost — it is merely no longer the only thing that runs.
+        xlog_cb.toggled.connect(lambda _=False: self._redraw_for_a_user_edit())
+        ylog_cb.toggled.connect(lambda _=False: self._redraw_for_a_user_edit())
         add_stacked(s_lim, "Log scale", hrow(xlog_cb, ylog_cb))
+
+        # The base each log axis is drawn in. Editable rather than a fixed list:
+        # 10, 2 and e are what almost everyone wants and are one click away, but
+        # a base this panel does not offer is still a base, and refusing to type
+        # it would be a control that answers a narrower question than the one
+        # asked. Anything at or below 1 is not a base at all and falls back to
+        # 10 (``plot_style.log_base_value``) rather than taking the axis down.
+        _xbase_cb = QComboBox()
+        _xbase_cb.setEditable(True)
+        _xbase_cb.addItems(list(LOG_BASE_CHOICES))
+        _xbase_cb.setCurrentText(str(self._prefs.get("x_log_base", "10")))
+        _xbase_cb.setToolTip(
+            "Base of the X log axis — 10, 2, e, or any number above 1.")
+        _ybase_cb = QComboBox()
+        _ybase_cb.setEditable(True)
+        _ybase_cb.addItems(list(LOG_BASE_CHOICES))
+        _ybase_cb.setCurrentText(str(self._prefs.get("y_log_base", "10")))
+        _ybase_cb.setToolTip(
+            "Base of the Y log axis — 10, 2, e, or any number above 1.")
+        self._bind_getter_setter("x_log_base", _xbase_cb)
+        self._bind_getter_setter("y_log_base", _ybase_cb)
+        # Same argument as the toggles: a tab that positions anything against
+        # the axis's steps (the Response tab puts its zero-dose column one step
+        # below the lowest real dose) can only re-place it by drawing again.
+        _xbase_cb.currentTextChanged.connect(
+            lambda _t: self._redraw_for_a_user_edit())
+        _ybase_cb.currentTextChanged.connect(
+            lambda _t: self._redraw_for_a_user_edit())
+        add_stacked(s_lim, "Log base", hrow(QLabel("X"), _xbase_cb,
+                                            QLabel("Y"), _ybase_cb,
+                                            spacing=sp.xs))
 
         def _lim_preview_text() -> str:
             tags = []
             if xlog_cb.isChecked():
-                tags.append("X log")
+                tags.append(f"X log{_base_suffix(_xbase_cb.currentText())}")
             if ylog_cb.isChecked():
-                tags.append("Y log")
+                tags.append(f"Y log{_base_suffix(_ybase_cb.currentText())}")
             return ", ".join(tags) if tags else "linear"
 
         _lim_preview = QLabel(_lim_preview_text())
         _lim_preview.setObjectName("Muted")
         s_lim.setValueWidget(_lim_preview)
-        xlog_cb.toggled.connect(lambda *_a, _l=_lim_preview: _l.setText(_lim_preview_text()))
-        ylog_cb.toggled.connect(lambda *_a, _l=_lim_preview: _l.setText(_lim_preview_text()))
+        for _w in (xlog_cb, ylog_cb):
+            _w.toggled.connect(
+                lambda *_a, _l=_lim_preview: _l.setText(_lim_preview_text()))
+        for _w in (_xbase_cb, _ybase_cb):
+            _w.currentTextChanged.connect(
+                lambda *_a, _l=_lim_preview: _l.setText(_lim_preview_text()))
 
         # ── Layout (+ draw order) ───────────────────────────────────────────
         s_layout = section("Layout", expanded=False)
@@ -1334,13 +1408,15 @@ class ExportStyleSidebar(QWidget):
             elif tab == "Scatter Plot":
                 from well_viewer.features.scatter.tab_view import scatter_redraw_active
                 scatter_redraw_active(app._ctx)
-            elif tab in ("Spatial", "Multivariate") and app._ctx.features.redraw(app._ctx, tab):
-                # Spatial and Multivariate both render from their own cached
-                # result and are not part of ``redraw_app``'s fan-out, so
-                # without this a Properties edit made while looking at either
-                # changed nothing until the tab was left and re-entered. Resolved by name through the registry
-                # rather than imported, so this sidebar names no other feature's
-                # module and a profiled-out Spatial just falls through.
+            elif (tab in _FEATURES_THAT_REDRAW_THEMSELVES
+                    and app._ctx.features.redraw(app._ctx, tab)):
+                # Spatial, Multivariate and Response Curves each render from
+                # their own state and are not part of ``redraw_app``'s fan-out,
+                # so without this a Properties edit made while looking at one of
+                # them changed nothing until the tab was left and re-entered.
+                # Resolved by name through the registry rather than imported, so
+                # this sidebar names no other feature's module and a profiled-out
+                # feature just falls through.
                 #
                 # Named rather than "any feature with a redraw hook": the
                 # registry calls the hook as ``redraw()(ctx)`` and Line Graphs'
@@ -1487,6 +1563,50 @@ class ExportStyleSidebar(QWidget):
 
     def _is_line_fig(self) -> bool:
         return getattr(self._app, "_line_fig", None) is self._fig
+
+    def _redraw_for_a_user_edit(self) -> None:
+        """Redraw the bound figure, unless the panel is writing to itself.
+
+        ``_updating`` is raised while the panel pushes values *into* its own
+        widgets — restoring defaults, applying a preset, switching the targeted
+        axis — and every one of those moves several fields at once. Without this
+        the log controls would each ask for a full redraw of the figure on the
+        way past, and the caller redraws once at the end anyway. It is the same
+        guard ``_on_fields_changed`` opens with, for the same reason.
+        """
+        if self._updating:
+            return
+        self._redraw_bound_figure()
+
+    def _log_toggle_seed(self, key: str, which: str, default: bool) -> bool:
+        """What the X/Y log toggle should show when the panel opens.
+
+        The stored preference, except where this figure has **no** stored answer
+        — then the axis on screen, because that is what the user is looking at.
+
+        The Response tab is why. It picks a log axis from the doses when the
+        preference is unset (``figure_pref_is_set`` is what keeps "never
+        touched" distinct from "turned off"), so a toggle seeded from the unset
+        preference read *off* over an axis that was plainly logarithmic. Worse
+        than merely wrong: ``_persist`` writes every field on any edit, so
+        changing the title size wrote that ``False`` down and the next redraw
+        obeyed it — an unrelated control silently un-logging the axis.
+
+        Only the two shared keys behave this way. The scatter's own
+        ``scatter_x_log`` / ``scatter_y_log`` default to on and are always
+        stored, so there is nothing to infer there.
+        """
+        stored = bool(self._prefs.get(key, default))
+        if key not in ("x_log", "y_log"):
+            return stored
+        with swallow("read whether this figure's log preference is set"):
+            if figure_pref_is_set(self._app._ctx, self._fig, key):
+                return stored
+        axes = list(getattr(self._fig, "axes", ()) or ())
+        if not axes:
+            return stored
+        scale = (axes[0].get_xscale if which == "x" else axes[0].get_yscale)()
+        return scale != "linear"
 
     def _is_scatter_cells_fig(self) -> bool:
         """True only for the per-cell scatter figure (density + gates apply there)."""
@@ -1699,6 +1819,13 @@ class ExportStyleSidebar(QWidget):
             if getattr(app, "_heatmap_fig", None) is self._fig:
                 redraw_heatmap(app._ctx)
                 return True
+            for fig_attr, feature in _FIGURE_OWNING_FEATURES:
+                if getattr(app, fig_attr, None) is self._fig:
+                    return bool(app._ctx.features.redraw(app._ctx, feature))
+            _logger.warning(
+                "Properties: no redraw is registered for this figure, so the "
+                "Line tab was redrawn instead. Add its figure to "
+                "_FIGURE_OWNING_FEATURES.")
             app._redraw()
             return True
         except Exception:

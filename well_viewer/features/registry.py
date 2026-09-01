@@ -119,7 +119,7 @@ _build_sample_map = _lazy_build("well_viewer.features.home.sample_map.tab_view",
                                 "build_sample_map_subtab")
 _build_response = _lazy_build("well_viewer.features.response.tab_view",
                               "build_response_tab")
-_redraw_response = _lazy_hook("well_viewer.features.response.controller",
+_response_redraw = _lazy_hook("well_viewer.features.response.controller",
                               "redraw_response")
 _build_pipeline_info = _lazy_build("well_viewer.features.home.pipeline_info.tab_view",
                                    "build_pipeline_info_subtab")
@@ -582,6 +582,24 @@ def _redraw_scatter():
     return scatter_redraw_active
 
 
+def _redraw_response():
+    """Response Curves' figure redraw — a factory, like every other leaf's.
+
+    The descriptor field is a *lazy factory* (``() -> ((ctx) -> None)``), and
+    what sat here was a ``_lazy_hook`` — a ``hook(ctx)``, one shape short.
+    ``FeatureRegistry.redraw`` calls ``d.redraw()(ctx)``, so every dispatch
+    through the registry raised ``TypeError: hook() missing 1 required
+    positional argument`` before it reached the figure, and the guard that was
+    meant to cover this asserted only that the field was not ``None`` — a
+    property the wrong callable satisfies just as well. The dispatch hooks
+    below still call ``_response_redraw(ctx)``, which is the hook shape *they*
+    want; the two are separate names now precisely because they are separate
+    shapes.
+    """
+    from well_viewer.features.response.controller import redraw_response
+    return redraw_response
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # on_dataset_loaded hooks — a feature's post-load refresh, fanned out by
 # ``load_controller`` from the registry so core never names the feature (nor
@@ -824,7 +842,7 @@ def _activate_response(ctx) -> None:
     """
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
     ctx.coordinator.refresh_sidebar_map()
-    _redraw_response(ctx)
+    _response_redraw(ctx)
 
 
 def _channel_response(ctx) -> None:
@@ -837,7 +855,7 @@ def _channel_response(ctx) -> None:
     is a plot of the wrong data that looks exactly like a plot of the right
     data, which is the same reason the other two hooks exist.
     """
-    _redraw_response(ctx)
+    _response_redraw(ctx)
 
 
 def _sel_response(ctx) -> None:
@@ -848,7 +866,7 @@ def _sel_response(ctx) -> None:
     curves drawn from the previous selection, which is a plot of the wrong
     data that looks exactly like a plot of the right data.
     """
-    _redraw_response(ctx)
+    _response_redraw(ctx)
 
 
 def _fold_change_scope_response():

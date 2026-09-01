@@ -79,6 +79,32 @@ def test_every_leaf_draws_and_redraws(leaves):
     assert not missing, f"a Plotting leaf declares no builder or no redraw: {missing}"
 
 
+def test_every_leaf_s_redraw_is_the_shape_the_registry_calls(leaves):
+    """``FeatureRegistry.redraw`` calls ``d.redraw()(ctx)`` — a *factory*.
+
+    The test above asks only whether the field is set, and "is not None" is a
+    property the wrong callable satisfies perfectly. Response Curves declared a
+    ``_lazy_hook`` — a ``hook(ctx)``, one shape short of a factory — so every
+    dispatch through the registry raised ``TypeError: hook() missing 1 required
+    positional argument`` instead of repainting the figure, and the whole file
+    stayed green. So call it, and require a callable back.
+    """
+    broken = {}
+    for d in leaves:
+        if d.redraw is None:
+            continue
+        try:
+            made = d.redraw()
+        except TypeError as exc:
+            broken[d.name] = f"calling redraw() raised {exc}"
+            continue
+        if not callable(made):
+            broken[d.name] = f"redraw() returned {made!r}, which is not callable"
+    assert not broken, (
+        "a Plotting leaf's redraw is not the lazy factory the registry calls "
+        f"— ``d.redraw()(ctx)`` cannot reach it: {broken}")
+
+
 @pytest.mark.parametrize("hook", ["on_selection_changed", "on_channel_changed"])
 def test_every_leaf_is_repainted_when_what_it_draws_changes(leaves, hook):
     """Selecting different wells, or a different channel, reaches every figure.

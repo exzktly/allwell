@@ -602,6 +602,7 @@ def redraw_response(ctx) -> None:
 
     draw_response(ctx, ax, data,
                   log_x=log_x,
+                  log_base=resolved_log_base(ctx, ax.figure),
                   title=_figure_title(ctx, data),
                   ylabel=_y_label(ctx, data),
                   variable_chosen=bool(selected_variable_id(ctx)),
@@ -874,3 +875,22 @@ def resolved_log_x(ctx, fig, data) -> bool:
             return bool(figure_prefs(ctx, fig).get("x_log"))
     return spans_enough_decades(
         [p.x for c in data.curves for p in c.points if p.x > 0])
+
+
+def resolved_log_base(ctx, fig) -> float:
+    """The base this figure's log x axis is drawn in — the Properties value.
+
+    Unlike ``x_log`` there is nothing to derive from the data: a base is a way
+    of reading an axis, not a property of the doses, so an unset preference is
+    simply base 10. The renderer needs it in hand because it positions the
+    zero-dose column one step of this base below the lowest real dose, and
+    because setting the scale itself is what records the base on the axis for
+    the restyle that follows.
+    """
+    from well_viewer.core.plot_style import (
+        DEFAULT_LOG_BASE, figure_prefs, log_base_value,
+    )
+
+    with swallow("read this figure's x log base"):
+        return log_base_value(figure_prefs(ctx, fig).get("x_log_base", "10"))
+    return DEFAULT_LOG_BASE

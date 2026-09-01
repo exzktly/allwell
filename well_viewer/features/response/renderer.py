@@ -18,6 +18,7 @@ from well_viewer.features.response.response_compute import (
 _logger = logging.getLogger("well_viewer")
 
 def draw_response(ctx, ax, data, *, log_x: bool | None = None,
+                  log_base: float = 10.0,
                   title: str = "", ylabel: str = "",
                   variable_chosen: bool = True,
                   timepoints_chosen: bool = True,
@@ -28,6 +29,13 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
     decades. Offering it from the data rather than defaulting to linear is the
     difference between a dose series that opens readable and one every user has
     to fix by hand before they can see anything.
+
+    *log_base* is the base that axis is drawn in, from the Properties panel. It
+    does not move the points relative to one another — every base is the same
+    axis up to a constant factor — so what it changes is the spacing the eye
+    reads the gaps against: the minor ticks, and how far off the scale the
+    zero-dose column sits, which is one step of *this* base below the lowest
+    real dose rather than always a decade.
 
     **The caption is drawn whenever there is one**, including on an otherwise
     perfect-looking plot. It is the only place a saved figure carries what it
@@ -55,10 +63,11 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
         return
     positives = [p.x for c in data.curves for p in c.points if p.x > 0]
     use_log = spans_enough_decades(positives) if log_x is None else bool(log_x)
-    # Where a zero (or negative) dose is drawn on a log axis. One decade below
-    # the lowest real dose, so the gap reads as "off the scale" rather than as a
-    # measured point that happens to be small.
-    off_scale_x = zero_position(positives) if use_log else None
+    # Where a zero (or negative) dose is drawn on a log axis. One step of the
+    # axis's own base below the lowest real dose, so the gap reads as "off the
+    # scale" rather than as a measured point that happens to be small — and so
+    # that it stays one tick-step wide whatever base the axis is drawn in.
+    off_scale_x = zero_position(positives, base=log_base) if use_log else None
 
     marks = _CurveStyles(_series_colours(data), _timepoint_styles(data))
     drew_off_scale = False
@@ -68,14 +77,22 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
             drew_off_scale = True
 
     if use_log and positives:
-        ax.set_xscale("log")
+        # Through the shared helper rather than ``ax.set_xscale`` directly, so
+        # the base this figure was drawn in is recorded on the axis. The restyle
+        # that follows every redraw asks for the same scale and the same base
+        # and therefore leaves the axis alone — which is what keeps the dose
+        # ticks below. Setting the scale here by hand left it unstamped, the
+        # restyle rebuilt the scale, and the doses came back as decades.
+        from well_viewer.core.plot_style import apply_axis_log_scale
+        apply_axis_log_scale(ax, "x", True, log_base)
         _tick_the_doses(ax, positives,
                         off_scale_x if drew_off_scale else None,
                         _labels_the_user_typed(data))
-    # ``_aw_force_xlog`` pins it, the way the scatter tab pins its own log/log:
-    # ``apply_export_style_prefs`` re-reads the shared ``x_log`` on every
-    # restyle and would otherwise reset an axis whose scale this tab chose from
-    # the data, taking the off-scale column's ticks with it.
+    # ``_aw_force_xlog`` pins *whether* the axis is logarithmic, the way the
+    # scatter tab pins its own log/log: ``apply_export_style_prefs`` re-reads
+    # the shared ``x_log`` on every restyle and would otherwise reset an axis
+    # whose scale this tab chose from the data. It does not pin the base, which
+    # is the user's on this tab as on every other.
     ax._aw_force_xlog = bool(use_log and positives)
 
     unit = f" ({data.unit})" if data.unit else ""

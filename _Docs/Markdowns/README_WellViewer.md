@@ -1957,9 +1957,10 @@ row, holding five actions:
   edit rather than as a picture.
 - **Properties** — opens a slide-out sidebar that styles the active figure:
   axis label / tick / title sizes, grid on/off + alpha + linestyle, legend,
-  line / marker widths, axis limits + log-scale, layout engine, and an
-  export-profile picker. Axis **limits**, **log-scale** and the **line / marker
-  styling** are scoped to the one plot — the Scatter tab's Cells and
+  line / marker widths, axis limits + log-scale (with the **log base** each
+  logarithmic axis is drawn in — 10, 2, e, or anything else above 1), layout
+  engine, and an export-profile picker. Axis **limits**, **log-scale** and the
+  **line / marker styling** are scoped to the one plot — the Scatter tab's Cells and
   Wells views are separate plots here, so sizing markers for five
   aggregate points won't blow up a fifty-thousand-cell cloud. **Typography,
   grid, legend and ticks stay shared** across tabs, so one setting still gives
@@ -2778,9 +2779,20 @@ the fit is the point of the page and none of it can be worked out again from the
 plate.
 
 If the axis went logarithmic because your doses span two decades rather than
-because you asked, the caption says so and points at Properties. The checkbox
-there shows your own answer, and until you give one it reads "off" while the
-axis is log; setting it either way from then on stands.
+because you asked, the caption says so and points at Properties. Until you give
+an answer of your own the switch there shows what is on screen, so an axis the
+tab chose reads as log rather than contradicting the plot above it; once you set
+it either way, your answer stands and the doses stop deciding.
+
+**Properties → Limits & Scale → Log base** sets what that axis is logarithmic
+in. **10** is the default, **2** and **e** are on the list, and you can type any
+other number above 1. The base does not move the points relative to one another
+— every base is the same axis stretched by a constant — so what it changes is
+the spacing you read the gaps against, and on a response curve it also decides
+where a zero dose sits: one step of your base below the lowest real dose, behind
+the dotted break, rather than always a factor of ten. The field applies to any
+figure's log axes, not only this tab's; on a plot ticked at decades (most of
+them) picking base 2 re-ticks it at the powers of two.
 
 #### Fold change on a response curve
 

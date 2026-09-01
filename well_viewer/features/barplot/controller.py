@@ -320,12 +320,9 @@ def update_bar_tp_menu(ctx) -> None:
         return
 
     # The canonical list plus the 0.0 a schema with no timepoint field resolves
-    # to, from the one helper that answers this — ``timepoint_sync``. The pair
-    # used to be spelled here, and Response Curves asked a third source that
-    # knew about neither, so its picker was empty on exactly the plates this
-    # fallback exists for.
+    # to. The pair was spelled here, and Response Curves asked a third source
+    # knowing neither — so ``timepoint_sync`` now answers this for both tabs.
     from well_viewer.core.timepoint_sync import plottable_timepoints
-
     sorted_tps = plottable_timepoints(ctx)
     tp_strs = [f"{t:.4g}" for t in sorted_tps]
 

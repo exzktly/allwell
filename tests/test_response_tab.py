@@ -1641,3 +1641,96 @@ def test_the_series_default_is_short_enough_not_to_stretch_the_band(tab):
     this one several times the width of its neighbours.
     """
     assert len(rctl.NO_SERIES_LABEL) <= 12, rctl.NO_SERIES_LABEL
+
+
+# ── Group by, driven through the plate-wide control ─────────────────────────
+
+def test_group_by_a_variable_splits_the_curves_rather_than_emptying_the_plot(tab):
+    """The reported defect, driven the way the user drives it.
+
+    *Group by* pools every well holding a value, so grouping by `Cell line`
+    handed this tab one member per cell line holding both doses — no position
+    on a dose axis, refused as "wells disagree", figure blank. Now the members
+    are the cross of the grouping with the axis, and the grouping is what tells
+    the curves apart.
+
+    Written against the state the band's control writes, not the collector's
+    argument, because the defect was that the plate-wide setting never reached
+    this tab's collector at all.
+    """
+    _load_two_series(tab)
+    # The redraw is what fills the X combo and mirrors its pick onto the slice,
+    # which is where the member seam reads the axis from. Dose is the plate's
+    # only Number variable, so it selects itself, exactly as it does on screen.
+    rctl.redraw_response(tab.ctx)
+    tab.ctx.state.plot.group_by_variable = "cl"
+
+    rctl.redraw_response(tab.ctx)
+    data = rctl.response_data(tab.ctx)
+
+    assert [c.series_label for c in data.curves] == ["HeLa", "U2OS"]
+    assert all(len(c.points) == 2 for c in data.curves), (
+        "a grouped curve does not span the dose series"
+    )
+    assert data.omitted == []
+    assert tab.ax.has_data()
+
+
+def test_group_by_and_series_are_two_layers_on_this_tab(tab):
+    """Group by outermost, the tab's own Series inside it.
+
+    Both name the same variable here, which is the case where a naive "use
+    them both" produces `HeLa · HeLa`: the seam drops the duplicate, so the
+    figure is two curves rather than two curves with doubled labels.
+    """
+    _load_two_series(tab)
+    rctl.redraw_response(tab.ctx)
+    tab.ctx.state.plot.group_by_variable = "cl"
+    _pick_series(tab, "cl")
+
+    data = rctl.response_data(tab.ctx)
+
+    assert [c.series_label for c in data.curves] == ["HeLa", "U2OS"]
+    assert data.series_name == "Cell line"
+
+
+def test_the_figure_says_when_a_grouping_could_not_be_crossed(tab):
+    """A grouping that matches wells but shares none with the axis.
+
+    The members fall back to the user's own groups, which is the right answer
+    and a substitution — the band still reads "Group by: Cell line" over curves
+    that are not grouped by it. ``group_by_shortfall`` cannot say this: it asks
+    whether the grouping matched any wells, and here it did. It is the
+    *crossing* that found none, so the sentence has to be its own.
+
+    The fixture is the case where the two sentences differ. An earlier version
+    dropped the cell-line assignments entirely, which makes the grouping match
+    nothing — and ``group_by_shortfall``'s existing sentence for that case
+    already contains both "Cell line" and "your own groups", so the test passed
+    against origin/main with the whole feature absent.
+    """
+    _load_two_series(tab)
+    # Dose on the A row, Cell line on the B row: each variable matches wells,
+    # and no well carries both.
+    variables = tab.ctx.state.selection.variables
+    tab.ctx.state.selection.variables = sv.VariableSet(
+        variables=variables.variables,
+        assignments={"dose": {"A01": "v0", "A02": "v1"},
+                     "cl": {"B01": "hela", "B02": "u2os"}})
+    rctl.redraw_response(tab.ctx)
+    tab.ctx.state.plot.group_by_variable = "cl"
+
+    # Read at the boundary — what the renderer hands the axes — because the
+    # fixture stubs ``apply_ax_style`` to a no-op, so ``ax.get_title()`` is
+    # empty here for every figure and would pass this test with the sentence
+    # deleted.
+    import well_viewer.core.plot_style as ps
+    titles = []
+    tab.monkeypatch.setattr(
+        ps, "apply_ax_style", lambda _ax, title, _ylabel: titles.append(title))
+
+    rctl.redraw_response(tab.ctx)
+
+    assert titles, "the renderer never styled the axes"
+    assert "No well holds both Cell line and Dose" in titles[-1], (
+        f"the figure does not say the grouping was not applied: {titles[-1]!r}")

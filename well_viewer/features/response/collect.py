@@ -55,6 +55,13 @@ Y_METRICS = (Y_MEAN, Y_FRACTION)
 _MIXED_SERIES = "\x00mixed"
 _NO_SERIES = "\x00none"
 
+#: What joins two splitting variables' value ids into one curve key. A
+#: control character rather than a punctuation mark, because a value id is the
+#: user's and could hold anything printable — two variables' ids running
+#: together under a separator one of them contains would silently merge two
+#: curves into one.
+_SERIES_SEP = "\x00+"
+
 
 @dataclass(frozen=True)
 class ResponsePoint:
@@ -319,24 +326,35 @@ def fit_curves(data: ResponseData, model: str, *, fixed_top: float | None = None
 
 
 def collect_response(ctx, variable_id: str, timepoints,
-                    series_id: str = "", y_metric: str = Y_MEAN,
+                    series_id: str | tuple[str, ...] = "", y_metric: str = Y_MEAN,
                     *, val_col: str | None = None) -> ResponseData:
     """Build every curve for *variable_id* at *timepoints*.
 
-    *series_id* names a second variable that splits the members into separate
-    curves — one line per (timepoint, series value). Without it the figure is
-    what it always was, one line per timepoint. A member the series variable
-    does not resolve to a single value is put on its own ``unassigned`` curve
-    rather than dropped or folded into a neighbour, because a member silently
-    joining the wrong condition is the failure this whole split exists to end.
+    *series_id* names the variable — or, as a tuple, the **variables** — whose
+    values split the members into separate curves: one line per (timepoint,
+    value, …). Without any, the figure is what it always was, one line per
+    timepoint. A member a splitting variable does not resolve to a single value
+    is put on its own named curve rather than dropped or folded into a
+    neighbour, because a member silently joining the wrong condition is the
+    failure this whole split exists to end.
 
-    Members come from ``plot_members.response_members`` — over the same
-    ``plot_replicate_sets`` seam every other tab pools through — so a plate
-    grouped by `Cell line` draws one curve set per cell line against `Dose`, and
-    this tab cannot disagree with the Bar tab about what a member is. With no
-    replicate set defined it is one member per well lit on the plate, which is
-    the fallback the Bar and Line tabs already make: a sample variable is
-    assigned per well, so a lone well carries its own dose.
+    Two of them is the shape a plate needs when it varies two things besides
+    the dose: *Group by* is the outer split and this tab's own *Series* the
+    inner, so two cell lines in two media are four curves per timepoint and the
+    legend says which is which. The pair arrives ordered and already filtered
+    by the caller (``plot_members.response_split_variables``), so this function
+    does not decide which control outranks which — it draws what it is given,
+    in the order it is given.
+
+    Members come from ``plot_members.response_members``. With no *Group by* in
+    force that is the same ``plot_replicate_sets`` seam every other tab pools
+    through, so this tab cannot disagree with the Bar tab about what a member
+    is; with no replicate set defined it is one member per well lit on the
+    plate, which is the fallback the Bar and Line tabs already make, since a
+    sample variable is assigned per well and so a lone well carries its own
+    dose. Under a *Group by* it is the **cross** of the axis variable with what
+    splits the curves — one member per (dose, cell line) — because a member
+    pooling every dose of a cell line has no position on a dose axis at all.
 
     The x of a member is the value **all** of its wells share. A member whose
     wells disagree, or that holds a well with no value, gets no point: it is
@@ -370,10 +388,14 @@ def collect_response(ctx, variable_id: str, timepoints,
         return ResponseData()
 
     data = ResponseData(variable_name=variable.name, unit=variable.unit)
-    # A series on the x variable would draw one curve per dose, each holding a
-    # single point — every line one point long, which is not a curve.
-    series_variable = (vset.by_id(series_id)
-                       if series_id and series_id != variable_id else None)
+    # A split on the x variable would draw one curve per dose, each holding a
+    # single point — every line one point long, which is not a curve. Filtered
+    # here as well as in the caller because the headless and export paths call
+    # this directly with whatever they hold.
+    split_ids = (series_id,) if isinstance(series_id, str) else tuple(series_id)
+    series_variables = [v for v in (vset.by_id(sid) for sid in split_ids
+                                    if sid and sid != variable_id)
+                        if v is not None]
     well_paths = ctx.state.dataset.well_paths or {}
     # The tab's own column when it has one, so the ON cutoff, the stats and
     # the axis label all describe the same measurement. ``None`` keeps the
@@ -409,7 +431,7 @@ def collect_response(ctx, variable_id: str, timepoints,
             len(getattr(rset, "wells", ()) or ()) > 1 for rset in members):
         data.pooled_notice = "replicates pooled — this tab has no per-well mode"
     placed = _place_on_x(vset, variable, variable_id, members, well_paths,
-                         series_variable, data)
+                         series_variables, data)
     data.placed = len(placed)
 
     # By x, so each curve's own points come out ascending; the series split
@@ -517,16 +539,16 @@ def collect_response(ctx, variable_id: str, timepoints,
     # declared order. Not sorted alphabetically — the order a user put their
     # values in is the order their legend and their colours should follow, the
     # same rule the value list on the Variables tab is a list for.
-    order = _series_order(series_variable, series_labels)
-    data.series_name = series_variable.name if series_variable is not None else ""
+    order = _series_order(series_variables, series_labels)
+    data.series_name = " · ".join(v.name for v in series_variables)
     data.curves = [
         ResponseCurve(timepoint=t, series_id=sid,
                       series_label=series_labels.get(sid, ""),
                       points=tuple(by_curve.get((t, sid), ())))
         for t in targets for sid in order
-        if not series_id or by_curve.get((t, sid))
+        if not series_variables or by_curve.get((t, sid))
     ]
-    if not series_id:
+    if not series_variables:
         # No series chosen: exactly the one curve per timepoint this tab has
         # always drawn, empty ones included, so "nothing was measured then"
         # still reaches ``empty_reason`` as a curve with no points.
@@ -537,7 +559,7 @@ def collect_response(ctx, variable_id: str, timepoints,
 
 
 def _place_on_x(vset, variable, variable_id, members, well_paths,
-                series_variable, data: ResponseData) -> list[tuple]:
+                series_variables, data: ResponseData) -> list[tuple]:
     """Which members get an x, and why each of the rest does not.
 
     Returns ``[(rset, x, label, series_key, series_label)]`` and records every
@@ -568,42 +590,68 @@ def _place_on_x(vset, variable, variable_id, members, well_paths,
             data.non_numeric.append(rset.name)
             continue
         placed.append((rset, float(value.number), value.label,
-                       *_series_of(vset, series_variable, rset, wells)))
+                       *_series_of(vset, series_variables, wells)))
     return placed
 
 
-def _series_of(vset, variable, rset, wells) -> tuple[str, str]:
-    """``(series key, label)`` for *rset* under *variable*.
+def _series_of(vset, variables, wells) -> tuple[str, str]:
+    """``(curve key, legend label)`` for a member under *variables*.
 
-    ``("", "")`` when no series variable is chosen. A member whose wells
-    disagree, or that holds a well the variable never reached, gets its own
-    named bucket rather than being dropped: the x axis can refuse such a member
-    because a point needs a number, but a *series* is only a grouping, and
-    dropping a fully dosed member for want of a cell-line label would remove
-    real data from the figure over an annotation gap.
+    ``("", "")`` when nothing splits the curves. With more than one the key and
+    the label are each variable's answer joined — ``"hela|dmem"`` keyed,
+    ``"HeLa · DMEM"`` read — so a curve stays one string to the renderer, the
+    fit dict and the legend, and two layers cost no new shape.
+
+    A member whose wells disagree about one of them, or that holds a well the
+    variable never reached, gets its own named bucket rather than being
+    dropped: the x axis can refuse a member because a point needs a number, but
+    a split is only a grouping, and dropping a fully dosed member for want of a
+    cell-line label would take real data off the figure over an annotation gap.
     """
     from well_viewer.domain.sample_variables import MIXED, roll_up
 
-    if variable is None:
+    if not variables:
         return "", ""
-    value_id = roll_up(vset, variable.id, wells) if wells else None
-    if value_id is MIXED:
-        return _MIXED_SERIES, f"{variable.name}: mixed"
-    if value_id is None:
-        return _NO_SERIES, f"no {variable.name}"
-    value = variable.value_by_id(value_id)
-    if value is None:
-        return _NO_SERIES, f"no {variable.name}"
-    return str(value_id), value.label
+    keys, labels = [], []
+    for variable in variables:
+        value_id = roll_up(vset, variable.id, wells) if wells else None
+        value = (variable.value_by_id(value_id)
+                 if value_id is not None and value_id is not MIXED else None)
+        if value_id is MIXED:
+            keys.append(_MIXED_SERIES)
+            labels.append(f"{variable.name}: mixed")
+        elif value is None:
+            keys.append(_NO_SERIES)
+            labels.append(f"no {variable.name}")
+        else:
+            keys.append(str(value_id))
+            labels.append(value.label)
+    return _SERIES_SEP.join(keys), " · ".join(labels)
 
 
-def _series_order(variable, seen: dict[str, str]) -> list[str]:
-    """Series keys in the variable's own value order, oddments last."""
-    if variable is None:
+def _series_order(variables, seen: dict[str, str]) -> list[str]:
+    """Curve keys in the variables' own declared value order, oddments last.
+
+    The product of the declared values, outermost variable slowest — the order
+    a user put their values in is the order their legend and their colours
+    follow, which is the same rule the value list on the Variables tab is a
+    list for. Only combinations a member actually landed in are kept, so a
+    plate where one cell line never got the top dose has no empty curve for it.
+
+    Oddments — a member whose wells disagree, or that the variable never
+    reached — come last, in the order they were placed, which is ascending x.
+    They are named rather than dropped for the reason :func:`_series_of` gives.
+    """
+    from itertools import product
+
+    if not variables:
         return [""]
-    declared = [v.id for v in variable.values if v.id in seen]
-    extra = [k for k in (_MIXED_SERIES, _NO_SERIES) if k in seen]
-    return declared + extra
+    declared = [_SERIES_SEP.join(ids)
+                for ids in product(*([v.id for v in var.values]
+                                     for var in variables))]
+    known = set(declared)
+    return ([key for key in declared if key in seen]
+            + [key for key in seen if key not in known])
 
 
 def _is_number(value) -> bool:

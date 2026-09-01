@@ -290,6 +290,23 @@ def refresh_x_combo(ctx) -> None:
     index = combo.findData(keep)
     combo.setCurrentIndex(index if index >= 0 else 0)
     combo.blockSignals(False)
+    _store_x_variable(ctx)
+
+
+def _store_x_variable(ctx) -> None:
+    """Mirror the X combo's pick onto the slice.
+
+    ``domain/plot_members`` needs the axis variable — under a *Group by* this
+    tab pools into the cross of the axis with what splits its curves — and it
+    cannot read a widget. Written here as well as in the change handler because
+    this function decides the selection too: it re-lists the variables on every
+    redraw and falls back to the first when the user's pick has gone, with
+    signals blocked, so the handler does not fire for the fall-back and the
+    slice would keep naming a variable the combo no longer shows.
+    """
+    slice_ = ctx.state.feature_slice("response")
+    if slice_ is not None:
+        slice_.x_variable_id = selected_variable_id(ctx)
 
 
 def _tp_state(ctx) -> dict:
@@ -447,8 +464,15 @@ def response_data(ctx):
     variable_id = selected_variable_id(ctx)
     if not variable_id:
         return ResponseData()
+    # Both layers, from the seam that owns which is which: *Group by* splits
+    # the curves outermost and the tab's own *Series* inside it. Passing the
+    # Series combo alone here is what made the plate-wide grouping do nothing
+    # on this tab but empty it — the members were pooled across the axis and
+    # every one of them rolled up to "wells disagree".
+    from well_viewer.domain.plot_members import response_split_variables
+
     return collect_response(
-        ctx, variable_id, timepoints_for(ctx), selected_series_id(ctx),
+        ctx, variable_id, timepoints_for(ctx), response_split_variables(ctx),
         Y_FRACTION if response_draws_fraction(ctx) else Y_MEAN,
         val_col=response_val_col(ctx))
 
@@ -496,6 +520,7 @@ def redraw_response(ctx) -> None:
 
 
 def on_x_variable_changed(ctx) -> None:
+    _store_x_variable(ctx)
     redraw_response(ctx)
 
 
@@ -688,10 +713,40 @@ def _figure_title(ctx, data) -> str:
     parts = []
     if data.variable_name:
         parts.append(f"Response vs {data.variable_name}")
-    shortfall = group_by_shortfall(ctx)
-    if shortfall:
-        parts.append(shortfall)
+    for shortfall in (group_by_shortfall(ctx), _uncrossed_grouping(ctx)):
+        if shortfall:
+            parts.append(shortfall)
     return " — ".join(parts)
+
+
+def _uncrossed_grouping(ctx) -> str:
+    """Said when a grouping is chosen and this tab could not use it.
+
+    Under *Group by* this tab pools into the cross of the grouping with the
+    axis variable, and a cross can come out empty — the two are filled on
+    disjoint parts of the plate, so no well holds both. The members then fall
+    back to the user's own groups rather than the figure emptying, which is the
+    right answer and a **substitution**: the band reads "Group by: Cell line"
+    over curves that are not grouped by cell line at all, and nothing else on
+    the page would say so. ``group_by_shortfall`` cannot: it asks whether the
+    grouping matched any wells, and here it did — it is the *crossing* that
+    found none.
+    """
+    from well_viewer.domain.plot_members import crossed_response_sets
+
+    variable_id = str(getattr(ctx.state.plot, "group_by_variable", "") or "")
+    if not variable_id or not selected_variable_id(ctx):
+        return ""
+    if crossed_response_sets(ctx):
+        return ""
+    vset = getattr(ctx.state.selection, "variables", None)
+    variable = vset.by_id(variable_id) if vset is not None else None
+    if variable is None:
+        return ""
+    axis = vset.by_id(selected_variable_id(ctx))
+    axis_name = axis.name if axis is not None else "the x variable"
+    return (f"No well holds both {variable.name} and {axis_name}, so these "
+            f"curves are your own groups rather than {variable.name}")
 
 
 def _log_x_was_asked_for(ctx, fig) -> bool:

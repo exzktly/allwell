@@ -17,6 +17,7 @@ from __future__ import annotations
 from well_viewer.domain.control_ref import ControlRef
 from well_viewer.domain.bar_colors import BAR_COLOR_MODES
 from well_viewer.domain.line_colors import LINE_COLOR_MODES
+from well_viewer.domain.response_colors import RESPONSE_COLOR_MODES
 
 import logging
 from typing import Any
@@ -170,6 +171,12 @@ def snapshot(ctx) -> dict:
         # beside the rest of that tab's settings. Validated against
         # LINE_COLOR_MODES on the way back in.
         "line_color_mode": str(ctx.state.plot.line_color_mode),
+        # The Response Curves colour mode, here for the same reason as the line
+        # one: that tab's own block holds the axis, series and timepoint
+        # choices, and a colour mode is a statement about the whole figure
+        # rather than about which variable is on x. Validated against
+        # RESPONSE_COLOR_MODES on the way back in.
+        "response_color_mode": str(ctx.state.plot.response_color_mode),
         # The time-axis label correction, both halves. Captured because it
         # changes what every time axis in a restored view reads, and a saved
         # plot whose axis said 4, 8, 12 must not come back saying 1, 2, 3 with
@@ -578,6 +585,13 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> list[str]:
             ctx.state.plot.line_color_mode = str(state["line_color_mode"])
         except Exception:
             failed.append("line colours")
+            swallowed()
+
+    if str(state.get("response_color_mode")) in RESPONSE_COLOR_MODES:
+        try:
+            ctx.state.plot.response_color_mode = str(state["response_color_mode"])
+        except Exception:
+            failed.append("response curve colours")
             swallowed()
 
     if "show_value_labels" in state:

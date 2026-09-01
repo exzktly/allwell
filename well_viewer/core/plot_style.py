@@ -611,6 +611,25 @@ AXIS_SCOPED_PREF_KEYS = AXIS_LIMIT_PREF_KEYS | frozenset({
 })
 
 
+def drop_bucket_limits(buckets) -> None:
+    """Remove every axis limit from a mapping of per-panel buckets, in place.
+
+    Split out from :func:`drop_axis_limits` because one caller holds the
+    buckets without the entry around them: the Properties sidebar keeps
+    ``self._axis_buckets`` in memory for the life of the panel and writes it
+    back on the next persist, so its *Auto scale* button has to clear the
+    per-panel copies there rather than in the stored preferences. Sharing the
+    key list is the whole point — a second copy of it is how a panel comes to
+    clear three limits out of four.
+    """
+    if not isinstance(buckets, dict):
+        return
+    for bucket in buckets.values():
+        if isinstance(bucket, dict):
+            for key in AXIS_LIMIT_PREF_KEYS:
+                bucket.pop(key, None)
+
+
 def drop_axis_limits(fig_prefs) -> None:
     """Remove every axis limit from one figure's export-axis entry, in place.
 
@@ -630,12 +649,7 @@ def drop_axis_limits(fig_prefs) -> None:
         return
     for key in AXIS_LIMIT_PREF_KEYS:
         fig_prefs.pop(key, None)
-    buckets = fig_prefs.get("axis_buckets")
-    if isinstance(buckets, dict):
-        for bucket in buckets.values():
-            if isinstance(bucket, dict):
-                for key in AXIS_LIMIT_PREF_KEYS:
-                    bucket.pop(key, None)
+    drop_bucket_limits(fig_prefs.get("axis_buckets"))
 
 # Mark styling is per-figure too, for the same reason but a different argument:
 # the right mark size is a property of what the plot *draws*, not of the

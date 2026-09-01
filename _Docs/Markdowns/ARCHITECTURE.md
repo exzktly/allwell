@@ -9083,6 +9083,21 @@ clear both, and every caller that means it goes through
 that moves bar values onto a different scale. Clearing the flat keys alone left
 the drawn limit exactly where it was.
 
+The Properties sidebar's **Auto scale** button is the third caller, and it holds
+the buckets without the entry around them — `self._axis_buckets` lives on the
+panel for its lifetime and is written back on the next persist — so it shares
+the key list through `drop_bucket_limits`, which `drop_axis_limits` is built on.
+Clearing is only two thirds of the button, though. `apply_export_style_prefs`
+only ever *sets* a limit; nothing in the pass can re-enable autoscale, so an
+axis keeps the last bounds it was handed until its own renderer builds it again.
+So `_autoscale_axes` blanks the four fields, clears every panel's bucket, and
+then redraws the bound figure — the same three steps, and for the same reason,
+as the Reset button beside it. A redraw that did not run is reported to the
+user: the redraw is the button's only visible effect, so a silent failure is
+indistinguishable from a button wired to nothing. The log toggles and the base
+are deliberately untouched — an axis drawn in log stays in log and merely picks
+its own bounds again.
+
 `view_state.restore` cannot stand in for the reset: it early-returns when the
 new plate has no saved block, which is exactly the case where the previous
 plate's settings carry over. A fold-change control naming a group of plate A's

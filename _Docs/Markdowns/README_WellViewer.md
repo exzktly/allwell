@@ -2902,8 +2902,10 @@ t-test** and **Wilcoxon signed-rank**, and a **two-way ANOVA**.
   controls band and the results: the well map on the left, and the group cards
   with **+ Add**, **Clear All** and **↻ Load groups from Home → Replicates** on
   the right. Select a card, then drag wells on the map to assign them to that
-  group. It is on the page rather than in the sidebar so that defining groups
-  never depends on which pane has the focus — see
+  group. On a narrow pane — a small window with the rail open and Split View on
+  — the map moves above the cards rather than shrinking beside them. It is on
+  the page rather than in the sidebar so that defining groups never depends on
+  which pane has the focus — see
   [Saved selections and Split View](#saved-selections-and-split-view).
   Everything else is on the
   same one-row controls band every tab uses — **Channel**, **Property**,

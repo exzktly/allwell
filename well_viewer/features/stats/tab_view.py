@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QLabel, QTextEdit,
+    QComboBox, QLabel, QTextEdit,
     QVBoxLayout, QWidget,
 )
 
@@ -77,17 +77,27 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     import theme
     from well_viewer.core.ui_helpers import make_scrollable_canvas
     from well_viewer.core.ui_helpers import well_plate_tooltip_provider
+    from widgets.responsive_row import ResponsiveRow
     from widgets.plate_geometry import (
         PLATE_MAX_HEIGHT, PLATE_MIN_WIDTH, apply_plate_geometry,
     )
     from widgets.well_plate_selector import WellPlateSelector
 
-    row = parent.layout()
-    if row is None:
-        row = QHBoxLayout(parent)
-        parent.setLayout(row)
-    row.setContentsMargins(0, 0, 0, theme.Spacing.md)
-    row.setSpacing(theme.Spacing.lg)
+    # A row that becomes a column when the pane cannot hold both panels. A plain
+    # QHBoxLayout does not refuse to lay out children it has no room for — it
+    # overlaps and clips them, which on a 350px pane (an 1100x800 window with the
+    # rail open and this pane split) drew the group cards over the map, a title
+    # reading "COMP GROU" and a button cut off mid-word. ResponsiveRow flips on
+    # the panels' own minimums, so it stacks exactly when one line would clip.
+    outer = parent.layout()
+    if outer is None:
+        outer = QVBoxLayout(parent)
+        parent.setLayout(outer)
+    outer.setContentsMargins(0, 0, 0, theme.Spacing.md)
+    outer.setSpacing(0)
+    row = ResponsiveRow(parent, spacing=theme.Spacing.lg)
+    outer.addWidget(row)
+    ctx.widgets.register("_stats_group_row", row)
 
     # ── The plate, on the left ──────────────────────────────────────────────
     plate = WellPlateSelector(parent)
@@ -109,7 +119,11 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     # while the cards beside it were a sliver. The cards are text and scroll, so
     # they are the half that should give.
     plate.setMinimumWidth(PLATE_MIN_WIDTH)
-    row.addWidget(plate, 0, Qt.AlignTop)
+    # Top-aligned beside the cards; centred above them when the row stacks, so a
+    # map narrower than the pane sits under the middle of what it feeds rather
+    # than against one edge.
+    row.add_panel(plate, row_alignment=Qt.AlignTop,
+                  column_alignment=Qt.AlignHCenter)
     ctx.widgets.register("_stats_map_plate", plate)
 
     # ── The groups, on the right ────────────────────────────────────────────
@@ -147,7 +161,8 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     ctx.widgets.register("_stats_grp_canvas", sa)
     ctx.widgets.register("_stats_grp_inner", inner)
 
-    row.addWidget(side, 1)
+    row.add_panel(side, stretch=1)
+    ctx.widgets.register("_stats_group_side", side)
 
     ctx.state.stats.drag_adding = True
     ctx.state.stats.drag_visited = set()

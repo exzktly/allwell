@@ -307,3 +307,20 @@ def test_a_linear_response_figure_still_opens_showing_linear(qtbot, monkeypatch)
     answering "on" to everything."""
     _app, sb, _calls = _sidebar(qtbot, monkeypatch, drawn_log=False)
     assert not _log_toggle(sb, "X log").isChecked()
+
+
+@pytest.mark.qt
+def test_the_panel_writing_to_its_own_widgets_does_not_redraw_per_field(
+        qtbot, monkeypatch):
+    """Restore-defaults, a preset, and an axis switch each move several fields.
+
+    They raise ``_updating`` and redraw once at the end; a log control that
+    asked for its own full redraw on the way past would repaint the figure
+    several times for one click. The same guard ``_on_fields_changed`` opens
+    with, which is why it is asserted here rather than assumed.
+    """
+    _app, sb, calls = _sidebar(qtbot, monkeypatch)
+    sb._updating = True
+    _log_toggle(sb, "X log").setChecked(True)
+    _base_field(sb, "X").setCurrentText("2")
+    assert calls == [], f"the panel redrew while writing to itself: {calls}"

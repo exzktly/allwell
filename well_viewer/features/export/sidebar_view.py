@@ -1065,8 +1065,8 @@ class ExportStyleSidebar(QWidget):
         # nothing at all. Every figure redraws here for the same reason, and
         # each redraw ends in a restyle anyway, so the lightweight path is not
         # lost — it is merely no longer the only thing that runs.
-        xlog_cb.toggled.connect(lambda _=False: self._redraw_bound_figure())
-        ylog_cb.toggled.connect(lambda _=False: self._redraw_bound_figure())
+        xlog_cb.toggled.connect(lambda _=False: self._redraw_for_a_user_edit())
+        ylog_cb.toggled.connect(lambda _=False: self._redraw_for_a_user_edit())
         add_stacked(s_lim, "Log scale", hrow(xlog_cb, ylog_cb))
 
         # The base each log axis is drawn in. Editable rather than a fixed list:
@@ -1093,9 +1093,9 @@ class ExportStyleSidebar(QWidget):
         # the axis's steps (the Response tab puts its zero-dose column one step
         # below the lowest real dose) can only re-place it by drawing again.
         _xbase_cb.currentTextChanged.connect(
-            lambda _t: self._redraw_bound_figure())
+            lambda _t: self._redraw_for_a_user_edit())
         _ybase_cb.currentTextChanged.connect(
-            lambda _t: self._redraw_bound_figure())
+            lambda _t: self._redraw_for_a_user_edit())
         add_stacked(s_lim, "Log base", hrow(QLabel("X"), _xbase_cb,
                                             QLabel("Y"), _ybase_cb,
                                             spacing=sp.xs))
@@ -1563,6 +1563,20 @@ class ExportStyleSidebar(QWidget):
 
     def _is_line_fig(self) -> bool:
         return getattr(self._app, "_line_fig", None) is self._fig
+
+    def _redraw_for_a_user_edit(self) -> None:
+        """Redraw the bound figure, unless the panel is writing to itself.
+
+        ``_updating`` is raised while the panel pushes values *into* its own
+        widgets — restoring defaults, applying a preset, switching the targeted
+        axis — and every one of those moves several fields at once. Without this
+        the log controls would each ask for a full redraw of the figure on the
+        way past, and the caller redraws once at the end anyway. It is the same
+        guard ``_on_fields_changed`` opens with, for the same reason.
+        """
+        if self._updating:
+            return
+        self._redraw_bound_figure()
 
     def _log_toggle_seed(self, key: str, which: str, default: bool) -> bool:
         """What the X/Y log toggle should show when the panel opens.

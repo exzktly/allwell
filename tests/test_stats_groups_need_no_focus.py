@@ -46,6 +46,26 @@ def _split_plots_left_statistics_right(app):
     return app._ctx
 
 
+def _split_statistics_beside_segmentation(app):
+    """Statistics focused, beside a pane that *does* own a rail section.
+
+    The partner matters and this file originally got it wrong. Plotting's
+    section is ``_sidebar_main_frame``, which is also the fallback the rail's
+    arbitration reaches for when the focused pane contributes nothing — so
+    pairing Statistics with Plotting passes whether the rule holds or not. A
+    partner with a section of its own is what separates "the picker went to the
+    other pane" from "the picker happened to be the fallback".
+    """
+    from well_viewer.core.split_view import enter_split, focus_split
+    from well_viewer.features.image_browser.controller import show_image_browser_subtab
+    assert show_image_browser_subtab(app._ctx, "Segmentation")
+    app._notebook.setCurrentByName("Statistics")
+    enter_split(app._ctx, "Statistics", "Image Browser")
+    focus_split(app._ctx, "Statistics")
+    assert "Segmentation" in app._visible_centre_tabs()
+    return app._ctx
+
+
 def _rail_plates(ctx):
     """Every well picker mounted in the shared rail slot, hidden or not."""
     from widgets.well_plate_selector import WellPlateSelector
@@ -169,6 +189,43 @@ def test_focusing_statistics_leaves_the_rail_to_the_other_pane(loaded_app):
         "focusing the Statistics pane took the plot selector off the rail")
     assert not ctx.widgets.get("_stats_map_plate").isHidden(), (
         "the comparison-group plate went away when its pane took the focus")
+
+
+@pytest.mark.slow
+def test_a_sectionless_pane_hands_the_picker_over_rather_than_blanking_it(loaded_app):
+    """The case the Plotting pairing above cannot see.
+
+    A focused pane that contributes no sidebar section has no claim on the one
+    rail picker, and the arbitration must pass it to the visible pane that does
+    — not to the shared frame, which is hidden here and leaves the rail with no
+    picker at all. Measured before the fix: the rail carried Segmentation's
+    section, its "Click one well to load its images" line, and nothing to click.
+    That is this pane's version of the defect the whole change is about.
+    """
+    from well_viewer.core.rail_plate import section_of
+
+    app = loaded_app
+    ctx = _split_statistics_beside_segmentation(app)
+
+    shown = [p for p in _rail_plates(ctx) if not p.isHidden()]
+    assert len(shown) == 1, (
+        f"{len(shown)} well pickers on the rail while the Segmentation pane is "
+        f"on screen with its section shown; it should have exactly its own")
+    assert section_of(shown[0]) is ctx.widgets.get("_sidebar_preview_frame"), (
+        "the picker on the rail is not the one belonging to the pane whose "
+        "section is showing")
+
+
+@pytest.mark.slow
+def test_the_group_editor_survives_that_hand_over(loaded_app):
+    """Handing the rail to the other pane must not be read as handing the
+    editor over too: it is on the Statistics page and owes the rail nothing."""
+    app = loaded_app
+    ctx = _split_statistics_beside_segmentation(app)
+
+    plate = ctx.widgets.get("_stats_map_plate")
+    assert not plate.isHidden()
+    assert plate not in _rail_plates(ctx)
 
 
 @pytest.mark.slow

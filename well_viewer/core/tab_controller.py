@@ -216,8 +216,20 @@ def on_tab_change(ctx, _e=None) -> None:
     # When it inherits everything — two plot tabs sharing ``_sidebar_main_frame``
     # — there is one frame and therefore one plate, and the main frame is the
     # right thing to keep.
+    #
+    # ``_newly`` is also empty when the focused pane contributes *no* section,
+    # which Statistics does: its comparison-group editor is on its own page. The
+    # main frame is the wrong answer there, because it is hidden too, and
+    # ``_show`` below then holds for nothing at all — measured with Statistics
+    # focused beside Segmentation, the rail carried its section's "Click one
+    # well to load its images" and no plate to click, which is this pane's
+    # version of the defect that moved the editor off the rail in the first
+    # place. A sectionless focused pane has no claim on the picker, so it passes
+    # to whichever visible pane does have one; the main frame stays the last
+    # resort, and on a single sectionless page it is hidden, which is how the
+    # rail correctly ends up with no picker at all.
     _newly = [f for f in _focused_frames if f not in _other_frames]
-    _keep = _newly or [ctx.widgets.get_or_none("_sidebar_main_frame")]
+    _keep = _newly or _other_frames or [ctx.widgets.get_or_none("_sidebar_main_frame")]
     for _frame in _frames:
         _show = _frame in _keep and _frame in _focused_frames
         for _plate in _section_plates(ctx, _frame):

@@ -28,7 +28,7 @@ what it was while each section built its plate into itself. The unfocused
 section then collapsed by the height of the picker it was no longer showing, and
 everything below it slid up: the plot-groups drawer moved 333px between the two
 focus states, and reserving the missing picker's space instead put back a
-picker-shaped hole. All four plates live in one slot above the sections now, so
+picker-shaped hole. All three plates live in one slot above the sections now, so
 neither happens — see ``well_viewer/core/rail_plate.py``.
 """
 

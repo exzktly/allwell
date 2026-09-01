@@ -1,9 +1,14 @@
 """One sizing/alignment rule for every :class:`~widgets.well_plate_selector.WellPlateSelector`.
 
-Ten places in the app build a plate map — Review's rail pickers, the Statistics
-comparison-group editor, the Sample-Definitions "New Replicate Set" dialog, the
-saved-selections compose popover, the Subset tool's well picker, and the status
-map inside every run dashboard (``widgets/plate_progress.py``). They differ in what the *host* does
+Thirteen places in the app build a plate map — Review's three rail pickers
+(shared, Segmentation, Image Table), the Statistics comparison-group editor,
+Batch Export's group editor, Home's plate panel and its Variables canvas, the
+Sample-Definitions replicate-set panel and its "New Replicate Set" dialog, the
+saved-selections compose popover, the OME import and Subset tools, and the
+status map inside every run dashboard (``widgets/plate_progress.py``). Counted
+from the ``apply_plate_geometry`` call sites rather than remembered: this
+sentence has been stale twice, and the count is the one part of it a reader
+takes on trust. They differ in what the *host* does
 with the plate (which signals it wires, which wells it enables, whether it
 paints run states onto it), and they used to differ in how big the plate was
 allowed to be, because each one set its own caps and its own alignment. Three
@@ -66,6 +71,13 @@ from PySide6.QtWidgets import QSizePolicy
 PLATE_MAX_WIDTH = 330
 
 #: Narrowest a plate may be squeezed to by a host that has to share its width.
+#: Also the app's statement of how small a well may get before a plate stops
+#: being something you can drag on: twelve columns in this width is about 18 px
+#: of well, and ``PLATE_MIN_WIDTH / 12`` is the figure to compare a plate's own
+#: cell size against. There is deliberately no matching height floor — a host
+#: that cannot give a plate its height should scroll, and the one place this
+#: came up (the Statistics comparison-group editor) does exactly that, which
+#: made a ``setMinimumHeight`` beside it measurably dead.
 #: Only relevant to a plate laid out *beside* something else — the rail's is
 #: alone in its slot and an ``editor`` plate on a full-width page never reaches
 #: this. The grid sizes its cells to ``min(width / 12, height / 8)``, so 12

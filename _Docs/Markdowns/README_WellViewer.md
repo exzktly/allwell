@@ -2903,9 +2903,12 @@ t-test** and **Wilcoxon signed-rank**, and a **two-way ANOVA**.
   with **+ Add**, **Clear All** and **↻ Load groups from Home → Replicates** on
   the right. Select a card, then drag wells on the map to assign them to that
   group. On a narrow pane — a small window with the rail open and Split View on
-  — the map moves above the cards rather than shrinking beside them. It is on
-  the page rather than in the sidebar so that defining groups never depends on
-  which pane has the focus — see
+  — the map moves above the cards rather than shrinking beside them, and the
+  page scrolls rather than squeezing either. **Click the section header to fold
+  the editor away** once the groups are defined; folded, it still says how many
+  there are, and the results get the height back. It is on the page rather than
+  in the sidebar so that defining groups never depends on which pane has the
+  focus — see
   [Saved selections and Split View](#saved-selections-and-split-view).
   Everything else is on the
   same one-row controls band every tab uses — **Channel**, **Property**,
@@ -3681,10 +3684,10 @@ rather than a single panel.
     says **edited — press Generate** so it is clear the images below it are not
     yet of what the shelf now describes.
   - A plot saved with **statistics** comes back with its comparison groups in
-    the Statistics sidebar, not only in the test it re-runs. The groups are
-    listed and coloured on the group-editor plate exactly as if you had defined
-    them, so you can see what the restored brackets were computed from and edit
-    it from there.
+    the editor on the Statistics page, not only in the test it re-runs. The
+    groups are listed and coloured on the group-editor map exactly as if you
+    had defined them, so you can see what the restored brackets were computed
+    from and edit it from there.
   - **Every comparison you had run is saved, not just the last one.** The
     Statistics tab keeps comparisons side by side — a second channel, a second
     statistic, a second timepoint each add one rather than replacing what was

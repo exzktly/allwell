@@ -5,13 +5,11 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QLabel, QTextEdit,
+    QComboBox, QFrame, QLabel, QTextEdit,
     QVBoxLayout, QWidget,
 )
 
-from well_viewer.core.ui_helpers import (
-    btn_primary, btn_secondary, build_section_header,
-)
+from well_viewer.core.ui_helpers import btn_primary, btn_secondary
 from widgets.labeled_combo import LabeledComboBox
 from widgets.page_body import build_page_body
 from well_viewer.features.stats.controller import stats_active_group
@@ -78,6 +76,7 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     from well_viewer.core.ui_helpers import make_scrollable_canvas
     from well_viewer.core.ui_helpers import well_plate_tooltip_provider
     from widgets.responsive_row import ResponsiveRow
+    from widgets.collapsible_section import CollapsibleSection
     from widgets.plate_geometry import (
         PLATE_MAX_HEIGHT, PLATE_MIN_WIDTH, apply_plate_geometry,
     )
@@ -95,12 +94,27 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
         parent.setLayout(outer)
     outer.setContentsMargins(0, 0, 0, theme.Spacing.md)
     outer.setSpacing(0)
-    row = ResponsiveRow(parent, spacing=theme.Spacing.lg)
-    outer.addWidget(row)
+
+    # Collapsible, because defining the groups is a phase of the work rather
+    # than a constant: once they are built the strip is a 220px band the user
+    # reads past on the way to the results, and folding it hands that height to
+    # the results without leaving the page. The header's count is what a folded
+    # section still has to say — a collapsed section that reports nothing is a
+    # section the user has to open to find out whether they need it open.
+    section = CollapsibleSection("Comparison groups", expanded=True)
+    count_lbl = QLabel("", section)
+    count_lbl.setObjectName("Muted")
+    section.setValueWidget(count_lbl)
+    ctx.widgets.register("_stats_group_count_lbl", count_lbl)
+    outer.addWidget(section)
+    ctx.widgets.register("_stats_group_section", section)
+
+    row = ResponsiveRow(section, spacing=theme.Spacing.lg)
+    section.addWidget(row)
     ctx.widgets.register("_stats_group_row", row)
 
     # ── The plate, on the left ──────────────────────────────────────────────
-    plate = WellPlateSelector(parent)
+    plate = WellPlateSelector(section)
     plate.setDragSelectEnabled(True)
     plate.setRowColumnSelectable(True)
     plate.setEnabledWells([])
@@ -118,6 +132,16 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     # open and the pane split, that left the map 167px wide — 13px of well —
     # while the cards beside it were a sliver. The cards are text and scroll, so
     # they are the half that should give.
+    # Width only. The grid sizes its cells to ``min(width / 12, height / 8)``,
+    # so a height floor would matter if anything here compressed the map
+    # vertically — and nothing does: the section hugs its content and the page
+    # scrolls (``ResponsiveScroll``). Measured at nine window sizes with and
+    # without a ``setMinimumHeight``, the map's geometry was identical in every
+    # one, which makes it a line that reads like a safeguard and guards nothing.
+    # ``tests/test_stats_group_editor_layout`` asserts the *outcome* — that a
+    # cell never falls below what ``PLATE_MIN_WIDTH`` allows — so the day
+    # something does compress the map, that fails rather than this quietly
+    # holding.
     plate.setMinimumWidth(PLATE_MIN_WIDTH)
     # Top-aligned beside the cards; centred above them when the row stacks, so a
     # map narrower than the pane sits under the middle of what it feeds rather
@@ -127,41 +151,21 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     ctx.widgets.register("_stats_map_plate", plate)
 
     # ── The groups, on the right ────────────────────────────────────────────
-    side = QWidget(parent)
+    side = QWidget(section)
     col = QVBoxLayout(side)
     col.setContentsMargins(0, 0, 0, 0)
-    col.setSpacing(0)
+    col.setSpacing(theme.Spacing.sm)
 
-    hdr = build_section_header(
-        side,
-        "COMPARISON GROUPS",
-        hint="Select a group card, then drag wells on the map to assign them.",
-        buttons=(
-            btn_secondary(side, "Clear All", partial(stats_grp_clear_all, ctx)),
-            btn_primary(side, "+ Add", partial(stats_grp_add, ctx)),
-        ),
-    )
-    col.addWidget(hdr)
-
-    # Pull the comparison groups straight from the shared Sample-Definition
-    # sets (S1). Its own row, because the label is long enough that a narrow
-    # pane would truncate it beside the header's two buttons — but hugging its
-    # text rather than filling the row. On the rail, where it used to live,
-    # full width was the house style and 330px was the ceiling; on a page the
-    # same rule made an 884px bar out of a secondary action, three times the
-    # width of the "+ Add" it is an alternative to and the heaviest thing in
-    # the editor.
-    from_defs_row = QWidget(side)
-    from_defs_layout = QHBoxLayout(from_defs_row)
-    from_defs_layout.setContentsMargins(0, 0, 0, 0)
-    from_defs_layout.setSpacing(0)
-    from_defs_btn = btn_secondary(
-        from_defs_row, "↻ Load groups from Home → Replicates",
-        partial(stats_resync_from_sample_defs, ctx),
-    )
-    from_defs_layout.addWidget(from_defs_btn)
-    from_defs_layout.addStretch(1)
-    col.addWidget(from_defs_row)
+    # The instruction leads, because it names the order the two gestures go in
+    # and the first of them is the one a user does not guess. It is a label of
+    # its own rather than a section header's hint: the section title now lives
+    # on the collapsible's header, which toggles on click and so cannot also
+    # carry text and buttons.
+    hint = QLabel("Select a group below, then drag wells on the map to "
+                  "assign them to it.", side)
+    hint.setObjectName("Muted")
+    hint.setWordWrap(True)
+    col.addWidget(hint)
 
     sa, inner = make_scrollable_canvas(side)
     # Bounded by the plate it sits beside, so however many groups are defined
@@ -172,6 +176,29 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     col.addWidget(sa, 1)
     ctx.widgets.register("_stats_grp_canvas", sa)
     ctx.widgets.register("_stats_grp_inner", inner)
+
+    # The actions sit at the foot of the list they act on. On the rail they were
+    # in the section header, which put "+ Add" at the far end of the panel from
+    # the cards it appends to — and in a split pane the title then wrapped to
+    # two lines underneath them.
+    # A wrapping row, not a QHBoxLayout: a box layout's minimum width is the
+    # sum of its buttons, so three of them made this column about 370px at its
+    # narrowest and pushed the map out of the row beside it at a pane width
+    # where the two still fitted. It comes from ``widgets/`` rather than being a
+    # ``FlowLayout`` built here, which is what ``test_control_band_adoption``
+    # asks of a module on the band — the last thing this page needs is a second
+    # thing that looks like a control row.
+    from widgets.button_row import ButtonRow
+    actions = ButtonRow(side)
+    actions.add(btn_primary(actions, "+ Add group", partial(stats_grp_add, ctx)))
+    actions.add(btn_secondary(actions, "Clear All",
+                              partial(stats_grp_clear_all, ctx)))
+    # Pull the comparison groups straight from the shared Sample-Definition
+    # sets (S1).
+    actions.add(btn_secondary(actions, "↻ Load from Replicates",
+                              partial(stats_resync_from_sample_defs, ctx)))
+    col.addWidget(actions)
+    ctx.widgets.register("_stats_group_actions", actions)
 
     row.add_panel(side, stretch=1)
     ctx.widgets.register("_stats_group_side", side)
@@ -226,11 +253,29 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     # band: they are all scope (which cells the test runs on and what it
     # measures), and Run is the action.
     band, body = build_page_body(parent, content_margins=(12, 12, 12))
-    layout = body.layout()
+    body_layout = body.layout()
+    body_layout.setSpacing(0)
+
+    # Everything below the band scrolls. Three things on this page have a real
+    # minimum height now — the comparison-group map, two rows of group cards,
+    # and the results panel — and on a short pane in Split View their sum
+    # exceeds what is there. Something has to give, and the honest answer is
+    # that the page is longer than the window rather than that the map is nine
+    # pixels of row. Horizontal scrolling is off, so width still drives the
+    # editor's side-by-side / stacked flip instead of being escaped sideways.
+    from widgets.responsive_row import ResponsiveScroll
+    scroll = ResponsiveScroll(body)
+    scroll.setFrameShape(QFrame.NoFrame)
+    page = QWidget(scroll)
+    layout = QVBoxLayout(page)
+    layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(0)
+    scroll.setWidget(page)
+    body_layout.addWidget(scroll)
+    reg.register("_stats_page_scroll", scroll)
     # ``build_stats_tab`` inserts the comparison-group editor at the top of this
     # host once the rest of the page exists; it needs the handle to do so.
-    reg.register("_stats_page_body", body)
+    reg.register("_stats_page_body", page)
     stats_ctrl = reg.register("_stats_ctrl", band)
 
     channel_cb = reg.register("_stats_channel_cb", QComboBox())
@@ -316,7 +361,7 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     stats_ctrl.add_action(btn_primary(stats_ctrl, "Run test", ctx.runtime.stats.run))
     stats_refresh_fov_indicator(ctx)
 
-    fig_frame = reg.register("_stats_fig_frame", QWidget(parent))
+    fig_frame = reg.register("_stats_fig_frame", QWidget(page))
     ff_l = QVBoxLayout(fig_frame)
     ff_l.setContentsMargins(0, 0, 0, 0)
 
@@ -333,7 +378,7 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     # sees the controls + result text only, no empty canvas.
     fig_frame.setVisible(False)
 
-    res_frame = reg.register("_stats_res_frame", QWidget(parent))
+    res_frame = reg.register("_stats_res_frame", QWidget(page))
     rl = QVBoxLayout(res_frame)
     rl.setContentsMargins(0, 6, 0, 6)
     result_text = reg.register("_stats_result_text", QTextEdit(res_frame))
@@ -363,13 +408,13 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
         if n == 1:
             return EmptyReason(
                 "One comparison group so far.",
-                "Add a second group to run a test — + Add under Comparison "
-                "groups above.",
+                "Add a second group to run a test — + Add group under "
+                "Comparison groups above.",
             )
         return EmptyReason(
             "No comparison groups yet.",
-            "Click + Add under Comparison groups above, select the card it "
-            "makes, then drag wells on the map beside it.",
+            "Click + Add group under Comparison groups above, select the card "
+            "it makes, then drag wells on the map beside it.",
         )
 
     layout.addWidget(wrap_with_empty_state(

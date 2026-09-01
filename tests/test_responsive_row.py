@@ -121,10 +121,89 @@ def test_each_panel_takes_the_alignment_for_the_orientation(qapp):
 
 
 def test_an_empty_row_is_not_a_flip(qapp):
-    """Nothing to measure, so nothing to decide — and no division by a panel
-    count of zero in ``needed_width``."""
+    """Nothing to measure, so nothing to decide.
+
+    ``spacing=8``, and that is the whole test. With the default ``spacing=0``
+    the unguarded arithmetic — ``0 + spacing * (0 - 1)`` — also comes out 0, so
+    deleting both empty-row guards left this file green and the fixture was
+    proving the guards were there by agreeing with their absence.
+    """
     from widgets.responsive_row import ResponsiveRow
-    row = ResponsiveRow()
-    assert row.needed_width() == 0
+    row = ResponsiveRow(spacing=8)
+    assert row.needed_width() == 0, "one negative gap for the panels not there"
     row.apply_orientation(avail=0)
     assert not row.is_stacked()
+
+
+def test_a_hidden_panel_is_not_charged_for_width(row_with_two_panels):
+    """A layout reserves nothing for a widget it is not drawing, so neither may
+    the measurement — counting a hidden panel stacks a row with room to spare,
+    and a host that shows and hides one is the caller most likely to be sitting
+    near the boundary."""
+    row, _left, right = row_with_two_panels
+    right.hide()
+    assert row.needed_width() == 100, (
+        "the hidden panel is still being charged for, and so is the gap that "
+        "would have been beside it")
+    row.apply_orientation(avail=150)
+    assert not row.is_stacked(), (
+        "a 100px panel stacked in 150px of room because of a panel that is not "
+        "on screen")
+
+
+def test_adding_a_panel_re_decides_the_orientation(qapp):
+    """A row already sized and then handed another panel needs more width than
+    the decision on file was made with. Nothing else asks again until the next
+    resize, which may never come."""
+    from PySide6.QtWidgets import QWidget
+    from widgets.responsive_row import ResponsiveRow
+
+    row = ResponsiveRow(spacing=8)
+    first = QWidget()
+    first.setMinimumWidth(200)
+    row.add_panel(first)
+    row.resize(300, 100)
+    row.apply_orientation()
+    assert not row.is_stacked()
+
+    second = QWidget()
+    second.setMinimumWidth(200)
+    row.add_panel(second)
+    assert row.is_stacked(), (
+        "the second panel arrived on a row that had already decided it fits, "
+        "and the row went on clipping until something else resized it")
+
+
+def test_a_row_reads_the_width_of_the_scroll_area_holding_it(qapp):
+    """The case the row's own width cannot report.
+
+    A scroll area with horizontal scrolling off sizes its inner widget to at
+    least that widget's minimum, so once the row is too wide the whole page is
+    too wide and every width up the chain repeats the same inflated number. The
+    viewport is the one honest measurement, and without it the flip that would
+    relieve the overflow never fires.
+    """
+    from PySide6.QtWidgets import QVBoxLayout, QWidget
+    from widgets.responsive_row import ResponsiveRow, ResponsiveScroll
+
+    scroll = ResponsiveScroll()
+    host = QWidget()
+    QVBoxLayout(host).setContentsMargins(0, 0, 0, 0)
+    row = ResponsiveRow(spacing=8)
+    for _ in range(2):
+        panel = QWidget()
+        panel.setMinimumWidth(300)
+        row.add_panel(panel)
+    host.layout().addWidget(row)
+    scroll.setWidget(host)
+    scroll.resize(400, 300)
+    scroll.show()
+
+    assert row.width() >= row.needed_width(), (
+        "the row is not pinned wider than its viewport, so this test is not "
+        "measuring the case it was written for")
+    scroll.refresh_rows()
+    assert row.is_stacked(), (
+        f"the row is {row.width()}px inside a {scroll.viewport().width()}px "
+        f"viewport and did not stack — it read its own inflated width")
+

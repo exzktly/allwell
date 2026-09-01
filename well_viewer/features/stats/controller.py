@@ -846,6 +846,7 @@ import copy as _copy
 
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
+from widgets.plate_geometry import PLATE_MAX_WIDTH
 from well_viewer.domain.plate_layout import WELL_COLORS
 from well_viewer.domain.batch_models import BarGroup
 from well_viewer.core.ui_helpers import ask_name_dialog as _ask_name_dialog, clear_layout as _clear_layout
@@ -956,6 +957,7 @@ def stats_refresh_group_list(ctx) -> None:
     # offered. The same call keeps the two variable pickers current.
     with swallow("refresh the Statistics test inputs after a group change"):
         refresh_stats_test_inputs(ctx)
+    _stats_refresh_group_count(ctx)
     container = ctx.widgets.get("_stats_grp_inner")
     layout = container.layout()
     if layout is None:
@@ -964,7 +966,7 @@ def stats_refresh_group_list(ctx) -> None:
         layout.setSpacing(2)
     _clear_layout(layout)
     if not ctx.state.stats.groups:
-        lbl = QLabel("No groups.  Click + Add to create one.")
+        lbl = QLabel("No groups.  Click + Add group to create one.")
         lbl.setObjectName("Muted")
         layout.addWidget(lbl)
         stats_refresh_map(ctx)
@@ -1007,7 +1009,61 @@ def stats_refresh_group_list(ctx) -> None:
         card.mousePressEvent = _click_select
         layout.addWidget(card)
     layout.addStretch(1)
+    _stats_floor_group_list(ctx, layout)
     stats_refresh_map(ctx)
+
+
+def _stats_refresh_group_count(ctx) -> None:
+    """Say how many groups there are on the section header.
+
+    The editor folds away (``CollapsibleSection``), and a folded section that
+    reports nothing is one the user has to unfold to find out whether they need
+    it unfolded. It is also the count the tab's own gate is on — two groups, not
+    one — so the header states the same number the results panel is waiting for.
+    """
+    lbl = ctx.widgets.get_or_none("_stats_group_count_lbl")
+    if lbl is None:
+        return
+    n = len(ctx.state.stats.groups or [])
+    lbl.setText("" if n == 0 else f"{n} group{'s' if n != 1 else ''}")
+
+
+def _stats_floor_group_list(ctx, layout) -> None:
+    """Give the group list the room two whole cards need, in both dimensions.
+
+    **Two rows tall**, because two groups is what the tab needs to run anything
+    and what its own empty state asks for — a list showing one card under a
+    sentence reading "define two comparison groups" is the software disagreeing
+    with itself.
+
+    **One card wide**, because the list is the panel the editor's responsive row
+    measures when it decides whether the map still fits beside it. Left to the
+    widest button in the action row underneath, that minimum was about 180px and
+    the row happily stayed on one line with the cards at 160 — a name, a count
+    and two buttons in a strip too narrow for them. The floor is what a card
+    asks for, so the row stacks when a card would be cut instead of when a
+    button would.
+
+    Both come from a card this pass actually built rather than from a number: a
+    card is a dot, a name, a muted count and two buttons at whatever the current
+    font and DPI make of them, and every literal here would be wrong on a
+    display it was not measured on. The width is capped at the plate's own, so
+    one long group name cannot push the map out of the row.
+    """
+    sa = ctx.widgets.get_or_none("_stats_grp_canvas")
+    if sa is None:
+        return
+    cards = [layout.itemAt(i).widget() for i in range(layout.count())]
+    cards = [w for w in cards if w is not None]
+    if not cards:
+        return
+    hints = [w.sizeHint() for w in cards]
+    margins = layout.contentsMargins()
+    row_h = max(h.height() for h in hints)
+    floor_h = 2 * row_h + layout.spacing() + margins.top() + margins.bottom()
+    sa.setMinimumHeight(min(floor_h, sa.maximumHeight()))
+    card_w = max(h.width() for h in hints) + margins.left() + margins.right()
+    sa.setMinimumWidth(min(card_w, PLATE_MAX_WIDTH))
 
 
 def stats_select_grp(ctx, idx: int) -> None:

@@ -161,10 +161,23 @@ def write(state, doc: dict) -> None:
         state.dataset.persistence_doc_degraded = False
     doc.setdefault("schema_version", SCHEMA_VERSION)
     try:
-        atomic_write_json(p, doc)
+        # ``deferrable``: inside a debounced autosave the file operations go to
+        # the background writer, because this is nine persistence domains'
+        # write path and every one of them was paying it on the GUI thread.
+        # The JSON is serialised before this returns, which is what makes it
+        # safe to hand over a dict that *is* the live cache assigned below.
+        # Outside an autosave — an explicit save, a test — nothing is deferred
+        # and this raises as it always did.
+        atomic_write_json(p, doc, deferrable=True)
     except OSError as exc:
         _logger.warning("Failed to write %s: %s", p, exc)
         return
+    # A deferred write has not landed yet, so this is the optimistic half: the
+    # cache takes the doc the user's edit produced, and a write that later
+    # fails is reported by the writer rather than by rolling the cache back.
+    # Rolling back would be worse — ``read`` would then hand the *pre-edit* doc
+    # to the next ``set_section``, so one unwritable moment would erase the
+    # edit from every subsequent write too.
     state.dataset.persistence_doc = doc
 
 

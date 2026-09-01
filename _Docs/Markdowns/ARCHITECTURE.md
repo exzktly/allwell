@@ -3385,20 +3385,30 @@ format values and log, to the microseconds between the final comparison and
 because a concurrent write re-runs it; the sample-definitions writer keeps its
 pre-v2 backup to one copy per call with a `backed_up` flag for exactly that
 reason, and takes the backup *inside* the mutate so the "was the old block v1?"
-test is made against the bytes actually being replaced. Three writers route
+test is made against the bytes actually being replaced. Four writers route
 through it — `persistence/smfish.py`'s `save_threshold` and `clear_thresholds`,
-`domain/gating_state.save_gating_to_pipeline_info`, and
-`domain/sample_definitions.save_to_pipeline_info`. A refusal comes back as
-`False`; the sample-definitions caller turns that into the `OSError` its own two
-callers already key off, so an autosave cannot fail silently.
+`domain/gating_state.save_gating_to_pipeline_info`,
+`domain/sample_definitions.save_to_pipeline_info`, and
+`persistence/sample_variables.save_to_data_dir`.
+
+A refusal comes back as `False`, and each writer turns that into something the
+user can see rather than a silent no-op: the sample-definitions writer raises
+the `OSError` its explicit-Save caller keys off, the variables writer logs a
+WARNING saying the block stays in memory only. Where the write has been handed
+to the background writer (below) there is no caller left to return `False` to,
+so those two checks travel *with* the write — each writer wraps the call and
+the checks that read its outcome in one `_write()` callable, which is what keeps
+the pre-v2 backup's abort from quietly becoming a no-op — and the report comes
+out on the status line and in the log instead of as a return value.
 
 Both `atomic_write_json` and `update_json_atomic` take `durable`, defaulting to
 True. `durable=False` skips the `fsync` before the replace: the replace is
 atomic either way so no reader ever sees a half-written file, and what is given
 up is only the guarantee that the bytes reached the platter before the call
-returns. The debounced sample-definitions autosave passes False because it runs
-on the GUI thread every time the user stops typing a well label, where an fsync
-per pause on a network share is a visible stall.
+returns. Every debounced autosave passes False: it fires each time the
+user stops typing or clicking, and the value is rewritten seconds later anyway,
+so paying an fsync per pause on a network share buys a durability guarantee
+nothing here needs.
 
 The registry owns the **one** debounced-save path — `schedule_save`
 with a shared pending-set — so signal storms (ratio-panel field edits, heatmap
@@ -3408,7 +3418,64 @@ identical per-domain `schedule_save`/`_flush` pairs and their
 `_<name>_save_pending` flags. Auto-saving domains: `ratios`,
 `heatmap_layouts`, `cell_overrides`, `line_order`, `view_state`, `qc_params`,
 `notes`, `sample_definitions`, and `crop_region` (`bar_groups.json` is the lone
-explicit user-picked file with no autosave). `cell_overrides.json` v2 stamps
+explicit user-picked file with no autosave).
+
+**The debounced writes do their file I/O on a background thread**
+(`persistence/_writer.py`). `update_json_atomic` is a read-modify-verify-write,
+which is seven filesystem round trips — `exists`, `read_bytes`, `exists`,
+`read_bytes`, the tmp `open` and `write`, `os.replace`, and the tmp `exists` —
+plus the `exists` calls `resolve_pipeline_info_path` makes to find the sidecar
+in the first place. On a local disk that is a few milliseconds. On the network
+share a plate normally lives on it is around a second, and it was being paid on
+the GUI thread half a second after every edit: the Home → Variables tab froze
+for a second or two each time the user paused while renaming a variable or
+ticking a value onto the plate. The tab's own work was never the cost — a full
+rebuild is 7.5 ms at 96 wells and 24 ms at 384 — so nothing about the repaint
+path would have helped.
+
+`PersistenceRegistry._flush` runs the domain's `save` inside
+`_io.background_writes`, a context manager that installs a **thread-local**
+sink. Everything that reads application state still runs on the GUI thread: the
+save reads `ctx.state`, builds its block, and closes over the finished payload.
+Only the file operations are handed over, and only the ones whose call site
+passed `deferrable=True` (or which routed themselves through `_io.defer_io`) —
+that opt-in is at the call site because deferring changes what the return value
+*means*, so only a site that does not inspect its result in the same call may
+take it. The sink being thread-local is load-bearing rather than tidy: the
+writer thread runs these same functions to do the actual I/O, and finds no sink
+there, so a job cannot re-queue itself for ever.
+
+`PersistenceWriter` is one daemon thread consuming one FIFO queue. Serialized on
+purpose — two writes to the same sidecar must not interleave, and the optimistic
+concurrency above narrows the race against *other processes*, not against a
+second thread of this one — and FIFO on purpose, because the last edit the user
+made has to be the last one written. `atomic_write_json` serialises its payload
+on the calling thread before queueing, which snapshots it: `_doc.write` hands in
+the live in-memory persistence cache, and a worker iterating that dict while the
+GUI thread edits it would raise `dictionary changed size during iteration`.
+
+`flush_all` drains the queue before returning, which is what makes its name true
+at the two moments it is called — quitting, and loading another dataset. Both
+need the bytes on disk before the next line runs; a queue left in flight is the
+same lost edit `flush_all` exists to prevent, moved one thread across. The drain
+is a sentinel job waited on with a timeout, not a poll of `Queue.empty()`, which
+goes true while the last job is still running.
+
+Failures are **reported, not returned**. The writer logs each one and emits
+`failed(domain, detail)`, which `PersistenceRegistry` puts on the status line
+and in a toast. The connection is made explicitly queued because the emit
+happens on the writer while the slot writes a widget (PySide6's default
+`AutoConnection` resolves the same way here, dispatching a plain receiver's
+bound method against the *sender's* thread affinity — the flag states the
+requirement rather than repairing it). Silence would be the defect itself: a
+user who fills a 96-well grid into a read-only or stale folder would otherwise
+learn of it by finding the grid gone next session.
+
+Nothing outside the debounced path is affected. `PersistenceRegistry.save(name)`
+— the dataset-swap force-save of `view_state`, the reset scopes, an explicit
+Save button — still writes inline and still gets a real answer, as do the smFISH
+threshold writer and the gating block, which never go through the debounce at
+all. `cell_overrides.json` v2 stamps
 each row with the well's
 `<well>_out.zip` mtime so a pipeline re-run drops the now-stale overrides
 on load instead of re-binding them to unrelated cells.

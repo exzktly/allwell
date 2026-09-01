@@ -20,15 +20,68 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer")
+
+
+# --------------------------------------------------------------------------
+# Deferring a write to the background writer
+# --------------------------------------------------------------------------
+#
+# Thread-local rather than a module global, and that is load-bearing: the
+# background writer runs these same functions to do the actual I/O, and on its
+# thread there is no sink, so the call executes inline instead of re-queueing
+# itself for ever.
+_sink = threading.local()
+
+#: A no-arg callable performing the I/O and returning ``(ok, detail)``.
+#: ``detail`` is a human-readable reason, read only when *ok* is false.
+Job = Callable[[], "tuple[bool, str]"]
+
+
+@contextmanager
+def background_writes(submit: "Callable[[Job], None]") -> Iterator[None]:
+    """Within this block, ``deferrable=True`` writes are handed to *submit*.
+
+    *submit* takes one no-arg callable returning ``(ok, detail)`` and is
+    expected to run it on another thread —
+    :class:`well_viewer.persistence._writer.PersistenceWriter` is the
+    implementation, and ``PersistenceRegistry._flush`` is the only caller.
+    Nesting restores the outer sink; a thread with no sink writes inline.
+
+    Only calls that pass ``deferrable=True`` are redirected. That opt-in is at
+    the call site on purpose: deferring changes what the return value *means*
+    (see :func:`update_json_atomic`), so only a site whose result is not
+    inspected in the same call may take it.
+    """
+    prev = getattr(_sink, "submit", None)
+    _sink.submit = submit
+    try:
+        yield
+    finally:
+        _sink.submit = prev
+
+
+def defer_io(job: Job) -> bool:
+    """Hand *job* to the active background writer. ``False`` when there is none.
+
+    ``False`` is the ordinary answer everywhere except inside a debounced
+    autosave, and the caller then performs the I/O itself.
+    """
+    submit = getattr(_sink, "submit", None)
+    if submit is None:
+        return False
+    submit(job)
+    return True
 
 
 # Bounded retry budget for transient Windows handle conflicts (AV,
@@ -70,34 +123,19 @@ def _retry_on_permission_error(op_name: str, op):
     raise last_exc
 
 
-def atomic_write_json(path: Path, data: Any, *, indent: int = 2,
-                      durable: bool = True) -> None:
-    """Serialise *data* as JSON to *path*, atomically.
+def _replace_with_text(path: Path, text: str, *, durable: bool) -> None:
+    """Land *text* at *path* through a uniquified tmp file + ``os.replace``.
 
-    Writes to a uniquified ``<path>.<pid>.<rand>.tmp`` then
-    ``os.replace`` onto the destination so a reader never sees a
-    partial file. Parents are created on demand. Both the initial
-    ``open`` and the final ``os.replace`` retry on Windows
-    ``PermissionError`` (AV / cloud sync / viewer holding the handle).
-
-    ``durable=False`` skips the ``fsync`` before the replace. The replace is
-    still atomic, so no reader ever sees a partial file; what is given up is
-    the guarantee that the bytes have reached the platter before this returns,
-    which only matters if the machine loses power in the next moment. Debounced
-    autosaves on the GUI thread pass False: an fsync on a network share is a
-    visible pause there, and the value is rewritten seconds later anyway.
-
-    Raises ``OSError`` on filesystem failure — callers decide whether to
-    catch (usually yes, with a logger.warning) or propagate (Save-via-dialog
-    paths where the user should see the error).
+    The half of :func:`atomic_write_json` that touches the filesystem, split out
+    so the serialisation can stay on the calling thread while this runs on the
+    background writer. Raises ``OSError`` exactly as before.
     """
-    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = _unique_tmp_path(path)
 
     def _write_tmp() -> None:
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=indent)
+            fh.write(text)
             fh.flush()
             if not durable:
                 return
@@ -121,6 +159,51 @@ def atomic_write_json(path: Path, data: Any, *, indent: int = 2,
                 _retry_on_permission_error("unlink", tmp.unlink)
         except OSError:
             swallowed("atomic_write_json: tmp cleanup unlink failed")
+
+
+def atomic_write_json(path: Path, data: Any, *, indent: int = 2,
+                      durable: bool = True, deferrable: bool = False) -> None:
+    """Serialise *data* as JSON to *path*, atomically.
+
+    Writes to a uniquified ``<path>.<pid>.<rand>.tmp`` then
+    ``os.replace`` onto the destination so a reader never sees a
+    partial file. Parents are created on demand. Both the initial
+    ``open`` and the final ``os.replace`` retry on Windows
+    ``PermissionError`` (AV / cloud sync / viewer holding the handle).
+
+    ``durable=False`` skips the ``fsync`` before the replace. The replace is
+    still atomic, so no reader ever sees a partial file; what is given up is
+    the guarantee that the bytes have reached the platter before this returns,
+    which only matters if the machine loses power in the next moment. Debounced
+    autosaves on the GUI thread pass False: an fsync on a network share is a
+    visible pause there, and the value is rewritten seconds later anyway.
+
+    Raises ``OSError`` on filesystem failure — callers decide whether to
+    catch (usually yes, with a logger.warning) or propagate (Save-via-dialog
+    paths where the user should see the error).
+    """
+    path = Path(path)
+    # Serialise here, on the calling thread, whether or not the write is
+    # deferred. It snapshots *data* — the persistence doc handed in by
+    # ``_doc.write`` is the live in-memory cache, and a background thread
+    # iterating it while the GUI thread edits it would raise "dictionary
+    # changed size during iteration" and lose the write. It also keeps a
+    # payload that cannot be serialised raising here, in the caller's frame,
+    # rather than on a thread with nobody to tell.
+    text = json.dumps(data, indent=indent)
+    if deferrable and defer_io(
+            lambda: _write_result(path, text, durable=durable)):
+        return
+    _replace_with_text(path, text, durable=durable)
+
+
+def _write_result(path: Path, text: str, *, durable: bool) -> tuple[bool, str]:
+    """:func:`_replace_with_text` in the ``(ok, detail)`` shape a job returns."""
+    try:
+        _replace_with_text(path, text, durable=durable)
+    except OSError as exc:
+        return False, f"could not write {path.name}: {exc}"
+    return True, ""
 
 
 def atomic_write_text(path: Path, text: str) -> None:
@@ -162,6 +245,7 @@ def update_json_atomic(
     create_missing: bool = False,
     attempts: int = 4,
     durable: bool = True,
+    deferrable: bool = False,
 ) -> bool:
     """Read *path*, apply *mutate* to the object in it, and write it back.
 
@@ -200,8 +284,39 @@ def update_json_atomic(
     *durable* is passed to :func:`atomic_write_json`; pass False from a
     debounced GUI-thread autosave, where an fsync per keystroke-pause is a
     visible stall on a network share.
+
+    *deferrable* lets the whole read-modify-verify-write loop run on the
+    background writer when one is active (see :func:`background_writes`). The
+    seven filesystem round trips above are what froze the window for about a
+    second per autosave on a network share, and the loop moves as a unit
+    because the re-read guard is only worth anything next to the write it
+    guards. **It changes what the return value means:** a deferred call returns
+    ``True`` for "accepted for writing", not "written", and a later failure is
+    reported by the writer — logged, and put on the status line — instead of
+    returned here. Only pass it from a call site that does not inspect the
+    result, and note that *mutate* then runs on the writer thread, so it must
+    read nothing but the ``existing`` dict it is handed.
     """
     path = Path(path)
+    if deferrable and defer_io(lambda: (
+            _update_json_now(path, mutate, create_missing=create_missing,
+                             attempts=attempts, durable=durable),
+            f"{path.name} refused the update; see the log",
+    )):
+        return True
+    return _update_json_now(path, mutate, create_missing=create_missing,
+                            attempts=attempts, durable=durable)
+
+
+def _update_json_now(
+    path: Path,
+    mutate: "Callable[[dict], dict | None]",
+    *,
+    create_missing: bool,
+    attempts: int,
+    durable: bool,
+) -> bool:
+    """:func:`update_json_atomic`'s loop, always inline on the calling thread."""
     for attempt in range(max(1, attempts)):
         try:
             raw = path.read_bytes() if path.exists() else None

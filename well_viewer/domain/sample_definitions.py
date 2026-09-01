@@ -36,7 +36,7 @@ from collections.abc import Iterable
 
 from well_viewer.domain import selections_model as _sel_model
 from well_viewer.domain.viewer_state import resolve_pipeline_info_path
-from well_viewer.persistence._io import update_json_atomic
+from well_viewer.persistence._io import defer_io, update_json_atomic
 
 
 _logger = logging.getLogger("well_viewer.domain.sample_definitions")
@@ -111,6 +111,8 @@ def _backup_pre_v2(info_path: Path) -> None:
 def save_to_pipeline_info(
     out_dir: Path,
     sample_definitions: dict[str, Any],
+    *,
+    deferrable: bool = False,
 ) -> Path:
     """Merge ``sample_definitions`` into the pipeline_info.json sidecar.
 
@@ -122,6 +124,16 @@ def save_to_pipeline_info(
 
     Raises FileNotFoundError when the pipeline file does not yet exist —
     the caller should run the pipeline first so the file gets created.
+
+    *deferrable* hands the write, and the two checks that read its outcome, to
+    the background writer when one is active (``_io.background_writes``, entered
+    only by the debounced autosave path). It then **raises nothing**: the caller
+    gets the path back immediately and a failure is reported by the writer —
+    logged, and put on the status line — instead. Only the autosave passes it,
+    and only because that caller already catches and logs every failure rather
+    than showing it, so nothing is lost but the frame the report comes from. The
+    explicit Save button leaves it False and keeps the exception its own
+    callers key off.
 
     **The read-modify-write goes through**
     :func:`well_viewer.persistence._io.update_json_atomic`, which re-reads the
@@ -171,21 +183,38 @@ def save_to_pipeline_info(
     # network share is a visible pause there, and the value is rewritten within
     # seconds anyway — what matters is that a reader never sees a half-written
     # file, which the rename gives regardless.
-    wrote = update_json_atomic(info_path, _mutate, durable=False)
-    if backup_failure:
-        raise OSError(
-            f"Refusing to save: couldn't write a pre-upgrade backup of "
-            f"{info_path.name} ({backup_failure[0]})."
-        ) from backup_failure[0]
-    if not wrote:
-        # update_json_atomic has already logged which of its refusals this was
-        # (unreadable, not a JSON object, unwritable, or a writer it could not
-        # get ahead of). The caller's contract is an exception, not a silent
-        # no-op autosave.
-        raise OSError(
-            f"Could not save {SAMPLE_DEFINITIONS_KEY} into {info_path} — see "
-            f"the log for which read or write step refused."
-        )
+    def _write() -> tuple[bool, str]:
+        # The write *and* the two checks that read its outcome, as one unit.
+        # ``backup_failure`` and ``wrote`` are set by the mutation, so they can
+        # only be read after it has run — which on the deferred path is on the
+        # writer thread, long after this function has returned. Keeping them
+        # inside the callable is what lets the whole thing move without the
+        # v1→v2 backup's abort quietly becoming a no-op.
+        wrote = update_json_atomic(info_path, _mutate, durable=False)
+        if backup_failure:
+            return False, (
+                f"couldn't write a pre-upgrade backup of {info_path.name} "
+                f"({backup_failure[0]}), so the save was abandoned rather than "
+                f"destroy the only old copy")
+        if not wrote:
+            # update_json_atomic has already logged which of its refusals this
+            # was (unreadable, not a JSON object, unwritable, or a writer it
+            # could not get ahead of).
+            return False, (
+                f"could not save {SAMPLE_DEFINITIONS_KEY} into {info_path} — "
+                f"see the log for which read or write step refused")
+        return True, ""
+
+    # *deferrable* is passed only by the debounced autosave, whose caller
+    # already catches and logs every failure rather than showing it — so
+    # handing the seven filesystem round trips to the background writer costs
+    # no report, it only moves where the report comes from. The explicit Save
+    # button leaves it False and still gets the exception its contract names.
+    if deferrable and defer_io(_write):
+        return info_path
+    ok, detail = _write()
+    if not ok:
+        raise OSError(detail[0].upper() + detail[1:])
     return info_path
 
 

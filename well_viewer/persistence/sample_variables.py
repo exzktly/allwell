@@ -59,7 +59,7 @@ def save_to_data_dir(ctx) -> None:
     from pathlib import Path
 
     from well_viewer.domain.viewer_state import resolve_pipeline_info_path
-    from well_viewer.persistence._io import update_json_atomic
+    from well_viewer.persistence._io import defer_io, update_json_atomic
 
     vset = getattr(ctx.state.selection, "variables", None) or VariableSet()
     block = to_block(vset)
@@ -72,26 +72,50 @@ def save_to_data_dir(ctx) -> None:
         merged[BLOCK_KEY] = block
         return merged
 
-    path = resolve_pipeline_info_path(Path(dataset.data_dir))
-    with swallow("write the variables block to pipeline_info.json"):
+    def _write() -> tuple[bool, str]:
+        # The path resolution, the write, and the check that reads its outcome,
+        # as one unit — so all of it moves to the background writer together.
+        # ``resolve_pipeline_info_path`` stats the folder and sometimes its
+        # parent, which on the share this app is pointed at is another hundred
+        # milliseconds of the GUI thread for no reason.
+        path = resolve_pipeline_info_path(Path(dataset.data_dir))
         # ``create_missing`` and a non-durable write, matching
         # ``smfish.save_threshold``. A dataset folder the pipeline never wrote a
         # sidecar into is ordinary — an imported plate, a hand-assembled one —
         # and without this a whole filled 96-well grid was never written at all,
         # with only an INFO line recording it. ``durable=False`` because this is
-        # a debounced autosave on the GUI thread, which is exactly the case
+        # a debounced autosave, which is exactly the case
         # ``update_json_atomic``'s own docstring names for it.
         if not update_json_atomic(path, _mutate, create_missing=True,
                                   durable=False):
+            return False, (
+                f"{path.name} is missing or could not be updated")
+        return True, ""
+
+    # The debounced path hands this to the background writer. It is the site
+    # the Variables tab's hang was measured at: the tab's own repaint is 7.5 ms
+    # at 96 wells, while this call is seven filesystem round trips — 1206 ms of
+    # them with every operation slowed to the 150 ms a network share costs. The
+    # writer reports a failure on the status line and in the log, which is the
+    # same warning below reaching the user by the one surface that still exists
+    # once this function has returned.
+    #
+    # Nothing on the writer touches application state: ``block`` is built above,
+    # on this thread, and ``_mutate`` reads only the dict it is handed.
+    if defer_io(_write):
+        return
+    with swallow("write the variables block to pipeline_info.json"):
+        ok, detail = _write()
+        if not ok:
             # WARNING, not INFO. A user who fills a 96-well grid into a
             # read-only or network-stale folder gets no other signal, and the
             # first they learn of it is the grid being gone next session — the
             # loss is silent, unbounded and unrecoverable, which is exactly the
             # shape §7 says must reach the user rather than only a debug log.
             _logger.warning(
-                "variables were NOT saved to %s — the file is missing or could "
-                "not be updated. They stay in memory for this session and will "
-                "be lost when it ends.", path.name)
+                "variables were NOT saved — %s. They stay in memory for this "
+                "session and will be lost when it ends.", detail)
+
 
 
 def read_block(data_dir) -> dict | None:

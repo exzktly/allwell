@@ -516,10 +516,32 @@ def apply_log_minor_ticks(ax, which: str, base: float) -> None:
     scale-setting is skipped as a no-op: the restyle that follows every redraw
     can have cleared the locator (``minorticks_off`` installs a ``NullLocator``)
     since the last time the scale itself changed.
+
+    **Only where the majors are the powers.** A subdivision is defined against
+    the power it sits under, not against whatever tick happens to be drawn to
+    its left, so on an axis whose major ticks are something else the two do not
+    line up and the count between one pair of labels differs from the count
+    between the next. That is a real axis: the Response tab ticks one dose per
+    concentration the experimenter gave, and this function put matplotlib's
+    decade subdivisions back between them after every redraw — a 0.1 / 0.3 / 1
+    / 3 / 10 series read 1, 6, 1, 6 marks between its labels, and on the
+    break-and-column axis those marks read as data. So an axis whose major
+    locator is not a :class:`~matplotlib.ticker.LogLocator` has chosen its own
+    ticks and keeps them.
+
+    Declining is not enough on its own, because the locator installed by the
+    *previous* call outlives the redraw that pinned new majors — so a
+    subdivision set left over from this function is taken away again. Only that
+    one: a minor locator this function did not install belongs to whoever did,
+    and is left where it is.
     """
-    from matplotlib.ticker import LogLocator, NullFormatter
+    from matplotlib.ticker import LogLocator, NullFormatter, NullLocator
 
     axis = ax.xaxis if which == "x" else ax.yaxis
+    if not isinstance(axis.get_major_locator(), LogLocator):
+        if isinstance(axis.get_minor_locator(), LogLocator):
+            axis.set_minor_locator(NullLocator())
+        return
     axis.set_minor_locator(LogLocator(base=float(base),
                                       subs=log_minor_subs(base)))
     axis.set_minor_formatter(NullFormatter())

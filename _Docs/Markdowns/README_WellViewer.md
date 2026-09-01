@@ -1975,7 +1975,12 @@ row, holding five actions:
   unlabelled — so you can read a value between two labels; they are part of the
   scale rather than of the **Minor ticks** row, which governs the linear axes.
   On a view wide enough that only every other power is labelled they are left
-  off, since a tick between two unlabelled powers tells you nothing. Axis **limits**, **log-scale** and the
+  off, since a tick between two unlabelled powers tells you nothing. They are
+  also left off where the plot has chosen its own tick positions rather than
+  the powers — the Response Curves dose axis, which ticks the concentrations
+  you gave — because a subdivision belongs to the power beneath it, so under
+  ticks that are something else the marks fall unevenly between one label and
+  the next and say nothing about either. Axis **limits**, **log-scale** and the
   **line / marker styling** are scoped to the one plot — the Scatter tab's Cells and
   Wells views are separate plots here, so sizing markers for five
   aggregate points won't blow up a fifty-thousand-cell cloud. **Typography,

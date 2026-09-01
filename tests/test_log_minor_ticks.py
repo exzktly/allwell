@@ -210,3 +210,116 @@ def test_a_thinned_axis_draws_none_and_that_is_matplotlib_s_rule():
     majors = [t for t in ax.get_xticks() if 1.0 <= t <= 1e6]
     assert len(majors) < 7, f"matplotlib stopped thinning; re-measure: {majors}"
     assert _minor(ax) == []
+
+
+# ── an axis whose majors are not the powers ──────────────────────────────────
+#
+# Reported as "there are not a constant number of minor ticks between major
+# ticks on the x axis", in base 10, and the number is the whole diagnosis. A
+# subdivision is defined against the power it sits under, so it can only be
+# evenly spaced between *powers*. Put decade subdivisions under a set of majors
+# that are something else and the counts between labels differ by construction:
+# a 0.1 / 0.3 / 1 / 3 / 10 dose axis measured 1, 6, 1, 6.
+
+_DOSES = (0.1, 0.3, 1.0, 3.0, 10.0)
+
+
+def _response_axis():
+    """The Response tab's dose axis, drawn by its own renderer.
+
+    Through the real renderer rather than by hand-setting fixed ticks: the tab
+    both pins the ticks *and* clears the minors, and a fixture that only did
+    the first would be measuring an axis the app never draws."""
+    from types import SimpleNamespace
+
+    from well_viewer.features.response.collect import (
+        ResponseCurve, ResponseData, ResponsePoint,
+    )
+    from well_viewer.features.response.renderer import draw_response
+
+    fig, ax = _fig()
+    points = [ResponsePoint(x=x, y=1.0 + i, err=float("nan"), n=3,
+                            member=f"m{i}")
+              for i, x in enumerate(_DOSES)]
+    data = ResponseData(variable_name="Dose",
+                        curves=[ResponseCurve(timepoint=0.0, series_id="",
+                                              points=points)])
+    draw_response(SimpleNamespace(), ax, data, log_x=True, log_base=10.0)
+    return fig, ax
+
+
+def _minors_between_majors(ax) -> list[int]:
+    """How many minor ticks fall between each adjacent pair of major ticks."""
+    ax.figure.draw_without_rendering()
+    lo, hi = ax.get_xlim()
+    majors = [float(t) for t in ax.xaxis.get_majorticklocs() if lo <= t <= hi]
+    minors = [float(t) for t in ax.xaxis.get_minorticklocs() if lo <= t <= hi]
+    return [sum(1 for m in minors if a < m < b)
+            for a, b in zip(majors, majors[1:])]
+
+
+def test_the_restyle_leaves_a_dose_axis_unsubdivided():
+    """The reported case, measured end to end.
+
+    The renderer clears the minors and the restyle put them straight back, so
+    the assertion is made *after* the restyle — which is the only place the
+    defect was ever visible. The majors are checked too: an implementation that
+    fixed the counts by throwing away the dose ticks would satisfy a bare "no
+    minor ticks" and would have broken the tab this axis belongs to.
+    """
+    fig, ax = _response_axis()
+    prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
+    prefs["x_log"] = True
+    prefs["x_log_base"] = "10"
+    apply_export_style_prefs(fig, prefs)
+    lo, hi = ax.get_xlim()
+    majors = [round(float(t), 6) for t in ax.xaxis.get_majorticklocs()
+              if lo <= t <= hi]
+    assert majors == pytest.approx(list(_DOSES)), (
+        "the dose ticks are gone, so this axis is no longer the one reported")
+    assert _minors_between_majors(ax) == [0, 0, 0, 0]
+
+
+def test_a_decade_axis_still_carries_eight_between_every_pair():
+    """The other half of the same rule, and the reason it is a rule about the
+    *majors* rather than about the Response tab. Counted per pair rather than
+    in total: the report was about the counts differing, and a total of 24 is
+    equally consistent with 8, 8, 8 and with 1, 6, 17."""
+    fig, ax = _fig()
+    ax.plot([1, 1000], [1, 2])
+    ax.set_xlim(1, 1000)
+    prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
+    prefs["x_log"] = True
+    apply_export_style_prefs(fig, prefs)
+    assert _minors_between_majors(ax) == [8, 8, 8]
+
+
+def test_a_subdivision_set_left_over_from_an_earlier_draw_is_taken_away():
+    """Declining to install is not enough on its own. The locator installed by
+    the previous call outlives the redraw that pinned the new majors, so an
+    axis that becomes dose-ticked would keep the decades it had before."""
+    from matplotlib.ticker import LogLocator
+
+    fig, ax = _fig()
+    ax.plot([1, 100], [1, 2])
+    apply_axis_log_scale(ax, "x", True, 10.0)
+    assert isinstance(ax.xaxis.get_minor_locator(), LogLocator), (
+        "the fixture never installed the subdivisions it is about to check for")
+    ax.set_xticks([1.0, 3.0, 100.0])
+    apply_axis_log_scale(ax, "x", True, 10.0)
+    assert _minor(ax) == []
+
+
+def test_a_minor_locator_this_module_did_not_install_is_left_alone():
+    """It removes only what it puts there. A renderer that chose its own minor
+    ticks on a log axis owns them — taking those away would be this same defect
+    again, one layer down."""
+    from matplotlib.ticker import FixedLocator
+
+    fig, ax = _fig()
+    ax.plot([1, 100], [1, 2])
+    apply_axis_log_scale(ax, "x", True, 10.0)
+    ax.set_xticks([1.0, 3.0, 100.0])
+    ax.xaxis.set_minor_locator(FixedLocator([2.0, 50.0]))
+    apply_axis_log_scale(ax, "x", True, 10.0)
+    assert _minor(ax) == pytest.approx([2.0, 50.0])

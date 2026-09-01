@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QLabel, QTextEdit,
+    QComboBox, QHBoxLayout, QLabel, QTextEdit,
     QVBoxLayout, QWidget,
 )
 
@@ -144,12 +144,24 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     col.addWidget(hdr)
 
     # Pull the comparison groups straight from the shared Sample-Definition
-    # sets (S1) — own full-width row so a narrow pane does not truncate it.
+    # sets (S1). Its own row, because the label is long enough that a narrow
+    # pane would truncate it beside the header's two buttons — but hugging its
+    # text rather than filling the row. On the rail, where it used to live,
+    # full width was the house style and 330px was the ceiling; on a page the
+    # same rule made an 884px bar out of a secondary action, three times the
+    # width of the "+ Add" it is an alternative to and the heaviest thing in
+    # the editor.
+    from_defs_row = QWidget(side)
+    from_defs_layout = QHBoxLayout(from_defs_row)
+    from_defs_layout.setContentsMargins(0, 0, 0, 0)
+    from_defs_layout.setSpacing(0)
     from_defs_btn = btn_secondary(
-        side, "↻ Load groups from Home → Replicates",
+        from_defs_row, "↻ Load groups from Home → Replicates",
         partial(stats_resync_from_sample_defs, ctx),
     )
-    col.addWidget(from_defs_btn)
+    from_defs_layout.addWidget(from_defs_btn)
+    from_defs_layout.addStretch(1)
+    col.addWidget(from_defs_row)
 
     sa, inner = make_scrollable_canvas(side)
     # Bounded by the plate it sits beside, so however many groups are defined

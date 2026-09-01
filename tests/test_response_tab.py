@@ -721,11 +721,49 @@ def test_off_is_distinguishable_from_never_touched(tab):
 def test_the_chosen_scale_survives_the_shared_restyle(tab):
     """``apply_export_style_prefs`` re-reads the shared ``x_log`` on every
     restyle; without ``_aw_force_xlog`` it resets an axis this tab chose from
-    the data, taking the off-scale column's ticks with it."""
+    the data, taking the off-scale column's ticks with it.
+
+    The pin alone was asserted here, and the pin alone was never the claim: it
+    decides *whether* the axis is logarithmic, while the reset happens inside
+    the call that sets the scale either way. So the restyle really runs, and
+    the ticks — the thing the pin exists to protect — are what is read back.
+    """
+    from well_viewer.core.plot_style import (
+        DEFAULT_EXPORT_STYLE_PREFS, apply_export_style_prefs,
+    )
     from well_viewer.features.response.renderer import draw_response
 
-    draw_response(None, tab.ax, _decade_data(), log_x=True)
+    data = _decade_data()
+    draw_response(None, tab.ax, data, log_x=True)
     assert getattr(tab.ax, "_aw_force_xlog", None) is True
+    doses = [p.x for c in data.curves for p in c.points]
+    assert list(tab.ax.get_xticks()) == pytest.approx(doses)
+
+    prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
+    prefs["x_log"] = True
+    apply_export_style_prefs(tab.ax.figure, prefs)
+    assert list(tab.ax.get_xticks()) == pytest.approx(doses), (
+        "the restyle rebuilt the scale and replaced the dose ticks with "
+        "matplotlib's decades")
+
+
+def test_the_redraw_draws_in_the_base_the_properties_panel_holds(tab):
+    """The Properties log base reaches the renderer through the redraw.
+
+    Asserted at the call the redraw makes rather than on the axis, because the
+    axis is where the two halves meet and this is about the half that carries
+    the value across: a controller that resolved the base perfectly and passed
+    the renderer nothing would draw an identical figure on the default base and
+    look right in every test that only looked at the picture.
+    """
+    _prefs(tab)["x_log"] = True
+    _prefs(tab)["x_log_base"] = "2"
+    seen = {}
+    tab.monkeypatch.setattr(rctl, "draw_response",
+                            lambda *a, **kw: seen.update(kw))
+    rctl.redraw_response(tab.ctx)
+    assert seen.get("log_x") is True
+    assert seen.get("log_base") == pytest.approx(2.0)
 
 
 def test_the_dose_ticks_say_what_the_user_typed(tab):

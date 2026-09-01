@@ -264,6 +264,12 @@ DEFAULT_EXPORT_STYLE_PREFS = {
     "y_lim_max": "",
     "x_log": False,
     "y_log": False,
+    # The base a log axis is drawn in, as the user typed it: "10", "2", "e", or
+    # any number above 1. Stored as text rather than a float so "e" survives a
+    # round trip through the panel and through ``persistence.json`` as the
+    # symbol the user picked, instead of coming back as 2.718281828459045.
+    "x_log_base": "10",
+    "y_log_base": "10",
     "tick_major": True,
     "tick_minor": False,
     "tick_length": 4.0,
@@ -388,22 +394,97 @@ def mark_time_rescale(*axes, rescale) -> None:
     target._aw_time_marker = True
 
 
-def apply_axis_log_scale(ax, which: str, on: bool) -> None:
-    """Set an axis to log scale, honouring a scatter ``_aw_log_plus1`` request.
+#: What the Properties panel offers in its log-base field. Editable, so a base
+#: this list does not name is still accepted — these are the ones worth a click.
+LOG_BASE_CHOICES = ("10", "2", "e")
+
+#: The base a log axis takes when nothing has said otherwise.
+DEFAULT_LOG_BASE = 10.0
+
+
+def log_base_value(text) -> float:
+    """The numeric base *text* names — ``"e"``, ``"10"``, ``"2"``, ``"1.5"``.
+
+    Falls back to :data:`DEFAULT_LOG_BASE` for anything matplotlib would refuse,
+    which is every base at or below 1: ``log_1(x)`` is undefined and a negative
+    base has no real logarithm, so a typo in an editable field would otherwise
+    take the axis down rather than the value with it.
+    """
+    import math
+
+    if isinstance(text, (int, float)) and not isinstance(text, bool):
+        base = float(text)
+    else:
+        cleaned = str(text or "").strip().lower()
+        if cleaned in ("e", "ln", "euler"):
+            return math.e
+        try:
+            base = float(cleaned)
+        except (TypeError, ValueError):
+            return DEFAULT_LOG_BASE
+    if not math.isfinite(base) or base <= 1.0:
+        return DEFAULT_LOG_BASE
+    return base
+
+
+#: Where :func:`apply_axis_log_scale` records the base it last set on an axis.
+_LOG_BASE_STAMP = "_aw_log_base"
+
+
+def _already_scaled(ax, which: str, name: str, base: float | None) -> bool:
+    """Whether *ax* is already drawn in exactly the scale about to be set.
+
+    ``set_xscale`` is not idempotent: re-setting the scale an axis already has
+    still rebuilds it, and rebuilding it **replaces the locator and formatter**.
+    That is why the Response tab's dose ticks — one tick per concentration the
+    experimenter actually gave — came back as matplotlib's decades on the next
+    restyle, and every restyle runs on every Properties edit and every theme
+    flip. The renderer's ``_aw_force_xlog`` pin was written to prevent exactly
+    that and could not: it decides *whether* the axis is log, and the reset
+    happens inside the call that sets it either way.
+
+    So an axis that is already in the requested scale is left alone, and a tab
+    that ticked its own axis keeps its ticks.
+
+    The base is compared against a stamp this module writes rather than read
+    back off matplotlib's scale object, whose ``base`` is not public API. A
+    missing stamp reads as "not the same", so an axis set to log by anything
+    else is rebuilt once and stamped — the safe direction to be wrong in.
+    """
+    current_name = (ax.get_xscale if which == "x" else ax.get_yscale)()
+    if current_name != name:
+        return False
+    if base is None:
+        return True
+    stamped = getattr(ax, f"{_LOG_BASE_STAMP}_{which}", None)
+    return stamped is not None and abs(float(stamped) - float(base)) < 1e-9
+
+
+def apply_axis_log_scale(ax, which: str, on: bool,
+                         base: float = DEFAULT_LOG_BASE) -> None:
+    """Set an axis to log scale in *base*, honouring a scatter ``_aw_log_plus1``.
 
     Plain ``log`` can't show 0 (it drops it). Axes tagged ``_aw_log_plus1`` (the
     per-cell scatter) instead use a ``log10(x+1)`` *display* transform via
     matplotlib ``FuncScale``: the data stays in raw units — so gates, clicks and
     exports are unaffected ("display-only, not saved") — while zeros land at the
     left edge. Ticks sit at real decade values (incl. 0) positioned by the
-    transform, so it still reads like a log axis.
+    transform, so it still reads like a log axis. That transform is defined in
+    decades, so *base* does not apply to it; the ordinary log path below is
+    where the user's base is honoured.
+
+    Setting an axis to the scale it already has is a no-op rather than a rebuild
+    — see :func:`_already_scaled` for what the rebuild costs.
     """
     set_scale = ax.set_xscale if which == "x" else ax.set_yscale
     if not on:
-        set_scale("linear")
+        if not _already_scaled(ax, which, "linear", None):
+            set_scale("linear")
         return
     if not bool(getattr(ax, "_aw_log_plus1", False)):
-        set_scale("log")
+        if not _already_scaled(ax, which, "log", base):
+            set_scale("log", base=base)
+            setattr(ax, f"{_LOG_BASE_STAMP}_{which}", float(base))
         return
     import numpy as _np
 
@@ -458,7 +539,8 @@ AXIS_LIMIT_PREF_KEYS = frozenset({
 })
 
 AXIS_SCOPED_PREF_KEYS = AXIS_LIMIT_PREF_KEYS | frozenset({
-    "x_log", "y_log", "axis_buckets", "axis_target",
+    "x_log", "y_log", "x_log_base", "y_log_base",
+    "axis_buckets", "axis_target",
 })
 
 
@@ -1006,14 +1088,21 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
             # state (the scatter plot defaults to log/log via a scatter-specific
             # pref) so the shared x_log/y_log — which other plot types reset —
             # can't clobber it on a later restyle.
+            #
+            # The *base* is the user's either way. An axis that pins whether it
+            # is logarithmic has not thereby chosen what it is logarithmic in,
+            # and the Response tab — the one figure that pins — reads the same
+            # pref when it draws, so the two agree.
             if not getattr(ax, "_categorical_xaxis", False):
                 _fx = getattr(ax, "_aw_force_xlog", None)
                 _xlog = bool(prefs.get("x_log", False)) if _fx is None else bool(_fx)
-                apply_axis_log_scale(ax, "x", _xlog)
+                apply_axis_log_scale(ax, "x", _xlog,
+                                     log_base_value(prefs.get("x_log_base", "10")))
             if not getattr(ax, "_categorical_yaxis", False):
                 _fy = getattr(ax, "_aw_force_ylog", None)
                 _ylog = bool(prefs.get("y_log", False)) if _fy is None else bool(_fy)
-                apply_axis_log_scale(ax, "y", _ylog)
+                apply_axis_log_scale(ax, "y", _ylog,
+                                     log_base_value(prefs.get("y_log_base", "10")))
             # ``set_xscale`` above resets the axis's locator and formatter, so a
             # time axis that asked to have its ticks rescaled has to say so
             # again. The renderer stamped the whole correction; re-install from

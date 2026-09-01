@@ -72,7 +72,7 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
     # that it stays one tick-step wide whatever base the axis is drawn in.
     off_scale_x = zero_position(positives, base=log_base) if use_log else None
 
-    marks = _CurveStyles(_series_styles(ctx, data), _timepoint_styles(data))
+    marks = _curve_styles(ctx, data)
     drew_off_scale = False
     for curve in data.curves:
         if _draw_one_curve(ax, data, curve, fits, marks,
@@ -327,7 +327,26 @@ def _timepoint_styles(data) -> dict[float, str] | None:
             for i, t in enumerate(timepoints)}
 
 
-def _series_styles(ctx, data) -> dict | None:
+def _curve_styles(ctx, data) -> "_CurveStyles":
+    """Both halves of how this figure is inked, decided together.
+
+    One function rather than two calls at the call site, because the two halves
+    are one decision: the dash is a cue the *series* may spend exactly when the
+    *timepoint* is not spending it, and that is derived here, once, from the
+    same ``_timepoint_styles`` result the pair is built from. Passed as an
+    argument instead, the call site could hand over a value that disagrees with
+    the dashes beside it — and it would draw correctly anyway, because
+    ``for_curve`` applies the timepoint's dash last and would overwrite the
+    series' claim. A wrong answer that happens to be discarded is the worst kind
+    to leave reachable: nothing goes red, and the next reader of
+    ``series_styles`` has no way to know the claim was never honoured.
+    """
+    dashes = _timepoint_styles(data)
+    return _CurveStyles(_series_styles(ctx, data, dash_is_spent=dashes is not None),
+                        dashes)
+
+
+def _series_styles(ctx, data, *, dash_is_spent: bool) -> dict | None:
     """``{series id: LineTraceStyle}``, or ``None`` to leave the defaults alone.
 
     The ids come from the curve order, which ``collect`` already put in the
@@ -347,6 +366,12 @@ def _series_styles(ctx, data) -> dict | None:
     visible. ``domain/response_colors.series_styles`` is what decides that; the
     branch is stated there rather than here so the two entry points cannot
     answer it differently.
+
+    *dash_is_spent* is whether the timepoint is using the dash on **this**
+    figure — ``_timepoint_styles`` draws none at all below two timepoints — and
+    grey mode gets the dash as a third cue whenever it is not. Passed in rather
+    than recomputed so the two cannot disagree about a figure they are both
+    describing.
     """
     ids = []
     for curve in data.curves:
@@ -360,7 +385,7 @@ def _series_styles(ctx, data) -> dict | None:
     from matplotlib import pyplot as plt
 
     cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color") or ["C0"]
-    return series_styles(mode, ids, cycle)
+    return series_styles(mode, ids, cycle, dash_is_spent=dash_is_spent)
 
 
 def _curve_label(data, curve) -> str:
@@ -394,9 +419,11 @@ class _CurveStyles(NamedTuple):
     forgotten. Either half is ``None`` when there is nothing to distinguish,
     and the curve then takes matplotlib's own cycle exactly as it always did.
 
-    The dash belongs to the timepoint in **both** colour modes, which is why
-    grey mode gives a series a shade and a marker and no dash of its own; see
-    ``domain/response_colors``.
+    The dash belongs to the timepoint whenever there is more than one on the
+    figure. Below that nothing is using it, and grey mode takes it as a third
+    cue for the series — so the dash is *somebody's* data in both modes and in
+    every configuration, which is what the tagging below relies on. See
+    ``domain/response_colors.response_grey_cues``.
     """
 
     styles: dict | None
@@ -416,6 +443,11 @@ class _CurveStyles(NamedTuple):
                 style["marker"] = trace.marker
                 style["markerfacecolor"] = trace.face
                 style["markeredgecolor"] = trace.color
+            if trace.linestyle is not None:
+                # Only ever set when the timepoint is not using the dash — the
+                # style carries one exactly then, and the branch below would
+                # otherwise overwrite it.
+                style["linestyle"] = trace.linestyle
         if self.dashes is not None:
             style["linestyle"] = self.dashes[curve.timepoint]
         return style
@@ -436,10 +468,12 @@ class _CurveStyles(NamedTuple):
         artists = [ln for ln in lines[:1] if ln is not None]
         if not artists:
             return
-        marker_is_data = any(
-            t.marker is not None for t in (self.styles or {}).values())
+        styles = (self.styles or {}).values()
+        marker_is_data = any(t.marker is not None for t in styles)
+        dash_is_data = self.dashes is not None or any(
+            t.linestyle is not None for t in styles)
         for artist in artists:
-            if self.dashes is not None:
+            if dash_is_data:
                 artist._aw_linestyle_is_data = True
             if marker_is_data:
                 artist._aw_marker_is_data = True

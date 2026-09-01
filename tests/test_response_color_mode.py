@@ -43,7 +43,8 @@ from well_viewer.domain.line_colors import (  # noqa: E402
     LINE_MARKERS, LINE_STYLES, grey_trace_style,
 )
 from well_viewer.domain.response_colors import (  # noqa: E402
-    RESPONSE_COLOR_MODES, grey_series_style, response_color_mode, series_styles,
+    RESPONSE_COLOR_MODES, grey_series_style, response_color_mode,
+    response_grey_cues, series_styles,
 )
 from well_viewer.features.response import collect as rc  # noqa: E402
 from well_viewer.features.response.renderer import draw_response  # noqa: E402
@@ -293,3 +294,119 @@ def test_the_mode_survives_a_new_dataset():
     plot.response_color_mode = "grey"
     plot.reset_for_new_dataset()
     assert plot.response_color_mode == "grey"
+
+
+# ── the dash is a cue when nobody else is using it ──────────────────────────
+#
+# Reserving it unconditionally was the defect: ``_timepoint_styles`` draws no
+# dashes at all below two timepoints, which is the commoner figure, and grey
+# mode gave the dash up there anyway — so three series came out solid, told
+# apart by one step of grey and a small marker. The reservation is a fact about
+# a figure's timepoints, not about the tab.
+
+def _one_timepoint_three_series() -> rc.ResponseData:
+    """Three series at one timepoint — the figure that was drawn all-solid.
+
+    Three rather than two, so a rule that varies the dash and a rule that
+    alternates between two of them draw different figures.
+    """
+    curves = [
+        rc.ResponseCurve(24.0, _points(i), series_id=sid, series_label=lab)
+        for i, (sid, lab) in enumerate(
+            (("s1", "HeLa"), ("s2", "U2OS"), ("s3", "RPE1")))
+    ]
+    return rc.ResponseData(variable_name="Dose", unit="µM", curves=curves,
+                           series_name="Cell line", placed=len(curves))
+
+
+def test_the_cue_set_is_a_question_about_the_figure():
+    assert response_grey_cues(dash_is_spent=True) == ("shade", "marker")
+    assert response_grey_cues(dash_is_spent=False) == ("shade", "marker", "dash")
+
+
+def test_a_caller_that_does_not_say_gets_the_conservative_answer():
+    """Handing a series the dash the timepoint is also using is the failure
+    worth defaulting away from, so an unsaid caller keeps two cues."""
+    assert grey_series_style(0).linestyle is None
+    assert grey_series_style(0, dash_is_spent=True).linestyle is None
+    assert grey_series_style(0, dash_is_spent=False).linestyle is not None
+
+
+def test_grey_mode_varies_the_dash_when_the_timepoint_is_not_using_it():
+    """The reported symptom, as the values on the axes.
+
+    Asserted as three *different* dashes rather than as "not all solid": a rule
+    that alternated two patterns would satisfy the looser claim, and so would
+    the broken behaviour on a two-series figure.
+    """
+    fig, ax = plt.subplots()
+    draw_response(_ctx("grey"), ax, _one_timepoint_three_series(), log_x=False)
+    dashes = [line.get_linestyle() for _label, line in _drawn(ax)]
+    assert len(dashes) == 3, dashes
+    assert len(set(dashes)) == 3, f"the series were not told apart by dash: {dashes}"
+
+
+def test_no_series_style_carries_a_dash_the_timepoint_is_using():
+    """Asserted on the styles, not on the drawn lines.
+
+    ``for_curve`` applies the timepoint's dash *after* the series', so a series
+    that wrongly claimed one is overwritten and the picture comes out right
+    anyway — which means no assertion on the drawn lines can see it. That is
+    why ``_curve_styles`` derives the two halves together instead of taking the
+    answer as an argument, and why this reads them off that one function:
+    exactly one of the two owns the dash, on either shape of figure.
+    """
+    from well_viewer.features.response.renderer import _curve_styles
+
+    for data, dashed_timepoints in ((_two_by_two(), True),
+                                    (_one_timepoint_three_series(), False)):
+        marks = _curve_styles(_ctx("grey"), data)
+        assert (marks.dashes is not None) is dashed_timepoints
+        carried = [st.linestyle for st in (marks.styles or {}).values()]
+        assert carried, marks
+        # Exactly one of the two owns the dash, on either figure.
+        assert all((ls is None) is dashed_timepoints for ls in carried), (
+            f"the series and the timepoint both claim the dash: {marks}")
+
+
+def test_the_timepoint_still_owns_the_dash_when_it_is_using_it():
+    """The half that must not regress: with two timepoints drawn, the dash goes
+    back to meaning *which moment*, and two series at one moment share it.
+
+    True by the overwrite in ``for_curve`` as well as by the cue set, so this
+    holds even against a series style that claimed a dash — see the test above
+    for the half that does not.
+    """
+    fig, ax = plt.subplots()
+    draw_response(_ctx("grey"), ax, _two_by_two(), log_x=False)
+    by_timepoint: dict[float, set] = {}
+    curves = [c for c in _two_by_two().curves if c.points]
+    for curve, (_label, line) in zip(curves, _drawn(ax)):
+        by_timepoint.setdefault(curve.timepoint, set()).add(line.get_linestyle())
+    assert all(len(v) == 1 for v in by_timepoint.values()), by_timepoint
+    assert len({next(iter(v)) for v in by_timepoint.values()}) == 2, by_timepoint
+
+
+def test_the_series_dash_is_tagged_as_data_too():
+    """Whoever owns the dash, the export-style pass must be told.
+
+    ``apply_export_style_prefs`` stamps one pref pattern over every artist
+    unless it says the dash is data — so a dash that now belongs to the series
+    needs the flag exactly as the timepoint's did. Without this the new cue
+    would be applied and then removed again on the restyle that follows every
+    redraw, which is how the timepoint's own dashes were lost before.
+    """
+    fig, ax = plt.subplots()
+    draw_response(_ctx("grey"), ax, _one_timepoint_three_series(), log_x=False)
+    lines = [line for _label, line in _drawn(ax)]
+    assert lines
+    assert all(getattr(line, "_aw_linestyle_is_data", False) for line in lines)
+
+
+def test_the_series_mode_is_left_solid_either_way():
+    """The dash is grey mode's to spend, not the palette mode's: a coloured
+    figure identifies a series by its colour, and a dash there would be a
+    distinction standing for nothing."""
+    fig, ax = plt.subplots()
+    draw_response(_ctx("series"), ax, _one_timepoint_three_series(), log_x=False)
+    assert {line.get_linestyle() for _label, line in _drawn(ax)} == {"-"}

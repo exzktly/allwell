@@ -8,13 +8,20 @@ A Response Curves panel carries **two** at once: the colour says which series a
 curve belongs to, and the dash says which timepoint it was measured at. The Line
 tab's grey mode identifies a trace three ways — shade, dash and marker — and
 taking the dash here would overwrite the timepoint with the series, silently, on
-a figure whose legend goes on naming both. So this mode identifies a series by
-**shade and marker only**, and leaves the dash to the data that already owns it.
+a figure whose legend goes on naming both.
 
-The shade and the marker come from ``line_colors`` rather than from a second
-cycle of their own: which greys stay apart on both grounds, and which marker
-shapes stay apart at three points, are answers this app should have once. What
-is local here is the decision about the dash.
+**But only while the timepoint is actually using it.** ``_timepoint_styles``
+returns no dashes at all on a single-timepoint figure, which is the commoner
+case, and reserving the dash there spent a cue on nobody: every series came out
+solid, told apart by one step of grey and a small marker. So the cue set is a
+question about *this figure* — :func:`response_grey_cues` — rather than a
+constant of the tab.
+
+Nothing about the greys or the markers is decided here.
+``line_colors.grey_style`` takes the cues it may spend and answers for all of
+them, so which greys stay apart on both grounds and which marker shapes stay
+apart at three points are answers this app has once. What is local to this
+module is only *how many channels are free*.
 
 The default mode is ``"series"`` rather than ``"plate"`` — the two other tabs'
 default is the well's or the group's plate-picker colour, and this one's is not.
@@ -27,7 +34,7 @@ name a thing the figure does not do.
 
 from __future__ import annotations
 
-from well_viewer.domain.line_colors import LineTraceStyle, grey_trace_style
+from well_viewer.domain.line_colors import GREY_CUES, LineTraceStyle, grey_style
 
 #: The two values ``PlotState.response_color_mode`` may hold. ``"series"`` is
 #: the default and reproduces the historical behaviour exactly.
@@ -49,21 +56,43 @@ def response_color_mode(plot) -> str:
     return mode if mode in RESPONSE_COLOR_MODES else "series"
 
 
-def grey_series_style(index: int) -> LineTraceStyle:
+def response_grey_cues(dash_is_spent: bool) -> tuple[str, ...]:
+    """Which cues grey mode may spend on a series of *this* figure.
+
+    Shade and marker always; the dash **only when the timepoint is not using
+    it**. That condition is the point: the dash means "which moment" on a figure
+    drawn at more than one timepoint, and taking it for the series there would
+    overwrite one encoding with the other on a plot whose legend goes on naming
+    both. On a single-timepoint figure — much the commoner case — nothing is
+    using it, and reserving it anyway spent a cue on nobody and drew every
+    series solid, told apart by one step of grey and a small marker.
+
+    Stated as a function of the figure rather than as a constant of the tab,
+    because that is what it is.
+    """
+    return tuple(c for c in GREY_CUES if c != "dash" or not dash_is_spent)
+
+
+def grey_series_style(index: int, *, dash_is_spent: bool = True) -> LineTraceStyle:
     """The grey mode's style for the *index*-th series on a figure.
 
-    :func:`line_colors.grey_trace_style` with the dash dropped, because the dash
-    on this figure means the timepoint. Its shade and marker cycles are coprime
-    with each other, so the pair is still unique across the first twelve series
-    even without the third cue — twelve being what the Line tab's legend names
-    individually, and more than a response figure is ever readable with.
+    :func:`line_colors.grey_style` asked for :func:`response_grey_cues`. With
+    the dash withheld the shade and marker cycles are coprime, so the pair is
+    still unique across the first twelve series — twelve being what the Line
+    tab's legend names individually, and more than a response figure is ever
+    readable with; the dash, when it is free, is redundancy on top of that
+    rather than what makes the series distinguishable.
+
+    *dash_is_spent* defaults to ``True`` — the conservative answer. A caller
+    that does not say has not looked at the figure's timepoints, and handing a
+    series the dash the timepoint is also using is the failure worth defaulting
+    away from.
     """
-    style = grey_trace_style(index)
-    return LineTraceStyle(color=style.color, marker=style.marker,
-                          filled=style.filled, linestyle=None)
+    return grey_style(index, cues=response_grey_cues(dash_is_spent))
 
 
-def series_styles(mode: str, series_ids, palette) -> dict[str, LineTraceStyle]:
+def series_styles(mode: str, series_ids, palette, *,
+                  dash_is_spent: bool = True) -> dict[str, LineTraceStyle]:
     """``{series id: style}`` for the ids on one figure, under the named *mode*.
 
     *series_ids* is the order the curves are drawn in, which ``collect`` already
@@ -88,4 +117,5 @@ def series_styles(mode: str, series_ids, palette) -> dict[str, LineTraceStyle]:
         colours = list(palette) or ["C0"]
         return {sid: LineTraceStyle(color=colours[i % len(colours)])
                 for i, sid in enumerate(ids)}
-    return {sid: grey_series_style(i) for i, sid in enumerate(ids)}
+    return {sid: grey_series_style(i, dash_is_spent=dash_is_spent)
+            for i, sid in enumerate(ids)}

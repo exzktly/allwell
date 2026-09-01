@@ -254,10 +254,18 @@ if _HAVE_MPL:
         # ── per-axis copy overlay ─────────────────────────────────────────
         def _build_axis_copy_overlay(self) -> None:
             """A small "copy" IconButton that floats near the top of whichever
-            subplot the cursor is over, so a single panel can be copied to the
-            clipboard. Only shown on multi-axis figures (Bar/Line) — on a
-            single-axis plot a per-panel copy is the same as the whole-canvas
-            Copy button, so it would just duplicate that affordance."""
+            subplot the cursor is over, so a panel can be copied to the
+            clipboard.
+
+            Offered on every figure, single-axis included. It used to be
+            suppressed there, on the reasoning that a per-panel copy duplicates
+            "the whole-canvas Copy button" — a button that no longer exists.
+            The card's header was retired when the shared ControlBand took over
+            its controls, and the only whole-figure copy left in the app is the
+            ``Save ▾ → Copy figure as SVG`` menu item. So on the five
+            single-axis plot tabs the suppression removed the affordance rather
+            than de-duplicating it, and the hover row showed a lone save glyph
+            with no way to copy beside it."""
             self._hover_ax = None
             self._copy_btn_hovered = False
             self._copy_btn = IconButton(
@@ -269,10 +277,8 @@ if _HAVE_MPL:
             self._copy_btn.installEventFilter(self)
             self._copy_btn.clicked.connect(self._on_copy_axis_clicked)
             # Optional sibling "save to Saved Plots" button, enabled per-tab via
-            # ``set_save_handler``. Unlike copy (suppressed on single-axis since
-            # the whole-canvas Copy covers it), the save button is the only
-            # affordance for sending a plot to the gallery, so it appears on
-            # single-axis figures too whenever a handler is wired.
+            # ``set_save_handler``. The only affordance for sending a plot to
+            # the gallery, so it appears whenever a handler is wired.
             self._save_handler = None
             self._save_btn_hovered = False
             self._save_btn = IconButton(
@@ -309,19 +315,47 @@ if _HAVE_MPL:
         def _hover_buttons(self) -> list:
             """The hover buttons to show for the current figure, right→left.
 
-            Copy is offered only on multi-axis figures (single-axis is covered
-            by the whole-canvas Copy); the per-panel save button shows on any
-            figure once a save handler is wired; the whole-figure save button is
-            multi-axis-only (single-axis per-panel save already == whole figure)."""
+            Copy is offered on every figure; the per-panel save button shows on
+            any figure once a save handler is wired; the whole-figure save
+            button is multi-axis-only (on a single-axis figure the per-panel
+            save already captures the whole figure).
+
+            The copy button's tooltip follows the figure rather than being
+            fixed at construction: on one axes it copies the plot, and calling
+            that "this panel" describes a division the user cannot see."""
             btns = []
             multi = len(self.figure.axes) > 1
-            if multi:
-                btns.append(self._copy_btn)
+            self._copy_btn.setToolTip("Copy this panel to the clipboard" if multi
+                                      else "Copy this plot to the clipboard")
+            btns.append(self._copy_btn)
             if self._save_handler is not None:
                 btns.append(self._save_btn)
                 if multi:
                     btns.append(self._save_fig_btn)
             return btns
+
+        def _panel_bbox(self, ax):
+            """What a per-panel capture of *ax* crops to.
+
+            ``"tight"`` — the whole figure — whenever the figure holds one
+            axes, because then the panel *is* the figure and the two answers
+            differ only in what they throw away. Measured rather than reasoned
+            about: an axes-tight crop **does** carry a free ``ax.text`` drawn
+            below the axes (Response Curves' omission caption), and does **not**
+            carry anything owned by the figure — ``fig.suptitle`` or a
+            ``fig.text`` footnote. Distribution titles its single-axes figure
+            with a suptitle, so a per-panel capture there was handing the user
+            an untitled plot that looked like a complete one.
+
+            With more than one axes the crop is the point of the affordance, and
+            the caller hides the siblings so a neighbour's ink cannot bleed in.
+            """
+            from widgets.fig_clipboard import axis_tight_bbox_inches
+
+            if len(self.figure.axes) <= 1:
+                return "tight"
+            return axis_tight_bbox_inches(
+                ax, pad_in=theme.Spacing.xs / float(self.figure.dpi))
 
         def _on_canvas_motion(self, event) -> None:
             btns = self._hover_buttons()
@@ -380,14 +414,12 @@ if _HAVE_MPL:
             if ax is None:
                 return
             from widgets.fig_clipboard import (
-                axis_tight_bbox_inches, copy_figure_to_clipboard,
-                hidden_sibling_axes,
+                copy_figure_to_clipboard, hidden_sibling_axes,
             )
             # Capture in publication mode (the canonical export look), then
             # revert — mirrors the whole-canvas Copy path.
             with self._publication_capture():
-                bbox = axis_tight_bbox_inches(
-                    ax, pad_in=theme.Spacing.xs / float(self.figure.dpi))
+                bbox = self._panel_bbox(ax)
                 # Hide sibling panels while cropping so a neighbour's title /
                 # labels / ticks that fall inside the crop rectangle don't bleed
                 # into the exported panel.
@@ -399,7 +431,10 @@ if _HAVE_MPL:
                     )
             failed = status.startswith("Copy failed")
             # Neutral message: this is a clipboard copy, not tied to any one app.
-            msg = status if failed else "Copied panel to clipboard"
+            # It names what was copied, which on a one-axes figure is the whole
+            # plot rather than a panel of it.
+            copied = "panel" if len(self.figure.axes) > 1 else "plot"
+            msg = status if failed else f"Copied {copied} to clipboard"
             try:
                 from widgets.toast import Toast
                 Toast.show_message(self.window(), msg,
@@ -434,14 +469,13 @@ if _HAVE_MPL:
             import io
 
             from widgets.fig_clipboard import (
-                axis_tight_bbox_inches, hidden_sibling_axes, render_figure_svg,
+                hidden_sibling_axes, render_figure_svg,
             )
             # Render the hovered panel in publication mode (the canonical export
             # look), mirroring the Copy path, then revert.
             png_bytes = b""
             with self._publication_capture():
-                bbox = axis_tight_bbox_inches(
-                    ax, pad_in=theme.Spacing.xs / float(self.figure.dpi))
+                bbox = self._panel_bbox(ax)
                 # Hide sibling panels while cropping so a neighbour's title /
                 # labels / ticks that fall inside the crop rectangle don't bleed
                 # into the saved panel.

@@ -62,10 +62,36 @@ def _migrate(state: dict, from_version) -> dict | None:
     work["schema_version"] = SCHEMA_VERSION
     return work
 
-# Plot sub-tab names that live inside the "Plotting" parent stack.
+# Plot sub-tab names that live inside the "Plotting" parent stack — the
+# **fallback**, for a context with no feature registry to ask. The live answer
+# comes from :func:`_plot_subtabs`, because a hand-written list of leaves is a
+# list that stops being complete: Response Curves was added to Plotting and not
+# to this tuple, so ``_activate_tab`` sent its name to the *outer* notebook,
+# which has no page by that name — Restore applied a saved plot's settings and
+# never navigated to it, and a session that quit on that tab reopened elsewhere.
 _PLOT_SUBTABS = (
     "Line Graphs", "Bar Plots", "Scatter Plot", "Distribution", "Heat Map",
 )
+
+
+def _plot_subtabs(ctx) -> tuple[str, ...]:
+    """The leaves that live inside the Plotting stack, from the registry.
+
+    ``features.sub_leaves("Plotting")`` is the same source ``core/centre_view``
+    builds the stack from, so the router and the stack cannot disagree about
+    what is in it — including for a profile that ships a subset. Falls back to
+    the literal above when there is no registry to ask (a headless context, a
+    unit test with a stub window), which is the behaviour every caller had
+    before and is right for every leaf that existed when it was written.
+    """
+    features = getattr(ctx, "features", None)
+    sub_leaves = getattr(features, "sub_leaves", None)
+    if callable(sub_leaves):
+        with swallow("view_state: reading the Plotting leaves from the registry"):
+            names = tuple(sub_leaves("Plotting") or ())
+            if names:
+                return names
+    return _PLOT_SUBTABS
 
 # Image-review sub-tab names that live inside the "Image Browser" parent
 # QTabWidget. The snapshot records the leaf (via _current_leaf_tab), so restore
@@ -824,7 +850,7 @@ def _activate_tab(ctx, name: str) -> None:
     if outer is None:
         return
     try:
-        if name in _PLOT_SUBTABS:
+        if name in _plot_subtabs(ctx):
             outer.setCurrentByName("Plotting")
             sub = getattr(ctx.window, "_plotting_notebook", None)
             if sub is not None:

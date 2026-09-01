@@ -66,13 +66,14 @@ def tab(qtbot, monkeypatch):
     # mutation that removed it left the whole file green.
     combo.currentIndexChanged.connect(
         lambda *_: rctl.on_x_variable_changed(ctx))
-    # Connected the way ``build_response_tab`` connects it — an unconnected
-    # combo makes every series test a test of ``refresh_series_combo`` alone,
-    # which is the exact gap that let the X combo ship dead once already.
-    series_combo = LabeledComboBox("Series")
-    qtbot.addWidget(series_combo)
-    series_combo.currentIndexChanged.connect(
-        lambda *_: rctl.on_series_changed(ctx))
+    # The Series control is a button over a checkbox menu, registered under the
+    # name the builder uses and connected the way the builder connects it — so
+    # ``_pick_series`` below can open the real menu and tick the real box
+    # rather than calling the handler the box is wired to, which is the step
+    # past the bug §7.6 records.
+    series_btn = QPushButton("Series: None")
+    qtbot.addWidget(series_btn)
+    series_btn.clicked.connect(lambda *_: rctl.open_series_selector(ctx))
     # This tab's own Channel and Property, connected the way the builder
     # connects them. Populated with plain labels here rather than through
     # ``populate_metric_combo``, which needs the whole ChannelState; the tests
@@ -112,7 +113,7 @@ def tab(qtbot, monkeypatch):
         widgets=_Registry(_response_x_cb=combo, _response_ax=ax,
                           _response_fig=fig, _response_canvas=canvas,
                           _response_tp_button=tp_button,
-                          _response_series_cb=series_combo,
+                          _response_series_btn=series_btn,
                           _response_metric_cb=y_combo,
                           _response_ch_cb=ch_combo),
         notify=SimpleNamespace(set_status=statuses.append),
@@ -173,7 +174,7 @@ def tab(qtbot, monkeypatch):
         runtime=SimpleNamespace(barplot=SimpleNamespace(current_keys=lambda: [])),
     )
     return SimpleNamespace(ctx=ctx, combo=combo, ax=ax, statuses=statuses,
-                           series=series_combo, y=y_combo,
+                           series=series_btn, y=y_combo,
                            channel=ch_combo,
                            monkeypatch=monkeypatch,
                            w=ctx.widgets.get_or_none)
@@ -221,20 +222,86 @@ def _load_two_series(tab, timepoints=(24.0,)):
     tab.ctx.runtime.barplot.current_keys = lambda: [g[0] for g in groups]
 
 
-def _pick_series(tab, variable_id):
-    """Redraw so the combo is populated, then choose *variable_id* in it.
+def _series_menu(tab):
+    """Open the real Series menu and return ``{label: checkbox}``.
 
-    The order matters and is the app's own: ``refresh_series_combo`` runs
-    inside the redraw, so a test that calls ``findData`` on a combo nothing has
-    filled gets -1, selects nothing, and then asserts against a figure that was
-    never drawn — which reads as the feature being broken.
+    ``exec_menu`` is the modal seam every menu in this app goes through, so
+    stubbing it is what lets a test open the menu, read what it offers and tick
+    a box — the control the user actually operates, rather than the handler
+    behind it. Redraws first, because ``refresh_series_control`` runs inside the
+    redraw and decides what the menu may offer.
     """
+    from PySide6.QtWidgets import QCheckBox
+
+    from widgets import menu_exec
+
     rctl.redraw_response(tab.ctx)
-    index = tab.series.findData(variable_id)
-    assert index >= 0, (
-        f"{variable_id!r} was not offered in the Series combo: "
-        f"{[tab.series.itemData(i) for i in range(tab.series.count())]}")
-    tab.series.setCurrentIndex(index)
+    shown = {}
+    tab.monkeypatch.setattr(menu_exec, "exec_menu",
+                            lambda menu, _pos: shown.setdefault("menu", menu))
+    tab.series.click()
+    menu = shown.get("menu")
+    assert menu is not None, "the Series button did not open its menu"
+    boxes = {}
+    for action in menu.actions():
+        widget = action.defaultWidget() if hasattr(action, "defaultWidget") else None
+        if isinstance(widget, QCheckBox):
+            boxes[widget.text()] = widget
+    return menu, boxes
+
+
+def _load_two_rnas(tab, timepoints=(24.0,)):
+    """A dose series run on two cell lines and two RNAs — the reported plate.
+
+    Every combination is filled, and the doses run *against* the cell-line
+    order, so a collector that pooled by one variable and one that crosses both
+    cannot produce the same points by coincidence.
+    """
+    tab.ctx.state.dataset.all_timepoints_cache = [float(t) for t in timepoints]
+    dose = _variable(pairs=(("1", 1.0), ("10", 10.0)))
+    line = sv.Variable(
+        id="cl", name="Cell line", kind=sv.TEXT, unit="",
+        values=(sv.VariableValue("hela", "HeLa", None),
+                sv.VariableValue("u2os", "U2OS", None)))
+    rna = sv.Variable(
+        id="rna", name="RNA", kind=sv.TEXT, unit="",
+        values=(sv.VariableValue("shgfp", "shGFP", None),
+                sv.VariableValue("shtp53", "shTP53", None)))
+    wells = ["A01", "A02", "B01", "B02", "C01", "C02", "D01", "D02"]
+    tab.ctx.state.dataset.well_paths = {w: f"/{w}.csv" for w in wells}
+    tab.ctx.state.selection.variables = sv.VariableSet(
+        variables=(dose, line, rna),
+        assignments={
+            "dose": {"A01": "v0", "A02": "v1", "B01": "v0", "B02": "v1",
+                     "C01": "v0", "C02": "v1", "D01": "v0", "D02": "v1"},
+            "cl": {"A01": "hela", "A02": "hela", "B01": "u2os", "B02": "u2os",
+                   "C01": "hela", "C02": "hela", "D01": "u2os", "D02": "u2os"},
+            "rna": {"A01": "shgfp", "A02": "shgfp", "B01": "shgfp",
+                    "B02": "shgfp", "C01": "shtp53", "C02": "shtp53",
+                    "D01": "shtp53", "D02": "shtp53"},
+        })
+    groups = [(w, [w]) for w in wells]
+    tab.ctx.state.selection.selections = [
+        {"id": f"g{i}", "name": n, "wells": w} for i, (n, w) in enumerate(groups)]
+    tab.ctx.runtime.barplot.current_keys = lambda: [g[0] for g in groups]
+
+
+def _pick_series(tab, *variable_ids):
+    """Tick each of *variable_ids* in the real Series menu, in order.
+
+    The order is the user's and is load-bearing: it is the order the curve
+    labels read in, so ticking cell line then RNA gives ``HeLa · shGFP``.
+    """
+    for variable_id in variable_ids:
+        _menu, boxes = _series_menu(tab)
+        vset = tab.ctx.state.selection.variables
+        variable = vset.by_id(variable_id)
+        assert variable is not None, f"{variable_id!r} is not a variable"
+        label = (f"{variable.name} ({variable.unit})" if variable.unit
+                 else variable.name)
+        assert label in boxes, (
+            f"{label!r} was not offered in the Series menu: {sorted(boxes)}")
+        boxes[label].setChecked(True)
 
 
 def _load_ungrouped(tab, variable, assignments, timepoints=(24.0,)):
@@ -459,6 +526,53 @@ def test_a_plate_with_no_timepoint_field_still_has_a_timepoint_to_draw(tab):
     )
     assert tab.w("_response_tp_button").text() == "Timepoints: All 1 selected"
     assert tab.ax.has_data(), "the figure is empty on a plate that has data"
+
+
+def test_a_selection_saved_before_the_plate_had_timepoints_is_widened(tab):
+    """The reported defect on 9.4.0: the picker still offered only "0".
+
+    The release before it could not see a plate's timepoints at all, so every
+    selection it saved reads ``{"0": True}``. Reconciling only *downwards* —
+    drop what the dataset lacks, keep the rest — took that stored dict as the
+    whole answer, so the tab went on offering one timepoint on a plate with
+    three while Bar Plots, reading the same list, offered all three. The fix
+    that made both read one source could not reach a tab pinned by its own
+    stored state.
+
+    The wrong implementation this rules out is the one that shipped: a sync
+    that never adds a timepoint the user has not already been asked about.
+    """
+    variable = _variable()
+    _load(tab, variable, {"A01": "v0"}, [("a", ["A01"])],
+          timepoints=(0.0, 24.0, 48.0))
+    tab.ctx.state.feature_slice("response").tp_selections = {"0": True}
+
+    rctl.redraw_response(tab.ctx)
+
+    assert tab.ctx.state.feature_slice("response").tp_selections == {
+        "0": True, "24": False, "48": False}, (
+        "the picker still offers only the timepoints stored under an older "
+        "release, so the plate's other timepoints cannot be ticked at all")
+    # The user's own answer is kept: 0 stays on, and nothing starts drawing
+    # itself.
+    assert rctl.timepoints_for(tab.ctx) == [0.0]
+
+
+def test_a_selection_that_belongs_to_another_plate_is_replaced(tab):
+    """A different dataset opened into the same session seeds afresh.
+
+    Keeping the old dict there would leave a picker whose entries name
+    timepoints this plate does not have — and, once they are filtered out, an
+    empty picker on a plate that has three.
+    """
+    variable = _variable()
+    _load(tab, variable, {"A01": "v0"}, [("a", ["A01"])], timepoints=(6.0, 12.0))
+    tab.ctx.state.feature_slice("response").tp_selections = {"0": False, "24": True}
+
+    rctl.redraw_response(tab.ctx)
+
+    assert tab.ctx.state.feature_slice("response").tp_selections == {
+        "6": True, "12": False}
 
 
 def test_the_button_says_how_many_of_how_many(tab):
@@ -1323,19 +1437,19 @@ def test_an_ungrouped_figure_is_not_captioned_replicates_pooled(tab):
 
 # ── several curves on one figure ────────────────────────────────────────────
 
-def test_choosing_a_series_in_the_combo_splits_the_figure_into_two_curves(tab):
-    """Pressed through the combo, not by calling the collector.
+def test_ticking_a_series_in_the_menu_splits_the_figure_into_two_curves(tab):
+    """Pressed through the control, not by calling the collector.
 
-    The combo is what a user touches, and an unconnected combo is the exact
-    failure this tab has shipped before — the control is offered, the figure
-    never changes, and every test that called the collector directly stays
-    green.
+    The menu is what a user touches, and a control wired to nothing is the
+    exact failure this tab has shipped before — the control is offered, the
+    figure never changes, and every test that called the collector directly
+    stays green.
     """
     _load_two_series(tab)
     rctl.redraw_response(tab.ctx)
     before = len(tab.ax.containers)
 
-    tab.series.setCurrentIndex(tab.series.findData("cl"))
+    _pick_series(tab, "cl")
 
     # ``ax.containers`` is one ErrorbarContainer per curve. Counting
     # ``get_lines()`` instead counts each errorbar's caplines too, which made
@@ -1349,32 +1463,33 @@ def test_choosing_a_series_in_the_combo_splits_the_figure_into_two_curves(tab):
         assert xs == [1.0, 10.0], xs
 
 
-def test_the_series_combo_never_offers_the_variable_on_x(tab):
+def test_the_series_menu_never_offers_the_variable_on_x(tab):
     """A series on the axis variable is one curve per dose, one point each."""
     _load_two_series(tab)
-    rctl.redraw_response(tab.ctx)
-    offered = [tab.series.itemData(i) for i in range(tab.series.count())]
-    assert "cl" in offered
-    assert "dose" not in offered, offered
+    _menu, boxes = _series_menu(tab)
+    offered = sorted(boxes)
+    # The menu shows the variables' labels, which is what a user reads.
+    assert "Cell line" in offered
+    assert not [label for label in offered if label.startswith("Dose")], offered
 
 
 def test_moving_x_onto_the_series_variable_drops_the_series(tab):
-    """The two combos cannot both hold one variable, and X wins.
+    """X and the Series cannot both hold one variable, and X wins.
 
     Reached by changing X *after* a series is chosen, which is the order a user
     hits it in. Leaving the stale pick would draw one curve per dose.
     """
     _load_two_series(tab)
     _pick_series(tab, "cl")
-    assert rctl.selected_series_id(tab.ctx) == "cl"
+    assert rctl.selected_series_ids(tab.ctx) == ["cl"]
 
     tab.combo.blockSignals(True)
     tab.combo.clear()
     tab.combo.addItem("Cell line", "cl")
     tab.combo.blockSignals(False)
-    rctl.refresh_series_combo(tab.ctx)
+    rctl.refresh_series_control(tab.ctx)
 
-    assert rctl.selected_series_id(tab.ctx) == ""
+    assert rctl.selected_series_ids(tab.ctx) == []
 
 
 def test_the_legend_names_the_series_rather_than_only_the_timepoint(tab):
@@ -1445,13 +1560,30 @@ def test_the_series_choice_survives_a_save_and_a_restore(tab):
     _load_two_series(tab)
     _pick_series(tab, "cl")
     saved = io.snapshot_response(tab.ctx)
-    assert saved["series_variable_id"] == "cl"
+    assert saved["series_variable_ids"] == ["cl"]
 
-    tab.series.setCurrentIndex(0)
-    assert rctl.selected_series_id(tab.ctx) == ""
+    tab.ctx.state.feature_slice("response").series_variable_ids = []
+    assert rctl.selected_series_ids(tab.ctx) == []
 
     io.apply_response(tab.ctx, saved)
-    assert rctl.selected_series_id(tab.ctx) == "cl"
+    assert rctl.selected_series_ids(tab.ctx) == ["cl"]
+
+
+def test_a_plot_saved_with_one_series_restores_it(tab):
+    """The block the release before this one wrote held a single ``id``.
+
+    Dropping it would restore a figure with no split at all — a different
+    figure from the one that was saved, looking like a complete restore, which
+    is the substitution this whole block exists to prevent.
+    """
+    from well_viewer.features.response import view_state_io as io
+
+    _load_two_series(tab)
+    rctl.redraw_response(tab.ctx)
+
+    io.apply_response(tab.ctx, {"series_variable_id": "cl"})
+
+    assert rctl.selected_series_ids(tab.ctx) == ["cl"]
 
 
 # ── the Y metric, and the spread the toggle asks for ────────────────────────
@@ -1674,6 +1806,62 @@ def test_group_by_a_variable_splits_the_curves_rather_than_emptying_the_plot(tab
     )
     assert data.omitted == []
     assert tab.ax.has_data()
+
+
+def test_two_variables_can_be_one_series(tab):
+    """The reported ask: Cell line **and** RNA as a single series.
+
+    Both are the tab's own control, so the plate-wide *Group by* is left free
+    for what it is for. Ticking two boxes crosses them: one curve per
+    combination, labelled in the order they were ticked.
+
+    Driven through the real menu — two boxes, one after the other — because a
+    control that offers two entries and stores one is precisely the failure a
+    test calling the collector with a tuple could not see.
+    """
+    _load_two_rnas(tab)
+
+    _pick_series(tab, "cl", "rna")
+
+    data = rctl.response_data(tab.ctx)
+    assert [c.series_label for c in data.curves] == [
+        "HeLa · shGFP", "HeLa · shTP53", "U2OS · shGFP", "U2OS · shTP53"]
+    assert data.series_name == "Cell line · RNA"
+    # Every curve is a dose series in its own right, not one point.
+    assert all(len(c.points) == 2 for c in data.curves)
+    # And the button says what the figure is split by, which is the only place
+    # that says so once the menu is closed.
+    assert tab.w("_response_series_btn").text() == "Series: Cell line · RNA"
+
+
+def test_the_series_order_is_the_order_they_were_ticked(tab):
+    """It decides the curve labels, so it is the user's and not the list's.
+
+    Ticked the other way round the same four curves read ``shGFP · HeLa``.
+    Asserted as the labels rather than as "the ids are in some order", which a
+    stored set would also satisfy.
+    """
+    _load_two_rnas(tab)
+
+    _pick_series(tab, "rna", "cl")
+
+    data = rctl.response_data(tab.ctx)
+    assert data.series_name == "RNA · Cell line"
+    assert [c.series_label for c in data.curves] == [
+        "shGFP · HeLa", "shGFP · U2OS", "shTP53 · HeLa", "shTP53 · U2OS"]
+
+
+def test_unticking_one_of_two_leaves_the_other(tab):
+    """The menu is a multi-select, so a box turns its own variable off."""
+    _load_two_rnas(tab)
+    _pick_series(tab, "cl", "rna")
+
+    _menu, boxes = _series_menu(tab)
+    boxes["Cell line"].setChecked(False)
+
+    assert rctl.selected_series_ids(tab.ctx) == ["rna"]
+    data = rctl.response_data(tab.ctx)
+    assert [c.series_label for c in data.curves] == ["shGFP", "shTP53"]
 
 
 def test_group_by_and_series_are_two_layers_on_this_tab(tab):

@@ -1392,7 +1392,7 @@ def test_the_two_layers_cross_into_one_curve_each(stub_stats):
                variables=(dose, line, medium), assignments=assignments,
                group_by="cl",
                response_state=_response_slice(x_variable_id="dose",
-                                              series_variable_id="med"))
+                                              series_variable_ids=["med"]))
 
     data = rc.collect_response(ctx, "dose", [24.0], ("cl", "med"))
 

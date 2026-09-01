@@ -42,13 +42,20 @@ class ResponseState:
     #: the combo's selection is decided.
     x_variable_id: str = ""
 
-    #: The variable whose values split the members into separate curves, by
-    #: **id**, or ``""`` for one curve per timepoint. An id rather than a name
-    #: or a combo index, for the reason ``view_state_io`` records about the x
-    #: variable: a name is renamed and an index moves when another variable is
-    #: added, and either would restore the figure against a different variable
-    #: while looking as though nothing had gone wrong.
-    series_variable_id: str = ""
+    #: The variables whose values split the members into separate curves, by
+    #: **id**, outermost first; empty for one curve per timepoint.
+    #:
+    #: A **list**, because one split is not enough for the plates this tab is
+    #: for: a dose series run across cell lines *and* RNAs is one curve per
+    #: (cell line, RNA), and asking the user to spend the plate-wide *Group by*
+    #: on the second one makes a tab-local question into a global setting. The
+    #: order is the order the curves are labelled and sorted in.
+    #:
+    #: Ids rather than names or combo indices, for the reason ``view_state_io``
+    #: records about the x variable: a name is renamed and an index moves when
+    #: another variable is added, and either would restore the figure against a
+    #: different variable while looking as though nothing had gone wrong.
+    series_variable_ids: list[str] = field(default_factory=list)
 
     #: The channel this tab measures, and the Property on it — **this tab's
     #: own**, as the aggregate Scatter tab's are, not the shared plotting

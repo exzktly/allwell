@@ -29,9 +29,9 @@ from well_viewer.features.export.service import export_cell_data_from
 from well_viewer.features.response.cell_scope_compute import cell_scope
 from well_viewer.features.response.controller import (
     export_response_csv, fit_model_labels, fit_settings,
-    on_response_channel_changed, on_response_metric_changed, on_series_changed,
-    on_x_variable_changed, open_timepoint_selector, redraw_response,
-    refresh_response_metric_combo, response_channel,
+    on_response_channel_changed, on_response_metric_changed,
+    on_x_variable_changed, open_series_selector, open_timepoint_selector,
+    redraw_response, refresh_response_metric_combo, response_channel,
     set_fit_bound, set_fit_model, update_timepoint_button,
 )
 
@@ -90,16 +90,22 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     band.add_scope("", metric_combo)
 
     # Scope, beside X and for the same reason: it says what the figure is *of*.
-    # One curve per value of this variable per timepoint, so a plate of two cell
-    # lines across a dose series is two curves rather than one line doubling
-    # back at every dose.
-    series_combo = reg.register("_response_series_cb", LabeledComboBox("Series"))
-    series_combo.setToolTip(
-        "Split the members into one curve per value of a second variable — "
-        "colour carries the series, dashes carry the timepoint. "
-        "None draws one curve per timepoint.")
-    series_combo.currentIndexChanged.connect(lambda *_: on_series_changed(ctx))
-    band.add_scope("", series_combo)
+    # One curve per combination of the chosen variables' values per timepoint,
+    # so a plate of two cell lines across a dose series is two curves rather
+    # than one line doubling back at every dose — and a plate that also varies
+    # the RNA is four, without spending the plate-wide Group by on the second
+    # one. A checkbox menu rather than a combo for exactly that: the number of
+    # variables a figure can be split by is the number the plate has.
+    # Self-describing, so it needs no caption: the button names what it splits
+    # by, which is what a reader of four curves needs to know.
+    series_btn = reg.register("_response_series_btn", QPushButton("Series: None"))
+    series_btn.setProperty("variant", "secondary")
+    series_btn.setToolTip(
+        "Split the members into one curve per combination of these variables' "
+        "values — colour carries the series, dashes carry the timepoint. "
+        "Pick more than one to cross them; None draws one curve per timepoint.")
+    series_btn.clicked.connect(lambda _=False: open_series_selector(ctx))
+    band.add_scope("", series_btn)
 
     # The Bar tab's picker, over this tab's own selection. Self-describing —
     # the button's own text carries the count, so it needs no caption beside it.

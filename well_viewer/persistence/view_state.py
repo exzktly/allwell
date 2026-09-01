@@ -171,11 +171,10 @@ def snapshot(ctx) -> dict:
         # beside the rest of that tab's settings. Validated against
         # LINE_COLOR_MODES on the way back in.
         "line_color_mode": str(ctx.state.plot.line_color_mode),
-        # The Response tab's mode rides in the top-level plot block for the
-        # same reason the Line one does: this block travels with every saved
-        # view, while a per-tab block is applied only when that tab is next
-        # activated — and a figure restored in the wrong colour mode is a
-        # different figure from the one that was saved. Validated against
+        # The Response Curves colour mode, here for the same reason as the line
+        # one: that tab's own block holds the axis, series and timepoint
+        # choices, and a colour mode is a statement about the whole figure
+        # rather than about which variable is on x. Validated against
         # RESPONSE_COLOR_MODES on the way back in.
         "response_color_mode": str(ctx.state.plot.response_color_mode),
         # The time-axis label correction, both halves. Captured because it

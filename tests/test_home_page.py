@@ -673,3 +673,87 @@ def test_the_recents_card_opens_the_dataset_it_names(loaded_app, tmp_path,
         "clicking the row did not reach _load_path, so the card is a picture "
         "of a shortcut rather than a shortcut"
     )
+
+
+
+def test_no_sample_map_layer_starts_at_the_pane_edge(loaded_app):
+    """Every layer's content is inset from the left edge of the page.
+
+    The rail sits hard against the pane's left edge and the collapse toggle
+    floats over that boundary, overhanging the centre pane by half its width —
+    and by its whole width once the rail is collapsed, when the toggle parks at
+    x=0 (``core/app_shell_view.position_rail_toggle``). Content flush at x=0
+    sits underneath it.
+
+    Each layer pays the inset somewhere different, because each has a different
+    leftmost thing: Replicates on its outer layout, Variables on its editor
+    column, Well Labels inside its grid card. Measuring the result rather than
+    reading the three call sites is the point — Replicates shipped with none of
+    it and looked exactly like a page that had one, and no test of any of the
+    three builders could have caught that, because none of them is wrong on its
+    own.
+
+    Geometry, so a fourth layer is covered by existing rather than by being
+    added to a list. Widgets that span the page — separators, wrapped hint
+    labels — are skipped: those are rules and paragraphs, not the left margin a
+    reader sees, and every layer has some.
+    """
+    from PySide6.QtCore import QPoint
+    from PySide6.QtWidgets import QApplication, QWidget
+
+    import theme
+    from well_viewer.features.home.controller import _subtabs
+    from well_viewer.features.home.sample_map.controller import (
+        LAYERS, STACK_KEY, set_layer,
+    )
+
+    app = loaded_app
+    app.resize(1500, 950)
+    app.show()
+    try:
+        sub = _subtabs(app._ctx)
+        names = [sub.tabText(i) for i in range(sub.count())]
+        assert "Sample Map" in names, names
+        sub.setCurrentIndex(names.index("Sample Map"))
+        QApplication.processEvents()
+
+        stack = app._ctx.widgets.get_or_none(STACK_KEY)
+        assert stack is not None, "the Sample Map layer stack was never built"
+
+        measured: dict[str, tuple] = {}
+        for layer in LAYERS:
+            set_layer(app._ctx, layer)
+            QApplication.processEvents()
+            page = stack.currentWidget()
+            assert page.width() > 100, (
+                f"{layer}'s page was never laid out (w={page.width()}), so "
+                "this measured nothing"
+            )
+            # ``type(w) is QWidget`` and not ``isinstance``: a bare QWidget is
+            # where all three layers put their layouts, so counting those would
+            # report x=0 for every layer however it is inset, and the test
+            # would fail identically before and after the fix.
+            leftmost = None
+            for w in page.findChildren(object):
+                if type(w) is QWidget or not hasattr(w, "isVisibleTo"):
+                    continue
+                if not hasattr(w, "mapTo") or not hasattr(w, "width"):
+                    continue
+                if not w.isVisibleTo(page) or w.width() <= 1:
+                    continue
+                x = w.mapTo(page, QPoint(0, 0)).x()
+                if x + w.width() >= page.width() - 2:
+                    continue            # spans the page: a rule or a paragraph
+                if leftmost is None or x < leftmost[0]:
+                    leftmost = (x, type(w).__name__, w.objectName())
+            assert leftmost is not None, f"{layer} drew nothing measurable"
+            measured[layer] = leftmost
+
+        flush = {name: seen for name, seen in measured.items()
+                 if seen[0] < theme.Spacing.sm}
+        assert not flush, (
+            "these Sample Map layers put content against the pane's left edge, "
+            f"under the rail toggle: {flush} (the others: {measured})"
+        )
+    finally:
+        app.hide()

@@ -401,8 +401,19 @@ def build_label_grid(ctx, parent: QWidget) -> None:
     if layout is None:
         layout = QVBoxLayout(parent)
         parent.setLayout(layout)
-        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+    # The same left inset the other two Sample Map layers carry, for the reason
+    # written at ``groups/tab_view.build_replicate_groups_centre``: the rail's
+    # collapse toggle floats over the pane's left edge. The grid below pays it
+    # already, inside its own card, but the help text and the affix row above
+    # it were flush at x=0 — measured, and found by the guard written for
+    # Replicates rather than reported, because the sentence is muted grey and
+    # the toggle sits over its middle rather than its start.
+    #
+    # Set unconditionally rather than only when this function creates the
+    # layout: under Sample Map the caller supplies the page and its layout, so
+    # the branch above never runs and the margins inside it never applied.
+    layout.setContentsMargins(theme.Spacing.md, 0, 0, 0)
 
     # ── top help + affix toolbar ─────────────────────────────────────
     head = QWidget(parent)

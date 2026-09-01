@@ -143,15 +143,16 @@ class PlotState:
     # Resolved through ``domain/line_colors.py``; read by the Line tab and the
     # Batch Export line figures, which render the same panels.
     line_color_mode: str = "plate"
-    # ``response_color_mode``: the Response Curves tab's twin — "colour" (the
-    # default: each series takes the figure's palette in the order the user
-    # arranged that variable's values) or "grey". Spelled "colour" rather than
-    # "plate" because it is not the plate: a response curve is one value of a
-    # sample variable, not one well. Grey mode here takes the shade **and** the
-    # marker, and leaves the dash alone — this tab already spends the dash on
-    # the timepoint, so reassigning it would re-encode the other half of the
-    # figure. Resolved through ``domain/response_colors.py``.
-    response_color_mode: str = "colour"
+    # ``response_color_mode``: the Response Curves tab's twin — "series" (the
+    # default: each series takes a colour from matplotlib's own cycle, in the
+    # order the user arranged the Series variable's values) or "grey". Not
+    # "plate", because a curve is a series pooled across however many wells
+    # hold that value, so there is no plate colour it could take and naming the
+    # mode after one would describe a thing the figure does not do. Grey mode
+    # here is the Line tab's minus the dash: that figure already spends its
+    # dash on the timepoint, so a series is identified by shade and marker.
+    # Resolved through ``domain/response_colors.py``.
+    response_color_mode: str = "series"
     # Draw significance brackets (from the Statistics tab's pairwise results)
     # between bars on the Bar plot. Off by default; toggled from the bar
     # Display popover. Only rendered when the plot is in grouped/pooled mode and

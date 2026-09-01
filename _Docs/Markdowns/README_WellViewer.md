@@ -2062,6 +2062,35 @@ The **Batch Export** line figures follow the switch too, so a plate exported in
 bulk is drawn the same way as the figure you set it on, and the mode is saved
 with the rest of the view state.
 
+#### Curve colours — Series or Grey
+
+The Response Curves tab has the same **Colours** section, and its two modes are
+named for what that figure actually does. **Series** is the default: each series
+— each value of the Series variable, pooled across every well that holds it —
+takes its own colour, in the order you arranged that variable's values. There is
+no *Plate* option here, because a curve is not a well or a group; it is a
+condition drawn from however many wells carry it, so there is no plate colour it
+could take.
+
+**Grey** gives each series its own **shade** and its own **marker**, from the
+same cycles the Line tab uses. It does **not** give it a dash, and that is the
+one difference worth knowing about: on this figure the dash pattern already
+means something. Solid, dashed, dash-dot and dotted are the **timepoints**, so
+that a series measured at 24 and 48 hours is one colour in two dashes and you
+can see at a glance which curves are the same condition and which are the same
+moment. Spending the dash on the series as well would have quietly replaced one
+of those with the other.
+
+The mode reaches a figure with no Series variable set too — a plate drawn as one
+curve per timepoint comes out in grey, told apart by the dashes. That is the
+common case, and a mode that skipped it would be the request refused on the
+figure where colour is most obvious.
+
+The **off-scale** column — the zero doses parked one decade below the axis on a
+log plot, behind the dotted break — takes its curve's own colour in both modes,
+so a grey figure has no stray coloured mark on it. The mode is saved with the
+rest of the view state.
+
 #### Value labels — printing the numbers on the plot
 
 Under **Properties → Overlays** is a **Show value labels** switch. Turn it on
@@ -2684,7 +2713,10 @@ both places is not an error — the second mention is ignored rather than
 doubling the label. Colour tells you the series and the dash pattern
 tells you the timepoint, so with two cell lines at two timepoints you get four
 curves in two colours and two dash patterns, and you can see at a glance which
-share a cell line and which share a moment. Each curve is fitted on its own,
+share a cell line and which share a moment. For a figure that has to print
+without colour, Properties → **Colours** switches the series onto shades of grey
+and distinct markers and leaves the dashes to the timepoints — see
+[Curve colours](#curve-colours--series-or-grey). Each curve is fitted on its own,
 with the same model and the same pinned plateaus, so their EC50s are
 comparable — which is the only reason to overlay them. The variable already on
 **X** is not offered, since a series on the dose axis would be one curve per
@@ -2692,15 +2724,6 @@ dose with a single point on each. A group the series variable does not cover —
 wells with no `Cell line`, or a group whose wells disagree about it — gets its
 own curve, named for what is missing rather than quietly joining one of the
 others.
-
-**Grey curves for a paper.** **Properties → Colours** offers this tab *Colour*
-or *Grey*, the same control the Bar Plots and Line Graphs tabs carry. In grey
-mode each series takes its own shade and its own marker — a shape and, further
-down the cycle, an open version of it — while the dash pattern goes on telling
-you the timepoint, so a figure means the same thing in either mode and you can
-switch to grey at the end without re-reading it. The setting is this tab's own:
-picking grey here leaves every other plot as it was, and it is saved with the
-view, so a plot sent to the gallery comes back in the mode it was saved in.
 
 **The title reads like the other tabs'.** It names the channel and Property
 being plotted, whether the error bars are SD or SEM, and which timepoints are

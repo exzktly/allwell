@@ -1,97 +1,91 @@
-"""Response-curve colour mode — the series palette, or greys told apart twice.
+"""Response-curve colour mode — one ink per series, or greys told apart twice.
 
-The third of the tab colour-mode modules, beside ``domain/bar_colors.py`` and
-``domain/line_colors.py``, and like those two it exists because *what grey
-means* is not the same on every plot.
+The third sibling of ``domain/bar_colors.py`` and ``domain/line_colors.py``, and
+like them a different rule, because the figure it serves has a different number
+of encodings already spoken for.
 
-A bar is named by the tick label under it, so the Bar tab's grey mode collapses
-every column onto one ink and loses nothing. A line has no such label, so the
-Line tab's grey mode gives each trace a shade **and** a dash **and** a marker.
-A response curve is a line — but this tab has already spent the dash: it draws
-**colour for the series and the dash for the timepoint**, which is what lets a
-reader see that two curves are the same condition at different moments.
+A Response Curves panel carries **two** at once: the colour says which series a
+curve belongs to, and the dash says which timepoint it was measured at. The Line
+tab's grey mode identifies a trace three ways — shade, dash and marker — and
+taking the dash here would overwrite the timepoint with the series, silently, on
+a figure whose legend goes on naming both. So this mode identifies a series by
+**shade and marker only**, and leaves the dash to the data that already owns it.
 
-So grey mode here takes the two cues the tab has free — the **shade** and the
-**marker** (shape and fill) — and leaves the dash where it is. The timepoint
-goes on being the dash in both modes, which means a figure keeps meaning the
-same thing when the mode is switched; a grey mode that reassigned the dash
-would silently re-encode the other half of the figure.
+The shade and the marker come from ``line_colors`` rather than from a second
+cycle of their own: which greys stay apart on both grounds, and which marker
+shapes stay apart at three points, are answers this app should have once. What
+is local here is the decision about the dash.
 
-The shade and marker cycles are :mod:`well_viewer.domain.line_colors`'s own,
-imported rather than re-derived. Two modules choosing "the greys" independently
-is two answers to one question, and the one that is not being looked at is the
-one that drifts.
-
-Qt-free and matplotlib-free: it returns marker *tokens*, and the renderer hands
-them to matplotlib.
+The default mode is ``"series"`` rather than ``"plate"`` — the two other tabs'
+default is the well's or the group's plate-picker colour, and this one's is not.
+A curve is a *series*, which is a value of the Series variable pooled across
+however many wells hold it, so there is no plate colour it could take; the
+colours come from matplotlib's own property cycle in the order the user arranged
+that variable's values. Calling the mode "Plate" on the Properties sidebar would
+name a thing the figure does not do.
 """
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 from well_viewer.domain.line_colors import LineTraceStyle, grey_trace_style
 
-#: The two values ``PlotState.response_color_mode`` may hold.
-#:
-#: ``"colour"`` rather than the Bar and Line tabs' ``"plate"``, because it is
-#: not the plate: a response curve is one value of a *sample variable*, not one
-#: well, so its default colour comes from the figure's palette in the order the
-#: user arranged that variable's values. Naming the mode "Plate" here would be
-#: a label that reads as a claim about where the colour came from, and the
-#: claim would be false.
-RESPONSE_COLOR_MODES = ("colour", "grey")
-
-#: What an unset or unrecognised mode reads as.
-DEFAULT_RESPONSE_COLOR_MODE = "colour"
+#: The two values ``PlotState.response_color_mode`` may hold. ``"series"`` is
+#: the default and reproduces the historical behaviour exactly.
+RESPONSE_COLOR_MODES = ("series", "grey")
 
 
 def response_color_mode(plot) -> str:
-    """The effective mode for *plot* (a ``PlotState``), defaulting to ``"colour"``.
+    """The effective mode for *plot* (a ``PlotState``), defaulting to ``"series"``.
 
-    Anything unrecognised reads as the default, so an older state object with no
-    such field, or a hand-edited ``persistence.json``, degrades to the colours
-    the tab has always drawn rather than to a blank or arbitrary one — the same
-    bargain the bar and line resolvers strike.
+    Anything unrecognised reads as ``"series"``, so an unknown value degrades to
+    the colours the app has always drawn rather than to a blank or arbitrary
+    one — the same bargain the two sibling modules strike, and for the same
+    reasons: a state object from an older build has no such field, and
+    ``persistence.view_state`` validates the on-disk value against
+    :data:`RESPONSE_COLOR_MODES` before assigning, so an edited
+    ``persistence.json`` is dropped rather than stored.
     """
-    mode = str(getattr(plot, "response_color_mode", DEFAULT_RESPONSE_COLOR_MODE)
-               or DEFAULT_RESPONSE_COLOR_MODE)
-    return mode if mode in RESPONSE_COLOR_MODES else DEFAULT_RESPONSE_COLOR_MODE
+    mode = str(getattr(plot, "response_color_mode", "series") or "series")
+    return mode if mode in RESPONSE_COLOR_MODES else "series"
 
 
-def series_style_for_mode(mode: str, index: int,
-                          palette_color: str | None) -> LineTraceStyle:
-    """How the *index*-th series is drawn under the named *mode*.
+def grey_series_style(index: int) -> LineTraceStyle:
+    """The grey mode's style for the *index*-th series on a figure.
 
-    In ``"colour"`` mode this is *palette_color* and no marker or dash opinion,
-    which is byte-for-byte what the renderer drew before the mode existed —
-    ``None`` included, which is the tab's "one series, so nothing to tell
-    apart" case and leaves matplotlib's own cycle alone.
-
-    In ``"grey"`` mode it is the Line tab's shade and marker for that index,
-    **with the dash dropped**: on this tab the dash is the timepoint's, and a
-    style that carried one would be claiming an encoding it does not own.
-
-    Today's only caller reads the colour and the marker and takes the dash from
-    the timepoint, so a leaked dash could not reach the axes through it — this
-    is the style object telling the truth about itself rather than a guard
-    standing between a bug and the screen. That distinction is worth stating,
-    because a reader who takes it for the latter will not add the assertion the
-    day a second caller starts reading the field.
-
-    Takes the mode string rather than the state object because the renderer has
-    no state; anything unrecognised reads as the default, so no caller can
-    answer a junk value differently from another.
+    :func:`line_colors.grey_trace_style` with the dash dropped, because the dash
+    on this figure means the timepoint. Its shade and marker cycles are coprime
+    with each other, so the pair is still unique across the first twelve series
+    even without the third cue — twelve being what the Line tab's legend names
+    individually, and more than a response figure is ever readable with.
     """
-    if str(mode or DEFAULT_RESPONSE_COLOR_MODE) != "grey":
-        return LineTraceStyle(color=palette_color or "")
-    return replace(grey_trace_style(index), linestyle=None)
+    style = grey_trace_style(index)
+    return LineTraceStyle(color=style.color, marker=style.marker,
+                          filled=style.filled, linestyle=None)
 
 
-def series_style(plot, index: int, palette_color: str | None) -> LineTraceStyle:
-    """:func:`series_style_for_mode` with the mode read off *plot*.
+def series_styles(mode: str, series_ids, palette) -> dict[str, LineTraceStyle]:
+    """``{series id: style}`` for the ids on one figure, under the named *mode*.
 
-    The state-object spelling the other two resolvers offer, so there is one
-    answer to "what does grey mode draw here" whichever door a caller uses.
+    *series_ids* is the order the curves are drawn in, which ``collect`` already
+    put in the series variable's own declared value order, and *palette* is the
+    colour cycle the ``"series"`` mode inks from — passed in because choosing it
+    means reading matplotlib's rcParams, which this module stays clear of.
+
+    Callers do not branch on the mode; they ask for the styles and draw them, so
+    a surface that forgets to check cannot silently keep the old behaviour while
+    another honours the new one. Takes the mode string rather than the state
+    object for the same reason ``line_colors.trace_style_for_mode`` does.
+
+    **Grey mode styles a lone series too.** The ``"series"`` mode leaves a
+    figure with nothing to distinguish alone — one curve, or none split — and
+    the caller draws matplotlib's default; grey mode cannot do that, because
+    the whole request is "take the colour out of this figure", and one curve
+    left in C0 blue is the request refused on the one figure where it is most
+    visible.
     """
-    return series_style_for_mode(response_color_mode(plot), index, palette_color)
+    ids = list(series_ids)
+    if str(mode or "series") != "grey":
+        colours = list(palette) or ["C0"]
+        return {sid: LineTraceStyle(color=colours[i % len(colours)])
+                for i, sid in enumerate(ids)}
+    return {sid: grey_series_style(i) for i, sid in enumerate(ids)}

@@ -388,6 +388,43 @@ def test_scope_controls_swap_for_the_view_toggle_on_scatter(loaded_app):
     assert view.isHidden()
 
 
+def test_scope_controls_leave_the_band_on_response_curves(loaded_app):
+    """Response Curves owns its Channel and Property, so the band hides its own.
+
+    It has to own them: its Property list carries `Fraction above threshold`,
+    which is not a column and which the shared combo's consumers resolve to
+    ``f"{channel}_{metric}"`` and cannot read. What shipped was both pairs at
+    once — two Channel dropdowns and two Property dropdowns in one row, of
+    which only the tab's moved the figure, above an ON-cutoff box editing the
+    cutoff of whatever channel the *band* held rather than the one the curves
+    were measuring.
+
+    Driven through the real notebook rather than by reading the roster, because
+    a roster entry that nothing consults is exactly the shape of the bug: the
+    assertion is on the widgets the user is looking at.
+    """
+    assert loaded_app._notebook.setCurrentByName("Plotting")
+    scope = [loaded_app._plotting_channel_grp,
+             loaded_app._plotting_metric_grp,
+             loaded_app._plotting_thresh_frac_grp]
+
+    assert loaded_app._plotting_notebook.setCurrentByName("Response Curves")
+    assert all(g.isHidden() for g in scope), (
+        "the band still carries its global Channel / Property / ON-cutoff on "
+        "Response Curves, beside the tab's own pair"
+    )
+    # The scatter View toggle is about scatter, not about owning a channel, so
+    # it does not take their place here.
+    assert loaded_app._plotting_scatter_grp.isHidden()
+    # The tab's own pair is what is left on the row, and it is real.
+    assert loaded_app._ctx.widgets.get_or_none("_response_ch_cb") is not None
+    assert loaded_app._ctx.widgets.get_or_none("_response_metric_cb") is not None
+
+    assert loaded_app._plotting_notebook.setCurrentByName("Bar Plots")
+    assert not any(g.isHidden() for g in scope), (
+        "the globals did not come back on a tab that shares them")
+
+
 def test_view_toggle_drives_the_scatter_mode(loaded_app):
     """The toggle is in the shared band, in core; the Scatter page is a feature.
     They are wired through ``ctx.runtime.scatter.set_mode`` so the core never

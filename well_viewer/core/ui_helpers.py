@@ -491,6 +491,29 @@ def make_properties_button(ctx, parent: QWidget, figure_key: str, *,
 #: ``core/centre_view.py`` before any of the page's leaves.
 PLOTTING_BAND_KEY = "_plotting_band"
 
+#: The Plotting leaves that carry a **Channel and Property of their own**, so
+#: the band's global pair — and the ON-cutoff quick-edit that follows it — does
+#: not drive what they draw and is hidden while they are on screen.
+#:
+#: A tab is here because it *must* own the pair, not because it prefers to: the
+#: Scatter leaves scope a channel per axis, and Response Curves needs a Property
+#: list carrying `Fraction above threshold`, which is not a column and which the
+#: shared combo's consumers would resolve to ``f"{channel}_{metric}"`` and fail
+#: to read. Showing the globals beside a tab-local pair is worse than showing
+#: nothing: two Channel dropdowns on one row, only one of which moves the
+#: figure, and an ON-cutoff box editing the cutoff of whichever channel the
+#: *band* holds rather than the one the tab is measuring — a control that writes
+#: somewhere other than where it appears to.
+#:
+#: A roster rather than the literal tuple of scatter titles this replaced, and
+#: named here beside the band's own key rather than inside the page builder, so
+#: adding a leaf that owns its pair is one line in the place the rule is written.
+#: ``tests/test_band_globals_follow_the_leaf.py`` holds it against the tabs that
+#: actually build their own channel combo.
+OWN_CHANNEL_LEAVES = frozenset({
+    "Scatter Plot", "Scatter Cells", "Scatter Agg", "Response Curves",
+})
+
 
 def plotting_slot_name(title: str, mode: str | None = None) -> str:
     """The Plotting band's slot name for sub-tab *title* in *mode*.

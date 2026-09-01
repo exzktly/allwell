@@ -819,6 +819,59 @@ def axis_scoped_value(prefs, idx, key, default=None):
     return v
 
 
+def limits_a_log_axis_can_take(scale: str, lo, hi):
+    """*(lo, hi, dropped)* — a typed range with the bounds a log axis refuses.
+
+    ``log(0)`` is ``-inf`` and a negative number has no logarithm, so a
+    non-positive bound is not a limit a log axis can be given. matplotlib says
+    so **only when the axis is already logarithmic**, and that asymmetry is the
+    whole defect: ``ax.clear()`` leaves the axis linear at the top of every
+    redraw, so the pass sets the limit first (accepted, no warning) and the
+    scale second, and the ``0`` survives into an axis it means nothing on. The
+    figure then spans ``-inf``, every real point collapses into the top sliver,
+    and it reads as "the traces are crushed to the top". Re-typing the identical
+    numbers fixes it because *that* path meets an axis that is already log,
+    where matplotlib refuses the bound and autoscales a usable floor — which is
+    exactly the shape of a bug that looks like the control not working.
+
+    A **fraction** axis makes it the obvious thing to type: the quantity is
+    bounded 0 to 1, so ``0`` is the honest floor, and it is precisely the one
+    number a log axis cannot show.
+
+    *dropped* names the bounds that were refused, so the caller can say so.
+    Silently substituting a floor would be the substitution §7 forbids: the
+    number stays in the Properties field, the plot is drawn to a different
+    range, and nothing distinguishes that from the setting having worked.
+    """
+    if scale != "log":
+        return lo, hi, ()
+    dropped = tuple(name for name, v in (("min", lo), ("max", hi))
+                    if v is not None and float(v) <= 0.0)
+    return (None if lo is not None and float(lo) <= 0.0 else lo,
+            None if hi is not None and float(hi) <= 0.0 else hi,
+            dropped)
+
+
+def _apply_limits_for_scale(ax, which: str, lo, hi) -> None:
+    """Apply *lo*/*hi* to one axis, minus whatever its scale cannot take."""
+    scale = ax.get_xscale() if which == "x" else ax.get_yscale()
+    lo, hi, dropped = limits_a_log_axis_can_take(scale, lo, hi)
+    if dropped:
+        _logger.warning(
+            "export style: the %s %s typed for this figure %s not a limit a "
+            "logarithmic axis can take — log(0) is undefined and a negative "
+            "number has no logarithm — so that bound is left to autoscale. "
+            "Set a small positive floor, or turn the %s log scale off.",
+            which, " and ".join(dropped),
+            "are" if len(dropped) > 1 else "is", which)
+    if lo is None and hi is None:
+        return
+    current = ax.get_xlim() if which == "x" else ax.get_ylim()
+    _apply_axis_limits(lo if lo is not None else current[0],
+                       hi if hi is not None else current[1],
+                       setter=ax.set_xlim if which == "x" else ax.set_ylim)
+
+
 def _hold_typed_limits(ax, xlo, xhi, ylo, yhi) -> None:
     """Re-assert a limit the user typed, and say so when it had been lost.
 
@@ -839,7 +892,11 @@ def _hold_typed_limits(ax, xlo, xhi, ylo, yhi) -> None:
     it hides it now. The log line names the axis and both numbers, so a report
     of "my limits keep coming back wrong" has something to read.
     """
-    for which, lo, hi in (("x", xlo, xhi), ("y", ylo, yhi)):
+    for which, raw_lo, raw_hi in (("x", xlo, xhi), ("y", ylo, yhi)):
+        scale = ax.get_xscale() if which == "x" else ax.get_yscale()
+        # Silently here: the bound was already reported when it was applied,
+        # and this runs on every redraw.
+        lo, hi, _dropped = limits_a_log_axis_can_take(scale, raw_lo, raw_hi)
         if lo is None and hi is None:
             continue
         current = ax.get_xlim() if which == "x" else ax.get_ylim()
@@ -1180,14 +1237,6 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
         xhi = _axis_limit(idx, "x_lim_max")
         ylo = _axis_limit(idx, "y_lim_min")
         yhi = _axis_limit(idx, "y_lim_max")
-        if xlo is not None or xhi is not None:
-            cur = ax.get_xlim()
-            _apply_axis_limits(xlo if xlo is not None else cur[0],
-                                xhi if xhi is not None else cur[1], setter=ax.set_xlim)
-        if ylo is not None or yhi is not None:
-            cur = ax.get_ylim()
-            _apply_axis_limits(ylo if ylo is not None else cur[0],
-                                yhi if yhi is not None else cur[1], setter=ax.set_ylim)
         # Whatever the rest of this pass does to the axes, a limit the user
         # typed is the last word — so it is re-asserted at the end and the
         # discrepancy is reported. See :func:`_hold_typed_limits`.
@@ -1221,6 +1270,19 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
             _ts = getattr(ax, "_aw_time_rescale", None)
             if _ts is not None:
                 apply_time_rescale(ax, _ts)
+
+        # **After the scale, never before.** A limit can only be validated
+        # against the scale the axis will actually be drawn in, and on every
+        # redraw ``ax.clear()`` has left this axis linear until the block above
+        # ran: applied first, a non-positive bound on a log axis is accepted in
+        # silence — matplotlib refuses one only when the axis is *already*
+        # logarithmic — and survives into an axis where it means ``-inf``. That
+        # is the whole of the "my y limits keep coming back wrong" report: a
+        # fraction axis typed as 0 to 1 drew every point in the top thousandth
+        # of the figure, and re-typing the same two numbers fixed it because
+        # that path met an axis that was already log and had the bound refused.
+        _apply_limits_for_scale(ax, "x", xlo, xhi)
+        _apply_limits_for_scale(ax, "y", ylo, yhi)
 
         # ``minorticks_off`` installs a ``NullLocator`` on *both* axes, which on
         # a log axis would take away the subdivisions that make it readable

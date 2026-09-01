@@ -2841,6 +2841,13 @@ an answer of your own the switch there shows what is on screen, so an axis the
 tab chose reads as log rather than contradicting the plot above it; once you set
 it either way, your answer stands and the doses stop deciding.
 
+**A log axis cannot start at zero.** If you set a limit of 0 — the natural
+floor for a *fraction*, which runs 0 to 1 — on an axis you have also set to
+logarithmic, that bound cannot be drawn: the logarithm of zero is undefined.
+The upper limit you typed is kept, the floor is chosen from the data, and the
+log drawer says so. Type a small positive floor instead (`0.01`, say) or turn
+the log scale off for that axis.
+
 **Properties → Limits & Scale → Log base** sets what that axis is logarithmic
 in. **10** is the default, with **2**, **3** and **e** on the list, and you can
 type any other number above 1. The base does not move the points relative to one another

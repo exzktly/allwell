@@ -450,6 +450,7 @@ def crossed_replicate_sets(ctx, variable_ids):
     from itertools import product
 
     from well_viewer.domain.batch_models import ReplicateSet
+    from well_viewer.domain.sample_variables import NAME_JOIN
 
     vset = getattr(ctx.state.selection, "variables", None)
     variables = [vset.by_id(vid) for vid in variable_ids] if vset is not None else []
@@ -470,8 +471,13 @@ def crossed_replicate_sets(ctx, variable_ids):
         # ``name_is_verbatim``: the labels are the user's own, so the
         # auto-generated-name heuristic must not rewrite a dose of "10" into
         # the tokens of the wells that received it.
-        name = " · ".join(v.display_label(value.id)
-                          for v, value in zip(variables, combination))
+        # ``NAME_JOIN``, not a literal: this is the same question
+        # ``sample_variables.name_for_wells`` answers for a replicate group —
+        # what these wells *are*, said in the values they hold — and two
+        # separators for one idea is how a crossed member and a named group
+        # come to read as different kinds of thing on one plate.
+        name = NAME_JOIN.join(v.display_label(value.id)
+                              for v, value in zip(variables, combination))
         out.append(ReplicateSet(name, wells, name_is_verbatim=True))
     return out
 

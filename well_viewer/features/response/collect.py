@@ -22,6 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from well_viewer.core.safe import swallow
+from well_viewer.domain.sample_variables import NAME_JOIN
 
 # Module scope, not function-local: ``response_compute`` imports nothing from
 # here, so there is no cycle to work around — and a deferred feature import
@@ -540,7 +541,10 @@ def collect_response(ctx, variable_id: str, timepoints,
     # values in is the order their legend and their colours should follow, the
     # same rule the value list on the Variables tab is a list for.
     order = _series_order(series_variables, series_labels)
-    data.series_name = " · ".join(v.name for v in series_variables)
+    # The same separator the labels below are joined with, from the same
+    # constant: a legend titled "Cell line · Medium" over entries reading
+    # "HeLa · DMEM" is one sentence, and the two drifting apart would show.
+    data.series_name = NAME_JOIN.join(v.name for v in series_variables)
     data.curves = [
         ResponseCurve(timepoint=t, series_id=sid,
                       series_label=series_labels.get(sid, ""),
@@ -626,7 +630,7 @@ def _series_of(vset, variables, wells) -> tuple[str, str]:
         else:
             keys.append(str(value_id))
             labels.append(value.label)
-    return _SERIES_SEP.join(keys), " · ".join(labels)
+    return _SERIES_SEP.join(keys), NAME_JOIN.join(labels)
 
 
 def _series_order(variables, seen: dict[str, str]) -> list[str]:

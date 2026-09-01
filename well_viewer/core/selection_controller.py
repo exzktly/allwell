@@ -498,6 +498,55 @@ def on_sidebar_plate_well_dropped(ctx, well_id: str, token: str) -> None:
         logging.getLogger(__name__).exception("Heat map well drop handling failed")
 
 
+def merge_imported_selections(ctx, payload) -> int | None:
+    """Add every selection in *payload* to the plate; ``None`` if it holds none.
+
+    Accepts either a v2 ``sample_definitions`` block (with a ``selections`` key)
+    or a bare list of selection dicts. Returns how many were added, or ``None``
+    for a payload with nothing importable in it — a distinct answer rather than
+    ``0``, because "this file has no selections" is a sentence to show the user
+    and "every selection in it failed to add" is a different one.
+
+    **Split from** :func:`import_selections_from_json` **so it can be driven.**
+    That function opens a modal file dialog first, and a modal blocks for ever
+    under the offscreen QPA — so every rule in this loop was reachable only
+    through a picker no test can answer. A guard written against ``sel_add``
+    instead passes with this whole loop deleted, which is exactly what happened
+    to the flag below: the carry was reviewed as untested and the first test
+    written for it called ``sel_add`` directly, one step past the thing that
+    was in doubt.
+    """
+    items = None
+    if isinstance(payload, dict):
+        items = payload.get("selections") or payload.get("sample_definitions", {}).get("selections")
+    elif isinstance(payload, list):
+        items = payload
+    if not items:
+        return None
+
+    added = 0
+    for sel in items:
+        if not isinstance(sel, dict):
+            continue
+        name = sel.get("name") or "Imported"
+        wells = sel.get("wells") or []
+        replicates = sel.get("replicates")
+        source = sel.get("source") or "imported"
+        try:
+            # The file's own flag, carried rather than re-derived: an
+            # imported group called ``10`` was named after a dose on the plate
+            # it came from, and dropping that here would relabel it as its
+            # wells on every axis in this dataset.
+            sel_add(ctx, name=name, wells=list(wells),
+                    replicates=replicates, source=source,
+                    name_is_verbatim=bool(sel.get("name_is_verbatim")))
+            added += 1
+        except Exception:
+            _logger = __import__("logging").getLogger("well_viewer.runtime_app")
+            _logger.exception("Import selection failed for %r", name)
+    return added
+
+
 def import_selections_from_json(ctx) -> None:
     """Import a selections JSON file (the same schema used by Save) and
     merge it into ``ctx.state.selection.selections``. Existing names get a ``_v2``
@@ -517,32 +566,10 @@ def import_selections_from_json(ctx) -> None:
         QMessageBox.critical(ctx.window, "Import failed", f"Could not parse JSON:\n{exc}")
         return
 
-    # Accept either a v2 sample-definitions block (with a 'selections' key)
-    # or a bare list of selection dicts.
-    items = None
-    if isinstance(payload, dict):
-        items = payload.get("selections") or payload.get("sample_definitions", {}).get("selections")
-    elif isinstance(payload, list):
-        items = payload
-    if not items:
+    added = merge_imported_selections(ctx, payload)
+    if added is None:
         QMessageBox.warning(ctx.window, "Import", "No selections found in that file.")
         return
-
-    added = 0
-    for sel in items:
-        if not isinstance(sel, dict):
-            continue
-        name = sel.get("name") or "Imported"
-        wells = sel.get("wells") or []
-        replicates = sel.get("replicates")
-        source = sel.get("source") or "imported"
-        try:
-            sel_add(ctx, name=name, wells=list(wells),
-                    replicates=replicates, source=source)
-            added += 1
-        except Exception:
-            _logger = __import__("logging").getLogger("well_viewer.runtime_app")
-            _logger.exception("Import selection failed for %r", name)
 
     try:
         groups_centre_refresh(ctx)
@@ -1056,13 +1083,22 @@ def _schedule_sample_def_autosave(ctx) -> None:
 
 
 def sel_add(ctx, name=None, wells=None, replicates=None, source="user",
-             *, make_current=True):
+             *, make_current=True, name_is_verbatim=False):
+    """Append one new selection and make it current.
+
+    ``name_is_verbatim`` says *name* was composed from the sample variables the
+    wells hold rather than generated from their tokens, and it has to travel:
+    a one-variable plate names a group after a `Dose` of ``10``, which
+    ``replicate_display_label`` would otherwise read as an auto-generated name
+    and redraw on every axis as ``A01,A02``.
+    """
     from well_viewer.domain.selections_model import make_selection
     sel_state = ctx.state.selection
     used_names = {s.get("name") for s in sel_state.selections}
     used_ids = {s.get("id") for s in sel_state.selections}
     sel = make_selection(name=name, wells=wells, replicates=replicates,
                          source=source, used_names=used_names, used_ids=used_ids,
+                         name_is_verbatim=name_is_verbatim,
                          fallback_color_idx=len(sel_state.selections))
     sel_strip_wells(ctx, sel["wells"], keep_id=sel["id"])
     sel_state.selections.append(sel)
@@ -1207,6 +1243,11 @@ def sel_rename(ctx, sid, name) -> None:
     # fold-change state, which names groups in three places.
     _upgrade_fc_controls(ctx)
     s["name"] = new
+    # The name is now the user's, so it goes back under the rule every typed
+    # name lives under: ``name_is_verbatim`` exempts a name the *app* composed
+    # from the sample variables, and leaving it set would quietly spare this
+    # group the relabelling every other typed ``3`` gets.
+    s.pop("name_is_verbatim", None)
     ctx.state.plot.rename_member(old, new)
     ctx.coordinator.rebuild_all()
 

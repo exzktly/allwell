@@ -1475,6 +1475,37 @@ spinbox (default 2), walking the wells along the Rows / Columns direction. On
 the Replicates plate every well is tinted by its **group's** colour, so all wells in
 a group read as one condition and match the group's row swatch.
 
+**Once you have filled in Variables, new groups are named after them.** A group
+whose wells all hold `HeLa` and `10 µM` is created as `HeLa · 10 µM`, whether it
+came from **Quick Replicates** or from **+ Add**, instead of the placeholder
+each of those used to give it — `A01/A02` from Quick Replicates, `Rep 3` from
+**+ Add**. In the
+**+ Add** dialog the name box fills in as you pick the wells, and stops doing so
+the moment you type a name of your own. Two groups that would end up with the
+same name — four replicates of one dose split into two groups, say — each carry
+their wells after it (`1 µM (A01/A02)`), so you can tell them apart.
+
+Where the variables cannot answer, the wells stay in the name. A group whose
+wells hold two different doses is named for what they *do* agree on plus the
+wells themselves (`HeLa (A01/A03)`), because a group spanning two doses must not
+read like one that is only ever `HeLa`; and a group on a plate with no variables
+filled in keeps the placeholder it always had — `A01/A02` from Quick
+Replicates, `Rep 3` from **+ Add**. A variable you have created
+but not yet filled in anywhere is not counted against a group — it is something
+you have not done to the plate, not something that makes this group ambiguous,
+and marking every group at once would say nothing.
+
+Nothing here guesses: a well you have not annotated is never given a
+neighbour's value.
+
+**The name is a snapshot, not a live readout.** It is worked out once, when the
+group is made. Renaming a value afterwards, or moving a well to a different one,
+leaves the group called what it was called — the same as any name you type
+yourself. Rename a group by double-clicking it in the list; and if you want the
+current answer rather than the stored one, the **By group** list under the
+Variables plate rolls every group up live and says `—mixed—` where its wells
+disagree.
+
 **Editing a group on a partly-loaded plate keeps the wells you cannot see.** If
 you opened a folder that holds only some of the plate's wells, the picker can
 only paint those — but the group's other members are still part of it. Adding

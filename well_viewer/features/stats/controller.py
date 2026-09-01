@@ -972,6 +972,12 @@ def stats_refresh_group_list(ctx) -> None:
         lbl = QLabel("No groups.  Click + Add group to create one.")
         lbl.setObjectName("Muted")
         layout.addWidget(lbl)
+        # Floors reset, not left behind. They are derived from the cards a pass
+        # builds, so a pass that builds none has no basis for either — and the
+        # ones from the last populated pass would otherwise sit under a "No
+        # groups." label, holding a two-row height and a card's width for
+        # content that is one line long.
+        _stats_clear_group_list_floor(ctx)
         stats_refresh_map(ctx)
         return
     for gi, grp in enumerate(ctx.state.stats.groups):
@@ -1060,7 +1066,27 @@ def _stats_refresh_group_count(ctx) -> None:
     if lbl is None:
         return
     n = len(ctx.state.stats.groups or [])
-    lbl.setText("" if n == 0 else f"{n} group{'s' if n != 1 else ''}")
+    # "None yet" rather than an empty string at zero. The docstring's own
+    # argument — a folded section that reports nothing is one you have to unfold
+    # to find out whether you need it unfolded — is *most* true at zero, which
+    # is exactly where the first version said nothing.
+    lbl.setText("None yet" if n == 0 else f"{n} group{'s' if n != 1 else ''}")
+
+
+def _stats_clear_group_list_floor(ctx) -> None:
+    """Drop the floors when there are no cards to derive them from.
+
+    Both are measured from a card the pass actually built (see
+    :func:`_stats_floor_group_list`), so the empty state has no basis for
+    either. Leaving the last pass's numbers in place is the more visible half of
+    the bug: after Clear All, a one-line "No groups." label sat in a box still
+    reserving two card rows and a card's width.
+    """
+    sa = ctx.widgets.get_or_none("_stats_grp_canvas")
+    if sa is None:
+        return
+    sa.setMinimumHeight(0)
+    sa.setMinimumWidth(0)
 
 
 def _stats_floor_group_list(ctx, layout) -> None:

@@ -2903,9 +2903,10 @@ t-test** and **Wilcoxon signed-rank**, and a **two-way ANOVA**.
   group list with **+ Add group**, **Clear All** and **↻ Load from Replicates**
   at its foot. Click a group to arm it — the armed one carries an accent rule
   down its left edge — then drag wells on the map to assign them to it. On a
-  narrow pane — a small window with the rail open and Split View on — the map
+    narrow pane — a small window with the rail open and Split View on — the map
   moves above the list rather than shrinking beside it, and the page scrolls
-  rather than squeezing either. **Click the section header to fold the editor
+  rather than squeezing either. Narrower still than the map itself can go, the
+  page scrolls sideways too: the editor is never quietly cut off at the edge. **Click the section header to fold the editor
   away** once the groups are defined; folded, it still says how many there are,
   and the results get the height back. It is on the page rather than in the
   sidebar so that defining groups never depends on which pane has the focus —

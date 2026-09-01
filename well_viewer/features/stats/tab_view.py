@@ -84,10 +84,11 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
 
     # A row that becomes a column when the pane cannot hold both panels. A plain
     # QHBoxLayout does not refuse to lay out children it has no room for — it
-    # overlaps and clips them, which on a 350px pane (an 1100x800 window with the
-    # rail open and this pane split) drew the group cards over the map, a title
-    # reading "COMP GROU" and a button cut off mid-word. ResponsiveRow flips on
-    # the panels' own minimums, so it stacks exactly when one line would clip.
+    # places them in order and runs the tail off its own edge, which on a 350px
+    # pane (an 1100x800 window with the rail open and this pane split) left a
+    # title reading "COMP GROU" and a button cut off mid-word. ResponsiveRow
+    # flips on the panels' own minimums, so it stacks exactly when one line
+    # would clip.
     outer = parent.layout()
     if outer is None:
         outer = QVBoxLayout(parent)
@@ -119,12 +120,14 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     plate.setRowColumnSelectable(True)
     plate.setEnabledWells([])
     plate.setWellTooltipProvider(well_plate_tooltip_provider(ctx))
-    # ``editor``, not ``rail``: this is one control on a page rather than the
-    # rail picker, so it takes the app-wide size caps (widgets/plate_geometry.py)
-    # like every other in-page plate, and hides the built-in All / Invert /
-    # Clear row — clearing a *comparison group* is the group card's ✕, and a
-    # second Clear meaning something else beside it is the confusion this whole
-    # change is about.
+    # ``editor``, not ``rail``, and the difference is the size caps and nothing
+    # else: both roles hide the built-in All / Invert / Clear row
+    # (``plate_geometry`` shows it for ``picker`` alone), so an earlier version
+    # of this comment claiming that as the reason was simply wrong. The reason
+    # is that ``rail`` is *uncapped* — an exemption argued for Review's rail
+    # picker specifically, where the plate is alone in a fixed-width column. On
+    # a page that shares its width with the group list, uncapped means the map
+    # grows to whatever the pane has and the list gets the remainder.
     apply_plate_geometry(plate, role="editor")
     # A floor as well as a cap, which the rail plate never needed: this one
     # shares its width with the group cards, and a box layout that cannot fit
@@ -161,6 +164,9 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     # its own rather than a section header's hint: the section title now lives
     # on the collapsible's header, which toggles on click and so cannot also
     # carry text and buttons.
+    # "the map", not "the map beside it": the row stacks on a narrow pane and
+    # the map is then above the list, so any word placing it would be wrong half
+    # the time. The hint sits inside the editor, where the only map is this one.
     hint = QLabel("Select a group below, then drag wells on the map to "
                   "assign them to it.", side)
     hint.setObjectName("Muted")
@@ -418,7 +424,7 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
         return EmptyReason(
             "No comparison groups yet.",
             "Click + Add group under Comparison groups above, select the card "
-            "it makes, then drag wells on the map beside it.",
+            "it makes, then drag wells on the map.",
         )
 
     layout.addWidget(wrap_with_empty_state(

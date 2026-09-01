@@ -130,3 +130,69 @@ def test_the_results_placeholder_says_what_is_still_owed(loaded_app):
     assert box.placeholderText().startswith("Choose a test above"), (
         f"with both groups defined the panel still asks for them: "
         f"{box.placeholderText()!r}")
+
+
+@pytest.mark.slow
+def test_the_header_count_reports_the_empty_state_too(loaded_app):
+    """A folded section that says nothing is one you have to unfold to find out
+    whether you need it unfolded — and that is most true at zero groups, which
+    is where the first version said nothing at all.
+
+    Asserts the three strings, not "the label changed": a count that read "0
+    groups" and one that read "" both change, and only one of them tells a user
+    with the editor folded that there is nothing in it.
+    """
+    from well_viewer.features.stats.controller import (
+        stats_grp_add, stats_grp_clear_all, stats_refresh_group_list,
+    )
+
+    app = loaded_app
+    ctx = app._ctx
+    app._notebook.setCurrentByName("Statistics")
+    label = ctx.widgets.get("_stats_group_count_lbl")
+
+    stats_grp_clear_all(ctx)
+    assert label.text() == "None yet", (
+        f"with no groups the folded header says {label.text()!r}")
+
+    stats_grp_add(ctx)
+    stats_refresh_group_list(ctx)
+    assert label.text() == "1 group"
+
+    stats_grp_add(ctx)
+    stats_refresh_group_list(ctx)
+    assert label.text() == "2 groups"
+
+
+@pytest.mark.slow
+def test_clearing_the_groups_drops_the_floors_they_justified(loaded_app):
+    """Both floors are measured from a card the pass actually built, so a pass
+    that builds none has no basis for either.
+
+    Left in place they outlive their reason: after Clear All, a one-line "No
+    groups." label sat in a box still reserving two card rows and a card's
+    width — and that width is what the responsive row measures when deciding
+    whether the map fits beside it, so a stale one moves the flip point for a
+    list that is no longer there.
+    """
+    from well_viewer.features.stats.controller import (
+        stats_grp_clear_all, stats_refresh_group_list,
+    )
+
+    app = loaded_app
+    ctx = app._ctx
+    app._notebook.setCurrentByName("Statistics")
+    _two_groups(ctx)
+    canvas = ctx.widgets.get("_stats_grp_canvas")
+    assert canvas.minimumWidth() > 0 and canvas.minimumHeight() > 0, (
+        "the floors were never set with two groups defined, so this test "
+        "cannot show them being dropped")
+
+    stats_grp_clear_all(ctx)
+    stats_refresh_group_list(ctx)
+    assert canvas.minimumWidth() == 0, (
+        f"the list still reserves {canvas.minimumWidth()}px of width for cards "
+        f"it no longer holds")
+    assert canvas.minimumHeight() == 0, (
+        f"the list still reserves {canvas.minimumHeight()}px of height for two "
+        f"cards it no longer holds")

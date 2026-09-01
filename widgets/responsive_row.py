@@ -1,12 +1,16 @@
 """ResponsiveRow — panels side by side while the width holds them, stacked when
 it does not.
 
-A ``QHBoxLayout`` given less width than its children's minimums does not stop
-laying them out: it overlaps and clips them. On the Statistics page that showed
-as the comparison-group map with the group cards drawn *over* it, a section
-title reading "COMP GROU", and a button cut off mid-word — a 1100x800 window
-with the rail open and the pane split leaves each pane about 350px, against a
-map floor of 220 and a card column that cannot go below its widest button.
+A ``QBoxLayout`` handed less width than its children's minimums does not
+decline to lay them out: it places them in order at the widths they demand and
+runs the tail off its own right edge. On the Statistics page that showed as a
+section title reading "COMP GROU" and a button cut off mid-word — a 1100x800
+window with the rail open and the pane split leaves each pane about 350px,
+against a map floor of 220 and a card column that cannot go below its widest
+button. (An earlier version of this note said the panels were drawn *over* each
+other. They are not, and no arrangement of them overlaps: a short box layout
+clips, and the two failures look similar on screen but only one of them is
+what happens here.)
 
 The flip point is not a chosen number. It is the panels' own
 ``minimumSizeHint`` widths plus the spacing between them: the row stacks exactly
@@ -156,17 +160,35 @@ class ResponsiveRow(QWidget):
         on its own resize, because a row already pinned at its minimum may not
         receive a resize of its own to react to.
 
-        Outside one, the row's own width is the answer. An earlier version also
-        took ``min(width, parent.width())``, on the reasoning that a row pinned
-        wider than its parent reports what it wants rather than what it has —
-        but with the viewport read above and ``add_panel`` re-deciding as panels
-        arrive, no arrangement was found that reaches that state, and a branch
-        no test can enter is not worth the sentence explaining it.
+        The viewport's width is not the row's width, though, and reading it raw
+        was a bug: every layout between the two takes its own margins out first.
+        On the Statistics page the row sits inside a ``CollapsibleSection``
+        body, whose layout reserves 24px horizontally — so the row believed it
+        had 400px where it had 376, stayed on one line 24px past the point it
+        should have stacked, and ran 8px of a button off a page that cannot
+        scroll sideways. The chrome is therefore summed on the way up and
+        subtracted, which is the same measurement Qt itself will make when it
+        lays the row out.
+
+        Outside a scroll area, the row's own width is the answer. An earlier
+        version also took ``min(width, parent.width())``, on the reasoning that
+        a row pinned wider than its parent reports what it wants rather than
+        what it has — but with the viewport read above and ``add_panel``
+        re-deciding as panels arrive, no arrangement was found that reaches that
+        state, and a branch no test can enter is not worth the sentence
+        explaining it.
         """
+        chrome = 0
         node = self.parentWidget()
         while isinstance(node, QWidget):
             if isinstance(node, QAbstractScrollArea):
-                return node.viewport().width()
+                # The scroll area's own layout is not between the row and the
+                # viewport, so it is read before its margins are counted.
+                return max(0, node.viewport().width() - chrome)
+            layout = node.layout()
+            if layout is not None:
+                margins = layout.contentsMargins()
+                chrome += margins.left() + margins.right()
             node = node.parentWidget()
         return self.width()
 
@@ -191,17 +213,28 @@ class ResponsiveScroll(QScrollArea):
     """A vertically-scrolling host that keeps the rows inside it told how much
     width they really have.
 
-    Horizontal scrolling is off, so the page can never be dragged sideways and
-    the rows must fit the viewport — which is the whole reason they flip. A row
-    pinned at its own side-by-side minimum does not necessarily receive a resize
-    event when the viewport shrinks under it, so the push has to come from here
-    rather than being left to each row to notice.
+    A row pinned at its own side-by-side minimum does not necessarily receive a
+    resize event when the viewport shrinks under it, so the push has to come
+    from here rather than being left to each row to notice.
+
+    **Horizontal scrolling is on demand, not off.** Off was the first choice, on
+    the reasoning that a page which cannot be dragged sideways is a page whose
+    rows must fit — but the rows flip on the *viewport's* width, which an
+    unwanted scrollbar does not change (a horizontal bar costs height), so
+    nothing about the decision depended on it. What it did cost is the case
+    below the floor: stacked, a row can be no narrower than its widest panel's
+    minimum, and a pane narrower than that has to put the difference somewhere.
+    With the bar off it went behind the page's own edge, unreachable and
+    unannounced — measured at an 800x600 window in a split, 54px of the editor
+    simply gone. Degraded output that looks like good output is the one thing
+    this codebase will not do, so the shortfall is now a scrollbar: visible,
+    reachable, and absent entirely at any size where the flip can do its job.
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWidgetResizable(True)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
     def resizeEvent(self, event) -> None:  # Qt override

@@ -1,11 +1,22 @@
-"""The comparison-group editor's two panels never draw on top of each other.
+"""The comparison-group editor fits its pane, at every size and group count.
 
 The map and the group cards sit side by side on the Statistics page. A
-``QHBoxLayout`` handed less width than its children's minimums does not decline
-to lay them out — it overlaps and clips — and that is what shipped in the first
-cut of this editor: measured on an 1100x800 window with the rail open and the
-pane split (about 350px per pane), the cards were drawn over the map, the
-section title read "COMP GROU" and the load button was cut off mid-word.
+``QBoxLayout`` handed less width than its children's minimums does not decline
+to lay them out — it places them in order at the widths they demand and runs
+the tail off its own right edge — and that is what shipped in the first cut of
+this editor: measured on an 1100x800 window with the rail open and the pane
+split (about 350px per pane), the section title read "COMP GROU" and the load
+button was cut off mid-word.
+
+**The panels never overlap, and cannot**, which is worth stating because
+``test_the_map_and_the_cards_never_overlap`` below asserts exactly that and
+therefore cannot fail for the reason its name gives: mutating the flip so the
+row never stacks leaves it green while three of its neighbours go red. It is
+kept as a cheap statement of an invariant that would start mattering if either
+panel were ever positioned rather than laid out, and its name says what it
+measures. The tests carrying the real weight are
+``test_the_page_never_scrolls_sideways`` and its companion for the floor below
+which nothing more can be given.
 
 ``widgets/responsive_row`` stacks the two before that happens, on the panels'
 own effective minimum widths. ``tests/test_responsive_row.py`` pins that rule on
@@ -109,7 +120,9 @@ def test_the_map_and_the_cards_never_overlap(loaded_app):
         _settle()
         a, b = _rect(plate), _rect(side)
         assert not a.intersects(b), (
-            f"at {w}x{h} the group cards {b} are drawn over the well map {a}")
+            f"at {w}x{h} the group cards {b} intersect the well map {a} — "
+            f"which a box layout does not do, so something is positioning one "
+            f"of them rather than laying it out")
 
 
 @pytest.mark.slow
@@ -250,7 +263,8 @@ def test_the_page_scrolls_rather_than_crushing_the_editor(loaded_app):
 
 
 @pytest.mark.slow
-def test_the_page_never_scrolls_sideways(loaded_app):
+@pytest.mark.parametrize("groups", [0, 2])
+def test_the_page_never_scrolls_sideways(loaded_app, groups):
     """The invariant the whole responsive design rests on, at every size.
 
     Width is what forces the editor to stack; a page that can be dragged
@@ -258,9 +272,53 @@ def test_the_page_never_scrolls_sideways(loaded_app):
     is off, so range on that scrollbar is not an escape hatch either — it is
     content behind the page's own edge, unreachable.
 
-    Swept, because it was found at one size and one size only: a card-list
-    minimum width capped at the plate's *cap* rather than its *floor* overflowed
-    a 300px pane by seven pixels, and every other size in this file was clean.
+    Swept over sizes, because it was first found at one size only. **And over
+    the group count**, because that is what let the next one through: with two
+    groups the list is wide enough that the row stacks at 1200x800 and the page
+    fits, while with none — the state the tab is in the first time it is opened
+    — the row stayed on one line and ran 8px of the load button off the page.
+    A fixture that defines groups before measuring cannot see it, which is the
+    whole of why this takes a parameter.
+
+    ``_SIZES`` are the sizes at which the flip can still fit the page; below
+    them a stacked row can be no narrower than its widest panel's minimum and
+    the shortfall has to go somewhere. That case is
+    ``test_a_pane_too_narrow_to_fit_shows_the_shortfall_rather_than_hiding_it``.
+    """
+    app = loaded_app
+    ctx = app._ctx
+    app.resize(1600, 1000)
+    _statistics_split(app)
+    if groups:
+        _two_groups(ctx)
+    else:
+        ctx.state.stats.clear_groups()
+        from well_viewer.features.stats.controller import stats_refresh_group_list
+        stats_refresh_group_list(ctx)
+    scroll = ctx.widgets.get("_stats_page_scroll")
+
+    for w, h in _SIZES:
+        app.resize(w, h)
+        _settle()
+        assert scroll.horizontalScrollBar().maximum() == 0, (
+            f"with {groups} groups at {w}x{h} the page is "
+            f"{scroll.horizontalScrollBar().maximum()}px wider than its "
+            f"viewport at a size where stacking should have fitted it")
+
+
+@pytest.mark.slow
+def test_a_pane_too_narrow_to_fit_shows_the_shortfall_rather_than_hiding_it(loaded_app):
+    """Below the floor there is nothing left to give, and that has to be said.
+
+    Stacked, the row can be no narrower than its widest panel's minimum — the
+    map's ``PLATE_MIN_WIDTH``. A pane narrower than that has a shortfall no
+    layout decision can absorb. With horizontal scrolling off it went behind the
+    page's own edge: measured at an 800x600 window in a split, 54px of the
+    editor simply gone, with nothing on screen saying so. Degraded output that
+    looks like good output is the one thing this codebase will not do.
+
+    Asserts the scrollbar is *visible*, not merely that it has range: range on a
+    bar the policy never shows is the clipping it was supposed to replace.
     """
     app = loaded_app
     ctx = app._ctx
@@ -268,14 +326,20 @@ def test_the_page_never_scrolls_sideways(loaded_app):
     _statistics_split(app)
     _two_groups(ctx)
     scroll = ctx.widgets.get("_stats_page_scroll")
+    row = ctx.widgets.get("_stats_group_row")
 
-    for w, h in _SIZES:
-        app.resize(w, h)
-        _settle()
-        assert scroll.horizontalScrollBar().maximum() == 0, (
-            f"at {w}x{h} the page is "
-            f"{scroll.horizontalScrollBar().maximum()}px wider than its "
-            f"viewport, and that width is unreachable rather than scrollable")
+    app.resize(800, 600)
+    _settle()
+    assert row.is_stacked(), (
+        "the row has not even stacked at this size, so this test is measuring "
+        "a flip failure rather than the floor below it")
+    bar = scroll.horizontalScrollBar()
+    assert bar.maximum() > 0, (
+        "the page fits an 800x600 split pane, so the floor this test is about "
+        "is not being reached — pick a narrower size")
+    assert bar.isVisible(), (
+        f"{bar.maximum()}px of the editor is past the viewport's edge with no "
+        f"scrollbar to reach it — clipped, not scrollable")
 
 
 @pytest.mark.slow

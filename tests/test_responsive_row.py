@@ -1,9 +1,11 @@
 """A row of panels becomes a column before it starts clipping them.
 
-A ``QHBoxLayout`` handed less width than its children's minimums does not
-decline to lay them out — it overlaps and clips. That is what the Statistics
-comparison-group editor did on a 350px pane: the group cards drawn over the
-well map, a section title reading "COMP GROU", a button cut off mid-word.
+A ``QBoxLayout`` handed less width than its children's minimums does not
+decline to lay them out — it places them in order at the widths they demand and
+runs the tail off its own right edge. That is what the Statistics
+comparison-group editor did on a 350px pane: a section title reading
+"COMP GROU", a button cut off mid-word. It does not draw one panel over
+another, and no arrangement of them does — a short box layout clips.
 
 ``widgets/responsive_row.ResponsiveRow`` flips to a column on the panels' own
 ``minimumSizeHint`` widths, so the flip point is not a number anybody has to
@@ -202,8 +204,58 @@ def test_a_row_reads_the_width_of_the_scroll_area_holding_it(qapp):
     assert row.width() >= row.needed_width(), (
         "the row is not pinned wider than its viewport, so this test is not "
         "measuring the case it was written for")
-    scroll.refresh_rows()
+    # ``apply_orientation()`` with no argument, deliberately: passing ``avail``
+    # is what ``refresh_rows`` does, and doing that here meant ``_available_width``
+    # — the whole subject of this test — was never entered. Replacing its body
+    # with ``return self.width()`` left this file green.
+    row.apply_orientation()
     assert row.is_stacked(), (
         f"the row is {row.width()}px inside a {scroll.viewport().width()}px "
         f"viewport and did not stack — it read its own inflated width")
+
+
+def test_a_row_subtracts_the_chrome_between_it_and_the_viewport(qapp):
+    """The viewport's width is not the row's width.
+
+    Every layout between the two takes its margins out first. Reading the
+    viewport raw made the row believe it had 24px it did not — the horizontal
+    margins of the ``CollapsibleSection`` body it sits in on the Statistics
+    page — so it stayed on one line 24px past the point it should have stacked
+    and ran a button off a page that cannot scroll sideways.
+
+    The fixture puts a real margin in the way and picks a width where the two
+    answers disagree: 300px of viewport, 40px of chrome, two 130px panels
+    needing 268. Read raw, 300 ≥ 268 and it stays on one line; read correctly,
+    260 < 268 and it stacks.
+    """
+    from PySide6.QtWidgets import QVBoxLayout, QWidget
+    from widgets.responsive_row import ResponsiveRow, ResponsiveScroll
+
+    scroll = ResponsiveScroll()
+    page = QWidget()
+    QVBoxLayout(page).setContentsMargins(0, 0, 0, 0)
+    framed = QWidget()
+    inner = QVBoxLayout(framed)
+    inner.setContentsMargins(20, 0, 20, 0)          # the chrome
+    row = ResponsiveRow(spacing=8)
+    for _ in range(2):
+        panel = QWidget()
+        panel.setMinimumWidth(130)
+        row.add_panel(panel)
+    inner.addWidget(row)
+    page.layout().addWidget(framed)
+    scroll.setWidget(page)
+    scroll.resize(300, 400)
+    scroll.show()
+    qapp.processEvents()
+
+    assert row.needed_width() == 268
+    assert scroll.viewport().width() >= row.needed_width(), (
+        "the raw viewport is already too narrow, so this fixture cannot tell "
+        "the two readings apart")
+    row.apply_orientation()
+    assert row.is_stacked(), (
+        f"the row read the {scroll.viewport().width()}px viewport rather than "
+        f"the {scroll.viewport().width() - 40}px it actually has, and stayed on "
+        f"one line with {row.needed_width()}px of panels")
 

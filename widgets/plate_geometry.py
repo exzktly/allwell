@@ -72,12 +72,11 @@ PLATE_MAX_WIDTH = 330
 
 #: Narrowest a plate may be squeezed to by a host that has to share its width.
 #: Also the app's statement of how small a well may get before a plate stops
-#: being something you can drag on: twelve columns in this width is about 18 px
-#: of well, and ``PLATE_MIN_WIDTH / 12`` is the figure to compare a plate's own
-#: cell size against. There is deliberately no matching height floor — a host
-#: that cannot give a plate its height should scroll, and the one place this
-#: came up (the Statistics comparison-group editor) does exactly that, which
-#: made a ``setMinimumHeight`` beside it measurably dead.
+#: being something you can drag on, so ``PLATE_MIN_WIDTH / 12`` is the figure to
+#: compare any plate's own cell size against. There is deliberately no matching
+#: height floor — a host that cannot give a plate its height should scroll, and
+#: the one place this came up (the Statistics comparison-group editor) does
+#: exactly that, which made a ``setMinimumHeight`` beside it measurably dead.
 #: Only relevant to a plate laid out *beside* something else — the rail's is
 #: alone in its slot and an ``editor`` plate on a full-width page never reaches
 #: this. The grid sizes its cells to ``min(width / 12, height / 8)``, so 12

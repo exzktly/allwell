@@ -21,6 +21,8 @@ through the scope registry rather than by naming any tab.
 
 from __future__ import annotations
 
+from well_viewer.data.metric_labels import spread_label
+
 from well_viewer.core.plot_orchestrator import redraw_every_scope
 from well_viewer.core.selection_controller import invalidate_stats_cache
 from well_viewer.core.safe import swallowed
@@ -145,7 +147,7 @@ def refresh_fov_btn_state(ctx) -> None:
 def toggle_sem(ctx) -> None:
     invalidate_stats_cache(ctx)
     is_sem = ctx.state.plot.toggle_sem()
-    text = "SEM" if is_sem else "SD"
+    text = spread_label(is_sem)
     variant = "sem" if is_sem else "sem_warn"
 
     def _apply_sem(btn) -> None:

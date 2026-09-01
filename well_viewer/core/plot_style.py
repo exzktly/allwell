@@ -396,7 +396,11 @@ def mark_time_rescale(*axes, rescale) -> None:
 
 #: What the Properties panel offers in its log-base field. Editable, so a base
 #: this list does not name is still accepted — these are the ones worth a click.
-LOG_BASE_CHOICES = ("10", "2", "e")
+#: In the order they are reached for rather than sorted: 10 is the default and
+#: almost always the answer, 2 and 3 are the doubling and tripling series a
+#: dilution plate is laid out in, and *e* is the one that is a symbol rather
+#: than a number.
+LOG_BASE_CHOICES = ("10", "2", "3", "e")
 
 #: The base a log axis takes when nothing has said otherwise.
 DEFAULT_LOG_BASE = 10.0
@@ -471,6 +475,56 @@ def _already_scaled(ax, which: str, name: str, base: float | None) -> bool:
     return current is not None and abs(float(current) - float(base)) < 1e-9
 
 
+def log_minor_subs(base: float) -> tuple[float, ...]:
+    """Where the minor ticks go between two major ones on a log axis in *base*.
+
+    The **standard subdivisions**: the whole multiples strictly between 1 and
+    the base, which for base 10 is the familiar 2, 3, … 9 that makes a decade
+    readable between its two labels. Without them a log axis is a pair of
+    labelled powers with an unmarked gap, and a reader cannot tell 2 from 5.
+
+    A base too small to have a whole multiple inside it gets its **log-space
+    midpoint** instead (√base), the one subdivision evenly placed in the space
+    the axis is actually drawn in. Of the bases the panel offers that is base 2
+    alone: *e* looks like the same case and is not, since 2 lies strictly inside
+    it and so subdivides it like any other base. Returning nothing for base 2
+    would leave the base most in need of a mark between its labels with none,
+    an axis that labels every doubling being the emptiest of the lot.
+    """
+    import math
+
+    base = float(base)
+    if not math.isfinite(base) or base <= 1.0:
+        base = DEFAULT_LOG_BASE
+    whole = tuple(float(n) for n in range(2, math.ceil(base)))
+    return whole or (math.sqrt(base),)
+
+
+def apply_log_minor_ticks(ax, which: str, base: float) -> None:
+    """Put the standard subdivisions on *ax*'s log axis, unlabelled.
+
+    Unlabelled because the subdivision is a *ruler*, not a reading: nine numbers
+    per decade would crowd the axis past legibility, which is why matplotlib
+    labels none of them either. What it does not do is place them for every
+    base — ``minorticks_on`` finds nothing at all between powers of two — and it
+    only places any when the Properties *Minor ticks* row is on, which is off by
+    default. On a log axis those ticks are not decoration, so they are installed
+    here, where the scale is set, rather than left to a preference about linear
+    axes.
+
+    Called on every :func:`apply_axis_log_scale`, including the calls whose
+    scale-setting is skipped as a no-op: the restyle that follows every redraw
+    can have cleared the locator (``minorticks_off`` installs a ``NullLocator``)
+    since the last time the scale itself changed.
+    """
+    from matplotlib.ticker import LogLocator, NullFormatter
+
+    axis = ax.xaxis if which == "x" else ax.yaxis
+    axis.set_minor_locator(LogLocator(base=float(base),
+                                      subs=log_minor_subs(base)))
+    axis.set_minor_formatter(NullFormatter())
+
+
 def apply_axis_log_scale(ax, which: str, on: bool,
                          base: float = DEFAULT_LOG_BASE) -> None:
     """Set an axis to log scale in *base*, honouring a scatter ``_aw_log_plus1``.
@@ -485,7 +539,9 @@ def apply_axis_log_scale(ax, which: str, on: bool,
     where the user's base is honoured.
 
     Setting an axis to the scale it already has is a no-op rather than a rebuild
-    — see :func:`_already_scaled` for what the rebuild costs.
+    — see :func:`_already_scaled` for what the rebuild costs. The *minor* ticks
+    are re-installed either way (:func:`apply_log_minor_ticks`), because the
+    restyle can have cleared them since the scale last changed.
     """
     set_scale = ax.set_xscale if which == "x" else ax.set_yscale
     if not on:
@@ -495,6 +551,7 @@ def apply_axis_log_scale(ax, which: str, on: bool,
     if not bool(getattr(ax, "_aw_log_plus1", False)):
         if not _already_scaled(ax, which, "log", base):
             set_scale("log", base=base)
+        apply_log_minor_ticks(ax, which, base)
         return
     import numpy as _np
 
@@ -1122,18 +1179,36 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
             if _ts is not None:
                 apply_time_rescale(ax, _ts)
 
+        # ``minorticks_off`` installs a ``NullLocator`` on *both* axes, which on
+        # a log axis would take away the subdivisions that make it readable
+        # between its two labelled powers — those are a property of the scale,
+        # not a preference about tick density, so a log axis keeps them whatever
+        # this row says and the row goes on governing the linear axes beside it.
+        from matplotlib.ticker import NullLocator as _NullLocator
+
         _tick_minor = bool(_axis_style(idx, "tick_minor", False))
+        _log_axes = [w for w in ("x", "y")
+                     if (ax.get_xscale() if w == "x" else ax.get_yscale()) == "log"]
         if _tick_minor:
             ax.minorticks_on()
-        else:
+        elif not _log_axes:
             ax.minorticks_off()
+        else:
+            for _w in ("x", "y"):
+                if _w not in _log_axes:
+                    (ax.xaxis if _w == "x" else ax.yaxis).set_minor_locator(
+                        _NullLocator())
+        for _w in _log_axes:
+            apply_log_minor_ticks(
+                ax, _w,
+                log_base_value(prefs.get(f"{_w}_log_base", "10")))
         length = float(_axis_style(idx, "tick_length", 4.0))
         direction = str(_axis_style(idx, "tick_direction", "out"))
         if bool(_axis_style(idx, "tick_major", True)):
             ax.tick_params(which="major", length=length, direction=direction)
         else:
             ax.tick_params(which="major", length=0)
-        if _tick_minor:
+        if _tick_minor or _log_axes:
             ax.tick_params(which="minor", length=max(1.0, length * 0.6), direction=direction)
 
         leg = ax.get_legend()

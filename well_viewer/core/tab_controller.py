@@ -30,6 +30,12 @@ def pane_mode(idx: int) -> str:
 _build_review_image_panel = _lazy(
     "well_viewer.features.preview.panel_view", "build_review_image_panel")
 
+# The shared three-scope repaint (Line / Distribution / Heat Map), bound lazily
+# so this module still names ``plot_orchestrator`` only at call time — the
+# reason the call sites below used to each carry their own function-local
+# import, which is one binding per site and one more place for them to drift.
+redraw_app = _lazy("well_viewer.core.plot_orchestrator", "redraw_app")
+
 # Split-View extension points. ``split_view.install_split_view`` sets these; while
 # they are None the resolvers below behave exactly as the single-tab original, so
 # the feature is fully absent until (and unless) it is installed.
@@ -100,7 +106,6 @@ def on_tab_change(ctx, _e=None) -> None:
     would return for the life of the process — no tab change reaching any tab.
     Nothing below this line touches the line feature.
     """
-    from well_viewer.core.plot_orchestrator import redraw_app
     tab = current_centre_tab(ctx)
     if not tab:
         return
@@ -245,22 +250,58 @@ def on_tab_change(ctx, _e=None) -> None:
     if ctx.runtime.view_state.pending:
         from well_viewer.persistence import view_state as _vs
         if _vs.apply_pending_tab_state(ctx, tab):
-            # The restore lands *after* this tab's initial draw above, so that
-            # draw used pre-restore defaults — e.g. the Bar timepoint popup,
-            # which ``update_bar_tp_menu`` had defaulted to a single checked
-            # timepoint, so the plot showed one timepoint even though the saved
-            # selection (now applied) has several. Redraw the plot tabs so they
-            # reflect the restored state. The Image Table is deliberately
-            # excluded — it reads images off disk, and it renders only when the
-            # user presses Generate. That holds on every restore path, this one
-            # and Saved Plots' Restore alike; the table is marked stale instead,
-            # so the shelf header asks for the Generate rather than taking it.
-            if tab == "Bar Plots":
-                ctx.features.redraw(ctx, "Bar Plots")
-            elif tab == "Scatter Plot":
-                ctx.features.redraw(ctx, "Scatter Plot")
-            elif tab == "Distribution":
-                redraw_app(ctx)
+            redraw_after_restore(ctx, tab)
+
+
+#: Tabs that own a view-state block and are deliberately **not** repainted when
+#: it is applied, with the reason. An absence and a considered exception look
+#: identical in code six months later, so the exception is a row.
+_NO_REDRAW_AFTER_RESTORE = {
+    "Image Table": (
+        "renders images off disk and only when the user presses Generate — a "
+        "restored grid can be hundreds of frames and paying for them is the "
+        "user's decision; the restore marks it stale instead"
+    ),
+}
+
+#: Tabs whose repaint is not their own registry hook, with why. Distribution is
+#: one of the three scopes ``redraw_app`` covers with a single callable, and
+#: that is the call the rest of the app makes for it.
+_REDRAWN_BY_THE_APP_FANOUT = ("Distribution",)
+
+
+def redraw_after_restore(ctx, tab: str) -> None:
+    """Repaint *tab* after its saved view-state has just been applied to it.
+
+    ``on_tab_change`` draws the tab and *then* drains its pending block — the
+    order is deliberate, because the apply step validates its values against
+    combo items the draw has populated. What it leaves behind is a figure drawn
+    from pre-restore defaults, one step behind controls that have already moved:
+    the Bar timepoint popup restored to several timepoints over a plot showing
+    one, and Response Curves' Series button naming a split over curves drawn as
+    a single undivided set. Nothing on either screen said which was live.
+
+    **The tab is resolved through the feature registry, not from a list.** This
+    was an ``if/elif`` over three names while six tabs own a block, and the
+    three it did not name were simply not repainted — Response Curves among
+    them, which is the report this function exists for. Deriving it means a tab
+    that gains a block gains its repaint by having declared one.
+
+    A tab with no redraw hook, or one profiled out of this build, repaints
+    nothing and says so in the log rather than silently: the restore has already
+    moved that tab's controls, so a figure left behind is one the user is
+    looking at.
+    """
+    if tab in _NO_REDRAW_AFTER_RESTORE:
+        return
+    if tab in _REDRAWN_BY_THE_APP_FANOUT:
+        redraw_app(ctx)
+        return
+    if not ctx.features.redraw(ctx, tab):
+        _logger.warning(
+            "view_state: %r restored its saved state but has no redraw hook, "
+            "so its figure still shows what it was drawn with before the "
+            "restore.", tab)
 
 
 def image_browser_subtab_app_bridge(

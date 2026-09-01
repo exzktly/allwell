@@ -7,6 +7,8 @@ the matplotlib axes to draw into.
 
 from __future__ import annotations
 
+from well_viewer.data.metric_labels import spread_label, timepoint_title
+
 from well_viewer.features.barplot.controller import refresh_bar_layout_btn_state
 from well_viewer.features.barplot.collect import _bar_debug, bar_err_settings, collect_bar_items_for_app
 
@@ -130,15 +132,6 @@ def _pooled_rows(ctx, lbl: str, pool_groups: dict[str, list[str]] | None) -> pd.
             return None
         return pd.concat(frames, ignore_index=True)
     return get_rows(ctx, lbl)
-
-
-def _format_tp_title(target_ts: list[float], tp_str: str) -> str:
-    """Build the axis-title timepoint suffix for one or many tps."""
-    if not target_ts:
-        return ""
-    if len(target_ts) == 1:
-        return f"t = {tp_str} h"
-    return f"t = [{tp_str}] h"
 
 
 def _timepoint_hours(df) -> np.ndarray:
@@ -340,7 +333,7 @@ def draw_violin(
     from well_viewer.domain import fold_change as _fc
     _metric_label = _MLB.get(ctx.state.channel.active_metric, "Mean Intensity")
     _fc_suffix = _fc.fold_change_suffix_for(ctx, "bar") if cell_scale else ""
-    _tp_suffix = _format_tp_title(target_ts_per_col, tp_str)
+    _tp_suffix = timepoint_title(target_ts_per_col, tp_str)
     ax_mean.set_title(
         f"{ctx.state.channel.active_channel.upper()} {_metric_label} distribution (violin, bw={bw:.2f}){_fc_suffix}  —  {_tp_suffix}",
         color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=6)
@@ -500,7 +493,7 @@ def draw_beeswarm(
     _metric_label = _MLB.get(ctx.state.channel.active_metric, "Mean Intensity")
     _thr_q = threshold_qualifier(ctx.state.channel.active_metric)
     _fc_suffix = _fc.fold_change_suffix_for(ctx, "bar") if cell_scale else ""
-    _tp_suffix = _format_tp_title(target_ts_per_col, tp_str)
+    _tp_suffix = timepoint_title(target_ts_per_col, tp_str)
     ax_mean.set_title(
         f"{ctx.state.channel.active_channel.upper()} {_metric_label} per cell{_thr_q}{_fc_suffix}  —  {_tp_suffix}",
         color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=6)
@@ -1118,7 +1111,7 @@ def draw_grouped_bar_mode(
     _metric_key = ctx.state.channel.active_metric
     _thr_q = threshold_qualifier(_metric_key)
     _fc_suffix = _fc.fold_change_suffix_for(ctx, "bar")
-    _tp_suffix = _format_tp_title(target_ts, tp_str)
+    _tp_suffix = timepoint_title(target_ts, tp_str)
     # Cluster headers (_annotate_cluster_headers) sit at y≈1.02 on ax_mean only;
     # when any survive normalization, push the title up so it clears them rather
     # than overlapping. items were normalized in place by render_bar_items.
@@ -1173,7 +1166,7 @@ def redraw_bars(ctx) -> None:
         ax_n.cla()
 
     use_sem = ctx.state.plot.use_sem
-    band_lbl = "SEM" if use_sem else "SD"
+    band_lbl = spread_label(use_sem)
     # The ON cutoff follows the value column: shapes keep every cell, spot
     # counts read ThreshCountOn, intensities read ThreshFracOn.
     threshold = on_cutoff_for_column(
@@ -1734,7 +1727,7 @@ def draw_per_well_n_bars(
     )
     _metric_key = ctx.state.channel.active_metric
     if per_fov_spread:
-        _n_title = events_per_fov_title(_metric_key, "SEM" if use_sem else "SD")
+        _n_title = events_per_fov_title(_metric_key, spread_label(use_sem))
         _n_ylabel = "N(above)/FOV"
     else:
         _n_title = events_total_title(_metric_key)

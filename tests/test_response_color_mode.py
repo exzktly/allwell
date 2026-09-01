@@ -244,3 +244,52 @@ def test_the_export_style_pass_does_not_stamp_over_the_encodings():
             assert [b[1] for b in before] == [a[1] for a in after], (
                 f"grey: the export pass overwrote the series markers "
                 f"{before} -> {after}")
+
+
+# ── and it survives a save and a reload ──────────────────────────────────────
+#
+# The mode rides in the top-level plot block rather than in this tab's own, and
+# nothing was reading that back: the snapshot and the restore were both written
+# and neither had a test, so a key that no longer round-tripped would have
+# looked exactly like one that did.
+
+@pytest.mark.qt
+def test_the_mode_survives_a_save_and_reload(loaded_app):
+    """Through the **real** ``snapshot`` / ``restore``.
+
+    That block's restore takes a whole app, so this is a slow-lane test —
+    faking the two halves would assert that a dict literal round-trips through
+    itself, which passes against a key nothing writes.
+    """
+    from well_viewer.persistence import view_state as vs
+
+    app = loaded_app
+    app._app_state.plot.response_color_mode = "grey"
+    snap = vs.snapshot(app._ctx)
+    assert snap.get("response_color_mode") == "grey"
+
+    app._app_state.plot.response_color_mode = "series"
+    vs.restore(app._ctx, snap)
+    assert app._app_state.plot.response_color_mode == "grey"
+
+
+@pytest.mark.qt
+def test_a_junk_value_on_disk_does_not_reach_the_state(loaded_app):
+    """An edited ``persistence.json`` is dropped rather than stored, so the
+    resolver's degrade-to-default is not the only thing between a typo and a
+    figure drawn in no mode at all."""
+    from well_viewer.persistence import view_state as vs
+
+    app = loaded_app
+    app._app_state.plot.response_color_mode = "grey"
+    vs.restore(app._ctx, {"response_color_mode": "chartreuse"})
+    assert app._app_state.plot.response_color_mode == "grey", (
+        "a junk value on disk overwrote a valid mode")
+
+
+def test_the_mode_survives_a_new_dataset():
+    """A presentation preference, not a statement about this plate's wells."""
+    plot = PlotState()
+    plot.response_color_mode = "grey"
+    plot.reset_for_new_dataset()
+    assert plot.response_color_mode == "grey"

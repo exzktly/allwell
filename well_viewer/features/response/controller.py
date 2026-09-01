@@ -270,15 +270,28 @@ def response_val_col(ctx) -> str:
     share of cells whose mean intensity clears the ON cutoff. One definition,
     reached from both tabs.
     """
-    from well_viewer.data.metric_labels import METRIC_LABEL_TO_KEY
-
     channel = response_channel_label(ctx)
     if not channel:
         return str(getattr(ctx.state.channel, "active_val_col", "") or "")
+    return col_for_scatter_axis(ctx, channel, response_metric_key(ctx))
+
+
+def response_metric_key(ctx) -> str:
+    """The tab's Property as a **key** — what the column resolvers take.
+
+    The combo holds display labels, and the fraction is the one entry with no
+    metric of its own: it is the share of cells whose *mean intensity* clears
+    the ON cutoff, so it carries its own key and the column resolver maps it
+    back to the mean-intensity column. Named here because two callers want it —
+    the column and the title's threshold qualifier — and a second inline
+    ``METRIC_LABEL_TO_KEY.get`` beside the first is how the two come to disagree
+    about what the tab is drawing.
+    """
+    from well_viewer.data.metric_labels import METRIC_LABEL_TO_KEY
+
     label = response_metric_label(ctx)
-    key = ("fraction_above_threshold" if label == FRACTION_LABEL
-           else METRIC_LABEL_TO_KEY.get(label, "mean_intensity"))
-    return col_for_scatter_axis(ctx, channel, key)
+    return ("fraction_above_threshold" if label == FRACTION_LABEL
+            else METRIC_LABEL_TO_KEY.get(label, "mean_intensity"))
 
 
 def response_channel_key(ctx) -> str:
@@ -794,20 +807,73 @@ def _y_label(ctx, data=None) -> str:
     return f"{label} {suffix}".strip() if suffix else label
 
 
-def _figure_title(ctx, data) -> str:
-    """The figure's own title, carrying the Group-by shortfall when there is one.
+def _measurement_title(ctx, data) -> str:
+    """What is plotted, in the words the Bar and Line titles use.
 
-    **In the title, because a title survives Save.** The shortfall was reaching
-    only ``set_status``, which is a transient line the figure does not carry: a
-    reader opening the saved PNG a month later had no way to learn that eight
+    ``GFP Mean Intensity (above threshold) ± SEM ÷ control`` — the channel, the
+    Property, the threshold qualifier, the spread the error bars are, and the
+    normalisation. Assembled from the same helpers those tabs assemble it from
+    (``metric_labels.threshold_qualifier`` / ``spread_label``,
+    ``fold_change``'s suffix, carried here on ``data.normalised``) rather than
+    spelled again, because three tabs describing one measurement in two
+    vocabularies is how a reader ends up believing they are two measurements.
+
+    The **fraction** is its own quantity rather than the channel's Property, so
+    it takes neither the Property's name nor the threshold qualifier: it is
+    already defined against the ON cutoff, and "Fraction above threshold (above
+    threshold)" says the same thing twice.
+    """
+    from well_viewer.data.metric_labels import spread_label, threshold_qualifier
+
+    channel = response_channel(ctx).upper()
+    if response_draws_fraction(ctx):
+        measure = " ".join(part for part in (channel, FRACTION_LABEL) if part)
+    else:
+        qualifier = threshold_qualifier(response_metric_key(ctx))
+        measure = " ".join(
+            part for part in (channel, response_metric_label(ctx)) if part
+        ) + qualifier
+    band = spread_label(bool(getattr(ctx.state.plot, "use_sem", False)))
+    # Appended verbatim, because ``data.normalised`` **is**
+    # ``fold_change_suffix_for(ctx, "response")`` — the same string the Bar and
+    # Line titles append, already carrying the two spaces that separate it. Any
+    # separator added here would be a third space and a second spelling of a
+    # clause the app already has one spelling of.
+    suffix = getattr(data, "normalised", "") or ""
+    return f"{measure} ± {band}{suffix}"
+
+
+def _figure_title(ctx, data) -> str:
+    """The figure's own title: what is plotted, when, against what.
+
+    **The same three things the Bar and Line titles carry**, in the same order
+    and the same words — the measurement with its spread, then the timepoints —
+    because a reader moving between the plotting tabs should not have to work
+    out that ``Response vs Dose`` and ``GFP Mean Intensity ± SEM — t = 24 h``
+    are describing the same plate. This tab said only what its x axis was, so
+    the two facts a reader needs to compare one saved figure with another (which
+    measurement, and which moment) were on the page but not in the artifact.
+
+    Then the x variable, which is this tab's own addition and belongs last: it
+    is already the x axis label, so it is the part a reader can recover from the
+    figure without the title.
+
+    **And the Group-by shortfall, because a title survives Save.** That was
+    reaching only ``set_status``, a transient line the figure does not carry, so
+    a reader opening the saved PNG a month later had no way to learn that eight
     wells were left out of it. §7's rule is that the shortfall must reach the
     *artifact*.
     """
     from well_viewer.core.group_by_controller import group_by_shortfall
+    from well_viewer.data.metric_labels import timepoint_title
 
-    parts = []
+    drawn = timepoints_for(ctx)
+    parts = [_measurement_title(ctx, data)]
+    when = timepoint_title(drawn, ", ".join(f"{t:g}" for t in drawn))
+    if when:
+        parts.append(when)
     if data.variable_name:
-        parts.append(f"Response vs {data.variable_name}")
+        parts.append(f"vs {data.variable_name}")
     for shortfall in (group_by_shortfall(ctx), _uncrossed_grouping(ctx)):
         if shortfall:
             parts.append(shortfall)

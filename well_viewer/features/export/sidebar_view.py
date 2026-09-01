@@ -1096,23 +1096,24 @@ class ExportStyleSidebar(QWidget):
         add_stacked(s_lim, "Log scale", hrow(xlog_cb, ylog_cb))
 
         # The base each log axis is drawn in. Editable rather than a fixed list:
-        # 10, 2 and e are what almost everyone wants and are one click away, but
-        # a base this panel does not offer is still a base, and refusing to type
-        # it would be a control that answers a narrower question than the one
-        # asked. Anything at or below 1 is not a base at all and falls back to
-        # 10 (``plot_style.log_base_value``) rather than taking the axis down.
+        # ``LOG_BASE_CHOICES`` are what almost everyone wants and are one click
+        # away, but a base this panel does not offer is still a base, and
+        # refusing to type it would be a control that answers a narrower
+        # question than the one asked. Anything at or below 1 is not a base at
+        # all and falls back to 10 (``plot_style.log_base_value``) rather than
+        # taking the axis down.
         _xbase_cb = QComboBox()
         _xbase_cb.setEditable(True)
         _xbase_cb.addItems(list(LOG_BASE_CHOICES))
         _xbase_cb.setCurrentText(str(self._prefs.get("x_log_base", "10")))
         _xbase_cb.setToolTip(
-            "Base of the X log axis — 10, 2, e, or any number above 1.")
+            "Base of the X log axis — 10, 2, 3, e, or any number above 1.")
         _ybase_cb = QComboBox()
         _ybase_cb.setEditable(True)
         _ybase_cb.addItems(list(LOG_BASE_CHOICES))
         _ybase_cb.setCurrentText(str(self._prefs.get("y_log_base", "10")))
         _ybase_cb.setToolTip(
-            "Base of the Y log axis — 10, 2, e, or any number above 1.")
+            "Base of the Y log axis — 10, 2, 3, e, or any number above 1.")
         self._bind_getter_setter("x_log_base", _xbase_cb)
         self._bind_getter_setter("y_log_base", _ybase_cb)
         # Same argument as the toggles: a tab that positions anything against
@@ -1589,6 +1590,16 @@ class ExportStyleSidebar(QWidget):
 
     def _is_line_fig(self) -> bool:
         return getattr(self._app, "_line_fig", None) is self._fig
+
+    def _is_response_fig(self) -> bool:
+        """True only for the Response Curves figure.
+
+        The Colours section is gated per figure for the same reason the Density
+        and Cell values sections are: the mode changes nothing on a scatter or
+        heat-map figure, and a control that does nothing is the defect §7.6 of
+        ``CLAUDE.md`` is about wearing the opposite face.
+        """
+        return getattr(self._app, "_response_fig", None) is self._fig
 
     def _redraw_for_a_user_edit(self) -> None:
         """Redraw the bound figure, unless the panel is writing to itself.

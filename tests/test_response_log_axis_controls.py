@@ -283,6 +283,13 @@ def test_the_log_base_field_redraws_the_response_tab(qtbot, monkeypatch):
     field = _base_field(sb, "X")
     assert field is not None, "no X log base field on the Properties panel"
     assert field.currentText() == "10"
+    from well_viewer.core.plot_style import LOG_BASE_CHOICES
+
+    assert [field.itemText(i) for i in range(field.count())] == \
+        list(LOG_BASE_CHOICES), "the field offers a different list from the roster"
+    assert field.isEditable(), (
+        "a base the list does not name would be untypeable, which is a control "
+        "answering a narrower question than the one asked")
     field.setCurrentText("2")
     assert calls == ["response"], (
         f"changing the log base did not redraw the Response tab: {calls}")

@@ -17,6 +17,7 @@ from types import SimpleNamespace
 import pytest
 
 from well_viewer.domain import sample_variables as sv
+from well_viewer.features.registry import build_feature_registry
 from well_viewer.features.response import controller as rctl
 
 
@@ -1499,6 +1500,39 @@ def test_ticking_a_series_in_the_menu_splits_the_figure_into_two_curves(tab):
     for container in tab.ax.containers:
         xs = [float(x) for x in container.lines[0].get_xdata()]
         assert xs == [1.0, 10.0], xs
+
+
+def test_a_restored_series_reaches_the_figure_without_touching_the_menu(tab):
+    """The launch-time report, driven through the real restore path.
+
+    ``on_tab_change`` draws the tab and *then* applies its pending view-state,
+    so the figure is drawn before the restored Series exists. The repaint that
+    closes that gap is ``tab_controller.redraw_after_restore``, and Response
+    Curves was not one of the three tabs it named — so the Series button came
+    back saying "Cell line" over a single undivided curve, and the first thing
+    that reached a redraw was the user toggling a series off and on.
+
+    Counted in curves rather than asserted as "the state was restored": the
+    slice was always restored correctly. What was missing was the figure.
+    """
+    from well_viewer.core import tab_controller
+
+    _load_two_series(tab)
+    rctl.redraw_response(tab.ctx)
+    assert len(tab.ax.containers) == 1, "the figure did not start unsplit"
+
+    tab.ctx.runtime.view_state = SimpleNamespace(
+        pending={"Response Curves": {"series_variable_ids": ["cl"]}})
+    tab.ctx.features = build_feature_registry()
+    from well_viewer.persistence import view_state as _vs
+    assert _vs.apply_pending_tab_state(tab.ctx, "Response Curves") is True
+    assert len(tab.ax.containers) == 1, (
+        "the restore repainted on its own — then this test is no longer "
+        "measuring the repaint that follows it")
+
+    tab_controller.redraw_after_restore(tab.ctx, "Response Curves")
+    assert len(tab.ax.containers) == 2, (
+        f"the restored series drew {len(tab.ax.containers)} curves, not two")
 
 
 def test_the_series_menu_never_offers_the_variable_on_x(tab):

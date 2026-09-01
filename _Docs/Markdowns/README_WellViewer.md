@@ -1969,8 +1969,13 @@ row, holding five actions:
 - **Properties** — opens a slide-out sidebar that styles the active figure:
   axis label / tick / title sizes, grid on/off + alpha + linestyle, legend,
   line / marker widths, axis limits + log-scale (with the **log base** each
-  logarithmic axis is drawn in — 10, 2, e, or anything else above 1), layout
-  engine, and an export-profile picker. Axis **limits**, **log-scale** and the
+  logarithmic axis is drawn in — 10, 2, 3, e, or anything else above 1), layout
+  engine, and an export-profile picker. A logarithmic axis also carries the
+  standard subdivisions between its labelled powers — 2, 3, … 9 in each decade,
+  unlabelled — so you can read a value between two labels; they are part of the
+  scale rather than of the **Minor ticks** row, which governs the linear axes.
+  On a view wide enough that only every other power is labelled they are left
+  off, since a tick between two unlabelled powers tells you nothing. Axis **limits**, **log-scale** and the
   **line / marker styling** are scoped to the one plot — the Scatter tab's Cells and
   Wells views are separate plots here, so sizing markers for five
   aggregate points won't blow up a fifty-thousand-cell cloud. **Typography,
@@ -2720,6 +2725,13 @@ wells with no `Cell line`, or a group whose wells disagree about it — gets its
 own curve, named for what is missing rather than quietly joining one of the
 others.
 
+**The title reads like the other tabs'.** It names the channel and Property
+being plotted, whether the error bars are SD or SEM, and which timepoints are
+drawn — the same clause the Bar Plots and Line Graphs titles carry, in the same
+words — then the variable on X, and any note about wells the grouping left out.
+It is the part of a figure that survives Save, so a plot in a folder six months
+later still says what it is of and when it was measured.
+
 **The axis picks itself.** If your doses span two decades or more the x axis
 opens logarithmic, because a 0.1–10 µM series on a linear axis puts three
 quarters of its points in the leftmost tenth. Every dose gets its own tick
@@ -2828,8 +2840,8 @@ tab chose reads as log rather than contradicting the plot above it; once you set
 it either way, your answer stands and the doses stop deciding.
 
 **Properties → Limits & Scale → Log base** sets what that axis is logarithmic
-in. **10** is the default, **2** and **e** are on the list, and you can type any
-other number above 1. The base does not move the points relative to one another
+in. **10** is the default, with **2**, **3** and **e** on the list, and you can
+type any other number above 1. The base does not move the points relative to one another
 — every base is the same axis stretched by a constant — so what it changes is
 the spacing you read the gaps against, and on a response curve it also decides
 where a zero dose sits: one step of your base below the lowest real dose, behind

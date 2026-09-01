@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from well_viewer.data.metric_labels import spread_label
+
 from typing import Any
 from collections.abc import Callable
 
@@ -978,7 +980,7 @@ def make_band_controls(ctx, parent: QWidget, *, with_fov: bool = False) -> QWidg
     eb_lbl.setObjectName("Muted")
     h.addWidget(eb_lbl)
     initial = bool(ctx.state.plot.use_sem)
-    sem_btn = QPushButton("SEM" if initial else "SD", w)
+    sem_btn = QPushButton(spread_label(initial), w)
     sem_btn.setProperty("variant", "sem" if initial else "sem_warn")
     sem_btn.clicked.connect(lambda _=False: toggle_sem(ctx))
     h.addWidget(sem_btn)

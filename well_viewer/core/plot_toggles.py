@@ -12,24 +12,26 @@ banned cross-feature import.
 Relocated here (A8 enabler E3) so any feature can call them through ``ctx`` with
 a plain ``core.`` import. The bodies are ctx-native: they read/write typed plot
 state (``ctx.state.plot``) and the shared button banks (``ctx.runtime.sem`` /
-``ctx.runtime.fov``). The only feature-specific wiring — the bar renderer redraw
-and the bar-layout button refresh — is reached through ``core.lazy`` proxies (a
-call, not an ``import`` statement), so this core module imports no feature at
-load time and the bar feature stays independently deletable.
+``ctx.runtime.fov``). The only feature-specific wiring — the bar-layout button
+refresh — is reached through a ``core.lazy`` proxy (a call, not an ``import``
+statement), so this core module imports no feature at load time and the bar
+feature stays independently deletable. The plots themselves are repainted
+through the scope registry rather than by naming any tab.
 """
 
 from __future__ import annotations
 
 from well_viewer.core.plot_orchestrator import redraw_app
-from well_viewer.core.tab_controller import is_tab_visible
 from well_viewer.core.selection_controller import invalidate_stats_cache
 from well_viewer.core.safe import swallowed
 from well_viewer.core.lazy import lazy as _lazy
 
-# Feature-specific wiring, bound as lazy proxies so importing this module never
+# Feature-specific wiring, bound as a lazy proxy so importing this module never
 # imports the bar feature (a ``lazy(...)`` binding is a call, not an import
-# statement — see core/lazy.py).
-_redraw_bars = _lazy("well_viewer.features.barplot.renderer", "redraw_bars")
+# statement — see core/lazy.py). The bar *redraw* used to be bound here too and
+# is not any more: it reached the plots through a hardcoded "if Bar Plots is
+# visible", which the scope fan-out in ``_redraw_every_scope`` now does for
+# every registered scope rather than for one named tab.
 _refresh_bar_layout_btn_state = _lazy(
     "well_viewer.features.barplot.controller", "refresh_bar_layout_btn_state"
 )
@@ -109,6 +111,34 @@ def _notify_observers(bank, value) -> None:
         bank[:] = live
 
 
+def _redraw_every_scope(ctx) -> None:
+    """Repaint the plots after an error-band or replicate-unit change.
+
+    Both toggles change the number every plot draws, so every plot has to be
+    told. ``redraw_app`` covers the three scopes that share it — Line,
+    Distribution and Heat Map — and the rest go through the scope coalescer:
+    the visible ones now, the others marked dirty and flushed the moment their
+    tab is next shown, which is the contract every other cross-tab setting
+    already follows.
+
+    That fan-out replaces a hardcoded "and redraw Bar Plots if it is visible".
+    A named tab is a roster of one, and it was written when Bar was the only
+    other scope: Response Curves is a registered scope too, and toggling
+    SEM/SD or Spread: FOV with it on screen changed the state, repainted three
+    figures the user was not looking at, and left the curves in front of them
+    drawn to the previous error band — until they left the tab and came back,
+    which is what ``on_activate`` was quietly doing for them.
+
+    ``skip`` is what keeps the fan-out from redrawing Line, Distribution and
+    Heat Map a second time, since ``redraw_app`` has already drawn them.
+    """
+    from well_viewer.core.scope_registry import redraw_app_scope
+    from well_viewer.domain.fold_change_scopes import redraw_scopes_or_defer
+
+    redraw_app(ctx)
+    redraw_scopes_or_defer(ctx.window, skip=redraw_app_scope)
+
+
 def refresh_fov_btn_state(ctx) -> None:
     """Sync every per-FOV toggle button's text/variant state."""
     is_on = bool(ctx.state.plot.use_fov_replicates)
@@ -155,27 +185,18 @@ def toggle_sem(ctx) -> None:
     for btn in _live_buttons(ctx.runtime.sem.btns):
         _style_button(btn, _apply_sem)
     _notify_observers(ctx.runtime.sem.observers, is_sem)
-    redraw_app(ctx)
-    # Redraw the bar pane too whenever it is on screen — in Split View it can be
-    # visible alongside another pane without being the focused tab.
-    if is_tab_visible(ctx, "Bar Plots"):
-        _redraw_bars(ctx)
+    _redraw_every_scope(ctx)
 
 
 def toggle_fov_replicates(ctx) -> None:
     ctx.state.plot.toggle_fov_replicates()
     invalidate_stats_cache(ctx)
     refresh_fov_btn_state(ctx)
-    # Gated on the bar feature being *present*. (``_redraw_bars`` below is
-    # gated too, but on the tab being *visible* — a different question that
-    # happens to imply this one.) This is an app-global button and
+    # Gated on the bar feature being *present*. This is an app-global button and
     # ``_refresh_bar_layout_btn_state`` is a lazy proxy into
     # ``features/barplot``: with that feature profiled out the call raised
     # ModuleNotFoundError *after* the state had already been flipped, so the
     # toggle both failed and took effect.
     if ctx.state.feature_slice("bar") is not None:
         _refresh_bar_layout_btn_state(ctx)
-    redraw_app(ctx)
-    # Split View: redraw the bar pane whenever it is on screen, even if unfocused.
-    if is_tab_visible(ctx, "Bar Plots"):
-        _redraw_bars(ctx)
+    _redraw_every_scope(ctx)

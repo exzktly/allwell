@@ -156,18 +156,28 @@ def _call_redraw(app, scope: FoldChangeScope) -> None:
                 swallowed("fold_change_scopes: status-bar update failed")
 
 
-def redraw_scopes_or_defer(app) -> None:
+def redraw_scopes_or_defer(app, *, skip=None) -> None:
     """Redraw the currently-visible scope, mark every other scope dirty.
 
     The single chokepoint used by every fold-change state mutation
     AND ``WellViewerApp._set_active_channel``. The companion
     ``flush_dirty_scopes`` is wired into the app's tab-change handler
     so a deferred redraw runs as soon as the user looks at the tab.
+
+    *skip* is a redraw callable the caller has **already run**. Scopes using it
+    are left alone and left clean, rather than drawn a second time: several
+    scopes share one callable (line, distribution and heat map all redraw
+    through ``scope_registry.redraw_app_scope``), and a caller that ran it
+    itself would otherwise repaint a 96-series figure twice per click.
+    Compared by identity on the callable, which is why that one is a module
+    function rather than a closure made per registration.
     """
     visible = visible_scope_names(app)
     dirty = _dirty_set(app)
     for scope in registered_scopes():
-        if scope.name in visible:
+        if skip is not None and scope.redraw is skip:
+            dirty.discard(scope.name)
+        elif scope.name in visible:
             _call_redraw(app, scope)
             dirty.discard(scope.name)
         else:
@@ -193,7 +203,7 @@ def redraw_scopes_after_load(app, *, default_redraw=None) -> None:
     dirty = _dirty_set(app)
     # Identity on the *scope*, not on its redraw callable. ``line``,
     # ``distribution`` and ``heatmap`` are all registered with the same
-    # ``_redraw_app_scope`` function object, so ``scope.redraw is
+    # ``redraw_app_scope`` function object, so ``scope.redraw is
     # default_redraw`` matched all three — and cleared the dirty marks that
     # ``plot_orchestrator.redraw`` had just set for the two hidden ones, leaving
     # them neither drawn nor owed. The default scope is one scope; name it.

@@ -38,7 +38,7 @@ class _RedrawCounter:
     the scope's callable is enough. The line scope enters through THREE
     paths, each resolving a *different* binding of
     ``plot_orchestrator.redraw_app``: the coalescer (via the line scope's
-    closure ``_redraw_app_scope``), the ``dataset_loaded`` subscriber (via
+    ``scope_registry.redraw_app_scope``), the ``dataset_loaded`` subscriber (via
     ``app._redraw``, runtime_app's module-top binding), and the tab-switch
     activation (``on_tab_change`` / ``_activate_default_plot``, which import
     ``redraw_app`` function-locally and so resolve the *module* attribute).

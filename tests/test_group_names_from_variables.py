@@ -26,6 +26,7 @@ does.
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -39,6 +40,9 @@ from well_viewer.domain.selections_model import (
 from well_viewer.features.home.groups.controller import (
     make_replicate_pairs, name_sets_from_variables, rep_quick_pairs,
 )
+
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 # ── fixtures ────────────────────────────────────────────────────────────────
@@ -638,6 +642,121 @@ def test_a_name_no_group_holds_is_left_alone(qtbot):
     qtbot.addWidget(dlg)
     plate.setSelectedWellIds(["B01", "B02"])
     assert name_edit.text() == "10 µM"
+
+
+def test_batch_exports_scope_swap_keeps_the_flag_on_its_rebuilt_selections():
+    """Batch Export re-runs the tab collectors against selections it rebuilds.
+
+    ``_app_group_scope`` swaps ``ctx.state.selection.selections`` for one
+    ``make_selection`` per live member so "a batch group behaves exactly like
+    the tab" — its own words. The collectors then read those rebuilt dicts back
+    through ``active_replicate_sets``, so a flag left behind in the rebuild
+    relabelled a variable-named group on the exported figure and not on the
+    tab's. Within one export, even: the line and bar panels read ``grp.members``
+    directly and kept the name, so a `Dose` group came out ``10`` on one panel
+    and ``A01,A02`` on the next.
+
+    Driven through ``make_selection`` the way the scope does rather than through
+    a built Batch Export panel, and pinned to the *label* — the outbound value
+    (§7.4 #1) — so it fails on the substitution rather than on the field.
+    """
+    member = ReplicateSet("10", ["A01", "A02"], name_is_verbatim=True)
+    used_names: set = set()
+    used_ids: set = set()
+    rebuilt = [make_selection(
+        name=member.name, wells=list(member.wells), source="rep_set",
+        name_is_verbatim=getattr(member, "name_is_verbatim", False),
+        used_names=used_names, used_ids=used_ids, fallback_color_idx=0)]
+    rsets = active_replicate_sets(rebuilt, {"A01": "A01", "A02": "A02"})
+    ctx = _label_ctx(["A01", "A02"])
+    assert replicate_display_label(ctx, rsets[0]) == "10"
+    assert replicate_display_label(ctx, member) == "10"
+
+
+def test_the_batch_scope_swap_really_passes_the_flag():
+    """The source line itself, so the test above cannot pass a fixture-only fix.
+
+    The test above rebuilds the selection the way the panel does; this one reads
+    the panel's own call, because a rule reproduced in a test and absent from the
+    code is the shape §7.8 is about.
+    """
+    import ast
+
+    from tests._repo_scan import parse_source
+
+    tree = parse_source(
+        REPO_ROOT / "well_viewer/features/batch_export/base_panel.py")
+    calls = [n for n in ast.walk(tree)
+             if isinstance(n, ast.Call)
+             and getattr(n.func, "id", "") == "make_selection"]
+    assert calls, "make_selection is no longer called here — re-point this guard"
+    for call in calls:
+        kwargs = {kw.arg: kw.value for kw in call.keywords}
+        source = getattr(kwargs.get("source"), "value", None)
+        if source == "well":
+            # A solo well is named after the well token itself, so there is no
+            # composed name to protect and the relabelling heuristic — which
+            # matches ``1`` / ``Rep 2`` / ``Group 3`` and never ``A01`` — cannot
+            # touch it. Exempted by what it builds rather than by its line
+            # number, so moving it keeps the exemption and adding a *fourth*
+            # call that rebuilds a group does not inherit one.
+            continue
+        assert "name_is_verbatim" in kwargs, (
+            "a make_selection in base_panel.py rebuilds a group without "
+            "name_is_verbatim; the collectors re-read these dicts through "
+            "active_replicate_sets, so the exported figure would relabel a "
+            "variable-named group that the tab draws correctly")
+
+
+def test_clearing_the_name_box_does_not_switch_the_offer_off(qtbot):
+    """Deleting the text is "not that one", not a name the user chose.
+
+    Treating the empty string as typed meant no later pick refilled the box, it
+    sat blank while wells were being selected, and Create stored ``Rep 1`` on a
+    fully annotated plate.
+    """
+    ctx = _dialog_ctx(["A01", "A02", "A03", "A04"], _full())
+    dlg, name_edit, plate = _dialog(ctx)
+    qtbot.addWidget(dlg)
+    plate.setSelectedWellIds(["A01", "A02"])
+    name_edit.clear()
+    plate.setSelectedWellIds(["A03", "A04"])
+    assert name_edit.text() == "HeLa · 10 µM"
+
+
+def test_creating_with_the_box_cleared_stores_the_composed_name(qtbot):
+    ctx = _dialog_ctx(["A01", "A02"], _full())
+    dlg, name_edit, plate = _dialog(ctx)
+    qtbot.addWidget(dlg)
+    plate.setSelectedWellIds(["A01", "A02"])
+    name_edit.clear()
+    _press_create(dlg)
+    sel = ctx.state.selection.selections[0]
+    assert sel["name"] == "HeLa · 1 µM"
+    assert sel["name_is_verbatim"] is True
+
+
+def test_rep_add_execs_the_dialog_the_builder_built(monkeypatch):
+    """The split is this branch's structural change; nothing pinned it.
+
+    Mutating ``rep_add``'s body to ``pass`` left the whole lane green — the
+    dialog would simply never open, which no test could see.
+    """
+    from well_viewer.features.home.groups import controller as mod
+
+    opened = []
+
+    class _Spy:
+        def exec(self):
+            opened.append(True)
+            return 0
+
+    spy = _Spy()
+    monkeypatch.setattr(
+        mod, "build_rep_add_dialog",
+        lambda ctx: mod.RepAddDialog(spy, object(), object()))
+    mod.rep_add(_dialog_ctx(["A01"], _full()))
+    assert opened == [True]
 
 
 if __name__ == "__main__":  # pragma: no cover

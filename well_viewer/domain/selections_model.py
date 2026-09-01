@@ -410,9 +410,19 @@ def make_selection(*, name: Any, wells: Any, replicates: Any = None,
     ``name_is_verbatim`` marks a name that means something on its own — a name
     composed from the sample variables the group's wells hold, rather than one
     the app made up from their tokens. It is stored **only when true**, so a
-    selection that has never claimed it keeps exactly the keys it always had,
-    and it rides through save and load on ``validate_repair``'s unknown-key
-    passthrough. :func:`active_replicate_sets` hands it to the ``ReplicateSet``,
+    selection that has never claimed it keeps exactly the keys it always had.
+
+    It survives save and load because :func:`validate_repair` reads it
+    **explicitly** and passes it back in here — *not*, as this said until a
+    reviewer measured it, on that function's unknown-key passthrough, which
+    excludes this key by name. The exclusion is the point of the pair: the
+    passthrough copies a key back only when it is absent from the rebuilt dict,
+    so a stored ``false`` would be copied in as a key that is present and
+    falsy, and this field's whole contract is that it is present only when
+    true. Deleting the explicit parameter on the strength of the old sentence
+    would silently drop the flag on every reload; the check is one line, and it
+    is in ``tests/test_group_names_from_variables.py``.
+    :func:`active_replicate_sets` hands it to the ``ReplicateSet``,
     which is where :func:`replicate_display_label` reads it: without it a `Dose`
     group named ``10`` matches the auto-generated-name pattern and is redrawn on
     every axis as the tokens of the wells that received that dose.

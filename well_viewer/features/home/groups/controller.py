@@ -272,8 +272,16 @@ def build_rep_add_dialog(ctx) -> RepAddDialog:
     v.addWidget(plate, 1, PLATE_ALIGNMENT)
 
     def _offer_name(*_a) -> None:
-        """Fill the name box from what the picked wells are, unless it was typed in."""
-        if name_edit.text().strip() != offered[0]:
+        """Fill the name box from what the picked wells are, unless it was typed in.
+
+        An **empty** field counts as untyped, not as a name of its own. Clearing
+        the box is how a user says "not that one"; treating the empty string as
+        a name they had chosen meant no later pick ever refilled it, the field
+        sat visibly blank while wells were being selected, and Create then
+        stored ``Rep 1`` on a fully annotated plate.
+        """
+        typed = name_edit.text().strip()
+        if typed and typed != offered[0]:
             return
         picked = [w for w in plate.selectedWellIds() if w in well_paths]
         name = _variable_name_for(ctx, picked)
@@ -298,11 +306,16 @@ def build_rep_add_dialog(ctx) -> RepAddDialog:
         if not picked:
             QMessageBox.warning(dlg, "No wells", "Select at least one well.")
             return
-        name = name_edit.text().strip() or fallback_name
+        name = name_edit.text().strip() or offered[0]
         # Verbatim only while the field still holds the name the variables
         # composed. A name the user typed over it is theirs, and a `Dose` group
         # they chose to call ``3`` is exactly the auto-generated-looking name the
         # relabelling heuristic is for.
+        #
+        # ``offered[0]`` rather than ``fallback_name`` for the empty field: with
+        # the box cleared, ``_offer_name`` has kept it up to date with the plate,
+        # so the composed name is what Create should store — falling back to
+        # ``Rep 1`` there would discard a name the dialog had already worked out.
         verbatim = offered[1] and name == offered[0]
         dlg.accept()
         # sel_add enforces well-exclusivity (the new group takes the wells).

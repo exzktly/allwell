@@ -722,8 +722,18 @@ class BatchExportPanel(QWidget):
         try:
             used_names: set = set()
             used_ids: set = set()
+            # ``name_is_verbatim`` travels with the member. This scope exists
+            # so a batch group behaves exactly like the tab, and the collectors
+            # it re-runs read the *rebuilt* selections through
+            # ``active_replicate_sets`` — so a flag left behind here made
+            # ``replicate_display_label`` relabel a variable-named group on the
+            # exported figure and not on the tab's. Worse, within one export:
+            # the line and bar panels read ``grp.members`` directly and kept the
+            # name, so a `Dose` group came out ``10`` on one panel and
+            # ``A01,A02`` on the next.
             selections = [
                 make_selection(name=m.name, wells=list(m.wells), source="rep_set",
+                               name_is_verbatim=getattr(m, "name_is_verbatim", False),
                                used_names=used_names, used_ids=used_ids,
                                fallback_color_idx=i)
                 for i, m in enumerate(grp.members)
@@ -774,6 +784,7 @@ class BatchExportPanel(QWidget):
                 continue
             out.append(make_selection(
                 name=name, wells=list(src.get("wells") or []), source="rep_set",
+                name_is_verbatim=bool(src.get("name_is_verbatim")),
                 hidden=True, used_names=used_names, used_ids=used_ids,
                 fallback_color_idx=color_idx + i,
             ))

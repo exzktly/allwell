@@ -1476,8 +1476,10 @@ the Replicates plate every well is tinted by its **group's** colour, so all well
 a group read as one condition and match the group's row swatch.
 
 **Once you have filled in Variables, new groups are named after them.** A group
-whose wells all hold `HeLa` and `10 µM` is created as `HeLa · 10 µM` rather than
-`A01/A02`, whether it came from **Quick Replicates** or from **+ Add** — in the
+whose wells all hold `HeLa` and `10 µM` is created as `HeLa · 10 µM`, whether it
+came from **Quick Replicates** or from **+ Add**, instead of the placeholder
+each of those used to give it — `A01/A02` from Quick Replicates, `Rep 3` from
+**+ Add**. In the
 **+ Add** dialog the name box fills in as you pick the wells, and stops doing so
 the moment you type a name of your own. Two groups that would end up with the
 same name — four replicates of one dose split into two groups, say — each carry
@@ -1487,7 +1489,8 @@ Where the variables cannot answer, the wells stay in the name. A group whose
 wells hold two different doses is named for what they *do* agree on plus the
 wells themselves (`HeLa (A01/A03)`), because a group spanning two doses must not
 read like one that is only ever `HeLa`; and a group on a plate with no variables
-filled in keeps the plain `A01/A02` it always had. A variable you have created
+filled in keeps the placeholder it always had — `A01/A02` from Quick
+Replicates, `Rep 3` from **+ Add**. A variable you have created
 but not yet filled in anywhere is not counted against a group — it is something
 you have not done to the plate, not something that makes this group ambiguous,
 and marking every group at once would say nothing.

@@ -7,13 +7,22 @@ from __future__ import annotations
 class ReplicateSet:
     """A named pool of wells the plots draw as one member.
 
-    *name_is_verbatim* says the name is a label a **user typed**, not one the
-    app generated. It exists because ``replicate_display_label`` replaces a name
-    that looks auto-generated (``"1"``, ``"Group 2"``, ``"R3"``) with the
-    member well tokens, which is right for a group nobody bothered to name and
-    wrong for a sample-variable value: a `Dose` of ``10`` typed before its unit
-    was entered came out on the axis as ``A01,A03``. The predicate is fine; it
-    was being applied outside the domain it was written for.
+    *name_is_verbatim* says the name means something on its own, rather than
+    being a placeholder the app invented from the member wells. It exists
+    because ``replicate_display_label`` replaces a name that looks
+    auto-generated (``"1"``, ``"Group 2"``, ``"R3"``) with the member well
+    tokens, which is right for a group nobody bothered to name and wrong for a
+    sample-variable value: a `Dose` of ``10`` typed before its unit was entered
+    came out on the axis as ``A01,A03``. The predicate is fine; it was being
+    applied outside the domain it was written for.
+
+    Not "a label a **user typed**", which is what this used to say and is no
+    longer the common case: most names carrying the flag are composed by
+    ``sample_variables.name_for_wells`` from the values the wells hold. The
+    distinction the flag draws is between a name derived from the *annotations*
+    and one derived from the *well tokens* — a user's own typed ``3`` is
+    deliberately on the second side of it, which is why ``sel_rename`` clears
+    the flag.
     """
 
     def __init__(self, name: str, wells: list[str] | None = None, *,

@@ -387,16 +387,10 @@ def _press_create(dlg) -> None:
 
 def _dialog(ctx):
     """Build the real dialog and hand back it, its name box and its plate."""
-    from PySide6.QtWidgets import QLineEdit
-
-    from widgets.well_plate_selector import WellPlateSelector
     from well_viewer.features.home.groups.controller import build_rep_add_dialog
 
-    dlg = build_rep_add_dialog(ctx)
-    name_edit = dlg.findChild(QLineEdit, "_grp_add_name")
-    plate = dlg.findChild(WellPlateSelector, "_grp_add_plate")
-    assert name_edit is not None and plate is not None
-    return dlg, name_edit, plate
+    built = build_rep_add_dialog(ctx)
+    return built.dialog, built.name_edit, built.plate
 
 
 def test_the_dialog_names_the_group_from_the_wells_picked_on_its_plate(qtbot):

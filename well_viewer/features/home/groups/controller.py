@@ -7,6 +7,8 @@ reads a dropdown, or writes to a widget, so it stays in the feature.
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 from PySide6.QtWidgets import (
     QDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout,
 )
@@ -22,6 +24,19 @@ from well_viewer.domain.viewer_state import extract_well_token as _extract_well_
 # (ARCHITECTURE §8: never hardcode a pixel size at a call site).
 _DLG_MIN_W = 420
 _DLG_MIN_H = 480
+
+
+class RepAddDialog(NamedTuple):
+    """The New Replicate Set dialog and the two controls a caller drives.
+
+    ``dialog`` is what :func:`rep_add` execs; ``name_edit`` and ``plate`` are
+    handed over rather than looked up, so nothing has to describe the dialog's
+    layout in order to reach them.
+    """
+
+    dialog: QDialog
+    name_edit: QLineEdit
+    plate: object          # a ``widgets.WellPlateSelector``, imported lazily
 
 
 def make_replicate_pairs(toks, size=2):
@@ -169,7 +184,7 @@ def rep_quick_pairs(ctx) -> None:
     ctx.coordinator.rebuild_all()
 
 
-def build_rep_add_dialog(ctx) -> QDialog:
+def build_rep_add_dialog(ctx) -> RepAddDialog:
     """Build the New Replicate Set dialog, fully wired, without showing it.
 
     Wells are picked on the same graphical plate the "+ wells…" popover uses to
@@ -194,10 +209,16 @@ def build_rep_add_dialog(ctx) -> QDialog:
     name box, rather than calling the naming rule directly one step past the
     connection that is the thing most likely to be wrong (§7.6).
 
-    The widgets a caller needs are named children — ``_grp_add_name`` and
-    ``_grp_add_plate`` — so a test finds them by ``findChild`` rather than by
-    walking the layout, which is a description of the layout and breaks when a
-    row moves.
+    Returns a :class:`RepAddDialog` — the dialog with its name box and its
+    plate beside it — because a caller that has to *find* those two has to
+    describe the layout to do it, and the description goes stale the first time
+    a row moves. Handing them back is neither an object name (which
+    ``tests/test_theme_selectors`` rightly reads as a request for appearance,
+    and these are not) nor a ``ctx.widgets`` registration (a transient dialog's
+    children outliving it in the app-wide registry is a stale handle waiting to
+    be read). The Create button is deliberately **not** among them: a test given
+    the button by the thing it is testing cannot notice a button that was never
+    connected, so it is found by its text.
     """
     from well_viewer.core.selection_controller import sel_add
     from well_viewer.domain.viewer_state import parse_rc
@@ -213,7 +234,6 @@ def build_rep_add_dialog(ctx) -> QDialog:
     v.addWidget(QLabel("Name:"))
     fallback_name = f"Rep {len(sel_state.selections)+1}"
     name_edit = QLineEdit(fallback_name)
-    name_edit.setObjectName("_grp_add_name")
     v.addWidget(name_edit)
     v.addWidget(QLabel("Choose wells for this group:"))
 
@@ -224,7 +244,6 @@ def build_rep_add_dialog(ctx) -> QDialog:
 
     enabled = sorted(well_paths.keys(), key=lambda l: parse_rc(l))
     plate = WellPlateSelector()
-    plate.setObjectName("_grp_add_plate")
     try:
         plate.setEnabledWells(enabled)
         plate.setRowColumnSelectable(True)
@@ -280,7 +299,7 @@ def build_rep_add_dialog(ctx) -> QDialog:
 
     ok_btn.clicked.connect(_ok)
     cancel_btn.clicked.connect(dlg.reject)
-    return dlg
+    return RepAddDialog(dlg, name_edit, plate)
 
 
 def rep_add(ctx) -> None:
@@ -289,7 +308,7 @@ def rep_add(ctx) -> None:
     The whole of what this adds to :func:`build_rep_add_dialog` is the ``exec``,
     which is the one line a test cannot run.
     """
-    build_rep_add_dialog(ctx).exec()
+    build_rep_add_dialog(ctx).dialog.exec()
 
 
 

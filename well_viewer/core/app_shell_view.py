@@ -546,9 +546,9 @@ def build_ui(win) -> None:
     sidebar_layout.addWidget(build_hline_separator(None))
 
     # One place for the well picker, above every section that offers one. The
-    # four pickers (main / Statistics / Segmentation / Image Table) are mounted
-    # here rather than into their own sections, so a picker's position on the
-    # rail no longer depends on whose section it is — see
+    # three pickers (main / Segmentation / Image Table) are mounted here rather
+    # than into their own sections, so a picker's position on the rail no
+    # longer depends on whose section it is — see
     # ``core/rail_plate.py`` for what that fixes. Stretch 0: the slot is sized
     # by the plate, and the sections below keep the rail's slack as before.
     from well_viewer.core.rail_plate import SLOT_KEY, build_rail_plate_slot
@@ -572,12 +572,13 @@ def build_ui(win) -> None:
     win._sidebar_image_table_frame = win._ctx.widgets.register(
         "_sidebar_image_table_frame", QWidget())
     win._sidebar_sample_frame = win._ctx.widgets.register("_sidebar_sample_frame", QWidget())
-    win._sidebar_stats_frame = win._ctx.widgets.register("_sidebar_stats_frame", QWidget())
     win._sidebar_cell_browser_frame = win._ctx.widgets.register(
         "_sidebar_cell_browser_frame", QWidget())
+    # Statistics is deliberately absent: its comparison-group editor is part of
+    # the Statistics page, not of the rail, so the tab contributes no section
+    # and no well picker here.
     for w in (win._sidebar_preview_frame, win._sidebar_image_table_frame,
-              win._sidebar_sample_frame,
-              win._sidebar_stats_frame):
+              win._sidebar_sample_frame):
         QVBoxLayout(w).setContentsMargins(0, 0, 0, 0)
         sidebar_layout.addWidget(w, 1)
         w.hide()

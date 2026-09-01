@@ -288,7 +288,7 @@ def _restore_stats(ctx, cfg) -> None:
             stats_state.runs.clear()
             for records in computed:
                 stats_state.record_run(records)
-            # Writing the state is not showing it. The Statistics sidebar's
+            # Writing the state is not showing it. The Statistics editor's
             # group list and its plate are painted by explicit refresh calls —
             # every other route that changes ``stats.groups`` (add, delete,
             # rename, clear, sync-from-home) funnels through them — and this one

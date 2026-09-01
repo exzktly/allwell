@@ -26,7 +26,7 @@ def build_image_table_picker(ctx, parent: QWidget) -> None:
         layout = QVBoxLayout(parent)
         parent.setLayout(layout)
     # No horizontal inset: the plate spans the full rail width, identical to every
-    # other sidebar tab's plate (the main / Stats / Preview / Groups pickers are all
+    # other sidebar tab's plate (the main / Preview / Groups pickers are all
     # flush at 0). A left/right gutter here used to make *only* this tab's plate
     # render ~24px narrower — the aspect-locked plate then shrank in both dimensions,
     # so the well picker looked smaller on the Image Table tab than anywhere else.

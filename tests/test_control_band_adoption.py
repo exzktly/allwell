@@ -102,6 +102,13 @@ def test_adopted_modules_have_no_bespoke_control_row():
     ``FlowLayout`` is how the pre-band control rows wrapped, and it is what the
     band uses internally. A direct construction in an adopted module means a
     second control row was built by hand rather than through ``add_scope``.
+
+    A page *section* can legitimately need a row that wraps — the Statistics
+    comparison-group editor has three buttons acting on its list — and the rule
+    for that is not an exemption here but a widget: ``widgets/button_row``. It
+    keeps the wrapping where it can be read and tested on its own, and it keeps
+    this scan able to say, of any adopted module, that the only wrapping row of
+    controls it builds is the band's.
     """
     for rel in ADOPTED:
         names = _call_names(_tree(rel))

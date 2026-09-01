@@ -115,10 +115,14 @@ def test_the_thin_build_ships_statistics(qtbot, monkeypatch, mini_dataset):
     """Statistics is part of the thin build, and boots as one.
 
     The manifest line is only half the claim: the tab has to build under the
-    subset too, and it is the one feature whose builder reaches outside its own
-    package for a host widget (the sidebar group-editor frame). Booting the
-    profile is what proves that frame exists in a build without the features
-    that surround it.
+    subset too. Its builder used to reach outside its own package for a host
+    widget — the rail's group-editor frame — and this test existed to prove that
+    frame was there in a build without the features around it. The editor is now
+    part of the Statistics page and reaches for nothing, which removes that
+    particular way to fail and not the reason to boot: Statistics is the widest
+    page in the thin profile, it builds a plate, a collapsible, a scrolling body
+    and a matplotlib canvas, and a profile that dropped anything those need
+    would still fail here and nowhere else.
     """
     monkeypatch.setenv("ALLWELL_PROFILE", "thin")
     from well_viewer.runtime_app import WellViewerApp

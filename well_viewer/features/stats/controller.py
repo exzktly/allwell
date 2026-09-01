@@ -844,8 +844,11 @@ def run_stats(ctx, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
 
 import copy as _copy
 
+import theme
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
+from widgets.plate_geometry import PLATE_MIN_WIDTH
 from well_viewer.domain.plate_layout import WELL_COLORS
 from well_viewer.domain.batch_models import BarGroup
 from well_viewer.core.ui_helpers import ask_name_dialog as _ask_name_dialog, clear_layout as _clear_layout
@@ -956,6 +959,8 @@ def stats_refresh_group_list(ctx) -> None:
     # offered. The same call keeps the two variable pickers current.
     with swallow("refresh the Statistics test inputs after a group change"):
         refresh_stats_test_inputs(ctx)
+    _stats_refresh_group_count(ctx)
+    _stats_refresh_results_placeholder(ctx)
     container = ctx.widgets.get("_stats_grp_inner")
     layout = container.layout()
     if layout is None:
@@ -964,9 +969,15 @@ def stats_refresh_group_list(ctx) -> None:
         layout.setSpacing(2)
     _clear_layout(layout)
     if not ctx.state.stats.groups:
-        lbl = QLabel("No groups.  Click + Add to create one.")
+        lbl = QLabel("No groups.  Click + Add group to create one.")
         lbl.setObjectName("Muted")
         layout.addWidget(lbl)
+        # Floors reset, not left behind. They are derived from the cards a pass
+        # builds, so a pass that builds none has no basis for either — and the
+        # ones from the last populated pass would otherwise sit under a "No
+        # groups." label, holding a two-row height and a card's width for
+        # content that is one line long.
+        _stats_clear_group_list_floor(ctx)
         stats_refresh_map(ctx)
         return
     for gi, grp in enumerate(ctx.state.stats.groups):
@@ -991,7 +1002,12 @@ def stats_refresh_group_list(ctx) -> None:
         meta = QLabel(f"  ({', '.join(parts)})")
         meta.setObjectName("Muted")
         hl.addWidget(meta)
-        hl.addStretch(1)
+        # A bounded gap, not ``addStretch(1)``. On the rail, where this list was
+        # 330px wide, a stretch put the rename and delete buttons at the right
+        # edge and that edge was beside the label. On a page the same column is
+        # up to 860px, and the two controls acting on a row ended ~640px from
+        # the row they act on. The row's own width is now its content's.
+        hl.addSpacing(theme.Spacing.lg)
         idx = gi
         ren_btn = QPushButton("✎")
         ren_btn.setFlat(True)
@@ -1005,9 +1021,119 @@ def stats_refresh_group_list(ctx) -> None:
         def _click_select(ev, i=idx):
             stats_select_grp(ctx, i)
         card.mousePressEvent = _click_select
-        layout.addWidget(card)
+        # Left-aligned rather than filling the column, so a card is as wide as
+        # what is in it and the list reads as rows of content rather than as
+        # full-width bands with their controls stranded at the far edge.
+        layout.addWidget(card, 0, Qt.AlignLeft)
     layout.addStretch(1)
+    _stats_floor_group_list(ctx, layout)
     stats_refresh_map(ctx)
+
+
+def _stats_refresh_results_placeholder(ctx) -> None:
+    """Say what is actually still owed before a test can run.
+
+    The results panel is empty until a run, and its placeholder is the sentence
+    a user reads while working out what to do next. Fixed at "define two
+    comparison groups above", it went on saying that with both groups listed
+    twenty pixels above it — the page disagreeing with itself, and the reader
+    left to work out which half to believe.
+    """
+    box = ctx.widgets.get_or_none("_stats_result_text")
+    if box is None:
+        return
+    n = len(ctx.state.stats.groups or [])
+    if n == 0:
+        text = ("Define two comparison groups above, choose a test, then click "
+                "Run test to see results here.")
+    elif n == 1:
+        text = ("One comparison group so far. Add a second above, choose a "
+                "test, then click Run test to see results here.")
+    else:
+        text = "Choose a test above, then click Run test to see results here."
+    box.setPlaceholderText(text)
+
+
+def _stats_refresh_group_count(ctx) -> None:
+    """Say how many groups there are on the section header.
+
+    The editor folds away (``CollapsibleSection``), and a folded section that
+    reports nothing is one the user has to unfold to find out whether they need
+    it unfolded. It is also the count the tab's own gate is on — two groups, not
+    one — so the header states the same number the results panel is waiting for.
+    """
+    lbl = ctx.widgets.get_or_none("_stats_group_count_lbl")
+    if lbl is None:
+        return
+    n = len(ctx.state.stats.groups or [])
+    # "None yet" rather than an empty string at zero. The docstring's own
+    # argument — a folded section that reports nothing is one you have to unfold
+    # to find out whether you need it unfolded — is *most* true at zero, which
+    # is exactly where the first version said nothing.
+    lbl.setText("None yet" if n == 0 else f"{n} group{'s' if n != 1 else ''}")
+
+
+def _stats_clear_group_list_floor(ctx) -> None:
+    """Drop the floors when there are no cards to derive them from.
+
+    Both are measured from a card the pass actually built (see
+    :func:`_stats_floor_group_list`), so the empty state has no basis for
+    either. Leaving the last pass's numbers in place is the more visible half of
+    the bug: after Clear All, a one-line "No groups." label sat in a box still
+    reserving two card rows and a card's width.
+    """
+    sa = ctx.widgets.get_or_none("_stats_grp_canvas")
+    if sa is None:
+        return
+    sa.setMinimumHeight(0)
+    sa.setMinimumWidth(0)
+
+
+def _stats_floor_group_list(ctx, layout) -> None:
+    """Give the group list the room two whole cards need, in both dimensions.
+
+    **Two rows tall**, because two groups is what the tab needs to run anything
+    and what its own empty state asks for — a list showing one card under a
+    sentence reading "define two comparison groups" is the software disagreeing
+    with itself.
+
+    **One card wide**, because the list is the panel the editor's responsive row
+    measures when it decides whether the map still fits beside it. Left to the
+    widest button in the action row underneath, that minimum was about 180px and
+    the row happily stayed on one line with the cards at 160 — a name, a count
+    and two buttons in a strip too narrow for them. The floor is what a card
+    asks for, so the row stacks when a card would be cut instead of when a
+    button would.
+
+    Both come from a card this pass actually built rather than from a number: a
+    card is a dot, a name, a muted count and two buttons at whatever the current
+    font and DPI make of them, and every literal here would be wrong on a
+    display it was not measured on. The width is capped at the plate's own, so
+    one long group name cannot push the map out of the row.
+    """
+    sa = ctx.widgets.get_or_none("_stats_grp_canvas")
+    if sa is None:
+        return
+    cards = [layout.itemAt(i).widget() for i in range(layout.count())]
+    cards = [w for w in cards if w is not None]
+    if not cards:
+        return
+    hints = [w.sizeHint() for w in cards]
+    margins = layout.contentsMargins()
+    row_h = max(h.height() for h in hints)
+    floor_h = 2 * row_h + layout.spacing() + margins.top() + margins.bottom()
+    sa.setMinimumHeight(min(floor_h, sa.maximumHeight()))
+    card_w = max(h.width() for h in hints) + margins.left() + margins.right()
+    # Capped at the *plate's* floor, not the plate's cap. This minimum is a hard
+    # one — the page has horizontal scrolling off, so anything the widths add up
+    # to beyond the viewport is clipped rather than reachable, and measured at a
+    # 300px pane a 330px cap here overflowed by 7px: seven pixels of a page that
+    # is not allowed to scroll sideways, because width is what forces the editor
+    # to stack. ``PLATE_MIN_WIDTH`` is the width the page has already committed
+    # to fitting for the map, so it is the most the list may ask for too. A card
+    # wider than that is elided by its own layout, which is a card that reads
+    # tightly; the alternative was a page with content behind its own edge.
+    sa.setMinimumWidth(min(card_w, PLATE_MIN_WIDTH))
 
 
 def stats_select_grp(ctx, idx: int) -> None:

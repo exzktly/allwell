@@ -1804,18 +1804,22 @@ the next.
   whichever pane owns it, so clicking between the panes swaps which plate you
   are painting on without moving it, or anything under it. **Both panes' sidebar
   sections are on screen
-  at once** — split Plots against Statistics and the Statistics group-definition
-  editor sits under the well picker straight away, without focusing that pane
-  first — and both panes refresh on a selection or channel change.
+  at once** — split Plots against Segmentation and Segmentation's own controls
+  sit in the sidebar straight away, without focusing that pane first — and both
+  panes refresh on a selection or channel change.
 
-  **There is still only one well picker.** Several pages carry their own plate
-  map in the sidebar (Statistics paints wells into comparison groups; Image
-  Table and Segmentation pick the well to show), and while split you get the
-  focused pane's, not both stacked. Click into the other pane and the picker
-  goes with the focus — so the Statistics plate is one click away, while its
-  group list stays visible, and stays put, the whole time. Focus decides this for the same
-  reason it decides drag-and-drop on the Heat Map: a plate click means different
-  things to different pages, and only one of them can win. Each
+  **There is still only one well picker.** A couple of pages carry their own
+  plate map in the sidebar (Image Table and Segmentation pick the wells to
+  show), and while split you get the focused pane's, not both stacked. Click
+  into the other pane and the picker goes with the focus. Focus decides this for
+  the same reason it decides drag-and-drop on the Heat Map: a plate click means
+  different things to different pages, and only one of them can win. Every
+  picker that reaches the sidebar means the same *kind* of thing, though —
+  which wells am I looking at — which is why **Statistics keeps its plate on its
+  own page** rather than in the sidebar: a click there does not select a well,
+  it paints one into a comparison group, and a sidebar that showed that plate
+  only while the Statistics pane had the focus would leave you adding empty
+  groups beside a picker that was quietly doing something else. Each
   pane keeps its own row of page tabs at its top, so a page's sub-tabs stay
   where its content is and either side can be switched without focusing it
   first; the shared row across the top of the window is empty while you are
@@ -2894,7 +2898,22 @@ t-test** and **Wilcoxon signed-rank**, and a **two-way ANOVA**.
 
 - **Needs** — at least two groups. On first visit the tab auto-populates from
   the replicate sets defined on [Home → Sample Map → Replicates](#replicates).
-- **Controls** — the group editor is in the sidebar; everything else is on the
+- **Controls** — the group editor is on the page itself, a strip between the
+  controls band and the results: the well map on the left, and beside it the
+  group list with **+ Add group**, **Clear All** and **↻ Load from Replicates**
+  at its foot. Click a group to arm it — the armed one carries an accent rule
+  down its left edge — then drag wells on the map to assign them to it. On a
+    narrow pane — a small window with the rail open and Split View on — the map
+  moves above the list rather than shrinking beside it, and the page scrolls
+  rather than squeezing either. Narrower still than the map itself can go, the
+  page scrolls sideways too: the editor is never quietly cut off at the edge. **Click the section header to fold the editor
+  away** once the groups are defined; folded, it still says how many there are,
+  and the results get the height back. It is on the page rather than in the
+  sidebar so that defining groups never depends on which pane has the focus —
+  see [Saved selections and Split View](#saved-selections-and-split-view).
+  Outside Split View the sidebar keeps its usual well picker, which selects
+  wells to plot as it does everywhere else; the map on this page is the one
+  that paints groups. Everything else is on the
   same one-row controls band every tab uses — **Channel**, **Property**,
   **Statistic**, **Timepoint** and **Test**, then an FOV-replicate indicator
   that mirrors the plot tabs' FOV mode, with **Run test** at the right. Three
@@ -3668,10 +3687,10 @@ rather than a single panel.
     says **edited — press Generate** so it is clear the images below it are not
     yet of what the shelf now describes.
   - A plot saved with **statistics** comes back with its comparison groups in
-    the Statistics sidebar, not only in the test it re-runs. The groups are
-    listed and coloured on the group-editor plate exactly as if you had defined
-    them, so you can see what the restored brackets were computed from and edit
-    it from there.
+    the editor on the Statistics page, not only in the test it re-runs. The
+    groups are listed and coloured on the group-editor map exactly as if you
+    had defined them, so you can see what the restored brackets were computed
+    from and edit it from there.
   - **Every comparison you had run is saved, not just the last one.** The
     Statistics tab keeps comparisons side by side — a second channel, a second
     statistic, a second timepoint each add one rather than replacing what was

@@ -1,6 +1,6 @@
-"""A restored plot's comparison groups appear in the Statistics sidebar.
+"""A restored plot's comparison groups appear in the Statistics group editor.
 
-Reported: restoring a saved graph with statistics left the sidebar's group list
+Reported: restoring a saved graph with statistics left the editor's group list
 empty while the groups were live in every other way — the Statistics tab ran its
 test on them, and "Load groups from Home" warned about overwriting the four that
 were not on screen.
@@ -9,7 +9,9 @@ were not on screen.
 state slice. Every *other* route that changes those groups — add, delete, rename,
 clear, sync-from-home — funnels through ``stats_refresh_group_list`` /
 ``stats_refresh_map``, which are what actually paint the list and the plate. This
-one went round them, so the state was right and the rail showed none of it.
+one went round them, so the state was right and the editor showed none of it.
+(The editor was on the rail when this was reported and is on the Statistics page
+now; the defect and the funnel it is about are the same either way.)
 
 ``_activate_statistics`` is not a backstop either: it re-seeds only when the group
 list is *empty*, which is precisely what the restore has just made false, so

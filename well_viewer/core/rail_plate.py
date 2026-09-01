@@ -1,14 +1,24 @@
 """The sidebar's one well-picker slot.
 
-Four sidebar sections offer a well picker — the shared one in
-``_sidebar_main_frame``, plus Statistics, Segmentation and the Image Table —
-and each used to build its plate into the top of its own section. That made a
-picker's position a function of which section owned it, and the sections are
-stacked in a fixed order, so the rail moved every time the focused pane
-changed: the unfocused section collapsed by the height of the picker it was no
-longer showing, and everything below it slid up with it. Measured on a
-1600×1000 window with Plots beside Statistics, the plot-groups drawer sat at
-y=789 with Plotting focused and y=456 with Statistics focused.
+Three sidebar sections offer a well picker — the shared one in
+``_sidebar_main_frame``, plus Segmentation and the Image Table — and each used
+to build its plate into the top of its own section. That made a picker's
+position a function of which section owned it, and the sections are stacked in
+a fixed order, so the rail moved every time the focused pane changed: the
+unfocused section collapsed by the height of the picker it was no longer
+showing, and everything below it slid up with it. Measured on a 1600×1000
+window with two plate-bearing panes side by side, the plot-groups drawer sat at
+y=789 under one and y=456 under the other.
+
+Every plate the slot arbitrates between answers the same question — which wells
+am I looking at. The shared one selects wells to plot, Segmentation's picks the
+one well to preview, the Image Table's picks the wells to tile. Statistics is
+deliberately not here: a click on its plate writes a well into a named
+comparison group, which is a different verb, and a slot that shows one plate at
+a time turns two verbs into an invisible mode. Its editor is part of the
+Statistics page instead (``features/stats/tab_view.build_stats_group_editor``).
+A fourth plate that only ever *selects* would be a fine addition to the slot; a
+fourth verb would not.
 
 Reserving the missing picker's height in the section that is not showing one
 removes the movement and puts back a picker-shaped hole. The two are the same

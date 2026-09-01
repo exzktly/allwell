@@ -96,15 +96,11 @@ def _build_smfish(ctx, frame) -> None:
 
 
 def _build_stats(ctx, frame) -> None:
-    from well_viewer.features.stats.tab_view import (
-        build_stats_group_editor, build_stats_tab,
-    )
+    from well_viewer.features.stats.tab_view import build_stats_tab
+    # One builder. The comparison-group editor is part of this page rather than
+    # a rail section, so ``build_stats_tab`` builds it along with the rest and
+    # there is no sidebar host frame to reach for.
     build_stats_tab(ctx, frame)
-    # ``build_stats_group_editor`` takes ``ctx`` (its body drives the ctx-native
-    # stats group-editor controllers); the sidebar host frame is an app-window
-    # widget handle fetched through the blessed ``ctx.window`` accessor (a
-    # widget-parenting need, not behaviour coupling).
-    build_stats_group_editor(ctx, ctx.window._sidebar_stats_frame)
 
 
 _build_multivariate = _lazy_build("well_viewer.features.multivariate.tab_view", "build_multivariate_tab")
@@ -237,7 +233,21 @@ def _activate_statistics(ctx) -> None:
         refresh_stats_test_inputs, stats_sync_from_app, stats_update_tp_menu,
         stats_refresh_fov_indicator,
     )
-    ctx.widgets.get("_sidebar_stats_frame").setVisible(True)
+    # **The rail keeps the shared well picker here, but only outside a split.**
+    # Statistics owns no sidebar section: its comparison-group editor is part of
+    # the page, and the rail's one picker exists so that a plate on it always
+    # means the same thing. On a single pane there is nothing else competing for
+    # it, so showing the shared frame costs no ambiguity — the rail selects
+    # wells to plot, as it does on every other page, and the page's own map
+    # paints groups. Leaving it empty was the alternative and it read as an
+    # unfinished screen.
+    #
+    # In Split View this is exactly what must not happen: the other pane has a
+    # claim on the rail, and taking it for a tab that has no section is the
+    # ambiguity the editor was moved off the rail to remove.
+    if not ctx.runtime.split.active:
+        ctx.widgets.get("_sidebar_main_frame").setVisible(True)
+        ctx.coordinator.refresh_sidebar_map()
     # Auto-populate from rep-sets on first visit
     if not ctx.state.stats.groups and ctx.widgets.has("_stats_grp_inner"):
         stats_sync_from_app(ctx)

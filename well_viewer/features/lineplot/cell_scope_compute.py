@@ -26,8 +26,18 @@ from well_viewer.domain.stats_compute import _thresh_on_col
 from well_viewer.features.export.cell_scope_compute import CellScope, scope_from_ctx
 
 
-def cell_scope(ctx) -> CellScope:
-    val_col = ctx.state.channel.active_val_col
+def cell_scope(ctx, *, val_col: str | None = None,
+               timepoints: tuple[float, ...] | None = None) -> CellScope:
+    """
+    *val_col* and *timepoints* override what this tab would read off its own
+    controls. They exist for Batch Export, which draws the same figure from its
+    **own** column and its own ticked timepoints: reading the tab's there wrote
+    a per-cell file describing the plot on screen, filed beside — and named
+    for — a figure of something else. Both default to the tab's own answer, so
+    the tab's call is unchanged.
+    """
+
+    val_col = val_col or ctx.state.channel.active_val_col
     rep_note = (
         "a replicate set's point is the mean of its wells' means with a "
         "cross-well SD (ddof=1); group by well_label to reproduce it"
@@ -37,7 +47,7 @@ def cell_scope(ctx) -> CellScope:
         plot="line",
         val_col=val_col,
         threshold=float(on_cutoff_for_column(ctx, val_col)),
-        timepoints=(),
+        timepoints=() if timepoints is None else tuple(timepoints),
         include_gate=True,
         tp_fallback=True,
         on_col=_thresh_on_col(ctx),

@@ -2664,9 +2664,12 @@ wrong on the next. The snapshot is stamped `params["batch_export"] = {mode,
 group}`, which is what lets the gallery summary and
 `saved_plots.controller._report_batch_export_origin` say where the record came
 from — the parameters reproduce the *group*, while Batch Export's own layout
-controls (bars versus beeswarm, stacked timepoints, the scatter facet mode) live
-on the panel and not in view state, so a Restore can draw the same data in a
-different arrangement.
+controls live on the panel and not in view state, so a Restore can draw the same
+data in a different arrangement. Those controls are: bars versus beeswarm,
+stacked timepoints, the scatter facet mode, and — since the AXES block below —
+the per-panel limits and scales and the panel selection itself. A record
+captured from a two-panel, y-limited batch figure therefore restores as a
+four-panel autoscaled one.
 
 **Which panels a figure draws, and what its axes are fixed to** (`_panels.py`).
 A batch figure is not one plot: the line mode stacks four panels and the bar
@@ -2676,6 +2679,13 @@ declaration rather than from a list written beside it — a shared X min/max and
 scale, then per panel a keep-it checkbox, a Y min/max and a Y scale. A mode
 whose figure is a single axes declares one panel, so the controls read the same
 everywhere instead of appearing only on the stacked modes.
+
+The X row governs only the panels that are actually on that x — `_X_PANELS`,
+which is a different question from `_SHARE_X`'s matplotlib linking and has a
+different answer on the line mode: its CDF plots intensity where its three
+siblings plot time, so an X row filled in hours was clipping the CDF to 0–48
+intensity units and giving three correct panels beside a fourth that looked
+empty. `None` means every drawn panel, which is what a single-axes mode wants.
 
 `panel_axes` lays the figure out with **only the panels the run kept**, and
 gives each excluded panel a real axes on a throwaway figure rather than
@@ -2715,7 +2725,8 @@ like the run had worked.
 plot tabs' `Save cell data…` file beside each group's figure — one row per cell
 the figure was computed from, with the scope block and the marker columns.
 Nothing is re-implemented: the scope comes from the mode's own source tab
-(`_CELL_SCOPE`, one per mode), the rows from
+(`_CELL_SCOPE` plus `_CELL_SCOPE_FN`, since Scatter's two modes are two
+different plots with two different scope builders), the rows from
 `export/cell_scope_compute.build_chunk`, and the file is written by
 `export/worker.CellExportWriter`, so the batch file's columns, quoting,
 blank-versus-zero rule and atomic replace are the tab's. The writer drains a
@@ -2723,6 +2734,25 @@ queue until `DONE`; the batch caller fills and closes the queue first and calls
 it inline, which is that contract used without a thread rather than in spite of
 one — the GUI path needs a thread because a user is waiting, and a batch job is
 already inside a blocking run.
+
+**A tab's scope reads that tab's controls, and a batch run overrides all of
+them.** Each `cell_scope` therefore takes explicit-argument overrides —
+`val_col` and `timepoints` on Line, Bar and Response; the axis entries, the
+resolved columns and the timepoints on Scatter — each defaulting to what the
+tab itself says, so the tab's own call is unchanged. Without them the per-cell
+file described *the plot on screen*: a bar run over t=24 and t=48 wrote two
+files of whatever timepoint the Bar tab happened to be on, each internally
+consistent, each named for a timepoint it did not contain. Overriding rather
+than rebuilding is what keeps one definition of what each tab's population is —
+its markers, its gate layer, its threshold rule.
+
+The write is refused, and said, in three distinguishable cases: no loaded
+wells, no readable rows, and a gating recompute still in flight. The last is
+the refusal `export/service` already makes for the same reason — the gating
+worker rewrites verdict columns in place on the cached frames, and the runner
+pumps the event loop between jobs — and without it a run started mid-recompute
+gives its early groups one gating state and its later ones another, under one
+manifest.
 
 `_write_cell_rows_for` **enters the group scope itself**, for the reason
 `_capture_group_params` does: the scope reads the live selections through

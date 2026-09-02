@@ -4067,8 +4067,12 @@ blank page.
 A note on the Y rows: each panel plots a different quantity, so they take
 different ranges. One Y range across a mean, a fraction and a count would be
 meaningless on two of the three, which is why there is a row each rather than
-one for the figure. The X row is shared because the panels of a stack share
-their x axis.
+one for the figure.
+
+The X row is shared because the time panels of a stack share their x axis — but
+it does **not** reach the Line mode's CDF, whose x is intensity rather than
+time. Setting X to 0–48 hours leaves the CDF autoscaled rather than clipping it
+to intensity 0–48.
 
 #### Writing the raw rows behind each figure
 
@@ -4084,9 +4088,12 @@ cell per well rather than one per group, so it can be orders of magnitude
 larger than the summary CSV every run already writes. That summary CSV is
 unaffected either way — this is an extra file, not a replacement.
 
-If a group's rows cannot be written — no loaded wells, or a tab that declines
-to describe its population before a first draw — the figure and the summary CSV
-are still written and the run's status line says what was missed. Losing the
+If a group's rows cannot be written, the figure and the summary CSV are still
+written and the run's status line says which of the four reasons it was: no
+loaded wells, none of their rows readable, a tab that declines to describe its
+population before a first draw, or cell gating still recomputing (the file
+would otherwise mix two gating states, which is the same refusal *Save cell
+data…* makes). Losing the
 files you asked for to a problem with one you merely also ticked would be the
 wrong trade.
 

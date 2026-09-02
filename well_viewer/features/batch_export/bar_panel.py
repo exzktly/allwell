@@ -89,7 +89,11 @@ class BarBatchExportPanel(BatchExportPanel):
         Panel("frac", "Fraction above cutoff"),
         Panel("n", "N above cutoff"),
     )
+    #: The three bar panels are drawn over one categorical axis rather than
+    #: linked by matplotlib, so nothing is shared in ``_SHARE_X`` — but the X
+    #: row does govern all three, which is what ``_X_PANELS`` says.
     _SHARE_X = ()
+    _X_PANELS = ("mean", "frac", "n")
     _CELL_SCOPE = "well_viewer.features.barplot.cell_scope_compute"
 
     def _mode_key(self) -> str:
@@ -463,7 +467,7 @@ class BarBatchExportPanel(BatchExportPanel):
             except Exception as exc:
                 return f"{grp.name} t={tp_strs} figure: {exc}"
             self._write_cell_rows_for(grp, write_dir, Path(base).name,
-                                      val_col=_val_col)
+                                      val_col=_val_col, timepoints=target_ts)
             return None
 
         self._run_batch_jobs(

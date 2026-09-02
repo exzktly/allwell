@@ -23,10 +23,13 @@ writer drains is filled and closed before it is called, and it is called
 inline. That is the writer's own contract — it drains until ``DONE`` — used
 without a thread rather than in spite of one.
 
-The cost of filling it first is that one group's frames are all in memory at
-once. That is the same shape the tab's own path already has, which reads every
-well's frame into a dict before it starts, and a batch group is a handful of
-wells rather than a plate.
+The cost of filling it first is real and slightly worse than the tab's. The tab
+reads every well's frame into a dict too, but it bounds the queue at two chunks
+and slices one well per event-loop tick; this holds the frames dict **plus a
+sliced copy of every well's population** at once. A batch group is a handful of
+wells rather than a plate, so the bound is fine — but it is not the same bound,
+and a future reader deciding whether it is safe at forty wells should have the
+real number rather than a reassuring comparison.
 """
 
 from __future__ import annotations
@@ -47,21 +50,49 @@ from well_viewer.features.export.worker import DONE, CellExportWriter
 _logger = logging.getLogger("well_viewer")
 
 
+def _gating_busy(ctx) -> bool:
+    """Whether the cell-gating worker is mid-recompute.
+
+    Read through the same runtime flag ``export/service`` consults, so the two
+    refusals cannot come to disagree about what "busy" means.
+    """
+    from well_viewer.core.safe import swallowed
+
+    try:
+        from well_viewer.features.export.service import _gating_busy as _busy
+        return bool(_busy(ctx))
+    except Exception:
+        swallowed("batch cell export: reading the gating-busy flag")
+        return False
+
+
 def write_cell_rows(ctx, scope, out_path) -> int:
     """Write every cell row behind *scope* to *out_path*. Returns the row count.
 
-    ``-1`` means the scope named nothing this dataset has loaded, which is not
-    an error: a group whose wells are not loaded has no cells to export, and
-    the caller reports it as a shortfall rather than writing a file that is
-    only a comment block. Distinguished from ``0`` — a scope whose wells *are*
-    loaded and whose population is empty gets a real file with its header, so a
-    reader can see which columns the export would have carried and that the
-    answer was genuinely none.
+    Two negatives, because they are two different problems with two different
+    fixes. ``-1`` means the scope named nothing this dataset has loaded — check
+    the selection. ``-2`` means it named loaded wells and **none of their rows
+    would read** — the cache is bad, and telling that user to check their
+    selection sends them to fix something that is already right.
+
+    Both are distinguished from ``0``, which is a real answer: a scope whose
+    wells are loaded and whose population is empty gets a real file with its
+    header, so a reader can see which columns the export would have carried and
+    that the count was genuinely none.
     """
     from well_viewer.data.data_loading import get_rows
 
     if scope is None:
         return -1
+    if _gating_busy(ctx):
+        # The same refusal the GUI path makes, for the same reason: the gating
+        # worker rewrites ``Included`` / ``Gate_Pass`` / ``Gate_On`` **in place
+        # on the cached frames**, and ``_run_batch_jobs`` pumps the event loop
+        # between jobs — which is exactly where that worker's callbacks land.
+        # A run started mid-recompute would give the early groups the old
+        # gating and the later ones the new, in one output directory under one
+        # manifest, with nothing in any file saying so.
+        return -3
     loaded = ctx.state.dataset.well_paths or {}
     wells = [(group, well) for group, well in scope.wells if well in loaded]
     if not wells:
@@ -81,7 +112,7 @@ def write_cell_rows(ctx, scope, out_path) -> int:
             unreadable.append(well)
     frames_columns = [list(f.columns) for f in frames.values() if f is not None]
     if not frames_columns:
-        return -1
+        return -2 if unreadable else -1
 
     header = csc.header_for(frames_columns, scope)
     scope_lines = _scope_block(

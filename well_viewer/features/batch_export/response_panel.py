@@ -124,6 +124,9 @@ class ResponseBatchExportPanel(BatchExportPanel):
 
     _PANELS = (Panel("plot", "Plot"),)
     _SHARE_X = ()
+    #: One panel, so the X row governs it. ``None`` rather than naming the key,
+    #: so a mode that renames its panel does not silently stop taking X.
+    _X_PANELS = None
     _CELL_SCOPE = "well_viewer.features.response.cell_scope_compute"
 
     #: The error band and the per-FOV replicate unit both reach the curves —
@@ -504,7 +507,8 @@ class ResponseBatchExportPanel(BatchExportPanel):
                 except Exception as exc:
                     return f"{grp.name} figure: {exc}"
 
-            self._write_cell_rows_for(grp, write_dir, safe, val_col=val_col)
+            self._write_cell_rows_for(grp, write_dir, safe, val_col=val_col,
+                                      timepoints=timepoints)
             _shared_logger.info("Batch: wrote %s and %s",
                                 csv_path.name, fig_path.name)
             return None

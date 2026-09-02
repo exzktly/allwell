@@ -33,10 +33,7 @@ bottom is zero", which on a log axis is not even a limit.
 from __future__ import annotations
 
 import copy
-import logging
 from dataclasses import dataclass, field
-
-_logger = logging.getLogger("well_viewer")
 
 
 @dataclass(frozen=True)
@@ -112,7 +109,8 @@ class AxesSpec:
         return bool(self.panels) and not self.drawn_keys()
 
     # ── what the style pass is handed ────────────────────────────────────
-    def prefs_overlay(self, base: dict, drawn_keys: tuple[str, ...]) -> dict:
+    def prefs_overlay(self, base: dict, drawn_keys: tuple[str, ...],
+                      *, x_keys: tuple[str, ...] | None = None) -> dict:
         """*base* with this run's limits merged in, as a **copy**.
 
         Never in place. ``_ensure_export_style_prefs`` hands back the
@@ -130,19 +128,30 @@ class AxesSpec:
         first would leave the rest autoscaled while the user had asked for one
         range. A flat preference reaches every axes on the figure, which is
         what "this plot's y range" means there.
+
+        *x_keys* names the panels the **shared X row governs**, because not
+        every panel of a stack is on the same x. The line mode's CDF plots
+        intensity where its three siblings plot time, so an X row the user
+        filled in hours was clipping the CDF to 0–48 intensity units — three
+        correct panels and a fourth that looks empty, with nothing saying why.
+        ``None`` means every drawn panel, which is right for a single-panel
+        mode and for a stack whose panels really do share one axis.
         """
         prefs = dict(base or {})
         prefs["axis_buckets"] = copy.deepcopy(base.get("axis_buckets") or {}) \
             if base else {}
         if not drawn_keys:
             return prefs
+        takes_x = drawn_keys if x_keys is None else tuple(x_keys)
         if len(drawn_keys) == 1:
-            axis = self.for_panel(drawn_keys[0])
+            key = drawn_keys[0]
+            axis = self.for_panel(key)
             # "All", so the flat limits below are not scoped away from the
             # figure's later axes — the whole point of the flat form here.
             prefs["axis_target"] = "All"
-            _put(prefs, "x_lim_min", self.x_min)
-            _put(prefs, "x_lim_max", self.x_max)
+            if key in takes_x:
+                _put(prefs, "x_lim_min", self.x_min)
+                _put(prefs, "x_lim_max", self.x_max)
             _put(prefs, "y_lim_min", axis.y_min)
             _put(prefs, "y_lim_max", axis.y_max)
             return prefs
@@ -150,8 +159,9 @@ class AxesSpec:
         for index, key in enumerate(drawn_keys, start=1):
             axis = self.for_panel(key)
             bucket = dict(buckets.get(str(index)) or {})
-            _put(bucket, "x_lim_min", self.x_min)
-            _put(bucket, "x_lim_max", self.x_max)
+            if key in takes_x:
+                _put(bucket, "x_lim_min", self.x_min)
+                _put(bucket, "x_lim_max", self.x_max)
             _put(bucket, "y_lim_min", axis.y_min)
             _put(bucket, "y_lim_max", axis.y_max)
             buckets[str(index)] = bucket
@@ -169,7 +179,8 @@ def _put(target: dict, key: str, value: float | None) -> None:
         target[key] = value
 
 
-def pin_scales(pairs, spec: AxesSpec) -> None:
+def pin_scales(pairs, spec: AxesSpec, *,
+               x_keys: tuple[str, ...] | None = None) -> None:
     """Pin each drawn panel's log/linear choice against the later style pass.
 
     ``apply_export_style_prefs`` re-reads the shared ``x_log`` / ``y_log`` on
@@ -191,7 +202,8 @@ def pin_scales(pairs, spec: AxesSpec) -> None:
         if ax is None:
             continue
         axis = spec.for_panel(key)
-        if spec.x_log is not None:
+        takes_x = x_keys is None or key in x_keys
+        if takes_x and spec.x_log is not None:
             ax._aw_force_xlog = bool(spec.x_log)
         if axis.y_log is not None:
             ax._aw_force_ylog = bool(axis.y_log)

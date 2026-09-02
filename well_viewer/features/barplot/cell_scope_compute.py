@@ -28,12 +28,26 @@ from well_viewer.domain.stats_compute import _thresh_on_col
 from well_viewer.features.export.cell_scope_compute import CellScope, scope_from_ctx
 
 
-def cell_scope(ctx) -> CellScope:
-    val_col = ctx.state.channel.active_val_col
-    try:
-        timepoints = tuple(float(t) for t, _label in resolve_bar_timepoints(ctx))
-    except (TypeError, ValueError):
-        timepoints = ()
+def cell_scope(ctx, *, val_col: str | None = None,
+               timepoints: tuple[float, ...] | None = None) -> CellScope:
+    """
+    *val_col* and *timepoints* override what this tab would read off its own
+    controls. They exist for Batch Export, which draws the same figure from its
+    **own** column and its own ticked timepoints: reading the tab's there wrote
+    a per-cell file describing the plot on screen, filed beside — and named
+    for — a figure of something else. Both default to the tab's own answer, so
+    the tab's call is unchanged.
+    """
+
+    val_col = val_col or ctx.state.channel.active_val_col
+    if timepoints is None:
+        try:
+            timepoints = tuple(float(t)
+                               for t, _label in resolve_bar_timepoints(ctx))
+        except (TypeError, ValueError):
+            timepoints = ()
+    else:
+        timepoints = tuple(float(t) for t in timepoints)
 
     overlay_on = bool(ctx.state.bar.violin or ctx.state.bar.swarm)
     drawn = (

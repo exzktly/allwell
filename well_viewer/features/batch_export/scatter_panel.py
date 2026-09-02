@@ -105,7 +105,47 @@ class ScatterBatchExportPanel(BatchExportPanel):
     #: range and one scale between them rather than a row of controls each.
     _PANELS = (Panel("plot", "Plot"),)
     _SHARE_X = ()
+    #: One panel, so the X row governs it. ``None`` rather than naming the key,
+    #: so a mode that renames its panel does not silently stop taking X.
+    _X_PANELS = None
     _CELL_SCOPE = "well_viewer.features.scatter.cell_scope_compute"
+
+    def _cell_scope_kwargs(self, *, val_col=None, timepoints=None) -> dict:
+        """This run's axes and timepoints, not the Scatter tab's combos.
+
+        Both modes plot columns the panel resolved once at the top of the run
+        (:class:`ScatterAxes`), and neither of them is what the tab's own
+        ``_scatter_ch_x_cb`` holds. The cells scope also wants the channel
+        *entries* rather than only the resolved columns, because the per-axis
+        fluor floors are keyed on the channel.
+        """
+        axes = self._run_scatter_axes
+        kwargs: dict = {}
+        if timepoints is not None:
+            kwargs["timepoints"] = tuple(float(t) for t in timepoints)
+        if axes is None:
+            return kwargs
+        if axes.mode == "cells":
+            kwargs.update(entry_x=self._sc_cells_x_cb.currentText(),
+                          entry_y=self._sc_cells_y_cb.currentText(),
+                          col_x=axes.col_x, col_y=axes.col_y)
+        else:
+            kwargs.update(
+                entry_x=self._sc_agg_x_cb.currentText(),
+                metric_x=self._scatter_metric_key(self._sc_agg_metric_x_cb))
+        return kwargs
+
+    @property
+    def _CELL_SCOPE_FN(self) -> str:
+        """The aggregate page has its own scope, and it is a different plot.
+
+        Different markers, a different gate layer and a different timepoint
+        resolution — ``agg_cell_scope``'s own docstring spells out why it is
+        deliberately not derived from the per-cell one. Reading the per-cell
+        scope for an aggregate run wrote a file whose block said
+        ``# plot: scatter_cells`` over the wrong axes.
+        """
+        return "cell_scope" if self._scatter_mode == "cells" else "agg_cell_scope"
 
     def _mode_key(self) -> str:
         """``scatter_cells`` / ``scatter_agg`` — this class is two modes.

@@ -311,11 +311,29 @@ class BatchExportPanel(QWidget):
     #: stacks share a time axis; the CDF's x is intensity and does not.
     _SHARE_X: tuple[str, ...] = ("mean", "frac", "n")
 
-    #: The source tab's ``cell_scope_compute.cell_scope``, for the per-cell row
+    #: Which panels the **shared X row governs**. Not the same question as
+    #: ``_SHARE_X``, though it has the same answer here: that one is about
+    #: matplotlib's axis linking, this one about whose x the user is typing
+    #: into. They come apart on the line mode's CDF, which plots intensity
+    #: where its three siblings plot time — an X row filled in hours was
+    #: clipping it to 0–48 intensity units, giving three correct panels and a
+    #: fourth that looks empty with nothing saying why.
+    #:
+    #: ``None`` means every drawn panel, which is what a single-panel mode
+    #: wants and what a stack whose panels really are one axis wants.
+    _X_PANELS: tuple[str, ...] | None = ("mean", "frac", "n")
+
+    #: The source tab's ``cell_scope_compute`` module, for the per-cell row
     #: export. A dotted module path rather than a proxy, because the modes'
     #: features are removable and the module is resolved only when a run has
     #: actually asked for the rows.
     _CELL_SCOPE: str = "well_viewer.features.lineplot.cell_scope_compute"
+
+    #: The function in it. Named because Scatter's two modes have two: the
+    #: aggregate tab's scope is a different plot with different markers and a
+    #: different gate layer, and reading the per-cell one for it wrote a file
+    #: whose own block said it was about the other page.
+    _CELL_SCOPE_FN: str = "cell_scope"
 
     #: Whether this mode's Channel row carries its own fold-change controls.
     #: False only where the mode normalises through the shared plotting state
@@ -397,6 +415,9 @@ class BatchExportPanel(QWidget):
         #: Shortfalls this run has hit, or ``None`` between runs. Same
         #: ownership as ``_spool`` and ``_run_axes``.
         self._run_notes: list[str] | None = None
+        #: Only the scatter panel fills this; declared here so the shared
+        #: runner can clear it without knowing which mode it is running.
+        self._run_scatter_axes = None
 
         self._build_ui()
         if not self._use_sidebar_groups:
@@ -1385,8 +1406,33 @@ class BatchExportPanel(QWidget):
         box = getattr(self, "_cell_rows_cb", None)
         return bool(box is not None and box.isChecked())
 
+    def _cell_scope_kwargs(self, *, val_col: str | None,
+                           timepoints=None) -> dict:
+        """What this mode overrides on its source tab's scope.
+
+        The scope a tab builds reads that tab's own controls — its column, its
+        ticked timepoints, its axis combos — and a batch run overrides every
+        one of them. Read unmodified, the per-cell file described **the plot on
+        screen**, filed beside and named for a figure of something else: a bar
+        run over t=24 and t=48 wrote two files of whatever timepoint the Bar tab
+        happened to be on, each internally consistent, each naming a timepoint
+        it did not contain.
+
+        So each mode says what it exported, and the tab's own scope builder
+        takes it. Overriding rather than rebuilding keeps one definition of what
+        each tab's population *is* — its markers, its gate layer, its
+        threshold rule — which is the half no batch panel should be restating.
+        """
+        kwargs: dict = {}
+        if val_col is not None:
+            kwargs["val_col"] = val_col
+        if timepoints is not None:
+            kwargs["timepoints"] = tuple(float(t) for t in timepoints)
+        return kwargs
+
     def _write_cell_rows_for(self, grp, write_dir, stem: str,
-                             *, val_col: str | None = None) -> None:
+                             *, val_col: str | None = None,
+                             timepoints=None) -> None:
         """Write this group's per-cell CSV, if the run asked for one.
 
         **Enters the group scope itself**, for the reason
@@ -1409,9 +1455,12 @@ class BatchExportPanel(QWidget):
 
         try:
             scope_module = import_module(self._CELL_SCOPE)
+            build = getattr(scope_module, self._CELL_SCOPE_FN)
             column = val_col or self._ctx.state.channel.active_val_col
+            kwargs = self._cell_scope_kwargs(val_col=val_col,
+                                             timepoints=timepoints)
             with self._app_group_scope(grp), self._app_val_col_scope(column):
-                scope = scope_module.cell_scope(self._ctx)
+                scope = build(self._ctx, **kwargs)
                 if scope is None:
                     # Some tabs decline to describe a population before a first
                     # draw. Said rather than written as an empty file.
@@ -1426,8 +1475,17 @@ class BatchExportPanel(QWidget):
                 f"{grp.name}: per-cell CSV failed ({exc})")
             return
         if rows < 0:
+            # Three different problems with three different fixes, so three
+            # different sentences. "No loaded wells" over a corrupt cache sends
+            # the user to fix a selection that is already correct.
+            reason = {
+                -1: "no loaded wells",
+                -2: "none of the wells' rows would read",
+                -3: "cell gating is still recomputing — the file would mix "
+                    "two gating states",
+            }.get(int(rows), "no rows")
             self._note_shortfall(
-                f"{grp.name}: no loaded wells — per-cell CSV not written")
+                f"{grp.name}: {reason} — per-cell CSV not written")
 
     def _note_shortfall(self, note: str) -> None:
         """Record something this run could not do, for its final report.
@@ -2264,6 +2322,10 @@ class BatchExportPanel(QWidget):
                 spool.discard()
                 self._spool = None
                 self._run_axes = None
+                # Set by the scatter panel for the life of one run; cleared
+                # here with the rest, so a figure written outside a run cannot
+                # read the previous run's columns.
+                self._run_scatter_axes = None
                 run_notes = list(self._run_notes or [])
                 self._run_notes = None
             self._run_btn.setEnabled(True)
@@ -2338,9 +2400,9 @@ class BatchExportPanel(QWidget):
         # mechanisms because ``apply_export_style_prefs`` honours two: it reads
         # ``_aw_force_*log`` before the shared ``x_log``, and it reads limits
         # only from what it is handed. See ``_panels``.
-        pin_scales(self._axes_pairs(fig, spec), spec)
+        pin_scales(self._axes_pairs(fig, spec), spec, x_keys=self._X_PANELS)
         prefs = spec.prefs_overlay(_ensure_export_style_prefs(self._ctx),
-                                   spec.drawn_keys())
+                                   spec.drawn_keys(), x_keys=self._X_PANELS)
 
         spool = self._spool
         on_saved = None
